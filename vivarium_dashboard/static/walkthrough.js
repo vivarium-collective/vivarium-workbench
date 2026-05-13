@@ -3106,6 +3106,44 @@
           });
           resultsHtml += '</tbody></table></div>';
         }
+        // Inline viz HTML, when the composite has a Visualization Step wired
+        // to a viz_html output store. Server returns json.viz_html as a
+        // {<wire_path>: <html>} mapping when render_results() finds any
+        // (or a bare string for legacy single-viz callers). Both shapes
+        // render into a sandboxed iframe so embedded <script> tags execute.
+        var vizHtml = json.viz_html;
+        if (vizHtml) {
+          var vizEntries = [];
+          if (typeof vizHtml === 'string' && vizHtml.length > 0) {
+            vizEntries.push(['viz', vizHtml]);
+          } else if (typeof vizHtml === 'object') {
+            Object.keys(vizHtml).forEach(function(k) {
+              var v = vizHtml[k];
+              var s = (v && typeof v === 'object' && 'html' in v) ? v.html : v;
+              if (typeof s === 'string' && s.length > 0) {
+                vizEntries.push([k, s]);
+              }
+            });
+          }
+          if (vizEntries.length) {
+            resultsHtml += '<div class="ce-run-viz" style="margin-top:1rem">' +
+              '<h4>Visualizations</h4>';
+            vizEntries.forEach(function(pair) {
+              var name = pair[0], html = pair[1];
+              var doc = '<!DOCTYPE html><html><body style="margin:0;padding:8px">' +
+                html + '</body></html>';
+              var docEsc = doc.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+              resultsHtml += '<div style="margin-bottom:0.8rem">' +
+                '<div style="font-size:0.85em;color:#5d6573;margin-bottom:4px">' +
+                _esc(String(name)) + '</div>' +
+                '<iframe sandbox="allow-scripts" style="width:100%;height:520px;' +
+                'border:1px solid #d8dbe0;border-radius:4px;background:#fff" ' +
+                'srcdoc="' + docEsc + '"></iframe>' +
+                '</div>';
+            });
+            resultsHtml += '</div>';
+          }
+        }
         resultsEl.innerHTML = resultsHtml;
         // Persist + refresh history
         window._ceHistoryLoaded = false;  // force re-fetch on next visit

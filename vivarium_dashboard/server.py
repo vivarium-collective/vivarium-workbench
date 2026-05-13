@@ -796,6 +796,17 @@ class Handler(BaseHTTPRequestHandler):
         bundled = STATIC_DIR / rel
         if bundled.is_file():
             return self._serve_file(bundled, self._guess_mime(rel))
+        # Compatibility: the live dashboard HTML references bundled assets
+        # under `/assets/<file>` (e.g. `<script src="assets/walkthrough.js">`),
+        # but STATIC_DIR stores them at the package root with no `assets/`
+        # prefix. Strip the prefix and retry the bundled lookup before
+        # falling through to the workspace tree — otherwise a stale
+        # `reports/assets/<file>` copy left by an earlier `pbg-report` run
+        # would shadow the live source.
+        if rel.startswith("assets/"):
+            bundled_alt = STATIC_DIR / rel[len("assets/"):]
+            if bundled_alt.is_file():
+                return self._serve_file(bundled_alt, self._guess_mime(rel))
         primary = WORKSPACE / rel
         if primary.is_file():
             return self._serve_file(primary, self._guess_mime(rel))
