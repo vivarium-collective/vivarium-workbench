@@ -621,6 +621,59 @@ def _pending_entries() -> dict:
 # Catalog sync check
 # ---------------------------------------------------------------------------
 
+def _platform_key() -> str:
+    """Map sys.platform to the install-key used in catalog system_dependencies.
+
+    Returns one of: 'darwin', 'linux', 'windows', or the raw lowercase
+    platform.system() string as a last-resort fallback. Kept tiny on
+    purpose — catalog entries key install commands by these strings.
+    """
+    import platform
+    p = platform.system().lower()
+    if p == "darwin":
+        return "darwin"
+    if p.startswith("linux"):
+        return "linux"
+    if p == "windows":
+        return "windows"
+    return p
+
+
+def _check_system_dep(check: dict, venv_py: Path) -> tuple[bool, str | None]:
+    """Run a single system-dep check defined in a catalog entry.
+
+    A check is satisfied when its ``import_check`` Python snippet runs
+    successfully inside the workspace venv. Empty/missing snippets are
+    treated as satisfied (the catalog author signalled the dep has no
+    programmatic check).
+
+    Returns ``(satisfied, failure_reason)`` — reason is None on success
+    and otherwise the most informative tail line of stderr.
+    """
+    snippet = check.get("import_check") or ""
+    if not snippet:
+        return True, None
+    if not venv_py.is_file():
+        return False, f"workspace venv python not found at {venv_py}"
+    try:
+        result = subprocess.run(
+            [str(venv_py), "-c", snippet],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            return True, None
+        # Last non-blank line of stderr is usually the most informative
+        # (Python traceback final line / dlopen error / etc.).
+        err_lines = [
+            ln for ln in (result.stderr or "").strip().splitlines() if ln.strip()
+        ]
+        return False, (err_lines[-1] if err_lines else f"exit {result.returncode}")
+    except subprocess.TimeoutExpired:
+        return False, "check timed out"
+    except Exception as e:
+        return False, str(e)
+
+
 def _check_installed_module_sync(pkg_name: str, install_path: str | None) -> str | None:
     """Return None if the module is consistently installed; else a one-line reason.
 
@@ -697,6 +750,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_investigations()
         if self.path.startswith("/api/composites"):
             return self._get_composites()
+        if self.path.startswith("/api/system-deps-check"):
+            return self._get_system_deps_check()
         if self.path.startswith("/api/catalog"):
             return self._get_catalog()
         if self.path.startswith("/api/workspace-manifest"):
@@ -784,6 +839,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/dirty-commit-all":   self._post_dirty_commit_all,
             "/api/catalog-install":    self._post_catalog_install,
             "/api/catalog-uninstall":  self._post_catalog_uninstall,
+            "/api/system-deps-install": self._post_system_deps_install,
             "/api/open-window":        self._post_open_window,
             "/api/suggest":            self._post_suggest,
             "/api/composite-test-run": self._post_composite_test_run,
@@ -5354,6 +5410,151 @@ if __name__ == "__main__":
             return self._json({"error": f"open failed: {e}"}, 500)
         return self._json({"ok": True, "url": url}, 200)
 
+    def _get_system_deps_check(self):
+        """GET /api/system-deps-check?name=<module> — check whether a catalog
+        module's ``system_dependencies`` are satisfied in the workspace venv.
+
+        Returns: ``{name, platform, ok, checks: [{name, description, ok,
+        reason, install: {manager, commands, notes}|null, notes}]}``.
+        """
+        import urllib.parse
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        name = (qs.get("name", [""])[0]).strip()
+        if not name:
+            return self._json({"error": "name required"}, 400)
+
+        catalog_path = WORKSPACE / "scripts" / "_catalog" / "modules.json"
+        if not catalog_path.is_file():
+            return self._json({"error": "catalog not found"}, 404)
+        try:
+            catalog = json.loads(catalog_path.read_text())
+        except Exception as e:
+            return self._json({"error": f"catalog parse failed: {e}"}, 500)
+        entry = next((m for m in catalog if m.get("name") == name), None)
+        if entry is None:
+            return self._json({"error": f"unknown module: {name}"}, 404)
+
+        sys_deps = (entry.get("system_dependencies") or {}).get("checks") or []
+        venv_py = WORKSPACE / ".venv" / "bin" / "python3"
+        plat = _platform_key()
+
+        results = []
+        all_ok = True
+        for check in sys_deps:
+            ok, reason = _check_system_dep(check, venv_py)
+            if not ok:
+                all_ok = False
+            install_block = check.get("install") if isinstance(check.get("install"), dict) else None
+            install_spec = install_block.get(plat) if install_block else None
+            results.append({
+                "name": check.get("name"),
+                "description": check.get("description", ""),
+                "ok": ok,
+                "reason": reason,
+                "install": install_spec,
+                "notes": check.get("notes"),
+            })
+        return self._json({
+            "name": name,
+            "platform": plat,
+            "ok": all_ok,
+            "checks": results,
+        }, 200)
+
+    def _post_system_deps_install(self, body: dict):
+        """POST /api/system-deps-install ``{name, check_names}`` — run install
+        commands for the named checks of a catalog module.
+
+        Caller is expected to have surfaced the commands to the user and
+        gotten explicit consent before invoking this endpoint; install
+        commands are run via ``shell=True`` (catalog is workspace-local
+        and editable only by trusted users).
+
+        Returns: ``{ok, log: [...], recheck: [{name, ok, reason}]}``.
+        """
+        name = (body.get("name") or "").strip()
+        check_names = body.get("check_names") or []
+        if not name or not check_names:
+            return self._json({"error": "name + check_names required"}, 400)
+
+        catalog_path = WORKSPACE / "scripts" / "_catalog" / "modules.json"
+        if not catalog_path.is_file():
+            return self._json({"error": "catalog not found"}, 404)
+        try:
+            catalog = json.loads(catalog_path.read_text())
+        except Exception as e:
+            return self._json({"error": f"catalog parse failed: {e}"}, 500)
+        entry = next((m for m in catalog if m.get("name") == name), None)
+        if entry is None:
+            return self._json({"error": f"unknown module: {name}"}, 404)
+
+        sys_deps = (entry.get("system_dependencies") or {}).get("checks") or []
+        plat = _platform_key()
+        by_name = {c.get("name"): c for c in sys_deps if c.get("name")}
+
+        log: list[dict] = []
+        overall_ok = True
+        for cn in check_names:
+            check = by_name.get(cn)
+            if check is None:
+                log.append({"check_name": cn, "returncode": -1, "error": "unknown check"})
+                overall_ok = False
+                continue
+            install_block = check.get("install") if isinstance(check.get("install"), dict) else None
+            install_spec = install_block.get(plat) if install_block else None
+            if not install_spec:
+                log.append({
+                    "check_name": cn, "returncode": -1,
+                    "error": f"no install spec for platform {plat}",
+                })
+                overall_ok = False
+                continue
+            commands = install_spec.get("commands") or []
+            for cmd in commands:
+                # WARNING: shell=True so catalog-supplied commands execute
+                # verbatim. Catalog is workspace-local; only trusted users
+                # should be allowed to edit it. The UI is expected to have
+                # shown each command to the user before this endpoint is
+                # called.
+                try:
+                    result = subprocess.run(
+                        cmd, shell=True, capture_output=True, text=True,
+                        timeout=600,  # brew installs can be slow
+                    )
+                except subprocess.TimeoutExpired:
+                    log.append({
+                        "check_name": cn, "command": cmd,
+                        "returncode": -1, "error": "timeout (600s)",
+                    })
+                    overall_ok = False
+                    break
+                log.append({
+                    "check_name": cn,
+                    "command": cmd,
+                    "returncode": result.returncode,
+                    "stdout_tail": (result.stdout or "")[-500:],
+                    "stderr_tail": (result.stderr or "")[-500:],
+                })
+                if result.returncode != 0:
+                    overall_ok = False
+                    break
+
+        # Re-check each requested dep after install attempts.
+        venv_py = WORKSPACE / ".venv" / "bin" / "python3"
+        recheck = []
+        for cn in check_names:
+            check = by_name.get(cn)
+            if check is None:
+                continue
+            ok, reason = _check_system_dep(check, venv_py)
+            recheck.append({"name": cn, "ok": ok, "reason": reason})
+
+        return self._json({
+            "ok": overall_ok,
+            "log": log,
+            "recheck": recheck,
+        }, 200)
+
     def _get_catalog(self):
         """GET /api/catalog — return the curated module catalog with installed annotations.
 
@@ -5415,6 +5616,38 @@ if __name__ == "__main__":
         entry = next((m for m in modules if m["name"] == name), None)
         if not entry:
             return self._json({"error": f"module '{name}' not in catalog"}, 404)
+
+        # System-dependency gate: if the catalog declares native checks and
+        # any are unsatisfied, refuse the install with a 409 containing
+        # structured info. UI then prompts the user to install the system
+        # deps (or POST again with skip_system_deps_check=true).
+        sys_deps_block = entry.get("system_dependencies") or {}
+        sys_deps_checks = sys_deps_block.get("checks") or []
+        if sys_deps_checks and not bool(body.get("skip_system_deps_check")):
+            venv_py_for_check = WORKSPACE / ".venv" / "bin" / "python3"
+            plat = _platform_key()
+            missing = []
+            for check in sys_deps_checks:
+                ok, reason = _check_system_dep(check, venv_py_for_check)
+                if ok:
+                    continue
+                install_block = check.get("install") if isinstance(check.get("install"), dict) else None
+                install_spec = install_block.get(plat) if install_block else None
+                missing.append({
+                    "name": check.get("name"),
+                    "description": check.get("description", ""),
+                    "reason": reason,
+                    "install": install_spec,
+                    "notes": check.get("notes"),
+                })
+            if missing:
+                return self._json({
+                    "error": "unmet system dependencies",
+                    "name": name,
+                    "platform": plat,
+                    "missing": missing,
+                    "hint": "POST again with skip_system_deps_check=true to proceed anyway, or call /api/system-deps-install first.",
+                }, 409)
 
         pypi_name = entry.get("pypi_name")  # optional; if set, install from PyPI
 

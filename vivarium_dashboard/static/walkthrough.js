@@ -1,4 +1,4 @@
-// walkthrough.js — v0.5.3: investigation detail panel — Spec/Runs/Visualizations tabs + Run button + Delete; v0.5.2: composite explorer UX fixes (no focus-mode hijack, one-row-per-param layout, lazy-load composite cache); v0.5.1: composite explorer page (bigraph-viz + test run + promote to simulation); v0.4.14: Available Composites picker + Emitter Use feedback + drop process multi-select; v0.4.5: _renderInstallError structured diagnosis; v0.4.1: _loadCatalog + _installFromCatalog; v0.4.0b: active-branch workstream strip; v0.3.7-A: _installImport; v0.3.6: Registry tab; v0.1.9: drag-drop uploads; v0.1.7: interactive forms.
+// walkthrough.js — v0.6.0: system-deps awareness — pre-install check + consent modal (_installFromCatalog → _showSystemDepsModal; new _checkSystemDepsForInstalled on Registry rows); v0.5.3: investigation detail panel — Spec/Runs/Visualizations tabs + Run button + Delete; v0.5.2: composite explorer UX fixes (no focus-mode hijack, one-row-per-param layout, lazy-load composite cache); v0.5.1: composite explorer page (bigraph-viz + test run + promote to simulation); v0.4.14: Available Composites picker + Emitter Use feedback + drop process multi-select; v0.4.5: _renderInstallError structured diagnosis; v0.4.1: _loadCatalog + _installFromCatalog; v0.4.0b: active-branch workstream strip; v0.3.7-A: _installImport; v0.3.6: Registry tab; v0.1.9: drag-drop uploads; v0.1.7: interactive forms.
 (function () {
   "use strict";
 
@@ -1098,12 +1098,20 @@
       var ref = _esc(m.ref || 'main');
       var path = _esc(m.install_path || m.path || '—');
       var pkg = _esc(m.package || m.name);
+      var sysDepsBtn = '';
+      // Only surface a "Run system-deps check" button when the module is
+      // installed AND the catalog flagged drift OR the entry declares
+      // native deps. Keeps the table clean for the common case.
+      var hasSysDeps = m.system_dependencies && (m.system_dependencies.checks || []).length;
+      if (hasSysDeps || m.out_of_sync) {
+        sysDepsBtn = ' <button class="action-btn action-btn--secondary" onclick="_checkSystemDepsForInstalled(\'' + name + '\')">Check system deps</button>';
+      }
       return '<tr>' +
         '<td><code>' + name + '</code><br><small style="color:#6b7280">' + pkg + '</small></td>' +
         '<td><code>' + source + '</code> @ <code>' + ref + '</code></td>' +
         '<td><code>' + path + '</code></td>' +
         '<td><span class="status-pill installed">installed</span></td>' +
-        '<td><button class="action-btn action-btn--secondary" onclick="_uninstallFromInstalled(\'' + name + '\')">Uninstall</button></td>' +
+        '<td><button class="action-btn action-btn--secondary" onclick="_uninstallFromInstalled(\'' + name + '\')">Uninstall</button>' + sysDepsBtn + '</td>' +
         '</tr>';
     }).join('');
 
@@ -1156,6 +1164,29 @@
       });
   }
   window._uninstallFromInstalled = _uninstallFromInstalled;
+
+  function _checkSystemDepsForInstalled(name) {
+    fetch('/api/system-deps-check?name=' + encodeURIComponent(name))
+      .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var ok = parts[0], j = parts[1];
+        if (!ok || !j || !j.checks) {
+          alert('System-deps check failed: ' + ((j && j.error) || 'unknown'));
+          return;
+        }
+        if (j.ok) {
+          alert('All system dependencies for ' + name + ' are satisfied.\n\n' +
+            (j.checks || []).map(function(c) { return '  • ' + c.name + ' OK'; }).join('\n'));
+          return;
+        }
+        // Reuse the install-flow modal so the user can choose to install deps.
+        _showSystemDepsModal(name, j);
+      })
+      .catch(function(err) {
+        alert('Network error: ' + String(err));
+      });
+  }
+  window._checkSystemDepsForInstalled = _checkSystemDepsForInstalled;
 
   function _loadCatalog() {
     fetch('/api/catalog')
@@ -1220,16 +1251,59 @@
   }
 
   function _installFromCatalog(name) {
+    // First check whether the catalog entry declares any native/system
+    // dependencies and, if so, that they're satisfied in the workspace venv.
+    // If anything is missing, show the consent modal instead of jumping
+    // straight to the pip-install path (which would fail with a cryptic
+    // dlopen error at first Run).
+    fetch('/api/system-deps-check?name=' + encodeURIComponent(name))
+      .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var rOk = parts[0], j = parts[1];
+        if (!rOk || !j || !j.checks || !j.checks.length || j.ok) {
+          // No checks declared, all green, or the check endpoint itself
+          // errored — fall through to the existing install flow.
+          return _proceedWithCatalogInstall(name);
+        }
+        _showSystemDepsModal(name, j);
+      })
+      .catch(function() {
+        // Network/parse error: don't block the user — let the install try.
+        _proceedWithCatalogInstall(name);
+      });
+  }
+  window._installFromCatalog = _installFromCatalog;
+
+  function _proceedWithCatalogInstall(name, opts) {
     if (!confirm("Install '" + name + "' as a workstream commit?\n\nThis adds a submodule, pip installs the package, and appends it to pyproject.toml. Requires an active workstream.")) return;
+    var body = {name: name};
+    if (opts && opts.skip_system_deps_check) body.skip_system_deps_check = true;
     fetch('/api/catalog-install', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: name}),
+      body: JSON.stringify(body),
     })
-      .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(r) { return r.json().then(function(j) { return [r.ok, r.status, j]; }); })
       .then(function(parts) {
-        var ok = parts[0], json = parts[1];
+        var ok = parts[0], status = parts[1], json = parts[2];
         if (!ok) {
+          // 409 = system-deps gate (defence-in-depth — UI should have
+          // already shown the modal; re-show if it happens anyway).
+          if (status === 409 && json && json.missing) {
+            _showSystemDepsModal(name, {
+              name: name,
+              platform: json.platform,
+              ok: false,
+              checks: json.missing.map(function(m) {
+                return {
+                  name: m.name, description: m.description,
+                  ok: false, reason: m.reason,
+                  install: m.install, notes: m.notes,
+                };
+              }),
+            });
+            return;
+          }
           alert(_renderInstallError(json));
           return;
         }
@@ -1244,7 +1318,142 @@
         alert("Network error: " + String(err));
       });
   }
-  window._installFromCatalog = _installFromCatalog;
+  window._proceedWithCatalogInstall = _proceedWithCatalogInstall;
+
+  // -------------------------------------------------------------------------
+  // System dependencies modal
+  // -------------------------------------------------------------------------
+
+  function _closeSystemDepsModal() {
+    var el = document.getElementById('modal-system-deps');
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+  window._closeSystemDepsModal = _closeSystemDepsModal;
+
+  function _showSystemDepsModal(name, depsResult) {
+    _closeSystemDepsModal();
+    var checks = (depsResult && depsResult.checks) || [];
+    var missing = checks.filter(function(c) { return !c.ok; });
+    var installableNames = missing
+      .filter(function(c) { return c.install && (c.install.commands || []).length; })
+      .map(function(c) { return c.name; });
+
+    // Build per-check sections.
+    var sections = missing.map(function(c) {
+      var statusIcon = '<span style="color:#c00;font-weight:bold;">FAIL</span>';
+      var header =
+        '<div style="margin-top:10px;"><strong><code>' + _esc(c.name) + '</code></strong> ' +
+        statusIcon + '</div>' +
+        (c.description ? '<div class="muted" style="font-size:0.9em;margin:2px 0;">' + _esc(c.description) + '</div>' : '');
+      var reason = c.reason
+        ? '<div style="font-family:monospace;font-size:0.85em;background:#fef3c7;border-left:3px solid #fcd34d;padding:6px 8px;margin:4px 0;">' +
+            _esc(c.reason) +
+          '</div>'
+        : '';
+      var installBlock = '';
+      if (c.install && (c.install.commands || []).length) {
+        var cmds = c.install.commands.map(function(cmd) {
+          return '<pre style="margin:2px 0;padding:6px 8px;background:#f3f4f6;border-radius:3px;font-size:0.85em;overflow-x:auto;">' +
+            '$ ' + _esc(cmd) + '</pre>';
+        }).join('');
+        var mgr = c.install.manager ? ' (' + _esc(c.install.manager) + ')' : '';
+        var notes = c.install.notes
+          ? '<div class="muted" style="font-size:0.85em;margin-top:4px;">' + _esc(c.install.notes) + '</div>'
+          : '';
+        installBlock =
+          '<div style="margin-top:4px;"><em>Install commands' + mgr + ':</em></div>' +
+          cmds + notes;
+      } else {
+        var nots = c.notes
+          ? '<div class="muted" style="font-size:0.85em;margin-top:4px;">' + _esc(c.notes) + '</div>'
+          : '<div class="muted" style="font-size:0.85em;margin-top:4px;">No automated install path on this platform — manual intervention required.</div>';
+        installBlock = nots;
+      }
+      return header + reason + installBlock;
+    }).join('');
+
+    var plat = _esc((depsResult && depsResult.platform) || '?');
+    var installBtn = installableNames.length
+      ? '<button type="button" class="action-btn" id="sysdeps-install-btn">Install all (' + installableNames.length + ')</button> '
+      : '';
+
+    var modal = document.createElement('div');
+    modal.id = 'modal-system-deps';
+    modal.className = 'modal-overlay';
+    modal.style.display = 'flex';
+    modal.innerHTML =
+      '<div class="modal-box" style="max-width:680px;">' +
+        '<button class="modal-close" onclick="_closeSystemDepsModal()">&times;</button>' +
+        '<h3>System dependencies missing for <code>' + _esc(name) + '</code></h3>' +
+        '<p class="muted" style="margin:4px 0;">' +
+          'Platform: <code>' + plat + '</code>. ' +
+          'These native libraries are required for the module to run but are not present in the workspace venv. ' +
+          'Review the install commands below before continuing.' +
+        '</p>' +
+        '<div id="sysdeps-checks-body">' + sections + '</div>' +
+        '<div id="sysdeps-error" class="form-error" style="color:#c00;min-height:1em;margin-top:8px;"></div>' +
+        '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">' +
+          installBtn +
+          '<button type="button" class="btn-mini" id="sysdeps-skip-btn">Skip checks &amp; install anyway</button>' +
+          '<button type="button" class="btn-mini" onclick="_closeSystemDepsModal()">Cancel</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(modal);
+
+    var installBtnEl = document.getElementById('sysdeps-install-btn');
+    if (installBtnEl) {
+      installBtnEl.addEventListener('click', function() {
+        _installSystemDeps(name, installableNames);
+      });
+    }
+    var skipBtnEl = document.getElementById('sysdeps-skip-btn');
+    if (skipBtnEl) {
+      skipBtnEl.addEventListener('click', function() {
+        if (!confirm("Skip system-deps check and install '" + name + "' anyway?\n\nThis is unsafe — the install will likely succeed at the pip step but fail with a native-library error at first Run.")) return;
+        _closeSystemDepsModal();
+        _proceedWithCatalogInstall(name, {skip_system_deps_check: true});
+      });
+    }
+  }
+  window._showSystemDepsModal = _showSystemDepsModal;
+
+  function _installSystemDeps(name, checkNames) {
+    var errEl = document.getElementById('sysdeps-error');
+    var btn = document.getElementById('sysdeps-install-btn');
+    if (errEl) errEl.textContent = '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Installing…'; }
+    fetch('/api/system-deps-install', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name, check_names: checkNames}),
+    })
+      .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var ok = parts[0], j = parts[1];
+        if (btn) { btn.disabled = false; btn.textContent = 'Install all (' + checkNames.length + ')'; }
+        if (!ok) {
+          if (errEl) errEl.textContent = (j && j.error) || 'install failed';
+          return;
+        }
+        // Show recheck status; if all green, proceed; otherwise keep modal up.
+        var stillFailing = (j.recheck || []).filter(function(r) { return !r.ok; });
+        if (stillFailing.length === 0) {
+          _closeSystemDepsModal();
+          _proceedWithCatalogInstall(name);
+          return;
+        }
+        // Surface the remaining failures so the user can decide what to do.
+        if (errEl) {
+          errEl.textContent = 'After install attempts, still failing: ' +
+            stillFailing.map(function(r) { return r.name + ' (' + (r.reason || '?') + ')'; }).join('; ');
+        }
+      })
+      .catch(function(err) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Install all (' + checkNames.length + ')'; }
+        if (errEl) errEl.textContent = 'Network error: ' + String(err);
+      });
+  }
+  window._installSystemDeps = _installSystemDeps;
 
   // -------------------------------------------------------------------------
   // Catalog uninstall (v0.5.5)
