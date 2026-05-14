@@ -637,6 +637,115 @@ def _diagnose_push_error(err: str) -> dict | None:
     return None
 
 
+def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
+                              label, overrides=None, sim_name=None, timeout=120):
+    """Run a resolved composite ``state`` for ``steps`` steps in a subprocess,
+    persisting runs_meta + history (via an injected SQLiteEmitter) to
+    ``db_file``.
+
+    Shared by ``_post_composite_test_run`` (scratchpad db) and the study-run
+    handlers (per-Study db). Does NOT clear prior rows — callers decide.
+
+    Returns ``(response_dict, status_code)``.  ``response_dict`` always has
+    ``"simulation_id"``; on success also ``"results"``, ``"viz_html"``,
+    ``"steps"``.
+    """
+    from vivarium_dashboard.lib import composite_runs as cr
+
+    state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
+
+    py = sys.executable
+    script = textwrap.dedent(f"""
+        import json, sys, traceback
+        try:
+            from {pkg}.core import build_core
+            from process_bigraph import Composite, gather_emitter_results
+            from process_bigraph.emitter import SQLiteEmitter
+            core = build_core()
+            core.register_link('SQLiteEmitter', SQLiteEmitter)
+            composite = Composite({{'state': __import__('json').loads({json.dumps(json.dumps(state, default=_json_default))})}}, core=core)
+            composite.run({steps})
+            results = gather_emitter_results(composite)
+            # Flatten tuple keys to JSON-friendly dotted strings
+            out = {{}}
+            for path_tuple, entries in results.items():
+                key = '.'.join(str(p) for p in path_tuple)
+                out[key] = entries
+            # Gather rendered viz HTML, if pbg_superpowers is importable.
+            viz_html = {{}}
+            try:
+                from pbg_superpowers.visualization import render_results
+                rendered = render_results(composite)
+                for path_tuple, payload in rendered.items():
+                    key = '.'.join(str(p) for p in path_tuple)
+                    viz_html[key] = payload
+            except Exception:
+                viz_html = {{}}
+            print('@@@RESULTS@@@')
+            print(json.dumps({{'results': out, 'viz_html': viz_html}}, default=str))
+        except Exception as e:
+            print('@@@ERROR@@@')
+            print(traceback.format_exc())
+    """)
+
+    conn = cr.connect(db_file)
+    try:
+        try:
+            cr.save_metadata(conn, spec_id=spec_id, run_id=run_id,
+                             params=overrides, label=label,
+                             started_at=time.time(), n_steps=steps)
+            if sim_name is not None:
+                conn.execute("UPDATE runs_meta SET sim_name=? WHERE run_id=?",
+                             (sim_name, run_id))
+                conn.commit()
+        except sqlite3.IntegrityError:
+            return ({"simulation_id": run_id,
+                     "error": "duplicate run_id (rare timing collision) — retry"}, 500)
+
+        try:
+            result = subprocess.run([py, "-c", script], cwd=WORKSPACE,
+                                    capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            try:
+                if exc.process is not None:
+                    exc.process.kill()
+                    exc.process.communicate(timeout=2)
+            except Exception:
+                pass
+            cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
+            return ({"simulation_id": run_id, "error": "run timed out"}, 504)
+
+        out = result.stdout
+        if "@@@ERROR@@@" in out:
+            cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
+            tb = out.split("@@@ERROR@@@", 1)[1].strip()
+            return ({"simulation_id": run_id, "error": "run failed",
+                     "traceback": tb}, 502)
+
+        try:
+            payload = json.loads(out.split("@@@RESULTS@@@", 1)[1].strip())
+        except (IndexError, json.JSONDecodeError):
+            cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
+            return ({"simulation_id": run_id,
+                     "error": "could not parse run output",
+                     "stdout": out, "stderr": result.stderr}, 502)
+
+        # Subprocess emits {results, viz_html}; older versions emitted the
+        # results dict directly. Handle both for forward/backward compat.
+        if isinstance(payload, dict) and "results" in payload:
+            results = payload.get("results") or {}
+            viz_html = payload.get("viz_html") or {}
+        else:
+            results = payload
+            viz_html = {}
+
+        cr.complete_metadata(conn, run_id=run_id, n_steps=steps, status="completed")
+        return ({"simulation_id": run_id, "results": results,
+                 "viz_html": viz_html, "steps": steps}, 200)
+    finally:
+        conn.close()
+
+
 def _count_viz_steps_in_state(state: dict) -> int:
     """Best-effort count of Visualization-Step entries in a composite state.
 
@@ -5490,101 +5599,12 @@ if __name__ == "__main__":
             # Best-effort cleanup; don't fail the run if a table is missing.
             pass
 
-        state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
-
-        # Subprocess-style run. Match existing pattern: composite.run(steps) + flatten tuple keys.
-        py = sys.executable
-        script = textwrap.dedent(f"""
-            import json, sys, traceback
-            try:
-                from {pkg}.core import build_core
-                from process_bigraph import Composite, gather_emitter_results
-                from process_bigraph.emitter import SQLiteEmitter
-                core = build_core()
-                core.register_link('SQLiteEmitter', SQLiteEmitter)
-                composite = Composite({{'state': __import__('json').loads({json.dumps(json.dumps(state, default=_json_default))})}}, core=core)
-                composite.run({steps})
-                results = gather_emitter_results(composite)
-                # Flatten tuple keys to JSON-friendly dotted strings
-                out = {{}}
-                for path_tuple, entries in results.items():
-                    key = '.'.join(str(p) for p in path_tuple)
-                    out[key] = entries
-                # Gather rendered viz HTML, if pbg_superpowers is importable.
-                viz_html = {{}}
-                try:
-                    from pbg_superpowers.visualization import render_results
-                    rendered = render_results(composite)
-                    for path_tuple, payload in rendered.items():
-                        key = '.'.join(str(p) for p in path_tuple)
-                        viz_html[key] = payload
-                except Exception:
-                    viz_html = {{}}
-                print('@@@RESULTS@@@')
-                print(json.dumps({{'results': out, 'viz_html': viz_html}}, default=str))
-            except Exception as e:
-                print('@@@ERROR@@@')
-                print(traceback.format_exc())
-        """)
-
-        # Save metadata before running so the row exists even on crash.
-        # save_metadata can raise sqlite3.IntegrityError on duplicate run_id;
-        # the run_id includes a fresh timestamp so duplicates are unexpected.
-        conn = cr.connect(db_file)
-        try:
-            try:
-                cr.save_metadata(conn, spec_id=spec_id, run_id=run_id,
-                                  params=overrides, label=label,
-                                  started_at=time.time(), n_steps=steps)
-            except sqlite3.IntegrityError:
-                return self._json({
-                    "simulation_id": run_id,
-                    "error": "duplicate run_id (rare timing collision) — retry",
-                }, 500)
-
-            try:
-                result = subprocess.run([py, "-c", script], cwd=WORKSPACE,
-                                         capture_output=True, text=True, timeout=120)
-            except subprocess.TimeoutExpired as exc:
-                try:
-                    if exc.process is not None:
-                        exc.process.kill()
-                        exc.process.communicate(timeout=2)
-                except Exception:
-                    pass
-                cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
-                return self._json({"simulation_id": run_id,
-                                    "error": "test run timed out"}, 504)
-
-            out = result.stdout
-            if "@@@ERROR@@@" in out:
-                cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
-                traceback_text = out.split("@@@ERROR@@@", 1)[1].strip()
-                return self._json({"simulation_id": run_id, "error": "run failed",
-                                    "traceback": traceback_text}, 502)
-
-            try:
-                payload = json.loads(out.split("@@@RESULTS@@@", 1)[1].strip())
-            except (IndexError, json.JSONDecodeError):
-                cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
-                return self._json({"simulation_id": run_id,
-                                    "error": "could not parse run output",
-                                    "stdout": out, "stderr": result.stderr}, 502)
-
-            # Subprocess emits {results, viz_html}; older versions emitted the
-            # results dict directly. Handle both for forward/backward compat.
-            if isinstance(payload, dict) and "results" in payload:
-                results = payload.get("results") or {}
-                viz_html = payload.get("viz_html") or {}
-            else:
-                results = payload
-                viz_html = {}
-
-            cr.complete_metadata(conn, run_id=run_id, n_steps=steps, status="completed")
-            return self._json({"simulation_id": run_id, "results": results,
-                                "viz_html": viz_html, "steps": steps}, 200)
-        finally:
-            conn.close()
+        response, code = _run_composite_subprocess(
+            pkg=pkg, state=state, steps=steps, db_file=db_file,
+            run_id=run_id, spec_id=spec_id, label=label, overrides=overrides,
+            timeout=120,
+        )
+        return self._json(response, code)
 
     # ------------------------------------------------------------------
     # Workspace manifest — one-call situational awareness for agents
