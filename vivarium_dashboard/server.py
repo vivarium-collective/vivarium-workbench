@@ -106,7 +106,8 @@ _POST_STUDY_ALIASES: dict[str, str] = {
     "/api/investigation-add-viz":            "/api/study-viz-add",
     "/api/investigation-run-delete":         "/api/study-run-delete",
     "/api/investigation-runs-clear":         "/api/study-runs-clear",
-    "/api/investigation-composite-perturb":  "/api/study-variant-add",
+    # /api/study-variant-add is now a v3-native route (not an alias), so it
+    # intentionally maps to _post_study_variant_add, not _post_investigation_composite_perturb.
     "/api/investigation-composite-rebuild":  "/api/study-variant-rebuild",
     "/api/investigation-set-observables":    "/api/study-set-observables",
     "/api/investigation-set-conclusions":    "/api/study-set-conclusion",
@@ -180,6 +181,8 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/study-create-from-run":            "_post_study_create_from_run",
     "/api/study-run-baseline":               "_post_study_run_baseline",
     "/api/study-run-variant":               "_post_study_run_variant",
+    "/api/study-variant-add":               "_post_study_variant_add",
+    "/api/study-variant-delete":            "_post_study_variant_delete",
 }
 # Inject study-alias routes into the POST route map (same method name as old).
 for _old, _new in _POST_STUDY_ALIASES.items():
@@ -714,6 +717,52 @@ def _post_study_run_variant_for_test(ws_root, body):
             "status": "completed", "n_steps": steps,
         })
     return response, code
+
+
+def _post_study_variant_add_for_test(ws_root, body):
+    """Add a variant entry to study.yaml. Returns (response_dict, status_code)."""
+    # Use "study" key directly — "name" here is the variant name, not the study.
+    study = (body.get("study") or body.get("investigation") or "").strip()
+    variant_name = (body.get("name") or "").strip()
+    if not study or not variant_name:
+        return {"error": "missing study or variant name"}, 400
+    sf = Path(ws_root) / "studies" / study / "study.yaml"
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text()) or {}
+    variants = spec.setdefault("variants", [])
+    if any(v.get("name") == variant_name for v in variants):
+        return {"error": f"variant {variant_name!r} already exists"}, 409
+
+    intervention = {"description": body.get("description") or ""}
+    if body.get("parameter_overrides"):
+        intervention["parameter_overrides"] = body["parameter_overrides"]
+    if body.get("process_overrides"):
+        intervention["process_overrides"] = body["process_overrides"]
+    variants.append({"name": variant_name, "intervention": intervention})
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    return {"ok": True, "name": variant_name}, 200
+
+
+def _post_study_variant_delete_for_test(ws_root, body):
+    """Remove a variant entry from study.yaml. Returns (response_dict, status_code)."""
+    study = _study_name_from_body(body)
+    variant_name = (body.get("variant") or "").strip()
+    if not study or not variant_name:
+        return {"error": "missing study or variant"}, 400
+    sf = Path(ws_root) / "studies" / study / "study.yaml"
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text()) or {}
+    variants = spec.get("variants") or []
+    remaining = [v for v in variants if v.get("name") != variant_name]
+    if len(remaining) == len(variants):
+        return {"error": f"variant {variant_name!r} not found"}, 404
+    spec["variants"] = remaining
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    return {"ok": True}, 200
 
 
 def _study_export_zip(ws_root: Path, name: str) -> bytes:
@@ -5107,6 +5156,17 @@ if __name__ == "__main__":
     def _post_study_run_variant(self, body: dict):
         """POST /api/study-run-variant {study, variant, steps?}"""
         response, code = _post_study_run_variant_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_variant_add(self, body: dict):
+        """POST /api/study-variant-add {study, name, description?,
+        parameter_overrides?, process_overrides?}"""
+        response, code = _post_study_variant_add_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_variant_delete(self, body: dict):
+        """POST /api/study-variant-delete {study, variant}"""
+        response, code = _post_study_variant_delete_for_test(WORKSPACE, body)
         return self._json(response, code)
 
     def _get_study_export(self):

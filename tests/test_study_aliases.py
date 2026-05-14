@@ -29,7 +29,8 @@ POST_ALIAS_PAIRS = [
     ("/api/investigation-add-viz",            "/api/study-viz-add"),
     ("/api/investigation-run-delete",         "/api/study-run-delete"),
     ("/api/investigation-runs-clear",         "/api/study-runs-clear"),
-    ("/api/investigation-composite-perturb",  "/api/study-variant-add"),
+    # /api/study-variant-add is now a v3-native route (not an alias), so it
+    # intentionally maps to _post_study_variant_add, not _post_investigation_composite_perturb.
     ("/api/investigation-composite-rebuild",  "/api/study-variant-rebuild"),
     ("/api/investigation-set-observables",    "/api/study-set-observables"),
     ("/api/investigation-set-conclusions",    "/api/study-set-conclusion"),
