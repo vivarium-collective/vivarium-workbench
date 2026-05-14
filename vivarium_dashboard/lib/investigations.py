@@ -101,6 +101,40 @@ def _validate_composites_list(spec: dict) -> None:
                 )
 
 
+def _validate_study_v3(spec: dict) -> None:
+    """Validate a schema_version=3 Study spec.
+
+    v3 shape (distinct from the v2 ``variants:``-as-composites shape):
+      - ``baseline``: a mapping with a ``composite`` string (required).
+      - ``variants``: optional list (MAY be empty) of parameter-overlay
+        mappings, each with a ``name``.
+      - ``runs``, ``visualizations``: optional lists.
+      - ``objective``, ``conclusion``: optional.
+    """
+    baseline = spec.get("baseline")
+    if not isinstance(baseline, dict):
+        raise InvestigationSpecError("v3 study: 'baseline' must be a mapping")
+    if not baseline.get("composite"):
+        raise InvestigationSpecError("v3 study: 'baseline.composite' is required")
+
+    variants = spec.get("variants", [])
+    if not isinstance(variants, list):
+        raise InvestigationSpecError("v3 study: 'variants' must be a list")
+    for i, v in enumerate(variants):
+        if not isinstance(v, dict) or not v.get("name"):
+            raise InvestigationSpecError(
+                f"v3 study: variants[{i}] must be a mapping with a 'name'"
+            )
+
+    runs = spec.get("runs", [])
+    if not isinstance(runs, list):
+        raise InvestigationSpecError("v3 study: 'runs' must be a list")
+
+    visualizations = spec.get("visualizations", [])
+    if not isinstance(visualizations, list):
+        raise InvestigationSpecError("v3 study: 'visualizations' must be a list")
+
+
 def _validate_variants_list(spec: dict) -> None:
     """Validate the v2 ``variants:`` list shape.
 
@@ -257,6 +291,11 @@ def load_spec(path: Path) -> dict:
     # name is always required
     if not spec.get("name"):
         raise InvestigationSpecError("missing required field: name")
+
+    # v3 (Studies) shape: single baseline + optional variants/runs/etc.
+    if spec.get("schema_version") == 3:
+        _validate_study_v3(spec)
+        return spec
 
     has_variants_list = "variants" in spec
     has_composites_list = "composites" in spec

@@ -337,6 +337,65 @@ LOCK = Lock()
 _SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
 
 # ---------------------------------------------------------------------------
+# Study / investigation directory resolution helpers
+# ---------------------------------------------------------------------------
+
+
+def _study_dir(name: str):
+    """Resolve a study directory, preferring the v3 ``studies/`` location
+    over the legacy ``investigations/`` location.
+
+    Studies created by /api/study-create-from-run live in ``studies/<name>/``.
+    Pre-Phase-1 investigations live in ``investigations/<name>/``. The aliased
+    /api/study-* handlers must find both.
+    """
+    studies_path = WORKSPACE / "studies" / name
+    if studies_path.is_dir():
+        return studies_path
+    return WORKSPACE / "investigations" / name
+
+
+def _study_spec_path(name: str):
+    """Resolve a study's spec file: ``study.yaml`` (v3) or ``spec.yaml`` (legacy)."""
+    d = _study_dir(name)
+    study_yaml = d / "study.yaml"
+    if study_yaml.is_file():
+        return study_yaml
+    return d / "spec.yaml"
+
+
+def _iter_study_dirs():
+    """Yield every study directory across both studies/ and investigations/.
+
+    A name present in both locations yields only the studies/ entry (the v3
+    location wins, matching _study_dir's precedence).
+    """
+    seen = set()
+    for root_name in ("studies", "investigations"):
+        root = WORKSPACE / root_name
+        if not root.is_dir():
+            continue
+        for d in sorted(root.iterdir()):
+            if not d.is_dir() or d.name in seen:
+                continue
+            seen.add(d.name)
+            yield d
+
+
+def _study_name_from_body(body: dict) -> str:
+    """Extract the study/investigation identifier from a request body.
+
+    The Study Detail UI sends 'study' (and 'investigation'); the legacy
+    investigation UI sends 'name'. Accept any of them so the aliased
+    /api/study-* handlers work for both callers.
+    """
+    return (
+        (body.get("name") or body.get("study") or body.get("investigation") or "")
+        .strip()
+    )
+
+
+# ---------------------------------------------------------------------------
 # Study pure-function helpers (testable without HTTP handler)
 # ---------------------------------------------------------------------------
 
@@ -2914,8 +2973,8 @@ if __name__ == "__main__":
             return self._json({"error": "bad route"}, 400)
         name = rest
 
-        inv_dir = WORKSPACE / "investigations" / name
-        spec_path = inv_dir / "spec.yaml"
+        inv_dir = _study_dir(name)
+        spec_path = _study_spec_path(name)
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
 
@@ -2991,7 +3050,7 @@ if __name__ == "__main__":
                 {"error": "investigation and run_id are required",
                  "viz_files": []}, 400,
             )
-        viz_dir = WORKSPACE / "investigations" / inv / "viz" / run_id
+        viz_dir = _study_dir(inv) / "viz" / run_id
         if not viz_dir.is_dir():
             return self._json({"viz_files": []}, 200)
         out = []
@@ -3013,7 +3072,7 @@ if __name__ == "__main__":
         name = urllib.parse.parse_qs(qs).get('investigation', [''])[0].strip()
         if not name:
             return self._json({"error": "investigation is required"}, 400)
-        spec_path = WORKSPACE / "investigations" / name / "spec.yaml"
+        spec_path = _study_spec_path(name)
         if not spec_path.is_file():
             return self._json({"error": f"investigation '{name}' not found"}, 404)
         try:
@@ -3039,7 +3098,7 @@ if __name__ == "__main__":
         comp = qs.get('composite', '').strip()
         if not inv or not comp:
             return self._json({"error": "investigation + composite required"}, 400)
-        composite_path = WORKSPACE / "investigations" / inv / "composites" / f"{comp}.yaml"
+        composite_path = _study_dir(inv) / "composites" / f"{comp}.yaml"
         if not composite_path.is_file():
             return self._json({"error": f"composite document not found: {composite_path}"}, 404)
         try:
@@ -3061,7 +3120,7 @@ if __name__ == "__main__":
         comp = qs.get('composite', '').strip()
         if not (inv and comp):
             return self._json({"error": "investigation + composite required"}, 400)
-        path = WORKSPACE / "investigations" / inv / "composites" / f"{comp}.yaml"
+        path = _study_dir(inv) / "composites" / f"{comp}.yaml"
         if not path.is_file():
             return self._json({"error": "composite document not found"}, 404)
         try:
@@ -3075,14 +3134,9 @@ if __name__ == "__main__":
         _ws_add_to_sys_path()
         from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
 
-        inv_root = WORKSPACE / "investigations"
-        if not inv_root.is_dir():
-            return self._json({"investigations": []}, 200)
         out = []
-        for d in sorted(inv_root.iterdir()):
-            if not d.is_dir():
-                continue
-            spec_path = d / "spec.yaml"
+        for d in _iter_study_dirs():
+            spec_path = d / "study.yaml" if (d / "study.yaml").is_file() else d / "spec.yaml"
             if not spec_path.is_file():
                 continue
             try:
@@ -3138,8 +3192,8 @@ if __name__ == "__main__":
         if not re.match(r"^[a-zA-Z0-9_-]+$", name):
             return self._json({"error": "name must match [a-zA-Z0-9_-]+"}, 400)
 
-        inv_dir = WORKSPACE / "investigations" / name
-        if inv_dir.exists():
+        inv_dir = WORKSPACE / "studies" / name
+        if inv_dir.exists() or (WORKSPACE / "investigations" / name).exists():
             return self._json({"error": f"investigation '{name}' already exists"}, 409)
 
         # Resolve source composite if provided
@@ -3216,10 +3270,10 @@ if __name__ == "__main__":
     def _post_investigation_delete(self, body: dict):
         """POST /api/investigation-delete {name} — remove investigation directory."""
         import shutil
-        name = (body.get("name") or "").strip()
+        name = _study_name_from_body(body)
         if not name:
             return self._json({"error": "name is required"}, 400)
-        inv_dir = WORKSPACE / "investigations" / name
+        inv_dir = _study_dir(name)
         if not inv_dir.is_dir():
             return self._json({"error": f"investigation '{name}' not found"}, 404)
 
@@ -3241,7 +3295,7 @@ if __name__ == "__main__":
         from vivarium_dashboard.lib.composite_lookup import substitute_parameters, find_composite_path
         from vivarium_dashboard.lib import composite_runs as cr
 
-        name = (body.get("name") or "").strip()
+        name = _study_name_from_body(body)
         if not name:
             return self._json({"error": "name is required"}, 400)
 
@@ -3404,8 +3458,8 @@ if __name__ == "__main__":
         name = (body.get("name") or "").strip()
         if not name:
             return self._json({"error": "name is required"}, 400)
-        inv_dir = WORKSPACE / "investigations" / name
-        spec_path = inv_dir / "spec.yaml"
+        inv_dir = _study_dir(name)
+        spec_path = _study_spec_path(name)
         if not spec_path.is_file():
             return self._json({"error": f"investigation '{name}' not found"}, 404)
         try:
@@ -3478,7 +3532,7 @@ if __name__ == "__main__":
         if not _re.match(r"^[a-zA-Z0-9_-]+$", viz_name):
             return self._json({"error": "viz name must match [a-zA-Z0-9_-]+"}, 400)
 
-        spec_path = WORKSPACE / "investigations" / inv / "spec.yaml"
+        spec_path = _study_spec_path(inv)
         if not spec_path.is_file():
             return self._json({"error": f"investigation '{inv}' not found"}, 404)
 
@@ -3770,7 +3824,7 @@ if __name__ == "__main__":
         # Try investigation source first if requested.
         if source.startswith("investigation:"):
             inv_name = source.split(":", 1)[1].strip()
-            inv_dir = WORKSPACE / "investigations" / inv_name
+            inv_dir = _study_dir(inv_name)
             runs_db = inv_dir / "runs.db"
             if not runs_db.is_file():
                 notes.append(f"investigation '{inv_name}' has no runs.db; falling back to demo")
@@ -3992,11 +4046,11 @@ if __name__ == "__main__":
         _ws_add_to_sys_path()
         from vivarium_dashboard.lib import composite_runs as cr
 
-        inv = (body.get("investigation") or "").strip()
+        inv = _study_name_from_body(body)
         run_id = (body.get("run_id") or "").strip()
         if not inv or not run_id:
             return self._json({"error": "investigation and run_id required"}, 400)
-        db = WORKSPACE / "investigations" / inv / "runs.db"
+        db = _study_dir(inv) / "runs.db"
         if not db.is_file():
             return self._json({"error": "runs.db not found"}, 404)
         conn = cr.connect(db)
@@ -4010,10 +4064,10 @@ if __name__ == "__main__":
 
     def _post_investigation_runs_clear(self, body: dict):
         """POST /api/investigation-runs-clear {investigation} — wipe runs.db."""
-        inv = (body.get("investigation") or "").strip()
+        inv = _study_name_from_body(body)
         if not inv:
             return self._json({"error": "investigation required"}, 400)
-        db = WORKSPACE / "investigations" / inv / "runs.db"
+        db = _study_dir(inv) / "runs.db"
         if db.is_file():
             db.unlink()
         return self._json({"ok": True, "investigation": inv}, 200)
@@ -4030,14 +4084,14 @@ if __name__ == "__main__":
         from vivarium_dashboard.lib.composite_lookup import substitute_parameters, find_composite_path
         from vivarium_dashboard.lib import composite_runs as cr
 
-        inv = (body.get("investigation") or "").strip()
+        inv = _study_name_from_body(body)
         sim_name = (body.get("sim_name") or "").strip() or "ad-hoc"
         overrides = body.get("overrides") or {}
         steps = int(body.get("steps") or 10)
         if not inv:
             return self._json({"error": "investigation required"}, 400)
 
-        spec_path = WORKSPACE / "investigations" / inv / "spec.yaml"
+        spec_path = _study_spec_path(inv)
         if not spec_path.is_file():
             return self._json({"error": "spec.yaml not found"}, 404)
         try:
@@ -4055,7 +4109,7 @@ if __name__ == "__main__":
         # and resolve via the workspace registry.
         composite_name = None
         composite_doc = None  # raw {state, parameters, ...} dict OR a flat state dict
-        inv_dir = WORKSPACE / "investigations" / inv
+        inv_dir = _study_dir(inv)
         if "variants" in spec:
             # v2 study shape: prefer baseline; if absent, the first declared variant.
             variants = spec.get("variants") or []
@@ -4106,7 +4160,7 @@ if __name__ == "__main__":
             for k, v in (overrides or {}).items():
                 if k in state:
                     state[k] = v
-        db_file = str(WORKSPACE / "investigations" / inv / "runs.db")
+        db_file = str(_study_dir(inv) / "runs.db")
         run_id = cr.generate_run_id(composite_name, overrides)
         state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
 
@@ -4319,8 +4373,8 @@ if __name__ == "__main__":
         slug = re.sub(r"-+", "-", slug)
         auto_name = f"study-{slug}-{uuid.uuid4().hex[:6]}"
 
-        inv_dir = WORKSPACE / "investigations" / auto_name
-        if inv_dir.exists():
+        inv_dir = WORKSPACE / "studies" / auto_name
+        if inv_dir.exists() or (WORKSPACE / "investigations" / auto_name).exists():
             # Collision is astronomically unlikely with 24 bits of entropy, but
             # if it happens (e.g. a test seeds uuid), surface it rather than
             # silently overwriting.
@@ -4384,8 +4438,8 @@ if __name__ == "__main__":
         except (FileNotFoundError, ValueError) as e:
             return self._json({"error": str(e)}, 404)
 
-        inv_dir = WORKSPACE / "investigations" / inv_name
-        spec_path = inv_dir / "spec.yaml"
+        inv_dir = _study_dir(inv_name)
+        spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
         composites_dir = inv_dir / "composites"
@@ -4427,15 +4481,15 @@ if __name__ == "__main__":
         entry are both overwritten) — this supports the Interventions tab's
         Save-edit flow without a separate endpoint.
         """
-        inv_name = (body.get("investigation") or "").strip()
+        inv_name = (body.get("investigation") or body.get("study") or "").strip()
         comp_name = (body.get("name") or "").strip()
         extends = (body.get("extends") or "").strip()
         if not (inv_name and comp_name and extends):
             return self._json({"error": "investigation, name, extends required"}, 400)
 
         _ws_add_to_sys_path()
-        inv_dir = WORKSPACE / "investigations" / inv_name
-        spec_path = inv_dir / "spec.yaml"
+        inv_dir = _study_dir(inv_name)
+        spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
 
@@ -4541,8 +4595,8 @@ if __name__ == "__main__":
         catalog_dir = WORKSPACE / pkg / "composites"
 
         # Source paths
-        inv_dir = WORKSPACE / "investigations" / inv_name
-        spec_path = inv_dir / "spec.yaml"
+        inv_dir = _study_dir(inv_name)
+        spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
         if not spec_path.is_file():
             return self._json({"error": f"investigation {inv_name!r} not found"}, 404)
         sidecar = inv_dir / "composites" / f"{variant_name}.yaml"
@@ -4601,8 +4655,8 @@ if __name__ == "__main__":
         if not (inv_name and comp_name):
             return self._json({"error": "investigation, name required"}, 400)
 
-        inv_dir = WORKSPACE / "investigations" / inv_name
-        spec_path = inv_dir / "spec.yaml"
+        inv_dir = _study_dir(inv_name)
+        spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
         spec = yaml.safe_load(spec_path.read_text()) or {}
@@ -4656,8 +4710,8 @@ if __name__ == "__main__":
             return self._json({"error": "investigation required"}, 400)
         if paths is None or not isinstance(paths, list):
             return self._json({"error": "paths must be a list of arrays"}, 400)
-        inv_dir = WORKSPACE / "investigations" / inv_name
-        spec_path = inv_dir / "spec.yaml"
+        inv_dir = _study_dir(inv_name)
+        spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
 
@@ -4680,7 +4734,7 @@ if __name__ == "__main__":
         """POST /api/investigation-set-conclusions {investigation, markdown}
         Writes spec.yaml.conclusions. Rejects bodies over 256KB.
         """
-        inv_name = (body.get("investigation") or "").strip()
+        inv_name = _study_name_from_body(body)
         markdown = body.get("markdown", "")
         if not inv_name:
             return self._json({"error": "investigation required"}, 400)
@@ -4688,8 +4742,8 @@ if __name__ == "__main__":
             return self._json({"error": "markdown must be a string"}, 400)
         if len(markdown.encode("utf-8")) > 256 * 1024:
             return self._json({"error": "conclusions exceed 256KB limit"}, 400)
-        inv_dir = WORKSPACE / "investigations" / inv_name
-        spec_path = inv_dir / "spec.yaml"
+        inv_dir = _study_dir(inv_name)
+        spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
 
@@ -4723,8 +4777,8 @@ if __name__ == "__main__":
         for key in ("question", "hypothesis", "topic"):
             if key in fields and not isinstance(fields[key], str):
                 return self._json({"error": f"{key} must be a string"}, 400)
-        inv_dir = WORKSPACE / "investigations" / inv_name
-        spec_path = inv_dir / "spec.yaml"
+        inv_dir = _study_dir(inv_name)
+        spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
 
@@ -4821,8 +4875,8 @@ if __name__ == "__main__":
         comp_name = (body.get("name") or "").strip()
         if not (inv_name and comp_name):
             return self._json({"error": "investigation, name required"}, 400)
-        inv_dir = WORKSPACE / "investigations" / inv_name
-        spec_path = inv_dir / "spec.yaml"
+        inv_dir = _study_dir(inv_name)
+        spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
         spec = yaml.safe_load(spec_path.read_text()) or {}
@@ -4864,7 +4918,7 @@ if __name__ == "__main__":
         """POST /api/investigation-comparison-add {investigation, name, description?, variants[], observables[]}
         Appends a comparison entry to spec.yaml.comparisons.
         """
-        inv_name = (body.get("investigation") or "").strip()
+        inv_name = (body.get("investigation") or body.get("study") or "").strip()
         cmp_name = (body.get("name") or "").strip()
         variants = body.get("variants") or []
         observables = body.get("observables") or []
@@ -4879,8 +4933,8 @@ if __name__ == "__main__":
             return self._json({"error": "observables must be a non-empty list"}, 400)
         if not isinstance(description, str):
             return self._json({"error": "description must be a string"}, 400)
-        inv_dir = WORKSPACE / "investigations" / inv_name
-        spec_path = inv_dir / "spec.yaml"
+        inv_dir = _study_dir(inv_name)
+        spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
 
@@ -4921,8 +4975,8 @@ if __name__ == "__main__":
             return self._json({"error": "name required"}, 400)
         if not isinstance(fields, dict):
             return self._json({"error": "fields_to_update must be a mapping"}, 400)
-        inv_dir = WORKSPACE / "investigations" / inv_name
-        spec_path = inv_dir / "spec.yaml"
+        inv_dir = _study_dir(inv_name)
+        spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
 
@@ -4958,8 +5012,8 @@ if __name__ == "__main__":
             return self._json({"error": "investigation required"}, 400)
         if not cmp_name:
             return self._json({"error": "name required"}, 400)
-        inv_dir = WORKSPACE / "investigations" / inv_name
-        spec_path = inv_dir / "spec.yaml"
+        inv_dir = _study_dir(inv_name)
+        spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
         spec = yaml.safe_load(spec_path.read_text()) or {}
@@ -5012,8 +5066,8 @@ if __name__ == "__main__":
             return self._json({"error": "variants must be a non-empty list"}, 400)
         if not isinstance(description, str):
             return self._json({"error": "description must be a string"}, 400)
-        inv_dir = WORKSPACE / "investigations" / inv_name
-        spec_path = inv_dir / "spec.yaml"
+        inv_dir = _study_dir(inv_name)
+        spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
 
@@ -5064,8 +5118,8 @@ if __name__ == "__main__":
             return self._json({"error": "name required"}, 400)
         if not isinstance(fields, dict):
             return self._json({"error": "fields_to_update must be a mapping"}, 400)
-        inv_dir = WORKSPACE / "investigations" / inv_name
-        spec_path = inv_dir / "spec.yaml"
+        inv_dir = _study_dir(inv_name)
+        spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
 
@@ -5118,8 +5172,8 @@ if __name__ == "__main__":
             return self._json({"error": "investigation required"}, 400)
         if not grp_name:
             return self._json({"error": "name required"}, 400)
-        inv_dir = WORKSPACE / "investigations" / inv_name
-        spec_path = inv_dir / "spec.yaml"
+        inv_dir = _study_dir(inv_name)
+        spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
         spec_peek = yaml.safe_load(spec_path.read_text()) or {}
@@ -5621,19 +5675,14 @@ if __name__ == "__main__":
 
     def _manifest_studies_section(self):
         """List of studies with name, topic, status, n_variants, n_runs, n_conclusions."""
-        inv_root = WORKSPACE / "investigations"
-        if not inv_root.is_dir():
-            return []
         _ws_add_to_sys_path()
         try:
             from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
         except Exception:
             return []
         out = []
-        for d in sorted(inv_root.iterdir()):
-            if not d.is_dir():
-                continue
-            spec_path = d / "spec.yaml"
+        for d in _iter_study_dirs():
+            spec_path = d / "study.yaml" if (d / "study.yaml").is_file() else d / "spec.yaml"
             if not spec_path.is_file():
                 continue
             try:
@@ -6424,6 +6473,9 @@ if __name__ == "__main__":
 def _render_composite_svg(state: dict, package_name: str) -> str:
     """Run bigraph-viz to render the composite state. Return SVG string or error placeholder."""
     py = sys.executable
+    # The state can be multi-megabyte (v2ecoli composites embed initial_state),
+    # which overflows the OS ARG_MAX if passed inside the ``-c`` script. Keep the
+    # script constant-size and feed the state JSON through stdin instead.
     script = textwrap.dedent(f"""
         import json, sys, traceback
         try:
@@ -6436,7 +6488,7 @@ def _render_composite_svg(state: dict, package_name: str) -> str:
                 sys.exit(0)
 
             core = build_core()
-            state = {json.dumps(state, default=_json_default)}
+            state = json.load(sys.stdin)
             # bigraph-viz's plot_bigraph expects the state dict directly, NOT
             # composite.composition (which is a string in this version). Pass
             # the resolved state with core so node types resolve properly.
@@ -6465,6 +6517,7 @@ def _render_composite_svg(state: dict, package_name: str) -> str:
         result = subprocess.run(
             [py, "-c", script],
             cwd=WORKSPACE, capture_output=True, text=True, timeout=30,
+            input=json.dumps(state, default=_json_default),
         )
     except subprocess.TimeoutExpired:
         return "<svg xmlns='http://www.w3.org/2000/svg' width='400' height='50'><text x='10' y='30'>diagram render timed out</text></svg>"
