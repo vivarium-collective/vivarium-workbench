@@ -15,9 +15,9 @@
     {{ study.status }}
   </div>
   <div class="study-actions">
-    <button onclick="_studyRename()">Rename</button>
-    <button onclick="_studyExport()">Export</button>
-    <button onclick="_studyDelete()" class="danger">Delete</button>
+    <button class="btn-rename" data-study="{{ name }}">Rename</button>
+    <button class="btn-export" data-study="{{ name }}">Export</button>
+    <button class="btn-delete danger" data-study="{{ name }}">Delete</button>
   </div>
 </header>
 
@@ -34,8 +34,8 @@
     <tr><th>{{ k }}</th><td>{{ v }}</td></tr>
     {% endfor %}
   </table>
-  <button onclick="_studyRunBaseline()">Run baseline</button>
-  <button onclick="_studyEditBaselineParams()">Edit params</button>
+  <button class="btn-run-baseline">Run baseline</button>
+  <button class="btn-edit-baseline-params">Edit params</button>
 </section>
 
 <section class="card" id="card-variants">
@@ -46,13 +46,13 @@
       <h3>{{ v.name }}</h3>
       <p>{{ v.intervention.description if v.intervention else '' }}</p>
       <pre>{{ v.intervention.parameter_overrides if v.intervention else '' }}</pre>
-      <button onclick="_studyRunVariant('{{ v.name }}')">Run variant</button>
-      <button onclick="_studyEditVariant('{{ v.name }}')">Edit</button>
-      <button onclick="_studyDeleteVariant('{{ v.name }}')">Delete</button>
+      <button class="btn-run-variant" data-variant="{{ v.name }}">Run variant</button>
+      <button class="btn-edit-variant" data-variant="{{ v.name }}">Edit</button>
+      <button class="btn-delete-variant" data-variant="{{ v.name }}">Delete</button>
     </div>
     {% endfor %}
   </div>
-  <button onclick="_studyAddVariant()">+ Add variant</button>
+  <button class="btn-add-variant">+ Add variant</button>
 </section>
 
 <section class="card" id="card-runs">
@@ -69,15 +69,15 @@
       <td>{{ r.status }}</td>
       <td>{% if r.viz %}&#127902;{% endif %}</td>
       <td>
-        <button onclick="_studyViewRun('{{ r.run_id }}')">View</button>
-        <button onclick="_studyDeleteRun('{{ r.run_id }}')">Delete</button>
+        <button class="btn-view-run" data-run-id="{{ r.run_id }}">View</button>
+        <button class="btn-delete-run" data-run-id="{{ r.run_id }}">Delete</button>
       </td>
     </tr>
     {% endfor %}
     </tbody>
   </table>
-  <button onclick="_studyCompareSelected()">Compare selected</button>
-  <button onclick="_studyClearAllRuns()" class="danger">Clear all runs</button>
+  <button class="btn-compare-selected">Compare selected</button>
+  <button class="btn-clear-runs danger">Clear all runs</button>
 </section>
 
 <section class="card" id="card-viz">
@@ -87,7 +87,7 @@
     <div class="viz-config">{{ v.name }} &middot; {{ v.kind }}</div>
     {% endfor %}
   </div>
-  <button onclick="_studyAddViz()">+ Add visualization</button>
+  <button class="btn-add-viz">+ Add visualization</button>
 </section>
 
 <section class="card" id="card-conclusion">
@@ -95,7 +95,7 @@
   <div id="conclusion-text" data-editable="true">
     {{ (study.conclusion and study.conclusion.text) or '(blank)' }}
   </div>
-  <button onclick="_studyMarkComplete()">Mark complete</button>
+  <button class="btn-mark-complete">Mark complete</button>
 </section>
 
 <script>

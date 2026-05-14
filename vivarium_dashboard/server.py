@@ -4800,6 +4800,9 @@ if __name__ == "__main__":
         if len(parts) < 2 or parts[0] != "studies":
             return self._send_html("<h1>Not found</h1>", code=404)
         name = parts[1]
+        # Reject path-traversal attempts and anything that's not a valid slug.
+        if not _SLUG_RE.match(name):
+            return self._send_html("<h1>Not found</h1>", code=404)
         sd = WORKSPACE / "studies" / name / "study.yaml"
         if not sd.is_file():
             return self._send_html(
