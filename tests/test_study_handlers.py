@@ -75,3 +75,17 @@ def test_export_returns_zip_bytes(_study_workspace):
     data = _study_export_zip(_study_workspace, "s1")
     # First 4 bytes of a zip file are PK\x03\x04
     assert data[:4] == b"PK\x03\x04"
+
+
+def test_study_detail_page_renders(_study_workspace):
+    """GET /studies/s1 — _render_study_detail_html returns HTML with key section headings."""
+    from vivarium_dashboard.server import _render_study_detail_html
+    import yaml
+    spec = yaml.safe_load((_study_workspace / "studies" / "s1" / "study.yaml").read_text())
+    html = _render_study_detail_html("s1", spec)
+    assert "s1" in html
+    # Should include section headings for the six cards
+    assert "Baseline" in html or "baseline" in html.lower()
+    assert "Objective" in html or "objective" in html.lower()
+    assert "Conclusion" in html or "conclusion" in html.lower()
+    assert "Variants" in html or "variants" in html.lower()

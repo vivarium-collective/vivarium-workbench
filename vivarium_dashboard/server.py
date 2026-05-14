@@ -501,6 +501,17 @@ def _study_export_zip(ws_root: Path, name: str) -> bytes:
     return buf.getvalue()
 
 
+def _render_study_detail_html(name: str, spec: dict) -> str:
+    """Render study-detail.html via Jinja2."""
+    import jinja2
+    env = jinja2.Environment(
+        loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
+        autoescape=True,
+    )
+    tpl = env.get_template("study-detail.html")
+    return tpl.render(study=spec, name=name)
+
+
 # ---------------------------------------------------------------------------
 # Git helpers
 # ---------------------------------------------------------------------------
@@ -990,6 +1001,10 @@ class Handler(BaseHTTPRequestHandler):
                 tail = self.path[len(new_prefix):]
                 self.path = old_prefix + tail
                 break
+
+        # Study Detail page: /studies/<name> → render study-detail.html
+        if self.path.startswith("/studies/"):
+            return self._get_study_detail_page()
 
         # Strip query string for route matching (self.path includes ?focus=...).
         path_only = self.path.split("?", 1)[0]
@@ -4769,6 +4784,31 @@ if __name__ == "__main__":
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def _send_html(self, body: str, code: int = 200):
+        """Send an HTML response with the given body and status code."""
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        encoded = body.encode("utf-8")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+    def _get_study_detail_page(self):
+        """GET /studies/<name> — render the Study Detail page."""
+        parts = self.path.strip("/").split("/")
+        if len(parts) < 2 or parts[0] != "studies":
+            return self._send_html("<h1>Not found</h1>", code=404)
+        name = parts[1]
+        sd = WORKSPACE / "studies" / name / "study.yaml"
+        if not sd.is_file():
+            return self._send_html(
+                f"<h1>Study not found</h1><p><code>{name}</code> does not exist.</p>",
+                code=404,
+            )
+        spec = yaml.safe_load(sd.read_text()) or {}
+        body = _render_study_detail_html(name, spec)
+        return self._send_html(body, code=200)
 
     def _delete_investigation_composite(self, body: dict):
         """DELETE /api/investigation-composite {investigation, name}
