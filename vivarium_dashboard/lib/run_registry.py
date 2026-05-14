@@ -41,19 +41,21 @@ def spawn_detached(request_path: Path, *, workspace: Path,
     """
     log_path = Path(log_path)
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_fh = open(log_path, "w")  # noqa: SIM115 — handed to the child; closed below
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(workspace) + os.pathsep + env.get("PYTHONPATH", "")
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "vivarium_dashboard.cli",
-         "run-composite", "--request", str(request_path)],
-        cwd=str(workspace),
-        stdout=log_fh,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-        env=env,
-    )
-    log_fh.close()  # the child holds its own dup'd fd
+    log_fh = open(log_path, "w")  # noqa: SIM115 — handed to the child, closed in finally
+    try:
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(workspace) + os.pathsep + env.get("PYTHONPATH", "")
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "vivarium_dashboard.cli",
+             "run-composite", "--request", str(request_path)],
+            cwd=str(workspace),
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            env=env,
+        )
+    finally:
+        log_fh.close()  # the child holds its own dup'd fd; the parent's copy is done
     return proc.pid
 
 
