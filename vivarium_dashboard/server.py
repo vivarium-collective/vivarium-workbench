@@ -100,7 +100,6 @@ _GET_STUDY_ALIASES: list[tuple[str, str]] = [
 _POST_STUDY_ALIASES: dict[str, str] = {
     "/api/investigation-create":             "/api/study-create",
     "/api/investigation-delete":             "/api/study-delete",
-    "/api/investigation-run":                "/api/study-run-baseline",
     "/api/investigation-run-one":            "/api/study-run-variant",
     "/api/investigation-render-viz":         "/api/study-viz-render",
     "/api/investigation-add-viz":            "/api/study-viz-add",
@@ -178,6 +177,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/study-set-baseline-params":        "_post_study_set_baseline_params",
     "/api/study-rename":                     "_post_study_rename",
     "/api/study-create-from-run":            "_post_study_create_from_run",
+    "/api/study-run-baseline":               "_post_study_run_baseline",
 }
 # Inject study-alias routes into the POST route map (same method name as old).
 for _old, _new in _POST_STUDY_ALIASES.items():
@@ -545,6 +545,109 @@ def _post_study_create_from_run_for_test(ws_root, body):
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
     return {"study": name, "url": f"/studies/{name}"}, 200
+
+
+def _append_study_run(study_dir, run_record: dict) -> None:
+    """Append a run record to a Study's study.yaml `runs` list."""
+    sf = study_dir / "study.yaml"
+    spec = yaml.safe_load(sf.read_text()) or {}
+    spec.setdefault("runs", []).append(run_record)
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+
+
+def _resolve_study_baseline_state(pkg, spec_id, params):
+    """Resolve a generator composite spec_id + params → a state dict.
+
+    Returns (state, error_dict_or_None). Studies always reference generator
+    composites (mirrors the generator branch of _post_composite_test_run).
+    """
+    import importlib
+    import sys as _sys
+
+    try:
+        from pbg_superpowers.composite_generator import (
+            _REGISTRY, build_generator, discover_generators,
+        )
+    except ImportError:
+        return None, {"error": "pbg_superpowers not importable"}
+    if not _REGISTRY:
+        discover_generators()
+    entry = _REGISTRY.get(spec_id)
+    if entry is None:
+        # The registry may be stale (cleared by test teardown or a registry
+        # reset). Force-reload the module that defines this composite so its
+        # @composite_generator decorators re-fire, then retry.
+        # spec_id is like "pkg.composites.name"; the defining module is
+        # typically "pkg.composites" or "pkg.composites.name".
+        candidate_mods = []
+        if ".composites." in spec_id:
+            # "pkg.composites.name" → try "pkg.composites.name", "pkg.composites", "pkg"
+            parts = spec_id.split(".")
+            for i in range(len(parts), 0, -1):
+                candidate_mods.append(".".join(parts[:i]))
+        for mod_name in candidate_mods:
+            if mod_name in _sys.modules:
+                try:
+                    importlib.reload(_sys.modules[mod_name])
+                except Exception:  # noqa: BLE001
+                    pass
+        if candidate_mods:
+            discover_generators()
+        entry = _REGISTRY.get(spec_id)
+    if entry is None:
+        return None, {"error": f"composite {spec_id!r} not in generator registry"}
+    try:
+        doc = build_generator(entry, overrides=params)
+    except Exception as e:  # noqa: BLE001
+        return None, {"error": f"generator build failed: {e}"}
+    if isinstance(doc, dict) and "state" in doc and isinstance(doc["state"], dict):
+        return doc["state"], None
+    return doc, None
+
+
+def _post_study_run_baseline_for_test(ws_root, body):
+    """Run a Study's baseline composite. Returns (response_dict, status_code)."""
+    from vivarium_dashboard.lib import composite_runs as cr
+
+    name = _study_name_from_body(body)
+    if not name:
+        return {"error": "missing study"}, 400
+    study_dir = _study_dir(name)
+    sf = study_dir / "study.yaml"
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text()) or {}
+    baseline = spec.get("baseline") or {}
+    spec_id = baseline.get("composite")
+    if not spec_id:
+        return {"error": "study has no baseline.composite"}, 400
+    params = dict(baseline.get("params") or {})
+    # n_steps is a run-level setting, not a generator parameter — extract it
+    # unconditionally before passing the remainder as generator overrides.
+    params_n_steps = params.pop("n_steps", None)
+    steps = int(body.get("steps") or params_n_steps or 5)
+    generator_overrides = params  # remaining keys are true generator parameters
+
+    ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text())
+    pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+
+    state, err = _resolve_study_baseline_state(pkg, spec_id, generator_overrides)
+    if err is not None:
+        return err, 400
+
+    db_file = str(study_dir / "runs.db")
+    run_id = cr.generate_run_id(spec_id, params)
+    response, code = _run_composite_subprocess(
+        pkg=pkg, state=state, steps=steps, db_file=db_file,
+        run_id=run_id, spec_id=spec_id, label="baseline", sim_name="baseline",
+    )
+    if code == 200:
+        _append_study_run(study_dir, {
+            "run_id": run_id, "variant": None, "label": "baseline",
+            "status": "completed", "n_steps": steps,
+        })
+    return response, code
 
 
 def _study_export_zip(ws_root: Path, name: str) -> bytes:
@@ -4928,6 +5031,11 @@ if __name__ == "__main__":
     def _post_study_create_from_run(self, body: dict):
         """POST /api/study-create-from-run {name, objective, description?, source_run_id}"""
         response, code = _post_study_create_from_run_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_run_baseline(self, body: dict):
+        """POST /api/study-run-baseline {study, steps?}"""
+        response, code = _post_study_run_baseline_for_test(WORKSPACE, body)
         return self._json(response, code)
 
     def _get_study_export(self):

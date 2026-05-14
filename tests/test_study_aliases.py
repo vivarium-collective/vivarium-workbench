@@ -21,7 +21,8 @@ import vivarium_dashboard.server as srv
 POST_ALIAS_PAIRS = [
     ("/api/investigation-create",             "/api/study-create"),
     ("/api/investigation-delete",             "/api/study-delete"),
-    ("/api/investigation-run",                "/api/study-run-baseline"),
+    # /api/study-run-baseline is now a v3-native route (not an alias), so it
+    # intentionally maps to _post_study_run_baseline, not _post_investigation_run.
     ("/api/investigation-run-one",            "/api/study-run-variant"),
     ("/api/investigation-render-viz",         "/api/study-viz-render"),
     ("/api/investigation-add-viz",            "/api/study-viz-add"),
