@@ -1587,9 +1587,12 @@ def test_post_composite_test_run_accepts_generator_id(workspace_server):
             f"Generator id {expected_id} should not fall through to "
             f"file-based 'spec file not found'; got code={code} body={j}"
         )
-        # Acceptable outcomes: 200 (rare in this minimal ws), or any other
-        # non-404-spec-lookup error (run failure, parse failure, etc.).
-        assert code == 200 or code >= 400, f"unexpected status: {code} {j}"
+        # Acceptable outcomes: 202 (detached run accepted + spawned — the
+        # normal case now), 200 (legacy/synchronous), or any non-404-spec-
+        # lookup error (run failure, parse failure, etc.).
+        assert code == 202 or code == 200 or code >= 400, (
+            f"unexpected status: {code} {j}"
+        )
     finally:
         _REGISTRY.pop(expected_id, None)
 
