@@ -967,7 +967,7 @@
     <h3>Save as Study</h3>
     <form id="form-save-as-study" onsubmit="event.preventDefault(); _ceSubmitSaveAsStudy()">
       <label>Study name
-        <input id="sas-name" name="name" type="text" placeholder="chemotaxis-260513" required pattern="[a-zA-Z0-9_-]+">
+        <input id="sas-name" name="name" type="text" placeholder="chemotaxis-260513" required pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?" title="Lowercase letters, digits, and hyphens only (no leading/trailing hyphen)">
       </label>
       <label>Objective
         <textarea id="sas-objective" name="objective" rows="3" placeholder="What question does this study address?"></textarea>

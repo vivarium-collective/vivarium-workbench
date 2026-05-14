@@ -3183,6 +3183,7 @@
       // Pre-fill: <composite-leaf>-<YYMMDD>
       var composite = (window._ceCurrent && window._ceCurrent.id) || '';
       var leaf = composite.indexOf('.') >= 0 ? composite.split('.').pop() : composite;
+      leaf = leaf.toLowerCase().replace(/_/g, '-');   // match server slug regex
       var date = new Date();
       var yymmdd = String(date.getFullYear()).slice(2) +
         String(date.getMonth() + 1).padStart(2, '0') +
