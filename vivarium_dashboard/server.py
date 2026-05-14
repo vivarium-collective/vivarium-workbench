@@ -100,6 +100,8 @@ _GET_STUDY_ALIASES: list[tuple[str, str]] = [
 _POST_STUDY_ALIASES: dict[str, str] = {
     "/api/investigation-create":             "/api/study-create",
     "/api/investigation-delete":             "/api/study-delete",
+    # /api/study-run-baseline is now a v3-native route (not an alias), so it
+    # intentionally maps to _post_study_run_baseline, not _post_investigation_run.
     # /api/study-run-variant is now a v3-native route (not an alias), so it
     # intentionally maps to _post_study_run_variant, not _post_investigation_run_one.
     "/api/investigation-render-viz":         "/api/study-viz-render",
@@ -175,17 +177,17 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/investigation-group-add":          "_post_investigation_group_add",
     "/api/investigation-group-update":       "_post_investigation_group_update",
     # Study-specific POST endpoints (no investigation alias).
-    "/api/study-set-objective":              "_post_study_set_objective",
-    "/api/study-set-baseline-params":        "_post_study_set_baseline_params",
-    "/api/study-rename":                     "_post_study_rename",
-    "/api/study-create-from-run":            "_post_study_create_from_run",
-    "/api/study-run-baseline":               "_post_study_run_baseline",
-    "/api/study-run-variant":               "_post_study_run_variant",
-    "/api/study-variant-add":               "_post_study_variant_add",
-    "/api/study-variant-delete":            "_post_study_variant_delete",
-    "/api/study-run-delete":                "_post_study_run_delete",
-    "/api/study-runs-clear":                "_post_study_runs_clear",
-    "/api/study-comparison-add":            "_post_study_comparison_add",
+    "/api/study-set-objective":         "_post_study_set_objective",
+    "/api/study-set-baseline-params":   "_post_study_set_baseline_params",
+    "/api/study-rename":                "_post_study_rename",
+    "/api/study-create-from-run":       "_post_study_create_from_run",
+    "/api/study-run-baseline":          "_post_study_run_baseline",
+    "/api/study-run-variant":           "_post_study_run_variant",
+    "/api/study-variant-add":           "_post_study_variant_add",
+    "/api/study-variant-delete":        "_post_study_variant_delete",
+    "/api/study-run-delete":            "_post_study_run_delete",
+    "/api/study-runs-clear":            "_post_study_runs_clear",
+    "/api/study-comparison-add":        "_post_study_comparison_add",
 }
 # Inject study-alias routes into the POST route map (same method name as old).
 for _old, _new in _POST_STUDY_ALIASES.items():
@@ -644,8 +646,15 @@ def _post_study_run_baseline_for_test(ws_root, body):
     if err is not None:
         return err, 400
 
+    # Reconstruct the full params dict (with n_steps) for run_id generation,
+    # mirroring _post_study_run_variant_for_test so baseline and variant runs
+    # hash their run_ids consistently.
+    full_params = dict(generator_overrides)
+    if params_n_steps is not None:
+        full_params["n_steps"] = params_n_steps
+
     db_file = str(study_dir / "runs.db")
-    run_id = cr.generate_run_id(spec_id, params)
+    run_id = cr.generate_run_id(spec_id, full_params)
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label="baseline", sim_name="baseline",
