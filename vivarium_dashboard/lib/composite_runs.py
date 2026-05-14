@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS runs_meta (
     started_at    REAL NOT NULL,
     completed_at  REAL,
     n_steps       INTEGER,
-    status        TEXT NOT NULL
+    status        TEXT NOT NULL,
+    sim_name      TEXT
 );
 """
 
@@ -41,6 +42,10 @@ def connect(db_file: str | Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute(_SCHEMA_RUNS_META)
     conn.execute(_INDEX_RUNS_META)
+    # Legacy DBs created before sim_name was in the base schema: ALTER it in.
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(runs_meta)")}
+    if "sim_name" not in cols:
+        conn.execute("ALTER TABLE runs_meta ADD COLUMN sim_name TEXT")
     conn.commit()
     return conn
 

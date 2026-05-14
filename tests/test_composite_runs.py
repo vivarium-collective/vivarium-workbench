@@ -214,3 +214,41 @@ def test_inject_emitter_for_paths_empty_list_noop():
     out = inject_emitter_for_paths(state, [])
     assert out is state
     assert "user_emitter" not in out
+
+
+def test_connect_runs_meta_has_sim_name(tmp_path):
+    """Fresh runs.db must have sim_name — _get_investigation_detail SELECTs it."""
+    from vivarium_dashboard.lib.composite_runs import connect
+    conn = connect(tmp_path / "fresh.db")
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(runs_meta)")}
+    conn.close()
+    assert "sim_name" in cols
+
+
+def test_connect_adds_sim_name_to_legacy_db(tmp_path):
+    """connect() ALTERs sim_name into a pre-existing runs_meta that lacks it."""
+    import sqlite3
+    db = tmp_path / "legacy.db"
+    raw = sqlite3.connect(str(db))
+    raw.executescript('''
+        CREATE TABLE runs_meta (
+            run_id TEXT PRIMARY KEY, spec_id TEXT NOT NULL, label TEXT,
+            params_json TEXT, started_at REAL NOT NULL, completed_at REAL,
+            n_steps INTEGER, status TEXT NOT NULL
+        );
+    ''')
+    raw.execute(
+        "INSERT INTO runs_meta VALUES (?,?,?,?,?,?,?,?)",
+        ("r1", "pkg.foo", "lbl", "{}", 1.0, 2.0, 5, "completed"),
+    )
+    raw.commit()
+    raw.close()
+
+    from vivarium_dashboard.lib.composite_runs import connect
+    conn = connect(db)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(runs_meta)")}
+    # Existing row survives the migration.
+    n = conn.execute("SELECT COUNT(*) FROM runs_meta").fetchone()[0]
+    conn.close()
+    assert "sim_name" in cols
+    assert n == 1
