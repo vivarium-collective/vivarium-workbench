@@ -3416,7 +3416,7 @@
 
     var runLabel = (status === 'planned') ? 'Run' : 'Re-run';
 
-    return '<div class="investigation-card" onclick="_openInvestigation(\'' + _esc(inv.name) + '\')">' +
+    return '<div class="investigation-card" onclick="window.location=\'/studies/' + encodeURIComponent(inv.name) + '\'">' +
       '<div class="ic-header">' +
         '<div class="ic-title">' + _esc(inv.name) + '</div>' +
         '<span class="ic-status status-pill ' + statusClass + '">' + _esc(status) + '</span>' +
