@@ -726,7 +726,7 @@ def _post_study_variant_add_for_test(ws_root, body):
     variant_name = (body.get("name") or "").strip()
     if not study or not variant_name:
         return {"error": "missing study or variant name"}, 400
-    sf = Path(ws_root) / "studies" / study / "study.yaml"
+    sf = _study_dir(study) / "study.yaml"
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
@@ -751,7 +751,7 @@ def _post_study_variant_delete_for_test(ws_root, body):
     variant_name = (body.get("variant") or "").strip()
     if not study or not variant_name:
         return {"error": "missing study or variant"}, 400
-    sf = Path(ws_root) / "studies" / study / "study.yaml"
+    sf = _study_dir(study) / "study.yaml"
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
