@@ -39,9 +39,12 @@ def server(tmp_path):
     shutil.copytree(FIXTURE_WORKSPACE, ws)
     port = _free_port()
     env = os.environ.copy()
-    # The subprocess needs (a) vivarium_dashboard (already on its sys.path via
-    # the venv install) and (b) the workspace's own package (pbg_ws_increase_demo).
-    env["PYTHONPATH"] = str(ws) + os.pathsep + env.get("PYTHONPATH", "")
+    # The subprocess (and the detached run-composite child it spawns) needs
+    # (a) this repo's vivarium_dashboard — put _REPO_ROOT first so the test
+    # exercises the working tree, not whatever happens to be pip-installed —
+    # and (b) the workspace's own package (pbg_ws_increase_demo).
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(_REPO_ROOT), str(ws), env.get("PYTHONPATH", "")])
     proc = subprocess.Popen(
         [sys.executable, "-m", "vivarium_dashboard.server",
          "--workspace", str(ws), "--port", str(port)],
@@ -82,16 +85,38 @@ def _get(url):
         return r.status, json.loads(r.read().decode())
 
 
-def test_test_run_persists_and_returns_simulation_id(server):
+def _get_raw(url):
+    """Like _get but tolerates non-2xx without raising."""
+    import urllib.error
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            return r.status, json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read().decode())
+
+
+def _poll_until_terminal(base, run_id, timeout=30):
+    """Poll the status endpoint until the run reaches a terminal state."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        _, body = _get(f"{base}/api/composite-run/{run_id}/status")
+        if body.get("status") in ("completed", "failed", "orphaned"):
+            return body
+        time.sleep(0.3)
+    raise AssertionError(f"run {run_id} did not finish within {timeout}s")
+
+
+def test_test_run_returns_run_id_and_completes(server):
     base = server["url"]
     spec_id = "pbg_ws_increase_demo.composites.increase-demo"
     status, body = _post(f"{base}/api/composite-test-run", {
         "id": spec_id, "overrides": {"rate": 2.5}, "steps": 5,
     })
-    assert status == 200
-    assert "simulation_id" in body
-    assert body.get("steps") == 5
-    # DB row exists
+    assert status == 202
+    assert "run_id" in body
+    assert body["status"] == "running"
+    final = _poll_until_terminal(base, body["run_id"])
+    assert final["status"] == "completed"
     db_file = server["ws"] / ".pbg" / "composite-runs.db"
     assert db_file.is_file()
 
@@ -99,9 +124,10 @@ def test_test_run_persists_and_returns_simulation_id(server):
 def test_list_runs_includes_the_persisted_run(server):
     base = server["url"]
     spec_id = "pbg_ws_increase_demo.composites.increase-demo"
-    _post(f"{base}/api/composite-test-run", {
+    _, post_body = _post(f"{base}/api/composite-test-run", {
         "id": spec_id, "overrides": {"rate": 2.5}, "steps": 5,
     })
+    _poll_until_terminal(base, post_body["run_id"])
     status, body = _get(f"{base}/api/composite-runs?"
                         f"spec_id={urllib.parse.quote(spec_id)}")
     assert status == 200
@@ -126,7 +152,8 @@ def test_fetch_single_run_trajectory(server):
     _, post_body = _post(f"{base}/api/composite-test-run", {
         "id": spec_id, "overrides": {}, "steps": 4,
     })
-    run_id = post_body["simulation_id"]
+    run_id = post_body["run_id"]
+    _poll_until_terminal(base, run_id)
     status, body = _get(f"{base}/api/composite-run/{urllib.parse.quote(run_id)}")
     assert status == 200
     assert "trajectory" in body
@@ -139,7 +166,8 @@ def test_fetch_state_at_step(server):
     _, post_body = _post(f"{base}/api/composite-test-run", {
         "id": spec_id, "overrides": {}, "steps": 3,
     })
-    run_id = post_body["simulation_id"]
+    run_id = post_body["run_id"]
+    _poll_until_terminal(base, run_id)
     status, body = _get(
         f"{base}/api/composite-run/{urllib.parse.quote(run_id)}/state?step=1")
     assert status == 200
@@ -156,7 +184,7 @@ def test_distinct_runs_get_distinct_ids(server):
     _, b2 = _post(f"{base}/api/composite-test-run", {
         "id": spec_id, "overrides": {"rate": 2.0}, "steps": 2,
     })
-    assert b1["simulation_id"] != b2["simulation_id"]
+    assert b1["run_id"] != b2["run_id"]
 
 
 def test_api_composites_includes_default_n_steps(server):
@@ -169,3 +197,22 @@ def test_api_composites_includes_default_n_steps(server):
     # (defined in pbg_ws_increase_demo/composites/__init__.py).
     matching = [c for c in composites if c.get("default_n_steps") == 42]
     assert matching, f"no composite has default_n_steps=42 in {composites}"
+
+
+def test_status_endpoint_reports_completed(server):
+    base = server["url"]
+    spec_id = "pbg_ws_increase_demo.composites.increase-demo"
+    _, body = _post(f"{base}/api/composite-test-run", {
+        "id": spec_id, "steps": 4,
+    })
+    run_id = body["run_id"]
+    final = _poll_until_terminal(base, run_id)
+    assert final["status"] == "completed"
+    assert final["progress_step"] == 4
+    assert final["n_steps"] == 4
+
+
+def test_status_endpoint_404s_for_unknown_run(server):
+    base = server["url"]
+    status, _ = _get_raw(f"{base}/api/composite-run/no-such-run/status")
+    assert status == 404

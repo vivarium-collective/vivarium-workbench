@@ -1550,6 +1550,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_registry()
         if self.path.startswith("/api/composite-run/") and self.path.split("?", 1)[0].endswith("/state"):
             return self._get_composite_run_state()
+        if self.path.startswith("/api/composite-run/") and self.path.split("?", 1)[0].endswith("/status"):
+            return self._get_composite_run_status()
         if self.path.startswith("/api/composite-run/"):
             return self._get_composite_run()
         if self.path.startswith("/api/composite-runs"):
@@ -3425,6 +3427,57 @@ if __name__ == "__main__":
             return self._json({"error": "state not found for run+step"}, 404)
         return self._json({"run_id": run_id, "step": step,
                             "state": state}, 200)
+
+    def _get_composite_run_status(self):
+        """GET /api/composite-run/<run_id>/status — lightweight run status.
+
+        Returns {status, progress_step, n_steps, heartbeat_at}. For terminal
+        states it also returns an `error` excerpt (failed/orphaned, from the
+        run log) or `viz_html` (completed, from the run's viz.json).
+        """
+        _ws_add_to_sys_path()
+        from vivarium_dashboard.lib import composite_runs as cr
+
+        path_only = self.path.split("?", 1)[0]
+        prefix = "/api/composite-run/"
+        rest = path_only[len(prefix):]
+        if not rest.endswith("/status"):
+            return self._json({"error": "bad route"}, 400)
+        run_id = rest[: -len("/status")]
+
+        db_file = WORKSPACE / ".pbg" / "composite-runs.db"
+        if not db_file.is_file():
+            return self._json({"error": "no run database"}, 404)
+        conn = cr.connect(db_file)
+        try:
+            meta = cr.query_run_meta(conn, run_id=run_id)
+        finally:
+            conn.close()
+        if meta is None:
+            return self._json({"error": "run not found"}, 404)
+
+        resp = {
+            "run_id": run_id,
+            "status": meta["status"],
+            "progress_step": meta.get("progress_step") or 0,
+            "n_steps": meta.get("n_steps"),
+            "heartbeat_at": meta.get("heartbeat_at"),
+        }
+        if meta["status"] in ("failed", "orphaned"):
+            log_rel = meta.get("log_path")
+            if log_rel:
+                resp["log_path"] = log_rel
+                log_full = WORKSPACE / log_rel
+                if log_full.is_file():
+                    resp["error"] = log_full.read_text()[-2000:]
+        elif meta["status"] == "completed":
+            viz_file = WORKSPACE / ".pbg" / "runs" / run_id / "viz.json"
+            if viz_file.is_file():
+                try:
+                    resp["viz_html"] = json.loads(viz_file.read_text())
+                except json.JSONDecodeError:
+                    pass
+        return self._json(resp, 200)
 
     def _get_investigation_detail(self):
         """GET /api/investigation/<name> — full spec + viz file paths + runs summary."""
@@ -5892,14 +5945,18 @@ if __name__ == "__main__":
         }, 200)
 
     def _post_composite_test_run(self, body: dict):
-        """POST /api/composite-test-run — run a composite for N steps, persist
-        to .pbg/composite-runs.db via an injected SQLiteEmitter, return
-        {simulation_id, results, steps}."""
-        _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.composite_lookup import substitute_parameters, find_composite_path
-        from vivarium_dashboard.lib import composite_runs as cr
+        """POST /api/composite-test-run — start a detached composite run.
 
+        Writes a run-request file, inserts the runs_meta row, spawns the
+        run-composite CLI detached, and returns 202 {run_id} immediately.
+        The run itself executes in a separate process; the browser polls
+        /api/composite-run/<id>/status to follow it.
+        """
+        _ws_add_to_sys_path()
+        from vivarium_dashboard.lib import composite_runs as cr
+        from vivarium_dashboard.lib import run_registry
         from vivarium_dashboard.lib.composite_runs import auto_label
+
         spec_id = (body.get("id") or "").strip()
         overrides = body.get("overrides") or {}
         steps = int(body.get("steps") or 5)
@@ -5907,96 +5964,57 @@ if __name__ == "__main__":
         emit_paths = body.get("emit_paths") or []
         if not isinstance(emit_paths, list):
             emit_paths = []
-
         if not spec_id:
             return self._json({"error": "missing id"}, 400)
 
         ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
-        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-
-        # Generator-kind branch: resolve via pbg-superpowers' live registry.
-        state = None
-        try:
-            from pbg_superpowers.composite_generator import _REGISTRY, build_generator, discover_generators
-            if not _REGISTRY:
-                discover_generators()
-            entry = _REGISTRY.get(spec_id)
-            if entry is not None:
-                try:
-                    doc = build_generator(entry, overrides=overrides)
-                except Exception as e:  # noqa: BLE001
-                    return self._json({"error": f"generator build failed: {e}"}, 400)
-                # build_generator may return {state: ...} or a bare state dict.
-                if isinstance(doc, dict) and "state" in doc and isinstance(doc["state"], dict):
-                    state = doc["state"]
-                else:
-                    state = doc
-        except ImportError:
-            pass
-
-        if state is None:
-            # File-based spec resolution (existing path)
-            path = find_composite_path(WORKSPACE, pkg, spec_id)
-            if path is None:
-                return self._json({"error": "spec file not found"}, 404)
-            text = path.read_text()
-            spec = json.loads(text) if path.suffix.lower() == ".json" else yaml.safe_load(text)
-            state = substitute_parameters(spec.get("state") or {},
-                                           spec.get("parameters") or {},
-                                           overrides)
-
-        # User-selected emit paths from the Composite Explorer wiring view.
-        if emit_paths:
-            state = cr.inject_emitter_for_paths(state, emit_paths)
-
-        # Persistence wiring
+        pkg = ws_data.get("package_path") or (
+            "pbg_" + ws_data.get("name", "").replace("-", "_"))
         db_file = str(WORKSPACE / ".pbg" / "composite-runs.db")
+
+        if run_registry.count_running(db_file) >= run_registry.CONCURRENCY_CAP:
+            return self._json(
+                {"error": "too many runs in progress — wait for one to finish"},
+                429)
+
         run_id = cr.generate_run_id(spec_id, overrides)
+        run_dir = WORKSPACE / ".pbg" / "runs" / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        log_rel = str((run_dir / "run.log").relative_to(WORKSPACE))
+        request_path = run_dir / "request.json"
+        request_path.write_text(json.dumps({
+            "run_id": run_id,
+            "spec_id": spec_id,
+            "pkg": pkg,
+            "workspace": str(WORKSPACE),
+            "overrides": overrides,
+            "steps": steps,
+            "emit_paths": emit_paths,
+            "db_file": db_file,
+            "log_path": log_rel,
+        }))
 
-        # Single-run scratchpad mode: the Composite Explorer keeps only the
-        # latest run per composite. Clear prior rows for this spec_id from
-        # both runs_meta (composite_runs) and history (SQLiteEmitter) before
-        # persisting the new one. Best-effort; never blocks the run.
+        conn = cr.connect(db_file)
         try:
-            db_path = WORKSPACE / ".pbg" / "composite-runs.db"
-            if db_path.is_file():
-                _cleanup_conn = sqlite3.connect(str(db_path))
-                try:
-                    prior_run_ids = [
-                        r[0] for r in _cleanup_conn.execute(
-                            "SELECT run_id FROM runs_meta WHERE spec_id = ?",
-                            (spec_id,),
-                        ).fetchall()
-                    ]
-                    if prior_run_ids:
-                        has_history = _cleanup_conn.execute(
-                            "SELECT name FROM sqlite_master "
-                            "WHERE type='table' AND name='history'"
-                        ).fetchone()
-                        if has_history:
-                            placeholders = ",".join("?" * len(prior_run_ids))
-                            _cleanup_conn.execute(
-                                "DELETE FROM history WHERE simulation_id IN "
-                                "(" + placeholders + ")",
-                                prior_run_ids,
-                            )
-                    _cleanup_conn.execute(
-                        "DELETE FROM runs_meta WHERE spec_id = ?",
-                        (spec_id,),
-                    )
-                    _cleanup_conn.commit()
-                finally:
-                    _cleanup_conn.close()
-        except Exception:
-            # Best-effort cleanup; don't fail the run if a table is missing.
-            pass
+            cr.prune_runs(conn, spec_id=spec_id, keep=cr.PRUNE_KEEP)
+            cr.save_metadata(conn, spec_id=spec_id, run_id=run_id,
+                             params=overrides, label=label,
+                             started_at=time.time(), n_steps=steps,
+                             log_path=log_rel)
+            try:
+                pid = run_registry.spawn_detached(
+                    request_path, workspace=WORKSPACE,
+                    log_path=run_dir / "run.log")
+            except Exception as e:  # noqa: BLE001 — surface the spawn failure
+                cr.complete_metadata(conn, run_id=run_id, n_steps=0,
+                                     status="failed")
+                return self._json(
+                    {"error": f"spawn failed: {e}", "run_id": run_id}, 500)
+            cr.set_pid(conn, run_id=run_id, pid=pid)
+        finally:
+            conn.close()
 
-        response, code = _run_composite_subprocess(
-            pkg=pkg, state=state, steps=steps, db_file=db_file,
-            run_id=run_id, spec_id=spec_id, label=label, overrides=overrides,
-            timeout=120,
-        )
-        return self._json(response, code)
+        return self._json({"run_id": run_id, "status": "running"}, 202)
 
     # ------------------------------------------------------------------
     # Workspace manifest — one-call situational awareness for agents
@@ -6993,6 +7011,16 @@ def serve(workspace: Path, port: int) -> int:
     # that used to walk up from __file__.
     from vivarium_dashboard.lib._root import set_workspace_root
     set_workspace_root(WORKSPACE)
+
+    # Repair runs left 'running' by a previous crash/restart: a dead or
+    # missing PID becomes 'orphaned'; a live PID is left to keep running.
+    try:
+        from vivarium_dashboard.lib.run_registry import reconcile_stale_runs
+        n = reconcile_stale_runs(WORKSPACE / ".pbg" / "composite-runs.db")
+        if n:
+            print(f"reconciled {n} stale composite run(s) on startup")
+    except Exception as e:  # noqa: BLE001 — never block server boot on this
+        print(f"warning: run reconcile failed: {e}", file=sys.stderr)
 
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     # Write server-info so tests and other tools can detect the server is ready.
