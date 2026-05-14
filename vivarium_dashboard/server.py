@@ -388,7 +388,11 @@ LOCK = Lock()
 # Study slug validation
 # ---------------------------------------------------------------------------
 
-_SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+# Study/investigation names are generated with underscores (e.g. derived from
+# composite names like ``monod_kinetics``), so the slug pattern allows ``_``
+# alongside ``-``. Still anchored to alphanumerics at both ends, which keeps
+# out path traversal (``..``, ``/``, leading dots).
+_SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$")
 
 # ---------------------------------------------------------------------------
 # Study / investigation directory resolution helpers
@@ -416,6 +420,21 @@ def _study_spec_path(name: str):
     if study_yaml.is_file():
         return study_yaml
     return d / "spec.yaml"
+
+
+def _study_detail_spec(name: str):
+    """Load a study's spec for the GET /studies/<name> detail page.
+
+    Resolves studies/ or investigations/, study.yaml or spec.yaml (via
+    _study_spec_path), then runs it through load_spec so legacy v2 specs are
+    migrated to the v3 shape the detail template expects. Returns None when no
+    spec file exists for the name.
+    """
+    from vivarium_dashboard.lib.investigations import load_spec
+    spec_path = _study_spec_path(name)
+    if not spec_path.is_file():
+        return None
+    return load_spec(spec_path)
 
 
 def _iter_study_dirs():
@@ -5435,13 +5454,12 @@ if __name__ == "__main__":
         # Reject path-traversal attempts and anything that's not a valid slug.
         if not _SLUG_RE.match(name):
             return self._send_html("<h1>Not found</h1>", code=404)
-        sd = WORKSPACE / "studies" / name / "study.yaml"
-        if not sd.is_file():
+        spec = _study_detail_spec(name)
+        if spec is None:
             return self._send_html(
                 f"<h1>Study not found</h1><p><code>{name}</code> does not exist.</p>",
                 code=404,
             )
-        spec = yaml.safe_load(sd.read_text()) or {}
         body = _render_study_detail_html(name, spec)
         return self._send_html(body, code=200)
 
