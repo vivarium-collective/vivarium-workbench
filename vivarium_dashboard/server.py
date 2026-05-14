@@ -177,6 +177,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/study-set-objective":              "_post_study_set_objective",
     "/api/study-set-baseline-params":        "_post_study_set_baseline_params",
     "/api/study-rename":                     "_post_study_rename",
+    "/api/study-create-from-run":            "_post_study_create_from_run",
 }
 # Inject study-alias routes into the POST route map (same method name as old).
 for _old, _new in _POST_STUDY_ALIASES.items():
@@ -390,6 +391,101 @@ def _post_study_rename_for_test(ws_root: Path, body: dict):
     spec["name"] = new_name
     sf.write_text(yaml.safe_dump(spec, sort_keys=False))
     return {"ok": True, "name": new_name}, 200
+
+
+def _post_study_create_from_run_for_test(ws_root, body):
+    """Create a new Study from a scratchpad run. Returns (response_dict, status_code)."""
+    import datetime
+    import json as _json
+    import tempfile
+    from vivarium_dashboard.lib.composite_runs import copy_run_to_new_db
+
+    name = (body.get("name") or "").strip()
+    objective = body.get("objective") or ""
+    description = body.get("description") or ""
+    source_run_id = (body.get("source_run_id") or "").strip()
+
+    if not name or not source_run_id:
+        return {"error": "missing name or source_run_id"}, 400
+    if not _SLUG_RE.match(name):
+        return {"error": "name must be lowercase + dashes"}, 400
+
+    studies_root = Path(ws_root) / "studies"
+    studies_root.mkdir(parents=True, exist_ok=True)
+    dst = studies_root / name
+    if dst.exists():
+        return {"error": f"study {name!r} already exists"}, 409
+
+    scratch = Path(ws_root) / ".pbg" / "composite-runs.db"
+    if not scratch.is_file():
+        return {"error": "no scratchpad DB"}, 404
+
+    # Read the source run's metadata once to populate baseline.
+    import sqlite3 as _sqlite3
+    src = _sqlite3.connect(str(scratch))
+    src.row_factory = _sqlite3.Row
+    meta = src.execute(
+        "SELECT spec_id, params_json, n_steps FROM runs_meta WHERE run_id = ?",
+        (source_run_id,),
+    ).fetchone()
+    src.close()
+    if meta is None:
+        return {"error": "source_run_id not in scratchpad"}, 404
+
+    spec_id = meta["spec_id"]
+    try:
+        params = _json.loads(meta["params_json"] or "{}")
+    except (TypeError, ValueError):
+        params = {}
+    n_steps = int(meta["n_steps"] or 0)
+    if n_steps and "n_steps" not in params:
+        params["n_steps"] = n_steps
+
+    # Build the study atomically: write to a temp dir inside studies_root,
+    # then rename. Using studies_root as the temp parent ensures same filesystem.
+    tmp_dir = tempfile.mkdtemp(dir=str(studies_root))
+    tmp_path = Path(tmp_dir) / "build"
+    try:
+        tmp_path.mkdir()
+        (tmp_path / "composites").mkdir()
+        (tmp_path / "viz").mkdir()
+
+        # Copy the run history into the new DB.
+        copy_run_to_new_db(scratch, tmp_path / "runs.db", source_run_id)
+
+        spec = {
+            "schema_version": 3,
+            "name": name,
+            "created": datetime.date.today().isoformat(),
+            "status": "ran",
+            "objective": objective,
+            "description": description,
+            "baseline": {"composite": spec_id, "params": params},
+            "variants": [],
+            "runs": [{
+                "run_id": source_run_id,
+                "variant": None,
+                "label": "promoted from scratchpad",
+                "status": "completed",
+            }],
+            "visualizations": [],
+            "conclusion": None,
+            "parent_studies": [],
+        }
+        (tmp_path / "study.yaml").write_text(yaml.safe_dump(spec, sort_keys=False))
+
+        # Atomic rename: tmp/build → studies/<name>.
+        tmp_path.rename(dst)
+    except Exception:
+        import shutil
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise
+    else:
+        # Clean up the now-empty temp dir (build/ was renamed out).
+        import shutil
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    return {"study": name, "url": f"/studies/{name}"}, 200
 
 
 def _study_export_zip(ws_root: Path, name: str) -> bytes:
@@ -4648,6 +4744,11 @@ if __name__ == "__main__":
     def _post_study_rename(self, body: dict):
         """POST /api/study-rename {study, new_name}"""
         response, code = _post_study_rename_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_create_from_run(self, body: dict):
+        """POST /api/study-create-from-run {name, objective, description?, source_run_id}"""
+        response, code = _post_study_create_from_run_for_test(WORKSPACE, body)
         return self._json(response, code)
 
     def _get_study_export(self):

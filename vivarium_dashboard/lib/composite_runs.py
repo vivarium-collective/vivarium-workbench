@@ -309,3 +309,57 @@ def _walk_collect(node, path: list[str], out: list[list[str]]) -> None:
             return
     # Otherwise it's a leaf store
     out.append(path)
+
+
+def copy_run_to_new_db(src_db: Path, dst_db: Path, run_id: str) -> int:
+    """Copy one run's metadata + history rows from src_db to dst_db.
+
+    Both DBs use the same schema (runs_meta + history). Bootstraps dst_db's
+    schema if missing. Returns the count of history rows copied.
+
+    Raises KeyError if run_id is not found in src_db.
+    """
+    src = sqlite3.connect(str(src_db))
+    src.row_factory = sqlite3.Row
+
+    dst = connect(dst_db)  # bootstraps runs_meta + index
+    # SQLiteEmitter creates the history table lazily on first write; do it eagerly here.
+    dst.executescript("""
+        CREATE TABLE IF NOT EXISTS history (
+            simulation_id TEXT NOT NULL,
+            step INTEGER NOT NULL,
+            global_time REAL,
+            state TEXT NOT NULL,
+            PRIMARY KEY (simulation_id, step)
+        );
+    """)
+
+    meta = src.execute(
+        "SELECT * FROM runs_meta WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    if meta is None:
+        src.close()
+        dst.close()
+        raise KeyError(run_id)
+
+    dst.execute(
+        "INSERT INTO runs_meta (run_id, spec_id, label, params_json, "
+        "started_at, completed_at, n_steps, status) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (meta["run_id"], meta["spec_id"], meta["label"], meta["params_json"],
+         meta["started_at"], meta["completed_at"], meta["n_steps"], meta["status"]),
+    )
+
+    rows = src.execute(
+        "SELECT step, global_time, state FROM history WHERE simulation_id = ?",
+        (run_id,),
+    ).fetchall()
+    dst.executemany(
+        "INSERT INTO history (simulation_id, step, global_time, state) "
+        "VALUES (?, ?, ?, ?)",
+        [(run_id, r["step"], r["global_time"], r["state"]) for r in rows],
+    )
+    dst.commit()
+    src.close()
+    dst.close()
+    return len(rows)
