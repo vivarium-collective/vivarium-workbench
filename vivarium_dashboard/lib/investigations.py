@@ -18,7 +18,7 @@ from typing import Any
 
 import yaml
 
-from .spec_migration import migrate_study_to_v2_vocabulary
+from .spec_migration import migrate_study_to_v2_vocabulary, migrate_v2_to_v3
 
 
 class InvestigationSpecError(ValueError):
@@ -250,6 +250,9 @@ def load_spec(path: Path) -> dict:
 
     if not isinstance(spec, dict):
         raise InvestigationSpecError("spec must be a YAML mapping at top level")
+
+    # Phase 1 transition: auto-migrate v2 → v3 on read (in-memory only).
+    spec = migrate_v2_to_v3(spec)
 
     # name is always required
     if not spec.get("name"):

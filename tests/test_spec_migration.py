@@ -109,3 +109,52 @@ def test_migrate_idempotent(tmp_path):
     before = p.read_text()
     migrate_study_to_v2_vocabulary(p)
     assert p.read_text() == before
+
+
+def test_migrate_v2_to_v3_lifts_first_composite_to_baseline(tmp_path):
+    """v3 has `baseline: {composite, params}` + drops `composites: [...]`."""
+    from vivarium_dashboard.lib.spec_migration import migrate_v2_to_v3
+
+    v2 = {
+        "schema_version": 2,
+        "name": "x",
+        "composites": [
+            {"name": "main", "source": "pkg.composites.foo", "parameters": {"a": 1}},
+        ],
+        "runs": [],
+        "variants": [],
+        "conclusion": None,
+    }
+    v3 = migrate_v2_to_v3(v2)
+    assert v3["schema_version"] == 3
+    assert v3["baseline"] == {"composite": "pkg.composites.foo", "params": {"a": 1}}
+    assert "composites" not in v3
+    assert v3.get("objective") == ""
+    assert v3.get("parent_studies") == []
+
+
+def test_migrate_v2_to_v3_warns_on_multi_composite():
+    """If v2 has >1 composite, migration keeps the first + emits a warning."""
+    import warnings
+    from vivarium_dashboard.lib.spec_migration import migrate_v2_to_v3
+
+    v2 = {
+        "schema_version": 2,
+        "name": "y",
+        "composites": [
+            {"name": "main", "source": "pkg.a"},
+            {"name": "alt",  "source": "pkg.b"},
+        ],
+    }
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        v3 = migrate_v2_to_v3(v2)
+    msgs = [str(w.message) for w in caught]
+    assert any("dropped 1 extra composite" in m for m in msgs)
+    assert v3["baseline"]["composite"] == "pkg.a"
+
+
+def test_migrate_v2_to_v3_idempotent():
+    from vivarium_dashboard.lib.spec_migration import migrate_v2_to_v3
+    v3_already = {"schema_version": 3, "baseline": {"composite": "x"}}
+    assert migrate_v2_to_v3(v3_already) is v3_already

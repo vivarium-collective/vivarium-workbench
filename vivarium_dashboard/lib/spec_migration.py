@@ -1,6 +1,8 @@
-"""Migration helper: legacy `composites:` shape → v2 `variants:` shape."""
+"""Migration helper: legacy `composites:` shape → v2 `variants:` shape,
+and v2 → v3 study shape (single-composite baseline)."""
 from __future__ import annotations
 import pathlib, os
+import warnings
 import yaml
 
 
@@ -66,3 +68,64 @@ def _atomic_write(path: pathlib.Path, text: str) -> None:
     tmp = path.with_suffix(path.suffix + '.tmp')
     tmp.write_text(text)
     os.replace(tmp, path)
+
+
+def migrate_v2_to_v3(spec: dict) -> dict:
+    """Migrate a schema_version=2 investigation spec to schema_version=3 study.
+
+    Transforms:
+      - Drop ``composites: [...]`` multi-composite list; promote the first entry
+        as ``baseline.composite``.  Emit a UserWarning if more than one was
+        present (only the first is preserved; recreate extras as variants if
+        needed).
+      - Lift the first composite's ``parameters: {...}`` into ``baseline.params``.
+      - Add empty ``objective: ""`` and ``parent_studies: []`` (reserved for
+        future inter-study linkage).
+      - Bump schema_version to 3.
+
+    Idempotent: returns *the same object* unchanged if ``schema_version`` is
+    already 3.
+    """
+    if spec.get("schema_version") == 3:
+        return spec
+
+    # Only migrate specs that are explicitly versioned as v2 (or have the v2
+    # multi-composite ``composites:`` key).  Specs without a schema_version
+    # (legacy single-composite shape) are passed through unchanged so that the
+    # existing load_spec validator can handle them.
+    version = spec.get("schema_version")
+    has_composites_key = "composites" in spec
+    if version != 2 and not has_composites_key:
+        return spec
+
+    out = dict(spec)
+    out["schema_version"] = 3
+    out.setdefault("objective", "")
+    out.setdefault("parent_studies", [])
+
+    composites = spec.get("composites") or []
+    if composites:
+        first = composites[0]
+        out["baseline"] = {
+            "composite": first.get("source") or first.get("name", ""),
+            "params": first.get("parameters", {}) or {},
+        }
+        if len(composites) > 1:
+            warnings.warn(
+                f"v2→v3 migration: dropped {len(composites) - 1} extra composite(s) "
+                f"from study {spec.get('name', '?')!r}; Phase 1 Studies are "
+                f"single-composite. Recreate as variants if needed.",
+                UserWarning,
+                stacklevel=2,
+            )
+        out.pop("composites", None)
+    elif "composite" in spec:
+        # Handle lone top-level `composite:` key (explicit v2 with composite key)
+        out["baseline"] = {
+            "composite": spec["composite"],
+            "params": spec.get("parameters", {}) or {},
+        }
+        out.pop("composite", None)
+        out.pop("parameters", None)
+
+    return out
