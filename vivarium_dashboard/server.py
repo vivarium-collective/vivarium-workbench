@@ -5935,7 +5935,9 @@ if __name__ == "__main__":
                 "svg": svg,
                 "kind": "generator",
                 "module": entry.module,
-                "default_n_steps": entry.default_n_steps,
+                # GeneratorEntry has no default_n_steps field; guard like
+                # _get_composites does rather than crashing the resolve.
+                "default_n_steps": getattr(entry, "default_n_steps", None),
             }, 200)
 
         path = find_composite_path(WORKSPACE, pkg, spec_id)
