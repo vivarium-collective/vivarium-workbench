@@ -173,6 +173,10 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/investigation-comparison-update":  "_post_investigation_comparison_update",
     "/api/investigation-group-add":          "_post_investigation_group_add",
     "/api/investigation-group-update":       "_post_investigation_group_update",
+    # Study-specific POST endpoints (no investigation alias).
+    "/api/study-set-objective":              "_post_study_set_objective",
+    "/api/study-set-baseline-params":        "_post_study_set_baseline_params",
+    "/api/study-rename":                     "_post_study_rename",
 }
 # Inject study-alias routes into the POST route map (same method name as old).
 for _old, _new in _POST_STUDY_ALIASES.items():
@@ -324,6 +328,81 @@ def _save_upload(file_b64: str, target_path: Path) -> str:
 
 WORKSPACE: Path = Path("/")  # set by main()
 LOCK = Lock()
+
+# ---------------------------------------------------------------------------
+# Study slug validation
+# ---------------------------------------------------------------------------
+
+_SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+
+# ---------------------------------------------------------------------------
+# Study pure-function helpers (testable without HTTP handler)
+# ---------------------------------------------------------------------------
+
+
+def _post_study_set_objective_for_test(ws_root: Path, body: dict):
+    """Set study.yaml objective field. Returns (response_dict, status_code)."""
+    name = (body.get("study") or "").strip()
+    text = body.get("text") or ""
+    if not name:
+        return {"error": "missing study"}, 400
+    sf = ws_root / "studies" / name / "study.yaml"
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+    spec = yaml.safe_load(sf.read_text()) or {}
+    spec["objective"] = text
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    return {"ok": True}, 200
+
+
+def _post_study_set_baseline_params_for_test(ws_root: Path, body: dict):
+    """Set study.yaml baseline.params field. Returns (response_dict, status_code)."""
+    name = (body.get("study") or "").strip()
+    params = body.get("params")
+    if not name or not isinstance(params, dict):
+        return {"error": "missing study or params"}, 400
+    sf = ws_root / "studies" / name / "study.yaml"
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+    spec = yaml.safe_load(sf.read_text()) or {}
+    spec.setdefault("baseline", {})["params"] = params
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    return {"ok": True}, 200
+
+
+def _post_study_rename_for_test(ws_root: Path, body: dict):
+    """Rename a study directory and update name in study.yaml. Returns (response_dict, status_code)."""
+    name = (body.get("study") or "").strip()
+    new_name = (body.get("new_name") or "").strip()
+    if not name or not new_name:
+        return {"error": "missing study or new_name"}, 400
+    if not _SLUG_RE.match(new_name):
+        return {"error": "new_name must be lowercase + dashes"}, 400
+    src = ws_root / "studies" / name
+    dst = ws_root / "studies" / new_name
+    if not src.is_dir():
+        return {"error": "study not found"}, 404
+    if dst.exists():
+        return {"error": f"study {new_name!r} already exists"}, 409
+    src.rename(dst)
+    sf = dst / "study.yaml"
+    spec = yaml.safe_load(sf.read_text()) or {}
+    spec["name"] = new_name
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    return {"ok": True, "name": new_name}, 200
+
+
+def _study_export_zip(ws_root: Path, name: str) -> bytes:
+    """Zip studies/<name>/ to bytes and return the zip content."""
+    import io
+    import zipfile
+    src = ws_root / "studies" / name
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path in src.rglob("*"):
+            if path.is_file():
+                zf.write(path, path.relative_to(src.parent))
+    return buf.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -856,6 +935,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_investigation_detail()
         if self.path.startswith("/api/investigations"):
             return self._get_investigations()
+        if self.path.startswith("/api/study-export"):
+            return self._get_study_export()
         if self.path.startswith("/api/composites"):
             return self._get_composites()
         if self.path.startswith("/api/system-deps-check"):
@@ -4549,6 +4630,44 @@ if __name__ == "__main__":
             return self._json(*_commit_or_run(commit_msg, do_action))
         except Exception as e:
             return self._json({"error": f"workstream error: {e}"}, 500)
+
+    # ------------------------------------------------------------------
+    # Study-specific POST handlers (thin wrappers around pure helpers)
+    # ------------------------------------------------------------------
+
+    def _post_study_set_objective(self, body: dict):
+        """POST /api/study-set-objective {study, text}"""
+        response, code = _post_study_set_objective_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_set_baseline_params(self, body: dict):
+        """POST /api/study-set-baseline-params {study, params}"""
+        response, code = _post_study_set_baseline_params_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_rename(self, body: dict):
+        """POST /api/study-rename {study, new_name}"""
+        response, code = _post_study_rename_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _get_study_export(self):
+        """GET /api/study-export?study=<name>"""
+        from urllib.parse import urlparse, parse_qs
+        qs = urlparse(self.path).query
+        params = parse_qs(qs)
+        name = (params.get("study", [""])[0] or "").strip()
+        if not name:
+            return self._json({"error": "missing study"}, 400)
+        src = WORKSPACE / "studies" / name
+        if not src.is_dir():
+            return self._json({"error": "study not found"}, 404)
+        data = _study_export_zip(WORKSPACE, name)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/zip")
+        self.send_header("Content-Disposition", f'attachment; filename="{name}.zip"')
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def _delete_investigation_composite(self, body: dict):
         """DELETE /api/investigation-composite {investigation, name}
