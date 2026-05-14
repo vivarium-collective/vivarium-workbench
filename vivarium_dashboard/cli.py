@@ -129,6 +129,12 @@ def cmd_migrate_investigations(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_run_composite(args: argparse.Namespace) -> int:
+    """CLI handler for the run-composite subcommand — runs one detached composite."""
+    from vivarium_dashboard.lib.run_runner import execute
+    return execute(Path(args.request))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vivarium-dashboard")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -149,6 +155,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Report what would change without writing anything",
     )
     p_mig.set_defaults(func=cmd_migrate_investigations)
+
+    p_run = sub.add_parser(
+        "run-composite",
+        help="Execute one composite run from a run-request file (internal; "
+             "spawned detached by the dashboard)",
+    )
+    p_run.add_argument("--request", required=True,
+                       help="Path to the run-request JSON file")
+    p_run.set_defaults(func=cmd_run_composite)
 
     args = parser.parse_args(argv)
     return args.func(args)
