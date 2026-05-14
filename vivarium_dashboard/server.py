@@ -112,7 +112,7 @@ _POST_STUDY_ALIASES: dict[str, str] = {
     "/api/investigation-set-observables":    "/api/study-set-observables",
     "/api/investigation-set-conclusions":    "/api/study-set-conclusion",
     "/api/investigation-set-overview":       "/api/study-set-description",
-    "/api/investigation-comparison-add":     "/api/study-comparison-add",
+    # /api/study-comparison-add is now a v3-native route (not an alias).
     "/api/investigation-comparison-update":  "/api/study-comparison-update",
     "/api/investigation-group-add":          "/api/study-group-add",
     "/api/investigation-group-update":       "/api/study-group-update",
@@ -185,6 +185,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/study-variant-delete":            "_post_study_variant_delete",
     "/api/study-run-delete":                "_post_study_run_delete",
     "/api/study-runs-clear":                "_post_study_runs_clear",
+    "/api/study-comparison-add":            "_post_study_comparison_add",
 }
 # Inject study-alias routes into the POST route map (same method name as old).
 for _old, _new in _POST_STUDY_ALIASES.items():
@@ -826,6 +827,27 @@ def _post_study_runs_clear_for_test(ws_root, body):
     spec["runs"] = []
     sf.write_text(yaml.safe_dump(spec, sort_keys=False))
     return {"ok": True}, 200
+
+
+def _post_study_comparison_add_for_test(ws_root, body):
+    """Add a named comparison (set of run_ids) to study.yaml['comparisons'].
+    Returns (response_dict, status_code)."""
+    study = _study_name_from_body(body)
+    run_ids = body.get("run_ids") or []
+    if not study:
+        return {"error": "missing study"}, 400
+    if not isinstance(run_ids, list) or len(run_ids) < 2:
+        return {"error": "run_ids must be a list of at least 2 run ids"}, 400
+    sf = _study_dir(study) / "study.yaml"
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text()) or {}
+    comparisons = spec.setdefault("comparisons", [])
+    name = (body.get("name") or "").strip() or f"comparison-{len(comparisons) + 1}"
+    comparisons.append({"name": name, "run_ids": list(run_ids)})
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    return {"ok": True, "name": name}, 200
 
 
 def _study_export_zip(ws_root: Path, name: str) -> bytes:
@@ -5240,6 +5262,11 @@ if __name__ == "__main__":
     def _post_study_runs_clear(self, body: dict):
         """POST /api/study-runs-clear {study}"""
         response, code = _post_study_runs_clear_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_comparison_add(self, body: dict):
+        """POST /api/study-comparison-add {study, run_ids, name?}"""
+        response, code = _post_study_comparison_add_for_test(WORKSPACE, body)
         return self._json(response, code)
 
     def _get_study_export(self):

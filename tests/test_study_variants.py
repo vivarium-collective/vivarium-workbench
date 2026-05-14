@@ -68,3 +68,21 @@ def test_variant_delete_unknown(_study_ws):
     resp, code = _post_study_variant_delete_for_test(
         _study_ws, {"study": "s1", "variant": "ghost"})
     assert code == 404
+
+
+def test_comparison_add_appends(_study_ws):
+    from vivarium_dashboard.server import _post_study_comparison_add_for_test
+    resp, code = _post_study_comparison_add_for_test(_study_ws, {
+        "study": "s1", "run_ids": ["r1", "r2"]})
+    assert code == 200, resp
+    spec = yaml.safe_load((_study_ws / "studies" / "s1" / "study.yaml").read_text())
+    assert len(spec["comparisons"]) == 1
+    assert spec["comparisons"][0]["run_ids"] == ["r1", "r2"]
+    assert "name" in spec["comparisons"][0]
+
+
+def test_comparison_add_requires_two_runs(_study_ws):
+    from vivarium_dashboard.server import _post_study_comparison_add_for_test
+    resp, code = _post_study_comparison_add_for_test(
+        _study_ws, {"study": "s1", "run_ids": ["only-one"]})
+    assert code == 400

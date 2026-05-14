@@ -37,7 +37,8 @@ POST_ALIAS_PAIRS = [
     ("/api/investigation-set-observables",    "/api/study-set-observables"),
     ("/api/investigation-set-conclusions",    "/api/study-set-conclusion"),
     ("/api/investigation-set-overview",       "/api/study-set-description"),
-    ("/api/investigation-comparison-add",     "/api/study-comparison-add"),
+    # /api/study-comparison-add is now a v3-native route (not an alias), so it
+    # intentionally maps to _post_study_comparison_add, not the old alias target.
     ("/api/investigation-comparison-update",  "/api/study-comparison-update"),
     ("/api/investigation-group-add",          "/api/study-group-add"),
     ("/api/investigation-group-update",       "/api/study-group-update"),
