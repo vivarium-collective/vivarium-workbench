@@ -62,3 +62,27 @@ def test_intervention_add_rejects_duplicate_name(_study_ws):
         _study_ws, {"study": "s1", "name": "x", "description": "second"},
     )
     assert code == 409
+
+
+def test_intervention_update_replaces_description(_study_ws):
+    from vivarium_dashboard.server import (
+        _post_study_intervention_add_for_test,
+        _post_study_intervention_update_for_test,
+    )
+    _post_study_intervention_add_for_test(
+        _study_ws, {"study": "s1", "name": "x", "description": "old"},
+    )
+    resp, code = _post_study_intervention_update_for_test(
+        _study_ws, {"study": "s1", "name": "x", "description": "new"},
+    )
+    assert code == 200
+    spec = yaml.safe_load((_study_ws / "studies" / "s1" / "study.yaml").read_text())
+    assert spec["interventions"][0]["description"] == "new"
+
+
+def test_intervention_update_404_unknown(_study_ws):
+    from vivarium_dashboard.server import _post_study_intervention_update_for_test
+    resp, code = _post_study_intervention_update_for_test(
+        _study_ws, {"study": "s1", "name": "ghost", "description": "x"},
+    )
+    assert code == 404
