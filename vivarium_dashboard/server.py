@@ -234,6 +234,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/study-baseline-remove":       "_post_study_baseline_remove",
     "/api/study-intervention-add":      "_post_study_intervention_add",
     "/api/study-intervention-update":   "_post_study_intervention_update",
+    "/api/study-intervention-delete":   "_post_study_intervention_delete",
     "/api/study-run-delete":            "_post_study_run_delete",
     "/api/study-runs-clear":            "_post_study_runs_clear",
     "/api/study-comparison-add":        "_post_study_comparison_add",
@@ -1072,6 +1073,31 @@ def _post_study_intervention_update_for_test(ws_root, body):
             sf.write_text(yaml.safe_dump(spec, sort_keys=False))
             return {"ok": True}, 200
     return {"error": f"intervention {name!r} not found"}, 404
+
+
+def _post_study_intervention_delete_for_test(ws_root, body):
+    """Remove an intervention by name. Returns (response, code)."""
+    study = (body.get("study") or body.get("investigation") or "").strip()
+    name = (body.get("name") or "").strip()
+    if not study or not name:
+        return {"error": "missing study or intervention name"}, 400
+
+    # Inline ws_root-based path resolution.
+    studies_path = ws_root / "studies" / study
+    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
+    sf = study_dir / "study.yaml"
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text()) or {}
+    interventions = spec.get("interventions") or []
+    remaining = [i for i in interventions
+                 if not (isinstance(i, dict) and i.get("name") == name)]
+    if len(remaining) == len(interventions):
+        return {"error": f"intervention {name!r} not found"}, 404
+    spec["interventions"] = remaining
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    return {"ok": True}, 200
 
 
 def _post_study_run_delete_for_test(ws_root, body):
@@ -5666,6 +5692,10 @@ if __name__ == "__main__":
 
     def _post_study_intervention_update(self, body: dict):
         response, code = _post_study_intervention_update_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_intervention_delete(self, body: dict):
+        response, code = _post_study_intervention_delete_for_test(WORKSPACE, body)
         return self._json(response, code)
 
     def _post_study_run_delete(self, body: dict):

@@ -86,3 +86,30 @@ def test_intervention_update_404_unknown(_study_ws):
         _study_ws, {"study": "s1", "name": "ghost", "description": "x"},
     )
     assert code == 404
+
+
+def test_intervention_delete_removes(_study_ws):
+    from vivarium_dashboard.server import (
+        _post_study_intervention_add_for_test,
+        _post_study_intervention_delete_for_test,
+    )
+    _post_study_intervention_add_for_test(
+        _study_ws, {"study": "s1", "name": "x"},
+    )
+    _post_study_intervention_add_for_test(
+        _study_ws, {"study": "s1", "name": "y"},
+    )
+    resp, code = _post_study_intervention_delete_for_test(
+        _study_ws, {"study": "s1", "name": "x"},
+    )
+    assert code == 200
+    spec = yaml.safe_load((_study_ws / "studies" / "s1" / "study.yaml").read_text())
+    assert [i["name"] for i in spec["interventions"]] == ["y"]
+
+
+def test_intervention_delete_404_unknown(_study_ws):
+    from vivarium_dashboard.server import _post_study_intervention_delete_for_test
+    resp, code = _post_study_intervention_delete_for_test(
+        _study_ws, {"study": "s1", "name": "ghost"},
+    )
+    assert code == 404
