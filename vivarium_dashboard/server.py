@@ -6170,17 +6170,22 @@ if __name__ == "__main__":
             except (InvestigationSpecError, Exception):
                 continue
             n_runs = len(spec.get("runs") or [])
-            out.append({
+            entry = {
                 "name":             spec.get("name", d.name),
                 "topic":            spec.get("topic", ""),
                 "status":           spec.get("status", "draft"),
-                "baseline":         spec.get("baseline", ""),
+                "baseline_names":   [b.get("name", "")
+                                     for b in (spec.get("baseline") or [])
+                                     if isinstance(b, dict)],
+                "n_baseline":       len(spec.get("baseline") or []),
                 "n_variants":       len(spec.get("variants") or []),
                 "n_groups":         len(spec.get("groups") or []),
+                "n_interventions":  len(spec.get("interventions") or []),
                 "n_runs":           n_runs,
                 "n_comparisons":    len(spec.get("comparisons") or []),
                 "conclusions_len":  len(spec.get("conclusions") or ""),
-            })
+            }
+            out.append(entry)
         return out
 
     def _manifest_registry_section(self):

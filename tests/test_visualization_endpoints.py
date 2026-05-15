@@ -1896,19 +1896,19 @@ def test_get_workspace_manifest_returns_all_sections(workspace_server):
 
 
 def test_get_workspace_manifest_studies_section_lists_specs(workspace_server):
-    """A workspace with one investigation surfaces it in the studies section."""
     inv_dir = workspace_server.root / "investigations" / "demo"
     inv_dir.mkdir(parents=True)
     (inv_dir / "spec.yaml").write_text(yaml.safe_dump({
+        "schema_version": 3,
         "name": "demo",
         "topic": "metabolism",
         "status": "in-progress",
-        "variants": [{"name": "baseline",
-                      "source": "pbg_testws.composites.demo"}],
-        "baseline": "baseline",
+        "baseline": [
+            {"name": "core", "composite": "pbg_testws.composites.demo", "params": {}},
+        ],
+        "variants": [],
+        "interventions": [],
         "runs": [],
-        "groups": [],
-        "comparisons": [],
         "conclusions": "## Claims\nlooks promising",
     }, sort_keys=False))
 
@@ -1920,9 +1920,10 @@ def test_get_workspace_manifest_studies_section_lists_specs(workspace_server):
     assert s["name"] == "demo"
     assert s["topic"] == "metabolism"
     assert s["status"] == "in-progress"
-    assert s["n_variants"] == 1
+    assert s["n_variants"] == 0
+    assert s["n_baseline"] == 1
+    assert s["baseline_names"] == ["core"]
     assert s["n_runs"] == 0
-    assert s["baseline"] == "baseline"
     assert s["conclusions_len"] > 0
 
 
