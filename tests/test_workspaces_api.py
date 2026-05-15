@@ -581,7 +581,6 @@ def test_post_workspaces_stop_happy_path(server, tmp_path):
     """Stopping a real running subprocess sends SIGTERM, the child's atexit
     removes the global entry, and the endpoint returns 200 within 3s."""
     import subprocess as _sp
-    import signal as _signal
     # Spawn a real long-running process. We register IT as a fake dashboard
     # for a "victim" workspace; the test asserts the endpoint successfully
     # terminates it. We DON'T actually need a vivarium-dashboard child here
