@@ -158,6 +158,16 @@
         </span>
         <span class="viv-rail-link-label">Investigations</span>
       </a>
+      <a href="#simulations"       class="viv-rail-link menu-link" data-page="simulations">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <ellipse cx="12" cy="6" rx="8" ry="3"/>
+            <path d="M4 6v12c0 1.657 3.582 3 8 3s8-1.343 8-3V6"/>
+            <path d="M4 12c0 1.657 3.582 3 8 3s8-1.343 8-3"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Simulations</span>
+      </a>
       <a href="#visualizations"    class="viv-rail-link menu-link" data-page="visualizations">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
@@ -541,6 +551,63 @@
   <!-- Detail panel renders inline after a row is clicked -->
   <div id="investigation-detail" style="display:none; margin-top:16px"></div>
 </section>
+
+  <!-- ============================== Simulations ============================== -->
+  <div class="viv-page" data-page="simulations" hidden>
+    <h2 class="page-title">Simulations</h2>
+    <p class="page-lead">
+      All persisted runs across this workspace, gathered from
+      <code>.pbg/composite-runs.db</code> and every
+      <code>studies/&lt;name&gt;/runs.db</code>. Delete a row to remove its
+      DB rows, run artifacts, and any Study references.
+    </p>
+
+    <div style="margin: 8px 0 12px; display: flex; gap: 8px; align-items: center;">
+      <input id="sim-filter" type="search" placeholder="Filter by composite, study, or label…"
+             style="flex: 1; max-width: 480px; padding: 6px 10px; font-size: 14px;
+                    border: 1px solid #d1d5db; border-radius: 4px;" />
+      <button id="sim-refresh" class="action-btn">Refresh</button>
+    </div>
+
+    <div id="sim-loading" style="color: #6b7280; padding: 12px;">Loading simulations…</div>
+    <div id="sim-empty"   style="color: #6b7280; padding: 12px; display: none;">
+      No simulations yet. Run a composite from the
+      <a href="#composite-explore">Composite Explorer</a> or from a
+      <a href="#investigations">Study</a> to see entries here.
+    </div>
+
+    <table id="sim-table" style="width:100%; border-collapse: collapse; font-size: 13px; display: none;">
+      <thead>
+        <tr style="background:#f3f4f6;">
+          <th style="text-align:left; padding:6px 8px;">Composite</th>
+          <th style="text-align:left; padding:6px 8px;">Studies</th>
+          <th style="text-align:left; padding:6px 8px; width:90px;">Status</th>
+          <th style="text-align:left; padding:6px 8px; width:80px;">Steps</th>
+          <th style="text-align:left; padding:6px 8px;">Label</th>
+          <th style="text-align:left; padding:6px 8px; width:120px;">Started</th>
+          <th style="text-align:left; padding:6px 8px; width:80px;">Run</th>
+          <th style="text-align:left; padding:6px 8px; width:60px;"></th>
+        </tr>
+      </thead>
+      <tbody id="sim-tbody"></tbody>
+    </table>
+
+    <!-- Delete confirmation dialog -->
+    <div id="sim-delete-dialog" style="display:none; position:fixed; inset:0;
+                                        background:rgba(0,0,0,0.45); z-index:1000;
+                                        align-items:center; justify-content:center;">
+      <div style="background:#fff; max-width:560px; padding:20px; border-radius:6px;
+                   box-shadow:0 4px 16px rgba(0,0,0,0.2);">
+        <h3 style="margin:0 0 12px;">Delete simulation?</h3>
+        <div id="sim-delete-body" style="font-size:14px; color:#374151;"></div>
+        <div style="text-align:right; margin-top:16px;">
+          <button id="sim-delete-cancel" class="action-btn">Cancel</button>
+          <button id="sim-delete-confirm" class="action-btn"
+                  style="background:#dc2626; color:#fff;">Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
 <!-- Modal: create investigation -->
 <div id="modal-investigation-create" class="modal-overlay">
