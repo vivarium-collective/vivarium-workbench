@@ -8,6 +8,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -63,7 +64,7 @@ def server(tmp_path):
         pytest.fail(
             f"server did not start:\nstdout:\n{out.decode()}\nstderr:\n{err.decode()}"
         )
-    yield {"url": f"http://127.0.0.1:{port}", "ws": ws, "pbg_home": pbg_home}
+    yield {"url": f"http://127.0.0.1:{port}", "ws": ws, "pbg_home": pbg_home, "workspace": ws}
     proc.terminate()
     try:
         proc.wait(timeout=5)
@@ -569,3 +570,211 @@ def test_post_workspaces_start_returns_existing_url_if_live(server, tmp_path):
     # by the Popen branch, which the idempotent path skips).
     assert not (other_ws / ".pbg" / "server" / "start.log").exists(), \
         "handler should NOT spawn a process when a live entry already exists"
+
+
+# ---------------------------------------------------------------------------
+# POST /api/workspaces/stop tests
+# ---------------------------------------------------------------------------
+
+
+def test_post_workspaces_stop_happy_path(server, tmp_path):
+    """Stopping a real running subprocess sends SIGTERM, the child's atexit
+    removes the global entry, and the endpoint returns 200 within 3s."""
+    import subprocess as _sp
+    import signal as _signal
+    # Spawn a real long-running process. We register IT as a fake dashboard
+    # for a "victim" workspace; the test asserts the endpoint successfully
+    # terminates it. We DON'T actually need a vivarium-dashboard child here
+    # because find_running only checks `kill -0 pid` — any live PID works,
+    # but we need atexit-like cleanup on SIGTERM. A child that handles SIGTERM
+    # by removing the registry file mimics the real cleanup:
+    pbg_home = server["pbg_home"]
+    victim_ws = tmp_path / "victim-ws"
+    victim_ws.mkdir()
+    (victim_ws / "workspace.yaml").write_text("name: victim-ws\npackage: pbg_victim\n")
+
+    # Add the victim workspace to the catalog (via the running dashboard
+    # subprocess, which shares PBG_HOME).
+    _post_json(f"{server['url']}/api/workspaces/add", {"path": str(victim_ws)})
+
+    # Spawn a real subprocess that will:
+    # - On SIGTERM, delete the registry entry then exit cleanly.
+    # That mimics cmd_serve's atexit/SIGTERM behavior.
+    helper = tmp_path / "fake_dashboard.py"
+    helper.write_text(f"""
+import os, signal, sys, time
+ENTRY = {repr(str(pbg_home / "servers" / "victim-ws.json"))}
+def cleanup(*_):
+    try:
+        os.unlink(ENTRY)
+    except FileNotFoundError:
+        pass
+    sys.exit(0)
+signal.signal(signal.SIGTERM, cleanup)
+while True:
+    time.sleep(60)
+""")
+    fake = _sp.Popen([sys.executable, str(helper)])
+    try:
+        # Wait for the child to be alive enough to handle signals.
+        time.sleep(0.2)
+        # Register a global running entry pointing at this child's PID.
+        import json as _json
+        (pbg_home / "servers").mkdir(exist_ok=True)
+        entry = {
+            "name": "victim-ws",
+            "path": str(victim_ws.resolve()),
+            "pid": fake.pid,
+            "port": 9999,
+            "url": "http://127.0.0.1:9999",
+            "started_at": "2026-05-15T00:00:00Z",
+        }
+        (pbg_home / "servers" / "victim-ws.json").write_text(_json.dumps(entry))
+
+        status, resp = _post_json(
+            f"{server['url']}/api/workspaces/stop",
+            {"path": str(victim_ws)},
+            timeout=10,
+        )
+        assert resp == {"ok": True}
+        # Entry must be gone (child's cleanup unlinked it).
+        assert not (pbg_home / "servers" / "victim-ws.json").exists()
+    finally:
+        # Belt-and-suspenders: ensure the helper is dead.
+        try:
+            fake.kill()
+        except ProcessLookupError:
+            pass
+        fake.wait(timeout=5)
+
+
+def test_post_workspaces_stop_refuses_self(server, tmp_path):
+    """POSTing stop with the dashboard's own bound workspace path returns
+    400 and a message pointing the user at the terminal."""
+    self_path = server["workspace"]
+    # Ensure the dashboard's own workspace is in the catalog (Add it).
+    _post_json(f"{server['url']}/api/workspaces/add", {"path": str(self_path)})
+    try:
+        _post_json(f"{server['url']}/api/workspaces/stop", {"path": str(self_path)})
+        assert False, "expected 400 for self-stop"
+    except urllib.error.HTTPError as exc:
+        assert exc.code == 400
+        body = json.loads(exc.read())
+        assert "refusing to stop self" in body["error"]
+        assert "kill " in body["error"]  # message includes a PID
+
+
+def test_post_workspaces_stop_refuses_not_running(server, tmp_path):
+    """If the workspace has no live entry, stop returns 400 'not running'."""
+    pbg_home = server["pbg_home"]
+    other_ws = tmp_path / "stopped-ws"
+    other_ws.mkdir()
+    (other_ws / "workspace.yaml").write_text("name: stopped-ws\npackage: pbg_stopped\n")
+    _post_json(f"{server['url']}/api/workspaces/add", {"path": str(other_ws)})
+
+    # No server entry exists for this workspace.
+    try:
+        _post_json(f"{server['url']}/api/workspaces/stop", {"path": str(other_ws)})
+        assert False, "expected 400"
+    except urllib.error.HTTPError as exc:
+        assert exc.code == 400
+        body = json.loads(exc.read())
+        assert body["error"] == "not running"
+
+
+def test_post_workspaces_stop_refuses_stale_entry(server, tmp_path):
+    """If the server entry exists but the PID is dead, treat as 'not running'."""
+    import subprocess as _sp
+    pbg_home = server["pbg_home"]
+    other_ws = tmp_path / "stale-ws"
+    other_ws.mkdir()
+    (other_ws / "workspace.yaml").write_text("name: stale-ws\npackage: pbg_stale\n")
+    _post_json(f"{server['url']}/api/workspaces/add", {"path": str(other_ws)})
+
+    # Get a confirmed-dead PID.
+    proc = _sp.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    import json as _json
+    (pbg_home / "servers").mkdir(exist_ok=True)
+    (pbg_home / "servers" / "stale-ws.json").write_text(_json.dumps({
+        "name": "stale-ws", "path": str(other_ws.resolve()),
+        "pid": proc.pid, "port": 9998,
+        "url": "http://127.0.0.1:9998",
+        "started_at": "2026-05-15T00:00:00Z",
+    }))
+
+    try:
+        _post_json(f"{server['url']}/api/workspaces/stop", {"path": str(other_ws)})
+        assert False, "expected 400"
+    except urllib.error.HTTPError as exc:
+        assert exc.code == 400
+        body = json.loads(exc.read())
+        assert body["error"] == "not running"
+
+
+def test_post_workspaces_stop_refuses_uncatalogued(server, tmp_path):
+    """A real workspace dir that's NOT in the catalog can't be stopped — even
+    if a server entry exists. (Safety: don't let the dashboard send SIGTERM
+    to arbitrary PIDs.)"""
+    other_ws = tmp_path / "ghost"
+    other_ws.mkdir()
+    (other_ws / "workspace.yaml").write_text("name: ghost\npackage: pbg_ghost\n")
+    # Note: do NOT add to catalog.
+
+    try:
+        _post_json(f"{server['url']}/api/workspaces/stop", {"path": str(other_ws)})
+        assert False, "expected 400"
+    except urllib.error.HTTPError as exc:
+        assert exc.code == 400
+        body = json.loads(exc.read())
+        assert body["error"] == "workspace not in catalog"
+
+
+def test_post_workspaces_stop_timeout(server, tmp_path):
+    """If the child ignores SIGTERM, the endpoint returns 504 with the PID
+    in the error message. The endpoint does NOT escalate to SIGKILL."""
+    import subprocess as _sp
+    pbg_home = server["pbg_home"]
+    victim_ws = tmp_path / "stubborn-ws"
+    victim_ws.mkdir()
+    (victim_ws / "workspace.yaml").write_text("name: stubborn-ws\npackage: pbg_stubborn\n")
+    _post_json(f"{server['url']}/api/workspaces/add", {"path": str(victim_ws)})
+
+    # Spawn a child that explicitly ignores SIGTERM.
+    helper = tmp_path / "stubborn.py"
+    helper.write_text("""
+import signal, time
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+while True:
+    time.sleep(60)
+""")
+    fake = _sp.Popen([sys.executable, str(helper)])
+    try:
+        time.sleep(0.2)
+        import json as _json
+        (pbg_home / "servers").mkdir(exist_ok=True)
+        (pbg_home / "servers" / "stubborn-ws.json").write_text(_json.dumps({
+            "name": "stubborn-ws", "path": str(victim_ws.resolve()),
+            "pid": fake.pid, "port": 9997,
+            "url": "http://127.0.0.1:9997",
+            "started_at": "2026-05-15T00:00:00Z",
+        }))
+
+        # The endpoint has a 3s polling deadline; give urllib up to 10s to
+        # be safe.
+        try:
+            _post_json(
+                f"{server['url']}/api/workspaces/stop",
+                {"path": str(victim_ws)},
+                timeout=10,
+            )
+            assert False, "expected 504"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 504
+            body = json.loads(exc.read())
+            assert body["error"] == "stop_timeout"
+            assert str(fake.pid) in body["hint"]
+    finally:
+        # Important: SIG_IGN is reset on SIGKILL — this must succeed.
+        fake.kill()
+        fake.wait(timeout=5)

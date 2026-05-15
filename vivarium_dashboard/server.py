@@ -31,6 +31,7 @@ import math
 import os
 import re
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -270,6 +271,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/workspaces/forget":        "_post_workspaces_forget",
     "/api/workspaces/cleanup-stale": "_post_workspaces_cleanup_stale",
     "/api/workspaces/start":         "_post_workspaces_start",
+    "/api/workspaces/stop":          "_post_workspaces_stop",
 }
 # Inject study-alias routes into the POST route map (same method name as old).
 for _old, _new in _POST_STUDY_ALIASES.items():
@@ -7535,6 +7537,63 @@ if __name__ == "__main__":
             "error": "start_timeout",
             "log_path": str(log_path),
             "hint": f"tail {log_path}",
+        }, 504)
+
+    def _post_workspaces_stop(self, body: dict):
+        """POST /api/workspaces/stop — SIGTERM a running workspace's dashboard
+        and poll for the child's atexit hook to remove the global registry
+        entry. Refuses self-stop and uncatalogued paths. Does NOT escalate
+        to SIGKILL on timeout — returns 504 with the PID instead."""
+        path = body.get("path") if isinstance(body, dict) else None
+        if not path or not isinstance(path, str) or not path.startswith("/"):
+            self._json({"error": "path must be an absolute string"}, 400)
+            return
+
+        target = Path(path).expanduser().resolve()
+
+        from pbg_superpowers import workspace_catalog
+
+        # Catalog membership guard (same as /start).
+        if not any(Path(e.get("path") or "").resolve() == target
+                   for e in workspace_catalog.list_workspaces()):
+            self._json({"error": "workspace not in catalog"}, 400)
+            return
+
+        # Refuse self-stop: WORKSPACE is the dashboard's own bound workspace,
+        # already resolved by serve(). Stopping it would kill the dashboard
+        # the user is currently using.
+        if target == WORKSPACE:
+            entry_self = workspace_catalog.find_running(target)
+            pid_self = entry_self["pid"] if entry_self else os.getpid()
+            self._json({
+                "error": f"refusing to stop self \u2014 use the terminal: kill {pid_self}"
+            }, 400)
+            return
+
+        entry = workspace_catalog.find_running(target)
+        if entry is None:
+            self._json({"error": "not running"}, 400)
+            return
+
+        pid = int(entry["pid"])
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            # Already dead between find_running and os.kill \u2014 treat as success.
+            self._json({"ok": True}, 200)
+            return
+
+        # Poll for the child's atexit to remove the global entry.
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            if workspace_catalog.find_entry(target) is None:
+                self._json({"ok": True}, 200)
+                return
+            time.sleep(0.1)
+
+        self._json({
+            "error": "stop_timeout",
+            "hint": f"PID {pid} still alive; SIGKILL it manually if stuck",
         }, 504)
 
     def _read_workspace_name(self, root: Path) -> str:
