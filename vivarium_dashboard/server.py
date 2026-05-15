@@ -7078,7 +7078,7 @@ if __name__ == "__main__":
 
         # Safety: only catalog paths can be spawned. Prevents the dashboard
         # from being used to launch processes against arbitrary directories.
-        if not any(Path(e["path"]).resolve() == target
+        if not any(Path(e.get("path") or "").resolve() == target
                    for e in workspace_catalog.list_workspaces()):
             self._json({"error": "workspace not in catalog — Add it first"}, 400)
             return
@@ -7089,7 +7089,6 @@ if __name__ == "__main__":
             self._json({"url": live["url"], "pid": live["pid"]}, 200)
             return
 
-        import time as _time
         log_path = target / ".pbg" / "server" / "start.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         with log_path.open("ab") as logf:
@@ -7102,13 +7101,13 @@ if __name__ == "__main__":
                 cwd=str(target),
             )
 
-        deadline = _time.monotonic() + 8.0
-        while _time.monotonic() < deadline:
+        deadline = time.monotonic() + 8.0
+        while time.monotonic() < deadline:
             entry = workspace_catalog.find_running(target)
             if entry is not None:
                 self._json({"url": entry["url"], "pid": entry["pid"]}, 200)
                 return
-            _time.sleep(0.1)
+            time.sleep(0.1)
 
         self._json({
             "error": "start_timeout",

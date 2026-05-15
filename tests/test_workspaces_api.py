@@ -487,9 +487,21 @@ def test_post_workspaces_start_spawns_dashboard(server, tmp_path):
         if spawned_pid:
             try:
                 os.kill(spawned_pid, 15)  # SIGTERM
-                time.sleep(0.5)          # give child a moment to unregister
             except ProcessLookupError:
                 pass
+            # Poll for the child's atexit to unregister itself. Up to 3 s.
+            # workspace_catalog.find_entry uses PBG_HOME from os.environ, which
+            # is NOT set in the test process — so check the servers/ directory
+            # directly via the fixture's pbg_home path instead.
+            pbg_home = server["pbg_home"]
+            servers_dir = pbg_home / "servers"
+            ws_name = "start-target"
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                remaining = list(servers_dir.glob(f"{ws_name}*.json"))
+                if not remaining:
+                    break
+                time.sleep(0.1)
 
 
 def test_post_workspaces_start_refuses_arbitrary_path(server, tmp_path):
@@ -552,3 +564,8 @@ def test_post_workspaces_start_returns_existing_url_if_live(server, tmp_path):
     assert status == 200
     assert resp["url"] == "http://127.0.0.1:8006"
     assert resp["pid"] == os.getpid()
+
+    # Verify no spawn occurred: start.log must NOT exist (it's only created
+    # by the Popen branch, which the idempotent path skips).
+    assert not (other_ws / ".pbg" / "server" / "start.log").exists(), \
+        "handler should NOT spawn a process when a live entry already exists"
