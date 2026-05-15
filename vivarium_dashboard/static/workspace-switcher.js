@@ -1,17 +1,20 @@
-// Workspace switcher: dropdown panel in the left rail.
+// Workspace switcher v2: centered modal mounted to <body> on first open.
 //
-// Reads GET /api/workspaces and renders rows by status. Click handlers:
-//   running  → navigate same tab to row.url
-//   stopped  → POST /api/workspaces/start, then navigate to returned url
-//   stale    → POST /api/workspaces/cleanup-stale, then re-render
-//   missing  → POST /api/workspaces/forget, then re-render
+// The trigger button (#viv-workspace-switcher-trigger) lives in the rail
+// from index.html.j2. Click → mount + open the modal. Reads GET
+// /api/workspaces on each open. Per-row primary action = click anywhere
+// except the right-side button. Secondary action = the button (Stop on
+// running non-current, Forget on stopped, Clean up on stale, Forget on
+// missing).
 
 (function () {
   const trigger = document.getElementById('viv-workspace-switcher-trigger');
-  const panel   = document.getElementById('viv-workspace-switcher-panel');
-  const list    = document.getElementById('viv-workspace-switcher-list');
-  const addBtn  = document.getElementById('viv-workspace-switcher-add');
-  if (!trigger || !panel || !list) return;
+  if (!trigger) return;
+
+  let modal = null;
+  let card = null;
+  let listEl = null;
+  let escHandler = null;
 
   const GLYPH = {
     current: '●', running: '●', stopped: '○', stale: '⚠', missing: '⊘',
@@ -22,182 +25,232 @@
     missing: 'viv-glyph-missing',
   };
 
-  function close() {
-    panel.hidden = true;
-    trigger.setAttribute('aria-expanded', 'false');
+  function ensureMounted() {
+    if (modal) return;
+    modal = document.createElement('div');
+    modal.className = 'viv-ws-modal';
+    modal.innerHTML = `
+      <div class="viv-ws-modal-card" role="dialog" aria-label="Workspaces">
+        <div class="viv-ws-modal-header">
+          <h2>Workspaces</h2>
+          <button type="button" class="viv-ws-modal-close" aria-label="Close">✕</button>
+        </div>
+        <ul class="viv-ws-modal-list"></ul>
+        <div class="viv-ws-modal-footer">
+          <button type="button" class="viv-ws-modal-add">+ Add existing workspace…</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    card = modal.querySelector('.viv-ws-modal-card');
+    listEl = modal.querySelector('.viv-ws-modal-list');
+
+    modal.addEventListener('click', (e) => {
+      // Click on the dim overlay (outside the card) closes the modal.
+      if (e.target === modal) close();
+    });
+    modal.querySelector('.viv-ws-modal-close').addEventListener('click', close);
+    modal.querySelector('.viv-ws-modal-add').addEventListener('click', doAdd);
   }
+
   function open() {
-    panel.hidden = false;
-    trigger.setAttribute('aria-expanded', 'true');
+    ensureMounted();
+    modal.classList.add('open');
+    listEl.innerHTML = '<li class="viv-ws-loading">Loading…</li>';
     refresh();
+    escHandler = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', escHandler);
+  }
+
+  function close() {
+    if (!modal) return;
+    modal.classList.remove('open');
+    if (escHandler) {
+      document.removeEventListener('keydown', escHandler);
+      escHandler = null;
+    }
   }
 
   trigger.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (panel.hidden) open(); else close();
-  });
-  document.addEventListener('click', (e) => {
-    if (!panel.hidden && !panel.contains(e.target) && e.target !== trigger) close();
-  });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !panel.hidden) close();
+    open();
   });
 
   async function refresh() {
-    list.innerHTML = '<li class="viv-workspace-switcher-loading">Loading…</li>';
     try {
       const resp = await fetch('/api/workspaces');
       const data = await resp.json();
       render(data);
     } catch (err) {
-      list.innerHTML = `<li class="viv-ws-error">Failed to load: ${escapeHtml(String(err))}</li>`;
+      listEl.innerHTML = `<li class="viv-ws-error">Failed to load: ${escapeHtml(String(err))}</li>`;
     }
   }
 
   function render(data) {
-    list.innerHTML = '';
-    data.workspaces.forEach((ws) => {
-      list.appendChild(renderRow(ws, data.current));
-    });
+    listEl.innerHTML = '';
+    data.workspaces.forEach((ws) => listEl.appendChild(renderRow(ws)));
   }
 
-  function renderRow(ws, current) {
+  function renderRow(ws) {
     const li = document.createElement('li');
-    if (ws.status === 'current') li.classList.add('viv-workspace-switcher-list', 'viv-ws-row-current');
+    li.className = 'viv-ws-row';
+    if (ws.status === 'current') li.classList.add('viv-ws-row-current');
+
+    const line1 = document.createElement('div');
+    line1.className = 'viv-ws-line1';
 
     const glyph = document.createElement('span');
     glyph.className = `viv-ws-glyph ${GLYPH_CLASS[ws.status] || ''}`;
     glyph.textContent = GLYPH[ws.status] || '?';
-    li.appendChild(glyph);
+    line1.appendChild(glyph);
 
-    if (ws.status === 'current') {
-      const label = document.createElement('div');
-      label.style.flex = '1';
-      label.innerHTML = `<strong>${escapeHtml(ws.name)}</strong> <small>(this)</small>
-                         <div class="viv-ws-path">${escapeHtml(ws.path)}</div>`;
-      li.appendChild(label);
-      return li;
-    }
+    const name = document.createElement('span');
+    name.className = 'viv-ws-name';
+    name.innerHTML = `<strong>${escapeHtml(ws.name)}</strong>${
+      ws.status === 'current' ? ' <small>(this)</small>' : ''
+    }`;
+    line1.appendChild(name);
 
-    if (ws.status === 'running') {
-      const a = document.createElement('a');
-      a.href = ws.url;
-      a.innerHTML = `<strong>${escapeHtml(ws.name)}</strong>
-                     <span class="viv-ws-path">${escapeHtml(ws.path)}</span>`;
-      li.appendChild(a);
-      return li;
-    }
+    const btn = renderActionButton(ws, li);
+    if (btn) line1.appendChild(btn);
 
-    const label = document.createElement('div');
-    label.style.flex = '1';
-    label.innerHTML = `<strong>${escapeHtml(ws.name)}</strong>
-                       <div class="viv-ws-path">${escapeHtml(ws.path)}</div>`;
-    li.appendChild(label);
+    const line2 = document.createElement('div');
+    line2.className = 'viv-ws-path';
+    line2.textContent = ws.path;
 
-    if (ws.status === 'stopped') {
-      const btn = document.createElement('button');
-      btn.textContent = 'Start ▸';
-      btn.addEventListener('click', () => doStart(ws.path, btn, li));
-      li.appendChild(btn);
-    } else if (ws.status === 'stale') {
-      const btn = document.createElement('button');
-      btn.textContent = 'Clean up';
-      btn.addEventListener('click', () => doCleanup(ws.path, btn, li));
-      li.appendChild(btn);
-    } else if (ws.status === 'missing') {
-      const btn = document.createElement('button');
-      btn.textContent = 'Forget ×';
-      btn.addEventListener('click', () => doForget(ws.path, btn, li));
-      li.appendChild(btn);
+    li.appendChild(line1);
+    li.appendChild(line2);
+
+    // Row click = primary action (except clicks on the button).
+    if (ws.status !== 'current') {
+      li.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return;
+        doPrimary(ws, li);
+      });
     }
     return li;
   }
 
-  async function doStart(path, btn, row) {
-    btn.disabled = true;
-    btn.textContent = 'Starting…';
+  function renderActionButton(ws, li) {
+    if (ws.status === 'current') return null;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'viv-ws-action';
+    let label;
+    if (ws.status === 'running') {
+      label = 'Stop ■';
+      btn.classList.add('viv-ws-action-danger');
+      btn.addEventListener('click', () => doStop(ws, btn, li));
+    } else if (ws.status === 'stopped') {
+      label = 'Forget';
+      btn.classList.add('viv-ws-action-muted');
+      btn.addEventListener('click', () => doForget(ws, btn, li));
+    } else if (ws.status === 'stale') {
+      label = 'Clean up';
+      btn.classList.add('viv-ws-action-warn');
+      btn.addEventListener('click', () => doCleanup(ws, btn, li));
+    } else if (ws.status === 'missing') {
+      label = 'Forget ×';
+      btn.classList.add('viv-ws-action-muted');
+      btn.addEventListener('click', () => doForget(ws, btn, li));
+    }
+    btn.textContent = label;
+    return btn;
+  }
+
+  function doPrimary(ws, li) {
+    if (ws.status === 'running') {
+      window.location.href = ws.url;
+    } else if (ws.status === 'stopped') {
+      doStart(ws, null, li);
+    } else if (ws.status === 'stale') {
+      doCleanup(ws, null, li);
+    } else if (ws.status === 'missing') {
+      doForget(ws, null, li);
+    }
+  }
+
+  function busy(btn, label) {
+    if (btn) { btn.disabled = true; btn.dataset.original = btn.textContent; btn.textContent = label; }
+  }
+  function unbusy(btn) {
+    if (btn) { btn.disabled = false; if (btn.dataset.original) btn.textContent = btn.dataset.original; }
+  }
+
+  async function postJson(path, payload) {
+    const resp = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw Object.assign(new Error(body.error || `HTTP ${resp.status}`), { body });
+    return body;
+  }
+
+  function rowError(li, msg) {
+    let err = li.querySelector('.viv-ws-error');
+    if (!err) {
+      err = document.createElement('div');
+      err.className = 'viv-ws-error';
+      li.appendChild(err);
+    }
+    err.textContent = msg;
+  }
+
+  async function doStart(ws, btn, li) {
+    busy(btn, 'Starting…');
     try {
-      const resp = await fetch('/api/workspaces/start', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({path}),
-      });
-      if (!resp.ok) {
-        const body = await resp.json().catch(() => ({}));
-        rowError(row, body.error || `HTTP ${resp.status}`,
-                 body.log_path ? `(log: ${body.log_path})` : '');
-        btn.disabled = false; btn.textContent = 'Start ▸';
-        return;
-      }
-      const data = await resp.json();
+      const data = await postJson('/api/workspaces/start', { path: ws.path });
       window.location.href = data.url;
     } catch (err) {
-      rowError(row, String(err));
-      btn.disabled = false; btn.textContent = 'Start ▸';
+      rowError(li, err.message + (err.body && err.body.log_path ? ` (log: ${err.body.log_path})` : ''));
+      unbusy(btn);
     }
   }
 
-  async function doCleanup(path, btn, row) {
-    btn.disabled = true;
+  async function doStop(ws, btn, li) {
+    busy(btn, 'Stopping…');
     try {
-      const resp = await fetch('/api/workspaces/cleanup-stale', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({path}),
-      });
-      if (!resp.ok) {
-        const body = await resp.json().catch(() => ({}));
-        rowError(row, body.error || `HTTP ${resp.status}`);
-        btn.disabled = false;
-        return;
-      }
+      await postJson('/api/workspaces/stop', { path: ws.path });
       refresh();
     } catch (err) {
-      rowError(row, String(err));
-      btn.disabled = false;
+      rowError(li, err.message + (err.body && err.body.hint ? ` — ${err.body.hint}` : ''));
+      unbusy(btn);
     }
   }
 
-  async function doForget(path, btn, row) {
-    btn.disabled = true;
+  async function doCleanup(ws, btn, li) {
+    busy(btn, 'Cleaning…');
     try {
-      const resp = await fetch('/api/workspaces/forget', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({path}),
-      });
-      if (!resp.ok) {
-        const body = await resp.json().catch(() => ({}));
-        rowError(row, body.error || `HTTP ${resp.status}`);
-        btn.disabled = false;
-        return;
-      }
+      await postJson('/api/workspaces/cleanup-stale', { path: ws.path });
       refresh();
     } catch (err) {
-      rowError(row, String(err));
-      btn.disabled = false;
+      rowError(li, err.message);
+      unbusy(btn);
     }
   }
 
-  function rowError(row, msg, hint) {
-    const e = document.createElement('div');
-    e.className = 'viv-ws-error';
-    e.textContent = hint ? `${msg} ${hint}` : msg;
-    row.appendChild(e);
+  async function doForget(ws, btn, li) {
+    busy(btn, 'Forgetting…');
+    try {
+      await postJson('/api/workspaces/forget', { path: ws.path });
+      refresh();
+    } catch (err) {
+      rowError(li, err.message);
+      unbusy(btn);
+    }
   }
 
-  if (addBtn) {
-    addBtn.addEventListener('click', async () => {
-      const p = window.prompt('Path to workspace directory:');
-      if (!p) return;
-      const resp = await fetch('/api/workspaces/add', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({path: p}),
-      });
-      if (!resp.ok) {
-        const body = await resp.json().catch(() => ({}));
-        alert('Could not add: ' + (body.error || `HTTP ${resp.status}`));
-        return;
-      }
+  async function doAdd() {
+    const p = window.prompt('Path to workspace directory:');
+    if (!p) return;
+    try {
+      await postJson('/api/workspaces/add', { path: p });
       refresh();
-    });
+    } catch (err) {
+      window.alert('Could not add: ' + err.message);
+    }
   }
 
   function escapeHtml(s) {
