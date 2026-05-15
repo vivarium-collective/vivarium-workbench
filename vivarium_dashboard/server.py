@@ -1704,6 +1704,7 @@ class Handler(BaseHTTPRequestHandler):
 
         route_map = {
             "/api/simulation":    self._delete_simulation,
+            "/api/simulation-run": self._delete_simulation_run,
             "/api/visualization": self._delete_visualization,
             "/api/investigation-composite": self._delete_investigation_composite,
             "/api/investigation-comparison": self._delete_investigation_comparison,
@@ -2769,6 +2770,35 @@ if __name__ == "__main__":
             save_workspace(ws_file, ws)
 
         return self._json(*_active_branch_action(commit_msg, action))
+
+    def _delete_simulation_run(self, body: dict):
+        """DELETE /api/simulation-run — full delete of one persisted run.
+
+        Body: ``{run_id}``. Removes the runs_meta row, all history rows for
+        that simulation_id, the ``.pbg/runs/<run_id>/`` directory if any,
+        and the run_id from any ``study.yaml`` ``runs[]`` that references
+        it. Returns the summary dict from
+        ``simulations_index.delete_simulation``.
+
+        Does NOT go through ``_active_branch_action``. Run DBs and run dirs
+        are gitignored; ``study.yaml`` edits are left in the working tree
+        (same UX as a Studies-tab edit before commit).
+        """
+        run_id = (body.get("run_id") or "").strip()
+        if not run_id:
+            return self._json({"error": "run_id is required"}, 400)
+
+        _ws_add_to_sys_path()
+        from vivarium_dashboard.lib.simulations_index import (
+            delete_simulation, RunNotFound,
+        )
+        try:
+            summary = delete_simulation(WORKSPACE, run_id)
+        except RunNotFound:
+            return self._json({"error": "run not found"}, 404)
+        except Exception as e:  # noqa: BLE001 — surface the failure, don't crash
+            return self._json({"error": f"delete failed: {e}"}, 500)
+        return self._json(summary, 200)
 
     def _delete_visualization(self, body: dict):
         """Remove a visualization from workspace.yaml.

@@ -115,3 +115,45 @@ def test_get_simulations_lists_a_completed_run(server):
     assert matching[0]["spec_id"] == spec_id
     assert matching[0]["db_path"] == ".pbg/composite-runs.db"
     assert matching[0]["studies"] == []
+
+
+def test_delete_simulation_run_removes_everything(server):
+    base = server["url"]
+    spec_id = "pbg_ws_increase_demo.composites.increase-demo"
+    _, body = _post(f"{base}/api/composite-test-run",
+                    {"id": spec_id, "steps": 2})
+    run_id = body["run_id"]
+    _poll_until_terminal(base, run_id)
+
+    status, summary = _delete(f"{base}/api/simulation-run", {"run_id": run_id})
+    assert status == 200
+    assert summary["deleted_rows"] == 1
+    assert summary["errors"] == []
+
+    # No longer in the listing
+    _, body = _get(f"{base}/api/simulations")
+    assert all(s["run_id"] != run_id for s in body["simulations"])
+
+    # Status endpoint now 404s for it
+    req = urllib.request.Request(
+        f"{base}/api/composite-run/{run_id}/status", method="GET")
+    try:
+        urllib.request.urlopen(req, timeout=5)
+        raise AssertionError("expected 404 for deleted run status")
+    except urllib.error.HTTPError as e:
+        assert e.code == 404
+
+
+def test_delete_simulation_run_404_unknown(server):
+    base = server["url"]
+    status, body = _delete(f"{base}/api/simulation-run",
+                            {"run_id": "ghost-run"})
+    assert status == 404
+    assert "error" in body
+
+
+def test_delete_simulation_run_400_missing_run_id(server):
+    base = server["url"]
+    status, body = _delete(f"{base}/api/simulation-run", {})
+    assert status == 400
+    assert "error" in body
