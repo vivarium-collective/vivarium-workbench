@@ -70,65 +70,35 @@ def _atomic_write(path: pathlib.Path, text: str) -> None:
 
 
 def migrate_v2_to_v3(spec: dict) -> dict:
-    """Migrate a schema_version=2 investigation spec to schema_version=3 study.
+    """Migrate a v2 study spec to v3 in-memory.
 
-    Transforms:
-      - Convert the ``composites: [...]`` multi-composite list into a
-        ``baseline`` **list**, where every entry becomes a dict shaped
-        ``{name, composite, params}``.  All composites are preserved; none are
-        dropped and no ``UserWarning`` is emitted.
-      - Lift each composite's ``parameters: {...}`` into its ``params`` field in
-        the resulting ``baseline`` entry.
-      - Add empty ``objective: ""`` and ``parent_studies: []`` (reserved for
-        future inter-study linkage).
-      - Bump schema_version to 3.
+    Three reachable input shapes get reshaped:
 
-    Example output shape for the ``baseline`` list::
+    1. **Legacy `composites:` list** — each entry becomes a baseline composite.
+    2. **Lone `composite:` string** (CLI bare-composite path) — wrapped as a
+       single baseline entry whose `name` defaults to the FQN.
+    3. **"Variants-as-composites" v2 shape** — variants carrying `source:`
+       split into the baseline list; variants carrying `extends:` /
+       `intervention:` become v3 variants with `base_composite` +
+       `parameter_overrides`.
 
-        baseline:
-          - name: my-composite
-            composite: pkg.composites.my_composite
-            params: {rate: 0.5}
-          - name: other-composite
-            composite: pkg.composites.other_composite
-            params: {}
+    All three paths produce:
+      - `schema_version: 3`
+      - `baseline: [{name, composite, params}, ...]` (non-empty list)
+      - `variants: [...]` (possibly empty; entries have `base_composite` +
+        `parameter_overrides`)
+      - `interventions: []` (default; preserved if already present)
+      - `objective`, `parent_studies` defaults
 
-    Idempotent: returns *the same object* unchanged if ``schema_version`` is
-    already 3.
-
-    Two calling paths reach this function:
-
-    1. ``load_spec`` (in-memory only) — runs after ``migrate_study_to_v2_vocabulary``
-       which converts ``composites: [...]`` → ``variants:``.  By the time this
-       function is called from ``load_spec`` the spec always has ``variants:`` or
-       a bare ``composite:`` (legacy single-composite shape); the latter is
-       guarded by the ``version != 2 and not has_composites_key`` early-return so
-       the ``elif "composite" in spec`` branch is **not** reachable via this path.
-
-    2. ``migrate_investigations_to_studies`` (Task 5.1 CLI) — loads raw YAML from
-       disk and calls ``migrate_v2_to_v3(spec)`` directly, *without* first running
-       ``migrate_study_to_v2_vocabulary``.  A v2 investigation that was hand-authored
-       with a top-level ``composite: "pkg.composites.foo"`` string instead of the
-       ``composites: [...]`` list **will** have ``schema_version: 2`` and a bare
-       ``composite:`` key, making the ``elif`` branch reachable.  Example raw YAML::
-
-           schema_version: 2
-           name: my-study
-           composite: pkg.composites.chemotaxis
-           parameters: {rate: 0.5}
-
-       In this case the branch promotes ``composite`` + ``parameters`` into a
-       one-element ``baseline`` list — ``baseline: [{name: ..., composite: ...,
-       params: {...}}]`` — matching the shape produced by the multi-composite
-       path.
+    Specs already at `schema_version: 3` are returned unchanged (identity).
     """
     if spec.get("schema_version") == 3:
         return spec
 
     # Only migrate specs that are explicitly versioned as v2 (or have the v2
-    # multi-composite ``composites:`` key).  Specs without a schema_version
-    # (legacy single-composite shape) are passed through unchanged so that the
-    # existing load_spec validator can handle them.
+    # multi-composite ``composites:`` key).  Specs without a schema_version fall
+    # through to the variants-as-composites detection below; if that doesn't
+    # match, they pass through unchanged.
     version = spec.get("schema_version")
     has_composites_key = "composites" in spec
     # The "variants-as-composites" v2 shape: a `variants:` list whose entries

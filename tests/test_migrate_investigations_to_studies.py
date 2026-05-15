@@ -61,6 +61,7 @@ def test_migration_rewrites_spec_to_v3(_ws_with_v2_investigation):
     entry = spec["baseline"][0]
     assert entry["composite"] == "pkg.composites.foo"
     assert entry["params"] == {"x": 1}
+    assert entry["name"] == "main"
 
 
 def test_migration_idempotent(_ws_with_v2_investigation):
