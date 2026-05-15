@@ -68,3 +68,30 @@ def test_study_detail_spec_returns_none_for_missing(_ws):
     """A name with no spec file resolves to None (handler renders 404)."""
     from vivarium_dashboard.server import _study_detail_spec
     assert _study_detail_spec("does-not-exist") is None
+
+
+def test_study_detail_page_has_five_tabs(_ws):
+    """The 5-tab scaffold is present: Overview · Baseline · Variants · Interventions · Runs."""
+    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    spec = _study_detail_spec("study-monod_kinetics-096184")
+    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    # Five buttons
+    for kind in ("overview", "baseline", "variants", "interventions", "runs"):
+        assert f'class="study-tab' in html
+        assert f'data-kind="{kind}"' in html
+    # Five panels
+    panels = html.count('class="study-tab-panel')
+    assert panels == 5, f"expected 5 panel elements, got {panels}"
+    # The Overview tab is active by default — must have both active class and overview kind on a button
+    assert 'class="study-tab active" data-kind="overview"' in html or \
+           'data-kind="overview" class="study-tab active"' in html or \
+           ('"study-tab active"' in html and 'data-kind="overview"' in html)
+
+
+def test_study_detail_page_loads_set_tab_helper(_ws):
+    """The page ships the _setStudyTab helper inline or via study-detail.js."""
+    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    spec = _study_detail_spec("study-monod_kinetics-096184")
+    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    # The page must reference _setStudyTab somewhere (in the script tag or via onclick)
+    assert "_setStudyTab" in html

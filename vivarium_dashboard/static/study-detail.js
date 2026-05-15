@@ -10,6 +10,17 @@
     });
   }
 
+  // --- Tab navigation ---
+  function _setStudyTab(kind) {
+    document.querySelectorAll('.study-tab').forEach(function(b) {
+      b.classList.toggle('active', b.dataset.kind === kind);
+    });
+    document.querySelectorAll('.study-tab-panel').forEach(function(p) {
+      p.classList.toggle('active', p.dataset.kind === kind);
+    });
+  }
+  window._setStudyTab = _setStudyTab;
+
   // --- Inline-edit (objective + conclusion) ---
   function makeEditable(el, savePath, field, placeholder) {
     if (!el) return;
