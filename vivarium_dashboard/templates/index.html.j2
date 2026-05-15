@@ -112,50 +112,96 @@
 }
 .viv-workspace-switcher-trigger:hover { background: #f5f5f5; }
 .viv-workspace-switcher-glyph { color: #2ea043; font-size: 14px; }
-.viv-workspace-switcher-panel {
-  position: absolute; top: 100%; left: 12px; right: 12px;
-  background: #fff; border: 1px solid #ccc; border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-  z-index: 1000; max-height: 70vh; overflow-y: auto;
-}
-.viv-workspace-switcher-header {
-  padding: 8px 12px; border-bottom: 1px solid #eee;
-  font-weight: 600; font-size: 12px; color: #666;
-}
-.viv-workspace-switcher-list { list-style: none; margin: 0; padding: 0; }
-.viv-workspace-switcher-list li {
-  padding: 8px 12px; border-bottom: 1px solid #f0f0f0;
-  display: flex; align-items: center; gap: 8px;
-}
-.viv-workspace-switcher-list li:last-child { border-bottom: none; }
-.viv-workspace-switcher-list a {
-  flex: 1; text-decoration: none; color: inherit;
-  display: flex; flex-direction: column;
-}
-.viv-workspace-switcher-list a:hover { color: #0366d6; }
-.viv-workspace-switcher-list .viv-ws-path {
-  font-size: 11px; color: #888; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap;
-}
-.viv-workspace-switcher-list .viv-ws-glyph { width: 18px; text-align: center; }
-.viv-workspace-switcher-list .viv-ws-row-current { background: #f8f9fb; }
-.viv-workspace-switcher-list button {
-  font-size: 11px; padding: 3px 8px; cursor: pointer;
-  border: 1px solid #ccc; background: #fff; border-radius: 3px;
-}
-.viv-workspace-switcher-list button:hover { background: #f0f0f0; }
-.viv-workspace-switcher-footer {
-  padding: 8px 12px; border-top: 1px solid #eee;
-}
-.viv-workspace-switcher-add {
-  background: none; border: none; color: #0366d6;
-  cursor: pointer; font-size: 12px; padding: 0;
-}
 .viv-glyph-running { color: #2ea043; }
 .viv-glyph-stopped { color: #999; }
 .viv-glyph-stale   { color: #d29922; }
 .viv-glyph-missing { color: #cf222e; }
 .viv-ws-error { color: #cf222e; font-size: 11px; padding: 2px 0; }
+
+/* Workspace switcher v2 — centered modal mounted to body. */
+.viv-ws-modal {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.32);
+  display: none;
+  align-items: center; justify-content: center;
+  z-index: 2000;
+  opacity: 0;
+  transition: opacity 0.14s ease-out;
+}
+.viv-ws-modal.open {
+  display: flex;
+  opacity: 1;
+}
+.viv-ws-modal-card {
+  width: min(720px, 90vw);
+  max-height: 80vh;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.18);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.viv-ws-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid #eee;
+}
+.viv-ws-modal-header h2 {
+  margin: 0; font-size: 15px; font-weight: 600; color: #333;
+}
+.viv-ws-modal-close {
+  background: none; border: none; cursor: pointer;
+  font-size: 18px; color: #666; padding: 0 4px;
+}
+.viv-ws-modal-close:hover { color: #000; }
+.viv-ws-modal-list {
+  list-style: none; margin: 0; padding: 0;
+  overflow-y: auto; flex: 1;
+}
+.viv-ws-modal-footer {
+  padding: 10px 18px; border-top: 1px solid #eee;
+}
+.viv-ws-modal-add {
+  background: none; border: none; color: #0366d6;
+  cursor: pointer; font-size: 13px; padding: 0;
+}
+.viv-ws-modal-add:hover { text-decoration: underline; }
+
+/* Rows */
+.viv-ws-row {
+  padding: 10px 18px;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+}
+.viv-ws-row:last-child { border-bottom: none; }
+.viv-ws-row:hover { background: #f6f8fa; }
+.viv-ws-row-current { cursor: default; background: #f8f9fb; }
+.viv-ws-row-current:hover { background: #f8f9fb; }
+.viv-ws-line1 {
+  display: flex; align-items: center; gap: 10px;
+}
+.viv-ws-row .viv-ws-glyph { width: 18px; text-align: center; font-size: 14px; }
+.viv-ws-name { flex: 1; font-size: 13px; }
+.viv-ws-name small { color: #777; font-weight: normal; }
+.viv-ws-path {
+  font-size: 11px; color: #888;
+  margin-top: 3px; margin-left: 28px;
+  word-break: break-all;
+}
+.viv-ws-action {
+  font-size: 11px; padding: 4px 10px; cursor: pointer;
+  border: 1px solid #ccc; background: #fff; border-radius: 3px;
+}
+.viv-ws-action:hover { background: #f0f0f0; }
+.viv-ws-action:disabled { opacity: 0.6; cursor: progress; }
+.viv-ws-action-danger { color: #cf222e; border-color: #f6c4c9; }
+.viv-ws-action-danger:hover { background: #fdecef; }
+.viv-ws-action-warn { color: #b3700d; border-color: #f0d8a7; }
+.viv-ws-action-warn:hover { background: #fff5e1; }
+.viv-ws-action-muted { color: #666; }
+.viv-ws-loading {
+  padding: 16px 18px; color: #999; font-size: 12px;
+}
+/* .viv-ws-error reused from v1; no rule change needed. */
 </style>
 </head><body>
 
@@ -181,18 +227,6 @@
         <strong>{{ workspace_name }}</strong>
         <span class="viv-arrow">▾</span>
       </button>
-      <div class="viv-workspace-switcher-panel" id="viv-workspace-switcher-panel" hidden>
-        <div class="viv-workspace-switcher-header">Workspaces</div>
-        <ul class="viv-workspace-switcher-list" id="viv-workspace-switcher-list">
-          <li class="viv-workspace-switcher-loading">Loading…</li>
-        </ul>
-        <div class="viv-workspace-switcher-footer">
-          <button class="viv-workspace-switcher-add" type="button"
-                  id="viv-workspace-switcher-add">
-            + Add existing workspace…
-          </button>
-        </div>
-      </div>
     </div>
 
     <!-- Primary nav -->
