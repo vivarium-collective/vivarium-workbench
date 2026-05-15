@@ -6893,7 +6893,8 @@ if __name__ == "__main__":
                 try:
                     result = subprocess.run(
                         pypi_install_cmd,
-                        cwd=WORKSPACE, capture_output=True, text=True, timeout=180,
+                        cwd=WORKSPACE, capture_output=True,
+                        encoding="utf-8", errors="replace", timeout=180,
                     )
                 except subprocess.TimeoutExpired:
                     raise RuntimeError("pip install from PyPI timed out after 180s")
@@ -6950,7 +6951,8 @@ if __name__ == "__main__":
                     r = subprocess.run(
                         ["git", "submodule", "add", "-b", catalog_entry["ref"],
                          catalog_entry["source"], target_path],
-                        cwd=WORKSPACE, capture_output=True, text=True, timeout=120,
+                        cwd=WORKSPACE, capture_output=True,
+                        encoding="utf-8", errors="replace", timeout=120,
                     )
                     if r.returncode != 0:
                         raise RuntimeError(
@@ -6961,7 +6963,8 @@ if __name__ == "__main__":
                 try:
                     result = subprocess.run(
                         pip_cmd_base + [str(abs_target)],
-                        cwd=WORKSPACE, capture_output=True, text=True, timeout=180,
+                        cwd=WORKSPACE, capture_output=True,
+                        encoding="utf-8", errors="replace", timeout=180,
                     )
                 except subprocess.TimeoutExpired:
                     raise RuntimeError("pip install timed out after 180s")
