@@ -105,17 +105,24 @@ def _validate_study_v3(spec: dict) -> None:
     """Validate a schema_version=3 Study spec.
 
     v3 shape (distinct from the v2 ``variants:``-as-composites shape):
-      - ``baseline``: a mapping with a ``composite`` string (required).
+      - ``baseline``: a non-empty list of ``{name, composite, params}`` mappings.
       - ``variants``: optional list (MAY be empty) of parameter-overlay
         mappings, each with a ``name``.
       - ``runs``, ``visualizations``: optional lists.
       - ``objective``, ``conclusion``: optional.
     """
     baseline = spec.get("baseline")
-    if not isinstance(baseline, dict):
-        raise InvestigationSpecError("v3 study: 'baseline' must be a mapping")
-    if not baseline.get("composite"):
-        raise InvestigationSpecError("v3 study: 'baseline.composite' is required")
+    if not isinstance(baseline, list) or not baseline:
+        raise InvestigationSpecError(
+            "v3 study: 'baseline' must be a non-empty list of composites"
+        )
+    for i, c in enumerate(baseline):
+        if not isinstance(c, dict):
+            raise InvestigationSpecError(f"v3 study: baseline[{i}] must be a mapping")
+        if not c.get("name"):
+            raise InvestigationSpecError(f"v3 study: baseline[{i}].name is required")
+        if not c.get("composite"):
+            raise InvestigationSpecError(f"v3 study: baseline[{i}].composite is required")
 
     variants = spec.get("variants", [])
     if not isinstance(variants, list):
