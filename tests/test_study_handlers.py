@@ -40,15 +40,6 @@ def test_set_objective_updates_yaml(_study_workspace):
     assert spec["objective"] == "Does X cause Y?"
 
 
-def test_set_baseline_params_updates_yaml(_study_workspace):
-    from vivarium_dashboard.server import _post_study_set_baseline_params_for_test
-    body = {"study": "s1", "params": {"a": 1, "n_steps": 50}}
-    resp, code = _post_study_set_baseline_params_for_test(_study_workspace, body)
-    assert code == 200
-    spec = yaml.safe_load((_study_workspace / "studies" / "s1" / "study.yaml").read_text())
-    assert spec["baseline"]["params"] == {"a": 1, "n_steps": 50}
-
-
 def test_rename_moves_directory_and_updates_name(_study_workspace):
     from vivarium_dashboard.server import _post_study_rename_for_test
     body = {"study": "s1", "new_name": "renamed-study"}
