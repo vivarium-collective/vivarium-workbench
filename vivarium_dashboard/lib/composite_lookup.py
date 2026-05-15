@@ -196,6 +196,11 @@ def discover_all_composites(ws_root: Path, package_path: str) -> dict[str, dict]
         # Generator entries always carry default_n_steps (int | None); emit it
         # unconditionally so callers can rely on the key being present.
         rec["default_n_steps"] = entry.get("default_n_steps")
+        # Canonical visualizations declared on @composite_generator. Always a
+        # list (empty when the generator omits the field). The dashboard's
+        # study-run handlers merge these defaults into the Study's viz list
+        # so callers inherit the composite's simulation-report panels.
+        rec["visualizations"] = list(entry.get("visualizations") or [])
         out[gid] = rec
     return out
 

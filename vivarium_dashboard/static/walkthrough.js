@@ -402,6 +402,11 @@
         loadBranches();
       }
     }
+    // Stop any running poll-loop started by the Composite Explorer's Run tab
+    // before activating a new page. _ceLoadRunFromId will restart polling if
+    // the next page is the explorer with a still-running run.
+    if (typeof _ceStopRunPoll === 'function') _ceStopRunPoll();
+
     // Initialize composite explorer when switching to that page.
     if (pageId === 'composite-explore') {
       _initCompositeExplorer();
@@ -2448,17 +2453,22 @@
 
   function _initCompositeExplorer() {
     // Called when the explorer page is activated. Parses ?id=<spec_id> from
-    // the URL, fetches the resolved composite, populates the page.
+    // the URL, fetches the resolved composite, populates the page. Also
+    // parses ?run_id=<run_id> — when present, loads that run's results and
+    // viz into the Run tab (a Simulations-row deep link or a refresh of a
+    // URL captured after kicking off a run).
     var params = new URLSearchParams(window.location.search);
     var id = params.get('id');
+    var run_id = params.get('run_id');
     if (!id) {
       document.getElementById('ce-loading').textContent =
         'No composite id specified. Open via the Use button on a composite card.';
       return;
     }
-    window._ceCurrent = {id: id, overrides: {}};
-    window._ceLastRunId = null;
-    // Hide the post-run bar when loading a fresh composite.
+    window._ceCurrent = {id: id, overrides: {}, run_id: run_id || null};
+    window._ceLastRunId = run_id || null;
+    // Hide the post-run bar when loading a fresh composite (it's set by the
+    // explore:run-complete postMessage path).
     var bar = document.getElementById('ce-post-run-bar');
     if (bar) bar.style.display = 'none';
     // Eagerly populate the composite card cache so "Create simulation" can
@@ -2468,6 +2478,11 @@
       _loadComposites();
     }
     _ceFetch();
+    if (run_id) {
+      // Run tab loads in parallel with _ceFetch's wiring fetch; no need to
+      // await, the two writes target different DOM containers.
+      _ceLoadRunFromId(run_id);
+    }
   }
   window._initCompositeExplorer = _initCompositeExplorer;
 
@@ -2913,12 +2928,14 @@
         // "library" = the package the composite ships in; data.module is the
         // submodule path (e.g. "pbg_biomodels.composites") — drop the
         // conventional .composites suffix to get the library name.
-        // parameters + overrides feed the Configure tab inside the loom iframe.
+        // parameters + overrides + default_n_steps feed the Configure + Run
+        // tabs inside the loom iframe.
         _loadCompositeExplorer(
           data.id, data.state, data.name,
           (data.module || '').replace(/\.composites$/, ''),
           data.parameters,
           window._ceCurrent.overrides || {},
+          data.default_n_steps,
         );
         // Render parameter editor
         _ceRenderParameters(data.parameters);
@@ -2956,7 +2973,7 @@
   // Can be called with a pre-resolved state object (from _ceFetch) or with
   // just a ref string, in which case it fetches /api/composite-state first.
   // When ui.composite_view === 'bigraph-viz', uses the legacy SVG path instead.
-  function _loadCompositeExplorer(ref, stateObj, nameHint, libraryHint, parametersHint, overridesHint) {
+  function _loadCompositeExplorer(ref, stateObj, nameHint, libraryHint, parametersHint, overridesHint, defaultStepsHint) {
     // Apply visibility toggle each time the explorer is loaded (catches cases
     // where the config fetch completed after the first render).
     _applyCompositeViewMode();
@@ -2976,6 +2993,7 @@
         state: state,
         parameters: parametersHint || undefined,
         overrides: overridesHint || {},
+        default_n_steps: defaultStepsHint,
         metadata: { name: name || ref, library: libraryHint || '', id: ref },
       };
       window._loomLastState = window._loomLastState || {};
@@ -3079,7 +3097,7 @@
     var steps = parseInt(document.getElementById('ce-steps').value, 10) || 5;
     var overrides = _ceCollectOverrides();
     var resultsEl = document.getElementById('ce-test-results');
-    resultsEl.innerHTML = '<p class="empty-state">Running&hellip;</p>';
+    resultsEl.innerHTML = '<p class="empty-state">Starting run&hellip;</p>';
     fetch('/api/composite-test-run', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -3090,100 +3108,43 @@
         emit_paths: window._explorerEmitPaths || [],
       }),
     })
-      .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(r) { return r.json().then(function(j) { return [r.status, j]; }); })
       .then(function(parts) {
-        var ok = parts[0], json = parts[1];
-        if (!ok) {
-          var msg = '<span style="color:#c00"><strong>Test run failed:</strong> ' +
-            _esc(json.error || 'unknown') + '</span>';
-          if (json.traceback) {
-            msg += '<details><summary>traceback</summary><pre style="font-size:0.8em">' +
-              _esc(json.traceback) + '</pre></details>';
-          }
-          resultsEl.innerHTML = msg;
+        var code = parts[0], body = parts[1];
+        if (code !== 202) {
+          var errMsg = body && body.error
+            ? body.error
+            : ('HTTP ' + code);
+          resultsEl.innerHTML =
+            '<div style="color:#c00;"><strong>Could not start run:</strong> ' +
+            _esc(errMsg) + '</div>';
           return;
         }
-        // Summary table: one row per observable, with final value preview.
-        var results = json.results || {};
-        var keys = Object.keys(results);
-        var resultsHtml;
-        if (!keys.length) {
-          resultsHtml = '<p class="muted">Run complete (' + json.steps +
-            ' steps) — no observables emitted. Select stores in the wiring ' +
-            'view to mark them for emit.</p>';
-        } else {
-          resultsHtml = '<div class="ce-run-results"><h4>Run results (' +
-            json.steps + ' steps)</h4>' +
-            '<table style="font-size:0.86em">' +
-            '<thead><tr><th>Observable</th><th>Steps</th><th>Final value</th></tr></thead>' +
-            '<tbody>';
-          keys.sort().forEach(function(k) {
-            var entries = results[k] || [];
-            var lastEntry = entries[entries.length - 1] || {};
-            var preview = '';
-            if (lastEntry && typeof lastEntry === 'object') {
-              Object.keys(lastEntry).forEach(function(field) {
-                if (field === 'time' || field.charAt(0) === '_') return;
-                if (!preview) preview = JSON.stringify(lastEntry[field]);
-              });
-              if (!preview) preview = JSON.stringify(lastEntry);
-            } else {
-              preview = JSON.stringify(lastEntry);
-            }
-            resultsHtml += '<tr><td><code>' + _esc(k) + '</code></td>' +
-              '<td>' + entries.length + '</td>' +
-              '<td><code>' + _esc(preview) + '</code></td></tr>';
-          });
-          resultsHtml += '</tbody></table></div>';
-        }
-        // Inline viz HTML, when the composite has a Visualization Step wired
-        // to a viz_html output store. Server returns json.viz_html as a
-        // {<wire_path>: <html>} mapping when render_results() finds any
-        // (or a bare string for legacy single-viz callers). Both shapes
-        // render into a sandboxed iframe so embedded <script> tags execute.
-        var vizHtml = json.viz_html;
-        if (vizHtml) {
-          var vizEntries = [];
-          if (typeof vizHtml === 'string' && vizHtml.length > 0) {
-            vizEntries.push(['viz', vizHtml]);
-          } else if (typeof vizHtml === 'object') {
-            Object.keys(vizHtml).forEach(function(k) {
-              var v = vizHtml[k];
-              var s = (v && typeof v === 'object' && 'html' in v) ? v.html : v;
-              if (typeof s === 'string' && s.length > 0) {
-                vizEntries.push([k, s]);
-              }
-            });
-          }
-          if (vizEntries.length) {
-            resultsHtml += '<div class="ce-run-viz" style="margin-top:1rem">' +
-              '<h4>Visualizations</h4>';
-            vizEntries.forEach(function(pair) {
-              var name = pair[0], html = pair[1];
-              var doc = '<!DOCTYPE html><html><body style="margin:0;padding:8px">' +
-                html + '</body></html>';
-              var docEsc = doc.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
-              resultsHtml += '<div style="margin-bottom:0.8rem">' +
-                '<div style="font-size:0.85em;color:#5d6573;margin-bottom:4px">' +
-                _esc(String(name)) + '</div>' +
-                '<iframe sandbox="allow-scripts" style="width:100%;height:520px;' +
-                'border:1px solid #d8dbe0;border-radius:4px;background:#fff" ' +
-                'srcdoc="' + docEsc + '"></iframe>' +
-                '</div>';
-            });
-            resultsHtml += '</div>';
-          }
-        }
-        resultsEl.innerHTML = resultsHtml;
-        // Persist + refresh history
-        window._ceHistoryLoaded = false;  // force re-fetch on next visit
+        // Successful 202 — server accepted the run, returned a run_id.
+        var run_id = body.run_id;
+        window._ceLastRunId = run_id;
+        // Bookmark the new run in the URL so refresh / share works.
+        try {
+          var url = new URL(window.location.href);
+          url.searchParams.set('run_id', run_id);
+          window.history.replaceState({}, '', url.toString());
+          if (window._ceCurrent) window._ceCurrent.run_id = run_id;
+        } catch (e) { /* non-critical */ }
+        // Invalidate the cached History list so the new run shows up the next
+        // time the Results tab is opened; refresh it now if it's already active.
+        window._ceHistoryLoaded = false;
         var resultsPanel = document.querySelector('.ce-tab-panel[data-tab="results"]');
-        if (resultsPanel && resultsPanel.classList.contains('active')) {
+        if (resultsPanel && resultsPanel.classList.contains('active')
+            && typeof _ceLoadHistory === 'function') {
           _ceLoadHistory();
         }
+        // Hand off to the shared loader — same render path as URL deep-link.
+        _ceLoadRunFromId(run_id);
       })
       .catch(function(err) {
-        resultsEl.innerHTML = '<span style="color:#c00">Network error: ' + _esc(String(err)) + '</span>';
+        resultsEl.innerHTML =
+          '<div style="color:#c00;"><strong>Network error:</strong> ' +
+          _esc(String(err)) + '</div>';
       });
   }
   window._ceTestRun = _ceTestRun;
@@ -5710,6 +5671,22 @@
   // Module-scope cache so the filter and delete flows can read current rows.
   window._simRows = [];
 
+  /** Open the Composite Explorer for a specific past simulation.
+   *
+   *  Mirrors _openCompositeExplorer (line 2437) but also seeds ?run_id=, so
+   *  _initCompositeExplorer picks it up and renders the run's results +
+   *  viz_html in the Run tab.
+   */
+  function _openSimulationInExplorer(run_id, spec_id) {
+    var url = new URL(window.location.href);
+    url.searchParams.set('id', spec_id);
+    url.searchParams.set('run_id', run_id);
+    url.hash = '#composite-explore';
+    window.history.pushState({}, '', url.toString());
+    _switchPage('composite-explore');
+  }
+  window._openSimulationInExplorer = _openSimulationInExplorer;
+
   function _renderSimRow(sim) {
     var composite = _escSim(sim.spec_id || '');
     // Last segment bold for scannability
@@ -5729,7 +5706,17 @@
     return (
       '<tr data-run-id="' + _escSim(sim.run_id) + '" ' +
         'style="border-bottom:1px solid #f3f4f6;">' +
-      '<td style="padding:6px 8px;"><code>' + composite + '</code></td>' +
+      '<td style="padding:6px 8px;">' +
+        '<a href="?id=' + encodeURIComponent(sim.spec_id) +
+        '&run_id=' + encodeURIComponent(sim.run_id) + '#composite-explore" ' +
+        'class="sim-composite-link" ' +
+        'style="text-decoration:none; color:inherit;" ' +
+        'onclick="event.preventDefault(); _openSimulationInExplorer(\'' +
+          _escSim(sim.run_id) + '\', \'' + _escSim(sim.spec_id) + '\');" ' +
+        'onmouseover="this.style.textDecoration=\'underline\';" ' +
+        'onmouseout="this.style.textDecoration=\'none\';">' +
+        '<code>' + composite + '</code></a>' +
+      '</td>' +
       '<td style="padding:6px 8px;">' + _simStudyChips(sim.studies) + '</td>' +
       '<td style="padding:6px 8px;">' + _simStatusChip(sim.status) + '</td>' +
       '<td style="padding:6px 8px;">' + _escSim(stepsTxt) + '</td>' +
@@ -5877,5 +5864,230 @@
     };
   }
   window._deleteSimulationRun = _deleteSimulationRun;
+
+  // ===========================================================================
+  // Composite Explorer — load a prior run into the Run tab
+  // ===========================================================================
+
+  // Module-scope interval id for the running-state poll. Owned by
+  // _ceLoadRunFromId; cleared by _ceStopRunPoll (called from _switchPage on
+  // navigation away, and on terminal status transitions).
+  window._cePollIntervalId = null;
+
+  function _ceStopRunPoll() {
+    if (window._cePollIntervalId != null) {
+      clearInterval(window._cePollIntervalId);
+      window._cePollIntervalId = null;
+    }
+  }
+  window._ceStopRunPoll = _ceStopRunPoll;
+
+  /** Transform a per-step trajectory list into the observable-keyed shape the
+   *  Run-tab table renderer wants. Skips rows without step or state. */
+  function _trajectoryToObservables(trajectory) {
+    var out = {};
+    if (!trajectory || !trajectory.length) return out;
+    for (var i = 0; i < trajectory.length; i++) {
+      var row = trajectory[i];
+      if (!row || row.step == null || !row.state) continue;
+      var state = row.state;
+      for (var k in state) {
+        if (!Object.prototype.hasOwnProperty.call(state, k)) continue;
+        if (!out[k]) out[k] = [];
+        out[k].push(state[k]);
+      }
+    }
+    return out;
+  }
+  window._trajectoryToObservables = _trajectoryToObservables;
+
+  /** Render the Run-tab results panel from a canonical input.
+   *
+   *  Single writer of #ce-test-results. The same input shape is produced by
+   *  both _ceLoadRunFromId (URL/prior-run flow) and the rewritten _ceTestRun
+   *  (fresh in-Explorer Run flow), so the rendered DOM only depends on this
+   *  data, not on which flow produced it.
+   *
+   *  Input fields:
+   *    status        — 'running' | 'completed' | 'failed' | 'orphaned' | 'gone'
+   *                    (the special value 'gone' is used when the run no
+   *                    longer exists in the DB; renders the deleted banner)
+   *    results       — {key: [entries, ...]}  (observable-keyed)
+   *    viz_html      — {path: {html}}  (may be undefined / empty)
+   *    n_steps       — int | null
+   *    progress_step — int | null
+   *    log_path      — workspace-relative string | undefined
+   *    error         — string | undefined  (log excerpt for failed/orphaned)
+   */
+  function _ceRenderRunResults(input) {
+    var el = document.getElementById('ce-test-results');
+    if (!el) return;
+    var status = (input && input.status) || 'unknown';
+    var n = (input && input.n_steps != null) ? input.n_steps : '?';
+    var prog = (input && input.progress_step != null) ? input.progress_step : 0;
+    var results = (input && input.results) || {};
+    var viz = (input && input.viz_html) || {};
+
+    if (status === 'gone') {
+      el.innerHTML =
+        '<div style="background:#fef3c7; border:1px solid #fde68a; ' +
+        'padding:10px 14px; border-radius:4px;">' +
+        '<strong>This run no longer exists.</strong> It may have been deleted ' +
+        'from the <a href="#simulations">Simulations tab</a>. Click <strong>' +
+        'Run</strong> above to start a new one.</div>';
+      return;
+    }
+
+    var bannerHtml = '';
+    if (status === 'running') {
+      var pct = (typeof n === 'number' && n > 0)
+        ? Math.round((prog / n) * 100) : 0;
+      bannerHtml =
+        '<div style="margin:0 0 12px;">' +
+        '<div style="background:#e5e7eb; border-radius:4px; height:10px; overflow:hidden;">' +
+        '<div style="width:' + pct + '%; background:#3b82f6; height:100%;"></div>' +
+        '</div>' +
+        '<small style="color:#6b7280;">Running detached — step ' + _esc(String(prog)) +
+        ' of ' + _esc(String(n)) + ' — safe to leave this tab.</small></div>';
+    } else if (status === 'failed' || status === 'orphaned') {
+      var logTxt = input && input.log_path
+        ? ' See log: <code>' + _esc(input.log_path) + '</code>'
+        : '';
+      var errBlock = '';
+      if (input && input.error) {
+        errBlock =
+          '<details style="margin-top:6px;"><summary style="cursor:pointer; color:#7f1d1d;">' +
+          'Show log excerpt</summary><pre style="background:#fef2f2; border:1px solid #fecaca; ' +
+          'padding:10px; font-size:11px; line-height:1.4; overflow:auto; max-height:320px; ' +
+          'margin-top:6px; white-space:pre-wrap;">' + _esc(String(input.error).trim()) +
+          '</pre></details>';
+      }
+      bannerHtml =
+        '<div style="color:#c00; margin:0 0 12px;"><p style="margin:0;"><strong>Run ' +
+        _esc(status) + '.</strong>' + logTxt + '</p>' + errBlock + '</div>';
+    } else if (status === 'completed') {
+      bannerHtml =
+        '<p style="color:#6b7280; font-size:13px; margin:0 0 10px;">Run complete — ' +
+        '<strong>' + _esc(String(n)) + '</strong> steps. ' +
+        String(Object.keys(results).length) + ' observables.</p>';
+    }
+
+    var tableHtml = '';
+    var keys = Object.keys(results).sort();
+    if (!keys.length) {
+      if (status === 'running') {
+        tableHtml = '<p class="muted">No trajectory data yet.</p>';
+      } else if (status === 'completed') {
+        tableHtml = '<p class="muted">No observables in this run.</p>';
+      }
+    } else {
+      tableHtml = '<table style="font-size:0.86em; width:100%;">' +
+        '<thead><tr><th style="text-align:left;">Observable</th>' +
+        '<th style="text-align:left; width:80px;">Steps</th>' +
+        '<th style="text-align:left;">Final value</th></tr></thead><tbody>';
+      keys.forEach(function(k) {
+        var entries = results[k] || [];
+        var last = entries[entries.length - 1];
+        var preview;
+        if (last == null || typeof last !== 'object') {
+          preview = String(last);
+        } else if (Array.isArray(last)) {
+          preview = 'list[' + last.length + ']';
+        } else {
+          preview = '{' + Object.keys(last).length + ' keys}';
+        }
+        tableHtml += '<tr><td><code>' + _esc(k) + '</code></td>' +
+          '<td>' + entries.length + '</td>' +
+          '<td style="font-family:monospace; font-size:12px; color:#4b5563;">' +
+          _esc(preview) + '</td></tr>';
+      });
+      tableHtml += '</tbody></table>';
+    }
+
+    var vizHtml = '';
+    var vizKeys = Object.keys(viz);
+    if (vizKeys.length) {
+      vizHtml = '<div style="margin-top:20px;"><h4>Visualizations</h4>';
+      vizKeys.forEach(function(path) {
+        var payload = viz[path] || {};
+        var html = payload.html || '<p>No HTML</p>';
+        vizHtml +=
+          '<div style="margin-bottom:12px; border:1px solid #e5e7eb; border-radius:4px;">' +
+          '<div style="padding:6px 10px; background:#f3f4f6; font-family:monospace; ' +
+          'font-size:12px;">' + _esc(path) + '</div>' +
+          '<iframe srcdoc="' + _esc(html).replace(/&quot;/g, '&#34;') +
+          '" style="width:100%; height:320px; border:0;" sandbox="allow-scripts"></iframe>' +
+          '</div>';
+      });
+      vizHtml += '</div>';
+    }
+
+    el.innerHTML = bannerHtml + tableHtml + vizHtml;
+  }
+  window._ceRenderRunResults = _ceRenderRunResults;
+
+  /** Load a prior run (or follow a live one) into the Run tab.
+   *
+   *  Fetches /api/composite-run/<id>/status and /api/composite-run/<id>,
+   *  transforms the trajectory, renders. If status is 'running', starts a
+   *  1.5s setInterval that re-fetches + re-renders until terminal.
+   */
+  // Monotonically-incrementing token. Every call to _ceLoadRunFromId bumps
+  // this and captures its value in a closure; ticks check that they still
+  // own the active token before writing to the DOM or stopping the poll.
+  window._cePollToken = 0;
+
+  function _ceLoadRunFromId(run_id) {
+    if (!run_id) return;
+    _ceStopRunPoll();  // clear any prior interval
+    var myToken = ++window._cePollToken;
+    var el = document.getElementById('ce-test-results');
+    if (el) el.innerHTML = '<p class="empty-state">Loading run&hellip;</p>';
+
+    function tick() {
+      Promise.all([
+        fetch('/api/composite-run/' + encodeURIComponent(run_id) + '/status')
+          .then(function(r) {
+            if (r.status === 404) return { _gone: true };
+            return r.json();
+          }),
+        fetch('/api/composite-run/' + encodeURIComponent(run_id))
+          .then(function(r) { return r.ok ? r.json() : { trajectory: [] }; })
+          .catch(function() { return { trajectory: [] }; }),
+      ]).then(function(parts) {
+        // A newer _ceLoadRunFromId invocation has superseded this one —
+        // drop the tick's writes on the floor to avoid stale-overwrite or
+        // accidental stop of the newer poll.
+        if (myToken !== window._cePollToken) return;
+        var statusBody = parts[0] || {};
+        var trajBody = parts[1] || {};
+        if (statusBody._gone || statusBody.error === 'run not found') {
+          _ceStopRunPoll();
+          _ceRenderRunResults({ status: 'gone' });
+          return;
+        }
+        var results = _trajectoryToObservables(trajBody.trajectory || []);
+        _ceRenderRunResults({
+          status: statusBody.status,
+          results: results,
+          viz_html: statusBody.viz_html,
+          n_steps: statusBody.n_steps,
+          progress_step: statusBody.progress_step,
+          log_path: statusBody.log_path,
+          error: statusBody.error,
+        });
+        var terminal = statusBody.status === 'completed'
+                    || statusBody.status === 'failed'
+                    || statusBody.status === 'orphaned';
+        if (terminal) _ceStopRunPoll();
+      }).catch(function(e) {
+        // Transient — next tick retries. Surface to devtools for debugging.
+        if (window.console && console.warn) console.warn('CE poll tick failed:', e);
+      });
+    }
+    tick();
+    window._cePollIntervalId = setInterval(tick, 1500);
+  }
+  window._ceLoadRunFromId = _ceLoadRunFromId;
 
 })();
