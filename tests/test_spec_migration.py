@@ -209,3 +209,34 @@ def test_migrate_v2_to_v3_lone_composite_key_becomes_one_element_list():
         {"name": "pkg.chemotaxis", "composite": "pkg.chemotaxis", "params": {"k": 0.5}}
     ]
     assert "composite" not in out and "parameters" not in out
+
+
+def test_migrate_v2_to_v3_reshapes_variants_as_composites_shape():
+    """The real workspace shape — `variants:` list (entries ARE composites) +
+    `baseline:` string, no schema_version — is reshaped: composite-entries go
+    to baseline[], extends/intervention entries become real variants."""
+    spec = {
+        "name": "t1",
+        "baseline": "chromosome-partition",
+        "variants": [
+            {"name": "chromosome-partition",
+             "source": "pkg.chromosome-partition",
+             "document": "./composites/chromosome-partition.yaml"},
+            {"name": "high-count",
+             "extends": "chromosome-partition",
+             "document": "./composites/high-count.yaml",
+             "intervention": {"description": "",
+                              "parameter_overrides": {"p.count": 2.0}}},
+        ],
+    }
+    out = migrate_v2_to_v3(spec)
+    assert out["schema_version"] == 3
+    assert out["baseline"] == [
+        {"name": "chromosome-partition",
+         "composite": "pkg.chromosome-partition", "params": {}},
+    ]
+    assert out["variants"] == [
+        {"name": "high-count",
+         "base_composite": "chromosome-partition",
+         "parameter_overrides": {"p.count": 2.0}},
+    ]

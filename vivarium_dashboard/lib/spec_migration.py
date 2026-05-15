@@ -131,13 +131,48 @@ def migrate_v2_to_v3(spec: dict) -> dict:
     # existing load_spec validator can handle them.
     version = spec.get("schema_version")
     has_composites_key = "composites" in spec
-    if version != 2 and not has_composites_key:
+    # The "variants-as-composites" v2 shape: a `variants:` list whose entries
+    # are composites (carry `source`), with a string `baseline:` naming one.
+    variants_in = spec.get("variants")
+    is_variants_as_composites = (
+        isinstance(variants_in, list)
+        and isinstance(spec.get("baseline"), str)
+        and any(isinstance(v, dict) and v.get("source") for v in variants_in)
+    )
+    if version != 2 and not has_composites_key and not is_variants_as_composites:
         return spec
 
     out = dict(spec)
     out["schema_version"] = 3
     out.setdefault("objective", "")
     out.setdefault("parent_studies", [])
+
+    if is_variants_as_composites:
+        baseline_list = []
+        new_variants = []
+        for v in variants_in:
+            if not isinstance(v, dict):
+                continue
+            if v.get("source") and not v.get("extends"):
+                baseline_list.append({
+                    "name": v.get("name", ""),
+                    "composite": v.get("source", ""),
+                    "params": v.get("parameter_overrides", {}) or {},
+                })
+            else:
+                iv = v.get("intervention") or {}
+                new_variants.append({
+                    "name": v.get("name", ""),
+                    "base_composite": v.get("extends", ""),
+                    "parameter_overrides": (
+                        v.get("parameter_overrides")
+                        or iv.get("parameter_overrides")
+                        or {}
+                    ),
+                })
+        out["baseline"] = baseline_list
+        out["variants"] = new_variants
+        return out
 
     composites = spec.get("composites") or []
     if composites:
