@@ -99,7 +99,7 @@
     _showPopoutPlaceholder(iframeId, w);
   }
 
-  function _showPopoutPlaceholder(iframeId, popupWin) {
+  function _showPopoutPlaceholder(iframeId, popupWin, message) {
     var iframe = document.getElementById(iframeId);
     if (!iframe) return;
     var placeholderId = iframeId + '-popout-placeholder';
@@ -112,8 +112,9 @@
       'border:1px dashed #93c5fd;background:#eff6ff;border-radius:4px;' +
       'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
       'gap:10px;color:#1e3a8a;font-size:0.95em;';
+    var msg = message || 'Wiring is open in a separate window.';
     placeholder.innerHTML =
-      '<div>↗ Wiring is open in a separate window.</div>' +
+      '<div>↗ ' + msg + '</div>' +
       '<div style="font-size:0.85em;color:#4b5563">Close the popup or click below to return it here.</div>' +
       '<button class="btn-mini" id="' + placeholderId + '-restore">Bring back here</button>';
     iframe.insertAdjacentElement('afterend', placeholder);
@@ -139,6 +140,67 @@
     if (iframe) iframe.style.display = '';
   }
   window._popoutLoom = _popoutLoom;
+
+  // -------------------------------------------------------------------------
+  // Embedded Study Detail
+  //
+  // Studies used to navigate the whole window to /studies/<name>. Now we host
+  // that same route in an iframe inside the Investigations page (with an
+  // optional Pop out into a separate window). The same /studies/<name> route
+  // serves both contexts, so external/bookmarked links to it still resolve.
+  // -------------------------------------------------------------------------
+
+  function _openStudyEmbedded(name) {
+    if (!name) return;
+    var frame = document.getElementById('study-detail-frame');
+    var panel = document.getElementById('study-detail-panel');
+    var nameEl = document.getElementById('study-detail-name');
+    if (!frame || !panel) {
+      // Fallback for any host that doesn't have the embed shell yet.
+      window.location = '/studies/' + encodeURIComponent(name);
+      return;
+    }
+    // If a previous study is currently popped out, drop the placeholder
+    // before reusing the iframe.
+    _restoreEmbeddedLoom('study-detail-frame');
+    frame.src = '/studies/' + encodeURIComponent(name);
+    panel.style.display = '';
+    if (nameEl) nameEl.textContent = name;
+    window._studyDetailCurrent = name;
+    panel.scrollIntoView({behavior: 'smooth', block: 'start'});
+  }
+  window._openStudyEmbedded = _openStudyEmbedded;
+
+  function _popoutStudy() {
+    var name = window._studyDetailCurrent;
+    if (!name) return;
+    var url = '/studies/' + encodeURIComponent(name);
+    var w = window.open(url, '_blank',
+      'width=1200,height=800,menubar=no,toolbar=no,location=no,resizable=yes,scrollbars=yes');
+    if (!w) {
+      alert('Popup blocked. Allow popups from this site to pop out the study view.');
+      return;
+    }
+    _showPopoutPlaceholder('study-detail-frame', w, 'Study is open in a separate window.');
+    // Restore the embedded view once the popup closes.
+    var poller = setInterval(function() {
+      if (!w || w.closed) {
+        clearInterval(poller);
+        _restoreEmbeddedLoom('study-detail-frame');
+      }
+    }, 1000);
+  }
+  window._popoutStudy = _popoutStudy;
+
+  function _closeStudyEmbedded() {
+    var frame = document.getElementById('study-detail-frame');
+    var panel = document.getElementById('study-detail-panel');
+    _restoreEmbeddedLoom('study-detail-frame');
+    if (frame) frame.src = '';
+    if (panel) panel.style.display = 'none';
+    window._studyDetailCurrent = null;
+  }
+  window._closeStudyEmbedded = _closeStudyEmbedded;
 
   // -------------------------------------------------------------------------
   // UI feature flags (ui.composite_view)
@@ -3210,7 +3272,14 @@
       .then(function(res) {
         if (res.status === 200) {
           closeModal('modal-save-as-study');
-          window.location = res.body.url || ('/studies/' + encodeURIComponent(name));
+          // Bring the user to Investigations with the new study already
+          // embedded. The legacy /studies/<name> URL still works as a direct
+          // link (in res.body.url) but full-window navigation is reserved
+          // for that fallback path.
+          window.location.hash = '#investigations';
+          _switchPage('investigations');
+          _loadInvestigations();
+          _openStudyEmbedded(name);
         } else {
           if (errEl) {
             errEl.textContent = res.body.error || 'Unknown error';
@@ -3392,7 +3461,7 @@
 
     var runLabel = (status === 'planned') ? 'Run' : 'Re-run';
 
-    return '<div class="investigation-card" onclick="window.location=\'/studies/' + encodeURIComponent(inv.name) + '\'">' +
+    return '<div class="investigation-card" onclick="_openStudyEmbedded(\'' + _esc(inv.name) + '\')">' +
       '<div class="ic-header">' +
         '<div class="ic-title">' + _esc(inv.name) + '</div>' +
         '<span class="ic-status status-pill ' + statusClass + '">' + _esc(status) + '</span>' +
