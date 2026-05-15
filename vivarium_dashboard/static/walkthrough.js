@@ -402,6 +402,11 @@
         loadBranches();
       }
     }
+    // Stop any running poll-loop started by the Composite Explorer's Run tab
+    // before activating a new page. _ceLoadRunFromId will restart polling if
+    // the next page is the explorer with a still-running run.
+    if (typeof _ceStopRunPoll === 'function') _ceStopRunPoll();
+
     // Initialize composite explorer when switching to that page.
     if (pageId === 'composite-explore') {
       _initCompositeExplorer();
@@ -5877,5 +5882,215 @@
     };
   }
   window._deleteSimulationRun = _deleteSimulationRun;
+
+  // ===========================================================================
+  // Composite Explorer — load a prior run into the Run tab
+  // ===========================================================================
+
+  // Module-scope interval id for the running-state poll. Owned by
+  // _ceLoadRunFromId; cleared by _ceStopRunPoll (called from _switchPage on
+  // navigation away, and on terminal status transitions).
+  window._cePollIntervalId = null;
+
+  function _ceStopRunPoll() {
+    if (window._cePollIntervalId != null) {
+      clearInterval(window._cePollIntervalId);
+      window._cePollIntervalId = null;
+    }
+  }
+  window._ceStopRunPoll = _ceStopRunPoll;
+
+  /** Transform a per-step trajectory list into the observable-keyed shape the
+   *  Run-tab table renderer wants. Skips rows without step or state. */
+  function _trajectoryToObservables(trajectory) {
+    var out = {};
+    if (!trajectory || !trajectory.length) return out;
+    for (var i = 0; i < trajectory.length; i++) {
+      var row = trajectory[i];
+      if (!row || row.step == null || !row.state) continue;
+      var state = row.state;
+      for (var k in state) {
+        if (!Object.prototype.hasOwnProperty.call(state, k)) continue;
+        if (!out[k]) out[k] = [];
+        out[k].push(state[k]);
+      }
+    }
+    return out;
+  }
+  window._trajectoryToObservables = _trajectoryToObservables;
+
+  /** Render the Run-tab results panel from a canonical input.
+   *
+   *  Single writer of #ce-test-results. The same input shape is produced by
+   *  both _ceLoadRunFromId (URL/prior-run flow) and the rewritten _ceTestRun
+   *  (fresh in-Explorer Run flow), so the rendered DOM only depends on this
+   *  data, not on which flow produced it.
+   *
+   *  Input fields:
+   *    status        — 'running' | 'completed' | 'failed' | 'orphaned' | 'gone'
+   *                    (the special value 'gone' is used when the run no
+   *                    longer exists in the DB; renders the deleted banner)
+   *    results       — {key: [entries, ...]}  (observable-keyed)
+   *    viz_html      — {path: {html}}  (may be undefined / empty)
+   *    n_steps       — int | null
+   *    progress_step — int | null
+   *    log_path      — workspace-relative string | undefined
+   *    error         — string | undefined  (log excerpt for failed/orphaned)
+   */
+  function _ceRenderRunResults(input) {
+    var el = document.getElementById('ce-test-results');
+    if (!el) return;
+    var status = (input && input.status) || 'unknown';
+    var n = (input && input.n_steps != null) ? input.n_steps : '?';
+    var prog = (input && input.progress_step != null) ? input.progress_step : 0;
+    var results = (input && input.results) || {};
+    var viz = (input && input.viz_html) || {};
+
+    if (status === 'gone') {
+      el.innerHTML =
+        '<div style="background:#fef3c7; border:1px solid #fde68a; ' +
+        'padding:10px 14px; border-radius:4px;">' +
+        '<strong>This run no longer exists.</strong> It may have been deleted ' +
+        'from the <a href="#simulations">Simulations tab</a>. Click <strong>' +
+        'Run</strong> above to start a new one.</div>';
+      return;
+    }
+
+    var bannerHtml = '';
+    if (status === 'running') {
+      var pct = (typeof n === 'number' && n > 0)
+        ? Math.round((prog / n) * 100) : 0;
+      bannerHtml =
+        '<div style="margin:0 0 12px;">' +
+        '<div style="background:#e5e7eb; border-radius:4px; height:10px; overflow:hidden;">' +
+        '<div style="width:' + pct + '%; background:#3b82f6; height:100%;"></div>' +
+        '</div>' +
+        '<small style="color:#6b7280;">Running detached — step ' + _esc(String(prog)) +
+        ' of ' + _esc(String(n)) + ' — safe to leave this tab.</small></div>';
+    } else if (status === 'failed' || status === 'orphaned') {
+      var logTxt = input && input.log_path
+        ? ' See log: <code>' + _esc(input.log_path) + '</code>'
+        : '';
+      var errBlock = '';
+      if (input && input.error) {
+        errBlock =
+          '<details style="margin-top:6px;"><summary style="cursor:pointer; color:#7f1d1d;">' +
+          'Show log excerpt</summary><pre style="background:#fef2f2; border:1px solid #fecaca; ' +
+          'padding:10px; font-size:11px; line-height:1.4; overflow:auto; max-height:320px; ' +
+          'margin-top:6px; white-space:pre-wrap;">' + _esc(String(input.error).trim()) +
+          '</pre></details>';
+      }
+      bannerHtml =
+        '<div style="color:#c00; margin:0 0 12px;"><p style="margin:0;"><strong>Run ' +
+        _esc(status) + '.</strong>' + logTxt + '</p>' + errBlock + '</div>';
+    } else if (status === 'completed') {
+      bannerHtml =
+        '<p style="color:#6b7280; font-size:13px; margin:0 0 10px;">Run complete — ' +
+        '<strong>' + _esc(String(n)) + '</strong> steps. ' +
+        Object.keys(results).length + ' observables.</p>';
+    }
+
+    var tableHtml = '';
+    var keys = Object.keys(results).sort();
+    if (!keys.length) {
+      if (status === 'running') {
+        tableHtml = '<p class="muted">No trajectory data yet.</p>';
+      } else if (status === 'completed') {
+        tableHtml = '<p class="muted">No observables in this run.</p>';
+      }
+    } else {
+      tableHtml = '<table style="font-size:0.86em; width:100%;">' +
+        '<thead><tr><th style="text-align:left;">Observable</th>' +
+        '<th style="text-align:left; width:80px;">Steps</th>' +
+        '<th style="text-align:left;">Final value</th></tr></thead><tbody>';
+      keys.forEach(function(k) {
+        var entries = results[k] || [];
+        var last = entries[entries.length - 1];
+        var preview;
+        if (last == null || typeof last !== 'object') {
+          preview = String(last);
+        } else if (Array.isArray(last)) {
+          preview = 'list[' + last.length + ']';
+        } else {
+          preview = '{' + Object.keys(last).length + ' keys}';
+        }
+        tableHtml += '<tr><td><code>' + _esc(k) + '</code></td>' +
+          '<td>' + entries.length + '</td>' +
+          '<td style="font-family:monospace; font-size:12px; color:#4b5563;">' +
+          _esc(preview) + '</td></tr>';
+      });
+      tableHtml += '</tbody></table>';
+    }
+
+    var vizHtml = '';
+    var vizKeys = Object.keys(viz);
+    if (vizKeys.length) {
+      vizHtml = '<div style="margin-top:20px;"><h4>Visualizations</h4>';
+      vizKeys.forEach(function(path) {
+        var payload = viz[path] || {};
+        var html = payload.html || '<p>No HTML</p>';
+        vizHtml +=
+          '<div style="margin-bottom:12px; border:1px solid #e5e7eb; border-radius:4px;">' +
+          '<div style="padding:6px 10px; background:#f3f4f6; font-family:monospace; ' +
+          'font-size:12px;">' + _esc(path) + '</div>' +
+          '<iframe srcdoc="' + _esc(html).replace(/&quot;/g, '&#34;') +
+          '" style="width:100%; height:320px; border:0;" sandbox="allow-scripts"></iframe>' +
+          '</div>';
+      });
+      vizHtml += '</div>';
+    }
+
+    el.innerHTML = bannerHtml + tableHtml + vizHtml;
+  }
+  window._ceRenderRunResults = _ceRenderRunResults;
+
+  /** Load a prior run (or follow a live one) into the Run tab.
+   *
+   *  Fetches /api/composite-run/<id>/status and /api/composite-run/<id>,
+   *  transforms the trajectory, renders. If status is 'running', starts a
+   *  1.5s setInterval that re-fetches + re-renders until terminal.
+   */
+  function _ceLoadRunFromId(run_id) {
+    if (!run_id) return;
+    _ceStopRunPoll();  // clear any prior interval
+
+    function tick() {
+      Promise.all([
+        fetch('/api/composite-run/' + encodeURIComponent(run_id) + '/status')
+          .then(function(r) {
+            if (r.status === 404) return { _gone: true };
+            return r.json();
+          }),
+        fetch('/api/composite-run/' + encodeURIComponent(run_id))
+          .then(function(r) { return r.ok ? r.json() : { trajectory: [] }; })
+          .catch(function() { return { trajectory: [] }; }),
+      ]).then(function(parts) {
+        var statusBody = parts[0] || {};
+        var trajBody = parts[1] || {};
+        if (statusBody._gone || statusBody.error === 'run not found') {
+          _ceStopRunPoll();
+          _ceRenderRunResults({ status: 'gone' });
+          return;
+        }
+        var results = _trajectoryToObservables(trajBody.trajectory || []);
+        _ceRenderRunResults({
+          status: statusBody.status,
+          results: results,
+          viz_html: statusBody.viz_html,
+          n_steps: statusBody.n_steps,
+          progress_step: statusBody.progress_step,
+          log_path: statusBody.log_path,
+          error: statusBody.error,
+        });
+        var terminal = statusBody.status === 'completed'
+                    || statusBody.status === 'failed'
+                    || statusBody.status === 'orphaned';
+        if (terminal) _ceStopRunPoll();
+      }).catch(function() { /* transient — next tick retries */ });
+    }
+    tick();
+    window._cePollIntervalId = setInterval(tick, 1500);
+  }
+  window._ceLoadRunFromId = _ceLoadRunFromId;
 
 })();
