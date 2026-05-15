@@ -829,27 +829,47 @@ def _post_study_run_variant_for_test(ws_root, body):
 
 
 def _post_study_variant_add_for_test(ws_root, body):
-    """Add a variant entry to study.yaml. Returns (response_dict, status_code)."""
-    # Use "study" key directly — "name" here is the variant name, not the study.
+    """Add a variant entry to study.yaml. Returns (response_dict, status_code).
+
+    Body:
+      study or investigation:  <study name>
+      name:                    <variant name>
+      base_composite:          <baseline entry name> (required)
+      parameter_overrides:     <dict>  (optional; defaults to {})
+    """
     study = (body.get("study") or body.get("investigation") or "").strip()
     variant_name = (body.get("name") or "").strip()
+    base_composite = (body.get("base_composite") or "").strip()
     if not study or not variant_name:
         return {"error": "missing study or variant name"}, 400
-    sf = _study_dir(study) / "study.yaml"
+    if not base_composite:
+        return {"error": "missing base_composite"}, 400
+    overrides = body.get("parameter_overrides")
+    if overrides is not None and not isinstance(overrides, dict):
+        return {"error": "parameter_overrides must be an object"}, 400
+
+    # Inline ws_root-based path resolution (matches Task 5/6 pattern).
+    studies_path = ws_root / "studies" / study
+    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
+    sf = study_dir / "study.yaml"
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
     spec = yaml.safe_load(sf.read_text()) or {}
+    baseline = spec.get("baseline") or []
+    baseline_names = {b.get("name") for b in baseline if isinstance(b, dict)}
+    if base_composite not in baseline_names:
+        return {"error": f"base_composite {base_composite!r} not in baseline"}, 404
+
     variants = spec.setdefault("variants", [])
-    if any(v.get("name") == variant_name for v in variants):
+    if any(v.get("name") == variant_name for v in variants if isinstance(v, dict)):
         return {"error": f"variant {variant_name!r} already exists"}, 409
 
-    intervention = {"description": body.get("description") or ""}
-    if body.get("parameter_overrides"):
-        intervention["parameter_overrides"] = body["parameter_overrides"]
-    if body.get("process_overrides"):
-        intervention["process_overrides"] = body["process_overrides"]
-    variants.append({"name": variant_name, "intervention": intervention})
+    variants.append({
+        "name": variant_name,
+        "base_composite": base_composite,
+        "parameter_overrides": overrides or {},
+    })
     sf.write_text(yaml.safe_dump(spec, sort_keys=False))
     return {"ok": True, "name": variant_name}, 200
 

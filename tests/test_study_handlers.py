@@ -21,7 +21,7 @@ def _study_workspace(tmp_path):
         "created": "2026-05-13",
         "status": "ran",
         "objective": "",
-        "baseline": {"composite": "pkg.composites.foo", "params": {}},
+        "baseline": [{"name": "core", "composite": "pkg.composites.foo", "params": {}}],
         "variants": [],
         "runs": [],
         "visualizations": [],
@@ -89,3 +89,63 @@ def test_study_detail_page_renders(_study_workspace):
     assert "Objective" in html or "objective" in html.lower()
     assert "Conclusion" in html or "conclusion" in html.lower()
     assert "Variants" in html or "variants" in html.lower()
+
+
+def test_variant_add_writes_flat_v3_shape(_study_workspace):
+    """variant-add writes {name, base_composite, parameter_overrides} flat."""
+    from vivarium_dashboard.server import _post_study_variant_add_for_test
+    resp, code = _post_study_variant_add_for_test(
+        _study_workspace,
+        {"study": "s1", "name": "fast", "base_composite": "core",
+         "parameter_overrides": {"k": 1.5}},
+    )
+    assert code == 200
+    spec = yaml.safe_load((_study_workspace / "studies" / "s1" / "study.yaml").read_text())
+    assert spec["variants"] == [
+        {"name": "fast", "base_composite": "core", "parameter_overrides": {"k": 1.5}},
+    ]
+
+
+def test_variant_add_default_empty_overrides(_study_workspace):
+    """Omitting parameter_overrides yields {} in the stored variant."""
+    from vivarium_dashboard.server import _post_study_variant_add_for_test
+    resp, code = _post_study_variant_add_for_test(
+        _study_workspace,
+        {"study": "s1", "name": "fast", "base_composite": "core"},
+    )
+    assert code == 200
+    spec = yaml.safe_load((_study_workspace / "studies" / "s1" / "study.yaml").read_text())
+    assert spec["variants"][0]["parameter_overrides"] == {}
+
+
+def test_variant_add_rejects_missing_base_composite(_study_workspace):
+    from vivarium_dashboard.server import _post_study_variant_add_for_test
+    resp, code = _post_study_variant_add_for_test(
+        _study_workspace,
+        {"study": "s1", "name": "fast"},
+    )
+    assert code == 400
+    assert "base_composite" in resp.get("error", "").lower()
+
+
+def test_variant_add_rejects_unknown_base_composite(_study_workspace):
+    from vivarium_dashboard.server import _post_study_variant_add_for_test
+    resp, code = _post_study_variant_add_for_test(
+        _study_workspace,
+        {"study": "s1", "name": "fast", "base_composite": "ghost"},
+    )
+    assert code == 404
+    assert "base_composite" in resp.get("error", "").lower()
+
+
+def test_variant_add_rejects_duplicate_name(_study_workspace):
+    from vivarium_dashboard.server import _post_study_variant_add_for_test
+    _post_study_variant_add_for_test(
+        _study_workspace,
+        {"study": "s1", "name": "fast", "base_composite": "core"},
+    )
+    resp, code = _post_study_variant_add_for_test(
+        _study_workspace,
+        {"study": "s1", "name": "fast", "base_composite": "core"},
+    )
+    assert code == 409
