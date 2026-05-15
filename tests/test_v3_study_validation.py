@@ -118,3 +118,36 @@ def test_v3_validation_rejects_intervention_missing_name():
             "variants": [], "runs": [], "visualizations": [],
             "interventions": [{"description": "no name"}],
         })
+
+
+def test_load_spec_migrates_real_v2ecoli_shape_end_to_end(tmp_path):
+    """A spec.yaml in the real workspace shape (variants-as-composites +
+    baseline string, no schema_version) loads into the v3 list-baseline shape."""
+    p = tmp_path / "spec.yaml"
+    p.write_text(yaml.safe_dump({
+        "name": "t1",
+        "baseline": "chromosome-partition",
+        "variants": [
+            {"name": "chromosome-partition",
+             "source": "pkg.chromosome-partition",
+             "document": "./composites/chromosome-partition.yaml"},
+            {"name": "high-count",
+             "extends": "chromosome-partition",
+             "document": "./composites/high-count.yaml",
+             "intervention": {"description": "",
+                              "parameter_overrides": {"p.count": 2.0}}},
+        ],
+        "comparisons": [], "conclusions": "", "question": "",
+        "hypothesis": "", "status": "draft",
+    }))
+    spec = load_spec(p)
+    assert spec["schema_version"] == 3
+    assert spec["baseline"] == [
+        {"name": "chromosome-partition",
+         "composite": "pkg.chromosome-partition", "params": {}},
+    ]
+    assert spec["variants"] == [
+        {"name": "high-count", "base_composite": "chromosome-partition",
+         "parameter_overrides": {"p.count": 2.0}},
+    ]
+    assert spec["interventions"] == []
