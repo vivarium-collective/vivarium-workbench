@@ -138,3 +138,138 @@ def list_simulations(workspace: Path) -> list[dict]:
     for r in rows:
         r["studies"] = list(run_to_studies.get(r["run_id"], []))
     return rows
+
+
+def _find_db_for_run(workspace: Path, run_id: str) -> tuple[Path, str] | None:
+    """Locate which runs DB owns ``run_id``. Returns (path, rel) or None."""
+    for db_path, db_rel in _discover_dbs(workspace):
+        try:
+            conn = cr.connect(db_path)
+        except sqlite3.OperationalError:
+            continue
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM runs_meta WHERE run_id=? LIMIT 1", (run_id,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            row = None
+        finally:
+            conn.close()
+        if row is not None:
+            return db_path, db_rel
+    return None
+
+
+def _delete_db_rows(db_path: Path, run_id: str) -> tuple[int, int]:
+    """Delete runs_meta + history rows for ``run_id``. Single transaction.
+
+    Returns (rows_deleted, history_rows_deleted).
+    """
+    conn = cr.connect(db_path)
+    try:
+        has_history = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='history'"
+        ).fetchone()
+        if has_history:
+            cur = conn.execute(
+                "DELETE FROM history WHERE simulation_id=?", (run_id,))
+            history_rows = cur.rowcount or 0
+        else:
+            history_rows = 0
+        cur = conn.execute(
+            "DELETE FROM runs_meta WHERE run_id=?", (run_id,))
+        meta_rows = cur.rowcount or 0
+        conn.commit()
+        return meta_rows, history_rows
+    finally:
+        conn.close()
+
+
+def _rewrite_study_yaml_without(yaml_path: Path, run_id: str) -> bool:
+    """Rewrite ``yaml_path``'s runs[] entry without ``run_id``.
+
+    Atomic: write-then-rename through a sibling temp file. Returns True if
+    a runs[] entry was removed, False if nothing changed. Raises OSError
+    on write failure (caller catches per-file).
+    """
+    data = yaml.safe_load(yaml_path.read_text()) or {}
+    runs = data.get("runs") or []
+    if not isinstance(runs, list):
+        return False
+    new_runs: list = []
+    changed = False
+    for entry in runs:
+        if isinstance(entry, str):
+            if entry == run_id:
+                changed = True
+                continue
+        elif isinstance(entry, dict):
+            if entry.get("run_id") == run_id:
+                changed = True
+                continue
+        new_runs.append(entry)
+    if not changed:
+        return False
+    data["runs"] = new_runs
+    tmp = yaml_path.with_suffix(yaml_path.suffix + ".tmp")
+    tmp.write_text(yaml.safe_dump(data, sort_keys=False))
+    tmp.replace(yaml_path)
+    return True
+
+
+def delete_simulation(workspace: Path, run_id: str) -> dict:
+    """Full delete of a simulation: DB rows + history + run dir + study refs.
+
+    Returns a summary dict::
+
+        {
+          "deleted_rows": int,            # 1 on success
+          "deleted_history": int,         # rows removed from history
+          "removed_dir": bool,            # True if .pbg/runs/<id>/ existed and was removed
+          "unlinked_studies": [str],      # study names whose study.yaml lost a ref
+          "errors": [str],                # one entry per per-file failure
+        }
+
+    Raises ``RunNotFound`` if ``run_id`` is in no known DB.
+    """
+    workspace = Path(workspace)
+    located = _find_db_for_run(workspace, run_id)
+    if located is None:
+        raise RunNotFound(run_id)
+    db_path, _ = located
+
+    errors: list[str] = []
+    deleted_rows, deleted_history = _delete_db_rows(db_path, run_id)
+
+    run_dir = workspace / ".pbg" / "runs" / run_id
+    removed_dir = run_dir.exists()
+    if removed_dir:
+        shutil.rmtree(run_dir, ignore_errors=True)
+        # If ignore_errors didn't fully remove it, surface that:
+        if run_dir.exists():
+            errors.append(f"run dir {run_dir.relative_to(workspace)}: partial removal")
+            removed_dir = False
+
+    unlinked: list[str] = []
+    studies_root = workspace / "studies"
+    if studies_root.is_dir():
+        for sdir in sorted(studies_root.iterdir()):
+            if not sdir.is_dir():
+                continue
+            yml = sdir / "study.yaml"
+            if not yml.is_file():
+                continue
+            try:
+                if _rewrite_study_yaml_without(yml, run_id):
+                    unlinked.append(sdir.name)
+            except (yaml.YAMLError, OSError) as e:
+                errors.append(f"{sdir.name}: {type(e).__name__}: {e}")
+
+    return {
+        "deleted_rows": deleted_rows,
+        "deleted_history": deleted_history,
+        "removed_dir": removed_dir,
+        "unlinked_studies": unlinked,
+        "errors": errors,
+    }
