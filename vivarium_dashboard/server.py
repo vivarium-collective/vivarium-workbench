@@ -1576,6 +1576,8 @@ class Handler(BaseHTTPRequestHandler):
         path_only = self.path.split("?", 1)[0]
         if path_only in ("/", "/index.html"):
             return self._serve_file(WORKSPACE / "reports" / "index.html", "text/html")
+        if self.path.startswith("/api/workspaces"):
+            return self._get_workspaces()
         if self.path.startswith("/api/state"):
             return self._serve_state()
         if self.path.startswith("/api/events"):
@@ -6913,6 +6915,76 @@ if __name__ == "__main__":
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
+
+    def _get_workspaces(self):
+        """GET /api/workspaces — dropdown payload for the workspace switcher.
+
+        Reads ~/.pbg/workspaces.json (catalog) and joins each entry with
+        ~/.pbg/servers/<name>.json to determine status. No HTTP probes.
+        Falls back to current-workspace-only on missing/corrupt catalog.
+        """
+        from pbg_superpowers import workspace_catalog
+
+        current_root = WORKSPACE
+        current_resolved = str(current_root.resolve())
+
+        current_name = self._read_workspace_name(current_root)
+        result = {
+            "current": {"name": current_name, "path": current_resolved},
+            "workspaces": [],
+        }
+
+        try:
+            catalog = workspace_catalog.list_workspaces()
+        except Exception:
+            catalog = []
+
+        if not any(e.get("path") == current_resolved for e in catalog):
+            catalog = [{
+                "name": current_name,
+                "path": current_resolved,
+                "package": None,
+                "added_at": None,
+            }] + list(catalog)
+
+        for entry in catalog:
+            path = entry.get("path", "")
+            row = {"name": entry.get("name") or Path(path).name, "path": path}
+            if not Path(path).is_dir():
+                row["status"] = "missing"
+            elif path == current_resolved:
+                row["status"] = "current"
+                running = workspace_catalog.find_running(path)
+                if running:
+                    row["url"] = running["url"]
+                    row["pid"] = running["pid"]
+            else:
+                running = workspace_catalog.find_running(path)
+                if running:
+                    row["status"] = "running"
+                    row["url"] = running["url"]
+                    row["pid"] = running["pid"]
+                else:
+                    stale = workspace_catalog.find_entry(path)
+                    if stale:
+                        row["status"] = "stale"
+                        row["pid"] = stale.get("pid")
+                    else:
+                        row["status"] = "stopped"
+            result["workspaces"].append(row)
+
+        order = {"current": 0, "running": 1, "stopped": 2, "stale": 3, "missing": 4}
+        result["workspaces"].sort(key=lambda r: (order.get(r["status"], 99), r["name"]))
+
+        self._json(result, 200)
+
+    def _read_workspace_name(self, root: Path) -> str:
+        """Read `name` from <root>/workspace.yaml; fall back to dir basename."""
+        try:
+            data = yaml.safe_load((root / "workspace.yaml").read_text()) or {}
+            return data.get("name") or root.name
+        except Exception:
+            return root.name
 
     def _serve_state(self):
         ws_file = WORKSPACE / "workspace.yaml"
