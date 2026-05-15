@@ -1,8 +1,7 @@
 """Migration helper: legacy `composites:` shape → v2 `variants:` shape,
-and v2 → v3 study shape (single-composite baseline)."""
+and v2 → v3 study shape (list-of-composites baseline)."""
 from __future__ import annotations
 import pathlib, os
-import warnings
 import yaml
 
 
@@ -129,26 +128,22 @@ def migrate_v2_to_v3(spec: dict) -> dict:
 
     composites = spec.get("composites") or []
     if composites:
-        first = composites[0]
-        out["baseline"] = {
-            "composite": first.get("source") or first.get("name", ""),
-            "params": first.get("parameters", {}) or {},
-        }
-        if len(composites) > 1:
-            warnings.warn(
-                f"v2→v3 migration: dropped {len(composites) - 1} extra composite(s) "
-                f"from study {spec.get('name', '?')!r}; Phase 1 Studies are "
-                f"single-composite. Recreate as variants if needed.",
-                UserWarning,
-                stacklevel=2,
-            )
+        out["baseline"] = [
+            {
+                "name": c.get("name") or c.get("source", ""),
+                "composite": c.get("source") or c.get("name", ""),
+                "params": c.get("parameters", {}) or {},
+            }
+            for c in composites
+        ]
         out.pop("composites", None)
     elif "composite" in spec:
-        # Handle lone top-level `composite:` key (explicit v2 with composite key)
-        out["baseline"] = {
+        # Lone top-level `composite:` key (explicit v2 with composite key).
+        out["baseline"] = [{
+            "name": spec["composite"],
             "composite": spec["composite"],
             "params": spec.get("parameters", {}) or {},
-        }
+        }]
         out.pop("composite", None)
         out.pop("parameters", None)
 

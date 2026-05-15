@@ -1,6 +1,5 @@
 """Tests for migrating a study spec.yaml from legacy `composites:` to v2 `variants:`."""
 import textwrap
-import warnings
 import yaml
 
 from vivarium_dashboard.lib.spec_migration import migrate_study_to_v2_vocabulary, migrate_v2_to_v3
@@ -113,7 +112,7 @@ def test_migrate_idempotent(tmp_path):
 
 
 def test_migrate_v2_to_v3_lifts_first_composite_to_baseline():
-    """v3 has `baseline: {composite, params}` + drops `composites: [...]`."""
+    """v3 has `baseline: [{name, composite, params}]` + drops `composites: [...]`."""
     v2 = {
         "schema_version": 2,
         "name": "x",
@@ -126,14 +125,14 @@ def test_migrate_v2_to_v3_lifts_first_composite_to_baseline():
     }
     v3 = migrate_v2_to_v3(v2)
     assert v3["schema_version"] == 3
-    assert v3["baseline"] == {"composite": "pkg.composites.foo", "params": {"a": 1}}
+    assert v3["baseline"] == [{"name": "main", "composite": "pkg.composites.foo", "params": {"a": 1}}]
     assert "composites" not in v3
     assert v3.get("objective") == ""
     assert v3.get("parent_studies") == []
 
 
-def test_migrate_v2_to_v3_warns_on_multi_composite():
-    """If v2 has >1 composite, migration keeps the first + emits a warning."""
+def test_migrate_v2_to_v3_preserves_all_composites_in_baseline_list():
+    """v2→v3: all composites are preserved — no composites are dropped."""
     v2 = {
         "schema_version": 2,
         "name": "y",
@@ -142,12 +141,11 @@ def test_migrate_v2_to_v3_warns_on_multi_composite():
             {"name": "alt",  "source": "pkg.b"},
         ],
     }
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        v3 = migrate_v2_to_v3(v2)
-    msgs = [str(w.message) for w in caught]
-    assert any("dropped 1 extra composite" in m for m in msgs)
-    assert v3["baseline"]["composite"] == "pkg.a"
+    v3 = migrate_v2_to_v3(v2)
+    assert v3["baseline"] == [
+        {"name": "main", "composite": "pkg.a", "params": {}},
+        {"name": "alt", "composite": "pkg.b", "params": {}},
+    ]
 
 
 def test_migrate_v2_to_v3_idempotent():
@@ -169,8 +167,45 @@ def test_migrate_v2_to_v3_bare_composite_key():
     }
     v3 = migrate_v2_to_v3(v2)
     assert v3["schema_version"] == 3
-    assert v3["baseline"] == {"composite": "pkg.composites.chemotaxis", "params": {"rate": 0.5}}
+    assert v3["baseline"] == [
+        {"name": "pkg.composites.chemotaxis", "composite": "pkg.composites.chemotaxis", "params": {"rate": 0.5}}
+    ]
     assert "composite" not in v3
     assert "parameters" not in v3
     assert v3.get("objective") == ""
     assert v3.get("parent_studies") == []
+
+
+def test_migrate_v2_to_v3_baseline_is_a_list_of_all_composites():
+    """v2→v3: a multi-entry composites: list becomes a baseline LIST with one
+    {name, composite, params} entry each — no composites are dropped."""
+    spec = {
+        "schema_version": 2,
+        "name": "s",
+        "composites": [
+            {"name": "a", "source": "pkg.a", "parameters": {"rate": 1.0}},
+            {"name": "b", "source": "pkg.b"},
+        ],
+    }
+    out = migrate_v2_to_v3(spec)
+    assert out["schema_version"] == 3
+    assert out["baseline"] == [
+        {"name": "a", "composite": "pkg.a", "params": {"rate": 1.0}},
+        {"name": "b", "composite": "pkg.b", "params": {}},
+    ]
+    assert "composites" not in out
+
+
+def test_migrate_v2_to_v3_lone_composite_key_becomes_one_element_list():
+    """A bare top-level composite: string becomes a one-element baseline list."""
+    spec = {
+        "schema_version": 2,
+        "name": "s",
+        "composite": "pkg.chemotaxis",
+        "parameters": {"k": 0.5},
+    }
+    out = migrate_v2_to_v3(spec)
+    assert out["baseline"] == [
+        {"name": "pkg.chemotaxis", "composite": "pkg.chemotaxis", "params": {"k": 0.5}}
+    ]
+    assert "composite" not in out and "parameters" not in out
