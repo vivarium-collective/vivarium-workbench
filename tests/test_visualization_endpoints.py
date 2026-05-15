@@ -1344,6 +1344,44 @@ def test_get_investigations_includes_topic(workspace_server):
 
 
 # ---------------------------------------------------------------------------
+# Unit tests for _format_baseline_source (v3 list baseline)
+# ---------------------------------------------------------------------------
+
+def test_format_baseline_source_single_entry_short_form():
+    """Single baseline entry with a `.composites.` source → pkg_short:name."""
+    from vivarium_dashboard.server import _format_baseline_source
+    spec = {"baseline": [
+        {"name": "core", "composite": "pbg_chromosome_rep1.composites.chromosome-partition", "params": {}},
+    ]}
+    assert _format_baseline_source(spec) == "pbg_chromosome_rep1:chromosome-partition"
+
+
+def test_format_baseline_source_opaque_composite():
+    """Single baseline entry with an opaque composite ID → returned verbatim."""
+    from vivarium_dashboard.server import _format_baseline_source
+    spec = {"baseline": [{"name": "x", "composite": "some.opaque.path", "params": {}}]}
+    assert _format_baseline_source(spec) == "some.opaque.path"
+
+
+def test_format_baseline_source_multiple_entries():
+    """Multiple baseline entries → first entry formatted + ' (+N more)'."""
+    from vivarium_dashboard.server import _format_baseline_source
+    spec = {"baseline": [
+        {"name": "a", "composite": "pkg_x.composites.first", "params": {}},
+        {"name": "b", "composite": "pkg_y.composites.second", "params": {}},
+        {"name": "c", "composite": "pkg_z.composites.third", "params": {}},
+    ]}
+    assert _format_baseline_source(spec) == "pkg_x:first (+2 more)"
+
+
+def test_format_baseline_source_empty_or_absent():
+    """Missing or empty baseline → empty string."""
+    from vivarium_dashboard.server import _format_baseline_source
+    assert _format_baseline_source({}) == ""
+    assert _format_baseline_source({"baseline": []}) == ""
+
+
+# ---------------------------------------------------------------------------
 # Richer-card projection: /api/investigations surfaces baseline_source +
 # conclusions_excerpt so the index can render at-a-glance cards.
 # ---------------------------------------------------------------------------

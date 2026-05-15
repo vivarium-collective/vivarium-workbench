@@ -1207,25 +1207,30 @@ def _safe_slug(s: str) -> str:
 
 
 def _format_baseline_source(spec: dict) -> str:
-    """Return the baseline variant's source dotted path reformatted as ``pkg_short:name``.
+    """Summarise a v3 study's baseline as a short label.
 
-    Example: ``pbg_chromosome_rep1.composites.chromosome-partition`` becomes
-    ``pbg_chromosome_rep1:chromosome-partition``. If the source has no
-    ``.composites.`` segment we fall back to the raw string. When no baseline
-    variant is declared (or the named baseline is missing from ``variants``)
-    we return an empty string so the dashboard can show ``unknown``.
+    - 1 entry: pkg_short:name if the composite contains '.composites.';
+      otherwise the composite verbatim.
+    - N entries: format the first as above, then append ' (+N-1 more)'.
+    - 0 entries / missing / not a list: ''.
     """
-    baseline_name = spec.get("baseline")
-    if not baseline_name:
+    baseline = spec.get("baseline") or []
+    if not isinstance(baseline, list) or not baseline:
         return ""
-    for v in (spec.get("variants") or []):
-        if v.get("name") == baseline_name:
-            src = v.get("source") or ""
-            if ".composites." in src:
-                pkg, _, name = src.partition(".composites.")
-                return f"{pkg}:{name}"
-            return src
-    return ""
+    first = baseline[0] if isinstance(baseline[0], dict) else None
+    if first is None:
+        return ""
+    composite = (first.get("composite") or "").strip()
+    if not composite:
+        return ""
+    if ".composites." in composite:
+        pkg, _, rest = composite.partition(".composites.")
+        label = f"{pkg}:{rest}"
+    else:
+        label = composite
+    if len(baseline) > 1:
+        return f"{label} (+{len(baseline) - 1} more)"
+    return label
 
 
 def _conclusions_excerpt(spec: dict, limit: int = 240) -> str:
