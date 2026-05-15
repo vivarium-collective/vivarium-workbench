@@ -191,3 +191,78 @@ def test_runs_panel_includes_visualizations(_ws):
     html = _render_study_detail_html("study-monod_kinetics-096184", spec)
     assert 'id="viz-list"' in html
     assert 'btn-add-viz' in html
+
+
+@pytest.fixture
+def _rich_ws(tmp_path, monkeypatch):
+    """Workspace with a richly-populated v3 study to exercise every tab."""
+    import vivarium_dashboard.server as srv
+    ws = tmp_path / "ws"
+    sd = ws / "studies" / "rich"
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "schema_version": 3,
+        "name": "rich",
+        "objective": "Compare growth kinetics across substrate-affinity variants.",
+        "status": "in_progress",
+        "baseline": [
+            {"name": "core", "composite": "pkg.composites.core", "params": {"k": 1}},
+            {"name": "alt",  "composite": "pkg.composites.alt",  "params": {}},
+        ],
+        "variants": [
+            {"name": "hi", "base_composite": "core", "parameter_overrides": {"k": 2}},
+            {"name": "lo", "base_composite": "core", "parameter_overrides": {"k": 0.5}},
+        ],
+        "interventions": [
+            {"name": "heat-shock", "description": "+10C for 5 min at t=10"},
+        ],
+        "runs": [
+            {"run_id": "r1", "variant": None, "composite": "core", "label": "core",
+             "n_steps": 5, "status": "completed"},
+            {"run_id": "r2", "variant": "hi",  "composite": "core", "label": "hi",
+             "n_steps": 5, "status": "completed"},
+        ],
+        "visualizations": [
+            {"name": "growth-curve", "address": "viv.metric.growth", "config": {}},
+        ],
+        "conclusion": "Variant `hi` showed faster early growth but plateaued sooner.",
+    }))
+    monkeypatch.setattr(srv, "WORKSPACE", ws)
+    return ws
+
+
+def test_full_study_renders_all_tabs(_rich_ws):
+    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    spec = _study_detail_spec("rich")
+    html = _render_study_detail_html("rich", spec)
+
+    # 5 tabs scaffolded
+    for kind in ("overview", "baseline", "variants", "interventions", "runs"):
+        assert f'data-kind="{kind}"' in html
+
+    # Overview: objective text + counts
+    assert "Compare growth kinetics" in html
+    assert "2</strong>" in html  # 2 variants OR 2 runs OR 2 baseline entries — at least one matches
+
+    # Baseline: both entries + their FQNs
+    assert 'data-baseline-name="core"' in html
+    assert 'data-baseline-name="alt"' in html
+    assert "pkg.composites.core" in html
+    assert "pkg.composites.alt" in html
+
+    # Variants: both + base_composite references
+    assert 'data-variant-name="hi"' in html
+    assert 'data-variant-name="lo"' in html
+    assert "based on" in html
+
+    # Interventions: the one entry + its description
+    assert 'data-intervention-name="heat-shock"' in html
+    assert "+10C for 5 min" in html
+
+    # Runs: both runs + viz section
+    assert 'data-run-id="r1"' in html
+    assert 'data-run-id="r2"' in html
+    assert "growth-curve" in html
+
+    # Conclusion text rendered
+    assert "Variant `hi` showed faster early growth" in html
