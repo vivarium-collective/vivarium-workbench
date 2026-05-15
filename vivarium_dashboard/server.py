@@ -7023,6 +7023,20 @@ if __name__ == "__main__":
             return
         self._json(entry, 200)
 
+    def _post_workspaces_forget(self, body: dict):
+        """POST /api/workspaces/forget — remove the catalog entry. Refuses
+        to forget a running workspace; caller must stop it first."""
+        path = body.get("path") if isinstance(body, dict) else None
+        if not path or not isinstance(path, str):
+            self._json({"error": "path required"}, 400)
+            return
+        from pbg_superpowers import workspace_catalog
+        if workspace_catalog.find_running(path) is not None:
+            self._json({"error": "stop the server before forgetting"}, 409)
+            return
+        workspace_catalog.forget(path)
+        self._json({"ok": True}, 200)
+
     def _read_workspace_name(self, root: Path) -> str:
         """Read `name` from <root>/workspace.yaml; fall back to dir basename."""
         try:

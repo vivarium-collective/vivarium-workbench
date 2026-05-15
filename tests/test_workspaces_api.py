@@ -292,3 +292,69 @@ def test_post_workspaces_add_rejects_non_workspace(server, tmp_path):
     assert exc.value.code == 400
     body = json.loads(exc.value.read())
     assert "workspace.yaml" in body["error"]
+
+
+def test_post_workspaces_forget_happy_path(server, tmp_path):
+    """POST /api/workspaces/forget removes a catalog entry; returns 200 + {ok: true}."""
+    pbg_home = server["pbg_home"]
+
+    # Create a workspace and add it to the catalog
+    ws = tmp_path / "forget-me"
+    ws.mkdir()
+    (ws / "workspace.yaml").write_text("name: forget-me\npackage: pbg_forget_me\n")
+
+    # Register it via the add endpoint first
+    _post_json(f"{server['url']}/api/workspaces/add", {"path": str(ws)})
+
+    # Verify it's in the catalog
+    catalog_data = json.loads((pbg_home / "workspaces.json").read_text())
+    paths_before = [e["path"] for e in catalog_data["workspaces"]]
+    assert str(ws.resolve()) in paths_before
+
+    # Now forget it
+    status, resp = _post_json(f"{server['url']}/api/workspaces/forget", {"path": str(ws)})
+    assert status == 200
+    assert resp == {"ok": True}
+
+    # Verify it's no longer in the catalog
+    catalog_data = json.loads((pbg_home / "workspaces.json").read_text())
+    paths_after = [e["path"] for e in catalog_data["workspaces"]]
+    assert str(ws.resolve()) not in paths_after
+
+
+def test_post_workspaces_forget_refuses_running(server, tmp_path):
+    """POST /api/workspaces/forget returns 409 when the workspace server is running."""
+    import urllib.error
+
+    pbg_home = server["pbg_home"]
+
+    # Create a workspace and add it to the catalog
+    ws = tmp_path / "running-forget-ws"
+    ws.mkdir()
+    (ws / "workspace.yaml").write_text("name: running-forget-ws\npackage: pbg_running_forget\n")
+    _post_json(f"{server['url']}/api/workspaces/add", {"path": str(ws)})
+
+    # Register it as running with the current (alive) PID
+    servers_dir = pbg_home / "servers"
+    servers_dir.mkdir(parents=True, exist_ok=True)
+    server_entry = {
+        "name": "running-forget-ws",
+        "path": str(ws.resolve()),
+        "pid": os.getpid(),
+        "port": 9997,
+        "url": "http://127.0.0.1:9997",
+    }
+    (servers_dir / "running-forget-ws.json").write_text(json.dumps(server_entry))
+
+    # Attempt to forget — should be refused with 409
+    req = urllib.request.Request(
+        f"{server['url']}/api/workspaces/forget",
+        data=json.dumps({"path": str(ws)}).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(req, timeout=10)
+    assert exc.value.code == 409
+    body = json.loads(exc.value.read())
+    assert body["error"] == "stop the server before forgetting"
