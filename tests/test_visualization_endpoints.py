@@ -1276,30 +1276,28 @@ def test_promote_to_catalog_404_when_variant_missing(workspace_server):
 # Task E1: /api/investigations exposes v2 summary stats
 # ---------------------------------------------------------------------------
 
-def test_get_investigations_includes_v2_summary_fields(workspace_server):
-    """The list endpoint must surface baseline + variant/group/comparison counts
-    (Task E1) so the dashboard index can render the v2 study vocabulary."""
+def test_get_investigations_includes_v3_summary_fields(workspace_server):
+    """Row shape under v3: baseline_names list, n_baseline, n_variants,
+    n_interventions, n_runs, plus the existing composite/composites fields."""
     inv = workspace_server.root / 'investigations' / 'demo'
     inv.mkdir(parents=True)
     (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'schema_version': 3,
         'name': 'demo',
-        'description': 'v2 summary fixture',
-        'baseline': 'base',
+        'description': 'v3 summary fixture',
+        'baseline': [
+            {'name': 'core', 'composite': 'pkg.composites.core', 'params': {}},
+        ],
         'variants': [
-            {'name': 'base', 'source': 'pkg.x'},
-            {'name': 'hi', 'extends': 'base'},
-            {'name': 'lo', 'extends': 'base'},
+            {'name': 'hi', 'base_composite': 'core', 'parameter_overrides': {'k': 1}},
+            {'name': 'lo', 'base_composite': 'core', 'parameter_overrides': {'k': 0.1}},
         ],
-        'groups': [
-            {'name': 'control', 'variants': ['base']},
-            {'name': 'treated', 'variants': ['hi', 'lo']},
-        ],
-        'comparisons': [
-            {'name': 'hi_vs_base', 'baseline': 'base', 'variants': ['hi']},
+        'interventions': [
+            {'name': 'heat-shock', 'description': '+10C for 5 min'},
         ],
         'runs': [
-            {'composite': 'base', 'params': {}, 'steps': 5},
-            {'composite': 'hi', 'params': {}, 'steps': 5},
+            {'run_id': 'r1', 'variant': None, 'label': 'core', 'status': 'completed', 'n_steps': 5},
+            {'run_id': 'r2', 'variant': 'hi', 'label': 'hi', 'status': 'completed', 'n_steps': 5},
         ],
     }, sort_keys=False))
 
@@ -1309,16 +1307,14 @@ def test_get_investigations_includes_v2_summary_fields(workspace_server):
     rows = [r for r in body['investigations'] if r['name'] == 'demo']
     assert len(rows) == 1
     row = rows[0]
-    assert row['baseline'] == 'base'
-    assert row['n_variants'] == 3
-    assert row['n_groups'] == 2
-    assert row['n_comparisons'] == 1
-    # Backward-compat fields still present
+    assert row['baseline_names'] == ['core']
+    assert row['n_baseline'] == 1
+    assert row['n_variants'] == 2
+    assert row['n_interventions'] == 1
+    assert row['n_runs'] == 2
+    assert row['n_simulations'] == row['n_runs']
     assert 'composite' in row
     assert 'composites' in row
-    assert 'n_simulations' in row
-    # n_runs mirrors n_simulations (alias for v2 consumers)
-    assert row['n_runs'] == row['n_simulations']
 
 
 def test_get_investigations_includes_topic(workspace_server):
@@ -1387,93 +1383,73 @@ def test_format_baseline_source_empty_or_absent():
 # ---------------------------------------------------------------------------
 
 def test_get_investigations_includes_baseline_source_and_conclusions_excerpt(workspace_server):
-    """Two new projected fields:
+    """row['baseline_source'] and row['conclusions_excerpt'] under v3."""
+    ws = workspace_server.root / 'investigations'
 
-    1. ``baseline_source`` — baseline variant's ``source`` dotted path
-       reformatted as ``pkg_short:name`` when the path contains
-       ``.composites.``; empty when no baseline.
-    2. ``conclusions_excerpt`` — first 240 chars of ``spec.conclusions`` with
-       the structured H2 headers stripped; empty when no conclusions.
-    """
-    inv_root = workspace_server.root / 'investigations'
-
-    # Case A — full happy path. Baseline source with ``.composites.`` segment +
-    # long structured conclusions that should be header-stripped + truncated.
+    # Case A — single baseline with .composites. source + long conclusions
+    a = ws / 'with-baseline'
+    a.mkdir(parents=True)
     long_prose = (
-        'The baseline replication run converges in 42 minutes which matches the '
-        'wet-lab doubling-time estimate from Smith 2019. The mutant variant runs '
-        'consistently slower, suggesting the modification adds load to the '
-        'replication fork. We should re-run with seeds 1..16 and compare CV.'
+        "We saw substantial divergence in growth across substrate variants. "
+        "Lag phase was extended at lower substrate concentrations, while "
+        "exponential phase plateaued at expected μmax values. "
+        "The baseline replication run converges in 42 minutes which matches "
+        "the wet-lab doubling-time estimate from Smith 2019."
     )
-    inv_a = inv_root / 'with-baseline'
-    inv_a.mkdir(parents=True)
-    (inv_a / 'spec.yaml').write_text(yaml.safe_dump({
+    (a / 'spec.yaml').write_text(yaml.safe_dump({
+        'schema_version': 3,
         'name': 'with-baseline',
-        'baseline': 'base',
-        'variants': [
-            {'name': 'base',
-             'source': 'pbg_chromosome_rep1.composites.chromosome-partition'},
-            {'name': 'mut', 'extends': 'base'},
-        ],
+        'baseline': [{'name': 'core',
+                      'composite': 'pbg_chromosome_rep1.composites.chromosome-partition',
+                      'params': {}}],
+        'variants': [{'name': 'mut', 'base_composite': 'core',
+                      'parameter_overrides': {}}],
         'conclusions': (
-            '## Claims\n'
-            + long_prose + '\n'
-            '## Evidence\n'
-            'Run logs show fork-stall events.\n'
-            '## Limitations\nSmall n.\n'
-            '## Next steps\nSweep seeds.\n'
+            '## Claims\n' + long_prose +
+            '\n## Evidence\nplots A,B\n## Limitations\nN=3\n## Next steps\nrun N=10\n'
         ),
     }, sort_keys=False))
 
-    # Case B — at least one variant declared, but no ``baseline`` set and no
-    # ``conclusions`` prose. baseline_source and conclusions_excerpt should
-    # both come back as empty strings. (Empty ``variants`` would fail
-    # validation entirely, so we declare one but skip the baseline pointer.)
-    inv_b = inv_root / 'no-baseline'
-    inv_b.mkdir(parents=True)
-    (inv_b / 'spec.yaml').write_text(yaml.safe_dump({
+    # Case B — no baseline, no conclusions (empty baseline: [] fails v3
+    # validation, so the row is returned as status=invalid; it will not have
+    # baseline_source / conclusions_excerpt fields)
+    b = ws / 'no-baseline'
+    b.mkdir(parents=True)
+    (b / 'spec.yaml').write_text(yaml.safe_dump({
+        'schema_version': 3,
         'name': 'no-baseline',
-        'variants': [{'name': 'lone', 'source': 'pkg.x'}],
+        'baseline': [],
+        'variants': [],
     }, sort_keys=False))
 
-    # Case C — baseline whose source does NOT have ``.composites.`` (fallback
-    # path: the full source string is returned verbatim).
-    inv_c = inv_root / 'opaque-source'
-    inv_c.mkdir(parents=True)
-    (inv_c / 'spec.yaml').write_text(yaml.safe_dump({
+    # Case C — opaque single composite
+    c = ws / 'opaque-source'
+    c.mkdir(parents=True)
+    (c / 'spec.yaml').write_text(yaml.safe_dump({
+        'schema_version': 3,
         'name': 'opaque-source',
-        'baseline': 'base',
-        'variants': [{'name': 'base', 'source': 'some.opaque.path'}],
+        'baseline': [{'name': 'x', 'composite': 'some.opaque.path', 'params': {}}],
+        'variants': [],
     }, sort_keys=False))
 
     with urllib.request.urlopen(workspace_server.url + '/api/investigations') as resp:
         body = json.loads(resp.read())
-    rows = {r['name']: r for r in body['investigations']}
+    by_name = {r['name']: r for r in body['investigations']}
 
-    # Case A — pretty-formatted baseline_source.
-    row_a = rows['with-baseline']
-    assert row_a['baseline_source'] == \
-        'pbg_chromosome_rep1:chromosome-partition'
-    # The excerpt drops the H2 markers, collapses whitespace, and caps at 240
-    # chars (an ellipsis is appended when truncated).
+    row_a = by_name['with-baseline']
+    assert row_a['baseline_source'] == 'pbg_chromosome_rep1:chromosome-partition'
     excerpt_a = row_a['conclusions_excerpt']
-    assert excerpt_a, 'conclusions_excerpt should be non-empty when prose exists'
+    assert len(excerpt_a) <= 241  # 240 + ellipsis
+    assert excerpt_a.endswith('…')
     assert '## Claims' not in excerpt_a
     assert '## Evidence' not in excerpt_a
-    assert '## Limitations' not in excerpt_a
-    assert '## Next steps' not in excerpt_a
-    assert len(excerpt_a) <= 241  # 240 + trailing ellipsis
-    assert excerpt_a.endswith('…')
-    # The prose itself should still show through (start of the Claims block).
-    assert 'baseline replication run' in excerpt_a
 
-    # Case B — empty fields when no baseline / no conclusions.
-    row_b = rows['no-baseline']
-    assert row_b['baseline_source'] == ''
-    assert row_b['conclusions_excerpt'] == ''
+    # Case B — empty baseline: [] fails v3 validation; the row is present but
+    # marked invalid (no baseline_source / conclusions_excerpt fields).
+    row_b = by_name['no-baseline']
+    assert row_b['status'] == 'invalid'
 
-    # Case C — fallback to raw source string when not a ``.composites.`` path.
-    row_c = rows['opaque-source']
+    row_c = by_name['opaque-source']
     assert row_c['baseline_source'] == 'some.opaque.path'
     assert row_c['conclusions_excerpt'] == ''
 

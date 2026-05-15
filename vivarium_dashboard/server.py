@@ -3713,29 +3713,30 @@ if __name__ == "__main__":
                     n_runs = len(spec.get("runs") or [])
                 else:
                     composite_summary = spec.get("composite", "")
-                    n_runs = len(spec.get("simulations") or [])
-                out.append({
-                    "name": spec["name"],
-                    "composite": composite_summary,
-                    "composites": composites,
-                    "description": spec.get("description", ""),
-                    "topic": spec.get("topic", ""),
-                    "tags": spec.get("tags") or [],
-                    "status": spec.get("status", "planned"),
-                    "last_run": spec.get("last_run"),
-                    "n_simulations": n_runs,
-                    # v2 study vocabulary (Task E1)
-                    "baseline": spec.get("baseline", ""),
-                    "n_variants": len(spec.get("variants") or []),
-                    "n_groups": len(spec.get("groups") or []),
-                    "n_comparisons": len(spec.get("comparisons") or []),
-                    "n_runs": n_runs,
-                    # Richer-card projection: pretty baseline source + one-line
-                    # conclusions preview so the index can render at-a-glance
-                    # study cards without a second fetch.
+                    # v3 uses `runs:`; legacy uses `simulations:`.
+                    n_runs = len(spec.get("runs") or spec.get("simulations") or [])
+                row = {
+                    "name":            spec["name"],
+                    "composite":       composite_summary,
+                    "composites":      composites,
+                    "description":     spec.get("description", ""),
+                    "topic":           spec.get("topic", ""),
+                    "tags":            spec.get("tags") or [],
+                    "status":          spec.get("status", "planned"),
+                    "last_run":        spec.get("last_run"),
+                    "n_simulations":   n_runs,
+                    "baseline_names":  [b.get("name", "") for b in (spec.get("baseline") or [])
+                                        if isinstance(b, dict)],
+                    "n_baseline":      len(spec.get("baseline") or []),
+                    "n_variants":      len(spec.get("variants") or []),
+                    "n_groups":        len(spec.get("groups") or []),
+                    "n_interventions": len(spec.get("interventions") or []),
+                    "n_comparisons":   len(spec.get("comparisons") or []),
+                    "n_runs":          n_runs,
                     "baseline_source": _format_baseline_source(spec),
                     "conclusions_excerpt": _conclusions_excerpt(spec),
-                })
+                }
+                out.append(row)
             except InvestigationSpecError as e:
                 out.append({
                     "name": d.name, "status": "invalid", "error": str(e),
