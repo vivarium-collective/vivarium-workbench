@@ -5687,7 +5687,7 @@
   function _simStudyChips(studies) {
     if (!studies || !studies.length) return '<span style="color:#9ca3af;">—</span>';
     return studies.map(function (name) {
-      return '<a href="#investigations?name=' + encodeURIComponent(name) +
+      return '<a href="#investigations" title="' + _escSim(name) +
         '" style="display:inline-block; background:#eef2ff; color:#3730a3; ' +
         'padding:1px 7px; margin:0 2px 2px 0; border-radius:10px; font-size:12px; ' +
         'text-decoration:none;">' + _escSim(name) + '</a>';
