@@ -1896,6 +1896,7 @@ def test_get_workspace_manifest_returns_all_sections(workspace_server):
 
 
 def test_get_workspace_manifest_studies_section_lists_specs(workspace_server):
+    """A v3 study under investigations/ surfaces in the manifest's studies section."""
     inv_dir = workspace_server.root / "investigations" / "demo"
     inv_dir.mkdir(parents=True)
     (inv_dir / "spec.yaml").write_text(yaml.safe_dump({

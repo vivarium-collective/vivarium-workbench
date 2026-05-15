@@ -6154,7 +6154,8 @@ if __name__ == "__main__":
         return out
 
     def _manifest_studies_section(self):
-        """List of studies with name, topic, status, n_variants, n_runs, n_conclusions."""
+        """List of studies (v3) with name, topic, status, baseline_names, n_baseline,
+        n_variants, n_groups, n_interventions, n_runs, n_comparisons, conclusions_len."""
         _ws_add_to_sys_path()
         try:
             from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
