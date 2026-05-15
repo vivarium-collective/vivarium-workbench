@@ -6956,15 +6956,19 @@ if __name__ == "__main__":
                 row["status"] = "current"
                 entry = workspace_catalog.find_entry(path)
                 if entry is not None:
-                    try:
-                        os.kill(int(entry.get("pid", 0)), 0)
-                        alive = True
-                    except ProcessLookupError:
+                    pid_val = int(entry.get("pid") or 0)
+                    if pid_val <= 0:
                         alive = False
-                    except PermissionError:
-                        alive = True  # PID exists but owned by another user
-                    except (OSError, ValueError):
-                        alive = False
+                    else:
+                        try:
+                            os.kill(pid_val, 0)
+                            alive = True
+                        except ProcessLookupError:
+                            alive = False
+                        except PermissionError:
+                            alive = True  # PID exists but owned by another user
+                        except (OSError, ValueError):
+                            alive = False
                     if alive:
                         row["url"] = entry["url"]
                         row["pid"] = entry["pid"]
@@ -6973,15 +6977,19 @@ if __name__ == "__main__":
                 if entry is None:
                     row["status"] = "stopped"
                 else:
-                    try:
-                        os.kill(int(entry.get("pid", 0)), 0)
-                        alive = True
-                    except ProcessLookupError:
+                    pid_val = int(entry.get("pid") or 0)
+                    if pid_val <= 0:
                         alive = False
-                    except PermissionError:
-                        alive = True  # PID exists but owned by another user
-                    except (OSError, ValueError):
-                        alive = False
+                    else:
+                        try:
+                            os.kill(pid_val, 0)
+                            alive = True
+                        except ProcessLookupError:
+                            alive = False
+                        except PermissionError:
+                            alive = True  # PID exists but owned by another user
+                        except (OSError, ValueError):
+                            alive = False
                     if alive:
                         row["status"] = "running"
                         row["url"] = entry["url"]
