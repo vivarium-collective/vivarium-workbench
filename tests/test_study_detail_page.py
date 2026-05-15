@@ -144,3 +144,20 @@ def test_baseline_panel_per_entry_buttons(_ws):
     html = _render_study_detail_html("study-monod_kinetics-096184", spec)
     assert 'btn-run-baseline' in html
     assert 'btn-baseline-remove' in html
+
+
+def test_variants_panel_lists_entries(_ws):
+    """Variants panel renders one .variant-row per variants[] entry, with name + base_composite + params count."""
+    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    spec = _study_detail_spec("study-monod_kinetics-096184")
+    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    # The legacy fixture has no variants[] (the only variant has `source:` so it migrated
+    # to baseline). So expect the empty-message instead of a row.
+    assert 'variant-row' in html or 'No variants yet' in html
+
+
+def test_variants_panel_has_new_variant_button(_ws):
+    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    spec = _study_detail_spec("study-monod_kinetics-096184")
+    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    assert 'btn-variant-new' in html

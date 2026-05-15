@@ -217,46 +217,96 @@
   }
   window._submitBaselineAdd = _submitBaselineAdd;
 
-  // --- Variants ---
-  // study-variant-add → _post_investigation_composite_perturb, key "investigation"
-  bindAll('.btn-add-variant', function() {
-    var name = prompt('Variant name:');
-    if (!name) return;
-    var desc = prompt('Description:', '') || '';
-    var po = prompt('Parameter overrides (JSON, e.g. {"rate": 2.0}):', '{}') || '{}';
-    try { po = JSON.parse(po); } catch (e) { return alert('Invalid JSON'); }
+  // ===== Variants tab handlers =====
+
+  // Variant add — base-composite dropdown changes trigger param-form render.
+  var _currentVariantAddCollect = null;
+  function _onBaseCompositeChange(selectEl) {
+    var opt = selectEl.options[selectEl.selectedIndex];
+    var specId = opt.dataset.compositeId || '';
+    var container = document.getElementById('variant-new-params');
+    if (!specId) {
+      container.innerHTML = '<p class="muted">Pick a base composite to see its parameters.</p>';
+      _currentVariantAddCollect = null;
+      return;
+    }
+    container.innerHTML = '<p class="muted">Loading parameters…</p>';
+    renderParamForm(container, specId, {}).then(function(result) {
+      _currentVariantAddCollect = result.collect;
+    });
+  }
+  window._onBaseCompositeChange = _onBaseCompositeChange;
+
+  function _submitVariantAdd(ev) {
+    ev.preventDefault();
+    var form = ev.target;
+    var name = form.name.value.trim();
+    var baseComposite = form.base_composite.value;
+    if (!name || !baseComposite) { alert('Name and base composite are required.'); return false; }
+    var overrides = _currentVariantAddCollect ? _currentVariantAddCollect() : {};
     api('POST', '/api/study-variant-add', {
-      investigation: studyName(), study: studyName(),
-      name: name,
-      extends: 'baseline', description: desc, parameter_overrides: po,
-    }).then(function(res) {
-      if (res.status === 200) location.reload();
-      else alert(res.body.error || 'Add variant failed');
+      study: studyName(), name: name, base_composite: baseComposite,
+      parameter_overrides: overrides
+    }).then(function(r) {
+      if (r.status === 200) location.reload();
+      else alert('Add variant failed: ' + (r.body && r.body.error || r.status));
+    });
+    return false;
+  }
+  window._submitVariantAdd = _submitVariantAdd;
+
+  // Variant edit — populate dialog, render param form with current overrides, then save.
+  var _currentVariantEditCollect = null;
+  bindAll('.btn-variant-edit', function(btn) {
+    var variantName = btn.dataset.variantName;
+    var variant = (window._study.variants || []).filter(function(v) { return v.name === variantName; })[0];
+    if (!variant) { alert('Variant not found in local spec.'); return; }
+    var baseEntry = (window._study.baseline || []).filter(function(b) { return b.name === variant.base_composite; })[0];
+    if (!baseEntry) { alert('Variant references a base composite that no longer exists.'); return; }
+    document.getElementById('variant-edit-name').textContent = variantName;
+    var container = document.getElementById('variant-edit-params');
+    container.innerHTML = '<p class="muted">Loading parameters…</p>';
+    renderParamForm(container, baseEntry.composite, variant.parameter_overrides || {}).then(function(result) {
+      _currentVariantEditCollect = result.collect;
+      document.getElementById('variant-edit-dialog').dataset.variantName = variantName;
+      document.getElementById('variant-edit-dialog').showModal();
     });
   });
 
-  // study-run-variant → _post_investigation_run_one, key "investigation"
-  bindAll('.btn-run-variant', function(btn) {
-    var variant = btn.dataset.variant;
+  function _submitVariantEdit(ev) {
+    ev.preventDefault();
+    var dialog = document.getElementById('variant-edit-dialog');
+    var variantName = dialog.dataset.variantName;
+    var overrides = _currentVariantEditCollect ? _currentVariantEditCollect() : {};
+    api('POST', '/api/study-variant-set-params', {
+      study: studyName(), variant: variantName, parameter_overrides: overrides
+    }).then(function(r) {
+      if (r.status === 200) location.reload();
+      else alert('Save failed: ' + (r.body && r.body.error || r.status));
+    });
+    return false;
+  }
+  window._submitVariantEdit = _submitVariantEdit;
+
+  bindAll('.btn-variant-delete', function(btn) {
+    var variantName = btn.dataset.variantName;
+    if (!confirm('Delete variant "' + variantName + '"?')) return;
+    api('POST', '/api/study-variant-delete', {
+      study: studyName(), variant: variantName
+    }).then(function(r) {
+      if (r.status === 200) location.reload();
+      else alert('Delete failed: ' + (r.body && r.body.error || r.status));
+    });
+  });
+
+  bindAll('.btn-variant-run', function(btn) {
+    var variantName = btn.dataset.variantName;
     api('POST', '/api/study-run-variant', {
-      investigation: studyName(), study: studyName(),
-      sim_name: variant, variant: variant,
-    }).then(function() { location.reload(); });
-  });
-
-  bindAll('.btn-edit-variant', function() {
-    alert('Edit variant not implemented in Phase 1 — delete + re-add for now.');
-  });
-
-  bindAll('.btn-delete-variant', function(btn) {
-    var variant = btn.dataset.variant;
-    if (!confirm('Delete variant ' + variant + '?')) return;
-    api('POST', '/api/study-variant-delete',
-        {study: studyName(), variant: variant})
-      .then(function(res) {
-        if (res.status === 200) location.reload();
-        else alert(res.body.error || 'Delete variant failed');
-      });
+      study: studyName(), variant: variantName
+    }).then(function(r) {
+      if (r.status === 200) location.reload();
+      else alert('Run failed: ' + (r.body && r.body.error || r.status));
+    });
   });
 
   // --- Runs ---

@@ -92,7 +92,68 @@
 </section>
 
 <section class="study-tab-panel" data-kind="variants" id="panel-variants">
-  <!-- Task 5 fills this -->
+  <div class="variants-list">
+    {% for v in (study.variants or []) %}
+    <article class="variant-row" data-variant-name="{{ v.name }}"
+             data-base-composite="{{ v.base_composite or '' }}">
+      <header class="variant-row-header">
+        <h3 class="variant-name">{{ v.name }}</h3>
+        <span class="variant-base">based on <code>{{ v.base_composite or '(none)' }}</code></span>
+        <span class="variant-overrides-count muted">{{ (v.parameter_overrides or {})|length }} override(s)</span>
+      </header>
+      {% if v.parameter_overrides %}
+      <details class="variant-overrides-detail">
+        <summary>Parameter overrides</summary>
+        <table class="variant-overrides-table">
+          <tbody>
+          {% for k, val in v.parameter_overrides.items() %}
+          <tr><td><code>{{ k }}</code></td><td><code>{{ val }}</code></td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </details>
+      {% endif %}
+      <div class="variant-row-actions">
+        <button class="btn-variant-edit" data-variant-name="{{ v.name }}">Edit params</button>
+        <button class="btn-variant-delete" data-variant-name="{{ v.name }}">Delete</button>
+        <button class="btn-variant-run" data-variant-name="{{ v.name }}">Run</button>
+      </div>
+    </article>
+    {% else %}
+    <p class="empty-message">No variants yet. Add one to perturb a baseline composite's parameters.</p>
+    {% endfor %}
+  </div>
+
+  <details class="variant-add-form-wrapper">
+    <summary class="btn-variant-new">+ New variant</summary>
+    <form id="variant-new-form" onsubmit="return _submitVariantAdd(event)">
+      <label>Name: <input name="name" required pattern="[a-zA-Z0-9_-]+"></label>
+      <label>Base composite:
+        <select name="base_composite" required onchange="_onBaseCompositeChange(this)">
+          <option value="">— pick a baseline composite —</option>
+          {% for b in (study.baseline or []) %}
+          <option value="{{ b.name }}" data-composite-id="{{ b.composite }}">{{ b.name }} ({{ b.composite }})</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div id="variant-new-params" class="param-form">
+        <p class="muted">Pick a base composite to see its parameters.</p>
+      </div>
+      <button type="submit">Save variant</button>
+    </form>
+  </details>
+
+  <!-- Hidden edit form, populated dynamically when "Edit params" is clicked -->
+  <dialog id="variant-edit-dialog">
+    <form id="variant-edit-form" onsubmit="return _submitVariantEdit(event)" method="dialog">
+      <h3>Edit parameter overrides for <code id="variant-edit-name"></code></h3>
+      <div id="variant-edit-params" class="param-form"></div>
+      <menu>
+        <button type="button" onclick="document.getElementById('variant-edit-dialog').close()">Cancel</button>
+        <button type="submit">Save</button>
+      </menu>
+    </form>
+  </dialog>
 </section>
 
 <section class="study-tab-panel" data-kind="interventions" id="panel-interventions">
