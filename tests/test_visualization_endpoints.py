@@ -1443,11 +1443,13 @@ def test_get_investigations_includes_baseline_source_and_conclusions_excerpt(wor
     assert excerpt_a.endswith('…')
     assert '## Claims' not in excerpt_a
     assert '## Evidence' not in excerpt_a
+    assert 'Lag phase' in excerpt_a  # prose content survived stripping
 
     # Case B — empty baseline: [] fails v3 validation; the row is present but
     # marked invalid (no baseline_source / conclusions_excerpt fields).
     row_b = by_name['no-baseline']
     assert row_b['status'] == 'invalid'
+    assert 'baseline_source' not in row_b  # invalid rows skip projection
 
     row_c = by_name['opaque-source']
     assert row_c['baseline_source'] == 'some.opaque.path'
