@@ -20,15 +20,17 @@ def _study_ws(tmp_path, monkeypatch):
     (sd / "study.yaml").write_text(yaml.safe_dump({
         "schema_version": 3, "name": "s1", "created": "2026-05-14",
         "status": "ran", "objective": "",
-        "baseline": {"composite": "multi_cell.composites.chemotaxis",
-                     "params": {"n_steps": 2}},
+        "baseline": [
+            {"name": "core",
+             "composite": "multi_cell.composites.chemotaxis",
+             "params": {"n_steps": 2}},
+        ],
         "variants": [
-            {"name": "fast", "intervention": {
-                "description": "more steps",
-                "parameter_overrides": {"n_steps": 3}}},
+            {"name": "fast", "base_composite": "core",
+             "parameter_overrides": {"n_steps": 3}},
         ],
         "runs": [], "visualizations": [], "comparisons": [],
-        "conclusion": None, "parent_studies": [],
+        "conclusion": None, "parent_studies": [], "interventions": [],
     }))
     monkeypatch.setattr(srv, "WORKSPACE", ws)
     return ws
@@ -140,3 +142,97 @@ def test_run_delete_missing_study(_study_ws):
     from vivarium_dashboard.server import _post_study_run_delete_for_test
     resp, code = _post_study_run_delete_for_test(_study_ws, {"study": "nope", "run_id": "r1"})
     assert code == 404
+
+
+def test_run_baseline_with_explicit_composite_404s_unknown_name(_study_ws):
+    """Body's `composite` selects a baseline entry by name; unknown → 404."""
+    from vivarium_dashboard.server import _post_study_run_baseline_for_test
+    resp, code = _post_study_run_baseline_for_test(
+        _study_ws, {"study": "s1", "composite": "no-such-name"})
+    assert code == 404
+    assert "composite" in resp.get("error", "").lower()
+
+
+def test_run_baseline_no_baseline_400s():
+    """Empty baseline list → 400 with 'no baseline' error."""
+    import tempfile
+    from pathlib import Path
+    from vivarium_dashboard.server import _post_study_run_baseline_for_test
+    with tempfile.TemporaryDirectory() as td:
+        ws = Path(td)
+        (ws / "workspace.yaml").write_text(
+            'schema_version: 2\nname: t\ncreated: "2026-05-14"\n'
+            'plugin_version: 0.6.1\npackage_path: t\n'
+        )
+        sd = ws / "studies" / "empty"
+        sd.mkdir(parents=True)
+        (sd / "study.yaml").write_text(yaml.safe_dump({
+            "schema_version": 3, "name": "empty",
+            "baseline": [], "variants": [],
+            "runs": [], "visualizations": [],
+        }))
+        resp, code = _post_study_run_baseline_for_test(ws, {"study": "empty"})
+        assert code == 400
+        assert "baseline" in resp.get("error", "").lower()
+
+
+def test_run_variant_layers_v3_overrides():
+    """A v3 variant with base_composite + parameter_overrides resolves and layers."""
+    import tempfile
+    from pathlib import Path
+    from vivarium_dashboard.server import _post_study_run_variant_for_test
+    with tempfile.TemporaryDirectory() as td:
+        ws = Path(td)
+        (ws / "workspace.yaml").write_text(
+            'schema_version: 2\nname: t\ncreated: "2026-05-14"\n'
+            'plugin_version: 0.6.1\npackage_path: nopkg\n'
+        )
+        sd = ws / "studies" / "s2"
+        sd.mkdir(parents=True)
+        (sd / "study.yaml").write_text(yaml.safe_dump({
+            "schema_version": 3, "name": "s2",
+            "baseline": [
+                {"name": "core",
+                 "composite": "nopkg.composites.missing",
+                 "params": {"k": 1, "n_steps": 2}},
+            ],
+            "variants": [
+                {"name": "fast", "base_composite": "core",
+                 "parameter_overrides": {"k": 2, "n_steps": 3}},
+            ],
+            "runs": [], "visualizations": [], "interventions": [],
+        }))
+        resp, code = _post_study_run_variant_for_test(
+            ws, {"study": "s2", "variant": "fast"})
+        # Composite is missing in this fake pkg → expect 400 from
+        # _resolve_study_baseline_state, NOT a 400 about base_composite shape.
+        assert code == 400
+        err = resp.get("error", "")
+        assert "base_composite" not in err.lower()
+        assert "no baseline" not in err.lower()
+
+
+def test_run_variant_unknown_base_composite_404s():
+    """Variant referencing a non-existent baseline name → 404."""
+    import tempfile
+    from pathlib import Path
+    from vivarium_dashboard.server import _post_study_run_variant_for_test
+    with tempfile.TemporaryDirectory() as td:
+        ws = Path(td)
+        (ws / "workspace.yaml").write_text(
+            'schema_version: 2\nname: t\ncreated: "2026-05-14"\n'
+            'plugin_version: 0.6.1\npackage_path: nopkg\n'
+        )
+        sd = ws / "studies" / "s3"
+        sd.mkdir(parents=True)
+        (sd / "study.yaml").write_text(yaml.safe_dump({
+            "schema_version": 3, "name": "s3",
+            "baseline": [{"name": "core", "composite": "nopkg.x", "params": {}}],
+            "variants": [{"name": "dangling", "base_composite": "ghost",
+                          "parameter_overrides": {}}],
+            "runs": [], "visualizations": [],
+        }))
+        resp, code = _post_study_run_variant_for_test(
+            ws, {"study": "s3", "variant": "dangling"})
+        assert code == 404
+        assert "base_composite" in resp.get("error", "").lower()

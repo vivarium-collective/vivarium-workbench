@@ -222,13 +222,18 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/investigation-group-update":       "_post_investigation_group_update",
     # Study-specific POST endpoints (no investigation alias).
     "/api/study-set-objective":         "_post_study_set_objective",
-    "/api/study-set-baseline-params":   "_post_study_set_baseline_params",
     "/api/study-rename":                "_post_study_rename",
     "/api/study-create-from-run":       "_post_study_create_from_run",
     "/api/study-run-baseline":          "_post_study_run_baseline",
     "/api/study-run-variant":           "_post_study_run_variant",
     "/api/study-variant-add":           "_post_study_variant_add",
     "/api/study-variant-delete":        "_post_study_variant_delete",
+    "/api/study-variant-set-params":    "_post_study_variant_set_params",
+    "/api/study-baseline-add":          "_post_study_baseline_add",
+    "/api/study-baseline-remove":       "_post_study_baseline_remove",
+    "/api/study-intervention-add":      "_post_study_intervention_add",
+    "/api/study-intervention-update":   "_post_study_intervention_update",
+    "/api/study-intervention-delete":   "_post_study_intervention_delete",
     "/api/study-run-delete":            "_post_study_run_delete",
     "/api/study-runs-clear":            "_post_study_runs_clear",
     "/api/study-comparison-add":        "_post_study_comparison_add",
@@ -488,20 +493,6 @@ def _post_study_set_objective_for_test(ws_root: Path, body: dict):
     return {"ok": True}, 200
 
 
-def _post_study_set_baseline_params_for_test(ws_root: Path, body: dict):
-    """Set study.yaml baseline.params field. Returns (response_dict, status_code)."""
-    name = (body.get("study") or "").strip()
-    params = body.get("params")
-    if not name or not isinstance(params, dict):
-        return {"error": "missing study or params"}, 400
-    sf = ws_root / "studies" / name / "study.yaml"
-    if not sf.is_file():
-        return {"error": "study not found"}, 404
-    spec = yaml.safe_load(sf.read_text()) or {}
-    spec.setdefault("baseline", {})["params"] = params
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
-    return {"ok": True}, 200
-
 
 def _post_study_rename_for_test(ws_root: Path, body: dict):
     """Rename a study directory and update name in study.yaml. Returns (response_dict, status_code)."""
@@ -679,28 +670,46 @@ def _resolve_study_baseline_state(pkg, spec_id, params):
 
 
 def _post_study_run_baseline_for_test(ws_root, body):
-    """Run a Study's baseline composite. Returns (response_dict, status_code)."""
+    """Run a Study's baseline composite. Returns (response_dict, status_code).
+
+    Body:
+      study:     <name>  (or `name`/`investigation`)
+      composite: <baseline-entry name>  (optional; default = baseline[0].name)
+      steps:     <int>   (optional; overrides params.n_steps; default 5)
+    """
     from vivarium_dashboard.lib import composite_runs as cr
 
     name = _study_name_from_body(body)
     if not name:
         return {"error": "missing study"}, 400
-    study_dir = _study_dir(name)
+    # Resolve study dir from ws_root so _for_test callers don't need WORKSPACE patched.
+    studies_path = ws_root / "studies" / name
+    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / name
     sf = study_dir / "study.yaml"
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
     spec = yaml.safe_load(sf.read_text()) or {}
-    baseline = spec.get("baseline") or {}
-    spec_id = baseline.get("composite")
+    baseline = spec.get("baseline") or []
+    if not isinstance(baseline, list) or not baseline:
+        return {"error": "study has no baseline composites"}, 400
+
+    requested = (body.get("composite") or "").strip()
+    if requested:
+        entry = next((b for b in baseline if isinstance(b, dict) and b.get("name") == requested),
+                     None)
+        if entry is None:
+            return {"error": f"baseline composite {requested!r} not found"}, 404
+    else:
+        entry = baseline[0]
+    spec_id = entry.get("composite")
     if not spec_id:
-        return {"error": "study has no baseline.composite"}, 400
-    params = dict(baseline.get("params") or {})
-    # n_steps is a run-level setting, not a generator parameter — extract it
-    # unconditionally before passing the remainder as generator overrides.
+        return {"error": f"baseline entry {entry.get('name')!r} has no composite"}, 400
+
+    params = dict(entry.get("params") or {})
     params_n_steps = params.pop("n_steps", None)
     steps = int(body.get("steps") or params_n_steps or 5)
-    generator_overrides = params  # remaining keys are true generator parameters
+    generator_overrides = params
 
     ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text())
     pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
@@ -709,62 +718,79 @@ def _post_study_run_baseline_for_test(ws_root, body):
     if err is not None:
         return err, 400
 
-    # Reconstruct the full params dict (with n_steps) for run_id generation,
-    # mirroring _post_study_run_variant_for_test so baseline and variant runs
-    # hash their run_ids consistently.
     full_params = dict(generator_overrides)
     if params_n_steps is not None:
         full_params["n_steps"] = params_n_steps
 
     db_file = str(study_dir / "runs.db")
     run_id = cr.generate_run_id(spec_id, full_params)
+    label = entry.get("name") or "baseline"
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
-        run_id=run_id, spec_id=spec_id, label="baseline", sim_name="baseline",
+        run_id=run_id, spec_id=spec_id, label=label, sim_name=label,
         overrides=generator_overrides,
     )
     if code == 200:
         _append_study_run(study_dir, {
-            "run_id": run_id, "variant": None, "label": "baseline",
+            "run_id": run_id, "variant": None, "label": label,
             "status": "completed", "n_steps": steps,
+            "composite": entry.get("name"),
         })
     return response, code
 
 
 def _post_study_run_variant_for_test(ws_root, body):
-    """Run a Study variant (baseline + param overrides). Returns (response_dict, status_code)."""
+    """Run a Study variant (baseline + param overrides). Returns (response_dict, status_code).
+
+    Body:
+      study:   <name>
+      variant: <variant name>
+    Resolves the variant's `base_composite` against the study's `baseline[]`,
+    layers `parameter_overrides` on top of that entry's `params`, and runs.
+    """
     from vivarium_dashboard.lib import composite_runs as cr
 
     name = _study_name_from_body(body)
     variant_name = (body.get("variant") or "").strip()
     if not name or not variant_name:
         return {"error": "missing study or variant"}, 400
-    study_dir = _study_dir(name)
+    # Resolve study dir from ws_root (matches Task 5 pattern; supports
+    # standalone tests without monkeypatching WORKSPACE).
+    studies_path = ws_root / "studies" / name
+    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / name
     sf = study_dir / "study.yaml"
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
     spec = yaml.safe_load(sf.read_text()) or {}
-    baseline = spec.get("baseline") or {}
-    spec_id = baseline.get("composite")
-    if not spec_id:
-        return {"error": "study has no baseline.composite"}, 400
+    baseline = spec.get("baseline") or []
+    if not isinstance(baseline, list) or not baseline:
+        return {"error": "study has no baseline composites"}, 400
 
     variant = next((v for v in (spec.get("variants") or [])
-                    if v.get("name") == variant_name), None)
+                    if isinstance(v, dict) and v.get("name") == variant_name), None)
     if variant is None:
         return {"error": f"variant {variant_name!r} not found"}, 404
 
-    # Layer the variant's parameter_overrides on top of baseline.params.
-    params = dict(baseline.get("params") or {})
-    intervention = variant.get("intervention") or {}
-    params.update(intervention.get("parameter_overrides") or {})
+    base_name = (variant.get("base_composite") or "").strip()
+    if base_name:
+        entry = next((b for b in baseline
+                      if isinstance(b, dict) and b.get("name") == base_name), None)
+        if entry is None:
+            return {"error": f"variant base_composite {base_name!r} not in baseline"}, 404
+    else:
+        entry = baseline[0]
+    spec_id = entry.get("composite")
+    if not spec_id:
+        return {"error": f"baseline entry {entry.get('name')!r} has no composite"}, 400
 
-    # n_steps is a run-level setting, not a generator parameter — extract it
-    # unconditionally before passing the remainder as generator overrides.
+    params = dict(entry.get("params") or {})
+    overrides = variant.get("parameter_overrides") or {}
+    params.update(overrides)
+
     params_n_steps = params.pop("n_steps", None)
     steps = int(body.get("steps") or params_n_steps or 5)
-    generator_overrides = params  # remaining keys are true generator parameters
+    generator_overrides = params
 
     ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text())
     pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
@@ -773,8 +799,6 @@ def _post_study_run_variant_for_test(ws_root, body):
     if err is not None:
         return err, 400
 
-    # Reconstruct the full params dict (with n_steps) for run_id generation,
-    # mirroring Task 3's pattern.
     full_params = dict(generator_overrides)
     if params_n_steps is not None:
         full_params["n_steps"] = params_n_steps
@@ -790,32 +814,53 @@ def _post_study_run_variant_for_test(ws_root, body):
         _append_study_run(study_dir, {
             "run_id": run_id, "variant": variant_name, "label": variant_name,
             "status": "completed", "n_steps": steps,
+            "composite": entry.get("name"),
         })
     return response, code
 
 
 def _post_study_variant_add_for_test(ws_root, body):
-    """Add a variant entry to study.yaml. Returns (response_dict, status_code)."""
-    # Use "study" key directly — "name" here is the variant name, not the study.
+    """Add a variant entry to study.yaml. Returns (response_dict, status_code).
+
+    Body:
+      study or investigation:  <study name>
+      name:                    <variant name>
+      base_composite:          <baseline entry name> (required)
+      parameter_overrides:     <dict>  (optional; defaults to {})
+    """
     study = (body.get("study") or body.get("investigation") or "").strip()
     variant_name = (body.get("name") or "").strip()
+    base_composite = (body.get("base_composite") or "").strip()
     if not study or not variant_name:
         return {"error": "missing study or variant name"}, 400
-    sf = _study_dir(study) / "study.yaml"
+    if not base_composite:
+        return {"error": "missing base_composite"}, 400
+    overrides = body.get("parameter_overrides")
+    if overrides is not None and not isinstance(overrides, dict):
+        return {"error": "parameter_overrides must be an object"}, 400
+
+    # Inline ws_root-based path resolution (matches Task 5/6 pattern).
+    studies_path = ws_root / "studies" / study
+    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
+    sf = study_dir / "study.yaml"
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
     spec = yaml.safe_load(sf.read_text()) or {}
+    baseline = spec.get("baseline") or []
+    baseline_names = {b.get("name") for b in baseline if isinstance(b, dict)}
+    if base_composite not in baseline_names:
+        return {"error": f"base_composite {base_composite!r} not in baseline"}, 404
+
     variants = spec.setdefault("variants", [])
-    if any(v.get("name") == variant_name for v in variants):
+    if any(v.get("name") == variant_name for v in variants if isinstance(v, dict)):
         return {"error": f"variant {variant_name!r} already exists"}, 409
 
-    intervention = {"description": body.get("description") or ""}
-    if body.get("parameter_overrides"):
-        intervention["parameter_overrides"] = body["parameter_overrides"]
-    if body.get("process_overrides"):
-        intervention["process_overrides"] = body["process_overrides"]
-    variants.append({"name": variant_name, "intervention": intervention})
+    variants.append({
+        "name": variant_name,
+        "base_composite": base_composite,
+        "parameter_overrides": overrides or {},
+    })
     sf.write_text(yaml.safe_dump(spec, sort_keys=False))
     return {"ok": True, "name": variant_name}, 200
 
@@ -836,6 +881,206 @@ def _post_study_variant_delete_for_test(ws_root, body):
     if len(remaining) == len(variants):
         return {"error": f"variant {variant_name!r} not found"}, 404
     spec["variants"] = remaining
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    return {"ok": True}, 200
+
+
+def _post_study_variant_set_params_for_test(ws_root, body):
+    """Replace a variant's parameter_overrides. Returns (response_dict, status_code).
+
+    Body:
+      study:                <name>
+      variant:              <variant name>
+      parameter_overrides:  <dict>  (replaces; does not merge)
+    """
+    study = _study_name_from_body(body)
+    variant_name = (body.get("variant") or "").strip()
+    overrides = body.get("parameter_overrides")
+    if not study or not variant_name:
+        return {"error": "missing study or variant"}, 400
+    if not isinstance(overrides, dict):
+        return {"error": "parameter_overrides must be an object"}, 400
+
+    # Inline ws_root-based path resolution (matches Task 5/6/7 pattern).
+    studies_path = ws_root / "studies" / study
+    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
+    sf = study_dir / "study.yaml"
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text()) or {}
+    variants = spec.get("variants") or []
+    for v in variants:
+        if isinstance(v, dict) and v.get("name") == variant_name:
+            v["parameter_overrides"] = dict(overrides)
+            spec["variants"] = variants
+            sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+            return {"ok": True}, 200
+    return {"error": f"variant {variant_name!r} not found"}, 404
+
+
+def _post_study_baseline_add_for_test(ws_root, body):
+    """Append a composite to study.yaml.baseline[]. Returns (response_dict, status_code).
+
+    Body:
+      study:     <name>
+      name:      <baseline entry name>  (unique within baseline)
+      composite: <pkg.composites.x>
+      params:    <dict>  (optional; defaults to {})
+    """
+    # Use body.get("study") directly — _study_name_from_body would pick up "name"
+    # (the baseline entry name field) and misidentify it as the study name.
+    study = (body.get("study") or body.get("investigation") or "").strip()
+    entry_name = (body.get("name") or "").strip()
+    composite = (body.get("composite") or "").strip()
+    params = body.get("params")
+    if not study:
+        return {"error": "missing study"}, 400
+    if not entry_name:
+        return {"error": "missing baseline entry name"}, 400
+    if not composite:
+        return {"error": "missing composite"}, 400
+    if params is not None and not isinstance(params, dict):
+        return {"error": "params must be an object"}, 400
+
+    # Inline ws_root-based path resolution (matches Task 5/6/7/8 pattern).
+    studies_path = ws_root / "studies" / study
+    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
+    sf = study_dir / "study.yaml"
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text()) or {}
+    baseline = spec.setdefault("baseline", [])
+    if any(b.get("name") == entry_name for b in baseline if isinstance(b, dict)):
+        return {"error": f"baseline entry {entry_name!r} already exists"}, 409
+    baseline.append({"name": entry_name, "composite": composite, "params": params or {}})
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    return {"ok": True, "name": entry_name}, 200
+
+
+def _post_study_baseline_remove_for_test(ws_root, body):
+    """Remove a baseline entry by name. Returns (response_dict, status_code).
+
+    Body:
+      study: <name>
+      name:  <baseline entry name>
+
+    409 if any variant has base_composite == name.
+    400 if removal would leave baseline empty.
+    """
+    study = (body.get("study") or body.get("investigation") or "").strip()
+    entry_name = (body.get("name") or "").strip()
+    if not study or not entry_name:
+        return {"error": "missing study or baseline entry name"}, 400
+
+    # Inline ws_root-based path resolution.
+    studies_path = ws_root / "studies" / study
+    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
+    sf = study_dir / "study.yaml"
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text()) or {}
+    baseline = spec.get("baseline") or []
+    remaining = [b for b in baseline
+                 if not (isinstance(b, dict) and b.get("name") == entry_name)]
+    if len(remaining) == len(baseline):
+        return {"error": f"baseline entry {entry_name!r} not found"}, 404
+
+    # Check variant dependencies BEFORE checking empty — so a sole entry that is
+    # referenced by a variant returns 409 (dependency) rather than 400 (empty).
+    dependents = [v.get("name") for v in (spec.get("variants") or [])
+                  if isinstance(v, dict) and v.get("base_composite") == entry_name]
+    if dependents:
+        return {
+            "error": f"variants reference {entry_name!r}: {', '.join(dependents)}",
+            "dependents": dependents,
+        }, 409
+
+    if not remaining:
+        return {"error": "cannot leave baseline empty"}, 400
+
+    spec["baseline"] = remaining
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    return {"ok": True}, 200
+
+
+def _post_study_intervention_add_for_test(ws_root, body):
+    """Append an intervention to study.yaml.interventions[]. Returns (response, code).
+
+    Body:
+      study:       <name>
+      name:        <intervention name>  (unique within interventions)
+      description: <freeform text>  (optional; defaults to "")
+    """
+    study = (body.get("study") or body.get("investigation") or "").strip()
+    name = (body.get("name") or "").strip()
+    description = body.get("description") or ""
+    if not study or not name:
+        return {"error": "missing study or intervention name"}, 400
+
+    # Inline ws_root-based path resolution.
+    studies_path = ws_root / "studies" / study
+    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
+    sf = study_dir / "study.yaml"
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text()) or {}
+    interventions = spec.setdefault("interventions", [])
+    if any(i.get("name") == name for i in interventions if isinstance(i, dict)):
+        return {"error": f"intervention {name!r} already exists"}, 409
+    interventions.append({"name": name, "description": description})
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    return {"ok": True, "name": name}, 200
+
+
+def _post_study_intervention_update_for_test(ws_root, body):
+    """Update an intervention's description. Returns (response, code)."""
+    study = (body.get("study") or body.get("investigation") or "").strip()
+    name = (body.get("name") or "").strip()
+    description = body.get("description") or ""
+    if not study or not name:
+        return {"error": "missing study or intervention name"}, 400
+
+    # Inline ws_root-based path resolution.
+    studies_path = ws_root / "studies" / study
+    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
+    sf = study_dir / "study.yaml"
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text()) or {}
+    for i in spec.get("interventions") or []:
+        if isinstance(i, dict) and i.get("name") == name:
+            i["description"] = description
+            sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+            return {"ok": True}, 200
+    return {"error": f"intervention {name!r} not found"}, 404
+
+
+def _post_study_intervention_delete_for_test(ws_root, body):
+    """Remove an intervention by name. Returns (response, code)."""
+    study = (body.get("study") or body.get("investigation") or "").strip()
+    name = (body.get("name") or "").strip()
+    if not study or not name:
+        return {"error": "missing study or intervention name"}, 400
+
+    # Inline ws_root-based path resolution.
+    studies_path = ws_root / "studies" / study
+    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
+    sf = study_dir / "study.yaml"
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text()) or {}
+    interventions = spec.get("interventions") or []
+    remaining = [i for i in interventions
+                 if not (isinstance(i, dict) and i.get("name") == name)]
+    if len(remaining) == len(interventions):
+        return {"error": f"intervention {name!r} not found"}, 404
+    spec["interventions"] = remaining
     sf.write_text(yaml.safe_dump(spec, sort_keys=False))
     return {"ok": True}, 200
 
@@ -1207,25 +1452,30 @@ def _safe_slug(s: str) -> str:
 
 
 def _format_baseline_source(spec: dict) -> str:
-    """Return the baseline variant's source dotted path reformatted as ``pkg_short:name``.
+    """Summarise a v3 study's baseline as a short label.
 
-    Example: ``pbg_chromosome_rep1.composites.chromosome-partition`` becomes
-    ``pbg_chromosome_rep1:chromosome-partition``. If the source has no
-    ``.composites.`` segment we fall back to the raw string. When no baseline
-    variant is declared (or the named baseline is missing from ``variants``)
-    we return an empty string so the dashboard can show ``unknown``.
+    - 1 entry: pkg_short:name if the composite contains '.composites.';
+      otherwise the composite verbatim.
+    - N entries: format the first as above, then append ' (+N-1 more)'.
+    - 0 entries / missing / not a list: ''.
     """
-    baseline_name = spec.get("baseline")
-    if not baseline_name:
+    baseline = spec.get("baseline") or []
+    if not isinstance(baseline, list) or not baseline:
         return ""
-    for v in (spec.get("variants") or []):
-        if v.get("name") == baseline_name:
-            src = v.get("source") or ""
-            if ".composites." in src:
-                pkg, _, name = src.partition(".composites.")
-                return f"{pkg}:{name}"
-            return src
-    return ""
+    first = baseline[0] if isinstance(baseline[0], dict) else None
+    if first is None:
+        return ""
+    composite = (first.get("composite") or "").strip()
+    if not composite:
+        return ""
+    if ".composites." in composite:
+        pkg, _, rest = composite.partition(".composites.")
+        label = f"{pkg}:{rest}"
+    else:
+        label = composite
+    if len(baseline) > 1:
+        return f"{label} (+{len(baseline) - 1} more)"
+    return label
 
 
 def _conclusions_excerpt(spec: dict, limit: int = 240) -> str:
@@ -3670,7 +3920,9 @@ if __name__ == "__main__":
 
     def _get_investigation_composites(self):
         """GET /api/investigation-composites?investigation=<n>
-        Returns: {composites: [{name, source?, extends?, document, ...}]}
+        Returns: {composites: [{name, source, params}]}
+        Reads the v3 ``baseline`` list; each entry is projected to
+        {name, source (was composite), params}.
         """
         import urllib.parse
         _ws_add_to_sys_path()
@@ -3686,11 +3938,15 @@ if __name__ == "__main__":
             spec = load_spec(spec_path)
         except InvestigationSpecError as e:
             return self._json({"error": f"spec error: {e}"}, 400)
-        # Post-A2: legacy ``composites:`` specs are auto-migrated to ``variants:``
-        # on read. Return whichever key is present so the dashboard keeps working
-        # across the migration window. The wire-format key stays ``composites``
-        # until the dashboard rename in B-series tasks.
-        items = spec.get("variants") or spec.get("composites") or []
+        items = [
+            {
+                "name":   b.get("name", ""),
+                "source": b.get("composite", ""),
+                "params": b.get("params") or {},
+            }
+            for b in (spec.get("baseline") or [])
+            if isinstance(b, dict)
+        ]
         return self._json({"composites": items}, 200)
 
     def _get_investigation_state_tree(self):
@@ -3755,29 +4011,30 @@ if __name__ == "__main__":
                     n_runs = len(spec.get("runs") or [])
                 else:
                     composite_summary = spec.get("composite", "")
-                    n_runs = len(spec.get("simulations") or [])
-                out.append({
-                    "name": spec["name"],
-                    "composite": composite_summary,
-                    "composites": composites,
-                    "description": spec.get("description", ""),
-                    "topic": spec.get("topic", ""),
-                    "tags": spec.get("tags") or [],
-                    "status": spec.get("status", "planned"),
-                    "last_run": spec.get("last_run"),
-                    "n_simulations": n_runs,
-                    # v2 study vocabulary (Task E1)
-                    "baseline": spec.get("baseline", ""),
-                    "n_variants": len(spec.get("variants") or []),
-                    "n_groups": len(spec.get("groups") or []),
-                    "n_comparisons": len(spec.get("comparisons") or []),
-                    "n_runs": n_runs,
-                    # Richer-card projection: pretty baseline source + one-line
-                    # conclusions preview so the index can render at-a-glance
-                    # study cards without a second fetch.
+                    # v3 uses `runs:`; legacy uses `simulations:`.
+                    n_runs = len(spec.get("runs") or spec.get("simulations") or [])
+                row = {
+                    "name":            spec["name"],
+                    "composite":       composite_summary,
+                    "composites":      composites,
+                    "description":     spec.get("description", ""),
+                    "topic":           spec.get("topic", ""),
+                    "tags":            spec.get("tags") or [],
+                    "status":          spec.get("status", "planned"),
+                    "last_run":        spec.get("last_run"),
+                    "n_simulations":   n_runs,
+                    "baseline_names":  [b.get("name", "") for b in (spec.get("baseline") or [])
+                                        if isinstance(b, dict)],
+                    "n_baseline":      len(spec.get("baseline") or []),
+                    "n_variants":      len(spec.get("variants") or []),
+                    "n_groups":        len(spec.get("groups") or []),
+                    "n_interventions": len(spec.get("interventions") or []),
+                    "n_comparisons":   len(spec.get("comparisons") or []),
+                    "n_runs":          n_runs,
                     "baseline_source": _format_baseline_source(spec),
                     "conclusions_excerpt": _conclusions_excerpt(spec),
-                })
+                }
+                out.append(row)
             except InvestigationSpecError as e:
                 out.append({
                     "name": d.name, "status": "invalid", "error": str(e),
@@ -5413,10 +5670,6 @@ if __name__ == "__main__":
         response, code = _post_study_set_objective_for_test(WORKSPACE, body)
         return self._json(response, code)
 
-    def _post_study_set_baseline_params(self, body: dict):
-        """POST /api/study-set-baseline-params {study, params}"""
-        response, code = _post_study_set_baseline_params_for_test(WORKSPACE, body)
-        return self._json(response, code)
 
     def _post_study_rename(self, body: dict):
         """POST /api/study-rename {study, new_name}"""
@@ -5447,6 +5700,30 @@ if __name__ == "__main__":
     def _post_study_variant_delete(self, body: dict):
         """POST /api/study-variant-delete {study, variant}"""
         response, code = _post_study_variant_delete_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_variant_set_params(self, body: dict):
+        response, code = _post_study_variant_set_params_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_baseline_add(self, body: dict):
+        response, code = _post_study_baseline_add_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_baseline_remove(self, body: dict):
+        response, code = _post_study_baseline_remove_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_intervention_add(self, body: dict):
+        response, code = _post_study_intervention_add_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_intervention_update(self, body: dict):
+        response, code = _post_study_intervention_update_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_intervention_delete(self, body: dict):
+        response, code = _post_study_intervention_delete_for_test(WORKSPACE, body)
         return self._json(response, code)
 
     def _post_study_run_delete(self, body: dict):
@@ -6195,7 +6472,8 @@ if __name__ == "__main__":
         return out
 
     def _manifest_studies_section(self):
-        """List of studies with name, topic, status, n_variants, n_runs, n_conclusions."""
+        """List of studies (v3) with name, topic, status, baseline_names, n_baseline,
+        n_variants, n_groups, n_interventions, n_runs, n_comparisons, conclusions_len."""
         _ws_add_to_sys_path()
         try:
             from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
@@ -6211,17 +6489,22 @@ if __name__ == "__main__":
             except (InvestigationSpecError, Exception):
                 continue
             n_runs = len(spec.get("runs") or [])
-            out.append({
+            entry = {
                 "name":             spec.get("name", d.name),
                 "topic":            spec.get("topic", ""),
                 "status":           spec.get("status", "draft"),
-                "baseline":         spec.get("baseline", ""),
+                "baseline_names":   [b.get("name", "")
+                                     for b in (spec.get("baseline") or [])
+                                     if isinstance(b, dict)],
+                "n_baseline":       len(spec.get("baseline") or []),
                 "n_variants":       len(spec.get("variants") or []),
                 "n_groups":         len(spec.get("groups") or []),
+                "n_interventions":  len(spec.get("interventions") or []),
                 "n_runs":           n_runs,
                 "n_comparisons":    len(spec.get("comparisons") or []),
                 "conclusions_len":  len(spec.get("conclusions") or ""),
-            })
+            }
+            out.append(entry)
         return out
 
     def _manifest_registry_section(self):

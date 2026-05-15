@@ -149,8 +149,14 @@ def test_migrate_v2_to_v3_preserves_all_composites_in_baseline_list():
 
 
 def test_migrate_v2_to_v3_idempotent():
-    v3_already = {"schema_version": 3, "baseline": {"composite": "x"}}
-    assert migrate_v2_to_v3(v3_already) is v3_already
+    v3_already = {
+        "schema_version": 3,
+        "name": "x",
+        "baseline": [{"name": "x", "composite": "pkg.composites.x", "params": {}}],
+        "variants": [],
+    }
+    out = migrate_v2_to_v3(v3_already)
+    assert out is v3_already
 
 
 def test_migrate_v2_to_v3_bare_composite_key():

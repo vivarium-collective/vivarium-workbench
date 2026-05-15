@@ -2913,8 +2913,13 @@
         // "library" = the package the composite ships in; data.module is the
         // submodule path (e.g. "pbg_biomodels.composites") — drop the
         // conventional .composites suffix to get the library name.
-        _loadCompositeExplorer(data.id, data.state, data.name,
-                               (data.module || '').replace(/\.composites$/, ''));
+        // parameters + overrides feed the Configure tab inside the loom iframe.
+        _loadCompositeExplorer(
+          data.id, data.state, data.name,
+          (data.module || '').replace(/\.composites$/, ''),
+          data.parameters,
+          window._ceCurrent.overrides || {},
+        );
         // Render parameter editor
         _ceRenderParameters(data.parameters);
         // Render state JSON (Document tab now lives inside the iframe — this
@@ -2951,7 +2956,7 @@
   // Can be called with a pre-resolved state object (from _ceFetch) or with
   // just a ref string, in which case it fetches /api/composite-state first.
   // When ui.composite_view === 'bigraph-viz', uses the legacy SVG path instead.
-  function _loadCompositeExplorer(ref, stateObj, nameHint, libraryHint) {
+  function _loadCompositeExplorer(ref, stateObj, nameHint, libraryHint, parametersHint, overridesHint) {
     // Apply visibility toggle each time the explorer is loaded (catches cases
     // where the config fetch completed after the first render).
     _applyCompositeViewMode();
@@ -2969,6 +2974,8 @@
       var payload = {
         type: 'composite:load',
         state: state,
+        parameters: parametersHint || undefined,
+        overrides: overridesHint || {},
         metadata: { name: name || ref, library: libraryHint || '', id: ref },
       };
       window._loomLastState = window._loomLastState || {};

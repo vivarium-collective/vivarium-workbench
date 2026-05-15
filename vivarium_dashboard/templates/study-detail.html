@@ -7,95 +7,231 @@
 </head>
 <body>
 <header class="study-header">
-  <h1><span class="study-name" id="study-name">{{ name }}</span>
-      <span class="status-badge status-{{ study.status }}">{{ study.status }}</span></h1>
-  <div class="study-meta">
-    {{ study.runs|length }} run(s) &middot;
-    {{ study.variants|length }} variant(s) &middot;
-    {{ study.status }}
-  </div>
-  <div class="study-actions">
-    <button class="btn-rename" data-study="{{ name }}">Rename</button>
-    <button class="btn-export" data-study="{{ name }}">Export</button>
-    <button class="btn-delete danger" data-study="{{ name }}">Delete</button>
-  </div>
+  <h1 class="study-title">
+    <span class="study-name" id="study-name">{{ name }}</span>
+    <span class="status-pill status-{{ study.status or 'planned' }}">{{ study.status or 'planned' }}</span>
+  </h1>
 </header>
 
-<section class="card" id="card-objective">
-  <h2>Objective</h2>
-  <div id="objective-text" data-editable="true">{{ study.objective or '(blank — click to write)' }}</div>
-</section>
+<nav class="study-tabs" aria-label="Study sections">
+  <button class="study-tab active" data-kind="overview"      onclick="_setStudyTab('overview')">Overview</button>
+  <button class="study-tab"        data-kind="baseline"      onclick="_setStudyTab('baseline')">Baseline</button>
+  <button class="study-tab"        data-kind="variants"      onclick="_setStudyTab('variants')">Variants</button>
+  <button class="study-tab"        data-kind="interventions" onclick="_setStudyTab('interventions')">Interventions</button>
+  <button class="study-tab"        data-kind="runs"          onclick="_setStudyTab('runs')">Runs</button>
+</nav>
 
-<section class="card" id="card-baseline">
-  <h2>Baseline</h2>
-  <p>Composite: <code>{{ study.baseline.composite }}</code></p>
-  <table id="baseline-params">
-    {% for k, v in (study.baseline.params or {}).items() %}
-    <tr><th>{{ k }}</th><td>{{ v }}</td></tr>
-    {% endfor %}
-  </table>
-  <button class="btn-run-baseline">Run baseline</button>
-  <button class="btn-edit-baseline-params">Edit params</button>
-</section>
-
-<section class="card" id="card-variants">
-  <h2>Variants ({{ study.variants|length }})</h2>
-  <div id="variants-list">
-    {% for v in (study.variants or []) %}
-    <div class="variant" data-variant="{{ v.name }}">
-      <h3>{{ v.name }}</h3>
-      <p>{{ v.intervention.description if v.intervention else '' }}</p>
-      <pre>{{ v.intervention.parameter_overrides if v.intervention else '' }}</pre>
-      <button class="btn-run-variant" data-variant="{{ v.name }}">Run variant</button>
-      <button class="btn-edit-variant" data-variant="{{ v.name }}">Edit</button>
-      <button class="btn-delete-variant" data-variant="{{ v.name }}">Delete</button>
+<section class="study-tab-panel active" data-kind="overview" id="panel-overview">
+  <div class="study-overview">
+    <div class="overview-section">
+      <h2 class="overview-label">Objective</h2>
+      <div id="objective-text" class="overview-prose" data-editable="true"
+           data-placeholder="(set an objective for this study)">{{ study.objective or '' }}</div>
     </div>
-    {% endfor %}
+
+    <div class="study-counts-strip">
+      <div class="count-cell">
+        <strong>{{ (study.variants or [])|length }}</strong>
+        <span class="count-label">variants</span>
+      </div>
+      <div class="count-cell">
+        <strong>{{ (study.runs or [])|length }}</strong>
+        <span class="count-label">runs</span>
+      </div>
+      <div class="count-cell">
+        <strong>{{ (study.interventions or [])|length }}</strong>
+        <span class="count-label">interventions</span>
+      </div>
+    </div>
+
+    <div class="overview-section">
+      <h2 class="overview-label">Conclusion</h2>
+      <div id="conclusion-text" class="overview-prose" data-editable="true"
+           data-placeholder="(fill in when the study wraps)">{{ study.conclusion or '' }}</div>
+    </div>
   </div>
-  <button class="btn-add-variant">+ Add variant</button>
 </section>
 
-<section class="card" id="card-runs">
-  <h2>Runs ({{ study.runs|length }})</h2>
-  <table id="runs-table">
-    <thead><tr><th></th><th>Variant</th><th>Label</th><th>Steps</th><th>Status</th><th>Viz</th><th>Actions</th></tr></thead>
-    <tbody>
-    {% for r in (study.runs or []) %}
-    <tr data-run-id="{{ r.run_id }}">
-      <td><input type="checkbox" class="run-compare-checkbox" value="{{ r.run_id }}"></td>
-      <td>{{ r.variant or 'baseline' }}</td>
-      <td>{{ r.label or '' }}</td>
-      <td>{{ r.n_steps or '' }}</td>
-      <td>{{ r.status }}</td>
-      <td>{% if r.viz %}&#127902;{% endif %}</td>
-      <td>
-        <button class="btn-view-run" data-run-id="{{ r.run_id }}">View</button>
-        <button class="btn-delete-run" data-run-id="{{ r.run_id }}">Delete</button>
-      </td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  <button class="btn-compare-selected">Compare selected</button>
-  <button class="btn-clear-runs danger">Clear all runs</button>
-</section>
-
-<section class="card" id="card-viz">
-  <h2>Visualizations</h2>
-  <div id="viz-list">
-    {% for v in (study.visualizations or []) %}
-    <div class="viz-config">{{ v.name }} &middot; {{ v.kind }}</div>
+<section class="study-tab-panel" data-kind="baseline" id="panel-baseline">
+  <div class="baseline-list">
+    {% for b in (study.baseline or []) %}
+    <article class="baseline-entry" data-baseline-name="{{ b.name }}">
+      <header class="baseline-entry-header">
+        <h3 class="baseline-entry-name">{{ b.name }}</h3>
+        <code class="baseline-entry-fqn">{{ b.composite }}</code>
+      </header>
+      {% if b.params %}
+      <table class="baseline-params">
+        <thead><tr><th>Parameter</th><th>Value</th></tr></thead>
+        <tbody>
+          {% for k, v in b.params.items() %}
+          <tr><td><code>{{ k }}</code></td><td><code>{{ v }}</code></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      <div class="baseline-entry-actions">
+        <button class="btn-run-baseline" data-baseline-name="{{ b.name }}">Run</button>
+        <button class="btn-baseline-remove" data-baseline-name="{{ b.name }}">Remove</button>
+      </div>
+    </article>
+    {% else %}
+    <p class="empty-message">No baseline composites yet. Add one to begin.</p>
     {% endfor %}
   </div>
-  <button class="btn-add-viz">+ Add visualization</button>
+
+  <details class="baseline-add-form">
+    <summary class="btn-baseline-add">+ Add composite</summary>
+    <form id="baseline-add-form" onsubmit="return _submitBaselineAdd(event)">
+      <label>Name (short, unique): <input name="name" required pattern="[a-zA-Z0-9_-]+"></label>
+      <label>Composite ID: <input name="composite" required placeholder="pkg.composites.foo"></label>
+      <label>Params (JSON, optional): <textarea name="params" placeholder="{}"></textarea></label>
+      <button type="submit">Add</button>
+    </form>
+  </details>
 </section>
 
-<section class="card" id="card-conclusion">
-  <h2>Conclusion</h2>
-  <div id="conclusion-text" data-editable="true">
-    {{ (study.conclusion and study.conclusion.text) or '(blank)' }}
+<section class="study-tab-panel" data-kind="variants" id="panel-variants">
+  <div class="variants-list">
+    {% for v in (study.variants or []) %}
+    <article class="variant-row" data-variant-name="{{ v.name }}"
+             data-base-composite="{{ v.base_composite or '' }}">
+      <header class="variant-row-header">
+        <h3 class="variant-name">{{ v.name }}</h3>
+        <span class="variant-base">based on <code>{{ v.base_composite or '(none)' }}</code></span>
+        <span class="variant-overrides-count muted">{{ (v.parameter_overrides or {})|length }} override(s)</span>
+      </header>
+      {% if v.parameter_overrides %}
+      <details class="variant-overrides-detail">
+        <summary>Parameter overrides</summary>
+        <table class="variant-overrides-table">
+          <tbody>
+          {% for k, val in v.parameter_overrides.items() %}
+          <tr><td><code>{{ k }}</code></td><td><code>{{ val }}</code></td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </details>
+      {% endif %}
+      <div class="variant-row-actions">
+        <button class="btn-variant-edit" data-variant-name="{{ v.name }}">Edit params</button>
+        <button class="btn-variant-delete" data-variant-name="{{ v.name }}">Delete</button>
+        <button class="btn-variant-run" data-variant-name="{{ v.name }}">Run</button>
+      </div>
+    </article>
+    {% else %}
+    <p class="empty-message">No variants yet. Add one to perturb a baseline composite's parameters.</p>
+    {% endfor %}
   </div>
-  <button class="btn-mark-complete">Mark complete</button>
+
+  <details class="variant-add-form-wrapper">
+    <summary class="btn-variant-new">+ New variant</summary>
+    <form id="variant-new-form" onsubmit="return _submitVariantAdd(event)">
+      <label>Name: <input name="name" required pattern="[a-zA-Z0-9_-]+"></label>
+      <label>Base composite:
+        <select name="base_composite" required onchange="_onBaseCompositeChange(this)">
+          <option value="">— pick a baseline composite —</option>
+          {% for b in (study.baseline or []) %}
+          <option value="{{ b.name }}" data-composite-id="{{ b.composite }}">{{ b.name }} ({{ b.composite }})</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div id="variant-new-params" class="param-form">
+        <p class="muted">Pick a base composite to see its parameters.</p>
+      </div>
+      <button type="submit">Save variant</button>
+    </form>
+  </details>
+
+  <!-- Hidden edit form, populated dynamically when "Edit params" is clicked -->
+  <dialog id="variant-edit-dialog">
+    <form id="variant-edit-form" onsubmit="return _submitVariantEdit(event)" method="dialog">
+      <h3>Edit parameter overrides for <code id="variant-edit-name"></code></h3>
+      <div id="variant-edit-params" class="param-form"></div>
+      <menu>
+        <button type="button" onclick="document.getElementById('variant-edit-dialog').close()">Cancel</button>
+        <button type="submit">Save</button>
+      </menu>
+    </form>
+  </dialog>
+</section>
+
+<section class="study-tab-panel" data-kind="interventions" id="panel-interventions">
+  <div class="interventions-list">
+    {% for i in (study.interventions or []) %}
+    <article class="intervention-row" data-intervention-name="{{ i.name }}">
+      <header class="intervention-row-header">
+        <h3 class="intervention-name">{{ i.name }}</h3>
+      </header>
+      <p class="intervention-description"
+         id="intervention-description-{{ i.name }}"
+         data-editable-intervention="{{ i.name }}">{{ i.description or '' }}</p>
+      <div class="intervention-row-actions">
+        <button class="btn-intervention-delete" data-intervention-name="{{ i.name }}">Delete</button>
+      </div>
+    </article>
+    {% else %}
+    <p class="empty-message">No interventions yet. Add one to record an experimental condition.</p>
+    {% endfor %}
+  </div>
+
+  <details class="intervention-add-form-wrapper">
+    <summary class="btn-intervention-new">+ New intervention</summary>
+    <form id="intervention-new-form" onsubmit="return _submitInterventionAdd(event)">
+      <label>Name: <input name="name" required pattern="[a-zA-Z0-9_-]+"></label>
+      <label>Description: <textarea name="description" placeholder="Describe the experimental condition"></textarea></label>
+      <button type="submit">Add</button>
+    </form>
+  </details>
+</section>
+
+<section class="study-tab-panel" data-kind="runs" id="panel-runs">
+  <div class="runs-section">
+    <h3 class="section-title">Runs</h3>
+    <table id="runs-table">
+      <thead>
+        <tr>
+          <th></th>
+          <th>Variant / Baseline</th>
+          <th>Label</th>
+          <th>Steps</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in (study.runs or []) %}
+        <tr data-run-id="{{ r.run_id }}">
+          <td><input type="checkbox" class="run-compare-checkbox" value="{{ r.run_id }}"></td>
+          <td>{{ r.variant or r.composite or 'baseline' }}</td>
+          <td>{{ r.label or '' }}</td>
+          <td>{{ r.n_steps or '' }}</td>
+          <td>{{ r.status }}</td>
+          <td>
+            <button class="btn-view-run" data-run-id="{{ r.run_id }}">View</button>
+            <button class="btn-delete-run" data-run-id="{{ r.run_id }}">Delete</button>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="empty-message">No runs yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="runs-actions">
+      <button class="btn-compare-selected">Compare selected</button>
+      <button class="btn-clear-runs danger">Clear all runs</button>
+    </div>
+  </div>
+
+  <div class="viz-section">
+    <h3 class="section-title">Visualizations</h3>
+    <div id="viz-list">
+      {% for v in (study.visualizations or []) %}
+      <div class="viz-config">{{ v.name }} <code class="muted">{{ v.address or '' }}</code></div>
+      {% endfor %}
+    </div>
+    <button class="btn-add-viz">+ Add visualization</button>
+  </div>
 </section>
 
 <script>

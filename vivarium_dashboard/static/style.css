@@ -1039,3 +1039,160 @@ body.focus-mode::before{
 .registry-entry code{ font-size:0.88em }
 .registry-entry pre{ margin:4px 0; max-height:200px; overflow:auto }
 
+/* ===== Study Detail — 5-tab redesign (Plan 3) ===== */
+
+/* Tab bar — visually identical to .registry-tabs but scoped */
+.study-tabs {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  border-bottom: 1px solid #e5e7eb;
+  margin: 16px 0 20px;
+}
+.study-tab {
+  background: transparent;
+  border: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  margin: 0;
+  font: inherit;
+  font-size: 0.95em;
+  color: #6b7280;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.12s, border-color 0.12s;
+}
+.study-tab:hover { color: #1f2937; }
+.study-tab.active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+  font-weight: 600;
+}
+.study-tab-panel { display: none; padding: 8px 0; }
+.study-tab-panel.active { display: block; }
+
+/* Study header — name + status pill */
+.study-header { margin: 0 0 8px; }
+.study-title { display: flex; align-items: center; gap: 12px; margin: 0; font-size: 1.6em; }
+.study-title .study-name { font-weight: 600; }
+
+/* Overview tab — notebook layout */
+.study-overview { max-width: 760px; }
+.overview-section { margin-bottom: 24px; }
+.overview-label { font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gray); margin: 0 0 6px; }
+.overview-prose {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  min-height: 40px;
+  white-space: pre-wrap;
+  cursor: text;
+}
+.overview-prose:empty::before {
+  content: attr(data-placeholder);
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.study-counts-strip {
+  display: flex;
+  gap: 24px;
+  padding: 12px 0;
+  border-top: 1px solid #eee;
+  border-bottom: 1px solid #eee;
+  margin: 18px 0;
+}
+.count-cell { display: flex; flex-direction: column; align-items: flex-start; min-width: 60px; }
+.count-cell strong { font-size: 1.2em; }
+.count-cell .count-label { color: #888; font-size: 0.78em; }
+
+/* Baseline tab */
+.baseline-list { display: flex; flex-direction: column; gap: 12px; }
+.baseline-entry {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+}
+.baseline-entry-header { display: flex; align-items: baseline; gap: 12px; }
+.baseline-entry-name { margin: 0; font-size: 1.05em; }
+.baseline-entry-fqn { color: var(--gray); font-size: 0.85em; }
+.baseline-params { width: 100%; margin-top: 8px; font-size: 0.85em; border-collapse: collapse; }
+.baseline-params th, .baseline-params td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #f3f4f6; }
+.baseline-entry-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+.baseline-add-form, .variant-add-form-wrapper, .intervention-add-form-wrapper {
+  margin-top: 16px;
+}
+.baseline-add-form summary, .variant-add-form-wrapper summary, .intervention-add-form-wrapper summary {
+  display: inline-block;
+  cursor: pointer;
+  color: #2563eb;
+  font-weight: 600;
+}
+.baseline-add-form form, .variant-add-form-wrapper form, .intervention-add-form-wrapper form {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 500px;
+}
+.baseline-add-form label, .variant-add-form-wrapper label, .intervention-add-form-wrapper label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.9em;
+}
+
+/* Variants tab */
+.variants-list { display: flex; flex-direction: column; gap: 12px; }
+.variant-row {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+}
+.variant-row-header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.variant-name { margin: 0; font-size: 1.05em; }
+.variant-base { color: var(--gray); font-size: 0.9em; }
+.variant-overrides-count { font-size: 0.85em; }
+.variant-overrides-detail { margin-top: 8px; }
+.variant-overrides-table { width: 100%; font-size: 0.85em; border-collapse: collapse; }
+.variant-overrides-table td { padding: 3px 8px; border-bottom: 1px solid #f3f4f6; }
+.variant-row-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+.param-form { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.param-row { display: flex; flex-direction: column; gap: 2px; }
+.param-label { display: flex; align-items: center; gap: 10px; }
+.param-input { padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px; min-width: 200px; }
+.param-desc { font-size: 0.8em; }
+
+/* Interventions tab */
+.interventions-list { display: flex; flex-direction: column; gap: 12px; }
+.intervention-row {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+}
+.intervention-row-header { display: flex; align-items: baseline; gap: 12px; }
+.intervention-name { margin: 0; font-size: 1.05em; }
+.intervention-description { margin: 8px 0; cursor: text; min-height: 1.5em; white-space: pre-wrap; }
+.intervention-description:empty::before {
+  content: "(click to add a description)";
+  color: #9ca3af;
+  font-style: italic;
+}
+.intervention-row-actions { display: flex; gap: 8px; margin-top: 4px; }
+
+/* Empty state */
+.empty-message { color: var(--gray); font-style: italic; padding: 12px 0; }
+
+/* Run-related shared utilities */
+.section-title { font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gray); margin: 16px 0 8px; }
+.muted { color: var(--gray); }
+.danger { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+
