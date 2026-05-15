@@ -141,19 +141,17 @@ def test_post_visualization_generate_rejects_bad_name(workspace_server):
 # ---------------------------------------------------------------------------
 
 def test_get_investigation_composites_lists_entries(workspace_server):
+    """GET /api/investigation-composites returns the v3 study baseline list."""
     inv_dir = workspace_server.root / 'investigations' / 'demo'
     inv_dir.mkdir(parents=True)
-    composites_dir = inv_dir / 'composites'
-    composites_dir.mkdir()
-    (composites_dir / 'baseline.yaml').write_text(yaml.safe_dump({
-        'name': 'baseline-doc',
-        'state': {'foo': {'_type': 'integer', '_default': 1}},
-    }))
     (inv_dir / 'spec.yaml').write_text(yaml.safe_dump({
+        'schema_version': 3,
         'name': 'demo',
-        'composites': [{'name': 'baseline', 'source': 'pkg.x',
-                         'document': './composites/baseline.yaml'}],
-        'runs': [],
+        'baseline': [
+            {'name': 'core', 'composite': 'pkg.composites.core', 'params': {'k': 1}},
+            {'name': 'alt',  'composite': 'pkg.composites.alt',  'params': {}},
+        ],
+        'variants': [], 'runs': [],
     }, sort_keys=False))
 
     req = urllib.request.Request(
@@ -161,9 +159,13 @@ def test_get_investigation_composites_lists_entries(workspace_server):
     )
     with urllib.request.urlopen(req) as resp:
         data = json.loads(resp.read())
-    assert len(data['composites']) == 1
-    assert data['composites'][0]['name'] == 'baseline'
-    assert data['composites'][0]['document'] == './composites/baseline.yaml'
+
+    assert len(data['composites']) == 2
+    assert data['composites'][0]['name'] == 'core'
+    assert data['composites'][0]['source'] == 'pkg.composites.core'
+    assert data['composites'][0]['params'] == {'k': 1}
+    assert data['composites'][1]['name'] == 'alt'
+    assert data['composites'][1]['source'] == 'pkg.composites.alt'
 
 
 def test_get_investigation_state_tree(workspace_server):

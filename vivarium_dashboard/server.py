@@ -3628,7 +3628,9 @@ if __name__ == "__main__":
 
     def _get_investigation_composites(self):
         """GET /api/investigation-composites?investigation=<n>
-        Returns: {composites: [{name, source?, extends?, document, ...}]}
+        Returns: {composites: [{name, source, params}]}
+        Reads the v3 ``baseline`` list; each entry is projected to
+        {name, source (was composite), params}.
         """
         import urllib.parse
         _ws_add_to_sys_path()
@@ -3644,11 +3646,15 @@ if __name__ == "__main__":
             spec = load_spec(spec_path)
         except InvestigationSpecError as e:
             return self._json({"error": f"spec error: {e}"}, 400)
-        # Post-A2: legacy ``composites:`` specs are auto-migrated to ``variants:``
-        # on read. Return whichever key is present so the dashboard keeps working
-        # across the migration window. The wire-format key stays ``composites``
-        # until the dashboard rename in B-series tasks.
-        items = spec.get("variants") or spec.get("composites") or []
+        items = [
+            {
+                "name":   b.get("name", ""),
+                "source": b.get("composite", ""),
+                "params": b.get("params") or {},
+            }
+            for b in (spec.get("baseline") or [])
+            if isinstance(b, dict)
+        ]
         return self._json({"composites": items}, 200)
 
     def _get_investigation_state_tree(self):
