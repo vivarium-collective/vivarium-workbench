@@ -44,6 +44,34 @@ from threading import Lock
 import yaml
 
 
+def _strip_process_instances(state):
+    """Strip live Process/Step instances from a state tree before JSON encoding.
+
+    Composite generators (e.g. v2ecoli's ``make_edge``) attach the live
+    Python ``instance`` to the state dict alongside the serialisable
+    ``address`` + ``config``. The instance can't cross a JSON boundary;
+    address+config is sufficient for the child subprocess to rebuild the
+    composite via ``Composite()`` + ``core.register_link``. The
+    ``_inputs``/``_outputs`` schema sidecars are also dropped here — they
+    come from ``instance.inputs()``/``outputs()`` and will be rederived by
+    the child when it instantiates the class.
+
+    Walks dicts and lists; leaves non-container leaves untouched. Returns a
+    new tree (does not mutate the input).
+    """
+    if isinstance(state, dict):
+        out = {}
+        is_edge = state.get('_type') in ('step', 'process')
+        for k, v in state.items():
+            if is_edge and k in ('instance', '_inputs', '_outputs'):
+                continue
+            out[k] = _strip_process_instances(v)
+        return out
+    if isinstance(state, list):
+        return [_strip_process_instances(v) for v in state]
+    return state
+
+
 def _json_default(o):
     """JSON serialization fallback for objects json.dumps can't handle natively.
 
@@ -1300,36 +1328,92 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
     """
     from vivarium_dashboard.lib import composite_runs as cr
 
-    state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
+    # Are we running a registered @composite_generator? If so, the child can
+    # rebuild the composite in its own process from (spec_id, overrides) —
+    # no state serialization needed. This avoids the live-Process-instance
+    # problem in shared partitioned-process pools (v2ecoli) and the pint
+    # Quantity infinite-recursion problem in repr() that JSON-encoding the
+    # parent-built state used to hit. Non-generator callers (file-based
+    # composites) keep the old state-serialization path below.
+    use_generator_path = False
+    try:
+        from pbg_superpowers.composite_generator import _REGISTRY, discover_generators
+        if not _REGISTRY:
+            discover_generators()
+        use_generator_path = spec_id in _REGISTRY
+    except ImportError:
+        pass
 
     py = sys.executable
-    # Hoist the state document out of argv: for v2ecoli-scale composites
-    # (55 processes, large bulk arrays) the JSON is megabytes and embedding
-    # it in a `python -c` script blows past ARG_MAX with OSError [Errno 7]
-    # "Argument list too long". Write it to a temp file the child reads.
     import tempfile as _tempfile
-    _state_fd, _state_path = _tempfile.mkstemp(suffix=".state.json", prefix="vivarium-run-")
-    try:
-        with os.fdopen(_state_fd, "w") as _f:
-            json.dump(state, _f, default=_json_default)
-    except Exception:
-        try: os.unlink(_state_path)
-        except OSError: pass
-        raise
+    from bigraph_schema.json_codec import BigraphJSONEncoder
 
-    script = textwrap.dedent(f"""
-        import json, sys, traceback
+    if use_generator_path:
+        # Pass (spec_id, overrides) as small JSON; the child builds + injects
+        # the SQLiteEmitter + runs entirely in-process.
+        _state_path = None
+        payload = {
+            "spec_id": spec_id,
+            "overrides": overrides or {},
+            "run_id": run_id,
+            "db_file": db_file,
+            "steps": steps,
+        }
+        script = textwrap.dedent(f"""
+            import json, sys, traceback
+            try:
+                from {pkg}.core import build_core
+                from process_bigraph import Composite, gather_emitter_results
+                from process_bigraph.emitter import SQLiteEmitter
+                from pbg_superpowers.composite_generator import (
+                    _REGISTRY, build_generator, discover_generators,
+                )
+                from vivarium_dashboard.lib import composite_runs as cr
+                from bigraph_schema.json_codec import BigraphJSONEncoder as _BJE
+                _payload = {payload!r}
+                if not _REGISTRY: discover_generators()
+                entry = _REGISTRY[_payload['spec_id']]
+                core = build_core()
+                core.register_link('SQLiteEmitter', SQLiteEmitter)
+                doc = build_generator(entry, overrides=_payload['overrides'])
+                state = doc.get('state', doc) if isinstance(doc, dict) else doc
+                state = cr.inject_sqlite_emitter(
+                    state, run_id=_payload['run_id'], db_file=_payload['db_file'])
+                composite = Composite({{'state': state}}, core=core)
+                composite.run(_payload['steps'])
+                results = gather_emitter_results(composite)
+        """).lstrip("\n")
+    else:
+        # Legacy path: serialize the pre-built state into a tempfile.
+        state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
+        state = _strip_process_instances(state)
+        _state_fd, _state_path = _tempfile.mkstemp(suffix=".state.json", prefix="vivarium-run-")
         try:
-            from {pkg}.core import build_core
-            from process_bigraph import Composite, gather_emitter_results
-            from process_bigraph.emitter import SQLiteEmitter
-            core = build_core()
-            core.register_link('SQLiteEmitter', SQLiteEmitter)
-            with open({_state_path!r}) as _sf:
-                _state = json.load(_sf)
-            composite = Composite({{'state': _state}}, core=core)
-            composite.run({steps})
-            results = gather_emitter_results(composite)
+            with os.fdopen(_state_fd, "w") as _f:
+                json.dump(state, _f, cls=BigraphJSONEncoder)
+        except Exception:
+            try: os.unlink(_state_path)
+            except OSError: pass
+            raise
+
+        script = textwrap.dedent(f"""
+            import json, sys, traceback
+            try:
+                from {pkg}.core import build_core
+                from process_bigraph import Composite, gather_emitter_results
+                from process_bigraph.emitter import SQLiteEmitter
+                from bigraph_schema.json_codec import bigraph_json_hook
+                core = build_core()
+                core.register_link('SQLiteEmitter', SQLiteEmitter)
+                with open({_state_path!r}) as _sf:
+                    _state = json.load(_sf, object_hook=bigraph_json_hook)
+                composite = Composite({{'state': _state}}, core=core)
+                composite.run({steps})
+                results = gather_emitter_results(composite)
+        """).lstrip("\n")
+
+    # Shared tail: gather results + viz HTML + emit @@@RESULTS@@@ block.
+    script += textwrap.dedent(f"""
             # Flatten tuple keys to JSON-friendly dotted strings
             out = {{}}
             for path_tuple, entries in results.items():
@@ -1345,8 +1429,9 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                     viz_html[key] = payload
             except Exception:
                 viz_html = {{}}
+            from bigraph_schema.json_codec import BigraphJSONEncoder as _BJE
             print('@@@RESULTS@@@')
-            print(json.dumps({{'results': out, 'viz_html': viz_html}}, default=str))
+            print(json.dumps({{'results': out, 'viz_html': viz_html}}, cls=_BJE))
         except Exception as e:
             print('@@@ERROR@@@')
             print(traceback.format_exc())
@@ -1380,8 +1465,9 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                 cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
                 return ({"simulation_id": run_id, "error": "run timed out"}, 504)
         finally:
-            try: os.unlink(_state_path)
-            except OSError: pass
+            if _state_path is not None:
+                try: os.unlink(_state_path)
+                except OSError: pass
 
         out = result.stdout
         if "@@@ERROR@@@" in out:
@@ -1391,7 +1477,11 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                      "traceback": tb}, 502)
 
         try:
-            payload = json.loads(out.split("@@@RESULTS@@@", 1)[1].strip())
+            from bigraph_schema.json_codec import bigraph_json_hook
+            payload = json.loads(
+                out.split("@@@RESULTS@@@", 1)[1].strip(),
+                object_hook=bigraph_json_hook,
+            )
         except (IndexError, json.JSONDecodeError):
             cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
             return ({"simulation_id": run_id,
