@@ -232,6 +232,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/study-variant-set-params":    "_post_study_variant_set_params",
     "/api/study-baseline-add":          "_post_study_baseline_add",
     "/api/study-baseline-remove":       "_post_study_baseline_remove",
+    "/api/study-intervention-add":      "_post_study_intervention_add",
     "/api/study-run-delete":            "_post_study_run_delete",
     "/api/study-runs-clear":            "_post_study_runs_clear",
     "/api/study-comparison-add":        "_post_study_comparison_add",
@@ -1016,6 +1017,36 @@ def _post_study_baseline_remove_for_test(ws_root, body):
     spec["baseline"] = remaining
     sf.write_text(yaml.safe_dump(spec, sort_keys=False))
     return {"ok": True}, 200
+
+
+def _post_study_intervention_add_for_test(ws_root, body):
+    """Append an intervention to study.yaml.interventions[]. Returns (response, code).
+
+    Body:
+      study:       <name>
+      name:        <intervention name>  (unique within interventions)
+      description: <freeform text>  (optional; defaults to "")
+    """
+    study = (body.get("study") or body.get("investigation") or "").strip()
+    name = (body.get("name") or "").strip()
+    description = body.get("description") or ""
+    if not study or not name:
+        return {"error": "missing study or intervention name"}, 400
+
+    # Inline ws_root-based path resolution.
+    studies_path = ws_root / "studies" / study
+    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
+    sf = study_dir / "study.yaml"
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text()) or {}
+    interventions = spec.setdefault("interventions", [])
+    if any(i.get("name") == name for i in interventions if isinstance(i, dict)):
+        return {"error": f"intervention {name!r} already exists"}, 409
+    interventions.append({"name": name, "description": description})
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    return {"ok": True, "name": name}, 200
 
 
 def _post_study_run_delete_for_test(ws_root, body):
@@ -5602,6 +5633,10 @@ if __name__ == "__main__":
 
     def _post_study_baseline_remove(self, body: dict):
         response, code = _post_study_baseline_remove_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_intervention_add(self, body: dict):
+        response, code = _post_study_intervention_add_for_test(WORKSPACE, body)
         return self._json(response, code)
 
     def _post_study_run_delete(self, body: dict):
