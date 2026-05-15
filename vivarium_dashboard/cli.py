@@ -71,18 +71,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
     pid_file = server_dir / "server.pid"
     pid_file.write_text(str(os.getpid()))
 
-    # Register the running dashboard in ~/.pbg/servers/<name>.json so the
-    # workspace switcher in other dashboards can see it.
-    from pbg_superpowers import workspace_catalog
-    ws_name = _workspace_name(workspace)
-    workspace_catalog.register_server(
-        name=ws_name, path=workspace,
-        pid=os.getpid(), port=port,
-        url=f"http://127.0.0.1:{port}",
-    )
-
     def _unregister():
         try:
+            from pbg_superpowers import workspace_catalog
             workspace_catalog.unregister_server(workspace)
         except Exception:
             pass
@@ -91,16 +82,32 @@ def cmd_serve(args: argparse.Namespace) -> int:
         except FileNotFoundError:
             pass
 
+    # Register the cleanup hook FIRST so pid_file is always removed, even
+    # if registration in the global running registry fails below.
     import atexit
-    import signal as _signal
     atexit.register(_unregister)
 
-    def _sig_handler(signum, frame):
-        _unregister()
-        if signum == _signal.SIGTERM:
+    # Register the running dashboard in ~/.pbg/servers/<name>.json so the
+    # workspace switcher in other dashboards can see it. Failure here is
+    # non-fatal — the dashboard still works, it just won't appear in other
+    # dashboards' switchers.
+    try:
+        from pbg_superpowers import workspace_catalog
+        ws_name = _workspace_name(workspace)
+        workspace_catalog.register_server(
+            name=ws_name, path=workspace,
+            pid=os.getpid(), port=port,
+            url=f"http://127.0.0.1:{port}",
+        )
+        import signal as _signal
+
+        def _sig_handler(signum, frame):
+            _unregister()
             sys.exit(0)
 
-    _signal.signal(_signal.SIGTERM, _sig_handler)
+        _signal.signal(_signal.SIGTERM, _sig_handler)
+    except Exception as e:
+        print(f"warning: workspace switcher registration failed: {e}", file=sys.stderr)
 
     print(f"\nWorkspace dashboard: http://127.0.0.1:{port}")
     print("   (Ctrl-C to stop)\n")
