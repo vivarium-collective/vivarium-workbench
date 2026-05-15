@@ -276,7 +276,7 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         registry=registry,
         registry_warning=registry_warning,
         pbg_doc_json=json.dumps(pbg_doc, indent=2, default=str),
-    ))
+    ), encoding="utf-8")
     return out
 
 

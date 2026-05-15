@@ -44,6 +44,34 @@ from threading import Lock
 import yaml
 
 
+def _strip_process_instances(state):
+    """Strip live Process/Step instances from a state tree before JSON encoding.
+
+    Composite generators (e.g. v2ecoli's ``make_edge``) attach the live
+    Python ``instance`` to the state dict alongside the serialisable
+    ``address`` + ``config``. The instance can't cross a JSON boundary;
+    address+config is sufficient for the child subprocess to rebuild the
+    composite via ``Composite()`` + ``core.register_link``. The
+    ``_inputs``/``_outputs`` schema sidecars are also dropped here — they
+    come from ``instance.inputs()``/``outputs()`` and will be rederived by
+    the child when it instantiates the class.
+
+    Walks dicts and lists; leaves non-container leaves untouched. Returns a
+    new tree (does not mutate the input).
+    """
+    if isinstance(state, dict):
+        out = {}
+        is_edge = state.get('_type') in ('step', 'process')
+        for k, v in state.items():
+            if is_edge and k in ('instance', '_inputs', '_outputs'):
+                continue
+            out[k] = _strip_process_instances(v)
+        return out
+    if isinstance(state, list):
+        return [_strip_process_instances(v) for v in state]
+    return state
+
+
 def _json_default(o):
     """JSON serialization fallback for objects json.dumps can't handle natively.
 
@@ -418,13 +446,27 @@ def _study_dir(name: str):
     return WORKSPACE / "investigations" / name
 
 
-def _study_spec_path(name: str):
-    """Resolve a study's spec file: ``study.yaml`` (v3) or ``spec.yaml`` (legacy)."""
-    d = _study_dir(name)
-    study_yaml = d / "study.yaml"
+def _study_spec_file(study_dir):
+    """Path-based variant of :func:`_study_spec_path` for handlers that already
+    have a ``study_dir`` (e.g. ``*_for_test`` callers that take ``ws_root``
+    explicitly rather than using the WORKSPACE global).
+
+    Prefers ``study.yaml`` (v3 convention) when present, falls back to legacy
+    ``spec.yaml``. Returns ``study_dir / "study.yaml"`` as the not-found
+    default so callers' ``is_file()`` checks behave the same as before.
+    """
+    study_yaml = study_dir / "study.yaml"
     if study_yaml.is_file():
         return study_yaml
-    return d / "spec.yaml"
+    spec_yaml = study_dir / "spec.yaml"
+    if spec_yaml.is_file():
+        return spec_yaml
+    return study_yaml
+
+
+def _study_spec_path(name: str):
+    """Resolve a study's spec file: ``study.yaml`` (v3) or ``spec.yaml`` (legacy)."""
+    return _study_spec_file(_study_dir(name))
 
 
 def _study_detail_spec(name: str):
@@ -613,7 +655,7 @@ def _post_study_create_from_run_for_test(ws_root, body):
 
 def _append_study_run(study_dir, run_record: dict) -> None:
     """Append a run record to a Study's study.yaml `runs` list."""
-    sf = study_dir / "study.yaml"
+    sf = _study_spec_file(study_dir)
     spec = yaml.safe_load(sf.read_text()) or {}
     spec.setdefault("runs", []).append(run_record)
     sf.write_text(yaml.safe_dump(spec, sort_keys=False))
@@ -637,6 +679,10 @@ def _resolve_study_baseline_state(pkg, spec_id, params):
     if not _REGISTRY:
         discover_generators()
     entry = _REGISTRY.get(spec_id)
+    # Allow `local:<name>` shorthand: look up by entry.name when no exact id match.
+    if entry is None and spec_id.startswith("local:"):
+        short_name = spec_id[len("local:"):]
+        entry = next((e for e in _REGISTRY.values() if e.name == short_name), None)
     if entry is None:
         # The registry may be stale (cleared by test teardown or a registry
         # reset). Force-reload the module that defines this composite so its
@@ -685,11 +731,16 @@ def _post_study_run_baseline_for_test(ws_root, body):
     # Resolve study dir from ws_root so _for_test callers don't need WORKSPACE patched.
     studies_path = ws_root / "studies" / name
     study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / name
-    sf = study_dir / "study.yaml"
+    sf = _study_spec_file(study_dir)
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
     spec = yaml.safe_load(sf.read_text()) or {}
+    # Auto-migrate legacy v2-shape specs (baseline: <str>, variants: [...]) to
+    # the v3 list shape this handler expects. In-memory only; doesn't rewrite
+    # the file. Keeps legacy investigations/spec.yaml usable.
+    from vivarium_dashboard.lib.spec_migration import migrate_v2_to_v3
+    spec = migrate_v2_to_v3(spec)
     baseline = spec.get("baseline") or []
     if not isinstance(baseline, list) or not baseline:
         return {"error": "study has no baseline composites"}, 400
@@ -758,11 +809,14 @@ def _post_study_run_variant_for_test(ws_root, body):
     # standalone tests without monkeypatching WORKSPACE).
     studies_path = ws_root / "studies" / name
     study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / name
-    sf = study_dir / "study.yaml"
+    sf = _study_spec_file(study_dir)
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
     spec = yaml.safe_load(sf.read_text()) or {}
+    # Auto-migrate legacy v2-shape specs to v3 list shape (see run-baseline).
+    from vivarium_dashboard.lib.spec_migration import migrate_v2_to_v3
+    spec = migrate_v2_to_v3(spec)
     baseline = spec.get("baseline") or []
     if not isinstance(baseline, list) or not baseline:
         return {"error": "study has no baseline composites"}, 400
@@ -842,7 +896,7 @@ def _post_study_variant_add_for_test(ws_root, body):
     # Inline ws_root-based path resolution (matches Task 5/6 pattern).
     studies_path = ws_root / "studies" / study
     study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
-    sf = study_dir / "study.yaml"
+    sf = _study_spec_file(study_dir)
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
@@ -871,7 +925,7 @@ def _post_study_variant_delete_for_test(ws_root, body):
     variant_name = (body.get("variant") or "").strip()
     if not study or not variant_name:
         return {"error": "missing study or variant"}, 400
-    sf = _study_dir(study) / "study.yaml"
+    sf = _study_spec_file(_study_dir(study))
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
@@ -904,7 +958,7 @@ def _post_study_variant_set_params_for_test(ws_root, body):
     # Inline ws_root-based path resolution (matches Task 5/6/7 pattern).
     studies_path = ws_root / "studies" / study
     study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
-    sf = study_dir / "study.yaml"
+    sf = _study_spec_file(study_dir)
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
@@ -946,7 +1000,7 @@ def _post_study_baseline_add_for_test(ws_root, body):
     # Inline ws_root-based path resolution (matches Task 5/6/7/8 pattern).
     studies_path = ws_root / "studies" / study
     study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
-    sf = study_dir / "study.yaml"
+    sf = _study_spec_file(study_dir)
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
@@ -977,7 +1031,7 @@ def _post_study_baseline_remove_for_test(ws_root, body):
     # Inline ws_root-based path resolution.
     studies_path = ws_root / "studies" / study
     study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
-    sf = study_dir / "study.yaml"
+    sf = _study_spec_file(study_dir)
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
@@ -1023,7 +1077,7 @@ def _post_study_intervention_add_for_test(ws_root, body):
     # Inline ws_root-based path resolution.
     studies_path = ws_root / "studies" / study
     study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
-    sf = study_dir / "study.yaml"
+    sf = _study_spec_file(study_dir)
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
@@ -1047,7 +1101,7 @@ def _post_study_intervention_update_for_test(ws_root, body):
     # Inline ws_root-based path resolution.
     studies_path = ws_root / "studies" / study
     study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
-    sf = study_dir / "study.yaml"
+    sf = _study_spec_file(study_dir)
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
@@ -1070,7 +1124,7 @@ def _post_study_intervention_delete_for_test(ws_root, body):
     # Inline ws_root-based path resolution.
     studies_path = ws_root / "studies" / study
     study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
-    sf = study_dir / "study.yaml"
+    sf = _study_spec_file(study_dir)
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
@@ -1092,7 +1146,7 @@ def _post_study_run_delete_for_test(ws_root, body):
     if not study or not run_id:
         return {"error": "missing study or run_id"}, 400
     study_dir = _study_dir(study)
-    sf = study_dir / "study.yaml"
+    sf = _study_spec_file(study_dir)
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
@@ -1122,7 +1176,7 @@ def _post_study_runs_clear_for_test(ws_root, body):
     if not study:
         return {"error": "missing study"}, 400
     study_dir = _study_dir(study)
-    sf = study_dir / "study.yaml"
+    sf = _study_spec_file(study_dir)
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
@@ -1155,7 +1209,7 @@ def _post_study_comparison_add_for_test(ws_root, body):
         return {"error": "missing study"}, 400
     if not isinstance(run_ids, list) or len(run_ids) < 2:
         return {"error": "run_ids must be a list of at least 2 run ids"}, 400
-    sf = _study_dir(study) / "study.yaml"
+    sf = _study_spec_file(_study_dir(study))
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
@@ -1274,20 +1328,92 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
     """
     from vivarium_dashboard.lib import composite_runs as cr
 
-    state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
+    # Are we running a registered @composite_generator? If so, the child can
+    # rebuild the composite in its own process from (spec_id, overrides) —
+    # no state serialization needed. This avoids the live-Process-instance
+    # problem in shared partitioned-process pools (v2ecoli) and the pint
+    # Quantity infinite-recursion problem in repr() that JSON-encoding the
+    # parent-built state used to hit. Non-generator callers (file-based
+    # composites) keep the old state-serialization path below.
+    use_generator_path = False
+    try:
+        from pbg_superpowers.composite_generator import _REGISTRY, discover_generators
+        if not _REGISTRY:
+            discover_generators()
+        use_generator_path = spec_id in _REGISTRY
+    except ImportError:
+        pass
 
     py = sys.executable
-    script = textwrap.dedent(f"""
-        import json, sys, traceback
+    import tempfile as _tempfile
+    from bigraph_schema.json_codec import BigraphJSONEncoder
+
+    if use_generator_path:
+        # Pass (spec_id, overrides) as small JSON; the child builds + injects
+        # the SQLiteEmitter + runs entirely in-process.
+        _state_path = None
+        payload = {
+            "spec_id": spec_id,
+            "overrides": overrides or {},
+            "run_id": run_id,
+            "db_file": db_file,
+            "steps": steps,
+        }
+        script = textwrap.dedent(f"""
+            import json, sys, traceback
+            try:
+                from {pkg}.core import build_core
+                from process_bigraph import Composite, gather_emitter_results
+                from process_bigraph.emitter import SQLiteEmitter
+                from pbg_superpowers.composite_generator import (
+                    _REGISTRY, build_generator, discover_generators,
+                )
+                from vivarium_dashboard.lib import composite_runs as cr
+                from bigraph_schema.json_codec import BigraphJSONEncoder as _BJE
+                _payload = {payload!r}
+                if not _REGISTRY: discover_generators()
+                entry = _REGISTRY[_payload['spec_id']]
+                core = build_core()
+                core.register_link('SQLiteEmitter', SQLiteEmitter)
+                doc = build_generator(entry, overrides=_payload['overrides'])
+                state = doc.get('state', doc) if isinstance(doc, dict) else doc
+                state = cr.inject_sqlite_emitter(
+                    state, run_id=_payload['run_id'], db_file=_payload['db_file'])
+                composite = Composite({{'state': state}}, core=core)
+                composite.run(_payload['steps'])
+                results = gather_emitter_results(composite)
+        """).lstrip("\n")
+    else:
+        # Legacy path: serialize the pre-built state into a tempfile.
+        state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
+        state = _strip_process_instances(state)
+        _state_fd, _state_path = _tempfile.mkstemp(suffix=".state.json", prefix="vivarium-run-")
         try:
-            from {pkg}.core import build_core
-            from process_bigraph import Composite, gather_emitter_results
-            from process_bigraph.emitter import SQLiteEmitter
-            core = build_core()
-            core.register_link('SQLiteEmitter', SQLiteEmitter)
-            composite = Composite({{'state': __import__('json').loads({json.dumps(json.dumps(state, default=_json_default))})}}, core=core)
-            composite.run({steps})
-            results = gather_emitter_results(composite)
+            with os.fdopen(_state_fd, "w") as _f:
+                json.dump(state, _f, cls=BigraphJSONEncoder)
+        except Exception:
+            try: os.unlink(_state_path)
+            except OSError: pass
+            raise
+
+        script = textwrap.dedent(f"""
+            import json, sys, traceback
+            try:
+                from {pkg}.core import build_core
+                from process_bigraph import Composite, gather_emitter_results
+                from process_bigraph.emitter import SQLiteEmitter
+                from bigraph_schema.json_codec import bigraph_json_hook
+                core = build_core()
+                core.register_link('SQLiteEmitter', SQLiteEmitter)
+                with open({_state_path!r}) as _sf:
+                    _state = json.load(_sf, object_hook=bigraph_json_hook)
+                composite = Composite({{'state': _state}}, core=core)
+                composite.run({steps})
+                results = gather_emitter_results(composite)
+        """).lstrip("\n")
+
+    # Shared tail: gather results + viz HTML + emit @@@RESULTS@@@ block.
+    script += textwrap.dedent(f"""
             # Flatten tuple keys to JSON-friendly dotted strings
             out = {{}}
             for path_tuple, entries in results.items():
@@ -1303,8 +1429,9 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                     viz_html[key] = payload
             except Exception:
                 viz_html = {{}}
+            from bigraph_schema.json_codec import BigraphJSONEncoder as _BJE
             print('@@@RESULTS@@@')
-            print(json.dumps({{'results': out, 'viz_html': viz_html}}, default=str))
+            print(json.dumps({{'results': out, 'viz_html': viz_html}}, cls=_BJE))
         except Exception as e:
             print('@@@ERROR@@@')
             print(traceback.format_exc())
@@ -1325,17 +1452,22 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                      "error": "duplicate run_id (rare timing collision) — retry"}, 500)
 
         try:
-            result = subprocess.run([py, "-c", script], cwd=WORKSPACE,
-                                    capture_output=True, text=True, timeout=timeout)
-        except subprocess.TimeoutExpired as exc:
             try:
-                if exc.process is not None:
-                    exc.process.kill()
-                    exc.process.communicate(timeout=2)
-            except Exception:
-                pass
-            cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
-            return ({"simulation_id": run_id, "error": "run timed out"}, 504)
+                result = subprocess.run([py, "-c", script], cwd=WORKSPACE,
+                                        capture_output=True, text=True, timeout=timeout)
+            except subprocess.TimeoutExpired as exc:
+                try:
+                    if exc.process is not None:
+                        exc.process.kill()
+                        exc.process.communicate(timeout=2)
+                except Exception:
+                    pass
+                cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
+                return ({"simulation_id": run_id, "error": "run timed out"}, 504)
+        finally:
+            if _state_path is not None:
+                try: os.unlink(_state_path)
+                except OSError: pass
 
         out = result.stdout
         if "@@@ERROR@@@" in out:
@@ -1345,7 +1477,11 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                      "traceback": tb}, 502)
 
         try:
-            payload = json.loads(out.split("@@@RESULTS@@@", 1)[1].strip())
+            from bigraph_schema.json_codec import bigraph_json_hook
+            payload = json.loads(
+                out.split("@@@RESULTS@@@", 1)[1].strip(),
+                object_hook=bigraph_json_hook,
+            )
         except (IndexError, json.JSONDecodeError):
             cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
             return ({"simulation_id": run_id,
