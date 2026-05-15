@@ -231,6 +231,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/study-variant-delete":        "_post_study_variant_delete",
     "/api/study-variant-set-params":    "_post_study_variant_set_params",
     "/api/study-baseline-add":          "_post_study_baseline_add",
+    "/api/study-baseline-remove":       "_post_study_baseline_remove",
     "/api/study-run-delete":            "_post_study_run_delete",
     "/api/study-runs-clear":            "_post_study_runs_clear",
     "/api/study-comparison-add":        "_post_study_comparison_add",
@@ -968,6 +969,53 @@ def _post_study_baseline_add_for_test(ws_root, body):
     baseline.append({"name": entry_name, "composite": composite, "params": params or {}})
     sf.write_text(yaml.safe_dump(spec, sort_keys=False))
     return {"ok": True, "name": entry_name}, 200
+
+
+def _post_study_baseline_remove_for_test(ws_root, body):
+    """Remove a baseline entry by name. Returns (response_dict, status_code).
+
+    Body:
+      study: <name>
+      name:  <baseline entry name>
+
+    409 if any variant has base_composite == name.
+    400 if removal would leave baseline empty.
+    """
+    study = (body.get("study") or body.get("investigation") or "").strip()
+    entry_name = (body.get("name") or "").strip()
+    if not study or not entry_name:
+        return {"error": "missing study or baseline entry name"}, 400
+
+    # Inline ws_root-based path resolution.
+    studies_path = ws_root / "studies" / study
+    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
+    sf = study_dir / "study.yaml"
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text()) or {}
+    baseline = spec.get("baseline") or []
+    remaining = [b for b in baseline
+                 if not (isinstance(b, dict) and b.get("name") == entry_name)]
+    if len(remaining) == len(baseline):
+        return {"error": f"baseline entry {entry_name!r} not found"}, 404
+
+    # Check variant dependencies BEFORE checking empty — so a sole entry that is
+    # referenced by a variant returns 409 (dependency) rather than 400 (empty).
+    dependents = [v.get("name") for v in (spec.get("variants") or [])
+                  if isinstance(v, dict) and v.get("base_composite") == entry_name]
+    if dependents:
+        return {
+            "error": f"variants reference {entry_name!r}: {', '.join(dependents)}",
+            "dependents": dependents,
+        }, 409
+
+    if not remaining:
+        return {"error": "cannot leave baseline empty"}, 400
+
+    spec["baseline"] = remaining
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    return {"ok": True}, 200
 
 
 def _post_study_run_delete_for_test(ws_root, body):
@@ -5550,6 +5598,10 @@ if __name__ == "__main__":
 
     def _post_study_baseline_add(self, body: dict):
         response, code = _post_study_baseline_add_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_baseline_remove(self, body: dict):
+        response, code = _post_study_baseline_remove_for_test(WORKSPACE, body)
         return self._json(response, code)
 
     def _post_study_run_delete(self, body: dict):
