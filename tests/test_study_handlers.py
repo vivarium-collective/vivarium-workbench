@@ -140,3 +140,50 @@ def test_variant_add_rejects_duplicate_name(_study_workspace):
         {"study": "s1", "name": "fast", "base_composite": "core"},
     )
     assert code == 409
+
+
+def test_variant_set_params_replaces_overrides(_study_workspace):
+    """Replaces parameter_overrides wholesale (not a merge)."""
+    from vivarium_dashboard.server import (
+        _post_study_variant_add_for_test,
+        _post_study_variant_set_params_for_test,
+    )
+    _post_study_variant_add_for_test(
+        _study_workspace,
+        {"study": "s1", "name": "v1", "base_composite": "core",
+         "parameter_overrides": {"a": 1, "b": 2}},
+    )
+    resp, code = _post_study_variant_set_params_for_test(
+        _study_workspace,
+        {"study": "s1", "variant": "v1", "parameter_overrides": {"c": 3}},
+    )
+    assert code == 200
+    spec = yaml.safe_load((_study_workspace / "studies" / "s1" / "study.yaml").read_text())
+    v = next(v for v in spec["variants"] if v["name"] == "v1")
+    assert v["parameter_overrides"] == {"c": 3}
+
+
+def test_variant_set_params_404_unknown_variant(_study_workspace):
+    from vivarium_dashboard.server import _post_study_variant_set_params_for_test
+    resp, code = _post_study_variant_set_params_for_test(
+        _study_workspace,
+        {"study": "s1", "variant": "ghost", "parameter_overrides": {}},
+    )
+    assert code == 404
+
+
+def test_variant_set_params_400_non_dict(_study_workspace):
+    """parameter_overrides must be an object."""
+    from vivarium_dashboard.server import (
+        _post_study_variant_add_for_test,
+        _post_study_variant_set_params_for_test,
+    )
+    _post_study_variant_add_for_test(
+        _study_workspace,
+        {"study": "s1", "name": "v1", "base_composite": "core"},
+    )
+    resp, code = _post_study_variant_set_params_for_test(
+        _study_workspace,
+        {"study": "s1", "variant": "v1", "parameter_overrides": "not a dict"},
+    )
+    assert code == 400

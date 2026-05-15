@@ -229,6 +229,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/study-run-variant":           "_post_study_run_variant",
     "/api/study-variant-add":           "_post_study_variant_add",
     "/api/study-variant-delete":        "_post_study_variant_delete",
+    "/api/study-variant-set-params":    "_post_study_variant_set_params",
     "/api/study-run-delete":            "_post_study_run_delete",
     "/api/study-runs-clear":            "_post_study_runs_clear",
     "/api/study-comparison-add":        "_post_study_comparison_add",
@@ -892,6 +893,40 @@ def _post_study_variant_delete_for_test(ws_root, body):
     spec["variants"] = remaining
     sf.write_text(yaml.safe_dump(spec, sort_keys=False))
     return {"ok": True}, 200
+
+
+def _post_study_variant_set_params_for_test(ws_root, body):
+    """Replace a variant's parameter_overrides. Returns (response_dict, status_code).
+
+    Body:
+      study:                <name>
+      variant:              <variant name>
+      parameter_overrides:  <dict>  (replaces; does not merge)
+    """
+    study = _study_name_from_body(body)
+    variant_name = (body.get("variant") or "").strip()
+    overrides = body.get("parameter_overrides")
+    if not study or not variant_name:
+        return {"error": "missing study or variant"}, 400
+    if not isinstance(overrides, dict):
+        return {"error": "parameter_overrides must be an object"}, 400
+
+    # Inline ws_root-based path resolution (matches Task 5/6/7 pattern).
+    studies_path = ws_root / "studies" / study
+    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
+    sf = study_dir / "study.yaml"
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text()) or {}
+    variants = spec.get("variants") or []
+    for v in variants:
+        if isinstance(v, dict) and v.get("name") == variant_name:
+            v["parameter_overrides"] = dict(overrides)
+            spec["variants"] = variants
+            sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+            return {"ok": True}, 200
+    return {"error": f"variant {variant_name!r} not found"}, 404
 
 
 def _post_study_run_delete_for_test(ws_root, body):
@@ -5466,6 +5501,10 @@ if __name__ == "__main__":
     def _post_study_variant_delete(self, body: dict):
         """POST /api/study-variant-delete {study, variant}"""
         response, code = _post_study_variant_delete_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_variant_set_params(self, body: dict):
+        response, code = _post_study_variant_set_params_for_test(WORKSPACE, body)
         return self._json(response, code)
 
     def _post_study_run_delete(self, body: dict):
