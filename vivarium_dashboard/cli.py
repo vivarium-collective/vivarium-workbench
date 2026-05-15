@@ -94,6 +94,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
     try:
         from pbg_superpowers import workspace_catalog
         ws_name = _workspace_name(workspace)
+        # Ensure this workspace appears in OTHER dashboards' switchers.
+        # add() is idempotent; safe to call on every boot.
+        workspace_catalog.add(workspace)
         workspace_catalog.register_server(
             name=ws_name, path=workspace,
             pid=os.getpid(), port=port,
