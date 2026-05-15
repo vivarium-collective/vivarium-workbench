@@ -966,11 +966,16 @@ def run_investigation(ws_root: Path, name: str, *,
     Returns:
         {name, n_runs, n_visualizations, status, viz_paths, errors}
     """
-    from scripts._lib import composite_runs as cr
+    from vivarium_dashboard.lib import composite_runs as cr
 
     ws_root = Path(ws_root)
     inv_dir = ws_root / "investigations" / name
     spec_path = inv_dir / "spec.yaml"
+    if not spec_path.is_file():
+        # v3 convention uses study.yaml; fall back to it when spec.yaml is absent.
+        alt = inv_dir / "study.yaml"
+        if alt.is_file():
+            spec_path = alt
     spec = load_spec(spec_path)  # raises InvestigationSpecError on bad shape
 
     if not acquire_run_lock(ws_root, name):
