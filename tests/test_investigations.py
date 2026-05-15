@@ -402,7 +402,14 @@ def test_render_visualizations_v2_writes_html(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_load_spec_accepts_composites_list(tmp_path):
-    """Legacy ``composites:`` shape is auto-migrated to ``variants:`` on read."""
+    """Legacy ``composites:`` shape is auto-migrated to v3 on read.
+
+    The first composite with ``source`` becomes a baseline entry; composites
+    with ``extends`` become variant entries.  Plan 1 changed the v3 shape:
+    ``baseline`` is now a list of ``{name, composite, params}`` mappings, and
+    variants carry ``base_composite`` + ``parameter_overrides`` (no nested
+    ``intervention`` wrapper).
+    """
     from vivarium_dashboard.lib.investigations import load_spec
     spec_path = tmp_path / 'spec.yaml'
     spec_path.write_text(
@@ -418,31 +425,27 @@ def test_load_spec_accepts_composites_list(tmp_path):
         'visualizations: []\n'
     )
     spec = load_spec(spec_path)
-    # Migration has run: composites is gone, variants is present.
+    # Migration has run: composites is gone; v3 list-baseline shape is present.
     assert 'composites' not in spec
-    assert len(spec['variants']) == 2
-    assert spec['variants'][0]['name'] == 'baseline'
-    assert spec['variants'][1]['extends'] == 'baseline'
+    assert spec.get('schema_version') == 3
+    # The source-bearing composite becomes the sole baseline entry.
+    assert isinstance(spec['baseline'], list)
+    assert len(spec['baseline']) == 1
+    assert spec['baseline'][0]['name'] == 'baseline'
+    assert spec['baseline'][0]['composite'] == 'pkg.composites.foo'
+    # The extends-bearing composite becomes a variant with base_composite.
+    assert len(spec['variants']) == 1
+    assert spec['variants'][0]['name'] == 'hi'
+    assert spec['variants'][0]['base_composite'] == 'baseline'
+    assert spec['variants'][0]['parameter_overrides'] == {'rate': 2.0}
+    # runs list is preserved as-is.
     assert spec['runs'][0]['composite'] == 'baseline'
 
 
-def test_load_spec_rejects_runs_without_composite_when_multi():
-    from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
-    import tempfile, pathlib, yaml
-    bad = {
-        'name': 'x',
-        'composites': [{'name': 'baseline', 'source': 'pkg.x', 'document': './c/b.yaml'}],
-        'runs': [{'steps': 10}],
-    }
-    with tempfile.TemporaryDirectory() as d:
-        p = pathlib.Path(d) / 'spec.yaml'
-        p.write_text(yaml.safe_dump(bad))
-        try:
-            load_spec(p)
-        except InvestigationSpecError as e:
-            assert 'composite' in str(e).lower()
-            return
-    raise AssertionError('expected InvestigationSpecError')
+# test_load_spec_rejects_runs_without_composite_when_multi was deleted (Plan 1 Task 7).
+# The v2 "composites" validator enforced that every run entry had a "composite"
+# field; the v3 _validate_study_v3 validator treats runs as a free-form list and
+# does not inspect individual run entries, so the rejection rule no longer exists.
 
 
 def test_load_spec_rejects_extends_referencing_undeclared():
@@ -466,26 +469,9 @@ def test_load_spec_rejects_extends_referencing_undeclared():
     raise AssertionError('expected InvestigationSpecError')
 
 
-def test_load_spec_rejects_duplicate_composite_names():
-    from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
-    import tempfile, pathlib, yaml
-    bad = {
-        'name': 'x',
-        'composites': [
-            {'name': 'baseline', 'source': 'pkg.x', 'document': './c/b.yaml'},
-            {'name': 'baseline', 'source': 'pkg.y', 'document': './c/b2.yaml'},
-        ],
-        'runs': [],
-    }
-    with tempfile.TemporaryDirectory() as d:
-        p = pathlib.Path(d) / 'spec.yaml'
-        p.write_text(yaml.safe_dump(bad))
-        try:
-            load_spec(p)
-        except InvestigationSpecError as e:
-            assert 'duplicate' in str(e).lower() or 'baseline' in str(e)
-            return
-    raise AssertionError('expected InvestigationSpecError')
+# test_load_spec_rejects_duplicate_composite_names was deleted (Plan 1 Task 7).
+# The v2 _validate_composites_list enforced no duplicate names; _validate_study_v3
+# has no such check yet (flagged as a follow-up for a later plan).
 
 
 def test_load_spec_legacy_single_composite_still_accepted(tmp_path):
@@ -634,6 +620,13 @@ def test_run_investigation_iterates_runs_and_passes_state_doc(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_load_spec_accepts_variants_shape(tmp_path):
+    """v2 'variants-as-composites' shape is migrated to v3 on read.
+
+    The entry with ``source`` (no ``extends``) becomes the sole baseline list
+    item; ``variants`` ends up empty since there are no extends-bearing entries.
+    Plan 1 changed ``baseline`` from a string to a list of
+    ``{name, composite, params}`` mappings.
+    """
     p = tmp_path / 'spec.yaml'
     p.write_text(
         "name: s\n"
@@ -642,8 +635,13 @@ def test_load_spec_accepts_variants_shape(tmp_path):
         "  - {name: a, source: pkg.a}\n"
     )
     spec = load_spec(p)
-    assert spec['baseline'] == 'a'
-    assert len(spec['variants']) == 1
+    assert spec.get('schema_version') == 3
+    assert isinstance(spec['baseline'], list)
+    assert len(spec['baseline']) == 1
+    assert spec['baseline'][0]['name'] == 'a'
+    assert spec['baseline'][0]['composite'] == 'pkg.a'
+    # The source-only entry moved to baseline; no extends entries → variants empty.
+    assert spec['variants'] == []
 
 
 def test_load_spec_migrates_legacy_composites_shape_on_read(tmp_path):
@@ -661,16 +659,10 @@ def test_load_spec_migrates_legacy_composites_shape_on_read(tmp_path):
     assert 'composites' not in p.read_text()
 
 
-def test_load_spec_validates_baseline_references_a_variant(tmp_path):
-    p = tmp_path / 'spec.yaml'
-    p.write_text(
-        "name: s\n"
-        "baseline: missing\n"
-        "variants:\n"
-        "  - {name: a, source: pkg.a}\n"
-    )
-    with pytest.raises(InvestigationSpecError, match="baseline 'missing'"):
-        load_spec(p)
+# test_load_spec_validates_baseline_references_a_variant was deleted (Plan 1 Task 7).
+# In v2 the string ``baseline:`` field was validated to name a declared variant;
+# in v3 ``baseline`` is a list of composite mappings produced by migration, so the
+# "named-string baseline must match a variant" rule no longer exists.
 
 
 # ---------------------------------------------------------------------------
@@ -701,30 +693,8 @@ def test_load_spec_accepts_groups_list(tmp_path):
     assert spec['groups'][1]['variants'] == ['b']
 
 
-def test_load_spec_rejects_group_with_unknown_variant(tmp_path):
-    p = tmp_path / 'spec.yaml'
-    p.write_text(
-        "name: s\n"
-        "baseline: a\n"
-        "variants:\n"
-        "  - {name: a, source: pkg.a}\n"
-        "groups:\n"
-        "  - {name: control, variants: [ghost]}\n"
-    )
-    with pytest.raises(InvestigationSpecError, match="ghost"):
-        load_spec(p)
-
-
-def test_load_spec_rejects_duplicate_group_names(tmp_path):
-    p = tmp_path / 'spec.yaml'
-    p.write_text(
-        "name: s\n"
-        "baseline: a\n"
-        "variants:\n"
-        "  - {name: a, source: pkg.a}\n"
-        "groups:\n"
-        "  - {name: control, variants: [a]}\n"
-        "  - {name: control, variants: [a]}\n"
-    )
-    with pytest.raises(InvestigationSpecError, match="duplicate group name"):
-        load_spec(p)
+# test_load_spec_rejects_group_with_unknown_variant was deleted (Plan 1 Task 7).
+# test_load_spec_rejects_duplicate_group_names was deleted (Plan 1 Task 7).
+# Both tests exercised v2 _validate_variants_list groups-validation.  The redesign
+# drops groups from the UI; _validate_study_v3 (v3) does not validate groups at
+# all, so these rejection rules no longer fire.

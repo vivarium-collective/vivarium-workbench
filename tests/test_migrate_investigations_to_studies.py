@@ -47,14 +47,20 @@ def test_migration_dry_run_makes_no_changes(_ws_with_v2_investigation):
 
 
 def test_migration_rewrites_spec_to_v3(_ws_with_v2_investigation):
+    """Plan 1 changed the v3 shape: ``baseline`` is now a list of
+    ``{name, composite, params}`` mappings (not a single dict)."""
     from vivarium_dashboard.cli import migrate_investigations_to_studies
     migrate_investigations_to_studies(_ws_with_v2_investigation, dry_run=False)
     spec = yaml.safe_load(
         (_ws_with_v2_investigation / "studies" / "old" / "study.yaml").read_text()
     )
     assert spec["schema_version"] == 3
-    assert spec["baseline"] == {"composite": "pkg.composites.foo", "params": {"x": 1}}
     assert "composites" not in spec
+    assert isinstance(spec["baseline"], list)
+    assert len(spec["baseline"]) == 1
+    entry = spec["baseline"][0]
+    assert entry["composite"] == "pkg.composites.foo"
+    assert entry["params"] == {"x": 1}
 
 
 def test_migration_idempotent(_ws_with_v2_investigation):
