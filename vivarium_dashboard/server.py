@@ -232,6 +232,11 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/study-run-delete":            "_post_study_run_delete",
     "/api/study-runs-clear":            "_post_study_runs_clear",
     "/api/study-comparison-add":        "_post_study_comparison_add",
+    # Workspace-switcher POST endpoints.
+    "/api/workspaces/add":           "_post_workspaces_add",
+    "/api/workspaces/forget":        "_post_workspaces_forget",
+    "/api/workspaces/cleanup-stale": "_post_workspaces_cleanup_stale",
+    "/api/workspaces/start":         "_post_workspaces_start",
 }
 # Inject study-alias routes into the POST route map (same method name as old).
 for _old, _new in _POST_STUDY_ALIASES.items():
@@ -7003,6 +7008,20 @@ if __name__ == "__main__":
         result["workspaces"].sort(key=lambda r: (order.get(r["status"], 99), r["name"]))
 
         self._json(result, 200)
+
+    def _post_workspaces_add(self, body: dict):
+        """POST /api/workspaces/add — register an existing workspace in the catalog."""
+        path = body.get("path") if isinstance(body, dict) else None
+        if not path or not isinstance(path, str) or not path.startswith("/"):
+            self._json({"error": "path must be an absolute string"}, 400)
+            return
+        from pbg_superpowers import workspace_catalog
+        try:
+            entry = workspace_catalog.add(path)
+        except ValueError as e:
+            self._json({"error": str(e)}, 400)
+            return
+        self._json(entry, 200)
 
     def _read_workspace_name(self, root: Path) -> str:
         """Read `name` from <root>/workspace.yaml; fall back to dir basename."""

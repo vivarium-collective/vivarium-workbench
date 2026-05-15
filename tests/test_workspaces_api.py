@@ -237,3 +237,58 @@ def test_catalog_with_stale_entry(server, tmp_path):
     assert stale_row["pid"] == dead_pid, (
         f"Expected pid={dead_pid}, got pid={stale_row.get('pid')}"
     )
+
+
+def _post_json(url, payload):
+    """POST JSON to url; return (status_code, response_dict).
+    Raises urllib.error.HTTPError on 4xx/5xx (caller can catch and read body).
+    """
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return r.status, json.loads(r.read().decode())
+
+
+def test_post_workspaces_add(server, tmp_path):
+    """POST /api/workspaces/add registers a valid workspace and returns its catalog entry."""
+    import urllib.error
+
+    new_ws = tmp_path / "added-ws"
+    new_ws.mkdir()
+    (new_ws / "workspace.yaml").write_text("name: added-ws\npackage: pbg_added_ws\n")
+
+    status, resp = _post_json(f"{server['url']}/api/workspaces/add", {"path": str(new_ws)})
+    assert status == 200
+    assert resp["name"] == "added-ws"
+    assert resp["path"] == str(new_ws.resolve())
+
+    # Verify the catalog on disk was updated (pbg_home is shared with the subprocess)
+    catalog_path = server["pbg_home"] / "workspaces.json"
+    catalog_data = json.loads(catalog_path.read_text())
+    paths = [e["path"] for e in catalog_data["workspaces"]]
+    assert str(new_ws.resolve()) in paths
+
+
+def test_post_workspaces_add_rejects_non_workspace(server, tmp_path):
+    """POST /api/workspaces/add returns 400 when the path has no workspace.yaml."""
+    import urllib.error
+
+    bogus = tmp_path / "no-yaml-here"
+    bogus.mkdir()
+
+    req = urllib.request.Request(
+        f"{server['url']}/api/workspaces/add",
+        data=json.dumps({"path": str(bogus)}).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(req, timeout=10)
+    assert exc.value.code == 400
+    body = json.loads(exc.value.read())
+    assert "workspace.yaml" in body["error"]
