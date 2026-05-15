@@ -230,6 +230,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/study-variant-add":           "_post_study_variant_add",
     "/api/study-variant-delete":        "_post_study_variant_delete",
     "/api/study-variant-set-params":    "_post_study_variant_set_params",
+    "/api/study-baseline-add":          "_post_study_baseline_add",
     "/api/study-run-delete":            "_post_study_run_delete",
     "/api/study-runs-clear":            "_post_study_runs_clear",
     "/api/study-comparison-add":        "_post_study_comparison_add",
@@ -927,6 +928,46 @@ def _post_study_variant_set_params_for_test(ws_root, body):
             sf.write_text(yaml.safe_dump(spec, sort_keys=False))
             return {"ok": True}, 200
     return {"error": f"variant {variant_name!r} not found"}, 404
+
+
+def _post_study_baseline_add_for_test(ws_root, body):
+    """Append a composite to study.yaml.baseline[]. Returns (response_dict, status_code).
+
+    Body:
+      study:     <name>
+      name:      <baseline entry name>  (unique within baseline)
+      composite: <pkg.composites.x>
+      params:    <dict>  (optional; defaults to {})
+    """
+    # Use body.get("study") directly — _study_name_from_body would pick up "name"
+    # (the baseline entry name field) and misidentify it as the study name.
+    study = (body.get("study") or body.get("investigation") or "").strip()
+    entry_name = (body.get("name") or "").strip()
+    composite = (body.get("composite") or "").strip()
+    params = body.get("params")
+    if not study:
+        return {"error": "missing study"}, 400
+    if not entry_name:
+        return {"error": "missing baseline entry name"}, 400
+    if not composite:
+        return {"error": "missing composite"}, 400
+    if params is not None and not isinstance(params, dict):
+        return {"error": "params must be an object"}, 400
+
+    # Inline ws_root-based path resolution (matches Task 5/6/7/8 pattern).
+    studies_path = ws_root / "studies" / study
+    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
+    sf = study_dir / "study.yaml"
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text()) or {}
+    baseline = spec.setdefault("baseline", [])
+    if any(b.get("name") == entry_name for b in baseline if isinstance(b, dict)):
+        return {"error": f"baseline entry {entry_name!r} already exists"}, 409
+    baseline.append({"name": entry_name, "composite": composite, "params": params or {}})
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    return {"ok": True, "name": entry_name}, 200
 
 
 def _post_study_run_delete_for_test(ws_root, body):
@@ -5505,6 +5546,10 @@ if __name__ == "__main__":
 
     def _post_study_variant_set_params(self, body: dict):
         response, code = _post_study_variant_set_params_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_baseline_add(self, body: dict):
+        response, code = _post_study_baseline_add_for_test(WORKSPACE, body)
         return self._json(response, code)
 
     def _post_study_run_delete(self, body: dict):
