@@ -787,7 +787,70 @@ def _post_study_run_baseline_for_test(ws_root, body):
             "status": "completed", "n_steps": steps,
             "composite": entry.get("name"),
         })
+        # Render canonical viz: composite defaults from
+        # @composite_generator(visualizations=...) merged with Study-declared
+        # ones (Study wins on name collision). Writes HTML under
+        # <study_dir>/viz/. Per-viz errors absorbed; others still render.
+        viz_files, viz_errors = _render_study_visualizations(
+            study_dir, spec, spec_id,
+        )
+        if viz_files:
+            response.setdefault("viz_files", []).extend(viz_files)
+        if viz_errors:
+            response.setdefault("viz_errors", []).extend(viz_errors)
     return response, code
+
+
+def _render_study_visualizations(study_dir, spec, spec_id):
+    """Render canonical + Study-declared visualizations after a completed run.
+
+    Merges the composite's ``@composite_generator(visualizations=...)``
+    defaults (from ``pbg_superpowers._REGISTRY``) with
+    ``spec.visualizations`` (Study entries win on name collision), then
+    delegates to ``vivarium_dashboard.lib.investigations.render_visualizations``
+    to render against ``study_dir/runs.db``.
+
+    Returns ``(viz_files, viz_errors)`` — viz_files lists paths relative
+    to ``study_dir`` of HTML files written; viz_errors is a list of
+    ``{error: <msg>}`` for global failures (per-viz failures are handled
+    inside ``render_visualizations`` and surface as error-stub HTML).
+    """
+    try:
+        from pbg_superpowers.composite_generator import (
+            _REGISTRY, discover_generators,
+        )
+        from vivarium_dashboard.lib.investigations import render_visualizations
+    except ImportError as e:
+        return [], [{"error": f"viz render deps missing: {e}"}]
+
+    if not _REGISTRY:
+        discover_generators()
+    entry = _REGISTRY.get(spec_id)
+    default_viz = list(getattr(entry, "visualizations", []) or []) if entry else []
+    study_viz = list(spec.get("visualizations") or [])
+    by_name: dict[str, dict] = {}
+    for v in default_viz + study_viz:
+        if isinstance(v, dict) and v.get("name"):
+            by_name[v["name"]] = v
+    merged = list(by_name.values())
+    if not merged:
+        return [], []
+
+    effective_spec = dict(spec)
+    effective_spec["visualizations"] = merged
+
+    try:
+        paths = render_visualizations(
+            effective_spec,
+            study_dir,
+            spec.get("name", ""),
+            core_registry={},
+            build_and_run=None,
+        )
+        return [str(Path(p).relative_to(study_dir)) for p in paths], []
+    except Exception as e:  # noqa: BLE001
+        return [], [{"error": f"render_visualizations failed: "
+                     f"{type(e).__name__}: {e}"}]
 
 
 def _post_study_run_variant_for_test(ws_root, body):
