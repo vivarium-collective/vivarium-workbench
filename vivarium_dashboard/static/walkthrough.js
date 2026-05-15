@@ -5725,6 +5725,22 @@
   // Module-scope cache so the filter and delete flows can read current rows.
   window._simRows = [];
 
+  /** Open the Composite Explorer for a specific past simulation.
+   *
+   *  Mirrors _openCompositeExplorer (line 2437) but also seeds ?run_id=, so
+   *  _initCompositeExplorer picks it up and renders the run's results +
+   *  viz_html in the Run tab.
+   */
+  function _openSimulationInExplorer(run_id, spec_id) {
+    var url = new URL(window.location.href);
+    url.searchParams.set('id', spec_id);
+    url.searchParams.set('run_id', run_id);
+    url.hash = '#composite-explore';
+    window.history.pushState({}, '', url.toString());
+    _switchPage('composite-explore');
+  }
+  window._openSimulationInExplorer = _openSimulationInExplorer;
+
   function _renderSimRow(sim) {
     var composite = _escSim(sim.spec_id || '');
     // Last segment bold for scannability
@@ -5744,7 +5760,17 @@
     return (
       '<tr data-run-id="' + _escSim(sim.run_id) + '" ' +
         'style="border-bottom:1px solid #f3f4f6;">' +
-      '<td style="padding:6px 8px;"><code>' + composite + '</code></td>' +
+      '<td style="padding:6px 8px;">' +
+        '<a href="?id=' + encodeURIComponent(sim.spec_id) +
+        '&run_id=' + encodeURIComponent(sim.run_id) + '#composite-explore" ' +
+        'class="sim-composite-link" ' +
+        'style="text-decoration:none; color:inherit;" ' +
+        'onclick="event.preventDefault(); _openSimulationInExplorer(\'' +
+          _escSim(sim.run_id) + '\', \'' + _escSim(sim.spec_id) + '\');" ' +
+        'onmouseover="this.style.textDecoration=\'underline\';" ' +
+        'onmouseout="this.style.textDecoration=\'none\';">' +
+        '<code>' + composite + '</code></a>' +
+      '</td>' +
       '<td style="padding:6px 8px;">' + _simStudyChips(sim.studies) + '</td>' +
       '<td style="padding:6px 8px;">' + _simStatusChip(sim.status) + '</td>' +
       '<td style="padding:6px 8px;">' + _escSim(stepsTxt) + '</td>' +
