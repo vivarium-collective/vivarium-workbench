@@ -222,7 +222,6 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/investigation-group-update":       "_post_investigation_group_update",
     # Study-specific POST endpoints (no investigation alias).
     "/api/study-set-objective":         "_post_study_set_objective",
-    "/api/study-set-baseline-params":   "_post_study_set_baseline_params",
     "/api/study-rename":                "_post_study_rename",
     "/api/study-create-from-run":       "_post_study_create_from_run",
     "/api/study-run-baseline":          "_post_study_run_baseline",
@@ -493,20 +492,6 @@ def _post_study_set_objective_for_test(ws_root: Path, body: dict):
     sf.write_text(yaml.safe_dump(spec, sort_keys=False))
     return {"ok": True}, 200
 
-
-def _post_study_set_baseline_params_for_test(ws_root: Path, body: dict):
-    """Set study.yaml baseline.params field. Returns (response_dict, status_code)."""
-    name = (body.get("study") or "").strip()
-    params = body.get("params")
-    if not name or not isinstance(params, dict):
-        return {"error": "missing study or params"}, 400
-    sf = ws_root / "studies" / name / "study.yaml"
-    if not sf.is_file():
-        return {"error": "study not found"}, 404
-    spec = yaml.safe_load(sf.read_text()) or {}
-    spec.setdefault("baseline", {})["params"] = params
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
-    return {"ok": True}, 200
 
 
 def _post_study_rename_for_test(ws_root: Path, body: dict):
@@ -5638,10 +5623,6 @@ if __name__ == "__main__":
         response, code = _post_study_set_objective_for_test(WORKSPACE, body)
         return self._json(response, code)
 
-    def _post_study_set_baseline_params(self, body: dict):
-        """POST /api/study-set-baseline-params {study, params}"""
-        response, code = _post_study_set_baseline_params_for_test(WORKSPACE, body)
-        return self._json(response, code)
 
     def _post_study_rename(self, body: dict):
         """POST /api/study-rename {study, new_name}"""
