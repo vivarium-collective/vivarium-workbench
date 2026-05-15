@@ -73,14 +73,25 @@ def migrate_v2_to_v3(spec: dict) -> dict:
     """Migrate a schema_version=2 investigation spec to schema_version=3 study.
 
     Transforms:
-      - Drop ``composites: [...]`` multi-composite list; promote the first entry
-        as ``baseline.composite``.  Emit a UserWarning if more than one was
-        present (only the first is preserved; recreate extras as variants if
-        needed).
-      - Lift the first composite's ``parameters: {...}`` into ``baseline.params``.
+      - Convert the ``composites: [...]`` multi-composite list into a
+        ``baseline`` **list**, where every entry becomes a dict shaped
+        ``{name, composite, params}``.  All composites are preserved; none are
+        dropped and no ``UserWarning`` is emitted.
+      - Lift each composite's ``parameters: {...}`` into its ``params`` field in
+        the resulting ``baseline`` entry.
       - Add empty ``objective: ""`` and ``parent_studies: []`` (reserved for
         future inter-study linkage).
       - Bump schema_version to 3.
+
+    Example output shape for the ``baseline`` list::
+
+        baseline:
+          - name: my-composite
+            composite: pkg.composites.my_composite
+            params: {rate: 0.5}
+          - name: other-composite
+            composite: pkg.composites.other_composite
+            params: {}
 
     Idempotent: returns *the same object* unchanged if ``schema_version`` is
     already 3.
@@ -106,8 +117,10 @@ def migrate_v2_to_v3(spec: dict) -> dict:
            composite: pkg.composites.chemotaxis
            parameters: {rate: 0.5}
 
-       In this case the branch promotes ``composite`` + ``parameters`` into
-       ``baseline: {composite: ..., params: {...}}`` exactly as the list path does.
+       In this case the branch promotes ``composite`` + ``parameters`` into a
+       one-element ``baseline`` list — ``baseline: [{name: ..., composite: ...,
+       params: {...}}]`` — matching the shape produced by the multi-composite
+       path.
     """
     if spec.get("schema_version") == 3:
         return spec
