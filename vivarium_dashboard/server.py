@@ -846,13 +846,79 @@ def _render_study_visualizations(study_dir, spec, spec_id):
     effective_spec = dict(spec)
     effective_spec["visualizations"] = merged
 
+    # Build core + viz registry + build_and_run hook — render_visualizations
+    # refuses to operate without a build_and_run callable, and bigraph-schema's
+    # `local:<name>` address resolution goes through `core.link_registry`, so
+    # viz classes must be registered onto the core itself (not just our local
+    # dict). Mirrors the legacy /api/investigation-run wiring.
+    _ws_add_to_sys_path()
+    try:
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        pkg_name = ws_data.get("package_path") or (
+            "pbg_" + ws_data.get("name", "").replace("-", "_"))
+        core_module = __import__(f"{pkg_name}.core", fromlist=["build_core"])
+        core = core_module.build_core()
+        registry = dict(core.link_registry)
+    except Exception as e:  # noqa: BLE001
+        return [], [{"error": f"failed to build core for viz: {e}"}]
+
+    # pbg-superpowers default Visualization classes.
+    try:
+        from pbg_superpowers.visualizations import (
+            TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap,
+        )
+        for cls in (TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap):
+            core.register_link(cls.__name__, cls)
+            registry[cls.__name__] = cls
+    except ImportError:
+        pass
+
+    # Discover every Visualization subclass loaded in the process (e.g.
+    # v2ecoli's WorkflowVisualization / NetworkVisualization / ColonyVisualization,
+    # plus any future wrapper-shipped viz). Walks the __subclasses__ tree
+    # so classes only loaded transitively still register.
+    try:
+        from pbg_superpowers.visualization import Visualization
+        import importlib
+        # Force-load workspace + every installed bigraph-schema-dependent
+        # package so their @Visualization classes appear in the subclass tree.
+        from pbg_superpowers.composite_generator import discover_generators
+        discover_generators()  # imports the same packages composite discovery walks
+
+        def _walk(cls):
+            for sub in cls.__subclasses__():
+                yield sub
+                yield from _walk(sub)
+        for sub in _walk(Visualization):
+            if sub.__name__ in registry:
+                continue
+            try:
+                core.register_link(sub.__name__, sub)
+                registry[sub.__name__] = sub
+            except Exception:
+                pass
+    except Exception:  # noqa: BLE001 — discovery is best-effort
+        pass
+
+    def build_and_run(viz_doc, registry_arg):
+        """Hook for render_visualizations: build composite, run 1 step,
+        return the output_store html string."""
+        from process_bigraph import Composite
+        composite = Composite({'state': viz_doc}, core=core)
+        composite.run(1)
+        state = composite.state
+        html = state.get('output_store')
+        if isinstance(html, dict):
+            html = html.get('value') or html.get('_value') or ''
+        return html if isinstance(html, str) else ''
+
     try:
         paths = render_visualizations(
             effective_spec,
             study_dir,
             spec.get("name", ""),
-            core_registry={},
-            build_and_run=None,
+            core_registry=registry,
+            build_and_run=build_and_run,
         )
         return [str(Path(p).relative_to(study_dir)) for p in paths], []
     except Exception as e:  # noqa: BLE001
