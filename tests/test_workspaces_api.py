@@ -181,3 +181,59 @@ def test_catalog_with_running_stopped_missing(server, tmp_path):
     assert statuses == sorted(statuses, key=lambda s: order.get(s, 99)), (
         f"Sort order wrong: {statuses}"
     )
+
+
+def test_catalog_with_stale_entry(server, tmp_path):
+    """A workspace with a server-registry file but a dead PID should report status 'stale'."""
+    pbg_home = server["pbg_home"]
+
+    # Spawn a real subprocess and wait for it to exit so we have a guaranteed-dead PID.
+    p = subprocess.Popen([sys.executable, "-c", "pass"])
+    p.wait()
+    dead_pid = p.pid
+
+    # Make a workspace that exists on disk but whose registered server has died.
+    stale_ws = tmp_path / "stale-ws"
+    stale_ws.mkdir()
+    (stale_ws / "workspace.yaml").write_text("name: stale-ws\npackage: pbg_stale\n")
+
+    # Write ~/.pbg/workspaces.json with the stale workspace entry.
+    catalog_path = pbg_home / "workspaces.json"
+    catalog_data = {
+        "workspaces": [
+            {
+                "name": "stale-ws",
+                "path": str(stale_ws.resolve()),
+                "package": "pbg_stale",
+                "added_at": "2026-01-01T00:00:00",
+            },
+        ]
+    }
+    catalog_path.write_text(json.dumps(catalog_data))
+
+    # Register the stale workspace in servers/ using the confirmed-dead PID.
+    servers_dir = pbg_home / "servers"
+    servers_dir.mkdir(parents=True, exist_ok=True)
+    server_entry = {
+        "name": "stale-ws",
+        "path": str(stale_ws.resolve()),
+        "pid": dead_pid,
+        "port": 9998,
+        "url": "http://127.0.0.1:9998",
+    }
+    (servers_dir / "stale-ws.json").write_text(json.dumps(server_entry))
+
+    status, body = _get(f"{server['url']}/api/workspaces")
+    assert status == 200
+
+    workspaces = body["workspaces"]
+    by_name = {w["name"]: w for w in workspaces}
+
+    assert "stale-ws" in by_name, f"stale-ws not in response: {by_name}"
+    stale_row = by_name["stale-ws"]
+    assert stale_row["status"] == "stale", (
+        f"Expected 'stale', got '{stale_row['status']}'"
+    )
+    assert stale_row["pid"] == dead_pid, (
+        f"Expected pid={dead_pid}, got pid={stale_row.get('pid')}"
+    )

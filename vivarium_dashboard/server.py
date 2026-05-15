@@ -6954,23 +6954,41 @@ if __name__ == "__main__":
                 row["status"] = "missing"
             elif path == current_resolved:
                 row["status"] = "current"
-                running = workspace_catalog.find_running(path)
-                if running:
-                    row["url"] = running["url"]
-                    row["pid"] = running["pid"]
+                entry = workspace_catalog.find_entry(path)
+                if entry is not None:
+                    try:
+                        os.kill(int(entry.get("pid", 0)), 0)
+                        alive = True
+                    except ProcessLookupError:
+                        alive = False
+                    except PermissionError:
+                        alive = True  # PID exists but owned by another user
+                    except (OSError, ValueError):
+                        alive = False
+                    if alive:
+                        row["url"] = entry["url"]
+                        row["pid"] = entry["pid"]
             else:
-                running = workspace_catalog.find_running(path)
-                if running:
-                    row["status"] = "running"
-                    row["url"] = running["url"]
-                    row["pid"] = running["pid"]
+                entry = workspace_catalog.find_entry(path)
+                if entry is None:
+                    row["status"] = "stopped"
                 else:
-                    stale = workspace_catalog.find_entry(path)
-                    if stale:
-                        row["status"] = "stale"
-                        row["pid"] = stale.get("pid")
+                    try:
+                        os.kill(int(entry.get("pid", 0)), 0)
+                        alive = True
+                    except ProcessLookupError:
+                        alive = False
+                    except PermissionError:
+                        alive = True  # PID exists but owned by another user
+                    except (OSError, ValueError):
+                        alive = False
+                    if alive:
+                        row["status"] = "running"
+                        row["url"] = entry["url"]
+                        row["pid"] = entry["pid"]
                     else:
-                        row["status"] = "stopped"
+                        row["status"] = "stale"
+                        row["pid"] = entry.get("pid")
             result["workspaces"].append(row)
 
         order = {"current": 0, "running": 1, "stopped": 2, "stale": 3, "missing": 4}
