@@ -3094,7 +3094,7 @@
     var steps = parseInt(document.getElementById('ce-steps').value, 10) || 5;
     var overrides = _ceCollectOverrides();
     var resultsEl = document.getElementById('ce-test-results');
-    resultsEl.innerHTML = '<p class="empty-state">Running&hellip;</p>';
+    resultsEl.innerHTML = '<p class="empty-state">Starting run&hellip;</p>';
     fetch('/api/composite-test-run', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -3105,100 +3105,35 @@
         emit_paths: window._explorerEmitPaths || [],
       }),
     })
-      .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(r) { return r.json().then(function(j) { return [r.status, j]; }); })
       .then(function(parts) {
-        var ok = parts[0], json = parts[1];
-        if (!ok) {
-          var msg = '<span style="color:#c00"><strong>Test run failed:</strong> ' +
-            _esc(json.error || 'unknown') + '</span>';
-          if (json.traceback) {
-            msg += '<details><summary>traceback</summary><pre style="font-size:0.8em">' +
-              _esc(json.traceback) + '</pre></details>';
-          }
-          resultsEl.innerHTML = msg;
+        var code = parts[0], body = parts[1];
+        if (code !== 202) {
+          var errMsg = body && body.error
+            ? body.error
+            : ('HTTP ' + code);
+          resultsEl.innerHTML =
+            '<div style="color:#c00;"><strong>Could not start run:</strong> ' +
+            _esc(errMsg) + '</div>';
           return;
         }
-        // Summary table: one row per observable, with final value preview.
-        var results = json.results || {};
-        var keys = Object.keys(results);
-        var resultsHtml;
-        if (!keys.length) {
-          resultsHtml = '<p class="muted">Run complete (' + json.steps +
-            ' steps) — no observables emitted. Select stores in the wiring ' +
-            'view to mark them for emit.</p>';
-        } else {
-          resultsHtml = '<div class="ce-run-results"><h4>Run results (' +
-            json.steps + ' steps)</h4>' +
-            '<table style="font-size:0.86em">' +
-            '<thead><tr><th>Observable</th><th>Steps</th><th>Final value</th></tr></thead>' +
-            '<tbody>';
-          keys.sort().forEach(function(k) {
-            var entries = results[k] || [];
-            var lastEntry = entries[entries.length - 1] || {};
-            var preview = '';
-            if (lastEntry && typeof lastEntry === 'object') {
-              Object.keys(lastEntry).forEach(function(field) {
-                if (field === 'time' || field.charAt(0) === '_') return;
-                if (!preview) preview = JSON.stringify(lastEntry[field]);
-              });
-              if (!preview) preview = JSON.stringify(lastEntry);
-            } else {
-              preview = JSON.stringify(lastEntry);
-            }
-            resultsHtml += '<tr><td><code>' + _esc(k) + '</code></td>' +
-              '<td>' + entries.length + '</td>' +
-              '<td><code>' + _esc(preview) + '</code></td></tr>';
-          });
-          resultsHtml += '</tbody></table></div>';
-        }
-        // Inline viz HTML, when the composite has a Visualization Step wired
-        // to a viz_html output store. Server returns json.viz_html as a
-        // {<wire_path>: <html>} mapping when render_results() finds any
-        // (or a bare string for legacy single-viz callers). Both shapes
-        // render into a sandboxed iframe so embedded <script> tags execute.
-        var vizHtml = json.viz_html;
-        if (vizHtml) {
-          var vizEntries = [];
-          if (typeof vizHtml === 'string' && vizHtml.length > 0) {
-            vizEntries.push(['viz', vizHtml]);
-          } else if (typeof vizHtml === 'object') {
-            Object.keys(vizHtml).forEach(function(k) {
-              var v = vizHtml[k];
-              var s = (v && typeof v === 'object' && 'html' in v) ? v.html : v;
-              if (typeof s === 'string' && s.length > 0) {
-                vizEntries.push([k, s]);
-              }
-            });
-          }
-          if (vizEntries.length) {
-            resultsHtml += '<div class="ce-run-viz" style="margin-top:1rem">' +
-              '<h4>Visualizations</h4>';
-            vizEntries.forEach(function(pair) {
-              var name = pair[0], html = pair[1];
-              var doc = '<!DOCTYPE html><html><body style="margin:0;padding:8px">' +
-                html + '</body></html>';
-              var docEsc = doc.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
-              resultsHtml += '<div style="margin-bottom:0.8rem">' +
-                '<div style="font-size:0.85em;color:#5d6573;margin-bottom:4px">' +
-                _esc(String(name)) + '</div>' +
-                '<iframe sandbox="allow-scripts" style="width:100%;height:520px;' +
-                'border:1px solid #d8dbe0;border-radius:4px;background:#fff" ' +
-                'srcdoc="' + docEsc + '"></iframe>' +
-                '</div>';
-            });
-            resultsHtml += '</div>';
-          }
-        }
-        resultsEl.innerHTML = resultsHtml;
-        // Persist + refresh history
-        window._ceHistoryLoaded = false;  // force re-fetch on next visit
-        var resultsPanel = document.querySelector('.ce-tab-panel[data-tab="results"]');
-        if (resultsPanel && resultsPanel.classList.contains('active')) {
-          _ceLoadHistory();
-        }
+        // Successful 202 — server accepted the run, returned a run_id.
+        var run_id = body.run_id;
+        window._ceLastRunId = run_id;
+        // Bookmark the new run in the URL so refresh / share works.
+        try {
+          var url = new URL(window.location.href);
+          url.searchParams.set('run_id', run_id);
+          window.history.replaceState({}, '', url.toString());
+          if (window._ceCurrent) window._ceCurrent.run_id = run_id;
+        } catch (e) { /* non-critical */ }
+        // Hand off to the shared loader — same render path as URL deep-link.
+        _ceLoadRunFromId(run_id);
       })
       .catch(function(err) {
-        resultsEl.innerHTML = '<span style="color:#c00">Network error: ' + _esc(String(err)) + '</span>';
+        resultsEl.innerHTML =
+          '<div style="color:#c00;"><strong>Network error:</strong> ' +
+          _esc(String(err)) + '</div>';
       });
   }
   window._ceTestRun = _ceTestRun;
