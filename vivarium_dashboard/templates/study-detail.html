@@ -53,7 +53,42 @@
 </section>
 
 <section class="study-tab-panel" data-kind="baseline" id="panel-baseline">
-  <!-- Task 3 fills this -->
+  <div class="baseline-list">
+    {% for b in (study.baseline or []) %}
+    <article class="baseline-entry" data-baseline-name="{{ b.name }}">
+      <header class="baseline-entry-header">
+        <h3 class="baseline-entry-name">{{ b.name }}</h3>
+        <code class="baseline-entry-fqn">{{ b.composite }}</code>
+      </header>
+      {% if b.params %}
+      <table class="baseline-params">
+        <thead><tr><th>Parameter</th><th>Value</th></tr></thead>
+        <tbody>
+          {% for k, v in b.params.items() %}
+          <tr><td><code>{{ k }}</code></td><td><code>{{ v }}</code></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      <div class="baseline-entry-actions">
+        <button class="btn-run-baseline" data-baseline-name="{{ b.name }}">Run</button>
+        <button class="btn-baseline-remove" data-baseline-name="{{ b.name }}">Remove</button>
+      </div>
+    </article>
+    {% else %}
+    <p class="empty-message">No baseline composites yet. Add one to begin.</p>
+    {% endfor %}
+  </div>
+
+  <details class="baseline-add-form">
+    <summary class="btn-baseline-add">+ Add composite</summary>
+    <form id="baseline-add-form" onsubmit="return _submitBaselineAdd(event)">
+      <label>Name (short, unique): <input name="name" required pattern="[a-zA-Z0-9_-]+"></label>
+      <label>Composite ID: <input name="composite" required placeholder="pkg.composites.foo"></label>
+      <label>Params (JSON, optional): <textarea name="params" placeholder="{}"></textarea></label>
+      <button type="submit">Add</button>
+    </form>
+  </details>
 </section>
 
 <section class="study-tab-panel" data-kind="variants" id="panel-variants">

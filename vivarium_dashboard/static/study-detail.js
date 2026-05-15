@@ -91,28 +91,53 @@
   });
 
   // --- Baseline ---
-  // study-run-baseline → _post_investigation_run, expects body key "name"
-  bindAll('.btn-run-baseline', function() {
-    api('POST', '/api/study-run-baseline', {name: studyName(), investigation: studyName()})
-      .then(function(res) {
-        if (res.status === 200) location.reload();
-        else alert(res.body.error || 'Run failed');
-      });
+  bindAll('.btn-run-baseline', function(btn) {
+    var entryName = btn.dataset.baselineName;
+    api('POST', '/api/study-run-baseline', {
+      study: studyName(), composite: entryName
+    }).then(function(r) {
+      if (r.status === 200) location.reload();
+      else alert('Run failed: ' + (r.body && r.body.error || r.status));
+    });
   });
 
-  // study-set-baseline-params → _post_study_set_baseline_params_for_test, key "study"
-  bindAll('.btn-edit-baseline-params', function() {
-    var params = (window._study && window._study.baseline && window._study.baseline.params) || {};
-    var text = prompt('Edit baseline params (JSON):', JSON.stringify(params, null, 2));
-    if (text == null) return;
-    try {
-      var parsed = JSON.parse(text);
-      api('POST', '/api/study-set-baseline-params', {study: studyName(), params: parsed})
-        .then(function() { location.reload(); });
-    } catch (e) {
-      alert('Invalid JSON: ' + e.message);
-    }
+  bindAll('.btn-baseline-remove', function(btn) {
+    var entryName = btn.dataset.baselineName;
+    if (!confirm('Remove baseline composite "' + entryName + '"?')) return;
+    api('POST', '/api/study-baseline-remove', {
+      study: studyName(), name: entryName
+    }).then(function(r) {
+      if (r.status === 200) location.reload();
+      else if (r.status === 409 && r.body.dependents) {
+        alert('Cannot remove: variants depend on this composite (' +
+              r.body.dependents.join(', ') + '). Delete those variants first.');
+      } else {
+        alert('Remove failed: ' + (r.body && r.body.error || r.status));
+      }
+    });
   });
+
+  function _submitBaselineAdd(ev) {
+    ev.preventDefault();
+    var form = ev.target;
+    var params = {};
+    var raw = form.params.value.trim();
+    if (raw) {
+      try { params = JSON.parse(raw); }
+      catch (e) { alert('Params must be valid JSON.'); return false; }
+    }
+    api('POST', '/api/study-baseline-add', {
+      study: studyName(),
+      name: form.name.value.trim(),
+      composite: form.composite.value.trim(),
+      params: params
+    }).then(function(r) {
+      if (r.status === 200) location.reload();
+      else alert('Add failed: ' + (r.body && r.body.error || r.status));
+    });
+    return false;
+  }
+  window._submitBaselineAdd = _submitBaselineAdd;
 
   // --- Variants ---
   // study-variant-add → _post_investigation_composite_perturb, key "investigation"

@@ -116,3 +116,31 @@ def test_overview_panel_has_counts_strip(_ws):
     # Each label appears
     for label in ('variants', 'runs', 'interventions'):
         assert label in html.lower()
+
+
+def test_baseline_panel_lists_entries(_ws):
+    """Baseline panel renders one .baseline-entry per baseline[] entry."""
+    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    spec = _study_detail_spec("study-monod_kinetics-096184")
+    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    # The legacy fixture has one variants-as-composites that migrates to one baseline entry
+    # named "monod_kinetics" (per Plan 1 migration rules).
+    assert 'class="baseline-entry"' in html
+    assert 'data-baseline-name="monod_kinetics"' in html
+
+
+def test_baseline_panel_has_add_button(_ws):
+    """Baseline panel has a '+ Add composite' button."""
+    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    spec = _study_detail_spec("study-monod_kinetics-096184")
+    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    assert 'btn-baseline-add' in html
+
+
+def test_baseline_panel_per_entry_buttons(_ws):
+    """Each baseline entry has Run + Remove buttons carrying its name."""
+    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    spec = _study_detail_spec("study-monod_kinetics-096184")
+    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    assert 'btn-run-baseline' in html
+    assert 'btn-baseline-remove' in html
