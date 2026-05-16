@@ -1231,3 +1231,22 @@ body.focus-mode::before{
 .test-nodeid { flex: 1; font-family: monospace; font-size: 0.9em; }
 .test-duration { color: #666; font-size: 0.85em; }
 .test-row details pre { background: #fff; padding: 0.6rem; border: 1px solid #ddd; border-radius: 4px; max-height: 200px; overflow: auto; }
+
+/* ---------- Investigations (top-level) ---------- */
+.investigation-list { list-style: none; padding: 0; }
+.investigation-card { padding: 0.8rem; border: 1px solid #ddd; border-radius: 6px; margin: 0.4rem 0; cursor: pointer; }
+.investigation-card:hover { background: #f7f7f7; }
+.investigation-card .investigation-title { font-weight: 600; cursor: pointer; }
+.investigation-card .badge { margin-left: 0.5rem; padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.85em; }
+.investigation-card .status-planned { background: #e0e0e0; }
+.investigation-card .status-in-progress { background: #fff3cd; color: #856404; }
+.investigation-card .status-complete { background: #d4edda; color: #155724; }
+.study-cards ol { list-style: none; padding: 0; }
+.study-card { display: flex; gap: 0.6rem; align-items: center; padding: 0.5rem 0.8rem; border: 1px solid #ddd; border-radius: 4px; margin: 0.3rem 0; }
+.study-card.study-complete { border-left: 3px solid #228B22; }
+.study-card.study-in-progress { border-left: 3px solid #f0ad4e; }
+.study-card.study-blocked { border-left: 3px solid #888; opacity: 0.7; }
+.study-card.study-planned { border-left: 3px solid #4a90e2; }
+.study-card .study-link { cursor: pointer; flex: 1; }
+.study-card .study-link:hover { text-decoration: underline; }
+.study-card .study-status { color: #666; font-size: 0.9em; }

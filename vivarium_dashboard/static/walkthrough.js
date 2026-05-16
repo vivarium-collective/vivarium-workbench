@@ -483,6 +483,11 @@
         _loadInvestigations();
       }
     }
+    if (pageId === 'investigations') {
+      if (typeof window.loadInvestigations === 'function') {
+        window.loadInvestigations();
+      }
+    }
   }
 
   function _initMenuNav() {
