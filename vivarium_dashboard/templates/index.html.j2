@@ -1122,30 +1122,24 @@
   </div>
 </div>
 
-<!-- Modal: Create GitHub repo -->
-<div id="modal-create-github-repo" class="modal-overlay">
+<!-- Modal: Link to upstream branch -->
+<div id="modal-link-branch" class="modal-overlay">
   <div class="modal-box">
-    <button class="modal-close" onclick="closeModal('modal-create-github-repo')">&times;</button>
-    <h3>Create GitHub repo</h3>
-    <form id="form-create-github-repo" onsubmit="event.preventDefault(); _submitCreateGithubRepo(this);">
-      <label>Repo name
-        <div class="input-with-suggest">
-          <input name="repo_name" pattern="^[A-Za-z0-9._-]+$" required>
-          <button type="button" class="btn-suggest" onclick="_suggestInto(this, 'repo-name', 'repo_name')">Suggest</button>
-        </div>
+    <button class="modal-close" onclick="closeModal('modal-link-branch')">&times;</button>
+    <h3>Link to upstream branch</h3>
+    <p class="muted">Push the current workstream branch to a branch on the upstream repo.</p>
+    <form id="form-link-branch" onsubmit="event.preventDefault(); _submitLinkBranch(this);">
+      <label>Upstream repo:
+        <input name="upstream_repo" value="{{ upstream_repo or 'vivarium-collective/v2ecoli' }}"
+               pattern="[A-Za-z0-9._-]+/[A-Za-z0-9._-]+" required>
       </label>
-      <label>Visibility
-        <select name="visibility">
-          <option value="private" selected>private</option>
-          <option value="public">public</option>
-          <option value="internal">internal</option>
-        </select>
+      <label>Branch name (optional — defaults to current branch):
+        <input name="branch_name" placeholder="leave blank to keep current">
       </label>
-      <label>Description
-        <textarea name="description" rows="2"></textarea>
-      </label>
-      <div class="form-error"></div>
-      <button type="submit" class="action-btn">Create + push</button>
+      <div class="form-actions">
+        <button type="submit" class="action-btn">Push branch</button>
+        <button type="button" class="action-btn--secondary" onclick="closeModal('modal-link-branch')">Cancel</button>
+      </div>
     </form>
   </div>
 </div>

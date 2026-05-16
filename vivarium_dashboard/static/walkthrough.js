@@ -1724,7 +1724,7 @@
       if (s.gh_available === false) {
         btnParts.push('<span class="ws-warn" title="Install GitHub CLI to enable one-click repo creation">gh CLI missing</span>');
       } else {
-        btnParts.push('<button class="ws-btn ws-primary" onclick="_createGithubRepo()" title="Create a GitHub repo for this workspace and push in one step">Create GitHub repo</button>');
+        btnParts.push('<button class="ws-btn ws-primary" onclick="_linkBranch()" title="Link this workspace to an upstream branch and push">Link branch to upstream</button>');
       }
     } else {
       if (s.unpushed > 0 || (!s.pushed && s.commits_ahead > 0)) {
@@ -1840,40 +1840,51 @@
   }
   window._commitDirtyAll = _commitDirtyAll;
 
-  function _createGithubRepo() {
-    openModal('modal-create-github-repo');
+  function _linkBranch() {
+    openModal('modal-link-branch');
   }
-  window._createGithubRepo = _createGithubRepo;
+  window._linkBranch = _linkBranch;
 
-  function _submitCreateGithubRepo(form) {
-    var data = {
-      name: form.repo_name.value.trim(),
-      visibility: form.visibility.value,
-      description: form.description.value.trim() || null,
+  function _submitLinkBranch(form) {
+    var fd = new FormData(form);
+    var body = {
+      upstream_repo: (fd.get('upstream_repo') || '').trim(),
+      branch_name:   (fd.get('branch_name')   || '').trim(),
     };
-    var errEl = form.querySelector('.form-error');
-    errEl.textContent = '';
-    fetch('/api/work-create-github-repo', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(data),
-    })
-      .then(function(r){ return r.json().then(function(j){ return [r.ok, j]; }); })
-      .then(function(parts){
-        var ok = parts[0], json = parts[1];
+    var submitBtn = form.querySelector('button[type=submit]');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Pushing…'; }
+    fetch('/api/work-link-branch', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    }).then(function (r) { return r.json().then(function (j) { return [r.ok, j]; }); })
+      .then(function (pair) {
+        var ok = pair[0], j = pair[1];
         if (!ok) {
-          var msg = json.error || 'unknown';
-          if (json.diagnosis) msg += " — " + json.diagnosis.suggestion;
-          errEl.textContent = msg;
+          alert('Push failed: ' + (j.error || 'unknown error'));
           return;
         }
-        closeModal('modal-create-github-repo');
-        alert("Created " + json.visibility + " repo. Opening on GitHub...");
-        if (json.repo_url) window.open(json.repo_url, '_blank');
-        _refreshWorkStrip();
+        closeModal('modal-link-branch');
+        var url = j.branch_url || '#';
+        var msg = 'Branch pushed: ' + j.branch + ' → ' + j.upstream_repo;
+        alert(msg + '\n\nOpen in browser: ' + url);
+        // Refresh workstream state UI if there is one.
+        if (typeof _refreshWorkstreamState === 'function') _refreshWorkstreamState();
+      })
+      .catch(function (e) { alert('Push failed: ' + e.message); })
+      .finally(function () {
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Push branch'; }
       });
   }
+  window._submitLinkBranch = _submitLinkBranch;
+
+  // Deprecated alias — kept for backwards compat with any cached HTML that still
+  // references _submitCreateGithubRepo.
+  function _submitCreateGithubRepo(form) { _submitLinkBranch(form); }
   window._submitCreateGithubRepo = _submitCreateGithubRepo;
+
+  // Deprecated alias for _linkBranch (was _createGithubRepo).
+  function _createGithubRepo() { _linkBranch(); }
+  window._createGithubRepo = _createGithubRepo;
 
   function _startWork() {
     var name = prompt("Workstream branch name (e.g., feat/baseline-work):");
