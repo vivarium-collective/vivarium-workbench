@@ -270,6 +270,14 @@ body.focus-mode .page.active{ display:block }
 body.focus-mode main.pages{ padding-top:8px }
 body.focus-mode .page-lead-supplement{ display:none }
 
+/* v2 layout (viv-rail / viv-topbar): focus mode hides the whole rail +
+ * topbar so the popped-out window is content-only. Used by pop-out
+ * buttons (?focus=investigations etc.). */
+body.focus-mode .viv-rail{ display:none !important }
+body.focus-mode .viv-topbar{ display:none !important }
+body.focus-mode .viv-main{ margin-left:0 !important; padding:8px 12px !important }
+body.focus-mode .viv-app{ grid-template-columns:1fr !important }
+
 /* ── Composite explorer diagram (v0.5.1.6) ─────────────────────────────
  * Server preserves graphviz's natural pt dimensions; CSS only shrinks
  * the SVG if the container is narrower. For wider containers, the SVG

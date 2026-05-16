@@ -4900,8 +4900,11 @@
       console.warn('_popoutInvestigation: no current investigation set');
       return;
     }
+    // focus=investigations strips the sidebar + topbar (CSS rules in
+    // style.css). investigation=<name> tells _loadInvestigationSets which
+    // iset to auto-open. The hash anchors the right page.
     var url = window.location.origin + window.location.pathname +
-              '?investigation=' + encodeURIComponent(name) +
+              '?focus=investigations&investigation=' + encodeURIComponent(name) +
               '#investigations';
     var w = _openDetachedWindow(url, 1400, 900);
     if (!w) {
