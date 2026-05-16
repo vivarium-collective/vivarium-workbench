@@ -24,9 +24,26 @@
   }
   window._setStudyTab = _setStudyTab;
 
-  // --- Inline-edit (objective + conclusion) ---
-  function makeEditable(el, savePath, field, placeholder) {
+  // --- Inline-edit (overview fields: objective, conclusion, question, hypothesis, status) ---
+  function _saveOverviewField(field, value) {
+    if (field === 'objective') {
+      return api('POST', '/api/study-set-objective', {study: studyName(), text: value});
+    }
+    if (field === 'conclusion') {
+      return api('POST', '/api/study-set-conclusion', {study: studyName(), text: value});
+    }
+    if (field === 'question' || field === 'hypothesis' || field === 'status') {
+      var body = {investigation: studyName(), fields: {}};
+      body.fields[field] = value;
+      return api('POST', '/api/investigation-set-overview', body);
+    }
+    return Promise.resolve();
+  }
+
+  function makeEditable(el) {
     if (!el) return;
+    var placeholder = el.dataset.placeholder || '';
+    var field = el.dataset.field || el.id.replace(/-text$/, '');
     el.addEventListener('click', function() {
       if (el.querySelector('textarea')) return;
       var current = el.textContent.trim();
@@ -38,24 +55,23 @@
       el.appendChild(t);
       t.focus();
       t.addEventListener('blur', function() {
-        var body = {study: window._studyName};
-        body[field] = t.value;
-        api('POST', savePath, body).then(function() {
+        _saveOverviewField(field, t.value).then(function() {
           el.textContent = t.value || placeholder;
         });
       });
     });
   }
-  makeEditable(
-    document.getElementById('objective-text'),
-    '/api/study-set-objective', 'text',
-    '(blank — click to write)'
-  );
-  makeEditable(
-    document.getElementById('conclusion-text'),
-    '/api/study-set-conclusion', 'text',
-    '(fill in when the study wraps)'
-  );
+
+  document.querySelectorAll('[data-editable="true"]').forEach(function(el) {
+    makeEditable(el);
+  });
+
+  var statusSel = document.getElementById('status-select');
+  if (statusSel) {
+    statusSel.addEventListener('change', function() {
+      _saveOverviewField('status', statusSel.value);
+    });
+  }
 
   // --- Helpers: attach a click handler to every button matching a CSS class ---
   function bindAll(selector, handler) {

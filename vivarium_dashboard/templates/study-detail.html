@@ -26,8 +26,33 @@
 <section class="study-tab-panel active" data-kind="overview" id="panel-overview">
   <div class="study-overview">
     <div class="overview-section">
+      <h2 class="overview-label">Question</h2>
+      <div id="question-text" class="overview-prose" data-editable="true"
+           data-field="question"
+           data-placeholder="(what research question is this study asking?)">{{ study.question or '' }}</div>
+    </div>
+
+    <div class="overview-section">
+      <h2 class="overview-label">Hypothesis</h2>
+      <div id="hypothesis-text" class="overview-prose" data-editable="true"
+           data-field="hypothesis"
+           data-placeholder="(predicted outcome)">{{ study.hypothesis or '' }}</div>
+    </div>
+
+    <div class="overview-section">
+      <h2 class="overview-label">Status</h2>
+      <select id="status-select" data-field="status" class="overview-status-select">
+        <option value="draft"       {% if study.status == 'draft'       %}selected{% endif %}>draft</option>
+        <option value="in-progress" {% if study.status == 'in-progress' %}selected{% endif %}>in-progress</option>
+        <option value="completed"   {% if study.status == 'completed'   %}selected{% endif %}>completed</option>
+        <option value="archived"    {% if study.status == 'archived'    %}selected{% endif %}>archived</option>
+      </select>
+    </div>
+
+    <div class="overview-section">
       <h2 class="overview-label">Objective</h2>
       <div id="objective-text" class="overview-prose" data-editable="true"
+           data-field="objective"
            data-placeholder="(set an objective for this study)">{{ study.objective or '' }}</div>
     </div>
 
@@ -49,6 +74,7 @@
     <div class="overview-section">
       <h2 class="overview-label">Conclusion</h2>
       <div id="conclusion-text" class="overview-prose" data-editable="true"
+           data-field="conclusion"
            data-placeholder="(fill in when the study wraps)">{{ study.conclusion or '' }}</div>
     </div>
   </div>
