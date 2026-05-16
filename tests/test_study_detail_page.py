@@ -70,18 +70,18 @@ def test_study_detail_spec_returns_none_for_missing(_ws):
     assert _study_detail_spec("does-not-exist") is None
 
 
-def test_study_detail_page_has_seven_tabs(_ws):
-    """The 7-tab scaffold is present: Overview · Baseline · Variants · Interventions · Tests · Runs · Conclusions."""
+def test_study_detail_page_has_eight_tabs(_ws):
+    """The 8-tab scaffold is present: Overview · Baseline · Variants · Interventions · Tests · Runs · Visualizations · Conclusions."""
     from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
     spec = _study_detail_spec("study-monod_kinetics-096184")
     html = _render_study_detail_html("study-monod_kinetics-096184", spec)
-    # Seven buttons
-    for kind in ("overview", "baseline", "variants", "interventions", "tests", "runs", "conclusions"):
+    # Eight buttons
+    for kind in ("overview", "baseline", "variants", "interventions", "tests", "runs", "visualizations", "conclusions"):
         assert f'class="study-tab' in html
         assert f'data-kind="{kind}"' in html
-    # Seven panels
+    # Eight panels
     panels = html.count('class="study-tab-panel')
-    assert panels == 7, f"expected 7 panel elements, got {panels}"
+    assert panels == 8, f"expected 8 panel elements, got {panels}"
     # The Overview tab is active by default — must have both active class and overview kind on a button
     assert 'class="study-tab active" data-kind="overview"' in html or \
            'data-kind="overview" class="study-tab active"' in html or \
@@ -186,11 +186,12 @@ def test_runs_panel_has_runs_table(_ws):
     assert 'id="runs-table"' in html
 
 
-def test_runs_panel_includes_visualizations(_ws):
-    """Runs panel folds in the visualizations section."""
+def test_visualizations_panel_present(_ws):
+    """Visualizations tab panel contains viz-list and add-viz button."""
     from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
     spec = _study_detail_spec("study-monod_kinetics-096184")
     html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    assert 'id="panel-visualizations"' in html
     assert 'id="viz-list"' in html
     assert 'btn-add-viz' in html
 
@@ -238,8 +239,8 @@ def test_full_study_renders_all_tabs(_rich_ws):
     spec = _study_detail_spec("rich")
     html = _render_study_detail_html("rich", spec)
 
-    # 7 tabs scaffolded (added Conclusions)
-    for kind in ("overview", "baseline", "variants", "interventions", "tests", "runs", "conclusions"):
+    # 8 tabs scaffolded (added Visualizations)
+    for kind in ("overview", "baseline", "variants", "interventions", "tests", "runs", "visualizations", "conclusions"):
         assert f'data-kind="{kind}"' in html
 
     # Overview: objective text + counts

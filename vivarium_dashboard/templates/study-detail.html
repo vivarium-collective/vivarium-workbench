@@ -20,8 +20,9 @@
   <button class="study-tab"        data-kind="variants"      onclick="_setStudyTab('variants')">Variants</button>
   <button class="study-tab"        data-kind="interventions" onclick="_setStudyTab('interventions')">Interventions</button>
   <button class="study-tab"        data-kind="runs"          onclick="_setStudyTab('runs')">Runs</button>
-  <button class="study-tab"        data-kind="tests"         onclick="_setStudyTab('tests')">Tests</button>
-  <button class="study-tab"        data-kind="conclusions"   onclick="_setStudyTab('conclusions')">Conclusions</button>
+  <button class="study-tab"        data-kind="tests"          onclick="_setStudyTab('tests')">Tests</button>
+  <button class="study-tab"        data-kind="visualizations" onclick="_setStudyTab('visualizations')">Visualizations</button>
+  <button class="study-tab"        data-kind="conclusions"    onclick="_setStudyTab('conclusions')">Conclusions</button>
 </nav>
 
 <section class="study-tab-panel active" data-kind="overview" id="panel-overview">
@@ -246,15 +247,6 @@
     </div>
   </div>
 
-  <div class="viz-section">
-    <h3 class="section-title">Visualizations</h3>
-    <div id="viz-list">
-      {% for v in (study.visualizations or []) %}
-      <div class="viz-config">{{ v.name }} <code class="muted">{{ v.address or '' }}</code></div>
-      {% endfor %}
-    </div>
-    <button class="btn-add-viz">+ Add visualization</button>
-  </div>
 </section>
 
 <section class="study-tab-panel" data-kind="tests" id="panel-tests" hidden>
@@ -270,6 +262,18 @@
   <ul class="tests-list" id="tests-list">
     <li class="placeholder">Click "Run tests" to discover and execute studies/&lt;slug&gt;/tests/test_*.py</li>
   </ul>
+</section>
+
+<section class="study-tab-panel" data-kind="visualizations" id="panel-visualizations" hidden>
+  <div class="viz-section">
+    <h3 class="section-title">Visualizations</h3>
+    <div id="viz-list">
+      {% for v in (study.visualizations or []) %}
+      <div class="viz-config">{{ v.name }} <code class="muted">{{ v.address or '' }}</code></div>
+      {% endfor %}
+    </div>
+    <button class="btn-add-viz">+ Add visualization</button>
+  </div>
 </section>
 
 <section class="study-tab-panel" data-kind="conclusions" id="panel-conclusions" hidden>
