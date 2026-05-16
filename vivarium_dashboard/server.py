@@ -2207,6 +2207,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_iset_list()
         if self.path.startswith("/api/iset/"):
             return self._get_iset_detail()
+        if self.path.startswith("/api/references-bib"):
+            return self._get_references_bib()
         if self.path.startswith("/api/investigation-composite-doc"):
             return self._get_investigation_composite_doc()
         if self.path.startswith("/api/investigation/"):
@@ -4586,6 +4588,19 @@ if __name__ == "__main__":
                 "studies":     list(spec.get("studies") or []),
             })
         return self._json({"investigations": out}, 200)
+
+    def _get_references_bib(self):
+        """GET /api/references-bib — parsed contents of references/papers.bib.
+
+        Returns {entries: [{key, type, title, author, journal, year, doi, url, note, ...}]}
+        """
+        _ws_add_to_sys_path()
+        from vivarium_dashboard.lib.report import _parse_bib_entries
+        try:
+            entries = _parse_bib_entries(WORKSPACE)
+        except Exception as e:
+            return self._json({"error": str(e)}, 500)
+        return self._json({"entries": entries}, 200)
 
     def _get_iset_detail(self):
         """GET /api/iset/<name> — return one investigation + its resolved studies.

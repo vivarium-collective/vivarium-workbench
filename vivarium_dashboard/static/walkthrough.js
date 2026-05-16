@@ -3552,12 +3552,16 @@
             .then(function(r) { return r.ok ? r.json() : {spec: {name: s.name, error: 'load-failed'}}; })
             .then(function(j) { return j.spec || j; });
         });
-        return Promise.all(studyFetches).then(function(specs) {
-          return {iset: iset, specs: specs};
+        var bibFetch = fetch('/api/references-bib')
+          .then(function(r) { return r.ok ? r.json() : {entries: []}; })
+          .then(function(j) { return j.entries || []; })
+          .catch(function() { return []; });
+        return Promise.all([Promise.all(studyFetches), bibFetch]).then(function(arr) {
+          return {iset: iset, specs: arr[0], bibEntries: arr[1]};
         });
       })
       .then(function(bundle) {
-        var html = _buildInvestigationReportHtml(bundle.iset, bundle.specs);
+        var html = _buildInvestigationReportHtml(bundle.iset, bundle.specs, bundle.bibEntries);
         var dateStr = new Date().toISOString().slice(0, 10);
         var filename = 'investigation-' + name + '-' + dateStr + '.html';
         _triggerDownload(filename, html, 'text/html');
@@ -3594,11 +3598,18 @@
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
   function _multiline(s) {
-    return _h(s).replace(/\n/g, '<br>');
+    if (s == null) return '';
+    // YAML | block scalars carry hard newlines. Treat blank-line breaks as
+    // paragraph spacing; single newlines as soft (space) so prose reflows
+    // at the rendered column width instead of stuck at the YAML wrap.
+    return _h(s).replace(/\n\s*\n/g, '<br><br>').replace(/\n/g, ' ');
   }
 
   // Construct the report's HTML body from the investigation + per-study specs.
-  function _buildInvestigationReportHtml(iset, specs) {
+  function _buildInvestigationReportHtml(iset, specs, bibEntries) {
+    bibEntries = bibEntries || [];
+    var bibByKey = {};
+    bibEntries.forEach(function(e) { bibByKey[e.key] = e; });
     var now = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
 
     // Topological depth ordering of the studies (same as the dashboard DAG).
@@ -3739,12 +3750,54 @@
       return '<li><code>' + _h(c.study) + '</code> · <code>' + _h(c.behavior) + '</code></li>';
     }).join('');
 
+    // ── Collect the union of bib keys cited across all studies + iset ──
+    var citedKeys = new Set();
+    specs.forEach(function(s) {
+      (s.expected_behavior || []).forEach(function(b) {
+        (b.cites || []).forEach(function(k) { citedKeys.add(k); });
+      });
+      var bib = (s.bibliography && s.bibliography.bib_keys) || [];
+      bib.forEach(function(k) { citedKeys.add(k); });
+    });
+    var orderedCited = Array.from(citedKeys).sort();
+    var referencesHtml = orderedCited.map(function(key) {
+      var e = bibByKey[key];
+      if (!e) {
+        return '<li class="ref-entry"><code>' + _h(key) + '</code> <span class="muted">— (not in papers.bib)</span></li>';
+      }
+      var citation = '';
+      if (e.author)  citation += _h(e.author);
+      if (e.year)    citation += (citation ? ' (' + _h(e.year) + ')' : _h(e.year));
+      if (e.title)   citation += (citation ? '. ' : '') + '<em>' + _h(e.title) + '</em>';
+      if (e.journal) citation += '. ' + _h(e.journal);
+      if (e.volume) {
+        citation += ' ' + _h(e.volume);
+        if (e.number) citation += '(' + _h(e.number) + ')';
+      }
+      if (e.pages)   citation += ', pp. ' + _h(e.pages);
+      var doiLink = e.doi ? ' · <a href="https://doi.org/' + encodeURIComponent(e.doi) + '" target="_blank">doi:' + _h(e.doi) + '</a>' : '';
+      var urlLink = e.url ? ' · <a href="' + _h(e.url) + '" target="_blank">link ↗</a>' : '';
+      return '<li class="ref-entry" id="ref-' + _h(key) + '">'
+           + '<code>' + _h(key) + '</code> &middot; '
+           + citation
+           + doiLink + urlLink
+           + (e.note ? '<div class="muted small">Note: ' + _h(e.note) + '</div>' : '')
+           + '</li>';
+    }).join('');
+
     // ── Build the TOC (sidebar nav) entries from the ordered studies ────
     var tocStudies = ordered.map(function(s, i) {
       var anchor = 'study-' + _h(s.name);
+      var statusClass = 'badge-' + _h(s.status || 'planned');
+      var counts = ((s.expected_behavior || []).length || 0) + 'pred · '
+                 + ((s.variants || []).length || 0) + 'var · '
+                 + ((s.interventions || []).length || 0) + 'int · '
+                 + ((s.gaps || []).length || 0) + 'gap';
       return '<li><a href="#' + anchor + '">' +
              '<span class="toc-num">' + (i + 1) + '.</span> ' +
              _h(s.name) +
+             ' <span class="toc-status ' + statusClass + '">' + _h(s.status || 'planned') + '</span>' +
+             '<div class="toc-counts muted">' + counts + '</div>' +
              '</a></li>';
     }).join('');
 
@@ -3769,11 +3822,22 @@
       +     'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
       + '.toc a:hover{background:#e2e8f0;color:#0f172a}'
       + '.toc a.active{background:#dbeafe;color:#1e40af;font-weight:600}'
-      + '.toc ul.studies a{padding-left:18px;font-family:ui-monospace,monospace;font-size:0.85em}'
+      + '.toc ul.studies a{padding-left:18px;font-family:ui-monospace,monospace;font-size:0.85em;white-space:normal}'
       + '.toc .toc-num{display:inline-block;color:#94a3b8;width:18px;font-family:ui-monospace,monospace}'
+      + '.toc-status{display:inline-block;font-size:0.7em;padding:1px 6px;border-radius:9999px;font-family:-apple-system,sans-serif;background:#e2e8f0;color:#1e293b;margin-left:4px}'
+      + '.toc-status.badge-planned{background:#f1f5f9;color:#475569}'
+      + '.toc-status.badge-running{background:#dbeafe;color:#1e40af}'
+      + '.toc-status.badge-ran{background:#d1fae5;color:#065f46}'
+      + '.toc-status.badge-complete{background:#d1fae5;color:#064e3b}'
+      + '.toc-status.badge-failed{background:#fee2e2;color:#991b1b}'
+      + '.toc-counts{font-size:0.7em;margin-top:2px;font-family:-apple-system,sans-serif}'
       + '.toc-toggle{display:none;position:fixed;top:12px;right:12px;z-index:100;padding:6px 10px;'
       +    'background:#0f172a;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85em}'
-      + '.content{flex:1;min-width:0;padding:24px 36px;max-width:1200px}'
+      + '.content{flex:1;min-width:0;padding:24px 36px}'
+      // Cap prose paragraphs only (≈75 chars) so wide-screen lines stay
+      // readable, but keep tables, code blocks, and callouts full-width.
+      + '.content p, .content li, .content .description p, .qh p{max-width:75ch}'
+      + '.content table, .content .qh, .content details, .content pre{max-width:none}'
       // ── typography ──
       + 'h1{margin:0 0 8px 0;font-size:2em;line-height:1.2}'
       + 'h2{margin:32px 0 12px 0;font-size:1.4em;border-bottom:1px solid #e2e8f0;padding-bottom:6px;scroll-margin-top:16px}'
@@ -3849,7 +3913,8 @@
       +     '<li><a href="#studies-heading">Studies (dep. order)</a></li>'
       +   '</ul>'
       +   '<ul class="studies">' + tocStudies + '</ul>'
-      +   '<ul><li><a href="#footer">References</a></li></ul>'
+      +   '<ul><li><a href="#references">References (' + orderedCited.length + ')</a></li>'
+      +   '<li><a href="#footer">About</a></li></ul>'
       + '</aside>'
 
       // ── Main content ──
@@ -3880,6 +3945,12 @@
 
       +   '<h2 id="studies-heading">Studies (dependency order)</h2>'
       +   studiesHtml
+
+      +   '<h2 id="references">References <span class="muted small">(' + orderedCited.length + ' cited across this investigation)</span></h2>'
+      +   '<p class="muted small">Union of <code>bibliography.bib_keys</code> and per-behavior <code>cites:</code> across all studies in this investigation. Click DOI or link to open the source.</p>'
+      +   '<ol class="references-list" style="line-height:1.6;font-size:0.93em">'
+      +     referencesHtml
+      +   '</ol>'
 
       +   '<footer id="footer">'
       +     '<p>Generated from the v2ecoli vivarium-dashboard. Source of truth: <code>investigations/' + nameClean + '/investigation.yaml</code> and the per-study <code>studies/&lt;name&gt;/study.yaml</code> files.</p>'
