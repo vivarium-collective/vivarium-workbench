@@ -52,6 +52,57 @@ def _resolve_composite_source(ref: str, workspace_root: Path) -> tuple[Path, str
     )
 
 
+def _resolve_composite_source_or_generate(
+    ref: str, workspace_root: Path,
+) -> tuple[Path | None, dict | None, str]:
+    """Resolve a composite ref to either a YAML source path or a freshly built document.
+
+    Tries the YAML lookup first (legacy ``pkg.composites.foo`` →
+    ``<workspace>/<pkg>/composites/foo.composite.yaml``); on miss, falls back
+    to ``pbg_superpowers.composite_generator._REGISTRY`` and runs the
+    registered ``@composite_generator`` to materialize the document.
+
+    Returns ``(path, doc, baseline_name)`` where exactly one of ``path`` or
+    ``doc`` is non-``None``. Callers write ``doc`` as YAML themselves
+    (``yaml.safe_dump``) or copy ``path`` to the destination.
+    """
+    try:
+        path, name = _resolve_composite_source(ref, workspace_root)
+        return path, None, name
+    except FileNotFoundError:
+        pass  # fall through to generator lookup
+
+    try:
+        from pbg_superpowers.composite_generator import (
+            _REGISTRY, build_generator, discover_generators,
+        )
+    except ImportError as e:
+        raise FileNotFoundError(
+            f"no YAML source for {ref!r} and pbg-superpowers is unavailable: {e}"
+        )
+
+    if not _REGISTRY:
+        discover_generators()
+    entry = _REGISTRY.get(ref)
+    if entry is None:
+        raise FileNotFoundError(
+            f"no YAML source for {ref!r} and not registered as a "
+            f"@composite_generator (registry has "
+            f"{len(_REGISTRY)} entries)"
+        )
+
+    doc = build_generator(entry)
+
+    # For generators, the canonical short name is the trailing segment
+    # (the @composite_generator function), not the full
+    # `<module>.<function>` stem — matches the catalog's id-stem
+    # convention and avoids ugly `baseline.baseline.yaml` sidecars.
+    parts = ref.split('.')
+    composites_idx = parts.index('composites')  # _resolve already validated layout
+    name = parts[-1] if (composites_idx + 1) < len(parts) else parts[composites_idx]
+    return None, doc, name
+
+
 def migrate_investigation(spec_path: Path, workspace_root: Path) -> dict:
     """Migrate the spec at ``spec_path`` in-place. Returns the new spec dict."""
     spec_path = Path(spec_path)

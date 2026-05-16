@@ -4325,14 +4325,21 @@ if __name__ == "__main__":
         if inv_dir.exists() or (WORKSPACE / "investigations" / name).exists():
             return self._json({"error": f"investigation '{name}' already exists"}, 409)
 
-        # Resolve source composite if provided
+        # Resolve source composite if provided. Accepts both legacy YAML
+        # composite docs and Python @composite_generator entries; for the
+        # latter the doc is materialized here and written below.
         source_path = None
+        source_doc = None
         baseline_name = None
         if source:
             _ws_add_to_sys_path()
-            from vivarium_dashboard.lib.investigation_migrate import _resolve_composite_source
+            from vivarium_dashboard.lib.investigation_migrate import (
+                _resolve_composite_source_or_generate,
+            )
             try:
-                source_path, baseline_name = _resolve_composite_source(source, WORKSPACE)
+                source_path, source_doc, baseline_name = (
+                    _resolve_composite_source_or_generate(source, WORKSPACE)
+                )
             except (FileNotFoundError, ValueError) as e:
                 return self._json({"error": f"source composite not found: {e}"}, 404)
 
@@ -4342,12 +4349,15 @@ if __name__ == "__main__":
             (inv_dir / "data").mkdir()
             (inv_dir / "data" / ".keep").write_text("")
 
-            if source_path and baseline_name:
+            if (source_path or source_doc) and baseline_name:
                 # New-shape spec: seed with a baseline composite entry
                 composites_dir = inv_dir / "composites"
                 composites_dir.mkdir(parents=True, exist_ok=True)
                 sidecar = composites_dir / f"{baseline_name}.yaml"
-                _shutil.copy2(source_path, sidecar)
+                if source_path is not None:
+                    _shutil.copy2(source_path, sidecar)
+                else:
+                    sidecar.write_text(yaml.safe_dump(source_doc, sort_keys=False))
                 spec = {
                     "name": name,
                     "description": "",
@@ -5562,9 +5572,13 @@ if __name__ == "__main__":
             return self._json({"error": "investigation, name, source required"}, 400)
 
         _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.investigation_migrate import _resolve_composite_source
+        from vivarium_dashboard.lib.investigation_migrate import (
+            _resolve_composite_source_or_generate,
+        )
         try:
-            source_path, _stem = _resolve_composite_source(source, WORKSPACE)
+            source_path, source_doc, _stem = (
+                _resolve_composite_source_or_generate(source, WORKSPACE)
+            )
         except (FileNotFoundError, ValueError) as e:
             return self._json({"error": str(e)}, 404)
 
@@ -5582,7 +5596,10 @@ if __name__ == "__main__":
 
         def do_action():
             import shutil
-            shutil.copy2(source_path, sidecar)
+            if source_path is not None:
+                shutil.copy2(source_path, sidecar)
+            else:
+                sidecar.write_text(yaml.safe_dump(source_doc, sort_keys=False))
             spec = yaml.safe_load(spec_path.read_text()) or {}
             composites = spec.setdefault('composites', [])
             composites.append({
