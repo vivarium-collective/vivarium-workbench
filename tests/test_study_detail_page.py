@@ -70,18 +70,18 @@ def test_study_detail_spec_returns_none_for_missing(_ws):
     assert _study_detail_spec("does-not-exist") is None
 
 
-def test_study_detail_page_has_six_tabs(_ws):
-    """The 6-tab scaffold is present: Overview · Baseline · Variants · Interventions · Tests · Runs."""
+def test_study_detail_page_has_seven_tabs(_ws):
+    """The 7-tab scaffold is present: Overview · Baseline · Variants · Interventions · Tests · Runs · Conclusions."""
     from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
     spec = _study_detail_spec("study-monod_kinetics-096184")
     html = _render_study_detail_html("study-monod_kinetics-096184", spec)
-    # Six buttons
-    for kind in ("overview", "baseline", "variants", "interventions", "tests", "runs"):
+    # Seven buttons
+    for kind in ("overview", "baseline", "variants", "interventions", "tests", "runs", "conclusions"):
         assert f'class="study-tab' in html
         assert f'data-kind="{kind}"' in html
-    # Six panels
+    # Seven panels
     panels = html.count('class="study-tab-panel')
-    assert panels == 6, f"expected 6 panel elements, got {panels}"
+    assert panels == 7, f"expected 7 panel elements, got {panels}"
     # The Overview tab is active by default — must have both active class and overview kind on a button
     assert 'class="study-tab active" data-kind="overview"' in html or \
            'data-kind="overview" class="study-tab active"' in html or \
@@ -97,14 +97,16 @@ def test_study_detail_page_loads_set_tab_helper(_ws):
     assert "_setStudyTab" in html
 
 
-def test_overview_panel_has_objective_and_conclusion_editables(_ws):
-    """Overview tab includes inline-editable objective and conclusion fields."""
+def test_overview_panel_has_objective_editable(_ws):
+    """Overview tab includes inline-editable objective field (conclusion moved to Conclusions tab)."""
     from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
     spec = _study_detail_spec("study-monod_kinetics-096184")
     html = _render_study_detail_html("study-monod_kinetics-096184", spec)
     assert 'id="objective-text"' in html
-    assert 'id="conclusion-text"' in html
     assert 'data-editable="true"' in html
+    # conclusion-text is no longer in the Overview; it now lives in the Conclusions tab
+    assert 'id="conclusion-text"' not in html
+    assert 'id="panel-conclusions"' in html
 
 
 def test_overview_panel_has_counts_strip(_ws):
@@ -236,8 +238,8 @@ def test_full_study_renders_all_tabs(_rich_ws):
     spec = _study_detail_spec("rich")
     html = _render_study_detail_html("rich", spec)
 
-    # 6 tabs scaffolded
-    for kind in ("overview", "baseline", "variants", "interventions", "tests", "runs"):
+    # 7 tabs scaffolded (added Conclusions)
+    for kind in ("overview", "baseline", "variants", "interventions", "tests", "runs", "conclusions"):
         assert f'data-kind="{kind}"' in html
 
     # Overview: objective text + counts
@@ -264,5 +266,6 @@ def test_full_study_renders_all_tabs(_rich_ws):
     assert 'data-run-id="r2"' in html
     assert "growth-curve" in html
 
-    # Conclusion text rendered
-    assert "Variant `hi` showed faster early growth" in html
+    # Conclusions panel is present (conclusion text is loaded by JS at runtime, not rendered in HTML)
+    assert 'id="panel-conclusions"' in html
+    assert 'id="conclusion-claims"' in html

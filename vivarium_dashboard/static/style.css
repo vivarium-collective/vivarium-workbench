@@ -1267,3 +1267,12 @@ body.focus-mode::before{
   border: 1px solid #ccc;
   background: white;
 }
+
+.conclusions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+.conclusion-field h3 { margin-top: 0; }
+.conclusion-field textarea { width: 100%; box-sizing: border-box; font-family: inherit; padding: 0.5rem; }

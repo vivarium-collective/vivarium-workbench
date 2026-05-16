@@ -21,6 +21,7 @@
   <button class="study-tab"        data-kind="interventions" onclick="_setStudyTab('interventions')">Interventions</button>
   <button class="study-tab"        data-kind="runs"          onclick="_setStudyTab('runs')">Runs</button>
   <button class="study-tab"        data-kind="tests"         onclick="_setStudyTab('tests')">Tests</button>
+  <button class="study-tab"        data-kind="conclusions"   onclick="_setStudyTab('conclusions')">Conclusions</button>
 </nav>
 
 <section class="study-tab-panel active" data-kind="overview" id="panel-overview">
@@ -71,12 +72,6 @@
       </div>
     </div>
 
-    <div class="overview-section">
-      <h2 class="overview-label">Conclusion</h2>
-      <div id="conclusion-text" class="overview-prose" data-editable="true"
-           data-field="conclusion"
-           data-placeholder="(fill in when the study wraps)">{{ study.conclusion or '' }}</div>
-    </div>
   </div>
 </section>
 
@@ -275,6 +270,28 @@
   <ul class="tests-list" id="tests-list">
     <li class="placeholder">Click "Run tests" to discover and execute studies/&lt;slug&gt;/tests/test_*.py</li>
   </ul>
+</section>
+
+<section class="study-tab-panel" data-kind="conclusions" id="panel-conclusions" hidden>
+  <div class="conclusions-grid">
+    <div class="conclusion-field">
+      <h3>Claims</h3>
+      <textarea id="conclusion-claims" rows="6" data-section="Claims"></textarea>
+    </div>
+    <div class="conclusion-field">
+      <h3>Evidence</h3>
+      <textarea id="conclusion-evidence" rows="6" data-section="Evidence"></textarea>
+    </div>
+    <div class="conclusion-field">
+      <h3>Limitations</h3>
+      <textarea id="conclusion-limitations" rows="6" data-section="Limitations"></textarea>
+    </div>
+    <div class="conclusion-field">
+      <h3>Next steps</h3>
+      <textarea id="conclusion-next-steps" rows="6" data-section="Next steps"></textarea>
+    </div>
+  </div>
+  <p class="muted">Saved as one markdown blob in study.yaml.conclusion with H2 headers.</p>
 </section>
 
 </main>

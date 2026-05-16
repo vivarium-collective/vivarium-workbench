@@ -21,6 +21,9 @@
     if (kind === 'tests') {
       loadTestsTab(window._study);
     }
+    if (kind === 'conclusions') {
+      _loadConclusionsTab(window._study);
+    }
   }
   window._setStudyTab = _setStudyTab;
 
@@ -38,6 +41,62 @@
       return api('POST', '/api/investigation-set-overview', body);
     }
     return Promise.resolve();
+  }
+
+  // --- Conclusions tab: split/join helpers + load/save ---
+  function _splitConclusion(md) {
+    var sections = { Claims: '', Evidence: '', Limitations: '', 'Next steps': '' };
+    if (!md) return sections;
+    var parts = md.split(/(?:^|\n)##\s+/);
+    if (parts.length === 1) {
+      sections.Claims = parts[0].trim();
+      return sections;
+    }
+    var preamble = parts.shift();
+    if (preamble && preamble.trim()) sections.Claims = preamble.trim();
+    parts.forEach(function(chunk) {
+      var nl = chunk.indexOf('\n');
+      var header = (nl === -1 ? chunk : chunk.slice(0, nl)).trim();
+      var body = (nl === -1 ? '' : chunk.slice(nl + 1)).trim();
+      if (header in sections) {
+        if (sections[header]) sections[header] += '\n\n' + body;
+        else sections[header] = body;
+      }
+    });
+    return sections;
+  }
+
+  function _joinConclusion(sections) {
+    var labels = ['Claims', 'Evidence', 'Limitations', 'Next steps'];
+    var parts = labels.map(function(label) {
+      var body = (sections[label] || '').trim();
+      return '## ' + label + (body ? '\n\n' + body : '');
+    });
+    return parts.join('\n\n') + '\n';
+  }
+
+  function _loadConclusionsTab(study) {
+    var s = _splitConclusion((study && study.conclusion) || '');
+    var ids = { Claims: 'conclusion-claims', Evidence: 'conclusion-evidence',
+                Limitations: 'conclusion-limitations', 'Next steps': 'conclusion-next-steps' };
+    Object.keys(ids).forEach(function(label) {
+      var el = document.getElementById(ids[label]);
+      if (el) el.value = s[label] || '';
+    });
+  }
+
+  function _saveConclusion() {
+    var sections = {
+      Claims:       (document.getElementById('conclusion-claims') || {}).value || '',
+      Evidence:     (document.getElementById('conclusion-evidence') || {}).value || '',
+      Limitations:  (document.getElementById('conclusion-limitations') || {}).value || '',
+      'Next steps': (document.getElementById('conclusion-next-steps') || {}).value || '',
+    };
+    return fetch('/api/study-set-conclusion', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({study: studyName(), text: _joinConclusion(sections)}),
+    });
   }
 
   function makeEditable(el) {
@@ -72,6 +131,11 @@
       _saveOverviewField('status', statusSel.value);
     });
   }
+
+  ['conclusion-claims', 'conclusion-evidence', 'conclusion-limitations', 'conclusion-next-steps'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('blur', _saveConclusion);
+  });
 
   // --- Helpers: attach a click handler to every button matching a CSS class ---
   function bindAll(selector, handler) {
