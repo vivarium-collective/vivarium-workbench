@@ -727,13 +727,50 @@
 <section id="page-investigations" class="page" data-page="investigations">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
     <h2 class="page-title" style="margin:0">Investigation</h2>
-    <button class="btn-mini" id="investigation-switch-btn" onclick="_showInvestigationList()" style="display:none">Switch investigation ↓</button>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn-mini" id="investigation-switch-btn" onclick="_showInvestigationList()" style="display:none">Switch investigation ↓</button>
+      <button class="action-btn" onclick="_openNewIsetModal()">+ New Investigation</button>
+    </div>
   </div>
   <p class="page-lead" id="investigation-page-lead">The active investigation. Click a node in the DAG to open a study. Use <em>Switch investigation</em> when more than one investigation exists in the workspace.</p>
 
   <!-- List view: investigation cards. -->
   <div id="investigations-list" class="investigations-list-grid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap:12px;">
     <p class="empty-state">Loading…</p>
+  </div>
+
+  <!-- "+ New Investigation" modal. Hidden by default. -->
+  <div id="new-iset-modal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.4); z-index:1000; align-items:center; justify-content:center;">
+    <div style="background:#fff; border-radius:8px; padding:20px 22px; width:min(540px, 92vw); max-height:90vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,0.2);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <h3 style="margin:0">New Investigation</h3>
+        <button class="btn-mini" onclick="_closeNewIsetModal()">×</button>
+      </div>
+      <div id="new-iset-error" style="display:none; background:#fee2e2; color:#991b1b; padding:8px 12px; border-radius:6px; margin-bottom:10px; font-size:0.9em;"></div>
+      <label style="display:block; margin-bottom:10px;">
+        <div style="font-weight:600; font-size:0.9em; margin-bottom:4px;">Name <span style="color:#dc2626">*</span></div>
+        <input type="text" id="new-iset-name" oninput="_updateNewIsetSlugPreview()" placeholder="My new investigation"
+               style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:0.95em;">
+        <div class="muted" style="font-size:0.8em; margin-top:4px;">
+          Slug: <code id="new-iset-slug-preview" style="background:#f3f4f6; padding:1px 4px; border-radius:3px;">—</code>
+        </div>
+      </label>
+      <label style="display:block; margin-bottom:10px;">
+        <div style="font-weight:600; font-size:0.9em; margin-bottom:4px;">Overview <span class="muted" style="font-weight:normal;">(optional)</span></div>
+        <textarea id="new-iset-overview" rows="3"
+                  style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:0.95em; font-family:inherit; resize:vertical;"
+                  placeholder="One- or two-line description of the research arc."></textarea>
+      </label>
+      <label style="display:block; margin-bottom:14px;">
+        <div style="font-weight:600; font-size:0.9em; margin-bottom:4px;">Parent studies <span class="muted" style="font-weight:normal;">(optional, hold ⌘/Ctrl to multi-select)</span></div>
+        <select id="new-iset-parent-studies" multiple size="5"
+                style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:0.95em;"></select>
+      </label>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn-mini" onclick="_closeNewIsetModal()">Cancel</button>
+        <button class="action-btn" id="new-iset-submit-btn" onclick="_submitNewIset()">Create</button>
+      </div>
+    </div>
   </div>
 
   <!-- Detail view: one investigation's DAG. Toggled on click. -->

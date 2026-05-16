@@ -133,6 +133,9 @@ img{max-width:100%}
 .status-pill.in_progress{background:#fef3c7; color:#92400e}
 .status-pill.gate_pending{background:#fee2e2; color:#991b1b}
 .status-pill.planned{background:#e5e7eb; color:#4b5563}
+.status-pill.planning{background:#e5e7eb; color:#4b5563}
+.status-pill.running{background:#dbeafe; color:#1e40af}
+.status-pill.failed{background:#fee2e2; color:#991b1b}
 .source-artifact{ background:#f3f4f6; padding:8px 12px; border-radius:4px;
                   font-size:0.92em; margin:0 0 12px }
 .stage-track{display:flex;gap:4px;margin:8px 0;flex-wrap:wrap}

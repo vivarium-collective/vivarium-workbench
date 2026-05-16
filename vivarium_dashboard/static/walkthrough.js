@@ -3324,12 +3324,24 @@
     }
     list.innerHTML = window._isetIndex.map(function(iset) {
       var desc = (iset.description || '').split('\n')[0].slice(0, 240);
+      // Prefer the server-computed effective_status (derived from member
+      // studies' live statuses). Fall back to the author-declared yaml
+      // status only if the server didn't send effective_status (e.g. an
+      // older backend). When the two diverge, surface the author intent
+      // as a small subtitle.
+      var effStatus  = iset.effective_status || iset.status || 'planning';
+      var authStatus = iset.status || 'planning';
+      var pillClass  = effStatus.replace(/[^a-z_]/g, '_');
+      var intentLine = (authStatus && authStatus !== effStatus)
+        ? '<div class="muted" style="font-size:0.72em; margin-top:-2px; margin-bottom:6px;">intent: ' + _esc(authStatus) + '</div>'
+        : '';
       return '<div class="investigation-set-card" onclick="_openInvestigationDetail(\'' + _esc(iset.name) + '\')" ' +
              'style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;cursor:pointer;transition:box-shadow 0.1s,border-color 0.1s;">' +
         '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px;">' +
           '<strong style="font-size:1.05em;flex:1">' + _esc(iset.title || iset.name) + '</strong>' +
-          '<span class="status-pill planned" style="font-size:0.78em">' + _esc(iset.status || 'planning') + '</span>' +
+          '<span class="status-pill ' + pillClass + '" style="font-size:0.78em">' + _esc(effStatus) + '</span>' +
         '</div>' +
+        intentLine +
         '<div class="muted" style="font-size:0.78em;font-family:monospace;margin-bottom:6px">' + _esc(iset.name) + '</div>' +
         (desc ? '<p style="margin:0 0 8px 0;font-size:0.9em;color:#475569">' + _esc(desc) + (iset.description.length > 240 ? '…' : '') + '</p>' : '') +
         '<div style="font-size:0.85em;color:#64748b">' +
@@ -3339,6 +3351,119 @@
       '</div>';
     }).join('');
   }
+
+  // ─── "+ New Investigation" modal ──────────────────────────────────────
+  // Slug the user-typed name client-side for a live preview. Matches the
+  // server-side validator: ^[a-z0-9][a-z0-9-]*$.
+  function _slugifyIsetName(s) {
+    if (!s) return '';
+    return String(s).toLowerCase()
+      .replace(/[\s_]+/g, '-')          // spaces, underscores → dashes
+      .replace(/[^a-z0-9-]/g, '')       // strip anything not alnum-or-dash
+      .replace(/^-+/, '')               // strip leading dashes
+      .replace(/-+/g, '-');             // collapse runs of dashes
+  }
+  window._slugifyIsetName = _slugifyIsetName;
+
+  function _updateNewIsetSlugPreview() {
+    var raw = (document.getElementById('new-iset-name') || {}).value || '';
+    var slug = _slugifyIsetName(raw);
+    var el = document.getElementById('new-iset-slug-preview');
+    if (el) el.textContent = slug || '—';
+  }
+  window._updateNewIsetSlugPreview = _updateNewIsetSlugPreview;
+
+  function _openNewIsetModal() {
+    // Reset fields.
+    document.getElementById('new-iset-name').value = '';
+    document.getElementById('new-iset-overview').value = '';
+    document.getElementById('new-iset-slug-preview').textContent = '—';
+    var errEl = document.getElementById('new-iset-error');
+    errEl.style.display = 'none';
+    errEl.textContent = '';
+    // Populate the parent-studies dropdown from the already-loaded
+    // _investigations list (the flat studies list; legacy name). Falls
+    // back to a fetch if it's empty.
+    var select = document.getElementById('new-iset-parent-studies');
+    select.innerHTML = '';
+    var studies = Array.isArray(window._investigations) ? window._investigations : [];
+    function _fill(arr) {
+      arr.forEach(function(s) {
+        var opt = document.createElement('option');
+        opt.value = s.name;
+        opt.textContent = s.name + (s.status ? ' (' + s.status + ')' : '');
+        select.appendChild(opt);
+      });
+    }
+    if (studies.length) {
+      _fill(studies);
+    } else {
+      fetch('/api/studies', {headers: {Accept: 'application/json'}})
+        .then(function(r) { return r.ok ? r.json() : {investigations: []}; })
+        .then(function(j) {
+          var arr = j.investigations || j.studies || [];
+          window._investigations = arr;
+          _fill(arr);
+        })
+        .catch(function() { /* fail silent — parent_studies is optional */ });
+    }
+    document.getElementById('new-iset-modal').style.display = 'flex';
+  }
+  window._openNewIsetModal = _openNewIsetModal;
+
+  function _closeNewIsetModal() {
+    document.getElementById('new-iset-modal').style.display = 'none';
+  }
+  window._closeNewIsetModal = _closeNewIsetModal;
+
+  function _submitNewIset() {
+    var rawName = (document.getElementById('new-iset-name').value || '').trim();
+    var slug    = _slugifyIsetName(rawName);
+    var overview = (document.getElementById('new-iset-overview').value || '').trim();
+    var select  = document.getElementById('new-iset-parent-studies');
+    var parents = Array.from(select.selectedOptions || []).map(function(o) { return o.value; });
+    var btn     = document.getElementById('new-iset-submit-btn');
+    var errEl   = document.getElementById('new-iset-error');
+
+    if (!slug) {
+      errEl.textContent = 'Name is required.';
+      errEl.style.display = '';
+      return;
+    }
+
+    var body = {name: slug};
+    if (overview) body.overview = overview;
+    if (parents.length) body.parent_studies = parents;
+
+    btn.disabled = true;
+    btn.textContent = 'Creating…';
+    errEl.style.display = 'none';
+
+    fetch('/api/iset-create', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', Accept: 'application/json'},
+      body: JSON.stringify(body),
+    }).then(function(r) {
+      return r.json().then(function(j) { return {ok: r.ok, status: r.status, body: j}; });
+    }).then(function(res) {
+      if (!res.ok) {
+        var msg = (res.body && res.body.error) ? res.body.error : ('HTTP ' + res.status);
+        errEl.textContent = msg;
+        errEl.style.display = '';
+        return;
+      }
+      _closeNewIsetModal();
+      // Refresh the Investigations tab so the new card appears.
+      if (typeof _loadInvestigationSets === 'function') _loadInvestigationSets();
+    }).catch(function(err) {
+      errEl.textContent = 'Network error: ' + String(err);
+      errEl.style.display = '';
+    }).then(function() {
+      btn.disabled = false;
+      btn.textContent = 'Create';
+    });
+  }
+  window._submitNewIset = _submitNewIset;
 
   function _openInvestigationDetail(name) {
     window._currentIset = name;
@@ -3352,8 +3477,15 @@
       .then(function(d) {
         window._currentIsetData = d;
         document.getElementById('investigation-detail-title').textContent = d.title || d.name;
-        var statusEl = document.getElementById('investigation-detail-status');
-        statusEl.textContent = d.status || 'planning';
+        var statusEl   = document.getElementById('investigation-detail-status');
+        var effStatus  = d.effective_status || d.status || 'planning';
+        var authStatus = d.status || 'planning';
+        statusEl.textContent = effStatus;
+        // Drop any stale status class then apply the one matching effStatus.
+        statusEl.className = 'status-pill ' + effStatus.replace(/[^a-z_]/g, '_');
+        statusEl.title = (authStatus && authStatus !== effStatus)
+          ? 'effective: ' + effStatus + '  (intent: ' + authStatus + ')'
+          : 'status: ' + effStatus;
         document.getElementById('investigation-detail-description').textContent = d.description || '';
         _renderInvestigationDag(d.studies || []);
       })
