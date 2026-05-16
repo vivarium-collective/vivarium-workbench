@@ -101,6 +101,21 @@ def _validate_composites_list(spec: dict) -> None:
                 )
 
 
+def _v4_field_hint(field_name: str) -> str:
+    """Return a suffix hint for v4 reserved-field validation errors.
+
+    Appended to error messages when a v4 reserved field fails shape validation.
+    This helps users who authored v3 specs with custom fields that collide with
+    v4 reserved names (e.g. ``references: {a: b}`` instead of the required list
+    of ``{file: ...}`` dicts).
+    """
+    return (
+        f" (Note: `{field_name}` is reserved by schema_version 4. "
+        f"If you authored this as a custom field in a v3 spec, rename it to avoid the collision. "
+        f"See docs/concepts/vivarium-dashboard-model.md#v4-reserved-fields for the list.)"
+    )
+
+
 def _validate_study_v3_or_v4(spec: dict) -> None:
     """Validate a schema_version=3 or 4 Study spec.
 
@@ -171,24 +186,30 @@ def _validate_study_v3_or_v4(spec: dict) -> None:
     if spec.get("schema_version") == 4:
         tests = spec.get("tests")
         if tests is not None and not isinstance(tests, dict):
-            raise InvestigationSpecError("tests must be a mapping")
+            raise InvestigationSpecError("tests must be a mapping" + _v4_field_hint("tests"))
         tests = tests or {}
         ds = tests.get("data_source", "latest_run")
         if ds not in ("latest_run", "first_run", "all_runs"):
             raise InvestigationSpecError(
                 f"tests.data_source must be one of latest_run|first_run|all_runs, got {ds!r}"
+                + _v4_field_hint("tests")
             )
         if not isinstance(tests.get("pytest_args", []), list):
-            raise InvestigationSpecError("tests.pytest_args must be a list")
+            raise InvestigationSpecError("tests.pytest_args must be a list" + _v4_field_hint("tests"))
         refs = spec.get("references")
         if refs is not None and not isinstance(refs, list):
-            raise InvestigationSpecError("references must be a list")
+            raise InvestigationSpecError("references must be a list" + _v4_field_hint("references"))
         refs = refs or []
         for i, ref in enumerate(refs):
             if not isinstance(ref, dict) or not ref.get("file"):
-                raise InvestigationSpecError(f"references[{i}] must be a mapping with at least a 'file' key")
+                raise InvestigationSpecError(
+                    f"references[{i}] must be a mapping with at least a 'file' key"
+                    + _v4_field_hint("references")
+                )
         if not isinstance(spec.get("implementation_tasks", ""), str):
-            raise InvestigationSpecError("implementation_tasks must be a string")
+            raise InvestigationSpecError(
+                "implementation_tasks must be a string" + _v4_field_hint("implementation_tasks")
+            )
 
 
 # Backwards-compatible alias for tests that pre-date v4 migration
