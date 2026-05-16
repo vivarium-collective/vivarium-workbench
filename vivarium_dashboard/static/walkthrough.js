@@ -3199,11 +3199,53 @@
   }
   window._toggleInvestigationChip = _toggleInvestigationChip;
 
+  // ── DAG helpers ─────────────────────────────────────────────────────
+  // Build a children map (reverse of parent_studies) and a depth map
+  // (BFS from roots) for the topological sort + Depends-on/Blocks chips.
+  function _buildInvestigationDag(all) {
+    var childrenMap = {};
+    all.forEach(function(inv) { childrenMap[inv.name] = []; });
+    function _parentName(p) { return (typeof p === 'string') ? p : (p && p.study); }
+    all.forEach(function(inv) {
+      (inv.parent_studies || []).forEach(function(p) {
+        var pn = _parentName(p);
+        if (pn && childrenMap[pn]) childrenMap[pn].push(inv.name);
+      });
+    });
+    // BFS depth from roots.
+    var depthMap = {};
+    var queue = [];
+    all.forEach(function(inv) {
+      if (!(inv.parent_studies || []).length) {
+        depthMap[inv.name] = 0;
+        queue.push(inv.name);
+      }
+    });
+    var guard = all.length * 4;   // cycle guard
+    while (queue.length && guard-- > 0) {
+      var name = queue.shift();
+      var d = depthMap[name];
+      (childrenMap[name] || []).forEach(function(child) {
+        if (depthMap[child] === undefined || depthMap[child] < d + 1) {
+          depthMap[child] = d + 1;
+          queue.push(child);
+        }
+      });
+    }
+    all.forEach(function(inv) {
+      if (depthMap[inv.name] === undefined) depthMap[inv.name] = 99;
+    });
+    return {children: childrenMap, depth: depthMap};
+  }
+
   function _renderInvestigations() {
     var grid = document.getElementById('investigations-grid');
     if (!grid) return;
     var f = window._investigationsFilter;
     var q = f.search.toLowerCase();
+    var dag = _buildInvestigationDag(window._investigations);
+    window._investigationsChildren = dag.children;
+    window._investigationsDepth = dag.depth;
     var filtered = window._investigations.filter(function(inv) {
       if (q) {
         var hay = (inv.name + ' ' + (inv.description || '') + ' ' +
@@ -3222,10 +3264,10 @@
       grid.classList.remove('list-view');
       return;
     }
-    var sort = window._investigationsSort || 'name';
+    var sort = window._investigationsSort || 'dependencies';   // topology default
     filtered.sort(function(a, b) {
       if (sort === 'last_run') {
-        return (b.last_run || '').localeCompare(a.last_run || '');  // newest first
+        return (b.last_run || '').localeCompare(a.last_run || '');
       }
       if (sort === 'status') {
         return (a.status || '').localeCompare(b.status || '') || a.name.localeCompare(b.name);
@@ -3234,9 +3276,15 @@
         return (a.topic || 'zzz').localeCompare(b.topic || 'zzz') || a.name.localeCompare(b.name);
       }
       if (sort === 'n_runs') {
-        return (b.n_runs || 0) - (a.n_runs || 0);  // most runs first
+        return (b.n_runs || 0) - (a.n_runs || 0);
       }
-      return a.name.localeCompare(b.name);
+      if (sort === 'name') {
+        return a.name.localeCompare(b.name);
+      }
+      // Default: topological depth (roots first), then alphabetical within depth.
+      var depthMap = window._investigationsDepth || {};
+      var da = depthMap[a.name] || 0, db = depthMap[b.name] || 0;
+      return da - db || a.name.localeCompare(b.name);
     });
     grid.classList.toggle('list-view', window._investigationsView === 'list');
     grid.innerHTML = filtered.map(_renderInvestigationCard).join('');
@@ -3282,12 +3330,54 @@
 
     var runLabel = (status === 'planned') ? 'Run' : 'Re-run';
 
+    // ── Dependency chips ──
+    var parents = inv.parent_studies || [];
+    var children = (window._investigationsChildren || {})[inv.name] || [];
+
+    function _depLink(name, suffix, color) {
+      return '<a onclick="event.stopPropagation(); _openStudyEmbedded(\'' + _esc(name) + '\')" ' +
+             'style="color:' + color + ';cursor:pointer;text-decoration:underline;">' +
+             _esc(name) + '</a>' + (suffix ? ' <small class="muted">(' + _esc(suffix) + ')</small>' : '');
+    }
+    var dependsHtml = '';
+    if (parents.length) {
+      dependsHtml = '<div class="ic-deps" style="margin-top:6px;font-size:0.78em;">' +
+        '<span class="muted">Depends on:</span> ' +
+        parents.map(function(p) {
+          var name = (typeof p === 'string') ? p : p.study;
+          var cond = (typeof p === 'string') ? 'tests-passed' : (p.condition || 'tests-passed');
+          return _depLink(name, cond, '#3b82f6');
+        }).join(' · ') +
+      '</div>';
+    }
+    var blocksHtml = '';
+    if (children.length) {
+      blocksHtml = '<div class="ic-deps" style="font-size:0.78em;">' +
+        '<span class="muted">Blocks:</span> ' +
+        children.map(function(name) { return _depLink(name, '', '#94a3b8'); }).join(' · ') +
+      '</div>';
+    }
+
+    // 🔒 Blocked badge (parents haven't satisfied their condition yet).
+    var blockedBadge = '';
+    if (inv.blocked) {
+      var reasons = (inv.blocked_by || []).map(function(b) {
+        return b.study + ' (' + b.condition + (b.missing ? ' — ' + b.missing : '') + ')';
+      }).join('\n');
+      blockedBadge = ' <span class="status-pill" ' +
+                     'style="background:#fef3c7;color:#92400e;font-size:0.7em;padding:1px 6px;" ' +
+                     'title="Blocked by:\n' + _esc(reasons) + '">🔒 blocked</span>';
+    }
+
     return '<div class="investigation-card" onclick="_openStudyEmbedded(\'' + _esc(inv.name) + '\')">' +
       '<div class="ic-header">' +
         '<div class="ic-title">' + _esc(inv.name) + '</div>' +
         '<span class="ic-status status-pill ' + statusClass + '">' + _esc(status) + '</span>' +
+        blockedBadge +
       '</div>' +
       '<div class="ic-baseline"><small>Baseline:</small> <code>' + _esc(baselineDisplay) + '</code></div>' +
+      dependsHtml +
+      blocksHtml +
       conclusionsHtml +
       '<div class="ic-meta">' +
         '<span>' + nVariants + ' variant' + (nVariants === 1 ? '' : 's') + '</span>' +

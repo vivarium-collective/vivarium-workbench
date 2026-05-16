@@ -664,6 +664,7 @@
     <input type="search" class="card-browse-search" id="investigations-search" placeholder="Filter studies…">
     <div class="card-browse-chips" id="investigations-tag-chips"></div>
     <select id="investigations-sort" onchange="_setInvestigationsSort(this.value)" style="margin-left:12px">
+      <option value="dependencies" selected>Sort: Dependencies (topological)</option>
       <option value="name">Sort: Name</option>
       <option value="last_run">Sort: Last run</option>
       <option value="status">Sort: Status</option>

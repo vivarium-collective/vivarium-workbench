@@ -4644,52 +4644,115 @@ if __name__ == "__main__":
         return self._json({"state": doc}, 200)
 
     def _get_investigations(self):
-        """GET /api/investigations — return summaries of all investigations."""
+        """GET /api/investigations — return summaries of all investigations.
+
+        Includes the study-dependency DAG: each row carries `parent_studies`
+        (normalized to [{study, condition}]) and a computed `blocked` flag
+        plus `blocked_by` list pointing at parents that don't yet satisfy
+        their condition.
+        """
         _ws_add_to_sys_path()
         from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
 
-        out = []
+        # First pass: load every spec so we can resolve cross-study conditions.
+        loaded: list[tuple[Path, dict]] = []   # (dir, spec)
         for d in _iter_study_dirs():
             spec_path = d / "study.yaml" if (d / "study.yaml").is_file() else d / "spec.yaml"
             if not spec_path.is_file():
                 continue
             try:
-                spec = load_spec(spec_path)
-                # Multi-composite (new) vs single-`composite:` (legacy) shape.
-                composites = spec.get("composites") or []
-                if composites:
-                    composite_summary = ", ".join(c.get("name", "") for c in composites)
-                    n_runs = len(spec.get("runs") or [])
-                else:
-                    composite_summary = spec.get("composite", "")
-                    # v3 uses `runs:`; legacy uses `simulations:`.
-                    n_runs = len(spec.get("runs") or spec.get("simulations") or [])
-                row = {
-                    "name":            spec["name"],
-                    "composite":       composite_summary,
-                    "composites":      composites,
-                    "description":     spec.get("description", ""),
-                    "topic":           spec.get("topic", ""),
-                    "tags":            spec.get("tags") or [],
-                    "status":          spec.get("status", "planned"),
-                    "last_run":        spec.get("last_run"),
-                    "n_simulations":   n_runs,
-                    "baseline_names":  [b.get("name", "") for b in (spec.get("baseline") or [])
-                                        if isinstance(b, dict)],
-                    "n_baseline":      len(spec.get("baseline") or []),
-                    "n_variants":      len(spec.get("variants") or []),
-                    "n_groups":        len(spec.get("groups") or []),
-                    "n_interventions": len(spec.get("interventions") or []),
-                    "n_comparisons":   len(spec.get("comparisons") or []),
-                    "n_runs":          n_runs,
-                    "baseline_source": _format_baseline_source(spec),
-                    "conclusions_excerpt": _conclusions_excerpt(spec),
-                }
-                out.append(row)
+                loaded.append((d, load_spec(spec_path)))
             except InvestigationSpecError as e:
-                out.append({
-                    "name": d.name, "status": "invalid", "error": str(e),
-                })
+                loaded.append((d, {"__invalid__": True, "name": d.name, "error": str(e)}))
+
+        by_name: dict[str, dict] = {s["name"]: s for _, s in loaded if not s.get("__invalid__")}
+
+        def _normalize_parents(spec: dict) -> list[dict]:
+            """Accept legacy [str, ...] AND new [{study, condition}, ...]."""
+            ps = spec.get("parent_studies") or []
+            out = []
+            for entry in ps:
+                if isinstance(entry, str):
+                    out.append({"study": entry, "condition": "tests-passed"})
+                elif isinstance(entry, dict) and entry.get("study"):
+                    out.append({
+                        "study":     entry["study"],
+                        "condition": entry.get("condition", "tests-passed"),
+                    })
+            return out
+
+        def _condition_satisfied(parent: dict | None, condition: str) -> bool:
+            """Does this parent currently satisfy `condition`?"""
+            if parent is None:
+                # Parent doesn't exist in workspace — treat as unsatisfiable,
+                # so the child shows up as blocked with a useful diagnostic.
+                return False
+            status = parent.get("status", "planned")
+            if condition == "ran":
+                return status in ("ran", "complete")
+            if condition == "complete":
+                return status == "complete"
+            if condition == "tests-passed":
+                tests = (parent.get("tests") or {}).get("last_results") or {}
+                summary = tests.get("summary") or {}
+                # treat 'no failures + at least one passed' as passed; 'no results yet' as not-passed.
+                passed = summary.get("passed", 0) or 0
+                failed = summary.get("failed", 0) or 0
+                return failed == 0 and passed > 0
+            return False
+
+        out = []
+        for d, spec in loaded:
+            if spec.get("__invalid__"):
+                out.append({"name": spec["name"], "status": "invalid", "error": spec["error"]})
+                continue
+            # Multi-composite (new) vs single-`composite:` (legacy) shape.
+            composites = spec.get("composites") or []
+            if composites:
+                composite_summary = ", ".join(c.get("name", "") for c in composites)
+                n_runs = len(spec.get("runs") or [])
+            else:
+                composite_summary = spec.get("composite", "")
+                n_runs = len(spec.get("runs") or spec.get("simulations") or [])
+
+            parents = _normalize_parents(spec)
+            blocked_by = []
+            for p in parents:
+                parent_spec = by_name.get(p["study"])
+                if not _condition_satisfied(parent_spec, p["condition"]):
+                    blocked_by.append({
+                        "study":     p["study"],
+                        "condition": p["condition"],
+                        "missing":   "parent-not-found" if parent_spec is None else
+                                     f"parent.status={parent_spec.get('status', 'planned')}",
+                    })
+
+            row = {
+                "name":            spec["name"],
+                "composite":       composite_summary,
+                "composites":      composites,
+                "description":     spec.get("description", ""),
+                "topic":           spec.get("topic", ""),
+                "tags":            spec.get("tags") or [],
+                "status":          spec.get("status", "planned"),
+                "last_run":        spec.get("last_run"),
+                "n_simulations":   n_runs,
+                "baseline_names":  [b.get("name", "") for b in (spec.get("baseline") or [])
+                                    if isinstance(b, dict)],
+                "n_baseline":      len(spec.get("baseline") or []),
+                "n_variants":      len(spec.get("variants") or []),
+                "n_groups":        len(spec.get("groups") or []),
+                "n_interventions": len(spec.get("interventions") or []),
+                "n_comparisons":   len(spec.get("comparisons") or []),
+                "n_runs":          n_runs,
+                "baseline_source": _format_baseline_source(spec),
+                "conclusions_excerpt": _conclusions_excerpt(spec),
+                # DAG / dependency fields.
+                "parent_studies":  parents,
+                "blocked":         len(blocked_by) > 0,
+                "blocked_by":      blocked_by,
+            }
+            out.append(row)
         return self._json({"investigations": out}, 200)
 
     def _post_investigation_create(self, body: dict):
