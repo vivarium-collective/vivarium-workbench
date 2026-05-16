@@ -280,22 +280,9 @@
         </span>
         <span class="viv-rail-link-label">Composites</span>
       </a>
-      <!-- Investigations: DAG of related studies -->
+      <!-- Investigations: DAG of related studies. Uses the branching-fan
+           icon (previously on the now-removed flat Studies catalog). -->
       <a href="#investigations" class="viv-rail-link menu-link" data-page="investigations">
-        <span class="viv-rail-link-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <!-- DAG: 3 connected nodes -->
-            <circle cx="5"  cy="6"  r="2.4"/>
-            <circle cx="5"  cy="18" r="2.4"/>
-            <circle cx="19" cy="12" r="2.4"/>
-            <path d="M7 7l10 4"/>
-            <path d="M7 17l10 -4"/>
-          </svg>
-        </span>
-        <span class="viv-rail-link-label">Investigations</span>
-      </a>
-      <!-- Studies: flat catalog of studies (legacy listing) -->
-      <a href="#studies"    class="viv-rail-link menu-link" data-page="studies">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
             <rect x="2.5" y="9" width="6" height="6"/>
@@ -307,7 +294,7 @@
             <path d="M8.5 12L16 19"/>
           </svg>
         </span>
-        <span class="viv-rail-link-label">Studies (all)</span>
+        <span class="viv-rail-link-label">Investigations</span>
       </a>
       <a href="#simulations"       class="viv-rail-link menu-link" data-page="simulations">
         <span class="viv-rail-link-icon">
@@ -683,12 +670,29 @@
       <button class="btn-mini" onclick="_closeInvestigationDetail()">← Back</button>
       <h3 id="investigation-detail-title" style="margin:0; flex:1"></h3>
       <span id="investigation-detail-status" class="status-pill planned" style="font-size:0.85em"></span>
+      <button class="btn-mini" onclick="_popoutInvestigation()" title="Open in separate window">Pop out ↗</button>
     </div>
     <p id="investigation-detail-description" class="muted" style="white-space:pre-wrap; margin: 0 0 12px 0;"></p>
     <div id="investigation-dag-shell"
-         style="position: relative; min-height: 480px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fafafa; overflow: auto;">
+         style="position: relative; min-height: 360px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fafafa; overflow: auto;">
       <svg id="investigation-dag-edges" style="position:absolute; top:0; left:0; pointer-events:none;"></svg>
       <div id="investigation-dag-nodes" style="position:absolute; top:0; left:0;"></div>
+    </div>
+
+    <!-- In-place study embed: when a DAG node is clicked, the full study
+         loads below in an iframe (same /studies/<name> route the Studies
+         page uses). Pop-out button breaks it into a separate window. -->
+    <div id="investigation-study-embed-panel" class="panel"
+         style="display:none; margin-top:16px; padding:0; overflow:hidden">
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid #e5e7eb; background:#f9fafb">
+        <strong id="investigation-study-embed-name" style="font-size:1.05em"></strong>
+        <div style="display:flex; gap:6px">
+          <button class="btn-mini" onclick="_popoutInvestigationStudy()" title="Open in separate window">Pop out ↗</button>
+          <button class="btn-mini" onclick="_closeInvestigationStudyEmbed()" title="Close">×</button>
+        </div>
+      </div>
+      <iframe id="investigation-study-embed-frame" src="" title="Study detail"
+              style="width:100%; border:0; display:block"></iframe>
     </div>
   </div>
 </section>

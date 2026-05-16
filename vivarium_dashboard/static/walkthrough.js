@@ -401,6 +401,14 @@
     }
     window.addEventListener('hashchange', fromHash);
     fromHash();
+
+    // ?investigation=<name> → auto-open that investigation's detail view.
+    var qInv = new URLSearchParams(window.location.search).get('investigation');
+    if (qInv) {
+      _switchPage('investigations');
+      // Give the page-investigations renderer one tick to mount.
+      setTimeout(function() { _openInvestigationDetail(qInv); }, 100);
+    }
   }
 
   window._switchPage = _switchPage;
@@ -3266,12 +3274,11 @@
   window._closeInvestigationDetail = _closeInvestigationDetail;
 
   // Layout + render the DAG of study nodes for the active investigation.
-  // x = topological depth, y = within-depth slot. Cards as absolute-positioned
-  // <div>s; edges as SVG cubic-Bezier paths.
+  // VERTICAL flow: y = topological depth (top = roots), x = within-depth slot.
+  // Cards as absolute-positioned <div>s; edges as SVG cubic-Bezier paths.
   function _renderInvestigationDag(studies) {
     var nodesHost = document.getElementById('investigation-dag-nodes');
     var edgesSvg  = document.getElementById('investigation-dag-edges');
-    var shell     = document.getElementById('investigation-dag-shell');
     nodesHost.innerHTML = '';
     edgesSvg.innerHTML  = '';
 
@@ -3319,29 +3326,42 @@
       byDepth[d].sort(function(a, b) { return a.name.localeCompare(b.name); });
     });
 
-    // Layout constants.
-    var CARD_W = 280, CARD_H = 110;
-    var X_GAP = 80,  Y_GAP = 24;
-    var PAD_X = 24,  PAD_Y = 16;
+    // Layout constants — vertical orientation.
+    var CARD_W = 320, CARD_H = 120;
+    var X_GAP = 40,   Y_GAP = 60;
+    var PAD_X = 24,   PAD_Y = 16;
 
-    // Compute each card's (x, y).
-    var pos = {};   // name -> {x, y, depth, slot}
+    // Compute each card's (x, y): y = depth, x = within-depth slot.
+    var pos = {};
     var depths = Object.keys(byDepth).map(Number).sort(function(a, b) { return a - b; });
     var maxSlot = 0;
     depths.forEach(function(d) {
       byDepth[d].forEach(function(s, i) {
         pos[s.name] = {
-          x: PAD_X + d * (CARD_W + X_GAP),
-          y: PAD_Y + i * (CARD_H + Y_GAP),
+          x: PAD_X + i * (CARD_W + X_GAP),
+          y: PAD_Y + d * (CARD_H + Y_GAP),
           depth: d, slot: i,
         };
         if (i > maxSlot) maxSlot = i;
       });
     });
 
-    // Size the canvas + svg.
-    var canvasW = PAD_X * 2 + (depths.length > 0 ? depths[depths.length - 1] : 0) * (CARD_W + X_GAP) + CARD_W;
-    var canvasH = PAD_Y * 2 + (maxSlot + 1) * (CARD_H + Y_GAP);
+    // Center each depth row inside the canvas: compute final canvasW first.
+    var canvasW = Math.max(
+      PAD_X * 2 + (maxSlot + 1) * CARD_W + maxSlot * X_GAP,
+      720
+    );
+    depths.forEach(function(d) {
+      var rowSize = byDepth[d].length;
+      var rowWidth = rowSize * CARD_W + (rowSize - 1) * X_GAP;
+      var rowOffset = Math.max(PAD_X, (canvasW - rowWidth) / 2);
+      byDepth[d].forEach(function(s, i) {
+        pos[s.name].x = rowOffset + i * (CARD_W + X_GAP);
+      });
+    });
+
+    var canvasH = PAD_Y * 2 + (depths.length > 0 ? depths[depths.length - 1] : 0) * (CARD_H + Y_GAP) + CARD_H;
+
     nodesHost.style.width = canvasW + 'px';
     nodesHost.style.height = canvasH + 'px';
     edgesSvg.setAttribute('width', canvasW);
@@ -3349,37 +3369,41 @@
     edgesSvg.style.width = canvasW + 'px';
     edgesSvg.style.height = canvasH + 'px';
 
-    // Render edges first (behind cards).
+    // Marker for arrowheads (defined once).
     var svgNS = 'http://www.w3.org/2000/svg';
+    edgesSvg.innerHTML =
+      '<defs><marker id="dag-arrowhead" viewBox="0 0 10 10" refX="9" refY="5" ' +
+      'markerWidth="7" markerHeight="7" orient="auto-start-reverse">' +
+      '<path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>';
+
+    // Render edges (behind cards) — top-of-child ← bottom-of-parent.
     studies.forEach(function(s) {
       (s.parent_studies || []).forEach(function(p) {
         var pn = p.study || p;
         if (!pos[pn] || !pos[s.name]) return;
-        var x1 = pos[pn].x + CARD_W;
-        var y1 = pos[pn].y + CARD_H / 2;
-        var x2 = pos[s.name].x;
-        var y2 = pos[s.name].y + CARD_H / 2;
-        var dx = Math.max(40, (x2 - x1) / 2);
+        var x1 = pos[pn].x + CARD_W / 2;
+        var y1 = pos[pn].y + CARD_H;
+        var x2 = pos[s.name].x + CARD_W / 2;
+        var y2 = pos[s.name].y;
+        var dy = Math.max(28, (y2 - y1) / 2);
         var path = document.createElementNS(svgNS, 'path');
         path.setAttribute('d', 'M ' + x1 + ' ' + y1 +
-                              ' C ' + (x1 + dx) + ' ' + y1 +
-                              ', ' + (x2 - dx) + ' ' + y2 +
+                              ' C ' + x1 + ' ' + (y1 + dy) +
+                              ', ' + x2 + ' ' + (y2 - dy) +
                               ', ' + x2 + ' ' + y2);
         path.setAttribute('fill', 'none');
         path.setAttribute('stroke', '#94a3b8');
         path.setAttribute('stroke-width', '1.5');
-        // Marker arrowhead via inline element.
+        path.setAttribute('marker-end', 'url(#dag-arrowhead)');
         edgesSvg.appendChild(path);
 
-        // Condition label at midpoint.
         var cond = (p.condition || 'tests-passed');
-        var midX = (x1 + x2) / 2;
-        var midY = (y1 + y2) / 2 - 6;
+        var midX = (x1 + x2) / 2 + 8;
+        var midY = (y1 + y2) / 2;
         var label = document.createElementNS(svgNS, 'text');
         label.setAttribute('x', midX);
         label.setAttribute('y', midY);
         label.setAttribute('font-size', '10');
-        label.setAttribute('text-anchor', 'middle');
         label.setAttribute('fill', '#94a3b8');
         label.textContent = cond;
         edgesSvg.appendChild(label);
@@ -3400,7 +3424,7 @@
 
       var node = document.createElement('div');
       node.className = 'iset-dag-node';
-      node.onclick = function() { _openStudyEmbeddedNewTab(s.name); };
+      node.onclick = function() { _openStudyInsideInvestigation(s.name); };
       node.style.cssText =
         'position:absolute;left:' + p.x + 'px;top:' + p.y + 'px;' +
         'width:' + CARD_W + 'px;height:' + CARD_H + 'px;' +
@@ -3423,13 +3447,62 @@
         '<div style="font-size:0.72em;color:#94a3b8;margin-top:4px">Click to open study</div>';
       nodesHost.appendChild(node);
     });
+
+    // Auto-scroll the shell so the top of the DAG is in view.
+    var shell = document.getElementById('investigation-dag-shell');
+    if (shell) shell.scrollTop = 0;
   }
   window._renderInvestigationDag = _renderInvestigationDag;
 
-  // Open the embedded study panel from any context (DAG node, sidebar, etc.)
-  // by routing through the Studies page's embed flow.
+  // Click a DAG node → load the full study in an in-page iframe BELOW the
+  // DAG (no jump to the legacy Studies tab). The iframe is the same
+  // /studies/<name> route the standalone embed uses.
+  function _openStudyInsideInvestigation(name) {
+    var panel = document.getElementById('investigation-study-embed-panel');
+    var frame = document.getElementById('investigation-study-embed-frame');
+    var nameEl = document.getElementById('investigation-study-embed-name');
+    if (!panel || !frame) return;
+    window._currentInvestigationStudy = name;
+    frame.src = '/studies/' + encodeURIComponent(name);
+    if (nameEl) nameEl.textContent = name;
+    panel.style.display = '';
+    panel.scrollIntoView({behavior: 'smooth', block: 'start'});
+  }
+  window._openStudyInsideInvestigation = _openStudyInsideInvestigation;
+
+  function _closeInvestigationStudyEmbed() {
+    var panel = document.getElementById('investigation-study-embed-panel');
+    var frame = document.getElementById('investigation-study-embed-frame');
+    if (frame) frame.src = '';
+    if (panel) panel.style.display = 'none';
+    window._currentInvestigationStudy = null;
+  }
+  window._closeInvestigationStudyEmbed = _closeInvestigationStudyEmbed;
+
+  function _popoutInvestigationStudy() {
+    var name = window._currentInvestigationStudy;
+    if (!name) return;
+    window.open('/studies/' + encodeURIComponent(name), '_blank');
+  }
+  window._popoutInvestigationStudy = _popoutInvestigationStudy;
+
+  // Pop-out the investigation itself (opens a fresh window scoped to this
+  // investigation via a ?investigation=<name> URL param the page picks up
+  // on load).
+  function _popoutInvestigation() {
+    var name = window._currentIset;
+    if (!name) return;
+    window.open(window.location.origin + '/?investigation=' + encodeURIComponent(name) + '#investigations', '_blank');
+  }
+  window._popoutInvestigation = _popoutInvestigation;
+
+  // Back-compat shim for any old callers (sidebar groups still use this).
   function _openStudyEmbeddedNewTab(name) {
-    // Switch to Studies page so the embed panel exists, then open.
+    // If we're inside the Investigations tab, use the in-place embed.
+    if (window._currentIset) {
+      _openStudyInsideInvestigation(name);
+      return;
+    }
     _switchPage('studies');
     setTimeout(function() {
       if (typeof _openStudyEmbedded === 'function') _openStudyEmbedded(name);
