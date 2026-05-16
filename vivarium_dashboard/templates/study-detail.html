@@ -52,6 +52,8 @@
 .sim-status-gated  { background:#fef3c7; color:#92400e }
 .sim-status-running{ background:#dbeafe; color:#1e40af }
 .sim-status-ran    { background:#d1fae5; color:#065f46 }
+.purpose-callout{margin-bottom:10px;padding:10px 14px;border-radius:4px;line-height:1.55}
+.purpose-callout strong{margin-right:6px}
 </style>
 
 <section class="study-tab-panel active" data-kind="overview" id="panel-overview">
@@ -61,18 +63,18 @@
     <div class="overview-section">
       <h2 class="overview-label">Purpose</h2>
       {% if study.purpose.question %}
-      <div style="margin-bottom:10px;padding:10px 14px;background:#eff6ff;border-left:4px solid #3b82f6;border-radius:4px">
-        <strong>Question.</strong> <span class="overview-prose">{{ study.purpose.question }}</span>
+      <div class="purpose-callout" style="background:#eff6ff;border-left:4px solid #3b82f6">
+        <strong>Question.</strong> {{ study.purpose.question }}
       </div>
       {% endif %}
       {% if study.purpose.mechanism %}
-      <div style="margin-bottom:10px;padding:10px 14px;background:#fefce8;border-left:4px solid #facc15;border-radius:4px">
-        <strong>Mechanism / Model change.</strong> <span class="overview-prose">{{ study.purpose.mechanism }}</span>
+      <div class="purpose-callout" style="background:#fefce8;border-left:4px solid #facc15">
+        <strong>Mechanism / Model change.</strong> {{ study.purpose.mechanism }}
       </div>
       {% endif %}
       {% if study.purpose.expected_outcome %}
-      <div style="margin-bottom:10px;padding:10px 14px;background:#f0fdf4;border-left:4px solid #10b981;border-radius:4px">
-        <strong>Expected outcome.</strong> <span class="overview-prose">{{ study.purpose.expected_outcome }}</span>
+      <div class="purpose-callout" style="background:#f0fdf4;border-left:4px solid #10b981">
+        <strong>Expected outcome.</strong> {{ study.purpose.expected_outcome }}
       </div>
       {% endif %}
     </div>

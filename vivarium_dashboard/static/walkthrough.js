@@ -3663,10 +3663,227 @@
           || a.name.localeCompare(b.name);
     });
 
+    // --- v3-shape per-study section ----------------------------------
+    function v3StudySection(s, i, statusBadge, phaseBadge, parents, kids) {
+      var slug = _h(s.name);
+      var sid = {
+        purpose:   'study-' + slug + '-purpose',
+        gate:      'study-' + slug + '-gate',
+        build:     'study-' + slug + '-build',
+        sims:      'study-' + slug + '-simulations',
+        readouts:  'study-' + slug + '-readouts',
+        tests:     'study-' + slug + '-tests',
+        decide:    'study-' + slug + '-decide',
+        limits:    'study-' + slug + '-limitations',
+        refs:      'study-' + slug + '-refs',
+      };
+
+      var purpose = s.purpose || {};
+      var gate = s.pipeline_gate || {};
+      var sims = s.simulation_set || [];
+      var modelChange = s.model_change;
+      var assumptions = s.key_assumptions || [];
+      var reqs = s.implementation_requirements || [];
+      var readouts = s.readouts || [];
+      var tests = s.behavior_tests || s.expected_behavior || [];
+      var decide = s.conclusion_logic || {};
+      var limitations = s.limitations || [];
+      var bib = (s.bibliography && s.bibliography.bib_keys) || [];
+
+      var hasBuild = !!modelChange || assumptions.length || reqs.length;
+      var hasDecide = !!(decide.if_pass || decide.if_fail
+                         || (decide.implementation_validation && decide.implementation_validation.length)
+                         || (decide.biological_validation && decide.biological_validation.length));
+
+      // Sub-nav links
+      var links = [];
+      links.push('<a href="#' + sid.purpose + '">Purpose</a>');
+      if (gate.prerequisites || gate.enables || gate.proceed_condition)
+                              links.push('<a href="#' + sid.gate + '">Pipeline gate</a>');
+      if (hasBuild)           links.push('<a href="#' + sid.build + '">Build <span class="sn-count">' + (reqs.length || 0) + '</span></a>');
+      if (sims.length)        links.push('<a href="#' + sid.sims + '">Simulations <span class="sn-count">' + sims.length + '</span></a>');
+      if (readouts.length)    links.push('<a href="#' + sid.readouts + '">Readouts <span class="sn-count">' + readouts.length + '</span></a>');
+      if (tests.length)       links.push('<a href="#' + sid.tests + '">Tests <span class="sn-count">' + tests.length + '</span></a>');
+      if (hasDecide)          links.push('<a href="#' + sid.decide + '">Decide</a>');
+      if (limitations.length) links.push('<a href="#' + sid.limits + '">Limitations <span class="sn-count">' + limitations.length + '</span></a>');
+      if (bib.length)         links.push('<a href="#' + sid.refs + '">Cited refs <span class="sn-count">' + bib.length + '</span></a>');
+
+      var dependsBrief = parents ? 'Depends on: ' + parents : '<em>Root study (no dependencies)</em>';
+
+      var subNav = ''
+        + '<div class="study-nav">'
+        +   '<div class="study-nav-row1">'
+        +     '<span class="study-nav-num">' + (i + 1) + '.</span>'
+        +     '<strong class="study-nav-name">' + _h(s.name) + '</strong>'
+        +     phaseBadge + statusBadge
+        +     '<span class="study-nav-deps muted small">' + dependsBrief + '</span>'
+        +   '</div>'
+        +   '<nav class="study-nav-row2">' + links.join('') + '</nav>'
+        + '</div>';
+
+      // Body sections
+      var purposeHtml = '<div id="' + sid.purpose + '">'
+        + '<h3>Purpose</h3>'
+        + (purpose.question        ? '<div class="callout cl-blue"><strong>Question.</strong> ' + _multiline(purpose.question) + '</div>' : '')
+        + (purpose.mechanism       ? '<div class="callout cl-yellow"><strong>Mechanism / Model change.</strong> ' + _multiline(purpose.mechanism) + '</div>' : '')
+        + (purpose.expected_outcome? '<div class="callout cl-green"><strong>Expected outcome.</strong> ' + _multiline(purpose.expected_outcome) + '</div>' : '')
+        + '</div>';
+
+      var gateHtml = '';
+      if (gate.prerequisites || gate.enables || gate.proceed_condition) {
+        var prereq = (gate.prerequisites && gate.prerequisites.length)
+          ? gate.prerequisites.map(function(p) { return '<code>' + _h(p) + '</code>'; }).join(' · ')
+          : '<em>none (root study)</em>';
+        var enables = (gate.enables && gate.enables.length)
+          ? gate.enables.map(function(p) { return '<code>' + _h(p) + '</code>'; }).join(' · ')
+          : '<em>—</em>';
+        gateHtml = '<div id="' + sid.gate + '">'
+          + '<h3>Pipeline gate</h3>'
+          + '<p><strong>Prerequisites:</strong> ' + prereq + '</p>'
+          + '<p><strong>Enables:</strong> ' + enables + '</p>'
+          + (gate.proceed_condition ? '<p><strong>Proceed when:</strong> ' + _multiline(gate.proceed_condition) + '</p>' : '')
+          + '</div>';
+      }
+
+      var buildHtml = '';
+      if (hasBuild) {
+        var mcHtml = '';
+        if (modelChange) {
+          mcHtml = '<h4>Model change</h4>';
+          if (typeof modelChange === 'string') {
+            mcHtml += '<p>' + _multiline(modelChange) + '</p>';
+          } else {
+            Object.keys(modelChange).forEach(function(k) {
+              var v = modelChange[k];
+              mcHtml += '<p><strong>' + _h(k) + ':</strong> ' + (typeof v === 'string' ? _multiline(v) : '<code>' + _h(JSON.stringify(v)) + '</code>') + '</p>';
+            });
+          }
+        }
+        var asmHtml = assumptions.length
+          ? '<h4>Key assumptions</h4><ul>' + assumptions.map(function(a) { return '<li>' + _multiline(typeof a === 'string' ? a : (a.text || JSON.stringify(a))) + '</li>'; }).join('') + '</ul>'
+          : '';
+        var reqHtml = reqs.length
+          ? '<h4>Implementation requirements</h4>' + reqs.map(function(r) {
+              var effort = r.effort ? ' <span class="muted">[' + _h(r.effort) + ']</span>' : '';
+              var steps = (r.steps && r.steps.length)
+                ? '<ol>' + r.steps.map(function(st) { return '<li>' + _h(st) + '</li>'; }).join('') + '</ol>'
+                : '';
+              var unblocks = r.unblocks ? '<p class="muted small">Unblocks: <code>' + _h(r.unblocks) + '</code></p>' : '';
+              return '<details class="req"><summary><strong>' + _h(r.id || '') + '</strong> — ' + _h(r.title || '') + effort + '</summary>'
+                   + (r.why ? '<p><strong>Why:</strong> ' + _multiline(r.why) + '</p>' : '')
+                   + steps + unblocks
+                   + '</details>';
+            }).join('')
+          : '';
+        buildHtml = '<div id="' + sid.build + '"><h3>Build</h3>' + mcHtml + asmHtml + reqHtml + '</div>';
+      }
+
+      var simsHtml = '';
+      if (sims.length) {
+        simsHtml = '<div id="' + sid.sims + '"><h3>Simulations</h3>'
+          + sims.map(function(sim) {
+              var st = sim.status ? ' <span class="muted">[' + _h(sim.status) + ']</span>' : '';
+              var params = sim.params ? '<ul class="params">' + Object.entries(sim.params).map(function(kv) {
+                return '<li><code>' + _h(kv[0]) + ' = ' + _h(JSON.stringify(kv[1])) + '</code></li>';
+              }).join('') + '</ul>' : '';
+              return '<details class="variant"><summary><strong>' + _h(sim.name || '') + '</strong>' + st + '</summary>'
+                   + (sim.description ? '<p>' + _multiline(sim.description) + '</p>' : '')
+                   + (sim.purpose ? '<p><strong>Purpose:</strong> ' + _multiline(sim.purpose) + '</p>' : '')
+                   + params
+                   + '</details>';
+            }).join('')
+          + '</div>';
+      }
+
+      var readoutsHtml = '';
+      if (readouts.length) {
+        readoutsHtml = '<div id="' + sid.readouts + '"><h3>Readouts</h3>'
+          + '<table class="eb"><thead><tr><th>Name</th><th>Path / identifier</th><th>Units</th><th>Notes</th></tr></thead><tbody>'
+          + readouts.map(function(r) {
+              return '<tr>'
+                   + '<td><code>' + _h(r.name || '') + '</code></td>'
+                   + '<td><code>' + _h(r.path || r.identifier || '') + '</code></td>'
+                   + '<td>' + _h(r.units || '') + '</td>'
+                   + '<td>' + _h(r.notes || r.description || '') + '</td>'
+                   + '</tr>';
+            }).join('')
+          + '</tbody></table></div>';
+      }
+
+      var testsHtml = '';
+      if (tests.length) {
+        testsHtml = '<div id="' + sid.tests + '"><h3>Behavior tests</h3>'
+          + '<table class="eb"><thead><tr><th>Name</th><th>Statement</th><th>Class</th><th>Calibration</th><th>Cites</th></tr></thead><tbody>'
+          + tests.map(function(t) {
+              var cites = (t.cites || []).map(function(k) { return '<code>' + _h(k) + '</code>'; }).join(', ');
+              var cls = t.classification || '';
+              var calib = t.calibration_anchor
+                ? '<span title="' + _h(typeof t.calibration_anchor === 'string' ? t.calibration_anchor : JSON.stringify(t.calibration_anchor)) + '">⚠️ anchor</span>'
+                : '';
+              return '<tr class="eb-row eb-' + _h(t.status || 'planned') + '">'
+                   + '<td><code>' + _h(t.name || '') + '</code></td>'
+                   + '<td>' + _h(t.en || '') + '</td>'
+                   + '<td>' + _h(cls) + '</td>'
+                   + '<td>' + calib + '</td>'
+                   + '<td>' + cites + '</td>'
+                   + '</tr>';
+            }).join('')
+          + '</tbody></table></div>';
+      }
+
+      var decideHtml = '';
+      if (hasDecide) {
+        decideHtml = '<div id="' + sid.decide + '"><h3>Decide (conclusion logic)</h3>'
+          + (decide.if_pass ? '<p><strong>If pass:</strong> ' + _multiline(decide.if_pass) + '</p>' : '')
+          + (decide.if_fail ? '<p><strong>If fail:</strong> ' + _multiline(decide.if_fail) + '</p>' : '')
+          + ((decide.implementation_validation && decide.implementation_validation.length)
+              ? '<p><strong>Implementation validation:</strong></p><ul>' + decide.implementation_validation.map(function(x){return '<li>' + _h(x) + '</li>';}).join('') + '</ul>' : '')
+          + ((decide.biological_validation && decide.biological_validation.length)
+              ? '<p><strong>Biological validation:</strong></p><ul>' + decide.biological_validation.map(function(x){return '<li>' + _h(x) + '</li>';}).join('') + '</ul>' : '')
+          + '</div>';
+      }
+
+      var limitsHtml = limitations.length
+        ? '<div id="' + sid.limits + '"><h3>Limitations</h3><ul>'
+          + limitations.map(function(l) { return '<li>' + _multiline(typeof l === 'string' ? l : (l.text || JSON.stringify(l))) + '</li>'; }).join('')
+          + '</ul></div>'
+        : '';
+
+      var refsHtml = bib.length
+        ? '<div id="' + sid.refs + '"><h3>References cited by this study</h3><p>'
+          + bib.map(function(k) { return '<code>' + _h(k) + '</code>'; }).join(', ')
+          + '</p></div>'
+        : '';
+
+      return ''
+        + '<section class="study" id="study-' + slug + '">'
+        +   subNav
+        +   '<header class="study-header">'
+        +     '<h2><span class="study-num">' + (i + 1) + '.</span> ' + _h(s.name) + ' ' + phaseBadge + statusBadge + '</h2>'
+        +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
+        +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
+        +   '</header>'
+        +   purposeHtml
+        +   gateHtml
+        +   buildHtml
+        +   simsHtml
+        +   readoutsHtml
+        +   testsHtml
+        +   decideHtml
+        +   limitsHtml
+        +   refsHtml
+        + '</section>';
+    }
+
     // --- per-study section builder -----------------------------------
     function studySection(s, i) {
+      var isV3 = !!(s.purpose || s.simulation_set || s.behavior_tests
+                    || s.pipeline_gate || s.readouts || s.implementation_requirements);
       var statusBadge = '<span class="badge badge-' + _h(s.status || 'planned') + '">'
                       + _h(s.status || 'planned') + '</span>';
+      var phaseBadge = s.phase
+        ? ' <span class="phase-badge phase-' + _h((s.phase || '').toLowerCase()) + '">' + _h(s.phase) + '</span>'
+        : '';
 
       // Parent + child chips.
       var parents = (s.parent_studies || []).map(function(p) {
@@ -3675,6 +3892,8 @@
         return '<code>' + _h(pn) + '</code> <span class="muted">(' + _h(cond) + ')</span>';
       }).join(' · ');
       var kids = (children[s.name] || []).map(function(c) { return '<code>' + _h(c) + '</code>'; }).join(' · ');
+
+      if (isV3) return v3StudySection(s, i, statusBadge, phaseBadge, parents, kids);
 
       // Variants list.
       var variants = (s.variants || []).map(function(v) {
@@ -3921,6 +4140,17 @@
       + '.badge-failed{background:#fee2e2;color:#991b1b}'
       + '.badge-invalid{background:#fee2e2;color:#991b1b}'
       + '.badge-planning{background:#fef3c7;color:#92400e}'
+      + '.phase-badge{display:inline-block;font-size:0.72em;padding:2px 9px;border-radius:9999px;margin-right:4px;font-weight:500;background:#e0e7ff;color:#3730a3;vertical-align:middle}'
+      + '.phase-design{background:#e0e7ff;color:#3730a3}'
+      + '.phase-build{background:#fef3c7;color:#92400e}'
+      + '.phase-simulate{background:#dbeafe;color:#1e40af}'
+      + '.phase-evaluate{background:#fce7f3;color:#9d174d}'
+      + '.phase-decide{background:#d1fae5;color:#065f46}'
+      + '.callout{margin:8px 0;padding:10px 14px;border-radius:4px;line-height:1.55}'
+      + '.callout.cl-blue{background:#eff6ff;border-left:4px solid #3b82f6}'
+      + '.callout.cl-yellow{background:#fefce8;border-left:4px solid #facc15}'
+      + '.callout.cl-green{background:#f0fdf4;border-left:4px solid #10b981}'
+      + '.callout strong{margin-right:6px}'
       // ── eb table row coloring ──
       + 'tr.eb-stub td{background:#fefce8}'
       + 'tr.eb-gated td{background:#fff7ed}'
