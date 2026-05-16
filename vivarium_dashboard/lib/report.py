@@ -142,6 +142,135 @@ def _count_bib_entries(ws_root: Path) -> int:
         return 0
 
 
+def _parse_bib_entries(ws_root: Path) -> list[dict]:
+    """Parse references/papers.bib into a flat list of {key, type, fields}.
+
+    Deliberately a minimal parser — doesn't handle every BibTeX nicety, just
+    enough to render entries in the dashboard. Supports @article{key, k=v,...}
+    with quoted "..." or brace {...} values. Comments (% ...) at line start
+    are skipped.
+
+    Returns one dict per entry:
+        {
+          key:      "Schmidt2016NatBiotechnol",
+          type:     "article",
+          title:    "...",
+          author:   "...",        # raw text from the file
+          journal:  "...",
+          year:     "2016",
+          volume:   "34",
+          number:   "1",
+          pages:    "104--110",
+          doi:      "10.1038/nbt.3418",
+          url:      "https://www.nature.com/articles/nbt.3418",
+          note:     "...",
+          has_notes_md: bool,     # whether references/notes/<key>.md exists
+        }
+    """
+    bib_file = ws_root / "references" / "papers.bib"
+    if not bib_file.exists():
+        return []
+    text = bib_file.read_text()
+
+    import re
+
+    # Strip line-comments (lines beginning with %).
+    text = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("%"))
+
+    entries: list[dict] = []
+    # Match each @<type>{<key>, ... }. Brace-balanced extraction: starting at
+    # the opening { after the type, scan forward counting braces.
+    i = 0
+    n = len(text)
+    while i < n:
+        m = re.search(r"@(\w+)\s*\{", text[i:])
+        if not m:
+            break
+        etype = m.group(1).lower()
+        start = i + m.end()
+        depth = 1
+        j = start
+        while j < n and depth > 0:
+            if text[j] == "{":
+                depth += 1
+            elif text[j] == "}":
+                depth -= 1
+            j += 1
+        body = text[start : j - 1] if depth == 0 else text[start:n]
+        i = j
+
+        # Split into key, then key=value pairs.
+        first_comma = body.find(",")
+        if first_comma < 0:
+            continue
+        key = body[:first_comma].strip()
+        rest = body[first_comma + 1:]
+
+        fields: dict[str, str] = {}
+        # Split fields by top-level commas, respecting brace/quote nesting.
+        buf = []
+        depth = 0
+        in_q = False
+        for ch in rest:
+            if ch == "{" and not in_q:
+                depth += 1
+                buf.append(ch)
+            elif ch == "}" and not in_q:
+                depth -= 1
+                buf.append(ch)
+            elif ch == '"':
+                in_q = not in_q
+                buf.append(ch)
+            elif ch == "," and depth == 0 and not in_q:
+                _absorb_kv("".join(buf), fields)
+                buf = []
+            else:
+                buf.append(ch)
+        if buf:
+            _absorb_kv("".join(buf), fields)
+
+        # Check for an accompanying reading-notes markdown file.
+        notes_md = ws_root / "references" / "notes" / f"{key}.md"
+
+        entry = {
+            "key": key,
+            "type": etype,
+            "title": fields.get("title", ""),
+            "author": fields.get("author", ""),
+            "journal": fields.get("journal", ""),
+            "year": fields.get("year", ""),
+            "volume": fields.get("volume", ""),
+            "number": fields.get("number", ""),
+            "pages": fields.get("pages", ""),
+            "doi": fields.get("doi", ""),
+            "url": fields.get("url", ""),
+            "note": fields.get("note", ""),
+            "has_notes_md": notes_md.is_file(),
+            "notes_md_path": str(notes_md.relative_to(ws_root)) if notes_md.is_file() else "",
+        }
+        entries.append(entry)
+    return entries
+
+
+def _absorb_kv(chunk: str, fields: dict) -> None:
+    """Internal: parse a single 'key = {value}' chunk into the fields dict."""
+    if "=" not in chunk:
+        return
+    k, v = chunk.split("=", 1)
+    k = k.strip().lower()
+    v = v.strip()
+    # Strip outer braces or quotes.
+    if v.startswith("{") and v.endswith("}"):
+        v = v[1:-1]
+    elif v.startswith('"') and v.endswith('"'):
+        v = v[1:-1]
+    # Collapse internal braces (e.g. {DnaA} -> DnaA) and whitespace.
+    import re
+    v = re.sub(r"\s+", " ", v.replace("{", "").replace("}", "")).strip()
+    if k and v:
+        fields[k] = v
+
+
 _SIZE_UNITS = ("B", "KB", "MB", "GB", "TB")
 
 
@@ -246,6 +375,7 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     _copy_assets(ws_root / "reports" / "assets")
 
     references_count = _count_bib_entries(ws_root)
+    bib_entries = _parse_bib_entries(ws_root)
     datasets = _enrich_with_file_info(ws.get("datasets") or [], ws_root)
     expert_docs = _enrich_with_file_info(ws.get("expert_docs") or [], ws_root)
     references_pdfs = _enrich_with_file_info(ws.get("references_pdfs") or [], ws_root)
@@ -267,6 +397,7 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         datasets=datasets,
         references_count=references_count,
         references_pdfs=references_pdfs,
+        bib_entries=bib_entries,
         decisions=decisions,
         expert_docs=expert_docs,
         observables=observables,
