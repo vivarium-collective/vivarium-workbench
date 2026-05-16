@@ -4000,17 +4000,83 @@
 
       var simsHtml = '';
       if (sims.length) {
-        simsHtml = '<div id="' + sid.sims + '"><h3>Simulations</h3>'
+        simsHtml = '<div id="' + sid.sims + '"><h3>Simulations (' + sims.length + ' planned)</h3>'
+          + '<p class="muted small" style="margin:0 0 8px 0">Each card is a concrete run plan: what gets perturbed, the environmental condition, how long it runs, which readouts get collected, and which behavior tests it feeds.</p>'
           + sims.map(function(sim) {
-              var st = sim.status ? ' <span class="muted">[' + _h(sim.status) + ']</span>' : '';
-              var params = sim.params ? '<ul class="params">' + Object.entries(sim.params).map(function(kv) {
-                return '<li><code>' + _h(kv[0]) + ' = ' + _h(JSON.stringify(kv[1])) + '</code></li>';
-              }).join('') + '</ul>' : '';
-              return '<details class="variant"><summary><strong>' + _h(sim.name || '') + '</strong>' + st + '</summary>'
-                   + (sim.description ? '<p>' + _multiline(sim.description) + '</p>' : '')
-                   + (sim.purpose ? '<p><strong>Purpose:</strong> ' + _multiline(sim.purpose) + '</p>' : '')
-                   + params
-                   + '</details>';
+              // Status pill — green=ready, amber=gated, blue=ran
+              var statusClass = sim.status === 'ready' ? 'sim-status-ready'
+                              : sim.status === 'gated' ? 'sim-status-gated'
+                              : sim.status === 'ran' ? 'sim-status-ran'
+                              : 'sim-status-unknown';
+              var statusPill = sim.status
+                ? '<span class="sim-status-pill ' + statusClass + '">' + _h(sim.status) + '</span>'
+                : '';
+
+              // KEY POINT: the perturbation — what's being changed vs the baseline.
+              var pertHtml = '';
+              if (sim.perturbation && Object.keys(sim.perturbation).length) {
+                var pertLines = Object.entries(sim.perturbation).map(function(kv) {
+                  return '<li><code>' + _h(kv[0]) + '</code> ← <code>' + _h(JSON.stringify(kv[1])) + '</code></li>';
+                }).join('');
+                pertHtml = '<div class="sim-pert"><strong>Perturbation</strong> (vs baseline composite):<ul>' + pertLines + '</ul></div>';
+              } else {
+                pertHtml = '<div class="sim-pert sim-pert-none">No perturbation — baseline run.</div>';
+              }
+
+              // Meta strip: base model · condition · duration · seeds
+              var metaParts = [];
+              if (sim.base_model) metaParts.push('<span><em>Base:</em> <code>' + _h(sim.base_model) + '</code></span>');
+              if (sim.condition)  metaParts.push('<span><em>Condition:</em> ' + _h(sim.condition) + '</span>');
+              if (sim.duration_min != null) metaParts.push('<span><em>Duration:</em> ' + _h(sim.duration_min) + ' min</span>');
+              if (sim.seeds && sim.seeds.length) metaParts.push('<span><em>Seeds:</em> ' + sim.seeds.length + ' (' + sim.seeds.join(', ') + ')</span>');
+              var metaHtml = metaParts.length
+                ? '<div class="sim-meta">' + metaParts.join(' &middot; ') + '</div>'
+                : '';
+
+              // Readouts collected
+              var readoutsList = (sim.readouts && sim.readouts.length)
+                ? '<div class="sim-readouts"><strong>Readouts collected:</strong> '
+                  + sim.readouts.map(function(r){return '<code>' + _h(r) + '</code>';}).join(' &middot; ')
+                  + '</div>'
+                : '';
+
+              // Tests this sim feeds
+              var appliesTests = sim.applies_tests || sim.tests || [];
+              var testsList = (Array.isArray(appliesTests) && appliesTests.length)
+                ? '<div class="sim-tests"><strong>Feeds behavior tests:</strong> '
+                  + appliesTests.map(function(t){return '<code>' + _h(t) + '</code>';}).join(' &middot; ')
+                  + '</div>'
+                : '';
+
+              // Blocked-by callout (when status === gated)
+              var blockedHtml = '';
+              if (sim.status === 'gated' && sim.blocked_by_requirements && sim.blocked_by_requirements.length) {
+                blockedHtml = '<div class="sim-blocked">⛔ <strong>Blocked by:</strong> '
+                            + sim.blocked_by_requirements.map(function(r){return '<code>' + _h(r) + '</code>';}).join(' &middot; ')
+                            + ' — see <em>Implementation requirements</em> above for each item.</div>';
+              }
+
+              // Other free-form fields (description / purpose / notes), tucked into a disclosure.
+              var extraDetail = '';
+              if (sim.description) extraDetail += '<div class="sim-extra"><strong>Description.</strong> ' + _multiline(sim.description) + '</div>';
+              if (sim.purpose)     extraDetail += '<div class="sim-extra"><strong>Purpose.</strong> ' + _multiline(sim.purpose) + '</div>';
+              if (sim.notes)       extraDetail += '<div class="sim-extra"><strong>Notes.</strong> ' + _multiline(sim.notes) + '</div>';
+              var extraDropdown = extraDetail
+                ? '<details class="sim-detail"><summary>More notes</summary>' + extraDetail + '</details>'
+                : '';
+
+              return '<div class="sim-card sim-' + statusClass + '">'
+                   +   '<div class="sim-header">'
+                   +     '<strong class="sim-name">' + _h(sim.name || '(unnamed)') + '</strong>'
+                   +     statusPill
+                   +   '</div>'
+                   +   pertHtml
+                   +   metaHtml
+                   +   readoutsList
+                   +   testsList
+                   +   blockedHtml
+                   +   extraDropdown
+                   + '</div>';
             }).join('')
           + '</div>';
       }
@@ -4510,6 +4576,31 @@
       + '.req-detail-section{margin-top:8px}'
       + '.req-detail-section h5{margin:6px 0 4px 0;font-size:0.85em;color:#475569;text-transform:uppercase;letter-spacing:0.04em}'
       + '.req-detail-section ol,.req-detail-section ul{margin:4px 0 0 22px;padding:0;font-size:0.93em}'
+      // simulation cards (biologist-friendly layout)
+      + '.sim-card{padding:12px 14px;margin:10px 0;border:1px solid #e2e8f0;border-radius:6px;background:#fff;box-shadow:0 1px 1px rgba(0,0,0,0.02)}'
+      + '.sim-card.sim-sim-status-gated{border-left:4px solid #f59e0b;background:#fffbeb}'
+      + '.sim-card.sim-sim-status-ready{border-left:4px solid #10b981}'
+      + '.sim-card.sim-sim-status-ran{border-left:4px solid #3b82f6;background:#eff6ff}'
+      + '.sim-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}'
+      + '.sim-name{font-size:1.02em;flex:1}'
+      + '.sim-status-pill{font-size:0.7em;text-transform:lowercase;padding:1px 8px;border-radius:9999px;font-weight:500}'
+      + '.sim-status-pill.sim-status-ready{background:#d1fae5;color:#065f46}'
+      + '.sim-status-pill.sim-status-gated{background:#fef3c7;color:#92400e}'
+      + '.sim-status-pill.sim-status-ran{background:#dbeafe;color:#1e40af}'
+      + '.sim-pert{padding:8px 12px;margin:6px 0;background:#f8fafc;border-left:3px solid #3b82f6;border-radius:3px;font-size:0.92em}'
+      + '.sim-pert ul{margin:4px 0 0 20px;padding:0}'
+      + '.sim-pert li{margin:2px 0;line-height:1.4}'
+      + '.sim-pert-none{color:#64748b;font-style:italic;border-left-color:#cbd5e1}'
+      + '.sim-meta{margin:6px 0;font-size:0.85em;color:#475569}'
+      + '.sim-meta span{margin-right:2px}'
+      + '.sim-meta em{font-style:normal;color:#94a3b8;font-size:0.92em}'
+      + '.sim-readouts,.sim-tests{margin:6px 0;font-size:0.88em;line-height:1.5}'
+      + '.sim-blocked{padding:6px 10px;margin:6px 0;background:#fef2f2;border-left:3px solid #dc2626;border-radius:3px;font-size:0.88em;color:#7f1d1d}'
+      + '.sim-blocked code{background:rgba(220,38,38,0.08);padding:1px 4px;border-radius:2px}'
+      + '.sim-detail{margin-top:8px;padding:6px 10px;background:#fafafa;border:1px solid #e2e8f0;border-radius:4px}'
+      + '.sim-detail summary{cursor:pointer;font-size:0.85em;color:#475569;font-weight:500}'
+      + '.sim-detail summary:hover{color:#0f172a}'
+      + '.sim-extra{margin-top:6px;font-size:0.92em;line-height:1.5}'
       // ── eb table row coloring ──
       + 'tr.eb-stub td{background:#fefce8}'
       + 'tr.eb-gated td{background:#fff7ed}'
