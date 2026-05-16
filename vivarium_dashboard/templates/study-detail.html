@@ -6,6 +6,7 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+<main class="study-page">
 <header class="study-header">
   <h1 class="study-title">
     <span class="study-name" id="study-name">{{ name }}</span>
@@ -234,6 +235,7 @@
   </div>
 </section>
 
+</main>
 <script>
 window._study = {{ study|tojson }};
 window._studyName = "{{ name }}";

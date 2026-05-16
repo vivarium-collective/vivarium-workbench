@@ -960,6 +960,20 @@ body.focus-mode::before{
   margin-left:4px;
 }
 
+/* Study Detail page shell — gives breathing room around the content
+   in both the standalone /studies/<name> view and inside the
+   Investigations iframe (where body margin:0 used to push text
+   flush against the iframe edges). */
+.study-page{
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 32px 48px;
+  box-sizing: border-box;
+}
+@media (max-width: 700px){
+  .study-page{ padding: 16px 16px 32px; }
+}
+
 /* Study-header card styling */
 .study-header{
   margin-bottom:8px;

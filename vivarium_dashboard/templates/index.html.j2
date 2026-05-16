@@ -571,6 +571,25 @@
 
   <!-- Detail panel renders inline after a row is clicked -->
   <div id="investigation-detail" style="display:none; margin-top:16px"></div>
+
+  <!--
+    Embedded study detail. Replaces the legacy full-window navigation to
+    /studies/<name> with an iframe that keeps the dashboard chrome visible.
+    The same /studies/<name> route serves both this iframe and the pop-out
+    window, so direct links keep working.
+  -->
+  <div id="study-detail-panel" class="panel" style="display:none; margin-top:16px; padding:0; overflow:hidden">
+    <div class="study-embed-header"
+         style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid #e5e7eb; background:#f9fafb">
+      <strong id="study-detail-name" style="font-size:1.05em"></strong>
+      <div style="display:flex; gap:6px">
+        <button class="btn-mini" onclick="_popoutStudy()" title="Open in separate window">Pop out &#8599;</button>
+        <button class="btn-mini" onclick="_closeStudyEmbedded()" title="Close">&times;</button>
+      </div>
+    </div>
+    <iframe id="study-detail-frame" src="" title="Study detail"
+            style="width:100%; height:calc(100vh - 220px); min-height:560px; border:0; display:block"></iframe>
+  </div>
 </section>
 
 <!-- ===== PAGE: SIMULATIONS ===== -->
