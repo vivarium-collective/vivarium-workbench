@@ -3739,74 +3739,172 @@
       return '<li><code>' + _h(c.study) + '</code> · <code>' + _h(c.behavior) + '</code></li>';
     }).join('');
 
+    // ── Build the TOC (sidebar nav) entries from the ordered studies ────
+    var tocStudies = ordered.map(function(s, i) {
+      var anchor = 'study-' + _h(s.name);
+      return '<li><a href="#' + anchor + '">' +
+             '<span class="toc-num">' + (i + 1) + '.</span> ' +
+             _h(s.name) +
+             '</a></li>';
+    }).join('');
+
+    var nameClean = _h(iset.name);
+
     return ''
       + '<!doctype html>\n<html><head><meta charset="utf-8">'
       + '<title>Investigation: ' + _h(iset.title || iset.name) + '</title>'
       + '<style>'
-      + 'body{font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif;color:#0f172a;line-height:1.5;max-width:980px;margin:0 auto;padding:24px 32px}'
-      + 'h1{margin:0 0 8px 0;font-size:1.8em}'
-      + 'h2{margin:24px 0 8px 0;font-size:1.3em;border-bottom:1px solid #e2e8f0;padding-bottom:6px}'
-      + 'h3{margin:20px 0 6px 0;font-size:1.05em;color:#1e293b}'
-      + 'p{margin:6px 0}'
+      // ── reset + base ──
+      + '*{box-sizing:border-box}'
+      + 'html,body{margin:0;padding:0}'
+      + 'body{font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;color:#0f172a;line-height:1.55;background:#fff}'
+      // ── layout: sticky TOC sidebar + flex content ──
+      + '.layout{display:flex;align-items:flex-start;min-height:100vh}'
+      + '.toc{position:sticky;top:0;flex:0 0 260px;width:260px;height:100vh;overflow-y:auto;'
+      +     'padding:24px 16px 24px 24px;border-right:1px solid #e2e8f0;background:#f8fafc;font-size:0.9em}'
+      + '.toc h4{margin:0 0 8px 0;font-size:0.78em;text-transform:uppercase;letter-spacing:0.05em;color:#64748b}'
+      + '.toc ul{list-style:none;padding:0;margin:0 0 16px 0}'
+      + '.toc li{margin:0}'
+      + '.toc a{display:block;padding:5px 8px;color:#334155;text-decoration:none;border-radius:4px;font-size:0.93em;'
+      +     'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+      + '.toc a:hover{background:#e2e8f0;color:#0f172a}'
+      + '.toc a.active{background:#dbeafe;color:#1e40af;font-weight:600}'
+      + '.toc ul.studies a{padding-left:18px;font-family:ui-monospace,monospace;font-size:0.85em}'
+      + '.toc .toc-num{display:inline-block;color:#94a3b8;width:18px;font-family:ui-monospace,monospace}'
+      + '.toc-toggle{display:none;position:fixed;top:12px;right:12px;z-index:100;padding:6px 10px;'
+      +    'background:#0f172a;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85em}'
+      + '.content{flex:1;min-width:0;padding:24px 36px;max-width:1200px}'
+      // ── typography ──
+      + 'h1{margin:0 0 8px 0;font-size:2em;line-height:1.2}'
+      + 'h2{margin:32px 0 12px 0;font-size:1.4em;border-bottom:1px solid #e2e8f0;padding-bottom:6px;scroll-margin-top:16px}'
+      + 'h3{margin:22px 0 8px 0;font-size:1.08em;color:#1e293b}'
+      + 'p{margin:8px 0}'
       + 'code{background:#f1f5f9;padding:1px 5px;border-radius:3px;font-size:0.88em;font-family:ui-monospace,monospace}'
-      + 'pre{background:#f1f5f9;padding:8px 10px;border-radius:4px;font-size:0.85em;overflow-x:auto}'
-      + 'table{border-collapse:collapse;width:100%;font-size:0.92em}'
-      + 'th,td{border-bottom:1px solid #e2e8f0;padding:6px 8px;text-align:left;vertical-align:top}'
+      + 'pre{background:#f1f5f9;padding:10px 12px;border-radius:4px;font-size:0.85em;overflow-x:auto;white-space:pre-wrap;word-wrap:break-word}'
+      // ── tables ──
+      + 'table{border-collapse:collapse;width:100%;font-size:0.92em;margin:8px 0}'
+      + 'th,td{border-bottom:1px solid #e2e8f0;padding:7px 10px;text-align:left;vertical-align:top}'
       + 'th{background:#f8fafc;font-weight:600}'
       + 'table.eb td{vertical-align:top}'
+      + 'table.eb td:first-child{font-family:ui-monospace,monospace;font-size:0.85em;color:#475569;white-space:nowrap}'
+      // ── badges + status pills ──
       + '.muted{color:#64748b}'
       + '.small{font-size:0.85em}'
-      + '.badge{display:inline-block;font-size:0.7em;padding:2px 8px;border-radius:9999px;background:#e2e8f0;color:#1e293b;text-transform:lowercase;vertical-align:middle;margin-left:8px}'
+      + '.badge{display:inline-block;font-size:0.72em;padding:2px 9px;border-radius:9999px;background:#e2e8f0;color:#1e293b;text-transform:lowercase;vertical-align:middle;margin-left:8px;font-weight:500}'
       + '.badge-planned{background:#f1f5f9;color:#475569}'
       + '.badge-running{background:#dbeafe;color:#1e40af}'
       + '.badge-ran{background:#d1fae5;color:#065f46}'
       + '.badge-complete{background:#d1fae5;color:#064e3b}'
       + '.badge-failed{background:#fee2e2;color:#991b1b}'
       + '.badge-invalid{background:#fee2e2;color:#991b1b}'
+      + '.badge-planning{background:#fef3c7;color:#92400e}'
+      // ── eb table row coloring ──
       + 'tr.eb-stub td{background:#fefce8}'
       + 'tr.eb-gated td{background:#fff7ed}'
       + 'tr.eb-implemented td{background:#f0fdf4}'
-      + 'details{margin:6px 0;padding:6px 10px;background:#f8fafc;border-radius:4px;border-left:3px solid #cbd5e1}'
-      + 'details > summary{cursor:pointer}'
-      + '.study{margin-top:32px;padding-top:8px}'
-      + '.study-num{color:#94a3b8;font-weight:normal}'
-      + '.qh{padding:10px 14px;background:#f8fafc;border-left:4px solid #3b82f6;border-radius:4px}'
+      // ── details / collapsibles ──
+      + 'details{margin:8px 0;padding:8px 12px;background:#f8fafc;border-radius:4px;border-left:3px solid #cbd5e1}'
+      + 'details > summary{cursor:pointer;font-size:0.95em}'
+      + 'details[open]{background:#fff;border-left-color:#3b82f6}'
+      + 'details details{margin-left:0;background:#fff}'
+      // ── per-study sections ──
+      + '.study{margin-top:40px;padding-top:8px;scroll-margin-top:16px}'
+      + '.study-header h2{border:0;padding:0;margin:0 0 4px 0}'
+      + '.study-num{color:#94a3b8;font-weight:normal;font-size:0.85em;margin-right:4px}'
+      + '.qh{padding:12px 16px;background:#f8fafc;border-left:4px solid #3b82f6;border-radius:4px;margin:12px 0}'
+      + '.qh p{margin:6px 0}'
       + '.description p{white-space:pre-wrap}'
       + 'ul.params{font-size:0.85em;font-family:ui-monospace,monospace;margin:6px 0;padding-left:20px}'
-      + 'footer{margin-top:48px;padding-top:16px;border-top:1px solid #e2e8f0;font-size:0.82em;color:#64748b}'
-      + '@media print{body{padding:0;max-width:none}details[open]{margin:4px 0}}'
+      // ── footer ──
+      + 'footer{margin-top:56px;padding-top:16px;border-top:1px solid #e2e8f0;font-size:0.82em;color:#64748b}'
+      // ── responsive ──
+      + '@media (max-width:900px){'
+      +   '.layout{flex-direction:column}'
+      +   '.toc{position:relative;width:100%;height:auto;flex:0 0 auto;border-right:0;border-bottom:1px solid #e2e8f0;display:none}'
+      +   '.toc.open{display:block}'
+      +   '.toc-toggle{display:inline-block}'
+      +   '.content{padding:60px 20px 20px 20px;max-width:none}'
+      + '}'
+      // ── print ──
+      + '@media print{'
+      +   '.toc,.toc-toggle{display:none}'
+      +   '.content{padding:0;max-width:none}'
+      +   'details[open]{margin:4px 0}'
+      +   'h1,h2,h3{break-after:avoid}'
+      +   '.study{break-inside:avoid-page}'
+      + '}'
       + '</style></head><body>'
 
-      + '<h1>' + _h(iset.title || iset.name) + ' <span class="badge badge-' + _h(iset.status || 'planning') + '">' + _h(iset.status || 'planning') + '</span></h1>'
-      + '<p class="muted small">Investigation report · generated ' + _h(now) + ' · for expert review prior to execution.</p>'
+      + '<button class="toc-toggle" onclick="document.querySelector(\'.toc\').classList.toggle(\'open\')">☰ Contents</button>'
+      + '<div class="layout">'
 
-      + '<h2>Overview</h2>'
-      + (iset.question   ? '<p><strong>Question.</strong> '   + _multiline(iset.question)   + '</p>' : '')
-      + (iset.hypothesis ? '<p><strong>Hypothesis.</strong> ' + _multiline(iset.hypothesis) + '</p>' : '')
-      + (iset.description ? '<div class="description"><p>' + _multiline(iset.description) + '</p></div>' : '')
+      // ── TOC sidebar ──
+      + '<aside class="toc">'
+      +   '<h4>' + _h(iset.title || iset.name) + '</h4>'
+      +   '<ul>'
+      +     '<li><a href="#top">Top</a></li>'
+      +     '<li><a href="#overview">Overview</a></li>'
+      +     (acceptance ? '<li><a href="#acceptance">Acceptance criteria</a></li>' : '')
+      +     '<li><a href="#how-to-read">How to read</a></li>'
+      +     '<li><a href="#studies-heading">Studies (dep. order)</a></li>'
+      +   '</ul>'
+      +   '<ul class="studies">' + tocStudies + '</ul>'
+      +   '<ul><li><a href="#footer">References</a></li></ul>'
+      + '</aside>'
 
-      + (acceptance ? '<h2>Acceptance criteria</h2>'
-                    + '<p class="muted small">Behavioral tests across the studies that must pass for this investigation to be considered complete.</p>'
-                    + '<ol>' + acceptance + '</ol>' : '')
+      // ── Main content ──
+      + '<main class="content" id="top">'
 
-      + '<h2>How to read this report</h2>'
-      + '<p>Each section below is one study, in dependency order (depth-first from the roots). Within a section:</p>'
-      + '<ul>'
-      + '<li><strong>Question / Hypothesis</strong> — what we want to know and what we predict.</li>'
-      + '<li><strong>Predicted behavior</strong> — quantitative, testable predictions with the supporting citations from <code>papers.bib</code>. Color coding: green = implemented (will run today), amber = gated on upstream work, yellow = stub.</li>'
-      + '<li><strong>Variants</strong> — the parameter perturbations we plan to run.</li>'
-      + '<li><strong>Interventions</strong> — named simulation plans that group variants + protocols + which tests they unlock.</li>'
-      + '<li><strong>Gaps / deferrals</strong> — explicit assumptions we are aware of; concrete code that needs to land first.</li>'
-      + '<li><strong>Expert questions</strong> — open questions for you to weigh in on before we proceed.</li>'
-      + '</ul>'
+      +   '<h1>' + _h(iset.title || iset.name) + ' <span class="badge badge-' + _h(iset.status || 'planning') + '">' + _h(iset.status || 'planning') + '</span></h1>'
+      +   '<p class="muted small">Investigation report · <code>' + nameClean + '</code> · generated ' + _h(now) + ' · for expert review prior to execution.</p>'
 
-      + '<h2>Studies (dependency order)</h2>'
-      + studiesHtml
+      +   '<h2 id="overview">Overview</h2>'
+      +   (iset.question   ? '<p><strong>Question.</strong> '   + _multiline(iset.question)   + '</p>' : '')
+      +   (iset.hypothesis ? '<p><strong>Hypothesis.</strong> ' + _multiline(iset.hypothesis) + '</p>' : '')
+      +   (iset.description ? '<div class="description"><p>' + _multiline(iset.description) + '</p></div>' : '')
 
-      + '<footer>'
-      + '<p>Generated from the v2ecoli vivarium-dashboard. Source of truth: <code>investigations/' + _h(iset.name) + '/investigation.yaml</code> and the per-study <code>studies/&lt;name&gt;/study.yaml</code> files.</p>'
-      + '<p>Open the live DAG: visit the dashboard <strong>Investigations</strong> tab and click <em>' + _h(iset.title || iset.name) + '</em>.</p>'
-      + '</footer>'
+      +   (acceptance ? '<h2 id="acceptance">Acceptance criteria</h2>'
+                      + '<p class="muted small">Behavioral tests across the studies that must pass for this investigation to be considered complete.</p>'
+                      + '<ol>' + acceptance + '</ol>' : '')
+
+      +   '<h2 id="how-to-read">How to read this report</h2>'
+      +   '<p>Each section below is one study, in dependency order (roots first). Within a section:</p>'
+      +   '<ul>'
+      +     '<li><strong>Question / Hypothesis / Objective</strong> — what we want to know, what we predict, and what we will build.</li>'
+      +     '<li><strong>Predicted behavior</strong> — quantitative, testable predictions with the supporting citations from <code>papers.bib</code>. Color coding: <span style="background:#f0fdf4;padding:1px 6px;border-radius:3px">green = implemented (will run today)</span>, <span style="background:#fff7ed;padding:1px 6px;border-radius:3px">amber = gated on upstream work</span>, <span style="background:#fefce8;padding:1px 6px;border-radius:3px">yellow = stub</span>.</li>'
+      +     '<li><strong>Variants</strong> — the parameter perturbations we plan to run.</li>'
+      +     '<li><strong>Interventions</strong> — named simulation plans grouping variants + protocols + which tests they unlock.</li>'
+      +     '<li><strong>Gaps / deferrals</strong> — explicit assumptions we are aware of; concrete code that needs to land first.</li>'
+      +     '<li><strong>Expert questions</strong> — open questions for you to weigh in on before we proceed.</li>'
+      +   '</ul>'
+
+      +   '<h2 id="studies-heading">Studies (dependency order)</h2>'
+      +   studiesHtml
+
+      +   '<footer id="footer">'
+      +     '<p>Generated from the v2ecoli vivarium-dashboard. Source of truth: <code>investigations/' + nameClean + '/investigation.yaml</code> and the per-study <code>studies/&lt;name&gt;/study.yaml</code> files.</p>'
+      +     '<p>Open the live DAG: in the dashboard, click <strong>Investigations</strong> → <em>' + _h(iset.title || iset.name) + '</em>.</p>'
+      +   '</footer>'
+
+      + '</main>'
+      + '</div>'
+
+      // ── Active-section tracking for TOC links ──
+      + '<script>'
+      + '(function(){'
+      +   'var links=Array.from(document.querySelectorAll(".toc a"));'
+      +   'var targets=links.map(function(a){return document.getElementById(a.getAttribute("href").slice(1));})'
+      +     '.filter(Boolean);'
+      +   'function onScroll(){'
+      +     'var y=window.scrollY+80;'
+      +     'var current=null;'
+      +     'for(var i=0;i<targets.length;i++){if(targets[i].offsetTop<=y)current=targets[i];}'
+      +     'links.forEach(function(a){a.classList.toggle("active",current&&("#"+current.id)===a.getAttribute("href"));});'
+      +   '}'
+      +   'window.addEventListener("scroll",onScroll,{passive:true});'
+      +   'onScroll();'
+      + '})();'
+      + '</script>'
 
       + '</body></html>';
   }
