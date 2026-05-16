@@ -210,6 +210,99 @@ def _validate_study_v3_or_v4(spec: dict) -> None:
             raise InvestigationSpecError(
                 "implementation_tasks must be a string" + _v4_field_hint("implementation_tasks")
             )
+        _validate_expected_behavior(spec)
+
+
+def _validate_expected_behavior(spec: dict) -> None:
+    """Validate the ``expected_behavior:`` field (v4 structured form).
+
+    Accepts two shapes for backward compatibility:
+
+    1. Legacy free-form — a list of plain strings (v3 / unstructured studies).
+       Passes without validation.
+    2. Structured DSL (v4) — a list of mappings with at least ``name``,
+       ``en``, ``measure``, and ``expect`` fields.
+
+    Each structured entry must have:
+      - ``name`` (str, required, non-empty)
+      - ``en`` (str, required, non-empty)
+      - ``given`` (dict, optional)
+      - ``measure`` (dict, required, with at least ``kind``)
+      - ``expect`` (dict, required, with at least ``op``)
+      - ``status`` (str, optional)
+      - ``requires`` (list, optional)
+
+    Unknown ``measure.kind`` / ``expect.op`` values are **not** validated
+    here (forward-compatible; the evaluator catches them at run time).
+    """
+    entries = spec.get("expected_behavior")
+    if entries is None:
+        return
+    if not isinstance(entries, list):
+        raise InvestigationSpecError(
+            "expected_behavior must be a list"
+        )
+    if not entries:
+        return
+
+    # Detect free-form (all strings) — pass through.
+    if all(isinstance(e, str) for e in entries):
+        return
+
+    # Mixed or structured form.
+    for i, entry in enumerate(entries):
+        if isinstance(entry, str):
+            continue  # tolerate strings mixed with dicts during migration
+        if not isinstance(entry, dict):
+            raise InvestigationSpecError(
+                f"expected_behavior[{i}] must be a string or mapping"
+            )
+        # Required fields
+        if not entry.get("name"):
+            raise InvestigationSpecError(
+                f"expected_behavior[{i}].name is required and must be non-empty"
+            )
+        if not entry.get("en"):
+            raise InvestigationSpecError(
+                f"expected_behavior[{i}].en is required and must be non-empty"
+            )
+        measure = entry.get("measure")
+        if measure is None:
+            raise InvestigationSpecError(
+                f"expected_behavior[{i}].measure is required"
+            )
+        if not isinstance(measure, dict):
+            raise InvestigationSpecError(
+                f"expected_behavior[{i}].measure must be a mapping"
+            )
+        if not measure.get("kind"):
+            raise InvestigationSpecError(
+                f"expected_behavior[{i}].measure.kind is required"
+            )
+        expect = entry.get("expect")
+        if expect is None:
+            raise InvestigationSpecError(
+                f"expected_behavior[{i}].expect is required"
+            )
+        if not isinstance(expect, dict):
+            raise InvestigationSpecError(
+                f"expected_behavior[{i}].expect must be a mapping"
+            )
+        if not expect.get("op"):
+            raise InvestigationSpecError(
+                f"expected_behavior[{i}].expect.op is required"
+            )
+        # Optional fields — type checks only
+        given = entry.get("given")
+        if given is not None and not isinstance(given, dict):
+            raise InvestigationSpecError(
+                f"expected_behavior[{i}].given must be a mapping"
+            )
+        requires = entry.get("requires")
+        if requires is not None and not isinstance(requires, list):
+            raise InvestigationSpecError(
+                f"expected_behavior[{i}].requires must be a list"
+            )
 
 
 # Backwards-compatible alias for tests that pre-date v4 migration
