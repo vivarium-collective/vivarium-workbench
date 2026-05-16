@@ -191,6 +191,10 @@ def _validate_study_v3_or_v4(spec: dict) -> None:
             raise InvestigationSpecError("implementation_tasks must be a string")
 
 
+# Backwards-compatible alias for tests that pre-date v4 migration
+_validate_study_v3 = _validate_study_v3_or_v4
+
+
 def _validate_variants_list(spec: dict) -> None:
     """Validate the v2 ``variants:`` list shape.
 

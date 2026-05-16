@@ -26,7 +26,7 @@ def _write_v3(tmp_path, **overrides):
 
 def test_v3_study_with_empty_variants_validates(tmp_path):
     spec = load_spec(_write_v3(tmp_path))
-    assert spec["schema_version"] == 3
+    assert spec["schema_version"] in (3, 4)
     assert spec["variants"] == []
 
 
@@ -122,7 +122,8 @@ def test_v3_validation_rejects_intervention_missing_name():
 
 def test_load_spec_migrates_real_v2ecoli_shape_end_to_end(tmp_path):
     """A spec.yaml in the real workspace shape (variants-as-composites +
-    baseline string, no schema_version) loads into the v3 list-baseline shape."""
+    baseline string, no schema_version) loads into the v3 list-baseline shape
+    (and migrates to v4 on read)."""
     p = tmp_path / "spec.yaml"
     p.write_text(yaml.safe_dump({
         "name": "t1",
@@ -141,7 +142,7 @@ def test_load_spec_migrates_real_v2ecoli_shape_end_to_end(tmp_path):
         "hypothesis": "", "status": "draft",
     }))
     spec = load_spec(p)
-    assert spec["schema_version"] == 3
+    assert spec["schema_version"] in (3, 4)
     assert spec["baseline"] == [
         {"name": "chromosome-partition",
          "composite": "pkg.chromosome-partition", "params": {}},

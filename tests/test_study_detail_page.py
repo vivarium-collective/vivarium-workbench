@@ -70,18 +70,18 @@ def test_study_detail_spec_returns_none_for_missing(_ws):
     assert _study_detail_spec("does-not-exist") is None
 
 
-def test_study_detail_page_has_five_tabs(_ws):
-    """The 5-tab scaffold is present: Overview · Baseline · Variants · Interventions · Runs."""
+def test_study_detail_page_has_six_tabs(_ws):
+    """The 6-tab scaffold is present: Overview · Baseline · Variants · Interventions · Tests · Runs."""
     from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
     spec = _study_detail_spec("study-monod_kinetics-096184")
     html = _render_study_detail_html("study-monod_kinetics-096184", spec)
-    # Five buttons
-    for kind in ("overview", "baseline", "variants", "interventions", "runs"):
+    # Six buttons
+    for kind in ("overview", "baseline", "variants", "interventions", "tests", "runs"):
         assert f'class="study-tab' in html
         assert f'data-kind="{kind}"' in html
-    # Five panels
+    # Six panels
     panels = html.count('class="study-tab-panel')
-    assert panels == 5, f"expected 5 panel elements, got {panels}"
+    assert panels == 6, f"expected 6 panel elements, got {panels}"
     # The Overview tab is active by default — must have both active class and overview kind on a button
     assert 'class="study-tab active" data-kind="overview"' in html or \
            'data-kind="overview" class="study-tab active"' in html or \
@@ -236,8 +236,8 @@ def test_full_study_renders_all_tabs(_rich_ws):
     spec = _study_detail_spec("rich")
     html = _render_study_detail_html("rich", spec)
 
-    # 5 tabs scaffolded
-    for kind in ("overview", "baseline", "variants", "interventions", "runs"):
+    # 6 tabs scaffolded
+    for kind in ("overview", "baseline", "variants", "interventions", "tests", "runs"):
         assert f'data-kind="{kind}"' in html
 
     # Overview: objective text + counts
