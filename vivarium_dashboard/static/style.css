@@ -1087,13 +1087,22 @@ body.focus-mode::before{
 
 /* ===== Study Detail — 5-tab redesign (Plan 3) ===== */
 
-/* Tab bar — visually identical to .registry-tabs but scoped */
+/* Tab bar — visually identical to .registry-tabs but scoped.
+ * Sticky at the top of the scroll container so the user can switch
+ * tabs (or re-anchor) while scrolling through long study sections
+ * like Findings or Tests. Background + z-index ensure tabs are
+ * readable over content underneath. */
 .study-tabs {
   display: flex;
   gap: 24px;
   align-items: center;
   border-bottom: 1px solid #e5e7eb;
   margin: 16px 0 20px;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: #fff;
+  padding-top: 4px;
 }
 .study-tab {
   background: transparent;
