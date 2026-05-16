@@ -628,7 +628,7 @@
   <!-- Section 3: Discovered registry (tabbed browser, lazy-loaded) -->
   <section class="panel">
     <h3>Discovered registry <span class="count-badge muted" id="registry-total-count"></span></h3>
-    <p class="panel-lead">Live snapshot of <code>build_core()</code> &mdash; every Process, Step, Emitter, Visualization, and Type that <code>allocate_core()</code> registers via auto-discovery. Grouped by kind.</p>
+    <p class="panel-lead">Live snapshot of <code>build_core()</code> — every Process, Step, Emitter, Visualization, and Type registered via auto-discovery. Classes from this workspace's own package and declared <code>imports</code> are shown first. Classes discovered from the Python environment but <em>not</em> declared in <code>workspace.yaml</code> appear collapsed under <em>Also available in environment</em>.</p>
 
     <button class="action-btn" onclick="_loadRegistry(true)">Refresh registry</button>
     <div id="registry-status" class="muted" style="margin:8px 0"></div>

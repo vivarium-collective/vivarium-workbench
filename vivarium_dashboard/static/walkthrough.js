@@ -526,6 +526,20 @@
   }
   window._useRegistryClass = _useRegistryClass;
 
+  function _renderRegistryEntry(p) {
+    var aliases = (p.aliases || []).length
+      ? ' <small style="color:#888">(aliases: ' + p.aliases.map(_esc).join(', ') + ')</small>'
+      : '';
+    var sourceAttr = p.source ? ' data-source="' + _esc(p.source) + '"' : '';
+    return '<div class="registry-entry"' + sourceAttr + '>' +
+      '<strong>' + _esc(p.name) + '</strong>' + aliases + '<br>' +
+      '<small><code>' + _esc(p.address) + '</code></small>' +
+      (p.schema_preview
+        ? '<details><summary>config schema</summary><pre class="json-tree">' + _esc(p.schema_preview) + '</pre></details>'
+        : '') +
+    '</div>';
+  }
+
   function _renderRegistryGrid(containerId, entries) {
     var el = document.getElementById(containerId);
     if (!el) return;
@@ -533,18 +547,37 @@
       el.innerHTML = '<p class="empty-state">None registered.</p>';
       return;
     }
-    el.innerHTML = entries.map(function(p) {
-      var aliases = (p.aliases || []).length
-        ? ' <small style="color:#888">(aliases: ' + p.aliases.map(_esc).join(', ') + ')</small>'
-        : '';
-      return '<div class="registry-entry">' +
-        '<strong>' + _esc(p.name) + '</strong>' + aliases + '<br>' +
-        '<small><code>' + _esc(p.address) + '</code></small>' +
-        (p.schema_preview
-          ? '<details><summary>config schema</summary><pre class="json-tree">' + _esc(p.schema_preview) + '</pre></details>'
-          : '') +
-      '</div>';
-    }).join('');
+
+    // Partition by source: in_workspace first, then framework, then environment_only.
+    var inWs = entries.filter(function(p) { return p.source === 'in_workspace'; });
+    var framework = entries.filter(function(p) { return p.source === 'framework'; });
+    var envOnly = entries.filter(function(p) { return p.source === 'environment_only' || !p.source; });
+
+    var html = '';
+
+    // In-workspace and framework entries render normally.
+    var primary = inWs.concat(framework);
+    if (primary.length) {
+      html += primary.map(_renderRegistryEntry).join('');
+    } else {
+      html += '<p class="empty-state muted" style="font-size:0.9em">No workspace-declared entries of this kind.</p>';
+    }
+
+    // Environment-only entries: collapsible section, dimmed.
+    if (envOnly.length) {
+      html +=
+        '<details class="registry-env-section" style="margin-top:12px">' +
+        '<summary style="cursor:pointer;color:#6b7280;font-size:0.9em;padding:4px 0">' +
+        'Also available in environment (' + envOnly.length + ') — not declared in workspace.yaml' +
+        '</summary>' +
+        '<div style="opacity:0.6;margin-top:6px">' +
+        envOnly.map(_renderRegistryEntry).join('') +
+        '</div>' +
+        '<p style="font-size:0.8em;color:#9ca3af;margin:4px 0 0">Run <code>/pbg-install &lt;pkg&gt;</code> to add a package to this workspace\'s imports.</p>' +
+        '</details>';
+    }
+
+    el.innerHTML = html;
   }
 
   function _renderRegistryTypesGrid(containerId, types) {
@@ -585,6 +618,15 @@
       var text = row.textContent.toLowerCase();
       row.style.display = (!q || text.indexOf(q) !== -1) ? '' : 'none';
     });
+    // Auto-open the environment-only details section when a search matches entries inside it.
+    activePanel.querySelectorAll('.registry-env-section').forEach(function(details) {
+      if (!q) { details.open = false; return; }
+      var hasVisible = false;
+      details.querySelectorAll('.registry-entry').forEach(function(row) {
+        if (row.style.display !== 'none') hasVisible = true;
+      });
+      if (hasVisible) details.open = true;
+    });
   }
   window._filterRegistry = _filterRegistry;
 
@@ -617,26 +659,48 @@
         _renderRegistryGrid('registry-visualizations-container', byKind.visualization);
         _renderRegistryTypesGrid('registry-types-container', types);
 
-        // Per-tab counts + total.
-        var setCount = function(id, n) {
+        // Per-tab count badges: show workspace-declared count + total in parens.
+        // "in_workspace" entries are the actionable ones; environment_only are dimmed.
+        var setCount = function(id, entries) {
           var el = document.getElementById(id);
-          if (el) el.textContent = n;
+          if (!el) return;
+          var wsCount = entries.filter(function(e) { return e.source === 'in_workspace'; }).length;
+          var total = entries.length;
+          if (wsCount === total) {
+            el.textContent = total;
+          } else {
+            el.textContent = wsCount + ' / ' + total;
+            el.title = wsCount + ' from this workspace, ' + (total - wsCount) + ' from environment';
+          }
         };
-        setCount('registry-process-count', byKind.process.length);
-        setCount('registry-step-count', byKind.step.length);
-        setCount('registry-emitter-count', byKind.emitter.length);
-        setCount('registry-visualization-count', byKind.visualization.length);
-        setCount('registry-type-count', types.length);
+        setCount('registry-process-count', byKind.process);
+        setCount('registry-step-count', byKind.step);
+        setCount('registry-emitter-count', byKind.emitter);
+        setCount('registry-visualization-count', byKind.visualization);
+        var typeCountEl = document.getElementById('registry-type-count');
+        if (typeCountEl) typeCountEl.textContent = types.length;
         var total = document.getElementById('registry-total-count');
-        if (total) total.textContent = (processes.length + types.length) + ' total';
+        if (total) {
+          var wsProcessCount = processes.filter(function(p) { return p.source === 'in_workspace'; }).length;
+          if (wsProcessCount < processes.length) {
+            total.textContent = wsProcessCount + ' workspace + ' + (processes.length - wsProcessCount) + ' env / ' + types.length + ' types';
+          } else {
+            total.textContent = (processes.length + types.length) + ' total';
+          }
+        }
 
         // Populate sim-process picker if present (Composite Explorer / setup forms).
+        // Only show in-workspace processes in the picker; environment-only are not
+        // declared by this workspace and using them would be unreliable.
         var picker = document.getElementById('sim-process-picker');
         if (picker) {
-          if (processes.length === 0) {
-            picker.innerHTML = '<p class="muted">No processes registered yet.</p>';
+          var wsProcesses = processes.filter(function(p) {
+            return p.source === 'in_workspace' || p.source === 'framework';
+          });
+          if (wsProcesses.length === 0) {
+            picker.innerHTML = '<p class="muted">No workspace processes registered yet.</p>';
           } else {
-            picker.innerHTML = processes.map(function(p) {
+            picker.innerHTML = wsProcesses.map(function(p) {
               return '<label style="display:inline-block; margin-right:12px">' +
                 '<input type="checkbox" name="processes" value="' + p.name + '"> ' + p.name +
                 '</label>';

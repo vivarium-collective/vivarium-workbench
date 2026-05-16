@@ -285,6 +285,15 @@ def _get_registry_data(bypass_cache: bool = False) -> dict:
     """Return registry data from build_core() subprocess, with 30s caching.
 
     Always returns {processes: [...], types: [...]} plus optional 'error' key.
+    Each process entry includes a ``source`` field:
+      - ``"in_workspace"`` — class belongs to the workspace's own package or a
+        declared import (workspace.yaml.imports).
+      - ``"framework"`` — class is from the process-bigraph framework infrastructure
+        (process_bigraph, bigraph_schema, bigraph_viz, pbg_superpowers,
+        vivarium_dashboard).
+      - ``"environment_only"`` — discovered via allocate_core() entry-point scan
+        but not declared in workspace.yaml.  Installed in the Python env but not
+        explicitly imported by this workspace.
     Never raises.
     """
     global _REGISTRY_CACHE
@@ -300,6 +309,23 @@ def _get_registry_data(bypass_cache: bool = False) -> dict:
         # Support explicit package_path in workspace.yaml (most reliable).
         package_name = ws_data.get("package_path") or ("pbg_" + slug.replace("-", "_"))
 
+        # Build the set of top-level package names that this workspace explicitly
+        # owns or imports.  Used inside the subprocess to tag each discovered class.
+        # imports is a dict keyed by catalog name; the Python package name lives
+        # in imports[name].get("package") or falls back to name.replace("-", "_").
+        imports_dict = ws_data.get("imports", {}) or {}
+        _ws_import_pkgs: list[str] = []
+        for cat_name, imp_val in imports_dict.items():
+            if isinstance(imp_val, dict):
+                pkg = imp_val.get("package") or cat_name.replace("-", "_")
+            else:
+                pkg = cat_name.replace("-", "_")
+            _ws_import_pkgs.append(pkg.split(".")[0])
+        # The workspace's own package is always "in_workspace".
+        _ws_import_pkgs.append(package_name.split(".")[0])
+        # Dedupe while preserving insertion order.
+        _workspace_pkgs_repr = repr(list(dict.fromkeys(_ws_import_pkgs)))
+
         py = sys.executable
         script = textwrap.dedent(f"""
 import json, sys
@@ -313,6 +339,25 @@ try:
         from pbg_superpowers.visualization import Visualization as VISUALIZATION_CLS
     except ImportError:
         VISUALIZATION_CLS = None
+
+    # Packages declared in this workspace (own package + workspace.yaml imports).
+    _WORKSPACE_PKGS = set({_workspace_pkgs_repr})
+    # Framework infrastructure packages — always shown, never "environment_only".
+    _FRAMEWORK_PKGS = {{
+        'process_bigraph', 'bigraph_schema', 'bigraph_viz',
+        'pbg_superpowers', 'vivarium_dashboard',
+    }}
+
+    def _classify_source(cls):
+        try:
+            top_pkg = cls.__module__.split('.')[0]
+        except Exception:
+            return 'environment_only'
+        if top_pkg in _WORKSPACE_PKGS:
+            return 'in_workspace'
+        if top_pkg in _FRAMEWORK_PKGS:
+            return 'framework'
+        return 'environment_only'
 
     # Processes (and other linkable components) live in core.link_registry,
     # a dict keyed by both short names ('Composite') and fully-qualified
@@ -358,6 +403,7 @@ try:
                 schema_preview = json.dumps(cls.config_schema, default=str)[:400]
             except Exception:
                 schema_preview = "<unserializable>"
+        source = _classify_source(cls)
         seen_classes[cls_id] = len(processes)
         processes.append({{
             "name": name,
@@ -365,9 +411,12 @@ try:
             "kind": kind,
             "schema_preview": schema_preview,
             "aliases": [],
+            "source": source,
         }})
     # Re-sort by name so output is deterministic; promote short names.
-    processes.sort(key=lambda p: ('.' in p['name'], p['name']))
+    # Within each source group: in_workspace first, then framework, then environment_only.
+    _source_order = {{"in_workspace": 0, "framework": 1, "environment_only": 2}}
+    processes.sort(key=lambda p: (_source_order.get(p.get('source', 'environment_only'), 2), '.' in p['name'], p['name']))
 
     # Types: core.registry is a dict of registered type schemas.
     types = []
@@ -380,7 +429,7 @@ try:
             preview = f"<error: {{e}}>"
         types.append({{"name": name, "schema_preview": preview}})
 
-    print(json.dumps({{"processes": processes, "types": types}}))
+    print(json.dumps({{"processes": processes, "types": types, "workspace_pkgs": list(_WORKSPACE_PKGS)}}))
 except ImportError as e:
     print(json.dumps({{"error": f"could not import {package_name}.core: {{e}}", "processes": [], "types": []}}))
 except Exception as e:
