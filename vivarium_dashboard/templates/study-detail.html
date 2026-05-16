@@ -65,34 +65,16 @@
 
     {% if study.expected_behavior %}
     <div class="overview-section">
-      <h2 class="overview-label">Expected Behavior</h2>
-      <p class="muted" style="margin: 0 0 8px 0; font-size: 0.85em;">
-        Each prediction below is paired with a precise <code>given / measure / expect</code>
-        rule so one English sentence auto-generates one pytest assertion (see Tests tab).
+      <h2 class="overview-label">Behavioral tests</h2>
+      {% set _eb = study.expected_behavior %}
+      {% set _impl = _eb | selectattr('status', 'equalto', 'implemented') | list | length %}
+      {% set _stub = _eb | selectattr('status', 'equalto', 'stub') | list | length %}
+      {% set _gated = _eb | length - _impl - _stub %}
+      <p style="margin: 0;">
+        <strong>{{ _eb | length }}</strong> behavioral test{{ '' if _eb|length == 1 else 's' }} defined
+        ({{ _impl }} implemented{% if _stub %}, {{ _stub }} stub{% endif %}{% if _gated %}, {{ _gated }} gated{% endif %}).
+        <a onclick="_setStudyTab('tests')" style="cursor: pointer; color: #3b82f6; text-decoration: underline; margin-left: 6px;">View on Tests tab →</a>
       </p>
-      <ul class="expected-behavior-list" style="list-style:none; padding-left:0;">
-        {% for b in study.expected_behavior %}
-        <li class="expected-behavior-item" style="margin: 0 0 10px 0; padding: 8px 10px; border-left: 3px solid {% if b.status == 'implemented' %}#10b981{% elif b.status == 'stub' %}#f59e0b{% else %}#94a3b8{% endif %}; background: #f8fafc;">
-          <div style="display: flex; align-items: baseline; gap: 8px;">
-            <span style="font-size: 0.75em; color: #475569; font-family: monospace;">
-              {% if b.status == 'implemented' %}✓{% elif b.status == 'stub' %}◯{% else %}⏳{% endif %}
-              {{ b.status or 'implemented' }}
-            </span>
-            <strong style="font-size: 0.85em;">{{ b.name or '(unnamed)' }}</strong>
-          </div>
-          <div style="margin-top: 4px;">{{ b.en or '' }}</div>
-          {% if b.given or b.measure or b.expect %}
-          <details style="margin-top: 4px; font-size: 0.8em;">
-            <summary class="muted" style="cursor: pointer;">Assertion</summary>
-            <pre style="background:#fff; padding:6px; margin:4px 0 0 0; border:1px solid #e2e8f0; border-radius:3px; overflow-x:auto;">given:   {{ b.given|tojson }}
-measure: {{ b.measure|tojson }}
-expect:  {{ b.expect|tojson }}{% if b.requires %}
-requires: {{ b.requires|tojson }}{% endif %}</pre>
-          </details>
-          {% endif %}
-        </li>
-        {% endfor %}
-      </ul>
     </div>
     {% endif %}
 
@@ -541,16 +523,62 @@ requires: {{ b.requires|tojson }}{% endif %}</pre>
 <section class="study-tab-panel" data-kind="tests" id="panel-tests" hidden>
   <div class="tests-header">
     <h3>Behavioral Tests</h3>
-    <div class="tests-summary" id="tests-summary">— no test results yet —</div>
-    <button id="run-tests-btn" class="btn-primary">Run tests</button>
+    <p class="muted" style="margin: 0 0 8px 0;">
+      Each prediction below is paired with a precise <code>given / measure / expect</code>
+      rule so one English sentence auto-generates one pytest assertion. The
+      generic evaluator in <code>tests/_behaviors.py</code> dispatches on
+      <code>measure.kind</code> + <code>expect.op</code> to compute pass/fail
+      against the latest simulation run.
+    </p>
+    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+      <button id="run-tests-btn" class="btn-primary">Run tests</button>
+      <div class="tests-summary muted" id="tests-summary">— no test results yet —</div>
+    </div>
+    <div class="tests-config" style="margin-top: 6px;">
+      <span class="badge">auto_discover: <code id="tests-auto-discover">true</code></span>
+      <span class="badge">data_source: <code id="tests-data-source">latest_run</code></span>
+    </div>
   </div>
-  <div class="tests-config">
-    <span class="badge">auto_discover: <code id="tests-auto-discover">true</code></span>
-    <span class="badge">data_source: <code id="tests-data-source">latest_run</code></span>
-  </div>
-  <ul class="tests-list" id="tests-list">
-    <li class="placeholder">Click "Run tests" to discover and execute studies/&lt;slug&gt;/tests/test_*.py</li>
+
+  {% if study.expected_behavior %}
+  <ul class="expected-behavior-list" id="tests-list" style="list-style:none; padding-left:0; margin-top: 12px;">
+    {% for b in study.expected_behavior %}
+    <li class="expected-behavior-item" id="bt-{{ b.name or loop.index0 }}"
+        data-pytest-node="{{ b.name or '' }}"
+        style="margin: 0 0 10px 0; padding: 10px 12px; border-left: 4px solid {% if b.status == 'implemented' %}#10b981{% elif b.status == 'stub' %}#f59e0b{% else %}#94a3b8{% endif %}; background: #f8fafc; border-radius: 4px;">
+      <div style="display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;">
+        <span class="bt-result" style="font-size: 0.75em; color: #94a3b8; font-family: monospace; min-width: 60px;">
+          ⏳ pending
+        </span>
+        <span style="font-size: 0.78em; color: #475569; font-family: monospace;">
+          {% if b.status == 'implemented' %}✓ implemented{% elif b.status == 'stub' %}◯ stub{% else %}⏳ {{ b.status or 'gated' }}{% endif %}
+        </span>
+        <strong style="font-size: 0.9em;">{{ b.name or '(unnamed)' }}</strong>
+      </div>
+      <div style="margin-top: 6px; font-size: 0.95em;">{{ b.en or '' }}</div>
+      {% if b.given or b.measure or b.expect %}
+      <details style="margin-top: 6px; font-size: 0.82em;">
+        <summary class="muted" style="cursor: pointer;">Assertion (given / measure / expect)</summary>
+        <pre style="background:#fff; padding:8px; margin:4px 0 0 0; border:1px solid #e2e8f0; border-radius:3px; overflow-x:auto;">given:   {{ b.given|tojson }}
+measure: {{ b.measure|tojson }}
+expect:  {{ b.expect|tojson }}{% if b.requires %}
+requires: {{ b.requires|tojson }}{% endif %}</pre>
+      </details>
+      {% endif %}
+      {% if b.notes %}
+      <p class="muted" style="margin: 6px 0 0 0; font-size: 0.8em;">Note: {{ b.notes }}</p>
+      {% endif %}
+    </li>
+    {% endfor %}
   </ul>
+  {% else %}
+  <ul class="tests-list" id="tests-list" style="margin-top: 12px;">
+    <li class="placeholder">No <code>expected_behavior:</code> entries declared in study.yaml yet.
+      Add some to see them appear here as test rows. Click "Run tests" to discover and
+      execute additional <code>studies/&lt;slug&gt;/tests/test_*.py</code> files alongside
+      the auto-generated assertions.</li>
+  </ul>
+  {% endif %}
 </section>
 
 <section class="study-tab-panel" data-kind="visualizations" id="panel-visualizations" hidden>
