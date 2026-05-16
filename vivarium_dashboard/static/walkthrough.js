@@ -376,6 +376,9 @@
         _loadInvestigations();
       }
     }
+    if (pageId === 'investigations') {
+      _loadInvestigationSets();
+    }
   }
 
   function _initMenuNav() {
@@ -383,7 +386,7 @@
     var params = new URLSearchParams(window.location.search);
     var focus = params.get('focus');
     if (focus) {
-      var validPages = ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'studies', 'simulations', 'composite-explore'];
+      var validPages = ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'investigations', 'studies', 'simulations', 'composite-explore'];
       if (validPages.indexOf(focus) >= 0) {
         document.body.classList.add('focus-mode', 'focus-' + focus);
         _switchPage(focus);
@@ -393,7 +396,7 @@
 
     function fromHash() {
       var h = (window.location.hash || '').replace(/^#/, '');
-      var validPages = ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'studies', 'simulations', 'composite-explore'];
+      var validPages = ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'investigations', 'studies', 'simulations', 'composite-explore'];
       _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
     }
     window.addEventListener('hashchange', fromHash);
@@ -2001,17 +2004,25 @@
   function _vivRefreshInvestigationsRail() {
     var host = document.getElementById('viv-rail-investigations');
     if (!host) return;
-    fetch('/api/investigations')
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        _vivRenderInvestigationsRail(data.investigations || []);
-      })
-      .catch(function(err) {
-        host.innerHTML =
-          '<p class="viv-rail-empty" style="font-size:0.85em;color:#c00;padding:4px 12px">' +
-          'Failed to load' +
-          '</p>';
-      });
+    // New flow: fetch both isets (groups) and studies (members), then render
+    // the grouped/collapsible view via _renderRailInvestigationGroups. The
+    // legacy fallback _vivRenderInvestigationsRail() is kept below for
+    // workspaces with no investigation.yaml files.
+    var hasIsetUI = (typeof _renderRailInvestigationGroups === 'function')
+                 && document.getElementById('investigations-list');
+    var p1 = fetch('/api/investigations').then(function(r) { return r.json(); }).catch(function() { return {investigations: []}; });
+    var p2 = hasIsetUI
+      ? fetch('/api/iset-list').then(function(r) { return r.json(); }).catch(function() { return {investigations: []}; })
+      : Promise.resolve({investigations: []});
+    Promise.all([p1, p2]).then(function(arr) {
+      window._investigations = arr[0].investigations || [];
+      window._isetIndex      = arr[1].investigations || [];
+      if (hasIsetUI && window._isetIndex.length) {
+        _renderRailInvestigationGroups();
+      } else {
+        _vivRenderInvestigationsRail(window._investigations);
+      }
+    });
   }
   window._vivRefreshInvestigationsRail = _vivRefreshInvestigationsRail;
 
@@ -3174,6 +3185,332 @@
       });
   }
   window._loadInvestigations = _loadInvestigations;
+
+  // ─── Investigation-sets (v3 "Investigations" tab) ──────────────────────
+  // An investigation-set (iset) is a named collection of studies with
+  // dependencies — populated from investigations/<name>/investigation.yaml.
+  // Distinct from `window._investigations` which is the FLAT list of every
+  // study in the workspace (legacy naming).
+  window._isetIndex = [];        // [{name, title, status, studies:[slug, ...]}]
+  window._currentIset = null;    // name of the iset currently open in detail view
+
+  function _loadInvestigationSets() {
+    var list = document.getElementById('investigations-list');
+    if (list) list.innerHTML = '<p class="empty-state">Loading…</p>';
+    fetch('/api/iset-list', {headers: {Accept: 'application/json'}})
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function(j) {
+        window._isetIndex = j.investigations || [];
+        _renderInvestigationSets();
+        _renderRailInvestigationGroups();
+      })
+      .catch(function(err) {
+        if (list) list.innerHTML = '<p class="empty-state" style="color:#b91c1c">' +
+          'Failed to load investigations: ' + _esc(String(err)) + '</p>';
+      });
+  }
+  window._loadInvestigationSets = _loadInvestigationSets;
+
+  function _renderInvestigationSets() {
+    var list = document.getElementById('investigations-list');
+    if (!list) return;
+    if (!window._isetIndex.length) {
+      list.innerHTML = '<p class="empty-state">No investigations declared. Author one at <code>investigations/&lt;name&gt;/investigation.yaml</code>.</p>';
+      return;
+    }
+    list.innerHTML = window._isetIndex.map(function(iset) {
+      var desc = (iset.description || '').split('\n')[0].slice(0, 240);
+      return '<div class="investigation-set-card" onclick="_openInvestigationDetail(\'' + _esc(iset.name) + '\')" ' +
+             'style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;cursor:pointer;transition:box-shadow 0.1s,border-color 0.1s;">' +
+        '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px;">' +
+          '<strong style="font-size:1.05em;flex:1">' + _esc(iset.title || iset.name) + '</strong>' +
+          '<span class="status-pill planned" style="font-size:0.78em">' + _esc(iset.status || 'planning') + '</span>' +
+        '</div>' +
+        '<div class="muted" style="font-size:0.78em;font-family:monospace;margin-bottom:6px">' + _esc(iset.name) + '</div>' +
+        (desc ? '<p style="margin:0 0 8px 0;font-size:0.9em;color:#475569">' + _esc(desc) + (iset.description.length > 240 ? '…' : '') + '</p>' : '') +
+        '<div style="font-size:0.85em;color:#64748b">' +
+          '<strong>' + iset.n_studies + '</strong> stud' + (iset.n_studies === 1 ? 'y' : 'ies') +
+          ' &nbsp;·&nbsp; click to open DAG' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  function _openInvestigationDetail(name) {
+    window._currentIset = name;
+    document.getElementById('investigations-list').style.display = 'none';
+    document.getElementById('investigation-detail-view').style.display = '';
+    document.getElementById('investigation-detail-title').textContent = name;
+    document.getElementById('investigation-detail-description').textContent = 'Loading…';
+
+    fetch('/api/iset/' + encodeURIComponent(name), {headers: {Accept: 'application/json'}})
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function(d) {
+        document.getElementById('investigation-detail-title').textContent = d.title || d.name;
+        var statusEl = document.getElementById('investigation-detail-status');
+        statusEl.textContent = d.status || 'planning';
+        document.getElementById('investigation-detail-description').textContent = d.description || '';
+        _renderInvestigationDag(d.studies || []);
+      })
+      .catch(function(err) {
+        document.getElementById('investigation-detail-description').textContent = 'Failed to load: ' + err;
+      });
+  }
+  window._openInvestigationDetail = _openInvestigationDetail;
+
+  function _closeInvestigationDetail() {
+    window._currentIset = null;
+    document.getElementById('investigations-list').style.display = '';
+    document.getElementById('investigation-detail-view').style.display = 'none';
+  }
+  window._closeInvestigationDetail = _closeInvestigationDetail;
+
+  // Layout + render the DAG of study nodes for the active investigation.
+  // x = topological depth, y = within-depth slot. Cards as absolute-positioned
+  // <div>s; edges as SVG cubic-Bezier paths.
+  function _renderInvestigationDag(studies) {
+    var nodesHost = document.getElementById('investigation-dag-nodes');
+    var edgesSvg  = document.getElementById('investigation-dag-edges');
+    var shell     = document.getElementById('investigation-dag-shell');
+    nodesHost.innerHTML = '';
+    edgesSvg.innerHTML  = '';
+
+    if (!studies.length) {
+      nodesHost.innerHTML = '<p class="empty-state" style="padding:24px">No studies in this investigation.</p>';
+      return;
+    }
+
+    // Build name->study + child map.
+    var byName = {};
+    var children = {};
+    studies.forEach(function(s) { byName[s.name] = s; children[s.name] = []; });
+    studies.forEach(function(s) {
+      (s.parent_studies || []).forEach(function(p) {
+        var pn = p.study || p;
+        if (children[pn]) children[pn].push(s.name);
+      });
+    });
+
+    // BFS depth from roots.
+    var depth = {};
+    var queue = [];
+    studies.forEach(function(s) {
+      if (!(s.parent_studies || []).length) { depth[s.name] = 0; queue.push(s.name); }
+    });
+    var guard = studies.length * 4;
+    while (queue.length && guard-- > 0) {
+      var n = queue.shift();
+      (children[n] || []).forEach(function(c) {
+        if (depth[c] === undefined || depth[c] < depth[n] + 1) {
+          depth[c] = depth[n] + 1;
+          queue.push(c);
+        }
+      });
+    }
+    studies.forEach(function(s) { if (depth[s.name] === undefined) depth[s.name] = 0; });
+
+    // Bin by depth.
+    var byDepth = {};
+    studies.forEach(function(s) {
+      var d = depth[s.name];
+      (byDepth[d] = byDepth[d] || []).push(s);
+    });
+    Object.keys(byDepth).forEach(function(d) {
+      byDepth[d].sort(function(a, b) { return a.name.localeCompare(b.name); });
+    });
+
+    // Layout constants.
+    var CARD_W = 280, CARD_H = 110;
+    var X_GAP = 80,  Y_GAP = 24;
+    var PAD_X = 24,  PAD_Y = 16;
+
+    // Compute each card's (x, y).
+    var pos = {};   // name -> {x, y, depth, slot}
+    var depths = Object.keys(byDepth).map(Number).sort(function(a, b) { return a - b; });
+    var maxSlot = 0;
+    depths.forEach(function(d) {
+      byDepth[d].forEach(function(s, i) {
+        pos[s.name] = {
+          x: PAD_X + d * (CARD_W + X_GAP),
+          y: PAD_Y + i * (CARD_H + Y_GAP),
+          depth: d, slot: i,
+        };
+        if (i > maxSlot) maxSlot = i;
+      });
+    });
+
+    // Size the canvas + svg.
+    var canvasW = PAD_X * 2 + (depths.length > 0 ? depths[depths.length - 1] : 0) * (CARD_W + X_GAP) + CARD_W;
+    var canvasH = PAD_Y * 2 + (maxSlot + 1) * (CARD_H + Y_GAP);
+    nodesHost.style.width = canvasW + 'px';
+    nodesHost.style.height = canvasH + 'px';
+    edgesSvg.setAttribute('width', canvasW);
+    edgesSvg.setAttribute('height', canvasH);
+    edgesSvg.style.width = canvasW + 'px';
+    edgesSvg.style.height = canvasH + 'px';
+
+    // Render edges first (behind cards).
+    var svgNS = 'http://www.w3.org/2000/svg';
+    studies.forEach(function(s) {
+      (s.parent_studies || []).forEach(function(p) {
+        var pn = p.study || p;
+        if (!pos[pn] || !pos[s.name]) return;
+        var x1 = pos[pn].x + CARD_W;
+        var y1 = pos[pn].y + CARD_H / 2;
+        var x2 = pos[s.name].x;
+        var y2 = pos[s.name].y + CARD_H / 2;
+        var dx = Math.max(40, (x2 - x1) / 2);
+        var path = document.createElementNS(svgNS, 'path');
+        path.setAttribute('d', 'M ' + x1 + ' ' + y1 +
+                              ' C ' + (x1 + dx) + ' ' + y1 +
+                              ', ' + (x2 - dx) + ' ' + y2 +
+                              ', ' + x2 + ' ' + y2);
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', '#94a3b8');
+        path.setAttribute('stroke-width', '1.5');
+        // Marker arrowhead via inline element.
+        edgesSvg.appendChild(path);
+
+        // Condition label at midpoint.
+        var cond = (p.condition || 'tests-passed');
+        var midX = (x1 + x2) / 2;
+        var midY = (y1 + y2) / 2 - 6;
+        var label = document.createElementNS(svgNS, 'text');
+        label.setAttribute('x', midX);
+        label.setAttribute('y', midY);
+        label.setAttribute('font-size', '10');
+        label.setAttribute('text-anchor', 'middle');
+        label.setAttribute('fill', '#94a3b8');
+        label.textContent = cond;
+        edgesSvg.appendChild(label);
+      });
+    });
+
+    // Render nodes (study cards).
+    studies.forEach(function(s) {
+      var p = pos[s.name];
+      var statusColor = ({
+        planned:    '#94a3b8',
+        running:    '#3b82f6',
+        ran:        '#10b981',
+        complete:   '#059669',
+        failed:     '#dc2626',
+        invalid:    '#dc2626',
+      })[s.status] || '#94a3b8';
+
+      var node = document.createElement('div');
+      node.className = 'iset-dag-node';
+      node.onclick = function() { _openStudyEmbeddedNewTab(s.name); };
+      node.style.cssText =
+        'position:absolute;left:' + p.x + 'px;top:' + p.y + 'px;' +
+        'width:' + CARD_W + 'px;height:' + CARD_H + 'px;' +
+        'background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;' +
+        'cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.04);transition:box-shadow 0.1s,border-color 0.1s;' +
+        'border-left: 4px solid ' + statusColor + ';' +
+        'box-sizing:border-box;overflow:hidden;';
+      node.innerHTML =
+        '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:4px">' +
+          '<strong style="font-size:0.95em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _esc(s.name) + '</strong>' +
+          '<span class="status-pill" style="background:#f1f5f9;color:#475569;font-size:0.7em;padding:1px 6px;">' + _esc(s.status || 'planned') + '</span>' +
+        '</div>' +
+        '<div style="font-size:0.78em;color:#64748b;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
+          _esc(s.baseline_source || '—') + '</div>' +
+        '<div style="font-size:0.78em;color:#64748b;margin-top:6px">' +
+          (s.n_variants || 0) + ' variants &middot; ' +
+          (s.n_interventions || 0) + ' interventions &middot; ' +
+          (s.n_behaviors || 0) + ' tests' +
+        '</div>' +
+        '<div style="font-size:0.72em;color:#94a3b8;margin-top:4px">Click to open study</div>';
+      nodesHost.appendChild(node);
+    });
+  }
+  window._renderInvestigationDag = _renderInvestigationDag;
+
+  // Open the embedded study panel from any context (DAG node, sidebar, etc.)
+  // by routing through the Studies page's embed flow.
+  function _openStudyEmbeddedNewTab(name) {
+    // Switch to Studies page so the embed panel exists, then open.
+    _switchPage('studies');
+    setTimeout(function() {
+      if (typeof _openStudyEmbedded === 'function') _openStudyEmbedded(name);
+    }, 80);
+  }
+  window._openStudyEmbeddedNewTab = _openStudyEmbeddedNewTab;
+
+  // Sidebar grouping: studies-by-investigation, collapsible.
+  // Replaces the existing flat-list render in #viv-rail-investigations.
+  function _renderRailInvestigationGroups() {
+    var host = document.getElementById('viv-rail-investigations');
+    if (!host) return;
+    // Need both: window._investigations (all studies) AND window._isetIndex (groups).
+    // If either isn't loaded yet, fall back to a loading message + kick the missing one.
+    if (!Array.isArray(window._isetIndex)) window._isetIndex = [];
+    if (!Array.isArray(window._investigations) || !window._investigations.length) {
+      // No studies in memory yet → fall back to the legacy render until they arrive.
+      if (typeof _renderRailInvestigationsLegacy === 'function') return _renderRailInvestigationsLegacy();
+      host.innerHTML = '<p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">Loading…</p>';
+      if (typeof _loadInvestigations === 'function') _loadInvestigations();
+      return;
+    }
+
+    var memberSet = {};         // studySlug -> [isetName, ...]
+    window._isetIndex.forEach(function(iset) {
+      (iset.studies || []).forEach(function(slug) {
+        (memberSet[slug] = memberSet[slug] || []).push(iset.name);
+      });
+    });
+
+    // Group studies: each iset gets its members; leftovers go to "Ungrouped".
+    var groups = [];   // [{name, title, studies: [study, ...]}]
+    var seen = {};
+    window._isetIndex.forEach(function(iset) {
+      var members = (iset.studies || [])
+        .map(function(slug) { return window._investigations.find(function(s) { return s.name === slug; }); })
+        .filter(Boolean);
+      members.forEach(function(s) { seen[s.name] = true; });
+      // Sort within group by topological depth (the same map computed in
+      // _renderInvestigations); if unavailable, fall back to alpha.
+      var depthMap = window._investigationsDepth || {};
+      members.sort(function(a, b) {
+        var da = depthMap[a.name] || 0, db = depthMap[b.name] || 0;
+        return da - db || a.name.localeCompare(b.name);
+      });
+      groups.push({name: iset.name, title: iset.title || iset.name, studies: members});
+    });
+    var ungrouped = window._investigations.filter(function(s) { return !seen[s.name]; });
+    if (ungrouped.length) groups.push({name: '__ungrouped__', title: 'Ungrouped', studies: ungrouped});
+
+    var collapsedState = window._isetRailCollapsed || {};
+    host.innerHTML = groups.map(function(g) {
+      var isCollapsed = !!collapsedState[g.name];
+      var children = isCollapsed ? '' : g.studies.map(function(s) {
+        var status = s.status || 'planned';
+        return '<a class="viv-rail-sublink" ' +
+               'onclick="event.preventDefault();_openStudyEmbeddedNewTab(\'' + _esc(s.name) + '\');return false;" ' +
+               'href="#" ' +
+               'style="display:flex;align-items:baseline;gap:6px;padding:3px 14px 3px 28px;color:#64748b;text-decoration:none;font-size:0.85em;">' +
+                 '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + _esc(s.name) + '</span>' +
+                 (s.blocked ? '<span title="blocked" style="font-size:0.85em">🔒</span>' : '') +
+                 '<span class="muted" style="font-size:0.72em">' + _esc(status) + '</span>' +
+               '</a>';
+      }).join('');
+      var headerClick = "event.preventDefault(); window._isetRailCollapsed = window._isetRailCollapsed || {}; window._isetRailCollapsed['" + _esc(g.name) + "'] = !window._isetRailCollapsed['" + _esc(g.name) + "']; _renderRailInvestigationGroups();";
+      var groupClick = g.name === '__ungrouped__' ? '' :
+        ' <a onclick="event.stopPropagation();event.preventDefault();_switchPage(\'investigations\');_openInvestigationDetail(\'' + _esc(g.name) + '\');return false;" ' +
+        'href="#" style="font-size:0.7em;color:#3b82f6;margin-left:auto;">[DAG]</a>';
+      return '<div class="viv-rail-iset-group" data-iset="' + _esc(g.name) + '">' +
+        '<div onclick="' + headerClick + '" ' +
+             'style="display:flex;align-items:center;gap:4px;padding:4px 12px;cursor:pointer;user-select:none;font-size:0.85em;color:#374151;font-weight:600;">' +
+          '<span style="display:inline-block;width:10px;text-align:center;color:#94a3b8;">' + (isCollapsed ? '▸' : '▾') + '</span>' +
+          '<span style="flex:1">' + _esc(g.title) + '</span>' +
+          '<span class="muted" style="font-size:0.72em;font-weight:normal;">(' + g.studies.length + ')</span>' +
+          groupClick +
+        '</div>' +
+        children +
+      '</div>';
+    }).join('');
+  }
+  window._renderRailInvestigationGroups = _renderRailInvestigationGroups;
 
   function _buildInvestigationTagChips() {
     var container = document.getElementById('investigations-tag-chips');

@@ -280,7 +280,21 @@
         </span>
         <span class="viv-rail-link-label">Composites</span>
       </a>
-      <!-- Studies: baseline process branching to variants — the Studies fan -->
+      <!-- Investigations: DAG of related studies -->
+      <a href="#investigations" class="viv-rail-link menu-link" data-page="investigations">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <!-- DAG: 3 connected nodes -->
+            <circle cx="5"  cy="6"  r="2.4"/>
+            <circle cx="5"  cy="18" r="2.4"/>
+            <circle cx="19" cy="12" r="2.4"/>
+            <path d="M7 7l10 4"/>
+            <path d="M7 17l10 -4"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Investigations</span>
+      </a>
+      <!-- Studies: flat catalog of studies (legacy listing) -->
       <a href="#studies"    class="viv-rail-link menu-link" data-page="studies">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
@@ -293,7 +307,7 @@
             <path d="M8.5 12L16 19"/>
           </svg>
         </span>
-        <span class="viv-rail-link-label">Studies</span>
+        <span class="viv-rail-link-label">Studies (all)</span>
       </a>
       <a href="#simulations"       class="viv-rail-link menu-link" data-page="simulations">
         <span class="viv-rail-link-icon">
@@ -322,9 +336,9 @@
       </a>
     </nav>
 
-    <!-- Investigations grouped list -->
+    <!-- Investigations: collapsible groups of studies, dependency-ordered within each. -->
     <div class="viv-rail-section">
-      <div class="viv-rail-section-label">Studies</div>
+      <div class="viv-rail-section-label">Investigations</div>
       <div id="viv-rail-investigations">
         <p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">Loading…</p>
       </div>
@@ -652,6 +666,33 @@
 </section>
 
 <!-- ===== PAGE: STUDIES ===== -->
+<section id="page-investigations" class="page" data-page="investigations">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+    <h2 class="page-title" style="margin:0">Investigations</h2>
+  </div>
+  <p class="page-lead">Investigations are named collections of related studies with explicit dependencies. Click one to see its dependency DAG; click a node to open the study.</p>
+
+  <!-- List view: investigation cards. -->
+  <div id="investigations-list" class="investigations-list-grid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap:12px;">
+    <p class="empty-state">Loading…</p>
+  </div>
+
+  <!-- Detail view: one investigation's DAG. Toggled on click. -->
+  <div id="investigation-detail-view" style="display:none; margin-top:8px">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+      <button class="btn-mini" onclick="_closeInvestigationDetail()">← Back</button>
+      <h3 id="investigation-detail-title" style="margin:0; flex:1"></h3>
+      <span id="investigation-detail-status" class="status-pill planned" style="font-size:0.85em"></span>
+    </div>
+    <p id="investigation-detail-description" class="muted" style="white-space:pre-wrap; margin: 0 0 12px 0;"></p>
+    <div id="investigation-dag-shell"
+         style="position: relative; min-height: 480px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fafafa; overflow: auto;">
+      <svg id="investigation-dag-edges" style="position:absolute; top:0; left:0; pointer-events:none;"></svg>
+      <div id="investigation-dag-nodes" style="position:absolute; top:0; left:0;"></div>
+    </div>
+  </div>
+</section>
+
 <section id="page-studies" class="page" data-page="studies">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
     <h2 class="page-title" style="margin:0">Studies</h2>

@@ -559,6 +559,23 @@ def _iter_study_dirs():
             yield d
 
 
+def _iter_iset_dirs():
+    """Yield investigations/<name>/ dirs that contain an investigation.yaml.
+
+    'iset' = investigation-set (a named collection of studies with the v3
+    'investigations as collections' semantics, distinct from the legacy
+    investigations/<name>/spec.yaml study format).
+    """
+    root = WORKSPACE / "investigations"
+    if not root.is_dir():
+        return
+    for d in sorted(root.iterdir()):
+        if not d.is_dir():
+            continue
+        if (d / "investigation.yaml").is_file():
+            yield d
+
+
 def _study_name_from_body(body: dict) -> str:
     """Extract the study/investigation identifier from a request body.
 
@@ -2186,6 +2203,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_investigation_state_tree()
         if self.path.startswith("/api/study-bigraph-paths"):
             return self._get_study_bigraph_paths()
+        if self.path.startswith("/api/iset-list"):
+            return self._get_iset_list()
+        if self.path.startswith("/api/iset/"):
+            return self._get_iset_detail()
         if self.path.startswith("/api/investigation-composite-doc"):
             return self._get_investigation_composite_doc()
         if self.path.startswith("/api/investigation/"):
@@ -4536,6 +4557,108 @@ if __name__ == "__main__":
     # under <workspace>/models/, walks it, and emits a flat list of leaf
     # entries with type hints.
     _bigraph_path_cache = {}  # {(path, mtime, max_depth): [nodes]}
+
+    # --- /api/iset-list, /api/iset/<name>: investigation-set endpoints ---
+    #
+    # An investigation-set (iset) is a named collection of studies with
+    # explicit ordering + cross-study dependencies. UI surface: the
+    # Investigations tab. Storage: investigations/<name>/investigation.yaml.
+    # The legacy investigations/<name>/spec.yaml (per-study v1/v2 format) is
+    # distinct and walked separately by _iter_study_dirs.
+
+    def _get_iset_list(self):
+        """GET /api/iset-list — return summaries of every investigation."""
+        out = []
+        for d in _iter_iset_dirs():
+            try:
+                spec = yaml.safe_load((d / "investigation.yaml").read_text()) or {}
+            except Exception as e:
+                out.append({"name": d.name, "error": f"parse failed: {e}"})
+                continue
+            out.append({
+                "name":        spec.get("name", d.name),
+                "title":       spec.get("title", spec.get("name", d.name)),
+                "status":      spec.get("status", "planning"),
+                "description": spec.get("description", ""),
+                "question":    spec.get("question", ""),
+                "hypothesis":  spec.get("hypothesis", ""),
+                "n_studies":   len(spec.get("studies") or []),
+                "studies":     list(spec.get("studies") or []),
+            })
+        return self._json({"investigations": out}, 200)
+
+    def _get_iset_detail(self):
+        """GET /api/iset/<name> — return one investigation + its resolved studies.
+
+        Each constituent study is returned with its `parent_studies:`
+        normalized (legacy strings become dicts) so the frontend DAG layout
+        has consistent shape.
+        """
+        import urllib.parse
+        path = urllib.parse.urlparse(self.path).path
+        name = path.split("/api/iset/", 1)[-1].strip("/")
+        if not name:
+            return self._json({"error": "investigation name required"}, 400)
+
+        spec_path = WORKSPACE / "investigations" / name / "investigation.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": f"no investigation.yaml at {spec_path}"}, 404)
+        try:
+            spec = yaml.safe_load(spec_path.read_text()) or {}
+        except Exception as e:
+            return self._json({"error": f"parse failed: {e}"}, 500)
+
+        # Resolve constituent studies.
+        _ws_add_to_sys_path()
+        from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
+
+        def _normalize_parents(study_spec: dict) -> list[dict]:
+            ps = study_spec.get("parent_studies") or []
+            out_ = []
+            for entry in ps:
+                if isinstance(entry, str):
+                    out_.append({"study": entry, "condition": "tests-passed"})
+                elif isinstance(entry, dict) and entry.get("study"):
+                    out_.append({"study": entry["study"], "condition": entry.get("condition", "tests-passed")})
+            return out_
+
+        studies_out = []
+        for slug in (spec.get("studies") or []):
+            study_dir = WORKSPACE / "studies" / slug
+            sp = study_dir / "study.yaml"
+            if not sp.is_file():
+                sp = WORKSPACE / "investigations" / slug / "spec.yaml"
+            if not sp.is_file():
+                studies_out.append({"name": slug, "status": "missing", "error": "study.yaml not found"})
+                continue
+            try:
+                study_spec = load_spec(sp)
+            except InvestigationSpecError as e:
+                studies_out.append({"name": slug, "status": "invalid", "error": str(e)})
+                continue
+            studies_out.append({
+                "name":            study_spec["name"],
+                "status":          study_spec.get("status", "planned"),
+                "question":        study_spec.get("question", ""),
+                "n_variants":      len(study_spec.get("variants") or []),
+                "n_interventions": len(study_spec.get("interventions") or []),
+                "n_runs":          len(study_spec.get("runs") or []),
+                "baseline_source": _format_baseline_source(study_spec),
+                "parent_studies":  _normalize_parents(study_spec),
+                "n_behaviors":     len(study_spec.get("expected_behavior") or []),
+            })
+
+        return self._json({
+            "name":          spec.get("name", name),
+            "title":         spec.get("title", spec.get("name", name)),
+            "description":   spec.get("description", ""),
+            "question":      spec.get("question", ""),
+            "hypothesis":    spec.get("hypothesis", ""),
+            "status":        spec.get("status", "planning"),
+            "expert_docs":   spec.get("expert_docs") or [],
+            "acceptance_criteria": spec.get("acceptance_criteria") or [],
+            "studies":       studies_out,
+        }, 200)
 
     def _get_study_bigraph_paths(self):
         """GET /api/study-bigraph-paths?study=<slug>[&baseline=<name>][&max_depth=<n>]
