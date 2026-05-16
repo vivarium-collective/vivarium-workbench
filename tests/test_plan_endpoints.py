@@ -59,3 +59,50 @@ def test_get_plan_detail_404(tmp_path, dashboard_client):
     client = dashboard_client(workspace=tmp_path)
     resp = client.get("/api/plan/nonexistent")
     assert resp.status_code == 404
+
+
+def test_post_plan_create(tmp_path, dashboard_client):
+    _scaffold_workspace(tmp_path)
+    client = dashboard_client(workspace=tmp_path)
+    resp = client.post("/api/plan-create", json={
+        "name": "dnaA-replication",
+        "objective": "build DnaA cycle",
+        "studies": [{"study": "s1"}, {"study": "s2", "gate": "tests-pass"}],
+    })
+    assert resp.status_code == 201, resp.text
+    p = tmp_path / "investigations" / "dnaA-replication" / "investigation.yaml"
+    assert p.exists()
+    data = yaml.safe_load(p.read_text())
+    assert data["objective"] == "build DnaA cycle"
+    assert data["studies"][1]["gate"] == "tests-pass"
+
+
+def test_post_plan_create_rejects_duplicate(tmp_path, dashboard_client):
+    _scaffold_workspace(tmp_path)
+    _scaffold_plan(tmp_path, "demo", studies=[{"study": "s1"}])
+    client = dashboard_client(workspace=tmp_path)
+    resp = client.post("/api/plan-create", json={"name": "demo", "studies": []})
+    assert resp.status_code == 409
+
+
+def test_delete_plan(tmp_path, dashboard_client):
+    _scaffold_workspace(tmp_path)
+    _scaffold_plan(tmp_path, "demo", studies=[{"study": "s1"}])
+    client = dashboard_client(workspace=tmp_path)
+    resp = client.delete("/api/plan", json={"slug": "demo"})
+    assert resp.status_code == 200
+    assert not (tmp_path / "investigations" / "demo").exists()
+
+
+def test_post_plan_set_meta(tmp_path, dashboard_client):
+    _scaffold_workspace(tmp_path)
+    _scaffold_plan(tmp_path, "demo", studies=[{"study": "s1"}])
+    client = dashboard_client(workspace=tmp_path)
+    resp = client.post("/api/plan-set-meta", json={
+        "slug": "demo", "objective": "new obj", "hypothesis": "h", "status": "in-progress",
+    })
+    assert resp.status_code == 200, resp.text
+    data = yaml.safe_load((tmp_path / "investigations" / "demo" / "investigation.yaml").read_text())
+    assert data["objective"] == "new obj"
+    assert data["hypothesis"] == "h"
+    assert data["status"] == "in-progress"

@@ -267,6 +267,9 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/study-runs-clear":            "_post_study_runs_clear",
     "/api/study-comparison-add":        "_post_study_comparison_add",
     "/api/study-tests-run":             "_post_study_tests_run",
+    # Investigation-plan mutating endpoints.
+    "/api/plan-create":   "_post_plan_create",
+    "/api/plan-set-meta": "_post_plan_set_meta",
     # Workspace-switcher POST endpoints.
     "/api/workspaces/add":           "_post_workspaces_add",
     "/api/workspaces/forget":        "_post_workspaces_forget",
@@ -2238,6 +2241,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/investigation-composite": self._delete_investigation_composite,
             "/api/investigation-comparison": self._delete_investigation_comparison,
             "/api/investigation-group":      self._delete_investigation_group,
+            "/api/plan":          self._delete_plan,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -4336,6 +4340,61 @@ if __name__ == "__main__":
         if plan is None:
             return self._json({"error": f"plan not found: {slug}"}, 404)
         return self._json(plan, 200)
+
+    def _post_plan_create(self, body: dict):
+        """POST /api/plan-create — scaffold a new investigation plan."""
+        from .lib.investigation_plans import save_plan, InvestigationPlanError
+        name = (body or {}).get("name")
+        if not name:
+            return self._json({"error": "missing 'name'"}, 400)
+        slug = name  # simple convention
+        p = WORKSPACE / "investigations" / slug / "investigation.yaml"
+        if p.exists():
+            return self._json({"error": f"plan already exists: {slug}"}, 409)
+        data = {
+            "schema_version": 1,
+            "name": name,
+            "objective": body.get("objective", ""),
+            "hypothesis": body.get("hypothesis", ""),
+            "status": body.get("status", "planned"),
+            "references": body.get("references", []),
+            "studies": body.get("studies", []),
+        }
+        try:
+            save_plan(p, data)
+        except InvestigationPlanError as e:
+            return self._json({"error": str(e)}, 400)
+        return self._json({"slug": slug}, 201)
+
+    def _post_plan_set_meta(self, body: dict):
+        """POST /api/plan-set-meta — update metadata fields on an existing plan."""
+        from .lib.investigation_plans import load_plan, save_plan, InvestigationPlanError
+        slug = (body or {}).get("slug")
+        if not slug:
+            return self._json({"error": "missing 'slug'"}, 400)
+        p = WORKSPACE / "investigations" / slug / "investigation.yaml"
+        if not p.exists():
+            return self._json({"error": f"plan not found: {slug}"}, 404)
+        data = load_plan(p)
+        for k in ("objective", "hypothesis", "status"):
+            if k in body:
+                data[k] = body[k]
+        try:
+            save_plan(p, data)
+        except InvestigationPlanError as e:
+            return self._json({"error": str(e)}, 400)
+        return self._json({"ok": True}, 200)
+
+    def _delete_plan(self, body: dict):
+        """DELETE /api/plan — remove an investigation plan directory."""
+        slug = (body or {}).get("slug")
+        if not slug:
+            return self._json({"error": "missing 'slug'"}, 400)
+        plan_dir = WORKSPACE / "investigations" / slug
+        if not plan_dir.exists():
+            return self._json({"error": f"plan not found: {slug}"}, 404)
+        shutil.rmtree(plan_dir)
+        return self._json({"ok": True}, 200)
 
     def _post_investigation_create(self, body: dict):
         """POST /api/investigation-create {name, source?} — scaffold a new investigation.
