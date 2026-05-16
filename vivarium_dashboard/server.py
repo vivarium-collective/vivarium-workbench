@@ -273,6 +273,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/plan-study-add":        "_post_plan_study_add",
     "/api/plan-study-remove":     "_post_plan_study_remove",
     "/api/plan-study-set-status": "_post_plan_study_set_status",
+    "/api/plan-reference-add":    "_post_plan_reference_add",
     # Workspace-switcher POST endpoints.
     "/api/workspaces/add":           "_post_workspaces_add",
     "/api/workspaces/forget":        "_post_workspaces_forget",
@@ -4470,6 +4471,25 @@ if __name__ == "__main__":
                 break
         else:
             return self._json({"error": f"study {study!r} not in plan"}, 404)
+        save_plan(p, data)
+        return self._json({"ok": True}, 200)
+
+    def _post_plan_reference_add(self, body: dict):
+        """POST /api/plan-reference-add — add a reference to an existing plan."""
+        from .lib.investigation_plans import load_plan, save_plan
+        slug = (body or {}).get("slug"); ref_file = (body or {}).get("file")
+        if not slug or not ref_file:
+            return self._json({"error": "missing 'slug' or 'file'"}, 400)
+        if not _SLUG_RE.match(slug):
+            return self._json({"error": "slug must be lowercase alphanumeric (and -/_)"}, 400)
+        p = WORKSPACE / "investigations" / slug / "investigation.yaml"
+        if not p.exists():
+            return self._json({"error": f"plan not found: {slug}"}, 404)
+        data = load_plan(p)
+        ref = {"file": ref_file}
+        if body.get("label"):
+            ref["label"] = body["label"]
+        data.setdefault("references", []).append(ref)
         save_plan(p, data)
         return self._json({"ok": True}, 200)
 

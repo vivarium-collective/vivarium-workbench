@@ -207,3 +207,25 @@ def test_post_plan_study_set_status_rejects_path_traversal(tmp_path, dashboard_c
     client = dashboard_client(workspace=tmp_path)
     resp = client.post("/api/plan-study-set-status", json={"slug": "../../evil", "study": "s1", "status": "complete"})
     assert resp.status_code == 400
+
+
+def test_post_plan_reference_add(tmp_path, dashboard_client):
+    _scaffold_workspace(tmp_path)
+    _scaffold_plan(tmp_path, "demo", studies=[{"study": "s1"}])
+    client = dashboard_client(workspace=tmp_path)
+    resp = client.post("/api/plan-reference-add", json={
+        "slug": "demo", "file": "docs/references/molecular.md", "label": "Molecular reference",
+    })
+    assert resp.status_code == 200, resp.text
+    data = yaml.safe_load((tmp_path / "investigations" / "demo" / "investigation.yaml").read_text())
+    assert data["references"][0]["file"] == "docs/references/molecular.md"
+    assert data["references"][0]["label"] == "Molecular reference"
+
+
+def test_post_plan_reference_add_rejects_path_traversal(tmp_path, dashboard_client):
+    _scaffold_workspace(tmp_path)
+    client = dashboard_client(workspace=tmp_path)
+    resp = client.post("/api/plan-reference-add", json={
+        "slug": "../evil", "file": "x.md",
+    })
+    assert resp.status_code == 400
