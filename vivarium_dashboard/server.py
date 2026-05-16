@@ -266,6 +266,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/study-run-delete":            "_post_study_run_delete",
     "/api/study-runs-clear":            "_post_study_runs_clear",
     "/api/study-comparison-add":        "_post_study_comparison_add",
+    "/api/study-tests-run":             "_post_study_tests_run",
     # Workspace-switcher POST endpoints.
     "/api/workspaces/add":           "_post_workspaces_add",
     "/api/workspaces/forget":        "_post_workspaces_forget",
@@ -6014,6 +6015,27 @@ if __name__ == "__main__":
         """POST /api/study-comparison-add {study, run_ids, name?}"""
         response, code = _post_study_comparison_add_for_test(WORKSPACE, body)
         return self._json(response, code)
+
+    def _post_study_tests_run(self, body: dict):
+        """POST /api/study-tests-run {study} — run pytest against
+        studies/<study>/tests/. Returns {summary, tests, note?}.
+        """
+        from .lib.study_tests import run_study_tests, StudyTestsConcurrentError
+        slug = (body or {}).get("study")
+        if not slug:
+            return self._json({"error": "missing 'study' in body"}, 400)
+        spec_path = WORKSPACE / "studies" / slug / "study.yaml"
+        if not spec_path.exists():
+            return self._json({"error": f"study not found: {slug}"}, 404)
+        try:
+            result = run_study_tests(WORKSPACE, slug)
+        except StudyTestsConcurrentError as e:
+            return self._json({"error": str(e)}, 409)
+        return self._json({
+            "summary": result.summary,
+            "tests": result.tests,
+            "note": result.note,
+        }, 200)
 
     def _get_study_export(self):
         """GET /api/study-export?study=<name>"""
