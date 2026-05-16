@@ -4876,6 +4876,12 @@ if __name__ == "__main__":
                                      f"parent.status={parent_spec.get('status', 'planned')}",
                     })
 
+            sim_set_top = spec.get("simulation_set") or []
+            beh_tests_top = spec.get("behavior_tests") or spec.get("expected_behavior") or []
+            readouts_top = spec.get("readouts") or spec.get("observables") or []
+            reqs_top = spec.get("implementation_requirements") or spec.get("gaps") or []
+            n_variants_top = (len(sim_set_top) if sim_set_top
+                              else len(spec.get("variants") or []))
             row = {
                 "name":            spec["name"],
                 "composite":       composite_summary,
@@ -4884,14 +4890,18 @@ if __name__ == "__main__":
                 "topic":           spec.get("topic", ""),
                 "tags":            spec.get("tags") or [],
                 "status":          spec.get("status", "planned"),
+                "phase":           spec.get("phase"),
                 "last_run":        spec.get("last_run"),
                 "n_simulations":   n_runs,
                 "baseline_names":  [b.get("name", "") for b in (spec.get("baseline") or [])
                                     if isinstance(b, dict)],
                 "n_baseline":      len(spec.get("baseline") or []),
-                "n_variants":      len(spec.get("variants") or []),
+                "n_variants":      n_variants_top,
                 "n_groups":        len(spec.get("groups") or []),
                 "n_interventions": len(spec.get("interventions") or []),
+                "n_behaviors":     len(beh_tests_top),
+                "n_readouts":      len(readouts_top),
+                "n_requirements":  len(reqs_top),
                 "n_comparisons":   len(spec.get("comparisons") or []),
                 "n_runs":          n_runs,
                 "baseline_source": _format_baseline_source(spec),

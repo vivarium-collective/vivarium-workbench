@@ -4262,6 +4262,14 @@
       if (sort === 'status') {
         return (a.status || '').localeCompare(b.status || '') || a.name.localeCompare(b.name);
       }
+      if (sort === 'phase') {
+        var phaseOrder = { Design: 0, Build: 1, Simulate: 2, Evaluate: 3, Decide: 4 };
+        var pa = phaseOrder[a.phase];
+        var pb = phaseOrder[b.phase];
+        if (pa == null) pa = 99;
+        if (pb == null) pb = 99;
+        return pa - pb || a.name.localeCompare(b.name);
+      }
       if (sort === 'topic') {
         return (a.topic || 'zzz').localeCompare(b.topic || 'zzz') || a.name.localeCompare(b.name);
       }
@@ -4359,10 +4367,25 @@
                      'title="Blocked by:\n' + _esc(reasons) + '">🔒 blocked</span>';
     }
 
+    var phaseColors = {
+      Design:   {bg: '#e0e7ff', fg: '#3730a3'},
+      Build:    {bg: '#fef3c7', fg: '#92400e'},
+      Simulate: {bg: '#dbeafe', fg: '#1e40af'},
+      Evaluate: {bg: '#fce7f3', fg: '#9d174d'},
+      Decide:   {bg: '#d1fae5', fg: '#065f46'},
+    };
+    var pc = phaseColors[inv.phase] || null;
+    var phaseChip = (inv.phase && pc)
+      ? ' <span class="status-pill" style="background:' + pc.bg +
+        ';color:' + pc.fg + ';font-size:0.7em;padding:1px 8px;border-radius:9999px;">' +
+        _esc(inv.phase) + '</span>'
+      : '';
+
     return '<div class="investigation-card" onclick="_openStudyEmbedded(\'' + _esc(inv.name) + '\')">' +
       '<div class="ic-header">' +
         '<div class="ic-title">' + _esc(inv.name) + '</div>' +
         '<span class="ic-status status-pill ' + statusClass + '">' + _esc(status) + '</span>' +
+        phaseChip +
         blockedBadge +
       '</div>' +
       '<div class="ic-baseline"><small>Baseline:</small> <code>' + _esc(baselineDisplay) + '</code></div>' +
