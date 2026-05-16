@@ -490,7 +490,7 @@
     var params = new URLSearchParams(window.location.search);
     var focus = params.get('focus');
     if (focus) {
-      var validPages = ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'studies', 'simulations', 'branches', 'composite-explore'];
+      var validPages = ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'studies', 'investigations', 'simulations', 'branches', 'composite-explore'];
       if (validPages.indexOf(focus) >= 0) {
         document.body.classList.add('focus-mode', 'focus-' + focus);
         _switchPage(focus);
@@ -500,9 +500,7 @@
 
     function fromHash() {
       var h = (window.location.hash || '').replace(/^#/, '');
-      // '#investigations' is kept as an alias for backwards-compatible bookmarks
-      if (h === 'investigations') h = 'studies';
-      var validPages = ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'studies', 'simulations', 'branches', 'composite-explore'];
+      var validPages = ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'studies', 'investigations', 'simulations', 'branches', 'composite-explore'];
       _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
     }
     window.addEventListener('hashchange', fromHash);

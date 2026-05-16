@@ -284,6 +284,19 @@
         </span>
         <span class="viv-rail-link-label">Studies</span>
       </a>
+      <!-- Investigations: chain-of-studies research plans -->
+      <a href="#investigations" class="viv-rail-link menu-link" data-page="investigations">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <path d="M9 3H5a2 2 0 0 0-2 2v4"/>
+            <path d="M9 3h10a2 2 0 0 1 2 2v4"/>
+            <path d="M3 9h18"/>
+            <path d="M5 9v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/>
+            <line x1="10" y1="13" x2="14" y2="13"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Investigations</span>
+      </a>
       <a href="#simulations"       class="viv-rail-link menu-link" data-page="simulations">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
@@ -698,6 +711,48 @@
             style="width:100%; height:calc(100vh - 220px); min-height:560px; border:0; display:block"></iframe>
   </div>
 </section>
+
+<!-- ===== PAGE: INVESTIGATIONS ===== -->
+<section id="page-investigations" class="page" data-page="investigations" hidden>
+  <div class="page-header">
+    <h2 class="page-title">Investigations</h2>
+    <button id="new-investigation-btn" class="action-btn" onclick="document.getElementById('new-investigation-dialog').showModal()">+ New investigation</button>
+  </div>
+
+  <ul id="investigations-list" class="investigation-list"></ul>
+
+  <div id="investigation-detail" hidden>
+    <button id="investigation-back" class="btn-text" onclick="">← Investigations</button>
+    <h3 id="investigation-title"></h3>
+    <p class="muted" id="investigation-status"></p>
+    <section class="meta">
+      <h4>Objective</h4>
+      <p id="investigation-objective"></p>
+      <h4>Hypothesis</h4>
+      <p id="investigation-hypothesis"></p>
+      <h4>References</h4>
+      <ul id="investigation-references"></ul>
+    </section>
+    <section class="study-cards">
+      <h4>Studies (sequential)</h4>
+      <ol id="investigation-study-cards"></ol>
+    </section>
+  </div>
+</section>
+
+<dialog id="new-investigation-dialog">
+  <form method="dialog">
+    <h3>New investigation</h3>
+    <label>Name: <input type="text" id="new-inv-name" required></label><br>
+    <label>Objective:<br><textarea id="new-inv-objective" rows="3"></textarea></label><br>
+    <label>Hypothesis:<br><textarea id="new-inv-hypothesis" rows="3"></textarea></label><br>
+    <label>Studies (comma-separated slugs):<br><input type="text" id="new-inv-studies"></label><br>
+    <menu>
+      <button value="cancel">Cancel</button>
+      <button id="new-inv-submit" value="create">Create</button>
+    </menu>
+  </form>
+</dialog>
 
 <!-- ===== PAGE: SIMULATIONS ===== -->
 <section id="page-simulations" class="page" data-page="simulations">
