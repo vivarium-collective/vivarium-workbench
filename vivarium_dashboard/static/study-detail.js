@@ -18,6 +18,9 @@
     document.querySelectorAll('.study-tab-panel').forEach(function(p) {
       p.classList.toggle('active', p.dataset.kind === kind);
     });
+    if (kind === 'tests') {
+      loadTestsTab(window._study);
+    }
   }
   window._setStudyTab = _setStudyTab;
 
@@ -413,4 +416,97 @@
       investigation: studyName(), study: studyName(), mark_complete: true,
     }).then(function() { location.reload(); });
   });
+
+  // ----- Tests tab -----
+
+  function loadTestsTab(spec) {
+    var cfg = (spec && spec.tests) || {};
+    var autoEl = document.getElementById('tests-auto-discover');
+    var dsEl = document.getElementById('tests-data-source');
+    if (autoEl) autoEl.textContent = String(cfg.auto_discover !== undefined ? cfg.auto_discover : true);
+    if (dsEl) dsEl.textContent = cfg.data_source || 'latest_run';
+    var lr = cfg.last_results;
+    var summary = document.getElementById('tests-summary');
+    if (!summary) return;
+    if (lr) {
+      summary.innerHTML =
+        '<span class="ok">' + (lr.passed || 0) + ' passed</span>' +
+        ' / <span class="fail">' + (lr.failed || 0) + ' failed</span>' +
+        ' / <span class="skip">' + (lr.skipped || 0) + ' skipped</span>' +
+        ' <span class="muted">(' + ((lr.duration_s || 0).toFixed(2)) + 's' +
+        (lr.timestamp ? ', ' + lr.timestamp : '') + ')</span>';
+    } else {
+      summary.textContent = '— no test results yet —';
+    }
+  }
+
+  function escapeHtmlForTests(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+    });
+  }
+
+  function renderTestResults(body) {
+    var list = document.getElementById('tests-list');
+    if (!list) return;
+    list.innerHTML = '';
+    if (body.note === 'no tests directory') {
+      list.innerHTML = '<li class="placeholder">No tests/ directory found in this study.</li>';
+      return;
+    }
+    var icons = {passed: '✅', failed: '❌', skipped: '⏭'};
+    (body.tests || []).forEach(function(t) {
+      var li = document.createElement('li');
+      li.className = 'test-row test-' + t.outcome;
+      var icon = icons[t.outcome] || '•';
+      var tb = t.traceback
+        ? '<details><summary>traceback</summary><pre>' + escapeHtmlForTests(t.traceback) + '</pre></details>'
+        : '';
+      li.innerHTML =
+        '<span class="test-icon">' + icon + '</span>' +
+        '<code class="test-nodeid">' + escapeHtmlForTests(t.nodeid) + '</code>' +
+        '<span class="test-duration">' + ((t.duration || 0).toFixed(3)) + 's</span>' +
+        tb;
+      list.appendChild(li);
+    });
+    var s = body.summary || {};
+    var summary = document.getElementById('tests-summary');
+    if (summary) {
+      summary.innerHTML =
+        '<span class="ok">' + (s.passed || 0) + ' passed</span>' +
+        ' / <span class="fail">' + (s.failed || 0) + ' failed</span>' +
+        ' / <span class="skip">' + (s.skipped || 0) + ' skipped</span>' +
+        ' <span class="muted">(' + ((s.duration_s || 0).toFixed(2)) + 's)</span>';
+    }
+  }
+
+  function runStudyTests() {
+    var btn = document.getElementById('run-tests-btn');
+    if (!btn) return;
+    btn.disabled = true;
+    btn.textContent = 'Running…';
+    fetch('/api/study-tests-run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({study: studyName()}),
+    }).then(function(resp) {
+      return resp.json().then(function(d) { return {status: resp.status, body: d}; });
+    }).then(function(r) {
+      if (r.status !== 200) {
+        alert('Test run failed: ' + (r.body && r.body.error || r.status));
+        return;
+      }
+      renderTestResults(r.body);
+    }).catch(function(err) {
+      alert('Test run error: ' + err);
+    }).then(function() {
+      btn.disabled = false;
+      btn.textContent = 'Run tests';
+    });
+  }
+
+  var runBtn = document.getElementById('run-tests-btn');
+  if (runBtn) {
+    runBtn.addEventListener('click', runStudyTests);
+  }
 })();

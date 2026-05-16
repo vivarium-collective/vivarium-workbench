@@ -1210,3 +1210,24 @@ body.focus-mode::before{
 .muted { color: var(--gray); }
 .danger { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
 
+
+/* ---------- Tests tab ---------- */
+.tests-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.6rem; }
+.tests-summary { flex: 1; }
+.tests-summary .ok { color: #228B22; }
+.tests-summary .fail { color: #B22222; }
+.tests-summary .skip { color: #888; }
+.tests-summary .muted { color: #888; font-size: 0.9em; }
+
+.tests-config { margin: 0.5rem 0; display: flex; gap: 1rem; }
+.tests-config .badge { background: #f0f0f0; padding: 0.2rem 0.5rem; border-radius: 4px; }
+
+.tests-list { list-style: none; padding: 0; }
+.test-row { padding: 0.4rem 0.6rem; margin: 0.2rem 0; border-radius: 4px; background: #fafafa; display: flex; gap: 0.6rem; align-items: center; }
+.test-row.test-passed { border-left: 3px solid #228B22; }
+.test-row.test-failed { border-left: 3px solid #B22222; }
+.test-row.test-skipped { border-left: 3px solid #888; opacity: 0.7; }
+.test-icon { font-size: 1.1em; }
+.test-nodeid { flex: 1; font-family: monospace; font-size: 0.9em; }
+.test-duration { color: #666; font-size: 0.85em; }
+.test-row details pre { background: #fff; padding: 0.6rem; border: 1px solid #ddd; border-radius: 4px; max-height: 200px; overflow: auto; }
