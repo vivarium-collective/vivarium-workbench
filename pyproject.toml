@@ -13,6 +13,7 @@ dependencies = [
     "pyyaml",
     "jsonschema[format-nongpl]>=4.21",
     "pypdf>=4.0",
+    "numpy",
     "process-bigraph",
     "bigraph-schema",
     "pbg-superpowers",

@@ -7,7 +7,6 @@ from __future__ import annotations
 import json, sqlite3
 from pathlib import Path
 import numpy as np
-import pandas as pd
 import pytest
 import yaml
 
@@ -105,7 +104,15 @@ class Run:
         return float(arr.std() / mean) if mean else float("nan")
 
     @property
-    def trajectory(self) -> pd.DataFrame:
+    def trajectory(self):
+        """Pivoted DataFrame of (step × observable → value). Requires pandas."""
+        try:
+            import pandas as pd
+        except ImportError as e:
+            raise ImportError(
+                "pandas is required for Run.trajectory; install via "
+                "`pip install pandas`"
+            ) from e
         return pd.read_sql_query(
             "SELECT step, observable, value FROM history WHERE run_id = ?",
             self._db, params=(self._run_id,),
