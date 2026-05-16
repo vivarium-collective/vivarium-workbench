@@ -30,50 +30,45 @@ main.study-page{max-width:none;padding:12px 16px;width:100%;box-sizing:border-bo
  * scroll.
  * ───────────────────────────────────────────────────────────────────── */
 /* `.viv-content > .page { max-width: 1200px; margin: 0 auto }` at line ~862
- * is what's actually clamping the Studies content. Override with high
- * specificity AND on every ancestor in the layout chain. */
+ * clamps the Studies content. Override with high specificity on every
+ * relevant element so the layout uses the full content area. Keep block
+ * flow + .viv-content's natural overflow-y:auto so the user can scroll
+ * past the cards to see an embedded study below. */
 .viv-content:has(> #page-studies.active){
   padding:8px 12px !important;
-  overflow:hidden !important;
   width:100% !important;
   max-width:none !important;
+  /* overflow:auto stays as the .viv-content default — single scrollbar. */
 }
 .viv-content > #page-studies.active,
 #page-studies.active{
   max-width:none !important;
   width:100% !important;
   margin:0 !important;
-  display:flex !important;
-  flex-direction:column;
-  height:100%; min-height:0;
-  gap:8px;
   box-sizing:border-box;
 }
-#page-studies.active > *{ flex:0 0 auto; max-width:none }
-#page-studies.active > .page-lead{ margin-bottom:0; max-width:none }
-/* The card grid flexes; on its own it fills the area, when the embedded
- * study panel is also visible it caps at ~half the height so both stay
- * readable. */
+#page-studies.active > .page-lead{ max-width:none }
+/* Cards: tight to content (no stretch-to-row-max), wider minmax than the
+ * default 280px so the grid breathes on big screens. */
 #page-studies.active > #investigations-grid{
-  flex:1 1 200px; min-height:160px; max-height:55vh;
-  overflow-y:auto;
   width:100% !important; max-width:none !important;
-  align-self:stretch;
-  /* Wider minmax so cards don't artificially pack at 280px on big screens. */
   grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)) !important;
+  align-items:start;
+  gap:12px;
 }
+#page-studies.active .investigation-card{
+  align-self:start;
+}
+/* Embedded study: full content width, fixed comfortable height. Iframe
+ * scrolls its own content; the page scrolls past the grid to reach it. */
 #study-detail-panel{
-  display:flex !important; flex-direction:column;
-  flex:2 1 400px; min-height:0;
-  margin-top:0 !important; max-width:none !important;
-  width:100% !important;
-  align-self:stretch;
+  width:100% !important; max-width:none !important;
+  margin-top:16px !important;
 }
-#study-detail-panel .study-embed-header{ flex:0 0 auto }
 #study-detail-frame{
-  flex:1 1 auto;
-  height:100% !important; min-height:0 !important;
   width:100% !important;
+  height:85vh !important;
+  min-height:600px !important;
 }
 .panel{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:18px;margin-bottom:18px}
 .guidance{background:linear-gradient(180deg,#fff7e6,#fff);border:2px solid #f5b042;display:none}
