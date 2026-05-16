@@ -169,9 +169,10 @@ def _validate_study_v3_or_v4(spec: dict) -> None:
 
     # v4-only field validation
     if spec.get("schema_version") == 4:
-        tests = spec.get("tests") or {}
-        if not isinstance(tests, dict):
+        tests = spec.get("tests")
+        if tests is not None and not isinstance(tests, dict):
             raise InvestigationSpecError("tests must be a mapping")
+        tests = tests or {}
         ds = tests.get("data_source", "latest_run")
         if ds not in ("latest_run", "first_run", "all_runs"):
             raise InvestigationSpecError(
@@ -179,9 +180,10 @@ def _validate_study_v3_or_v4(spec: dict) -> None:
             )
         if not isinstance(tests.get("pytest_args", []), list):
             raise InvestigationSpecError("tests.pytest_args must be a list")
-        refs = spec.get("references") or []
-        if not isinstance(refs, list):
+        refs = spec.get("references")
+        if refs is not None and not isinstance(refs, list):
             raise InvestigationSpecError("references must be a list")
+        refs = refs or []
         for i, ref in enumerate(refs):
             if not isinstance(ref, dict) or not ref.get("file"):
                 raise InvestigationSpecError(f"references[{i}] must be a mapping with at least a 'file' key")
