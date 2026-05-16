@@ -3530,6 +3530,287 @@
   }
   window._popoutInvestigationStudy = _popoutInvestigationStudy;
 
+  // Build a self-contained HTML report of the current investigation and
+  // trigger a download. The report is for sharing with a domain expert
+  // (over email) BEFORE simulations run — so it surfaces the predictions,
+  // assumptions, and gaps in a form that lets the expert validate the
+  // design without needing the dashboard.
+  function _generateInvestigationReport() {
+    var name = window._currentIset;
+    if (!name) {
+      console.warn('_generateInvestigationReport: no current investigation');
+      return;
+    }
+    var btn = event && event.target;
+    var orig = btn ? btn.textContent : null;
+    if (btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
+    fetch('/api/iset/' + encodeURIComponent(name), {headers: {Accept: 'application/json'}})
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function(iset) {
+        var studyFetches = (iset.studies || []).map(function(s) {
+          return fetch('/api/study/' + encodeURIComponent(s.name))
+            .then(function(r) { return r.ok ? r.json() : {spec: {name: s.name, error: 'load-failed'}}; })
+            .then(function(j) { return j.spec || j; });
+        });
+        return Promise.all(studyFetches).then(function(specs) {
+          return {iset: iset, specs: specs};
+        });
+      })
+      .then(function(bundle) {
+        var html = _buildInvestigationReportHtml(bundle.iset, bundle.specs);
+        var dateStr = new Date().toISOString().slice(0, 10);
+        var filename = 'investigation-' + name + '-' + dateStr + '.html';
+        _triggerDownload(filename, html, 'text/html');
+      })
+      .catch(function(err) {
+        console.error('report generation failed', err);
+        alert('Report generation failed: ' + err);
+      })
+      .finally(function() {
+        if (btn) { btn.textContent = orig; btn.disabled = false; }
+      });
+  }
+  window._generateInvestigationReport = _generateInvestigationReport;
+
+  function _triggerDownload(filename, content, mime) {
+    var blob = new Blob([content], {type: mime || 'text/plain'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function() {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 0);
+  }
+  window._triggerDownload = _triggerDownload;
+
+  function _h(s) {
+    if (s == null) return '';
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function _multiline(s) {
+    return _h(s).replace(/\n/g, '<br>');
+  }
+
+  // Construct the report's HTML body from the investigation + per-study specs.
+  function _buildInvestigationReportHtml(iset, specs) {
+    var now = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+
+    // Topological depth ordering of the studies (same as the dashboard DAG).
+    var depthMap = {};
+    var children = {};
+    specs.forEach(function(s) {
+      depthMap[s.name] = 0;
+      children[s.name] = [];
+    });
+    specs.forEach(function(s) {
+      (s.parent_studies || []).forEach(function(p) {
+        var pn = (typeof p === 'string') ? p : p.study;
+        if (children[pn]) children[pn].push(s.name);
+      });
+    });
+    var queue = [];
+    specs.forEach(function(s) {
+      if (!(s.parent_studies || []).length) queue.push(s.name);
+    });
+    var guard = specs.length * 4;
+    while (queue.length && guard-- > 0) {
+      var n = queue.shift();
+      (children[n] || []).forEach(function(c) {
+        if (depthMap[c] < (depthMap[n] || 0) + 1) {
+          depthMap[c] = depthMap[n] + 1;
+          queue.push(c);
+        }
+      });
+    }
+    var ordered = specs.slice().sort(function(a, b) {
+      return (depthMap[a.name] || 0) - (depthMap[b.name] || 0)
+          || a.name.localeCompare(b.name);
+    });
+
+    // --- per-study section builder -----------------------------------
+    function studySection(s, i) {
+      var statusBadge = '<span class="badge badge-' + _h(s.status || 'planned') + '">'
+                      + _h(s.status || 'planned') + '</span>';
+
+      // Parent + child chips.
+      var parents = (s.parent_studies || []).map(function(p) {
+        var pn = (typeof p === 'string') ? p : p.study;
+        var cond = (typeof p === 'string') ? 'tests-passed' : (p.condition || 'tests-passed');
+        return '<code>' + _h(pn) + '</code> <span class="muted">(' + _h(cond) + ')</span>';
+      }).join(' · ');
+      var kids = (children[s.name] || []).map(function(c) { return '<code>' + _h(c) + '</code>'; }).join(' · ');
+
+      // Variants list.
+      var variants = (s.variants || []).map(function(v) {
+        var paramRows = v.params ? Object.entries(v.params).map(function(kv) {
+          return '<li><code>' + _h(kv[0]) + ' = ' + _h(JSON.stringify(kv[1])) + '</code></li>';
+        }).join('') : '';
+        return '<details class="variant"><summary><strong>' + _h(v.name) + '</strong>'
+             + (v.status ? ' <span class="muted">[' + _h(v.status) + ']</span>' : '')
+             + '</summary>'
+             + '<p>' + _multiline(v.description || '') + '</p>'
+             + (paramRows ? '<ul class="params">' + paramRows + '</ul>' : '')
+             + '</details>';
+      }).join('');
+
+      // Interventions list.
+      var interventions = (s.interventions || []).map(function(iv) {
+        var tests = (iv.triggers_tests || []).map(function(t) { return '<code>' + _h(t) + '</code>'; }).join(', ');
+        return '<details class="intervention"><summary><strong>' + _h(iv.name) + '</strong></summary>'
+             + '<p>' + _multiline(iv.description || '') + '</p>'
+             + (tests ? '<p class="muted">Triggers tests: ' + tests + '</p>' : '')
+             + '</details>';
+      }).join('');
+
+      // Expected-behavior table (the assumptions / predictions block).
+      var ebRows = (s.expected_behavior || []).map(function(b) {
+        var cites = (b.cites || []).map(function(k) { return '<code>' + _h(k) + '</code>'; }).join(', ');
+        return '<tr class="eb-row eb-' + _h(b.status || 'implemented') + '">'
+             + '<td><code>' + _h(b.name) + '</code></td>'
+             + '<td>' + _h(b.en || '') + '</td>'
+             + '<td>' + _h(b.status || 'implemented') + '</td>'
+             + '<td>' + cites + '</td>'
+             + '</tr>';
+      }).join('');
+
+      // Gaps (assumptions / explicit deferrals).
+      var gaps = (s.gaps || []).map(function(g) {
+        return '<details class="gap"><summary><strong>' + _h(g.id || '') + '</strong> — ' + _h(g.title || '') + '</summary>'
+             + (g.why ? '<p><strong>Why:</strong> ' + _multiline(g.why) + '</p>' : '')
+             + (g.approach ? '<p><strong>Approach:</strong> ' + _multiline(g.approach) + '</p>' : '')
+             + (g.defer_until ? '<p class="muted">Deferred until: <code>' + _h(g.defer_until) + '</code></p>' : '')
+             + '</details>';
+      }).join('');
+
+      // Expert questions (the validate-this block).
+      var expertQs = (s.expert_questions || []).map(function(q) {
+        return '<li>' + _h(q) + '</li>';
+      }).join('');
+
+      // Bibliography keys for this study (so the expert can pull each).
+      var bib = (s.bibliography && s.bibliography.bib_keys) || [];
+      var bibList = bib.map(function(k) { return '<code>' + _h(k) + '</code>'; }).join(', ');
+
+      return ''
+        + '<section class="study" id="study-' + _h(s.name) + '">'
+        +   '<header class="study-header">'
+        +     '<h2><span class="study-num">' + (i + 1) + '.</span> ' + _h(s.name) + ' ' + statusBadge + '</h2>'
+        +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
+        +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
+        +   '</header>'
+
+        +   '<div class="qh">'
+        +     (s.question   ? '<p><strong>Question.</strong> '   + _multiline(s.question)   + '</p>' : '')
+        +     (s.hypothesis ? '<p><strong>Hypothesis.</strong> ' + _multiline(s.hypothesis) + '</p>' : '')
+        +     (s.objective  ? '<p><strong>Objective.</strong> '  + _multiline(s.objective)  + '</p>' : '')
+        +   '</div>'
+
+        +   (s.description ? '<div class="description"><h3>Background</h3><p>' + _multiline(s.description) + '</p></div>' : '')
+
+        +   (ebRows ? '<div><h3>Predicted behavior (assumptions to validate)</h3>'
+                    + '<p class="muted small">Each row is a precise, testable prediction. Status indicates whether the supporting code is in place today (implemented) or gated on upstream work (gated / stub).</p>'
+                    + '<table class="eb"><thead><tr><th>Name</th><th>Prediction</th><th>Status</th><th>Citations</th></tr></thead>'
+                    + '<tbody>' + ebRows + '</tbody></table></div>' : '')
+
+        +   (variants ? '<div><h3>Variants (perturbations to be tested)</h3>' + variants + '</div>' : '')
+
+        +   (interventions ? '<div><h3>Interventions (simulation plans)</h3>' + interventions + '</div>' : '')
+
+        +   (gaps ? '<div><h3>Open gaps / explicit deferrals</h3>'
+                  + '<p class="muted small">Concrete pieces of code that need to land before this study can run end-to-end.</p>'
+                  + gaps + '</div>' : '')
+
+        +   (expertQs ? '<div><h3>Questions for domain experts</h3><ul class="expert-qs">' + expertQs + '</ul></div>' : '')
+
+        +   (bibList ? '<div><h3>References cited by this study</h3><p>' + bibList + '</p></div>' : '')
+
+        + '</section>';
+    }
+
+    var studiesHtml = ordered.map(studySection).join('\n');
+
+    var acceptance = (iset.acceptance_criteria || []).map(function(c) {
+      return '<li><code>' + _h(c.study) + '</code> · <code>' + _h(c.behavior) + '</code></li>';
+    }).join('');
+
+    return ''
+      + '<!doctype html>\n<html><head><meta charset="utf-8">'
+      + '<title>Investigation: ' + _h(iset.title || iset.name) + '</title>'
+      + '<style>'
+      + 'body{font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif;color:#0f172a;line-height:1.5;max-width:980px;margin:0 auto;padding:24px 32px}'
+      + 'h1{margin:0 0 8px 0;font-size:1.8em}'
+      + 'h2{margin:24px 0 8px 0;font-size:1.3em;border-bottom:1px solid #e2e8f0;padding-bottom:6px}'
+      + 'h3{margin:20px 0 6px 0;font-size:1.05em;color:#1e293b}'
+      + 'p{margin:6px 0}'
+      + 'code{background:#f1f5f9;padding:1px 5px;border-radius:3px;font-size:0.88em;font-family:ui-monospace,monospace}'
+      + 'pre{background:#f1f5f9;padding:8px 10px;border-radius:4px;font-size:0.85em;overflow-x:auto}'
+      + 'table{border-collapse:collapse;width:100%;font-size:0.92em}'
+      + 'th,td{border-bottom:1px solid #e2e8f0;padding:6px 8px;text-align:left;vertical-align:top}'
+      + 'th{background:#f8fafc;font-weight:600}'
+      + 'table.eb td{vertical-align:top}'
+      + '.muted{color:#64748b}'
+      + '.small{font-size:0.85em}'
+      + '.badge{display:inline-block;font-size:0.7em;padding:2px 8px;border-radius:9999px;background:#e2e8f0;color:#1e293b;text-transform:lowercase;vertical-align:middle;margin-left:8px}'
+      + '.badge-planned{background:#f1f5f9;color:#475569}'
+      + '.badge-running{background:#dbeafe;color:#1e40af}'
+      + '.badge-ran{background:#d1fae5;color:#065f46}'
+      + '.badge-complete{background:#d1fae5;color:#064e3b}'
+      + '.badge-failed{background:#fee2e2;color:#991b1b}'
+      + '.badge-invalid{background:#fee2e2;color:#991b1b}'
+      + 'tr.eb-stub td{background:#fefce8}'
+      + 'tr.eb-gated td{background:#fff7ed}'
+      + 'tr.eb-implemented td{background:#f0fdf4}'
+      + 'details{margin:6px 0;padding:6px 10px;background:#f8fafc;border-radius:4px;border-left:3px solid #cbd5e1}'
+      + 'details > summary{cursor:pointer}'
+      + '.study{margin-top:32px;padding-top:8px}'
+      + '.study-num{color:#94a3b8;font-weight:normal}'
+      + '.qh{padding:10px 14px;background:#f8fafc;border-left:4px solid #3b82f6;border-radius:4px}'
+      + '.description p{white-space:pre-wrap}'
+      + 'ul.params{font-size:0.85em;font-family:ui-monospace,monospace;margin:6px 0;padding-left:20px}'
+      + 'footer{margin-top:48px;padding-top:16px;border-top:1px solid #e2e8f0;font-size:0.82em;color:#64748b}'
+      + '@media print{body{padding:0;max-width:none}details[open]{margin:4px 0}}'
+      + '</style></head><body>'
+
+      + '<h1>' + _h(iset.title || iset.name) + ' <span class="badge badge-' + _h(iset.status || 'planning') + '">' + _h(iset.status || 'planning') + '</span></h1>'
+      + '<p class="muted small">Investigation report · generated ' + _h(now) + ' · for expert review prior to execution.</p>'
+
+      + '<h2>Overview</h2>'
+      + (iset.question   ? '<p><strong>Question.</strong> '   + _multiline(iset.question)   + '</p>' : '')
+      + (iset.hypothesis ? '<p><strong>Hypothesis.</strong> ' + _multiline(iset.hypothesis) + '</p>' : '')
+      + (iset.description ? '<div class="description"><p>' + _multiline(iset.description) + '</p></div>' : '')
+
+      + (acceptance ? '<h2>Acceptance criteria</h2>'
+                    + '<p class="muted small">Behavioral tests across the studies that must pass for this investigation to be considered complete.</p>'
+                    + '<ol>' + acceptance + '</ol>' : '')
+
+      + '<h2>How to read this report</h2>'
+      + '<p>Each section below is one study, in dependency order (depth-first from the roots). Within a section:</p>'
+      + '<ul>'
+      + '<li><strong>Question / Hypothesis</strong> — what we want to know and what we predict.</li>'
+      + '<li><strong>Predicted behavior</strong> — quantitative, testable predictions with the supporting citations from <code>papers.bib</code>. Color coding: green = implemented (will run today), amber = gated on upstream work, yellow = stub.</li>'
+      + '<li><strong>Variants</strong> — the parameter perturbations we plan to run.</li>'
+      + '<li><strong>Interventions</strong> — named simulation plans that group variants + protocols + which tests they unlock.</li>'
+      + '<li><strong>Gaps / deferrals</strong> — explicit assumptions we are aware of; concrete code that needs to land first.</li>'
+      + '<li><strong>Expert questions</strong> — open questions for you to weigh in on before we proceed.</li>'
+      + '</ul>'
+
+      + '<h2>Studies (dependency order)</h2>'
+      + studiesHtml
+
+      + '<footer>'
+      + '<p>Generated from the v2ecoli vivarium-dashboard. Source of truth: <code>investigations/' + _h(iset.name) + '/investigation.yaml</code> and the per-study <code>studies/&lt;name&gt;/study.yaml</code> files.</p>'
+      + '<p>Open the live DAG: visit the dashboard <strong>Investigations</strong> tab and click <em>' + _h(iset.title || iset.name) + '</em>.</p>'
+      + '</footer>'
+
+      + '</body></html>';
+  }
+
   // Pop-out the investigation itself in a detached window. URL carries
   // both ?investigation=<name> AND #investigations so detection is robust
   // regardless of when the param is read on the receiving side.
