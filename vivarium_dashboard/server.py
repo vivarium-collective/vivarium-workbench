@@ -4687,6 +4687,7 @@ if __name__ == "__main__":
             readouts = study_spec.get("readouts") or study_spec.get("observables") or []
             purpose = study_spec.get("purpose") or {}
             question = (purpose.get("question") if isinstance(purpose, dict) else None) or study_spec.get("question", "")
+            follow_ups = study_spec.get("follow_up_studies") or []
             studies_out.append({
                 "name":            study_spec["name"],
                 "status":          study_spec.get("status", "planned"),
@@ -4700,6 +4701,8 @@ if __name__ == "__main__":
                 "n_behaviors":     len(beh_tests),
                 "n_readouts":      len(readouts),
                 "n_requirements":  len(study_spec.get("implementation_requirements") or study_spec.get("gaps") or []),
+                "n_followups":     len(follow_ups),
+                "follow_up_studies": follow_ups,
             })
 
         return self._json({

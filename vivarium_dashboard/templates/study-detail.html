@@ -828,19 +828,34 @@
   </div>
 
   {% set _bt = study.behavior_tests or study.expected_behavior %}
+  {# Aggregate the latest test outcomes from study.runs[].outcomes so each
+     row below can show PASS/FAIL/skip instead of a stale "pending" pill. #}
+  {% set _outcomes = {} %}
+  {% for r in (study.runs or []) %}
+    {% if r.outcomes %}
+      {% for tname, outcome in r.outcomes.items() %}
+        {# last wins → most recent run #}
+        {% set _ = _outcomes.update({tname: outcome}) %}
+      {% endfor %}
+    {% endif %}
+  {% endfor %}
   {% if _bt %}
   <ul class="expected-behavior-list" id="tests-list" style="list-style:none; padding-left:0; margin-top: 12px;">
     {% for b in _bt %}
     {% set _cls = b.classification or 'unclassified' %}
     {% set _border = '#10b981' if _cls == 'primary' else ('#3b82f6' if _cls == 'supporting' else ('#f59e0b' if _cls == 'diagnostic' else ('#94a3b8' if _cls == 'regression' else '#cbd5e1'))) %}
+    {% set _out = _outcomes.get(b.name) %}
+    {% set _res = _out.result if _out else None %}
+    {% set _pill_bg = '#d1fae5' if _res == 'PASS' else ('#fee2e2' if _res == 'FAIL' else ('#fef3c7' if _res == 'SKIP' else '#f1f5f9')) %}
+    {% set _pill_fg = '#065f46' if _res == 'PASS' else ('#991b1b' if _res == 'FAIL' else ('#92400e' if _res == 'SKIP' else '#475569')) %}
+    {% set _pill_text = ('✓ PASS' if _res == 'PASS' else ('✗ FAIL' if _res == 'FAIL' else ('⏭ SKIP' if _res == 'SKIP' else '⏳ pending'))) %}
     <li class="expected-behavior-item" id="bt-{{ b.name or loop.index0 }}"
         data-pytest-node="{{ b.name or '' }}"
         data-classification="{{ _cls }}"
+        data-result="{{ _res or 'pending' }}"
         style="margin: 0 0 10px 0; padding: 10px 12px; border-left: 4px solid {{ _border }}; background: #f8fafc; border-radius: 4px;">
       <div style="display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;">
-        <span class="bt-result" style="font-size: 0.75em; color: #94a3b8; font-family: monospace; min-width: 60px;">
-          ⏳ pending
-        </span>
+        <span class="bt-result" style="font-size: 0.75em; font-family: monospace; padding: 2px 8px; border-radius: 9999px; background: {{ _pill_bg }}; color: {{ _pill_fg }}">{{ _pill_text }}</span>
         <span class="classification-pill classification-{{ _cls }}">{{ _cls }}</span>
         <strong style="font-size: 0.9em;">{{ b.name or '(unnamed)' }}</strong>
         {% if b.requires_simulation %}
@@ -848,6 +863,14 @@
         {% endif %}
       </div>
       <div style="margin-top: 6px; font-size: 0.95em;">{{ b.description or b.en or '' }}</div>
+      {% if _out %}
+      <div style="margin-top:6px;font-size:0.85em;padding:6px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:3px">
+        <strong>Latest result:</strong>
+        {% for k, v in _out.items() if k != 'result' %}
+          <code style="font-family:ui-monospace,monospace;color:#475569;margin-right:8px">{{ k }}: {{ v }}</code>
+        {% endfor %}
+      </div>
+      {% endif %}
       {% if b.measure or b.pass_if or b.given or b.expect %}
       <details style="margin-top: 6px; font-size: 0.82em;">
         <summary class="muted" style="cursor: pointer;">Assertion</summary>
@@ -882,17 +905,168 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
 
 <section class="study-tab-panel" data-kind="visualizations" id="panel-visualizations" hidden>
   <div class="viz-section">
-    <h3 class="section-title">Visualizations</h3>
+    <h3 class="section-title">Latest-run visualizations (auto-generated from <code>runs.db</code>)</h3>
+    <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
+      These charts re-render each time the page loads, against the most recent simulation in the study's <code>runs.db</code>.
+      They are also embedded into the downloadable investigation HTML report.
+    </p>
+    <div id="viz-charts-panel" class="charts-panel"></div>
+    <h3 class="section-title" style="margin-top:24px">Registered visualization modules</h3>
     <div id="viz-list">
       {% for v in (study.visualizations or []) %}
-      <div class="viz-config">{{ v.name }} <code class="muted">{{ v.address or '' }}</code></div>
+      <div class="viz-config">{{ v.name }} <code class="muted">{{ v.address or '' }}</code>
+        {% if v.description %}<div class="muted small" style="margin-top:2px">{{ v.description }}</div>{% endif %}
+      </div>
+      {% else %}
+      <p class="muted" style="margin:0">No registered viz modules. The composite's default workflow + topology visualizations apply automatically when running.</p>
       {% endfor %}
     </div>
-    <button class="btn-add-viz">+ Add visualization</button>
+    <button class="btn-add-viz" style="margin-top:8px">+ Add visualization</button>
   </div>
 </section>
 
 <section class="study-tab-panel" data-kind="conclusions" id="panel-conclusions" hidden>
+
+  {% set _is_v3 = study.conclusion_logic or study.follow_up_studies %}
+  {% if _is_v3 %}
+  <div class="decide-v3">
+    <h2 style="margin:0 0 4px 0">Decide</h2>
+    <p class="muted" style="margin:0 0 16px 0;font-size:0.9em">
+      Synthesises the latest run's outcomes against the pre-stated
+      <code>conclusion_logic</code>, then surfaces concrete follow-up actions
+      you can either review (existing studies) or seed (new ones).
+    </p>
+
+    {# ── Latest run outcomes ────────────────────────────────────────── #}
+    {% set _latest = (study.runs or [])[-1] if study.runs else None %}
+    {% if _latest %}
+    <div class="decide-section">
+      <h3 class="overview-label">Latest run outcomes</h3>
+      <div style="font-size:0.88em;color:#64748b;margin-bottom:8px">
+        {{ _latest.simulation or 'baseline' }} · seed {{ _latest.seed or '?' }} ·
+        {{ _latest.duration_s or '?' }}s simulated ·
+        {{ _latest.rows or '?' }} history rows ·
+        started {{ _latest.started_at or '?' }}
+      </div>
+      {% if _latest.outcomes %}
+      <table style="width:100%;border-collapse:collapse;font-size:0.9em">
+        <thead><tr style="background:#f8fafc">
+          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e2e8f0">Test</th>
+          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e2e8f0">Result</th>
+          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e2e8f0">Detail</th>
+        </tr></thead>
+        <tbody>
+          {% for tname, out in _latest.outcomes.items() %}
+          {% set _r = out.result %}
+          {% set _pb = '#d1fae5' if _r == 'PASS' else ('#fee2e2' if _r == 'FAIL' else '#fef3c7') %}
+          {% set _pf = '#065f46' if _r == 'PASS' else ('#991b1b' if _r == 'FAIL' else '#92400e') %}
+          <tr>
+            <td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;font-family:ui-monospace,monospace;font-size:0.85em">{{ tname }}</td>
+            <td style="padding:6px 10px;border-bottom:1px solid #f1f5f9">
+              <span style="background:{{ _pb }};color:{{ _pf }};padding:1px 8px;border-radius:9999px;font-size:0.8em;font-family:ui-monospace,monospace">{{ _r }}</span>
+            </td>
+            <td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;font-size:0.85em;color:#475569">
+              {% for k, v in out.items() if k != 'result' %}
+                <code style="margin-right:8px">{{ k }}: {{ v }}</code>
+              {% endfor %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {# ── Conclusion logic (gate decision) ───────────────────────────── #}
+    {% if study.conclusion_logic %}
+    {% set _cl = study.conclusion_logic %}
+    <div class="decide-section" style="margin-top:18px">
+      <h3 class="overview-label">Conclusion logic — gate decision</h3>
+      {% if _cl.if_primary_tests_pass %}
+      <div style="padding:10px 14px;background:#f0fdf4;border-left:4px solid #10b981;border-radius:4px;margin-bottom:8px">
+        <strong>✓ If primary tests pass:</strong>
+        {% if _cl.if_primary_tests_pass.implementation_status %}
+        <div style="margin-top:4px"><em>Implementation:</em> {{ _cl.if_primary_tests_pass.implementation_status }}</div>
+        {% endif %}
+        {% if _cl.if_primary_tests_pass.biological_validation %}
+        <div style="margin-top:4px"><em>Biological validation:</em> {{ _cl.if_primary_tests_pass.biological_validation }}</div>
+        {% endif %}
+        {% if _cl.if_primary_tests_pass.pipeline_unblocks %}
+        <div style="margin-top:4px"><em>Pipeline unblocks:</em>
+          <ul style="margin:4px 0 0 18px">{% for u in _cl.if_primary_tests_pass.pipeline_unblocks %}<li>{{ u }}</li>{% endfor %}</ul>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+      {% if _cl.if_primary_tests_fail %}
+      <div style="padding:10px 14px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px">
+        <strong>✗ If primary tests fail:</strong>
+        {% if _cl.if_primary_tests_fail.diagnose %}
+        <div style="margin-top:4px"><em>Diagnose:</em>
+          <ul style="margin:4px 0 0 18px">{% for d in _cl.if_primary_tests_fail.diagnose %}<li>{{ d }}</li>{% endfor %}</ul>
+        </div>
+        {% endif %}
+        {% if _cl.if_primary_tests_fail.block_downstream %}
+        <div style="margin-top:4px"><em>Block downstream:</em> {{ _cl.if_primary_tests_fail.block_downstream }}</div>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {# ── Conclusion blob (the synthesised narrative) ─────────────────── #}
+    {% if study.conclusion %}
+    <div class="decide-section" style="margin-top:18px">
+      <h3 class="overview-label">Conclusion</h3>
+      <pre style="background:#f8fafc;padding:12px;border-left:3px solid #94a3b8;border-radius:3px;white-space:pre-wrap;font-family:inherit;font-size:0.9em;line-height:1.5;margin:0">{{ study.conclusion }}</pre>
+    </div>
+    {% endif %}
+
+    {# ── Follow-up studies with one-click seed ──────────────────────── #}
+    {% if study.follow_up_studies %}
+    <div class="decide-section" style="margin-top:18px">
+      <h3 class="overview-label">Follow-up studies — pick one to seed</h3>
+      <p class="muted" style="margin:0 0 8px 0;font-size:0.85em">
+        Click <strong>Seed new study →</strong> on any non-existing follow-up to scaffold a child study.yaml.
+        The new study inherits this one as a <code>pipeline_gate</code> prerequisite and starts at phase: Design.
+      </p>
+      <div class="followup-list">
+        {% for f in study.follow_up_studies %}
+        <div class="followup-card followup-kind-{{ f.kind or 'other' }}">
+          <div class="followup-header">
+            <span class="followup-kind">{{ f.kind or 'other' }}</span>
+            {% if f.effort %}<span class="followup-effort">{{ f.effort }}</span>{% endif %}
+            {% if f.status %}<span class="followup-status status-{{ f.status }}">{{ f.status }}</span>{% endif %}
+            <strong class="followup-title">{{ f.title }}</strong>
+          </div>
+          {% if f.why %}<div class="followup-why"><em>Why:</em> {{ f.why }}</div>{% endif %}
+          {% if f.hypothesized_mechanism %}
+          <div class="followup-hypothesis"><em>Hypothesized mechanism:</em> {{ f.hypothesized_mechanism }}</div>
+          {% endif %}
+          {% if f.unblocks %}
+          <div class="followup-unblocks"><em>Unblocks:</em>
+            <ul style="margin:2px 0 0 18px;padding:0">{% for u in f.unblocks %}<li>{{ u }}</li>{% endfor %}</ul>
+          </div>
+          {% endif %}
+          {% if f.acceptance %}
+          <div class="followup-acceptance"><em>Acceptance:</em>
+            <ul style="margin:2px 0 0 18px;padding:0">{% for a in f.acceptance %}<li>{{ a }}</li>{% endfor %}</ul>
+          </div>
+          {% endif %}
+          {% if f.kind not in ('existing',) %}
+          <div class="followup-actions" style="margin-top:8px">
+            <button class="btn-seed-followup" onclick="_seedFollowupStudy('{{ name }}', {{ loop.index0 }})">Seed new study →</button>
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  {# ── Legacy four-field markdown editor (kept for non-v3 studies) ──── #}
   <div class="conclusions-grid">
     <div class="conclusion-field">
       <h3>Claims</h3>
@@ -912,6 +1086,7 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
     </div>
   </div>
   <p class="muted">Saved as one markdown blob in study.yaml.conclusion with H2 headers.</p>
+  {% endif %}
 </section>
 
 </main>

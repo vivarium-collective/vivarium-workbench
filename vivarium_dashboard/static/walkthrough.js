@@ -3290,6 +3290,7 @@
     fetch('/api/iset/' + encodeURIComponent(name), {headers: {Accept: 'application/json'}})
       .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function(d) {
+        window._currentIsetData = d;
         document.getElementById('investigation-detail-title').textContent = d.title || d.name;
         var statusEl = document.getElementById('investigation-detail-status');
         statusEl.textContent = d.status || 'planning';
@@ -3488,6 +3489,18 @@
       // Composite counts line — readouts (new) | variants (legacy) + behavior tests + requirements (new).
       var nReadouts = (s.n_readouts !== undefined) ? s.n_readouts : 0;
       var nReqs = (s.n_requirements !== undefined) ? s.n_requirements : 0;
+      var followUps = s.follow_up_studies || [];
+      // When phase=Decide AND there are follow-ups, surface a clickable chip
+      // that opens a popover listing them with one-click "Seed →" actions.
+      var followUpsChip = '';
+      if (s.phase === 'Decide' && followUps.length) {
+        followUpsChip =
+          '<button class="dag-followups-btn" ' +
+          'onclick="event.stopPropagation(); _openDagFollowupsPopover(\'' + _esc(s.name) + '\', this)" ' +
+          'style="margin-top:4px;font-size:0.72em;padding:2px 8px;border:1px solid #10b981;background:#d1fae5;color:#065f46;border-radius:9999px;cursor:pointer">' +
+          '▸ ' + followUps.length + ' follow-up' + (followUps.length === 1 ? '' : 's') + ' · click to seed' +
+          '</button>';
+      }
       node.innerHTML =
         '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:4px">' +
           '<strong style="font-size:0.95em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _esc(s.name) + '</strong>' +
@@ -3503,7 +3516,12 @@
           (nReadouts ? ' · ' + nReadouts + ' readouts' : '') +
           (nReqs ? ' · ' + nReqs + ' reqs' : '') +
         '</div>' +
-        '<div style="font-size:0.72em;color:#94a3b8;margin-top:4px">Click to open study</div>';
+        followUpsChip +
+        (followUpsChip
+          ? ''
+          : '<div style="font-size:0.72em;color:#94a3b8;margin-top:4px">Click to open study</div>');
+      // Stash follow-ups on the node for the popover lookup.
+      node._followUps = followUps;
       nodesHost.appendChild(node);
     });
 
@@ -3512,6 +3530,120 @@
     if (shell) shell.scrollTop = 0;
   }
   window._renderInvestigationDag = _renderInvestigationDag;
+
+  // ── DAG follow-ups popover ───────────────────────────────────────────────
+  // Surfaced when phase=Decide. Lists each follow_up_studies entry with a
+  // "Seed →" button that POSTs to /api/study-seed-followup (existing
+  // endpoint) and navigates to the newly-created child study.
+  function _openDagFollowupsPopover(studyName, anchorBtn) {
+    // Find this study's follow-ups from the most recent iset payload.
+    var isetStudies = (window._currentIsetData && window._currentIsetData.studies) || [];
+    var match = null;
+    for (var i = 0; i < isetStudies.length; i++) {
+      if (isetStudies[i].name === studyName) { match = isetStudies[i]; break; }
+    }
+    var followUps = (match && match.follow_up_studies) || [];
+    if (!followUps.length) {
+      alert('No follow-ups recorded for ' + studyName + '.');
+      return;
+    }
+    // Close any existing popover
+    var prior = document.getElementById('dag-followups-popover');
+    if (prior) prior.remove();
+
+    var pop = document.createElement('div');
+    pop.id = 'dag-followups-popover';
+    var rect = anchorBtn.getBoundingClientRect();
+    pop.style.cssText =
+      'position:fixed;top:' + (rect.bottom + 6) + 'px;left:' + Math.max(8, rect.left - 80) + 'px;' +
+      'width:520px;max-height:60vh;overflow-y:auto;background:#fff;border:1px solid #d1d5db;' +
+      'border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.18);z-index:1000;padding:14px;';
+
+    var header =
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">' +
+        '<strong>' + _esc(studyName) + ' — follow-ups</strong>' +
+        '<button onclick="document.getElementById(\'dag-followups-popover\').remove()" ' +
+        'style="background:transparent;border:0;font-size:1.3em;cursor:pointer;color:#64748b">×</button>' +
+      '</div>' +
+      '<p style="font-size:0.85em;color:#64748b;margin:0 0 10px 0">Click <em>Seed →</em> to spawn a new child study from any entry. The new study inherits this one as a pipeline_gate prerequisite.</p>';
+
+    var rows = followUps.map(function(f, idx) {
+      var kind = f.kind || 'other';
+      var kindColors = {
+        infrastructure_fix: {bg: '#fef2f2', fg: '#991b1b', border: '#dc2626'},
+        calibration_task:   {bg: '#fefce8', fg: '#92400e', border: '#f59e0b'},
+        expert_question:    {bg: '#faf5ff', fg: '#6b21a8', border: '#a855f7'},
+        existing:           {bg: '#eff6ff', fg: '#1e40af', border: '#3b82f6'},
+        new:                {bg: '#f0fdf4', fg: '#065f46', border: '#10b981'},
+        other:              {bg: '#f8fafc', fg: '#475569', border: '#94a3b8'},
+      };
+      var kc = kindColors[kind] || kindColors.other;
+      var canSeed = kind !== 'existing';
+      var seedBtn = canSeed
+        ? '<button onclick="event.stopPropagation(); _seedFollowupAndOpen(\'' + _esc(studyName) + '\', ' + idx + ')" ' +
+          'style="font-size:0.8em;padding:3px 10px;border:1px solid ' + kc.border + ';background:#fff;color:' + kc.fg +
+          ';border-radius:4px;cursor:pointer;white-space:nowrap">Seed →</button>'
+        : '<span style="font-size:0.78em;color:#64748b;font-style:italic">(existing study)</span>';
+      var statusBadge = f.status
+        ? '<span style="font-size:0.7em;padding:1px 6px;border-radius:9999px;background:#fef3c7;color:#92400e;margin-left:6px">' + _esc(f.status) + '</span>'
+        : '';
+      var effortBadge = f.effort
+        ? '<span style="font-size:0.7em;padding:1px 6px;border-radius:9999px;background:#e0e7ff;color:#3730a3;margin-left:6px;font-family:monospace">' + _esc(f.effort) + '</span>'
+        : '';
+      var why = f.why
+        ? '<div style="font-size:0.83em;color:#475569;margin-top:4px;line-height:1.4">' + _esc(f.why.slice(0, 280)) + (f.why.length > 280 ? '…' : '') + '</div>'
+        : '';
+      return '<div style="padding:10px 12px;border:1px solid ' + kc.border + ';border-left:4px solid ' + kc.border +
+             ';border-radius:4px;background:' + kc.bg + ';margin-bottom:8px">' +
+               '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">' +
+                 '<div style="flex:1;min-width:0">' +
+                   '<span style="font-size:0.7em;text-transform:uppercase;letter-spacing:0.05em;padding:1px 8px;border-radius:9999px;background:#fff;color:' + kc.fg + '">' + _esc(kind) + '</span>' +
+                   effortBadge + statusBadge +
+                   '<div style="font-weight:600;margin-top:4px;font-size:0.93em">' + _esc(f.title || '(untitled)') + '</div>' +
+                   why +
+                 '</div>' +
+                 seedBtn +
+               '</div>' +
+             '</div>';
+    }).join('');
+
+    pop.innerHTML = header + rows;
+    document.body.appendChild(pop);
+
+    // Click-outside to close
+    setTimeout(function() {
+      document.addEventListener('click', function _closer(e) {
+        if (!pop.contains(e.target)) {
+          pop.remove();
+          document.removeEventListener('click', _closer);
+        }
+      });
+    }, 0);
+  }
+  window._openDagFollowupsPopover = _openDagFollowupsPopover;
+
+  // Seed-then-open helper used by the popover. Shares the POST endpoint with
+  // the study-detail page's _seedFollowupStudy (in study-detail.js) so both
+  // surfaces converge on the same backend.
+  function _seedFollowupAndOpen(parentName, idx) {
+    if (!confirm('Seed a new study from this follow-up?\n\nA new study.yaml will be created under studies/<new-name>/.')) return;
+    fetch('/api/study-seed-followup', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({parent: parentName, followup_idx: idx}),
+    }).then(function(r) { return r.json().then(function(d) { return {status: r.status, body: d}; }); })
+      .then(function(res) {
+        if (res.status !== 200 || res.body.error) {
+          alert('Seed failed: ' + (res.body.error || res.status));
+          return;
+        }
+        var pop = document.getElementById('dag-followups-popover');
+        if (pop) pop.remove();
+        alert('Created: ' + res.body.new_study_name + '\nOpening it now.');
+        window.location.href = '/studies/' + encodeURIComponent(res.body.new_study_name);
+      });
+  }
+  window._seedFollowupAndOpen = _seedFollowupAndOpen;
 
   // Click a DAG node → load the full study in an in-page iframe BELOW the
   // DAG (no jump to the legacy Studies tab). The iframe is the same
@@ -3707,9 +3839,16 @@
       var charts = (chartsByStudy && chartsByStudy[s.name]) || [];
 
       var hasBuild = !!modelChange || assumptions.length || reqs.length;
-      var hasDecide = !!(decide.if_pass || decide.if_fail
+      // v3 canonical names: if_primary_tests_pass / if_primary_tests_fail.
+      // Older specs used if_pass / if_fail. Coalesce.
+      var ifPass = decide.if_primary_tests_pass || decide.if_pass;
+      var ifFail = decide.if_primary_tests_fail || decide.if_fail;
+      var runs = s.runs || [];
+      var latestRun = runs.length ? runs[runs.length - 1] : null;
+      var hasDecide = !!(ifPass || ifFail
                          || (decide.implementation_validation && decide.implementation_validation.length)
-                         || (decide.biological_validation && decide.biological_validation.length));
+                         || (decide.biological_validation && decide.biological_validation.length)
+                         || s.conclusion || latestRun);
 
       // Sub-nav links
       var links = [];
@@ -3851,13 +3990,67 @@
 
       var decideHtml = '';
       if (hasDecide) {
-        decideHtml = '<div id="' + sid.decide + '"><h3>Decide (conclusion logic)</h3>'
-          + (decide.if_pass ? '<p><strong>If pass:</strong> ' + _multiline(decide.if_pass) + '</p>' : '')
-          + (decide.if_fail ? '<p><strong>If fail:</strong> ' + _multiline(decide.if_fail) + '</p>' : '')
-          + ((decide.implementation_validation && decide.implementation_validation.length)
-              ? '<p><strong>Implementation validation:</strong></p><ul>' + decide.implementation_validation.map(function(x){return '<li>' + _h(x) + '</li>';}).join('') + '</ul>' : '')
-          + ((decide.biological_validation && decide.biological_validation.length)
-              ? '<p><strong>Biological validation:</strong></p><ul>' + decide.biological_validation.map(function(x){return '<li>' + _h(x) + '</li>';}).join('') + '</ul>' : '')
+        // Latest-run outcomes (PASS/FAIL/SKIP per behavior test)
+        var outcomesHtml = '';
+        if (latestRun && latestRun.outcomes) {
+          var rows = Object.keys(latestRun.outcomes).map(function(tname) {
+            var o = latestRun.outcomes[tname] || {};
+            var res = o.result || '';
+            var pillBg = res === 'PASS' ? '#d1fae5' : (res === 'FAIL' ? '#fee2e2' : '#fef3c7');
+            var pillFg = res === 'PASS' ? '#065f46' : (res === 'FAIL' ? '#991b1b' : '#92400e');
+            var detail = Object.keys(o).filter(function(k){return k !== 'result';})
+              .map(function(k){return '<code style="margin-right:8px">' + _h(k) + ': ' + _h(String(o[k])) + '</code>';})
+              .join('');
+            return '<tr>'
+                 +   '<td style="padding:6px 10px;font-family:ui-monospace,monospace;font-size:0.85em">' + _h(tname) + '</td>'
+                 +   '<td style="padding:6px 10px"><span style="background:' + pillBg + ';color:' + pillFg + ';padding:1px 8px;border-radius:9999px;font-size:0.8em;font-family:ui-monospace,monospace">' + _h(res) + '</span></td>'
+                 +   '<td style="padding:6px 10px;font-size:0.85em;color:#475569">' + detail + '</td>'
+                 + '</tr>';
+          }).join('');
+          var meta = (latestRun.simulation || 'baseline')
+                   + ' · seed ' + (latestRun.seed != null ? latestRun.seed : '?')
+                   + ' · ' + (latestRun.duration_s || '?') + 's simulated'
+                   + ' · ' + (latestRun.rows || '?') + ' rows'
+                   + ' · ' + (latestRun.started_at || '?');
+          outcomesHtml = '<h4>Latest run outcomes</h4>'
+            + '<p class="muted small" style="margin:0 0 6px 0">' + _h(meta) + '</p>'
+            + '<table style="width:100%;border-collapse:collapse;font-size:0.9em">'
+            +   '<thead><tr style="background:#f8fafc"><th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e2e8f0">Test</th><th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e2e8f0">Result</th><th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e2e8f0">Detail</th></tr></thead>'
+            +   '<tbody>' + rows + '</tbody></table>';
+        }
+
+        // Conclusion-logic gate decision
+        function _renderClBlock(label, obj, accentBg, accentFg) {
+          if (!obj) return '';
+          var parts = [];
+          if (obj.implementation_status) parts.push('<div><em>Implementation:</em> ' + _multiline(obj.implementation_status) + '</div>');
+          if (obj.biological_validation) parts.push('<div style="margin-top:4px"><em>Biological validation:</em> ' + _multiline(obj.biological_validation) + '</div>');
+          if (obj.pipeline_unblocks && obj.pipeline_unblocks.length)
+            parts.push('<div style="margin-top:4px"><em>Pipeline unblocks:</em><ul style="margin:4px 0 0 18px">' + obj.pipeline_unblocks.map(function(u){return '<li>' + _h(u) + '</li>';}).join('') + '</ul></div>');
+          if (obj.diagnose && obj.diagnose.length)
+            parts.push('<div><em>Diagnose:</em><ul style="margin:4px 0 0 18px">' + obj.diagnose.map(function(d){return '<li>' + _h(d) + '</li>';}).join('') + '</ul></div>');
+          if (obj.block_downstream) parts.push('<div style="margin-top:4px"><em>Block downstream:</em> ' + _multiline(obj.block_downstream) + '</div>');
+          if (typeof obj === 'string') parts.push('<div>' + _multiline(obj) + '</div>');
+          return '<div style="padding:10px 14px;border-left:4px solid ' + accentFg + ';background:' + accentBg + ';border-radius:4px;margin-bottom:8px">'
+               +   '<strong>' + label + '</strong>'
+               +   parts.join('')
+               + '</div>';
+        }
+        var clHtml = '';
+        if (ifPass || ifFail) {
+          clHtml = '<h4>Gate decision (conclusion logic)</h4>'
+                 + _renderClBlock('✓ If primary tests pass', ifPass, '#f0fdf4', '#10b981')
+                 + _renderClBlock('✗ If primary tests fail', ifFail, '#fef2f2', '#dc2626');
+        }
+
+        // Conclusion blob
+        var conclusionHtml = s.conclusion
+          ? '<h4>Conclusion (synthesised narrative)</h4>'
+          + '<pre style="background:#f8fafc;padding:12px;border-left:3px solid #94a3b8;border-radius:3px;white-space:pre-wrap;font-family:inherit;font-size:0.9em;line-height:1.5;margin:0">' + _h(s.conclusion) + '</pre>'
+          : '';
+
+        decideHtml = '<div id="' + sid.decide + '"><h3>Decide</h3>'
+          + outcomesHtml + clHtml + conclusionHtml
           + '</div>';
       }
 

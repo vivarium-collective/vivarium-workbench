@@ -25,18 +25,22 @@
       _loadConclusionsTab(window._study);
     }
     if (kind === 'runs') {
-      _loadChartsForRunsTab();
+      _loadCharts('charts-panel');
+    }
+    if (kind === 'visualizations') {
+      _loadCharts('viz-charts-panel');
     }
   }
   window._setStudyTab = _setStudyTab;
 
-  // ── Charts panel (top of Runs tab): inline SVGs from /api/study-charts ─────
-  var _chartsLoaded = false;
-  function _loadChartsForRunsTab() {
-    if (_chartsLoaded) return;
-    var panel = document.getElementById('charts-panel');
+  // ── Charts panel: inline SVGs from /api/study-charts ─────────────────────
+  // Re-used by both Runs tab and Visualizations tab. Memoized per panel id.
+  var _chartsLoadedFor = {};
+  function _loadCharts(panelId) {
+    if (_chartsLoadedFor[panelId]) return;
+    var panel = document.getElementById(panelId);
     if (!panel) return;
-    _chartsLoaded = true;
+    _chartsLoadedFor[panelId] = true;
     panel.innerHTML = '<p class="muted" style="margin:0">Loading charts from runs.db…</p>';
     fetch('/api/study-charts/' + encodeURIComponent(studyName()))
       .then(function(r) { return r.json(); })
@@ -47,11 +51,13 @@
             : '<p class="muted" style="margin:0">No chart data available for this study.</p>';
           return;
         }
-        panel.innerHTML = '<h3 class="section-title">Latest run — visualizations</h3>' +
-          d.charts.map(function(c) {
-            return '<div class="chart-card">' + c.svg +
-                   '<div class="chart-caption">' + (c.caption || '') + '</div></div>';
-          }).join('');
+        // Section header only on Runs-tab variant; viz panel has its own header.
+        var header = (panelId === 'charts-panel')
+          ? '<h3 class="section-title">Latest run — visualizations</h3>' : '';
+        panel.innerHTML = header + d.charts.map(function(c) {
+          return '<div class="chart-card">' + c.svg +
+                 '<div class="chart-caption">' + (c.caption || '') + '</div></div>';
+        }).join('');
       })
       .catch(function(e) {
         panel.innerHTML = '<p class="muted" style="color:#dc2626">Chart load failed: ' + (e && e.message || e) + '</p>';
@@ -553,10 +559,33 @@
     var dsEl = document.getElementById('tests-data-source');
     if (autoEl) autoEl.textContent = String(cfg.auto_discover !== undefined ? cfg.auto_discover : true);
     if (dsEl) dsEl.textContent = cfg.data_source || 'latest_run';
-    var lr = cfg.last_results;
     var summary = document.getElementById('tests-summary');
     if (!summary) return;
-    if (lr) {
+
+    // Prefer aggregated outcomes from runs[].outcomes (the v3-shape result
+    // recording), falling back to legacy tests.last_results.
+    var passed = 0, failed = 0, skipped = 0, runRefs = 0;
+    (spec && spec.runs || []).forEach(function(r) {
+      if (!r.outcomes) return;
+      runRefs++;
+      Object.keys(r.outcomes).forEach(function(tname) {
+        var res = (r.outcomes[tname] || {}).result;
+        if (res === 'PASS') passed++;
+        else if (res === 'FAIL') failed++;
+        else if (res === 'SKIP') skipped++;
+      });
+    });
+
+    if (passed + failed + skipped > 0) {
+      var lastRun = (spec.runs || [])[spec.runs.length - 1] || {};
+      summary.innerHTML =
+        '<span class="ok">' + passed + ' passed</span>' +
+        ' / <span class="fail">' + failed + ' failed</span>' +
+        ' / <span class="skip">' + skipped + ' skipped</span>' +
+        ' <span class="muted">(' + runRefs + ' run' + (runRefs === 1 ? '' : 's') + ' recorded; latest: ' +
+        (lastRun.started_at || '?') + ')</span>';
+    } else if (cfg.last_results) {
+      var lr = cfg.last_results;
       summary.innerHTML =
         '<span class="ok">' + (lr.passed || 0) + ' passed</span>' +
         ' / <span class="fail">' + (lr.failed || 0) + ' failed</span>' +
@@ -564,7 +593,7 @@
         ' <span class="muted">(' + ((lr.duration_s || 0).toFixed(2)) + 's' +
         (lr.timestamp ? ', ' + lr.timestamp : '') + ')</span>';
     } else {
-      summary.textContent = '— no test results yet —';
+      summary.textContent = '— no test results yet — click "Run tests" to execute them or check the runs[] section in study.yaml';
     }
   }
 
