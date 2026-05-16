@@ -356,7 +356,16 @@ def load_spec(path: Path) -> dict:
         raise InvestigationSpecError("missing required field: name")
 
     # v3/v4 (Studies) shape: single baseline + optional variants/runs/etc.
-    if spec.get("schema_version") in (3, 4):
+    # Detect v3-shape even when schema_version is absent: a top-level
+    # ``baseline:`` that is a list-of-mappings is v3 (legacy v2 used a
+    # string ``baseline:`` naming a single variant, or no ``baseline:`` at all).
+    baseline_field = spec.get("baseline")
+    looks_like_v3 = isinstance(baseline_field, list) and all(
+        isinstance(b, dict) for b in baseline_field
+    )
+    if spec.get("schema_version") in (3, 4) or looks_like_v3:
+        spec.setdefault("schema_version", 3)
+        spec = migrate_v3_to_v4(spec)
         _validate_study_v3_or_v4(spec)
         return spec
 
