@@ -3920,16 +3920,79 @@
           ? '<h4>Key assumptions</h4><ul>' + assumptions.map(function(a) { return '<li>' + _multiline(typeof a === 'string' ? a : (a.text || JSON.stringify(a))) + '</li>'; }).join('') + '</ul>'
           : '';
         var reqHtml = reqs.length
-          ? '<h4>Implementation requirements</h4>' + reqs.map(function(r) {
-              var effort = r.effort ? ' <span class="muted">[' + _h(r.effort) + ']</span>' : '';
-              var steps = (r.steps && r.steps.length)
-                ? '<ol>' + r.steps.map(function(st) { return '<li>' + _h(st) + '</li>'; }).join('') + '</ol>'
+          ? '<h4>Implementation requirements</h4>'
+          + '<p class="muted small" style="margin:0 0 8px 0">'
+          +   'Concrete code work needed to fully exercise this study. Each card shows the biological purpose first; '
+          +   'click <em>Implementation detail</em> to see steps, file pointers, and gate conditions.'
+          + '</p>'
+          + reqs.map(function(r) {
+              var effortBadge = r.effort
+                ? '<span class="req-effort" title="Effort: S=small, M=medium, L=large">' + _h(r.effort) + '</span>'
                 : '';
-              var unblocks = r.unblocks ? '<p class="muted small">Unblocks: <code>' + _h(r.unblocks) + '</code></p>' : '';
-              return '<details class="req"><summary><strong>' + _h(r.id || '') + '</strong> — ' + _h(r.title || '') + effort + '</summary>'
-                   + (r.why ? '<p><strong>Why:</strong> ' + _multiline(r.why) + '</p>' : '')
-                   + steps + unblocks
-                   + '</details>';
+              var kindBadge = r.kind
+                ? '<span class="req-kind">' + _h(r.kind) + '</span>'
+                : '';
+              var statusBadge = '';
+              if (r.defer_until) {
+                statusBadge = '<span class="req-status req-status-deferred" title="Deferred until: ' + _h(r.defer_until) + '">deferred</span>';
+              } else if (r.status === 'done' || r.status === 'complete') {
+                statusBadge = '<span class="req-status req-status-done">done</span>';
+              } else {
+                statusBadge = '<span class="req-status req-status-open">open</span>';
+              }
+              // KEY POINT: the biological/scientific reason this matters — promote to visible.
+              var keyLine = '';
+              if (r.why) {
+                keyLine = '<div class="req-key"><strong>Why it matters:</strong> ' + _multiline(r.why) + '</div>';
+              } else if (r.description) {
+                // First paragraph of description (up to 240 chars) — a useful teaser.
+                var teaser = String(r.description).split(/\n\s*\n/)[0].slice(0, 240);
+                keyLine = '<div class="req-key">' + _multiline(teaser) + (r.description.length > 240 ? '…' : '') + '</div>';
+              }
+              // Outcomes (what this unblocks). Surfaced visibly — that's the dependency the
+              // reader cares about most when triaging.
+              var unblocks = '';
+              if (r.unblocks) {
+                var items = Array.isArray(r.unblocks) ? r.unblocks : [r.unblocks];
+                unblocks = '<div class="req-unblocks"><strong>Unblocks when done:</strong><ul>'
+                         + items.map(function(u){return '<li><code>' + _h(u) + '</code></li>';}).join('')
+                         + '</ul></div>';
+              }
+              // Deferred-until note when present — gives the reader a "you can ignore this for now" signal.
+              var deferredNote = r.defer_until
+                ? '<div class="req-deferred">⏸ Deferred until <code>' + _h(r.defer_until) + '</code> — not a blocker for this study\'s gate.</div>'
+                : '';
+
+              // Drop-down: full technical detail (description, concrete steps, file pointers).
+              var detail = '';
+              if (r.description && r.description.length > 240) {
+                detail += '<div class="req-detail-section"><h5>Full description</h5>' + _multiline(r.description) + '</div>';
+              }
+              if (r.steps && r.steps.length) {
+                detail += '<div class="req-detail-section"><h5>Concrete steps</h5><ol>'
+                        + r.steps.map(function(st){return '<li>' + _h(st) + '</li>';}).join('')
+                        + '</ol></div>';
+              }
+              if (r.files && r.files.length) {
+                detail += '<div class="req-detail-section"><h5>Files to touch</h5><ul>'
+                        + r.files.map(function(f){return '<li><code>' + _h(f) + '</code></li>';}).join('')
+                        + '</ul></div>';
+              }
+              var detailDropdown = detail
+                ? '<details class="req-detail"><summary>Implementation detail</summary>' + detail + '</details>'
+                : '';
+
+              return '<div class="req-card req-' + _h(r.effort || 'unk').toLowerCase() + '">'
+                   +   '<div class="req-header">'
+                   +     '<code class="req-id">' + _h(r.id || '') + '</code>'
+                   +     '<strong class="req-title">' + _h(r.title || '(untitled requirement)') + '</strong>'
+                   +     '<span class="req-badges">' + kindBadge + effortBadge + statusBadge + '</span>'
+                   +   '</div>'
+                   +   keyLine
+                   +   deferredNote
+                   +   unblocks
+                   +   detailDropdown
+                   + '</div>';
             }).join('')
           : '';
         buildHtml = '<div id="' + sid.build + '"><h3>Build</h3>' + mcHtml + asmHtml + reqHtml + '</div>';
@@ -4424,6 +4487,29 @@
       // charts
       + '.chart-card{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 12px 12px 12px;margin:10px 0}'
       + '.chart-caption{font-size:0.83em;color:#475569;margin-top:4px;line-height:1.4}'
+      // implementation-requirement cards (biologist-friendly layout)
+      + '.req-card{padding:12px 14px;margin:10px 0;border:1px solid #e2e8f0;border-radius:6px;background:#fff;box-shadow:0 1px 1px rgba(0,0,0,0.02)}'
+      + '.req-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}'
+      + '.req-id{font-size:0.78em;color:#475569;background:#f1f5f9;padding:1px 6px;border-radius:3px;font-family:ui-monospace,monospace}'
+      + '.req-title{font-size:1.02em;flex:1;line-height:1.3}'
+      + '.req-badges{display:flex;gap:4px;flex-wrap:wrap}'
+      + '.req-kind{font-size:0.7em;text-transform:lowercase;padding:1px 8px;border-radius:9999px;background:#e0e7ff;color:#3730a3}'
+      + '.req-effort{font-size:0.72em;font-family:ui-monospace,monospace;padding:1px 8px;border-radius:9999px;background:#fef3c7;color:#92400e;font-weight:600}'
+      + '.req-status{font-size:0.7em;padding:1px 8px;border-radius:9999px;font-weight:500}'
+      + '.req-status-open{background:#fee2e2;color:#991b1b}'
+      + '.req-status-deferred{background:#fef3c7;color:#92400e}'
+      + '.req-status-done{background:#d1fae5;color:#065f46}'
+      + '.req-key{padding:8px 12px;background:#f8fafc;border-left:3px solid #3b82f6;border-radius:3px;font-size:0.94em;line-height:1.5;margin:6px 0}'
+      + '.req-deferred{padding:6px 10px;background:#fffbeb;border-left:3px solid #f59e0b;border-radius:3px;font-size:0.86em;color:#78350f;margin:6px 0}'
+      + '.req-unblocks{padding:6px 10px;background:#f0fdf4;border-left:3px solid #10b981;border-radius:3px;font-size:0.88em;margin:6px 0}'
+      + '.req-unblocks ul{margin:4px 0 0 20px;padding:0}'
+      + '.req-unblocks li{margin:2px 0}'
+      + '.req-detail{margin-top:8px;padding:6px 10px;background:#fafafa;border:1px solid #e2e8f0;border-radius:4px}'
+      + '.req-detail summary{cursor:pointer;font-size:0.85em;color:#475569;font-weight:500}'
+      + '.req-detail summary:hover{color:#0f172a}'
+      + '.req-detail-section{margin-top:8px}'
+      + '.req-detail-section h5{margin:6px 0 4px 0;font-size:0.85em;color:#475569;text-transform:uppercase;letter-spacing:0.04em}'
+      + '.req-detail-section ol,.req-detail-section ul{margin:4px 0 0 22px;padding:0;font-size:0.93em}'
       // ── eb table row coloring ──
       + 'tr.eb-stub td{background:#fefce8}'
       + 'tr.eb-gated td{background:#fff7ed}'
