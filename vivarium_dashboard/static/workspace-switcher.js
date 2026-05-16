@@ -38,6 +38,10 @@
         <ul class="viv-ws-modal-list"></ul>
         <div class="viv-ws-modal-footer">
           <button type="button" class="viv-ws-modal-add">+ Add existing workspace…</button>
+          <div class="viv-workspace-switcher-actions">
+            <button type="button" class="viv-ws-action-start-workstream">+ Start workstream</button>
+            <button type="button" class="viv-ws-action-end-workstream">End current workstream</button>
+          </div>
         </div>
       </div>
     `;
@@ -51,6 +55,18 @@
     });
     modal.querySelector('.viv-ws-modal-close').addEventListener('click', close);
     modal.querySelector('.viv-ws-modal-add').addEventListener('click', doAdd);
+    modal.querySelector('.viv-ws-action-start-workstream').addEventListener('click', () => {
+      close();
+      if (typeof window._startWork === 'function') {
+        window._startWork();
+      }
+    });
+    modal.querySelector('.viv-ws-action-end-workstream').addEventListener('click', () => {
+      close();
+      if (typeof window._endWork === 'function') {
+        window._endWork();
+      }
+    });
   }
 
   function open() {

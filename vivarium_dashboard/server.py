@@ -3559,11 +3559,21 @@ if __name__ == "__main__":
     def _post_work_link_branch(self, body: dict):
         """Link the workspace to an upstream branch.
 
-        Body: {upstream_repo?: "owner/name", branch_name?: str, push?: bool=True}.
+        Body: {upstream_repo?: "owner/name", branch_name?: str, push?: bool=True,
+               mode?: "branch" | "fork"}.
 
+        mode="branch" (default):
         - Sets git origin to the upstream (https://github.com/<repo>.git) if absent.
         - Pushes the current branch (or `branch_name`, after renaming if provided).
         - Marks workstream as pushed.
+
+        mode="fork":
+        - Forks the upstream repo under the authenticated gh user (gh repo fork).
+        - Sets origin to the fork URL; adds upstream remote pointing to the original.
+        - Pushes the current branch to origin (the fork).
+        - Returns fork and upstream full names in the response.
+
+        Any other mode value returns 400.
         """
         _ws_add_to_sys_path()
         from vivarium_dashboard.lib.work_state import load_state, save_state
@@ -3577,6 +3587,10 @@ if __name__ == "__main__":
         auth = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
         if auth.returncode != 0:
             return self._json({"error": "gh not authenticated. Run `gh auth login`."}, 500)
+
+        mode = (body.get("mode") or "branch").strip().lower()
+        if mode not in ("branch", "fork"):
+            return self._json({"error": f"mode must be 'branch' or 'fork'; got {mode!r}"}, 400)
 
         upstream_repo = (body.get("upstream_repo") or "").strip() or self._default_upstream_repo()
         if not re.match(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$", upstream_repo):
@@ -3592,6 +3606,72 @@ if __name__ == "__main__":
             if r.returncode != 0:
                 return self._json({"error": f"branch rename failed: {(r.stderr or r.stdout)[:300]}"}, 500)
 
+        if mode == "fork":
+            # --- Fork mode ---
+            # 1. Fork the upstream repo (no local clone, no remote change yet).
+            repo_name = upstream_repo.split("/")[1]
+            r = subprocess.run(
+                ["gh", "repo", "fork", upstream_repo, "--remote=false", "--clone=false"],
+                capture_output=True, text=True,
+            )
+            if r.returncode != 0:
+                return self._json({"error": f"gh repo fork failed: {(r.stderr or r.stdout)[:500]}"}, 500)
+
+            # 2. Resolve the fork's full name via gh api user.
+            login_r = subprocess.run(
+                ["gh", "api", "user", "--jq", ".login"],
+                capture_output=True, text=True,
+            )
+            if login_r.returncode != 0:
+                return self._json({"error": f"could not resolve gh login: {(login_r.stderr or login_r.stdout)[:300]}"}, 500)
+            gh_login = login_r.stdout.strip()
+            fork_repo = f"{gh_login}/{repo_name}"
+            fork_url = f"https://github.com/{fork_repo}.git"
+            upstream_url = f"https://github.com/{upstream_repo}.git"
+
+            # 3. Set origin to fork; add upstream remote.
+            existing = subprocess.run(["git", "remote", "get-url", "origin"],
+                                      cwd=WORKSPACE, capture_output=True, text=True)
+            if existing.returncode != 0:
+                r = subprocess.run(["git", "remote", "add", "origin", fork_url],
+                                   cwd=WORKSPACE, capture_output=True, text=True)
+                if r.returncode != 0:
+                    return self._json({"error": f"git remote add origin failed: {(r.stderr or r.stdout)[:300]}"}, 500)
+            else:
+                r = subprocess.run(["git", "remote", "set-url", "origin", fork_url],
+                                   cwd=WORKSPACE, capture_output=True, text=True)
+                if r.returncode != 0:
+                    return self._json({"error": f"git remote set-url origin failed: {(r.stderr or r.stdout)[:300]}"}, 500)
+
+            # Add or update upstream remote.
+            up_existing = subprocess.run(["git", "remote", "get-url", "upstream"],
+                                         cwd=WORKSPACE, capture_output=True, text=True)
+            if up_existing.returncode != 0:
+                subprocess.run(["git", "remote", "add", "upstream", upstream_url],
+                               cwd=WORKSPACE, capture_output=True, text=True)
+            else:
+                subprocess.run(["git", "remote", "set-url", "upstream", upstream_url],
+                               cwd=WORKSPACE, capture_output=True, text=True)
+
+            # 4. Push to fork.
+            if body.get("push", True):
+                r = subprocess.run(["git", "push", "-u", "origin", target_branch],
+                                   cwd=WORKSPACE, capture_output=True, text=True, timeout=120)
+                if r.returncode != 0:
+                    return self._json({"error": f"git push to fork failed: {(r.stderr or r.stdout)[:500]}"}, 500)
+
+            state["pushed"] = True
+            save_state(state)
+
+            return self._json({
+                "ok": True,
+                "fork": fork_repo,
+                "upstream": upstream_repo,
+                "branch": target_branch,
+                "branch_url": f"https://github.com/{fork_repo}/tree/{target_branch}",
+            }, 200)
+
+        # --- Branch mode (default) ---
         # Set origin if not present (or replace if it points elsewhere).
         upstream_url = f"https://github.com/{upstream_repo}.git"
         existing = subprocess.run(["git", "remote", "get-url", "origin"],

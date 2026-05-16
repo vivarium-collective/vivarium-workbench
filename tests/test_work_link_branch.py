@@ -54,3 +54,11 @@ def test_link_branch_refuses_overwriting_existing_origin(tmp_path, dashboard_cli
     resp = client.post("/api/work-link-branch", json={"upstream_repo": "vivarium-collective/v2ecoli", "push": False})
     assert resp.status_code == 409, resp.text
     assert "refusing to overwrite" in resp.json()["error"]
+
+
+def test_link_branch_rejects_unknown_mode(tmp_path, dashboard_client):
+    ws = _init_workspace(tmp_path)
+    client = dashboard_client(workspace=ws)
+    resp = client.post("/api/work-link-branch", json={"upstream_repo": "vivarium-collective/v2ecoli", "mode": "bogus"})
+    assert resp.status_code == 400, resp.text
+    assert "mode" in resp.json()["error"].lower()

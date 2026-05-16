@@ -202,6 +202,17 @@
   padding: 16px 18px; color: #999; font-size: 12px;
 }
 /* .viv-ws-error reused from v1; no rule change needed. */
+.mode-selector { margin: 0.5rem 0; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; }
+.mode-selector legend { font-weight: bold; padding: 0 0.3rem; }
+.mode-selector label { display: block; margin: 0.3rem 0; font-weight: normal; }
+.viv-workspace-switcher-actions {
+  border-top: 1px solid #eee; margin-top: 0.4rem; padding-top: 0.4rem;
+}
+.viv-workspace-switcher-actions button {
+  display: block; width: 100%; text-align: left;
+  padding: 0.4rem 0.6rem; background: transparent; border: none; cursor: pointer;
+}
+.viv-workspace-switcher-actions button:hover { background: #f0f0f0; }
 </style>
 </head><body>
 
@@ -303,18 +314,6 @@
           </svg>
         </span>
         <span class="viv-rail-link-label">Visualizations</span>
-      </a>
-      <a href="#branches"          class="viv-rail-link menu-link" data-page="branches">
-        <span class="viv-rail-link-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <circle cx="6" cy="5" r="2"/>
-            <circle cx="6" cy="19" r="2"/>
-            <circle cx="18" cy="12" r="2"/>
-            <path d="M6 7v10"/>
-            <path d="M6 12h6a4 4 0 0 0 4-4V7"/>
-          </svg>
-        </span>
-        <span class="viv-rail-link-label">GitHub Branches</span>
       </a>
     </nav>
 
@@ -836,13 +835,6 @@
   </div>
 </div>
 
-<!-- ===== PAGE: BRANCHES ===== -->
-<section id="page-branches" class="page" data-page="branches">
-  <h2 class="page-title">Branches</h2>
-  <p class="page-lead">All stage/* branches in this workspace, with one-click merge / PR / diff actions. Branches accumulate as the dashboard creates them on actions (Add observable, Install module, etc.). Use this tab to land them on main.</p>
-  <div id="branch-timeline-body"></div>
-</section>
-
 <!-- ===== PAGE: COMPOSITE EXPLORER ===== -->
 <section id="page-composite-explore" class="page" data-page="composite-explore">
   <h2 class="page-title">Composite Explorer</h2>
@@ -1136,6 +1128,11 @@
       <label>Branch name (optional — defaults to current branch):
         <input name="branch_name" placeholder="leave blank to keep current">
       </label>
+      <fieldset class="mode-selector">
+        <legend>Mode:</legend>
+        <label><input type="radio" name="mode" value="branch" checked> Branch off upstream (push current branch to a branch on the upstream repo)</label>
+        <label><input type="radio" name="mode" value="fork"> Fork upstream (create your own fork; current branch pushes to your fork's origin)</label>
+      </fieldset>
       <div class="form-actions">
         <button type="submit" class="action-btn">Push branch</button>
         <button type="button" class="action-btn--secondary" onclick="closeModal('modal-link-branch')">Cancel</button>
