@@ -86,10 +86,85 @@
 .charts-panel{margin-top:18px;display:flex;flex-direction:column;gap:18px}
 .chart-card{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 12px 12px 12px}
 .chart-caption{font-size:0.83em;color:#475569;margin-top:4px;line-height:1.4}
+/* findings */
+.findings-section{padding:14px 16px;background:#fafbff;border:1px solid #c7d2fe;border-radius:8px}
+.finding-card{padding:12px 14px;margin:10px 0;border:1px solid #e2e8f0;border-left:5px solid #6366f1;border-radius:6px;background:#fff}
+.finding-card.finding-status-confirms{border-left-color:#10b981}
+.finding-card.finding-status-partial{border-left-color:#f59e0b}
+.finding-card.finding-status-contradicts{border-left-color:#dc2626}
+.finding-card.finding-status-novel{border-left-color:#8b5cf6}
+.finding-header{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}
+.finding-status-glyph{font-size:1.2em;width:24px;text-align:center}
+.finding-status-confirms .finding-status-glyph{color:#10b981}
+.finding-status-partial .finding-status-glyph{color:#f59e0b}
+.finding-status-contradicts .finding-status-glyph{color:#dc2626}
+.finding-status-novel .finding-status-glyph{color:#8b5cf6}
+.finding-id{font-family:ui-monospace,monospace;font-size:0.78em;color:#475569;background:#f1f5f9;padding:1px 6px;border-radius:3px}
+.finding-kind{font-size:0.7em;text-transform:uppercase;letter-spacing:0.05em;padding:1px 8px;border-radius:9999px;background:#e0e7ff;color:#3730a3;font-weight:500}
+.finding-status-text{font-size:0.78em;color:#64748b;margin-left:auto;font-style:italic}
+.finding-statement{font-size:1em;line-height:1.5;font-weight:500;color:#0f172a;margin:4px 0 8px 0}
+.finding-evidence,.finding-expected{font-size:0.86em;color:#475569;padding:6px 10px;background:#f8fafc;border-left:3px solid #94a3b8;border-radius:3px;margin:6px 0;line-height:1.5}
+.finding-exp-summary{font-size:0.9em;color:#475569;padding:6px 10px;background:#fafbff;border-left:3px solid #6366f1;border-radius:3px;margin:6px 0;line-height:1.5}
+.finding-explanation{font-size:0.92em;color:#1e293b;margin:6px 0;line-height:1.5}
+.finding-explanation em{color:#475569;font-style:normal;font-weight:600}
+.finding-expert{margin:6px 0;padding:6px 10px;background:#fafafa;border:1px solid #e2e8f0;border-radius:4px}
+.finding-expert summary{cursor:pointer;font-size:0.85em;color:#475569;font-weight:500}
+.finding-expert-quote{border-left:3px solid #6366f1;margin:6px 0 4px 0;padding:6px 10px;background:#fafbff;font-style:italic;color:#1e1b4b;font-size:0.92em;line-height:1.5}
+.finding-expert-note{font-size:0.88em;color:#475569;margin-top:4px;font-style:italic}
+.finding-next{padding:6px 10px;background:#f0fdf4;border-left:3px solid #10b981;border-radius:3px;font-size:0.9em;margin-top:8px;line-height:1.5}
+.finding-next strong{color:#065f46}
 </style>
 
 <section class="study-tab-panel active" data-kind="overview" id="panel-overview">
   <div class="study-overview">
+
+    {% if study.findings %}
+    <div class="overview-section findings-section">
+      <h2 class="overview-label">🔬 Findings — what this study taught us</h2>
+      <p class="muted" style="margin:0 0 8px 0;font-size:0.85em">
+        Each card states a finding, links the evidence (run + test + value), shows the literature/expert comparison, and marks whether v2ecoli's behavior <em>confirms</em>, <em>contradicts</em>, <em>partially</em> agrees with, or is <em>novel</em> vs the reference.
+      </p>
+      {% for f in study.findings %}
+      {% set _status = f.status or 'novel' %}
+      {% set _glyph = {'confirms': '✓', 'partial': '◐', 'contradicts': '✗', 'novel': '◆'}.get(_status, '◆') %}
+      <div class="finding-card finding-kind-{{ f.kind or 'other' }} finding-status-{{ _status }}">
+        <div class="finding-header">
+          <span class="finding-status-glyph">{{ _glyph }}</span>
+          <span class="finding-id">{{ f.id or '' }}</span>
+          <span class="finding-kind">{{ f.kind or 'other' }}</span>
+          <span class="finding-status-text">{{ _status }} literature</span>
+        </div>
+        <div class="finding-statement">{{ f.statement }}</div>
+        {% if f.evidence %}
+        <div class="finding-evidence">
+          {% if f.evidence.observed is defined %}<strong>observed:</strong> {{ f.evidence.observed }}{% if f.evidence.units %} {{ f.evidence.units }}{% endif %} · {% endif %}
+          {% if f.evidence.from_test %}via test <code>{{ f.evidence.from_test }}</code> · {% endif %}
+          {% if f.evidence.from_run %}in run <code>{{ f.evidence.from_run }}</code>{% endif %}
+          {% if f.evidence.window %} ({{ f.evidence.window }}){% endif %}
+          {% if f.evidence.smoking_gun %}<details style="display:inline-block;margin-left:4px"><summary>smoking gun</summary><pre style="white-space:pre-wrap;margin:4px 0 0 0;padding:6px 8px;background:#fff;border-radius:3px;font-size:0.85em;font-family:inherit">{{ f.evidence.smoking_gun }}</pre></details>{% endif %}
+        </div>
+        {% endif %}
+        {% if f.expected %}
+        <div class="finding-expected">
+          {% if f.expected.range %}<strong>expected:</strong> {{ f.expected.range }} · {% endif %}
+          {% if f.expected.threshold is defined %}<strong>threshold:</strong> {{ f.expected.threshold }} · {% endif %}
+          {% if f.expected.cites %}cites: {% for c in f.expected.cites %}<code>{{ c }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+        </div>
+        {% if f.expected.summary %}<div class="finding-exp-summary"><em>Reference says:</em> {{ f.expected.summary }}</div>{% endif %}
+        {% endif %}
+        {% if f.explanation %}<div class="finding-explanation"><em>Why:</em> {{ f.explanation }}</div>{% endif %}
+        {% if f.expert_reference %}
+        <details class="finding-expert">
+          <summary>Expert ref: <code>{{ f.expert_reference.doc }}</code>{% if f.expert_reference.section %} ({{ f.expert_reference.section }}){% endif %}</summary>
+          {% if f.expert_reference.quote %}<blockquote class="finding-expert-quote">{{ f.expert_reference.quote }}</blockquote>{% endif %}
+          {% if f.expert_reference.note %}<div class="finding-expert-note">{{ f.expert_reference.note }}</div>{% endif %}
+        </details>
+        {% endif %}
+        {% if f.next_action %}<div class="finding-next"><strong>→ Next:</strong> {{ f.next_action }}</div>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
 
     {% if study.purpose %}
     <div class="overview-section">

@@ -3811,6 +3811,7 @@
     function v3StudySection(s, i, statusBadge, phaseBadge, parents, kids) {
       var slug = _h(s.name);
       var sid = {
+        findings:  'study-' + slug + '-findings',
         purpose:   'study-' + slug + '-purpose',
         gate:      'study-' + slug + '-gate',
         build:     'study-' + slug + '-build',
@@ -3835,6 +3836,7 @@
       var decide = s.conclusion_logic || {};
       var limitations = s.limitations || [];
       var followUps = s.follow_up_studies || [];
+      var findings = s.findings || [];
       var bib = (s.bibliography && s.bibliography.bib_keys) || [];
       var charts = (chartsByStudy && chartsByStudy[s.name]) || [];
 
@@ -3852,6 +3854,7 @@
 
       // Sub-nav links
       var links = [];
+      if (findings.length)    links.push('<a href="#' + sid.findings + '">Findings <span class="sn-count">' + findings.length + '</span></a>');
       links.push('<a href="#' + sid.purpose + '">Purpose</a>');
       if (gate.prerequisites || gate.enables || gate.proceed_condition)
                               links.push('<a href="#' + sid.gate + '">Pipeline gate</a>');
@@ -3878,7 +3881,94 @@
         +   '<nav class="study-nav-row2">' + links.join('') + '</nav>'
         + '</div>';
 
-      // Body sections
+      // Body sections — findings first (the "what we learned" headline).
+      var findingsHtml = '';
+      if (findings.length) {
+        var bioCount = findings.filter(function(f){return f.kind === 'biological';}).length;
+        var compCount = findings.filter(function(f){return f.kind === 'computational';}).length;
+        var methodCount = findings.filter(function(f){return f.kind === 'methodological';}).length;
+        var headerStats = [];
+        if (bioCount)    headerStats.push(bioCount + ' biological');
+        if (compCount)   headerStats.push(compCount + ' computational');
+        if (methodCount) headerStats.push(methodCount + ' methodological');
+        findingsHtml = '<div id="' + sid.findings + '" class="findings-section">'
+          + '<h3>🔬 Findings <span class="muted small">(' + headerStats.join(' · ') + ')</span></h3>'
+          + '<p class="muted small" style="margin:0 0 10px 0">What this study TAUGHT us. Each card links the observed evidence to the literature / expert reference it confirms, contradicts, or extends.</p>'
+          + findings.map(function(f) {
+              var status = f.status || 'novel';
+              var statusGlyph = {
+                confirms:    '✓',
+                partial:     '◐',
+                contradicts: '✗',
+                novel:       '◆',
+              }[status] || '◆';
+              var kind = f.kind || 'other';
+              var ev = f.evidence || {};
+              var exp = f.expected || {};
+              var ref = f.expert_reference || {};
+
+              // Evidence line: what we observed + which run/test produced it.
+              var evParts = [];
+              if (ev.observed != null) evParts.push('<strong>observed:</strong> ' + _h(String(ev.observed)) + (ev.units ? ' ' + _h(ev.units) : ''));
+              if (ev.from_test) evParts.push('via test <code>' + _h(ev.from_test) + '</code>');
+              if (ev.from_run)  evParts.push('in run <code>' + _h(ev.from_run) + '</code>');
+              if (ev.window) evParts.push('(' + _h(ev.window) + ')');
+              if (ev.reduction) evParts.push('(' + _h(ev.reduction) + ')');
+              if (ev.smoking_gun) evParts.push('<details style="display:inline-block;margin-left:4px"><summary style="cursor:pointer">smoking gun</summary><div style="padding:6px 8px;background:#fff;border-radius:3px;font-size:0.9em;margin-top:4px">' + _multiline(ev.smoking_gun) + '</div></details>');
+              if (ev.discovered_during) evParts.push('discovered during <code>' + _h(ev.discovered_during) + '</code>');
+              var evidenceLine = evParts.length
+                ? '<div class="finding-evidence">' + evParts.join(' · ') + '</div>' : '';
+
+              // Expected line: literature / reference comparison.
+              var expParts = [];
+              if (exp.range != null) {
+                var rng = Array.isArray(exp.range) ? '[' + exp.range.join(', ') + ']' : String(exp.range);
+                expParts.push('<strong>expected:</strong> ' + _h(rng));
+              }
+              if (exp.threshold != null) expParts.push('<strong>threshold:</strong> ' + _h(String(exp.threshold)));
+              if (exp.cites && exp.cites.length) expParts.push('cites: ' + exp.cites.map(function(c){return '<code>' + _h(c) + '</code>';}).join(', '));
+              var expLine = expParts.length
+                ? '<div class="finding-expected">' + expParts.join(' · ') + '</div>' : '';
+              var expSummary = exp.summary
+                ? '<div class="finding-exp-summary"><em>Reference says:</em> ' + _multiline(exp.summary) + '</div>' : '';
+
+              // Expert document reference (quote, page, doc id).
+              var refBlock = '';
+              if (ref.doc || ref.quote || ref.note) {
+                var refBody = '';
+                if (ref.quote) refBody += '<blockquote class="finding-expert-quote">' + _multiline(ref.quote) + '</blockquote>';
+                if (ref.note) refBody += '<div class="finding-expert-note">' + _multiline(ref.note) + '</div>';
+                var refLabel = ref.doc ? 'Expert ref: <code>' + _h(ref.doc) + '</code>' : 'Expert ref';
+                if (ref.section) refLabel += ' (' + _h(ref.section) + ')';
+                refBlock = '<details class="finding-expert"><summary>' + refLabel + '</summary>' + refBody + '</details>';
+              }
+
+              var explanationHtml = f.explanation
+                ? '<div class="finding-explanation"><em>Why:</em> ' + _multiline(f.explanation) + '</div>'
+                : '';
+              var nextHtml = f.next_action
+                ? '<div class="finding-next"><strong>→ Next:</strong> ' + _multiline(f.next_action) + '</div>'
+                : '';
+
+              return '<div class="finding-card finding-kind-' + _h(kind) + ' finding-status-' + _h(status) + '">'
+                   +   '<div class="finding-header">'
+                   +     '<span class="finding-status-glyph" title="' + _h(status) + '">' + statusGlyph + '</span>'
+                   +     '<span class="finding-id">' + _h(f.id || '') + '</span>'
+                   +     '<span class="finding-kind">' + _h(kind) + '</span>'
+                   +     '<span class="finding-status-text">' + _h(status) + ' literature</span>'
+                   +   '</div>'
+                   +   '<div class="finding-statement">' + _multiline(f.statement || '(no statement)') + '</div>'
+                   +   evidenceLine
+                   +   expLine
+                   +   expSummary
+                   +   explanationHtml
+                   +   refBlock
+                   +   nextHtml
+                   + '</div>';
+            }).join('')
+          + '</div>';
+      }
+
       var purposeHtml = '<div id="' + sid.purpose + '">'
         + '<h3>Purpose</h3>'
         + (purpose.question        ? '<div class="callout cl-blue"><strong>Question.</strong> ' + _multiline(purpose.question) + '</div>' : '')
@@ -4243,6 +4333,7 @@
         +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
         +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
         +   '</header>'
+        +   findingsHtml
         +   purposeHtml
         +   gateHtml
         +   buildHtml
@@ -4601,6 +4692,35 @@
       + '.sim-detail summary{cursor:pointer;font-size:0.85em;color:#475569;font-weight:500}'
       + '.sim-detail summary:hover{color:#0f172a}'
       + '.sim-extra{margin-top:6px;font-size:0.92em;line-height:1.5}'
+      // findings (top-of-section "what we learned" cards)
+      + '.findings-section{margin:0 0 24px 0;padding:14px 16px;background:#fafbff;border:1px solid #c7d2fe;border-radius:8px}'
+      + '.findings-section h3{margin:0 0 6px 0;color:#3730a3}'
+      + '.finding-card{padding:12px 14px;margin:10px 0;border:1px solid #e2e8f0;border-left:5px solid #6366f1;border-radius:6px;background:#fff;box-shadow:0 1px 1px rgba(0,0,0,0.02)}'
+      + '.finding-card.finding-status-confirms{border-left-color:#10b981}'
+      + '.finding-card.finding-status-partial{border-left-color:#f59e0b}'
+      + '.finding-card.finding-status-contradicts{border-left-color:#dc2626}'
+      + '.finding-card.finding-status-novel{border-left-color:#8b5cf6}'
+      + '.finding-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}'
+      + '.finding-status-glyph{font-size:1.2em;width:24px;text-align:center}'
+      + '.finding-status-confirms .finding-status-glyph{color:#10b981}'
+      + '.finding-status-partial   .finding-status-glyph{color:#f59e0b}'
+      + '.finding-status-contradicts .finding-status-glyph{color:#dc2626}'
+      + '.finding-status-novel     .finding-status-glyph{color:#8b5cf6}'
+      + '.finding-id{font-family:ui-monospace,monospace;font-size:0.78em;color:#475569;background:#f1f5f9;padding:1px 6px;border-radius:3px}'
+      + '.finding-kind{font-size:0.7em;text-transform:uppercase;letter-spacing:0.05em;padding:1px 8px;border-radius:9999px;background:#e0e7ff;color:#3730a3;font-weight:500}'
+      + '.finding-status-text{font-size:0.78em;color:#64748b;margin-left:auto;font-style:italic}'
+      + '.finding-statement{font-size:1.0em;line-height:1.5;font-weight:500;color:#0f172a;margin:4px 0 8px 0}'
+      + '.finding-evidence{font-size:0.86em;color:#475569;padding:6px 10px;background:#f8fafc;border-left:3px solid #94a3b8;border-radius:3px;margin:6px 0;line-height:1.5}'
+      + '.finding-expected{font-size:0.86em;color:#475569;padding:6px 10px;background:#f8fafc;border-left:3px solid #94a3b8;border-radius:3px;margin:6px 0;line-height:1.5}'
+      + '.finding-exp-summary{font-size:0.9em;color:#475569;padding:6px 10px;background:#fafbff;border-left:3px solid #6366f1;border-radius:3px;margin:6px 0;line-height:1.5}'
+      + '.finding-explanation{font-size:0.92em;color:#1e293b;margin:6px 0;line-height:1.5}'
+      + '.finding-explanation em{color:#475569;font-style:normal;font-weight:600}'
+      + '.finding-expert{margin:6px 0;padding:6px 10px;background:#fafafa;border:1px solid #e2e8f0;border-radius:4px}'
+      + '.finding-expert summary{cursor:pointer;font-size:0.85em;color:#475569;font-weight:500}'
+      + '.finding-expert-quote{border-left:3px solid #6366f1;margin:6px 0 4px 0;padding:6px 10px;background:#fafbff;font-style:italic;color:#1e1b4b;font-size:0.92em;line-height:1.5}'
+      + '.finding-expert-note{font-size:0.88em;color:#475569;margin-top:4px;font-style:italic}'
+      + '.finding-next{padding:6px 10px;background:#f0fdf4;border-left:3px solid #10b981;border-radius:3px;font-size:0.9em;margin-top:8px;line-height:1.5}'
+      + '.finding-next strong{color:#065f46}'
       // ── eb table row coloring ──
       + 'tr.eb-stub td{background:#fefce8}'
       + 'tr.eb-gated td{background:#fff7ed}'
