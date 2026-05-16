@@ -65,12 +65,12 @@ def test_post_plan_create(tmp_path, dashboard_client):
     _scaffold_workspace(tmp_path)
     client = dashboard_client(workspace=tmp_path)
     resp = client.post("/api/plan-create", json={
-        "name": "dnaA-replication",
+        "name": "dnaa-replication",
         "objective": "build DnaA cycle",
         "studies": [{"study": "s1"}, {"study": "s2", "gate": "tests-pass"}],
     })
     assert resp.status_code == 201, resp.text
-    p = tmp_path / "investigations" / "dnaA-replication" / "investigation.yaml"
+    p = tmp_path / "investigations" / "dnaa-replication" / "investigation.yaml"
     assert p.exists()
     data = yaml.safe_load(p.read_text())
     assert data["objective"] == "build DnaA cycle"
@@ -161,3 +161,49 @@ def test_post_plan_study_set_status_writes_override(tmp_path, dashboard_client):
     assert resp.status_code == 200, resp.text
     data = yaml.safe_load((tmp_path / "investigations" / "demo" / "investigation.yaml").read_text())
     assert data["studies"][0]["status_override"] == "complete"
+
+
+def test_post_plan_create_rejects_path_traversal(tmp_path, dashboard_client):
+    _scaffold_workspace(tmp_path)
+    client = dashboard_client(workspace=tmp_path)
+    resp = client.post("/api/plan-create", json={"name": "../evil", "studies": []})
+    assert resp.status_code == 400
+
+
+def test_post_plan_set_meta_rejects_path_traversal(tmp_path, dashboard_client):
+    _scaffold_workspace(tmp_path)
+    _scaffold_plan(tmp_path, "demo", studies=[{"study": "s1"}])
+    client = dashboard_client(workspace=tmp_path)
+    resp = client.post("/api/plan-set-meta", json={"slug": "../../evil", "objective": "test"})
+    assert resp.status_code == 400
+
+
+def test_delete_plan_rejects_path_traversal(tmp_path, dashboard_client):
+    _scaffold_workspace(tmp_path)
+    client = dashboard_client(workspace=tmp_path)
+    resp = client.delete("/api/plan", json={"slug": "../../evil"})
+    assert resp.status_code == 400
+
+
+def test_post_plan_study_add_rejects_path_traversal(tmp_path, dashboard_client):
+    _scaffold_workspace(tmp_path)
+    _scaffold_plan(tmp_path, "demo", studies=[{"study": "s1"}])
+    client = dashboard_client(workspace=tmp_path)
+    resp = client.post("/api/plan-study-add", json={"slug": "../evil", "study": "s2"})
+    assert resp.status_code == 400
+
+
+def test_post_plan_study_remove_rejects_path_traversal(tmp_path, dashboard_client):
+    _scaffold_workspace(tmp_path)
+    _scaffold_plan(tmp_path, "demo", studies=[{"study": "s1"}])
+    client = dashboard_client(workspace=tmp_path)
+    resp = client.post("/api/plan-study-remove", json={"slug": "../evil", "study": "s1"})
+    assert resp.status_code == 400
+
+
+def test_post_plan_study_set_status_rejects_path_traversal(tmp_path, dashboard_client):
+    _scaffold_workspace(tmp_path)
+    _scaffold_plan(tmp_path, "demo", studies=[{"study": "s1"}])
+    client = dashboard_client(workspace=tmp_path)
+    resp = client.post("/api/plan-study-set-status", json={"slug": "../../evil", "study": "s1", "status": "complete"})
+    assert resp.status_code == 400

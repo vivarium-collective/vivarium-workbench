@@ -4411,6 +4411,8 @@ if __name__ == "__main__":
         slug = (body or {}).get("slug"); study = (body or {}).get("study")
         if not slug or not study:
             return self._json({"error": "missing 'slug' or 'study'"}, 400)
+        if not _SLUG_RE.match(slug):
+            return self._json({"error": "slug must be lowercase alphanumeric (and -/_)"}, 400)
         p = WORKSPACE / "investigations" / slug / "investigation.yaml"
         if not p.exists():
             return self._json({"error": f"plan not found: {slug}"}, 404)
@@ -4437,6 +4439,8 @@ if __name__ == "__main__":
         slug = (body or {}).get("slug"); study = (body or {}).get("study")
         if not slug or not study:
             return self._json({"error": "missing 'slug' or 'study'"}, 400)
+        if not _SLUG_RE.match(slug):
+            return self._json({"error": "slug must be lowercase alphanumeric (and -/_)"}, 400)
         p = WORKSPACE / "investigations" / slug / "investigation.yaml"
         if not p.exists():
             return self._json({"error": f"plan not found: {slug}"}, 404)
@@ -4451,6 +4455,8 @@ if __name__ == "__main__":
         slug = (body or {}).get("slug"); study = (body or {}).get("study"); status = body.get("status")
         if not slug or not study:
             return self._json({"error": "missing 'slug' or 'study'"}, 400)
+        if not _SLUG_RE.match(slug):
+            return self._json({"error": "slug must be lowercase alphanumeric (and -/_)"}, 400)
         p = WORKSPACE / "investigations" / slug / "investigation.yaml"
         if not p.exists():
             return self._json({"error": f"plan not found: {slug}"}, 404)
