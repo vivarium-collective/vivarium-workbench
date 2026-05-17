@@ -670,6 +670,40 @@ def _read_study_status(ws_root: Path, slug: str) -> tuple[str, bool]:
     return "planning", False
 
 
+# Pass A multi-axis status: the six independent axes added to study.yaml in
+# Pass A of the infrastructure-feedback roadmap. Each is optional; absence is
+# represented as ``None`` in the iset passthrough.
+_MULTIAXIS_STATUS_FIELDS = (
+    "design_status",
+    "implementation_status",
+    "simulation_status",
+    "evaluation_status",
+    "gate_status",
+    "expert_review_status",
+)
+
+
+def _read_study_multiaxis_status(ws_root: Path, slug: str) -> dict:
+    """Return ``{axis: value or None}`` for the six Pass A status axes.
+
+    Mirrors :func:`_read_study_status` for fallback behavior — returns all-None
+    if the study spec is missing or unparseable.
+    """
+    candidates = [
+        ws_root / "studies" / slug / "study.yaml",
+        ws_root / "investigations" / slug / "spec.yaml",
+    ]
+    for sp in candidates:
+        if not sp.is_file():
+            continue
+        try:
+            spec = yaml.safe_load(sp.read_text()) or {}
+        except Exception:
+            return {axis: None for axis in _MULTIAXIS_STATUS_FIELDS}
+        return {axis: spec.get(axis) for axis in _MULTIAXIS_STATUS_FIELDS}
+    return {axis: None for axis in _MULTIAXIS_STATUS_FIELDS}
+
+
 def _build_iset_summary_for_test(ws_root: Path) -> list[dict]:
     """Pure function backing ``GET /api/iset-list`` — emits the same list
     of summary dicts that the handler returns, but without HTTP plumbing.
@@ -728,7 +762,11 @@ def _build_iset_detail_for_test(ws_root: Path, name: str) -> tuple[dict, int]:
         status, runs = _read_study_status(ws_root, slug)
         statuses.append(status)
         has_runs.append(runs)
-        studies_out.append({"name": slug, "status": status})
+        # Pass A multi-axis status: surface the six optional axes per study.
+        # Absent axes round-trip as None so callers can detect "not set".
+        entry = {"name": slug, "status": status}
+        entry.update(_read_study_multiaxis_status(ws_root, slug))
+        studies_out.append(entry)
 
     author_status = spec.get("status", "planning")
     effective_status = compute_investigation_status(statuses, has_runs=has_runs)
@@ -5138,6 +5176,14 @@ if __name__ == "__main__":
                 "follow_up_studies": follow_ups,
                 "n_findings":      len(findings),
                 "findings":        findings,
+                # Pass A multi-axis status: pass through whichever of the six
+                # axes are set on the study spec. All optional, all independent.
+                "design_status":         study_spec.get("design_status"),
+                "implementation_status": study_spec.get("implementation_status"),
+                "simulation_status":     study_spec.get("simulation_status"),
+                "evaluation_status":     study_spec.get("evaluation_status"),
+                "gate_status":           study_spec.get("gate_status"),
+                "expert_review_status":  study_spec.get("expert_review_status"),
             })
 
         # Compute effective_status from the member studies' current statuses.
