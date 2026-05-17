@@ -2392,11 +2392,13 @@ def _conclusions_excerpt(spec: dict, limit: int = 240) -> str:
 def _active_branch_action(commit_message: str, action_fn) -> tuple[dict, int]:
     """Run action_fn on the active workstream branch; commit; stay on it."""
     _ws_add_to_sys_path()
-    from vivarium_dashboard.lib.work_state import load_state, save_state
-    state = load_state()
+    from vivarium_dashboard.lib.work_state import (
+        load_state, load_state_or_adopt_current, save_state,
+    )
+    state = load_state_or_adopt_current()
     branch = state.get("active_branch")
     if not branch:
-        return {"error": "no active workstream — click Start workstream at the top of the dashboard"}, 409
+        return {"error": "no active workstream — click Start workstream at the top of the dashboard, or check out a feature branch first"}, 409
 
     # Make sure we're on the active branch (auto-recover from drift)
     current = subprocess.run(
@@ -4149,8 +4151,10 @@ if __name__ == "__main__":
 
     def _post_work_push(self, body: dict):
         _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.work_state import load_state, save_state
-        state = load_state()
+        from vivarium_dashboard.lib.work_state import (
+            load_state_or_adopt_current, save_state,
+        )
+        state = load_state_or_adopt_current()
         branch = state.get("active_branch")
         if not branch:
             return self._json({"error": "no active workstream"}, 409)
@@ -4260,8 +4264,10 @@ if __name__ == "__main__":
         Any other mode value returns 400.
         """
         _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.work_state import load_state, save_state
-        state = load_state()
+        from vivarium_dashboard.lib.work_state import (
+            load_state_or_adopt_current, save_state,
+        )
+        state = load_state_or_adopt_current()
         current_branch = state.get("active_branch")
         if not current_branch:
             return self._json({"error": "no active workstream — Start one first so the push has a target"}, 409)
@@ -4420,8 +4426,10 @@ if __name__ == "__main__":
 
     def _post_work_create_pr(self, body: dict):
         _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.work_state import load_state, save_state
-        state = load_state()
+        from vivarium_dashboard.lib.work_state import (
+            load_state_or_adopt_current, save_state,
+        )
+        state = load_state_or_adopt_current()
         branch = state.get("active_branch")
         if not branch:
             return self._json({"error": "no active workstream"}, 409)
@@ -4719,8 +4727,8 @@ if __name__ == "__main__":
     def _post_dirty_commit_all(self, body: dict):
         """Stage and commit all dirty files (minus reports/) under the active workstream."""
         _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.work_state import load_state
-        state = load_state()
+        from vivarium_dashboard.lib.work_state import load_state_or_adopt_current
+        state = load_state_or_adopt_current()
         branch = state.get("active_branch")
         if not branch:
             return self._json({"error": "no active workstream"}, 409)
