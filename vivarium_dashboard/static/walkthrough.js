@@ -3868,18 +3868,170 @@
     });
 
     // --- v3-shape per-study section ----------------------------------
+    // Render a sweep table (e.g. {1x: {dnaA_median: 115}, ...}) as a small
+    // inline-SVG bar chart. Used in finding cards when evidence.sweep or
+    // evidence.sweep_table is present.
+    function _renderSweepChart(sweep) {
+      if (!sweep || typeof sweep !== 'object') return '';
+      var keys = Object.keys(sweep);
+      if (!keys.length) return '';
+      var metrics = {};
+      keys.forEach(function(k) {
+        var v = sweep[k];
+        if (v && typeof v === 'object') {
+          Object.keys(v).forEach(function(m) {
+            var n = v[m];
+            if (typeof n === 'number') {
+              (metrics[m] = metrics[m] || {})[k] = n;
+            }
+          });
+        }
+      });
+      var metricNames = Object.keys(metrics);
+      if (!metricNames.length) return '';
+      // Render the most numeric-rich metric (max count of non-null values).
+      var metric = metricNames.sort(function(a, b) {
+        return Object.keys(metrics[b]).length - Object.keys(metrics[a]).length;
+      })[0];
+      var data = metrics[metric];
+      var entries = keys.map(function(k){return [k, data[k]];}).filter(function(e){return e[1] != null;});
+      if (!entries.length) return '';
+      var maxV = Math.max.apply(null, entries.map(function(e){return Math.abs(e[1]);}));
+      var minV = Math.min.apply(null, entries.map(function(e){return e[1];}));
+      var W = 480, H = 160, barW = Math.max(40, (W - 80) / entries.length - 8);
+      var x0 = 56, baseY = (minV < 0) ? H / 2 : H - 32;
+      var bars = entries.map(function(e, i) {
+        var x = x0 + i * (barW + 8);
+        var pixels = maxV ? Math.abs(e[1]) / maxV * (H - 60) : 0;
+        var y = e[1] >= 0 ? baseY - pixels : baseY;
+        var color = e[1] >= 0 ? '#3b82f6' : '#dc2626';
+        return '<rect x="' + x + '" y="' + y + '" width="' + barW + '" height="' + pixels + '" fill="' + color + '" rx="2"/>'
+             + '<text x="' + (x + barW/2) + '" y="' + (y - 4) + '" font-size="10" text-anchor="middle" fill="#0f172a">' + e[1] + '</text>'
+             + '<text x="' + (x + barW/2) + '" y="' + (H - 10) + '" font-size="10" text-anchor="middle" fill="#475569">' + _h(e[0]) + '</text>';
+      }).join('');
+      return '<div class="sweep-chart"><svg viewBox="0 0 ' + W + ' ' + H + '" style="display:block;width:100%;max-width:' + W + 'px;margin:8px 0">'
+        + '<text x="' + W/2 + '" y="16" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Sweep comparison — ' + _h(metric) + '</text>'
+        + '<line x1="' + x0 + '" y1="' + baseY + '" x2="' + (W - 16) + '" y2="' + baseY + '" stroke="#94a3b8" stroke-width="0.5"/>'
+        + bars
+        + '</svg></div>';
+    }
+
+    // Decision-status helper — returns the data the decision box renders.
+    function _decideDecision(s) {
+      var runs = s.runs || [];
+      var latest = runs.length ? runs[runs.length - 1] : null;
+      var followUps = s.follow_up_studies || [];
+      var openFollowups = followUps.filter(function(f) {
+        return f.status !== 'done' && f.kind !== 'existing';
+      });
+      var phase = s.phase || '';
+      var status = s.status || 'planned';
+
+      // No runs yet
+      if (!latest) {
+        if (phase === 'Design' || status === 'planned') {
+          return {
+            label: 'Not started',
+            cls:   'dec-notstarted',
+            passed: [], failed: [], blocks: [],
+            next: 'Run the baseline simulation to begin evaluation.'
+          };
+        }
+        return {
+          label: 'Ready to run',
+          cls:   'dec-ready',
+          passed: [], failed: [], blocks: [],
+          next: 'Execute the simulation_set to gather evidence.'
+        };
+      }
+
+      var outcomes = latest.outcomes || {};
+      var passed = [], failed = [];
+      Object.keys(outcomes).forEach(function(name) {
+        var res = (outcomes[name] || {}).result;
+        if (res === 'PASS') passed.push(name);
+        if (res === 'FAIL') failed.push(name);
+      });
+      var calibration = openFollowups.filter(function(f){return f.kind === 'calibration_task';});
+      var infra       = openFollowups.filter(function(f){return f.kind === 'infrastructure_fix';});
+      var newWork     = openFollowups.filter(function(f){return f.kind === 'new';});
+
+      if (failed.length === 0 && passed.length > 0) {
+        var enables = (s.pipeline_gate && s.pipeline_gate.enables) || [];
+        return {
+          label: 'Passed',
+          cls:   'dec-passed',
+          passed: passed, failed: [], blocks: [],
+          next: enables.length
+            ? 'Gate cleared. Next: ' + enables.join(', ')
+            : 'Gate cleared. No declared downstream studies — review pipeline_gate.enables.'
+        };
+      }
+      if (failed.length > 0) {
+        var label = calibration.length ? 'Needs calibration' : 'Blocked';
+        var cls   = calibration.length ? 'dec-needscal'      : 'dec-blocked';
+        var nextItem = calibration[0] || infra[0] || newWork[0] || null;
+        var nextStr;
+        if (nextItem) {
+          nextStr = 'Resolve: ' + nextItem.title;
+        } else {
+          nextStr = 'Investigate why ' + failed.length + ' test(s) failed.';
+        }
+        return {
+          label: label, cls: cls,
+          passed: passed, failed: failed,
+          blocks: openFollowups.map(function(f){return f.title;}),
+          next: nextStr
+        };
+      }
+      return {
+        label: 'In progress', cls: 'dec-inprogress',
+        passed: passed, failed: failed, blocks: [],
+        next: 'Continue analysing run outcomes.'
+      };
+    }
+
+    // Plain-English study summary — 2-4 sentences, no code identifiers.
+    function _studySummary(s, dec) {
+      var purpose = s.purpose || {};
+      var question = (purpose.question || '').trim().split('\n')[0];
+      var findings = s.findings || [];
+      var sentences = [];
+
+      if (question) {
+        var q = question.charAt(0).toLowerCase() + question.slice(1);
+        if (q.charAt(q.length - 1) === '.') q = q.slice(0, -1);
+        sentences.push('This study asks whether ' + q + '.');
+      }
+      if (findings.length) {
+        var confirms     = findings.filter(function(f){return f.status === 'confirms';}).length;
+        var contradicts  = findings.filter(function(f){return f.status === 'contradicts';}).length;
+        var novel        = findings.filter(function(f){return f.status === 'novel';}).length;
+        var parts = [];
+        if (confirms)    parts.push(confirms + ' finding' + (confirms === 1 ? '' : 's') + ' confirm the expected biology');
+        if (contradicts) parts.push(contradicts + ' contradict it');
+        if (novel)       parts.push(novel + ' novel computational result' + (novel === 1 ? '' : 's'));
+        if (parts.length) sentences.push('We recorded ' + parts.join(', ') + '.');
+      } else if ((s.runs || []).length === 0) {
+        sentences.push('No simulations have run yet — the study is still in its design phase.');
+      }
+      sentences.push('Gate decision: ' + dec.label + '. ' + dec.next);
+      return sentences.join(' ');
+    }
+
     function v3StudySection(s, i, statusBadge, phaseBadge, parents, kids) {
       var slug = _h(s.name);
       var sid = {
+        summary:   'study-' + slug + '-summary',
+        decision:  'study-' + slug + '-decision',
+        takeaways: 'study-' + slug + '-takeaways',
         findings:  'study-' + slug + '-findings',
-        purpose:   'study-' + slug + '-purpose',
-        gate:      'study-' + slug + '-gate',
-        build:     'study-' + slug + '-build',
-        sims:      'study-' + slug + '-simulations',
+        sims:      'study-' + slug + '-sims',
         charts:    'study-' + slug + '-charts',
         readouts:  'study-' + slug + '-readouts',
         tests:     'study-' + slug + '-tests',
-        decide:    'study-' + slug + '-decide',
+        build:     'study-' + slug + '-build',
+        reqs:      'study-' + slug + '-reqs',
         followups: 'study-' + slug + '-followups',
         limits:    'study-' + slug + '-limitations',
         refs:      'study-' + slug + '-refs',
@@ -3901,30 +4053,32 @@
       var charts = (chartsByStudy && chartsByStudy[s.name]) || [];
 
       var hasBuild = !!modelChange || assumptions.length || reqs.length;
-      // v3 canonical names: if_primary_tests_pass / if_primary_tests_fail.
-      // Older specs used if_pass / if_fail. Coalesce.
       var ifPass = decide.if_primary_tests_pass || decide.if_pass;
       var ifFail = decide.if_primary_tests_fail || decide.if_fail;
       var runs = s.runs || [];
       var latestRun = runs.length ? runs[runs.length - 1] : null;
+
+      // Derive decision + plain-English summary FIRST so they can be linked
+      // from the sub-nav and rendered at the top of the section.
+      var decision = _decideDecision(s);
+      var summaryText = _studySummary(s, decision);
       var hasDecide = !!(ifPass || ifFail
                          || (decide.implementation_validation && decide.implementation_validation.length)
                          || (decide.biological_validation && decide.biological_validation.length)
                          || s.conclusion || latestRun);
 
-      // Sub-nav links
+      // Sub-nav links — new section order, human-readable labels.
       var links = [];
-      if (findings.length)    links.push('<a href="#' + sid.findings + '">Findings <span class="sn-count">' + findings.length + '</span></a>');
-      links.push('<a href="#' + sid.purpose + '">Purpose</a>');
-      if (gate.prerequisites || gate.enables || gate.proceed_condition)
-                              links.push('<a href="#' + sid.gate + '">Pipeline gate</a>');
-      if (hasBuild)           links.push('<a href="#' + sid.build + '">Build <span class="sn-count">' + (reqs.length || 0) + '</span></a>');
-      if (sims.length)        links.push('<a href="#' + sid.sims + '">Simulations <span class="sn-count">' + sims.length + '</span></a>');
-      if (readouts.length)    links.push('<a href="#' + sid.readouts + '">Readouts <span class="sn-count">' + readouts.length + '</span></a>');
-      if (tests.length)       links.push('<a href="#' + sid.tests + '">Tests <span class="sn-count">' + tests.length + '</span></a>');
-      if (hasDecide)          links.push('<a href="#' + sid.decide + '">Decide</a>');
+      links.push('<a href="#' + sid.summary + '">Summary</a>');
+      links.push('<a href="#' + sid.decision + '">Decision</a>');
+      if (findings.length)    links.push('<a href="#' + sid.takeaways + '">Key takeaways <span class="sn-count">' + findings.length + '</span></a>');
+      if (sims.length)        links.push('<a href="#' + sid.sims + '">What we ran <span class="sn-count">' + sims.length + '</span></a>');
       if (charts.length)      links.push('<a href="#' + sid.charts + '">Charts <span class="sn-count">' + charts.length + '</span></a>');
-      if (followUps.length)   links.push('<a href="#' + sid.followups + '">Follow-ups <span class="sn-count">' + followUps.length + '</span></a>');
+      if (readouts.length)    links.push('<a href="#' + sid.readouts + '">What we measured <span class="sn-count">' + readouts.length + '</span></a>');
+      if (tests.length)       links.push('<a href="#' + sid.tests + '">How we judge it <span class="sn-count">' + tests.length + '</span></a>');
+      if (hasBuild)           links.push('<a href="#' + sid.build + '">Model changes</a>');
+      if (reqs.length)        links.push('<a href="#' + sid.reqs + '">What to build / fix <span class="sn-count">' + reqs.length + '</span></a>');
+      if (followUps.length)   links.push('<a href="#' + sid.followups + '">Next steps <span class="sn-count">' + followUps.length + '</span></a>');
       if (limitations.length) links.push('<a href="#' + sid.limits + '">Limitations <span class="sn-count">' + limitations.length + '</span></a>');
       if (bib.length)         links.push('<a href="#' + sid.refs + '">Cited refs <span class="sn-count">' + bib.length + '</span></a>');
 
@@ -3941,444 +4095,397 @@
         +   '<nav class="study-nav-row2">' + links.join('') + '</nav>'
         + '</div>';
 
-      // Body sections — findings first (the "what we learned" headline).
-      var findingsHtml = '';
+      // ── PLAIN-ENGLISH SUMMARY ─────────────────────────────────────────
+      var summaryHtml = '<div id="' + sid.summary + '" class="study-summary">'
+        + '<p class="study-summary-text">' + _h(summaryText) + '</p>'
+        + '<details class="tech-details"><summary>Purpose &amp; background (study design)</summary>'
+        +   (purpose.question         ? '<div class="callout cl-blue"><strong>Question.</strong> ' + _multiline(purpose.question) + '</div>' : '')
+        +   (purpose.mechanism        ? '<div class="callout cl-yellow"><strong>Mechanism / Model change.</strong> ' + _multiline(purpose.mechanism) + '</div>' : '')
+        +   (purpose.expected_outcome ? '<div class="callout cl-green"><strong>Expected outcome.</strong> ' + _multiline(purpose.expected_outcome) + '</div>' : '')
+        + '</details>'
+        + '</div>';
+
+      // ── DECISION BOX ──────────────────────────────────────────────────
+      function _listAsBullets(arr, emptyText) {
+        if (!arr || !arr.length) return '<em class="muted">' + emptyText + '</em>';
+        return '<ul style="margin:4px 0 0 18px;padding:0">' + arr.map(function(x){return '<li>' + _h(x) + '</li>';}).join('') + '</ul>';
+      }
+      var decisionTechnical = '';
+      if (gate.prerequisites || gate.enables || gate.proceed_condition || ifPass || ifFail) {
+        var prereqStr = (gate.prerequisites && gate.prerequisites.length)
+          ? gate.prerequisites.map(function(p){return '<code>' + _h(p) + '</code>';}).join(' · ')
+          : '<em class="muted">none (root study)</em>';
+        var enablesStr = (gate.enables && gate.enables.length)
+          ? gate.enables.map(function(p){return '<code>' + _h(p) + '</code>';}).join(' · ')
+          : '<em class="muted">—</em>';
+        decisionTechnical = '<details class="tech-details"><summary>Pipeline gate &amp; conclusion logic (technical)</summary>'
+          + '<p><strong>Prerequisites:</strong> ' + prereqStr + '</p>'
+          + '<p><strong>Enables:</strong> ' + enablesStr + '</p>'
+          + (gate.proceed_condition ? '<p><strong>Proceed when:</strong> ' + _multiline(gate.proceed_condition) + '</p>' : '')
+          + (ifPass ? '<div class="callout cl-green"><strong>If primary tests pass:</strong> ' + (typeof ifPass === 'string' ? _multiline(ifPass) : _multiline((ifPass.implementation_status || '') + (ifPass.biological_validation ? ' ' + ifPass.biological_validation : ''))) + '</div>' : '')
+          + (ifFail ? '<div class="callout cl-red"><strong>If primary tests fail:</strong> ' + (typeof ifFail === 'string' ? _multiline(ifFail) : _multiline((ifFail.block_downstream || JSON.stringify(ifFail.diagnose || '')))) + '</div>' : '')
+          + '</details>';
+      }
+      var decisionHtml = '<div id="' + sid.decision + '" class="decision-box decision-' + decision.cls + '">'
+        + '<div class="decision-header">'
+        +   '<h3 class="decision-title">Can we move to the next study?</h3>'
+        +   '<span class="decision-status">' + _h(decision.label) + '</span>'
+        + '</div>'
+        + '<div class="decision-grid">'
+        +   '<div class="decision-cell decision-cell-pass"><strong>✓ Passed</strong>' + _listAsBullets(decision.passed, 'nothing yet') + '</div>'
+        +   '<div class="decision-cell decision-cell-fail"><strong>✗ Failed</strong>' + _listAsBullets(decision.failed, 'nothing failing') + '</div>'
+        +   '<div class="decision-cell decision-cell-block"><strong>⛔ Blocks the next study</strong>' + _listAsBullets(decision.blocks, 'nothing blocking') + '</div>'
+        +   '<div class="decision-cell decision-cell-next"><strong>→ Immediate next action</strong><div style="margin-top:4px">' + _h(decision.next) + '</div></div>'
+        + '</div>'
+        + decisionTechnical
+        + '</div>';
+
+      // ── KEY TAKEAWAYS + GROUPED FINDINGS ─────────────────────────────
+      var takeawaysHtml = '';
       if (findings.length) {
-        var bioCount = findings.filter(function(f){return f.kind === 'biological';}).length;
-        var compCount = findings.filter(function(f){return f.kind === 'computational';}).length;
-        var methodCount = findings.filter(function(f){return f.kind === 'methodological';}).length;
-        var headerStats = [];
-        if (bioCount)    headerStats.push(bioCount + ' biological');
-        if (compCount)   headerStats.push(compCount + ' computational');
-        if (methodCount) headerStats.push(methodCount + ' methodological');
-        findingsHtml = '<div id="' + sid.findings + '" class="findings-section">'
-          + '<h3>🔬 Findings <span class="muted small">(' + headerStats.join(' · ') + ')</span></h3>'
-          + '<p class="muted small" style="margin:0 0 10px 0">What this study TAUGHT us. Each card links the observed evidence to the literature / expert reference it confirms, contradicts, or extends.</p>'
-          + findings.map(function(f) {
-              var status = f.status || 'novel';
-              var statusGlyph = {
-                confirms:    '✓',
-                partial:     '◐',
-                contradicts: '✗',
-                novel:       '◆',
-              }[status] || '◆';
-              var kind = f.kind || 'other';
-              var ev = f.evidence || {};
-              var exp = f.expected || {};
-              var ref = f.expert_reference || {};
+        var groups = {biological: [], computational: [], methodological: [], other: []};
+        findings.forEach(function(f) {
+          var k = f.kind || 'other';
+          (groups[k] || groups.other).push(f);
+        });
 
-              // Evidence line: what we observed + which run/test produced it.
-              var evParts = [];
-              if (ev.observed != null) evParts.push('<strong>observed:</strong> ' + _h(String(ev.observed)) + (ev.units ? ' ' + _h(ev.units) : ''));
-              if (ev.from_test) evParts.push('via test <code>' + _h(ev.from_test) + '</code>');
-              if (ev.from_run)  evParts.push('in run <code>' + _h(ev.from_run) + '</code>');
-              if (ev.window) evParts.push('(' + _h(ev.window) + ')');
-              if (ev.reduction) evParts.push('(' + _h(ev.reduction) + ')');
-              if (ev.smoking_gun) evParts.push('<details style="display:inline-block;margin-left:4px"><summary style="cursor:pointer">smoking gun</summary><div style="padding:6px 8px;background:#fff;border-radius:3px;font-size:0.9em;margin-top:4px">' + _multiline(ev.smoking_gun) + '</div></details>');
-              if (ev.discovered_during) evParts.push('discovered during <code>' + _h(ev.discovered_during) + '</code>');
-              var evidenceLine = evParts.length
-                ? '<div class="finding-evidence">' + evParts.join(' · ') + '</div>' : '';
+        // 1) Short takeaways list — one bullet per finding (statement first sentence).
+        var takeawayItems = findings.map(function(f) {
+          var status = f.status || 'novel';
+          var glyph = ({confirms:'✓', partial:'◐', contradicts:'✗', novel:'◆'})[status] || '◆';
+          var stmt = (f.statement || '').split('\n')[0].split('.')[0];
+          if (stmt.length > 180) stmt = stmt.slice(0, 177) + '…';
+          return '<li class="takeaway-' + status + '"><span class="takeaway-glyph">' + glyph + '</span> '
+               + '<a href="#finding-' + _h(f.id || '') + '">' + _h(stmt) + '</a></li>';
+        }).join('');
 
-              // Expected line: literature / reference comparison.
-              var expParts = [];
-              if (exp.range != null) {
-                var rng = Array.isArray(exp.range) ? '[' + exp.range.join(', ') + ']' : String(exp.range);
-                expParts.push('<strong>expected:</strong> ' + _h(rng));
+        // 2) Detailed cards grouped by kind, each with a heading.
+        var kindHeader = {
+          biological:     'Biological findings',
+          computational:  'Infrastructure / computational findings',
+          methodological: 'Methodological findings',
+          other:          'Other findings',
+        };
+        function _renderFinding(f) {
+          var status = f.status || 'novel';
+          var glyph = ({confirms:'✓', partial:'◐', contradicts:'✗', novel:'◆'})[status] || '◆';
+          var ev = f.evidence || {};
+          var exp = f.expected || {};
+          var ref = f.expert_reference || {};
+          var techParts = [];
+          if (ev.from_test) techParts.push('test: <code>' + _h(ev.from_test) + '</code>');
+          if (ev.from_run)  techParts.push('run: <code>' + _h(ev.from_run) + '</code>');
+          if (ev.window)    techParts.push('window: ' + _h(ev.window));
+          if (ev.smoking_gun) techParts.push('<details style="margin-top:4px"><summary>Smoking gun</summary><pre style="white-space:pre-wrap;font-size:0.85em;background:#fff;padding:6px;border-radius:3px">' + _h(ev.smoking_gun) + '</pre></details>');
+          if (ev.discovered_during) techParts.push('discovered during: <code>' + _h(ev.discovered_during) + '</code>');
+
+          var techDisclosure = techParts.length
+            ? '<details class="tech-details"><summary>Technical details</summary>' + techParts.join('<br>') + '</details>'
+            : '';
+
+          var evMain = '';
+          if (ev.observed != null) {
+            evMain = '<div class="finding-evidence"><strong>What we saw:</strong> '
+                   + _h(String(ev.observed)) + (ev.units ? ' ' + _h(ev.units) : '') + '</div>';
+          }
+          var expMain = '';
+          if (exp.range != null || exp.threshold != null || exp.summary) {
+            var rngStr = '';
+            if (exp.range != null) {
+              var rng = Array.isArray(exp.range) ? '[' + exp.range.join(', ') + ']' : String(exp.range);
+              rngStr = '<strong>What the literature says:</strong> ' + _h(rng);
+            } else if (exp.threshold != null) {
+              rngStr = '<strong>Target threshold:</strong> ' + _h(String(exp.threshold));
+            }
+            expMain = '<div class="finding-expected">' + rngStr
+                    + (exp.summary ? '<div style="margin-top:4px">' + _multiline(exp.summary) + '</div>' : '')
+                    + (exp.cites && exp.cites.length ? '<div class="muted small" style="margin-top:4px">Cites: ' + exp.cites.map(function(c){return '<code>' + _h(c) + '</code>';}).join(', ') + '</div>' : '')
+                    + '</div>';
+          }
+
+          var refBlock = '';
+          if (ref.doc || ref.quote || ref.note) {
+            var refBody = '';
+            if (ref.quote) refBody += '<blockquote class="finding-expert-quote">' + _multiline(ref.quote) + '</blockquote>';
+            if (ref.note) refBody += '<div class="finding-expert-note">' + _multiline(ref.note) + '</div>';
+            var refLabel = ref.doc ? 'Expert reference: <code>' + _h(ref.doc) + '</code>' : 'Expert reference';
+            if (ref.section) refLabel += ' (' + _h(ref.section) + ')';
+            refBlock = '<details class="finding-expert"><summary>' + refLabel + '</summary>' + refBody + '</details>';
+          }
+
+          // Optional sweep visualisation when evidence carries a sweep table
+          // (e.g. F-08 / F-10 calibration sweeps). Renders an inline SVG
+          // bar chart of the numeric value across multipliers.
+          var sweepChart = '';
+          var sweepData = ev.sweep_table || ev.sweep;
+          if (sweepData && typeof sweepData === 'object') {
+            sweepChart = _renderSweepChart(sweepData);
+          }
+
+          return '<div class="finding-card finding-kind-' + _h(f.kind || 'other') + ' finding-status-' + _h(status) + '" id="finding-' + _h(f.id || '') + '">'
+               +   '<div class="finding-header">'
+               +     '<span class="finding-status-glyph">' + glyph + '</span>'
+               +     '<span class="finding-id">' + _h(f.id || '') + '</span>'
+               +     '<span class="finding-status-text">' + _h(status) + ' literature</span>'
+               +   '</div>'
+               +   '<div class="finding-statement">' + _multiline(f.statement || '(no statement)') + '</div>'
+               +   evMain
+               +   expMain
+               +   (f.explanation ? '<div class="finding-explanation"><em>Why:</em> ' + _multiline(f.explanation) + '</div>' : '')
+               +   sweepChart
+               +   refBlock
+               +   (f.next_action ? '<div class="finding-next"><strong>→ Next:</strong> ' + _multiline(f.next_action) + '</div>' : '')
+               +   techDisclosure
+               + '</div>';
+        }
+
+        takeawaysHtml = '<div id="' + sid.takeaways + '" class="takeaways-section">'
+          + '<h3>Key takeaways</h3>'
+          + '<ul class="takeaway-list">' + takeawayItems + '</ul>'
+          + '</div>'
+          + '<div id="' + sid.findings + '" class="findings-section">'
+          + '<h3>Detailed findings</h3>'
+          + Object.keys(groups).filter(function(k){return groups[k].length;}).map(function(k) {
+              return '<h4 class="findings-group-header">' + kindHeader[k] + ' <span class="muted small">(' + groups[k].length + ')</span></h4>'
+                   + groups[k].map(_renderFinding).join('');
+            }).join('')
+          + '</div>';
+      }
+
+      // ── WHAT DID/WILL WE RUN? (Simulations) ──────────────────────────
+      var simsHtml = '';
+      if (sims.length) {
+        simsHtml = '<div id="' + sid.sims + '"><h3>What did/will we run? <span class="muted small">(' + sims.length + ' simulations)</span></h3>'
+          + '<p class="muted small" style="margin:0 0 8px 0">Each card describes one concrete run: what we change vs the baseline, the environmental condition, how long it runs, which measurements get collected, and which tests it feeds.</p>'
+          + sims.map(function(sim) {
+              var statusClass = sim.status === 'ready' ? 'sim-status-ready'
+                              : sim.status === 'gated' ? 'sim-status-gated'
+                              : sim.status === 'ran' ? 'sim-status-ran' : 'sim-status-unknown';
+              var statusPill = sim.status ? '<span class="sim-status-pill ' + statusClass + '">' + _h(sim.status) + '</span>' : '';
+              var pertHtml = '';
+              if (sim.perturbation && Object.keys(sim.perturbation).length) {
+                var pertLines = Object.entries(sim.perturbation).map(function(kv){return '<li>' + _h(kv[0]) + ' set to ' + _h(JSON.stringify(kv[1])) + '</li>';}).join('');
+                pertHtml = '<div class="sim-pert"><strong>What we change:</strong><ul>' + pertLines + '</ul></div>';
+              } else {
+                pertHtml = '<div class="sim-pert sim-pert-none">Unmodified baseline — no perturbation.</div>';
               }
-              if (exp.threshold != null) expParts.push('<strong>threshold:</strong> ' + _h(String(exp.threshold)));
-              if (exp.cites && exp.cites.length) expParts.push('cites: ' + exp.cites.map(function(c){return '<code>' + _h(c) + '</code>';}).join(', '));
-              var expLine = expParts.length
-                ? '<div class="finding-expected">' + expParts.join(' · ') + '</div>' : '';
-              var expSummary = exp.summary
-                ? '<div class="finding-exp-summary"><em>Reference says:</em> ' + _multiline(exp.summary) + '</div>' : '';
-
-              // Expert document reference (quote, page, doc id).
-              var refBlock = '';
-              if (ref.doc || ref.quote || ref.note) {
-                var refBody = '';
-                if (ref.quote) refBody += '<blockquote class="finding-expert-quote">' + _multiline(ref.quote) + '</blockquote>';
-                if (ref.note) refBody += '<div class="finding-expert-note">' + _multiline(ref.note) + '</div>';
-                var refLabel = ref.doc ? 'Expert ref: <code>' + _h(ref.doc) + '</code>' : 'Expert ref';
-                if (ref.section) refLabel += ' (' + _h(ref.section) + ')';
-                refBlock = '<details class="finding-expert"><summary>' + refLabel + '</summary>' + refBody + '</details>';
+              var metaParts = [];
+              if (sim.condition)  metaParts.push('Condition: ' + _h(sim.condition));
+              if (sim.duration_min != null) metaParts.push(_h(sim.duration_min) + ' min');
+              if (sim.seeds && sim.seeds.length) metaParts.push(sim.seeds.length + ' seed' + (sim.seeds.length === 1 ? '' : 's'));
+              var metaHtml = metaParts.length ? '<div class="sim-meta">' + metaParts.join(' &middot; ') + '</div>' : '';
+              var blockedHtml = '';
+              if (sim.status === 'gated' && sim.blocked_by_requirements && sim.blocked_by_requirements.length) {
+                blockedHtml = '<div class="sim-blocked">⛔ Blocked by ' + sim.blocked_by_requirements.length + ' open requirement(s) — see <em>What to build / fix</em> below.</div>';
               }
+              var techParts = [];
+              if (sim.base_model) techParts.push('Base model: <code>' + _h(sim.base_model) + '</code>');
+              if (sim.seeds && sim.seeds.length) techParts.push('Seeds: ' + sim.seeds.join(', '));
+              if (sim.readouts && sim.readouts.length) techParts.push('Readouts: ' + sim.readouts.map(function(r){return '<code>' + _h(r) + '</code>';}).join(', '));
+              var appliesTests = sim.applies_tests || sim.tests || [];
+              if (Array.isArray(appliesTests) && appliesTests.length) techParts.push('Feeds tests: ' + appliesTests.map(function(t){return '<code>' + _h(t) + '</code>';}).join(', '));
+              if (sim.blocked_by_requirements && sim.blocked_by_requirements.length) techParts.push('Blocked by: ' + sim.blocked_by_requirements.map(function(b){return '<code>' + _h(b) + '</code>';}).join(', '));
+              var techDisc = techParts.length ? '<details class="tech-details"><summary>Technical details</summary>' + techParts.join('<br>') + '</details>' : '';
 
-              var explanationHtml = f.explanation
-                ? '<div class="finding-explanation"><em>Why:</em> ' + _multiline(f.explanation) + '</div>'
-                : '';
-              var nextHtml = f.next_action
-                ? '<div class="finding-next"><strong>→ Next:</strong> ' + _multiline(f.next_action) + '</div>'
-                : '';
-
-              return '<div class="finding-card finding-kind-' + _h(kind) + ' finding-status-' + _h(status) + '">'
-                   +   '<div class="finding-header">'
-                   +     '<span class="finding-status-glyph" title="' + _h(status) + '">' + statusGlyph + '</span>'
-                   +     '<span class="finding-id">' + _h(f.id || '') + '</span>'
-                   +     '<span class="finding-kind">' + _h(kind) + '</span>'
-                   +     '<span class="finding-status-text">' + _h(status) + ' literature</span>'
-                   +   '</div>'
-                   +   '<div class="finding-statement">' + _multiline(f.statement || '(no statement)') + '</div>'
-                   +   evidenceLine
-                   +   expLine
-                   +   expSummary
-                   +   explanationHtml
-                   +   refBlock
-                   +   nextHtml
+              return '<div class="sim-card sim-' + statusClass + '">'
+                   +   '<div class="sim-header"><strong class="sim-name">' + _h(sim.name || '(unnamed)') + '</strong>' + statusPill + '</div>'
+                   +   pertHtml + metaHtml + blockedHtml + techDisc
                    + '</div>';
             }).join('')
           + '</div>';
       }
 
-      var purposeHtml = '<div id="' + sid.purpose + '">'
-        + '<h3>Purpose</h3>'
-        + (purpose.question        ? '<div class="callout cl-blue"><strong>Question.</strong> ' + _multiline(purpose.question) + '</div>' : '')
-        + (purpose.mechanism       ? '<div class="callout cl-yellow"><strong>Mechanism / Model change.</strong> ' + _multiline(purpose.mechanism) + '</div>' : '')
-        + (purpose.expected_outcome? '<div class="callout cl-green"><strong>Expected outcome.</strong> ' + _multiline(purpose.expected_outcome) + '</div>' : '')
-        + '</div>';
+      // ── CHARTS (visualisations from runs.db) ─────────────────────────
+      var chartsHtml = charts.length
+        ? '<div id="' + sid.charts + '"><h3>Visualisations from the latest run</h3>'
+          + charts.map(function(c) {
+              return '<div class="chart-card">' + c.svg + '<div class="chart-caption">' + _h(c.caption || '') + '</div></div>';
+            }).join('')
+          + '</div>'
+        : '';
 
-      var gateHtml = '';
-      if (gate.prerequisites || gate.enables || gate.proceed_condition) {
-        var prereq = (gate.prerequisites && gate.prerequisites.length)
-          ? gate.prerequisites.map(function(p) { return '<code>' + _h(p) + '</code>'; }).join(' · ')
-          : '<em>none (root study)</em>';
-        var enables = (gate.enables && gate.enables.length)
-          ? gate.enables.map(function(p) { return '<code>' + _h(p) + '</code>'; }).join(' · ')
-          : '<em>—</em>';
-        gateHtml = '<div id="' + sid.gate + '">'
-          + '<h3>Pipeline gate</h3>'
-          + '<p><strong>Prerequisites:</strong> ' + prereq + '</p>'
-          + '<p><strong>Enables:</strong> ' + enables + '</p>'
-          + (gate.proceed_condition ? '<p><strong>Proceed when:</strong> ' + _multiline(gate.proceed_condition) + '</p>' : '')
+      // ── WHAT DID/WILL WE MEASURE? (Readouts) ─────────────────────────
+      var readoutsHtml = readouts.length
+        ? '<div id="' + sid.readouts + '"><h3>What did/will we measure? <span class="muted small">(' + readouts.length + ' readouts)</span></h3>'
+          + '<p class="muted small" style="margin:0 0 8px 0">Quantities we extract from each simulation run to evaluate the study\'s tests.</p>'
+          + readouts.map(function(r) {
+              var techBits = [];
+              if (r.path || r.identifier) techBits.push('Path: <code>' + _h(r.path || r.identifier) + '</code>');
+              if (r.units) techBits.push('Units: ' + _h(r.units));
+              if (r.blocked_by_requirements && r.blocked_by_requirements.length)
+                techBits.push('Blocked by: ' + r.blocked_by_requirements.map(function(b){return '<code>' + _h(b) + '</code>';}).join(', '));
+              var techDisc = techBits.length ? '<details class="tech-details"><summary>Technical details</summary>' + techBits.join('<br>') + '</details>' : '';
+              return '<div class="readout-card">'
+                   +   '<strong>' + _h(r.name || '') + '</strong>'
+                   +   (r.status ? ' <span class="muted small">(' + _h(r.status) + ')</span>' : '')
+                   +   '<div class="readout-desc">' + _h(r.notes || r.description || '') + '</div>'
+                   +   techDisc
+                   + '</div>';
+            }).join('')
+          + '</div>'
+        : '';
+
+      // ── HOW DO WE JUDGE SUCCESS? (Tests, claim-first) ────────────────
+      var testsHtml = '';
+      if (tests.length) {
+        // Aggregate latest outcomes by test name so we can show PASS/FAIL pills.
+        var outcomeByTest = {};
+        if (latestRun && latestRun.outcomes) {
+          Object.keys(latestRun.outcomes).forEach(function(k) { outcomeByTest[k] = latestRun.outcomes[k]; });
+        }
+        testsHtml = '<div id="' + sid.tests + '"><h3>How do we judge success? <span class="muted small">(' + tests.length + ' tests)</span></h3>'
+          + '<p class="muted small" style="margin:0 0 8px 0">Each test makes a specific scientific claim. The latest result (pass/fail) appears as a pill when we have evidence; the technical assertion is hidden by default.</p>'
+          + tests.map(function(t) {
+              var name = t.name || '(unnamed)';
+              var cls = t.classification || 'unclassified';
+              var out = outcomeByTest[name];
+              var result = out ? out.result : (t.status === 'gated' ? 'GATED' : 'PENDING');
+              var resBg = result === 'PASS' ? '#d1fae5' : (result === 'FAIL' ? '#fee2e2' : (result === 'SKIP' ? '#fef3c7' : '#f1f5f9'));
+              var resFg = result === 'PASS' ? '#065f46' : (result === 'FAIL' ? '#991b1b' : (result === 'SKIP' ? '#92400e' : '#475569'));
+              var resGlyph = result === 'PASS' ? '✓' : (result === 'FAIL' ? '✗' : '⏳');
+              // Claim: the English description, first sentence.
+              var claim = (t.description || t.en || '').split('\n')[0].split('. ')[0];
+              if (claim.length > 220) claim = claim.slice(0, 217) + '…';
+              if (claim && claim.charAt(claim.length - 1) !== '.' && claim.charAt(claim.length - 1) !== '?') claim += '.';
+              // Evidence: extra fields from the outcome (skip 'result' itself).
+              var evidence = '';
+              if (out) {
+                var bits = Object.keys(out).filter(function(k){return k !== 'result';})
+                  .map(function(k){return _h(k) + ': ' + _h(String(out[k]));});
+                if (bits.length) evidence = bits.join(' · ');
+              }
+              var techBits = [];
+              if (t.measure) techBits.push('Measure: <code>' + _h(JSON.stringify(t.measure)) + '</code>');
+              if (t.pass_if) techBits.push('Pass condition: <code>' + _h(JSON.stringify(t.pass_if)) + '</code>');
+              else if (t.expect) techBits.push('Expect: <code>' + _h(JSON.stringify(t.expect)) + '</code>');
+              if (t.requires_simulation) techBits.push('Requires sim: <code>' + _h(t.requires_simulation) + '</code>');
+              if (t.cites && t.cites.length) techBits.push('Cites: ' + t.cites.map(function(c){return '<code>' + _h(c) + '</code>';}).join(', '));
+              if (t.calibration_anchor) techBits.push('Calibration anchor: ⚠️ <code>' + _h(JSON.stringify(t.calibration_anchor)) + '</code>');
+              var techDisc = techBits.length ? '<details class="tech-details"><summary>Technical details</summary>' + techBits.join('<br>') + '</details>' : '';
+
+              return '<div class="test-card test-classification-' + _h(cls) + '">'
+                   +   '<div class="test-header">'
+                   +     '<span style="background:' + resBg + ';color:' + resFg + ';padding:2px 10px;border-radius:9999px;font-size:0.78em;font-weight:600">' + resGlyph + ' ' + _h(result) + '</span>'
+                   +     '<span class="test-classification">' + _h(cls) + '</span>'
+                   +   '</div>'
+                   +   '<div class="test-claim"><strong>Claim:</strong> ' + _h(claim) + '</div>'
+                   +   (evidence ? '<div class="test-evidence"><strong>Evidence:</strong> ' + evidence + '</div>' : '')
+                   +   '<div class="test-id muted small">Test id: <code>' + _h(name) + '</code></div>'
+                   +   techDisc
+                   + '</div>';
+            }).join('')
           + '</div>';
       }
 
+      // ── WHAT CHANGES IN THE MODEL? (Build / model_change) ────────────
       var buildHtml = '';
-      if (hasBuild) {
+      if (modelChange || assumptions.length) {
         var mcHtml = '';
         if (modelChange) {
-          mcHtml = '<h4>Model change</h4>';
           if (typeof modelChange === 'string') {
-            mcHtml += '<p>' + _multiline(modelChange) + '</p>';
+            mcHtml = '<p>' + _multiline(modelChange) + '</p>';
           } else {
+            var mcNotes = modelChange.notes || '';
+            var hasNewWork = (modelChange.new_processes || []).length
+                          || (modelChange.new_state_variables || []).length
+                          || (modelChange.new_parameters || []).length
+                          || (modelChange.modified_processes || []).length;
+            mcHtml = mcNotes ? '<p>' + _multiline(mcNotes) + '</p>' : '';
+            if (!hasNewWork && !mcNotes) mcHtml = '<p class="muted">No code-level model changes in this study.</p>';
+            // Technical details with everything (processes, params, listeners).
+            var mcBits = [];
             Object.keys(modelChange).forEach(function(k) {
+              if (k === 'notes') return;
               var v = modelChange[k];
-              mcHtml += '<p><strong>' + _h(k) + ':</strong> ' + (typeof v === 'string' ? _multiline(v) : '<code>' + _h(JSON.stringify(v)) + '</code>') + '</p>';
+              if (Array.isArray(v) && !v.length) return;
+              if (typeof v === 'string') mcBits.push(_h(k) + ': ' + _multiline(v));
+              else mcBits.push(_h(k) + ': <code>' + _h(JSON.stringify(v)) + '</code>');
             });
+            if (mcBits.length) mcHtml += '<details class="tech-details"><summary>Technical details</summary>' + mcBits.join('<br>') + '</details>';
           }
         }
         var asmHtml = assumptions.length
-          ? '<h4>Key assumptions</h4><ul>' + assumptions.map(function(a) { return '<li>' + _multiline(typeof a === 'string' ? a : (a.text || JSON.stringify(a))) + '</li>'; }).join('') + '</ul>'
+          ? '<h4 style="margin:12px 0 4px 0">Key assumptions</h4>'
+          + '<ul>' + assumptions.map(function(a){return '<li>' + _multiline(typeof a === 'string' ? a : (a.text || JSON.stringify(a))) + '</li>';}).join('') + '</ul>'
           : '';
-        var reqHtml = reqs.length
-          ? '<h4>Implementation requirements</h4>'
-          + '<p class="muted small" style="margin:0 0 8px 0">'
-          +   'Concrete code work needed to fully exercise this study. Each card shows the biological purpose first; '
-          +   'click <em>Implementation detail</em> to see steps, file pointers, and gate conditions.'
-          + '</p>'
+        buildHtml = '<div id="' + sid.build + '"><h3>What changes in the model?</h3>' + mcHtml + asmHtml + '</div>';
+      }
+
+      // ── WHAT NEEDS TO BE BUILT OR FIXED? (Implementation reqs) ───────
+      var reqsHtml = '';
+      if (reqs.length) {
+        reqsHtml = '<div id="' + sid.reqs + '"><h3>What needs to be built or fixed? <span class="muted small">(' + reqs.length + ')</span></h3>'
+          + '<p class="muted small" style="margin:0 0 8px 0">Concrete engineering work to fully exercise this study.</p>'
           + reqs.map(function(r) {
-              var effortBadge = r.effort
-                ? '<span class="req-effort" title="Effort: S=small, M=medium, L=large">' + _h(r.effort) + '</span>'
-                : '';
-              var kindBadge = r.kind
-                ? '<span class="req-kind">' + _h(r.kind) + '</span>'
-                : '';
+              var effortBadge = r.effort ? '<span class="req-effort">' + _h(r.effort) + '</span>' : '';
+              var kindBadge   = r.kind   ? '<span class="req-kind">'   + _h(r.kind)   + '</span>' : '';
               var statusBadge = '';
-              if (r.defer_until) {
-                statusBadge = '<span class="req-status req-status-deferred" title="Deferred until: ' + _h(r.defer_until) + '">deferred</span>';
-              } else if (r.status === 'done' || r.status === 'complete') {
-                statusBadge = '<span class="req-status req-status-done">done</span>';
-              } else {
-                statusBadge = '<span class="req-status req-status-open">open</span>';
-              }
-              // KEY POINT: the biological/scientific reason this matters — promote to visible.
+              if (r.defer_until) statusBadge = '<span class="req-status req-status-deferred">deferred</span>';
+              else if (r.status === 'done' || r.status === 'complete') statusBadge = '<span class="req-status req-status-done">done</span>';
+              else statusBadge = '<span class="req-status req-status-open">open</span>';
               var keyLine = '';
               if (r.why) {
                 keyLine = '<div class="req-key"><strong>Why it matters:</strong> ' + _multiline(r.why) + '</div>';
               } else if (r.description) {
-                // First paragraph of description (up to 240 chars) — a useful teaser.
                 var teaser = String(r.description).split(/\n\s*\n/)[0].slice(0, 240);
                 keyLine = '<div class="req-key">' + _multiline(teaser) + (r.description.length > 240 ? '…' : '') + '</div>';
               }
-              // Outcomes (what this unblocks). Surfaced visibly — that's the dependency the
-              // reader cares about most when triaging.
               var unblocks = '';
               if (r.unblocks) {
                 var items = Array.isArray(r.unblocks) ? r.unblocks : [r.unblocks];
-                unblocks = '<div class="req-unblocks"><strong>Unblocks when done:</strong><ul>'
-                         + items.map(function(u){return '<li><code>' + _h(u) + '</code></li>';}).join('')
-                         + '</ul></div>';
+                unblocks = '<div class="req-unblocks"><strong>Unblocks:</strong><ul>' + items.map(function(u){return '<li>' + _h(u) + '</li>';}).join('') + '</ul></div>';
               }
-              // Deferred-until note when present — gives the reader a "you can ignore this for now" signal.
               var deferredNote = r.defer_until
-                ? '<div class="req-deferred">⏸ Deferred until <code>' + _h(r.defer_until) + '</code> — not a blocker for this study\'s gate.</div>'
+                ? '<div class="req-deferred">⏸ Deferred until <code>' + _h(r.defer_until) + '</code>.</div>'
                 : '';
+              var techBits = [];
+              if (r.description && r.description.length > 240) techBits.push(_multiline(r.description));
+              if (r.steps && r.steps.length) techBits.push('<ol>' + r.steps.map(function(st){return '<li>' + _h(st) + '</li>';}).join('') + '</ol>');
+              if (r.files && r.files.length) techBits.push('Files: ' + r.files.map(function(f){return '<code>' + _h(f) + '</code>';}).join(', '));
+              var techDisc = techBits.length ? '<details class="tech-details"><summary>Implementation detail</summary>' + techBits.join('<br>') + '</details>' : '';
 
-              // Drop-down: full technical detail (description, concrete steps, file pointers).
-              var detail = '';
-              if (r.description && r.description.length > 240) {
-                detail += '<div class="req-detail-section"><h5>Full description</h5>' + _multiline(r.description) + '</div>';
-              }
-              if (r.steps && r.steps.length) {
-                detail += '<div class="req-detail-section"><h5>Concrete steps</h5><ol>'
-                        + r.steps.map(function(st){return '<li>' + _h(st) + '</li>';}).join('')
-                        + '</ol></div>';
-              }
-              if (r.files && r.files.length) {
-                detail += '<div class="req-detail-section"><h5>Files to touch</h5><ul>'
-                        + r.files.map(function(f){return '<li><code>' + _h(f) + '</code></li>';}).join('')
-                        + '</ul></div>';
-              }
-              var detailDropdown = detail
-                ? '<details class="req-detail"><summary>Implementation detail</summary>' + detail + '</details>'
-                : '';
-
-              return '<div class="req-card req-' + _h(r.effort || 'unk').toLowerCase() + '">'
+              return '<div class="req-card">'
                    +   '<div class="req-header">'
                    +     '<code class="req-id">' + _h(r.id || '') + '</code>'
-                   +     '<strong class="req-title">' + _h(r.title || '(untitled requirement)') + '</strong>'
+                   +     '<strong class="req-title">' + _h(r.title || '(untitled)') + '</strong>'
                    +     '<span class="req-badges">' + kindBadge + effortBadge + statusBadge + '</span>'
                    +   '</div>'
-                   +   keyLine
-                   +   deferredNote
-                   +   unblocks
-                   +   detailDropdown
-                   + '</div>';
-            }).join('')
-          : '';
-        buildHtml = '<div id="' + sid.build + '"><h3>Build</h3>' + mcHtml + asmHtml + reqHtml + '</div>';
-      }
-
-      var simsHtml = '';
-      if (sims.length) {
-        simsHtml = '<div id="' + sid.sims + '"><h3>Simulations (' + sims.length + ' planned)</h3>'
-          + '<p class="muted small" style="margin:0 0 8px 0">Each card is a concrete run plan: what gets perturbed, the environmental condition, how long it runs, which readouts get collected, and which behavior tests it feeds.</p>'
-          + sims.map(function(sim) {
-              // Status pill — green=ready, amber=gated, blue=ran
-              var statusClass = sim.status === 'ready' ? 'sim-status-ready'
-                              : sim.status === 'gated' ? 'sim-status-gated'
-                              : sim.status === 'ran' ? 'sim-status-ran'
-                              : 'sim-status-unknown';
-              var statusPill = sim.status
-                ? '<span class="sim-status-pill ' + statusClass + '">' + _h(sim.status) + '</span>'
-                : '';
-
-              // KEY POINT: the perturbation — what's being changed vs the baseline.
-              var pertHtml = '';
-              if (sim.perturbation && Object.keys(sim.perturbation).length) {
-                var pertLines = Object.entries(sim.perturbation).map(function(kv) {
-                  return '<li><code>' + _h(kv[0]) + '</code> ← <code>' + _h(JSON.stringify(kv[1])) + '</code></li>';
-                }).join('');
-                pertHtml = '<div class="sim-pert"><strong>Perturbation</strong> (vs baseline composite):<ul>' + pertLines + '</ul></div>';
-              } else {
-                pertHtml = '<div class="sim-pert sim-pert-none">No perturbation — baseline run.</div>';
-              }
-
-              // Meta strip: base model · condition · duration · seeds
-              var metaParts = [];
-              if (sim.base_model) metaParts.push('<span><em>Base:</em> <code>' + _h(sim.base_model) + '</code></span>');
-              if (sim.condition)  metaParts.push('<span><em>Condition:</em> ' + _h(sim.condition) + '</span>');
-              if (sim.duration_min != null) metaParts.push('<span><em>Duration:</em> ' + _h(sim.duration_min) + ' min</span>');
-              if (sim.seeds && sim.seeds.length) metaParts.push('<span><em>Seeds:</em> ' + sim.seeds.length + ' (' + sim.seeds.join(', ') + ')</span>');
-              var metaHtml = metaParts.length
-                ? '<div class="sim-meta">' + metaParts.join(' &middot; ') + '</div>'
-                : '';
-
-              // Readouts collected
-              var readoutsList = (sim.readouts && sim.readouts.length)
-                ? '<div class="sim-readouts"><strong>Readouts collected:</strong> '
-                  + sim.readouts.map(function(r){return '<code>' + _h(r) + '</code>';}).join(' &middot; ')
-                  + '</div>'
-                : '';
-
-              // Tests this sim feeds
-              var appliesTests = sim.applies_tests || sim.tests || [];
-              var testsList = (Array.isArray(appliesTests) && appliesTests.length)
-                ? '<div class="sim-tests"><strong>Feeds behavior tests:</strong> '
-                  + appliesTests.map(function(t){return '<code>' + _h(t) + '</code>';}).join(' &middot; ')
-                  + '</div>'
-                : '';
-
-              // Blocked-by callout (when status === gated)
-              var blockedHtml = '';
-              if (sim.status === 'gated' && sim.blocked_by_requirements && sim.blocked_by_requirements.length) {
-                blockedHtml = '<div class="sim-blocked">⛔ <strong>Blocked by:</strong> '
-                            + sim.blocked_by_requirements.map(function(r){return '<code>' + _h(r) + '</code>';}).join(' &middot; ')
-                            + ' — see <em>Implementation requirements</em> above for each item.</div>';
-              }
-
-              // Other free-form fields (description / purpose / notes), tucked into a disclosure.
-              var extraDetail = '';
-              if (sim.description) extraDetail += '<div class="sim-extra"><strong>Description.</strong> ' + _multiline(sim.description) + '</div>';
-              if (sim.purpose)     extraDetail += '<div class="sim-extra"><strong>Purpose.</strong> ' + _multiline(sim.purpose) + '</div>';
-              if (sim.notes)       extraDetail += '<div class="sim-extra"><strong>Notes.</strong> ' + _multiline(sim.notes) + '</div>';
-              var extraDropdown = extraDetail
-                ? '<details class="sim-detail"><summary>More notes</summary>' + extraDetail + '</details>'
-                : '';
-
-              return '<div class="sim-card sim-' + statusClass + '">'
-                   +   '<div class="sim-header">'
-                   +     '<strong class="sim-name">' + _h(sim.name || '(unnamed)') + '</strong>'
-                   +     statusPill
-                   +   '</div>'
-                   +   pertHtml
-                   +   metaHtml
-                   +   readoutsList
-                   +   testsList
-                   +   blockedHtml
-                   +   extraDropdown
+                   +   keyLine + deferredNote + unblocks + techDisc
                    + '</div>';
             }).join('')
           + '</div>';
       }
 
-      var readoutsHtml = '';
-      if (readouts.length) {
-        readoutsHtml = '<div id="' + sid.readouts + '"><h3>Readouts</h3>'
-          + '<table class="eb"><thead><tr><th>Name</th><th>Path / identifier</th><th>Units</th><th>Notes</th></tr></thead><tbody>'
-          + readouts.map(function(r) {
-              return '<tr>'
-                   + '<td><code>' + _h(r.name || '') + '</code></td>'
-                   + '<td><code>' + _h(r.path || r.identifier || '') + '</code></td>'
-                   + '<td>' + _h(r.units || '') + '</td>'
-                   + '<td>' + _h(r.notes || r.description || '') + '</td>'
-                   + '</tr>';
-            }).join('')
-          + '</tbody></table></div>';
-      }
-
-      var testsHtml = '';
-      if (tests.length) {
-        testsHtml = '<div id="' + sid.tests + '"><h3>Behavior tests</h3>'
-          + '<table class="eb"><thead><tr><th>Name</th><th>Statement</th><th>Class</th><th>Calibration</th><th>Cites</th></tr></thead><tbody>'
-          + tests.map(function(t) {
-              var cites = (t.cites || []).map(function(k) { return '<code>' + _h(k) + '</code>'; }).join(', ');
-              var cls = t.classification || '';
-              var calib = t.calibration_anchor
-                ? '<span title="' + _h(typeof t.calibration_anchor === 'string' ? t.calibration_anchor : JSON.stringify(t.calibration_anchor)) + '">⚠️ anchor</span>'
-                : '';
-              return '<tr class="eb-row eb-' + _h(t.status || 'planned') + '">'
-                   + '<td><code>' + _h(t.name || '') + '</code></td>'
-                   + '<td>' + _h(t.en || '') + '</td>'
-                   + '<td>' + _h(cls) + '</td>'
-                   + '<td>' + calib + '</td>'
-                   + '<td>' + cites + '</td>'
-                   + '</tr>';
-            }).join('')
-          + '</tbody></table></div>';
-      }
-
-      var decideHtml = '';
-      if (hasDecide) {
-        // Latest-run outcomes (PASS/FAIL/SKIP per behavior test)
-        var outcomesHtml = '';
-        if (latestRun && latestRun.outcomes) {
-          var rows = Object.keys(latestRun.outcomes).map(function(tname) {
-            var o = latestRun.outcomes[tname] || {};
-            var res = o.result || '';
-            var pillBg = res === 'PASS' ? '#d1fae5' : (res === 'FAIL' ? '#fee2e2' : '#fef3c7');
-            var pillFg = res === 'PASS' ? '#065f46' : (res === 'FAIL' ? '#991b1b' : '#92400e');
-            var detail = Object.keys(o).filter(function(k){return k !== 'result';})
-              .map(function(k){return '<code style="margin-right:8px">' + _h(k) + ': ' + _h(String(o[k])) + '</code>';})
-              .join('');
-            return '<tr>'
-                 +   '<td style="padding:6px 10px;font-family:ui-monospace,monospace;font-size:0.85em">' + _h(tname) + '</td>'
-                 +   '<td style="padding:6px 10px"><span style="background:' + pillBg + ';color:' + pillFg + ';padding:1px 8px;border-radius:9999px;font-size:0.8em;font-family:ui-monospace,monospace">' + _h(res) + '</span></td>'
-                 +   '<td style="padding:6px 10px;font-size:0.85em;color:#475569">' + detail + '</td>'
-                 + '</tr>';
-          }).join('');
-          var meta = (latestRun.simulation || 'baseline')
-                   + ' · seed ' + (latestRun.seed != null ? latestRun.seed : '?')
-                   + ' · ' + (latestRun.duration_s || '?') + 's simulated'
-                   + ' · ' + (latestRun.rows || '?') + ' rows'
-                   + ' · ' + (latestRun.started_at || '?');
-          outcomesHtml = '<h4>Latest run outcomes</h4>'
-            + '<p class="muted small" style="margin:0 0 6px 0">' + _h(meta) + '</p>'
-            + '<table style="width:100%;border-collapse:collapse;font-size:0.9em">'
-            +   '<thead><tr style="background:#f8fafc"><th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e2e8f0">Test</th><th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e2e8f0">Result</th><th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e2e8f0">Detail</th></tr></thead>'
-            +   '<tbody>' + rows + '</tbody></table>';
-        }
-
-        // Conclusion-logic gate decision
-        function _renderClBlock(label, obj, accentBg, accentFg) {
-          if (!obj) return '';
-          var parts = [];
-          if (obj.implementation_status) parts.push('<div><em>Implementation:</em> ' + _multiline(obj.implementation_status) + '</div>');
-          if (obj.biological_validation) parts.push('<div style="margin-top:4px"><em>Biological validation:</em> ' + _multiline(obj.biological_validation) + '</div>');
-          if (obj.pipeline_unblocks && obj.pipeline_unblocks.length)
-            parts.push('<div style="margin-top:4px"><em>Pipeline unblocks:</em><ul style="margin:4px 0 0 18px">' + obj.pipeline_unblocks.map(function(u){return '<li>' + _h(u) + '</li>';}).join('') + '</ul></div>');
-          if (obj.diagnose && obj.diagnose.length)
-            parts.push('<div><em>Diagnose:</em><ul style="margin:4px 0 0 18px">' + obj.diagnose.map(function(d){return '<li>' + _h(d) + '</li>';}).join('') + '</ul></div>');
-          if (obj.block_downstream) parts.push('<div style="margin-top:4px"><em>Block downstream:</em> ' + _multiline(obj.block_downstream) + '</div>');
-          if (typeof obj === 'string') parts.push('<div>' + _multiline(obj) + '</div>');
-          return '<div style="padding:10px 14px;border-left:4px solid ' + accentFg + ';background:' + accentBg + ';border-radius:4px;margin-bottom:8px">'
-               +   '<strong>' + label + '</strong>'
-               +   parts.join('')
-               + '</div>';
-        }
-        var clHtml = '';
-        if (ifPass || ifFail) {
-          clHtml = '<h4>Gate decision (conclusion logic)</h4>'
-                 + _renderClBlock('✓ If primary tests pass', ifPass, '#f0fdf4', '#10b981')
-                 + _renderClBlock('✗ If primary tests fail', ifFail, '#fef2f2', '#dc2626');
-        }
-
-        // Conclusion blob
-        var conclusionHtml = s.conclusion
-          ? '<h4>Conclusion (synthesised narrative)</h4>'
-          + '<pre style="background:#f8fafc;padding:12px;border-left:3px solid #94a3b8;border-radius:3px;white-space:pre-wrap;font-family:inherit;font-size:0.9em;line-height:1.5;margin:0">' + _h(s.conclusion) + '</pre>'
-          : '';
-
-        decideHtml = '<div id="' + sid.decide + '"><h3>Decide</h3>'
-          + outcomesHtml + clHtml + conclusionHtml
-          + '</div>';
-      }
-
-      var chartsHtml = charts.length
-        ? '<div id="' + sid.charts + '"><h3>Simulation visualizations (latest run)</h3>'
-          + charts.map(function(c) {
-              return '<div class="chart-card">' + c.svg
-                   + '<div class="chart-caption">' + _h(c.caption || '') + '</div></div>';
-            }).join('')
-          + '</div>'
-        : '';
-
+      // ── WHAT SHOULD HAPPEN NEXT? (Follow-ups) ────────────────────────
       var followUpsHtml = followUps.length
-        ? '<div id="' + sid.followups + '"><h3>Follow-up studies + decisions</h3>'
-          + '<p class="muted small">Concrete next steps derived from this study\'s outcomes. '
-          + '<em>Non-existing</em> entries can be seeded into a new study.yaml via the '
-          + 'dashboard\'s study-detail page → Overview → "Seed new study →" button.</p>'
+        ? '<div id="' + sid.followups + '"><h3>What should happen next? <span class="muted small">(' + followUps.length + ' follow-ups)</span></h3>'
+          + '<p class="muted small">Concrete next steps. <em>Non-existing</em> entries can be seeded into child studies via the dashboard.</p>'
           + followUps.map(function(f) {
               var kind = f.kind || 'other';
-              var why = f.why ? '<div class="fu-why"><em>Why:</em> ' + _multiline(f.why) + '</div>' : '';
-              var hyp = f.hypothesized_mechanism
-                ? '<div class="fu-hyp"><em>Hypothesized mechanism:</em> ' + _multiline(f.hypothesized_mechanism) + '</div>'
-                : '';
-              var unb = (f.unblocks && f.unblocks.length)
-                ? '<div class="fu-unblocks"><em>Unblocks:</em> ' + f.unblocks.map(function(x){return '<code>' + _h(x) + '</code>';}).join(' · ') + '</div>'
-                : '';
-              var acc = (f.acceptance && f.acceptance.length)
-                ? '<div class="fu-acc"><em>Acceptance:</em><ul>' + f.acceptance.map(function(a){return '<li>' + _h(a) + '</li>';}).join('') + '</ul></div>'
-                : '';
+              var techBits = [];
+              if (f.hypothesized_mechanism) techBits.push('Hypothesised mechanism: ' + _multiline(f.hypothesized_mechanism));
+              if (f.unblocks && f.unblocks.length) techBits.push('Unblocks: ' + f.unblocks.map(function(x){return '<code>' + _h(x) + '</code>';}).join(', '));
+              if (f.acceptance && f.acceptance.length) techBits.push('Acceptance criteria: <ul>' + f.acceptance.map(function(a){return '<li>' + _h(a) + '</li>';}).join('') + '</ul>');
+              var techDisc = techBits.length ? '<details class="tech-details"><summary>Technical details</summary>' + techBits.join('<br>') + '</details>' : '';
               var status = f.status ? '<span class="fu-status fu-status-' + _h(f.status) + '">' + _h(f.status) + '</span>' : '';
               var effort = f.effort ? '<span class="fu-effort">' + _h(f.effort) + '</span>' : '';
               return '<div class="fu-card fu-kind-' + _h(kind) + '">'
-                   +   '<div class="fu-head">'
-                   +     '<span class="fu-kind">' + _h(kind) + '</span>'
-                   +     effort + status
-                   +     '<strong class="fu-title">' + _h(f.title || '(untitled)') + '</strong>'
-                   +   '</div>'
-                   +   why + hyp + unb + acc
+                   +   '<div class="fu-head"><span class="fu-kind">' + _h(kind) + '</span>' + effort + status + '<strong class="fu-title">' + _h(f.title || '(untitled)') + '</strong></div>'
+                   +   (f.why ? '<div class="fu-why">' + _multiline(f.why) + '</div>' : '')
+                   +   techDisc
                    + '</div>';
             }).join('')
           + '</div>'
         : '';
 
+      // ── LIMITATIONS ──────────────────────────────────────────────────
       var limitsHtml = limitations.length
         ? '<div id="' + sid.limits + '"><h3>Limitations</h3><ul>'
           + limitations.map(function(l) { return '<li>' + _multiline(typeof l === 'string' ? l : (l.text || JSON.stringify(l))) + '</li>'; }).join('')
           + '</ul></div>'
         : '';
 
+      // ── REFERENCES ───────────────────────────────────────────────────
       var refsHtml = bib.length
         ? '<div id="' + sid.refs + '"><h3>References cited by this study</h3><p>'
           + bib.map(function(k) { return '<code>' + _h(k) + '</code>'; }).join(', ')
@@ -4393,18 +4500,18 @@
         +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
         +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
         +   '</header>'
-        +   findingsHtml
-        +   purposeHtml
-        +   gateHtml
-        +   buildHtml
-        +   simsHtml
-        +   chartsHtml
-        +   readoutsHtml
-        +   testsHtml
-        +   decideHtml
-        +   followUpsHtml
-        +   limitsHtml
-        +   refsHtml
+        +   summaryHtml         // 1. Plain-English summary (with Purpose disclosure)
+        +   decisionHtml        // 2. Decision box (with Pipeline-gate disclosure)
+        +   takeawaysHtml       // 3 + 4. Key takeaways + detailed findings grouped by kind
+        +   simsHtml            // 5. What did/will we run?
+        +   chartsHtml          //    + Visualisations from runs
+        +   readoutsHtml        // 6. What did/will we measure?
+        +   testsHtml           // 7. How do we judge success?
+        +   buildHtml           // 8. What changes in the model?
+        +   reqsHtml            // 9. What needs to be built or fixed?
+        +   followUpsHtml       // 10. What should happen next?
+        +   limitsHtml          // 11. Limitations
+        +   refsHtml            // 12. References
         + '</section>';
     }
 
@@ -4800,6 +4907,65 @@
       // findings (top-of-section "what we learned" cards)
       + '.findings-section{margin:0 0 24px 0;padding:14px 16px;background:#fafbff;border:1px solid #c7d2fe;border-radius:8px}'
       + '.findings-section h3{margin:0 0 6px 0;color:#3730a3}'
+      // study summary (plain-English block at top of each study)
+      + '.study-summary{padding:14px 16px;margin:12px 0 16px 0;background:#f8fafc;border-left:4px solid #6366f1;border-radius:6px}'
+      + '.study-summary-text{margin:0;font-size:1.02em;line-height:1.55;color:#1e293b}'
+      + '.tech-details{margin-top:10px;padding:6px 10px;background:#ffffff;border:1px solid #e2e8f0;border-radius:4px;font-size:0.88em}'
+      + '.tech-details summary{cursor:pointer;color:#475569;font-weight:500}'
+      + '.tech-details summary:hover{color:#0f172a}'
+      // decision box
+      + '.decision-box{margin:0 0 20px 0;padding:14px 16px;border-radius:8px;border:2px solid #cbd5e1;background:#fff}'
+      + '.decision-box.dec-passed{border-color:#10b981;background:#f0fdf4}'
+      + '.decision-box.dec-blocked{border-color:#dc2626;background:#fef2f2}'
+      + '.decision-box.dec-needscal{border-color:#f59e0b;background:#fffbeb}'
+      + '.decision-box.dec-ready{border-color:#3b82f6;background:#eff6ff}'
+      + '.decision-box.dec-notstarted{border-color:#94a3b8;background:#f8fafc}'
+      + '.decision-box.dec-inprogress{border-color:#8b5cf6;background:#faf5ff}'
+      + '.decision-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px}'
+      + '.decision-title{margin:0;font-size:1.1em;color:#0f172a}'
+      + '.decision-status{font-size:0.9em;font-weight:600;padding:4px 12px;border-radius:9999px;background:#fff;border:1px solid currentColor}'
+      + '.dec-passed .decision-status{color:#065f46}'
+      + '.dec-blocked .decision-status{color:#991b1b}'
+      + '.dec-needscal .decision-status{color:#92400e}'
+      + '.dec-ready .decision-status{color:#1e40af}'
+      + '.dec-notstarted .decision-status{color:#475569}'
+      + '.dec-inprogress .decision-status{color:#6b21a8}'
+      + '.decision-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:6px}'
+      + '.decision-cell{padding:8px 10px;background:#fff;border-radius:4px;font-size:0.9em;border:1px solid #e2e8f0}'
+      + '.decision-cell strong{display:block;margin-bottom:4px;font-size:0.88em;color:#475569}'
+      + '.decision-cell-pass{border-left:3px solid #10b981}'
+      + '.decision-cell-fail{border-left:3px solid #dc2626}'
+      + '.decision-cell-block{border-left:3px solid #f59e0b}'
+      + '.decision-cell-next{border-left:3px solid #3b82f6}'
+      // key takeaways list
+      + '.takeaways-section{margin:0 0 20px 0;padding:14px 16px;background:#fafbff;border-left:4px solid #6366f1;border-radius:6px}'
+      + '.takeaways-section h3{margin:0 0 8px 0;color:#3730a3}'
+      + '.takeaway-list{list-style:none;padding:0;margin:0}'
+      + '.takeaway-list li{padding:5px 0;line-height:1.45;font-size:0.95em}'
+      + '.takeaway-list li a{color:#1e293b;text-decoration:none}'
+      + '.takeaway-list li a:hover{text-decoration:underline}'
+      + '.takeaway-glyph{display:inline-block;width:20px;text-align:center;margin-right:4px}'
+      + '.takeaway-confirms .takeaway-glyph{color:#10b981}'
+      + '.takeaway-contradicts .takeaway-glyph{color:#dc2626}'
+      + '.takeaway-partial .takeaway-glyph{color:#f59e0b}'
+      + '.takeaway-novel .takeaway-glyph{color:#8b5cf6}'
+      + '.findings-group-header{margin:14px 0 4px 0;font-size:1em;color:#3730a3}'
+      // test cards (claim-first)
+      + '.test-card{padding:10px 14px;margin:8px 0;background:#fff;border:1px solid #e2e8f0;border-radius:6px}'
+      + '.test-card.test-classification-primary{border-left:4px solid #10b981}'
+      + '.test-card.test-classification-supporting{border-left:4px solid #3b82f6}'
+      + '.test-card.test-classification-diagnostic{border-left:4px solid #f59e0b}'
+      + '.test-card.test-classification-regression{border-left:4px solid #94a3b8}'
+      + '.test-header{display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap}'
+      + '.test-classification{font-size:0.7em;text-transform:uppercase;letter-spacing:0.05em;padding:1px 8px;border-radius:9999px;background:#e0e7ff;color:#3730a3}'
+      + '.test-claim{font-size:0.95em;line-height:1.5;margin:4px 0}'
+      + '.test-evidence{font-size:0.86em;color:#475569;padding:6px 10px;background:#f8fafc;border-left:3px solid #94a3b8;border-radius:3px;margin:6px 0}'
+      + '.test-id{margin-top:4px;font-family:ui-monospace,monospace}'
+      // readout cards
+      + '.readout-card{padding:8px 12px;margin:6px 0;background:#fff;border:1px solid #e2e8f0;border-radius:4px}'
+      + '.readout-desc{font-size:0.9em;color:#475569;margin-top:4px}'
+      // sweep chart
+      + '.sweep-chart{margin:8px 0;padding:6px;background:#fafbff;border:1px solid #e0e7ff;border-radius:4px}'
       + '.finding-card{padding:12px 14px;margin:10px 0;border:1px solid #e2e8f0;border-left:5px solid #6366f1;border-radius:6px;background:#fff;box-shadow:0 1px 1px rgba(0,0,0,0.02)}'
       + '.finding-card.finding-status-confirms{border-left-color:#10b981}'
       + '.finding-card.finding-status-partial{border-left-color:#f59e0b}'
@@ -4914,15 +5080,15 @@
                       + '<ol>' + acceptance + '</ol>' : '')
 
       +   '<h2 id="how-to-read">How to read this report</h2>'
-      +   '<p>Each section below is one study, in dependency order (roots first). Within a section:</p>'
-      +   '<ul>'
-      +     '<li><strong>Question / Hypothesis / Objective</strong> — what we want to know, what we predict, and what we will build.</li>'
-      +     '<li><strong>Predicted behavior</strong> — quantitative, testable predictions with the supporting citations from <code>papers.bib</code>. Color coding: <span style="background:#f0fdf4;padding:1px 6px;border-radius:3px">green = implemented (will run today)</span>, <span style="background:#fff7ed;padding:1px 6px;border-radius:3px">amber = gated on upstream work</span>, <span style="background:#fefce8;padding:1px 6px;border-radius:3px">yellow = stub</span>.</li>'
-      +     '<li><strong>Variants</strong> — the parameter perturbations we plan to run.</li>'
-      +     '<li><strong>Interventions</strong> — named simulation plans grouping variants + protocols + which tests they unlock.</li>'
-      +     '<li><strong>Gaps / deferrals</strong> — explicit assumptions we are aware of; concrete code that needs to land first.</li>'
-      +     '<li><strong>Expert questions</strong> — open questions for you to weigh in on before we proceed.</li>'
-      +   '</ul>'
+      +   '<p>Each section below is one study, in dependency order (roots first). For each study, read in this order:</p>'
+      +   '<ol>'
+      +     '<li><strong>Plain-English summary</strong> — what the study asked, what we learned, and where the gate decision lands.</li>'
+      +     '<li><strong>Can we move to the next study?</strong> — the gate decision in one box: what passed, what failed, what blocks the next study, and the immediate next action.</li>'
+      +     '<li><strong>Key takeaways</strong> — one-line findings linking back to detailed cards.</li>'
+      +     '<li><strong>Simulations, measurements, and tests</strong> — what we ran, what we measured, how we judge success.</li>'
+      +     '<li><strong>Technical details</strong> — file paths, parameter names, listener paths, CLI flags. These live inside collapsible <em>Technical details</em> blocks; open them only when implementing or debugging.</li>'
+      +   '</ol>'
+      +   '<p class="muted small">Status pills use four glyphs: <strong style="color:#10b981">✓ confirms</strong> literature, <strong style="color:#dc2626">✗ contradicts</strong> literature, <strong style="color:#f59e0b">◐ partial</strong> match, <strong style="color:#8b5cf6">◆ novel</strong> (no literature comparator).</p>'
 
       +   '<h2 id="studies-heading">Studies (dependency order)</h2>'
       +   studiesHtml
