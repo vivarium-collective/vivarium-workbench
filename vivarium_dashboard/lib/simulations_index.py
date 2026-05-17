@@ -61,6 +61,10 @@ def _row_to_dict(row, db_path_str: str) -> dict:
         "completed_at": row["completed_at"],
         "db_path": db_path_str,
         "studies": [],  # filled in by _annotate_studies
+        # Match the SQLiteEmitter shape so JS consumers can rely on the
+        # keys existing regardless of which emitter wrote the row.
+        "study_slug": None,
+        "investigation_slug": None,
     }
 
 
@@ -80,12 +84,26 @@ def _read_sqlite_emitter(db_path: Path, db_path_str: str) -> list[dict]:
         ).fetchall()}
         if "simulations" not in tbls or "history" not in tbls:
             return []
+        # study_slug + investigation_slug are added by v2ecoli's
+        # sqlite_emitter() helper (PR: fix/workspace-shared-sim-db). Older
+        # DBs may not have the columns yet — detect and skip in that case.
+        sim_cols = {row[1] for row in raw.execute(
+            "PRAGMA table_info(simulations)"
+        ).fetchall()}
+        has_study_slug = 'study_slug' in sim_cols
+        has_investigation_slug = 'investigation_slug' in sim_cols
+        select_extras = ''
+        if has_study_slug:
+            select_extras += ', s.study_slug'
+        if has_investigation_slug:
+            select_extras += ', s.investigation_slug'
         rows = raw.execute(
             "SELECT s.simulation_id, s.name, s.started_at, s.completed_at, "
             "       s.elapsed_seconds, "
             "       (SELECT COUNT(*) FROM history h WHERE h.simulation_id = s.simulation_id) AS n_rows, "
-            "       (SELECT MAX(step) FROM history h WHERE h.simulation_id = s.simulation_id) AS max_step "
-            "FROM simulations s ORDER BY s.started_at DESC"
+            "       (SELECT MAX(step) FROM history h WHERE h.simulation_id = s.simulation_id) AS max_step"
+            + select_extras +
+            " FROM simulations s ORDER BY s.started_at DESC"
         ).fetchall()
     except sqlite3.OperationalError as e:
         warnings.warn(f"simulations_index: sqlite-emitter read failed for {db_path_str}: {e}")
@@ -96,18 +114,20 @@ def _read_sqlite_emitter(db_path: Path, db_path_str: str) -> list[dict]:
     for r in rows:
         n_rows = r["n_rows"] or 0
         out.append({
-            "run_id":        r["simulation_id"],
-            "spec_id":       "",
-            "sim_name":      r["name"] or "",
-            "label":         r["name"] or "",
-            "status":        "completed" if r["completed_at"] else "running",
-            "n_steps":       (r["max_step"] + 1) if r["max_step"] is not None else n_rows,
-            "progress_step": r["max_step"] if r["max_step"] is not None else n_rows,
-            "started_at":    r["started_at"],
-            "completed_at":  r["completed_at"],
-            "db_path":       db_path_str,
-            "source":        "sqlite_emitter",
-            "studies":       [],
+            "run_id":             r["simulation_id"],
+            "spec_id":            "",
+            "sim_name":           r["name"] or "",
+            "label":              r["name"] or "",
+            "status":             "completed" if r["completed_at"] else "running",
+            "n_steps":            (r["max_step"] + 1) if r["max_step"] is not None else n_rows,
+            "progress_step":      r["max_step"] if r["max_step"] is not None else n_rows,
+            "started_at":         r["started_at"],
+            "completed_at":       r["completed_at"],
+            "db_path":            db_path_str,
+            "source":             "sqlite_emitter",
+            "studies":            [],
+            "study_slug":         r["study_slug"] if has_study_slug else None,
+            "investigation_slug": r["investigation_slug"] if has_investigation_slug else None,
         })
     return out
 
@@ -209,6 +229,10 @@ def list_simulations(workspace: Path) -> list[dict]:
             if p.startswith("studies/") and p.endswith("/runs.db"):
                 study = p[len("studies/"):-len("/runs.db")]
                 r["studies"] = [study]
+        # Fall back to path-derived study_slug for legacy per-study DBs
+        # written before sqlite_emitter() stamped the column.
+        if not r.get("study_slug") and r.get("studies"):
+            r["study_slug"] = r["studies"][0]
     return rows
 
 
