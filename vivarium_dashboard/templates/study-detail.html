@@ -500,8 +500,152 @@
 {% if study.simulation_set %}
 <section class="study-tab-panel" data-kind="simulations" id="panel-simulations" hidden>
   <h3>Simulation set <span class="muted" style="font-size:0.85em;font-weight:normal">({{ study.simulation_set | length }} runs planned)</span></h3>
-  <p class="muted" style="font-size:0.88em">Each entry is a concrete run plan: baseline or perturbation, condition, duration, seeds, readouts collected, and tests applied.</p>
+  <p class="muted" style="font-size:0.88em">Each entry is a concrete run plan: baseline or perturbation, condition, duration, seeds, readouts collected, and tests applied. Sweep entries (Pass B) render their axes, per-run results, candidates, and rejection reasons.</p>
   {% for sim in study.simulation_set %}
+  {% if sim.kind == 'sweep' %}
+  {# ─── Pass B sweep entry ─────────────────────────────────────────── #}
+  <div class="panel sweep-entry" style="padding:14px 18px;margin-bottom:12px;border-left:3px solid #6366f1">
+    <header style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+      <strong style="font-size:1.05em">{{ sim.name }}</strong>
+      <span class="sim-status-pill sim-status-{{ sim.status or 'ready' }}">{{ sim.status or 'ready' }}</span>
+      <span class="muted" style="font-size:0.8em;padding:2px 6px;background:#eef2ff;border-radius:3px;color:#4338ca">SWEEP</span>
+    </header>
+    {% if sim.base_model %}
+    <div style="font-size:0.9em;margin-bottom:6px"><strong>Base model:</strong> <code>{{ sim.base_model }}</code></div>
+    {% endif %}
+    {# Axes table — use ['values'] indexing because .values is a dict method #}
+    <div style="margin:6px 0">
+      <strong style="font-size:0.9em">Axes ({{ sim.axes | length }})</strong>
+      <table class="sweep-axes-table" style="width:100%;border-collapse:collapse;margin-top:4px;font-size:0.85em">
+        <thead>
+          <tr style="background:#f8fafc">
+            <th style="text-align:left;padding:5px 8px;border-bottom:1px solid #cbd5e1">Parameter</th>
+            <th style="text-align:left;padding:5px 8px;border-bottom:1px solid #cbd5e1">Values</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ax in sim.axes %}
+          <tr style="border-bottom:1px solid #f1f5f9">
+            <td style="padding:5px 8px;vertical-align:top"><code>{{ ax.parameter }}</code></td>
+            <td style="padding:5px 8px;vertical-align:top">
+              {% for v in ax['values'] %}<code style="margin-right:6px">{{ v }}</code>{% endfor %}
+              <span class="muted" style="font-size:0.78em;margin-left:8px">({{ ax['values'] | length }} values)</span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {# Top-level sweep metadata #}
+    <p style="margin:6px 0;font-size:0.88em">
+      {% if sim.seeds %}<strong>Seeds:</strong> <code>{{ sim.seeds | join(', ') }}</code>{% else %}<span class="muted">No seeds set</span>{% endif %}
+      {% if sim.duration %} · <strong>Duration:</strong> {{ sim.duration }}s{% elif sim.duration_min %} · <strong>Duration:</strong> {{ sim.duration_min }} min{% endif %}
+    </p>
+    {% if sim.metrics %}
+    <p style="margin:4px 0;font-size:0.88em"><strong>Metrics captured:</strong>
+      {% for m in sim.metrics %}<code>{{ m }}</code>{% if not loop.last %} · {% endif %}{% endfor %}
+    </p>
+    {% endif %}
+    {% if sim.pass_fail_tests %}
+    <p style="margin:4px 0;font-size:0.88em"><strong>Pass/fail tests:</strong>
+      {% for t in sim.pass_fail_tests %}<code>{{ t }}</code>{% if not loop.last %} · {% endif %}{% endfor %}
+    </p>
+    {% endif %}
+    {% if sim.candidate_selection %}
+    <p style="margin:4px 0;font-size:0.88em"><strong>Candidate selection:</strong> <span class="muted">{{ sim.candidate_selection }}</span></p>
+    {% endif %}
+    {# Per-run results table — populated after execution #}
+    {% if sim.runs %}
+    <div style="margin:10px 0 6px 0">
+      <strong style="font-size:0.9em">Runs ({{ sim.runs | length }})</strong>
+      <div style="overflow-x:auto;margin-top:4px">
+        <table class="sweep-runs-table" style="width:100%;border-collapse:collapse;font-size:0.82em">
+          <thead>
+            <tr style="background:#f8fafc">
+              <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #cbd5e1">Axis values</th>
+              <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #cbd5e1">Seed</th>
+              <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #cbd5e1">Run ID</th>
+              <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #cbd5e1">Metrics</th>
+              <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #cbd5e1">Tests</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for run in sim.runs %}
+            {% set is_candidate = sim.candidates_selected and run.run_id in sim.candidates_selected %}
+            <tr style="border-bottom:1px solid #f1f5f9{% if is_candidate %};background:#ecfdf5{% endif %}">
+              <td style="padding:4px 6px;vertical-align:top">
+                {% if run.axis_values %}
+                  {% for k, v in run.axis_values.items() %}<code style="margin-right:4px">{{ k }}={{ v }}</code>{% endfor %}
+                {% else %}<span class="muted">—</span>{% endif %}
+              </td>
+              <td style="padding:4px 6px;vertical-align:top"><code>{{ run.seed if run.seed is defined else '—' }}</code></td>
+              <td style="padding:4px 6px;vertical-align:top">
+                <code>{{ run.run_id or '—' }}</code>
+                {% if is_candidate %}<span style="font-size:0.75em;color:#047857;margin-left:4px">★ candidate</span>{% endif %}
+              </td>
+              <td style="padding:4px 6px;vertical-align:top;font-size:0.95em">
+                {% if run.metrics %}
+                  {% for k, v in run.metrics.items() %}<div><code>{{ k }}</code>: {{ v }}</div>{% endfor %}
+                {% else %}<span class="muted">—</span>{% endif %}
+              </td>
+              <td style="padding:4px 6px;vertical-align:top">
+                {% if run.test_results %}
+                  {% for tname, tresult in run.test_results.items() %}
+                  <span class="sweep-test-badge sweep-test-{{ tresult }}" style="display:inline-block;padding:1px 6px;margin:1px;border-radius:3px;font-size:0.75em;{% if tresult == 'pass' %}background:#d1fae5;color:#065f46{% elif tresult == 'fail' %}background:#fee2e2;color:#991b1b{% elif tresult == 'error' %}background:#fef3c7;color:#92400e{% else %}background:#e5e7eb;color:#4b5563{% endif %}">{{ tname }}: {{ tresult }}</span>
+                  {% endfor %}
+                {% else %}<span class="muted">—</span>{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          {% if sim.aggregate_metrics %}
+          <tfoot>
+            <tr style="background:#f1f5f9;font-weight:600">
+              <td colspan="3" style="padding:6px 8px;text-align:right">Aggregate:</td>
+              <td colspan="2" style="padding:6px 8px">
+                {% for k, v in sim.aggregate_metrics.items() %}<code style="margin-right:8px">{{ k }}={{ v }}</code>{% endfor %}
+              </td>
+            </tr>
+          </tfoot>
+          {% endif %}
+        </table>
+      </div>
+    </div>
+    {% else %}
+    <p style="margin:8px 0;font-size:0.85em" class="muted"><em>No runs executed yet.</em></p>
+    {% endif %}
+    {# Candidates selected — highlighted #}
+    {% if sim.candidates_selected %}
+    <p style="margin:6px 0;font-size:0.88em;background:#ecfdf5;padding:6px 10px;border-radius:4px;color:#065f46">
+      ★ <strong>Candidates selected:</strong>
+      {% for cid in sim.candidates_selected %}<code style="background:#d1fae5;padding:1px 5px;margin:0 3px;border-radius:3px">{{ cid }}</code>{% endfor %}
+    </p>
+    {% endif %}
+    {# Rejection reasons — collapsible #}
+    {% if sim.rejection_reasons %}
+    <details style="margin:6px 0">
+      <summary style="cursor:pointer;font-size:0.88em;color:#991b1b"><strong>Rejection reasons ({{ sim.rejection_reasons | length }})</strong></summary>
+      <table style="width:100%;border-collapse:collapse;margin-top:4px;font-size:0.85em">
+        <thead>
+          <tr style="background:#fef2f2"><th style="text-align:left;padding:4px 8px">Run ID</th><th style="text-align:left;padding:4px 8px">Reason</th></tr>
+        </thead>
+        <tbody>
+          {% for rid, reason in sim.rejection_reasons.items() %}
+          <tr style="border-bottom:1px solid #fee2e2">
+            <td style="padding:4px 8px;vertical-align:top"><code>{{ rid }}</code></td>
+            <td style="padding:4px 8px;vertical-align:top">{{ reason }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </details>
+    {% endif %}
+    {% if sim.artifact_path %}
+    <p style="margin:6px 0;font-size:0.82em" class="muted">Stored at: <code>{{ sim.artifact_path }}</code></p>
+    {% endif %}
+  </div>
+  {% else %}
+  {# ─── Existing single-entry rendering (back-compat) ──────────────── #}
   <div class="panel" style="padding:14px 18px;margin-bottom:12px">
     <header style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px">
       <strong style="font-size:1.05em">{{ sim.name }}</strong>
@@ -539,6 +683,7 @@
     </p>
     {% endif %}
   </div>
+  {% endif %}
   {% endfor %}
 </section>
 {% endif %}
