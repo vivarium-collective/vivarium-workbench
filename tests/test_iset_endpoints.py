@@ -236,3 +236,81 @@ def test_iset_detail_includes_effective_status(_ws):
     assert code == 200, resp
     assert resp["effective_status"] == "complete"
     assert resp["status"] == "planning"
+
+
+# ---------------------------------------------------------------------------
+# Part 4: Pass A multi-axis status — round-trip through iset detail
+# ---------------------------------------------------------------------------
+
+
+def _write_study_full(ws, name, **fields):
+    """Write a study with arbitrary extra fields (multi-axis status etc.)."""
+    p = ws / "studies" / name / "study.yaml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "schema_version": 3,
+        "name": name,
+        "baseline": [{"composite": "x", "name": "b"}],
+        **fields,
+    }
+    p.write_text(yaml.safe_dump(data, sort_keys=False))
+
+
+def test_iset_detail_multiaxis_status_round_trip(_ws):
+    """All six Pass A axes set on a study must surface on the iset detail."""
+    _write_iset(_ws, "inv", status="planning", studies=["s1"])
+    _write_study_full(
+        _ws,
+        "s1",
+        status="ran",
+        design_status="approved",
+        implementation_status="complete",
+        simulation_status="ran",
+        evaluation_status="evaluated",
+        gate_status="passed",
+        expert_review_status="approved",
+    )
+    resp, code = _build_iset_detail_for_test(_ws, "inv")
+    assert code == 200, resp
+    s = resp["studies"][0]
+    assert s["name"] == "s1"
+    assert s["design_status"] == "approved"
+    assert s["implementation_status"] == "complete"
+    assert s["simulation_status"] == "ran"
+    assert s["evaluation_status"] == "evaluated"
+    assert s["gate_status"] == "passed"
+    assert s["expert_review_status"] == "approved"
+
+
+def test_iset_detail_multiaxis_status_absent_is_none(_ws):
+    """Studies that don't set any multi-axis fields must round-trip as None
+    on every axis (not raise KeyError, not omit the keys)."""
+    _write_iset(_ws, "inv", status="planning", studies=["s1"])
+    _write_study(_ws, "s1", "planned")  # no axis fields set
+    resp, code = _build_iset_detail_for_test(_ws, "inv")
+    assert code == 200, resp
+    s = resp["studies"][0]
+    for axis in (
+        "design_status", "implementation_status", "simulation_status",
+        "evaluation_status", "gate_status", "expert_review_status",
+    ):
+        assert s[axis] is None, f"{axis} should be None for legacy study, got {s[axis]!r}"
+
+
+def test_iset_detail_multiaxis_status_partial(_ws):
+    """Setting only some axes returns the set ones and leaves the rest None."""
+    _write_iset(_ws, "inv", status="planning", studies=["s1"])
+    _write_study_full(
+        _ws, "s1", status="ran",
+        gate_status="needs_calibration",
+        simulation_status="ran",
+    )
+    resp, code = _build_iset_detail_for_test(_ws, "inv")
+    assert code == 200, resp
+    s = resp["studies"][0]
+    assert s["gate_status"] == "needs_calibration"
+    assert s["simulation_status"] == "ran"
+    assert s["design_status"] is None
+    assert s["implementation_status"] is None
+    assert s["evaluation_status"] is None
+    assert s["expert_review_status"] is None

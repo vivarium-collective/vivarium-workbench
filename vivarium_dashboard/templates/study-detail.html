@@ -13,9 +13,56 @@
     {% if study.phase %}
     <span class="phase-pill phase-{{ study.phase|lower }}" title="Lifecycle: Design → Build → Simulate → Evaluate → Decide">{{ study.phase }}</span>
     {% endif %}
-    <span class="status-pill status-{{ study.status or 'planned' }}">{{ study.status or 'planned' }}</span>
+    {# Pass A: headline pill priority — gate_status (Pass A multi-axis) > legacy status > 'planned' fallback. #}
+    {% if study.gate_status %}
+    <span class="status-pill gate-status gate-status-{{ study.gate_status }}" title="Pipeline gate verdict (Pass A multi-axis status). Drives downstream unblocking.">gate: {{ study.gate_status }}</span>
+    {% elif study.status %}
+    <span class="status-pill status-{{ study.status }}">{{ study.status }}</span>
+    {% else %}
+    <span class="status-pill status-planned">planned</span>
+    {% endif %}
   </h1>
 </header>
+
+{# Pass A: multi-axis Status Detail panel — one chip per axis that is set on the study spec.
+   Hidden entirely when none of the six axes are set, so legacy v3 studies stay unchanged. #}
+{% set _axes = [
+  ('design_status',         'Design'),
+  ('implementation_status', 'Implementation'),
+  ('simulation_status',     'Simulation'),
+  ('evaluation_status',     'Evaluation'),
+  ('gate_status',           'Gate'),
+  ('expert_review_status',  'Expert review'),
+] %}
+{% set _ns = namespace(any_set=false) %}
+{% for _k, _ in _axes %}{% if study[_k] %}{% set _ns.any_set = true %}{% endif %}{% endfor %}
+{% if _ns.any_set %}
+<style>
+.status-detail-panel{margin:8px 0 14px 0;padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:0.88em}
+.status-detail-panel h2{margin:0 0 6px 0;font-size:0.82em;text-transform:uppercase;letter-spacing:0.05em;color:#475569;font-weight:600}
+.status-detail-row{display:flex;align-items:center;gap:8px;padding:3px 0}
+.status-detail-axis{min-width:140px;color:#475569;font-size:0.9em}
+.status-chip{display:inline-block;font-size:0.78em;padding:2px 10px;border-radius:9999px;background:#e2e8f0;color:#334155;font-family:ui-monospace,monospace}
+/* gate_status colors per Pass A spec: blocked=gray, needs_calibration=amber, passed=green, failed=red, stale=purple */
+.gate-status-blocked          { background:#e5e7eb; color:#374151 }
+.gate-status-needs_calibration{ background:#fef3c7; color:#92400e }
+.gate-status-passed           { background:#d1fae5; color:#065f46 }
+.gate-status-failed           { background:#fee2e2; color:#991b1b }
+.gate-status-stale            { background:#ede9fe; color:#5b21b6 }
+.status-pill.gate-status{font-weight:500}
+</style>
+<section class="status-detail-panel" aria-label="Multi-axis status detail">
+  <h2>Status detail (Pass A multi-axis)</h2>
+  {% for _key, _label in _axes %}
+  {% if study[_key] %}
+  <div class="status-detail-row">
+    <span class="status-detail-axis">{{ _label }}</span>
+    <span class="status-chip {% if _key == 'gate_status' %}gate-status-{{ study[_key] }}{% endif %}">{{ study[_key] }}</span>
+  </div>
+  {% endif %}
+  {% endfor %}
+</section>
+{% endif %}
 
 {# v3 detection: any of these fields being present (even as an empty list/dict)
    means the study was authored against the 8-section / 5-phase schema, and
