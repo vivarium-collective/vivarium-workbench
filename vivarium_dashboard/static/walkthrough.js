@@ -7882,10 +7882,22 @@
   function _simStudyChips(studies) {
     if (!studies || !studies.length) return '<span style="color:#9ca3af;">—</span>';
     return studies.map(function (name) {
-      return '<a href="#studies" title="' + _escSim(name) +
-        '" style="display:inline-block; background:#eef2ff; color:#3730a3; ' +
+      // Click opens that SPECIFIC study (via the embed-in-studies-page handler
+      // or, if it doesn't exist, the standalone /studies/<name> page).
+      // Falls back to the global Studies tab if neither handler is loaded.
+      var safeName = _escSim(name);
+      var onclick = "event.preventDefault(); " +
+        "if (typeof _openStudyEmbeddedNewTab === 'function') { " +
+          "_openStudyEmbeddedNewTab('" + safeName + "'); " +
+        "} else { " +
+          "window.location.href = '/studies/' + encodeURIComponent('" + safeName + "'); " +
+        "} return false;";
+      return '<a href="/studies/' + encodeURIComponent(name) + '" ' +
+        'onclick="' + onclick + '" ' +
+        'title="Open ' + safeName + '" ' +
+        'style="display:inline-block; background:#eef2ff; color:#3730a3; ' +
         'padding:1px 7px; margin:0 2px 2px 0; border-radius:10px; font-size:12px; ' +
-        'text-decoration:none;">' + _escSim(name) + '</a>';
+        'text-decoration:none;">' + safeName + '</a>';
     }).join('');
   }
 
