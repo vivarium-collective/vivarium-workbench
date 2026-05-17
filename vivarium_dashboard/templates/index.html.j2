@@ -213,6 +213,63 @@
   padding: 0.4rem 0.6rem; background: transparent; border: none; cursor: pointer;
 }
 .viv-workspace-switcher-actions button:hover { background: #f0f0f0; }
+
+/* Investigation switcher dropdown (anchored under the rail trigger). */
+.viv-workspace-switcher { position: relative; }
+.viv-iset-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% - 2px);
+  left: 12px;
+  right: 12px;
+  z-index: 1500;
+  background: #fff;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.14);
+  max-height: 60vh;
+  overflow-y: auto;
+  font-size: 13px;
+}
+.viv-iset-menu.open { display: block; }
+.viv-iset-menu-header {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: #6b7280; padding: 8px 12px 4px;
+}
+.viv-iset-menu-list { list-style: none; margin: 0; padding: 0; }
+.viv-iset-menu-row {
+  padding: 8px 12px; cursor: pointer;
+  border-top: 1px solid #f3f4f6;
+}
+.viv-iset-menu-row:first-child { border-top: none; }
+.viv-iset-menu-row:hover, .viv-iset-menu-row:focus { background: #f6f8fa; outline: none; }
+.viv-iset-menu-row-current { background: #eef4ff; }
+.viv-iset-menu-row-current:hover { background: #e3eefe; }
+.viv-iset-menu-row-line1 {
+  display: flex; align-items: center; gap: 8px;
+}
+.viv-iset-menu-row-title { flex: 1; font-size: 13px; color: #111827; }
+.viv-iset-menu-row-pill {
+  font-size: 0.7em !important;
+  padding: 1px 7px !important;
+  white-space: nowrap;
+}
+.viv-iset-menu-row-slug {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; color: #6b7280; margin-top: 2px;
+}
+.viv-iset-menu-row-current-tag { color: #1e40af; font-weight: 600; font-family: inherit; }
+.viv-iset-menu-loading, .viv-iset-menu-empty, .viv-iset-menu-error {
+  padding: 10px 12px; color: #6b7280; font-size: 12px;
+}
+.viv-iset-menu-error { color: #b91c1c; }
+.viv-iset-menu-divider { border-top: 1px solid #e5e7eb; }
+.viv-iset-menu-new {
+  display: block; width: 100%; text-align: left;
+  background: none; border: none; cursor: pointer;
+  padding: 10px 12px; font-size: 13px; color: #0366d6;
+}
+.viv-iset-menu-new:hover { background: #f6f8fa; }
 </style>
 </head><body>
 
@@ -728,11 +785,11 @@
   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
     <h2 class="page-title" style="margin:0">Investigation</h2>
     <div style="display:flex;gap:8px;align-items:center">
-      <button class="btn-mini" id="investigation-switch-btn" onclick="_showInvestigationList()" style="display:none">Switch investigation ↓</button>
-      <button class="action-btn" onclick="_openNewIsetModal()">+ New Investigation</button>
+      <!-- "Switch investigation" + "+ New Investigation" actions now live in
+           the left-rail investigation switcher dropdown (top of the rail). -->
     </div>
   </div>
-  <p class="page-lead" id="investigation-page-lead">The active investigation. Click a node in the DAG to open a study. Use <em>Switch investigation</em> when more than one investigation exists in the workspace.</p>
+  <p class="page-lead" id="investigation-page-lead">The active investigation. Click a node in the DAG to open a study. Use the investigation switcher at the top of the left rail to switch active investigation or start a new one.</p>
 
   <!-- List view: investigation cards. -->
   <div id="investigations-list" class="investigations-list-grid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap:12px;">
@@ -1399,7 +1456,11 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/client.js" onerror="/* live mode unavailable */"></script>
 <script src="assets/walkthrough.js" onerror="/* walkthrough unavailable */"></script>
 <script src="assets/investigations.js" onerror="/* investigations unavailable */"></script>
-<script src="assets/workspace-switcher.js"></script>
+<!-- workspace-switcher.js is intentionally not loaded: the left-rail dropdown
+     it used to drive has been repurposed into the investigation switcher
+     (investigation-switcher.js). The /api/workspaces endpoints remain available
+     for CLI tooling. -->
+<script src="assets/investigation-switcher.js"></script>
 <script>
 // Initialize drop zones once walkthrough.js is loaded.
 document.addEventListener("DOMContentLoaded", function() {
