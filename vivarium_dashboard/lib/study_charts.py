@@ -232,17 +232,44 @@ def _fmt(v: float) -> str:
     return f"{v:.2g}"
 
 
+def _table_exists(conn, name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone()
+    return row is not None
+
+
 def render_study_charts(runs_db: Path,
                         run_name: str | None = None) -> list[dict]:
     """Return a list of {key, title, caption, svg} for the latest run in runs.db.
 
     Returns an empty list (not an error) when the db is missing, the run
     name isn't found, or all extractors come back empty.
+
+    Schema fallback: if runs.db doesn't have the dnaa-style
+    ``simulations``/``history`` tables but DOES have a perf-style
+    ``runs``/``ticks`` pair (the colonies-01 perf harness), render
+    N-sweep scaling charts instead. Extend this with new schemas as
+    studies introduce them.
     """
     if not runs_db.exists():
         return []
+
+    # Perf-harness schema (colonies-01-hpc-readiness): runs + ticks tables.
     conn = sqlite3.connect(str(runs_db))
     try:
+        if _table_exists(conn, "runs") and _table_exists(conn, "ticks"):
+            charts = _render_perf_sweep_charts(conn)
+            if charts:
+                return charts
+    finally:
+        conn.close()
+
+    # dnaa-style schema fallback.
+    conn = sqlite3.connect(str(runs_db))
+    try:
+        if not _table_exists(conn, "simulations") or not _table_exists(conn, "history"):
+            return []
         if run_name:
             row = conn.execute(
                 "SELECT simulation_id FROM simulations WHERE name=? "
@@ -299,4 +326,182 @@ def render_study_charts(runs_db: Path,
             "key": spec["key"], "title": spec["title"],
             "caption": spec["caption"], "svg": svg,
         })
+    return charts
+
+
+# ---------------------------------------------------------------------------
+# Perf-harness schema (runs + ticks)
+#
+# Schema (see studies/colonies-01-hpc-readiness/sims/run.py):
+#   runs(run_id, sim_name, n_cells_initial, n_cells_final, duration_s,
+#        seed, wall_seconds, peak_rss_mb, n_division_events, started_at,
+#        completed_at, status, note)
+#   ticks(run_id, tick, sim_time, wall_ms, per_cell_update_ms_sum,
+#         pymunk_step_ms, live_cell_count, rss_mb)
+#
+# Renders four charts: N-vs-tick-wall (total), N-vs-per-cell-wall (the
+# flat-scaling test), N-vs-peak-RSS, and the largest-N per-tick wall
+# trace over time (shows variability + division spikes).
+# ---------------------------------------------------------------------------
+
+def _render_xy_svg(title: str, x_label: str, y_label: str,
+                   xs: list[float], ys: list[float],
+                   width: int = 720, height: int = 220) -> str:
+    """Thin wrapper around _render_svg that swaps the default per-second
+    x-axis tick labels for a custom one (used for N-on-x-axis charts)."""
+    svg = _render_svg(title, y_label, xs, ys, width=width, height=height)
+    # _render_svg appends "s" to x-axis tick labels (assumes seconds).
+    # Replace those with bare values for non-time x-axes.
+    import re
+    svg = re.sub(r'(<text[^>]*text-anchor="middle"[^>]*>)(\d[^<]*)s(</text>)',
+                 r'\1\2\3', svg)
+    return svg
+
+
+def _embed_gif_chart(gif_path: Path, key: str, title: str, caption: str) -> dict | None:
+    """If ``gif_path`` exists, return a chart dict whose ``svg`` field is an
+    <img> tag with the GIF inlined as a base64 data URL. Returns None when
+    the GIF is missing so the caller can skip the entry.
+
+    The chart panel renders ``c.svg`` via innerHTML, so HTML tags work just
+    as well as SVG markup. Embedding keeps the chart self-contained for the
+    downloadable HTML investigation report."""
+    if not gif_path.exists():
+        return None
+    import base64
+    try:
+        b64 = base64.b64encode(gif_path.read_bytes()).decode("ascii")
+    except Exception:
+        return None
+    return {
+        "key": key,
+        "title": title,
+        "caption": caption,
+        "svg": (
+            '<div style="text-align:center; padding:8px">'
+            f'<img src="data:image/gif;base64,{b64}" '
+            f'alt="{escape(title)}" '
+            'style="max-width:100%; height:auto; border:1px solid #e2e8f0; '
+            'border-radius:4px"></div>'
+        ),
+    }
+
+
+def _render_perf_sweep_charts(conn) -> list[dict]:
+    """Build N-sweep scaling charts from runs + ticks tables.
+
+    Aggregates per-tick wall times by run (steady-state window = tick ≥ 10)
+    and plots {avg_tick_ms, per_cell_ms, peak_rss_mb} versus
+    n_cells_initial. Filters to ``sim_name LIKE 'nsweep-%'`` so the
+    smoke run doesn't muddy the curve.
+    """
+    rows = conn.execute("""
+        SELECT r.run_id, r.sim_name, r.n_cells_initial, r.peak_rss_mb,
+               AVG(t.wall_ms)               AS avg_tick_ms,
+               AVG(t.per_cell_update_ms_sum) AS avg_ecoli_ms,
+               AVG(t.pymunk_step_ms)        AS avg_pymunk_ms,
+               COUNT(t.tick)                AS ticks
+        FROM runs r
+        JOIN ticks t ON r.run_id = t.run_id AND t.tick >= 10
+        WHERE r.status = 'ok' AND r.sim_name LIKE 'nsweep-%'
+        GROUP BY r.run_id
+        ORDER BY r.n_cells_initial
+    """).fetchall()
+    if not rows:
+        return []
+
+    ns           = [float(r[2] or 0) for r in rows]
+    avg_ticks    = [float(r[4] or 0) for r in rows]
+    per_cell_ms  = [(avg_ticks[i] / ns[i]) if ns[i] else 0.0 for i in range(len(rows))]
+    peak_rss     = [float(r[3] or 0) for r in rows]
+
+    charts: list[dict] = []
+
+    # Colony animation — colony.gif lives next to runs.db when present.
+    # Surface it as the first chart so the Visualizations tab opens with
+    # the most-immediate "is this actually growing and dividing?" answer.
+    gif_chart = _embed_gif_chart(
+        Path(conn.execute("PRAGMA database_list").fetchone()[2]).parent / "colony.gif",
+        key="colony-animation",
+        title="Colony growth + division (animated)",
+        caption=(
+            "Pure whole-cell E. coli colony, N=2 initial → divided to 4 daughters "
+            "(force-divide after warmup tick). Each capsule is one cell; colour "
+            "encodes lineage (daughters get hue-shifted variants of the mother). "
+            "Regenerate via `python studies/colonies-01-hpc-readiness/sims/make_gif.py`."
+        ),
+    )
+    if gif_chart:
+        charts.append(gif_chart)
+    charts.append({
+        "key": "perf-tick-wall-vs-n",
+        "title": "Per-tick wall time vs N (steady-state)",
+        "caption": (
+            "Mean wall time per composite tick, by initial cell count. "
+            "Linear scaling here is the HPC-readiness signature — anything "
+            "super-linear (GIL contention, O(N²) physics, scheduler) would "
+            "bend up at large N."
+        ),
+        "svg": _render_xy_svg(
+            "Per-tick wall time vs N",
+            "N (initial cells)", "wall time (ms / tick)",
+            ns, avg_ticks,
+        ),
+    })
+    charts.append({
+        "key": "perf-per-cell-vs-n",
+        "title": "Per-cell wall time vs N (steady-state)",
+        "caption": (
+            "wall_ms / N. The `per-cell-cost-within-2x-reference` test "
+            "passes when this stays within 2× of N=1. Flat-or-decreasing "
+            "is the ideal shape (here ~73 ms/cell across N=1..8)."
+        ),
+        "svg": _render_xy_svg(
+            "Per-cell wall time vs N",
+            "N (initial cells)", "wall time (ms / cell / tick)",
+            ns, per_cell_ms,
+        ),
+    })
+    charts.append({
+        "key": "perf-rss-vs-n",
+        "title": "Peak RSS vs N",
+        "caption": (
+            "Process resident set size at end of run. RAM grows ~450 MB per "
+            "added cell atop a ~1 GB Python/import baseline; this is the "
+            "constraint that sets the per-node cell ceiling on HPC."
+        ),
+        "svg": _render_xy_svg(
+            "Peak RSS vs N",
+            "N (initial cells)", "RSS (MB)",
+            ns, peak_rss,
+        ),
+    })
+
+    # Per-tick wall trace for the largest-N run — shows steady-state vs
+    # warmup / division spikes.
+    largest = rows[-1]
+    largest_run_id = largest[0]
+    trace_rows = conn.execute(
+        "SELECT tick, wall_ms FROM ticks WHERE run_id=? ORDER BY tick",
+        (largest_run_id,),
+    ).fetchall()
+    if trace_rows:
+        ticks_x = [float(r[0]) for r in trace_rows]
+        walls_y = [float(r[1]) for r in trace_rows]
+        svg = _render_xy_svg(
+            f"Per-tick wall trace — {largest[1]} (N={int(largest[2])})",
+            "tick", "wall time (ms)",
+            ticks_x, walls_y,
+        )
+        charts.append({
+            "key": "perf-tick-trace-largest",
+            "title": f"Per-tick wall trace — {largest[1]}",
+            "caption": (
+                "Wall-time per tick over the whole run for the largest N "
+                "in the sweep. Useful for spotting outliers, warmup effects, "
+                "and division-event spikes."
+            ),
+            "svg": svg,
+        })
+
     return charts

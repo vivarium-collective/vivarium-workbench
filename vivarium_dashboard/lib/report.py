@@ -389,8 +389,29 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     registry, registry_warning = _load_registry(ws_root, package_path)
     pbg_doc = _load_document(ws_root, package_path)
 
+    # Active investigation: when the workspace has exactly one
+    # investigation declared at investigations/<name>/investigation.yaml,
+    # surface its name alongside the workspace name in the dashboard
+    # chrome (so e.g. `v2ecoli:colonies` instead of just `v2ecoli`).
+    # Multiple investigations → leave blank; the workspace switcher
+    # already exposes a per-investigation selector.
+    active_investigation_name = ""
+    inv_root = ws_root / "investigations"
+    if inv_root.is_dir():
+        inv_dirs = sorted(
+            d for d in inv_root.iterdir()
+            if d.is_dir() and (d / "investigation.yaml").is_file()
+        )
+        if len(inv_dirs) == 1:
+            try:
+                inv_spec = yaml.safe_load((inv_dirs[0] / "investigation.yaml").read_text()) or {}
+                active_investigation_name = inv_spec.get("name") or inv_dirs[0].name
+            except Exception:
+                active_investigation_name = inv_dirs[0].name
+
     out.write_text(tpl.render(
         workspace_name=ws["name"],
+        active_investigation_name=active_investigation_name,
         workspace_description=ws.get("description", ""),
         generated_at=today,
         imports=imports,

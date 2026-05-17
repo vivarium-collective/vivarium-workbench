@@ -271,12 +271,27 @@ body.focus-mode main.pages{ padding-top:8px }
 body.focus-mode .page-lead-supplement{ display:none }
 
 /* v2 layout (viv-rail / viv-topbar): focus mode hides the whole rail +
- * topbar so the popped-out window is content-only. Used by pop-out
- * buttons (?focus=investigations etc.). */
+ * topbar so the popped-out window is content-only. Explicit sizing on
+ * .viv-main + .viv-content prevents the flex collapse that left popouts
+ * blank when the topbar was hidden but the flex container still expected
+ * a topbar-shaped child. */
 body.focus-mode .viv-rail{ display:none !important }
 body.focus-mode .viv-topbar{ display:none !important }
-body.focus-mode .viv-main{ margin-left:0 !important; padding:8px 12px !important }
-body.focus-mode .viv-app{ grid-template-columns:1fr !important }
+body.focus-mode .viv-layout{ height:100vh !important; display:flex !important; flex-direction:row !important }
+body.focus-mode .viv-main{
+  display:flex !important; flex-direction:column !important;
+  flex:1 1 100% !important; width:100% !important;
+  min-width:0 !important; margin:0 !important;
+  overflow:hidden !important;
+}
+body.focus-mode .viv-content{
+  flex:1 1 auto !important;
+  width:100% !important; height:100% !important;
+  overflow-y:auto !important;
+  padding:12px 16px !important;
+  display:block !important;
+}
+body.focus-mode .page.active{ display:block !important; min-height:0 !important }
 
 /* ── Composite explorer diagram (v0.5.1.6) ─────────────────────────────
  * Server preserves graphviz's natural pt dimensions; CSS only shrinks
