@@ -35,29 +35,51 @@
 
   // ── Charts panel: inline SVGs from /api/study-charts ─────────────────────
   // Re-used by both Runs tab and Visualizations tab. Memoized per panel id.
+  // Merges two sources returned by the server:
+  //   live   — generated from runs.db at request time
+  //   static — pre-rendered SVGs under studies/<name>/charts/
   var _chartsLoadedFor = {};
+  function _renderChartCard(c) {
+    var title = c.title
+      ? '<div class="chart-title">' + c.title + '</div>'
+      : '';
+    return '<div class="chart-card">' + title + c.svg +
+           '<div class="chart-caption">' + (c.caption || '') + '</div></div>';
+  }
   function _loadCharts(panelId) {
     if (_chartsLoadedFor[panelId]) return;
     var panel = document.getElementById(panelId);
     if (!panel) return;
     _chartsLoadedFor[panelId] = true;
-    panel.innerHTML = '<p class="muted" style="margin:0">Loading charts from runs.db…</p>';
+    panel.innerHTML = '<p class="muted" style="margin:0">Loading charts…</p>';
     fetch('/api/study-charts/' + encodeURIComponent(studyName()))
       .then(function(r) { return r.json(); })
       .then(function(d) {
         if (!d || !d.charts || !d.charts.length) {
           panel.innerHTML = (d && d.db_exists === false)
-            ? '<p class="muted" style="margin:0">No <code>runs.db</code> yet. Run a baseline to populate charts.</p>'
+            ? '<p class="muted" style="margin:0">No <code>runs.db</code> and no static charts under <code>studies/' + studyName() + '/charts/</code>.</p>'
             : '<p class="muted" style="margin:0">No chart data available for this study.</p>';
           return;
         }
+        var live = d.charts.filter(function(c) { return (c.source || 'live') === 'live'; });
+        var stat = d.charts.filter(function(c) { return c.source === 'static'; });
+        var html = '';
         // Section header only on Runs-tab variant; viz panel has its own header.
-        var header = (panelId === 'charts-panel')
+        var topHeader = (panelId === 'charts-panel')
           ? '<h3 class="section-title">Latest run — visualizations</h3>' : '';
-        panel.innerHTML = header + d.charts.map(function(c) {
-          return '<div class="chart-card">' + c.svg +
-                 '<div class="chart-caption">' + (c.caption || '') + '</div></div>';
-        }).join('');
+        html += topHeader;
+        if (live.length) {
+          html += live.map(_renderChartCard).join('');
+        }
+        if (stat.length) {
+          if (live.length) {
+            html += '<h3 class="section-title" style="margin-top:24px">Pre-rendered charts <span class="muted" style="font-weight:400;font-size:0.85em">(checked-in under <code>studies/' + studyName() + '/charts/</code>)</span></h3>';
+          } else if (panelId === 'charts-panel') {
+            html += '<p class="muted" style="margin:0 0 12px 0">No <code>runs.db</code> yet — showing pre-rendered charts only.</p>';
+          }
+          html += stat.map(_renderChartCard).join('');
+        }
+        panel.innerHTML = html;
       })
       .catch(function(e) {
         panel.innerHTML = '<p class="muted" style="color:#dc2626">Chart load failed: ' + (e && e.message || e) + '</p>';

@@ -5076,29 +5076,49 @@ if __name__ == "__main__":
         return self._json({"base": base, "branch": branch, "changes": changes}, 200)
 
     def _get_study_charts(self):
-        """GET /api/study-charts/<name> — inline-SVG charts for the latest run.
+        """GET /api/study-charts/<name> — inline-SVG charts for the study.
 
-        Reads ``studies/<name>/runs.db`` (the per-step history emitted by
-        SQLiteEmitter), picks the latest entry from the ``simulations`` table
-        (filtered to ``baseline-steady-state`` when present), and renders a
-        small canonical set of line charts as inline SVG so they can be
-        embedded directly in the offline HTML report.
+        Two sources, merged in display order (live first, static after):
+
+          live    — ``studies/<name>/runs.db`` (the per-step history
+                    emitted by SQLiteEmitter). Picks the latest entry
+                    from the ``simulations`` table (filtered to
+                    ``baseline-steady-state`` when present) and renders
+                    a small canonical set of line charts.
+          static  — any pre-rendered ``studies/<name>/charts/*.svg``
+                    files (with optional ``*.meta.json`` sidecars
+                    providing title + caption). These are the domain-
+                    specific charts the study authors checked in
+                    directly (e.g. chromosome maps, DnaA-box positions).
         """
         import urllib.parse
-        from vivarium_dashboard.lib.study_charts import render_study_charts
+        from vivarium_dashboard.lib.study_charts import (
+            render_study_charts, discover_static_study_charts,
+        )
         path = urllib.parse.urlparse(self.path).path
         name = path[len("/api/study-charts/"):].strip("/")
         if not name:
             return self._json({"error": "missing study name"}, 400)
         runs_db = WORKSPACE / "studies" / name / "runs.db"
+        charts_dir = WORKSPACE / "studies" / name / "charts"
         try:
-            charts = render_study_charts(runs_db, run_name="baseline-steady-state")
-            if not charts:
-                charts = render_study_charts(runs_db, run_name=None)
+            live_charts = render_study_charts(
+                runs_db, run_name="baseline-steady-state",
+            )
+            if not live_charts:
+                live_charts = render_study_charts(runs_db, run_name=None)
+            for c in live_charts:
+                c.setdefault("source", "live")
+            static_charts = discover_static_study_charts(charts_dir)
         except Exception as e:
             return self._json({"error": str(e), "study": name}, 500)
-        return self._json({"study": name, "charts": charts,
-                           "db_exists": runs_db.exists()}, 200)
+        return self._json({
+            "study": name,
+            "charts": live_charts + static_charts,
+            "db_exists": runs_db.exists(),
+            "static_count": len(static_charts),
+            "live_count": len(live_charts),
+        }, 200)
 
     def _get_iset_detail(self):
         """GET /api/iset/<name> — return one investigation + its resolved studies.

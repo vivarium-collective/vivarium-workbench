@@ -239,6 +239,52 @@ def _table_exists(conn, name: str) -> bool:
     return row is not None
 
 
+def discover_static_study_charts(charts_dir: Path) -> list[dict]:
+    """Return inline-SVG chart records for any `*.svg` under ``charts_dir``.
+
+    Companion to ``render_study_charts``: where that one runs SQL against
+    ``runs.db`` to draw fresh plots, this one surfaces SVGs the study has
+    ALREADY rendered to disk (e.g. domain-specific chromosome maps,
+    DnaA-box layouts) so the dashboard's chart panel includes them.
+
+    Convention: each ``<name>.svg`` may have a sibling ``<name>.meta.json``
+    of shape ``{"title": "...", "caption": "..."}``. Files are returned
+    sorted by filename — the ``00_summary.svg`` / ``01_*.svg`` naming
+    convention used in this workspace gives a natural display order.
+
+    Returns ``[]`` if the directory doesn't exist, has no SVGs, or any I/O
+    fails (treated as "no charts" rather than an error so the panel can
+    still render the live charts).
+    """
+    if not charts_dir.exists() or not charts_dir.is_dir():
+        return []
+    out: list[dict] = []
+    for svg_path in sorted(charts_dir.glob("*.svg")):
+        try:
+            svg_text = svg_path.read_text()
+        except Exception:
+            continue
+        meta_path = svg_path.with_suffix(".meta.json")
+        title = svg_path.stem
+        caption = ""
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+                if isinstance(meta, dict):
+                    title = str(meta.get("title", title)) or title
+                    caption = str(meta.get("caption", "")) or ""
+            except Exception:
+                pass
+        out.append({
+            "key": svg_path.stem,
+            "title": title,
+            "caption": caption,
+            "svg": svg_text,
+            "source": "static",
+        })
+    return out
+
+
 def render_study_charts(runs_db: Path,
                         run_name: str | None = None) -> list[dict]:
     """Return a list of {key, title, caption, svg} for the latest run in runs.db.
