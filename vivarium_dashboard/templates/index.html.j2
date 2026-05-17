@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en"><head>
-<meta charset="UTF-8"><title>{{ workspace_name }}</title>
+<meta charset="UTF-8"><title>{{ workspace_name }}{% if active_investigation_name %}:{{ active_investigation_name }}{% endif %}</title>
 <link rel="stylesheet" href="assets/style.css">
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 <style>
@@ -235,7 +235,7 @@
               aria-haspopup="true" aria-expanded="false"
               id="viv-workspace-switcher-trigger">
         <span class="viv-workspace-switcher-glyph">●</span>
-        <strong>{{ workspace_name }}</strong>
+        <strong>{{ workspace_name }}{% if active_investigation_name %}:{{ active_investigation_name }}{% endif %}</strong>
         <span class="viv-arrow">▾</span>
       </button>
     </div>
@@ -353,7 +353,7 @@
 
     <header class="viv-topbar">
       <nav class="viv-topbar-breadcrumbs" id="viv-breadcrumbs">
-        <span>{{ workspace_name }} dashboard</span>
+        <span>{{ workspace_name }}{% if active_investigation_name %}:{{ active_investigation_name }}{% endif %} dashboard</span>
       </nav>
       <div class="viv-topbar-actions" id="viv-topbar-actions">
         <!-- Git status strip + action buttons populated by JS (_refreshGitStatus) -->
@@ -819,7 +819,7 @@
          style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid #e5e7eb; background:#f9fafb">
       <strong id="study-detail-name" style="font-size:1.05em"></strong>
       <div style="display:flex; gap:6px">
-        <button class="btn-mini" onclick="_popoutStudy()" title="Open in separate window">Pop out &#8599;</button>
+        <button class="btn-mini" onclick="_popoutStudy()" title="Open in a separate window. If it opens as a tab, your browser's 'open new pages as tabs' preference is overriding the popup hint (Safari → Tabs → 'Open pages in tabs instead of windows' → set to 'Manually').">Pop out &#8599;</button>
         <button class="btn-mini" onclick="_closeStudyEmbedded()" title="Close">&times;</button>
       </div>
     </div>
@@ -994,7 +994,7 @@
     <!-- Loom-explore iframe — internal View/Run/Document tabs live inside -->
     <div class="panel">
       <div class="loom-frame-toolbar" style="display:flex;justify-content:flex-end;margin-bottom:6px">
-        <button class="btn-mini" onclick="_popoutLoom('composite-explore-frame')" title="Open in separate window">Pop out &#8599;</button>
+        <button class="btn-mini" onclick="_popoutLoom('composite-explore-frame')" title="Open in a separate window. If it opens as a tab, your browser's 'open new pages as tabs' preference is overriding the popup hint (Safari → Tabs → 'Open pages in tabs instead of windows' → set to 'Manually').">Pop out &#8599;</button>
       </div>
       <iframe id="composite-explore-frame"
               src="/loom-explore/index.html"
