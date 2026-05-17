@@ -889,6 +889,7 @@
     <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
       <h3 id="investigation-detail-title" style="margin:0; flex:1"></h3>
       <span id="investigation-detail-status" class="status-pill planned" style="font-size:0.85em"></span>
+      <button class="btn-mini" id="investigation-detail-refresh" onclick="_refreshInvestigationDetail()" title="Re-fetch the investigation + its studies from disk. Use after editing YAML files directly (which the dashboard can't see otherwise).">↻ Refresh</button>
       <button class="btn-mini" onclick="_generateInvestigationReport()" title="Generate a shareable HTML report (self-contained, attach to email)">Generate report 📄</button>
       <button class="btn-mini" onclick="_openCloneIsetModal()" title="Clone this investigation into a fresh planning state (no run results). Useful for a parallel attempt or a demo fixture.">Clone ⎘</button>
       <button class="btn-mini" onclick="_popoutInvestigation()" title="Open in a separate window (investigation-only, no sidebar). If it opens as a tab, your browser's 'open new pages as tabs' preference is overriding the popup hint (Safari → Tabs → 'Open pages in tabs instead of windows' → set to 'Manually').">Pop out ↗</button>
