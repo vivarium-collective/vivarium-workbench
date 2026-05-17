@@ -3578,6 +3578,26 @@
   }
   window._openInvestigationDetail = _openInvestigationDetail;
 
+  // Manual refresh: re-fetch /api/iset/<current> + re-render. Use after editing
+  // investigation.yaml / study.yaml files directly on disk (which the dashboard
+  // has no other way to learn about — there's no file watcher or auto-poll).
+  function _refreshInvestigationDetail() {
+    var name = window._currentIset;
+    if (!name) return;
+    var btn = document.getElementById('investigation-detail-refresh');
+    if (btn) { btn.disabled = true; btn.textContent = '↻ Refreshing…'; }
+    try {
+      _openInvestigationDetail(name);
+    } finally {
+      // _openInvestigationDetail kicks off an async fetch; restore the button
+      // shortly after so the user sees the click registered.
+      setTimeout(function() {
+        if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh'; }
+      }, 400);
+    }
+  }
+  window._refreshInvestigationDetail = _refreshInvestigationDetail;
+
   function _closeInvestigationDetail() {
     window._currentIset = null;
     document.getElementById('investigations-list').style.display = '';
