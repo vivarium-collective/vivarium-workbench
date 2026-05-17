@@ -99,6 +99,121 @@ def test_list_tolerates_malformed_study_yaml(tmp_path):
     assert sims[0]["studies"] == []
 
 
+def _seed_sqlite_emitter_run(
+    db_file,
+    *,
+    simulation_id,
+    name,
+    started_at_iso,
+    study_slug=None,
+    investigation_slug=None,
+):
+    """Seed a row in the SQLiteEmitter-shaped DB, with optional slug cols."""
+    import sqlite3
+    db_file.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_file))
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS simulations ("
+        "  simulation_id TEXT PRIMARY KEY, name TEXT, started_at TEXT NOT NULL,"
+        "  completed_at TEXT, elapsed_seconds REAL, composite_config TEXT,"
+        "  metadata TEXT, emit_schema TEXT,"
+        "  study_slug TEXT, investigation_slug TEXT)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS history ("
+        "  simulation_id TEXT, step INTEGER, global_time REAL, state TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO simulations "
+        "(simulation_id, name, started_at, completed_at, study_slug, "
+        "investigation_slug) VALUES (?, ?, ?, ?, ?, ?)",
+        (simulation_id, name, started_at_iso, started_at_iso,
+         study_slug, investigation_slug),
+    )
+    conn.execute(
+        "INSERT INTO history (simulation_id, step, global_time, state) "
+        "VALUES (?, ?, ?, ?)",
+        (simulation_id, 0, 0.0, "{}"),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_list_exposes_study_and_investigation_slugs(tmp_path):
+    """SQLiteEmitter rows with the new slug columns surface them in the API shape."""
+    ws = tmp_path / "ws"
+    db = ws / ".pbg" / "composite-runs.db"
+    _seed_sqlite_emitter_run(
+        db,
+        simulation_id="sim-1",
+        name="baseline-seed0",
+        started_at_iso="2026-05-17T00:00:00Z",
+        study_slug="dnaa-01-expression-dynamics",
+        investigation_slug="dnaa-replication",
+    )
+
+    sims = list_simulations(ws)
+    assert len(sims) == 1
+    assert sims[0]["run_id"] == "sim-1"
+    assert sims[0]["study_slug"] == "dnaa-01-expression-dynamics"
+    assert sims[0]["investigation_slug"] == "dnaa-replication"
+
+
+def test_list_tolerates_legacy_db_without_slug_columns(tmp_path):
+    """SQLiteEmitter DBs predating the slug columns still list cleanly."""
+    import sqlite3
+    ws = tmp_path / "ws"
+    db = ws / ".pbg" / "composite-runs.db"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db))
+    # Old shape — no study_slug / investigation_slug columns.
+    conn.execute(
+        "CREATE TABLE simulations ("
+        "  simulation_id TEXT PRIMARY KEY, name TEXT, started_at TEXT NOT NULL,"
+        "  completed_at TEXT, elapsed_seconds REAL)"
+    )
+    conn.execute(
+        "CREATE TABLE history ("
+        "  simulation_id TEXT, step INTEGER, global_time REAL, state TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO simulations (simulation_id, name, started_at, completed_at) "
+        "VALUES (?, ?, ?, ?)",
+        ("sim-legacy", "legacy", "2025-01-01T00:00:00Z", "2025-01-01T00:01:00Z"),
+    )
+    conn.execute(
+        "INSERT INTO history VALUES (?, ?, ?, ?)",
+        ("sim-legacy", 0, 0.0, "{}"),
+    )
+    conn.commit()
+    conn.close()
+
+    sims = list_simulations(ws)
+    assert len(sims) == 1
+    assert sims[0]["run_id"] == "sim-legacy"
+    assert sims[0]["study_slug"] is None
+    assert sims[0]["investigation_slug"] is None
+
+
+def test_list_derives_study_slug_from_path_for_legacy_per_study_db(tmp_path):
+    """Per-study DBs without slug columns get a path-derived study_slug."""
+    ws = tmp_path / "ws"
+    db = ws / "studies" / "alpha" / "runs.db"
+    _seed_sqlite_emitter_run(
+        db,
+        simulation_id="sim-perstudy",
+        name="seed0",
+        started_at_iso="2026-01-01T00:00:00Z",
+    )
+
+    sims = list_simulations(ws)
+    assert len(sims) == 1
+    # path -> studies, and study_slug falls back to studies[0]
+    assert sims[0]["studies"] == ["alpha"]
+    assert sims[0]["study_slug"] == "alpha"
+    assert sims[0]["investigation_slug"] is None
+
+
 import os
 
 from vivarium_dashboard.lib.simulations_index import (

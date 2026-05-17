@@ -7921,6 +7921,11 @@
       ? new Date(sim.started_at * 1000).toISOString()
       : '';
     var runTooltip = (sim.run_id || '') + '\n' + (sim.db_path || '');
+    var investigation = sim.investigation_slug || '';
+    var investigationCell = investigation
+      ? '<code style="font-size:12px; color:#374151;">' +
+          _escSim(investigation) + '</code>'
+      : '<span style="color:#9ca3af;">—</span>';
     return (
       '<tr data-run-id="' + _escSim(sim.run_id) + '" ' +
         'style="border-bottom:1px solid #f3f4f6;">' +
@@ -7935,6 +7940,7 @@
         'onmouseout="this.style.textDecoration=\'none\';">' +
         '<code>' + composite + '</code></a>' +
       '</td>' +
+      '<td style="padding:6px 8px;">' + investigationCell + '</td>' +
       '<td style="padding:6px 8px;">' + _simStudyChips(sim.studies) + '</td>' +
       '<td style="padding:6px 8px;">' + _simStatusChip(sim.status) + '</td>' +
       '<td style="padding:6px 8px;">' + _escSim(stepsTxt) + '</td>' +
@@ -7958,7 +7964,9 @@
     var rows = window._simRows || [];
     var visible = q ? rows.filter(function (s) {
       var hay = (s.spec_id + ' ' + (s.sim_name || '') + ' ' + (s.label || '') +
-                  ' ' + (s.studies || []).join(' ')).toLowerCase();
+                  ' ' + (s.studies || []).join(' ') +
+                  ' ' + (s.investigation_slug || '') +
+                  ' ' + (s.study_slug || '')).toLowerCase();
       return hay.indexOf(q) >= 0;
     }) : rows;
     var tbody = document.getElementById('sim-tbody');
