@@ -4597,18 +4597,60 @@
     }).join('');
 
     // ── Build the TOC (sidebar nav) entries from the ordered studies ────
+    // Display name is human-readable; the kebab-slug appears in small
+    // muted text below as a stable identifier reference. Counts surface
+    // the v3-shape quantities a reader actually cares about.
+    function _humanizeStudyName(slug) {
+      // strip a leading "<prefix>-NN[a-z]?-" so dnaa-01-expression-dynamics
+      // becomes just "expression-dynamics". Keep the numbered prefix for
+      // display as a chip ("dnaa-01").
+      var m = /^([a-z]+-\d+[a-z]*)-(.+)$/.exec(slug);
+      if (!m) return {chip: '', title: slug.replace(/-/g, ' ')};
+      var rest = m[2].replace(/-/g, ' ');
+      // Title-case the first letter of the first word; leave the rest in
+      // lowercase so identifiers (rna_synth_prob etc.) read naturally.
+      rest = rest.charAt(0).toUpperCase() + rest.slice(1);
+      // Truncate aggressively for very long follow-up names.
+      if (rest.length > 60) rest = rest.slice(0, 57) + '…';
+      return {chip: m[1], title: rest};
+    }
+
     var tocStudies = ordered.map(function(s, i) {
       var anchor = 'study-' + _h(s.name);
       var statusClass = 'badge-' + _h(s.status || 'planned');
-      var counts = ((s.expected_behavior || []).length || 0) + 'pred · '
-                 + ((s.variants || []).length || 0) + 'var · '
-                 + ((s.interventions || []).length || 0) + 'int · '
-                 + ((s.gaps || []).length || 0) + 'gap';
+      var display = _humanizeStudyName(s.name);
+      var beh = s.behavior_tests || s.expected_behavior || [];
+      var nFindings  = (s.findings || []).length;
+      var nRuns      = (s.runs || []).length;
+      var nTests     = beh.length;
+      var nFollowups = (s.follow_up_studies || []).length;
+      // "Blockers" = open follow-ups that the next study depends on
+      // resolving (the seedable, not-done ones). A coarse but useful
+      // signal that the gate isn't clean yet.
+      var nBlockers = (s.follow_up_studies || []).filter(function(f) {
+        return f.status !== 'done' && f.kind !== 'existing';
+      }).length;
+
+      function _pill(n, label) {
+        if (!n) return '';
+        return '<span class="toc-count-pill">' + n + ' ' + label + '</span>';
+      }
+      var counts = ''
+        + _pill(nFindings,  'findings')
+        + _pill(nRuns,      'runs')
+        + _pill(nTests,     'tests')
+        + _pill(nFollowups, 'follow-ups')
+        + _pill(nBlockers,  'blockers');
+
+      var chipHtml = display.chip
+        ? '<span class="toc-chip">' + _h(display.chip) + '</span> '
+        : '';
       return '<li><a href="#' + anchor + '">' +
              '<span class="toc-num">' + (i + 1) + '.</span> ' +
-             _h(s.name) +
+             chipHtml + '<strong>' + _h(display.title) + '</strong>' +
              ' <span class="toc-status ' + statusClass + '">' + _h(s.status || 'planned') + '</span>' +
-             '<div class="toc-counts muted">' + counts + '</div>' +
+             (counts ? '<div class="toc-counts">' + counts + '</div>' : '') +
+             '<div class="toc-slug muted">' + _h(s.name) + '</div>' +
              '</a></li>';
     }).join('');
 
@@ -4641,7 +4683,10 @@
       + '.toc-status.badge-ran{background:#d1fae5;color:#065f46}'
       + '.toc-status.badge-complete{background:#d1fae5;color:#064e3b}'
       + '.toc-status.badge-failed{background:#fee2e2;color:#991b1b}'
-      + '.toc-counts{font-size:0.7em;margin-top:2px;font-family:-apple-system,sans-serif}'
+      + '.toc-counts{font-size:0.7em;margin-top:4px;font-family:-apple-system,sans-serif;display:flex;flex-wrap:wrap;gap:3px}'
+      + '.toc-count-pill{display:inline-block;background:#eef2ff;color:#3730a3;padding:1px 7px;border-radius:9999px;font-size:0.92em;line-height:1.4}'
+      + '.toc-chip{display:inline-block;font-family:ui-monospace,monospace;font-size:0.78em;background:#f1f5f9;color:#475569;padding:0 5px;border-radius:3px;margin-right:2px}'
+      + '.toc-slug{font-size:0.66em;color:#94a3b8;margin-top:3px;font-family:ui-monospace,monospace;word-break:break-all}'
       + '.toc-toggle{display:none;position:fixed;top:12px;right:12px;z-index:100;padding:6px 10px;'
       +    'background:#0f172a;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85em}'
       + '.content{flex:1;min-width:0;padding:24px 36px}'
