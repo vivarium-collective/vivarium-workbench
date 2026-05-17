@@ -64,6 +64,54 @@ def _row_to_dict(row, db_path_str: str) -> dict:
     }
 
 
+def _read_sqlite_emitter(db_path: Path, db_path_str: str) -> list[dict]:
+    """Read process_bigraph.emitter.SQLiteEmitter's `simulations` + `history`
+    tables and translate to the dashboard's run-dict shape. Returns [] when
+    the DB doesn't have a `simulations` table (this isn't an emitter DB)."""
+    try:
+        raw = sqlite3.connect(str(db_path))
+        raw.row_factory = sqlite3.Row
+    except sqlite3.OperationalError as e:
+        warnings.warn(f"simulations_index: skipping {db_path_str}: {e}")
+        return []
+    try:
+        tbls = {r[0] for r in raw.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+        if "simulations" not in tbls or "history" not in tbls:
+            return []
+        rows = raw.execute(
+            "SELECT s.simulation_id, s.name, s.started_at, s.completed_at, "
+            "       s.elapsed_seconds, "
+            "       (SELECT COUNT(*) FROM history h WHERE h.simulation_id = s.simulation_id) AS n_rows, "
+            "       (SELECT MAX(step) FROM history h WHERE h.simulation_id = s.simulation_id) AS max_step "
+            "FROM simulations s ORDER BY s.started_at DESC"
+        ).fetchall()
+    except sqlite3.OperationalError as e:
+        warnings.warn(f"simulations_index: sqlite-emitter read failed for {db_path_str}: {e}")
+        return []
+    finally:
+        raw.close()
+    out = []
+    for r in rows:
+        n_rows = r["n_rows"] or 0
+        out.append({
+            "run_id":        r["simulation_id"],
+            "spec_id":       "",
+            "sim_name":      r["name"] or "",
+            "label":         r["name"] or "",
+            "status":        "completed" if r["completed_at"] else "running",
+            "n_steps":       (r["max_step"] + 1) if r["max_step"] is not None else n_rows,
+            "progress_step": r["max_step"] if r["max_step"] is not None else n_rows,
+            "started_at":    r["started_at"],
+            "completed_at":  r["completed_at"],
+            "db_path":       db_path_str,
+            "source":        "sqlite_emitter",
+            "studies":       [],
+        })
+    return out
+
+
 def _read_runs_meta(db_path: Path, db_path_str: str) -> list[dict]:
     """SELECT every runs_meta row in a DB. Tolerates lock/timeout by returning []."""
     try:
@@ -72,6 +120,12 @@ def _read_runs_meta(db_path: Path, db_path_str: str) -> list[dict]:
         warnings.warn(f"simulations_index: skipping {db_path_str}: {e}")
         return []
     try:
+        # Skip if no runs_meta table (DB is SQLiteEmitter-format, not dashboard-format).
+        tbls = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+        if "runs_meta" not in tbls:
+            return []
         rows = conn.execute(
             "SELECT run_id, spec_id, sim_name, label, status, n_steps, "
             "progress_step, started_at, completed_at "
@@ -132,11 +186,29 @@ def list_simulations(workspace: Path) -> list[dict]:
     workspace = Path(workspace)
     rows: list[dict] = []
     for db_path, db_rel in _discover_dbs(workspace):
+        # Try both schemas; each returns [] when its table is absent so the
+        # two are non-overlapping per DB.
         rows.extend(_read_runs_meta(db_path, db_rel))
-    rows.sort(key=lambda r: (r["started_at"] or 0.0), reverse=True)
+        rows.extend(_read_sqlite_emitter(db_path, db_rel))
+
+    def _ts(r):
+        v = r.get("started_at")
+        return v if v is not None else ""
+    rows.sort(key=_ts, reverse=True)
+
     run_to_studies = _build_run_to_studies_map(workspace)
+    # SQLiteEmitter runs are study-scoped by path (studies/<name>/runs.db),
+    # so derive the study name from db_path when no explicit study.yaml
+    # cross-reference exists.
     for r in rows:
-        r["studies"] = list(run_to_studies.get(r["run_id"], []))
+        # Explicit cross-reference takes priority
+        explicit = list(run_to_studies.get(r["run_id"], []))
+        r["studies"] = explicit
+        if not explicit and r.get("source") == "sqlite_emitter":
+            p = (r.get("db_path") or "")
+            if p.startswith("studies/") and p.endswith("/runs.db"):
+                study = p[len("studies/"):-len("/runs.db")]
+                r["studies"] = [study]
     return rows
 
 

@@ -200,12 +200,14 @@
   function _openDetachedWindow(url, width, height) {
     width = width || 1280;
     height = height || 900;
+    var left = Math.max(0, (window.screen.availWidth  - width)  / 2);
+    var top  = Math.max(0, (window.screen.availHeight - height) / 2);
     var features = [
       'popup=yes',
       'width=' + width,
       'height=' + height,
-      'left=' + Math.max(0, (window.screen.availWidth - width) / 2),
-      'top=' + Math.max(0, (window.screen.availHeight - height) / 2),
+      'left=' + left,
+      'top=' + top,
       'menubar=no',
       'toolbar=no',
       'location=no',
@@ -214,7 +216,20 @@
       'scrollbars=yes',
       'noopener',           // discourage tab grouping with opener
     ].join(',');
-    return window.open(url, '_blank', features);
+    // NOTE: dropping `_blank` as the target name and using a unique name
+    // ('detached-' + timestamp) makes Safari less inclined to merge the
+    // popup into the opener tab's window. With a fresh name + popup
+    // features the browser is more likely to honor the request.
+    var target = 'detached-' + Date.now();
+    var w = window.open(url, target, features);
+    if (!w) return w;
+    // Belt-and-suspenders: a few browsers (Chrome with certain prefs,
+    // Firefox on Linux) ignore the popup hint at open() time but still
+    // honor a post-open resizeTo/moveTo. Calling these is harmless when
+    // they don't apply.
+    try { w.resizeTo(width, height); } catch (_) {}
+    try { w.moveTo(left, top);       } catch (_) {}
+    return w;
   }
   window._openDetachedWindow = _openDetachedWindow;
 
@@ -411,29 +426,36 @@
     // Focus mode: ?focus=<panel> hides everything except the named panel.
     var params = new URLSearchParams(window.location.search);
     var focus = params.get('focus');
+    var focusedPage = null;
     if (focus) {
       var validPages = ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'investigations', 'studies', 'simulations', 'composite-explore'];
       if (validPages.indexOf(focus) >= 0) {
         document.body.classList.add('focus-mode', 'focus-' + focus);
         _switchPage(focus);
-        return; // skip normal hash-based routing
+        focusedPage = focus;
+        // DO NOT return — fall through so the ?investigation=<name> auto-open
+        // handler below also fires (it was previously skipped by the early
+        // return, leaving popouts blank when the iset auto-open in
+        // _loadInvestigationSets didn't fire in time).
       }
     }
 
-    function fromHash() {
-      var h = (window.location.hash || '').replace(/^#/, '');
-      var validPages = ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'investigations', 'studies', 'simulations', 'composite-explore'];
-      _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
+    if (!focusedPage) {
+      function fromHash() {
+        var h = (window.location.hash || '').replace(/^#/, '');
+        var validPages = ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'investigations', 'studies', 'simulations', 'composite-explore'];
+        _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
+      }
+      window.addEventListener('hashchange', fromHash);
+      fromHash();
     }
-    window.addEventListener('hashchange', fromHash);
-    fromHash();
 
     // ?investigation=<name> → auto-open that investigation's detail view.
     // The setTimeout retries to handle the race where the iframe / API
     // load races with the page swap.
     var qInv = new URLSearchParams(window.location.search).get('investigation');
     if (qInv) {
-      _switchPage('investigations');
+      if (!focusedPage) _switchPage('investigations');
       var tries = 0;
       var attemptOpen = function() {
         var detailEl = document.getElementById('investigation-detail-view');
