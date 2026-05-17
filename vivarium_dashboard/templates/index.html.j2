@@ -466,34 +466,7 @@
     <button class="action-btn" onclick="openModal('modal-dataset')">+ Add dataset</button>
   </div>
 
-  <!-- References panel -->
-  <div class="panel">
-    <h3>References</h3>
-    <p class="panel-lead">BibTeX bibliography + claim &rarr; paper mapping. Adds entries to <code>references/papers.bib</code> and <code>references/claims.yaml</code>.</p>
-    <p>Entries in <code>references/papers.bib</code>: <strong>{{ references_count }}</strong> &nbsp;&middot;&nbsp; PDFs committed: <strong>{{ (references_pdfs or [])|length }}</strong></p>
-    {% if references_pdfs %}
-    <table style="font-size:0.86em;margin-bottom:10px"><thead><tr><th>Bib key</th><th>File</th></tr></thead><tbody>
-    {% for pdf in references_pdfs %}
-    <tr>
-      <td><code>{{ pdf.bib_key }}</code>{% if pdf._metadata_pending %} <span class="stage-label optional">Needs metadata</span>{% endif %}</td>
-      <td>
-        {% if pdf.file_exists %}
-          {% if pdf.sha256_valid == False %}<span class="file-status status-mismatch">⚠ sha mismatch</span>{% else %}<span class="file-status status-ok">✓ {{ pdf.size_human }}</span>{% endif %}
-          <a href="/{{ pdf.path }}" target="_blank" class="file-link">Open ↗</a><br>
-          <small class="muted">{{ pdf.path }}</small>
-        {% elif pdf.file_exists == False %}
-          <span class="file-status status-missing">⚠ missing</span><br>
-          <small class="muted">{{ pdf.path }}</small>
-        {% else %}
-          <small class="muted">{{ pdf.path }}</small>
-        {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-    </tbody></table>
-    {% endif %}
-    <button class="action-btn" onclick="openModal('modal-reference')">+ Add reference (PDF)</button>
-  </div>
+  <!-- (References panel folded into the unified References & Bibliography panel below.) -->
 
   <!-- Expert knowledge panel — card layout (replaces cramped 5-column table) -->
   <div class="panel">
@@ -540,16 +513,42 @@
     <button class="action-btn" onclick="openModal('modal-expert-doc')">+ Add expert document</button>
   </div>
 
-  <!-- Bibliography panel — papers.bib explorer -->
+  <!-- References & Bibliography panel — unified (papers.bib explorer + committed PDFs + add-reference action) -->
   <div class="panel">
-    <h3>Bibliography <span class="muted" style="font-size:0.75em;font-weight:normal">({{ bib_entries|length }} entries in references/papers.bib)</span></h3>
-    <p class="panel-lead">Formal publications cited across the studies. Click any card to expand its details; click <em>Open ↗</em> to access the paper. Reading notes (if present) live at <code>references/notes/&lt;bib-key&gt;.md</code>.</p>
+    <h3>References &amp; Bibliography <span class="muted" style="font-size:0.75em;font-weight:normal">({{ bib_entries|length }} entries in references/papers.bib · {{ (references_pdfs or [])|length }} PDFs committed)</span></h3>
+    <p class="panel-lead">Formal publications cited across the studies. BibTeX entries in <code>references/papers.bib</code> + committed PDF files + claim mapping in <code>references/claims.yaml</code>. Click any card to expand details; click <em>Open ↗</em> to access. Reading notes (if present) live at <code>references/notes/&lt;bib-key&gt;.md</code>.</p>
 
-    <div style="margin-bottom:10px">
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
       <input type="search" id="bib-filter" placeholder="Filter by key, title, author, year…"
-             style="width:100%;max-width:480px;padding:6px 10px;border:1px solid #cbd5e1;border-radius:4px;font-size:0.9em"
+             style="flex:1;min-width:280px;max-width:480px;padding:6px 10px;border:1px solid #cbd5e1;border-radius:4px;font-size:0.9em"
              oninput="_filterBibEntries(this.value)">
+      <button class="action-btn" onclick="openModal('modal-reference')">+ Add reference (PDF)</button>
     </div>
+
+    {% if references_pdfs %}
+    <details style="margin-bottom:14px">
+      <summary style="cursor:pointer;font-weight:600;color:#334155">Committed PDFs ({{ (references_pdfs or [])|length }})</summary>
+      <table style="font-size:0.86em;margin-top:8px;width:100%"><thead><tr><th style="text-align:left">Bib key</th><th style="text-align:left">File</th></tr></thead><tbody>
+      {% for pdf in references_pdfs %}
+      <tr>
+        <td><code>{{ pdf.bib_key }}</code>{% if pdf._metadata_pending %} <span class="stage-label optional">Needs metadata</span>{% endif %}</td>
+        <td>
+          {% if pdf.file_exists %}
+            {% if pdf.sha256_valid == False %}<span class="file-status status-mismatch">⚠ sha mismatch</span>{% else %}<span class="file-status status-ok">✓ {{ pdf.size_human }}</span>{% endif %}
+            <a href="/{{ pdf.path }}" target="_blank" class="file-link">Open ↗</a><br>
+            <small class="muted">{{ pdf.path }}</small>
+          {% elif pdf.file_exists == False %}
+            <span class="file-status status-missing">⚠ missing</span><br>
+            <small class="muted">{{ pdf.path }}</small>
+          {% else %}
+            <small class="muted">{{ pdf.path }}</small>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody></table>
+    </details>
+    {% endif %}
 
     {% if bib_entries %}
     <div id="bib-entries-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px">

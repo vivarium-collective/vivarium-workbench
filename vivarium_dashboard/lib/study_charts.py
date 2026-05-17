@@ -239,6 +239,45 @@ def _table_exists(conn, name: str) -> bool:
     return row is not None
 
 
+def _load_static_charts(study_dir: Path) -> list[dict]:
+    """Discover per-study static SVGs in <study_dir>/charts/.
+
+    Each *.svg file is returned as one chart entry. Optional sidecar
+    .meta.json with {title, caption} per file is honored; otherwise the
+    filename (sans extension) becomes the title.
+
+    Files load in alpha-sorted order, so prefix with 01_, 02_, ... to
+    control display sequence. Stable for both the dashboard's Visualizations
+    tab and the downloadable investigation HTML report.
+    """
+    charts_dir = study_dir / "charts"
+    if not charts_dir.is_dir():
+        return []
+    out: list[dict] = []
+    for svg_path in sorted(charts_dir.glob("*.svg")):
+        try:
+            svg_body = svg_path.read_text()
+        except Exception:
+            continue
+        meta_path = svg_path.with_suffix(".meta.json")
+        title = svg_path.stem
+        caption = ""
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+                title = meta.get("title", title)
+                caption = meta.get("caption", "")
+            except Exception:
+                pass
+        out.append({
+            "key":     svg_path.stem,
+            "title":   title,
+            "caption": caption,
+            "svg":     svg_body,
+        })
+    return out
+
+
 def render_study_charts(runs_db: Path,
                         run_name: str | None = None) -> list[dict]:
     """Return a list of {key, title, caption, svg} for the latest run in runs.db.
@@ -246,12 +285,32 @@ def render_study_charts(runs_db: Path,
     Returns an empty list (not an error) when the db is missing, the run
     name isn't found, or all extractors come back empty.
 
-    Schema fallback: if runs.db doesn't have the dnaa-style
-    ``simulations``/``history`` tables but DOES have a perf-style
-    ``runs``/``ticks`` pair (the colonies-01 perf harness), render
-    N-sweep scaling charts instead. Extend this with new schemas as
-    studies introduce them.
+    Sources, in priority order:
+      1. Per-study static SVGs in ``studies/<name>/charts/*.svg`` (if present).
+         These are written by study authors (e.g., via
+         ``pbg_superpowers.study_charts``) and survive when the run DB is
+         absent or stale.
+      2. Perf-harness schema (colonies-01-hpc-readiness): runs + ticks tables.
+      3. dnaa-style schema (simulations + history tables) with hardcoded CHART_SPECS.
     """
+    # Source 1: per-study static charts. Convention: SVGs live alongside
+    # runs.db in studies/<name>/charts/.
+    study_dir = runs_db.parent
+    static = _load_static_charts(study_dir)
+    if static:
+        # Append db-derived charts AFTER the curated ones, so curated work
+        # leads but live trajectories are still available below.
+        db_charts = _render_db_charts(runs_db, run_name) if runs_db.exists() else []
+        return static + db_charts
+
+    if not runs_db.exists():
+        return []
+    return _render_db_charts(runs_db, run_name)
+
+
+def _render_db_charts(runs_db: Path, run_name: str | None) -> list[dict]:
+    """Original DB-driven chart logic, factored out so static charts can
+    pre-empt or augment it."""
     if not runs_db.exists():
         return []
 
