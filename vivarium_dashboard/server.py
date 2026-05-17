@@ -738,6 +738,156 @@ def _build_iset_summary_for_test(ws_root: Path) -> list[dict]:
     return out
 
 
+# --- Pass C: cross-worktree investigation registry --------------------------
+#
+# Each running vivarium-dashboard registers itself in ~/.pbg/servers/*.json
+# (path = worktree, pid, port, url). To support the cross-worktree
+# investigation switcher in the left rail, we expose
+# /api/investigation-registry which combines:
+#
+#   • "current"         — this server's active Investigation summary
+#   • "running_others"  — every OTHER live server's current Investigation,
+#                         queried over HTTP from each peer's /api/iset-list.
+#
+# Peers that don't respond within a short timeout are silently skipped.
+# The HTTP probe results are cached for _REGISTRY_TTL_S to avoid hammering
+# peers on every sidebar render.
+
+_REGISTRY_TTL_S = 5.0
+_registry_cache: dict[str, tuple[float, dict]] = {}
+
+
+def _http_get_json(url: str, timeout: float = 1.5) -> dict | None:
+    """Best-effort GET → JSON. Returns None on any failure (timeout, non-2xx,
+    invalid JSON). Never raises — callers treat None as 'peer unreachable'.
+    """
+    import urllib.request
+    import urllib.error
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            if resp.status != 200:
+                return None
+            data = resp.read()
+            return json.loads(data.decode("utf-8", errors="replace"))
+    except (urllib.error.URLError, TimeoutError, OSError,
+            json.JSONDecodeError, ValueError):
+        return None
+
+
+def _peer_current_investigation(url: str) -> dict | None:
+    """Query a peer dashboard's /api/iset-list and pick a current Investigation.
+
+    Heuristic: peer-side `/api/iset-list` returns every Investigation in the
+    peer's workspace. We pick the one whose `effective_status` is "running"
+    if present; otherwise the first entry. Returns a slim
+    ``{slug, title, effective_status}`` dict, or None if the peer has no
+    investigations or didn't respond.
+    """
+    cached = _registry_cache.get(url)
+    now = time.time()
+    if cached and now - cached[0] < _REGISTRY_TTL_S:
+        return cached[1] or None
+    data = _http_get_json(url.rstrip("/") + "/api/iset-list")
+    out: dict | None
+    if not data or not isinstance(data.get("investigations"), list):
+        out = None
+    else:
+        invs = data["investigations"]
+        running = next(
+            (i for i in invs if i.get("effective_status") == "running"),
+            None,
+        )
+        chosen = running or (invs[0] if invs else None)
+        if chosen:
+            out = {
+                "slug":             chosen.get("name"),
+                "title":            chosen.get("title", chosen.get("name")),
+                "effective_status": chosen.get("effective_status"),
+            }
+        else:
+            out = None
+    _registry_cache[url] = (now, out or {})
+    return out
+
+
+def _build_investigation_registry_for_test(
+    ws_root: Path,
+    this_url: str,
+    *,
+    list_servers_fn=None,
+    fetch_peer_fn=None,
+) -> dict:
+    """Pure function backing GET /api/investigation-registry.
+
+    ``list_servers_fn`` and ``fetch_peer_fn`` are injectable to keep the
+    helper testable without filesystem or HTTP I/O.
+
+    Returns ``{current: {...}, running_others: [...]}`` where each
+    ``running_others`` entry carries ``{slug, title?, worktree_path, url,
+    effective_status, pid}``. Entries whose peer probe fails (None) are
+    dropped from the list so the sidebar never renders empty rows.
+    """
+    if list_servers_fn is None:
+        try:
+            from pbg_superpowers import workspace_catalog
+            list_servers_fn = workspace_catalog.list_servers
+        except Exception:
+            list_servers_fn = lambda: []
+    if fetch_peer_fn is None:
+        fetch_peer_fn = _peer_current_investigation
+
+    # Current Investigation: pick from this workspace's iset list with the
+    # same heuristic we use for peers (running > first > none).
+    invs = _build_iset_summary_for_test(ws_root)
+    if invs:
+        running = next(
+            (i for i in invs if i.get("effective_status") == "running"),
+            None,
+        )
+        chosen = running or invs[0]
+        current = {
+            "slug":             chosen.get("name"),
+            "title":            chosen.get("title", chosen.get("name")),
+            "worktree_path":    str(ws_root.resolve()),
+            "url":              this_url,
+            "effective_status": chosen.get("effective_status"),
+        }
+    else:
+        current = {
+            "slug":             None,
+            "title":            None,
+            "worktree_path":    str(ws_root.resolve()),
+            "url":              this_url,
+            "effective_status": None,
+        }
+
+    # Running-others: every server record that does NOT point at this
+    # worktree path AND has a live PID.
+    this_path = str(ws_root.resolve())
+    others: list[dict] = []
+    for entry in list_servers_fn():
+        if entry.get("path") == this_path:
+            continue
+        if not entry.get("_alive", False):
+            continue
+        url = entry.get("url") or ""
+        if not url:
+            continue
+        peer = fetch_peer_fn(url)
+        if peer is None:
+            continue
+        others.append({
+            "slug":             peer.get("slug"),
+            "title":            peer.get("title"),
+            "worktree_path":    entry.get("path"),
+            "url":              url,
+            "effective_status": peer.get("effective_status"),
+            "pid":              entry.get("pid"),
+        })
+
+    return {"current": current, "running_others": others}
+
+
 def _build_iset_detail_for_test(ws_root: Path, name: str) -> tuple[dict, int]:
     """Pure function backing ``GET /api/iset/<name>`` — returns
     (response_dict, status_code). Used by the HTTP handler and unit tests.
@@ -2538,6 +2688,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_iset_list()
         if self.path.startswith("/api/iset/"):
             return self._get_iset_detail()
+        if self.path.startswith("/api/investigation-registry"):
+            return self._get_investigation_registry()
         if self.path.startswith("/api/study-charts/"):
             return self._get_study_charts()
         if self.path.startswith("/api/work-composite-diff"):
@@ -4969,6 +5121,52 @@ if __name__ == "__main__":
         """
         out = _build_iset_summary_for_test(WORKSPACE)
         return self._json({"investigations": out}, 200)
+
+    def _get_investigation_registry(self):
+        """GET /api/investigation-registry — Pass C cross-worktree view.
+
+        Returns the current worktree's active Investigation plus every
+        OTHER live dashboard's current Investigation, queried over HTTP
+        from each peer's /api/iset-list and cached for ~5s.
+
+        Shape::
+
+            {
+              "current": {
+                "slug": "...",
+                "title": "...",
+                "worktree_path": "...",
+                "url": "http://127.0.0.1:<port>",
+                "effective_status": "..."
+              },
+              "running_others": [
+                {
+                  "slug": "...",
+                  "title": "...",
+                  "worktree_path": "...",
+                  "url": "http://127.0.0.1:<port>",
+                  "effective_status": "...",
+                  "pid": <int>
+                }, ...
+              ]
+            }
+        """
+        # The server doesn't know its own URL up front; derive from the
+        # ~/.pbg/servers record (which we wrote on boot in cli.py). Fall
+        # back to a best-effort URL constructed from this request's Host.
+        this_url = ""
+        try:
+            from pbg_superpowers import workspace_catalog
+            rec = workspace_catalog.find_running(WORKSPACE)
+            if rec:
+                this_url = rec.get("url") or ""
+        except Exception:
+            pass
+        if not this_url:
+            host = self.headers.get("Host") or "127.0.0.1"
+            this_url = f"http://{host}"
+        out = _build_investigation_registry_for_test(WORKSPACE, this_url)
+        return self._json(out, 200)
 
     def _post_iset_create(self, body: dict):
         """POST /api/iset-create — scaffold a new investigation.yaml.

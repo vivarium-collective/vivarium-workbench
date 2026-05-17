@@ -1,19 +1,31 @@
-// Investigation switcher dropdown for the left rail.
+// Cross-worktree Investigation switcher dropdown for the left rail.
 //
-// Repurposes the dropdown trigger that previously opened the workspace
-// switcher modal (#viv-workspace-switcher-trigger). It now lists every
-// investigation in the workspace (GET /api/iset-list), shows each one's
-// effective_status as a colored pill, and lets the user:
+// Pass C (2026-05-17). The dropdown now reads /api/investigation-registry —
+// an aggregated view across every running dashboard on this host — instead
+// of just this server's /api/iset-list. The convention is one Investigation
+// per worktree per branch, so each entry corresponds to a separate worktree
+// + dashboard server (intentional parallelism).
 //
-//   • click an investigation row → switch the active investigation
-//     (delegates to window._openInvestigationDetail, which also navigates
-//     to the Investigation tab),
-//   • click "+ New Investigation" at the bottom → open the existing
-//     new-investigation modal owned by walkthrough.js (window._openNewIsetModal).
+// Layout (top → bottom):
 //
-// The dropdown is a small absolute-positioned panel anchored under the
-// trigger button, not a centered modal. Clicking outside, pressing Escape,
-// or selecting a row closes it.
+//   ┌─────────────────────────────────────────────┐
+//   │ Investigations                              │   header
+//   ├─────────────────────────────────────────────┤
+//   │ [active here] <current slug>      [pill]    │   THIS worktree
+//   ├──── OTHER WORKTREES ───────────────────────┤   (hidden if empty)
+//   │ <slug>                            [pill] →  │   click → open peer URL
+//   │ <slug>                            [pill] →  │
+//   ├─────────────────────────────────────────────┤
+//   │ + New Investigation                         │
+//   └─────────────────────────────────────────────┘
+//
+// Clicking the current-investigation row opens its detail in-place (same
+// behavior as the legacy switcher). Clicking a row under OTHER WORKTREES
+// opens that peer dashboard in a new tab — it lives in a different worktree
+// and shouldn't be navigated to in this tab.
+//
+// "+ New Investigation" still calls window._openNewIsetModal (provided by
+// walkthrough.js), which scaffolds the YAML in THIS workspace.
 
 (function () {
   const trigger = document.getElementById('viv-workspace-switcher-trigger');
@@ -36,8 +48,6 @@
       <div class="viv-iset-menu-divider"></div>
       <button type="button" class="viv-iset-menu-new" role="menuitem">+ New Investigation</button>
     `;
-    // Mount inside the same container as the trigger so it inherits the
-    // rail's stacking + positioning context.
     const container = document.getElementById('viv-workspace-switcher') || document.body;
     container.appendChild(menu);
 
@@ -51,7 +61,6 @@
       }
     });
 
-    // Click inside the menu shouldn't propagate to the outside-click handler.
     menu.addEventListener('click', (e) => { e.stopPropagation(); });
   }
 
@@ -61,8 +70,6 @@
     trigger.setAttribute('aria-expanded', 'true');
     refresh();
 
-    // Outside-click closes (use a microtask delay so the trigger's own
-    // click doesn't immediately close the menu we just opened).
     setTimeout(() => {
       outsideHandler = (e) => {
         if (menu && !menu.contains(e.target) && !trigger.contains(e.target)) close();
@@ -97,75 +104,114 @@
     const list = menu.querySelector('.viv-iset-menu-list');
     list.innerHTML = '<li class="viv-iset-menu-loading">Loading…</li>';
     try {
-      const resp = await fetch('/api/iset-list', { headers: { Accept: 'application/json' } });
+      const resp = await fetch('/api/investigation-registry', {
+        headers: { Accept: 'application/json' },
+      });
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const data = await resp.json();
-      render(data.investigations || []);
+      render(data.current || null, data.running_others || []);
     } catch (err) {
       list.innerHTML = '<li class="viv-iset-menu-error">Failed to load: '
         + escapeHtml(String(err)) + '</li>';
     }
   }
 
-  function render(isets) {
+  function render(current, others) {
     const list = menu.querySelector('.viv-iset-menu-list');
     list.innerHTML = '';
-    if (!isets.length) {
+
+    if (current && current.slug) {
+      list.appendChild(renderCurrentRow(current));
+    } else {
       const li = document.createElement('li');
       li.className = 'viv-iset-menu-empty';
-      li.textContent = 'No investigations yet.';
+      li.textContent = 'No investigations in this worktree yet.';
       list.appendChild(li);
-      return;
     }
-    const activeName = window._currentIset || '';
-    isets.forEach((iset) => list.appendChild(renderRow(iset, activeName)));
+
+    if (others && others.length) {
+      const divider = document.createElement('li');
+      divider.className = 'viv-iset-menu-section';
+      divider.textContent = 'OTHER WORKTREES';
+      list.appendChild(divider);
+      others.forEach((peer) => list.appendChild(renderPeerRow(peer)));
+    }
+    // If `others` is empty, the OTHER WORKTREES section is omitted entirely
+    // — no empty header, no placeholder row.
   }
 
-  function renderRow(iset, activeName) {
+  function renderCurrentRow(current) {
     const li = document.createElement('li');
-    li.className = 'viv-iset-menu-row';
+    li.className = 'viv-iset-menu-row viv-iset-menu-row-current';
     li.setAttribute('role', 'menuitem');
     li.tabIndex = 0;
-    if (iset.name === activeName) li.classList.add('viv-iset-menu-row-current');
 
-    const effStatus = iset.effective_status || iset.status || 'planning';
+    const effStatus = current.effective_status || 'planning';
     const pillClass = effStatus.replace(/[^a-z_]/g, '_');
-    const title = iset.title || iset.name;
+    const title = current.title || current.slug;
 
     li.innerHTML = `
       <div class="viv-iset-menu-row-line1">
         <strong class="viv-iset-menu-row-title">${escapeHtml(title)}</strong>
         <span class="status-pill ${escapeHtml(pillClass)} viv-iset-menu-row-pill">${escapeHtml(effStatus)}</span>
       </div>
-      <div class="viv-iset-menu-row-slug">${escapeHtml(iset.name)}${
-        iset.name === activeName ? ' <span class="viv-iset-menu-row-current-tag">(active)</span>' : ''
-      }</div>
+      <div class="viv-iset-menu-row-slug">${escapeHtml(current.slug)}
+        <span class="viv-iset-menu-row-current-tag">(active here)</span>
+      </div>
     `;
 
-    li.addEventListener('click', (e) => {
-      e.stopPropagation();
+    const activate = () => {
       close();
-      switchInvestigation(iset.name);
-    });
+      switchInvestigationLocal(current.slug);
+    };
+    li.addEventListener('click', (e) => { e.stopPropagation(); activate(); });
     li.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        close();
-        switchInvestigation(iset.name);
-      }
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
     });
     return li;
   }
 
-  function switchInvestigation(name) {
-    // Make sure the Investigation tab is active, then open the chosen iset.
+  function renderPeerRow(peer) {
+    const li = document.createElement('li');
+    li.className = 'viv-iset-menu-row viv-iset-menu-row-peer';
+    li.setAttribute('role', 'menuitem');
+    li.tabIndex = 0;
+    li.title = `Open ${peer.url} (worktree: ${peer.worktree_path})`;
+
+    const effStatus = peer.effective_status || 'unknown';
+    const pillClass = effStatus.replace(/[^a-z_]/g, '_');
+    const title = peer.title || peer.slug || '(unnamed)';
+
+    li.innerHTML = `
+      <div class="viv-iset-menu-row-line1">
+        <strong class="viv-iset-menu-row-title">${escapeHtml(title)}</strong>
+        <span class="status-pill ${escapeHtml(pillClass)} viv-iset-menu-row-pill">${escapeHtml(effStatus)}</span>
+        <span class="viv-iset-menu-row-arrow" aria-hidden="true">→</span>
+      </div>
+      <div class="viv-iset-menu-row-slug">${escapeHtml(peer.slug || '')}</div>
+    `;
+
+    const activate = () => {
+      close();
+      // Open the peer dashboard in a new tab — it lives in a different
+      // worktree, so navigating to it in this tab would orphan the user's
+      // state in the current worktree.
+      window.open(peer.url, '_blank', 'noopener');
+    };
+    li.addEventListener('click', (e) => { e.stopPropagation(); activate(); });
+    li.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
+    });
+    return li;
+  }
+
+  function switchInvestigationLocal(name) {
     if (typeof window._switchPage === 'function') {
       try { window._switchPage('investigations'); } catch (_) { /* ignore */ }
     }
     if (typeof window._openInvestigationDetail === 'function') {
       window._openInvestigationDetail(name);
     } else {
-      // Fallback — just navigate via hash and let the page router pick it up.
       window.location.hash = '#investigations';
     }
   }
