@@ -214,7 +214,10 @@
       'status=no',
       'resizable=yes',
       'scrollbars=yes',
-      'noopener',           // discourage tab grouping with opener
+      // NB: `noopener` removed. It was hinting at security hygiene but
+      // some browsers treat noopener popups as fresh navigations that
+      // lose the dashboard's session context, leaving the popup blank.
+      // For a local dashboard this isn't a security risk.
     ].join(',');
     // NOTE: dropping `_blank` as the target name and using a unique name
     // ('detached-' + timestamp) makes Safari less inclined to merge the
