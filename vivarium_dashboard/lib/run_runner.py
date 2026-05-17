@@ -100,18 +100,156 @@ def _emit_paths_for(req: RunRequest, state: dict) -> list[str]:
     return req.emit_paths or cr.all_store_paths(state)
 
 
-def _render_viz(composite, run_dir: Path) -> None:
-    """Render Visualization-step HTML to viz.json. Best-effort — never raises."""
+def _render_viz(composite, run_dir: Path, *,
+                spec_id: str | None = None,
+                db_file: str | None = None,
+                run_id: str | None = None,
+                core=None) -> None:
+    """Render the run's visualizations to ``run_dir/viz.json``. Best-effort
+    — never raises.
+
+    Two sources contribute:
+      1. Inline ``Visualization`` Step instances embedded in the running
+         composite (the spatio-flux pattern).  ``render_results(composite)``
+         picks these up directly from the live state tree.
+      2. Canonical visualizations declared on the
+         ``@composite_generator(visualizations=[...])`` decorator (the
+         v2ecoli pattern).  These are metadata, not state, so they are not
+         visible to ``render_results`` and must be materialized after the
+         fact: read ``entry.visualizations`` from
+         ``pbg_superpowers.composite_generator._REGISTRY``, build a small
+         viz composite per entry against the just-completed run's emitter
+         output, and capture its rendered HTML.
+
+    Inline entries win on key collision (they're scoped to a concrete
+    state-tree path; canonical entries are bare names).
+    """
+    viz_html: dict = {}
+
+    # 1. Inline viz steps.
     try:
         from pbg_superpowers.visualization import render_results
         rendered = render_results(composite)
-        viz_html = {
-            ".".join(str(p) for p in path_tuple): payload
-            for path_tuple, payload in rendered.items()
-        }
+        for path_tuple, payload in rendered.items():
+            key = ".".join(str(p) for p in path_tuple)
+            viz_html[key] = payload
+    except Exception:
+        traceback.print_exc()
+
+    # 2. Canonical viz from the @composite_generator decorator.
+    if spec_id and db_file and run_id and core is not None:
+        try:
+            canonical = _render_canonical_viz(
+                spec_id=spec_id, db_file=db_file, run_id=run_id, core=core,
+            )
+            for name, html in canonical.items():
+                viz_html.setdefault(name, html)
+        except Exception:
+            traceback.print_exc()
+
+    try:
         (run_dir / "viz.json").write_text(json.dumps(viz_html, default=str))
     except Exception:
         traceback.print_exc()
+
+
+def _render_canonical_viz(*, spec_id: str, db_file: str, run_id: str, core) -> dict:
+    """Render @composite_generator(visualizations=...) entries for this run.
+
+    Returns ``{viz_name: html_string}``. Per-viz errors surface as an
+    error-stub HTML string (mirroring ``render_visualizations``); the
+    function itself never raises.
+    """
+    try:
+        from pbg_superpowers.composite_generator import _REGISTRY, discover_generators
+        from vivarium_dashboard.lib.investigations import (
+            build_viz_composite, gather_emitter_outputs,
+        )
+    except ImportError:
+        return {}
+
+    if not _REGISTRY:
+        discover_generators()
+    entry = _REGISTRY.get(spec_id)
+    if entry is None:
+        return {}
+    canonical = list(getattr(entry, "visualizations", []) or [])
+    if not canonical:
+        return {}
+
+    # Build the Visualization class registry the same way
+    # _render_study_visualizations does, so `local:<ClassName>`
+    # addresses resolve through core.link_registry.
+    registry = dict(core.link_registry)
+    try:
+        from pbg_superpowers.visualizations import (
+            TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap,
+        )
+        for cls in (TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap):
+            try:
+                core.register_link(cls.__name__, cls)
+                registry[cls.__name__] = cls
+            except Exception:
+                pass
+    except ImportError:
+        pass
+
+    try:
+        from pbg_superpowers.visualization import Visualization
+        def _walk(cls):
+            for sub in cls.__subclasses__():
+                yield sub
+                yield from _walk(sub)
+        for sub in _walk(Visualization):
+            if sub.__name__ in registry:
+                continue
+            try:
+                core.register_link(sub.__name__, sub)
+                registry[sub.__name__] = sub
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Pull emitter output for this run only — the workspace-level
+    # composite-runs.db can hold many CE runs and we don't want the viz to
+    # pick up trajectories from a different one.
+    gathered = gather_emitter_outputs(Path(db_file))
+    by_sim_filtered: dict = {}
+    for sim_name, runs in (gathered.get("by_sim") or {}).items():
+        keep = [r for r in runs if r.get("run_id") == run_id]
+        if keep:
+            by_sim_filtered[sim_name] = keep
+    gathered_filtered = {
+        "schemas": gathered.get("schemas") or {},
+        "by_sim": by_sim_filtered,
+    }
+
+    from process_bigraph import Composite
+
+    out: dict = {}
+    for viz_spec in canonical:
+        if not isinstance(viz_spec, dict):
+            continue
+        name = viz_spec.get("name") \
+            or viz_spec.get("address", "?").rsplit(":", 1)[-1]
+        try:
+            doc = build_viz_composite(viz_spec, gathered_filtered, registry)
+            viz_composite = Composite({"state": doc}, core=core)
+            viz_composite.run(1)
+            state = viz_composite.state
+            html = state.get("output_store")
+            if isinstance(html, dict):
+                html = html.get("value") or html.get("_value") or ""
+            if isinstance(html, str) and html:
+                out[name] = html
+        except Exception as e:  # noqa: BLE001
+            out[name] = (
+                f'<p style="color:#991b1b">Failed to render '
+                f'<code>{name}</code>: '
+                f'<code>{type(e).__name__}: {e}</code></p>'
+            )
+    return out
 
 
 def execute(request_path: Path) -> int:
@@ -171,7 +309,11 @@ def execute(request_path: Path) -> int:
                                      status="failed")
                 return 1
 
-        _render_viz(composite, run_dir)
+        _render_viz(
+            composite, run_dir,
+            spec_id=req.spec_id, db_file=req.db_file, run_id=req.run_id,
+            core=core,
+        )
         cr.complete_metadata(conn, run_id=req.run_id, n_steps=req.steps,
                              status="completed")
         print(f"run {req.run_id} completed: {req.steps} steps", flush=True)

@@ -37,6 +37,7 @@
   <button class="study-tab"        data-kind="observables"   onclick="_setStudyTab('observables')">Readouts</button>
   {% else %}
   <button class="study-tab"        data-kind="baseline"      onclick="_setStudyTab('baseline')">Baseline</button>
+  <button class="study-tab"        data-kind="observables"   onclick="_setStudyTab('observables')">Observables</button>
   <button class="study-tab"        data-kind="variants"      onclick="_setStudyTab('variants')">Variants</button>
   <button class="study-tab"        data-kind="interventions" onclick="_setStudyTab('interventions')">Interventions</button>
   <button class="study-tab"        data-kind="observables"   onclick="_setStudyTab('observables')">Observables</button>
@@ -200,6 +201,34 @@
     </div>
     {% endif %}
     {% if study.objective %}
+    <div class="overview-section">
+      <h2 class="overview-label">Question</h2>
+      <div id="question-text" class="overview-prose" data-editable="true"
+           data-field="question"
+           data-placeholder="(what research question is this study asking?)">{{ study.question or '' }}</div>
+    </div>
+
+    <div class="overview-section">
+      <h2 class="overview-label">Hypothesis</h2>
+      <div id="hypothesis-text" class="overview-prose" data-editable="true"
+           data-field="hypothesis"
+           data-placeholder="(predicted outcome)">{{ study.hypothesis or '' }}</div>
+    </div>
+
+    <div class="overview-section">
+      <h2 class="overview-label">Status</h2>
+      <select id="status-select" data-field="status" class="overview-status-select">
+        <option value="planned"     {% if study.status == 'planned'     %}selected{% endif %}>planned</option>
+        <option value="draft"       {% if study.status == 'draft'       %}selected{% endif %}>draft</option>
+        <option value="in-progress" {% if study.status == 'in-progress' %}selected{% endif %}>in-progress</option>
+        <option value="running"     {% if study.status == 'running'     %}selected{% endif %}>running</option>
+        <option value="ran"         {% if study.status == 'ran'         %}selected{% endif %}>ran</option>
+        <option value="completed"   {% if study.status == 'completed'   %}selected{% endif %}>completed</option>
+        <option value="complete"    {% if study.status == 'complete'    %}selected{% endif %}>complete</option>
+        <option value="archived"    {% if study.status == 'archived'    %}selected{% endif %}>archived</option>
+      </select>
+    </div>
+
     <div class="overview-section">
       <h2 class="overview-label">Objective</h2>
       <div id="objective-text" class="overview-prose" data-editable="true" data-field="objective">{{ study.objective }}</div>

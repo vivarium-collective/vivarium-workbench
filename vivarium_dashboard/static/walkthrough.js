@@ -8374,8 +8374,6 @@
     return lines.join('\n');
   }
 
-  // Stub remaining `}` from the previous function body — restore the original
-  // closing in case downstream parsers rely on it.
   function _submitOpenPR(form) {
     var fd = new FormData(form);
     var prBody = {

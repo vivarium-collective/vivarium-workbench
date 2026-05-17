@@ -1,102 +1,108 @@
 # vivarium-dashboard
 
-Web-based dashboard for [Vivarium](https://vivarium-collective.github.io/) /
-[process-bigraph](https://github.com/vivarium-collective/process-bigraph) workspaces.
+Local web UI for [Process-Bigraph](https://github.com/vivarium-collective/process-bigraph)
+workspaces. Browse composites, run studies, inspect state-trees, and render
+visualizations — without writing dashboard boilerplate.
 
-Extracted from `pbg-template` so the dashboard runtime can be pip-installed
-into any workspace venv rather than being vendored at scaffold-time. Template
-scaffolding still lives in `pbg-template`; the dashboard runtime now lives here.
+Point it at a workspace directory (one containing `workspace.yaml`) and it
+serves an interactive UI over the workspace's registry, composites, studies,
+and reports.
 
-## Install
+> **Status:** in active beta. APIs and UI may change before 1.0.
 
-> **Not yet published on PyPI.** Listing `vivarium-dashboard` in a fresh
-> workspace's `pyproject.toml` and running `uv pip install -e .` will fail
-> with *"vivarium-dashboard was not found in the package registry"* until
-> this package ships to PyPI. In the meantime use an editable install from
-> a local checkout and add a `[tool.uv.sources]` pin to the consumer's
-> pyproject (see below).
+## Getting Started
 
-### Editable install from a local checkout
+### 1. Install
 
 ```bash
-# clone this repo as a sibling of your workspace
+pip install vivarium-dashboard         # or: uv pip install vivarium-dashboard
+```
+
+Not on PyPI yet during beta — install editable from a clone instead:
+
+```bash
 git clone https://github.com/vivarium-collective/vivarium-dashboard ~/code/vivarium-dashboard
-
-# install into the workspace venv
-cd /path/to/workspace
-./.venv/bin/pip install -e ~/code/vivarium-dashboard
+./.venv/bin/pip install -e ~/code/vivarium-dashboard   # into your workspace's venv
 ```
 
-### Pin from a workspace's pyproject.toml
+### 2. Get a workspace
 
-So `uv pip install -e ".[dev]"` resolves the dep without a manual second step:
+The dashboard serves a [pbg-template](https://github.com/vivarium-collective/pbg-template)
+workspace. Two ways to scaffold one — same files either way, pick whichever
+interface you prefer:
 
-```toml
-[project]
-dependencies = ["vivarium-dashboard", ...]
-
-[tool.uv.sources]
-vivarium-dashboard = { path = "../vivarium-dashboard", editable = true }
-```
-
-The `pbg-template` workspace template's `template-init.sh` adds this block
-automatically when a sibling `../vivarium-dashboard/` directory (or
-`$VIVARIUM_DASHBOARD_PATH`) is detected at scaffold time.
-
-## Usage
-
-From inside a workspace (directory containing `workspace.yaml`):
+**Standalone (no AI required).** On the pbg-template GitHub page, click
+**Use this template → Create a new repository**, clone your new repo, then run:
 
 ```bash
-vivarium-dashboard serve
-# or pin a port
-vivarium-dashboard serve --port 8765
-# or point at a specific workspace
-vivarium-dashboard serve --workspace /path/to/ws --port 8765
+bash use-this-template-init.sh
 ```
 
-This renders `<workspace>/reports/index.html` and starts a local HTTP server
-backing the interactive dashboard.
+**With AI authoring.** Install the
+[pbg-superpowers](https://github.com/vivarium-collective/pbg-superpowers)
+Claude Code plugin and from inside Claude Code run:
 
-> **Heads up — there are two HTTP servers in play.** This `vivarium-dashboard
-> serve` is the *interactive* one (side-rail tabs, Registry, Composites,
-> Investigations, …). The separate `pbg-superpowers/server/start-server.sh`
-> launched by the `/pbg-server` skill backs a minimal report-only server
-> for stage-skill prompt mirroring; it does **not** serve this UI. If your
-> browser shows only the static report ("biomodels · No models yet"), you
-> launched the wrong one — stop it and use `bash scripts/serve.sh` (or
-> `vivarium-dashboard serve --workspace .`) instead.
+```
+/pbg-workspace my-project
+```
 
-### Migration: Investigations → Studies (one-time)
+See [pbg-superpowers' Getting Started](https://github.com/vivarium-collective/pbg-superpowers#getting-started)
+for the full walkthrough.
 
-If your workspace has `investigations/<name>/spec.yaml` directories created
-before schema_version 3 / Studies, run the migration once:
+### 3. Serve
+
+```bash
+cd my-workspace
+vivarium-dashboard serve --workspace .
+# or, from inside a scaffolded workspace:
+bash scripts/serve.sh
+```
+
+Open the printed URL.
+
+### What to expect
+
+You land on a UI with **seven tabs**: Workspace inputs, Registry, Composites,
+Studies, Investigations, Visualizations, and GitHub Branches. Every action you
+take — creating a study, registering an observable, kicking off a run — commits
+to your active workstream branch, so there's a full git audit trail visible
+under **GitHub Branches**. The dashboard reads the workspace's `.pbg/schemas/`
+validators, so malformed YAML is caught at save time rather than at run time.
+If you installed the **pbg-superpowers** plugin, every dashboard action can
+also be driven by natural-language `/pbg-*` skills against the same files —
+use whichever interface fits the moment. For the full AI-augmented authoring
+experience, see the
+[pbg-superpowers Getting Started](https://github.com/vivarium-collective/pbg-superpowers#getting-started).
+
+## Tabs at a glance
+
+- **Workspace inputs** — workspace.yaml summary, dependencies, scaffolding status.
+- **Registry** — every Process / Step / Composite the workspace can import.
+- **Composites** — composite browser with an embedded loom-explore view of the
+  state-tree (the bigraph).
+- **Studies** — canonical 8-section view (Purpose · Pipeline gate · Build ·
+  Simulations · Readouts · Tests · Limitations · References) with phase chip
+  and rolled-up `effective_status`.
+- **Investigations** — DAG canvas grouping studies into research arcs, with
+  a "+ New Investigation" creator. *(Final polish shipping in PR #18.)*
+- **Visualizations** — render Visualization Steps wired into composites.
+- **GitHub Branches** — active branch, push, open PR for the workstream.
+
+## Companion repos
+
+- **[pbg-superpowers](https://github.com/vivarium-collective/pbg-superpowers)** — the Claude Code plugin whose `/pbg-*` skills drive this dashboard's HTTP API. Use it for AI-assisted authoring.
+- **[pbg-template](https://github.com/vivarium-collective/pbg-template)** — the workspace scaffold this dashboard serves. Includes the canonical `.pbg/schemas/` validators.
+
+## Migrating an older workspace
+
+If your workspace has `investigations/<name>/spec.yaml` directories from
+before schema_version 3, run the one-time migration:
 
 ```bash
 vivarium-dashboard migrate-investigations --workspace /path/to/workspace
+# add --dry-run to preview
 ```
 
-The script renames `investigations/` → `studies/`, bumps each spec from
-v2 to v3, and lifts the first composite into `baseline:`. Multi-composite
-investigations are migrated with a warning — recreate the extra composites
-as variants from the new Study Detail view.
+## License
 
-Add `--dry-run` to preview without writing.
-
-## What's included
-
-- `vivarium_dashboard.server` — REST + SSE server (`/api/state`, `/api/composites`,
-  `/api/composite-test-run`, `/api/workspace-manifest`, …)
-- `vivarium_dashboard.lib.*` — workspace helpers (composite lookup/runs,
-  investigations, pyproject editing, report rendering, …)
-- `vivarium_dashboard/templates/index.html.j2` — dashboard template (Jinja2)
-- `vivarium_dashboard/static/` — CSS, JS, vivarium logo, bundled
-  `loom-explore` viewer
-
-## Provenance
-
-This package was extracted from
-[pbg-template](https://github.com/vivarium-collective/pbg-template)'s
-`template/scripts/_{server,templates,assets,lib}/` directories. Workspaces
-scaffolded from `pbg-template` now depend on `vivarium-dashboard` as a
-regular pip dep.
+TBD — license file pending before 1.0.

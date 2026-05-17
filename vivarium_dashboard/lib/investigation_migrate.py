@@ -52,6 +52,117 @@ def _resolve_composite_source(ref: str, workspace_root: Path) -> tuple[Path, str
     )
 
 
+def _to_yaml_friendly(obj):
+    """Round-trip a composite document through ``BigraphJSONEncoder`` so
+    every non-native type (numpy arrays, structured arrays, pint
+    Quantities, …) becomes plain Python and ``yaml.safe_dump`` can handle
+    it.
+
+    Generator-materialized composite docs commonly carry numpy state and
+    pint-tagged parameters (e.g. wcEcoli's bulk-molecule state, growth
+    rates with units). Without this normalization ``yaml.safe_dump``
+    raises ``cannot represent an object`` for whichever foreign type it
+    hits first.
+
+    Falls back to a recursive duck-typed walk when bigraph-schema is not
+    available (smaller test workspaces / minimal envs).
+    """
+    import json
+    try:
+        from bigraph_schema.json_codec import BigraphJSONEncoder
+        return json.loads(json.dumps(obj, cls=BigraphJSONEncoder))
+    except ImportError:
+        pass
+
+    # Fallback path: numpy + scalar duck-typing only; pint not supported here.
+    if isinstance(obj, dict):
+        return {k: _to_yaml_friendly(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_yaml_friendly(x) for x in obj]
+    tolist = getattr(obj, "tolist", None)
+    if callable(tolist):
+        try:
+            return _to_yaml_friendly(tolist())
+        except Exception:
+            pass
+    item = getattr(obj, "item", None)
+    if callable(item) and not isinstance(obj, (str, bytes)):
+        try:
+            return obj.item()
+        except Exception:
+            pass
+    return obj
+
+
+def _resolve_composite_source_or_generate(
+    ref: str, workspace_root: Path,
+) -> tuple[Path | None, bool, str]:
+    """Resolve a composite ref to either a YAML source path on disk or a
+    registered ``@composite_generator`` entry.
+
+    Returns ``(yaml_path, is_generator, name)``:
+      - YAML found → ``(path, False, stem)`` matching the legacy lookup.
+      - Generator found in ``pbg_superpowers.composite_generator._REGISTRY``
+        → ``(None, True, last_segment)``. The caller decides whether to
+        actually materialize the document (via :func:`materialize_generator_doc`)
+        — many v3-shape callers don't need it, since the dotted ref is
+        sufficient and avoids the cost / serialization hazards of
+        building the full state tree.
+      - Neither → ``FileNotFoundError``.
+    """
+    try:
+        path, name = _resolve_composite_source(ref, workspace_root)
+        return path, False, name
+    except FileNotFoundError:
+        pass  # fall through to generator lookup
+
+    try:
+        from pbg_superpowers.composite_generator import (
+            _REGISTRY, discover_generators,
+        )
+    except ImportError as e:
+        raise FileNotFoundError(
+            f"no YAML source for {ref!r} and pbg-superpowers is unavailable: {e}"
+        )
+
+    if not _REGISTRY:
+        discover_generators()
+    if ref not in _REGISTRY:
+        raise FileNotFoundError(
+            f"no YAML source for {ref!r} and not registered as a "
+            f"@composite_generator (registry has "
+            f"{len(_REGISTRY)} entries)"
+        )
+
+    # Generators use the trailing dotted segment (function name) as the
+    # canonical short name — matches the catalog's id-stem convention and
+    # avoids ugly `baseline.baseline` sidecars for `pkg.composites.foo.foo`
+    # style refs.
+    parts = ref.split('.')
+    composites_idx = parts.index('composites')  # _resolve already validated
+    name = parts[-1] if (composites_idx + 1) < len(parts) else parts[composites_idx]
+    return None, True, name
+
+
+def materialize_generator_doc(ref: str) -> dict:
+    """Build the composite document for a ``@composite_generator`` ref and
+    normalize it through :func:`_to_yaml_friendly` so callers can YAML-dump
+    it without hitting numpy / pint serialization errors.
+
+    Raises ``KeyError`` if ``ref`` is not in the generator registry, or
+    propagates any exception from ``build_generator(entry)`` (e.g. for
+    composites whose state contains live Process instances that can't be
+    serialized — those need a different storage path).
+    """
+    from pbg_superpowers.composite_generator import (
+        _REGISTRY, build_generator, discover_generators,
+    )
+    if not _REGISTRY:
+        discover_generators()
+    entry = _REGISTRY[ref]
+    return _to_yaml_friendly(build_generator(entry))
+
+
 def migrate_investigation(spec_path: Path, workspace_root: Path) -> dict:
     """Migrate the spec at ``spec_path`` in-place. Returns the new spec dict."""
     spec_path = Path(spec_path)

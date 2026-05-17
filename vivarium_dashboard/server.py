@@ -255,6 +255,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/study-rename":                "_post_study_rename",
     "/api/study-create-from-run":       "_post_study_create_from_run",
     "/api/study-run-baseline":          "_post_study_run_baseline",
+    "/api/study-run-all-baselines":     "_post_study_run_all_baselines",
     "/api/study-run-variant":           "_post_study_run_variant",
     "/api/study-variant-add":           "_post_study_variant_add",
     "/api/study-variant-delete":        "_post_study_variant_delete",
@@ -993,6 +994,81 @@ def _render_study_visualizations(study_dir, spec, spec_id):
     except Exception as e:  # noqa: BLE001
         return [], [{"error": f"render_visualizations failed: "
                      f"{type(e).__name__}: {e}"}]
+
+
+def _post_study_run_all_baselines_for_test(ws_root, body):
+    """Run every entry in spec.baseline[] sequentially. Returns
+    ``({results: [...], errors: [...]}, status_code)``.
+
+    Sugar for multi-baseline Studies (e.g. architecture comparisons) where
+    the UI wants a single "run all" affordance instead of clicking through
+    N per-baseline buttons. Each per-entry run is dispatched through the
+    existing :func:`_post_study_run_baseline_for_test` so the persistence,
+    canonical-viz rendering, and run-record bookkeeping all stay identical
+    — this function only sequences the calls and aggregates the responses.
+
+    Body:
+      study: <name>             # required
+      steps: <int>              # optional; passed through to each run
+
+    Response (status 200 when every baseline succeeds; 207 multi-status
+    when at least one fails but others succeeded; 4xx/5xx propagated when
+    none can be run, e.g. the study itself doesn't exist):
+
+      {
+        "results": [
+          {"composite": <entry-name>, "status": "completed", "run_id": ..., "viz_files": [...]},
+          ...
+        ],
+        "errors": [
+          {"composite": <entry-name>, "status": <http-code>, "error": "..."},
+          ...
+        ],
+      }
+    """
+    name = _study_name_from_body(body)
+    if not name:
+        return {"error": "missing study"}, 400
+    studies_path = ws_root / "studies" / name
+    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / name
+    sf = _study_spec_file(study_dir)
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text()) or {}
+    from vivarium_dashboard.lib.spec_migration import migrate_v2_to_v3
+    spec = migrate_v2_to_v3(spec)
+    baseline = spec.get("baseline") or []
+    if not isinstance(baseline, list) or not baseline:
+        return {"error": "study has no baseline composites"}, 400
+
+    steps = body.get("steps")
+    results: list = []
+    errors: list = []
+    for entry in baseline:
+        if not isinstance(entry, dict) or not entry.get("name"):
+            continue
+        sub_body = {"study": name, "composite": entry["name"]}
+        if steps is not None:
+            sub_body["steps"] = steps
+        sub_response, sub_code = _post_study_run_baseline_for_test(ws_root, sub_body)
+        if sub_code == 200:
+            results.append({
+                "composite": entry["name"],
+                **sub_response,
+            })
+        else:
+            errors.append({
+                "composite": entry["name"],
+                "status": sub_code,
+                "error": sub_response.get("error") if isinstance(sub_response, dict) else str(sub_response),
+            })
+
+    if not results and errors:
+        # Nothing ran — propagate the first error's status as the overall code.
+        return {"results": results, "errors": errors}, errors[0]["status"]
+    code = 207 if errors else 200
+    return {"results": results, "errors": errors}, code
 
 
 def _post_study_run_variant_for_test(ws_root, body):
@@ -5109,14 +5185,23 @@ if __name__ == "__main__":
         if inv_dir.exists() or (WORKSPACE / "investigations" / name).exists():
             return self._json({"error": f"investigation '{name}' already exists"}, 409)
 
-        # Resolve source composite if provided
+        # Resolve source composite if provided. YAML refs land in the
+        # legacy v2-shape with a copied sidecar; @composite_generator refs
+        # land in the v3 shape (no sidecar — just store the dotted ref in
+        # `baseline:`), which sidesteps the "can't serialize live Process
+        # instances" problem for v2ecoli-style composites.
         source_path = None
+        is_generator = False
         baseline_name = None
         if source:
             _ws_add_to_sys_path()
-            from vivarium_dashboard.lib.investigation_migrate import _resolve_composite_source
+            from vivarium_dashboard.lib.investigation_migrate import (
+                _resolve_composite_source_or_generate,
+            )
             try:
-                source_path, baseline_name = _resolve_composite_source(source, WORKSPACE)
+                source_path, is_generator, baseline_name = (
+                    _resolve_composite_source_or_generate(source, WORKSPACE)
+                )
             except (FileNotFoundError, ValueError) as e:
                 return self._json({"error": f"source composite not found: {e}"}, 404)
 
@@ -5126,8 +5211,28 @@ if __name__ == "__main__":
             (inv_dir / "data").mkdir()
             (inv_dir / "data" / ".keep").write_text("")
 
-            if source_path and baseline_name:
-                # New-shape spec: seed with a baseline composite entry
+            if is_generator and baseline_name:
+                # v3-shape spec: dotted ref lives in `baseline:`; no sidecar.
+                spec = {
+                    "name": name,
+                    "description": "",
+                    "status": "planned",
+                    "baseline": [
+                        {
+                            "name": baseline_name,
+                            "composite": source,
+                            "params": {},
+                        }
+                    ],
+                    "variants": [],
+                    "interventions": [],
+                    "observables": [],
+                    "visualizations": [],
+                    "runs": [],
+                }
+                (inv_dir / "study.yaml").write_text(yaml.safe_dump(spec, sort_keys=False))
+            elif source_path and baseline_name:
+                # Legacy v2-shape spec: seed with a baseline composite entry.
                 composites_dir = inv_dir / "composites"
                 composites_dir.mkdir(parents=True, exist_ok=True)
                 sidecar = composites_dir / f"{baseline_name}.yaml"
@@ -6346,9 +6451,14 @@ if __name__ == "__main__":
             return self._json({"error": "investigation, name, source required"}, 400)
 
         _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.investigation_migrate import _resolve_composite_source
+        from vivarium_dashboard.lib.investigation_migrate import (
+            _resolve_composite_source_or_generate,
+            materialize_generator_doc,
+        )
         try:
-            source_path, _stem = _resolve_composite_source(source, WORKSPACE)
+            source_path, is_generator, _stem = (
+                _resolve_composite_source_or_generate(source, WORKSPACE)
+            )
         except (FileNotFoundError, ValueError) as e:
             return self._json({"error": str(e)}, 404)
 
@@ -6362,11 +6472,32 @@ if __name__ == "__main__":
         if sidecar.is_file():
             return self._json({"error": f"composite {comp_name!r} already exists"}, 409)
 
+        # For generator refs we materialize the doc now so the YAML sidecar
+        # write below has something concrete to dump. Composites whose
+        # state contains non-serializable objects (e.g. live Process
+        # instances) will surface a clear error here.
+        if is_generator:
+            try:
+                generator_doc = materialize_generator_doc(source)
+            except Exception as e:  # noqa: BLE001
+                return self._json(
+                    {"error": (
+                        f"composite {source!r} can't be serialized as a "
+                        f"YAML sidecar: {e}"
+                    )},
+                    400,
+                )
+        else:
+            generator_doc = None
+
         commit_msg = f"feat(investigations/{inv_name}): add composite '{comp_name}'"
 
         def do_action():
             import shutil
-            shutil.copy2(source_path, sidecar)
+            if source_path is not None:
+                shutil.copy2(source_path, sidecar)
+            else:
+                sidecar.write_text(yaml.safe_dump(generator_doc, sort_keys=False))
             spec = yaml.safe_load(spec_path.read_text()) or {}
             composites = spec.setdefault('composites', [])
             composites.append({
@@ -6755,6 +6886,17 @@ if __name__ == "__main__":
     def _post_study_run_baseline(self, body: dict):
         """POST /api/study-run-baseline {study, steps?}"""
         response, code = _post_study_run_baseline_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_run_all_baselines(self, body: dict):
+        """POST /api/study-run-all-baselines {study, steps?}
+
+        Runs every entry in the study's `baseline:` list sequentially. The
+        UI uses this for multi-baseline Studies (architecture comparisons)
+        where firing one button is friendlier than clicking N per-entry
+        Run buttons in order.
+        """
+        response, code = _post_study_run_all_baselines_for_test(WORKSPACE, body)
         return self._json(response, code)
 
     def _post_study_run_variant(self, body: dict):
