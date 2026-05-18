@@ -262,11 +262,180 @@ def test_full_study_renders_all_tabs(_rich_ws):
     assert 'data-intervention-name="heat-shock"' in html
     assert "+10C for 5 min" in html
 
-    # Runs: both runs + viz section
+    # Runs: both runs render in the runs-table
     assert 'data-run-id="r1"' in html
     assert 'data-run-id="r2"' in html
+    # The viz (growth-curve) renders in the Visualizations tab's viz-list, NOT
+    # in the Runs tab — verified by anchoring after the panel-visualizations id.
     assert "growth-curve" in html
 
     # Conclusions panel is present (conclusion text is loaded by JS at runtime, not rendered in HTML)
     assert 'id="panel-conclusions"' in html
     assert 'id="conclusion-claims"' in html
+
+
+# ---------------------------------------------------------------------------
+# Runs tab: viz section moved out + per-run metadata enrichment
+# ---------------------------------------------------------------------------
+
+
+def _section(html: str, start_marker: str, end_marker: str) -> str:
+    """Slice html between two markers; both must be present."""
+    i = html.index(start_marker)
+    j = html.index(end_marker, i)
+    return html[i:j]
+
+
+def test_runs_tab_does_not_render_charts_panel(_rich_ws):
+    """The inline 'Latest run — visualizations' panel was removed from the
+    Runs tab. Charts now live exclusively in the Visualizations tab."""
+    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    html = _render_study_detail_html("rich", _study_detail_spec("rich"))
+    runs_panel = _section(html, 'id="panel-runs"', 'id="panel-tests"')
+    assert 'id="charts-panel"' not in runs_panel, (
+        "Runs tab still contains the inline charts panel — should have moved "
+        "to the Visualizations tab."
+    )
+    # Sanity: the Visualizations tab still has its chart panel.
+    viz_panel = _section(html, 'id="panel-visualizations"', 'id="panel-conclusions"')
+    assert 'id="viz-charts-panel"' in viz_panel
+
+
+def test_runs_tab_has_richer_columns(_rich_ws):
+    """The Runs table now exposes Composite, Started, Duration, and Model changes."""
+    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    html = _render_study_detail_html("rich", _study_detail_spec("rich"))
+    runs_panel = _section(html, 'id="panel-runs"', 'id="panel-tests"')
+    for header in ("Composite", "Started (UTC)", "Duration", "Model changes"):
+        assert f">{header}<" in runs_panel, f"missing column header: {header}"
+
+
+@pytest.fixture
+def _ws_with_runs_db(tmp_path, monkeypatch):
+    """Workspace whose study has both a study.yaml runs[] list AND a populated
+    runs.db, so _enrich_runs_with_meta has a real DB to merge from."""
+    import vivarium_dashboard.server as srv
+    from vivarium_dashboard.lib.composite_runs import (
+        connect, save_metadata, complete_metadata,
+    )
+
+    ws = tmp_path / "ws"
+    sd = ws / "studies" / "rich-runs"
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "schema_version": 3,
+        "name": "rich-runs",
+        "objective": "Per-run metadata round-trip.",
+        "baseline": [
+            {"name": "core", "composite": "pkg.composites.core"},
+        ],
+        "runs": [
+            {"run_id": "run-A", "variant": None, "composite": "core",
+             "label": "baseline", "n_steps": 5, "status": "completed"},
+            {"run_id": "run-B", "variant": "hi", "composite": "core",
+             "label": "hi", "n_steps": 5, "status": "completed"},
+            # third entry has NO matching runs_meta row — enrichment must be tolerant
+            {"run_id": "run-orphan", "variant": None, "composite": "core",
+             "label": "lost", "n_steps": 5, "status": "completed"},
+        ],
+    }))
+
+    # Populate runs.db for the two runs that have metadata.
+    conn = connect(sd / "runs.db")
+    save_metadata(
+        conn, spec_id="pkg.composites.core", run_id="run-A",
+        params={}, label="baseline", started_at=1700000000.0, n_steps=5,
+        log_path="logs/run-A.log",
+    )
+    complete_metadata(conn, run_id="run-A", n_steps=5, status="completed")
+    # Force a known completed_at so the duration assertion is deterministic.
+    conn.execute(
+        "UPDATE runs_meta SET completed_at=? WHERE run_id=?",
+        (1700000095.0, "run-A"),
+    )
+    save_metadata(
+        conn, spec_id="pkg.composites.core", run_id="run-B",
+        params={"k": 2, "alpha": 0.5}, label="hi", started_at=1700000200.0,
+        n_steps=5, log_path="logs/run-B.log",
+    )
+    complete_metadata(conn, run_id="run-B", n_steps=5, status="completed")
+    conn.execute(
+        "UPDATE runs_meta SET completed_at=? WHERE run_id=?",
+        (1700000260.0, "run-B"),
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(srv, "WORKSPACE", ws)
+    return ws
+
+
+def test_runs_table_renders_started_and_duration_from_runs_db(_ws_with_runs_db):
+    """When runs.db has a metadata row, the Runs table shows formatted
+    started/duration columns derived from runs_meta."""
+    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    html = _render_study_detail_html("rich-runs", _study_detail_spec("rich-runs"))
+    runs_panel = _section(html, 'id="panel-runs"', 'id="panel-tests"')
+
+    # run-A: started_at=1700000000 → 2023-11-14 22:13 UTC; duration=95s → "1m 35s"
+    assert "2023-11-14 22:13" in runs_panel
+    assert "1m 35s" in runs_panel
+    # run-B: duration=60s → "1m"
+    assert "1m</td>" in runs_panel or ">1m<" in runs_panel
+
+
+def test_runs_table_renders_param_overrides(_ws_with_runs_db):
+    """params_json from runs_meta surfaces as the Model-changes details block."""
+    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    html = _render_study_detail_html("rich-runs", _study_detail_spec("rich-runs"))
+    runs_panel = _section(html, 'id="panel-runs"', 'id="panel-tests"')
+
+    # run-A has empty params → "—"; run-B has 2 overrides → "2 overrides"
+    assert "2 overrides" in runs_panel
+    # The JSON content is escaped in the rendered template; check for substrings
+    # that survive both raw + escaped rendering of the dict.
+    assert "alpha" in runs_panel
+    assert "0.5" in runs_panel
+
+
+def test_runs_table_tolerates_orphan_runs(_ws_with_runs_db):
+    """A study.runs[] entry with no matching runs.db row still renders — the
+    metadata columns are simply empty for that row."""
+    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    html = _render_study_detail_html("rich-runs", _study_detail_spec("rich-runs"))
+    runs_panel = _section(html, 'id="panel-runs"', 'id="panel-tests"')
+    assert 'data-run-id="run-orphan"' in runs_panel
+
+
+def test_runs_table_tolerates_missing_runs_db(_rich_ws):
+    """A study with study.runs[] but no runs.db still renders rows; metadata
+    columns are blank (function returns runs unchanged on missing DB)."""
+    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    html = _render_study_detail_html("rich", _study_detail_spec("rich"))
+    runs_panel = _section(html, 'id="panel-runs"', 'id="panel-tests"')
+    assert 'data-run-id="r1"' in runs_panel
+    assert 'data-run-id="r2"' in runs_panel
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for the formatting helpers
+# ---------------------------------------------------------------------------
+
+
+def test_fmt_duration_handles_ranges():
+    from vivarium_dashboard.server import _jinja_fmt_duration
+    assert _jinja_fmt_duration(None) == ""
+    assert _jinja_fmt_duration(-1) == ""
+    assert _jinja_fmt_duration(0) == "0s"
+    assert _jinja_fmt_duration(45) == "45s"
+    assert _jinja_fmt_duration(60) == "1m"
+    assert _jinja_fmt_duration(95) == "1m 35s"
+    assert _jinja_fmt_duration(3600) == "1h"
+    assert _jinja_fmt_duration(3660) == "1h 1m"
+
+
+def test_fmt_ts_handles_none_and_unix():
+    from vivarium_dashboard.server import _jinja_fmt_ts
+    assert _jinja_fmt_ts(None) == ""
+    assert _jinja_fmt_ts(0) == ""  # epoch zero treated as falsy/no-data
+    assert _jinja_fmt_ts(1700000000.0) == "2023-11-14 22:13"

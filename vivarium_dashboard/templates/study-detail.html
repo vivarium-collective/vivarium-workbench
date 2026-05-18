@@ -1075,34 +1075,71 @@
 
 <section class="study-tab-panel" data-kind="runs" id="panel-runs">
   <div class="runs-section">
-    <div id="charts-panel" class="charts-panel"></div>
     <h3 class="section-title">Runs</h3>
+    <p class="muted" style="margin:0 0 10px 0;font-size:0.88em">
+      Per-run record of what was executed. Visualizations live in the
+      <a href="#" onclick="_setStudyTab('visualizations');return false">Visualizations</a> tab.
+    </p>
     <table id="runs-table">
       <thead>
         <tr>
           <th></th>
           <th>Variant / Baseline</th>
-          <th>Label</th>
+          <th>Composite</th>
           <th>Steps</th>
+          <th>Started (UTC)</th>
+          <th>Duration</th>
           <th>Status</th>
+          <th>Model changes</th>
           <th>Actions</th>
         </tr>
       </thead>
       <tbody>
         {% for r in (study.runs or []) %}
-        <tr data-run-id="{{ r.run_id }}">
+        {% set _params = r.meta_params or {} %}
+        {% set _has_changes = _params and _params|length > 0 %}
+        <tr data-run-id="{{ r.run_id }}"
+            data-spec-id="{{ r.meta_spec_id or '' }}"
+            data-started-at="{{ r.meta_started_at or '' }}">
           <td><input type="checkbox" class="run-compare-checkbox" value="{{ r.run_id }}"></td>
-          <td>{{ r.variant or r.composite or 'baseline' }}</td>
-          <td>{{ r.label or '' }}</td>
+          <td>
+            {{ r.variant or r.composite or 'baseline' }}
+            {% if r.label and r.label != (r.variant or r.composite) %}
+              <div class="muted" style="font-size:0.78em">{{ r.label }}</div>
+            {% endif %}
+          </td>
+          <td>
+            <code style="font-size:0.82em">{{ r.composite or r.meta_spec_id or '—' }}</code>
+            {% if r.meta_spec_id and r.composite and r.meta_spec_id != r.composite %}
+              <div class="muted" style="font-size:0.76em">spec: <code>{{ r.meta_spec_id }}</code></div>
+            {% endif %}
+          </td>
           <td>{{ r.n_steps or '' }}</td>
-          <td>{{ r.status }}</td>
+          <td style="font-size:0.85em;white-space:nowrap">{{ r.meta_started_at | fmt_ts }}</td>
+          <td style="font-size:0.85em;white-space:nowrap">{{ r.meta_duration_sec | fmt_duration }}</td>
+          <td>
+            <span class="run-status run-status-{{ r.status }}">{{ r.status }}</span>
+            {% if r.meta_log_path %}
+              <div class="muted" style="font-size:0.74em"><code>{{ r.meta_log_path }}</code></div>
+            {% endif %}
+          </td>
+          <td>
+            {% if _has_changes %}
+            <details>
+              <summary class="muted" style="cursor:pointer;font-size:0.85em">{{ _params|length }} override{{ '' if _params|length == 1 else 's' }}</summary>
+              <pre style="margin:4px 0 0 0;padding:6px 8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:3px;font-size:0.78em;overflow-x:auto">{{ _params | tojson(indent=2) }}</pre>
+            </details>
+            {% else %}
+            <span class="muted" style="font-size:0.82em">—</span>
+            {% endif %}
+          </td>
           <td>
             <button class="btn-view-run" data-run-id="{{ r.run_id }}">View</button>
             <button class="btn-delete-run" data-run-id="{{ r.run_id }}">Delete</button>
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="empty-message">No runs yet.</td></tr>
+        <tr><td colspan="9" class="empty-message">No runs yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>
