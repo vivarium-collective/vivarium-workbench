@@ -30,6 +30,15 @@ main{padding:20px;margin:0 auto}
 #investigation-study-embed-panel{
   width: 100% !important; max-width: none !important;
   margin-top: 16px !important;
+  /* Sticky so the embedded study iframe stays visible as the user
+   * scrolls the SPA past the investigation DAG above. Without this,
+   * the SPA scroll lifts the iframe off-screen and the iframe's own
+   * sticky nav has no chance to engage — the bar is technically
+   * pinned, but pinned to a top edge the user can no longer see. */
+  position: -webkit-sticky;
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }
 #investigation-study-embed-frame{
   width: 100% !important;
@@ -83,10 +92,18 @@ main.study-page{max-width:none;padding:12px 16px;width:100%;box-sizing:border-bo
   align-self:start;
 }
 /* Embedded study: full content width, fixed comfortable height. Iframe
- * scrolls its own content; the page scrolls past the grid to reach it. */
+ * scrolls its own content; the page scrolls past the grid to reach it.
+ * Sticky in the SPA so the iframe stays in view as the user scrolls
+ * past the Studies grid above — without this, the iframe scrolls off
+ * the top and the .study-tabs inside it (also sticky) end up pinned
+ * to an edge the user can no longer see. */
 #study-detail-panel{
   width:100% !important; max-width:none !important;
   margin-top:16px !important;
+  position: -webkit-sticky;
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }
 #study-detail-frame{
   width:100% !important;
@@ -1109,18 +1126,23 @@ body.focus-mode::before{
  * Sticky at the top of the scroll container so the user can switch
  * tabs (or re-anchor) while scrolling through long study sections
  * like Findings or Tests. Background + z-index ensure tabs are
- * readable over content underneath. */
+ * readable over content underneath. The -webkit-sticky prefix is
+ * still needed for older Safari versions. */
 .study-tabs {
   display: flex;
   gap: 24px;
   align-items: center;
   border-bottom: 1px solid #e5e7eb;
   margin: 16px 0 20px;
+  position: -webkit-sticky;
   position: sticky;
   top: 0;
   z-index: 30;
   background: #fff;
   padding-top: 4px;
+  /* Subtle drop-shadow gives a visual cue when the bar has stuck —
+   * users can tell at a glance whether they've scrolled past it. */
+  box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.04);
 }
 .study-tab {
   background: transparent;

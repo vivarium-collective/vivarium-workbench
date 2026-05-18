@@ -270,6 +270,8 @@ def list_simulations(workspace: Path) -> list[dict]:
     rows = list(merged.values())
 
     def _ts(r):
+        # After dedupe above, started_at is already normalised to float
+        # (or None). Trivial sort key here.
         v = r.get("started_at")
         return float(v) if isinstance(v, (int, float)) else 0.0
     rows.sort(key=_ts, reverse=True)

@@ -31,7 +31,7 @@
   window._setStudyTab = _setStudyTab;
 
   // ── Charts panel: inline SVGs from /api/study-charts ─────────────────────
-  // Re-used by both Runs tab and Visualizations tab. Memoized per panel id.
+  // Lives in the Visualizations tab only. Memoized per panel id.
   // Merges two sources returned by the server:
   //   live   — generated from runs.db at request time
   //   static — pre-rendered SVGs under studies/<name>/charts/
@@ -61,18 +61,12 @@
         var live = d.charts.filter(function(c) { return (c.source || 'live') === 'live'; });
         var stat = d.charts.filter(function(c) { return c.source === 'static'; });
         var html = '';
-        // Section header only on Runs-tab variant; viz panel has its own header.
-        var topHeader = (panelId === 'charts-panel')
-          ? '<h3 class="section-title">Latest run — visualizations</h3>' : '';
-        html += topHeader;
         if (live.length) {
           html += live.map(_renderChartCard).join('');
         }
         if (stat.length) {
           if (live.length) {
             html += '<h3 class="section-title" style="margin-top:24px">Pre-rendered charts <span class="muted" style="font-weight:400;font-size:0.85em">(checked-in under <code>studies/' + studyName() + '/charts/</code>)</span></h3>';
-          } else if (panelId === 'charts-panel') {
-            html += '<p class="muted" style="margin:0 0 12px 0">No <code>runs.db</code> yet — showing pre-rendered charts only.</p>';
           }
           html += stat.map(_renderChartCard).join('');
         }
