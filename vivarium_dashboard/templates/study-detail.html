@@ -1392,8 +1392,11 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
         {% if v.description %}
         <p class="muted" style="margin:6px 12px;font-size:0.88em">{{ v.description }}</p>
         {% endif %}
-        <iframe src="{{ v.url }}" style="width:100%;height:600px;border:0;display:block"
-                loading="lazy" title="{{ v.name }}"></iframe>
+        <iframe src="{{ v.url }}"
+                style="width:100%;min-height:1600px;border:0;display:block"
+                loading="lazy" title="{{ v.name }}"
+                onload="(function(f){try{var d=f.contentDocument;if(!d)return;var h=Math.max(d.documentElement.scrollHeight,d.body&&d.body.scrollHeight||0);if(h>200)f.style.height=(h+24)+'px';}catch(e){}})(this)"
+                ></iframe>
       </div>
       {% endfor %}
     </div>
