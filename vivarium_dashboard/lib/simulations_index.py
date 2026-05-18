@@ -30,13 +30,22 @@ class RunNotFound(Exception):
 def _discover_dbs(workspace: Path) -> list[tuple[Path, str]]:
     """Return list of (db_path, workspace_relative_str) for every runs DB.
 
-    Skips missing files. Order: workspace-level DB first, then studies in
-    alphabetical order (deterministic for tests).
+    Skips missing files. Order: workspace-level DBs first (composite-runs
+    + default-baseline), then per-study in alphabetical order (deterministic
+    for tests).
+
+    .pbg/default-baseline/runs.db is produced by ``scripts/run_default_baseline.py``
+    (workspace.yaml:default_baseline). It's the "before any study runs"
+    reference state — surfaces in the Simulations DB tab so evaluators can
+    open it, and is read as a fallback when a study has no runs of its own.
     """
     dbs: list[tuple[Path, str]] = []
     scratch = workspace / ".pbg" / "composite-runs.db"
     if scratch.is_file():
         dbs.append((scratch, ".pbg/composite-runs.db"))
+    default_baseline = workspace / ".pbg" / "default-baseline" / "runs.db"
+    if default_baseline.is_file():
+        dbs.append((default_baseline, ".pbg/default-baseline/runs.db"))
     studies_root = workspace / "studies"
     if studies_root.is_dir():
         for sdir in sorted(studies_root.iterdir()):
@@ -46,6 +55,17 @@ def _discover_dbs(workspace: Path) -> list[tuple[Path, str]]:
             if db.is_file():
                 dbs.append((db, f"studies/{sdir.name}/runs.db"))
     return dbs
+
+
+def discover_default_baseline_db(workspace: Path) -> Path | None:
+    """Return the path to the workspace's default-baseline runs.db, or None.
+
+    Used by viz pre-fill: when a study has no runs of its own, callers
+    fall back to this db so the evaluator sees the cell's baseline
+    behaviour against the study's measure paths.
+    """
+    p = Path(workspace) / ".pbg" / "default-baseline" / "runs.db"
+    return p if p.is_file() else None
 
 
 def _row_to_dict(row, db_path_str: str) -> dict:
