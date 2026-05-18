@@ -1984,15 +1984,110 @@ def _study_export_zip(ws_root: Path, name: str) -> bytes:
     return buf.getvalue()
 
 
+def _enrich_runs_with_meta(study_dir: Path, runs: list[dict]) -> list[dict]:
+    """Merge per-run metadata from studies/<name>/runs.db into study.runs[].
+
+    study.yaml's runs[] carries only the slim authoritative fields (run_id,
+    variant, composite, label, status, n_steps). The runs_meta table in
+    runs.db carries the rich per-run record (spec_id, params, started_at,
+    completed_at, log_path). The Runs tab needs both. We copy the rich
+    fields onto each entry under namespaced keys (`meta_*`) so the
+    template doesn't have to know which DB they came from.
+
+    Tolerant: if runs.db is absent, has no row for a run_id, or fails to
+    open, the run entry is returned unchanged.
+    """
+    if not runs:
+        return runs
+    db = study_dir / "runs.db"
+    rows: list = []
+    if db.is_file():
+        import sqlite3 as _sql
+        try:
+            conn = _sql.connect(str(db))
+            conn.row_factory = _sql.Row
+            rows = conn.execute(
+                "SELECT run_id, spec_id, params_json, started_at, completed_at, "
+                "n_steps, status, log_path FROM runs_meta"
+            ).fetchall()
+            conn.close()
+        except _sql.Error:
+            rows = []
+    import json as _json
+    by_id = {r["run_id"]: r for r in rows}
+    enriched = []
+    for r in runs:
+        out = dict(r)
+        # Always set meta_* keys so the Jinja template can call filters
+        # against them unconditionally (None → empty cell).
+        out.setdefault("meta_spec_id", None)
+        out.setdefault("meta_started_at", None)
+        out.setdefault("meta_completed_at", None)
+        out.setdefault("meta_duration_sec", None)
+        out.setdefault("meta_params", {})
+        out.setdefault("meta_log_path", None)
+        m = by_id.get(r.get("run_id"))
+        if m is not None:
+            try:
+                params = _json.loads(m["params_json"] or "{}")
+            except (ValueError, TypeError):
+                params = {}
+            started = m["started_at"]
+            completed = m["completed_at"]
+            duration = (completed - started) if (started and completed) else None
+            out["meta_spec_id"] = m["spec_id"]
+            out["meta_started_at"] = started
+            out["meta_completed_at"] = completed
+            out["meta_duration_sec"] = duration
+            out["meta_params"] = params
+            out["meta_log_path"] = m["log_path"]
+        enriched.append(out)
+    return enriched
+
+
 def _render_study_detail_html(name: str, spec: dict) -> str:
     """Render study-detail.html via Jinja2."""
     import jinja2
+    spec = dict(spec)
+    spec["runs"] = _enrich_runs_with_meta(_study_dir(name), spec.get("runs") or [])
     env = jinja2.Environment(
         loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
         autoescape=True,
     )
+    env.filters["fmt_ts"] = _jinja_fmt_ts
+    env.filters["fmt_duration"] = _jinja_fmt_duration
     tpl = env.get_template("study-detail.html")
     return tpl.render(study=spec, name=name)
+
+
+def _jinja_fmt_ts(ts) -> str:
+    """Format a unix timestamp as 'YYYY-MM-DD HH:MM' UTC, or '' if missing."""
+    try:
+        ts = float(ts)
+    except (TypeError, ValueError):
+        return ""
+    if not ts:
+        return ""
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+
+def _jinja_fmt_duration(seconds) -> str:
+    """Format a duration in seconds as '12s', '1m 30s', '2h 15m', or '' if missing."""
+    try:
+        seconds = float(seconds)
+    except (TypeError, ValueError):
+        return ""
+    if seconds < 0:
+        return ""
+    s = int(seconds)
+    if s < 60:
+        return f"{s}s"
+    m, s = divmod(s, 60)
+    if m < 60:
+        return f"{m}m {s}s" if s else f"{m}m"
+    h, m = divmod(m, 60)
+    return f"{h}h {m}m" if m else f"{h}h"
 
 
 # ---------------------------------------------------------------------------
