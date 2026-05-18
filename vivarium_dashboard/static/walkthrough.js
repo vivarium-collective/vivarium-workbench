@@ -3570,6 +3570,20 @@
           ? 'effective: ' + effStatus + '  (intent: ' + authStatus + ')'
           : 'status: ' + effStatus;
         document.getElementById('investigation-detail-description').textContent = d.description || '';
+        // Biology-story banner: populated only when investigation.yaml
+        // declares `biological_story:`. Hidden otherwise.
+        var storyBox = document.getElementById('investigation-biology-story');
+        var storyText = document.getElementById('investigation-biology-story-text');
+        if (storyBox && storyText) {
+          var story = (d.biological_story || '').trim();
+          if (story) {
+            storyText.textContent = story;
+            storyBox.style.display = '';
+          } else {
+            storyText.textContent = '';
+            storyBox.style.display = 'none';
+          }
+        }
         _renderInvestigationDag(d.studies || []);
       })
       .catch(function(err) {
@@ -4012,13 +4026,46 @@
                             Promise.all(chartFetches)]).then(function(arr) {
           var chartsByStudy = {};
           arr[2].forEach(function(c) { chartsByStudy[c.name] = c.charts; });
-          return {iset: iset, specs: arr[0], bibEntries: arr[1],
-                  chartsByStudy: chartsByStudy};
+          // Second pass: now that we have the specs, fetch each study's
+          // embed_visualizations URLs so the downloaded report can inline
+          // them as <iframe srcdoc="...">. This makes the file truly
+          // self-contained — works offline because the full preview HTML
+          // (incl. its Plotly CDN <script src>) is embedded inline.
+          var specs = arr[0];
+          var embedFetches = specs.map(function(spec) {
+            var embeds = (spec && spec.embed_visualizations) || [];
+            var perStudy = embeds.map(function(embed) {
+              if (!embed || !embed.url) return Promise.resolve(null);
+              return fetch(embed.url, {headers: {Accept: 'text/html'}})
+                .then(function(r) { return r.ok ? r.text() : null; })
+                .then(function(text) {
+                  return text ? {
+                    name: embed.name || '',
+                    description: embed.description || '',
+                    url: embed.url,
+                    html: text,
+                  } : null;
+                })
+                .catch(function() { return null; });
+            });
+            return Promise.all(perStudy).then(function(results) {
+              return {name: spec && spec.name, embeds: results.filter(Boolean)};
+            });
+          });
+          return Promise.all(embedFetches).then(function(embedResults) {
+            var embedsByStudy = {};
+            embedResults.forEach(function(e) {
+              if (e && e.name) embedsByStudy[e.name] = e.embeds;
+            });
+            return {iset: iset, specs: specs, bibEntries: arr[1],
+                    chartsByStudy: chartsByStudy, embedsByStudy: embedsByStudy};
+          });
         });
       })
       .then(function(bundle) {
         var html = _buildInvestigationReportHtml(bundle.iset, bundle.specs,
-                                                  bundle.bibEntries, bundle.chartsByStudy);
+                                                  bundle.bibEntries, bundle.chartsByStudy,
+                                                  bundle.embedsByStudy);
         var dateStr = new Date().toISOString().slice(0, 10);
         var filename = 'investigation-' + name + '-' + dateStr + '.html';
         _triggerDownload(filename, html, 'text/html');
@@ -4063,9 +4110,10 @@
   }
 
   // Construct the report's HTML body from the investigation + per-study specs.
-  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy) {
+  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy) {
     bibEntries = bibEntries || [];
     chartsByStudy = chartsByStudy || {};
+    embedsByStudy = embedsByStudy || {};
     var bibByKey = {};
     bibEntries.forEach(function(e) { bibByKey[e.key] = e; });
     var now = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
@@ -4306,6 +4354,9 @@
       var links = [];
       links.push('<a href="#' + sid.summary + '">Summary</a>');
       links.push('<a href="#' + sid.decision + '">Decision</a>');
+      var nEmbedsForStudy = (embedsByStudy[s.name] || []).length;
+      if (nEmbedsForStudy)
+        links.push('<a href="#study-' + slug + '-embeds">Visualizations <span class="sn-count">' + nEmbedsForStudy + '</span></a>');
       if (findings.length)    links.push('<a href="#' + sid.takeaways + '">Key takeaways <span class="sn-count">' + findings.length + '</span></a>');
       if (sims.length)        links.push('<a href="#' + sid.sims + '">What we ran <span class="sn-count">' + sims.length + '</span></a>');
       if (charts.length)      links.push('<a href="#' + sid.charts + '">Charts <span class="sn-count">' + charts.length + '</span></a>');
@@ -4727,6 +4778,148 @@
           + '</p></div>'
         : '';
 
+      // ── BIOLOGY-AT-A-GLANCE (planning-phase, biologist-first) ────────
+      // Renders when study.yaml declares any of: biological_summary,
+      // study_card, literature_anchors. Designed so a biologist reading
+      // the report sees the biology before any code identifier.
+      var biologyGlanceHtml = '';
+      if (s.biological_summary || s.study_card || s.literature_anchors) {
+        var bgsBits = [];
+        if (s.biological_summary) {
+          bgsBits.push(
+            '<div class="biology-summary-callout">'
+            + '<h3 class="biology-glance-label">Biology — what this study is about</h3>'
+            + '<p class="biology-prose">' + _multiline(s.biological_summary) + '</p>'
+            + '</div>'
+          );
+        }
+        if (s.study_card) {
+          var sc = s.study_card;
+          var scRows = [];
+          if (sc.goal) scRows.push('<tr><th>Goal</th><td>' + _multiline(sc.goal) + '</td></tr>');
+          if (sc.mechanism) scRows.push('<tr><th>Mechanism</th><td>' + _multiline(sc.mechanism) + '</td></tr>');
+          if (sc.why_before_next) scRows.push('<tr><th>Why before next</th><td>' + _multiline(sc.why_before_next) + '</td></tr>');
+          if (sc.expected_result) scRows.push('<tr><th>Expected result</th><td>' + _multiline(sc.expected_result) + '</td></tr>');
+          if (sc.main_expert_question) scRows.push('<tr><th>Main expert question</th><td>' + _multiline(sc.main_expert_question) + '</td></tr>');
+          if (scRows.length) {
+            bgsBits.push(
+              '<div class="study-card">'
+              + '<h3 class="biology-glance-label">Study card</h3>'
+              + '<table class="study-card-table">' + scRows.join('') + '</table>'
+              + '</div>'
+            );
+          }
+        }
+        if (Array.isArray(s.literature_anchors) && s.literature_anchors.length) {
+          var anchorItems = s.literature_anchors.map(function(a) {
+            var bits = ['<div class="anchor-expectation">' + _h(a.expectation || '') + '</div>'];
+            if (a.model_observable) {
+              bits.push('<div class="anchor-observable"><em>Model observable:</em> <code>'
+                + _h(a.model_observable) + '</code></div>');
+            }
+            if (a.source) {
+              bits.push('<div class="anchor-source"><em>Source:</em> ' + _h(a.source) + '</div>');
+            }
+            if (a.status_in_v2ecoli) {
+              bits.push('<div class="anchor-status"><em>Current status:</em> '
+                + _h(a.status_in_v2ecoli) + '</div>');
+            }
+            return '<li class="literature-anchor-card">' + bits.join('') + '</li>';
+          }).join('');
+          bgsBits.push(
+            '<div class="literature-anchors">'
+            + '<h3 class="biology-glance-label">Literature anchors</h3>'
+            + '<p class="muted small" style="margin:0 0 8px 0">The biological '
+            + 'expectations this study tests, mapped to the model observable that '
+            + 'will measure each one. Full citations live in the test cards.</p>'
+            + '<ul class="literature-anchor-list">' + anchorItems + '</ul>'
+            + '</div>'
+          );
+        }
+        if (bgsBits.length) {
+          biologyGlanceHtml = '<div class="biology-glance">' + bgsBits.join('') + '</div>';
+        }
+      }
+
+      // ── PRE-RUN EXPERT REVIEW ────────────────────────────────────────
+      // Compiles expert_decisions_needed into a prominent panel so biologists
+      // can answer them before the simulation is run.
+      var expertReviewHtml = '';
+      if (Array.isArray(s.expert_decisions_needed) && s.expert_decisions_needed.length) {
+        var qCards = s.expert_decisions_needed.map(function(q) {
+          var altHtml = '';
+          if (Array.isArray(q.alternatives) && q.alternatives.length) {
+            altHtml = '<div class="expert-question-alternatives"><em>Alternatives:</em><ul>'
+              + q.alternatives.map(function(a){return '<li>' + _h(a) + '</li>';}).join('')
+              + '</ul></div>';
+          }
+          var impactHtml = q.impact_if_wrong
+            ? '<div class="expert-question-impact"><em>Impact if wrong:</em> '
+              + _multiline(q.impact_if_wrong) + '</div>'
+            : '';
+          var blocksHtml = '';
+          if (Array.isArray(q.blocks) && q.blocks.length) {
+            blocksHtml = '<details class="expert-question-blocks"><summary>What this blocks ('
+              + q.blocks.length + ' items)</summary><ul>'
+              + q.blocks.map(function(b){return '<li>' + _h(b) + '</li>';}).join('')
+              + '</ul></details>';
+          }
+          var requestedHtml = q.requested_response
+            ? '<details class="expert-question-response"><summary>Requested response format</summary><p>'
+              + _multiline(q.requested_response) + '</p></details>'
+            : '';
+          var askedToHtml = q.asked_to
+            ? '<span class="expert-question-asked-to">asked to: ' + _h(q.asked_to) + '</span>'
+            : '';
+          return '<div class="expert-question-card status-' + _h(q.status || 'open') + '">'
+            + '<div class="expert-question-header">'
+            +   '<span class="expert-question-id">' + _h(q.id || '') + '</span>'
+            +   '<span class="expert-question-status">' + _h(q.status || 'open') + '</span>'
+            +   askedToHtml
+            + '</div>'
+            + '<div class="expert-question-text"><strong>Q.</strong> '
+            +   _multiline(q.question || '') + '</div>'
+            + altHtml + impactHtml + blocksHtml + requestedHtml
+            + '</div>';
+        }).join('');
+        expertReviewHtml = '<div class="pre-run-expert-review" id="study-' + slug + '-expert">'
+          + '<h3>Pre-run expert review</h3>'
+          + '<p class="muted small" style="margin:0 0 8px 0">Open biological '
+          + 'questions the planning is contingent on. A "wrong" answer here means '
+          + 'a primary test threshold needs to change <em>before</em> the simulation '
+          + 'is run, not after.</p>'
+          + qCards
+          + '</div>';
+      }
+
+      // ── EMBED VISUALIZATIONS ─────────────────────────────────────────
+      // Pre-fetched HTML previews (study.yaml.embed_visualizations) inlined
+      // as <iframe srcdoc> so the downloaded report works offline. The
+      // preview's own <script src> CDN loads (Plotly) will still need
+      // network access at *viewing* time, but the HTML structure + data
+      // are baked in.
+      var embedsHtml = '';
+      var studyEmbeds = embedsByStudy[s.name] || [];
+      if (studyEmbeds.length) {
+        embedsHtml = '<div class="study-embeds" id="study-' + slug + '-embeds">'
+          + '<h3>Visualizations</h3>'
+          + studyEmbeds.map(function(emb) {
+              // Escape double-quotes for srcdoc attribute.
+              var escaped = (emb.html || '').replace(/&/g, '&amp;')
+                                            .replace(/"/g, '&quot;');
+              return '<div class="study-embed-card" style="margin:12px 0;border:1px solid #e2e8f0;border-radius:6px;background:#fff;overflow:hidden">'
+                + '<div style="padding:8px 12px;border-bottom:1px solid #e5e7eb;background:#f9fafb">'
+                +   '<strong>' + _h(emb.name) + '</strong>'
+                + '</div>'
+                + (emb.description ? '<p class="muted small" style="margin:6px 12px">' + _h(emb.description) + '</p>' : '')
+                + '<iframe srcdoc="' + escaped + '" '
+                +   'style="width:100%;height:680px;border:0;display:block" '
+                +   'loading="lazy" title="' + _h(emb.name) + '"></iframe>'
+                + '</div>';
+            }).join('')
+          + '</div>';
+      }
+
       return ''
         + '<section class="study" id="study-' + slug + '">'
         +   subNav
@@ -4735,8 +4928,11 @@
         +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
         +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
         +   '</header>'
+        +   biologyGlanceHtml   // 0. Biology-at-a-glance (planning-phase, biologist-first)
+        +   embedsHtml          // 0b. Embedded preview HTMLs (figures) — inlined for offline use
         +   summaryHtml         // 1. Plain-English summary (with Purpose disclosure)
         +   decisionHtml        // 2. Decision box (with Pipeline-gate disclosure)
+        +   expertReviewHtml    // 2b. Pre-run expert review (open biological questions)
         +   takeawaysHtml       // 3 + 4. Key takeaways + detailed findings grouped by kind
         +   simsHtml            // 5. What did/will we run?
         +   chartsHtml          //    + Visualisations from runs
@@ -5088,8 +5284,11 @@
       + '.fu-why,.fu-unblocks,.fu-acc,.fu-hyp{margin:4px 0 0 0;font-size:0.92em;line-height:1.45}'
       + '.fu-hyp{padding:6px 10px;background:#fff;border-radius:3px;border:1px dashed #cbd5e1}'
       + '.fu-acc ul{margin:2px 0 0 18px;padding:0}'
-      // charts
+      // charts — SVGs scale to fit their card container; preserves aspect
+      // ratio so a 1400×484 chart shrinks to (e.g.) 800×276 instead of
+      // overflowing horizontally + clipping content.
       + '.chart-card{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 12px 12px 12px;margin:10px 0}'
+      + '.chart-card svg{display:block;width:100%;max-width:100%;height:auto}'
       + '.chart-caption{font-size:0.83em;color:#475569;margin-top:4px;line-height:1.4}'
       // implementation-requirement cards (biologist-friendly layout)
       + '.req-card{padding:12px 14px;margin:10px 0;border:1px solid #e2e8f0;border-radius:6px;background:#fff;box-shadow:0 1px 1px rgba(0,0,0,0.02)}'
@@ -5279,6 +5478,49 @@
       +   'h1,h2,h3{break-after:avoid}'
       +   '.study{break-inside:avoid-page}'
       + '}'
+
+      // ── biology-at-a-glance + investigation biology-story + expert-review
+      //    (added so the shareable report mirrors the live dashboard
+      //    biologist-first planning view; styled inline so the standalone
+      //    HTML renders with no external assets) ─────────────────────────
+      + '.investigation-biology-story{padding:16px 20px;background:#f0f9ff;border:1px solid #bae6fd;border-left:5px solid #0284c7;border-radius:8px;margin:14px 0 18px 0;max-width:none}'
+      + '.investigation-biology-story p.biology-prose{margin:0;font-size:1em;line-height:1.6;color:#0c4a6e;white-space:pre-line;max-width:none}'
+      + '.biology-glance{margin:0 0 18px 0;padding:14px 18px;background:#f0fdf4;border:1px solid #bbf7d0;border-left:5px solid #16a34a;border-radius:8px}'
+      + '.biology-glance .biology-glance-label{font-size:0.85em;text-transform:uppercase;letter-spacing:0.05em;color:#166534;margin:0 0 8px 0;font-weight:600;border:none;padding:0}'
+      + '.biology-summary-callout{margin-bottom:14px}'
+      + '.biology-summary-callout .biology-prose{margin:0;font-size:1.02em;line-height:1.55;color:#14532d;white-space:pre-line;max-width:none}'
+      + '.biology-glance .study-card{margin-bottom:14px;background:#fff;border-radius:6px;padding:10px 14px;border:1px solid #d1fae5}'
+      + '.study-card-table{width:100%;border-collapse:collapse;font-size:0.93em;margin:0}'
+      + '.study-card-table th{text-align:left;font-weight:600;color:#166534;background:#f0fdf4;padding:6px 10px;white-space:nowrap;vertical-align:top;width:180px;border-bottom:1px solid #bbf7d0}'
+      + '.study-card-table td{padding:6px 10px;vertical-align:top;color:#14532d;border-bottom:1px solid #f0fdf4;line-height:1.5}'
+      + '.study-card-table tr:last-child th,.study-card-table tr:last-child td{border-bottom:none}'
+      + '.literature-anchors{background:#fff;border-radius:6px;padding:10px 14px;border:1px solid #d1fae5}'
+      + '.literature-anchor-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}'
+      + '.literature-anchor-card{padding:8px 12px;background:#f8fefa;border-left:3px solid #16a34a;border-radius:4px;font-size:0.92em}'
+      + '.literature-anchor-card .anchor-expectation{font-weight:500;color:#064e3b;margin-bottom:4px;line-height:1.45}'
+      + '.literature-anchor-card .anchor-observable,.literature-anchor-card .anchor-source,.literature-anchor-card .anchor-status{font-size:0.88em;color:#475569;margin:2px 0;line-height:1.45}'
+      + '.literature-anchor-card .anchor-observable code{font-size:0.92em;background:#fff;padding:1px 5px;border-radius:3px;border:1px solid #d1fae5}'
+      + '.literature-anchor-card .anchor-status{font-style:italic}'
+      + '.pre-run-expert-review{margin:18px 0;padding:14px 16px;background:#faf5ff;border:1px solid #e9d5ff;border-left:5px solid #a855f7;border-radius:8px}'
+      + '.pre-run-expert-review h3{color:#6b21a8;margin:0 0 6px 0}'
+      + '.expert-question-card{padding:10px 14px;background:#fff;border:1px solid #e9d5ff;border-left:4px solid #a855f7;border-radius:6px;margin:10px 0}'
+      + '.expert-question-card.status-resolved{border-left-color:#10b981}'
+      + '.expert-question-header{display:flex;align-items:center;gap:8px;font-size:0.85em;color:#6b21a8;margin-bottom:6px;flex-wrap:wrap}'
+      + '.expert-question-id{font-family:ui-monospace,monospace;font-size:0.85em;background:#ede9fe;padding:1px 6px;border-radius:3px}'
+      + '.expert-question-status{font-size:0.78em;padding:1px 6px;border-radius:9999px;background:#fef3c7;color:#92400e}'
+      + '.expert-question-card.status-resolved .expert-question-status{background:#d1fae5;color:#065f46}'
+      + '.expert-question-asked-to{font-size:0.78em;color:#6b7280;margin-left:auto}'
+      + '.expert-question-text{font-size:0.95em;line-height:1.55;color:#1e1b4b;margin-bottom:6px}'
+      + '.expert-question-alternatives,.expert-question-impact{font-size:0.9em;color:#475569;line-height:1.5;margin:4px 0}'
+      + '.expert-question-alternatives ul{margin:4px 0 0 18px;padding:0}'
+      + '.expert-question-alternatives li{margin:2px 0}'
+      + '.expert-question-impact em,.expert-question-alternatives em{color:#6b21a8;font-style:normal;font-weight:600}'
+      + '.expert-question-blocks,.expert-question-response{font-size:0.88em;margin:6px 0 0 0;color:#475569}'
+      + '.expert-question-blocks summary,.expert-question-response summary{cursor:pointer;padding:3px 0;color:#6b7280}'
+      + '.expert-question-blocks ul{margin:4px 0 0 18px;padding:0}'
+      + '.expert-question-blocks li{margin:2px 0;font-size:0.92em}'
+      + '.expert-question-response p{margin:4px 0;padding:6px 10px;background:#faf5ff;border-radius:4px}'
+
       + '</style></head><body>'
 
       + '<button class="toc-toggle" onclick="document.querySelector(\'.toc\').classList.toggle(\'open\')">☰ Contents</button>'
@@ -5304,6 +5546,13 @@
 
       +   '<h1>' + _h(iset.title || iset.name) + ' <span class="badge badge-' + _h(iset.status || 'planning') + '">' + _h(iset.status || 'planning') + '</span></h1>'
       +   '<p class="muted small">Investigation report · <code>' + nameClean + '</code> · generated ' + _h(now) + ' · for expert review prior to execution.</p>'
+
+      +   ((iset.biological_story || '').trim()
+          ? '<div class="investigation-biology-story">'
+            + '<h2 style="margin:0 0 8px 0;font-size:0.85em;text-transform:uppercase;letter-spacing:0.05em;color:#075985;font-weight:600;border:none;padding:0">Biology — the mechanism this investigation models</h2>'
+            + '<p class="biology-prose">' + _multiline(iset.biological_story) + '</p>'
+            + '</div>'
+          : '')
 
       +   '<h2 id="overview">Overview</h2>'
       +   (iset.question   ? '<p><strong>Question.</strong> '   + _multiline(iset.question)   + '</p>' : '')

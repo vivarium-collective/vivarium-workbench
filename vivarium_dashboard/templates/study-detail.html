@@ -133,6 +133,9 @@
 .btn-seed-followup:hover{background:#3b82f6;color:#fff}
 .charts-panel{margin-top:18px;display:flex;flex-direction:column;gap:18px}
 .chart-card{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 12px 12px 12px}
+/* SVGs scale to fit their card; preserves aspect ratio so a 1400×484
+   chart shrinks instead of overflowing horizontally + clipping. */
+.chart-card svg{display:block;width:100%;max-width:100%;height:auto}
 .chart-caption{font-size:0.83em;color:#475569;margin-top:4px;line-height:1.4}
 /* findings */
 .findings-section{padding:14px 16px;background:#fafbff;border:1px solid #c7d2fe;border-radius:8px}
@@ -165,6 +168,76 @@
 
 <section class="study-tab-panel active" data-kind="overview" id="panel-overview">
   <div class="study-overview">
+
+    {# ─── Biology-at-a-glance (planning-phase, biologist-first) ──────────
+       Renders when a study.yaml declares biological_summary or study_card
+       or literature_anchors. Designed for pre-execution evaluation:
+       a biologist should be able to understand the study's purpose and
+       expectations without scrolling into implementation details.
+    #}
+    {% if study.biological_summary or study.study_card or study.literature_anchors %}
+    <div class="biology-glance">
+      {% if study.biological_summary %}
+      <div class="biology-summary-callout">
+        <h2 class="biology-glance-label">Biology — what this study is about</h2>
+        <p class="biology-prose">{{ study.biological_summary }}</p>
+      </div>
+      {% endif %}
+
+      {% if study.study_card %}
+      {% set _sc = study.study_card %}
+      <div class="study-card">
+        <h2 class="biology-glance-label">Study card</h2>
+        <table class="study-card-table">
+          {% if _sc.goal %}
+          <tr><th>Goal</th><td>{{ _sc.goal }}</td></tr>
+          {% endif %}
+          {% if _sc.mechanism %}
+          <tr><th>Mechanism</th><td>{{ _sc.mechanism }}</td></tr>
+          {% endif %}
+          {% if _sc.why_before_next %}
+          <tr><th>Why before next</th><td>{{ _sc.why_before_next }}</td></tr>
+          {% endif %}
+          {% if _sc.expected_result %}
+          <tr><th>Expected result</th><td>{{ _sc.expected_result }}</td></tr>
+          {% endif %}
+          {% if _sc.main_expert_question %}
+          <tr><th>Main expert question</th><td>{{ _sc.main_expert_question }}</td></tr>
+          {% endif %}
+        </table>
+      </div>
+      {% endif %}
+
+      {% if study.literature_anchors %}
+      <div class="literature-anchors">
+        <h2 class="biology-glance-label">Literature anchors</h2>
+        <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
+          The biological expectations this study tests, mapped to the
+          model observable that will measure each one. Full citations
+          live in the Tests tab.
+        </p>
+        <ul class="literature-anchor-list">
+        {% for anchor in study.literature_anchors %}
+          <li class="literature-anchor-card">
+            <div class="anchor-expectation">{{ anchor.expectation }}</div>
+            <div class="anchor-observable">
+              <em>Model observable:</em> <code>{{ anchor.model_observable }}</code>
+            </div>
+            {% if anchor.source %}
+            <div class="anchor-source"><em>Source:</em> {{ anchor.source }}</div>
+            {% endif %}
+            {% if anchor.status_in_v2ecoli %}
+            <div class="anchor-status">
+              <em>Current status:</em> {{ anchor.status_in_v2ecoli }}
+            </div>
+            {% endif %}
+          </li>
+        {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
 
     {% if study.findings %}
     <div class="overview-section findings-section">
@@ -332,6 +405,53 @@
           <span class="classification-pill classification-regression">{{ _regression }} regression</span>{% endif %}
         <a onclick="_setStudyTab('tests')" style="cursor:pointer;color:#3b82f6;text-decoration:underline;margin-left:6px">View on Tests tab →</a>
       </p>
+    </div>
+    {% endif %}
+
+    {% if study.expert_decisions_needed %}
+    <div class="overview-section pre-run-expert-review">
+      <h2 class="overview-label">Pre-run expert review</h2>
+      <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
+        Open biological questions the planning is contingent on. A "wrong" answer here
+        means a primary test threshold needs to change <em>before</em> the simulation
+        is run, not after. Each question lists alternatives + the impact of the wrong
+        choice + what downstream work it blocks.
+      </p>
+      <div class="expert-question-list">
+        {% for q in study.expert_decisions_needed %}
+        <div class="expert-question-card status-{{ q.status or 'open' }}">
+          <div class="expert-question-header">
+            <span class="expert-question-id">{{ q.id }}</span>
+            <span class="expert-question-status">{{ q.status or 'open' }}</span>
+            {% if q.asked_to %}<span class="expert-question-asked-to">asked to: {{ q.asked_to }}</span>{% endif %}
+          </div>
+          <div class="expert-question-text"><strong>Q.</strong> {{ q.question }}</div>
+          {% if q.alternatives %}
+          <div class="expert-question-alternatives">
+            <em>Alternatives:</em>
+            <ul>{% for a in q.alternatives %}<li>{{ a }}</li>{% endfor %}</ul>
+          </div>
+          {% endif %}
+          {% if q.impact_if_wrong %}
+          <div class="expert-question-impact">
+            <em>Impact if wrong:</em> {{ q.impact_if_wrong }}
+          </div>
+          {% endif %}
+          {% if q.blocks %}
+          <details class="expert-question-blocks">
+            <summary>What this blocks ({{ q.blocks|length }} items)</summary>
+            <ul>{% for b in q.blocks %}<li>{{ b }}</li>{% endfor %}</ul>
+          </details>
+          {% endif %}
+          {% if q.requested_response %}
+          <details class="expert-question-response">
+            <summary>Requested response format</summary>
+            <p>{{ q.requested_response }}</p>
+          </details>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
     </div>
     {% endif %}
 
@@ -1075,16 +1195,22 @@
 
 <section class="study-tab-panel" data-kind="runs" id="panel-runs">
   <div class="runs-section">
-    <div id="charts-panel" class="charts-panel"></div>
     <h3 class="section-title">Runs</h3>
-    <table id="runs-table">
+    <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
+      All simulations for this study, sourced from <code>studies/{{ study.name }}/runs.db</code>
+      (canonical) merged with any persisted entries in <code>study.yaml</code>.
+      Click <em>View</em> to inspect a single run; <em>Visualizations</em> tab for charts.
+    </p>
+    <table id="runs-table" style="font-size:0.92em">
       <thead>
         <tr>
           <th></th>
-          <th>Variant / Baseline</th>
-          <th>Label</th>
+          <th>Simulation</th>
+          <th>Variant</th>
+          <th>Params</th>
           <th>Steps</th>
           <th>Status</th>
+          <th>Started (UTC)</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -1092,17 +1218,24 @@
         {% for r in (study.runs or []) %}
         <tr data-run-id="{{ r.run_id }}">
           <td><input type="checkbox" class="run-compare-checkbox" value="{{ r.run_id }}"></td>
+          <td><code style="font-size:0.88em">{{ r.sim_name or r.label or r.run_id[:24] }}</code></td>
           <td>{{ r.variant or r.composite or 'baseline' }}</td>
-          <td>{{ r.label or '' }}</td>
-          <td>{{ r.n_steps or '' }}</td>
-          <td>{{ r.status }}</td>
+          <td><code class="muted" style="font-size:0.82em">{{ r.params_summary or '' }}</code></td>
+          <td>{{ r.n_steps if r.n_steps is not none else '' }}</td>
+          <td>
+            {% set _s = r.status or '' %}
+            {% set _bg = '#d1fae5' if _s in ('complete', 'ok', 'ran') else ('#fee2e2' if _s in ('orphaned', 'failed') else '#fef3c7') %}
+            {% set _fg = '#065f46' if _s in ('complete', 'ok', 'ran') else ('#991b1b' if _s in ('orphaned', 'failed') else '#92400e') %}
+            <span style="background:{{ _bg }};color:{{ _fg }};padding:1px 8px;border-radius:9999px;font-size:0.85em">{{ _s }}</span>
+          </td>
+          <td class="muted" style="font-size:0.85em;font-family:ui-monospace,monospace">{{ r.started_at_iso or '' }}</td>
           <td>
             <button class="btn-view-run" data-run-id="{{ r.run_id }}">View</button>
             <button class="btn-delete-run" data-run-id="{{ r.run_id }}">Delete</button>
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="empty-message">No runs yet.</td></tr>
+        <tr><td colspan="8" class="empty-message">No runs yet — launch one via the workspace runner or the dashboard's Run-baseline button.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -1212,6 +1345,36 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
 
 <section class="study-tab-panel" data-kind="visualizations" id="panel-visualizations" hidden>
   <div class="viz-section">
+
+    {# ─── Embedded HTML visualizations (e.g. pre-execution preview pages
+         produced by a runner script). study.embed_visualizations is a list of
+         {name, url, description} entries; each renders as an inline iframe at
+         the top of the Visualizations tab so a biologist gets immediate
+         payoff without waiting for runs.db / Visualization-class plumbing.
+    #}
+    {% if study.embed_visualizations %}
+    <div class="embed-viz-section" style="margin-bottom:24px">
+      <h3 class="section-title">Embedded visualizations</h3>
+      <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
+        Self-contained HTML pages produced by the study's runner. Each iframe
+        below is a standalone artefact you can also open in a separate tab.
+      </p>
+      {% for v in study.embed_visualizations %}
+      <div class="embed-viz-card" style="border:1px solid #e2e8f0;border-radius:6px;margin-bottom:14px;background:#fff">
+        <div style="display:flex;align-items:center;gap:12px;padding:8px 12px;border-bottom:1px solid #e5e7eb;background:#f9fafb">
+          <strong style="flex:1">{{ v.name }}</strong>
+          <a href="{{ v.url }}" target="_blank" class="btn-mini">Open in new tab ↗</a>
+        </div>
+        {% if v.description %}
+        <p class="muted" style="margin:6px 12px;font-size:0.88em">{{ v.description }}</p>
+        {% endif %}
+        <iframe src="{{ v.url }}" style="width:100%;height:600px;border:0;display:block"
+                loading="lazy" title="{{ v.name }}"></iframe>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
     <h3 class="section-title">Latest-run visualizations (auto-generated from <code>runs.db</code>)</h3>
     <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
       These charts re-render each time the page loads, against the most recent simulation in the study's <code>runs.db</code>.
