@@ -852,8 +852,10 @@ def _read_study_status(ws_root: Path, slug: str) -> tuple[str, bool]:
         except Exception:
             return "planning", False
         status = spec.get("status") or "planning"
-        n_runs = len(spec.get("runs") or [])
-        return status, n_runs > 0
+        # F2: count via _count_runs_for_study so we see runs that landed in
+        # runs.db without a matching study.yaml entry (the new canonical
+        # path). spec.runs still merged in via max() for legacy specs.
+        return status, _count_runs_for_study(slug, spec) > 0
     return "planning", False
 
 
@@ -1386,12 +1388,27 @@ def _post_study_create_from_run_for_test(ws_root, body):
     return {"study": name, "url": f"/studies/{name}"}, 200
 
 
-def _append_study_run(study_dir, run_record: dict) -> None:
-    """Append a run record to a Study's study.yaml `runs` list."""
-    sf = _study_spec_file(study_dir)
-    spec = yaml.safe_load(sf.read_text()) or {}
-    spec.setdefault("runs", []).append(run_record)
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+def _count_runs_for_study(name: str, spec: dict | None = None) -> int:
+    """Count runs in studies/<name>/runs.db, falling back to len(spec.runs).
+
+    F2: ``runs.db`` is the canonical source of truth. We still merge with
+    the count from ``spec.get("runs")`` to surface legacy v3 specs that
+    have historical ``runs:`` entries which never made it into the DB
+    (e.g. workspaces predating pbg_runner). Returns the larger of the two
+    so the dashboard never undercounts.
+    """
+    try:
+        db_runs = _read_runs_db_for_study(name)
+    except Exception:
+        db_runs = []
+    db_count = len(db_runs)
+    spec_count = 0
+    if spec is not None:
+        spec_count = len(spec.get("runs") or [])
+    # Most workspaces will have db_count >= spec_count after F2 lands.
+    # If they ever diverge below, max() preserves the union — better to
+    # over-report than under-report when both sources should agree.
+    return max(db_count, spec_count)
 
 
 def _resolve_study_baseline_state(pkg, spec_id, params):
@@ -1515,11 +1532,12 @@ def _post_study_run_baseline_for_test(ws_root, body):
         overrides=generator_overrides,
     )
     if code == 200:
-        _append_study_run(study_dir, {
-            "run_id": run_id, "variant": None, "label": label,
-            "status": "completed", "n_steps": steps,
-            "composite": entry.get("name"),
-        })
+        # F2: do NOT append to study.yaml.runs[] — the runs_meta row
+        # written by _run_composite_subprocess (via composite_runs.save_metadata)
+        # IS the canonical record. The Runs tab reads runs.db directly via
+        # _read_runs_db_for_study + _enrich_runs_with_meta; appending here
+        # would duplicate the same fact in two places and let them drift.
+        #
         # Render canonical viz: composite defaults from
         # @composite_generator(visualizations=...) merged with Study-declared
         # ones (Study wins on name collision). Writes HTML under
@@ -1801,12 +1819,8 @@ def _post_study_run_variant_for_test(ws_root, body):
         run_id=run_id, spec_id=spec_id, label=variant_name,
         sim_name=variant_name, overrides=generator_overrides,
     )
-    if code == 200:
-        _append_study_run(study_dir, {
-            "run_id": run_id, "variant": variant_name, "label": variant_name,
-            "status": "completed", "n_steps": steps,
-            "composite": entry.get("name"),
-        })
+    # F2: no _append_study_run — the runs_meta row is the canonical record;
+    # see the matching note in run-baseline above.
     return response, code
 
 
@@ -5813,7 +5827,7 @@ if __name__ == "__main__":
                 "question":        question,
                 "n_variants":      len(sim_set) if sim_set else len(study_spec.get("variants") or []),
                 "n_interventions": len(study_spec.get("interventions") or []),
-                "n_runs":          len(study_spec.get("runs") or []),
+                "n_runs":          _count_runs_for_study(study_spec["name"], study_spec),  # F2
                 "baseline_source": _format_baseline_source(study_spec),
                 "parent_studies":  _normalize_parents(study_spec),
                 "n_behaviors":     len(beh_tests),
@@ -6022,10 +6036,15 @@ if __name__ == "__main__":
             composites = spec.get("composites") or []
             if composites:
                 composite_summary = ", ".join(c.get("name", "") for c in composites)
-                n_runs = len(spec.get("runs") or [])
+                n_runs = _count_runs_for_study(spec["name"], spec)  # F2: runs.db canonical
             else:
                 composite_summary = spec.get("composite", "")
-                n_runs = len(spec.get("runs") or spec.get("simulations") or [])
+                # Legacy v2 specs sometimes used `simulations:` instead of `runs:`.
+                # _count_runs_for_study only checks `runs:` against runs.db, so
+                # preserve the `simulations:` fallback for that shape.
+                n_runs = _count_runs_for_study(spec["name"], spec)
+                if n_runs == 0:
+                    n_runs = len(spec.get("simulations") or [])
 
             parents = _normalize_parents(spec)
             blocked_by = []
@@ -8638,7 +8657,7 @@ if __name__ == "__main__":
                 spec = load_spec(spec_path)
             except (InvestigationSpecError, Exception):
                 continue
-            n_runs = len(spec.get("runs") or [])
+            n_runs = _count_runs_for_study(spec.get("name", d.name), spec)  # F2
             entry = {
                 "name":             spec.get("name", d.name),
                 "topic":            spec.get("topic", ""),

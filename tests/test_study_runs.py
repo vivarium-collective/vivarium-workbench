@@ -36,21 +36,32 @@ def _study_ws(tmp_path, monkeypatch):
     return ws
 
 
-def test_run_baseline_persists_and_appends(_study_ws):
+def test_run_baseline_persists_to_runs_db_canonical(_study_ws):
+    """F2: runs.db is the canonical source of truth — the runs_meta row
+    holds the full record (params, started_at, completed_at, etc.). The
+    dashboard no longer ALSO appends to study.yaml.runs[]; that field
+    stays untouched. See _count_runs_for_study for how the read side now
+    merges runs.db + spec.runs for back-compat counts."""
     from vivarium_dashboard.server import _post_study_run_baseline_for_test
     resp, code = _post_study_run_baseline_for_test(_study_ws, {"study": "s1", "steps": 2})
     assert code == 200, resp
-    # runs.db got a row
+
+    # Canonical: runs_meta row exists with the right run_id and sim_name.
     db = _study_ws / "studies" / "s1" / "runs.db"
     conn = sqlite3.connect(str(db))
-    n = conn.execute("SELECT COUNT(*) FROM runs_meta").fetchone()[0]
+    rows = conn.execute(
+        "SELECT run_id, sim_name FROM runs_meta"
+    ).fetchall()
     conn.close()
-    assert n == 1
-    # study.yaml.runs grew by one, with variant=None (baseline)
+    assert len(rows) == 1
+    assert rows[0][0] == resp["simulation_id"]
+
+    # F2 contract: study.yaml.runs[] is NOT appended to. The runs.db row
+    # is the canonical record; duplicating into yaml lets the two drift.
     spec = yaml.safe_load((_study_ws / "studies" / "s1" / "study.yaml").read_text())
-    assert len(spec["runs"]) == 1
-    assert spec["runs"][0]["variant"] is None
-    assert spec["runs"][0]["run_id"] == resp["simulation_id"]
+    assert spec.get("runs", []) == [], (
+        f"F2: study.yaml.runs[] must not grow on run; got {spec.get('runs')}"
+    )
 
 
 def test_run_baseline_missing_study(_study_ws):
@@ -60,15 +71,28 @@ def test_run_baseline_missing_study(_study_ws):
 
 
 def test_run_variant_layers_overrides(_study_ws):
+    """F2: variant run lands in runs_meta with the variant name as sim_name
+    (params_json captures the override). study.yaml.runs[] is NOT appended."""
     from vivarium_dashboard.server import _post_study_run_variant_for_test
     resp, code = _post_study_run_variant_for_test(
         _study_ws, {"study": "s1", "variant": "fast"})
     assert code == 200, resp
+
+    # Canonical: runs_meta row carries variant identity via sim_name + label.
+    db = _study_ws / "studies" / "s1" / "runs.db"
+    conn = sqlite3.connect(str(db))
+    rows = conn.execute(
+        "SELECT run_id, sim_name, label FROM runs_meta"
+    ).fetchall()
+    conn.close()
+    assert len(rows) == 1
+    assert rows[0][0] == resp["simulation_id"]
+    assert rows[0][1] == "fast"  # sim_name
+    assert rows[0][2] == "fast"  # label
+
+    # F2 contract: yaml stays clean.
     spec = yaml.safe_load((_study_ws / "studies" / "s1" / "study.yaml").read_text())
-    # The new run records the variant name.
-    variant_runs = [r for r in spec["runs"] if r.get("variant") == "fast"]
-    assert len(variant_runs) == 1
-    assert variant_runs[0]["run_id"] == resp["simulation_id"]
+    assert spec.get("runs", []) == []
 
 
 def test_run_variant_unknown_variant(_study_ws):
@@ -236,3 +260,110 @@ def test_run_variant_unknown_base_composite_404s():
             ws, {"study": "s3", "variant": "dangling"})
         assert code == 404
         assert "base_composite" in resp.get("error", "").lower()
+
+
+# ----------------------------------------------------------------------------
+# F2 — _count_runs_for_study (canonical reader; merges runs.db + spec.runs)
+# ----------------------------------------------------------------------------
+
+
+def test_count_runs_for_study_reads_runs_db_first(tmp_path, monkeypatch):
+    """The canonical source is runs.db; spec.runs is a back-compat fallback.
+    When runs.db has more rows than spec.runs, the higher count wins —
+    F2's whole point is that runs landing via pbg_runner (or any future
+    CLI runner) show up without a corresponding study.yaml entry."""
+    import vivarium_dashboard.server as srv
+    from vivarium_dashboard.lib.composite_runs import connect
+
+    ws = tmp_path / "ws"
+    sd = ws / "studies" / "demo"
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "schema_version": 3, "name": "demo",
+        "baseline": [{"name": "b1", "composite": "pkg.x"}],
+        # No runs: entry — workspace post-F2 doesn't populate this.
+    }))
+    conn = connect(sd / "runs.db")
+    for rid in ("r1", "r2", "r3"):
+        conn.execute(
+            "INSERT INTO runs_meta (run_id, spec_id, started_at, status, sim_name) "
+            "VALUES (?, 'pkg.x', 1.0, 'completed', ?)", (rid, rid),
+        )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(srv, "WORKSPACE", ws)
+    spec = yaml.safe_load((sd / "study.yaml").read_text())
+    assert srv._count_runs_for_study("demo", spec) == 3
+
+
+def test_count_runs_for_study_fallback_to_spec_runs(tmp_path, monkeypatch):
+    """Legacy v3 spec with historical runs[] entries and no runs.db —
+    the count still reflects the legacy entries. This keeps the Studies
+    tab honest when migrating a workspace that has yaml-only run records."""
+    import vivarium_dashboard.server as srv
+    ws = tmp_path / "ws"
+    sd = ws / "studies" / "legacy"
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "schema_version": 3, "name": "legacy",
+        "baseline": [{"name": "b1", "composite": "pkg.x"}],
+        "runs": [
+            {"run_id": "old-1", "status": "completed"},
+            {"run_id": "old-2", "status": "completed"},
+        ],
+    }))
+    # No runs.db file on disk.
+    monkeypatch.setattr(srv, "WORKSPACE", ws)
+    spec = yaml.safe_load((sd / "study.yaml").read_text())
+    assert srv._count_runs_for_study("legacy", spec) == 2
+
+
+def test_count_runs_for_study_zero_when_neither(tmp_path, monkeypatch):
+    """No runs.db and no spec.runs → 0. Doesn't crash on missing study dir."""
+    import vivarium_dashboard.server as srv
+    ws = tmp_path / "ws"
+    sd = ws / "studies" / "empty"
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "schema_version": 3, "name": "empty",
+        "baseline": [{"name": "b1", "composite": "pkg.x"}],
+    }))
+    monkeypatch.setattr(srv, "WORKSPACE", ws)
+    spec = yaml.safe_load((sd / "study.yaml").read_text())
+    assert srv._count_runs_for_study("empty", spec) == 0
+
+
+def test_count_runs_for_study_takes_max_when_both_present(tmp_path, monkeypatch):
+    """During a workspace's migration window both sources may coexist with
+    overlapping run_ids. The helper returns the larger count so the
+    dashboard never undercounts. (Exact dedupe by run_id is overkill here;
+    counts are display-only.)"""
+    import vivarium_dashboard.server as srv
+    from vivarium_dashboard.lib.composite_runs import connect
+
+    ws = tmp_path / "ws"
+    sd = ws / "studies" / "mixed"
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "schema_version": 3, "name": "mixed",
+        "baseline": [{"name": "b1", "composite": "pkg.x"}],
+        "runs": [
+            {"run_id": "a", "status": "completed"},
+            {"run_id": "b", "status": "completed"},
+            {"run_id": "c", "status": "completed"},
+        ],
+    }))
+    conn = connect(sd / "runs.db")
+    # Only 2 in db; legacy yaml has 3. Helper returns max(2, 3) = 3.
+    for rid in ("a", "b"):
+        conn.execute(
+            "INSERT INTO runs_meta (run_id, spec_id, started_at, status, sim_name) "
+            "VALUES (?, 'pkg.x', 1.0, 'completed', ?)", (rid, rid),
+        )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(srv, "WORKSPACE", ws)
+    spec = yaml.safe_load((sd / "study.yaml").read_text())
+    assert srv._count_runs_for_study("mixed", spec) == 3
