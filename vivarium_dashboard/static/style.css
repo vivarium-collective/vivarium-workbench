@@ -1144,6 +1144,24 @@ body.focus-mode::before{
    * users can tell at a glance whether they've scrolled past it. */
   box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.04);
 }
+/* JS-driven fallback: when study-detail.js detects we've scrolled past
+ * the tab bar's resting position, it adds `.is-stuck` and inserts a
+ * same-height spacer. This pins the bar to the viewport top even in
+ * contexts where `position: sticky` fails (some iframe / focus-mode /
+ * containing-block scenarios). See _setupStickyTabs in study-detail.js. */
+.study-tabs.is-stuck {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  margin: 0;
+  padding: 8px 16px 4px 16px;
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+}
+.study-tabs-spacer { width: 100%; }
 .study-tab {
   background: transparent;
   border: 0;

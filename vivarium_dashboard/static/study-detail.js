@@ -679,4 +679,77 @@
   if (runBtn) {
     runBtn.addEventListener('click', runStudyTests);
   }
+
+  // ── Sticky tabs: bulletproof JS fallback ─────────────────────────────────
+  // The .study-tabs nav has `position: sticky; top: 0` declared in style.css,
+  // but sticky has surprising failure modes (containing-block issues, focus
+  // mode, iframe contexts where the SPA scroll container differs from the
+  // iframe document's scroll). This script adds a belt-and-suspenders
+  // `position: fixed` mode that engages once the user scrolls past the tab
+  // bar's resting position, and inserts a same-height spacer so the layout
+  // below doesn't jump when the tabs leave normal flow.
+  (function _setupStickyTabs() {
+    var tabs = document.querySelector('.study-tabs');
+    if (!tabs) return;
+    var scroller = document.scrollingElement || document.documentElement;
+    var spacer = null;
+    var restingTop = 0;   // recomputed lazily — see ensureRestingTop()
+    var lastResize = 0;
+
+    function ensureRestingTop() {
+      // Only meaningful when not currently stuck (otherwise the bar is
+      // already fixed at top:0 and its getBoundingClientRect is misleading).
+      if (tabs.classList.contains('is-stuck')) return;
+      var rect = tabs.getBoundingClientRect();
+      restingTop = rect.top + scroller.scrollTop;
+    }
+
+    function stick() {
+      if (tabs.classList.contains('is-stuck')) return;
+      // Capture pre-stick width so the fixed-position bar matches the in-flow
+      // width exactly (no flicker when transitioning).
+      var w = tabs.getBoundingClientRect().width;
+      spacer = document.createElement('div');
+      spacer.style.height = tabs.offsetHeight + 'px';
+      spacer.setAttribute('aria-hidden', 'true');
+      spacer.className = 'study-tabs-spacer';
+      tabs.parentNode.insertBefore(spacer, tabs);
+      tabs.classList.add('is-stuck');
+      tabs.style.width = w + 'px';
+    }
+
+    function unstick() {
+      if (!tabs.classList.contains('is-stuck')) return;
+      tabs.classList.remove('is-stuck');
+      tabs.style.width = '';
+      if (spacer && spacer.parentNode) spacer.parentNode.removeChild(spacer);
+      spacer = null;
+    }
+
+    function update() {
+      if (restingTop === 0) ensureRestingTop();
+      if (scroller.scrollTop >= restingTop) stick(); else unstick();
+    }
+
+    // Recompute resting offset on resize (debounced via rAF token).
+    function onResize() {
+      var now = Date.now();
+      lastResize = now;
+      requestAnimationFrame(function() {
+        if (lastResize !== now) return;
+        // Snap out of stuck mode to read the true in-flow offset, then re-check.
+        unstick();
+        ensureRestingTop();
+        update();
+      });
+    }
+
+    window.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', onResize);
+    // Initial computation after layout settles.
+    requestAnimationFrame(function() {
+      ensureRestingTop();
+      update();
+    });
+  })();
 })();
