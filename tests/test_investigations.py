@@ -699,3 +699,111 @@ def test_load_spec_accepts_groups_list(tmp_path):
 # Both tests exercised v2 _validate_variants_list groups-validation.  The redesign
 # drops groups from the UI; _validate_study_v3 (v3) does not validate groups at
 # all, so these rejection rules no longer fire.
+
+
+# ----------------------------------------------------------------------------
+# F3 — normalize_dag_edges (pipeline_gate.prerequisites is canonical;
+# parent_studies stays as a back-compat fallback with a DeprecationWarning).
+# ----------------------------------------------------------------------------
+
+
+import warnings as _warnings
+
+from vivarium_dashboard.lib.investigations import normalize_dag_edges
+
+
+def test_normalize_dag_edges_reads_pipeline_gate_first():
+    """When pipeline_gate.prerequisites is set, it wins — parent_studies
+    is ignored entirely (so a half-migrated spec doesn't get DOUBLE-counted
+    parents)."""
+    spec = {
+        "name": "child",
+        "pipeline_gate": {
+            "prerequisites": [
+                {"study": "parent-A", "condition": "ran"},
+                "parent-B",
+            ],
+        },
+        "parent_studies": ["should-be-ignored"],
+    }
+    edges = normalize_dag_edges(spec)
+    slugs = [e["study"] for e in edges]
+    assert slugs == ["parent-A", "parent-B"]
+    # Bare-string entry got the default condition
+    assert next(e for e in edges if e["study"] == "parent-B")["condition"] == "tests-passed"
+    # Explicit condition is preserved
+    assert next(e for e in edges if e["study"] == "parent-A")["condition"] == "ran"
+
+
+def test_normalize_dag_edges_preserves_pass_a_extras():
+    """Pass A added extension fields (required_gate_status, outputs_used,
+    artifact_hashes). The normalizer passes them through verbatim so
+    downstream code can use them without re-reading the raw spec."""
+    spec = {
+        "name": "child",
+        "pipeline_gate": {
+            "prerequisites": [{
+                "study":                "parent-A",
+                "condition":            "tests-passed",
+                "required_gate_status": "passed",
+                "outputs_used":         ["dnaA_count"],
+            }],
+        },
+    }
+    edge = normalize_dag_edges(spec)[0]
+    assert edge["required_gate_status"] == "passed"
+    assert edge["outputs_used"] == ["dnaA_count"]
+
+
+def test_normalize_dag_edges_falls_back_to_parent_studies_with_warning():
+    """Legacy specs that only set parent_studies still work, but emit a
+    DeprecationWarning naming the study so the workspace knows to migrate."""
+    spec = {
+        "name": "legacy-child",
+        "parent_studies": ["legacy-parent"],
+    }
+    with _warnings.catch_warnings(record=True) as captured:
+        _warnings.simplefilter("always")
+        edges = normalize_dag_edges(spec)
+    assert edges == [{"study": "legacy-parent", "condition": "tests-passed"}]
+    msgs = [str(w.message) for w in captured if issubclass(w.category, DeprecationWarning)]
+    assert msgs, "expected a DeprecationWarning when only parent_studies is set"
+    assert "legacy-child" in msgs[0]
+    assert "pipeline_gate.prerequisites" in msgs[0]
+
+
+def test_normalize_dag_edges_empty_spec_returns_empty_list():
+    """A spec with neither field returns []."""
+    assert normalize_dag_edges({"name": "lonely"}) == []
+
+
+def test_normalize_dag_edges_empty_prerequisites_falls_back():
+    """pipeline_gate.prerequisites: [] is treated as 'not set' so the
+    fallback to parent_studies kicks in. (Otherwise migration would
+    require deleting parent_studies in the same edit as adding the new
+    empty list — which is the wrong order if a workspace wants to do a
+    'remove all dependencies' migration in two steps.)"""
+    spec = {
+        "name": "child",
+        "pipeline_gate": {"prerequisites": []},
+        "parent_studies": ["fallback-parent"],
+    }
+    with _warnings.catch_warnings(record=True) as captured:
+        _warnings.simplefilter("always")
+        edges = normalize_dag_edges(spec)
+    assert edges == [{"study": "fallback-parent", "condition": "tests-passed"}]
+    # Still warns because we ended up using the legacy field
+    assert any(issubclass(w.category, DeprecationWarning) for w in captured)
+
+
+def test_normalize_dag_edges_no_warning_when_using_canonical():
+    """The canonical-only case must be silent — no nagging the user when
+    they've already done the right thing."""
+    spec = {
+        "name": "modern-child",
+        "pipeline_gate": {"prerequisites": ["parent-A"]},
+    }
+    with _warnings.catch_warnings(record=True) as captured:
+        _warnings.simplefilter("always")
+        normalize_dag_edges(spec)
+    assert not [w for w in captured if issubclass(w.category, DeprecationWarning)]

@@ -1023,6 +1023,71 @@ def load_overlays(spec: dict, viz_config: dict, ws_root: Path,
 
 
 # ----------------------------------------------------------------------------
+# DAG-edge normalization (F3 of the framework cleanup)
+# ----------------------------------------------------------------------------
+
+
+def normalize_dag_edges(spec: dict) -> list[dict]:
+    """Unified read of a study's DAG dependencies.
+
+    Two declaration forms have coexisted: the canonical Pass A field
+    ``pipeline_gate.prerequisites`` (Section 2 of the 8-section structure)
+    and the legacy ``parent_studies``. Both accept the same item shapes
+    (bare slug string, or ``{study, condition}`` object), but only
+    ``parent_studies`` is consumed by the dashboard today. This helper
+    is the single read path going forward: ``pipeline_gate.prerequisites``
+    wins, with a transparent fallback to ``parent_studies`` for v3 specs
+    that haven't been migrated yet.
+
+    Returns a normalized list of ``{study: str, condition: str}`` dicts.
+    Items in ``pipeline_gate.prerequisites`` may carry additional Pass A
+    fields (``required_gate_status``, ``outputs_used``, etc.); those are
+    passed through verbatim.
+
+    When the canonical source is empty/absent AND the legacy source has
+    entries, a one-time DeprecationWarning is emitted naming the study
+    so the workspace can migrate.
+    """
+    pg = spec.get("pipeline_gate") or {}
+    prereqs = pg.get("prerequisites") if isinstance(pg, dict) else None
+
+    legacy = spec.get("parent_studies") or []
+    using_legacy = bool(legacy) and not prereqs
+
+    if using_legacy:
+        import warnings
+        warnings.warn(
+            f"Study {spec.get('name', '<unnamed>')!r}: "
+            "`parent_studies` is the legacy DAG-edge field. The canonical "
+            "location is `pipeline_gate.prerequisites` (Section 2 of the "
+            "8-section structure). The dashboard still reads `parent_studies` "
+            "as a back-compat fallback, but a future version will require "
+            "the canonical field. Migrate with /pbg-study migrate-dag.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+    source = prereqs if prereqs else legacy
+    if not source:
+        return []
+
+    out: list[dict] = []
+    for entry in source:
+        if isinstance(entry, str):
+            out.append({"study": entry, "condition": "tests-passed"})
+        elif isinstance(entry, dict) and entry.get("study"):
+            # Preserve any extra Pass A fields (required_gate_status etc.)
+            # so downstream consumers can use them without re-reading the
+            # raw spec.
+            normalized = dict(entry)
+            normalized.setdefault("condition", "tests-passed")
+            out.append(normalized)
+        # Silently drop malformed entries; the JSON-schema validator is the
+        # right place to surface those as errors.
+    return out
+
+
+# ----------------------------------------------------------------------------
 # Spec status updater + run lock + orchestrator
 # ----------------------------------------------------------------------------
 
