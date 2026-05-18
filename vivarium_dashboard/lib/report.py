@@ -419,6 +419,19 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
             except Exception:
                 active_investigation_name = inv_dirs[0].name
 
+    # Cache-bust for the live dashboard assets. Browsers happily serve a
+    # stale walkthrough.js / style.css if the URL doesn't change, even
+    # when the plugin ships a newer version. Computing a version stamp
+    # from the asset mtimes makes the URL change whenever the file does.
+    assets_dir = ws_root / "reports" / "assets"
+    def _mtime(rel: str) -> str:
+        p = assets_dir / rel
+        try:
+            return str(int(p.stat().st_mtime))
+        except OSError:
+            return "0"
+    asset_version = _mtime("walkthrough.js") + "_" + _mtime("style.css")
+
     out.write_text(tpl.render(
         workspace_name=ws["name"],
         active_investigation_name=active_investigation_name,
@@ -438,6 +451,7 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         registry=registry,
         registry_warning=registry_warning,
         pbg_doc_json=json.dumps(pbg_doc, indent=2, default=str),
+        asset_version=asset_version,
     ), encoding="utf-8")
     return out
 

@@ -5909,8 +5909,17 @@
       + '</script>'
 
       // ── Inline feedback widget (fully detached: localStorage only) ──
+      //
+      // Per-report annotation key: each download gets a unique reportId
+      // (millisecond-precision generation timestamp). Annotations are
+      // keyed by INV + REPORT_ID, so opening an older report doesn't
+      // see comments left on a newer one and vice versa. The yaml export
+      // tags meta.report_id so pbg-feedback-import can attribute it
+      // back to a specific report file.
       + _feedbackWidgetCss()
-      + _feedbackWidgetJs(iset.name || 'investigation')
+      + _feedbackWidgetJs(iset.name || 'investigation',
+                          'rpt-' + new Date().toISOString()
+                                     .slice(0, 19).replace(/[-:T]/g, ''))
 
       + '</body></html>';
   }
@@ -5964,11 +5973,12 @@
   //      blocks) that clip or hide the editor entirely.
   //   2. A single global editor means clicking a different 💬 swaps the
   //      anchor cleanly instead of opening N stacked editors.
-  function _feedbackWidgetJs(invName) {
+  function _feedbackWidgetJs(invName, reportId) {
     return '<script>'
       + '(function(){'
       +   'var INV=' + JSON.stringify(invName) + ';'
-      +   'var KEY="v2ecoli_feedback_"+INV;'
+      +   'var REPORT_ID=' + JSON.stringify(reportId || '') + ';'
+      +   'var KEY="v2ecoli_feedback_"+INV+(REPORT_ID?("_"+REPORT_ID):"");'
       +   'var ID_PATTERNS=[/^study-/,/^finding-/,/^acceptance$/,/^references$/,/^how-to-read$/,/^studies-heading$/];'
       +   'var openEd=null;'
       +   'var memStore={};'
@@ -6078,7 +6088,7 @@
       +   'function downloadFeedback(){'
       +     'var d=load();if(!countAll()){alert("No feedback yet — click 💬 next to any section first.");return;}'
       +     'var ts=new Date().toISOString();'
-      +     'var meta={investigation:INV,generated_at:ts,page_title:document.title,source_url:location.href};'
+      +     'var meta={investigation:INV,report_id:REPORT_ID,generated_at:ts,page_title:document.title,source_url:location.href};'
       +     'var blob=new Blob([serialiseYaml(meta,d)],{type:"application/yaml"});'
       +     'var url=URL.createObjectURL(blob);var a=document.createElement("a");'
       +     'a.href=url;a.download="feedback-"+INV+"-"+ts.slice(0,19).replace(/[:T]/g,"-")+".yaml";'

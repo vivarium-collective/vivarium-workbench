@@ -615,6 +615,16 @@
         <thead><tr><th>Name</th><th>Type</th><th>Default</th><th>Current</th><th>Range</th><th>Gate</th><th></th></tr></thead>
         <tbody>
           {% for e in _cond.expert_inputs %}
+          {# Derive a sensible step for type=number from the declared range
+             so the spinner arrows step by ~1% of the range. Falls back to
+             1 for integer, 0.01 for unranged number, "any" for unknown. #}
+          {% set _step = "any" %}
+          {% if e.type == 'integer' %}{% set _step = 1 %}
+          {% elif e.type == 'number' %}
+            {% if e.range and e.range|length == 2 %}
+              {% set _step = ((e.range[1] - e.range[0]) / 100.0) %}
+            {% else %}{% set _step = 0.01 %}{% endif %}
+          {% endif %}
           <tr data-ei-name="{{ e.name }}">
             <td title="{{ e.description or '' }}"><code>{{ e.name }}</code></td>
             <td>{{ e.type or '' }}</td>
@@ -625,6 +635,7 @@
                      value="{% if e.current is none %}{% else %}{{ e.current }}{% endif %}"
                      placeholder="(awaiting expert)"
                      {% if e.range and e.range[0] is defined %}min="{{ e.range[0] }}" max="{{ e.range[1] }}"{% endif %}
+                     step="{{ _step }}"
                      style="width:100%;padding:3px 6px;border:1px solid #cbd5e1;border-radius:3px;font:inherit">
             </td>
             <td>
