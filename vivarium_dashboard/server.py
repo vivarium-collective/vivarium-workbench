@@ -5770,15 +5770,12 @@ if __name__ == "__main__":
         _ws_add_to_sys_path()
         from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
 
+        from vivarium_dashboard.lib.investigations import normalize_dag_edges
+        # Delegate to the canonical helper — reads pipeline_gate.prerequisites
+        # first, falls back to parent_studies for back-compat (with a
+        # DeprecationWarning when only the legacy field is set).
         def _normalize_parents(study_spec: dict) -> list[dict]:
-            ps = study_spec.get("parent_studies") or []
-            out_ = []
-            for entry in ps:
-                if isinstance(entry, str):
-                    out_.append({"study": entry, "condition": "tests-passed"})
-                elif isinstance(entry, dict) and entry.get("study"):
-                    out_.append({"study": entry["study"], "condition": entry.get("condition", "tests-passed")})
-            return out_
+            return normalize_dag_edges(study_spec)
 
         studies_out = []
         for slug in (spec.get("studies") or []):
@@ -5984,19 +5981,12 @@ if __name__ == "__main__":
 
         by_name: dict[str, dict] = {s["name"]: s for _, s in loaded if not s.get("__invalid__")}
 
+        from vivarium_dashboard.lib.investigations import normalize_dag_edges
+        # Single read path — reads pipeline_gate.prerequisites (canonical)
+        # with parent_studies fallback. Emits DeprecationWarning for the
+        # legacy-only case so workspaces know to migrate.
         def _normalize_parents(spec: dict) -> list[dict]:
-            """Accept legacy [str, ...] AND new [{study, condition}, ...]."""
-            ps = spec.get("parent_studies") or []
-            out = []
-            for entry in ps:
-                if isinstance(entry, str):
-                    out.append({"study": entry, "condition": "tests-passed"})
-                elif isinstance(entry, dict) and entry.get("study"):
-                    out.append({
-                        "study":     entry["study"],
-                        "condition": entry.get("condition", "tests-passed"),
-                    })
-            return out
+            return normalize_dag_edges(spec)
 
         def _condition_satisfied(parent: dict | None, condition: str) -> bool:
             """Does this parent currently satisfy `condition`?"""
