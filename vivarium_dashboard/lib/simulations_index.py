@@ -12,6 +12,7 @@ sorted list. ``delete_simulation`` performs the full-delete pass.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import shutil
 import sqlite3
 import warnings
@@ -212,8 +213,23 @@ def list_simulations(workspace: Path) -> list[dict]:
         rows.extend(_read_sqlite_emitter(db_path, db_rel))
 
     def _ts(r):
+        # runs_meta stores started_at as REAL (unix epoch); SQLiteEmitter's
+        # simulations table stores it as TEXT (ISO 8601). Normalise to float
+        # so list_simulations() can merge both sources in a single sort —
+        # otherwise Python 3 raises 'str < float' the first time both DBs
+        # contribute rows to the same workspace.
         v = r.get("started_at")
-        return v if v is not None else ""
+        if v is None:
+            return 0.0
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            try:
+                return _dt.datetime.fromisoformat(
+                    v.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                return 0.0
+        return 0.0
     rows.sort(key=_ts, reverse=True)
 
     run_to_studies = _build_run_to_studies_map(workspace)

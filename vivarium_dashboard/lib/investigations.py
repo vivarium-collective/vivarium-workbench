@@ -821,6 +821,39 @@ def inject_emitter_step(doc: dict, observables: list) -> dict:
     return out
 
 
+def _resolve_observable(observables: dict, path: str) -> list | None:
+    """Resolve a dotted observable path against per-tick observables.
+
+    The gather pipeline records observables as
+    ``{top_level_key: [value_at_tick_0, value_at_tick_1, ...]}`` — top-level
+    only. For nested listener fields like
+    ``listeners.dnaA_cycle.atp_count`` we need to walk into the per-tick
+    dict at each index. Returns a list with one element per tick (None if
+    the segment is missing at that tick) or None if the top-level key
+    doesn't exist at all.
+    """
+    if not path:
+        return None
+    parts = path.split(".")
+    top = parts[0]
+    series = observables.get(top)
+    if series is None:
+        return None
+    if len(parts) == 1:
+        return series
+    out = []
+    for tick_val in series:
+        v = tick_val
+        for seg in parts[1:]:
+            if isinstance(v, dict) and seg in v:
+                v = v[seg]
+            else:
+                v = None
+                break
+        out.append(v)
+    return out
+
+
 def build_viz_composite(viz_spec: dict, gathered: dict, core_registry: dict) -> dict:
     """Build the small composite that dispatches one visualization."""
     address = viz_spec["address"]
@@ -852,7 +885,8 @@ def build_viz_composite(viz_spec: dict, gathered: dict, core_registry: dict) -> 
         observable_name = inputs_map.get(port, port)
         per_run_values = []
         for run in candidate_runs:
-            vals = run.get("observables", {}).get(observable_name)
+            vals = _resolve_observable(
+                run.get("observables", {}) or {}, observable_name)
             if vals is None:
                 continue
             per_run_values.append(vals)
