@@ -821,35 +821,13 @@ When done, summarize which entries got PDFs vs URLs only vs were unresolvable, a
   <!-- Available Visualization classes (registry-driven, secondary catalog) -->
   <div class="panel">
     <h3>Available Visualization classes <span id="viz-count" class="count-badge"></span></h3>
-    <p class="panel-lead">Visualization classes discovered from <code>core.link_registry</code> (subclasses of <code>pbg_superpowers.visualization.Visualization</code> from any installed pbg-* package). Click <strong>Preview</strong> to see a demo render; <strong>Use</strong> to register it as a Workspace visualization.</p>
+    <p class="panel-lead">Visualization classes discovered from <code>core.link_registry</code> (subclasses of <code>pbg_superpowers.visualization.Visualization</code> from any installed pbg-* package). Click <strong>Preview</strong> to see a demo render; <strong>Use</strong> to register it as a Workspace visualization. <span class="muted">Workspace classes listed first; environment-only classes follow.</span> Need a new one? Run <code>/pbg-viz &lt;name&gt; &lt;description&gt;</code> in Claude Code.</p>
     <input type="search" id="viz-catalog-search" placeholder="Search Visualization classes by name or doc…"
            style="width:100%;padding:6px;margin-bottom:8px;font-size:0.9em"
            oninput="_filterVizCatalog(this.value)">
     <div id="viz-picker-container">
-      <p class="empty-state">Loading from Registry&hellip;</p>
+      <p class="empty-state">Discovering Visualization classes&hellip; <span class="muted">First load walks every installed pbg-* package and can take a few seconds; subsequent loads are cached for 30 s.</span></p>
     </div>
-  </div>
-
-  <!-- Generate new visualization class -->
-  <div class="panel">
-    <h3>Generate new visualization class</h3>
-    <p class="panel-lead">Nothing in the catalog above matches? Describe what you want. The
-      <code>/pbg-viz</code> skill writes a decorated function to
-      <code>&lt;workspace_pkg&gt;/visualizations/&lt;snake&gt;.py</code>. After accepting, the new
-      class joins the catalog for everyone.</p>
-    <form id="form-viz-generate" onsubmit="event.preventDefault(); _submitVizGenerate(this)">
-      <label>Name (kebab-case)
-        <input name="name" pattern="^[a-zA-Z0-9_-]+$" required
-               placeholder="e.g. dna-a-trajectory">
-      </label>
-      <label>Description
-        <textarea name="description" rows="4" required
-                  placeholder="e.g. 'free_DnaA concentration vs time with a horizontal line at the binding threshold of 50 molecules.'"></textarea>
-      </label>
-      <div class="form-error"></div>
-      <button type="submit" class="action-btn">Generate</button>
-    </form>
-    <div id="viz-generate-status" style="margin-top:12px;font-size:0.9em;color:#555"></div>
   </div>
 
 </section>
