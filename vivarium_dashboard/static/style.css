@@ -877,6 +877,15 @@ body.focus-mode::before{
 .viv-rail.viv-rail-collapsed .viv-rail-investigations-group-name{ display:none }
 .viv-rail.viv-rail-collapsed .viv-rail-investigations-group-count{ display:none }
 .viv-rail.viv-rail-collapsed .viv-rail-investigations-group-items{ display:none }
+/* The rail's "Studies" list (rendered into #viv-rail-investigations by
+ * _renderRailInvestigationGroups in walkthrough.js) emits .viv-rail-iset-group
+ * + .viv-rail-sublink children — different class names than the older
+ * .viv-rail-investigations-group-* rules above match. When the rail is
+ * collapsed those leaked through and wrapped to single-character columns
+ * (see screenshot in friction log). Hide the whole host + its enclosing
+ * .viv-rail-section so the collapsed rail shows only the top-level icons. */
+.viv-rail.viv-rail-collapsed #viv-rail-investigations{ display:none }
+.viv-rail.viv-rail-collapsed .viv-rail-section:has(#viv-rail-investigations){ display:none }
 .viv-rail.viv-rail-collapsed .viv-rail-footer{
   padding:10px 8px; justify-content:center;
 }
