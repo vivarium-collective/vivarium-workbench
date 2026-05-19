@@ -5074,6 +5074,64 @@
       // variant's overrides + every expert_input's current/default/range.
       var conditionsHtml = _renderConditionsBlock(s, sid.conditions);
 
+      // ── PLANNING-PHASE DETECTION ──
+      // A study is "planning" when no runs have completed yet. In that
+      // mode we strip decision / takeaways / findings (post-execution
+      // sections) and lead with the spec the expert needs to comment on:
+      // Question → Conditions → Tests → Baseline preview → Assumptions.
+      // Once runs land, the full flow returns.
+      var hasRuns = (s.runs || []).length > 0 || (s.findings || []).length > 0;
+      var isPlanning = !hasRuns;
+
+      // Charts come from runs.db when present, or fall back to the
+      // workspace default-baseline. Wrap them with a BASELINE banner
+      // so the expert knows the trace is pre-execution data, not a
+      // study-specific run.
+      var chartsWithBaselineNoticeHtml = chartsHtml;
+      if (isPlanning && chartsHtml) {
+        chartsWithBaselineNoticeHtml =
+            '<div class="planning-baseline-strip" id="study-' + slug + '-baseline-strip">' +
+              '<div class="planning-baseline-strip-banner">' +
+                '<span class="planning-baseline-pill">BASELINE</span>' +
+                '<span class="planning-baseline-text">' +
+                  'Charts below show the <strong>workspace pre-execution baseline</strong>' +
+                  ' — what the cell looks like before any of this study\'s variants run.' +
+                  ' Expert reviewers: comment on whether these traces look right for the' +
+                  ' wild-type starting point.' +
+                '</span>' +
+              '</div>' +
+              chartsHtml +
+            '</div>';
+      }
+
+      if (isPlanning) {
+        // Planning-phase layout — minimal, expert-comment-driven.
+        return ''
+          + '<section class="study study-planning" id="study-' + slug + '">'
+          +   subNav
+          +   '<header class="study-header">'
+          +     '<h2><span class="study-num">' + (i + 1) + '.</span> ' + _h(s.name) + ' ' + phaseBadge + statusBadge + '</h2>'
+          +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
+          +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
+          +     '<div class="study-planning-pill">PLANNING — not yet run</div>'
+          +   '</header>'
+          +   summaryHtml         // Question / purpose
+          +   conditionsHtml      // Conditions: variants + expert inputs (PROMINENT)
+          +   testsHtml           // Expected behavior / tests (PROMINENT for comments)
+          +   chartsWithBaselineNoticeHtml  // Baseline charts with BASELINE label
+          +   embedsHtml          // Embedded preview HTMLs
+          +   readoutsHtml        // What we'll measure
+          +   buildHtml           // Model change (collapsed-ish, technical)
+          +   '<details class="study-technical-fold"><summary>Technical context (model changes · implementation tasks · follow-ups · limitations · refs)</summary>'
+          +     reqsHtml          // Implementation requirements
+          +     followUpsHtml     // Follow-ups
+          +     limitsHtml        // Limitations
+          +     refsHtml          // References
+          +   '</details>'
+          + '</section>';
+      }
+
+      // Post-execution layout — full v3 flow including decision + findings.
       return ''
         + '<section class="study" id="study-' + slug + '">'
         +   subNav
@@ -5082,20 +5140,20 @@
         +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
         +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
         +   '</header>'
-        +   biologyGlanceHtml   // 0. Biology-at-a-glance (planning-phase, biologist-first)
-        +   embedsHtml          // 0b. Embedded preview HTMLs (figures) — inlined for offline use
-        +   summaryHtml         // 1. Plain-English summary (with Purpose disclosure)
-        +   decisionHtml        // 2. Decision box (with Pipeline-gate disclosure)
-        +   expertReviewHtml    // 2b. Pre-run expert review (open biological questions)
-        +   takeawaysHtml       // 3 + 4. Key takeaways + detailed findings grouped by kind
-        +   simsHtml            // 5. What did/will we run?
-        +   chartsHtml          //    + Visualisations from runs
-        +   readoutsHtml        // 6. What did/will we measure?
-        +   testsHtml           // 7. How do we judge success?
-        +   conditionsHtml      // 7b. Conditions: baseline + variants + expert inputs (v4)
-        +   buildHtml           // 8. What changes in the model?
-        +   reqsHtml            // 9. What needs to be built or fixed?
-        +   followUpsHtml       // 10. What should happen next?
+        +   biologyGlanceHtml   // 0. Biology-at-a-glance
+        +   embedsHtml          // 0b. Embedded preview HTMLs
+        +   summaryHtml         // 1. Plain-English summary
+        +   decisionHtml        // 2. Decision box
+        +   expertReviewHtml    // 2b. Pre-run expert review
+        +   takeawaysHtml       // 3 + 4. Key takeaways + findings
+        +   simsHtml            // 5. What we ran
+        +   chartsHtml          //    + Visualisations
+        +   readoutsHtml        // 6. What we measured
+        +   testsHtml           // 7. How we judge success
+        +   conditionsHtml      // 7b. Conditions
+        +   buildHtml           // 8. Model changes
+        +   reqsHtml            // 9. What to build/fix
+        +   followUpsHtml       // 10. Next steps
         +   limitsHtml          // 11. Limitations
         +   refsHtml            // 12. References
         + '</section>';
@@ -5708,7 +5766,29 @@
       + '.finding-next strong{color:#065f46}'
       // ── eb table row coloring ──
       // ── Conditions block (Variants + Expert inputs) ──
-      + '.study-conditions{margin:18px 0 10px 0;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px}'
+      + '.study-conditions{margin:18px 0 10px 0;padding:12px 14px;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px}'
+      // Planning-phase banner at the top of the report
+      + '.planning-phase-banner{display:flex;gap:16px;align-items:flex-start;background:linear-gradient(135deg,#fef9c3 0%,#fde68a 100%);border:1px solid #f59e0b;border-radius:8px;padding:18px 22px;margin:16px 0 24px 0;box-shadow:0 1px 3px rgba(0,0,0,0.05)}'
+      + '.planning-phase-banner-icon{font-size:1.8em;line-height:1;flex-shrink:0}'
+      + '.planning-phase-banner-body{flex:1;color:#78350f;line-height:1.5}'
+      + '.planning-phase-banner-body strong{color:#451a03}'
+      + '.planning-phase-banner-list{margin:8px 0 0 36px;color:#78350f}'
+      + '.planning-phase-banner-list li{margin:6px 0;line-height:1.5}'
+      + '.planning-phase-banner-foot{margin:10px 0 0 36px;color:#92400e;font-size:0.9em;font-style:italic;padding-top:8px;border-top:1px solid rgba(217,119,6,0.25)}'
+      // Per-study planning pill in the header
+      + '.study-planning-pill{display:inline-block;background:#fbbf24;color:#451a03;font-weight:700;font-size:0.78em;letter-spacing:0.06em;padding:3px 10px;border-radius:4px;margin-top:8px}'
+      // Baseline strip wrapping charts in planning mode
+      + '.planning-baseline-strip{border:1px solid #93c5fd;border-radius:8px;padding:0;margin:18px 0;background:#fff;overflow:hidden}'
+      + '.planning-baseline-strip-banner{display:flex;gap:10px;align-items:flex-start;background:#dbeafe;padding:8px 14px;border-bottom:1px solid #93c5fd}'
+      + '.planning-baseline-pill{display:inline-block;background:#1e40af;color:#fff;font-weight:700;font-size:0.72em;letter-spacing:0.08em;padding:3px 9px;border-radius:3px;flex-shrink:0;margin-top:2px}'
+      + '.planning-baseline-text{color:#1e40af;font-size:0.92em;line-height:1.5}'
+      + '.planning-baseline-text strong{color:#1e3a8a}'
+      + '.planning-baseline-strip .charts{padding:12px 14px}'
+      // Collapsed technical fold at the end of a planning study
+      + '.study-technical-fold{margin:18px 0 0 0;padding:8px 12px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px}'
+      + '.study-technical-fold>summary{cursor:pointer;color:#475569;font-size:0.9em;font-weight:600}'
+      + '.study-technical-fold[open]{background:#fff;border-color:#94a3b8}'
+      + '.study-technical-fold[open]>summary{margin-bottom:8px;color:#0f172a}'
       + '.study-conditions h3{margin:0 0 8px 0;font-size:1.05em;color:#0f172a}'
       + '.study-conditions h4{margin:14px 0 6px 0;font-size:0.95em;color:#334155;text-transform:uppercase;letter-spacing:0.04em}'
       + '.cond-baseline{background:#fff;border:1px solid #e2e8f0;border-radius:4px;padding:8px 10px;margin:0 0 12px 0}'
@@ -5844,6 +5924,32 @@
 
       +   '<h1>' + _h(iset.title || iset.name) + ' <span class="badge badge-' + _h(iset.status || 'planning') + '">' + _h(iset.status || 'planning') + '</span></h1>'
       +   '<p class="muted small">Investigation report · <code>' + nameClean + '</code> · generated ' + _h(now) + ' · for expert review prior to execution.</p>'
+
+      // Planning-phase banner: any study that has not yet produced runs
+      // is treated as planning, and the whole report leads with a notice
+      // that the doc is a pre-execution spec for expert review.
+      +   (function() {
+            var planningCount = (specs || []).filter(function(s) {
+              return !(s.runs || []).length && !(s.findings || []).length;
+            }).length;
+            if (!planningCount) return '';
+            return '<div class="planning-phase-banner" id="planning-phase-banner">'
+              + '<div class="planning-phase-banner-icon">📝</div>'
+              + '<div class="planning-phase-banner-body">'
+              +   '<strong>Planning phase — pre-execution review.</strong> '
+              +   planningCount + ' of ' + (specs || []).length + ' studies have not yet run. '
+              +   'The charts below come from the <strong>workspace pre-execution baseline</strong> '
+              +   '(seed 0, M9-glucose, full cell cycle until division). For each study, the most '
+              +   'important sections for expert input are:'
+              + '</div>'
+              + '<ul class="planning-phase-banner-list">'
+              +   '<li><strong>Conditions</strong> — variants and their parameter overrides, plus the expert inputs awaiting your call. Edit values in the live dashboard\'s Build tab, or comment here.</li>'
+              +   '<li><strong>Expected behavior</strong> — what each test claims will pass / fail and the criterion it uses. Flag any test that\'s under- or over-specified.</li>'
+              +   '<li><strong>Baseline visualizations</strong> — what the wild-type cell looks like before the study\'s mechanism lands. Comment on whether the trace matches your intuition.</li>'
+              + '</ul>'
+              + '<div class="planning-phase-banner-foot">Click the <strong>💬</strong> icon next to any section to leave inline feedback. "Generate feedback report" (bottom-right) packages everything into a single yaml file to send back.</div>'
+              + '</div>';
+          })()
 
       +   ((iset.biological_story || '').trim()
           ? '<div class="investigation-biology-story">'
