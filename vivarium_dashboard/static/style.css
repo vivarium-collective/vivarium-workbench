@@ -1019,6 +1019,28 @@ body.focus-mode::before{
   font-size:0.78em; white-space:nowrap;
   z-index:60;
 }
+/* Wide / multi-line variant for explainer chips (mem3dg-readdy friction #36
+ * — Run-cluster actions had title= tooltips that nobody discovered; a visible
+ * chip makes the explainer signposted). Inline-block label with a hovering
+ * pre-wrap card. */
+.viv-info-chip{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:18px; height:18px; border-radius:50%;
+  background:#e5e7eb; color:#4b5563;
+  font-size:11px; font-weight:600;
+  cursor:help; position:relative;
+}
+.viv-info-chip:hover{ background:#d1d5db; color:#111827 }
+.viv-info-chip[data-tooltip]:hover::after{
+  content:attr(data-tooltip);
+  position:absolute; top:calc(100% + 6px); left:0;
+  background:#1f2937; color:#fff;
+  padding:8px 10px; border-radius:4px;
+  font-size:0.78em; line-height:1.5;
+  white-space:pre-wrap; min-width:260px; max-width:340px;
+  z-index:60;
+  text-align:left; font-weight:400;
+}
 
 /* Study detail — cleaner tab strip + summary header (UX polish pass) -------- */
 .investigation-detail-tabs{
