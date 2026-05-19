@@ -1442,6 +1442,74 @@ def _count_runs_for_study(name: str, spec: dict | None = None) -> int:
     return max(db_count, spec_count)
 
 
+def _collect_study_observables(spec: dict) -> list[str]:
+    """Return slash-joined observable store paths declared by the study spec.
+
+    v2ecoli friction #14 (2026-05-19): study-run handlers historically did
+    not pass `emit_paths` to `inject_emitter_for_paths`, so the
+    SQLiteEmitter had an empty `emit:` schema and every `history.state` row
+    was just `{"_tick": <global_time>}`. Comparative visualizations rendered
+    as empty traces. This helper sweeps the spec for every observable-shaped
+    path declaration so the run handler can wire `inject_emitter_for_paths`
+    automatically — no study-yaml schema change required.
+
+    Recognised sources (tolerant — drives off whatever the study author
+    declared, in whatever shape):
+      - readouts[*].store_path                (v2ecoli explicit per-readout
+                                               paths, dot-joined)
+      - behavior_tests[*].measure.path        (single-path measures)
+      - behavior_tests[*].measure.{series_x,series_y,
+                                    x,y,
+                                    series_a,series_b}.path
+      - simulation_set[*].observe             (per-sim observable list)
+
+    Paths come in dot-joined ('agents.0.listeners.foo') or slash-joined
+    ('agents/0/listeners/foo'); both are normalised to slash-joined so
+    `inject_emitter_for_paths` accepts them uniformly. Duplicates are
+    dropped while preserving declaration order.
+    """
+    def _norm(p: str) -> str | None:
+        if not isinstance(p, str) or not p.strip():
+            return None
+        # Accept either separator; output is slash-joined.
+        parts = [seg for seg in p.replace(".", "/").split("/") if seg]
+        return "/".join(parts) if parts else None
+
+    out: list[str] = []
+    seen: set[str] = set()
+    def _push(p):
+        n = _norm(p) if isinstance(p, str) else None
+        if n and n not in seen:
+            seen.add(n)
+            out.append(n)
+
+    for r in spec.get("readouts", []) or []:
+        if isinstance(r, dict):
+            _push(r.get("store_path"))
+
+    for bt in spec.get("behavior_tests", []) or []:
+        m = (bt or {}).get("measure") if isinstance(bt, dict) else None
+        if not isinstance(m, dict):
+            continue
+        _push(m.get("path"))
+        for nested_key in ("series_x", "series_y", "x", "y", "series_a", "series_b"):
+            n = m.get(nested_key)
+            if isinstance(n, dict):
+                _push(n.get("path"))
+
+    for sim in spec.get("simulation_set", []) or []:
+        if not isinstance(sim, dict):
+            continue
+        obs = sim.get("observe")
+        if isinstance(obs, list):
+            for p in obs:
+                _push(p)
+        elif isinstance(obs, str):
+            _push(obs)
+
+    return out
+
+
 def _resolve_study_baseline_state(pkg, spec_id, params):
     """Resolve a generator composite spec_id + params → a state dict.
 
@@ -1609,10 +1677,14 @@ def _post_study_run_baseline_for_test(ws_root, body):
     # baseline isn't killed by the 120s default. Per-study override.
     runtime_cfg = (spec.get("runtime") or {}) if isinstance(spec.get("runtime"), dict) else {}
     timeout_s = int(runtime_cfg.get("subprocess_timeout_s") or 1800)
+    # v2ecoli friction #14: derive emit_paths from spec observables so the
+    # injected SQLiteEmitter captures real biology, not just ticks.
+    emit_paths = _collect_study_observables(spec)
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label=label, sim_name=label,
         overrides=generator_overrides, timeout=timeout_s,
+        emit_paths=emit_paths,
     )
     if code == 200:
         # F2: do NOT append to study.yaml.runs[] — the runs_meta row
@@ -1943,11 +2015,14 @@ def _post_study_run_variant_for_test(ws_root, body):
     # v2ecoli friction #6: per-study subprocess timeout.
     runtime_cfg = (spec.get("runtime") or {}) if isinstance(spec.get("runtime"), dict) else {}
     timeout_s = int(runtime_cfg.get("subprocess_timeout_s") or 1800)
+    # v2ecoli friction #14: thread observables to the subprocess (same as
+    # baseline path) so variant runs also capture biology in history.state.
+    emit_paths = _collect_study_observables(spec)
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label=variant_name,
         sim_name=variant_name, overrides=generator_overrides,
-        timeout=timeout_s,
+        timeout=timeout_s, emit_paths=emit_paths,
     )
     # F2: no _append_study_run — the runs_meta row is the canonical record;
     # see the matching note in run-baseline above.
@@ -2502,7 +2577,8 @@ def _diagnose_push_error(err: str) -> dict | None:
 
 
 def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
-                              label, overrides=None, sim_name=None, timeout=1800):
+                              label, overrides=None, sim_name=None, timeout=1800,
+                              emit_paths=None):
     """Run a resolved composite ``state`` for ``steps`` steps in a subprocess,
     persisting runs_meta + history (via an injected SQLiteEmitter) to
     ``db_file``.
@@ -2546,6 +2622,12 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
             "run_id": run_id,
             "db_file": db_file,
             "steps": steps,
+            # v2ecoli friction #14: thread the study's declared observables
+            # to the child so it can populate the user_emitter schema BEFORE
+            # injecting SQLiteEmitter. Without this, history.state rows are
+            # just `{"_tick": <global_time>}` and every comparative viz
+            # renders empty. Empty list = legacy "no observables" behavior.
+            "emit_paths": list(emit_paths or []),
         }
         script = textwrap.dedent(f"""
             import json, sys, traceback
@@ -2565,6 +2647,8 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                 core.register_link('SQLiteEmitter', SQLiteEmitter)
                 doc = build_generator(entry, overrides=_payload['overrides'])
                 state = doc.get('state', doc) if isinstance(doc, dict) else doc
+                if _payload.get('emit_paths'):
+                    state = cr.inject_emitter_for_paths(state, _payload['emit_paths'])
                 state = cr.inject_sqlite_emitter(
                     state, run_id=_payload['run_id'], db_file=_payload['db_file'])
                 composite = Composite({{'state': state}}, core=core)
@@ -2573,6 +2657,10 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
         """).lstrip("\n")
     else:
         # Legacy path: serialize the pre-built state into a tempfile.
+        # v2ecoli friction #14: parent-side injection works here because
+        # the serialized state IS what the subprocess reconstructs.
+        if emit_paths:
+            state = cr.inject_emitter_for_paths(state, list(emit_paths))
         state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
         state = _strip_process_instances(state)
         _state_fd, _state_path = _tempfile.mkstemp(suffix=".state.json", prefix="vivarium-run-")
