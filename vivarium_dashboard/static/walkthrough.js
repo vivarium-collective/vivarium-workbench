@@ -520,12 +520,29 @@
   }
   window._filterVizCatalog = _filterVizCatalog;
 
+  // Source-rank for picker sort: in_workspace classes are the ones the user
+  // can act on directly (they live in this workspace's package or an
+  // explicit `imports:` entry); framework comes next; environment-only is
+  // last (installed but not declared by this workspace). Matches the
+  // server-side _source_order map in /api/registry so the picker reads in
+  // the same order as the Registry tab.
+  var _SOURCE_RANK = { in_workspace: 0, framework: 1, environment_only: 2 };
+
   function _renderKindPicker(items, container, kind) {
     if (!items || items.length === 0) {
       container.innerHTML = '<p class="empty-state">No ' + kind + 's registered. Install a pbg-* package that provides one (Registry tab &rarr; Available modules).</p>';
       return;
     }
-    var rows = items.map(function(it) {
+    // Sort: in_workspace → framework → environment_only, then alpha by name.
+    // Stable across loads so the list doesn't jitter between fetches.
+    var sorted = items.slice().sort(function(a, b) {
+      var ra = _SOURCE_RANK[a.source] != null ? _SOURCE_RANK[a.source] : 99;
+      var rb = _SOURCE_RANK[b.source] != null ? _SOURCE_RANK[b.source] : 99;
+      if (ra !== rb) return ra - rb;
+      return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
+    });
+    var lastSource = null;
+    var rows = sorted.map(function(it) {
       var schemaSnippet = '';
       if (it.schema_preview) {
         schemaSnippet = '<details><summary class="muted" style="cursor:pointer;font-size:0.85em">config_schema</summary><code class="registry-schema">' + _esc(it.schema_preview) + '</code></details>';
@@ -533,7 +550,20 @@
       var previewBtn = (kind === 'visualization')
         ? '<button class="btn-mini" onclick="_vizClassPreview(\'' + _esc(it.address) + '\',\'' + _esc(it.name) + '\')">Preview</button>'
         : '';
-      return '<div class="picker-row">' +
+      // Section divider when source group changes. Lightweight — keeps the
+      // sort intent visible without committing to a full grouped-list layout.
+      var divider = '';
+      if (it.source !== lastSource) {
+        var labels = {
+          in_workspace: 'Workspace',
+          framework: 'Framework',
+          environment_only: 'Environment (installed but not declared in workspace.yaml)',
+        };
+        var label = labels[it.source] || (it.source || 'other');
+        divider = '<div class="picker-section-label muted" style="margin:10px 0 4px;font-size:0.78em;text-transform:uppercase;letter-spacing:0.05em">' + _esc(label) + '</div>';
+        lastSource = it.source;
+      }
+      return divider + '<div class="picker-row" data-source="' + _esc(it.source || '') + '">' +
         '<div class="picker-row-main">' +
           '<strong>' + _esc(it.name) + '</strong>' +
           ' <code class="muted" style="font-size:0.82em">' + _esc(it.address) + '</code>' +
