@@ -614,6 +614,35 @@ def _discover_viz_html_files(name: str) -> list[dict]:
     return out
 
 
+def _discover_investigation_viz_html_files(inv_slug: str) -> list[dict]:
+    """Walk ``investigations/<inv>/viz/*.html`` and return embed entries.
+
+    Counterpart to ``_discover_viz_html_files`` for investigation-level
+    comparative visualisations (rendered by
+    ``_render_investigation_comparative_visualisations`` after a
+    ``run-unblocked`` job completes). Same return shape so the
+    investigation-detail endpoint can splice these into
+    ``embed_visualizations``.
+    """
+    viz_dir = WORKSPACE / "investigations" / inv_slug / "viz"
+    if not viz_dir.is_dir():
+        return []
+    out = []
+    for html_file in sorted(viz_dir.glob("*.html")):
+        size_kb = max(1, html_file.stat().st_size // 1024)
+        rel = html_file.relative_to(WORKSPACE).as_posix()
+        out.append({
+            "name": f"{html_file.stem} (comparative)",
+            "url": f"/{rel}",
+            "description": (
+                f"Investigation-level comparative visualisation "
+                f"({size_kb} KB). Rendered by the run-unblocked worker "
+                f"from the investigation yaml's comparative_visualizations block."
+            ),
+        })
+    return out
+
+
 def _read_runs_db_for_study(name: str) -> list[dict]:
     """Read all runs from ``studies/<name>/runs.db`` for the Runs tab.
 
@@ -1867,20 +1896,31 @@ def _post_study_run_variant_for_test(ws_root, body):
     if variant is None:
         return {"error": f"variant {variant_name!r} not found"}, 404
 
-    base_name = (variant.get("base_composite") or "").strip()
-    if base_name:
-        entry = next((b for b in baseline
-                      if isinstance(b, dict) and b.get("name") == base_name), None)
-        if entry is None:
-            return {"error": f"variant base_composite {base_name!r} not in baseline"}, 404
+    # Variant resolution: a variant may either
+    #   (a) point at its own ``composite`` directly (v4 redesign — a
+    #       variant can use a different generator than the baseline), or
+    #   (b) reference a baseline entry by name via ``base_composite``,
+    #       inheriting its composite + params (legacy v3 shape).
+    # Direct composite wins when present.
+    direct_composite = (variant.get("composite") or "").strip()
+    if direct_composite:
+        spec_id = direct_composite
+        params: dict = {}  # no baseline params inheritance — variant is standalone
     else:
-        entry = baseline[0]
-    spec_id = entry.get("composite")
-    if not spec_id:
-        return {"error": f"baseline entry {entry.get('name')!r} has no composite"}, 400
+        base_name = (variant.get("base_composite") or "").strip()
+        if base_name:
+            entry = next((b for b in baseline
+                          if isinstance(b, dict) and b.get("name") == base_name), None)
+            if entry is None:
+                return {"error": f"variant base_composite {base_name!r} not in baseline"}, 404
+        else:
+            entry = baseline[0]
+        spec_id = entry.get("composite")
+        if not spec_id:
+            return {"error": f"baseline entry {entry.get('name')!r} has no composite"}, 400
+        params = dict(entry.get("params") or {})
 
-    params = dict(entry.get("params") or {})
-    overrides = variant.get("parameter_overrides") or {}
+    overrides = variant.get("parameter_overrides") or variant.get("params") or {}
     params.update(overrides)
 
     params_n_steps = params.pop("n_steps", None)
@@ -8265,65 +8305,89 @@ if __name__ == "__main__":
     def _render_investigation_comparative_visualisations(
         self, inv_slug: str, iset: dict, job
     ) -> None:
-        """Run the investigation yaml's ``comparative_visualizations`` block.
+        """Walk each member study + render its ``comparative_visualizations``.
 
-        Schema (optional):
+        Comparative viz now lives in the **study** yaml, not the
+        investigation yaml — each comparison is between the study's own
+        baseline + variants. Single ``studies/<slug>/runs.db`` is queried
+        once per trace (filtered by simulation name), and output lands
+        in ``studies/<slug>/viz/comparative_<name>.html`` so the
+        per-study viz auto-discovery + the downloadable report's
+        per-study section pick it up.
+
+        Schema (optional, in each study.yaml):
 
             comparative_visualizations:
               - name: dnaa-atp-count-vs-time
-                title: DnaA-ATP count over time (3-way comparison)
+                title: DnaA-ATP count over time (baseline vs variants)
                 observable_path: listeners.itv2.dnaa_atp_count
                 y_label: DnaA-ATP count
                 runs:
-                  - {study: dnaa-05-itv2-comparison, variant: itv2-standalone-wt}
-                  - {study: dnaa-05-itv2-comparison, variant: v2ecoli-baseline-default}
-                  - {study: dnaa-05-itv2-comparison, variant: v2ecoli-with-fxj-params}
+                  - {sim_name: dnaa-05-itv2-comparison-baseline, label: Baseline (ITv2)}
+                  - {sim_name: v2ecoli-baseline-default,         label: v2ecoli default}
+                  - {sim_name: v2ecoli-with-fxj-params,          label: v2ecoli + FXJ}
 
-        Each ``runs[]`` entry resolves to ``studies/<study>/runs.db`` —
-        the dashboard's standard per-study db. Output is written to
-        ``investigations/<inv>/viz/<name>.html`` where the auto-discovery
-        pipeline picks it up.
+        ``sim_name`` matches the ``simulations.name`` column in the
+        study's runs.db — the value pbg_runner writes as the run's
+        label. For baselines this is typically ``<study-slug>-baseline``;
+        for variants it's the variant's own name.
         """
+        import yaml as _yaml
         from vivarium_dashboard.lib.comparative_viz import (
             render_comparative_time_series,
         )
-        specs = iset.get("comparative_visualizations") or []
-        if not specs:
-            return
-        viz_dir = WORKSPACE / "investigations" / inv_slug / "viz"
-        viz_dir.mkdir(parents=True, exist_ok=True)
-        for spec in specs:
-            if not isinstance(spec, dict) or not spec.get("name"):
+        for member in (iset.get("studies") or []):
+            study_slug = member if isinstance(member, str) else (member or {}).get("study")
+            if not study_slug:
                 continue
-            runs = []
-            for r in spec.get("runs") or []:
-                if not isinstance(r, dict):
-                    continue
-                study = r.get("study", "")
-                label = r.get("label") or f"{study} / {r.get('variant', 'baseline')}"
-                db = WORKSPACE / "studies" / study / "runs.db"
-                runs.append({"label": label, "db_path": db})
-            if not runs:
+            spec_path = WORKSPACE / "studies" / study_slug / "study.yaml"
+            if not spec_path.is_file():
                 continue
-            out_path = viz_dir / f"{spec['name']}.html"
             try:
-                render_comparative_time_series(
-                    runs=runs,
-                    observable_path=spec.get("observable_path", ""),
-                    title=spec.get("title", spec["name"]),
-                    y_label=spec.get("y_label", ""),
-                    output_path=out_path,
-                    observable_index=spec.get("observable_index"),
-                    target_band=spec.get("target_band"),
-                    target_band_label=spec.get("target_band_label"),
-                )
-            except Exception as e:  # noqa: BLE001
-                # Surface the error in the job items so the UI sees it,
-                # but don't fail the whole job over one viz.
-                job.update_item(
-                    len(job.items) - 1,
-                    comparative_viz_warning=f"{spec['name']}: {e}",
-                )
+                study_spec = _yaml.safe_load(spec_path.read_text()) or {}
+            except _yaml.YAMLError:
+                continue
+            specs = study_spec.get("comparative_visualizations") or []
+            if not specs:
+                continue
+            viz_dir = WORKSPACE / "studies" / study_slug / "viz"
+            viz_dir.mkdir(parents=True, exist_ok=True)
+            study_db = WORKSPACE / "studies" / study_slug / "runs.db"
+            if not study_db.is_file():
+                continue
+            for cv in specs:
+                if not isinstance(cv, dict) or not cv.get("name"):
+                    continue
+                runs = []
+                for r in cv.get("runs") or []:
+                    if not isinstance(r, dict):
+                        continue
+                    sim_name = r.get("sim_name") or r.get("variant") or r.get("name")
+                    label = r.get("label") or sim_name or "?"
+                    runs.append({
+                        "label": label,
+                        "db_path": study_db,
+                        "sim_name": sim_name,
+                    })
+                if not runs:
+                    continue
+                out_path = viz_dir / f"comparative_{cv['name']}.html"
+                try:
+                    render_comparative_time_series(
+                        runs=runs,
+                        observable_path=cv.get("observable_path", ""),
+                        title=cv.get("title", cv["name"]),
+                        y_label=cv.get("y_label", ""),
+                        output_path=out_path,
+                        observable_index=cv.get("observable_index"),
+                        target_band=cv.get("target_band"),
+                        target_band_label=cv.get("target_band_label"),
+                    )
+                except Exception as e:  # noqa: BLE001
+                    job.update_item(
+                        len(job.items) - 1,
+                        comparative_viz_warning=f"{study_slug}/{cv['name']}: {e}",
+                    )
 
     def _post_study_variant_add(self, body: dict):
         """POST /api/study-variant-add {study, name, description?,
