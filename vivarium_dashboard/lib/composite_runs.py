@@ -268,34 +268,37 @@ def auto_label(overrides: dict) -> str:
 
 
 def inject_sqlite_emitter(state: dict, *, run_id: str,
-                          db_file: str | Path,
-                          interval_seconds: float = 60.0) -> dict:
-    """Return a copy of `state` with a SQLiteEmitter process appended.
+                          db_file: str | Path) -> dict:
+    """Return a copy of `state` with a SQLiteEmitter step appended.
 
-    The injected process consumes the same input ports declared by the first
+    The injected step consumes the same input ports declared by the first
     ``_type='step'`` entry whose ``address`` ends with ``Emitter`` (case-
     insensitive) — so the SQLiteEmitter captures the same observables the
-    spec's primary emitter already declared. When no such step exists, the
-    SQLiteEmitter is added with an empty ``emit`` schema and no inputs
-    (step counts persist anyway).
+    spec's primary emitter already declared.
 
-    **2026-05-19: switched from ``_type: "step"`` to ``_type: "process"``
-    with a configurable ``interval``** (v2ecoli friction #1). Steps in
-    process_bigraph only fire when an upstream input mutates at the scope
-    they're wired into. The injection always lands at the top of the
-    state tree, but real composites often wire their primary emitter
-    deeper (e.g. ``agents/0/emitter``) — the top-level step never saw
-    those mutations and ``runs.db`` ended up with exactly 2 history rows
-    per run regardless of sim length, breaking every comparative
-    visualization downstream. Making the injected emitter a Process on
-    a fixed interval guarantees periodic writes regardless of where the
-    spec wires its own emitter.
+    **2026-05-19 — empty-inputs fix (v2ecoli friction #1, deeper finding).**
+    Spec-level ``_type`` does NOT control Step-vs-Process scheduling;
+    ``find_instance_paths`` uses Python ``isinstance`` against the loaded
+    class, and ``SQLiteEmitter`` extends ``Step``. A Step only re-fires when
+    ``trigger_steps`` sees overlap between just-updated paths and the step's
+    wired ``inputs``. With ``inputs={}`` the SQLiteEmitter fired exactly
+    once at construction and never again, leaving ``runs.db`` with 1–2
+    history rows per run no matter how long the sim ran (this broke every
+    comparative visualization downstream).
 
-    ``interval_seconds`` default 60.0 is sane for the typical 1-hour
-    workspace baseline. Callers driving longer sims should pass a larger
-    value; callers wanting sub-second resolution can pass a smaller one.
-    A future iteration may walk the composite recursively and inject at
-    every level a spec emitter lives — the proper but heavier fix.
+    Fix: when the candidate-scan finds no spec emitter to mirror, default
+    ``inputs`` to ``{"global_time": ["global_time"]}``. Every Process
+    ``update`` advances ``global_time``, so that path lands in
+    ``update_paths`` and ``trigger_steps`` re-enqueues the SQLiteEmitter
+    once per composite apply (cadence ≈ composite tick rate). The state
+    payload is whatever ``config.emit`` declares — empty by default, which
+    still gives one history row per tick so callers can verify cadence.
+
+    A future iteration may walk the composite recursively and inject the
+    SQLiteEmitter as a sibling of every nested spec emitter — the higher-
+    fidelity fix. Or upstream may grow ``SQLiteEmitterProcess(Process)`` so
+    a periodic-interval emitter is expressible as a Process and the
+    impedance mismatch goes away.
 
     Idempotent: a second call with the same run_id is a no-op.
     """
@@ -338,11 +341,19 @@ def inject_sqlite_emitter(state: dict, *, run_id: str,
     # SQLiteEmitter joins file_path (directory) + db_file (filename) via
     # os.path.join, so we must split the absolute path accordingly.
     # (db_file is already a Path from the top of this function.)
+    # v2ecoli friction #1 (deeper finding): a Step with empty `inputs`
+    # never re-fires — `trigger_steps` has nothing to match against. When
+    # the scan above found no spec emitter to mirror, fall back to
+    # wiring `global_time` so every Process apply re-enqueues us.
+    if not inputs:
+        inputs = {"global_time": ["global_time"]}
+
     new_state = dict(state)
     new_state["sqlite_emitter"] = {
-        # _type: "process" with `interval` — see docstring + v2ecoli
-        # friction #1 for why this isn't a step.
-        "_type": "process",
+        # _type: "step" is the truth — SQLiteEmitter extends Step in
+        # process-bigraph. Spec-level _type does not influence scheduling;
+        # see the docstring for why `inputs` is the actual lever.
+        "_type": "step",
         "address": "local:SQLiteEmitter",
         "config": {
             "emit": emit_schema,
@@ -350,7 +361,6 @@ def inject_sqlite_emitter(state: dict, *, run_id: str,
             "db_file": db_file.name,
             "simulation_id": run_id,
         },
-        "interval": float(interval_seconds),
         "inputs": inputs,
     }
     return new_state

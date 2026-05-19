@@ -101,12 +101,11 @@ def _example_state_with_emitter():
     }
 
 
-def test_inject_sqlite_emitter_adds_process():
-    """v2ecoli friction #1: the injected emitter is now a Process with an
-    `interval`, not a Step. Step-typed emitters at the top level didn't
-    fire when the composite's primary emitter lived deeper in the state
-    tree (e.g. agents/0/emitter), giving runs.db exactly 2 rows per run
-    regardless of sim length."""
+def test_inject_sqlite_emitter_adds_step():
+    """SQLiteEmitter is wired as a Step (matching its Python class). The
+    `_type` field is a spec-level annotation; process-bigraph's scheduler
+    routes via isinstance, not via the string. See the docstring for the
+    `inputs`-empty bug that motivated the fallback wiring."""
     state = _example_state_with_emitter()
     out = inject_sqlite_emitter(state, run_id="r1", db_file="/tmp/x.db")
     # Original state unchanged
@@ -114,22 +113,12 @@ def test_inject_sqlite_emitter_adds_process():
     # New emitter present in returned state
     assert "sqlite_emitter" in out
     sql_em = out["sqlite_emitter"]
-    assert sql_em["_type"] == "process"  # was "step" pre-2026-05-19
-    assert sql_em["interval"] == 60.0  # default
+    assert sql_em["_type"] == "step"
+    assert "interval" not in sql_em  # Steps don't take interval
     assert sql_em["address"] == "local:SQLiteEmitter"
     assert sql_em["config"]["simulation_id"] == "r1"
     assert sql_em["config"]["file_path"] == "/tmp"
     assert sql_em["config"]["db_file"] == "x.db"
-
-
-def test_inject_sqlite_emitter_accepts_custom_interval():
-    """Callers driving long sims can override the 60-second default;
-    callers wanting sub-second resolution can pass a fraction."""
-    state = _example_state_with_emitter()
-    out = inject_sqlite_emitter(
-        state, run_id="r2", db_file="/tmp/x.db", interval_seconds=600.0,
-    )
-    assert out["sqlite_emitter"]["interval"] == 600.0
 
 
 def test_inject_sqlite_emitter_copies_existing_emitter_inputs():
@@ -172,9 +161,12 @@ def test_inject_sqlite_emitter_matches_lowercase_emitter_address():
     assert out["sqlite_emitter"]["inputs"] == {"level": ["stores", "level"]}
 
 
-def test_inject_sqlite_emitter_no_emitter_in_spec():
-    """When the spec has no emitter, inject a SQLite emitter with an empty
-    schema — the run still persists step counts even without observables."""
+def test_inject_sqlite_emitter_no_emitter_in_spec_falls_back_to_global_time():
+    """When the spec has no emitter to mirror, wire `inputs` to
+    `global_time` so `trigger_steps` re-fires us every composite apply.
+    Without this fallback the SQLiteEmitter would have empty `inputs`,
+    fire exactly once at construction, and leave runs.db with 1 row.
+    See v2ecoli friction #1 (deeper finding, 2026-05-19)."""
     state = {
         "p": {"_type": "process", "address": "local:Foo",
               "outputs": {}, "interval": 1.0},
@@ -183,7 +175,7 @@ def test_inject_sqlite_emitter_no_emitter_in_spec():
     out = inject_sqlite_emitter(state, run_id="r1", db_file="/tmp/x.db")
     assert "sqlite_emitter" in out
     assert out["sqlite_emitter"]["config"]["emit"] == {}
-    assert out["sqlite_emitter"]["inputs"] == {}
+    assert out["sqlite_emitter"]["inputs"] == {"global_time": ["global_time"]}
 
 
 def test_inject_sqlite_emitter_prefers_user_emitter():
