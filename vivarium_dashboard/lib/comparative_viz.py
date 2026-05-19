@@ -48,12 +48,19 @@ _PLOTLY_CDN = (
 def _extract_trace(db_path: Path,
                    observable_path: str,
                    observable_index: int | None,
-                   subsample: int) -> tuple[list[float], list[float]]:
+                   subsample: int,
+                   sim_name: str | None = None) -> tuple[list[float], list[float]]:
     """Pull (times, values) for one observable from one run db.
 
     Uses SQLite's json_extract to avoid the cost of materialising every
     state blob. Returns ([], []) on any error so a missing path doesn't
     sink the whole multi-run chart.
+
+    When ``sim_name`` is given, selects the latest simulation_id whose
+    ``simulations.name == sim_name``. This is the per-study comparative
+    pattern — multiple variants share one ``studies/<slug>/runs.db``
+    and are disambiguated by their sim name. When ``sim_name`` is None
+    falls back to the most-recently-started simulation in the db.
     """
     if not db_path.exists():
         return [], []
@@ -71,9 +78,27 @@ def _extract_trace(db_path: Path,
         ).fetchall()}
         if "simulations" not in tables or "history" not in tables:
             return [], []
-        row = conn.execute(
-            "SELECT simulation_id FROM simulations ORDER BY started_at DESC LIMIT 1"
-        ).fetchone()
+        if sim_name:
+            # ``simulations.name`` is written by the SQLiteEmitter but is
+            # typically empty for runs produced by the dashboard's
+            # _post_study_run_variant path — the sim's label lives in
+            # ``runs_meta.sim_name`` instead. Try simulations.name first
+            # (in case future emit pipelines set it), then fall back to
+            # runs_meta which is what the dashboard's run-variant path
+            # populates. simulation_id in history == run_id in runs_meta.
+            row = conn.execute(
+                "SELECT simulation_id FROM simulations WHERE name=? "
+                "ORDER BY started_at DESC LIMIT 1", (sim_name,)
+            ).fetchone()
+            if row is None and "runs_meta" in tables:
+                row = conn.execute(
+                    "SELECT run_id FROM runs_meta WHERE sim_name=? "
+                    "ORDER BY started_at DESC LIMIT 1", (sim_name,)
+                ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT simulation_id FROM simulations ORDER BY started_at DESC LIMIT 1"
+            ).fetchone()
         if row is None:
             return [], []
         sim_id = row[0]
@@ -130,11 +155,20 @@ def render_comparative_time_series(
     for entry in runs:
         label = str(entry.get("label", "?"))
         db_path = Path(entry["db_path"]) if entry.get("db_path") else None
+        sim_name = entry.get("sim_name")
         if db_path is None:
             traces.append({"label": label, "x": [], "y": [], "note": "(no db_path)"})
             continue
-        xs, ys = _extract_trace(db_path, observable_path, observable_index, subsample)
-        note = "" if xs else f"(no data at {observable_path!r})"
+        xs, ys = _extract_trace(
+            db_path, observable_path, observable_index, subsample, sim_name,
+        )
+        if not xs:
+            note = f"(no data: {observable_path!r}"
+            if sim_name:
+                note += f" sim={sim_name!r}"
+            note += ")"
+        else:
+            note = ""
         traces.append({"label": label, "x": xs, "y": ys, "note": note})
 
     plotly_data = []

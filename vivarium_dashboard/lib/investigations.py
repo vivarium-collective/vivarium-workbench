@@ -359,13 +359,17 @@ def _project_v4_redesign_to_legacy_view(spec: dict) -> dict:
             "params": dict(bl.get("params") or {}),
         }]
 
-    # variants — re-shape new variants list onto the legacy projection
+    # variants — re-shape new variants list onto the legacy projection.
+    # v4 variants may declare their own ``composite`` (a different
+    # generator than the baseline); we pass that through so the variant
+    # runner can pick it up without first looking up a baseline entry.
     new_variants = cond.get("variants") or []
     baseline_name = out.get("name") or "baseline"
     baseline_composite = bl.get("composite")
     if new_variants and not out.get("variants"):
         out["variants"] = [{
             "name": v.get("name"),
+            "composite": v.get("composite"),  # may be None — falls back to base_composite lookup
             "base_composite": v.get("base_composite", baseline_name),
             "parameter_overrides": dict(v.get("parameter_overrides") or v.get("params") or {}),
             "description": v.get("description", ""),
