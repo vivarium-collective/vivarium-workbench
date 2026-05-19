@@ -593,12 +593,34 @@ def _discover_viz_html_files(name: str) -> list[dict]:
     Returns one dict per HTML file, with the shape the study-detail template
     expects: ``{name, url, description}``. The URL is workspace-relative so
     the dashboard's static-file fallback serves it.
+
+    v2ecoli friction #17 (2026-05-19): the previous unconditional glob
+    surfaced `topology.html` / `workflow.html` rendered eagerly against an
+    empty composite as "(auto)" tabs that persisted forever. Eran flagged
+    them as "way too detailed" and "excessive". Two-pronged gate:
+
+      1. If no `runs.db` exists, no real sims have run → any HTML on disk
+         predates real data and should not be surfaced.
+      2. If `runs.db` exists, only surface viz whose mtime is at least as
+         fresh as `runs.db` mtime. Stale renders (from before the most
+         recent run) drop off automatically without a spec migration.
+
+    This is the "mtime gate" half of friction-log Option A — robust enough
+    without requiring a yaml-schema migration (Option B). Composites that
+    re-render their viz after each run continue to work; composites that
+    rendered once and never again age out naturally.
     """
     viz_dir = WORKSPACE / "studies" / name / "viz"
     if not viz_dir.is_dir():
         return []
+    runs_db = WORKSPACE / "studies" / name / "runs.db"
+    if not runs_db.is_file():
+        return []
+    runs_db_mtime = runs_db.stat().st_mtime
     out = []
     for html_file in sorted(viz_dir.glob("*.html")):
+        if html_file.stat().st_mtime < runs_db_mtime:
+            continue
         size_kb = max(1, html_file.stat().st_size // 1024)
         rel = html_file.relative_to(WORKSPACE).as_posix()
         out.append({
