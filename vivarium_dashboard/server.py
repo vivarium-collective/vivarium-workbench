@@ -1637,6 +1637,26 @@ def _render_study_visualizations(study_dir, spec, spec_id):
     if not merged:
         return [], []
 
+    # mem3dg-readdy friction #29: study.yaml needed `address:` (caught by
+    # the report linter in pbg-superpowers / friction #26), but the same
+    # gap existed on the @composite_generator(visualizations=[...]) side
+    # and silently won on name collisions. Single source of truth fix:
+    # default any unaddressed entry from workspace.yaml.visualizations[].class
+    # by name, before render_visualizations gets a chance to KeyError.
+    name_to_class: dict[str, str] = {}
+    try:
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+        for ws_viz in ws_data.get("visualizations", []) or []:
+            if isinstance(ws_viz, dict) and ws_viz.get("name") and ws_viz.get("class"):
+                name_to_class[ws_viz["name"]] = ws_viz["class"]
+    except Exception:  # noqa: BLE001 — defaulting is best-effort
+        pass
+    for v in merged:
+        if not v.get("address"):
+            cls = name_to_class.get(v.get("name", ""))
+            if cls:
+                v["address"] = f"local:{cls}"
+
     effective_spec = dict(spec)
     effective_spec["visualizations"] = merged
 
