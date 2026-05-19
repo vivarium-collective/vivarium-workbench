@@ -112,12 +112,16 @@ def cmd_serve(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"warning: workspace switcher registration failed: {e}", file=sys.stderr)
 
-    print(f"\nWorkspace dashboard: http://127.0.0.1:{port}")
+    host = getattr(args, "host", None) or "127.0.0.1"
+    advertise_host = "127.0.0.1" if host == "0.0.0.0" else host
+    print(f"\nWorkspace dashboard: http://{advertise_host}:{port}")
+    if host == "0.0.0.0":
+        print("   (bound on all interfaces — reachable from outside this host)")
     print("   (Ctrl-C to stop)\n")
 
     # Boot the HTTP server.
     from vivarium_dashboard.server import serve as serve_dashboard
-    return serve_dashboard(workspace=workspace, port=port)
+    return serve_dashboard(workspace=workspace, port=port, host=host)
 
 
 def migrate_investigations_to_studies(ws_root: Path, dry_run: bool = False) -> dict:
@@ -198,6 +202,10 @@ def main(argv: list[str] | None = None) -> int:
     p_serve = sub.add_parser("serve", help="Serve the dashboard for a workspace")
     p_serve.add_argument("--workspace", default=".", help="Path to workspace root (default: cwd)")
     p_serve.add_argument("--port", type=int, default=0, help="Port (default: pick a free port)")
+    p_serve.add_argument(
+        "--host", default="127.0.0.1",
+        help="Bind host (default 127.0.0.1; pass 0.0.0.0 to expose outside this machine, e.g. when running in a container)",
+    )
     p_serve.set_defaults(func=cmd_serve)
 
     p_mig = sub.add_parser(

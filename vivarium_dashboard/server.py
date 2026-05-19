@@ -9807,8 +9807,13 @@ STATIC_DIR: Path = PACKAGE_ROOT / "static"
 # Entry point
 # ---------------------------------------------------------------------------
 
-def serve(workspace: Path, port: int) -> int:
-    """Boot the dashboard HTTP server against ``workspace`` on ``port``.
+def serve(workspace: Path, port: int, host: str = "127.0.0.1") -> int:
+    """Boot the dashboard HTTP server against ``workspace`` on ``host:port``.
+
+    ``host`` defaults to ``127.0.0.1`` (loopback only — appropriate for local
+    development). Pass ``0.0.0.0`` to bind every interface, which is required
+    when running inside a container whose published port must be reachable
+    from the host.
 
     Blocks until the server stops. Returns 0 on clean shutdown.
     """
@@ -9830,14 +9835,19 @@ def serve(workspace: Path, port: int) -> int:
     except Exception as e:  # noqa: BLE001 — never block server boot on this
         print(f"warning: run reconcile failed: {e}", file=sys.stderr)
 
-    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    srv = ThreadingHTTPServer((host, port), Handler)
     # Write server-info so tests and other tools can detect the server is ready.
+    # When binding 0.0.0.0, advertise the loopback URL since that's what
+    # in-container tooling reaches; the host machine reaches via the published
+    # port mapping.
+    advertise_host = "127.0.0.1" if host == "0.0.0.0" else host
     info_dir = WORKSPACE / ".pbg" / "server"
     info_dir.mkdir(parents=True, exist_ok=True)
     (info_dir / "server-info").write_text(json.dumps({
         "port": port,
-        "host": "127.0.0.1",
-        "url": f"http://127.0.0.1:{port}",
+        "host": advertise_host,
+        "bind_host": host,
+        "url": f"http://{advertise_host}:{port}",
         "pid": os.getpid(),
         "screen_dir": str(info_dir / "content"),
         "state_dir": str(info_dir / "state"),
@@ -9855,8 +9865,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--workspace", required=True, type=Path)
     ap.add_argument("--port", type=int, required=True)
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="Bind host (default 127.0.0.1; use 0.0.0.0 in containers)")
     args = ap.parse_args()
-    return serve(args.workspace, args.port)
+    return serve(args.workspace, args.port, host=args.host)
 
 
 if __name__ == "__main__":
