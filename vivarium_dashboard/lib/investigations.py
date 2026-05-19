@@ -213,6 +213,218 @@ def _validate_study_v3_or_v4(spec: dict) -> None:
         _validate_expected_behavior(spec)
 
 
+def _validate_study_v4_redesign(spec: dict) -> None:
+    """Validate the redesigned v4 study spec (question/assumptions/conditions/tests/status).
+
+    This is a *different* schema_version=4 shape than the legacy "v3 + extras"
+    one validated by ``_validate_study_v3_or_v4``. The two are disambiguated
+    in ``load_spec`` by the presence of a top-level ``conditions:`` block.
+
+    Required fields::
+
+        schema_version: 4
+        name: <slug>
+        question: <str>
+        conditions:
+          baseline: {composite: <dotted.path>, params: {...}}
+          variants: [ {name, ...}, ... ]            # may be empty
+          model_settings: [ {name, gate, ...}, ... ] # may be empty
+          # (accepts the legacy `expert_inputs` alias)
+        tests: [ {name, measure, pass_if, ...}, ... ]
+        status: <str>                                # free-form gate keyword
+
+    Optional: ``assumptions``, ``created``, ``cites``, top-level metadata.
+    """
+    if not spec.get("question") or not isinstance(spec["question"], str):
+        raise InvestigationSpecError(
+            "v4 study: 'question' must be a non-empty string"
+        )
+
+    cond = spec.get("conditions")
+    if not isinstance(cond, dict):
+        raise InvestigationSpecError("v4 study: 'conditions' must be a mapping")
+
+    baseline = cond.get("baseline")
+    if not isinstance(baseline, dict) or not baseline.get("composite"):
+        raise InvestigationSpecError(
+            "v4 study: conditions.baseline must be a mapping with at least a "
+            "'composite' key (dotted path to the composite function)"
+        )
+
+    variants = cond.get("variants", [])
+    if not isinstance(variants, list):
+        raise InvestigationSpecError("v4 study: conditions.variants must be a list")
+    for i, v in enumerate(variants):
+        if not isinstance(v, dict) or not v.get("name"):
+            raise InvestigationSpecError(
+                f"v4 study: conditions.variants[{i}] must be a mapping with a 'name'"
+            )
+
+    # ``model_settings`` is the canonical name; ``expert_inputs`` is
+    # accepted as a deprecated alias so older study yamls keep working
+    # without a forced migration.
+    model_settings = cond.get("model_settings")
+    if model_settings is None:
+        model_settings = cond.get("expert_inputs", [])
+    if not isinstance(model_settings, list):
+        raise InvestigationSpecError(
+            "v4 study: conditions.model_settings must be a list"
+        )
+    for i, ms in enumerate(model_settings):
+        if not isinstance(ms, dict) or not ms.get("name"):
+            raise InvestigationSpecError(
+                f"v4 study: conditions.model_settings[{i}] must be a mapping with a 'name'"
+            )
+        gate = ms.get("gate", "optional")
+        if gate not in ("optional", "required-before-run"):
+            raise InvestigationSpecError(
+                f"v4 study: conditions.model_settings[{i}].gate must be one of "
+                f"'optional' or 'required-before-run' (got {gate!r})"
+            )
+    # Promote the legacy alias to the canonical key so downstream code
+    # only needs to read one field.
+    if "model_settings" not in cond and "expert_inputs" in cond:
+        cond["model_settings"] = cond.pop("expert_inputs")
+
+    assumptions = spec.get("assumptions", [])
+    if not isinstance(assumptions, list):
+        raise InvestigationSpecError("v4 study: 'assumptions' must be a list")
+    for i, a in enumerate(assumptions):
+        if not isinstance(a, dict) or not a.get("text"):
+            raise InvestigationSpecError(
+                f"v4 study: assumptions[{i}] must be a mapping with at least a 'text' field"
+            )
+
+    tests = spec.get("tests", [])
+    if not isinstance(tests, list):
+        raise InvestigationSpecError(
+            "v4 study: 'tests' must be a list (one entry per pass/fail criterion). "
+            "The legacy 'tests: {auto_discover, pytest_args, ...}' mapping is the "
+            "older v4 shape — not the redesign."
+        )
+    for i, t in enumerate(tests):
+        if not isinstance(t, dict) or not t.get("name"):
+            raise InvestigationSpecError(
+                f"v4 study: tests[{i}] must be a mapping with at least a 'name' field"
+            )
+        meas = t.get("measure")
+        if meas is not None and not isinstance(meas, dict):
+            raise InvestigationSpecError(
+                f"v4 study: tests[{i}].measure must be a mapping when present"
+            )
+
+
+def _project_v4_redesign_to_legacy_view(spec: dict) -> dict:
+    """Project a redesigned v4 study spec onto legacy-shaped synonyms.
+
+    The dashboard's study-detail page + report renderer were built against
+    the v3 field names (``baseline``, ``variants``, ``key_assumptions``,
+    ``behavior_tests``, ``purpose.question``, etc.). To avoid rewriting the
+    whole renderer, we synthesise those legacy fields IN-MEMORY from the
+    new structured shape. The originals stay in place so v4-aware code
+    (e.g. ``render_v4_test_charts``) can still read them.
+
+    Adds:
+      - ``purpose.question`` ← top-level ``question``
+      - ``key_assumptions`` ← ``[a.text for a in assumptions]``
+      - ``baseline`` ← single-entry list synthesised from ``conditions.baseline``
+      - ``variants`` ← ``conditions.variants`` projected onto legacy variant shape
+      - ``behavior_tests`` ← legacy projection of ``tests[]``
+      - ``status`` ← unchanged
+
+    The v3 baseline ``name`` is filled with the study slug since v4
+    collapses to a single baseline per study.
+    """
+    out = dict(spec)
+    cond = out.get("conditions") or {}
+
+    # purpose.question — fed by ``question`` paragraph
+    if out.get("question"):
+        purpose = dict(out.get("purpose") or {})
+        purpose.setdefault("question", out["question"])
+        out["purpose"] = purpose
+
+    # key_assumptions — flatten assumptions[].text
+    if out.get("assumptions") and not out.get("key_assumptions"):
+        out["key_assumptions"] = [
+            a.get("text", "") for a in out["assumptions"] if isinstance(a, dict)
+        ]
+
+    # baseline — synthesise the v3 single-baseline list shape
+    bl = cond.get("baseline") or {}
+    if bl.get("composite") and not out.get("baseline"):
+        out["baseline"] = [{
+            "name": out.get("name") or "baseline",
+            "composite": bl["composite"],
+            "params": dict(bl.get("params") or {}),
+        }]
+
+    # variants — re-shape new variants list onto the legacy projection.
+    # v4 variants may declare their own ``composite`` (a different
+    # generator than the baseline); we pass that through so the variant
+    # runner can pick it up without first looking up a baseline entry.
+    new_variants = cond.get("variants") or []
+    baseline_name = out.get("name") or "baseline"
+    baseline_composite = bl.get("composite")
+    if new_variants and not out.get("variants"):
+        out["variants"] = [{
+            "name": v.get("name"),
+            "composite": v.get("composite"),  # may be None — falls back to base_composite lookup
+            "base_composite": v.get("base_composite", baseline_name),
+            "parameter_overrides": dict(v.get("parameter_overrides") or v.get("params") or {}),
+            "description": v.get("description", ""),
+        } for v in new_variants if isinstance(v, dict)]
+
+    # simulation_set — synthesise the v3 planned-simulations list so the
+    # study-detail Simulations tab + the report's "What we ran" section
+    # render content for v4 studies. Each variant maps to one planned sim.
+    # The baseline itself appears as a leading "baseline" entry so the
+    # tab isn't empty when there are no variants.
+    if "simulation_set" not in out:
+        sim_set = []
+        if baseline_composite:
+            sim_set.append({
+                "name":        baseline_name + "-baseline",
+                "kind":        "single",
+                "base_model":  baseline_composite,
+                "is_baseline": True,
+                "description": "Reference run for the study — variants below perturb this.",
+                "params":      dict(bl.get("params") or {}),
+            })
+        for v in new_variants:
+            if not isinstance(v, dict):
+                continue
+            sim_set.append({
+                "name":        v.get("name"),
+                "kind":        v.get("kind", "single"),
+                "base_model":  v.get("composite") or v.get("base_composite") or baseline_composite,
+                "description": v.get("description", ""),
+                "params":      dict(v.get("parameter_overrides") or v.get("params") or {}),
+                "status":      v.get("status", "ready"),
+            })
+        if sim_set:
+            out["simulation_set"] = sim_set
+
+    # behavior_tests — keep ``tests`` as-is for v4-aware code; expose a
+    # legacy projection so the v3 detail page has something to enumerate.
+    new_tests = out.get("tests")
+    if isinstance(new_tests, list) and "behavior_tests" not in out:
+        out["behavior_tests"] = [{
+            "name": t.get("name"),
+            "en": t.get("question") or t.get("name"),
+            "measure": t.get("measure"),
+            "expect": t.get("pass_if"),
+            "status": t.get("status"),
+        } for t in new_tests if isinstance(t, dict)]
+
+    # interventions placeholder — the legacy validator + renderer expect
+    # a list; v4 doesn't carry interventions yet.
+    out.setdefault("interventions", [])
+    # runs default — populated by _study_detail_spec from runs.db
+    out.setdefault("runs", [])
+    return out
+
+
 def _validate_expected_behavior(spec: dict) -> None:
     """Validate the ``expected_behavior:`` field (v4 structured form).
 
@@ -468,6 +680,16 @@ def load_spec(path: Path) -> dict:
     # name is always required
     if not spec.get("name"):
         raise InvestigationSpecError("missing required field: name")
+
+    # NEW v4 study shape (question / assumptions / conditions / tests / status).
+    # Distinct from the legacy "v4 = v3 + extras" shape by the presence of a
+    # top-level ``conditions:`` block. Validate the new fields, then project
+    # them onto legacy-shaped synonyms so the existing detail page renders
+    # without needing a parallel template.
+    if spec.get("schema_version") == 4 and isinstance(spec.get("conditions"), dict):
+        _validate_study_v4_redesign(spec)
+        spec = _project_v4_redesign_to_legacy_view(spec)
+        return spec
 
     # v3/v4 (Studies) shape: single baseline + optional variants/runs/etc.
     # Detect v3-shape even when schema_version is absent: a top-level

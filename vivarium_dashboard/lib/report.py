@@ -419,6 +419,26 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
             except Exception:
                 active_investigation_name = inv_dirs[0].name
 
+    # Cache-bust for the live dashboard assets. Browsers happily serve a
+    # stale walkthrough.js / style.css if the URL doesn't change, even
+    # when the plugin ships a newer version. Computing a version stamp
+    # from the asset mtimes makes the URL change whenever the file does.
+    assets_dir = ws_root / "reports" / "assets"
+    def _mtime(rel: str) -> str:
+        p = assets_dir / rel
+        try:
+            return str(int(p.stat().st_mtime))
+        except OSError:
+            return "0"
+    asset_version = _mtime("walkthrough.js") + "_" + _mtime("style.css")
+
+    # Workspace owner — resolved from GitHub CLI (`gh api user`) so the
+    # rail footer + profile links route to the right person. Falls back
+    # to `git config user.{name,email}` for users without `gh` set up.
+    # Result is cached in memory on the module so re-renders within the
+    # same process don't re-hit the network.
+    owner = _resolve_workspace_owner()
+
     out.write_text(tpl.render(
         workspace_name=ws["name"],
         active_investigation_name=active_investigation_name,
@@ -438,7 +458,86 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         registry=registry,
         registry_warning=registry_warning,
         pbg_doc_json=json.dumps(pbg_doc, indent=2, default=str),
+        asset_version=asset_version,
+        owner_login=owner.get("login") or "",
+        owner_name=owner.get("name") or "",
+        owner_email=owner.get("email") or "",
+        owner_avatar_url=owner.get("avatar_url") or "",
+        owner_html_url=owner.get("html_url") or "",
+        owner_initials=owner.get("initials") or "",
+        owner_source=owner.get("source") or "",
     ), encoding="utf-8")
+    return out
+
+
+# In-process cache for the workspace owner; `gh api user` is a network
+# call so we don't want to repeat it on every report render.
+_OWNER_CACHE: dict | None = None
+
+
+def _resolve_workspace_owner() -> dict:
+    """Return ``{login, name, email, avatar_url, html_url, initials, source}``.
+
+    Order:
+      1. ``gh api user`` (preferred — gives login + avatar)
+      2. ``git config user.{name,email}`` (fallback)
+      3. Empty defaults
+
+    Cached in module memory after the first successful call.
+    """
+    global _OWNER_CACHE
+    if _OWNER_CACHE is not None:
+        return _OWNER_CACHE
+
+    import subprocess
+    import shutil
+
+    out = {"login": "", "name": "", "email": "", "avatar_url": "",
+           "html_url": "", "initials": "", "source": ""}
+
+    if shutil.which("gh"):
+        try:
+            r = subprocess.run(
+                ["gh", "api", "user"],
+                capture_output=True, text=True, timeout=4, check=False,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                data = json.loads(r.stdout)
+                out["login"] = data.get("login") or ""
+                out["name"] = data.get("name") or ""
+                out["email"] = data.get("email") or ""
+                out["avatar_url"] = data.get("avatar_url") or ""
+                out["html_url"] = data.get("html_url") or ""
+                out["source"] = "github"
+        except (subprocess.SubprocessError, json.JSONDecodeError, OSError):
+            pass
+
+    # Fall back to git config for missing name/email.
+    for field, key in (("user.name", "name"), ("user.email", "email")):
+        if out[key]:
+            continue
+        try:
+            r = subprocess.run(
+                ["git", "config", "--get", field],
+                capture_output=True, text=True, timeout=2, check=False,
+            )
+            if r.returncode == 0:
+                out[key] = r.stdout.strip()
+                if not out["source"]:
+                    out["source"] = "git-config"
+        except (subprocess.SubprocessError, OSError):
+            pass
+
+    # Derive initials from name → fall back to login → fall back to email
+    src = out["name"] or out["login"] or out["email"]
+    if src:
+        parts = [p for p in src.replace("@", " ").replace(".", " ").split() if p]
+        if len(parts) >= 2:
+            out["initials"] = (parts[0][0] + parts[1][0]).upper()
+        elif parts:
+            out["initials"] = parts[0][:2].upper()
+
+    _OWNER_CACHE = out
     return out
 
 

@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "vivarium-dashboard"
 version = "0.1.0"
 description = "Web-based dashboard for Vivarium / process-bigraph workspaces"
-authors = [{name = "Eran Agmon", email = "agmon.eran@gmail.com"}]
+authors = [{name = "Vivarium Collective", email = "team@vivarium-collective.org"}]
 requires-python = ">=3.10"
 dependencies = [
     "jinja2",

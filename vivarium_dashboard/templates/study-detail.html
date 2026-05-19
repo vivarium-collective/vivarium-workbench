@@ -137,6 +137,9 @@
 .btn-seed-followup:hover{background:#3b82f6;color:#fff}
 .charts-panel{margin-top:18px;display:flex;flex-direction:column;gap:18px}
 .chart-card{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 12px 12px 12px}
+/* SVGs scale to fit their card; preserves aspect ratio so a 1400×484
+   chart shrinks instead of overflowing horizontally + clipping. */
+.chart-card svg{display:block;width:100%;max-width:100%;height:auto}
 .chart-caption{font-size:0.83em;color:#475569;margin-top:4px;line-height:1.4}
 /* findings */
 .findings-section{padding:14px 16px;background:#fafbff;border:1px solid #c7d2fe;border-radius:8px}
@@ -169,6 +172,76 @@
 
 <section class="study-tab-panel active" data-kind="overview" id="panel-overview">
   <div class="study-overview">
+
+    {# ─── Biology-at-a-glance (planning-phase, biologist-first) ──────────
+       Renders when a study.yaml declares biological_summary or study_card
+       or literature_anchors. Designed for pre-execution evaluation:
+       a biologist should be able to understand the study's purpose and
+       expectations without scrolling into implementation details.
+    #}
+    {% if study.biological_summary or study.study_card or study.literature_anchors %}
+    <div class="biology-glance">
+      {% if study.biological_summary %}
+      <div class="biology-summary-callout">
+        <h2 class="biology-glance-label">Biology — what this study is about</h2>
+        <p class="biology-prose">{{ study.biological_summary }}</p>
+      </div>
+      {% endif %}
+
+      {% if study.study_card %}
+      {% set _sc = study.study_card %}
+      <div class="study-card">
+        <h2 class="biology-glance-label">Study card</h2>
+        <table class="study-card-table">
+          {% if _sc.goal %}
+          <tr><th>Goal</th><td>{{ _sc.goal }}</td></tr>
+          {% endif %}
+          {% if _sc.mechanism %}
+          <tr><th>Mechanism</th><td>{{ _sc.mechanism }}</td></tr>
+          {% endif %}
+          {% if _sc.why_before_next %}
+          <tr><th>Why before next</th><td>{{ _sc.why_before_next }}</td></tr>
+          {% endif %}
+          {% if _sc.expected_result %}
+          <tr><th>Expected result</th><td>{{ _sc.expected_result }}</td></tr>
+          {% endif %}
+          {% if _sc.main_expert_question %}
+          <tr><th>Main expert question</th><td>{{ _sc.main_expert_question }}</td></tr>
+          {% endif %}
+        </table>
+      </div>
+      {% endif %}
+
+      {% if study.literature_anchors %}
+      <div class="literature-anchors">
+        <h2 class="biology-glance-label">Literature anchors</h2>
+        <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
+          The biological expectations this study tests, mapped to the
+          model observable that will measure each one. Full citations
+          live in the Tests tab.
+        </p>
+        <ul class="literature-anchor-list">
+        {% for anchor in study.literature_anchors %}
+          <li class="literature-anchor-card">
+            <div class="anchor-expectation">{{ anchor.expectation }}</div>
+            <div class="anchor-observable">
+              <em>Model observable:</em> <code>{{ anchor.model_observable }}</code>
+            </div>
+            {% if anchor.source %}
+            <div class="anchor-source"><em>Source:</em> {{ anchor.source }}</div>
+            {% endif %}
+            {% if anchor.status_in_v2ecoli %}
+            <div class="anchor-status">
+              <em>Current status:</em> {{ anchor.status_in_v2ecoli }}
+            </div>
+            {% endif %}
+          </li>
+        {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
 
     {% if study.findings %}
     <div class="overview-section findings-section">
@@ -339,6 +412,53 @@
     </div>
     {% endif %}
 
+    {% if study.expert_decisions_needed %}
+    <div class="overview-section pre-run-expert-review">
+      <h2 class="overview-label">Pre-run expert review</h2>
+      <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
+        Open biological questions the planning is contingent on. A "wrong" answer here
+        means a primary test threshold needs to change <em>before</em> the simulation
+        is run, not after. Each question lists alternatives + the impact of the wrong
+        choice + what downstream work it blocks.
+      </p>
+      <div class="expert-question-list">
+        {% for q in study.expert_decisions_needed %}
+        <div class="expert-question-card status-{{ q.status or 'open' }}">
+          <div class="expert-question-header">
+            <span class="expert-question-id">{{ q.id }}</span>
+            <span class="expert-question-status">{{ q.status or 'open' }}</span>
+            {% if q.asked_to %}<span class="expert-question-asked-to">asked to: {{ q.asked_to }}</span>{% endif %}
+          </div>
+          <div class="expert-question-text"><strong>Q.</strong> {{ q.question }}</div>
+          {% if q.alternatives %}
+          <div class="expert-question-alternatives">
+            <em>Alternatives:</em>
+            <ul>{% for a in q.alternatives %}<li>{{ a }}</li>{% endfor %}</ul>
+          </div>
+          {% endif %}
+          {% if q.impact_if_wrong %}
+          <div class="expert-question-impact">
+            <em>Impact if wrong:</em> {{ q.impact_if_wrong }}
+          </div>
+          {% endif %}
+          {% if q.blocks %}
+          <details class="expert-question-blocks">
+            <summary>What this blocks ({{ q.blocks|length }} items)</summary>
+            <ul>{% for b in q.blocks %}<li>{{ b }}</li>{% endfor %}</ul>
+          </details>
+          {% endif %}
+          {% if q.requested_response %}
+          <details class="expert-question-response">
+            <summary>Requested response format</summary>
+            <p>{{ q.requested_response }}</p>
+          </details>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
     {% if study.limitations %}
     <div class="overview-section">
       <h2 class="overview-label">Limitations</h2>
@@ -425,9 +545,124 @@
 </section>
 
 
-{# ─── Build tab: model_change + implementation_requirements ─────────── #}
-{% if study.model_change or study.implementation_requirements %}
+{# ─── Build tab: conditions + model_change + implementation_requirements ── #}
+{% if study.model_change or study.implementation_requirements or study.conditions %}
 <section class="study-tab-panel" data-kind="build" id="panel-build" hidden>
+
+  {# Conditions (v4): baseline + variants + model_settings. Edit a value in
+     the Current column and the next pbg_runner invocation picks it up. #}
+  {% if study.conditions %}
+  {# Backward-compat: the new field is ``model_settings``; older yamls may
+     still carry the legacy ``expert_inputs`` alias. #}
+  {% set _model_settings = study.conditions.model_settings if study.conditions.model_settings is defined else study.conditions.expert_inputs %}
+  <div class="overview-section" id="conditions-section">
+    <h3>Conditions <span class="muted" style="font-size:0.85em;font-weight:normal">— what we set up to test it</span></h3>
+    <p class="muted" style="font-size:0.88em">The experimental knobs: which composite forms the baseline, how variants perturb it, and which model settings still need a human-set value.</p>
+
+    {% set _cond = study.conditions %}
+    {% if _cond.baseline %}
+    <div class="cond-block">
+      <div class="cond-block-title">Baseline</div>
+      <div style="font-size:0.92em;margin-bottom:4px">Composite: <code>{{ _cond.baseline.composite or '?' }}</code></div>
+      {% if _cond.baseline.params %}
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        {% for k, v in _cond.baseline.params.items() %}
+        <span class="cond-pill"><span class="cond-pill-k">{{ k }}</span>=<code>{{ v }}</code></span>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if _cond.variants %}
+    <div class="cond-block">
+      <div class="cond-block-title">Variants <span class="muted" style="font-weight:normal;font-size:0.85em">({{ _cond.variants | length }})</span></div>
+      <table class="cond-table">
+        <thead><tr><th>Variant</th><th>Composite / base</th><th>Parameter overrides</th><th>Notes</th></tr></thead>
+        <tbody>
+          {% for v in _cond.variants %}
+          <tr>
+            <td><code>{{ v.name or '?' }}</code></td>
+            <td>
+              {% if v.composite %}<code>{{ v.composite }}</code>
+              {% elif v.base_composite %}<code>{{ v.base_composite }}</code>
+              {% else %}<em class="muted">(inherits baseline)</em>{% endif %}
+            </td>
+            <td>
+              {% set _ovr = v.parameter_overrides or v.params or {} %}
+              {% if _ovr %}
+                {% for k, val in _ovr.items() %}
+                <div><span class="cond-pill-k">{{ k }}</span>=<code>{{ val }}</code></div>
+                {% endfor %}
+              {% else %}
+                <em class="muted">(no overrides)</em>
+              {% endif %}
+            </td>
+            <td>{{ v.description or v.notes or '' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if _model_settings %}
+    <div class="cond-block">
+      {% set _n_required = _model_settings | selectattr('gate','equalto','required-before-run') | list | length %}
+      <div class="cond-block-title">
+        Model settings <span class="muted" style="font-weight:normal;font-size:0.85em">({{ _model_settings | length }})</span>
+        {% if _n_required %}<span class="cond-ei-required-badge" title="{{ _n_required }} required-before-run">{{ _n_required }} required</span>{% endif %}
+      </div>
+      <p class="muted" style="font-size:0.85em;margin:0 0 6px 0">Edit a value in the Current column and click <strong>Save</strong>. The next <code>pbg_runner</code> invocation for this study reads the updated value from <code>study.yaml</code>.</p>
+      <table class="cond-table cond-expert-table" data-study="{{ study.name }}">
+        <thead><tr><th>Name</th><th>Type</th><th>Default</th><th>Current</th><th>Range</th><th>Gate</th><th></th></tr></thead>
+        <tbody>
+          {% for e in _model_settings %}
+          {# Derive a sensible step for type=number from the declared range
+             so the spinner arrows step by ~1% of the range. Falls back to
+             1 for integer, 0.01 for unranged number, "any" for unknown. #}
+          {% set _step = "any" %}
+          {% if e.type == 'integer' %}{% set _step = 1 %}
+          {% elif e.type == 'number' %}
+            {% if e.range and e.range|length == 2 %}
+              {% set _step = ((e.range[1] - e.range[0]) / 100.0) %}
+            {% else %}{% set _step = 0.01 %}{% endif %}
+          {% endif %}
+          <tr data-ei-name="{{ e.name }}">
+            <td title="{{ e.description or '' }}"><code>{{ e.name }}</code></td>
+            <td>{{ e.type or '' }}</td>
+            <td><code>{{ e.default }}</code></td>
+            <td>
+              <input class="cond-ei-input"
+                     type="{% if e.type == 'number' or e.type == 'integer' %}number{% else %}text{% endif %}"
+                     value="{% if e.current is none %}{% else %}{{ e.current }}{% endif %}"
+                     placeholder="(awaiting expert)"
+                     {% if e.range and e.range[0] is defined %}min="{{ e.range[0] }}" max="{{ e.range[1] }}"{% endif %}
+                     step="{{ _step }}"
+                     style="width:100%;padding:3px 6px;border:1px solid #cbd5e1;border-radius:3px;font:inherit">
+            </td>
+            <td>
+              {% if e.range %}<code>[{{ e.range[0] }}, {{ e.range[1] }}]</code>
+              {% elif e.options %}<code>{{ e.options | join(' | ') }}</code>
+              {% else %}<em class="muted">—</em>{% endif %}
+            </td>
+            <td>
+              {% if e.gate == 'required-before-run' %}<span class="cond-ei-gate-req">required</span>
+              {% else %}<span class="cond-ei-gate-opt">optional</span>{% endif %}
+            </td>
+            <td>
+              <button class="action-btn cond-ei-save" type="button"
+                      onclick="_saveExpertInput('{{ study.name }}', '{{ e.name }}', this)">Save</button>
+              <span class="cond-ei-flash" style="display:none;margin-left:6px;font-size:0.85em"></span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
 
   {% if study.model_change %}
   <div class="overview-section">
@@ -1100,11 +1335,11 @@
       </thead>
       <tbody>
         {% for r in (study.runs or []) %}
-        {% set _params = r.meta_params or {} %}
+        {% set _params = r.meta_params or r.params or {} %}
         {% set _has_changes = _params and _params|length > 0 %}
         <tr data-run-id="{{ r.run_id }}"
-            data-spec-id="{{ r.meta_spec_id or '' }}"
-            data-started-at="{{ r.meta_started_at or '' }}">
+            data-spec-id="{{ r.meta_spec_id or r.spec_id or '' }}"
+            data-started-at="{{ r.meta_started_at or r.started_at or '' }}">
           <td><input type="checkbox" class="run-compare-checkbox" value="{{ r.run_id }}"></td>
           <td>
             {{ r.variant or r.composite or 'baseline' }}
@@ -1113,14 +1348,14 @@
             {% endif %}
           </td>
           <td>
-            <code style="font-size:0.82em">{{ r.composite or r.meta_spec_id or '—' }}</code>
-            {% if r.meta_spec_id and r.composite and r.meta_spec_id != r.composite %}
-              <div class="muted" style="font-size:0.76em">spec: <code>{{ r.meta_spec_id }}</code></div>
+            <code style="font-size:0.82em">{{ r.composite or r.meta_spec_id or r.spec_id or '—' }}</code>
+            {% if (r.meta_spec_id or r.spec_id) and r.composite and (r.meta_spec_id or r.spec_id) != r.composite %}
+              <div class="muted" style="font-size:0.76em">spec: <code>{{ r.meta_spec_id or r.spec_id }}</code></div>
             {% endif %}
           </td>
           <td>{{ r.n_steps or '' }}</td>
-          <td style="font-size:0.85em;white-space:nowrap">{{ r.meta_started_at | fmt_ts }}</td>
-          <td style="font-size:0.85em;white-space:nowrap">{{ r.meta_duration_sec | fmt_duration }}</td>
+          <td style="font-size:0.85em;white-space:nowrap">{{ (r.meta_started_at or r.started_at_iso or r.started_at) | fmt_ts if (r.meta_started_at or r.started_at_iso or r.started_at) is not none else '' }}</td>
+          <td style="font-size:0.85em;white-space:nowrap">{{ r.meta_duration_sec | fmt_duration if r.meta_duration_sec is not none else '' }}</td>
           <td>
             <span class="run-status run-status-{{ r.status }}">{{ r.status }}</span>
             {% if r.meta_log_path %}
@@ -1253,6 +1488,39 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
 
 <section class="study-tab-panel" data-kind="visualizations" id="panel-visualizations" hidden>
   <div class="viz-section">
+
+    {# ─── Embedded HTML visualizations (e.g. pre-execution preview pages
+         produced by a runner script). study.embed_visualizations is a list of
+         {name, url, description} entries; each renders as an inline iframe at
+         the top of the Visualizations tab so a biologist gets immediate
+         payoff without waiting for runs.db / Visualization-class plumbing.
+    #}
+    {% if study.embed_visualizations %}
+    <div class="embed-viz-section" style="margin-bottom:24px">
+      <h3 class="section-title">Embedded visualizations</h3>
+      <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
+        Self-contained HTML pages produced by the study's runner. Each iframe
+        below is a standalone artefact you can also open in a separate tab.
+      </p>
+      {% for v in study.embed_visualizations %}
+      <div class="embed-viz-card" style="border:1px solid #e2e8f0;border-radius:6px;margin-bottom:14px;background:#fff">
+        <div style="display:flex;align-items:center;gap:12px;padding:8px 12px;border-bottom:1px solid #e5e7eb;background:#f9fafb">
+          <strong style="flex:1">{{ v.name }}</strong>
+          <a href="{{ v.url }}" target="_blank" class="btn-mini">Open in new tab ↗</a>
+        </div>
+        {% if v.description %}
+        <p class="muted" style="margin:6px 12px;font-size:0.88em">{{ v.description }}</p>
+        {% endif %}
+        <iframe src="{{ v.url }}"
+                style="width:100%;min-height:1600px;border:0;display:block"
+                loading="lazy" title="{{ v.name }}"
+                onload="(function(f){try{var d=f.contentDocument;if(!d)return;var h=Math.max(d.documentElement.scrollHeight,d.body&&d.body.scrollHeight||0);if(h>200)f.style.height=(h+24)+'px';}catch(e){}})(this)"
+                ></iframe>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
     <h3 class="section-title">Latest-run visualizations (auto-generated from <code>runs.db</code>)</h3>
     <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
       These charts re-render each time the page loads, against the most recent simulation in the study's <code>runs.db</code>.
@@ -1441,6 +1709,52 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
 <script>
 window._study = {{ study|tojson }};
 window._studyName = "{{ name }}";
+
+// Save handler for the Conditions → Model settings editable rows.
+// POSTs to /api/study-expert-input-set (route kept for back-compat)
+// which patches study.yaml in place.
+// On success: flashes "saved" + updates the row's data-current attribute.
+// On failure: flashes the error (HTTP body) for ~5s.
+function _saveExpertInput(studyName, eiName, btn) {
+  var row = btn.closest('tr');
+  var input = row && row.querySelector('.cond-ei-input');
+  var flash = row && row.querySelector('.cond-ei-flash');
+  if (!input || !flash) return;
+  var raw = (input.value || '').trim();
+  // Coerce numeric inputs so yaml carries the right type
+  var val = raw;
+  if (input.type === 'number' && raw !== '') {
+    var n = Number(raw);
+    if (!isNaN(n)) val = n;
+  } else if (raw === '') {
+    val = null;
+  }
+  btn.disabled = true;
+  flash.className = 'cond-ei-flash';
+  flash.style.display = '';
+  flash.textContent = 'saving…';
+  fetch('/api/study-expert-input-set', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({study: studyName, name: eiName, current: val}),
+  }).then(function(r) {
+    return r.text().then(function(t) { return {ok: r.ok, status: r.status, body: t}; });
+  }).then(function(res) {
+    if (res.ok) {
+      flash.className = 'cond-ei-flash saved';
+      flash.textContent = '✓ saved';
+      setTimeout(function() { flash.style.display = 'none'; }, 2500);
+    } else {
+      flash.className = 'cond-ei-flash error';
+      flash.textContent = '✗ ' + (res.body || ('HTTP ' + res.status));
+    }
+  }).catch(function(err) {
+    flash.className = 'cond-ei-flash error';
+    flash.textContent = '✗ ' + String(err);
+  }).finally(function() {
+    btn.disabled = false;
+  });
+}
 </script>
 <script src="/study-detail.js"></script>
 </body>

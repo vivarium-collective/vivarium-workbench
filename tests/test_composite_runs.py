@@ -102,6 +102,10 @@ def _example_state_with_emitter():
 
 
 def test_inject_sqlite_emitter_adds_step():
+    """SQLiteEmitter is wired as a Step (matching its Python class). The
+    `_type` field is a spec-level annotation; process-bigraph's scheduler
+    routes via isinstance, not via the string. See the docstring for the
+    `inputs`-empty bug that motivated the fallback wiring."""
     state = _example_state_with_emitter()
     out = inject_sqlite_emitter(state, run_id="r1", db_file="/tmp/x.db")
     # Original state unchanged
@@ -110,6 +114,7 @@ def test_inject_sqlite_emitter_adds_step():
     assert "sqlite_emitter" in out
     sql_em = out["sqlite_emitter"]
     assert sql_em["_type"] == "step"
+    assert "interval" not in sql_em  # Steps don't take interval
     assert sql_em["address"] == "local:SQLiteEmitter"
     assert sql_em["config"]["simulation_id"] == "r1"
     assert sql_em["config"]["file_path"] == "/tmp"
@@ -125,9 +130,43 @@ def test_inject_sqlite_emitter_copies_existing_emitter_inputs():
     assert out["sqlite_emitter"]["config"]["emit"] == {"level": "float"}
 
 
-def test_inject_sqlite_emitter_no_emitter_in_spec():
-    """When the spec has no emitter, inject a SQLite emitter with an empty
-    schema — the run still persists step counts even without observables."""
+def test_inject_sqlite_emitter_matches_lowercase_emitter_address():
+    """mem3dg-readdy friction #24: a workspace registering its emitter as
+    `local:ram-emitter` (kebab-case) used to silently fall through the
+    `addr.endswith("Emitter")` check; the SQLiteEmitter then got an empty
+    emit:/inputs: map and runs.db filled up with state={} rows. Fix is to
+    match case-insensitively so kebab-case addresses register too."""
+    state = {
+        "increase": {
+            "_type": "process",
+            "address": "local:IncreaseProcess",
+            "config": {"rate": 2.0},
+            "inputs": {"level": ["stores", "level"]},
+            "outputs": {"level": ["stores", "level"]},
+            "interval": 1.0,
+        },
+        "stores": {"level": 1.0},
+        # lowercase + hyphenated — historically would have been skipped
+        "emitter": {
+            "_type": "step",
+            "address": "local:ram-emitter",
+            "config": {"emit": {"level": "float"}},
+            "inputs": {"level": ["stores", "level"]},
+        },
+    }
+    out = inject_sqlite_emitter(state, run_id="r1", db_file="/tmp/x.db")
+    # The SQLite emitter must have picked up the schema + inputs from the
+    # kebab-case emitter, NOT defaulted to empty.
+    assert out["sqlite_emitter"]["config"]["emit"] == {"level": "float"}
+    assert out["sqlite_emitter"]["inputs"] == {"level": ["stores", "level"]}
+
+
+def test_inject_sqlite_emitter_no_emitter_in_spec_falls_back_to_global_time():
+    """When the spec has no emitter to mirror, wire `inputs` to
+    `global_time` so `trigger_steps` re-fires us every composite apply.
+    Without this fallback the SQLiteEmitter would have empty `inputs`,
+    fire exactly once at construction, and leave runs.db with 1 row.
+    See v2ecoli friction #1 (deeper finding, 2026-05-19)."""
     state = {
         "p": {"_type": "process", "address": "local:Foo",
               "outputs": {}, "interval": 1.0},
@@ -136,7 +175,7 @@ def test_inject_sqlite_emitter_no_emitter_in_spec():
     out = inject_sqlite_emitter(state, run_id="r1", db_file="/tmp/x.db")
     assert "sqlite_emitter" in out
     assert out["sqlite_emitter"]["config"]["emit"] == {}
-    assert out["sqlite_emitter"]["inputs"] == {}
+    assert out["sqlite_emitter"]["inputs"] == {"global_time": ["global_time"]}
 
 
 def test_inject_sqlite_emitter_prefers_user_emitter():

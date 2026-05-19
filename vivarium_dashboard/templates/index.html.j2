@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><title>{{ workspace_name }}{% if active_investigation_name %}:{{ active_investigation_name }}{% endif %}</title>
-<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/style.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 <style>
 /* Modal overlay */
@@ -402,14 +402,49 @@
       </div>
     </div>
 
-    <!-- Footer: user identity + collapse toggle -->
+    <!-- Footer: user identity + collapse toggle.
+         Workspace owner is resolved from `gh api user` (which requires
+         the user to have authenticated `gh auth login`). When that
+         succeeds, `owner_login` is the GitHub username and we link to
+         their profile. When it doesn't, we fall back to a GENERIC
+         "Connect GitHub" prompt — never to git-config name/email —
+         so a workspace shown on screen / shared in a screenshot
+         doesn't leak the local user's personal git identity. -->
+    {% if owner_login %}
+    {% set _owner_label = owner_name or owner_login %}
+    {% set _owner_sub = '@' + owner_login %}
+    {% if owner_html_url %}
+    <a class="viv-rail-footer viv-rail-footer-link" href="{{ owner_html_url }}" target="_blank" rel="noopener" title="Open {{ owner_login }} on GitHub ↗">
+    {% else %}
     <div class="viv-rail-footer">
-      <div class="viv-avatar viv-avatar-rail">{{ owner_initials or '—' }}</div>
+    {% endif %}
+      {% if owner_avatar_url %}
+        <img class="viv-avatar viv-avatar-rail viv-avatar-img" src="{{ owner_avatar_url }}" alt="{{ owner_login }}" loading="lazy" referrerpolicy="no-referrer">
+      {% else %}
+        <div class="viv-avatar viv-avatar-rail">{{ owner_initials or '—' }}</div>
+      {% endif %}
       <div class="viv-rail-footer-text">
-        <strong>{{ owner_name or 'Workspace owner' }}</strong>
-        <small>{{ owner_email or '' }}</small>
+        <strong>{{ _owner_label }}</strong>
+        <small>{{ _owner_sub }}</small>
       </div>
+    {% if owner_html_url %}
+    </a>
+    {% else %}
     </div>
+    {% endif %}
+    {% else %}
+    {# No GitHub identity → generic prompt linking to gh-cli setup. #}
+    <a class="viv-rail-footer viv-rail-footer-link viv-rail-footer-no-github"
+       href="https://cli.github.com/manual/gh_auth_login"
+       target="_blank" rel="noopener"
+       title="Connect this workspace to GitHub — run `gh auth login`">
+      <div class="viv-avatar viv-avatar-rail" aria-hidden="true">+</div>
+      <div class="viv-rail-footer-text">
+        <strong>Connect GitHub</strong>
+        <small>run <code>gh auth login</code></small>
+      </div>
+    </a>
+    {% endif %}
 
     <button class="viv-rail-toggle" id="viv-rail-toggle" type="button" aria-label="Collapse rail" onclick="_vivToggleRail()">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-toggle-svg">
@@ -436,7 +471,21 @@
         </div>
         <span class="viv-btn viv-tooltip" data-tooltip="Coming soon — share workspace link">Share</span>
         <span class="viv-kebab viv-tooltip" data-tooltip="Workspace settings — coming soon">⋯</span>
-        <span class="viv-avatar viv-avatar-topbar" title="{{ owner_email or '' }}">{{ owner_initials or '—' }}</span>
+        {# Mirrors the rail-footer logic — show GitHub initials/email only
+           when `gh auth login` succeeded; otherwise a generic prompt that
+           opens the gh-cli setup docs, so screenshots of this workspace
+           don't leak the local git config identity. #}
+        {% if owner_login %}
+        <a class="viv-avatar viv-avatar-topbar viv-avatar-link"
+           href="{{ owner_html_url or '#' }}"
+           target="_blank" rel="noopener"
+           title="{{ owner_login }}{% if owner_email %} · {{ owner_email }}{% endif %}">{{ owner_initials or '—' }}</a>
+        {% else %}
+        <a class="viv-avatar viv-avatar-topbar viv-avatar-link viv-avatar-no-github"
+           href="https://cli.github.com/manual/gh_auth_login"
+           target="_blank" rel="noopener"
+           title="Connect this workspace to GitHub — run `gh auth login`">+</a>
+        {% endif %}
       </div>
     </header>
 
@@ -772,35 +821,13 @@ When done, summarize which entries got PDFs vs URLs only vs were unresolvable, a
   <!-- Available Visualization classes (registry-driven, secondary catalog) -->
   <div class="panel">
     <h3>Available Visualization classes <span id="viz-count" class="count-badge"></span></h3>
-    <p class="panel-lead">Visualization classes discovered from <code>core.link_registry</code> (subclasses of <code>pbg_superpowers.visualization.Visualization</code> from any installed pbg-* package). Click <strong>Preview</strong> to see a demo render; <strong>Use</strong> to register it as a Workspace visualization.</p>
+    <p class="panel-lead">Visualization classes discovered from <code>core.link_registry</code> (subclasses of <code>pbg_superpowers.visualization.Visualization</code> from any installed pbg-* package). Click <strong>Preview</strong> to see a demo render; <strong>Use</strong> to register it as a Workspace visualization. <span class="muted">Workspace classes listed first; environment-only classes follow.</span> Need a new one? Run <code>/pbg-viz &lt;name&gt; &lt;description&gt;</code> in Claude Code.</p>
     <input type="search" id="viz-catalog-search" placeholder="Search Visualization classes by name or doc…"
            style="width:100%;padding:6px;margin-bottom:8px;font-size:0.9em"
            oninput="_filterVizCatalog(this.value)">
     <div id="viz-picker-container">
-      <p class="empty-state">Loading from Registry&hellip;</p>
+      <p class="empty-state">Discovering Visualization classes&hellip; <span class="muted">First load walks every installed pbg-* package and can take a few seconds; subsequent loads are cached for 30 s.</span></p>
     </div>
-  </div>
-
-  <!-- Generate new visualization class -->
-  <div class="panel">
-    <h3>Generate new visualization class</h3>
-    <p class="panel-lead">Nothing in the catalog above matches? Describe what you want. The
-      <code>/pbg-viz</code> skill writes a decorated function to
-      <code>&lt;workspace_pkg&gt;/visualizations/&lt;snake&gt;.py</code>. After accepting, the new
-      class joins the catalog for everyone.</p>
-    <form id="form-viz-generate" onsubmit="event.preventDefault(); _submitVizGenerate(this)">
-      <label>Name (kebab-case)
-        <input name="name" pattern="^[a-zA-Z0-9_-]+$" required
-               placeholder="e.g. dna-a-trajectory">
-      </label>
-      <label>Description
-        <textarea name="description" rows="4" required
-                  placeholder="e.g. 'free_DnaA concentration vs time with a horizontal line at the binding threshold of 50 molecules.'"></textarea>
-      </label>
-      <div class="form-error"></div>
-      <button type="submit" class="action-btn">Generate</button>
-    </form>
-    <div id="viz-generate-status" style="margin-top:12px;font-size:0.9em;color:#555"></div>
   </div>
 
 </section>
@@ -974,12 +1001,36 @@ When done, summarize which entries got PDFs vs URLs only vs were unresolvable, a
     <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
       <h3 id="investigation-detail-title" style="margin:0; flex:1"></h3>
       <span id="investigation-detail-status" class="status-pill planned" style="font-size:0.85em"></span>
+      <span class="viv-info-chip" data-tooltip="Run unblocked &mdash; queue every variant whose model_settings don&#39;t have any unset &#39;required-before-run&#39; gates. Sequential, one variant at a time on a background thread.&#10;&#10;Refresh &mdash; re-fetch the investigation from disk. Use after editing YAML files directly.&#10;&#10;Generate report &mdash; self-contained HTML report you can email.&#10;&#10;Clone &mdash; copy this investigation into a fresh planning state with no run results.">?</span>
       <button class="btn-mini" id="investigation-detail-refresh" onclick="_refreshInvestigationDetail()" title="Re-fetch the investigation + its studies from disk. Use after editing YAML files directly (which the dashboard can't see otherwise).">↻ Refresh</button>
+      <button class="btn-mini" id="investigation-run-unblocked" onclick="_runUnblockedSimulations()" title="Run every variant whose model_settings don't have any unset 'required-before-run' gates. Sequential — one variant at a time on a background thread. Progress shown in the panel below.">▶ Run unblocked</button>
       <button class="btn-mini" onclick="_generateInvestigationReport()" title="Generate a shareable HTML report (self-contained, attach to email)">Generate report 📄</button>
       <button class="btn-mini" onclick="_openCloneIsetModal()" title="Clone this investigation into a fresh planning state (no run results). Useful for a parallel attempt or a demo fixture.">Clone ⎘</button>
-      <button class="btn-mini" onclick="_popoutInvestigation()" title="Open in a separate window (investigation-only, no sidebar). If it opens as a tab, your browser's 'open new pages as tabs' preference is overriding the popup hint (Safari → Tabs → 'Open pages in tabs instead of windows' → set to 'Manually').">Pop out ↗</button>
     </div>
-    <p id="investigation-detail-description" class="muted" style="white-space:pre-wrap; margin: 0 0 12px 0;"></p>
+    <!-- Run-progress panel: rendered while a run-unblocked job is active. -->
+    <div id="investigation-run-progress" class="inv-run-progress" style="display:none"></div>
+
+    <div id="investigation-intro" class="inv-intro" style="margin: 0 0 16px 0;">
+      <!-- Lead paragraph (the abstract). Auto-styled as serif body type for readability. -->
+      <div id="investigation-detail-description" class="inv-lead"></div>
+      <!-- At-a-glance grid: one tile per study with a one-line role. Populated by JS. -->
+      <div id="investigation-at-a-glance" class="inv-at-a-glance" style="display:none"></div>
+      <!-- How to read this: ordered list of usage tips for the evaluator. -->
+      <div id="investigation-how-to-read" class="inv-how-to-read" style="display:none">
+        <strong>How to read this</strong>
+        <ol></ol>
+      </div>
+      <!-- Glossary: collapsible. -->
+      <details id="investigation-glossary" class="inv-glossary" style="display:none">
+        <summary>Glossary</summary>
+        <dl></dl>
+      </details>
+      <!-- Biology story (free-form prose). Hidden if the yaml omits it. -->
+      <div id="investigation-biology-story" class="inv-bio-story" style="display:none">
+        <strong class="inv-bio-story-label">Biology story</strong>
+        <div id="investigation-biology-story-text" class="inv-bio-story-text"></div>
+      </div>
+    </div>
     <div id="investigation-dag-shell"
          style="position: relative; border: 1px solid #e2e8f0; border-radius: 6px; background: #fafafa;
                 overflow-x: auto; overflow-y: hidden;">
@@ -1596,7 +1647,7 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 
 <script src="assets/render-helpers.js"></script>
 <script src="assets/client.js" onerror="/* live mode unavailable */"></script>
-<script src="assets/walkthrough.js" onerror="/* walkthrough unavailable */"></script>
+<script src="assets/walkthrough.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* walkthrough unavailable */"></script>
 <script src="assets/investigations.js" onerror="/* investigations unavailable */"></script>
 <!-- workspace-switcher.js is intentionally not loaded: the left-rail dropdown
      it used to drive has been repurposed into the investigation switcher

@@ -520,12 +520,29 @@
   }
   window._filterVizCatalog = _filterVizCatalog;
 
+  // Source-rank for picker sort: in_workspace classes are the ones the user
+  // can act on directly (they live in this workspace's package or an
+  // explicit `imports:` entry); framework comes next; environment-only is
+  // last (installed but not declared by this workspace). Matches the
+  // server-side _source_order map in /api/registry so the picker reads in
+  // the same order as the Registry tab.
+  var _SOURCE_RANK = { in_workspace: 0, framework: 1, environment_only: 2 };
+
   function _renderKindPicker(items, container, kind) {
     if (!items || items.length === 0) {
       container.innerHTML = '<p class="empty-state">No ' + kind + 's registered. Install a pbg-* package that provides one (Registry tab &rarr; Available modules).</p>';
       return;
     }
-    var rows = items.map(function(it) {
+    // Sort: in_workspace → framework → environment_only, then alpha by name.
+    // Stable across loads so the list doesn't jitter between fetches.
+    var sorted = items.slice().sort(function(a, b) {
+      var ra = _SOURCE_RANK[a.source] != null ? _SOURCE_RANK[a.source] : 99;
+      var rb = _SOURCE_RANK[b.source] != null ? _SOURCE_RANK[b.source] : 99;
+      if (ra !== rb) return ra - rb;
+      return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
+    });
+    var lastSource = null;
+    var rows = sorted.map(function(it) {
       var schemaSnippet = '';
       if (it.schema_preview) {
         schemaSnippet = '<details><summary class="muted" style="cursor:pointer;font-size:0.85em">config_schema</summary><code class="registry-schema">' + _esc(it.schema_preview) + '</code></details>';
@@ -533,7 +550,20 @@
       var previewBtn = (kind === 'visualization')
         ? '<button class="btn-mini" onclick="_vizClassPreview(\'' + _esc(it.address) + '\',\'' + _esc(it.name) + '\')">Preview</button>'
         : '';
-      return '<div class="picker-row">' +
+      // Section divider when source group changes. Lightweight — keeps the
+      // sort intent visible without committing to a full grouped-list layout.
+      var divider = '';
+      if (it.source !== lastSource) {
+        var labels = {
+          in_workspace: 'Workspace',
+          framework: 'Framework',
+          environment_only: 'Environment (installed but not declared in workspace.yaml)',
+        };
+        var label = labels[it.source] || (it.source || 'other');
+        divider = '<div class="picker-section-label muted" style="margin:10px 0 4px;font-size:0.78em;text-transform:uppercase;letter-spacing:0.05em">' + _esc(label) + '</div>';
+        lastSource = it.source;
+      }
+      return divider + '<div class="picker-row" data-source="' + _esc(it.source || '') + '">' +
         '<div class="picker-row-main">' +
           '<strong>' + _esc(it.name) + '</strong>' +
           ' <code class="muted" style="font-size:0.82em">' + _esc(it.address) + '</code>' +
@@ -3548,6 +3578,157 @@
   }
   window._submitCloneIset = _submitCloneIset;
 
+  // ─── Investigation intro renderers (textbook-style) ────────────────
+  function _escInv(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // Light Markdown subset for the lead paragraph. Supports:
+  //   blank-line paragraph breaks · bulleted lists ("- " or "* ") ·
+  //   numbered lists ("N. ") · **bold** · `inline code`.
+  // Anything else is rendered as plain text, HTML-escaped. Deliberately
+  // small so the intro stays readable as plain yaml too.
+  function _renderInvLeadMarkdown(text) {
+    var lines = text.split('\n');
+    var html = '', i = 0;
+    function inline(s) {
+      s = _escInv(s);
+      s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+      return s;
+    }
+    while (i < lines.length) {
+      var line = lines[i];
+      if (/^\s*$/.test(line)) { i++; continue; }
+      // Bulleted list (-, *, or • prefix)
+      if (/^\s*[-*•]\s+/.test(line)) {
+        html += '<ul>';
+        while (i < lines.length && /^\s*[-*•]\s+/.test(lines[i])) {
+          html += '<li>' + inline(lines[i].replace(/^\s*[-*•]\s+/, '')) + '</li>';
+          i++;
+        }
+        html += '</ul>';
+        continue;
+      }
+      // Numbered list
+      if (/^\s*\d+\.\s+/.test(line)) {
+        html += '<ol>';
+        while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+          html += '<li>' + inline(lines[i].replace(/^\s*\d+\.\s+/, '')) + '</li>';
+          i++;
+        }
+        html += '</ol>';
+        continue;
+      }
+      // Paragraph: keep gluing until blank line or list start
+      var para = [line];
+      i++;
+      while (i < lines.length && !/^\s*$/.test(lines[i])
+             && !/^\s*[-*•]\s+/.test(lines[i])
+             && !/^\s*\d+\.\s+/.test(lines[i])) {
+        para.push(lines[i]); i++;
+      }
+      html += '<p>' + inline(para.join(' ')) + '</p>';
+    }
+    return html;
+  }
+
+  function _renderInvAtAGlance(d) {
+    var host = document.getElementById('investigation-at-a-glance');
+    if (!host) return;
+    host.innerHTML = '';
+    // Prefer authored at_a_glance; fall back to studies' one-line role
+    // derived from study.question (first sentence) when available.
+    var tiles = [];
+    var authored = Array.isArray(d.at_a_glance) ? d.at_a_glance : [];
+    if (authored.length) {
+      tiles = authored.map(function(t, i) {
+        return { num: i + 1, slug: t.study || '', role: t.role || '' };
+      });
+    } else {
+      var studies = d.studies || [];
+      tiles = studies.map(function(s, i) {
+        var role = '';
+        var q = (s.question || (s.purpose && s.purpose.question) || '').trim();
+        if (q) {
+          role = q.split(/[.!?]\s/)[0]; // first sentence
+          if (role.length > 140) role = role.slice(0, 137) + '…';
+        }
+        return { num: i + 1, slug: s.name, role: role };
+      });
+    }
+    if (!tiles.length) { host.style.display = 'none'; return; }
+    host.innerHTML = tiles.map(function(t) {
+      // Linkable tile: clicking opens the study INLINE (same iframe
+      // panel a DAG-node click uses). Plain-text href is kept so
+      // middle-click / cmd-click still opens the standalone study
+      // detail page in a new tab.
+      var href = t.slug ? '/studies/' + encodeURIComponent(t.slug) : '#';
+      var slugAttr = _escInv(t.slug || '');
+      return '<a class="inv-aag-tile" href="' + href + '" '
+        +    'data-study-slug="' + slugAttr + '" '
+        +    'title="Open ' + slugAttr + ' in this view (Cmd-click for new tab)" '
+        +    'onclick="return _vivOpenAagTile(event, \'' + slugAttr.replace(/&amp;/g, '&').replace(/\x27/g, '\\x27') + '\')">'
+        + '<span class="inv-aag-num">' + t.num + '</span>'
+        + '<span class="inv-aag-slug">' + slugAttr + '</span>'
+        + (t.role ? '<span class="inv-aag-role">' + _escInv(t.role) + '</span>' : '')
+        + '</a>';
+    }).join('');
+    host.style.display = '';
+  }
+
+  // Click handler for at-a-glance tiles. Behaves like a DAG-node click
+  // (inline iframe embed) for plain clicks; passes through to default
+  // navigation when the user holds a modifier (Cmd/Ctrl/Shift/middle).
+  function _vivOpenAagTile(ev, slug) {
+    if (!slug) return true;
+    if (ev && (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button === 1)) {
+      return true;  // let the browser open in a new tab / window
+    }
+    ev.preventDefault();
+    if (typeof _openStudyInsideInvestigation === 'function') {
+      _openStudyInsideInvestigation(slug);
+    } else {
+      // Fallback: navigate to the detail page.
+      window.location.href = '/studies/' + encodeURIComponent(slug);
+    }
+    return false;
+  }
+  window._vivOpenAagTile = _vivOpenAagTile;
+
+  function _renderInvHowToRead(items) {
+    var host = document.getElementById('investigation-how-to-read');
+    if (!host) return;
+    var ol = host.querySelector('ol');
+    if (!Array.isArray(items) || !items.length) {
+      host.style.display = 'none';
+      if (ol) ol.innerHTML = '';
+      return;
+    }
+    ol.innerHTML = items.map(function(s) {
+      return '<li>' + _renderInvLeadMarkdown(String(s)).replace(/^<p>|<\/p>$/g, '') + '</li>';
+    }).join('');
+    host.style.display = '';
+  }
+
+  function _renderInvGlossary(items) {
+    var host = document.getElementById('investigation-glossary');
+    if (!host) return;
+    var dl = host.querySelector('dl');
+    if (!Array.isArray(items) || !items.length) {
+      host.style.display = 'none';
+      if (dl) dl.innerHTML = '';
+      return;
+    }
+    dl.innerHTML = items.map(function(g) {
+      var term = _escInv(g.term || g.name || '');
+      var def  = _escInv(g.definition || g.def || '');
+      return '<dt>' + term + '</dt><dd>' + def + '</dd>';
+    }).join('');
+    host.style.display = '';
+  }
+
   function _openInvestigationDetail(name) {
     window._currentIset = name;
     document.getElementById('investigations-list').style.display = 'none';
@@ -3569,7 +3750,37 @@
         statusEl.title = (authStatus && authStatus !== effStatus)
           ? 'effective: ' + effStatus + '  (intent: ' + authStatus + ')'
           : 'status: ' + effStatus;
-        document.getElementById('investigation-detail-description').textContent = d.description || '';
+        // Lead paragraph: render lead (preferred) or fall back to description.
+        // Light markdown: paragraph splits, * bullets, `code`, **bold**.
+        var leadEl = document.getElementById('investigation-detail-description');
+        var leadText = (d.lead || d.description || '').trim();
+        leadEl.innerHTML = leadText ? _renderInvLeadMarkdown(leadText) : '';
+
+        // At-a-glance grid: one tile per study with a one-line role.
+        // Sources: investigation.yaml#at_a_glance (preferred) → derive from
+        // each study's purpose.question first sentence as fallback.
+        _renderInvAtAGlance(d);
+
+        // How to read: yaml-driven list of evaluator tips. Hidden if absent.
+        _renderInvHowToRead(d.how_to_read);
+
+        // Glossary: yaml-driven list of {term, definition}. Hidden if absent.
+        _renderInvGlossary(d.glossary);
+
+        // Biology-story banner: populated only when investigation.yaml
+        // declares `biological_story:`. Hidden otherwise.
+        var storyBox = document.getElementById('investigation-biology-story');
+        var storyText = document.getElementById('investigation-biology-story-text');
+        if (storyBox && storyText) {
+          var story = (d.biological_story || '').trim();
+          if (story) {
+            storyText.textContent = story;
+            storyBox.style.display = '';
+          } else {
+            storyText.textContent = '';
+            storyBox.style.display = 'none';
+          }
+        }
         _renderInvestigationDag(d.studies || []);
       })
       .catch(function(err) {
@@ -3577,6 +3788,114 @@
       });
   }
   window._openInvestigationDetail = _openInvestigationDetail;
+
+  // "Run unblocked" — kick off every variant in the current investigation
+  // whose required-before-run gates are satisfied. POSTs to start a
+  // background job, then polls /api/investigation-run-unblocked-status
+  // every 2 s and re-renders the progress panel. Once all items finish,
+  // re-loads the investigation so charts pick up the fresh runs.db data.
+  var _vivRunUnblockedTimer = null;
+  function _runUnblockedSimulations() {
+    var name = window._currentIset;
+    if (!name) return;
+    var btn = document.getElementById('investigation-run-unblocked');
+    var panel = document.getElementById('investigation-run-progress');
+    if (btn) { btn.disabled = true; btn.textContent = '… queuing'; }
+    if (panel) { panel.style.display = ''; panel.innerHTML = '<div class="inv-run-progress-banner">Queuing run-unblocked job…</div>'; }
+    fetch('/api/investigation-run-unblocked', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({investigation: name}),
+    }).then(function(r) {
+      return r.json().then(function(j) { return {ok: r.ok, body: j, status: r.status}; });
+    }).then(function(res) {
+      if (!res.ok) {
+        var msg = (res.body && res.body.error) || ('HTTP ' + res.status);
+        var itemsHtml = '';
+        // mem3dg-readdy friction #34: when the server returns the per-item
+        // breakdown, render each item's reason so the user has an
+        // actionable next step instead of an opaque "no variants to queue".
+        var items = res.body && Array.isArray(res.body.items) ? res.body.items : [];
+        if (items.length) {
+          itemsHtml = '<details class="inv-run-error-detail" style="margin-top:8px"><summary style="cursor:pointer;font-size:0.85em">Per-item reasons (' + items.length + ')</summary>'
+            + '<table style="width:100%;font-size:0.83em;margin-top:6px;border-collapse:collapse">'
+            + '<thead><tr><th style="text-align:left;padding:4px 8px;background:#f3f4f6">Study</th><th style="text-align:left;padding:4px 8px;background:#f3f4f6">Variant</th><th style="text-align:left;padding:4px 8px;background:#f3f4f6">Status</th><th style="text-align:left;padding:4px 8px;background:#f3f4f6">Reason</th></tr></thead><tbody>'
+            + items.map(function(it) {
+                return '<tr>'
+                  + '<td style="padding:4px 8px;border-bottom:1px solid #e5e7eb">' + _h(it.study || '?') + '</td>'
+                  + '<td style="padding:4px 8px;border-bottom:1px solid #e5e7eb">' + _h(it.variant || '?') + '</td>'
+                  + '<td style="padding:4px 8px;border-bottom:1px solid #e5e7eb"><span class="status-pill ' + _h(it.status || '?') + '" style="font-size:0.78em">' + _h(it.status || '?') + '</span></td>'
+                  + '<td style="padding:4px 8px;border-bottom:1px solid #e5e7eb;color:#6b7280">' + _h(it.error || '—') + '</td>'
+                  + '</tr>';
+              }).join('')
+            + '</tbody></table></details>';
+        }
+        if (panel) panel.innerHTML = '<div class="inv-run-progress-banner inv-run-error">Failed to queue: ' + _h(msg) + itemsHtml + '</div>';
+        if (btn) { btn.disabled = false; btn.textContent = '▶ Run unblocked'; }
+        return;
+      }
+      var jobId = res.body.job_id;
+      _vivRenderRunProgress(res.body);
+      _vivPollRunProgress(jobId);
+    }).catch(function(err) {
+      if (panel) panel.innerHTML = '<div class="inv-run-progress-banner inv-run-error">Network error: ' + _h(String(err)) + '</div>';
+      if (btn) { btn.disabled = false; btn.textContent = '▶ Run unblocked'; }
+    });
+  }
+  window._runUnblockedSimulations = _runUnblockedSimulations;
+
+  function _vivPollRunProgress(jobId) {
+    if (_vivRunUnblockedTimer) clearTimeout(_vivRunUnblockedTimer);
+    function tick() {
+      fetch('/api/investigation-run-unblocked-status?job_id=' + encodeURIComponent(jobId))
+        .then(function(r) { return r.json().then(function(j) { return {ok: r.ok, body: j}; }); })
+        .then(function(res) {
+          if (!res.ok) return;
+          _vivRenderRunProgress(res.body);
+          if (res.body.status === 'done' || res.body.status === 'failed') {
+            var btn = document.getElementById('investigation-run-unblocked');
+            if (btn) { btn.disabled = false; btn.textContent = '▶ Run unblocked'; }
+            // Refresh the investigation so new runs surface in charts.
+            if (typeof _refreshInvestigationDetail === 'function') {
+              setTimeout(_refreshInvestigationDetail, 500);
+            }
+            return;
+          }
+          _vivRunUnblockedTimer = setTimeout(tick, 2000);
+        });
+    }
+    tick();
+  }
+
+  function _vivRenderRunProgress(job) {
+    var panel = document.getElementById('investigation-run-progress');
+    if (!panel) return;
+    var items = (job.items || []).map(function(it) {
+      var statusCls = 'inv-run-item inv-run-' + (it.status || 'queued');
+      var icon = ({queued: '⋯', running: '▶', done: '✓', failed: '✗',
+                   blocked: '⛔', skipped: '—'})[it.status] || '?';
+      var err = it.error ? ' <span class="inv-run-err">' + _h(it.error) + '</span>' : '';
+      return '<div class="' + statusCls + '">'
+        + '<span class="inv-run-icon">' + icon + '</span>'
+        + '<code>' + _h(it.study) + '</code>'
+        + ' <span class="inv-run-arrow">›</span> '
+        + '<code>' + _h(it.variant) + '</code>'
+        + err
+        + '</div>';
+    }).join('');
+    var prog = job.progress || {total: 0, done: 0, running: 0};
+    var headline;
+    if (job.status === 'done') {
+      headline = '<strong>✓ All done.</strong> ' + prog.done + ' / ' + prog.total + ' runs completed.';
+    } else if (job.status === 'failed') {
+      headline = '<strong>✗ Job failed.</strong> ' + prog.done + ' / ' + prog.total + ' attempted.';
+    } else {
+      headline = '<strong>Running…</strong> ' + prog.done + ' / ' + prog.total + ' complete' +
+                 (prog.running ? ' · ' + prog.running + ' in flight' : '');
+    }
+    panel.innerHTML = '<div class="inv-run-progress-banner">' + headline + '</div>'
+                    + '<div class="inv-run-list">' + items + '</div>';
+  }
 
   // Manual refresh: re-fetch /api/iset/<current> + re-render. Use after editing
   // investigation.yaml / study.yaml files directly on disk (which the dashboard
@@ -4012,13 +4331,46 @@
                             Promise.all(chartFetches)]).then(function(arr) {
           var chartsByStudy = {};
           arr[2].forEach(function(c) { chartsByStudy[c.name] = c.charts; });
-          return {iset: iset, specs: arr[0], bibEntries: arr[1],
-                  chartsByStudy: chartsByStudy};
+          // Second pass: now that we have the specs, fetch each study's
+          // embed_visualizations URLs so the downloaded report can inline
+          // them as <iframe srcdoc="...">. This makes the file truly
+          // self-contained — works offline because the full preview HTML
+          // (incl. its Plotly CDN <script src>) is embedded inline.
+          var specs = arr[0];
+          var embedFetches = specs.map(function(spec) {
+            var embeds = (spec && spec.embed_visualizations) || [];
+            var perStudy = embeds.map(function(embed) {
+              if (!embed || !embed.url) return Promise.resolve(null);
+              return fetch(embed.url, {headers: {Accept: 'text/html'}})
+                .then(function(r) { return r.ok ? r.text() : null; })
+                .then(function(text) {
+                  return text ? {
+                    name: embed.name || '',
+                    description: embed.description || '',
+                    url: embed.url,
+                    html: text,
+                  } : null;
+                })
+                .catch(function() { return null; });
+            });
+            return Promise.all(perStudy).then(function(results) {
+              return {name: spec && spec.name, embeds: results.filter(Boolean)};
+            });
+          });
+          return Promise.all(embedFetches).then(function(embedResults) {
+            var embedsByStudy = {};
+            embedResults.forEach(function(e) {
+              if (e && e.name) embedsByStudy[e.name] = e.embeds;
+            });
+            return {iset: iset, specs: specs, bibEntries: arr[1],
+                    chartsByStudy: chartsByStudy, embedsByStudy: embedsByStudy};
+          });
         });
       })
       .then(function(bundle) {
         var html = _buildInvestigationReportHtml(bundle.iset, bundle.specs,
-                                                  bundle.bibEntries, bundle.chartsByStudy);
+                                                  bundle.bibEntries, bundle.chartsByStudy,
+                                                  bundle.embedsByStudy);
         var dateStr = new Date().toISOString().slice(0, 10);
         var filename = 'investigation-' + name + '-' + dateStr + '.html';
         _triggerDownload(filename, html, 'text/html');
@@ -4063,9 +4415,10 @@
   }
 
   // Construct the report's HTML body from the investigation + per-study specs.
-  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy) {
+  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy) {
     bibEntries = bibEntries || [];
     chartsByStudy = chartsByStudy || {};
+    embedsByStudy = embedsByStudy || {};
     var bibByKey = {};
     bibEntries.forEach(function(e) { bibByKey[e.key] = e; });
     var now = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
@@ -4257,19 +4610,20 @@
     function v3StudySection(s, i, statusBadge, phaseBadge, parents, kids) {
       var slug = _h(s.name);
       var sid = {
-        summary:   'study-' + slug + '-summary',
-        decision:  'study-' + slug + '-decision',
-        takeaways: 'study-' + slug + '-takeaways',
-        findings:  'study-' + slug + '-findings',
-        sims:      'study-' + slug + '-sims',
-        charts:    'study-' + slug + '-charts',
-        readouts:  'study-' + slug + '-readouts',
-        tests:     'study-' + slug + '-tests',
-        build:     'study-' + slug + '-build',
-        reqs:      'study-' + slug + '-reqs',
-        followups: 'study-' + slug + '-followups',
-        limits:    'study-' + slug + '-limitations',
-        refs:      'study-' + slug + '-refs',
+        summary:    'study-' + slug + '-summary',
+        decision:   'study-' + slug + '-decision',
+        takeaways:  'study-' + slug + '-takeaways',
+        findings:   'study-' + slug + '-findings',
+        sims:       'study-' + slug + '-sims',
+        charts:     'study-' + slug + '-charts',
+        readouts:   'study-' + slug + '-readouts',
+        tests:      'study-' + slug + '-tests',
+        conditions: 'study-' + slug + '-conditions',
+        build:      'study-' + slug + '-build',
+        reqs:       'study-' + slug + '-reqs',
+        followups:  'study-' + slug + '-followups',
+        limits:     'study-' + slug + '-limitations',
+        refs:       'study-' + slug + '-refs',
       };
 
       var purpose = s.purpose || {};
@@ -4306,11 +4660,23 @@
       var links = [];
       links.push('<a href="#' + sid.summary + '">Summary</a>');
       links.push('<a href="#' + sid.decision + '">Decision</a>');
+      var nEmbedsForStudy = (embedsByStudy[s.name] || []).length;
+      if (nEmbedsForStudy)
+        links.push('<a href="#study-' + slug + '-embeds">Visualizations <span class="sn-count">' + nEmbedsForStudy + '</span></a>');
       if (findings.length)    links.push('<a href="#' + sid.takeaways + '">Key takeaways <span class="sn-count">' + findings.length + '</span></a>');
       if (sims.length)        links.push('<a href="#' + sid.sims + '">What we ran <span class="sn-count">' + sims.length + '</span></a>');
       if (charts.length)      links.push('<a href="#' + sid.charts + '">Charts <span class="sn-count">' + charts.length + '</span></a>');
       if (readouts.length)    links.push('<a href="#' + sid.readouts + '">What we measured <span class="sn-count">' + readouts.length + '</span></a>');
       if (tests.length)       links.push('<a href="#' + sid.tests + '">How we judge it <span class="sn-count">' + tests.length + '</span></a>');
+      // Conditions sub-nav link: rendered when v4 ``conditions:`` exists.
+      var _cond = (s.conditions && typeof s.conditions === 'object') ? s.conditions : null;
+      var _nVar = (_cond && _cond.variants || []).length;
+      var _nEI  = (_cond && (_cond.model_settings || _cond.expert_inputs) || []).length;
+      if (_cond) {
+        var _condCount = _nVar + _nEI;
+        links.push('<a href="#' + sid.conditions + '">Conditions ' +
+                   (_condCount ? '<span class="sn-count">' + _condCount + '</span>' : '') + '</a>');
+      }
       if (hasBuild)           links.push('<a href="#' + sid.build + '">Model changes</a>');
       if (reqs.length)        links.push('<a href="#' + sid.reqs + '">What to build / fix <span class="sn-count">' + reqs.length + '</span></a>');
       if (followUps.length)   links.push('<a href="#' + sid.followups + '">Next steps <span class="sn-count">' + followUps.length + '</span></a>');
@@ -4534,7 +4900,15 @@
       var chartsHtml = charts.length
         ? '<div id="' + sid.charts + '"><h3>Visualisations from the latest run</h3>'
           + charts.map(function(c) {
-              return '<div class="chart-card">' + c.svg + '<div class="chart-caption">' + _h(c.caption || '') + '</div></div>';
+              var capHtml = '';
+              if (c.caption) capHtml += '<div class="chart-caption">' + _h(c.caption) + '</div>';
+              if (c.simulations) capHtml +=
+                  '<div class="chart-simulations"><strong>Simulations behind this chart.</strong> '
+                  + _h(c.simulations) + '</div>';
+              if (c.interpretation) capHtml +=
+                  '<div class="chart-interpretation"><strong>What it means.</strong> '
+                  + _h(c.interpretation) + '</div>';
+              return '<div class="chart-card">' + c.svg + capHtml + '</div>';
             }).join('')
           + '</div>'
         : '';
@@ -4727,6 +5101,211 @@
           + '</p></div>'
         : '';
 
+      // ── BIOLOGY-AT-A-GLANCE (planning-phase, biologist-first) ────────
+      // Renders when study.yaml declares any of: biological_summary,
+      // study_card, literature_anchors. Designed so a biologist reading
+      // the report sees the biology before any code identifier.
+      var biologyGlanceHtml = '';
+      if (s.biological_summary || s.study_card || s.literature_anchors) {
+        var bgsBits = [];
+        if (s.biological_summary) {
+          bgsBits.push(
+            '<div class="biology-summary-callout">'
+            + '<h3 class="biology-glance-label">Biology — what this study is about</h3>'
+            + '<p class="biology-prose">' + _multiline(s.biological_summary) + '</p>'
+            + '</div>'
+          );
+        }
+        if (s.study_card) {
+          var sc = s.study_card;
+          var scRows = [];
+          if (sc.goal) scRows.push('<tr><th>Goal</th><td>' + _multiline(sc.goal) + '</td></tr>');
+          if (sc.mechanism) scRows.push('<tr><th>Mechanism</th><td>' + _multiline(sc.mechanism) + '</td></tr>');
+          if (sc.why_before_next) scRows.push('<tr><th>Why before next</th><td>' + _multiline(sc.why_before_next) + '</td></tr>');
+          if (sc.expected_result) scRows.push('<tr><th>Expected result</th><td>' + _multiline(sc.expected_result) + '</td></tr>');
+          if (sc.main_expert_question) scRows.push('<tr><th>Main expert question</th><td>' + _multiline(sc.main_expert_question) + '</td></tr>');
+          if (scRows.length) {
+            bgsBits.push(
+              '<div class="study-card">'
+              + '<h3 class="biology-glance-label">Study card</h3>'
+              + '<table class="study-card-table">' + scRows.join('') + '</table>'
+              + '</div>'
+            );
+          }
+        }
+        if (Array.isArray(s.literature_anchors) && s.literature_anchors.length) {
+          var anchorItems = s.literature_anchors.map(function(a) {
+            var bits = ['<div class="anchor-expectation">' + _h(a.expectation || '') + '</div>'];
+            if (a.model_observable) {
+              bits.push('<div class="anchor-observable"><em>Model observable:</em> <code>'
+                + _h(a.model_observable) + '</code></div>');
+            }
+            if (a.source) {
+              bits.push('<div class="anchor-source"><em>Source:</em> ' + _h(a.source) + '</div>');
+            }
+            if (a.status_in_v2ecoli) {
+              bits.push('<div class="anchor-status"><em>Current status:</em> '
+                + _h(a.status_in_v2ecoli) + '</div>');
+            }
+            return '<li class="literature-anchor-card">' + bits.join('') + '</li>';
+          }).join('');
+          bgsBits.push(
+            '<div class="literature-anchors">'
+            + '<h3 class="biology-glance-label">Literature anchors</h3>'
+            + '<p class="muted small" style="margin:0 0 8px 0">The biological '
+            + 'expectations this study tests, mapped to the model observable that '
+            + 'will measure each one. Full citations live in the test cards.</p>'
+            + '<ul class="literature-anchor-list">' + anchorItems + '</ul>'
+            + '</div>'
+          );
+        }
+        if (bgsBits.length) {
+          biologyGlanceHtml = '<div class="biology-glance">' + bgsBits.join('') + '</div>';
+        }
+      }
+
+      // ── PRE-RUN EXPERT REVIEW ────────────────────────────────────────
+      // Compiles expert_decisions_needed into a prominent panel so biologists
+      // can answer them before the simulation is run.
+      var expertReviewHtml = '';
+      if (Array.isArray(s.expert_decisions_needed) && s.expert_decisions_needed.length) {
+        var qCards = s.expert_decisions_needed.map(function(q) {
+          var altHtml = '';
+          if (Array.isArray(q.alternatives) && q.alternatives.length) {
+            altHtml = '<div class="expert-question-alternatives"><em>Alternatives:</em><ul>'
+              + q.alternatives.map(function(a){return '<li>' + _h(a) + '</li>';}).join('')
+              + '</ul></div>';
+          }
+          var impactHtml = q.impact_if_wrong
+            ? '<div class="expert-question-impact"><em>Impact if wrong:</em> '
+              + _multiline(q.impact_if_wrong) + '</div>'
+            : '';
+          var blocksHtml = '';
+          if (Array.isArray(q.blocks) && q.blocks.length) {
+            blocksHtml = '<details class="expert-question-blocks"><summary>What this blocks ('
+              + q.blocks.length + ' items)</summary><ul>'
+              + q.blocks.map(function(b){return '<li>' + _h(b) + '</li>';}).join('')
+              + '</ul></details>';
+          }
+          var requestedHtml = q.requested_response
+            ? '<details class="expert-question-response"><summary>Requested response format</summary><p>'
+              + _multiline(q.requested_response) + '</p></details>'
+            : '';
+          var askedToHtml = q.asked_to
+            ? '<span class="expert-question-asked-to">asked to: ' + _h(q.asked_to) + '</span>'
+            : '';
+          return '<div class="expert-question-card status-' + _h(q.status || 'open') + '">'
+            + '<div class="expert-question-header">'
+            +   '<span class="expert-question-id">' + _h(q.id || '') + '</span>'
+            +   '<span class="expert-question-status">' + _h(q.status || 'open') + '</span>'
+            +   askedToHtml
+            + '</div>'
+            + '<div class="expert-question-text"><strong>Q.</strong> '
+            +   _multiline(q.question || '') + '</div>'
+            + altHtml + impactHtml + blocksHtml + requestedHtml
+            + '</div>';
+        }).join('');
+        expertReviewHtml = '<div class="pre-run-expert-review" id="study-' + slug + '-expert">'
+          + '<h3>Pre-run expert review</h3>'
+          + '<p class="muted small" style="margin:0 0 8px 0">Open biological '
+          + 'questions the planning is contingent on. A "wrong" answer here means '
+          + 'a primary test threshold needs to change <em>before</em> the simulation '
+          + 'is run, not after.</p>'
+          + qCards
+          + '</div>';
+      }
+
+      // ── EMBED VISUALIZATIONS ─────────────────────────────────────────
+      // Pre-fetched HTML previews (study.yaml.embed_visualizations) inlined
+      // as <iframe srcdoc> so the downloaded report works offline. The
+      // preview's own <script src> CDN loads (Plotly) will still need
+      // network access at *viewing* time, but the HTML structure + data
+      // are baked in.
+      var embedsHtml = '';
+      var studyEmbeds = embedsByStudy[s.name] || [];
+      if (studyEmbeds.length) {
+        embedsHtml = '<div class="study-embeds" id="study-' + slug + '-embeds">'
+          + '<h3>Visualizations</h3>'
+          + studyEmbeds.map(function(emb) {
+              // Escape double-quotes for srcdoc attribute.
+              var escaped = (emb.html || '').replace(/&/g, '&amp;')
+                                            .replace(/"/g, '&quot;');
+              return '<div class="study-embed-card" style="margin:12px 0;border:1px solid #e2e8f0;border-radius:6px;background:#fff;overflow:hidden">'
+                + '<div style="padding:8px 12px;border-bottom:1px solid #e5e7eb;background:#f9fafb">'
+                +   '<strong>' + _h(emb.name) + '</strong>'
+                + '</div>'
+                + (emb.description ? '<p class="muted small" style="margin:6px 12px">' + _h(emb.description) + '</p>' : '')
+                + '<iframe srcdoc="' + escaped + '" '
+                +   'style="width:100%;height:680px;border:0;display:block" '
+                +   'loading="lazy" title="' + _h(emb.name) + '"></iframe>'
+                + '</div>';
+            }).join('')
+          + '</div>';
+      }
+
+      // ── CONDITIONS (v4: baseline + variants + model_settings) ─────────
+      // Renders the actual parameter table the evaluator wants: each
+      // variant's overrides + every model_setting's current/default/range.
+      var conditionsHtml = _renderConditionsBlock(s, sid.conditions);
+
+      // ── PLANNING-PHASE DETECTION ──
+      // A study is "planning" when no runs have completed yet. In that
+      // mode we strip decision / takeaways / findings (post-execution
+      // sections) and lead with the spec the expert needs to comment on:
+      // Question → Conditions → Tests → Baseline preview → Assumptions.
+      // Once runs land, the full flow returns.
+      var hasRuns = (s.runs || []).length > 0 || (s.findings || []).length > 0;
+      var isPlanning = !hasRuns;
+
+      // Charts come from runs.db when present, or fall back to the
+      // workspace default-baseline. Wrap them with a BASELINE banner
+      // so the expert knows the trace is pre-execution data, not a
+      // study-specific run.
+      var chartsWithBaselineNoticeHtml = chartsHtml;
+      if (isPlanning && chartsHtml) {
+        chartsWithBaselineNoticeHtml =
+            '<div class="planning-baseline-strip" id="study-' + slug + '-baseline-strip">' +
+              '<div class="planning-baseline-strip-banner">' +
+                '<span class="planning-baseline-pill">BASELINE</span>' +
+                '<span class="planning-baseline-text">' +
+                  'Charts below show the <strong>workspace pre-execution baseline</strong>' +
+                  ' — what the cell looks like before any of this study\'s variants run.' +
+                  ' Expert reviewers: comment on whether these traces look right for the' +
+                  ' wild-type starting point.' +
+                '</span>' +
+              '</div>' +
+              chartsHtml +
+            '</div>';
+      }
+
+      if (isPlanning) {
+        // Planning-phase layout — minimal, expert-comment-driven.
+        return ''
+          + '<section class="study study-planning" id="study-' + slug + '">'
+          +   subNav
+          +   '<header class="study-header">'
+          +     '<h2><span class="study-num">' + (i + 1) + '.</span> ' + _h(s.name) + ' ' + phaseBadge + statusBadge + '</h2>'
+          +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
+          +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
+          +     '<div class="study-planning-pill">PLANNING — not yet run</div>'
+          +   '</header>'
+          +   summaryHtml         // Question / purpose
+          +   conditionsHtml      // Conditions: variants + model settings (PROMINENT)
+          +   testsHtml           // Expected behavior / tests (PROMINENT for comments)
+          +   chartsWithBaselineNoticeHtml  // Baseline charts with BASELINE label
+          +   embedsHtml          // Embedded preview HTMLs
+          +   readoutsHtml        // What we'll measure
+          +   buildHtml           // Model change (collapsed-ish, technical)
+          +   '<details class="study-technical-fold"><summary>Technical context (model changes · implementation tasks · follow-ups · limitations · refs)</summary>'
+          +     reqsHtml          // Implementation requirements
+          +     followUpsHtml     // Follow-ups
+          +     limitsHtml        // Limitations
+          +     refsHtml          // References
+          +   '</details>'
+          + '</section>';
+      }
+
+      // Post-execution layout — full v3 flow including decision + findings.
       return ''
         + '<section class="study" id="study-' + slug + '">'
         +   subNav
@@ -4735,19 +5314,148 @@
         +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
         +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
         +   '</header>'
-        +   summaryHtml         // 1. Plain-English summary (with Purpose disclosure)
-        +   decisionHtml        // 2. Decision box (with Pipeline-gate disclosure)
-        +   takeawaysHtml       // 3 + 4. Key takeaways + detailed findings grouped by kind
-        +   simsHtml            // 5. What did/will we run?
-        +   chartsHtml          //    + Visualisations from runs
-        +   readoutsHtml        // 6. What did/will we measure?
-        +   testsHtml           // 7. How do we judge success?
-        +   buildHtml           // 8. What changes in the model?
-        +   reqsHtml            // 9. What needs to be built or fixed?
-        +   followUpsHtml       // 10. What should happen next?
+        +   biologyGlanceHtml   // 0. Biology-at-a-glance
+        +   embedsHtml          // 0b. Embedded preview HTMLs
+        +   summaryHtml         // 1. Plain-English summary
+        +   decisionHtml        // 2. Decision box
+        +   expertReviewHtml    // 2b. Pre-run expert review
+        +   takeawaysHtml       // 3 + 4. Key takeaways + findings
+        +   simsHtml            // 5. What we ran
+        +   chartsHtml          //    + Visualisations
+        +   readoutsHtml        // 6. What we measured
+        +   testsHtml           // 7. How we judge success
+        +   conditionsHtml      // 7b. Conditions
+        +   buildHtml           // 8. Model changes
+        +   reqsHtml            // 9. What to build/fix
+        +   followUpsHtml       // 10. Next steps
         +   limitsHtml          // 11. Limitations
         +   refsHtml            // 12. References
         + '</section>';
+    }
+
+    // Render the per-study Conditions block (v4). Returns empty string for
+    // studies without a ``conditions:`` mapping.
+    //
+    // Layout:
+    //   - Baseline composite + params
+    //   - Variants table (name, base_composite, parameter overrides)
+    //   - Model settings table (name, type, default, current, range, gate)
+    //
+    // Why this lives next to Tests instead of inside Build: variants and
+    // model_settings are the *experimental conditions* — what you change to
+    // run the tests — distinct from the *code* changes captured in Build.
+    function _renderConditionsBlock(s, anchorId) {
+      var cond = (s.conditions && typeof s.conditions === 'object') ? s.conditions : null;
+      if (!cond) return '';
+      var baseline = cond.baseline || {};
+      var variants = cond.variants || [];
+      var expertInputs = cond.model_settings || cond.expert_inputs || [];
+      if (!baseline.composite && !variants.length && !expertInputs.length) return '';
+
+      function _fmtVal(v) {
+        if (v === null || v === undefined) return '<em class="muted">—</em>';
+        if (typeof v === 'object') return '<code>' + _h(JSON.stringify(v)) + '</code>';
+        return '<code>' + _h(String(v)) + '</code>';
+      }
+      function _kvList(obj) {
+        var keys = Object.keys(obj || {});
+        if (!keys.length) return '<em class="muted">(no overrides)</em>';
+        return keys.map(function(k) {
+          return '<div class="cond-kv"><span class="cond-kv-k">' + _h(k) + '</span>' +
+                 '<span class="cond-kv-v">' + _fmtVal(obj[k]) + '</span></div>';
+        }).join('');
+      }
+
+      // Baseline row
+      var baselineHtml = '';
+      if (baseline.composite || baseline.params) {
+        baselineHtml =
+            '<div class="cond-baseline">' +
+              '<h4>Baseline</h4>' +
+              '<div class="cond-baseline-composite">' +
+                'Composite: <code>' + _h(baseline.composite || '?') + '</code>' +
+              '</div>' +
+              '<div class="cond-baseline-params">' +
+                _kvList(baseline.params || {}) +
+              '</div>' +
+            '</div>';
+      }
+
+      // Variants table
+      var variantsHtml = '';
+      if (variants.length) {
+        variantsHtml =
+            '<div class="cond-variants">' +
+              '<h4>Variants <span class="muted small">(' + variants.length + ')</span></h4>' +
+              '<p class="muted small" style="margin:0 0 6px 0">Each variant is a perturbation of the baseline — typically a parameter override or a swapped composite. These define the runs that test the assumption.</p>' +
+              '<table class="cond-table">' +
+                '<thead><tr><th>Variant</th><th>Composite / base</th><th>Parameter overrides</th><th>Notes</th></tr></thead>' +
+                '<tbody>' +
+                  variants.map(function(v) {
+                    var ovr = v.parameter_overrides || v.params || {};
+                    var base = v.composite || v.base_composite || '<em class="muted">(inherits baseline)</em>';
+                    var name = v.name || '?';
+                    var notes = v.description || v.notes || '';
+                    return '<tr>' +
+                      '<td><code>' + _h(name) + '</code></td>' +
+                      '<td>' + (typeof base === 'string' && base.indexOf('<em') === 0 ? base : '<code>' + _h(base) + '</code>') + '</td>' +
+                      '<td>' + _kvList(ovr) + '</td>' +
+                      '<td>' + (notes ? _multiline(notes) : '<em class="muted">—</em>') + '</td>' +
+                    '</tr>';
+                  }).join('') +
+                '</tbody>' +
+              '</table>' +
+            '</div>';
+      }
+
+      // Model settings table
+      var expertHtml = '';
+      if (expertInputs.length) {
+        var nRequired = expertInputs.filter(function(e){return e.gate === 'required-before-run';}).length;
+        var requiredBadge = nRequired
+          ? '<span class="cond-ei-required-badge" title="' + nRequired + ' input(s) must be set before this study can run">' + nRequired + ' required</span>'
+          : '';
+        expertHtml =
+            '<div class="cond-expert-inputs">' +
+              '<h4>Model settings <span class="muted small">(' + expertInputs.length + ')</span> ' + requiredBadge + '</h4>' +
+              '<p class="muted small" style="margin:0 0 6px 0">Parameters that need human input before the study runs. Edit a value on the dashboard\'s study-detail page (Build tab) and the next <code>pbg_runner</code> invocation will pick it up.</p>' +
+              '<table class="cond-table">' +
+                '<thead><tr><th>Name</th><th>Type</th><th>Default</th><th>Current</th><th>Range</th><th>Gate</th><th>Description</th></tr></thead>' +
+                '<tbody>' +
+                  expertInputs.map(function(e) {
+                    var name = e.name || '?';
+                    var type = e.type || '';
+                    var def  = e.default;
+                    var cur  = (e.current === null || e.current === undefined) ? null : e.current;
+                    var range = '';
+                    if (Array.isArray(e.range) && e.range.length === 2)
+                      range = '[' + e.range[0] + ', ' + e.range[1] + ']';
+                    else if (Array.isArray(e.options))
+                      range = e.options.join(' | ');
+                    var gate = e.gate || 'optional';
+                    var gateBadge = gate === 'required-before-run'
+                      ? '<span class="cond-ei-gate-req">required</span>'
+                      : '<span class="cond-ei-gate-opt">optional</span>';
+                    var awaiting = (cur === null) ? '<em class="muted">awaiting expert</em>' : _fmtVal(cur);
+                    return '<tr>' +
+                      '<td><code>' + _h(name) + '</code></td>' +
+                      '<td>' + _h(type) + '</td>' +
+                      '<td>' + _fmtVal(def) + '</td>' +
+                      '<td>' + awaiting + '</td>' +
+                      '<td>' + (range ? '<code>' + _h(range) + '</code>' : '<em class="muted">—</em>') + '</td>' +
+                      '<td>' + gateBadge + '</td>' +
+                      '<td>' + (e.description ? _multiline(e.description) : '<em class="muted">—</em>') + '</td>' +
+                    '</tr>';
+                  }).join('') +
+                '</tbody>' +
+              '</table>' +
+            '</div>';
+      }
+
+      return '<div id="' + anchorId + '" class="study-conditions">' +
+               '<h3>Conditions <span class="muted small">— what we set up to test it</span></h3>' +
+               baselineHtml + variantsHtml + expertHtml +
+             '</div>';
     }
 
     // --- per-study section builder -----------------------------------
@@ -5088,9 +5796,16 @@
       + '.fu-why,.fu-unblocks,.fu-acc,.fu-hyp{margin:4px 0 0 0;font-size:0.92em;line-height:1.45}'
       + '.fu-hyp{padding:6px 10px;background:#fff;border-radius:3px;border:1px dashed #cbd5e1}'
       + '.fu-acc ul{margin:2px 0 0 18px;padding:0}'
-      // charts
+      // charts — SVGs scale to fit their card container; preserves aspect
+      // ratio so a 1400×484 chart shrinks to (e.g.) 800×276 instead of
+      // overflowing horizontally + clipping content.
       + '.chart-card{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 12px 12px 12px;margin:10px 0}'
+      + '.chart-card svg{display:block;width:100%;max-width:100%;height:auto}'
       + '.chart-caption{font-size:0.83em;color:#475569;margin-top:4px;line-height:1.4}'
+      + '.chart-simulations{font-size:0.9em;color:#1e3a8a;background:#dbeafe;border-left:3px solid #2563eb;padding:6px 10px;margin-top:8px;border-radius:0 3px 3px 0;line-height:1.5}'
+      + '.chart-simulations strong{color:#1e40af}'
+      + '.chart-interpretation{font-size:0.9em;color:#14532d;background:#dcfce7;border-left:3px solid #16a34a;padding:6px 10px;margin-top:6px;border-radius:0 3px 3px 0;line-height:1.5}'
+      + '.chart-interpretation strong{color:#15803d}'
       // implementation-requirement cards (biologist-friendly layout)
       + '.req-card{padding:12px 14px;margin:10px 0;border:1px solid #e2e8f0;border-radius:6px;background:#fff;box-shadow:0 1px 1px rgba(0,0,0,0.02)}'
       + '.req-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}'
@@ -5228,6 +5943,47 @@
       + '.finding-next{padding:6px 10px;background:#f0fdf4;border-left:3px solid #10b981;border-radius:3px;font-size:0.9em;margin-top:8px;line-height:1.5}'
       + '.finding-next strong{color:#065f46}'
       // ── eb table row coloring ──
+      // ── Conditions block (Variants + Model settings) ──
+      + '.study-conditions{margin:18px 0 10px 0;padding:12px 14px;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px}'
+      // Planning-phase banner at the top of the report
+      + '.planning-phase-banner{display:flex;gap:16px;align-items:flex-start;background:linear-gradient(135deg,#fef9c3 0%,#fde68a 100%);border:1px solid #f59e0b;border-radius:8px;padding:18px 22px;margin:16px 0 24px 0;box-shadow:0 1px 3px rgba(0,0,0,0.05)}'
+      + '.planning-phase-banner-icon{font-size:1.8em;line-height:1;flex:0 0 auto;width:32px}'
+      + '.planning-phase-banner-content{flex:1 1 auto;min-width:0;color:#78350f;line-height:1.55}'
+      + '.planning-phase-banner-body{color:#78350f;line-height:1.55}'
+      + '.planning-phase-banner-body strong{color:#451a03}'
+      + '.planning-phase-banner-list{margin:8px 0 0 20px;padding:0;color:#78350f}'
+      + '.planning-phase-banner-list li{margin:6px 0;line-height:1.5}'
+      + '.planning-phase-banner-foot{margin:10px 0 0 0;color:#92400e;font-size:0.9em;font-style:italic;padding-top:8px;border-top:1px solid rgba(217,119,6,0.25)}'
+      // Per-study planning pill in the header
+      + '.study-planning-pill{display:inline-block;background:#fbbf24;color:#451a03;font-weight:700;font-size:0.78em;letter-spacing:0.06em;padding:3px 10px;border-radius:4px;margin-top:8px}'
+      // Baseline strip wrapping charts in planning mode
+      + '.planning-baseline-strip{border:1px solid #93c5fd;border-radius:8px;padding:0;margin:18px 0;background:#fff;overflow:hidden}'
+      + '.planning-baseline-strip-banner{display:flex;gap:10px;align-items:flex-start;background:#dbeafe;padding:8px 14px;border-bottom:1px solid #93c5fd}'
+      + '.planning-baseline-pill{display:inline-block;background:#1e40af;color:#fff;font-weight:700;font-size:0.72em;letter-spacing:0.08em;padding:3px 9px;border-radius:3px;flex-shrink:0;margin-top:2px}'
+      + '.planning-baseline-text{color:#1e40af;font-size:0.92em;line-height:1.5}'
+      + '.planning-baseline-text strong{color:#1e3a8a}'
+      + '.planning-baseline-strip .charts{padding:12px 14px}'
+      // Collapsed technical fold at the end of a planning study
+      + '.study-technical-fold{margin:18px 0 0 0;padding:8px 12px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px}'
+      + '.study-technical-fold>summary{cursor:pointer;color:#475569;font-size:0.9em;font-weight:600}'
+      + '.study-technical-fold[open]{background:#fff;border-color:#94a3b8}'
+      + '.study-technical-fold[open]>summary{margin-bottom:8px;color:#0f172a}'
+      + '.study-conditions h3{margin:0 0 8px 0;font-size:1.05em;color:#0f172a}'
+      + '.study-conditions h4{margin:14px 0 6px 0;font-size:0.95em;color:#334155;text-transform:uppercase;letter-spacing:0.04em}'
+      + '.cond-baseline{background:#fff;border:1px solid #e2e8f0;border-radius:4px;padding:8px 10px;margin:0 0 12px 0}'
+      + '.cond-baseline-composite{font-size:0.92em;color:#334155;margin-bottom:6px}'
+      + '.cond-baseline-params{display:flex;flex-wrap:wrap;gap:6px}'
+      + '.cond-kv{display:inline-flex;align-items:center;gap:6px;background:#eef2ff;border-radius:3px;padding:2px 6px;font-size:0.85em}'
+      + '.cond-kv-k{color:#3730a3;font-weight:600;font-family:ui-monospace,monospace}'
+      + '.cond-kv-v code{background:transparent;padding:0;color:#1f2937}'
+      + '.cond-table{width:100%;border-collapse:collapse;font-size:0.9em;margin:6px 0}'
+      + '.cond-table th{text-align:left;padding:6px 8px;border-bottom:1px solid #cbd5e1;color:#334155;font-weight:600;background:#fff}'
+      + '.cond-table td{padding:6px 8px;border-bottom:1px solid #e5e7eb;vertical-align:top}'
+      + '.cond-table tr:last-child td{border-bottom:none}'
+      + '.cond-table td .cond-kv{display:block;margin:2px 0;background:#f3f4f6}'
+      + '.cond-ei-required-badge{display:inline-block;background:#fde68a;color:#78350f;font-size:0.75em;padding:1px 8px;border-radius:9px;margin-left:6px;font-weight:600}'
+      + '.cond-ei-gate-req{display:inline-block;background:#fde68a;color:#78350f;font-size:0.78em;padding:1px 6px;border-radius:3px;font-weight:600}'
+      + '.cond-ei-gate-opt{display:inline-block;background:#e0e7ff;color:#3730a3;font-size:0.78em;padding:1px 6px;border-radius:3px}'
       + 'tr.eb-stub td{background:#fefce8}'
       + 'tr.eb-gated td{background:#fff7ed}'
       + 'tr.eb-implemented td{background:#f0fdf4}'
@@ -5279,6 +6035,49 @@
       +   'h1,h2,h3{break-after:avoid}'
       +   '.study{break-inside:avoid-page}'
       + '}'
+
+      // ── biology-at-a-glance + investigation biology-story + expert-review
+      //    (added so the shareable report mirrors the live dashboard
+      //    biologist-first planning view; styled inline so the standalone
+      //    HTML renders with no external assets) ─────────────────────────
+      + '.investigation-biology-story{padding:16px 20px;background:#f0f9ff;border:1px solid #bae6fd;border-left:5px solid #0284c7;border-radius:8px;margin:14px 0 18px 0;max-width:none}'
+      + '.investigation-biology-story p.biology-prose{margin:0;font-size:1em;line-height:1.6;color:#0c4a6e;white-space:pre-line;max-width:none}'
+      + '.biology-glance{margin:0 0 18px 0;padding:14px 18px;background:#f0fdf4;border:1px solid #bbf7d0;border-left:5px solid #16a34a;border-radius:8px}'
+      + '.biology-glance .biology-glance-label{font-size:0.85em;text-transform:uppercase;letter-spacing:0.05em;color:#166534;margin:0 0 8px 0;font-weight:600;border:none;padding:0}'
+      + '.biology-summary-callout{margin-bottom:14px}'
+      + '.biology-summary-callout .biology-prose{margin:0;font-size:1.02em;line-height:1.55;color:#14532d;white-space:pre-line;max-width:none}'
+      + '.biology-glance .study-card{margin-bottom:14px;background:#fff;border-radius:6px;padding:10px 14px;border:1px solid #d1fae5}'
+      + '.study-card-table{width:100%;border-collapse:collapse;font-size:0.93em;margin:0}'
+      + '.study-card-table th{text-align:left;font-weight:600;color:#166534;background:#f0fdf4;padding:6px 10px;white-space:nowrap;vertical-align:top;width:180px;border-bottom:1px solid #bbf7d0}'
+      + '.study-card-table td{padding:6px 10px;vertical-align:top;color:#14532d;border-bottom:1px solid #f0fdf4;line-height:1.5}'
+      + '.study-card-table tr:last-child th,.study-card-table tr:last-child td{border-bottom:none}'
+      + '.literature-anchors{background:#fff;border-radius:6px;padding:10px 14px;border:1px solid #d1fae5}'
+      + '.literature-anchor-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}'
+      + '.literature-anchor-card{padding:8px 12px;background:#f8fefa;border-left:3px solid #16a34a;border-radius:4px;font-size:0.92em}'
+      + '.literature-anchor-card .anchor-expectation{font-weight:500;color:#064e3b;margin-bottom:4px;line-height:1.45}'
+      + '.literature-anchor-card .anchor-observable,.literature-anchor-card .anchor-source,.literature-anchor-card .anchor-status{font-size:0.88em;color:#475569;margin:2px 0;line-height:1.45}'
+      + '.literature-anchor-card .anchor-observable code{font-size:0.92em;background:#fff;padding:1px 5px;border-radius:3px;border:1px solid #d1fae5}'
+      + '.literature-anchor-card .anchor-status{font-style:italic}'
+      + '.pre-run-expert-review{margin:18px 0;padding:14px 16px;background:#faf5ff;border:1px solid #e9d5ff;border-left:5px solid #a855f7;border-radius:8px}'
+      + '.pre-run-expert-review h3{color:#6b21a8;margin:0 0 6px 0}'
+      + '.expert-question-card{padding:10px 14px;background:#fff;border:1px solid #e9d5ff;border-left:4px solid #a855f7;border-radius:6px;margin:10px 0}'
+      + '.expert-question-card.status-resolved{border-left-color:#10b981}'
+      + '.expert-question-header{display:flex;align-items:center;gap:8px;font-size:0.85em;color:#6b21a8;margin-bottom:6px;flex-wrap:wrap}'
+      + '.expert-question-id{font-family:ui-monospace,monospace;font-size:0.85em;background:#ede9fe;padding:1px 6px;border-radius:3px}'
+      + '.expert-question-status{font-size:0.78em;padding:1px 6px;border-radius:9999px;background:#fef3c7;color:#92400e}'
+      + '.expert-question-card.status-resolved .expert-question-status{background:#d1fae5;color:#065f46}'
+      + '.expert-question-asked-to{font-size:0.78em;color:#6b7280;margin-left:auto}'
+      + '.expert-question-text{font-size:0.95em;line-height:1.55;color:#1e1b4b;margin-bottom:6px}'
+      + '.expert-question-alternatives,.expert-question-impact{font-size:0.9em;color:#475569;line-height:1.5;margin:4px 0}'
+      + '.expert-question-alternatives ul{margin:4px 0 0 18px;padding:0}'
+      + '.expert-question-alternatives li{margin:2px 0}'
+      + '.expert-question-impact em,.expert-question-alternatives em{color:#6b21a8;font-style:normal;font-weight:600}'
+      + '.expert-question-blocks,.expert-question-response{font-size:0.88em;margin:6px 0 0 0;color:#475569}'
+      + '.expert-question-blocks summary,.expert-question-response summary{cursor:pointer;padding:3px 0;color:#6b7280}'
+      + '.expert-question-blocks ul{margin:4px 0 0 18px;padding:0}'
+      + '.expert-question-blocks li{margin:2px 0;font-size:0.92em}'
+      + '.expert-question-response p{margin:4px 0;padding:6px 10px;background:#faf5ff;border-radius:4px}'
+
       + '</style></head><body>'
 
       + '<button class="toc-toggle" onclick="document.querySelector(\'.toc\').classList.toggle(\'open\')">☰ Contents</button>'
@@ -5305,6 +6104,41 @@
       +   '<h1>' + _h(iset.title || iset.name) + ' <span class="badge badge-' + _h(iset.status || 'planning') + '">' + _h(iset.status || 'planning') + '</span></h1>'
       +   '<p class="muted small">Investigation report · <code>' + nameClean + '</code> · generated ' + _h(now) + ' · for expert review prior to execution.</p>'
 
+      // Planning-phase banner: any study that has not yet produced runs
+      // is treated as planning, and the whole report leads with a notice
+      // that the doc is a pre-execution spec for expert review.
+      +   (function() {
+            var planningCount = (specs || []).filter(function(s) {
+              return !(s.runs || []).length && !(s.findings || []).length;
+            }).length;
+            if (!planningCount) return '';
+            return '<div class="planning-phase-banner" id="planning-phase-banner">'
+              + '<div class="planning-phase-banner-icon">📝</div>'
+              + '<div class="planning-phase-banner-content">'
+              +   '<div class="planning-phase-banner-body">'
+              +     '<strong>Planning phase — pre-execution review.</strong> '
+              +     planningCount + ' of ' + (specs || []).length + ' studies have not yet run. '
+              +     'The charts below come from the <strong>workspace pre-execution baseline</strong> '
+              +     '(seed 0, M9-glucose, full cell cycle until division). For each study, the most '
+              +     'important sections for expert review are:'
+              +   '</div>'
+              +   '<ul class="planning-phase-banner-list">'
+              +     '<li><strong>Conditions</strong> — variants and their parameter overrides, plus the model settings awaiting your call. Edit values in the live dashboard\'s Build tab, or comment here.</li>'
+              +     '<li><strong>Expected behavior</strong> — what each test claims will pass / fail and the criterion it uses. Flag any test that\'s under- or over-specified.</li>'
+              +     '<li><strong>Baseline visualizations</strong> — what the wild-type cell looks like before the study\'s mechanism lands. Comment on whether the trace matches your intuition.</li>'
+              +   '</ul>'
+              +   '<div class="planning-phase-banner-foot">Click the <strong>💬</strong> icon next to any section to leave inline feedback. "Generate feedback report" (bottom-right) packages everything into a single yaml file to send back.</div>'
+              + '</div>'
+              + '</div>';
+          })()
+
+      +   ((iset.biological_story || '').trim()
+          ? '<div class="investigation-biology-story">'
+            + '<h2 style="margin:0 0 8px 0;font-size:0.85em;text-transform:uppercase;letter-spacing:0.05em;color:#075985;font-weight:600;border:none;padding:0">Biology — the mechanism this investigation models</h2>'
+            + '<p class="biology-prose">' + _multiline(iset.biological_story) + '</p>'
+            + '</div>'
+          : '')
+
       +   '<h2 id="overview">Overview</h2>'
       +   (iset.question   ? '<p><strong>Question.</strong> '   + _multiline(iset.question)   + '</p>' : '')
       +   (iset.hypothesis ? '<p><strong>Hypothesis.</strong> ' + _multiline(iset.hypothesis) + '</p>' : '')
@@ -5315,15 +6149,17 @@
                       + '<ol>' + acceptance + '</ol>' : '')
 
       +   '<h2 id="how-to-read">How to read this report</h2>'
-      +   '<p>Each section below is one study, in dependency order (roots first). For each study, read in this order:</p>'
+      +   '<p>Each section below is one study, in dependency order (roots first). A downstream study assumes everything above it has passed, so reading top-down keeps the calibration context intact. Every study uses the same five-section header:</p>'
       +   '<ol>'
-      +     '<li><strong>Plain-English summary</strong> — what the study asked, what we learned, and where the gate decision lands.</li>'
-      +     '<li><strong>Can we move to the next study?</strong> — the gate decision in one box: what passed, what failed, what blocks the next study, and the immediate next action.</li>'
-      +     '<li><strong>Key takeaways</strong> — one-line findings linking back to detailed cards.</li>'
-      +     '<li><strong>Simulations, measurements, and tests</strong> — what we ran, what we measured, how we judge success.</li>'
-      +     '<li><strong>Technical details</strong> — file paths, parameter names, listener paths, CLI flags. These live inside collapsible <em>Technical details</em> blocks; open them only when implementing or debugging.</li>'
+      +     '<li><strong>Question</strong> — what this study is asking, in one paragraph. The "why" lives here.</li>'
+      +     '<li><strong>Assumptions</strong> — what we take as given (cited to literature where applicable) and whether we have verified each one in v2ecoli yet.</li>'
+      +     '<li><strong>Conditions</strong> — what we set up to test the question. Three sub-fields: <em>baseline</em> (the reference composite), <em>variants</em> (perturbations), and <em>model settings</em> (parameters that need human input before the study can run).</li>'
+      +     '<li><strong>Tests</strong> — pass/fail criteria with a measure path + a comparison op. Each test owns one row in the gate decision; charts inline below show the observable over time with the criterion overlaid.</li>'
+      +     '<li><strong>Status</strong> — a single keyword summarising where the study currently stands (e.g. <code>evaluate-with-calibration-todo</code>, <code>done-tests-passing</code>, <code>blocked</code>).</li>'
       +   '</ol>'
-      +   '<p class="muted small">Status pills use four glyphs: <strong style="color:#10b981">✓ confirms</strong> literature, <strong style="color:#dc2626">✗ contradicts</strong> literature, <strong style="color:#f59e0b">◐ partial</strong> match, <strong style="color:#8b5cf6">◆ novel</strong> (no literature comparator).</p>'
+      +   '<p>Auxiliary blocks — <em>Model change</em>, <em>Implementation requirements</em>, <em>Follow-up studies</em>, <em>Limitations</em>, <em>Bibliography</em> — sit below the five-section header. They live inside collapsible <em>Technical details</em> blocks; open them only when you need the file paths, parameter names, or CLI flags.</p>'
+      +   '<p class="muted small">Chart sourcing: live charts are rendered from the latest study <code>runs.db</code>; charts captioned <strong>"Drawn from workspace default-baseline"</strong> mean the study hasn\'t run yet and we\'re showing the pre-execution baseline as a "before" reference.</p>'
+      +   '<p class="muted small">Want to leave inline feedback? Click the <strong>💬</strong> icon next to any section. "Generate feedback report" (bottom-right) packages every annotation into a single yaml file that comes back via <code>pbg-feedback-import</code>.</p>'
 
       +   '<h2 id="studies-heading">Studies (dependency order)</h2>'
       +   studiesHtml
@@ -5359,7 +6195,196 @@
       + '})();'
       + '</script>'
 
+      // ── Inline feedback widget (fully detached: localStorage only) ──
+      //
+      // Per-report annotation key: each download gets a unique reportId
+      // (millisecond-precision generation timestamp). Annotations are
+      // keyed by INV + REPORT_ID, so opening an older report doesn't
+      // see comments left on a newer one and vice versa. The yaml export
+      // tags meta.report_id so pbg-feedback-import can attribute it
+      // back to a specific report file.
+      + _feedbackWidgetCss()
+      + _feedbackWidgetJs(iset.name || 'investigation',
+                          'rpt-' + new Date().toISOString()
+                                     .slice(0, 19).replace(/[-:T]/g, ''))
+
       + '</body></html>';
+  }
+
+  // Inline CSS for the inline-feedback widget. Self-contained so the
+  // downloaded report works with no external dependencies.
+  function _feedbackWidgetCss() {
+    return '<style>'
+      + '.fb-host{position:relative}'
+      + '.fb-add{position:absolute;top:4px;right:4px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:999px;width:26px;height:26px;font-size:13px;line-height:1;cursor:pointer;opacity:.55;transition:opacity .15s;z-index:5;padding:0;display:inline-flex;align-items:center;justify-content:center}'
+      + '.fb-host:hover .fb-add{opacity:1}'
+      + '.fb-add:hover{background:#fde68a;border-color:#f59e0b}'
+      + '.fb-add.has-fb{opacity:1;background:#fde68a;border-color:#f59e0b}'
+      // Editor is a body-level FIXED overlay so it can never be clipped
+      // by parent overflow:hidden / flex / transform. Positioned at click
+      // time via getBoundingClientRect against the trigger button.
+      + '.fb-editor{position:fixed;width:360px;max-width:calc(100vw - 24px);padding:12px;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:1000}'
+      + '.fb-editor textarea{width:100%;box-sizing:border-box;padding:6px;font:inherit;border:1px solid #cbd5e1;border-radius:3px;min-height:80px;resize:vertical}'
+      + '.fb-editor-row{display:flex;gap:6px;margin-top:8px;align-items:center}'
+      + '.fb-editor-row input{flex:1;min-width:0;padding:4px 8px;border:1px solid #cbd5e1;border-radius:3px;font:inherit}'
+      + '.fb-editor-row button{padding:5px 12px;cursor:pointer;border-radius:3px;font:inherit}'
+      + '.fb-save{background:#2563eb;color:#fff;border:1px solid #1e40af}'
+      + '.fb-cancel{background:#f3f4f6;border:1px solid #d1d5db;color:#1f2937}'
+      + '.fb-entries{margin:6px 0 0 0}'
+      + '.fb-entry{background:#fefce8;border-left:3px solid #f59e0b;padding:6px 10px;margin:4px 0;border-radius:0 4px 4px 0;position:relative}'
+      + '.fb-meta{font-size:11px;color:#78716c}'
+      + '.fb-text{margin-top:2px;white-space:pre-wrap}'
+      + '.fb-del{position:absolute;top:4px;right:6px;background:none;border:none;color:#a8a29e;cursor:pointer;font-size:14px;padding:0;line-height:1}'
+      + '.fb-del:hover{color:#dc2626}'
+      + '.fb-bar{position:fixed;bottom:16px;right:16px;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,.15);border-radius:6px;background:#fff}'
+      + '.fb-bar-btn{background:#f59e0b;color:#1f2937;border:1px solid #d97706;padding:10px 14px;font-weight:600;border-radius:6px;cursor:pointer;font-size:14px}'
+      + '.fb-bar-btn:hover{background:#fde68a}'
+      + '.fb-bar-btn[disabled]{opacity:.5;cursor:not-allowed}'
+      + '.fb-count{font-weight:400;opacity:.75;margin-left:4px}'
+      + '@media print{.fb-add,.fb-editor,.fb-bar{display:none}}'
+      + '</style>';
+  }
+
+  // Inline JS for the inline-feedback widget. Persists to localStorage
+  // keyed per-investigation; renders 💬 buttons on every element whose
+  // id matches the section taxonomy (study-*, finding-*, acceptance,
+  // references, how-to-read, studies-heading) and offers a "Generate
+  // feedback report" YAML download. No server contact — works offline.
+  //
+  // The editor is a body-level FIXED overlay anchored at click time to
+  // the trigger button's viewport coords. Two reasons for the overlay
+  // pattern instead of an in-host child:
+  //   1. <button> defaults to type="submit" — appending a child editor
+  //      inside arbitrary report sections can land in unexpected layout
+  //      contexts (overflow:hidden parents, flex containers, <details>
+  //      blocks) that clip or hide the editor entirely.
+  //   2. A single global editor means clicking a different 💬 swaps the
+  //      anchor cleanly instead of opening N stacked editors.
+  function _feedbackWidgetJs(invName, reportId) {
+    return '<script>'
+      + '(function(){'
+      +   'var INV=' + JSON.stringify(invName) + ';'
+      +   'var REPORT_ID=' + JSON.stringify(reportId || '') + ';'
+      +   'var KEY="v2ecoli_feedback_"+INV+(REPORT_ID?("_"+REPORT_ID):"");'
+      +   'var ID_PATTERNS=[/^study-/,/^finding-/,/^acceptance$/,/^references$/,/^how-to-read$/,/^studies-heading$/];'
+      +   'var openEd=null;'
+      +   'var memStore={};'
+      +   'function safeGet(k){try{var v=(typeof localStorage!=="undefined")?localStorage.getItem(k):null;return (v==null?memStore[k]:v)||"";}catch(e){return memStore[k]||"";}}'
+      +   'function safeSet(k,v){memStore[k]=v;try{if(typeof localStorage!=="undefined")localStorage.setItem(k,v);}catch(e){}}'
+      +   'function load(){try{var s=safeGet(KEY);return s?JSON.parse(s):{};}catch(e){return {};}}'
+      +   'function save(d){safeSet(KEY,JSON.stringify(d));}'
+      +   'function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}'
+      +   'function shouldAttach(el){if(!el.id)return false;return ID_PATTERNS.some(function(re){return re.test(el.id);});}'
+      +   'function attachAll(){'
+      +     'document.querySelectorAll("[id]").forEach(function(el){'
+      +       'if(!shouldAttach(el)||el.dataset.fbAttached)return;'
+      +       'el.dataset.fbAttached="1";el.classList.add("fb-host");'
+      +       'var btn=document.createElement("button");'
+      +       'btn.type="button";'  // explicit: never a form submit
+      +       'btn.className="fb-add";btn.title="Add feedback to this section";btn.textContent="💬";'
+      +       'btn.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();openEditor(el,el.id,btn);});'
+      +       'el.appendChild(btn);renderExisting(el,el.id);'
+      +     '});'
+      +     'updateBadges();updateBarCount();'
+      +   '}'
+      +   'function renderExisting(host,sid){'
+      +     'var data=load();var entries=data[sid]||[];'
+      +     'var box=host.querySelector(":scope>.fb-entries");'
+      +     'if(!box){box=document.createElement("div");box.className="fb-entries";host.appendChild(box);}'
+      +     'box.innerHTML=entries.map(function(e,i){'
+      +       'return "<div class=\\"fb-entry\\">'
+      +              '<button type=\\"button\\" class=\\"fb-del\\" data-i=\\""+i+"\\" title=\\"Delete\\">×</button>'
+      +              '<div class=\\"fb-meta\\">"+esc(e.author||"evaluator")+" · "+esc(e.ts)+"</div>'
+      +              '<div class=\\"fb-text\\">"+esc(e.text)+"</div>'
+      +              '</div>";'
+      +     '}).join("");'
+      +     'box.querySelectorAll(".fb-del").forEach(function(b){'
+      +       'b.addEventListener("click",function(ev){ev.preventDefault();ev.stopPropagation();var i=parseInt(b.dataset.i,10);var d=load();(d[sid]||[]).splice(i,1);if(!(d[sid]||[]).length)delete d[sid];save(d);renderExisting(host,sid);updateBadges();updateBarCount();});'
+      +     '});'
+      +   '}'
+      +   'function closeEditor(){if(openEd){openEd.remove();openEd=null;}}'
+      +   'function positionEditor(ed,anchorBtn){'
+      +     'var r=anchorBtn.getBoundingClientRect();'
+      +     'var edW=Math.min(360,window.innerWidth-24);'
+      +     'var top=r.bottom+8;'
+      +     'var left=Math.max(12,Math.min(window.innerWidth-edW-12,r.right-edW));'
+      +     'ed.style.top=top+"px";'
+      +     'ed.style.left=left+"px";'
+      +     'var edH=ed.offsetHeight||220;'
+      +     'if(top+edH>window.innerHeight-12){ed.style.top=Math.max(12,r.top-edH-8)+"px";}'
+      +   '}'
+      +   'function openEditor(host,sid,anchorBtn){'
+      +     'closeEditor();'  // singleton: only one editor at a time
+      +     'var ed=document.createElement("div");ed.className="fb-editor";'
+      +     'ed.setAttribute("data-fb-sid",sid);'
+      +     'ed.innerHTML="<div style=\\"font-size:12px;color:#78716c;margin-bottom:6px\\">Feedback on §<code>"+esc(sid)+"</code></div>'
+      +       '<textarea placeholder=\\"What feedback do you have on this section? (assumption, parameter, evidence, missing detail, etc.)\\"></textarea>'
+      +       '<div class=\\"fb-editor-row\\">'
+      +         '<input class=\\"fb-author\\" placeholder=\\"Your name (optional)\\" value=\\""+esc(safeGet("fb_author"))+"\\">'
+      +         '<button type=\\"button\\" class=\\"fb-cancel\\">Cancel</button>'
+      +         '<button type=\\"button\\" class=\\"fb-save\\">Save</button>'
+      +       '</div>";'
+      +     'document.body.appendChild(ed);'
+      +     'openEd=ed;'
+      +     'ed.addEventListener("click",function(e){e.stopPropagation();});'
+      +     'positionEditor(ed,anchorBtn);'
+      +     'window.requestAnimationFrame(function(){positionEditor(ed,anchorBtn);});'  // refine after layout
+      +     'setTimeout(function(){var ta=ed.querySelector("textarea");if(ta)ta.focus();},0);'
+      +     'ed.querySelector(".fb-cancel").addEventListener("click",function(e){e.preventDefault();e.stopPropagation();closeEditor();});'
+      +     'ed.querySelector(".fb-save").addEventListener("click",function(e){'
+      +       'e.preventDefault();e.stopPropagation();'
+      +       'var text=ed.querySelector("textarea").value.trim();if(!text)return;'
+      +       'var author=ed.querySelector(".fb-author").value.trim();'
+      +       'if(author)safeSet("fb_author",author);'
+      +       'var d=load();d[sid]=d[sid]||[];'
+      +       'd[sid].push({ts:new Date().toISOString(),author:author,text:text});'
+      +       'save(d);closeEditor();renderExisting(host,sid);updateBadges();updateBarCount();'
+      +     '});'
+      +   '}'
+      +   'document.addEventListener("click",function(e){'
+      +     'if(!openEd)return;'
+      +     'if(openEd.contains(e.target))return;'
+      +     'if(e.target.classList&&e.target.classList.contains("fb-add"))return;'
+      +     'closeEditor();'
+      +   '});'
+      +   'document.addEventListener("keydown",function(e){if(e.key==="Escape")closeEditor();});'
+      +   'window.addEventListener("resize",function(){if(openEd){var sid=openEd.getAttribute("data-fb-sid");var host=sid&&document.getElementById(sid);var btn=host&&host.querySelector(":scope>.fb-add");if(btn)positionEditor(openEd,btn);}});'
+      +   'window.addEventListener("scroll",function(){if(openEd){var sid=openEd.getAttribute("data-fb-sid");var host=sid&&document.getElementById(sid);var btn=host&&host.querySelector(":scope>.fb-add");if(btn)positionEditor(openEd,btn);}},{passive:true});'
+      +   'function countAll(){var d=load();var n=0;Object.keys(d).forEach(function(k){n+=(d[k]||[]).length;});return n;}'
+      +   'function updateBadges(){var d=load();document.querySelectorAll(".fb-add").forEach(function(b){var sid=b.parentElement&&b.parentElement.id;if(!sid)return;b.classList.toggle("has-fb",((d[sid]||[]).length>0));});}'
+      +   'function updateBarCount(){var c=countAll();var s=document.querySelector(".fb-count");var nt="("+c+")";if(s&&s.textContent!==nt)s.textContent=nt;var btn=document.querySelector(".fb-bar-btn");if(btn)btn.disabled=c===0;}'
+      +   'function ensureBar(){'
+      +     'if(document.querySelector(".fb-bar"))return;'
+      +     'var bar=document.createElement("div");bar.className="fb-bar";'
+      +     'bar.innerHTML="<button type=\\"button\\" class=\\"fb-bar-btn\\" title=\\"Download all your annotations as a yaml file; send it back to the investigation\\">Generate feedback report <span class=\\"fb-count\\">(0)</span></button>";'
+      +     'document.body.appendChild(bar);'
+      +     'bar.querySelector(".fb-bar-btn").addEventListener("click",function(e){e.preventDefault();e.stopPropagation();downloadFeedback();});'
+      +   '}'
+      +   'function serialiseYaml(meta,data){'
+      +     'var L=["# Inline feedback report","# Generated from the v2ecoli inline-feedback widget.","# Import with: pbg-feedback-import <this-file>"];'
+      +     'L.push("meta:");'
+      +     'Object.keys(meta).forEach(function(k){L.push("  "+k+": "+JSON.stringify(meta[k]));});'
+      +     'var keys=Object.keys(data).sort();'
+      +     'if(!keys.length){L.push("annotations: {}");return L.join("\\n")+"\\n";}'
+      +     'L.push("annotations:");'
+      +     'keys.forEach(function(sid){'
+      +       '(data[sid]||[]).forEach(function(e,i){if(i===0)L.push("  "+JSON.stringify(sid)+":");L.push("    - ts: "+JSON.stringify(e.ts));if(e.author)L.push("      author: "+JSON.stringify(e.author));L.push("      text: "+JSON.stringify(e.text));});'
+      +     '});'
+      +     'return L.join("\\n")+"\\n";'
+      +   '}'
+      +   'function downloadFeedback(){'
+      +     'var d=load();if(!countAll()){alert("No feedback yet — click 💬 next to any section first.");return;}'
+      +     'var ts=new Date().toISOString();'
+      +     'var meta={investigation:INV,report_id:REPORT_ID,generated_at:ts,page_title:document.title,source_url:location.href};'
+      +     'var blob=new Blob([serialiseYaml(meta,d)],{type:"application/yaml"});'
+      +     'var url=URL.createObjectURL(blob);var a=document.createElement("a");'
+      +     'a.href=url;a.download="feedback-"+INV+"-"+ts.slice(0,19).replace(/[:T]/g,"-")+".yaml";'
+      +     'document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},0);'
+      +   '}'
+      +   'function init(){attachAll();ensureBar();var mo=new MutationObserver(function(){attachAll();});mo.observe(document.body,{childList:true,subtree:true});}'
+      +   'if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init);else init();'
+      + '})();'
+      + '</script>';
   }
 
   // Pop-out the investigation itself in a detached window. URL carries
@@ -7976,7 +9001,8 @@
   function _simStudyChips(studies) {
     if (!studies || !studies.length) return '<span style="color:#9ca3af;">—</span>';
     return studies.map(function (name) {
-      return '<a href="#studies" title="' + _escSim(name) +
+      return '<a href="/studies/' + encodeURIComponent(name) +
+        '" title="Open study: ' + _escSim(name) +
         '" style="display:inline-block; background:#eef2ff; color:#3730a3; ' +
         'padding:1px 7px; margin:0 2px 2px 0; border-radius:10px; font-size:12px; ' +
         'text-decoration:none;">' + _escSim(name) + '</a>';

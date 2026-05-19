@@ -255,7 +255,9 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/investigation-group-update":       "_post_investigation_group_update",
     # Study-specific POST endpoints (no investigation alias).
     "/api/study-set-objective":         "_post_study_set_objective",
+    "/api/study-expert-input-set":      "_post_study_expert_input_set",
     "/api/study-rename":                "_post_study_rename",
+    "/api/investigation-run-unblocked": "_post_investigation_run_unblocked",
     "/api/study-create-from-run":       "_post_study_create_from_run",
     "/api/study-run-baseline":          "_post_study_run_baseline",
     "/api/study-run-all-baselines":     "_post_study_run_all_baselines",
@@ -591,12 +593,34 @@ def _discover_viz_html_files(name: str) -> list[dict]:
     Returns one dict per HTML file, with the shape the study-detail template
     expects: ``{name, url, description}``. The URL is workspace-relative so
     the dashboard's static-file fallback serves it.
+
+    v2ecoli friction #17 (2026-05-19): the previous unconditional glob
+    surfaced `topology.html` / `workflow.html` rendered eagerly against an
+    empty composite as "(auto)" tabs that persisted forever. Eran flagged
+    them as "way too detailed" and "excessive". Two-pronged gate:
+
+      1. If no `runs.db` exists, no real sims have run → any HTML on disk
+         predates real data and should not be surfaced.
+      2. If `runs.db` exists, only surface viz whose mtime is at least as
+         fresh as `runs.db` mtime. Stale renders (from before the most
+         recent run) drop off automatically without a spec migration.
+
+    This is the "mtime gate" half of friction-log Option A — robust enough
+    without requiring a yaml-schema migration (Option B). Composites that
+    re-render their viz after each run continue to work; composites that
+    rendered once and never again age out naturally.
     """
     viz_dir = WORKSPACE / "studies" / name / "viz"
     if not viz_dir.is_dir():
         return []
+    runs_db = WORKSPACE / "studies" / name / "runs.db"
+    if not runs_db.is_file():
+        return []
+    runs_db_mtime = runs_db.stat().st_mtime
     out = []
     for html_file in sorted(viz_dir.glob("*.html")):
+        if html_file.stat().st_mtime < runs_db_mtime:
+            continue
         size_kb = max(1, html_file.stat().st_size // 1024)
         rel = html_file.relative_to(WORKSPACE).as_posix()
         out.append({
@@ -607,6 +631,35 @@ def _discover_viz_html_files(name: str) -> list[dict]:
                 f"{html_file.stat().st_mtime:.0f}s epoch "
                 f"({size_kb} KB). Source: render_visualizations against the "
                 f"latest runs.db history."
+            ),
+        })
+    return out
+
+
+def _discover_investigation_viz_html_files(inv_slug: str) -> list[dict]:
+    """Walk ``investigations/<inv>/viz/*.html`` and return embed entries.
+
+    Counterpart to ``_discover_viz_html_files`` for investigation-level
+    comparative visualisations (rendered by
+    ``_render_investigation_comparative_visualisations`` after a
+    ``run-unblocked`` job completes). Same return shape so the
+    investigation-detail endpoint can splice these into
+    ``embed_visualizations``.
+    """
+    viz_dir = WORKSPACE / "investigations" / inv_slug / "viz"
+    if not viz_dir.is_dir():
+        return []
+    out = []
+    for html_file in sorted(viz_dir.glob("*.html")):
+        size_kb = max(1, html_file.stat().st_size // 1024)
+        rel = html_file.relative_to(WORKSPACE).as_posix()
+        out.append({
+            "name": f"{html_file.stem} (comparative)",
+            "url": f"/{rel}",
+            "description": (
+                f"Investigation-level comparative visualisation "
+                f"({size_kb} KB). Rendered by the run-unblocked worker "
+                f"from the investigation yaml's comparative_visualizations block."
             ),
         })
     return out
@@ -1411,6 +1464,74 @@ def _count_runs_for_study(name: str, spec: dict | None = None) -> int:
     return max(db_count, spec_count)
 
 
+def _collect_study_observables(spec: dict) -> list[str]:
+    """Return slash-joined observable store paths declared by the study spec.
+
+    v2ecoli friction #14 (2026-05-19): study-run handlers historically did
+    not pass `emit_paths` to `inject_emitter_for_paths`, so the
+    SQLiteEmitter had an empty `emit:` schema and every `history.state` row
+    was just `{"_tick": <global_time>}`. Comparative visualizations rendered
+    as empty traces. This helper sweeps the spec for every observable-shaped
+    path declaration so the run handler can wire `inject_emitter_for_paths`
+    automatically — no study-yaml schema change required.
+
+    Recognised sources (tolerant — drives off whatever the study author
+    declared, in whatever shape):
+      - readouts[*].store_path                (v2ecoli explicit per-readout
+                                               paths, dot-joined)
+      - behavior_tests[*].measure.path        (single-path measures)
+      - behavior_tests[*].measure.{series_x,series_y,
+                                    x,y,
+                                    series_a,series_b}.path
+      - simulation_set[*].observe             (per-sim observable list)
+
+    Paths come in dot-joined ('agents.0.listeners.foo') or slash-joined
+    ('agents/0/listeners/foo'); both are normalised to slash-joined so
+    `inject_emitter_for_paths` accepts them uniformly. Duplicates are
+    dropped while preserving declaration order.
+    """
+    def _norm(p: str) -> str | None:
+        if not isinstance(p, str) or not p.strip():
+            return None
+        # Accept either separator; output is slash-joined.
+        parts = [seg for seg in p.replace(".", "/").split("/") if seg]
+        return "/".join(parts) if parts else None
+
+    out: list[str] = []
+    seen: set[str] = set()
+    def _push(p):
+        n = _norm(p) if isinstance(p, str) else None
+        if n and n not in seen:
+            seen.add(n)
+            out.append(n)
+
+    for r in spec.get("readouts", []) or []:
+        if isinstance(r, dict):
+            _push(r.get("store_path"))
+
+    for bt in spec.get("behavior_tests", []) or []:
+        m = (bt or {}).get("measure") if isinstance(bt, dict) else None
+        if not isinstance(m, dict):
+            continue
+        _push(m.get("path"))
+        for nested_key in ("series_x", "series_y", "x", "y", "series_a", "series_b"):
+            n = m.get(nested_key)
+            if isinstance(n, dict):
+                _push(n.get("path"))
+
+    for sim in spec.get("simulation_set", []) or []:
+        if not isinstance(sim, dict):
+            continue
+        obs = sim.get("observe")
+        if isinstance(obs, list):
+            for p in obs:
+                _push(p)
+        elif isinstance(obs, str):
+            _push(obs)
+
+    return out
+
+
 def _resolve_study_baseline_state(pkg, spec_id, params):
     """Resolve a generator composite spec_id + params → a state dict.
 
@@ -1455,7 +1576,49 @@ def _resolve_study_baseline_state(pkg, spec_id, params):
             discover_generators()
         entry = _REGISTRY.get(spec_id)
     if entry is None:
-        return None, {"error": f"composite {spec_id!r} not in generator registry"}
+        # mem3dg-readdy friction #21: fall back to file-discovered composites
+        # (the OTHER registry — pbg_superpowers.composite_discovery walks
+        # *.composite.{yaml,json} on disk). A workspace that ships YAML
+        # specs without @composite_generator decorators is still runnable
+        # via this path, removing the "Composites tab lists it but Run
+        # rejects it" foot-gun.
+        try:
+            from pbg_superpowers.composite_discovery import discover_composites
+            specs = discover_composites()
+        except Exception:  # noqa: BLE001
+            specs = {}
+        yaml_spec = specs.get(spec_id)
+        # Allow the same `local:<name>` shorthand on the YAML side.
+        if yaml_spec is None and spec_id.startswith("local:"):
+            short_name = spec_id[len("local:"):]
+            yaml_spec = next(
+                (s for sid, s in specs.items() if sid.endswith("." + short_name)
+                 or s.get("name") == short_name),
+                None,
+            )
+        if yaml_spec is not None:
+            state = yaml_spec.get("state") if isinstance(yaml_spec, dict) else None
+            if isinstance(state, dict):
+                # YAML composites don't support `params` overrides yet —
+                # generators are the path for parametrized runs. Surface
+                # this clearly rather than silently dropping the kwargs.
+                if params:
+                    return None, {"error": (
+                        f"YAML composite {spec_id!r} resolved but `params:` "
+                        "overrides aren't supported on file-discovered specs. "
+                        "Promote to @composite_generator to use param overrides."
+                    )}
+                return state, None
+            return None, {"error": (
+                f"YAML composite {spec_id!r} has no `state:` block "
+                "(check the spec shape)"
+            )}
+        return None, {"error": (
+            f"composite {spec_id!r} not found in either the "
+            "@composite_generator registry OR the file-discovery index "
+            "(*.composite.{yaml,json}). Add an @composite_generator "
+            "function or ship a composite YAML."
+        )}
     try:
         doc = build_generator(entry, overrides=params)
     except Exception as e:  # noqa: BLE001
@@ -1491,6 +1654,12 @@ def _post_study_run_baseline_for_test(ws_root, body):
     # the file. Keeps legacy investigations/spec.yaml usable.
     from vivarium_dashboard.lib.spec_migration import migrate_v2_to_v3
     spec = migrate_v2_to_v3(spec)
+    # v4-redesign projection: synthesises legacy fields (baseline list,
+    # variants list, behavior_tests, simulation_set) from a v4 conditions
+    # block. Idempotent on v3 (no-op when conditions is absent).
+    if spec.get("schema_version") == 4 and isinstance(spec.get("conditions"), dict):
+        from vivarium_dashboard.lib.investigations import _project_v4_redesign_to_legacy_view
+        spec = _project_v4_redesign_to_legacy_view(spec)
     baseline = spec.get("baseline") or []
     if not isinstance(baseline, list) or not baseline:
         return {"error": "study has no baseline composites"}, 400
@@ -1526,10 +1695,18 @@ def _post_study_run_baseline_for_test(ws_root, body):
     db_file = str(study_dir / "runs.db")
     run_id = cr.generate_run_id(spec_id, full_params)
     label = entry.get("name") or "baseline"
+    # v2ecoli friction #6: subprocess timeout from study yaml so a 3600-step
+    # baseline isn't killed by the 120s default. Per-study override.
+    runtime_cfg = (spec.get("runtime") or {}) if isinstance(spec.get("runtime"), dict) else {}
+    timeout_s = int(runtime_cfg.get("subprocess_timeout_s") or 1800)
+    # v2ecoli friction #14: derive emit_paths from spec observables so the
+    # injected SQLiteEmitter captures real biology, not just ticks.
+    emit_paths = _collect_study_observables(spec)
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label=label, sim_name=label,
-        overrides=generator_overrides,
+        overrides=generator_overrides, timeout=timeout_s,
+        emit_paths=emit_paths,
     )
     if code == 200:
         # F2: do NOT append to study.yaml.runs[] — the runs_meta row
@@ -1586,6 +1763,26 @@ def _render_study_visualizations(study_dir, spec, spec_id):
     merged = list(by_name.values())
     if not merged:
         return [], []
+
+    # mem3dg-readdy friction #29: study.yaml needed `address:` (caught by
+    # the report linter in pbg-superpowers / friction #26), but the same
+    # gap existed on the @composite_generator(visualizations=[...]) side
+    # and silently won on name collisions. Single source of truth fix:
+    # default any unaddressed entry from workspace.yaml.visualizations[].class
+    # by name, before render_visualizations gets a chance to KeyError.
+    name_to_class: dict[str, str] = {}
+    try:
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+        for ws_viz in ws_data.get("visualizations", []) or []:
+            if isinstance(ws_viz, dict) and ws_viz.get("name") and ws_viz.get("class"):
+                name_to_class[ws_viz["name"]] = ws_viz["class"]
+    except Exception:  # noqa: BLE001 — defaulting is best-effort
+        pass
+    for v in merged:
+        if not v.get("address"):
+            cls = name_to_class.get(v.get("name", ""))
+            if cls:
+                v["address"] = f"local:{cls}"
 
     effective_spec = dict(spec)
     effective_spec["visualizations"] = merged
@@ -1712,6 +1909,12 @@ def _post_study_run_all_baselines_for_test(ws_root, body):
     spec = yaml.safe_load(sf.read_text()) or {}
     from vivarium_dashboard.lib.spec_migration import migrate_v2_to_v3
     spec = migrate_v2_to_v3(spec)
+    # v4-redesign projection: synthesises legacy fields (baseline list,
+    # variants list, behavior_tests, simulation_set) from a v4 conditions
+    # block. Idempotent on v3 (no-op when conditions is absent).
+    if spec.get("schema_version") == 4 and isinstance(spec.get("conditions"), dict):
+        from vivarium_dashboard.lib.investigations import _project_v4_redesign_to_legacy_view
+        spec = _project_v4_redesign_to_legacy_view(spec)
     baseline = spec.get("baseline") or []
     if not isinstance(baseline, list) or not baseline:
         return {"error": "study has no baseline composites"}, 400
@@ -1772,6 +1975,12 @@ def _post_study_run_variant_for_test(ws_root, body):
     # Auto-migrate legacy v2-shape specs to v3 list shape (see run-baseline).
     from vivarium_dashboard.lib.spec_migration import migrate_v2_to_v3
     spec = migrate_v2_to_v3(spec)
+    # v4-redesign projection: synthesises legacy fields (baseline list,
+    # variants list, behavior_tests, simulation_set) from a v4 conditions
+    # block. Idempotent on v3 (no-op when conditions is absent).
+    if spec.get("schema_version") == 4 and isinstance(spec.get("conditions"), dict):
+        from vivarium_dashboard.lib.investigations import _project_v4_redesign_to_legacy_view
+        spec = _project_v4_redesign_to_legacy_view(spec)
     baseline = spec.get("baseline") or []
     if not isinstance(baseline, list) or not baseline:
         return {"error": "study has no baseline composites"}, 400
@@ -1781,20 +1990,31 @@ def _post_study_run_variant_for_test(ws_root, body):
     if variant is None:
         return {"error": f"variant {variant_name!r} not found"}, 404
 
-    base_name = (variant.get("base_composite") or "").strip()
-    if base_name:
-        entry = next((b for b in baseline
-                      if isinstance(b, dict) and b.get("name") == base_name), None)
-        if entry is None:
-            return {"error": f"variant base_composite {base_name!r} not in baseline"}, 404
+    # Variant resolution: a variant may either
+    #   (a) point at its own ``composite`` directly (v4 redesign — a
+    #       variant can use a different generator than the baseline), or
+    #   (b) reference a baseline entry by name via ``base_composite``,
+    #       inheriting its composite + params (legacy v3 shape).
+    # Direct composite wins when present.
+    direct_composite = (variant.get("composite") or "").strip()
+    if direct_composite:
+        spec_id = direct_composite
+        params: dict = {}  # no baseline params inheritance — variant is standalone
     else:
-        entry = baseline[0]
-    spec_id = entry.get("composite")
-    if not spec_id:
-        return {"error": f"baseline entry {entry.get('name')!r} has no composite"}, 400
+        base_name = (variant.get("base_composite") or "").strip()
+        if base_name:
+            entry = next((b for b in baseline
+                          if isinstance(b, dict) and b.get("name") == base_name), None)
+            if entry is None:
+                return {"error": f"variant base_composite {base_name!r} not in baseline"}, 404
+        else:
+            entry = baseline[0]
+        spec_id = entry.get("composite")
+        if not spec_id:
+            return {"error": f"baseline entry {entry.get('name')!r} has no composite"}, 400
+        params = dict(entry.get("params") or {})
 
-    params = dict(entry.get("params") or {})
-    overrides = variant.get("parameter_overrides") or {}
+    overrides = variant.get("parameter_overrides") or variant.get("params") or {}
     params.update(overrides)
 
     params_n_steps = params.pop("n_steps", None)
@@ -1814,10 +2034,17 @@ def _post_study_run_variant_for_test(ws_root, body):
 
     db_file = str(study_dir / "runs.db")
     run_id = cr.generate_run_id(spec_id, full_params)
+    # v2ecoli friction #6: per-study subprocess timeout.
+    runtime_cfg = (spec.get("runtime") or {}) if isinstance(spec.get("runtime"), dict) else {}
+    timeout_s = int(runtime_cfg.get("subprocess_timeout_s") or 1800)
+    # v2ecoli friction #14: thread observables to the subprocess (same as
+    # baseline path) so variant runs also capture biology in history.state.
+    emit_paths = _collect_study_observables(spec)
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label=variant_name,
         sim_name=variant_name, overrides=generator_overrides,
+        timeout=timeout_s, emit_paths=emit_paths,
     )
     # F2: no _append_study_run — the runs_meta row is the canonical record;
     # see the matching note in run-baseline above.
@@ -2304,9 +2531,16 @@ def _is_generated_path(path: str) -> bool:
     """True if `path` is a generated report file (the dashboard rebuilds these
     on every page load, so they're chronically dirty and shouldn't block actions)
     or a large untracked artifact directory (out/ — the ~175 MB ParCa cache —
-    which must never block actions and must never be committed).
+    which must never block actions and must never be committed) or dashboard
+    runtime state under .pbg/ (the dashboard's own files; v2ecoli friction #15
+    flagged the Install action being blocked by composite-runs.db-shm and
+    .pbg/dashboard/ that older pbg-template revisions don't .gitignore yet).
     """
-    return path.startswith("reports/") or path.startswith("out/") or path == "out/"
+    return (
+        path.startswith("reports/")
+        or path.startswith("out/") or path == "out/"
+        or path.startswith(".pbg/") or path == ".pbg/"
+    )
 
 
 def _submodule_paths() -> set[str]:
@@ -2365,7 +2599,8 @@ def _diagnose_push_error(err: str) -> dict | None:
 
 
 def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
-                              label, overrides=None, sim_name=None, timeout=120):
+                              label, overrides=None, sim_name=None, timeout=1800,
+                              emit_paths=None):
     """Run a resolved composite ``state`` for ``steps`` steps in a subprocess,
     persisting runs_meta + history (via an injected SQLiteEmitter) to
     ``db_file``.
@@ -2409,6 +2644,12 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
             "run_id": run_id,
             "db_file": db_file,
             "steps": steps,
+            # v2ecoli friction #14: thread the study's declared observables
+            # to the child so it can populate the user_emitter schema BEFORE
+            # injecting SQLiteEmitter. Without this, history.state rows are
+            # just `{"_tick": <global_time>}` and every comparative viz
+            # renders empty. Empty list = legacy "no observables" behavior.
+            "emit_paths": list(emit_paths or []),
         }
         script = textwrap.dedent(f"""
             import json, sys, traceback
@@ -2428,6 +2669,8 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                 core.register_link('SQLiteEmitter', SQLiteEmitter)
                 doc = build_generator(entry, overrides=_payload['overrides'])
                 state = doc.get('state', doc) if isinstance(doc, dict) else doc
+                if _payload.get('emit_paths'):
+                    state = cr.inject_emitter_for_paths(state, _payload['emit_paths'])
                 state = cr.inject_sqlite_emitter(
                     state, run_id=_payload['run_id'], db_file=_payload['db_file'])
                 composite = Composite({{'state': state}}, core=core)
@@ -2436,6 +2679,10 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
         """).lstrip("\n")
     else:
         # Legacy path: serialize the pre-built state into a tempfile.
+        # v2ecoli friction #14: parent-side injection works here because
+        # the serialized state IS what the subprocess reconstructs.
+        if emit_paths:
+            state = cr.inject_emitter_for_paths(state, list(emit_paths))
         state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
         state = _strip_process_instances(state)
         _state_fd, _state_path = _tempfile.mkstemp(suffix=".state.json", prefix="vivarium-run-")
@@ -2501,6 +2748,18 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
         except sqlite3.IntegrityError:
             return ({"simulation_id": run_id,
                      "error": "duplicate run_id (rare timing collision) — retry"}, 500)
+
+        # v2ecoli friction #10: persist the rendered script alongside runs.db
+        # so "what did the dashboard actually run for this run_id?" is one cat.
+        # Best-effort; never fail a run because the sidecar couldn't be written.
+        try:
+            _db_dir = os.path.dirname(os.path.abspath(db_file))
+            _sims_dir = os.path.join(_db_dir, "sims")
+            os.makedirs(_sims_dir, exist_ok=True)
+            with open(os.path.join(_sims_dir, f"{run_id}.subprocess.py"), "w") as _f:
+                _f.write(script)
+        except OSError:
+            pass
 
         try:
             try:
@@ -3065,6 +3324,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_iset_list()
         if self.path.startswith("/api/iset/"):
             return self._get_iset_detail()
+        if self.path.startswith("/api/investigation-run-unblocked-status"):
+            return self._get_investigation_run_unblocked_status()
         if self.path.startswith("/api/investigation-registry"):
             return self._get_investigation_registry()
         if self.path.startswith("/api/study-charts/"):
@@ -4754,7 +5015,23 @@ if __name__ == "__main__":
                     state["pushed"] = True
                     save_state(state)
         if not state.get("pushed"):
-            return self._json({"error": "push to origin first (Push button)"}, 409)
+            # mem3dg-readdy friction #35: the old error said "click the Push
+            # button" but that button only renders when the branch has an
+            # upstream AND is ahead of it. For a never-pushed branch the
+            # workstream strip shows "Link branch to upstream" instead, and
+            # the user ended up stuck. Spell out BOTH UI paths plus the
+            # terminal fallback so the user has an actionable next step
+            # regardless of branch state.
+            return self._json({
+                "error": (
+                    "branch not yet pushed. Use the workstream strip at "
+                    "the top of the dashboard — click `Link branch to "
+                    "upstream` (if shown) to create the remote and push, "
+                    "or `Push` (if the branch already has an upstream). "
+                    "Terminal fallback: `git push -u origin <branch>`; "
+                    "the dashboard picks it up on the next refresh."
+                ),
+            }, 409)
         if state.get("pr_url"):
             return self._json({"error": f"PR already exists: {state['pr_url']}", "pr_url": state["pr_url"]}, 409)
 
@@ -5359,6 +5636,40 @@ if __name__ == "__main__":
         except InvestigationSpecError as e:
             return self._json({"error": str(e), "name": name, "status": "invalid"}, 200)
 
+        # Merge auto-discovered viz/*.html into spec.embed_visualizations so
+        # the downloadable investigation report (walkthrough.js'
+        # _buildInvestigationReportHtml) — which iterates spec.embed_visualizations
+        # to inline iframes — picks up CLI-rendered Plotly charts without a
+        # manual study.yaml edit. Mirror logic of _study_detail_spec.
+        if isinstance(spec, dict):
+            try:
+                auto_embeds = _discover_viz_html_files(name)
+            except Exception:
+                auto_embeds = []
+            if auto_embeds:
+                existing_urls = {
+                    (e or {}).get("url")
+                    for e in (spec.get("embed_visualizations") or [])
+                }
+                merged_embeds = list(spec.get("embed_visualizations") or [])
+                for e in auto_embeds:
+                    if e.get("url") not in existing_urls:
+                        merged_embeds.append(e)
+                spec["embed_visualizations"] = merged_embeds
+            # Also merge runs.db rows so spec.runs reflects all CLI-launched
+            # runs (same logic as _study_detail_spec).
+            try:
+                db_runs = _read_runs_db_for_study(name)
+            except Exception:
+                db_runs = []
+            if db_runs:
+                existing_ids = {(r or {}).get("run_id") for r in (spec.get("runs") or [])}
+                merged_runs = list(spec.get("runs") or [])
+                for r in db_runs:
+                    if r.get("run_id") not in existing_ids:
+                        merged_runs.append(r)
+                spec["runs"] = merged_runs
+
         viz_dir = inv_dir / "viz"
         viz_files = []
         if viz_dir.is_dir():
@@ -5736,8 +6047,13 @@ if __name__ == "__main__":
                     directly (e.g. chromosome maps, DnaA-box positions).
         """
         import urllib.parse
+        import yaml as _yaml
         from vivarium_dashboard.lib.study_charts import (
-            render_study_charts, discover_static_study_charts,
+            render_study_charts, render_v4_test_charts,
+            discover_static_study_charts,
+        )
+        from vivarium_dashboard.lib.simulations_index import (
+            discover_default_baseline_db,
         )
         path = urllib.parse.urlparse(self.path).path
         name = path[len("/api/study-charts/"):].strip("/")
@@ -5745,12 +6061,30 @@ if __name__ == "__main__":
             return self._json({"error": "missing study name"}, 400)
         runs_db = WORKSPACE / "studies" / name / "runs.db"
         charts_dir = WORKSPACE / "studies" / name / "charts"
+        spec_path = WORKSPACE / "studies" / name / "study.yaml"
         try:
-            live_charts = render_study_charts(
-                runs_db, run_name="baseline-steady-state",
-            )
-            if not live_charts:
-                live_charts = render_study_charts(runs_db, run_name=None)
+            # Detect v4: study.yaml with schema_version: 4 → render charts
+            # per-test from tests[].measure.path, with default-baseline
+            # fallback when the per-study runs.db is empty.
+            spec = None
+            if spec_path.is_file():
+                try:
+                    spec = _yaml.safe_load(spec_path.read_text())
+                except Exception:
+                    spec = None
+            is_v4 = isinstance(spec, dict) and spec.get("schema_version") == 4
+
+            if is_v4:
+                fallback_db = discover_default_baseline_db(WORKSPACE)
+                live_charts = render_v4_test_charts(
+                    spec, runs_db, fallback_db=fallback_db,
+                )
+            else:
+                live_charts = render_study_charts(
+                    runs_db, run_name="baseline-steady-state",
+                )
+                if not live_charts:
+                    live_charts = render_study_charts(runs_db, run_name=None)
             for c in live_charts:
                 c.setdefault("source", "live")
             static_charts = discover_static_study_charts(charts_dir)
@@ -5758,6 +6092,7 @@ if __name__ == "__main__":
             return self._json({"error": str(e), "study": name}, 500)
         return self._json({
             "study": name,
+            "schema_version": (spec or {}).get("schema_version"),
             "charts": live_charts + static_charts,
             "db_exists": runs_db.exists(),
             "static_count": len(static_charts),
@@ -5860,6 +6195,10 @@ if __name__ == "__main__":
             "name":             spec.get("name", name),
             "title":            spec.get("title", spec.get("name", name)),
             "description":      spec.get("description", ""),
+            "lead":             spec.get("lead", ""),
+            "at_a_glance":      spec.get("at_a_glance") or [],
+            "how_to_read":      spec.get("how_to_read") or [],
+            "glossary":         spec.get("glossary") or [],
             "biological_story": spec.get("biological_story", ""),
             "question":         spec.get("question", ""),
             "hypothesis":       spec.get("hypothesis", ""),
@@ -6019,9 +6358,19 @@ if __name__ == "__main__":
             if condition == "complete":
                 return status == "complete"
             if condition == "tests-passed":
-                tests = (parent.get("tests") or {}).get("last_results") or {}
-                summary = tests.get("summary") or {}
-                # treat 'no failures + at least one passed' as passed; 'no results yet' as not-passed.
+                tests = parent.get("tests")
+                # New v4 shape: tests is a list of {name, status, ...}.
+                if isinstance(tests, list):
+                    statuses = [
+                        (t.get("status") or "").lower()
+                        for t in tests if isinstance(t, dict)
+                    ]
+                    if not statuses:
+                        return False
+                    return all("pass" in s for s in statuses)
+                # Legacy v3/v4-extras shape: tests is a mapping with last_results.
+                last = (tests or {}).get("last_results") or {}
+                summary = last.get("summary") or {}
                 passed = summary.get("passed", 0) or 0
                 failed = summary.get("failed", 0) or 0
                 return failed == 0 and passed > 0
@@ -7780,6 +8129,95 @@ if __name__ == "__main__":
         response, code = _post_study_set_objective_for_test(WORKSPACE, body)
         return self._json(response, code)
 
+    def _post_study_expert_input_set(self, body: dict):
+        """POST /api/study-expert-input-set {study, name, current}
+
+        Patches one ``conditions.model_settings[i].current`` value in the
+        target study's yaml (legacy alias ``conditions.expert_inputs`` is
+        still accepted on read). The next ``pbg_runner`` invocation reads
+        the updated value. Round-trip preserves yaml comments via the
+        standard yaml.safe_dump output (comments not preserved by design —
+        the file is canonical, not a hand-edited doc).
+
+        Body: ``{"study": "<slug>", "name": "<setting-name>", "current": <value>}``
+        Where ``current`` can be a number, string, bool, or null (to reset
+        to "awaiting expert").
+
+        URL kept as ``/api/study-expert-input-set`` for back-compat; rename
+        the field internally without breaking deployed clients.
+        """
+        import yaml as _yaml
+        slug = (body or {}).get("study", "").strip()
+        name = (body or {}).get("name", "").strip()
+        if not slug or not name:
+            return self._json({"error": "study and name are required"}, 400)
+        if "current" not in (body or {}):
+            return self._json({"error": "current is required (may be null)"}, 400)
+        new_current = body["current"]
+
+        spec_path = _study_spec_path(slug)
+        if not spec_path or not spec_path.is_file():
+            return self._json({"error": f"study not found: {slug}"}, 404)
+        try:
+            spec = _yaml.safe_load(spec_path.read_text()) or {}
+        except _yaml.YAMLError as e:
+            return self._json({"error": f"yaml parse failed: {e}"}, 500)
+
+        cond = spec.get("conditions")
+        if not isinstance(cond, dict):
+            return self._json(
+                {"error": "study has no v4 conditions block; cannot set model setting"},
+                400,
+            )
+        # Prefer the new key; fall back to the legacy alias.
+        eis_key = "model_settings" if "model_settings" in cond else "expert_inputs"
+        eis = cond.get(eis_key)
+        if not isinstance(eis, list):
+            return self._json(
+                {"error": f"conditions.{eis_key} is missing or not a list"},
+                400,
+            )
+
+        target = None
+        for ei in eis:
+            if isinstance(ei, dict) and ei.get("name") == name:
+                target = ei
+                break
+        if target is None:
+            return self._json(
+                {"error": f"model setting not found: {name}"},
+                404,
+            )
+
+        # Optional bounds check when range is declared.
+        rng = target.get("range")
+        if (
+            isinstance(rng, list) and len(rng) == 2
+            and isinstance(new_current, (int, float))
+            and not isinstance(new_current, bool)
+        ):
+            lo, hi = rng[0], rng[1]
+            if isinstance(lo, (int, float)) and isinstance(hi, (int, float)):
+                if new_current < lo or new_current > hi:
+                    return self._json(
+                        {"error": f"value {new_current} is outside declared range [{lo}, {hi}]"},
+                        400,
+                    )
+
+        target["current"] = new_current
+        try:
+            spec_path.write_text(
+                _yaml.safe_dump(spec, sort_keys=False, allow_unicode=True, width=100)
+            )
+        except OSError as e:
+            return self._json({"error": f"write failed: {e}"}, 500)
+
+        return self._json({
+            "study": slug,
+            "name": name,
+            "current": new_current,
+        }, 200)
+
     def _post_study_seed_followup(self, body: dict):
         """POST /api/study-seed-followup {parent, followup_idx} → seed child study.
 
@@ -7833,6 +8271,240 @@ if __name__ == "__main__":
         """POST /api/study-run-variant {study, variant, steps?}"""
         response, code = _post_study_run_variant_for_test(WORKSPACE, body)
         return self._json(response, code)
+
+    def _post_investigation_run_unblocked(self, body: dict):
+        """POST /api/investigation-run-unblocked {investigation}
+
+        Enumerates every study in the investigation, finds variants whose
+        ``conditions.model_settings`` don't have any unset
+        ``required-before-run`` gates, and runs them sequentially on a
+        background thread. Returns a ``job_id`` immediately; the client
+        polls ``/api/investigation-run-unblocked-status?job_id=...``.
+
+        Each variant's run delegates to the existing
+        ``_post_study_run_baseline_for_test`` / ``_post_study_run_variant_for_test``
+        handlers — same composite resolution, same emit pipeline, same
+        viz-rendering side effect.
+
+        After the last variant lands, the worker also fires comparative
+        visualisations declared under the investigation yaml's
+        ``comparative_visualizations:`` block (if present).
+        """
+        import threading
+        import yaml as _yaml
+        from vivarium_dashboard.lib.run_jobs import (
+            manager, enumerate_unblocked,
+        )
+
+        inv_slug = ((body or {}).get("investigation") or "").strip()
+        if not inv_slug:
+            return self._json({"error": "investigation is required"}, 400)
+        inv_yaml = WORKSPACE / "investigations" / inv_slug / "investigation.yaml"
+        if not inv_yaml.is_file():
+            return self._json({"error": f"investigation not found: {inv_slug}"}, 404)
+        try:
+            iset = _yaml.safe_load(inv_yaml.read_text()) or {}
+        except _yaml.YAMLError as e:
+            return self._json({"error": f"yaml parse failed: {e}"}, 500)
+
+        # Optional studies filter: ``{"investigation": "...", "studies":
+        # ["dnaa-05-itv2-comparison", ...]}`` runs only those member
+        # studies. Default (no filter) is "all studies in the investigation".
+        studies_filter_raw = (body or {}).get("studies")
+        studies_filter: set[str] | None = None
+        if studies_filter_raw:
+            if isinstance(studies_filter_raw, str):
+                studies_filter = {studies_filter_raw}
+            elif isinstance(studies_filter_raw, list):
+                studies_filter = {str(s) for s in studies_filter_raw if s}
+
+        # Collect runnable items across every member study (or just the
+        # requested subset).
+        items: list[dict] = []
+        skipped: list[dict] = []
+        for member in (iset.get("studies") or []):
+            member_name = member if isinstance(member, str) else member.get("study")
+            if not member_name:
+                continue
+            if studies_filter and member_name not in studies_filter:
+                continue
+            spec_path = WORKSPACE / "studies" / member_name / "study.yaml"
+            if not spec_path.is_file():
+                # legacy: investigations/<name>/spec.yaml
+                spec_path = WORKSPACE / "investigations" / member_name / "spec.yaml"
+            if not spec_path.is_file():
+                skipped.append({"study": member_name, "variant": "?",
+                                "status": "skipped",
+                                "error": "study.yaml not found"})
+                continue
+            try:
+                spec = _yaml.safe_load(spec_path.read_text()) or {}
+            except _yaml.YAMLError as e:
+                skipped.append({"study": member_name, "variant": "?",
+                                "status": "skipped", "error": f"yaml: {e}"})
+                continue
+            runnable, blocked = enumerate_unblocked(spec)
+            items.extend(runnable)
+            items.extend(blocked)
+        items.extend(skipped)
+
+        if not any(it.get("status") == "queued" for it in items):
+            # mem3dg-readdy friction #34: a bare "no unblocked variants"
+            # error was unactionable. Compute a per-status breakdown
+            # *and* surface the items[] in the response body so the UI
+            # can render per-item reasons.
+            from collections import Counter as _Counter
+            status_counts = _Counter(it.get("status") or "?" for it in items)
+            parts = []
+            for label, key in (
+                ("blocked",   "blocked"),
+                ("skipped",   "skipped"),
+                ("completed", "done"),
+            ):
+                if status_counts.get(key):
+                    parts.append(f"{status_counts[key]} {label}")
+            breakdown = ", ".join(parts) if parts else "no items enumerated"
+            return self._json({
+                "error": (
+                    f"no variants to queue ({breakdown}). Each item's reason "
+                    "is in `items[].error` — see the per-item panel."
+                ),
+                "items": items,
+            }, 400)
+
+        # Worker: walk through queued items in order, fire each via the
+        # existing run-variant / run-baseline path.
+        def _worker(job):
+            for idx, item in enumerate(list(job.items)):
+                if item.get("status") != "queued":
+                    continue
+                job.update_item(idx, status="running")
+                study_slug = item["study"]
+                variant_name = item["variant"]
+                try:
+                    if item["kind"] == "baseline":
+                        resp, code = _post_study_run_baseline_for_test(
+                            WORKSPACE, {"study": study_slug}
+                        )
+                    else:
+                        resp, code = _post_study_run_variant_for_test(
+                            WORKSPACE, {"study": study_slug, "variant": variant_name}
+                        )
+                    if code == 200:
+                        job.update_item(idx, status="done",
+                                        run_id=resp.get("run_id", ""))
+                    else:
+                        job.update_item(idx, status="failed",
+                                        error=resp.get("error", f"HTTP {code}"))
+                except BaseException as e:  # noqa: BLE001
+                    job.update_item(idx, status="failed", error=str(e))
+            # Optional: render investigation-level comparative visualisations.
+            self._render_investigation_comparative_visualisations(
+                inv_slug, iset, job,
+            )
+
+        job = manager.submit(inv_slug, items, _worker)
+        return self._json({"job_id": job.job_id, "items": items}, 202)
+
+    def _get_investigation_run_unblocked_status(self):
+        """GET /api/investigation-run-unblocked-status?job_id=<id>"""
+        import urllib.parse
+        from vivarium_dashboard.lib.run_jobs import manager
+        q = urllib.parse.parse_qs(self.path.split("?", 1)[-1] if "?" in self.path else "")
+        job_id = (q.get("job_id") or [""])[0]
+        if not job_id:
+            return self._json({"jobs": manager.list_recent(10)}, 200)
+        job = manager.get(job_id)
+        if job is None:
+            return self._json({"error": "job not found"}, 404)
+        return self._json(job.to_dict(), 200)
+
+    def _render_investigation_comparative_visualisations(
+        self, inv_slug: str, iset: dict, job
+    ) -> None:
+        """Walk each member study + render its ``comparative_visualizations``.
+
+        Comparative viz now lives in the **study** yaml, not the
+        investigation yaml — each comparison is between the study's own
+        baseline + variants. Single ``studies/<slug>/runs.db`` is queried
+        once per trace (filtered by simulation name), and output lands
+        in ``studies/<slug>/viz/comparative_<name>.html`` so the
+        per-study viz auto-discovery + the downloadable report's
+        per-study section pick it up.
+
+        Schema (optional, in each study.yaml):
+
+            comparative_visualizations:
+              - name: dnaa-atp-count-vs-time
+                title: DnaA-ATP count over time (baseline vs variants)
+                observable_path: listeners.itv2.dnaa_atp_count
+                y_label: DnaA-ATP count
+                runs:
+                  - {sim_name: dnaa-05-itv2-comparison-baseline, label: Baseline (ITv2)}
+                  - {sim_name: v2ecoli-baseline-default,         label: v2ecoli default}
+                  - {sim_name: v2ecoli-with-fxj-params,          label: v2ecoli + FXJ}
+
+        ``sim_name`` matches the ``simulations.name`` column in the
+        study's runs.db — the value pbg_runner writes as the run's
+        label. For baselines this is typically ``<study-slug>-baseline``;
+        for variants it's the variant's own name.
+        """
+        import yaml as _yaml
+        from vivarium_dashboard.lib.comparative_viz import (
+            render_comparative_time_series,
+        )
+        for member in (iset.get("studies") or []):
+            study_slug = member if isinstance(member, str) else (member or {}).get("study")
+            if not study_slug:
+                continue
+            spec_path = WORKSPACE / "studies" / study_slug / "study.yaml"
+            if not spec_path.is_file():
+                continue
+            try:
+                study_spec = _yaml.safe_load(spec_path.read_text()) or {}
+            except _yaml.YAMLError:
+                continue
+            specs = study_spec.get("comparative_visualizations") or []
+            if not specs:
+                continue
+            viz_dir = WORKSPACE / "studies" / study_slug / "viz"
+            viz_dir.mkdir(parents=True, exist_ok=True)
+            study_db = WORKSPACE / "studies" / study_slug / "runs.db"
+            if not study_db.is_file():
+                continue
+            for cv in specs:
+                if not isinstance(cv, dict) or not cv.get("name"):
+                    continue
+                runs = []
+                for r in cv.get("runs") or []:
+                    if not isinstance(r, dict):
+                        continue
+                    sim_name = r.get("sim_name") or r.get("variant") or r.get("name")
+                    label = r.get("label") or sim_name or "?"
+                    runs.append({
+                        "label": label,
+                        "db_path": study_db,
+                        "sim_name": sim_name,
+                    })
+                if not runs:
+                    continue
+                out_path = viz_dir / f"comparative_{cv['name']}.html"
+                try:
+                    render_comparative_time_series(
+                        runs=runs,
+                        observable_path=cv.get("observable_path", ""),
+                        title=cv.get("title", cv["name"]),
+                        y_label=cv.get("y_label", ""),
+                        output_path=out_path,
+                        observable_index=cv.get("observable_index"),
+                        target_band=cv.get("target_band"),
+                        target_band_label=cv.get("target_band_label"),
+                    )
+                except Exception as e:  # noqa: BLE001
+                    job.update_item(
+                        len(job.items) - 1,
+                        comparative_viz_warning=f"{study_slug}/{cv['name']}: {e}",
+                    )
 
     def _post_study_variant_add(self, body: dict):
         """POST /api/study-variant-add {study, name, description?,

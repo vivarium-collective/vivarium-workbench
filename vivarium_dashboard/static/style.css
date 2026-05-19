@@ -877,6 +877,15 @@ body.focus-mode::before{
 .viv-rail.viv-rail-collapsed .viv-rail-investigations-group-name{ display:none }
 .viv-rail.viv-rail-collapsed .viv-rail-investigations-group-count{ display:none }
 .viv-rail.viv-rail-collapsed .viv-rail-investigations-group-items{ display:none }
+/* The rail's "Studies" list (rendered into #viv-rail-investigations by
+ * _renderRailInvestigationGroups in walkthrough.js) emits .viv-rail-iset-group
+ * + .viv-rail-sublink children — different class names than the older
+ * .viv-rail-investigations-group-* rules above match. When the rail is
+ * collapsed those leaked through and wrapped to single-character columns
+ * (see screenshot in friction log). Hide the whole host + its enclosing
+ * .viv-rail-section so the collapsed rail shows only the top-level icons. */
+.viv-rail.viv-rail-collapsed #viv-rail-investigations{ display:none }
+.viv-rail.viv-rail-collapsed .viv-rail-section:has(#viv-rail-investigations){ display:none }
 .viv-rail.viv-rail-collapsed .viv-rail-footer{
   padding:10px 8px; justify-content:center;
 }
@@ -973,6 +982,21 @@ body.focus-mode::before{
   cursor:pointer; user-select:none;
 }
 .viv-avatar:hover{ background:#a5b4fc }
+.viv-avatar-link{ text-decoration:none }
+/* Generic "Connect GitHub" prompt when `gh auth login` hasn't run. Muted
+ * palette so it reads as an affordance, not an identity. */
+.viv-avatar-no-github{
+  background:#e5e7eb; color:#6b7280; font-size:1.05em; font-weight:400;
+}
+.viv-avatar-no-github:hover{ background:#d1d5db; color:#1f2937 }
+.viv-rail-footer-no-github{
+  color:#6b7280;
+}
+.viv-rail-footer-no-github strong{ font-weight:500 }
+.viv-rail-footer-no-github code{
+  background:#f3f4f6; padding:0 4px; border-radius:3px;
+  font-size:0.92em; color:#374151;
+}
 
 /* Content area ------------------------------------------------------------- */
 .viv-content{
@@ -994,6 +1018,28 @@ body.focus-mode::before{
   padding:4px 8px; border-radius:4px;
   font-size:0.78em; white-space:nowrap;
   z-index:60;
+}
+/* Wide / multi-line variant for explainer chips (mem3dg-readdy friction #36
+ * — Run-cluster actions had title= tooltips that nobody discovered; a visible
+ * chip makes the explainer signposted). Inline-block label with a hovering
+ * pre-wrap card. */
+.viv-info-chip{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:18px; height:18px; border-radius:50%;
+  background:#e5e7eb; color:#4b5563;
+  font-size:11px; font-weight:600;
+  cursor:help; position:relative;
+}
+.viv-info-chip:hover{ background:#d1d5db; color:#111827 }
+.viv-info-chip[data-tooltip]:hover::after{
+  content:attr(data-tooltip);
+  position:absolute; top:calc(100% + 6px); left:0;
+  background:#1f2937; color:#fff;
+  padding:8px 10px; border-radius:4px;
+  font-size:0.78em; line-height:1.5;
+  white-space:pre-wrap; min-width:260px; max-width:340px;
+  z-index:60;
+  text-align:left; font-weight:400;
 }
 
 /* Study detail — cleaner tab strip + summary header (UX polish pass) -------- */
@@ -1369,3 +1415,281 @@ body.focus-mode::before{
 .git-status-actions .ws-btn:hover { filter: brightness(0.97); }
 .git-status-actions .ws-warn { color: #92400e; font-size: 0.85em; background: #fef3c7; padding: 0.2rem 0.5rem; border-radius: 4px; }
 .checkbox-row { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; }
+
+/* ─── Investigation intro (textbook-style) ─────────────────────────── */
+.inv-intro {
+  font-family: 'Charter', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  color: #1f2937;
+}
+.inv-lead {
+  font-size: 1.05em;
+  line-height: 1.65;
+  color: #1f2937;
+  border-left: 4px solid #2563eb;
+  padding: 4px 14px;
+  margin: 0 0 16px 0;
+  background: linear-gradient(90deg, #f8fafc 0%, transparent 100%);
+}
+.inv-lead p { margin: 0 0 10px 0; }
+.inv-lead p:last-child { margin-bottom: 0; }
+.inv-lead code {
+  background: #f1f5f9;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.9em;
+  color: #0f172a;
+}
+.inv-lead ul, .inv-lead ol { margin: 6px 0 10px 22px; padding: 0; }
+.inv-lead li { margin: 2px 0; }
+.inv-lead strong { color: #0f172a; }
+
+.inv-at-a-glance {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+  margin: 0 0 16px 0;
+}
+.inv-aag-tile {
+  display: block;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid #6366f1;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  text-decoration: none;
+  color: inherit;
+  transition: box-shadow 0.12s, transform 0.05s, border-left-color 0.12s;
+  cursor: pointer;
+}
+.inv-aag-tile:hover {
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.18);
+  border-left-color: #4338ca;
+  transform: translateY(-1px);
+}
+.inv-aag-tile:active {
+  transform: translateY(0);
+}
+.inv-aag-tile:visited { color: inherit; }
+.inv-aag-tile .inv-aag-num {
+  display: inline-block;
+  background: #eef2ff;
+  color: #3730a3;
+  border-radius: 50%;
+  width: 22px; height: 22px;
+  line-height: 22px;
+  text-align: center;
+  font-size: 0.8em;
+  font-weight: 600;
+  margin-right: 6px;
+}
+.inv-aag-tile .inv-aag-slug {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.88em;
+  color: #1f2937;
+  font-weight: 600;
+}
+.inv-aag-tile .inv-aag-role {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.92em;
+  color: #475569;
+  line-height: 1.4;
+}
+
+.inv-how-to-read {
+  background: #fefce8;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  padding: 10px 16px;
+  margin: 0 0 16px 0;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  font-size: 0.95em;
+}
+.inv-how-to-read strong { color: #78350f; display: block; margin-bottom: 4px; }
+.inv-how-to-read ol { margin: 0 0 0 18px; padding: 0; color: #1f2937; }
+.inv-how-to-read li { margin: 3px 0; line-height: 1.5; }
+
+.inv-glossary {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px 16px;
+  margin: 0 0 16px 0;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  font-size: 0.92em;
+}
+.inv-glossary summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #334155;
+  padding: 2px 0;
+}
+.inv-glossary[open] summary { margin-bottom: 6px; }
+.inv-glossary dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 14px;
+  row-gap: 4px;
+}
+.inv-glossary dt {
+  font-weight: 600;
+  color: #0f172a;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.92em;
+}
+.inv-glossary dd { margin: 0; color: #334155; line-height: 1.5; }
+
+.inv-bio-story {
+  background: #f0f9ff;
+  border-left: 4px solid #0284c7;
+  border-radius: 0 6px 6px 0;
+  padding: 12px 16px;
+  margin: 0 0 16px 0;
+}
+.inv-bio-story-label {
+  display: block;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.78em;
+  color: #075985;
+  margin-bottom: 6px;
+}
+.inv-bio-story-text {
+  color: #0c4a6e;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  font-size: 0.95em;
+}
+
+/* ─── Conditions block on study-detail Build tab ──────────────────── */
+.cond-block { margin: 12px 0; padding: 10px 12px; background: #fff;
+  border: 1px solid #e2e8f0; border-radius: 6px; }
+.cond-block-title { font-weight: 600; color: #1f2937; margin-bottom: 6px; }
+.cond-pill { display: inline-flex; align-items: center; gap: 4px;
+  background: #eef2ff; border-radius: 3px; padding: 2px 6px;
+  font-size: 0.85em; }
+.cond-pill-k { color: #3730a3; font-weight: 600;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.cond-table { width: 100%; border-collapse: collapse; font-size: 0.9em;
+  margin: 6px 0; }
+.cond-table th { text-align: left; padding: 6px 8px;
+  border-bottom: 1px solid #cbd5e1; color: #334155; font-weight: 600;
+  background: #f8fafc; }
+.cond-table td { padding: 6px 8px; border-bottom: 1px solid #e5e7eb;
+  vertical-align: top; }
+.cond-table tr:last-child td { border-bottom: none; }
+.cond-ei-input { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.cond-ei-required-badge { display: inline-block; background: #fde68a;
+  color: #78350f; font-size: 0.75em; padding: 1px 8px; border-radius: 9px;
+  margin-left: 6px; font-weight: 600; }
+.cond-ei-gate-req { display: inline-block; background: #fde68a;
+  color: #78350f; font-size: 0.78em; padding: 1px 6px; border-radius: 3px;
+  font-weight: 600; }
+.cond-ei-gate-opt { display: inline-block; background: #e0e7ff;
+  color: #3730a3; font-size: 0.78em; padding: 1px 6px; border-radius: 3px; }
+.cond-ei-flash.saved { color: #065f46; font-weight: 600; }
+.cond-ei-flash.error { color: #991b1b; font-weight: 600; }
+
+/* ─── Workspace-owner footer: GitHub-linked variant ──────────────── */
+.viv-rail-footer-link {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  text-decoration: none;
+  color: inherit;
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  transition: background 0.15s, transform 0.05s;
+}
+.viv-rail-footer-link:hover {
+  background: rgba(99, 102, 241, 0.08);
+}
+.viv-rail-footer-link:active {
+  transform: translateY(1px);
+}
+.viv-rail-footer-link:visited { color: inherit; }
+.viv-avatar-img {
+  background: transparent;
+  padding: 0;
+  border: 1px solid #e2e8f0;
+  object-fit: cover;
+}
+.viv-rail-footer-text small {
+  display: block;
+  color: #6b7280;
+  font-size: 0.78em;
+  margin-top: 1px;
+}
+
+/* ─── Run-unblocked progress panel ─────────────────────────────────── */
+.inv-run-progress {
+  background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px;
+  padding: 10px 14px; margin: 10px 0 16px 0;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+}
+.inv-run-progress-banner { font-size: 0.95em; color: #1f2937; margin-bottom: 6px; }
+.inv-run-progress-banner.inv-run-error { color: #991b1b; }
+.inv-run-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.inv-run-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 10px; border-radius: 4px; font-size: 0.9em;
+  background: #fff; border: 1px solid #e2e8f0;
+}
+.inv-run-item code { font-size: 0.88em; }
+.inv-run-icon { display: inline-block; width: 18px; text-align: center; font-weight: 600; }
+.inv-run-arrow { color: #9ca3af; }
+.inv-run-err { color: #991b1b; font-size: 0.88em; }
+.inv-run-queued   { background: #fff; border-color: #e5e7eb; color: #475569; }
+.inv-run-queued .inv-run-icon { color: #94a3b8; }
+.inv-run-running  { background: #eff6ff; border-color: #93c5fd; color: #1e3a8a; }
+.inv-run-running .inv-run-icon { color: #2563eb; animation: inv-run-pulse 1s infinite; }
+.inv-run-done     { background: #f0fdf4; border-color: #86efac; color: #14532d; }
+.inv-run-done    .inv-run-icon { color: #16a34a; }
+.inv-run-failed   { background: #fef2f2; border-color: #fca5a5; color: #991b1b; }
+.inv-run-failed  .inv-run-icon { color: #dc2626; }
+.inv-run-blocked  { background: #fef3c7; border-color: #fcd34d; color: #78350f; }
+.inv-run-skipped  { background: #f3f4f6; border-color: #d1d5db; color: #4b5563; font-style: italic; }
+@keyframes inv-run-pulse {
+  0%, 100% { opacity: 1; } 50% { opacity: 0.4; }
+}
+
+/* ─── Investigation-level comparative viz strip ─────────────────────── */
+.inv-comparative-viz {
+  margin: 18px 0 0 0;
+  padding: 14px 16px;
+  background: #f0f9ff;
+  border: 1px solid #93c5fd;
+  border-radius: 8px;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+}
+.inv-comparative-title { margin: 0 0 4px 0; font-size: 1.05em; color: #1e3a8a; }
+.inv-comparative-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 12px;
+}
+.inv-comparative-card {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.inv-comparative-card-title {
+  padding: 8px 12px;
+  font-size: 0.9em;
+  font-weight: 600;
+  color: #334155;
+  background: #f1f5f9;
+  border-bottom: 1px solid #e2e8f0;
+}
+.inv-comparative-frame {
+  width: 100%;
+  height: 540px;
+  border: 0;
+  display: block;
+  background: #fff;
+}
