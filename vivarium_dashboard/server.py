@@ -1457,7 +1457,49 @@ def _resolve_study_baseline_state(pkg, spec_id, params):
             discover_generators()
         entry = _REGISTRY.get(spec_id)
     if entry is None:
-        return None, {"error": f"composite {spec_id!r} not in generator registry"}
+        # mem3dg-readdy friction #21: fall back to file-discovered composites
+        # (the OTHER registry — pbg_superpowers.composite_discovery walks
+        # *.composite.{yaml,json} on disk). A workspace that ships YAML
+        # specs without @composite_generator decorators is still runnable
+        # via this path, removing the "Composites tab lists it but Run
+        # rejects it" foot-gun.
+        try:
+            from pbg_superpowers.composite_discovery import discover_composites
+            specs = discover_composites()
+        except Exception:  # noqa: BLE001
+            specs = {}
+        yaml_spec = specs.get(spec_id)
+        # Allow the same `local:<name>` shorthand on the YAML side.
+        if yaml_spec is None and spec_id.startswith("local:"):
+            short_name = spec_id[len("local:"):]
+            yaml_spec = next(
+                (s for sid, s in specs.items() if sid.endswith("." + short_name)
+                 or s.get("name") == short_name),
+                None,
+            )
+        if yaml_spec is not None:
+            state = yaml_spec.get("state") if isinstance(yaml_spec, dict) else None
+            if isinstance(state, dict):
+                # YAML composites don't support `params` overrides yet —
+                # generators are the path for parametrized runs. Surface
+                # this clearly rather than silently dropping the kwargs.
+                if params:
+                    return None, {"error": (
+                        f"YAML composite {spec_id!r} resolved but `params:` "
+                        "overrides aren't supported on file-discovered specs. "
+                        "Promote to @composite_generator to use param overrides."
+                    )}
+                return state, None
+            return None, {"error": (
+                f"YAML composite {spec_id!r} has no `state:` block "
+                "(check the spec shape)"
+            )}
+        return None, {"error": (
+            f"composite {spec_id!r} not found in either the "
+            "@composite_generator registry OR the file-discovery index "
+            "(*.composite.{yaml,json}). Add an @composite_generator "
+            "function or ship a composite YAML."
+        )}
     try:
         doc = build_generator(entry, overrides=params)
     except Exception as e:  # noqa: BLE001
