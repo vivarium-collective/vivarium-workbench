@@ -2434,9 +2434,16 @@ def _is_generated_path(path: str) -> bool:
     """True if `path` is a generated report file (the dashboard rebuilds these
     on every page load, so they're chronically dirty and shouldn't block actions)
     or a large untracked artifact directory (out/ — the ~175 MB ParCa cache —
-    which must never block actions and must never be committed).
+    which must never block actions and must never be committed) or dashboard
+    runtime state under .pbg/ (the dashboard's own files; v2ecoli friction #15
+    flagged the Install action being blocked by composite-runs.db-shm and
+    .pbg/dashboard/ that older pbg-template revisions don't .gitignore yet).
     """
-    return path.startswith("reports/") or path.startswith("out/") or path == "out/"
+    return (
+        path.startswith("reports/")
+        or path.startswith("out/") or path == "out/"
+        or path.startswith(".pbg/") or path == ".pbg/"
+    )
 
 
 def _submodule_paths() -> set[str]:
