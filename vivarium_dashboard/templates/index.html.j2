@@ -402,14 +402,32 @@
       </div>
     </div>
 
-    <!-- Footer: user identity + collapse toggle -->
+    <!-- Footer: user identity + collapse toggle.
+         Workspace owner resolved from `gh api user` (preferred) or
+         `git config user.{name,email}` (fallback). When a GitHub login
+         is present the whole footer becomes a link to the profile;
+         otherwise it stays inert. -->
+    {% set _owner_label = owner_name or owner_login or 'Workspace owner' %}
+    {% set _owner_sub = owner_login and ('@' + owner_login) or owner_email or '' %}
+    {% if owner_html_url %}
+    <a class="viv-rail-footer viv-rail-footer-link" href="{{ owner_html_url }}" target="_blank" rel="noopener" title="Open {{ owner_login or owner_name }} on GitHub ↗">
+    {% else %}
     <div class="viv-rail-footer">
-      <div class="viv-avatar viv-avatar-rail">{{ owner_initials or '—' }}</div>
+    {% endif %}
+      {% if owner_avatar_url %}
+        <img class="viv-avatar viv-avatar-rail viv-avatar-img" src="{{ owner_avatar_url }}" alt="{{ owner_login or owner_name or 'owner' }}" loading="lazy" referrerpolicy="no-referrer">
+      {% else %}
+        <div class="viv-avatar viv-avatar-rail">{{ owner_initials or '—' }}</div>
+      {% endif %}
       <div class="viv-rail-footer-text">
-        <strong>{{ owner_name or 'Workspace owner' }}</strong>
-        <small>{{ owner_email or '' }}</small>
+        <strong>{{ _owner_label }}</strong>
+        <small>{{ _owner_sub }}</small>
       </div>
+    {% if owner_html_url %}
+    </a>
+    {% else %}
     </div>
+    {% endif %}
 
     <button class="viv-rail-toggle" id="viv-rail-toggle" type="button" aria-label="Collapse rail" onclick="_vivToggleRail()">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-toggle-svg">

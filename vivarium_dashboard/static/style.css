@@ -1531,3 +1531,34 @@ body.focus-mode::before{
   color: #3730a3; font-size: 0.78em; padding: 1px 6px; border-radius: 3px; }
 .cond-ei-flash.saved { color: #065f46; font-weight: 600; }
 .cond-ei-flash.error { color: #991b1b; font-weight: 600; }
+
+/* ─── Workspace-owner footer: GitHub-linked variant ──────────────── */
+.viv-rail-footer-link {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  text-decoration: none;
+  color: inherit;
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  transition: background 0.15s, transform 0.05s;
+}
+.viv-rail-footer-link:hover {
+  background: rgba(99, 102, 241, 0.08);
+}
+.viv-rail-footer-link:active {
+  transform: translateY(1px);
+}
+.viv-rail-footer-link:visited { color: inherit; }
+.viv-avatar-img {
+  background: transparent;
+  padding: 0;
+  border: 1px solid #e2e8f0;
+  object-fit: cover;
+}
+.viv-rail-footer-text small {
+  display: block;
+  color: #6b7280;
+  font-size: 0.78em;
+  margin-top: 1px;
+}
