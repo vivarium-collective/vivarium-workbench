@@ -7856,15 +7856,19 @@ if __name__ == "__main__":
     def _post_study_expert_input_set(self, body: dict):
         """POST /api/study-expert-input-set {study, name, current}
 
-        Patches one ``conditions.expert_inputs[i].current`` value in the
-        target study's yaml. The next ``pbg_runner`` invocation reads the
-        updated value. Round-trip preserves yaml comments via the standard
-        yaml.safe_dump output (comments not preserved by design — the file
-        is canonical, not a hand-edited doc).
+        Patches one ``conditions.model_settings[i].current`` value in the
+        target study's yaml (legacy alias ``conditions.expert_inputs`` is
+        still accepted on read). The next ``pbg_runner`` invocation reads
+        the updated value. Round-trip preserves yaml comments via the
+        standard yaml.safe_dump output (comments not preserved by design —
+        the file is canonical, not a hand-edited doc).
 
-        Body: ``{"study": "<slug>", "name": "<expert-input-name>", "current": <value>}``
+        Body: ``{"study": "<slug>", "name": "<setting-name>", "current": <value>}``
         Where ``current`` can be a number, string, bool, or null (to reset
-        to "awaiting expert input").
+        to "awaiting expert").
+
+        URL kept as ``/api/study-expert-input-set`` for back-compat; rename
+        the field internally without breaking deployed clients.
         """
         import yaml as _yaml
         slug = (body or {}).get("study", "").strip()
@@ -7886,13 +7890,15 @@ if __name__ == "__main__":
         cond = spec.get("conditions")
         if not isinstance(cond, dict):
             return self._json(
-                {"error": "study has no v4 conditions block; cannot set expert input"},
+                {"error": "study has no v4 conditions block; cannot set model setting"},
                 400,
             )
-        eis = cond.get("expert_inputs")
+        # Prefer the new key; fall back to the legacy alias.
+        eis_key = "model_settings" if "model_settings" in cond else "expert_inputs"
+        eis = cond.get(eis_key)
         if not isinstance(eis, list):
             return self._json(
-                {"error": "conditions.expert_inputs is missing or not a list"},
+                {"error": f"conditions.{eis_key} is missing or not a list"},
                 400,
             )
 
@@ -7903,7 +7909,7 @@ if __name__ == "__main__":
                 break
         if target is None:
             return self._json(
-                {"error": f"expert input not found: {name}"},
+                {"error": f"model setting not found: {name}"},
                 404,
             )
 

@@ -4505,7 +4505,7 @@
       // Conditions sub-nav link: rendered when v4 ``conditions:`` exists.
       var _cond = (s.conditions && typeof s.conditions === 'object') ? s.conditions : null;
       var _nVar = (_cond && _cond.variants || []).length;
-      var _nEI  = (_cond && _cond.expert_inputs || []).length;
+      var _nEI  = (_cond && (_cond.model_settings || _cond.expert_inputs) || []).length;
       if (_cond) {
         var _condCount = _nVar + _nEI;
         links.push('<a href="#' + sid.conditions + '">Conditions ' +
@@ -4734,7 +4734,15 @@
       var chartsHtml = charts.length
         ? '<div id="' + sid.charts + '"><h3>Visualisations from the latest run</h3>'
           + charts.map(function(c) {
-              return '<div class="chart-card">' + c.svg + '<div class="chart-caption">' + _h(c.caption || '') + '</div></div>';
+              var capHtml = '';
+              if (c.caption) capHtml += '<div class="chart-caption">' + _h(c.caption) + '</div>';
+              if (c.simulations) capHtml +=
+                  '<div class="chart-simulations"><strong>Simulations behind this chart.</strong> '
+                  + _h(c.simulations) + '</div>';
+              if (c.interpretation) capHtml +=
+                  '<div class="chart-interpretation"><strong>What it means.</strong> '
+                  + _h(c.interpretation) + '</div>';
+              return '<div class="chart-card">' + c.svg + capHtml + '</div>';
             }).join('')
           + '</div>'
         : '';
@@ -5069,9 +5077,9 @@
           + '</div>';
       }
 
-      // ── CONDITIONS (v4: baseline + variants + expert_inputs) ─────────
+      // ── CONDITIONS (v4: baseline + variants + model_settings) ─────────
       // Renders the actual parameter table the evaluator wants: each
-      // variant's overrides + every expert_input's current/default/range.
+      // variant's overrides + every model_setting's current/default/range.
       var conditionsHtml = _renderConditionsBlock(s, sid.conditions);
 
       // ── PLANNING-PHASE DETECTION ──
@@ -5116,7 +5124,7 @@
           +     '<div class="study-planning-pill">PLANNING — not yet run</div>'
           +   '</header>'
           +   summaryHtml         // Question / purpose
-          +   conditionsHtml      // Conditions: variants + expert inputs (PROMINENT)
+          +   conditionsHtml      // Conditions: variants + model settings (PROMINENT)
           +   testsHtml           // Expected behavior / tests (PROMINENT for comments)
           +   chartsWithBaselineNoticeHtml  // Baseline charts with BASELINE label
           +   embedsHtml          // Embedded preview HTMLs
@@ -5165,17 +5173,17 @@
     // Layout:
     //   - Baseline composite + params
     //   - Variants table (name, base_composite, parameter overrides)
-    //   - Expert inputs table (name, type, default, current, range, gate)
+    //   - Model settings table (name, type, default, current, range, gate)
     //
     // Why this lives next to Tests instead of inside Build: variants and
-    // expert_inputs are the *experimental conditions* — what you change to
+    // model_settings are the *experimental conditions* — what you change to
     // run the tests — distinct from the *code* changes captured in Build.
     function _renderConditionsBlock(s, anchorId) {
       var cond = (s.conditions && typeof s.conditions === 'object') ? s.conditions : null;
       if (!cond) return '';
       var baseline = cond.baseline || {};
       var variants = cond.variants || [];
-      var expertInputs = cond.expert_inputs || [];
+      var expertInputs = cond.model_settings || cond.expert_inputs || [];
       if (!baseline.composite && !variants.length && !expertInputs.length) return '';
 
       function _fmtVal(v) {
@@ -5234,7 +5242,7 @@
             '</div>';
       }
 
-      // Expert inputs table
+      // Model settings table
       var expertHtml = '';
       if (expertInputs.length) {
         var nRequired = expertInputs.filter(function(e){return e.gate === 'required-before-run';}).length;
@@ -5243,7 +5251,7 @@
           : '';
         expertHtml =
             '<div class="cond-expert-inputs">' +
-              '<h4>Expert inputs <span class="muted small">(' + expertInputs.length + ')</span> ' + requiredBadge + '</h4>' +
+              '<h4>Model settings <span class="muted small">(' + expertInputs.length + ')</span> ' + requiredBadge + '</h4>' +
               '<p class="muted small" style="margin:0 0 6px 0">Parameters that need human input before the study runs. Edit a value on the dashboard\'s study-detail page (Build tab) and the next <code>pbg_runner</code> invocation will pick it up.</p>' +
               '<table class="cond-table">' +
                 '<thead><tr><th>Name</th><th>Type</th><th>Default</th><th>Current</th><th>Range</th><th>Gate</th><th>Description</th></tr></thead>' +
@@ -5628,6 +5636,10 @@
       + '.chart-card{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 12px 12px 12px;margin:10px 0}'
       + '.chart-card svg{display:block;width:100%;max-width:100%;height:auto}'
       + '.chart-caption{font-size:0.83em;color:#475569;margin-top:4px;line-height:1.4}'
+      + '.chart-simulations{font-size:0.9em;color:#1e3a8a;background:#dbeafe;border-left:3px solid #2563eb;padding:6px 10px;margin-top:8px;border-radius:0 3px 3px 0;line-height:1.5}'
+      + '.chart-simulations strong{color:#1e40af}'
+      + '.chart-interpretation{font-size:0.9em;color:#14532d;background:#dcfce7;border-left:3px solid #16a34a;padding:6px 10px;margin-top:6px;border-radius:0 3px 3px 0;line-height:1.5}'
+      + '.chart-interpretation strong{color:#15803d}'
       // implementation-requirement cards (biologist-friendly layout)
       + '.req-card{padding:12px 14px;margin:10px 0;border:1px solid #e2e8f0;border-radius:6px;background:#fff;box-shadow:0 1px 1px rgba(0,0,0,0.02)}'
       + '.req-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}'
@@ -5765,7 +5777,7 @@
       + '.finding-next{padding:6px 10px;background:#f0fdf4;border-left:3px solid #10b981;border-radius:3px;font-size:0.9em;margin-top:8px;line-height:1.5}'
       + '.finding-next strong{color:#065f46}'
       // ── eb table row coloring ──
-      // ── Conditions block (Variants + Expert inputs) ──
+      // ── Conditions block (Variants + Model settings) ──
       + '.study-conditions{margin:18px 0 10px 0;padding:12px 14px;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px}'
       // Planning-phase banner at the top of the report
       + '.planning-phase-banner{display:flex;gap:16px;align-items:flex-start;background:linear-gradient(135deg,#fef9c3 0%,#fde68a 100%);border:1px solid #f59e0b;border-radius:8px;padding:18px 22px;margin:16px 0 24px 0;box-shadow:0 1px 3px rgba(0,0,0,0.05)}'
@@ -5942,10 +5954,10 @@
               +     planningCount + ' of ' + (specs || []).length + ' studies have not yet run. '
               +     'The charts below come from the <strong>workspace pre-execution baseline</strong> '
               +     '(seed 0, M9-glucose, full cell cycle until division). For each study, the most '
-              +     'important sections for expert input are:'
+              +     'important sections for expert review are:'
               +   '</div>'
               +   '<ul class="planning-phase-banner-list">'
-              +     '<li><strong>Conditions</strong> — variants and their parameter overrides, plus the expert inputs awaiting your call. Edit values in the live dashboard\'s Build tab, or comment here.</li>'
+              +     '<li><strong>Conditions</strong> — variants and their parameter overrides, plus the model settings awaiting your call. Edit values in the live dashboard\'s Build tab, or comment here.</li>'
               +     '<li><strong>Expected behavior</strong> — what each test claims will pass / fail and the criterion it uses. Flag any test that\'s under- or over-specified.</li>'
               +     '<li><strong>Baseline visualizations</strong> — what the wild-type cell looks like before the study\'s mechanism lands. Comment on whether the trace matches your intuition.</li>'
               +   '</ul>'
@@ -5975,7 +5987,7 @@
       +   '<ol>'
       +     '<li><strong>Question</strong> — what this study is asking, in one paragraph. The "why" lives here.</li>'
       +     '<li><strong>Assumptions</strong> — what we take as given (cited to literature where applicable) and whether we have verified each one in v2ecoli yet.</li>'
-      +     '<li><strong>Conditions</strong> — what we set up to test the question. Three sub-fields: <em>baseline</em> (the reference composite), <em>variants</em> (perturbations), and <em>expert inputs</em> (parameters that need human input before the study can run).</li>'
+      +     '<li><strong>Conditions</strong> — what we set up to test the question. Three sub-fields: <em>baseline</em> (the reference composite), <em>variants</em> (perturbations), and <em>model settings</em> (parameters that need human input before the study can run).</li>'
       +     '<li><strong>Tests</strong> — pass/fail criteria with a measure path + a comparison op. Each test owns one row in the gate decision; charts inline below show the observable over time with the criterion overlaid.</li>'
       +     '<li><strong>Status</strong> — a single keyword summarising where the study currently stands (e.g. <code>evaluate-with-calibration-todo</code>, <code>done-tests-passing</code>, <code>blocked</code>).</li>'
       +   '</ol>'

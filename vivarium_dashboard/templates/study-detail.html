@@ -549,12 +549,15 @@
 {% if study.model_change or study.implementation_requirements or study.conditions %}
 <section class="study-tab-panel" data-kind="build" id="panel-build" hidden>
 
-  {# Conditions (v4): baseline + variants + expert_inputs. Edit a value in
+  {# Conditions (v4): baseline + variants + model_settings. Edit a value in
      the Current column and the next pbg_runner invocation picks it up. #}
   {% if study.conditions %}
+  {# Backward-compat: the new field is ``model_settings``; older yamls may
+     still carry the legacy ``expert_inputs`` alias. #}
+  {% set _model_settings = study.conditions.model_settings if study.conditions.model_settings is defined else study.conditions.expert_inputs %}
   <div class="overview-section" id="conditions-section">
     <h3>Conditions <span class="muted" style="font-size:0.85em;font-weight:normal">— what we set up to test it</span></h3>
-    <p class="muted" style="font-size:0.88em">The experimental knobs: which composite forms the baseline, how variants perturb it, and which parameters await expert input.</p>
+    <p class="muted" style="font-size:0.88em">The experimental knobs: which composite forms the baseline, how variants perturb it, and which model settings still need a human-set value.</p>
 
     {% set _cond = study.conditions %}
     {% if _cond.baseline %}
@@ -603,18 +606,18 @@
     </div>
     {% endif %}
 
-    {% if _cond.expert_inputs %}
+    {% if _model_settings %}
     <div class="cond-block">
-      {% set _n_required = _cond.expert_inputs | selectattr('gate','equalto','required-before-run') | list | length %}
+      {% set _n_required = _model_settings | selectattr('gate','equalto','required-before-run') | list | length %}
       <div class="cond-block-title">
-        Expert inputs <span class="muted" style="font-weight:normal;font-size:0.85em">({{ _cond.expert_inputs | length }})</span>
+        Model settings <span class="muted" style="font-weight:normal;font-size:0.85em">({{ _model_settings | length }})</span>
         {% if _n_required %}<span class="cond-ei-required-badge" title="{{ _n_required }} required-before-run">{{ _n_required }} required</span>{% endif %}
       </div>
       <p class="muted" style="font-size:0.85em;margin:0 0 6px 0">Edit a value in the Current column and click <strong>Save</strong>. The next <code>pbg_runner</code> invocation for this study reads the updated value from <code>study.yaml</code>.</p>
       <table class="cond-table cond-expert-table" data-study="{{ study.name }}">
         <thead><tr><th>Name</th><th>Type</th><th>Default</th><th>Current</th><th>Range</th><th>Gate</th><th></th></tr></thead>
         <tbody>
-          {% for e in _cond.expert_inputs %}
+          {% for e in _model_settings %}
           {# Derive a sensible step for type=number from the declared range
              so the spinner arrows step by ~1% of the range. Falls back to
              1 for integer, 0.01 for unranged number, "any" for unknown. #}
@@ -1707,8 +1710,9 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
 window._study = {{ study|tojson }};
 window._studyName = "{{ name }}";
 
-// Save handler for the Conditions → Expert inputs editable rows.
-// POSTs to /api/study-expert-input-set which patches study.yaml in place.
+// Save handler for the Conditions → Model settings editable rows.
+// POSTs to /api/study-expert-input-set (route kept for back-compat)
+// which patches study.yaml in place.
 // On success: flashes "saved" + updates the row's data-current attribute.
 // On failure: flashes the error (HTTP body) for ~5s.
 function _saveExpertInput(studyName, eiName, btn) {

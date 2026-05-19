@@ -268,9 +268,20 @@ def discover_static_study_charts(charts_dir: Path) -> list[dict]:
     DnaA-box layouts) so the dashboard's chart panel includes them.
 
     Convention: each ``<name>.svg`` may have a sibling ``<name>.meta.json``
-    of shape ``{"title": "...", "caption": "..."}``. Files are returned
-    sorted by filename — the ``00_summary.svg`` / ``01_*.svg`` naming
-    convention used in this workspace gives a natural display order.
+    of shape::
+
+        {
+          "title":          "...",   # display heading
+          "caption":        "...",   # one-line subtitle
+          "simulations":    "...",   # multi-sentence: which runs produced this
+          "interpretation": "..."    # multi-sentence: what the result means
+        }
+
+    The last two are optional and surface as separate paragraphs below
+    the chart so an evaluator gets both the provenance and the read.
+    Files are returned sorted by filename — the ``00_summary.svg`` /
+    ``01_*.svg`` naming convention used in this workspace gives a
+    natural display order.
 
     Returns ``[]`` if the directory doesn't exist, has no SVGs, or any I/O
     fails (treated as "no charts" rather than an error so the panel can
@@ -287,18 +298,24 @@ def discover_static_study_charts(charts_dir: Path) -> list[dict]:
         meta_path = svg_path.with_suffix(".meta.json")
         title = svg_path.stem
         caption = ""
+        simulations = ""
+        interpretation = ""
         if meta_path.exists():
             try:
                 meta = json.loads(meta_path.read_text())
                 if isinstance(meta, dict):
                     title = str(meta.get("title", title)) or title
                     caption = str(meta.get("caption", "")) or ""
+                    simulations = str(meta.get("simulations", "")) or ""
+                    interpretation = str(meta.get("interpretation", "")) or ""
             except Exception:
                 pass
         out.append({
             "key": svg_path.stem,
             "title": title,
             "caption": caption,
+            "simulations": simulations,
+            "interpretation": interpretation,
             "svg": svg_text,
             "source": "static",
         })
