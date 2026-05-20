@@ -587,28 +587,55 @@ def _study_detail_spec(name: str):
     return spec
 
 
+def _latest_run_timestamp(runs_db: Path) -> float | None:
+    """Return the most recent run's wall-clock time from ``runs_meta``.
+
+    Prefers ``completed_at`` (when the run finished, hence when its viz
+    could have been rendered), falling back to ``started_at``. Returns
+    ``None`` if the table is unreadable or empty.
+
+    Why not ``runs.db`` file mtime: the db is opened in WAL mode, and any
+    *read* connection (including the one render_visualizations uses to draw
+    the charts) can trigger a checkpoint that bumps the file mtime AFTER the
+    viz HTML was written. That made freshly-rendered viz look "older" than
+    the db and get silently dropped. The recorded run timestamps are real
+    data and immune to that race.
+    """
+    try:
+        conn = sqlite3.connect(f"file:{runs_db}?mode=ro", uri=True, timeout=1.0)
+        try:
+            row = conn.execute(
+                "SELECT MAX(COALESCE(completed_at, started_at)) FROM runs_meta"
+            ).fetchone()
+        finally:
+            conn.close()
+        return float(row[0]) if row and row[0] is not None else None
+    except Exception:  # noqa: BLE001 — best-effort freshness probe
+        return None
+
+
 def _discover_viz_html_files(name: str) -> list[dict]:
     """Walk ``studies/<name>/viz/*.html`` and return embed_visualizations entries.
 
     Returns one dict per HTML file, with the shape the study-detail template
-    expects: ``{name, url, description}``. The URL is workspace-relative so
-    the dashboard's static-file fallback serves it.
+    expects: ``{name, url, description, stale}``. The URL is workspace-relative
+    so the dashboard's static-file fallback serves it.
 
-    v2ecoli friction #17 (2026-05-19): the previous unconditional glob
-    surfaced `topology.html` / `workflow.html` rendered eagerly against an
-    empty composite as "(auto)" tabs that persisted forever. Eran flagged
-    them as "way too detailed" and "excessive". Two-pronged gate:
+    v2ecoli friction #17 (2026-05-19): the original unconditional glob
+    surfaced eagerly-rendered ``topology.html`` / ``workflow.html`` as
+    "(auto)" tabs that persisted forever on un-run studies. The first fix
+    added an mtime gate that *silently dropped* any viz older than
+    ``runs.db``. mem3dg-readdy (2026-05-20): that gate dropped legitimate,
+    freshly-rendered charts because a WAL checkpoint on the render's own
+    read connection bumped ``runs.db`` mtime a few seconds *after* the HTML
+    was written — every chart vanished with no error anywhere.
 
-      1. If no `runs.db` exists, no real sims have run → any HTML on disk
-         predates real data and should not be surfaced.
-      2. If `runs.db` exists, only surface viz whose mtime is at least as
-         fresh as `runs.db` mtime. Stale renders (from before the most
-         recent run) drop off automatically without a spec migration.
-
-    This is the "mtime gate" half of friction-log Option A — robust enough
-    without requiring a yaml-schema migration (Option B). Composites that
-    re-render their viz after each run continue to work; composites that
-    rendered once and never again age out naturally.
+    Robustness rule (no silent drops): surface every viz file once a study
+    has actually run. The single hard guard remains "no ``runs.db`` → nothing"
+    (genuine pre-data junk). Past-run staleness is *surfaced*, not swallowed:
+    a viz whose mtime predates the latest recorded run is flagged
+    ``stale: True`` with a note, so the reader sees it and knows to re-run,
+    rather than the chart silently disappearing.
     """
     viz_dir = WORKSPACE / "studies" / name / "viz"
     if not viz_dir.is_dir():
@@ -616,22 +643,31 @@ def _discover_viz_html_files(name: str) -> list[dict]:
     runs_db = WORKSPACE / "studies" / name / "runs.db"
     if not runs_db.is_file():
         return []
-    runs_db_mtime = runs_db.stat().st_mtime
+    # Freshness reference: the latest recorded run time (WAL-immune), not the
+    # db file mtime. A small grace absorbs sub-second render/commit ordering.
+    fresh_ref = _latest_run_timestamp(runs_db)
+    grace_s = 5.0
     out = []
     for html_file in sorted(viz_dir.glob("*.html")):
-        if html_file.stat().st_mtime < runs_db_mtime:
-            continue
+        mtime = html_file.stat().st_mtime
         size_kb = max(1, html_file.stat().st_size // 1024)
         rel = html_file.relative_to(WORKSPACE).as_posix()
+        stale = fresh_ref is not None and mtime + grace_s < fresh_ref
+        desc = (
+            f"Auto-discovered Plotly viz ({size_kb} KB) rendered by "
+            f"render_visualizations against the study's runs.db history."
+        )
+        if stale:
+            desc = (
+                "⚠ May predate the latest run — this chart was "
+                "rendered before the most recent simulation completed; re-run "
+                "the study to refresh it. " + desc
+            )
         out.append({
             "name": f"{html_file.stem} (auto)",
             "url": f"/{rel}",
-            "description": (
-                f"Auto-discovered Plotly viz rendered at "
-                f"{html_file.stat().st_mtime:.0f}s epoch "
-                f"({size_kb} KB). Source: render_visualizations against the "
-                f"latest runs.db history."
-            ),
+            "description": desc,
+            "stale": stale,
         })
     return out
 
@@ -9599,36 +9635,99 @@ if __name__ == "__main__":
         Each installed module is additionally checked for venv-vs-workspace.yaml
         drift: if the declared Python package is not importable in the workspace
         venv, the module is flagged ``out_of_sync: true`` with a short reason.
+
+        The workspace's own first-party package (workspace.yaml.package_path) is
+        prepended to the list with ``kind: "workspace"`` so the Installed
+        Modules panel can show it. The UI filters it out of Available Modules.
         """
         catalog_path = WORKSPACE / "scripts" / "_catalog" / "modules.json"
-        if not catalog_path.exists():
-            return self._json({"modules": [], "error": "catalog not found"}, 200)
         try:
-            modules = json.loads(catalog_path.read_text())
-            # Annotate with installed status from workspace.yaml imports.
             ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
-            imports = ws_data.get("imports", {}) or {}
-            for m in modules:
-                m["installed"] = m["name"] in imports
-                if m["installed"]:
-                    # Merge live workspace.yaml entry fields (source/ref/path/install_path/package)
-                    # into the catalog item so the UI has authoritative install metadata.
-                    imp = imports.get(m["name"], {}) or {}
-                    for k in ("source", "ref", "path", "install_path", "package"):
-                        v = imp.get(k)
-                        if v is not None:
-                            m[k] = v
-                    # Sync check: is the Python package actually importable?
-                    pkg_name = m.get("package") or m["name"].replace("-", "_")
-                    sync_reason = _check_installed_module_sync(
-                        pkg_name, m.get("install_path")
-                    )
-                    if sync_reason:
-                        m["out_of_sync"] = True
-                        m["out_of_sync_reason"] = sync_reason
-            return self._json({"modules": modules}, 200)
         except Exception as e:
-            return self._json({"modules": [], "error": str(e)}, 500)
+            return self._json({"modules": [], "error": f"workspace.yaml: {e}"}, 500)
+
+        if catalog_path.exists():
+            try:
+                modules = json.loads(catalog_path.read_text())
+            except Exception as e:
+                return self._json({"modules": [], "error": str(e)}, 500)
+        else:
+            modules = []  # catalog is optional; the workspace-self entry still applies
+
+        imports = (ws_data or {}).get("imports", {}) or {}
+        for m in modules:
+            m["installed"] = m["name"] in imports
+            if m["installed"]:
+                # Merge live workspace.yaml entry fields (source/ref/path/install_path/package)
+                # into the catalog item so the UI has authoritative install metadata.
+                imp = imports.get(m["name"], {}) or {}
+                for k in ("source", "ref", "path", "install_path", "package"):
+                    v = imp.get(k)
+                    if v is not None:
+                        m[k] = v
+                # Sync check: is the Python package actually importable?
+                pkg_name = m.get("package") or m["name"].replace("-", "_")
+                sync_reason = _check_installed_module_sync(
+                    pkg_name, m.get("install_path")
+                )
+                if sync_reason:
+                    m["out_of_sync"] = True
+                    m["out_of_sync_reason"] = sync_reason
+
+        ws_self = self._workspace_self_module(ws_data)
+        if ws_self is not None:
+            modules = [ws_self] + modules
+
+        return self._json({"modules": modules}, 200)
+
+    def _workspace_self_module(self, ws_data: dict) -> dict | None:
+        """Synthesize a catalog-style entry for the workspace's own package.
+
+        ``workspace.yaml.package_path`` is the first-party Python package that
+        ``build_core()`` imports — its Processes/Steps/Composites/Types are
+        what the workspace actually runs with. Treating it as just-another
+        installed module in the Installed Modules panel makes that visible.
+
+        Returns None when no package_path is declared OR when the directory
+        doesn't exist on disk (degenerate workspace; nothing to show).
+        """
+        slug = (ws_data or {}).get("name", "") or ""
+        pkg = (ws_data or {}).get("package_path")
+        if not pkg:
+            # Fall back to the same heuristic used elsewhere in the server.
+            pkg = "pbg_" + slug.replace("-", "_") if slug else None
+        if not pkg:
+            return None
+        pkg_dir = WORKSPACE / pkg
+        if not pkg_dir.is_dir():
+            return None
+
+        sync_reason = _check_installed_module_sync(pkg, pkg)
+        # Best-effort current branch — purely cosmetic for the Source column.
+        try:
+            ref = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=WORKSPACE, capture_output=True, text=True, timeout=2,
+            ).stdout.strip() or "—"
+        except (subprocess.TimeoutExpired, OSError):
+            ref = "—"
+        entry: dict = {
+            "kind": "workspace",
+            "name": slug or pkg,
+            "package": pkg,
+            "install_path": pkg,
+            "description": "Workspace's own first-party package — provides the "
+                           "Processes, Steps, Composites, and Types that "
+                           "build_core() registers for this workspace.",
+            "source": "workspace",
+            "ref": ref,
+            "tags": ["workspace"],
+            "installed": True,
+        }
+        if sync_reason:
+            entry["out_of_sync"] = True
+            entry["out_of_sync_reason"] = sync_reason
+        return entry
 
     def _post_catalog_install(self, body: dict):
         """POST /api/catalog-install — install a catalog module.
