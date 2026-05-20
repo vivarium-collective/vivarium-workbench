@@ -344,7 +344,12 @@ def _get_registry_data(bypass_cache: bool = False) -> dict:
         _workspace_pkgs_repr = repr(list(dict.fromkeys(_ws_import_pkgs)))
 
         venv_py = WORKSPACE / ".venv" / "bin" / "python3"
-        py = str(venv_py) if venv_py.exists() else sys.executable
+        if venv_py.exists():
+            py_cmd = [str(venv_py), "-c"]
+        elif shutil.which("uv") and (WORKSPACE / "pyproject.toml").exists():
+            py_cmd = ["uv", "run", "--project", str(WORKSPACE), "python3", "-c"]
+        else:
+            py_cmd = [sys.executable, "-c"]
         script = textwrap.dedent(f"""
 import json, sys
 try:
@@ -454,7 +459,7 @@ except Exception as e:
     print(json.dumps({{"error": f"build_core() failed: {{e}}", "processes": [], "types": []}}))
 """)
         result = subprocess.run(
-            [py, "-c", script],
+            py_cmd + [script],
             cwd=WORKSPACE, capture_output=True, text=True, timeout=15,
         )
         if result.returncode != 0:

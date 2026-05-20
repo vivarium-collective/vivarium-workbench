@@ -111,10 +111,17 @@
   // ============================================================
   // Palette
   // ============================================================
-  async function loadPalette() {
+  async function loadPalette(forceRefresh) {
     dom.paletteList.textContent = 'Loading…';
+    const url = forceRefresh ? '/api/registry?refresh=1' : '/api/registry';
     try {
-      const data = await jget('/api/registry');
+      const data = await jget(url);
+      if (data.error) {
+        dom.paletteList.textContent = '';
+        dom.paletteList.appendChild(el('div', { class: 'cb-error' },
+          `Registry error: ${data.error}`));
+        return;
+      }
       const procs = (data.processes || []).filter(
         (p) => p.kind === 'process' || p.kind === 'step',
       );
@@ -170,8 +177,10 @@
       dom.paletteList.appendChild(section);
     }
     if (!dom.paletteList.children.length) {
-      dom.paletteList.appendChild(el('div', { class: 'cb-empty' },
-        'No processes match.'));
+      const msg = filter
+        ? `No matches for "${filter}".`
+        : 'No processes found in registry.';
+      dom.paletteList.appendChild(el('div', { class: 'cb-empty' }, msg));
     }
   }
 
@@ -968,7 +977,17 @@
     });
     dom.paletteList = el('div', { class: 'cb-palette-list' });
 
-    dom.palette.appendChild(el('h3', { class: 'cb-pane-h' }, 'Palette'));
+    const paletteHeader = el('div', {
+      style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;',
+    },
+      el('h3', { class: 'cb-pane-h', style: 'margin:0;' }, 'Palette'),
+      el('button', {
+        class: 'cb-btn cb-btn-sm',
+        title: 'Refresh registry',
+        onclick: () => loadPalette(true),
+      }, '↺'),
+    );
+    dom.palette.appendChild(paletteHeader);
     dom.palette.appendChild(paletteFilter);
     dom.palette.appendChild(dom.paletteList);
     dom.palette.appendChild(el('button', {
@@ -1009,9 +1028,24 @@
   }
 
   document.addEventListener('DOMContentLoaded', async () => {
-    bootUI();
-    await Promise.all([loadPalette(), loadDraftFromQuery()]);
-    syncCytoscapeFromModel();
-    renderInspector();
+    try {
+      bootUI();
+      await Promise.all([loadPalette(), loadDraftFromQuery()]);
+      syncCytoscapeFromModel();
+      renderInspector();
+    } catch (err) {
+      const root = document.getElementById('composite-builder-root');
+      if (root) {
+        root.innerHTML = '';
+        root.appendChild(
+          Object.assign(document.createElement('div'), {
+            className: 'cb-error',
+            style: 'padding:24px;font-size:13px;',
+            textContent: `Builder failed to initialise: ${err.message}`,
+          }),
+        );
+      }
+      console.error('composite builder boot error', err);
+    }
   });
 })();

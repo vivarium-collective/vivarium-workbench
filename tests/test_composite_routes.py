@@ -333,8 +333,8 @@ def test_composite_builder_page_renders(dashboard_client, tmp_path):
     assert r.status_code == 200
     body = r.text
     assert "composite-builder-root" in body
-    assert "/static/vendor/cytoscape.min.js" in body
-    assert "/static/composite-builder.js" in body
+    assert "/assets/vendor/cytoscape.min.js" in body
+    assert "/assets/composite-builder.js" in body
 
 
 # ---------------------------------------------------------------------------
