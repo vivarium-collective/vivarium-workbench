@@ -25,3 +25,8 @@ htmlcov/
 .DS_Store
 todo.md
 .opencode/
+
+# Local PR-body scratch files (never to be committed; see CLAUDE.md commit protocol)
+.pr-body-*.md
+# Local verification-report HTML scratch files (per-todo, large, never committed)
+verification-report-*.html
