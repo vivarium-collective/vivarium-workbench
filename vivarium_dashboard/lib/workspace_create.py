@@ -17,7 +17,7 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 
@@ -103,6 +103,69 @@ def normalise_org(raw: str | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+_PBG_TEMPLATE_CACHE_REFRESH_H = 24
+_PBG_TEMPLATE_REPO = "https://github.com/vivarium-collective/pbg-template.git"
+_PBG_TEMPLATE_REF = "dynamic-workspace-images"
+
+
+def _clone_or_refresh_cache(
+    cache_root: Path, clone_dir: Path, template_dir: Path,
+) -> None:
+    """Ensure ``clone_dir`` has a fresh clone of pbg-template.
+
+    If the clone doesn't exist, ``git clone --depth 1 --branch <ref>`` it.
+    If it exists and is older than ``_PBG_TEMPLATE_CACHE_REFRESH_H`` hours,
+    ``git fetch --depth 1`` + ``git reset --hard origin/<ref>``.
+    On failure (no git available, network error), the stale clone is kept if
+    its ``template/template-init.sh`` exists; otherwise a new failure is
+    surfaced via the cache-miss path the caller handles.
+    """
+    now = datetime.now(timezone.utc)
+    _fresh_enough = (
+        _PBG_TEMPLATE_CACHE_REFRESH_H is not None
+        and (clone_dir / ".git").is_dir()
+        and clone_dir / "template" / "template-init.sh" in clone_dir.rglob("*")
+        and now - datetime.fromtimestamp(
+            (clone_dir / ".git").stat().st_mtime, tz=timezone.utc
+        ) < timedelta(hours=_PBG_TEMPLATE_CACHE_REFRESH_H)
+    )
+
+    if _fresh_enough:
+        return
+
+    if not shutil.which("git"):
+        return  # caller will fall through to the error path
+
+    cache_root.mkdir(parents=True, exist_ok=True)
+
+    if (clone_dir / ".git").is_dir():
+        # Refresh: fetch + hard-reset to the target ref.
+        try:
+            subprocess.run(
+                ["git", "fetch", "--depth", "1", "origin",
+                 f"refs/heads/{_PBG_TEMPLATE_REF}"],
+                cwd=str(clone_dir), capture_output=True, text=True,
+                timeout=30, check=True,
+            )
+            subprocess.run(
+                ["git", "reset", "--hard", f"origin/{_PBG_TEMPLATE_REF}"],
+                cwd=str(clone_dir), capture_output=True, text=True,
+                timeout=30, check=True,
+            )
+        except Exception:
+            pass  # keep stale clone if template-init.sh exists
+    else:
+        # Fresh clone.
+        try:
+            subprocess.run(
+                ["git", "clone", "--depth", "1", "--branch", _PBG_TEMPLATE_REF,
+                 _PBG_TEMPLATE_REPO, str(clone_dir)],
+                capture_output=True, text=True, timeout=60, check=True,
+            )
+        except Exception:
+            pass  # caller will raise WorkspaceCreateError
+
+
 def find_pbg_template() -> Path:
     """Locate the ``pbg-template/template/`` source directory.
 
@@ -134,9 +197,14 @@ def find_pbg_template() -> Path:
     if (sibling / "template-init.sh").is_file():
         return sibling
 
-    cache = Path.home() / ".cache" / "vivarium-dashboard" / "pbg-template" / "template"
-    if (cache / "template-init.sh").is_file():
-        return cache
+    # Cache clone — git clone vivarium-collective/pbg-template into
+    # ~/.cache/vivarium-dashboard/pbg-template/, refreshed if older than 24h.
+    cache_root = Path.home() / ".cache" / "vivarium-dashboard"
+    cache_clone = cache_root / "pbg-template"
+    cache_template = cache_clone / "template"
+    _clone_or_refresh_cache(cache_root, cache_clone, cache_template)
+    if (cache_template / "template-init.sh").is_file():
+        return cache_template
 
     raise WorkspaceCreateError(
         500, "pbg-template not found",
@@ -144,7 +212,8 @@ def find_pbg_template() -> Path:
             "hint": ("set PBG_TEMPLATE_PATH to a local pbg-template checkout, "
                      "or clone vivarium-collective/pbg-template alongside "
                      "vivarium-dashboard"),
-            "tried": [env_override or None, str(sibling), str(cache)],
+            "tried": [env_override or None, str(sibling),
+                      str(cache_template)],
         },
     )
 
@@ -260,6 +329,31 @@ def _persist_compute_backend(workspace_yaml: Path, backend: str) -> None:
     workspace_yaml.write_text(text)
 
 
+def _persist_github_org(workspace_yaml: Path, github_org: str | None) -> None:
+    """Append/overwrite the top-level ``github_org`` key in workspace.yaml.
+
+    Same line-edit pattern as :func:`_persist_compute_backend`. No-op when
+    ``github_org`` is ``None`` or empty.
+    """
+    if not github_org:
+        return
+    if not workspace_yaml.is_file():
+        raise WorkspaceCreateError(
+            500, "workspace.yaml missing after scaffold",
+            detail={"path": str(workspace_yaml)},
+        )
+    text = workspace_yaml.read_text()
+    line = f"github_org: {github_org}\n"
+    pattern = re.compile(r"^github_org:.*$", re.MULTILINE)
+    if pattern.search(text):
+        text = pattern.sub(line.rstrip(), text)
+    else:
+        if not text.endswith("\n"):
+            text += "\n"
+        text += "\n" + line
+    workspace_yaml.write_text(text)
+
+
 def _maybe_remove_singularity(target: Path, backend: str) -> None:
     """Delete ``Singularity.def`` when backend is not HPC.
 
@@ -283,9 +377,10 @@ def _check_singularity_for_hpc(target: Path, backend: str) -> str | None:
     if (target / "Singularity.def").is_file():
         return None
     return (
-        "Singularity.def not present in the scaffolded workspace — Phase E of "
-        "todo #8 (the pbg-template Singularity.def.j2 file) has not yet shipped. "
-        "compute_backend metadata is set; the file can be added later."
+        "Singularity.def not present in the scaffolded workspace — the "
+        "pbg-template checkout may predate the Singularity.def.j2 template. "
+        "compute_backend metadata is set; add a Singularity.def manually or "
+        "re-scaffold against a newer pbg-template to populate it."
     )
 
 
@@ -345,17 +440,21 @@ def _gh_repo_view(org: str, name: str, *, env: dict) -> bool:
 def _attach_or_create_remote(
     target: Path, name: str, org: str, *, env: dict,
 ) -> tuple[str, str]:
-    """Either create a brand-new ``<org>/<name>`` GitHub repo and push the
-    scaffold commit, or attach to the existing repo on a fresh branch.
+    """Either create a brand-new ``<org>/<name>`` GitHub repo or attach to
+    an existing one. Always leaves the workspace checked out on a fresh
+    ``scaffold/<utc-ts>`` branch that has been pushed with ``-u origin``,
+    so the first dashboard-driven commit lands cleanly on a workstream
+    branch (and ``main`` stays clean as the integration branch).
 
-    Returns ``(remote_url, branch)``.
+    Returns ``(remote_url, branch)`` where ``branch`` is always the
+    scaffold branch.
     """
     remote_url = f"https://github.com/{org}/{name}.git"
     branch = f"scaffold/{_utc_timestamp_slug()}"
 
     if _gh_repo_view(org, name, env=env):
-        # Existing repo: add it as origin, fetch, and create a fresh branch
-        # that we push set-upstream.
+        # Existing repo: add it as origin, fetch, branch off the local
+        # scaffold commit, and push set-upstream.
         _git(target, ["remote", "add", "origin", remote_url], env=env)
         _git(target, ["fetch", "origin"], env=env, check=False)
         _git(target, ["checkout", "-b", branch], env=env)
@@ -367,8 +466,9 @@ def _attach_or_create_remote(
             )
         return remote_url, branch
 
-    # Fresh repo: gh repo create handles `git remote add origin`, branch
-    # push, and visibility set in one shot.
+    # Fresh repo: gh repo create pushes the current branch (``main``) as
+    # the default branch. Then create + push the workstream branch on top
+    # so the user lands ready to commit immediately.
     r = subprocess.run(
         ["gh", "repo", "create", f"{org}/{name}",
          "--public", "--source=.", "--push"],
@@ -389,7 +489,36 @@ def _attach_or_create_remote(
             502, "gh repo create failed",
             detail={"stderr": r.stderr[-2000:], "stdout": r.stdout[-2000:]},
         )
-    return remote_url, "main"
+    # Now branch off main onto scaffold/<ts> and push.
+    _git(target, ["checkout", "-b", branch], env=env)
+    push = _git(target, ["push", "-u", "origin", branch], env=env, check=False)
+    if push.returncode != 0:
+        raise WorkspaceCreateError(
+            502, "git push of scaffold branch failed",
+            detail={"stderr": push.stderr[-2000:], "stdout": push.stdout[-2000:]},
+        )
+    return remote_url, branch
+
+
+def _write_active_workstream(target: Path, branch: str) -> None:
+    """Pre-set ``.pbg/state.json`` so the workspace's dashboard treats
+    ``branch`` as the active workstream from the very first request.
+
+    Mirrors the shape produced by :func:`work_state.load_state_or_adopt_current`.
+    Without this, the user would have to click "Start workstream" before
+    the first Install button works (todo #8 Phase D).
+    """
+    import json as _json
+    state_dir = target / ".pbg"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "state.json").write_text(_json.dumps({
+        "active_branch": branch,
+        "base": "main",
+        "pushed": True,
+        "pr_number": None,
+        "pr_url": None,
+        "adopted": False,
+    }, indent=2) + "\n")
 
 
 def create_workspace(
@@ -445,6 +574,7 @@ def create_workspace(
 
             workspace_yaml = target / "workspace.yaml"
             _persist_compute_backend(workspace_yaml, backend)
+            _persist_github_org(workspace_yaml, github_org)
             _maybe_remove_singularity(target, backend)
 
             _git_init_first_commit(target, name)
@@ -458,6 +588,10 @@ def create_workspace(
                 remote_url, branch = _attach_or_create_remote(
                     target, name, github_org, env=env,
                 )
+                # Phase D: pre-set the active workstream to the scaffold
+                # branch so the first Install in the new workspace commits
+                # without the user clicking "Start workstream" first.
+                _write_active_workstream(target, branch)
 
             # Catalog the workspace so it appears in /api/workspaces switchers.
             try:

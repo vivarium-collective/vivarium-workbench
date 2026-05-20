@@ -334,6 +334,9 @@
           </div>
 
           <label for="viv-ws-create-org">GitHub Organization <span class="viv-ws-optional">(optional)</span></label>
+          <select id="viv-ws-create-org-select" name="github_org_select"
+                  style="display:none">
+          </select>
           <input id="viv-ws-create-org" name="github_org" type="text"
                  placeholder="https://github.com/&lt;org&gt;" autocomplete="off">
           <div class="viv-ws-field-hint viv-ws-org-hint">
@@ -381,6 +384,78 @@
     });
   }
 
+  // Sentinel value used by the org <select> to switch back to free-text
+  // mode ("+ Other…" option).
+  const ORG_SELECT_OTHER = '__viv_other__';
+  const ORG_SELECT_NONE = '';  // "Leave blank — local-only workspace"
+
+  async function loadOrgsIntoSelect() {
+    """Fetch the user's GitHub orgs and populate the org <select>.
+
+    On 200: replace the free-text input with a populated <select>.
+    On 401 (unauthenticated): leave the input visible and append a hint.
+    On other errors: leave the input visible silently.
+    """
+    const sel = createModal.querySelector('#viv-ws-create-org-select');
+    const inp = createModal.querySelector('#viv-ws-create-org');
+    const hint = createModal.querySelector('.viv-ws-org-hint');
+
+    // Reset to a known state every time the modal opens.
+    sel.innerHTML = '';
+    sel.style.display = 'none';
+    inp.style.display = '';
+    inp.value = '';
+
+    let resp;
+    try {
+      resp = await fetch('/api/auth/github/orgs');
+    } catch (_e) {
+      return; // Network error — leave as free-text.
+    }
+    if (resp.status === 401) {
+      hint.textContent =
+        'Sign in with GitHub (header chip) to pick from your orgs in a dropdown. ' +
+        'Or leave this field blank for a local-only workspace.';
+      return;
+    }
+    if (!resp.ok) return;
+    const data = await resp.json().catch(() => null);
+    if (!data || !Array.isArray(data.orgs)) return;
+
+    // Build options. Default = empty value (local-only).
+    const blankOpt = document.createElement('option');
+    blankOpt.value = ORG_SELECT_NONE;
+    blankOpt.textContent = '— None (local-only) —';
+    sel.appendChild(blankOpt);
+
+    data.orgs.forEach((o) => {
+      const opt = document.createElement('option');
+      opt.value = o.name;
+      const tag = o.kind === 'personal' ? ' (personal)' : '';
+      opt.textContent = o.name + tag;
+      sel.appendChild(opt);
+    });
+    // "+ Other…" entry toggles back to free-text input.
+    const otherOpt = document.createElement('option');
+    otherOpt.value = ORG_SELECT_OTHER;
+    otherOpt.textContent = '+ Other…';
+    sel.appendChild(otherOpt);
+
+    sel.style.display = '';
+    inp.style.display = 'none';
+    hint.textContent =
+      'Pick a personal namespace or an org you have access to. "+ Other…" reverts to free text.';
+
+    sel.onchange = () => {
+      if (sel.value === ORG_SELECT_OTHER) {
+        sel.style.display = 'none';
+        inp.style.display = '';
+        inp.value = '';
+        inp.focus();
+      }
+    };
+  }
+
   function openCreate() {
     ensureCreateMounted();
     // Reset state in case the user opened-cancelled-reopened.
@@ -397,6 +472,10 @@
     setTimeout(() => {
       createModal.querySelector('#viv-ws-create-name').focus();
     }, 0);
+    // Phase B-extension: try to populate the org dropdown. Non-blocking —
+    // the form is usable as free-text while the request is in flight or if
+    // it fails.
+    loadOrgsIntoSelect().catch(() => { /* leave as free-text */ });
   }
 
   function closeCreate() {
@@ -415,11 +494,16 @@
 
   async function submitCreate() {
     const nameEl = createModal.querySelector('#viv-ws-create-name');
-    const orgEl = createModal.querySelector('#viv-ws-create-org');
+    const orgSelect = createModal.querySelector('#viv-ws-create-org-select');
+    const orgInput = createModal.querySelector('#viv-ws-create-org');
     const backendEl = createModal.querySelector('#viv-ws-create-backend');
     const submitBtn = createModal.querySelector('.viv-ws-create-submit');
 
     const name = String(nameEl.value || '').trim();
+    // Read from whichever element is visible: the <select> when orgs were
+    // loaded (Phase B-extension), or the free-text <input> when the user
+    // chose "+ Other…" or the fetch failed / returned 401.
+    const orgEl = orgSelect.style.display !== 'none' ? orgSelect : orgInput;
     const orgRaw = String(orgEl.value || '').trim();
     const backend = String(backendEl.value || '').trim();
 

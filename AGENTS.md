@@ -85,5 +85,3 @@ pytest tests/test_foo.py::test_bar                      # single test
 
 Core: jinja2, pyyaml, jsonschema[format-nongpl], pypdf, numpy, process-bigraph, bigraph-schema, pbg-superpowers.
 Opt-in: `viz = ["matplotlib", "imageio"]`.
-
-

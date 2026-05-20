@@ -542,3 +542,32 @@ def status_payload() -> dict:
         "source": session.source,
         "scopes": list(session.scopes),
     }
+
+
+def list_orgs() -> dict:
+    """Fetch the current user's GitHub orgs (todo #8 Phase B-extension).
+
+    Returns ``{login: str, orgs: [{name: str, kind: "personal"|"org"}, ...]}``
+    on success; ``{"error": "unauthenticated"}`` if no session.
+
+    The user's personal namespace is the first entry (kind=``personal``);
+    real orgs follow (kind=``org``). The New Workspace modal renders this
+    payload as a ``<select>`` so the user picks rather than free-types.
+    """
+    session = current_session()
+    if session is None:
+        return {"error": "unauthenticated"}
+    status, payload = _http_get(
+        "https://api.github.com/user/orgs", token=session.token,
+    )
+    if status != 200 or not isinstance(payload, list):
+        return {
+            "error": "orgs_lookup_failed",
+            "status": status,
+            "detail": (payload.get("message") if isinstance(payload, dict) else None),
+        }
+    orgs = [{"name": session.login, "kind": "personal"}]
+    for o in payload:
+        if isinstance(o, dict) and o.get("login"):
+            orgs.append({"name": o["login"], "kind": "org"})
+    return {"login": session.login, "orgs": orgs}

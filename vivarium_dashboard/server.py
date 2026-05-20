@@ -3357,11 +3357,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_file(WORKSPACE / "reports" / "index.html", "text/html")
         if self.path.startswith("/api/workspaces"):
             return self._get_workspaces()
-        # GitHub OAuth (todo #8 Phase B-bis).
+        # GitHub OAuth (todo #8 Phase B-bis + B-extension).
         if self.path.startswith("/api/auth/github/status"):
             return self._get_auth_github_status()
         if self.path.startswith("/api/auth/github/poll"):
             return self._get_auth_github_poll()
+        if self.path.startswith("/api/auth/github/orgs"):
+            return self._get_auth_github_orgs()
         if self.path.startswith("/api/state"):
             return self._serve_state()
         if self.path.startswith("/api/events"):
@@ -10178,9 +10180,23 @@ if __name__ == "__main__":
                     "added_at": None,
                 }] + list(catalog)
 
+        import yaml as _yaml
         for entry in catalog:
             path = entry.get("path", "")
             row = {"name": entry.get("name") or Path(path).name, "path": path}
+            ws_path = Path(path)
+            ws_yaml_path = ws_path / "workspace.yaml"
+            if ws_yaml_path.is_file():
+                try:
+                    ws_data = _yaml.safe_load(ws_yaml_path.read_text()) or {}
+                    cb = ws_data.get("compute_backend")
+                    if cb:
+                        row["compute_backend"] = cb
+                    go = ws_data.get("github_org")
+                    if go:
+                        row["github_org"] = go
+                except Exception:
+                    pass  # non-fatal — omit extra fields
             if not Path(path).is_dir():
                 row["status"] = "missing"
             elif path == current_resolved:
@@ -10317,6 +10333,10 @@ if __name__ == "__main__":
 
         log_path = target / ".pbg" / "server" / "start.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        from vivarium_dashboard.lib import github_auth
+        gh_env = github_auth.current_token_env()
+        spawn_env = os.environ.copy()
+        spawn_env.update(gh_env)
         with log_path.open("ab") as logf:
             subprocess.Popen(
                 [sys.executable, "-m", "vivarium_dashboard.cli",
@@ -10325,6 +10345,7 @@ if __name__ == "__main__":
                 start_new_session=True,
                 close_fds=True,
                 cwd=str(target),
+                env=spawn_env,
             )
 
         deadline = time.monotonic() + 8.0
@@ -10542,6 +10563,15 @@ if __name__ == "__main__":
         from vivarium_dashboard.lib.github_auth import logout
         logout()
         return self._json({"ok": True}, 200)
+
+    def _get_auth_github_orgs(self):
+        """GET /api/auth/github/orgs — user's personal namespace + orgs (Phase B-extension)."""
+        from vivarium_dashboard.lib.github_auth import list_orgs
+        result = list_orgs()
+        if "error" in result:
+            code = 401 if result["error"] == "unauthenticated" else 502
+            return self._json(result, code)
+        return self._json(result, 200)
 
     def _read_workspace_name(self, root: Path) -> str:
         """Read `name` from <root>/workspace.yaml; fall back to dir basename."""
