@@ -122,17 +122,20 @@ def test_style_css_has_create_form_rules(workspaceless_server):
 
 
 def test_create_endpoint_is_allowlisted_workspaceless(workspaceless_server):
-    """The frontend will POST to /api/workspaces/create from the landing
-    page (before any workspace is bound). The workspaceless dispatch guard
-    must let that through. Phase C still owes the actual handler — until
-    then the route is a 404, NOT a 409."""
+    """The frontend POSTs to /api/workspaces/create from the landing page
+    (before any workspace is bound). The workspaceless dispatch guard must
+    let that through to the Phase-C handler. We probe with an *invalid*
+    backend so the request short-circuits at input validation (400) instead
+    of actually scaffolding a workspace on disk — proves both that the
+    route is allowlisted AND that the handler exists, without side-effects."""
     status, body = _request(
         workspaceless_server, "/api/workspaces/create", method="POST",
-        json_body={"name": "demo-ws", "backend": "local"},
+        json_body={"name": "demo-ws", "backend": "k8s-not-real"},
     )
     payload = json.loads(body)
-    assert status == 404, f"expected 404 (handler missing), got {status} {payload}"
-    assert payload == {"error": "not found"}
+    assert status == 400, f"expected 400 (handler rejects bad backend), got {status} {payload}"
+    assert "unknown backend" in payload["error"]
+    assert "allowed" in payload
 
 
 def test_non_allowlisted_post_still_409(workspaceless_server):

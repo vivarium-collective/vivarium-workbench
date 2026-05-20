@@ -32,6 +32,7 @@ import os
 import re
 import shutil
 import signal
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -281,6 +282,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/workspaces/cleanup-stale": "_post_workspaces_cleanup_stale",
     "/api/workspaces/start":         "_post_workspaces_start",
     "/api/workspaces/stop":          "_post_workspaces_stop",
+    "/api/workspaces/create":        "_post_workspaces_create",
     # GitHub OAuth (todo #8 Phase B-bis).
     "/api/auth/github/start":  "_post_auth_github_start",
     "/api/auth/github/logout": "_post_auth_github_logout",
@@ -10339,6 +10341,100 @@ if __name__ == "__main__":
             "hint": f"tail {log_path}",
         }, 504)
 
+    def _post_workspaces_create(self, body: dict):
+        """POST /api/workspaces/create — scaffold a new workspace + spawn it.
+
+        Body: ``{name: str, backend: "local"|"hpc:ccam", github_org?: str}``.
+        Validates inputs, copies pbg-template, runs template-init.sh, persists
+        ``compute_backend`` in workspace.yaml, ``git init``s, optionally
+        creates/attaches a GitHub remote (injecting the Phase B-bis session
+        token env), registers the workspace, and finally spawns the
+        per-workspace dashboard subprocess + polls for it to register —
+        reusing the same wait-on-server-info pattern as /api/workspaces/start.
+
+        Returns ``{url, pid, path, workspace_yaml, branch, remote_url?,
+        backend, github_org?, warnings?}`` on success.
+        """
+        from vivarium_dashboard.lib.workspace_create import (
+            create_workspace, validate_name, validate_backend, normalise_org,
+            WorkspaceCreateError, _check_singularity_for_hpc,
+        )
+        from vivarium_dashboard.lib import github_auth
+
+        if not isinstance(body, dict):
+            return self._json({"error": "body must be a JSON object"}, 400)
+
+        try:
+            name = validate_name(body.get("name", ""))
+            backend = validate_backend(body.get("backend", ""))
+            github_org = normalise_org(body.get("github_org"))
+        except WorkspaceCreateError as e:
+            return self._json({"error": e.message, **e.detail}, e.code)
+
+        # Auth gate: org-tracked workspaces require a GitHub session so the
+        # gh repo create / push subprocesses can authenticate. The UI guards
+        # against this client-side (Phase B disables the org field when
+        # unauthenticated) — belt-and-braces server-side check.
+        gh_env: dict[str, str] = {}
+        if github_org:
+            gh_env = github_auth.current_token_env()
+            if not gh_env:
+                return self._json({
+                    "error": "github_login_required",
+                    "hint": "Sign in with GitHub first (header chip) or run gh auth login.",
+                }, 401)
+
+        try:
+            result = create_workspace(
+                name=name, backend=backend, github_org=github_org, gh_env=gh_env,
+            )
+        except WorkspaceCreateError as e:
+            return self._json({"error": e.message, **e.detail}, e.code)
+        except Exception as e:  # noqa: BLE001 — last-resort surface
+            return self._json({"error": "create_failed",
+                               "detail": github_auth.mask_token(str(e))}, 500)
+
+        # Spawn the child dashboard for the new workspace and poll until it
+        # registers in ~/.pbg/servers/. Mirrors _post_workspaces_start.
+        target = result.path
+        log_path = target / ".pbg" / "server" / "start.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        spawn_env = os.environ.copy()
+        spawn_env.update(gh_env)  # child inherits the session token (empty when no org)
+        with log_path.open("ab") as logf:
+            subprocess.Popen(
+                [sys.executable, "-m", "vivarium_dashboard.cli",
+                 "serve", "--workspace", str(target)],
+                stdout=logf, stderr=logf, stdin=subprocess.DEVNULL,
+                start_new_session=True, close_fds=True,
+                cwd=str(target), env=spawn_env,
+            )
+
+        from pbg_superpowers import workspace_catalog
+        deadline = time.monotonic() + 12.0
+        entry = None
+        while time.monotonic() < deadline:
+            entry = workspace_catalog.find_running(target)
+            if entry is not None:
+                break
+            time.sleep(0.1)
+
+        response: dict = result.as_dict()
+        warning = _check_singularity_for_hpc(target, backend)
+        if warning:
+            response["warnings"] = [warning]
+
+        if entry is None:
+            response.update({
+                "error": "spawn_timeout",
+                "log_path": str(log_path),
+                "hint": f"workspace scaffolded but dashboard didn't register in time; tail {log_path}",
+            })
+            return self._json(response, 504)
+
+        response.update({"url": entry["url"], "pid": entry["pid"]})
+        return self._json(response, 200)
+
     def _post_workspaces_stop(self, body: dict):
         """POST /api/workspaces/stop — SIGTERM a running workspace's dashboard
         and poll for the child's atexit hook to remove the global registry
@@ -10702,11 +10798,27 @@ def main():
     ap.add_argument("--workspace", type=Path, default=None,
                     help="Path to workspace root. Omit to run in workspaceless "
                          "launcher mode.")
-    ap.add_argument("--port", type=int, required=True)
+    ap.add_argument("--port", type=int, default=0,
+                    help="Port to bind (default: pick a free one and print the URL).")
     ap.add_argument("--host", default="127.0.0.1",
                     help="Bind host (default 127.0.0.1; use 0.0.0.0 in containers)")
     args = ap.parse_args()
-    return serve(args.workspace, args.port, host=args.host)
+    port = args.port
+    if not port:
+        # Same auto-pick path as cli.cmd_serve so `python -m
+        # vivarium_dashboard.server` has parity with `vivarium-dashboard serve`.
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+        advertise = "127.0.0.1" if args.host == "0.0.0.0" else args.host
+        mode = "launcher" if args.workspace is None else "workspace"
+        print(f"\nvivarium-dashboard ({mode}): http://{advertise}:{port}", file=sys.stderr)
+        if args.host == "0.0.0.0":
+            print("   (bound on all interfaces — reachable from outside this host)",
+                  file=sys.stderr)
+        print("   (Ctrl-C to stop)\n", file=sys.stderr)
+    return serve(args.workspace, port, host=args.host)
 
 
 if __name__ == "__main__":
