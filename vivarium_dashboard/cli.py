@@ -28,8 +28,38 @@ def _workspace_name(workspace: Path) -> str:
         return workspace.name
 
 
+def _cmd_serve_workspaceless(args: argparse.Namespace) -> int:
+    """Launch the dashboard with no workspace bound (Phase A of todo #8).
+
+    Skips dashboard render, sys.path injection, lib._root binding, run-DB
+    reconcile, and switcher self-registration — none apply when there is
+    no workspace. Picks a free port, prints the URL, hands off to
+    ``server.serve(workspace=None, ...)``.
+    """
+    port = args.port or _pick_free_port()
+    host = getattr(args, "host", None) or "127.0.0.1"
+    advertise_host = "127.0.0.1" if host == "0.0.0.0" else host
+    print(f"\nvivarium-dashboard (launcher): http://{advertise_host}:{port}")
+    if host == "0.0.0.0":
+        print("   (bound on all interfaces — reachable from outside this host)")
+    print("   (no workspace bound — Ctrl-C to stop)\n")
+
+    from vivarium_dashboard.server import serve as serve_dashboard
+    return serve_dashboard(workspace=None, port=port, host=host)
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
-    """Render the workspace dashboard once and start the HTTP server."""
+    """Render the workspace dashboard once and start the HTTP server.
+
+    If ``--workspace`` is omitted (``args.workspace is None``) the dashboard
+    runs in workspaceless / launcher mode (Phase A of todo #8): no render,
+    no switcher self-registration, only the landing page + workspace
+    switcher are reachable. See ``vivarium_dashboard.server.serve``.
+    """
+    workspaceless = args.workspace is None
+    if workspaceless:
+        return _cmd_serve_workspaceless(args)
+
     workspace = Path(args.workspace).resolve()
     if not (workspace / "workspace.yaml").is_file():
         print(f"ERROR: not a workspace (no workspace.yaml): {workspace}", file=sys.stderr)
@@ -200,7 +230,11 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_serve = sub.add_parser("serve", help="Serve the dashboard for a workspace")
-    p_serve.add_argument("--workspace", default=".", help="Path to workspace root (default: cwd)")
+    p_serve.add_argument(
+        "--workspace", default=None,
+        help="Path to workspace root. Omit to run in workspaceless launcher "
+             "mode — the UI lets you pick or create a workspace from there.",
+    )
     p_serve.add_argument("--port", type=int, default=0, help="Port (default: pick a free port)")
     p_serve.add_argument(
         "--host", default="127.0.0.1",

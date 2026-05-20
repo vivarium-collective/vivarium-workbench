@@ -479,8 +479,34 @@ def _save_upload(file_b64: str, target_path: Path) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-WORKSPACE: Path = Path("/")  # set by main()
+WORKSPACE: Path | None = Path("/")  # set by serve(); ``None`` = workspaceless mode
+# Default sentinel kept as ``Path("/")`` rather than ``None`` so unit tests
+# that call pure helpers from this module without going through ``serve()``
+# see the same sentinel they always have (avoids ``None / "studies"`` TypeErrors
+# in fixtures that monkeypatch lazily). ``serve(workspace=None, ...)``
+# explicitly assigns ``WORKSPACE = None`` to enter workspaceless mode; the
+# dispatch guards in ``do_GET`` / ``do_POST`` then short-circuit non-allowlisted
+# routes.
 LOCK = Lock()
+
+# Workspaceless mode (Phase A of todo #8): when WORKSPACE is None, the dashboard
+# acts as a launcher — only the listed routes are reachable. Everything else
+# 409s with {"error": "no workspace bound"}. Pure prefixes (matched with
+# ``startswith``) so query strings and sub-paths under /api/auth/github/ work.
+_WORKSPACELESS_GET_ALLOW: tuple[str, ...] = (
+    "/api/workspaces",
+    "/api/auth/github/",     # Phase B-bis (not yet wired)
+    "/api/compute-backends", # Phase B (not yet wired)
+)
+_WORKSPACELESS_POST_ALLOW: frozenset[str] = frozenset({
+    "/api/workspaces/add",
+    "/api/workspaces/start",
+    "/api/workspaces/forget",
+    "/api/workspaces/cleanup-stale",
+    "/api/workspaces/create",  # Phase C (not yet wired)
+    "/api/auth/github/start",  # Phase B-bis (not yet wired)
+    "/api/auth/github/logout", # Phase B-bis (not yet wired)
+})
 
 # ---------------------------------------------------------------------------
 # Study slug validation
@@ -2473,6 +2499,27 @@ def _enrich_runs_with_meta(study_dir: Path, runs: list[dict]) -> list[dict]:
     return enriched
 
 
+def _render_workspaceless_landing_html() -> str:
+    """Render templates/landing.html.j2 for the no-workspace-bound mode."""
+    import jinja2
+    env = jinja2.Environment(
+        loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
+        autoescape=True,
+    )
+    tpl = env.get_template("landing.html.j2")
+    return tpl.render(asset_version=_static_asset_version())
+
+
+def _static_asset_version() -> str:
+    """Cheap cache-busting key derived from the package version. ``""`` if
+    unavailable."""
+    try:
+        from importlib.metadata import version
+        return version("vivarium-dashboard")
+    except Exception:
+        return ""
+
+
 def _render_study_detail_html(name: str, spec: dict) -> str:
     """Render study-detail.html via Jinja2."""
     import jinja2
@@ -3280,6 +3327,27 @@ class Handler(BaseHTTPRequestHandler):
 
         # Strip query string for route matching (self.path includes ?focus=...).
         path_only = self.path.split("?", 1)[0]
+
+        # Workspaceless mode: serve only the landing page, the allowlisted API
+        # routes, and bundled static assets. Everything else 409s.
+        if WORKSPACE is None:
+            if path_only in ("/", "/index.html"):
+                return self._serve_workspaceless_landing()
+            if any(self.path.startswith(p) for p in _WORKSPACELESS_GET_ALLOW):
+                pass  # fall through to the normal GET dispatch below
+            else:
+                static_rel = path_only.lstrip("/")
+                if ".." in static_rel.split("/") or static_rel.startswith("/"):
+                    self.send_response(403); self.end_headers(); return
+                bundled = STATIC_DIR / static_rel
+                if bundled.is_file():
+                    return self._serve_file(bundled, self._guess_mime(static_rel))
+                if static_rel.startswith("assets/"):
+                    bundled_alt = STATIC_DIR / static_rel[len("assets/"):]
+                    if bundled_alt.is_file():
+                        return self._serve_file(bundled_alt, self._guess_mime(static_rel))
+                return self._json({"error": "no workspace bound"}, 409)
+
         if path_only in ("/", "/index.html"):
             return self._serve_file(WORKSPACE / "reports" / "index.html", "text/html")
         if self.path.startswith("/api/workspaces"):
@@ -3415,6 +3483,9 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length).decode()) if length else {}
         except json.JSONDecodeError as e:
             return self._json({"error": f"invalid JSON: {e}"}, 400)
+
+        if WORKSPACE is None and self.path not in _WORKSPACELESS_POST_ALLOW:
+            return self._json({"error": "no workspace bound"}, 409)
 
         method_name = _POST_ROUTE_MAP.get(self.path)
         if method_name is None:
@@ -10045,6 +10116,16 @@ if __name__ == "__main__":
         self.end_headers()
         self.wfile.write(data)
 
+    def _serve_workspaceless_landing(self):
+        """Render and serve the no-workspace-bound landing page."""
+        html = _render_workspaceless_landing_html().encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(html)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(html)
+
     def _get_workspaces(self):
         """GET /api/workspaces — dropdown payload for the workspace switcher.
 
@@ -10054,27 +10135,38 @@ if __name__ == "__main__":
         """
         from pbg_superpowers import workspace_catalog
 
-        current_root = WORKSPACE
-        current_resolved = str(current_root.resolve())
+        # Workspaceless mode: there's no "current" workspace, so skip the
+        # self-row injection and report `current: null`. The catalog still
+        # populates the list.
+        if WORKSPACE is None:
+            result = {"current": None, "workspaces": []}
+            try:
+                catalog = workspace_catalog.list_workspaces()
+            except Exception:
+                catalog = []
+            current_resolved = None
+        else:
+            current_root = WORKSPACE
+            current_resolved = str(current_root.resolve())
 
-        current_name = self._read_workspace_name(current_root)
-        result = {
-            "current": {"name": current_name, "path": current_resolved},
-            "workspaces": [],
-        }
+            current_name = self._read_workspace_name(current_root)
+            result = {
+                "current": {"name": current_name, "path": current_resolved},
+                "workspaces": [],
+            }
 
-        try:
-            catalog = workspace_catalog.list_workspaces()
-        except Exception:
-            catalog = []
+            try:
+                catalog = workspace_catalog.list_workspaces()
+            except Exception:
+                catalog = []
 
-        if not any(e.get("path") == current_resolved for e in catalog):
-            catalog = [{
-                "name": current_name,
-                "path": current_resolved,
-                "package": None,
-                "added_at": None,
-            }] + list(catalog)
+            if not any(e.get("path") == current_resolved for e in catalog):
+                catalog = [{
+                    "name": current_name,
+                    "path": current_resolved,
+                    "package": None,
+                    "added_at": None,
+                }] + list(catalog)
 
         for entry in catalog:
             path = entry.get("path", "")
@@ -10479,8 +10571,14 @@ STATIC_DIR: Path = PACKAGE_ROOT / "static"
 # Entry point
 # ---------------------------------------------------------------------------
 
-def serve(workspace: Path, port: int, host: str = "127.0.0.1") -> int:
-    """Boot the dashboard HTTP server against ``workspace`` on ``host:port``.
+def serve(workspace: Path | None, port: int, host: str = "127.0.0.1") -> int:
+    """Boot the dashboard HTTP server on ``host:port``.
+
+    If ``workspace`` is a path, the dashboard binds to it (the existing
+    per-workspace mode). If ``workspace`` is ``None``, the server runs in
+    workspaceless / launcher mode (Phase A of todo #8): only the workspace
+    switcher, GitHub auth, and workspace-creation routes are reachable;
+    everything else 409s with ``{"error": "no workspace bound"}``.
 
     ``host`` defaults to ``127.0.0.1`` (loopback only — appropriate for local
     development). Pass ``0.0.0.0`` to bind every interface, which is required
@@ -10490,40 +10588,47 @@ def serve(workspace: Path, port: int, host: str = "127.0.0.1") -> int:
     Blocks until the server stops. Returns 0 on clean shutdown.
     """
     global WORKSPACE
-    WORKSPACE = Path(workspace).resolve()
-    _ws_add_to_sys_path()
-    # Register the active workspace root for ``vivarium_dashboard.lib`` helpers
-    # that used to walk up from __file__.
-    from vivarium_dashboard.lib._root import set_workspace_root
-    set_workspace_root(WORKSPACE)
+    if workspace is None:
+        WORKSPACE = None
+        print("vivarium-dashboard: no workspace bound — launcher mode", file=sys.stderr)
+    else:
+        WORKSPACE = Path(workspace).resolve()
+        _ws_add_to_sys_path()
+        # Register the active workspace root for ``vivarium_dashboard.lib``
+        # helpers that used to walk up from __file__.
+        from vivarium_dashboard.lib._root import set_workspace_root
+        set_workspace_root(WORKSPACE)
 
-    # Repair runs left 'running' by a previous crash/restart: a dead or
-    # missing PID becomes 'orphaned'; a live PID is left to keep running.
-    try:
-        from vivarium_dashboard.lib.run_registry import reconcile_stale_runs
-        n = reconcile_stale_runs(WORKSPACE / ".pbg" / "composite-runs.db")
-        if n:
-            print(f"reconciled {n} stale composite run(s) on startup")
-    except Exception as e:  # noqa: BLE001 — never block server boot on this
-        print(f"warning: run reconcile failed: {e}", file=sys.stderr)
+        # Repair runs left 'running' by a previous crash/restart: a dead or
+        # missing PID becomes 'orphaned'; a live PID is left to keep running.
+        try:
+            from vivarium_dashboard.lib.run_registry import reconcile_stale_runs
+            n = reconcile_stale_runs(WORKSPACE / ".pbg" / "composite-runs.db")
+            if n:
+                print(f"reconciled {n} stale composite run(s) on startup")
+        except Exception as e:  # noqa: BLE001 — never block server boot on this
+            print(f"warning: run reconcile failed: {e}", file=sys.stderr)
 
     srv = ThreadingHTTPServer((host, port), Handler)
-    # Write server-info so tests and other tools can detect the server is ready.
-    # When binding 0.0.0.0, advertise the loopback URL since that's what
-    # in-container tooling reaches; the host machine reaches via the published
-    # port mapping.
+    # Write server-info so tests and other tools can detect the server is
+    # ready. When binding 0.0.0.0, advertise the loopback URL since that's
+    # what in-container tooling reaches; the host machine reaches via the
+    # published port mapping. In workspaceless mode there's no workspace-local
+    # dir to write to, so skip — the parent process (cli.cmd_serve) is
+    # responsible for any launcher-level discovery file.
     advertise_host = "127.0.0.1" if host == "0.0.0.0" else host
-    info_dir = WORKSPACE / ".pbg" / "server"
-    info_dir.mkdir(parents=True, exist_ok=True)
-    (info_dir / "server-info").write_text(json.dumps({
-        "port": port,
-        "host": advertise_host,
-        "bind_host": host,
-        "url": f"http://{advertise_host}:{port}",
-        "pid": os.getpid(),
-        "screen_dir": str(info_dir / "content"),
-        "state_dir": str(info_dir / "state"),
-    }))
+    if WORKSPACE is not None:
+        info_dir = WORKSPACE / ".pbg" / "server"
+        info_dir.mkdir(parents=True, exist_ok=True)
+        (info_dir / "server-info").write_text(json.dumps({
+            "port": port,
+            "host": advertise_host,
+            "bind_host": host,
+            "url": f"http://{advertise_host}:{port}",
+            "pid": os.getpid(),
+            "screen_dir": str(info_dir / "content"),
+            "state_dir": str(info_dir / "state"),
+        }))
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
@@ -10535,7 +10640,9 @@ def serve(workspace: Path, port: int, host: str = "127.0.0.1") -> int:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--workspace", required=True, type=Path)
+    ap.add_argument("--workspace", type=Path, default=None,
+                    help="Path to workspace root. Omit to run in workspaceless "
+                         "launcher mode.")
     ap.add_argument("--port", type=int, required=True)
     ap.add_argument("--host", default="127.0.0.1",
                     help="Bind host (default 127.0.0.1; use 0.0.0.0 in containers)")
