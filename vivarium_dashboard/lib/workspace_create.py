@@ -397,6 +397,49 @@ def _git(target: Path, args: list[str], *, env: dict | None = None, check: bool 
     )
 
 
+def _ensure_venv(target: Path) -> None:
+    """Create a virtual environment in the workspace if one doesn't exist.
+
+    Uses ``uv venv`` (much faster) with a fallback to ``python3 -m venv``.
+    The venv is needed for the Registry Install flow, which checks for
+    ``.venv/bin/pip`` or ``.venv/bin/python3`` + ``uv`` on PATH.
+
+    Raises ``WorkspaceCreateError`` if neither tool can create the venv.
+    """
+    venv_dir = target / ".venv"
+    if venv_dir.is_dir():
+        return  # already exists — nothing to do
+
+    if shutil.which("uv"):
+        try:
+            subprocess.run(
+                ["uv", "venv", ".venv"],
+                cwd=str(target), capture_output=True, timeout=60, check=True,
+            )
+            return
+        except Exception:
+            pass  # fall through to python3 -m venv
+
+    python = shutil.which("python3") or shutil.which("python")
+    if python:
+        try:
+            subprocess.run(
+                [python, "-m", "venv", ".venv"],
+                cwd=str(target), capture_output=True, timeout=120, check=True,
+            )
+            return
+        except Exception as e:
+            raise WorkspaceCreateError(
+                500, "failed to create virtual environment",
+                detail={"error": str(e)[-500:]},
+            ) from None
+
+    raise WorkspaceCreateError(
+        500, "cannot create virtual environment — neither uv nor python3 found on PATH",
+        detail={"hint": "Install Python 3.10+ or uv, then retry."},
+    )
+
+
 def _git_init_first_commit(target: Path, name: str, *, env: dict | None = None) -> None:
     """Init git in ``target`` on branch ``main`` and create a scaffold commit.
 
@@ -571,6 +614,9 @@ def create_workspace(
             target_created = True
 
             _run_template_init(target, name, dashboard_path=dashboard_path)
+
+            # Create .venv so the Registry Install flow finds pip/python3.
+            _ensure_venv(target)
 
             workspace_yaml = target / "workspace.yaml"
             _persist_compute_backend(workspace_yaml, backend)

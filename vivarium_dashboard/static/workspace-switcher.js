@@ -329,7 +329,7 @@
           <input id="viv-ws-create-name" name="name" type="text"
                  placeholder="Enter Workspace Name" autocomplete="off" required>
           <div class="viv-ws-field-hint">
-            Lowercase letters, digits, ``-``, ``_``. Must start and end with
+            Lowercase letters, digits, dash, underscore. Must start and end with
             alphanumeric.
           </div>
 
@@ -390,12 +390,10 @@
   const ORG_SELECT_NONE = '';  // "Leave blank — local-only workspace"
 
   async function loadOrgsIntoSelect() {
-    """Fetch the user's GitHub orgs and populate the org <select>.
-
-    On 200: replace the free-text input with a populated <select>.
-    On 401 (unauthenticated): leave the input visible and append a hint.
-    On other errors: leave the input visible silently.
-    """
+    // Fetch the user's GitHub orgs and populate the org <select>.
+    // On 200: replace the free-text input with a populated <select>.
+    // On 401 (unauthenticated): leave the input visible and append a hint.
+    // On other errors: leave the input visible silently.
     const sel = createModal.querySelector('#viv-ws-create-org-select');
     const inp = createModal.querySelector('#viv-ws-create-org');
     const hint = createModal.querySelector('.viv-ws-org-hint');

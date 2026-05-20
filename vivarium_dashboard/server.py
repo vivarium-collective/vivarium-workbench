@@ -339,7 +339,8 @@ def _get_registry_data(bypass_cache: bool = False) -> dict:
         # Dedupe while preserving insertion order.
         _workspace_pkgs_repr = repr(list(dict.fromkeys(_ws_import_pkgs)))
 
-        py = sys.executable
+        venv_py = WORKSPACE / ".venv" / "bin" / "python3"
+        py = str(venv_py) if venv_py.exists() else sys.executable
         script = textwrap.dedent(f"""
 import json, sys
 try:
@@ -2906,6 +2907,8 @@ def _dirty_workspace() -> str:
         if _is_generated_path(path):
             continue
         if path in submodules:
+            continue
+        if path == ".gitmodules":
             continue
         kept.append(raw)
     return "\n".join(kept)
