@@ -8,6 +8,7 @@ test is marked skip-if-missing so CI without the sibling still passes.
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -208,6 +209,73 @@ def test_create_workspace_hpc_keeps_singularity_def(stub_template, isolated_targ
     assert (result.path / "Singularity.def").is_file()
 
 
+def test_create_hpc_singularity_content_parity(isolated_target, monkeypatch, tmp_path):
+    """Verify that when backend is hpc:*, the scaffolded workspace carries a
+    Singularity.def whose runtime structure parallels the Dockerfile.
+
+    This is the dashboard-side content check for the Phase E acceptance
+    criterion (todo #8 lines 1138-1143).  The full parity smoke test
+    (install-command diff) lives in pbg-template.  Here we confirm the
+    scaffold pipeline preserves both files with meaningful content.
+    """
+    for k, v in _git_identity_env().items():
+        monkeypatch.setenv(k, v)
+
+    # Template with matching Dockerfile / Singularity.def (both ship a
+    # FROM/Bootstrap line so we can verify content is carried through).
+    tpl = tmp_path / "parity-tpl"
+    tpl.mkdir()
+    (tpl / "template-init.sh").write_text("#!/bin/sh\nread WS_NAME\necho ok $WS_NAME\n")
+    (tpl / "template-init.sh").chmod(0o755)
+    (tpl / "workspace.yaml").write_text("name: placeholder\n")
+    (tpl / "Dockerfile").write_text(
+        "FROM python:3.12-slim\n"
+        "RUN apt-get update && apt-get install -y git curl\n"
+        "COPY . /app\n"
+        "CMD [\"uv\", \"run\", \"vivarium-dashboard\"]\n"
+    )
+    (tpl / "Singularity.def").write_text(
+        "Bootstrap: docker\n"
+        "From: python:3.12-slim\n"
+        "\n"
+        "%post\n"
+        "    apt-get update && apt-get install -y git curl\n"
+        "\n"
+        "%files\n"
+        "    . /app\n"
+        "\n"
+        "%runscript\n"
+        "    uv run vivarium-dashboard\n"
+    )
+
+    result = wc.create_workspace(
+        name="hpc-parity", backend="hpc:ccam",
+        target_root=isolated_target, template_source=tpl,
+        dashboard_path=None,
+    )
+
+    # Both files exist in the scaffolded workspace.
+    docker = result.path / "Dockerfile"
+    sing = result.path / "Singularity.def"
+    assert docker.is_file(), "Dockerfile must be present in scaffolded workspace"
+    assert sing.is_file(), "Singularity.def must be present in HPC scaffolded workspace"
+
+    # Both files have content (not empty).
+    docker_text = docker.read_text()
+    sing_text = sing.read_text()
+    assert len(docker_text) > 20
+    assert len(sing_text) > 20
+
+    # Basic content sanity: Singularity.def has a Bootstrap line pointing to
+    # the same base image family as Dockerfile's FROM.
+    assert "Bootstrap:" in sing_text, "Singularity.def must declare a Bootstrap origin"
+    assert "python:" in sing_text, "Singularity.def should reference the same Python base image"
+
+    # compute_backend is recorded.
+    data = yaml.safe_load(result.workspace_yaml.read_text())
+    assert data.get("compute_backend") == "hpc:ccam"
+
+
 def test_create_workspace_refuses_existing_dir(stub_template, isolated_target, monkeypatch):
     for k, v in _git_identity_env().items():
         monkeypatch.setenv(k, v)
@@ -269,3 +337,85 @@ def test_check_singularity_for_hpc_warns_when_missing(tmp_path):
 
 def test_check_singularity_for_hpc_silent_for_local(tmp_path):
     assert wc._check_singularity_for_hpc(tmp_path, "local") is None
+
+
+# ---------------------------------------------------------------------------
+# create_workspace with org (mocked gh remote)
+# ---------------------------------------------------------------------------
+
+
+def test_create_workspace_local_with_org_mocked(stub_template, isolated_target, monkeypatch):
+    """org-tracked create: simulate the gh remote path by monkeypatching
+    _attach_or_create_remote so the test doesn't need real GitHub creds."""
+    for k, v in _git_identity_env().items():
+        monkeypatch.setenv(k, v)
+
+    from vivarium_dashboard.lib import workspace_create as wc_mod
+
+    fake_url = "https://github.com/testorg/test-ws.git"
+    fake_branch = "scaffold/20260519T120000Z"
+
+    def _fake_remote(target, name, org, *, env):
+            # Write a .git/config so the test can verify remote was "set up".
+            import subprocess as _sp
+            _sp.run(
+                ["git", "-C", str(target), "remote", "add", "origin", fake_url],
+                capture_output=True, check=True,
+            )
+            return fake_url, fake_branch
+
+    monkeypatch.setattr(wc_mod, "_attach_or_create_remote", _fake_remote)
+
+    result = wc.create_workspace(
+        name="org-ws", backend="local", github_org="testorg",
+        target_root=isolated_target, template_source=stub_template,
+        dashboard_path=None,
+    )
+
+    assert result.path == isolated_target / "org-ws"
+    assert result.path.is_dir()
+    assert result.github_org == "testorg"
+    assert result.remote_url == fake_url
+    assert result.branch == fake_branch
+
+    # workspace.yaml carries both extra keys.
+    data = yaml.safe_load(result.workspace_yaml.read_text())
+    assert data.get("compute_backend") == "local"
+    assert data.get("github_org") == "testorg"
+
+    # .pbg/state.json is written (Phase D — active workstream pre-set).
+    state_file = result.path / ".pbg" / "state.json"
+    assert state_file.is_file()
+    import json
+    state = json.loads(state_file.read_text())
+    assert state["active_branch"] == fake_branch
+    assert state["pushed"] is True
+
+    # Remote was configured.
+    git_remote = subprocess.run(
+        ["git", "-C", str(result.path), "remote", "-v"],
+        capture_output=True, text=True, check=True,
+    )
+    assert fake_url in git_remote.stdout
+
+
+def test_create_workspace_with_org_persist_github_org_to_yaml(tmp_path):
+    """Unit test for _persist_github_org — writes new key, overwrites existing."""
+    f = tmp_path / "workspace.yaml"
+    f.write_text("name: foo\ncompute_backend: local\n")
+
+    wc._persist_github_org(f, "my-org")
+    data = yaml.safe_load(f.read_text())
+    assert data["github_org"] == "my-org"
+
+    # Overwrite case.
+    wc._persist_github_org(f, "other-org")
+    data = yaml.safe_load(f.read_text())
+    assert data["github_org"] == "other-org"
+
+
+def test_persist_github_org_noop_when_none(tmp_path):
+    f = tmp_path / "workspace.yaml"
+    f.write_text("name: foo\n")
+    wc._persist_github_org(f, None)
+    assert "github_org" not in yaml.safe_load(f.read_text())
