@@ -43,6 +43,18 @@
   // ----- DOM refs (resolved after DOMContentLoaded) -----
   const dom = {};
 
+  // ----- port handle constants -----
+  const PORT_H   = 18;   // vertical px between port handles
+  const PORT_PAD = 12;   // px above first / below last handle
+  const SNAP_R   = 14;   // snap-to-target radius in px
+
+  // ----- edge drag state -----
+  const _drag = {
+    active: false,
+    srcNode: null, srcDir: null, srcPort: null,
+    x0: 0, y0: 0,
+  };
+
   // ----- utilities -----
   const $ = (sel, root) => (root || document).querySelector(sel);
   const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
@@ -256,7 +268,7 @@
             'border-width': 1,
             'border-color': '#0a1a2b',
             'width': 'label',
-            'height': 28,
+            'height': 'data(nodeHeight)',
             'padding': '12px',
             'shape': 'round-rectangle',
           },
@@ -313,10 +325,22 @@
     });
 
     state.cy.on('tap', 'node', (ev) => {
-      selectNode(ev.target.id());
+      const id = ev.target.id();
+      if (_drag.active && nodeKind(state.model.state[id]) === 'store') {
+        commitEdge(
+          { node: _drag.srcNode, dir: _drag.srcDir, port: _drag.srcPort },
+          { node: id, dir: 'store', port: '' },
+        );
+        cancelEdgeDrag();
+        return;
+      }
+      selectNode(id);
     });
     state.cy.on('tap', (ev) => {
-      if (ev.target === state.cy) selectNode(null);
+      if (ev.target === state.cy) {
+        if (_drag.active) { cancelEdgeDrag(); return; }
+        selectNode(null);
+      }
     });
     state.cy.on('cxttap', 'node', (ev) => {
       // Right-click: delete node.
@@ -325,6 +349,11 @@
         deleteNode(id);
       }
     });
+
+    // Reposition port handles on pan / zoom / node move / graph change.
+    state.cy.on('viewport', renderPortHandles);
+    state.cy.on('position', 'node', renderPortHandles);
+    state.cy.on('add remove', 'node', renderPortHandles);
 
     // Drag-drop onto canvas → spawn from palette payload.
     dom.canvas.addEventListener('dragover', (ev) => {
@@ -356,8 +385,13 @@
 
     for (const [id, node] of Object.entries(state.model.state || {})) {
       const kind = nodeKind(node);
+      const _sch  = (kind !== 'store') ? (state.schemaCache.get(node?.address) || {}) : {};
+      const _nIn  = Math.max((_sch.inputs  || []).length, Object.keys(node?.inputs  || {}).length);
+      const _nOut = Math.max((_sch.outputs || []).length, Object.keys(node?.outputs || {}).length);
+      const _pc   = (kind === 'store') ? 0 : Math.max(_nIn, _nOut, 1);
+      const _nh   = Math.max(36, _pc * PORT_H + 2 * PORT_PAD);
       want.set(id, {
-        data: { id, label: id, kind, address: node?.address || '' },
+        data: { id, label: id, kind, address: node?.address || '', nodeHeight: _nh },
       });
       if (kind === 'process' || kind === 'step') {
         for (const [port, target] of Object.entries(node.inputs || {})) {
@@ -416,6 +450,173 @@
         state.cy.add({ group: 'edges', data: e.data });
       }
     }
+
+    // Defer to next animation frame so Cytoscape has rendered the new node
+    // positions before we query renderedBoundingBox().
+    requestAnimationFrame(() => requestAnimationFrame(renderPortHandles));
+  }
+
+  // ============================================================
+  // Port handles (ReactFlow-style interactive knobs)
+  // ============================================================
+
+  function uniqPorts(schemaPorts, wires) {
+    const names = [], seen = new Set();
+    for (const p of schemaPorts) {
+      const n = typeof p === 'string' ? p : (p && p.name);
+      if (n && !seen.has(n)) { seen.add(n); names.push(n); }
+    }
+    for (const n of Object.keys(wires)) {
+      if (!seen.has(n)) { seen.add(n); names.push(n); }
+    }
+    return names;
+  }
+
+  function renderPortHandles() {
+    if (!state.cy || !dom.portOverlay || _drag.active) return;
+    dom.portOverlay.innerHTML = '';
+    state.cy.nodes().forEach((cyNode) => {
+      const id   = cyNode.id();
+      const node = state.model.state[id];
+      if (!node) return;
+      const bb  = cyNode.renderedBoundingBox();
+      const mcy = (bb.y1 + bb.y2) / 2;
+
+      if (nodeKind(node) === 'store') {
+        const h = el('div', {
+          class: 'cb-port-handle cb-port-handle-store',
+          dataset: { node: id, dir: 'store', port: '' },
+          title: `store: ${id}`,
+          style: `left:${bb.x2}px;top:${mcy}px`,
+          onmousedown: (ev) => { ev.stopPropagation(); startEdgeDrag(ev, id, 'store', '', bb.x2, mcy); },
+        });
+        dom.portOverlay.appendChild(h);
+        return;
+      }
+
+      const schema = state.schemaCache.get(node.address) || {};
+      const ports = {
+        inputs:  uniqPorts(schema.inputs  || [], node.inputs  || {}),
+        outputs: uniqPorts(schema.outputs || [], node.outputs || {}),
+      };
+      for (const [dir, list] of Object.entries(ports)) {
+        const xEdge = dir === 'inputs' ? bb.x1 : bb.x2;
+        list.forEach((portName, i) => {
+          const py = bb.y1 + PORT_PAD + i * PORT_H + PORT_H / 2;
+          const h = el('div', {
+            class: 'cb-port-handle',
+            dataset: { node: id, dir, port: portName },
+            title: `${dir === 'inputs' ? '→ in' : 'out →'}: ${portName}`,
+            style: `left:${xEdge}px;top:${py}px`,
+            onmousedown: (ev) => { ev.stopPropagation(); startEdgeDrag(ev, id, dir, portName, xEdge, py); },
+          });
+          const lbl = el('span', {
+            class: `cb-port-label cb-port-label-${dir}`,
+            style: dir === 'inputs'
+              ? `left:${xEdge + 9}px;top:${py}px`
+              : `right:${(dom.portOverlay.offsetWidth || dom.canvas.offsetWidth) - xEdge + 9}px;top:${py}px`,
+          }, portName);
+          dom.portOverlay.appendChild(h);
+          dom.portOverlay.appendChild(lbl);
+        });
+      }
+    });
+  }
+
+  function isValidTarget(dataset) {
+    if (!_drag.active) return false;
+    if (dataset.node === _drag.srcNode) return false;
+    const srcIsStore = _drag.srcDir === 'store';
+    const tgtIsStore = dataset.dir === 'store';
+    if (srcIsStore && tgtIsStore) return false;
+    if (!srcIsStore && !tgtIsStore && _drag.srcDir === dataset.dir) return false;
+    return true;
+  }
+
+  function startEdgeDrag(ev, nodeId, dir, port, x0, y0) {
+    _drag.active  = true;
+    _drag.srcNode = nodeId; _drag.srcDir = dir; _drag.srcPort = port;
+    _drag.x0 = x0; _drag.y0 = y0;
+    const rect = dom.canvas.getBoundingClientRect();
+    const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+    dom.ghostLine.setAttribute('x1', x0); dom.ghostLine.setAttribute('y1', y0);
+    dom.ghostLine.setAttribute('x2', mx);  dom.ghostLine.setAttribute('y2', my);
+    dom.ghostLine.style.display = '';
+    dom.portOverlay.querySelectorAll('.cb-port-handle').forEach((h) => {
+      if (isValidTarget(h.dataset)) h.classList.add('cb-port-valid');
+    });
+    document.addEventListener('mousemove', _onDragMove);
+    document.addEventListener('mouseup',   _onDragUp);
+  }
+
+  function _onDragMove(ev) {
+    if (!_drag.active) return;
+    const rect = dom.canvas.getBoundingClientRect();
+    const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+    let ex = mx, ey = my;
+    dom.portOverlay.querySelectorAll('.cb-port-handle').forEach((h) => {
+      if (!isValidTarget(h.dataset)) return;
+      const hr = h.getBoundingClientRect();
+      const hx = hr.left + hr.width  / 2 - rect.left;
+      const hy = hr.top  + hr.height / 2 - rect.top;
+      if (Math.hypot(mx - hx, my - hy) < SNAP_R) { ex = hx; ey = hy; }
+    });
+    dom.ghostLine.setAttribute('x2', ex);
+    dom.ghostLine.setAttribute('y2', ey);
+  }
+
+  function _onDragUp(ev) {
+    document.removeEventListener('mousemove', _onDragMove);
+    document.removeEventListener('mouseup',   _onDragUp);
+    if (!dom.portOverlay) { cancelEdgeDrag(); return; }
+    const rect = dom.canvas.getBoundingClientRect();
+    let best = null, bestDist = SNAP_R;
+    dom.portOverlay.querySelectorAll('.cb-port-handle').forEach((h) => {
+      if (!isValidTarget(h.dataset)) return;
+      const hr = h.getBoundingClientRect();
+      const d  = Math.hypot(ev.clientX - (hr.left + hr.width / 2),
+                             ev.clientY - (hr.top  + hr.height / 2));
+      if (d < bestDist) { bestDist = d; best = h; }
+    });
+    if (best) {
+      commitEdge(
+        { node: _drag.srcNode, dir: _drag.srcDir, port: _drag.srcPort },
+        best.dataset,
+      );
+    }
+    cancelEdgeDrag();
+  }
+
+  function cancelEdgeDrag() {
+    _drag.active = false;
+    _drag.srcNode = _drag.srcDir = _drag.srcPort = null;
+    if (dom.ghostLine) dom.ghostLine.style.display = 'none';
+    if (dom.portOverlay) {
+      dom.portOverlay.querySelectorAll('.cb-port-valid')
+        .forEach((h) => h.classList.remove('cb-port-valid'));
+    }
+  }
+
+  function commitEdge(src, tgt) {
+    if (src.node === tgt.node) return;
+    const srcIsStore = src.dir === 'store';
+    const tgtIsStore = tgt.dir === 'store';
+    if (srcIsStore && tgtIsStore) return;
+    if (!srcIsStore && !tgtIsStore) {
+      if (src.dir === tgt.dir) return;
+      const [outNode, outPort, inNode, inPort] = src.dir === 'outputs'
+        ? [src.node, src.port, tgt.node, tgt.port]
+        : [tgt.node, tgt.port, src.node, src.port];
+      const storeId = uniqueNodeId('store');
+      setWire(outNode, 'outputs', outPort, storeId);
+      setWire(inNode,  'inputs',  inPort,  storeId);
+    } else {
+      const [procInfo, storeId] = srcIsStore
+        ? [tgt, src.node]
+        : [src, tgt.node];
+      setWire(procInfo.node, procInfo.dir, procInfo.port, storeId);
+    }
+    renderInspector();
   }
 
   function nodeKind(node) {
@@ -969,6 +1170,18 @@
     dom.palette = el('aside', { class: 'cb-pane cb-palette' });
     dom.canvas = el('div', { id: 'composite-canvas', class: 'cb-canvas' });
     dom.inspector = el('aside', { class: 'cb-pane cb-inspector' });
+
+    // Port handle overlay (positioned absolutely inside the canvas).
+    dom.portOverlay = el('div', { id: 'cb-port-overlay' });
+    dom.canvas.appendChild(dom.portOverlay);
+
+    // Ghost edge SVG (drawn during drag-to-connect).
+    dom.ghostSvg  = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    dom.ghostSvg.id = 'cb-ghost-svg';
+    dom.ghostLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    dom.ghostLine.style.display = 'none';
+    dom.ghostSvg.appendChild(dom.ghostLine);
+    dom.canvas.appendChild(dom.ghostSvg);
 
     const paletteFilter = el('input', {
       type: 'text', placeholder: 'filter…',

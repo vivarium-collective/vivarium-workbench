@@ -8444,7 +8444,12 @@ if __name__ == "__main__":
             return self._json(err, 500)
 
         venv_py = WORKSPACE / ".venv" / "bin" / "python3"
-        py = str(venv_py) if venv_py.exists() else sys.executable
+        if venv_py.exists():
+            _schema_py_cmd = [str(venv_py), "-c"]
+        elif shutil.which("uv") and (WORKSPACE / "pyproject.toml").exists():
+            _schema_py_cmd = ["uv", "run", "--project", str(WORKSPACE), "python3", "-c"]
+        else:
+            _schema_py_cmd = [sys.executable, "-c"]
 
         # Subprocess script — locate the class in core.link_registry, read
         # inputs_schema / outputs_schema / config_schema, emit JSON.
@@ -8527,8 +8532,8 @@ if __name__ == "__main__":
                             out.append({{"name": chunk, "type": "", "multiple": False}})
                 return out
 
-            inputs = _ports_from_schema(_read_schema("inputs_schema"))
-            outputs = _ports_from_schema(_read_schema("outputs_schema"))
+            inputs = _ports_from_schema(_read_schema("inputs_schema") or _read_schema("inputs"))
+            outputs = _ports_from_schema(_read_schema("outputs_schema") or _read_schema("outputs"))
             config_schema = _read_schema("config_schema")
             try:
                 config_schema = json.loads(json.dumps(config_schema, default=str))
@@ -8552,7 +8557,7 @@ if __name__ == "__main__":
 
         try:
             result = subprocess.run(
-                [py, "-c", script],
+                _schema_py_cmd + [script],
                 cwd=WORKSPACE, capture_output=True, text=True, timeout=15,
             )
         except subprocess.TimeoutExpired:
