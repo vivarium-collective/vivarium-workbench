@@ -5381,6 +5381,32 @@
           + '</ul></div>';
       }
 
+      // Imported expert feedback (expert-feedback B.1). Shows the reviewer's
+      // own annotations back, in-context per study, so the loop closes: the
+      // next report makes clear what was said and lets the team show it's
+      // addressed. Newest-first; author + timestamp preserved.
+      var feedbackHtml = '';
+      var fb = s.expert_feedback;
+      if (fb && fb.length) {
+        feedbackHtml =
+          '<div class="expert-feedback-panel" id="study-' + slug + '-imported-feedback" '
+          + 'style="margin:12px 0;padding:12px 16px;background:#eff6ff;border:1px solid #3b82f6;'
+          + 'border-left-width:5px;border-radius:6px;color:#1e3a5f">'
+          + '<strong>💬 Expert feedback (' + fb.length + ')</strong>'
+          + '<ul style="list-style:none;margin:8px 0 0;padding:0">'
+          + fb.map(function(a) {
+              var who = _h(a.author || 'reviewer');
+              var when = a.ts ? _h(String(a.ts).replace('T', ' ').slice(0, 16)) : '';
+              return '<li style="margin:6px 0;padding:6px 10px;background:#fff;'
+                + 'border:1px solid #dbeafe;border-radius:4px">'
+                + '<div class="small" style="color:#3b82f6;font-weight:600">'
+                +   who + (when ? ' · ' + when : '') + '</div>'
+                + '<div style="margin-top:2px">' + _h(a.text || '') + '</div>'
+                + '</li>';
+            }).join('')
+          + '</ul></div>';
+      }
+
       // Charts come from runs.db when present, or fall back to the
       // workspace default-baseline. Wrap them with a BASELINE banner
       // so the expert knows the trace is pre-execution data, not a
@@ -5414,6 +5440,7 @@
           +     '<div class="study-planning-pill">PLANNING — not yet run</div>'
           +   '</header>'
           +   enforcementHtml     // ⚠ declared params not applied (D.2)
+          +   feedbackHtml        // 💬 imported expert feedback (B.1)
           +   summaryHtml         // Question / purpose
           +   conditionsHtml      // Conditions: variants + model settings (PROMINENT)
           +   testsHtml           // Expected behavior / tests (PROMINENT for comments)
@@ -5440,6 +5467,7 @@
         +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
         +   '</header>'
         +   enforcementHtml     // ⚠ declared params not applied (D.2)
+        +   feedbackHtml        // 💬 imported expert feedback (B.1)
         +   biologyGlanceHtml   // 0. Biology-at-a-glance
         +   embedsHtml          // 0b. Embedded preview HTMLs
         +   summaryHtml         // 1. Plain-English summary
