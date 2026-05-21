@@ -491,15 +491,14 @@ def _collect_emit_leaves(state: dict,
             if ag_node is not None:
                 parts, node = ag_parts, ag_node
         if node is None:
-            # Run-created store: some listener outputs (e.g.
-            # listeners/replication_data/number_of_oric) are materialised by
-            # the listener step during the run and are absent from the initial
-            # state, so the walk above finds nothing. Wire the agent-scoped
-            # leaf path directly so the emitter captures it once it exists,
-            # rather than silently dropping the observable.
-            direct = (["agents", "0"] + parts
-                      if parts[:1] != ["agents"] else parts)
-            leaves.append(direct)
+            # Path resolves nowhere (neither literal nor agents/0/ scoped).
+            # This happens for listener outputs materialised only during the
+            # run (e.g. listeners/replication_data/number_of_oric is absent at
+            # init). We deliberately do NOT wire it: the SQLiteEmitter is a
+            # Step that fires on input triggers, and an input path with no
+            # store to trigger on leaves the step without a per-tick trigger —
+            # it then emits ~once and the whole history collapses to 2 rows.
+            # Dropping the unresolved path keeps per-tick capture of the rest.
             continue
         _walk_collect(node, parts, leaves)
     # Dedup while preserving order
