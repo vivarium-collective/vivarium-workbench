@@ -43,6 +43,12 @@ _NEW_COLUMNS = {
     "progress_step": "INTEGER",
     "log_path": "TEXT",
     "heartbeat_at": "REAL",
+    # Coordinated-generation provenance (expert-feedback A.2). Links this run
+    # to one (git_sha, param_set, composite_versions) snapshot so the report
+    # can flag panels from an older generation as stale. See
+    # pbg_superpowers.generation. Nullable: runs predating the model have NULL
+    # and are treated as stale once any generation exists.
+    "generation_id": "TEXT",
 }
 
 
@@ -82,20 +88,24 @@ def generate_run_id(spec_id: str, params: dict | None = None,
 
 def save_metadata(conn: sqlite3.Connection, *, spec_id: str, run_id: str,
                   params: dict | None, label: str, started_at: float,
-                  n_steps: int, log_path: str | None = None) -> None:
+                  n_steps: int, log_path: str | None = None,
+                  generation_id: str | None = None) -> None:
     """Insert a new run row with status='running'.
 
     ``n_steps`` is the *requested* step total — stored up front so the UI
     progress bar always has a denominator. ``complete_metadata`` may later
     overwrite it with the actual count.
+
+    ``generation_id`` stamps the run with the workspace's current coordinated
+    generation (expert-feedback A.2) so stale panels can be flagged.
     """
     conn.execute(
         "INSERT INTO runs_meta "
         "(run_id, spec_id, label, params_json, started_at, status, "
-        " n_steps, log_path, progress_step) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
+        " n_steps, log_path, progress_step, generation_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
         (run_id, spec_id, label, json.dumps(params or {}),
-         started_at, "running", n_steps, log_path),
+         started_at, "running", n_steps, log_path, generation_id),
     )
     conn.commit()
 
@@ -115,7 +125,8 @@ def query_run_meta(conn: sqlite3.Connection, *, run_id: str) -> dict | None:
     """Return the runs_meta row for one run as a dict, or None if absent."""
     row = conn.execute(
         "SELECT run_id, spec_id, label, params_json, started_at, completed_at, "
-        "n_steps, status, pid, progress_step, log_path, heartbeat_at "
+        "n_steps, status, pid, progress_step, log_path, heartbeat_at, "
+        "generation_id "
         "FROM runs_meta WHERE run_id=?",
         (run_id,),
     ).fetchone()
@@ -191,7 +202,7 @@ def query_runs(conn: sqlite3.Connection, *, spec_id: str) -> list[dict]:
     """List runs for one spec_id, newest first."""
     rows = conn.execute(
         "SELECT run_id, spec_id, label, params_json, started_at, "
-        "completed_at, n_steps, status FROM runs_meta "
+        "completed_at, n_steps, status, generation_id FROM runs_meta "
         "WHERE spec_id=? ORDER BY started_at DESC",
         (spec_id,),
     ).fetchall()

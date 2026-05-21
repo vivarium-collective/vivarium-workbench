@@ -723,11 +723,16 @@ def _read_runs_db_for_study(name: str) -> list[dict]:
         # runs, but older backfilled DBs may only have runs_meta.
         tables = {row[0] for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}
+        # runs_meta.generation_id is a recently-added nullable column; older
+        # DBs won't have it, so probe before selecting it.
+        meta_cols = {row[1] for row in conn.execute("PRAGMA table_info(runs_meta)")} \
+            if "runs_meta" in tables else set()
+        _gen_col = "generation_id" if "generation_id" in meta_cols else "NULL AS generation_id"
         rows_by_id: dict[str, dict] = {}
         if "runs_meta" in tables:
             for r in conn.execute(
                 "SELECT run_id, spec_id, label, params_json, started_at, "
-                "completed_at, n_steps, status, sim_name "
+                f"completed_at, n_steps, status, sim_name, {_gen_col} "
                 "FROM runs_meta ORDER BY started_at DESC"
             ):
                 try:
@@ -735,18 +740,19 @@ def _read_runs_db_for_study(name: str) -> list[dict]:
                 except Exception:
                     params = {}
                 rows_by_id[r["run_id"]] = {
-                    "run_id":       r["run_id"],
-                    "spec_id":      r["spec_id"],
-                    "label":        r["label"] or r["sim_name"] or "",
-                    "sim_name":     r["sim_name"] or r["label"] or "",
-                    "variant":      params.get("variant"),
-                    "composite":    params.get("composite") or r["spec_id"],
-                    "params":       params,
-                    "n_steps":      r["n_steps"],
-                    "status":       r["status"],
-                    "started_at":   r["started_at"],
-                    "completed_at": r["completed_at"],
-                    "source":       "runs_meta",
+                    "run_id":        r["run_id"],
+                    "spec_id":       r["spec_id"],
+                    "label":         r["label"] or r["sim_name"] or "",
+                    "sim_name":      r["sim_name"] or r["label"] or "",
+                    "variant":       params.get("variant"),
+                    "composite":     params.get("composite") or r["spec_id"],
+                    "params":        params,
+                    "n_steps":       r["n_steps"],
+                    "status":        r["status"],
+                    "started_at":    r["started_at"],
+                    "completed_at":  r["completed_at"],
+                    "generation_id": r["generation_id"],
+                    "source":        "runs_meta",
                 }
         if "simulations" in tables:
             for r in conn.execute(
@@ -790,9 +796,22 @@ def _read_runs_db_for_study(name: str) -> list[dict]:
                 return str(v)
         return str(v)
 
+    # Coordinated-generation staleness (expert-feedback A.2): a run from an
+    # older generation than the workspace's current one is flagged so the
+    # report/Runs tab can mark it instead of silently mixing it in.
+    try:
+        from pbg_superpowers import generation as _gen
+        _cur_gen = _gen.current_generation_id(WORKSPACE)
+    except Exception:  # noqa: BLE001
+        _cur_gen = None
+
     out = []
     for r in rows_by_id.values():
         r["started_at_iso"] = _iso(r.get("started_at"))
+        try:
+            r["stale"] = _gen.is_stale(r.get("generation_id"), _cur_gen)
+        except Exception:  # noqa: BLE001
+            r["stale"] = False
         # Compact params summary for the table cell (e.g., "seed=0, rida_rate=4.6").
         params = r.get("params") or {}
         if params:
@@ -2776,12 +2795,23 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
             print(traceback.format_exc())
     """)
 
+    # Coordinated-generation stamp (expert-feedback A.2): tag this run with the
+    # workspace's current generation so the report can flag panels from an
+    # older generation as stale. No-op (None) when no generation is active.
+    _generation_id = None
+    try:
+        from pbg_superpowers import generation as _gen
+        _generation_id = _gen.current_generation_id(WORKSPACE)
+    except Exception:  # noqa: BLE001 — generation is advisory, never fatal
+        _generation_id = None
+
     conn = cr.connect(db_file)
     try:
         try:
             cr.save_metadata(conn, spec_id=spec_id, run_id=run_id,
                              params=overrides, label=label,
-                             started_at=time.time(), n_steps=steps)
+                             started_at=time.time(), n_steps=steps,
+                             generation_id=_generation_id)
             if sim_name is not None:
                 conn.execute("UPDATE runs_meta SET sim_name=? WHERE run_id=?",
                              (sim_name, run_id))
@@ -2789,6 +2819,13 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
         except sqlite3.IntegrityError:
             return ({"simulation_id": run_id,
                      "error": "duplicate run_id (rare timing collision) — retry"}, 500)
+        if _generation_id is not None:
+            try:
+                _gen.record_run(WORKSPACE, _generation_id,
+                                study=(sim_name or label or spec_id),
+                                run_id=run_id, sim_name=sim_name)
+            except Exception:  # noqa: BLE001 — manifest index is best-effort
+                pass
 
         # v2ecoli friction #10: persist the rendered script alongside runs.db
         # so "what did the dashboard actually run for this run_id?" is one cat.
