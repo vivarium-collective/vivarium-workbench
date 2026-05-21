@@ -5357,6 +5357,30 @@
       var hasRuns = (s.runs || []).length > 0 || (s.findings || []).length > 0;
       var isPlanning = !hasRuns;
 
+      // Param-enforcement banner (expert-feedback D.2). When the study
+      // declares enforced_params and its latest run didn't apply them, show
+      // the violations prominently so "declared but not implemented" is
+      // visible — the exact thing the reviewer caught manually.
+      var enforcementHtml = '';
+      var pe = s.param_enforcement;
+      if (pe && pe.violations && pe.violations.length) {
+        enforcementHtml =
+          '<div class="param-enforcement-banner" id="study-' + slug + '-enforcement" '
+          + 'style="margin:12px 0;padding:12px 16px;background:#fffbeb;border:1px solid #f59e0b;'
+          + 'border-left-width:5px;border-radius:6px;color:#92400e">'
+          + '<strong>⚠ Declared parameters were not applied to the latest run</strong>'
+          + '<div class="small" style="margin-top:4px">This study declares '
+          + 'enforced parameters, but the most recent run did not apply '
+          + (pe.violations.length === 1 ? 'one of them' : (pe.violations.length + ' of them'))
+          + ' — results below may reflect composite defaults rather than the '
+          + 'intended values. Re-run after wiring these in.</div>'
+          + '<ul class="small" style="margin:8px 0 0 18px">'
+          + pe.violations.map(function(v) {
+              return '<li>' + _h(v.message || (v.param + ': declared ' + v.expected)) + '</li>';
+            }).join('')
+          + '</ul></div>';
+      }
+
       // Charts come from runs.db when present, or fall back to the
       // workspace default-baseline. Wrap them with a BASELINE banner
       // so the expert knows the trace is pre-execution data, not a
@@ -5389,6 +5413,7 @@
           +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
           +     '<div class="study-planning-pill">PLANNING — not yet run</div>'
           +   '</header>'
+          +   enforcementHtml     // ⚠ declared params not applied (D.2)
           +   summaryHtml         // Question / purpose
           +   conditionsHtml      // Conditions: variants + model settings (PROMINENT)
           +   testsHtml           // Expected behavior / tests (PROMINENT for comments)
@@ -5414,6 +5439,7 @@
         +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
         +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
         +   '</header>'
+        +   enforcementHtml     // ⚠ declared params not applied (D.2)
         +   biologyGlanceHtml   // 0. Biology-at-a-glance
         +   embedsHtml          // 0b. Embedded preview HTMLs
         +   summaryHtml         // 1. Plain-English summary
