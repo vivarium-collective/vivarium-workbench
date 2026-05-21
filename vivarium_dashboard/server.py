@@ -1673,6 +1673,25 @@ def _collect_study_observables(spec: dict) -> list[str]:
         elif isinstance(obs, str):
             _push(obs)
 
+    # v4 studies declare their tests under `tests:` (not `behavior_tests:`)
+    # with the same {measure: {path, series_x, ...}} shape, and their overlay
+    # observables under `comparative_visualizations[].observable_path`. Without
+    # reading these, v4 studies (e.g. the dnaa investigation) collect zero
+    # observables and every history row is just `{"_tick": <time>}`.
+    for t in spec.get("tests", []) or []:
+        m = (t or {}).get("measure") if isinstance(t, dict) else None
+        if not isinstance(m, dict):
+            continue
+        _push(m.get("path"))
+        for nested_key in ("series_x", "series_y", "x", "y", "series_a", "series_b"):
+            n = m.get(nested_key)
+            if isinstance(n, dict):
+                _push(n.get("path"))
+
+    for cv in spec.get("comparative_visualizations", []) or []:
+        if isinstance(cv, dict):
+            _push(cv.get("observable_path"))
+
     return out
 
 
@@ -2823,7 +2842,7 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                 state = cr.inject_sqlite_emitter(
                     state, run_id=_payload['run_id'], db_file=_payload['db_file'])
                 composite = Composite({{'state': state}}, core=core)
-                composite.run(_payload['steps'])
+                cr.run_with_division(composite, _payload['steps'])
                 results = gather_emitter_results(composite)
         """).lstrip("\n")
     else:
@@ -2850,12 +2869,13 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                 from process_bigraph import Composite, gather_emitter_results
                 from process_bigraph.emitter import SQLiteEmitter
                 from bigraph_schema.json_codec import bigraph_json_hook
+                from vivarium_dashboard.lib import composite_runs as cr
                 core = build_core()
                 core.register_link('SQLiteEmitter', SQLiteEmitter)
                 with open({_state_path!r}) as _sf:
                     _state = json.load(_sf, object_hook=bigraph_json_hook)
                 composite = Composite({{'state': _state}}, core=core)
-                composite.run({steps})
+                cr.run_with_division(composite, {steps})
                 results = gather_emitter_results(composite)
         """).lstrip("\n")
 

@@ -76,6 +76,35 @@ def connect(db_file: str | Path) -> sqlite3.Connection:
     return conn
 
 
+def run_with_division(composite, steps: int, chunk: int = 100) -> int:
+    """Run ``composite`` up to ``steps`` ticks, stopping cleanly at division.
+
+    v2ecoli single-cell composites signal cell division in one of two ways:
+    ``composite.run()`` raises, or ``agents['0']`` is removed from the state.
+    The dashboard runs each study as a single generation, so either signal
+    means the cell cycle finished — we stop and let the caller gather whatever
+    the emitter captured up to that point.
+
+    Running ``steps`` in one ``composite.run(steps)`` call (the old behaviour)
+    instead crashed the whole run at division, so any run length that crossed
+    the division point failed with a 502. Mirrors the chunked, division-aware
+    loop in ``scripts/run_default_baseline.py``. Returns ticks actually run.
+    """
+    steps = int(steps)
+    done = 0
+    while done < steps:
+        n = min(chunk, steps - done)
+        try:
+            composite.run(n)
+        except Exception:
+            break  # division — composite raised
+        done += n
+        agents = (getattr(composite, "state", None) or {}).get("agents") or {}
+        if agents.get("0") is None:
+            break  # division — parent agent removed
+    return done
+
+
 def generate_run_id(spec_id: str, params: dict | None = None,
                     now: float | None = None) -> str:
     """Build a deterministic-shape run id: `<spec_id>__<ts>__<hash6>`."""
@@ -452,7 +481,25 @@ def _collect_emit_leaves(state: dict,
     for raw in explicit_paths:
         parts = [p for p in raw.split("/") if p]
         node = _resolve_path(state, parts)
+        # v2ecoli single-cell composites scope every listener store under
+        # agents/0/...; study observables are declared at the biology path
+        # (e.g. listeners/dnaA_cycle/atp_fraction). If the literal path
+        # doesn't resolve, retry under agents/0/.
+        if node is None and parts[:1] != ["agents"]:
+            ag_parts = ["agents", "0"] + parts
+            ag_node = _resolve_path(state, ag_parts)
+            if ag_node is not None:
+                parts, node = ag_parts, ag_node
         if node is None:
+            # Run-created store: some listener outputs (e.g.
+            # listeners/replication_data/number_of_oric) are materialised by
+            # the listener step during the run and are absent from the initial
+            # state, so the walk above finds nothing. Wire the agent-scoped
+            # leaf path directly so the emitter captures it once it exists,
+            # rather than silently dropping the observable.
+            direct = (["agents", "0"] + parts
+                      if parts[:1] != ["agents"] else parts)
+            leaves.append(direct)
             continue
         _walk_collect(node, parts, leaves)
     # Dedup while preserving order
