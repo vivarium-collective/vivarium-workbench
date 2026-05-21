@@ -1145,6 +1145,9 @@
     var search = f.search.toLowerCase();
     var activeTags = f.tags;
     var modules = window._catalogModules.filter(function(m) {
+      // The workspace's own first-party package is surfaced in
+      // Installed modules only — it's not an installable catalog item.
+      if (m.kind === 'workspace') return false;
       // Search filter
       if (search) {
         var haystack = (m.name + ' ' + (m.description || '') + ' ' + (m.tags || []).join(' ')).toLowerCase();
@@ -1227,12 +1230,33 @@
       return;
     }
 
+    // Pin the workspace's own first-party package row at the top.
+    installed.sort(function(a, b) {
+      var aw = a.kind === 'workspace' ? 0 : 1;
+      var bw = b.kind === 'workspace' ? 0 : 1;
+      if (aw !== bw) return aw - bw;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+
     var rows = installed.map(function(m) {
       var name = _esc(m.name);
       var source = _esc(m.source || '');
       var ref = _esc(m.ref || 'main');
       var path = _esc(m.install_path || m.path || '—');
       var pkg = _esc(m.package || m.name);
+
+      // The workspace's own package isn't uninstallable — it's the workspace.
+      // Render with a "first-party" pill and no Uninstall button.
+      if (m.kind === 'workspace') {
+        return '<tr style="background:#f8fafc">' +
+          '<td><code>' + name + '</code><br><small style="color:#6b7280">' + pkg + '</small></td>' +
+          '<td><code>' + source + '</code> @ <code>' + ref + '</code></td>' +
+          '<td><code>' + path + '</code></td>' +
+          '<td><span class="status-pill installed" title="The workspace\'s own first-party package. Always present; cannot be uninstalled.">first-party</span></td>' +
+          '<td><span style="color:#6b7280;font-size:0.85em">workspace package</span></td>' +
+          '</tr>';
+      }
+
       var sysDepsBtn = '';
       // Only surface a "Run system-deps check" button when the module is
       // installed AND the catalog flagged drift OR the entry declares
@@ -4349,6 +4373,7 @@
                     description: embed.description || '',
                     url: embed.url,
                     html: text,
+                    stale: embed.stale === true,
                   } : null;
                 })
                 .catch(function() { return null; });
@@ -4453,6 +4478,15 @@
     var ordered = specs.slice().sort(function(a, b) {
       return (depthMap[a.name] || 0) - (depthMap[b.name] || 0)
           || a.name.localeCompare(b.name);
+    });
+
+    // Data-driven flags so the "How to read" guide describes only what this
+    // investigation actually contains — no workspace-specific boilerplate.
+    var hasDag = specs.some(function(s) {
+      return (s.parent_studies || []).length > 0;
+    });
+    var hasAssumptions = specs.some(function(s) {
+      return ((s.key_assumptions || s.assumptions) || []).length > 0;
     });
 
     // --- v3-shape per-study section ----------------------------------
@@ -5230,11 +5264,16 @@
               // Escape double-quotes for srcdoc attribute.
               var escaped = (emb.html || '').replace(/&/g, '&amp;')
                                             .replace(/"/g, '&quot;');
-              return '<div class="study-embed-card" style="margin:12px 0;border:1px solid #e2e8f0;border-radius:6px;background:#fff;overflow:hidden">'
+              var isStale = emb.stale === true
+                || (typeof emb.description === 'string' && emb.description.indexOf('⚠') === 0);
+              var descStyle = isStale
+                ? 'margin:6px 12px;padding:6px 10px;background:#fffbeb;border:1px solid #f59e0b;border-radius:4px;color:#92400e'
+                : 'margin:6px 12px';
+              return '<div class="study-embed-card" style="margin:12px 0;border:1px solid ' + (isStale ? '#f59e0b' : '#e2e8f0') + ';border-radius:6px;background:#fff;overflow:hidden">'
                 + '<div style="padding:8px 12px;border-bottom:1px solid #e5e7eb;background:#f9fafb">'
                 +   '<strong>' + _h(emb.name) + '</strong>'
                 + '</div>'
-                + (emb.description ? '<p class="muted small" style="margin:6px 12px">' + _h(emb.description) + '</p>' : '')
+                + (emb.description ? '<p class="' + (isStale ? '' : 'muted ') + 'small" style="' + descStyle + '">' + _h(emb.description) + '</p>' : '')
                 + '<iframe srcdoc="' + escaped + '" '
                 +   'style="width:100%;height:680px;border:0;display:block" '
                 +   'loading="lazy" title="' + _h(emb.name) + '"></iframe>'
@@ -5269,9 +5308,9 @@
                 '<span class="planning-baseline-pill">BASELINE</span>' +
                 '<span class="planning-baseline-text">' +
                   'Charts below show the <strong>workspace pre-execution baseline</strong>' +
-                  ' — what the cell looks like before any of this study\'s variants run.' +
+                  ' — what the system looks like before any of this study\'s variants run.' +
                   ' Expert reviewers: comment on whether these traces look right for the' +
-                  ' wild-type starting point.' +
+                  ' starting point.' +
                 '</span>' +
               '</div>' +
               chartsHtml +
@@ -6118,14 +6157,13 @@
               +   '<div class="planning-phase-banner-body">'
               +     '<strong>Planning phase — pre-execution review.</strong> '
               +     planningCount + ' of ' + (specs || []).length + ' studies have not yet run. '
-              +     'The charts below come from the <strong>workspace pre-execution baseline</strong> '
-              +     '(seed 0, M9-glucose, full cell cycle until division). For each study, the most '
-              +     'important sections for expert review are:'
+              +     'The charts below come from the <strong>workspace pre-execution baseline</strong>. '
+              +     'For each study, the most important sections for expert review are:'
               +   '</div>'
               +   '<ul class="planning-phase-banner-list">'
               +     '<li><strong>Conditions</strong> — variants and their parameter overrides, plus the model settings awaiting your call. Edit values in the live dashboard\'s Build tab, or comment here.</li>'
               +     '<li><strong>Expected behavior</strong> — what each test claims will pass / fail and the criterion it uses. Flag any test that\'s under- or over-specified.</li>'
-              +     '<li><strong>Baseline visualizations</strong> — what the wild-type cell looks like before the study\'s mechanism lands. Comment on whether the trace matches your intuition.</li>'
+              +     '<li><strong>Baseline visualizations</strong> — what the system looks like before the study\'s mechanism lands. Comment on whether the trace matches your intuition.</li>'
               +   '</ul>'
               +   '<div class="planning-phase-banner-foot">Click the <strong>💬</strong> icon next to any section to leave inline feedback. "Generate feedback report" (bottom-right) packages everything into a single yaml file to send back.</div>'
               + '</div>'
@@ -6149,19 +6187,25 @@
                       + '<ol>' + acceptance + '</ol>' : '')
 
       +   '<h2 id="how-to-read">How to read this report</h2>'
-      +   '<p>Each section below is one study, in dependency order (roots first). A downstream study assumes everything above it has passed, so reading top-down keeps the calibration context intact. Every study uses the same five-section header:</p>'
-      +   '<ol>'
-      +     '<li><strong>Question</strong> — what this study is asking, in one paragraph. The "why" lives here.</li>'
-      +     '<li><strong>Assumptions</strong> — what we take as given (cited to literature where applicable) and whether we have verified each one in v2ecoli yet.</li>'
-      +     '<li><strong>Conditions</strong> — what we set up to test the question. Three sub-fields: <em>baseline</em> (the reference composite), <em>variants</em> (perturbations), and <em>model settings</em> (parameters that need human input before the study can run).</li>'
-      +     '<li><strong>Tests</strong> — pass/fail criteria with a measure path + a comparison op. Each test owns one row in the gate decision; charts inline below show the observable over time with the criterion overlaid.</li>'
-      +     '<li><strong>Status</strong> — a single keyword summarising where the study currently stands (e.g. <code>evaluate-with-calibration-todo</code>, <code>done-tests-passing</code>, <code>blocked</code>).</li>'
-      +   '</ol>'
-      +   '<p>Auxiliary blocks — <em>Model change</em>, <em>Implementation requirements</em>, <em>Follow-up studies</em>, <em>Limitations</em>, <em>Bibliography</em> — sit below the five-section header. They live inside collapsible <em>Technical details</em> blocks; open them only when you need the file paths, parameter names, or CLI flags.</p>'
-      +   '<p class="muted small">Chart sourcing: live charts are rendered from the latest study <code>runs.db</code>; charts captioned <strong>"Drawn from workspace default-baseline"</strong> mean the study hasn\'t run yet and we\'re showing the pre-execution baseline as a "before" reference.</p>'
+      +   '<p>Each section below is one study, '
+      +     (hasDag
+        ? 'ordered by dependency (roots first): a downstream study assumes the studies it depends on have passed, so reading top-down keeps the context intact.'
+        : 'listed in the order declared in the investigation.')
+      +   ' Each study presents these parts (sections with no content are omitted):</p>'
+      +   '<ul>'
+      +     '<li><strong>Question</strong> — what this study is asking, and why.</li>'
+      +     (hasAssumptions
+        ? '<li><strong>Assumptions</strong> — what the study takes as given, cited to the literature where applicable.</li>'
+        : '')
+      +     '<li><strong>Conditions</strong> — the experimental setup: <em>baseline</em> (the reference composite), <em>variants</em> (parameter perturbations), and <em>model settings</em> (any parameters gated on human input before a run).</li>'
+      +     '<li><strong>Tests</strong> — pass/fail criteria, each with a measure path and a comparison op. Charts inline below show the observable over the run; once tests are evaluated, each maps to a row in the gate decision.</li>'
+      +     '<li><strong>Status</strong> — shown as a phase badge plus per-axis status (design, implementation, simulation, evaluation, gate, expert review). The headline pill is the gate status when set; legacy single-keyword status is shown as a fallback.</li>'
+      +   '</ul>'
+      +   '<p>Supporting detail — <em>Model change</em>, <em>Implementation requirements</em>, <em>Follow-up studies</em>, <em>Limitations</em>, <em>References</em> — appears below each study when present, inside collapsible <em>Technical details</em> blocks. Open them when you need file paths, parameter names, or citations.</p>'
+      +   '<p class="muted small">Chart sourcing: charts are rendered from the study\'s latest <code>runs.db</code>. A study that has not run yet shows the workspace pre-execution baseline as a labelled "before" reference, and an auto-discovered chart that predates the latest run is flagged as possibly stale rather than hidden.</p>'
       +   '<p class="muted small">Want to leave inline feedback? Click the <strong>💬</strong> icon next to any section. "Generate feedback report" (bottom-right) packages every annotation into a single yaml file that comes back via <code>pbg-feedback-import</code>.</p>'
 
-      +   '<h2 id="studies-heading">Studies (dependency order)</h2>'
+      +   '<h2 id="studies-heading">Studies' + (hasDag ? ' (dependency order)' : '') + '</h2>'
       +   studiesHtml
 
       +   '<h2 id="references">References <span class="muted small">(' + orderedCited.length + ' cited across this investigation)</span></h2>'
@@ -6171,7 +6215,7 @@
       +   '</ol>'
 
       +   '<footer id="footer">'
-      +     '<p>Generated from the v2ecoli vivarium-dashboard. Source of truth: <code>investigations/' + nameClean + '/investigation.yaml</code> and the per-study <code>studies/&lt;name&gt;/study.yaml</code> files.</p>'
+      +     '<p>Generated by vivarium-dashboard. Source of truth: <code>investigations/' + nameClean + '/investigation.yaml</code> and the per-study <code>studies/&lt;name&gt;/study.yaml</code> files.</p>'
       +     '<p>Open the live DAG: in the dashboard, click <strong>Investigations</strong> → <em>' + _h(iset.title || iset.name) + '</em>.</p>'
       +   '</footer>'
 
