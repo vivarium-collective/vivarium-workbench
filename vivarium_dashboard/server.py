@@ -594,7 +594,48 @@ def _study_detail_spec(name: str):
             spec["param_enforcement"] = _compute_param_enforcement(spec)
         except Exception:  # noqa: BLE001
             pass
+
+        # Imported expert feedback (expert-feedback B.1): attach any
+        # annotations a reviewer left on this study's sections so the report
+        # shows them back in-context, closing the loop. Best-effort.
+        try:
+            fb = _collect_study_feedback(name)
+            if fb:
+                spec["expert_feedback"] = fb
+        except Exception:  # noqa: BLE001
+            pass
     return spec
+
+
+def _collect_study_feedback(study_slug: str) -> list[dict]:
+    """Gather imported feedback annotations targeting one study.
+
+    Scans every ``investigations/<inv>/`` for stored feedback (via
+    pbg_superpowers' shared reader) and returns the annotations whose section
+    id matches ``study-<slug>``, newest-first. Cross-investigation because a
+    study's feedback is keyed by the study slug embedded in the section id,
+    not by which investigation exported the report.
+    """
+    from pbg_superpowers.feedback_import import (
+        load_investigation_feedback, feedback_for_study,
+    )
+    inv_root = WORKSPACE / "investigations"
+    if not inv_root.is_dir():
+        return []
+    out: list[dict] = []
+    seen: set[tuple] = set()
+    for inv_dir in sorted(inv_root.iterdir()):
+        if not inv_dir.is_dir():
+            continue
+        by_section = load_investigation_feedback(WORKSPACE, inv_dir.name)
+        for ann in feedback_for_study(by_section, study_slug):
+            key = (ann.get("section"), ann.get("ts"), ann.get("text"))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(ann)
+    out.sort(key=lambda a: a.get("ts") or "", reverse=True)
+    return out
 
 
 def _compute_param_enforcement(spec: dict) -> dict | None:
