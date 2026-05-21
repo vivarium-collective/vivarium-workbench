@@ -584,7 +584,55 @@ def _study_detail_spec(name: str):
                 if e.get("url") not in existing_urls:
                     merged_embeds.append(e)
             spec["embed_visualizations"] = merged_embeds
+
+        # Param-enforcement gate (expert-feedback D.2): if the study declares
+        # `enforced_params`, verify the latest run actually applied them.
+        # Surfaces "declared but not applied" as structured violations the
+        # report renders as a banner, instead of the silent default-use the
+        # reviewer caught. Best-effort — never breaks the study response.
+        try:
+            spec["param_enforcement"] = _compute_param_enforcement(spec)
+        except Exception:  # noqa: BLE001
+            pass
     return spec
+
+
+def _compute_param_enforcement(spec: dict) -> dict | None:
+    """Compare a study's declared enforced_params against its latest run.
+
+    Returns ``{declared, checked_against_run, violations: [{param, expected,
+    actual, kind, message}]}`` or ``None`` when the study declares no
+    enforced params. The "applied" params are the newest run's recorded
+    overrides (``runs_meta.params_json``), surfaced via ``spec["runs"]``.
+    """
+    from pbg_superpowers.param_enforcement import (
+        load_enforced_params, check_enforced_params,
+    )
+    declared = load_enforced_params(spec)
+    if not declared:
+        return None
+    # Newest run with a params dict (runs are merged newest-first upstream,
+    # but be order-independent and prefer completed runs).
+    runs = spec.get("runs") or []
+    def _ts(r):
+        v = (r or {}).get("started_at")
+        return float(v) if isinstance(v, (int, float)) else 0.0
+    candidate = None
+    for r in sorted(runs, key=_ts, reverse=True):
+        if isinstance(r, dict) and isinstance(r.get("params"), dict):
+            candidate = r
+            break
+    applied = (candidate or {}).get("params") or {}
+    violations = check_enforced_params(declared, applied)
+    return {
+        "declared": declared,
+        "checked_against_run": (candidate or {}).get("run_id"),
+        "violations": [
+            {"param": v.param, "expected": v.expected, "actual": v.actual,
+             "kind": v.kind, "message": v.describe()}
+            for v in violations
+        ],
+    }
 
 
 def _latest_run_timestamp(runs_db: Path) -> float | None:
