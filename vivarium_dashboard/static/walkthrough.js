@@ -6239,7 +6239,7 @@
       // user scrolls past a study, its .study-nav exits its bounding
       // .study div and the next study's nav takes over.
       + '.study{margin-top:40px;padding-top:8px;scroll-margin-top:16px;position:relative}'
-      + '.study-nav{position:sticky;top:0;z-index:20;background:rgba(255,255,255,0.96);backdrop-filter:saturate(120%) blur(2px);'
+      + '.study-nav{position:sticky;top:44px;z-index:20;background:rgba(255,255,255,0.96);backdrop-filter:saturate(120%) blur(2px);'
       +     '-webkit-backdrop-filter:saturate(120%) blur(2px);'
       +     'border-bottom:1px solid #e2e8f0;padding:8px 12px 6px 12px;margin:0 -12px 12px -12px;border-radius:4px}'
       + '.study-nav .study-nav-row1{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:4px}'
