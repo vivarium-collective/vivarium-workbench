@@ -5140,43 +5140,63 @@
       // ── WHAT DID/WILL WE RUN? (Simulations) ──────────────────────────
       var simsHtml = '';
       if (sims.length) {
+        function _short(model) {
+          if (!model) return '';
+          var p = String(model).split('.');
+          return p[p.length - 1];
+        }
+        // The first sim is the reference; describe each row as its diff from it.
+        var baseSim = sims[0] || {};
+        var baseParams = baseSim.params || {};
+        var baseModel = baseSim.base_model;
+        function _changes(sim) {
+          var bits = [];
+          if (sim === baseSim) return '<em class="muted">reference baseline</em>';
+          if (sim.base_model && sim.base_model !== baseModel)
+            bits.push('different model <code>' + _h(_short(sim.base_model)) + '</code>');
+          // perturbation dict wins; else diff params vs the baseline sim
+          var changed = sim.perturbation && Object.keys(sim.perturbation).length
+            ? sim.perturbation
+            : (function() {
+                var d = {}, p = sim.params || {};
+                Object.keys(p).forEach(function(k) {
+                  if (k === 'seed' || k === 'cache_dir' || k === 'n_steps') return;
+                  if (JSON.stringify(p[k]) !== JSON.stringify(baseParams[k])) d[k] = p[k];
+                });
+                return d;
+              })();
+          var keys = Object.keys(changed).filter(function(k){return changed[k] !== null;});
+          if (keys.length) bits.push(keys.slice(0, 6).map(function(k) {
+            return '<code>' + _h(k) + '=' + _h(JSON.stringify(changed[k])) + '</code>';
+          }).join(' '));
+          return bits.length ? bits.join('; ') : '<em class="muted">same params, longer/other</em>';
+        }
+        var rows = sims.map(function(sim) {
+          var statusClass = sim.status === 'ready' ? 'sim-status-ready'
+                          : sim.status === 'gated' ? 'sim-status-gated'
+                          : sim.status === 'ran' ? 'sim-status-ran' : 'sim-status-unknown';
+          var statusPill = sim.status ? '<span class="sim-status-pill ' + statusClass + '">' + _h(sim.status) + '</span>' : '<span class="muted small">—</span>';
+          var runParts = [];
+          if (sim.condition) runParts.push(_h(sim.condition));
+          var ns = (sim.params && sim.params.n_steps);
+          if (sim.duration_min != null) runParts.push(_h(sim.duration_min) + ' min');
+          else if (ns != null) runParts.push(_h(ns) + ' steps');
+          if (sim.seeds && sim.seeds.length) runParts.push(sim.seeds.length + ' seed' + (sim.seeds.length === 1 ? '' : 's'));
+          var tests = sim.applies_tests || sim.tests || [];
+          var feeds = (Array.isArray(tests) && tests.length)
+            ? '<div class="sim-feeds muted small">feeds: ' + tests.map(function(t){return '<code>' + _h(t) + '</code>';}).join(' ') + '</div>' : '';
+          return '<tr>'
+            + '<td><strong>' + _h(sim.name || '(unnamed)') + '</strong>' + feeds + '</td>'
+            + '<td><code>' + _h(_short(sim.base_model)) + '</code></td>'
+            + '<td>' + _changes(sim) + '</td>'
+            + '<td class="muted small">' + (runParts.join(' · ') || '—') + '</td>'
+            + '<td>' + statusPill + '</td>'
+            + '</tr>';
+        }).join('');
         simsHtml = '<div id="' + sid.sims + '"><h3>What did/will we run? <span class="muted small">(' + sims.length + ' simulations)</span></h3>'
-          + '<p class="muted small" style="margin:0 0 8px 0">Each card describes one concrete run: what we change vs the baseline, the environmental condition, how long it runs, which measurements get collected, and which tests it feeds.</p>'
-          + sims.map(function(sim) {
-              var statusClass = sim.status === 'ready' ? 'sim-status-ready'
-                              : sim.status === 'gated' ? 'sim-status-gated'
-                              : sim.status === 'ran' ? 'sim-status-ran' : 'sim-status-unknown';
-              var statusPill = sim.status ? '<span class="sim-status-pill ' + statusClass + '">' + _h(sim.status) + '</span>' : '';
-              var pertHtml = '';
-              if (sim.perturbation && Object.keys(sim.perturbation).length) {
-                var pertLines = Object.entries(sim.perturbation).map(function(kv){return '<li>' + _h(kv[0]) + ' set to ' + _h(JSON.stringify(kv[1])) + '</li>';}).join('');
-                pertHtml = '<div class="sim-pert"><strong>What we change:</strong><ul>' + pertLines + '</ul></div>';
-              } else {
-                pertHtml = '<div class="sim-pert sim-pert-none">Unmodified baseline — no perturbation.</div>';
-              }
-              var metaParts = [];
-              if (sim.condition)  metaParts.push('Condition: ' + _h(sim.condition));
-              if (sim.duration_min != null) metaParts.push(_h(sim.duration_min) + ' min');
-              if (sim.seeds && sim.seeds.length) metaParts.push(sim.seeds.length + ' seed' + (sim.seeds.length === 1 ? '' : 's'));
-              var metaHtml = metaParts.length ? '<div class="sim-meta">' + metaParts.join(' &middot; ') + '</div>' : '';
-              var blockedHtml = '';
-              if (sim.status === 'gated' && sim.blocked_by_requirements && sim.blocked_by_requirements.length) {
-                blockedHtml = '<div class="sim-blocked">⛔ Blocked by ' + sim.blocked_by_requirements.length + ' open requirement(s) — see <em>What to build / fix</em> below.</div>';
-              }
-              var techParts = [];
-              if (sim.base_model) techParts.push('Base model: <code>' + _h(sim.base_model) + '</code>');
-              if (sim.seeds && sim.seeds.length) techParts.push('Seeds: ' + sim.seeds.join(', '));
-              if (sim.readouts && sim.readouts.length) techParts.push('Readouts: ' + sim.readouts.map(function(r){return '<code>' + _h(r) + '</code>';}).join(', '));
-              var appliesTests = sim.applies_tests || sim.tests || [];
-              if (Array.isArray(appliesTests) && appliesTests.length) techParts.push('Feeds tests: ' + appliesTests.map(function(t){return '<code>' + _h(t) + '</code>';}).join(', '));
-              if (sim.blocked_by_requirements && sim.blocked_by_requirements.length) techParts.push('Blocked by: ' + sim.blocked_by_requirements.map(function(b){return '<code>' + _h(b) + '</code>';}).join(', '));
-              var techDisc = techParts.length ? '<details class="tech-details"><summary>Technical details</summary>' + techParts.join('<br>') + '</details>' : '';
-
-              return '<div class="sim-card sim-' + statusClass + '">'
-                   +   '<div class="sim-header"><strong class="sim-name">' + _h(sim.name || '(unnamed)') + '</strong>' + statusPill + '</div>'
-                   +   pertHtml + metaHtml + blockedHtml + techDisc
-                   + '</div>';
-            }).join('')
+          + '<p class="muted small" style="margin:0 0 8px 0">One row per concrete run: the model composite, what changes vs the reference baseline, the condition / length, and its status.</p>'
+          + '<table class="sim-table"><thead><tr><th>Simulation</th><th>Model</th><th>Changes vs baseline</th><th>Run</th><th>Status</th></tr></thead>'
+          + '<tbody>' + rows + '</tbody></table>'
           + '</div>';
       }
 
@@ -5201,20 +5221,20 @@
       var readoutsHtml = readouts.length
         ? '<div id="' + sid.readouts + '"><h3>What did/will we measure? <span class="muted small">(' + readouts.length + ' readouts)</span></h3>'
           + '<p class="muted small" style="margin:0 0 8px 0">Quantities we extract from each simulation run to evaluate the study\'s tests.</p>'
+          + '<table class="readout-table"><thead><tr><th>Readout</th><th>Status</th><th>Path</th><th>Description</th></tr></thead><tbody>'
           + readouts.map(function(r) {
-              var techBits = [];
-              if (r.path || r.identifier) techBits.push('Path: <code>' + _h(r.path || r.identifier) + '</code>');
-              if (r.units) techBits.push('Units: ' + _h(r.units));
-              if (r.blocked_by_requirements && r.blocked_by_requirements.length)
-                techBits.push('Blocked by: ' + r.blocked_by_requirements.map(function(b){return '<code>' + _h(b) + '</code>';}).join(', '));
-              var techDisc = techBits.length ? '<details class="tech-details"><summary>Technical details</summary>' + techBits.join('<br>') + '</details>' : '';
-              return '<div class="readout-card">'
-                   +   '<strong>' + _h(r.name || '') + '</strong>'
-                   +   (r.status ? ' <span class="muted small">(' + _h(r.status) + ')</span>' : '')
-                   +   '<div class="readout-desc">' + _h(r.notes || r.description || '') + '</div>'
-                   +   techDisc
-                   + '</div>';
+              var path = r.path || r.identifier || r.store_path;
+              var blocked = (r.blocked_by_requirements && r.blocked_by_requirements.length)
+                ? '<div class="muted small">⛔ blocked by ' + r.blocked_by_requirements.map(function(b){return '<code>' + _h(b) + '</code>';}).join(', ') + '</div>' : '';
+              return '<tr>'
+                + '<td><strong>' + _h(r.name || '') + '</strong></td>'
+                + '<td class="muted small">' + (r.status ? _h(r.status) : '—') + '</td>'
+                + '<td>' + (path ? '<code>' + _h(path) + '</code>' : '<span class="muted">—</span>')
+                  + (r.units ? ' <span class="muted small">(' + _h(r.units) + ')</span>' : '') + '</td>'
+                + '<td>' + _h(r.notes || r.description || '') + blocked + '</td>'
+                + '</tr>';
             }).join('')
+          + '</tbody></table>'
           + '</div>'
         : '';
 
@@ -5251,6 +5271,18 @@
               if (t.measure) techBits.push('Measure: <code>' + _h(JSON.stringify(t.measure)) + '</code>');
               if (t.pass_if) techBits.push('Pass condition: <code>' + _h(JSON.stringify(t.pass_if)) + '</code>');
               else if (t.expect) techBits.push('Expect: <code>' + _h(JSON.stringify(t.expect)) + '</code>');
+              // The Python that actually evaluates this test: the declarative
+              // (kind, op) dispatch into the generic evaluator. There is no
+              // per-test Python — evaluate() handles every test by kind + op.
+              (function() {
+                var kind = (t.measure && t.measure.kind) || null;
+                var op = (t.pass_if && t.pass_if.op) || (t.expect && t.expect.op) || null;
+                if (!kind && !op) return;
+                var ref = 'Python: <code>vivarium_dashboard/lib/expected_behavior.py</code> → <code>evaluate()</code>';
+                if (kind) ref += '; measure kind <code>' + _h(kind) + '</code> via <code>_series_for_simple_kind()</code>/<code>_measure()</code>';
+                if (op) ref += '; op <code>' + _h(op) + '</code> via <code>_check()</code>';
+                techBits.push(ref);
+              })();
               if (t.requires_simulation) techBits.push('Requires sim: <code>' + _h(t.requires_simulation) + '</code>');
               if (t.cites && t.cites.length) techBits.push('Cites: ' + t.cites.map(function(c){return '<code>' + _h(c) + '</code>';}).join(', '));
               if (t.calibration_anchor) techBits.push('Calibration anchor: ⚠️ <code>' + _h(JSON.stringify(t.calibration_anchor)) + '</code>');
@@ -6454,6 +6486,17 @@
       + '.review-gate ul{margin:6px 0 0 18px;padding:0}'
       + '.review-gate li{margin:3px 0}'
       + '.review-gate code{background:#fef3c7;padding:0 4px;border-radius:3px;font-size:0.92em}'
+      // ── compact sim / readout tables ──
+      + '.sim-table,.readout-table{width:100%;border-collapse:collapse;font-size:0.9em;margin:4px 0 8px}'
+      + '.sim-table th,.readout-table th{text-align:left;padding:5px 8px;border-bottom:2px solid #e2e8f0;color:#475569;font-size:0.86em;font-weight:600}'
+      + '.sim-table td,.readout-table td{padding:5px 8px;border-bottom:1px solid #f1f5f9;vertical-align:top}'
+      + '.sim-table tr:hover,.readout-table tr:hover{background:#f8fafc}'
+      + '.sim-table code,.readout-table code{background:#f1f5f9;padding:0 4px;border-radius:3px;font-size:0.92em}'
+      + '.sim-feeds,.sim-table .sim-feeds code{font-size:0.82em}'
+      + '.sim-status-pill{display:inline-block;font-size:0.8em;padding:1px 8px;border-radius:9999px;background:#e2e8f0;color:#1e293b}'
+      + '.sim-status-ready,.sim-status-pill.sim-status-ready{background:#dcfce7;color:#166534}'
+      + '.sim-status-ran,.sim-status-pill.sim-status-ran{background:#dbeafe;color:#1e40af}'
+      + '.sim-status-gated,.sim-status-pill.sim-status-gated{background:#fef9c3;color:#854d0e}'
       + '</style></head><body>'
 
       // Auto-size embedded visualization iframes to their full content so they
