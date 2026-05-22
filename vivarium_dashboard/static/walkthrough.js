@@ -4702,6 +4702,114 @@
       return sentences.join(' ');
     }
 
+    // First sentence of a (possibly multi-line) prose blob — used to derive a
+    // one-liner for the collapsed control panel when no explicit one-liner was
+    // authored. Collapses whitespace/newlines first.
+    function _firstSentence(text) {
+      if (!text) return '';
+      var t = String(text).replace(/\s+/g, ' ').trim();
+      var m = /^(.*?[.!?])(\s|$)/.exec(t);
+      return m ? m[1] : t;
+    }
+
+    // Verdict vocabulary for the collapsed control panel. An authored
+    // `report.verdict` (one of the keys below) wins; otherwise we derive it
+    // from the gate decision class so older studies still get a sensible badge.
+    var VERDICT_MAP = {
+      'passing':              {emoji: '✅', label: 'Passing',                       cls: 'v-pass'},
+      'passing-with-caveats': {emoji: '⚠️', label: 'Passing with caveats',          cls: 'v-warn'},
+      'blocked':              {emoji: '⛔', label: 'Blocked',                       cls: 'v-block'},
+      'preliminary':          {emoji: '🧪', label: 'Preliminary',                   cls: 'v-prelim'},
+      'failing-bio':          {emoji: '❌', label: 'Failing biological validation', cls: 'v-fail'},
+      'calibrating':          {emoji: '🔄', label: 'Calibration in progress',       cls: 'v-cal'},
+      'not-started':          {emoji: '📋', label: 'Not started',                   cls: 'v-none'}
+    };
+    function _verdictBadge(s, decision) {
+      var key = ((s.report || {}).verdict || '').trim().toLowerCase();
+      if (VERDICT_MAP[key]) return VERDICT_MAP[key];
+      switch (decision.cls) {
+        case 'dec-passed':     return VERDICT_MAP['passing'];
+        case 'dec-needscal':   return VERDICT_MAP['calibrating'];
+        case 'dec-blocked':    return VERDICT_MAP['blocked'];
+        case 'dec-notstarted': return VERDICT_MAP['not-started'];
+        default:               return VERDICT_MAP['preliminary'];
+      }
+    }
+
+    // The collapsed study header — a scannable "scientific control panel".
+    // Ordering follows the spec: identity → verdict → confidence/evidence →
+    // objective → conclusion → metrics → insight → caveat. Every field is
+    // optional; an absent field simply doesn't render. Authored one-liners
+    // (report.objective/conclusion/main_insight/caveat) win; otherwise we
+    // derive from the longer report prose so nothing is silently blank.
+    function _studyControlPanel(s, i, decision) {
+      var rep = s.report || {};
+      var v = _verdictBadge(s, decision);
+      var title = rep.title || _humanizeStudyName(s.name).title;
+      var objective  = rep.objective    || _firstSentence(rep.purpose)
+                        || _firstSentence((s.purpose || {}).question);
+      var conclusion = rep.conclusion   || _firstSentence(rep.result);
+      var insight    = rep.main_insight || _firstSentence(rep.interpretation);
+      var caveat = rep.caveat;
+      if (!caveat && Array.isArray(s.limitations) && s.limitations.length) {
+        var l0 = s.limitations[0];
+        caveat = (typeof l0 === 'string') ? l0 : (l0 && (l0.text || l0.limitation)) || '';
+      }
+
+      // Metadata: keep machine ids visually secondary.
+      var runs = s.runs || [];
+      var latest = runs.length ? runs[runs.length - 1] : null;
+      var updated = (latest && (latest.created_at || latest.timestamp)) || s.last_run || '';
+      if (updated) updated = String(updated).replace('T', ' ').slice(0, 16);
+      var sha = (generation && generation.git_sha) ? String(generation.git_sha).slice(0, 7) : '';
+      var meta = ['<code>' + _h(s.name) + '</code>', 'depth ' + (depthMap[s.name] || 0)];
+      if (updated) meta.push('updated ' + _h(updated));
+      if (sha) meta.push('git <code>' + _h(sha) + '</code>');
+
+      var conf = (rep.confidence || '').trim();
+      var ev   = (rep.evidence_quality || '').trim();
+
+      // Metrics strip: authored key_metrics (strings or {label,value,status})
+      // plus an auto-derived test pass ratio and literature-match chip.
+      var chips = [];
+      (rep.key_metrics || []).forEach(function(m) {
+        if (typeof m === 'string') {
+          chips.push('<span class="sp-metric">' + _h(m) + '</span>');
+        } else if (m && typeof m === 'object') {
+          var st = (m.status || '').toLowerCase();
+          var icon = st === 'pass' ? '✅ ' : st === 'warn' ? '⚠️ ' : st === 'fail' ? '❌ ' : '';
+          var txt = (m.label || '') + (m.value != null ? ': ' + m.value : '');
+          chips.push('<span class="sp-metric sp-metric-' + _h(st || 'plain') + '">' + icon + _h(txt) + '</span>');
+        }
+      });
+      var nPass = (decision.passed || []).length, nFail = (decision.failed || []).length;
+      if (nPass + nFail) {
+        chips.push('<span class="sp-metric sp-metric-' + (nFail ? 'warn' : 'pass') + '">'
+                   + nPass + '/' + (nPass + nFail) + ' tests passing</span>');
+      }
+      if (rep.lit_match) chips.push('<span class="sp-metric">Lit match: ' + _h(rep.lit_match) + '</span>');
+
+      return ''
+        + '<div class="sp-top">'
+        +   '<span class="sp-num">' + (i + 1) + '.</span>'
+        +   '<span class="sp-title">' + _h(title) + '</span>'
+        +   '<span class="sp-verdict ' + v.cls + '">' + v.emoji + ' ' + _h(v.label) + '</span>'
+        + '</div>'
+        + (objective ? '<div class="sp-objective">' + _h(objective) + '</div>' : '')
+        + '<div class="sp-meta">' + meta.join(' · ') + '</div>'
+        + ((conf || ev)
+            ? '<div class="sp-quality">'
+              + (conf ? '<span class="sp-conf sp-conf-' + _h(conf.toLowerCase()) + '">Confidence: ' + _h(conf) + '</span>' : '')
+              + (ev   ? '<span class="sp-ev">Evidence: ' + _h(ev) + '</span>' : '')
+              + '</div>'
+            : '')
+        + (conclusion ? '<div class="sp-conclusion"><span class="sp-lbl">Conclusion</span> ' + _h(conclusion) + '</div>' : '')
+        + (chips.length ? '<div class="sp-metrics">' + chips.join('') + '</div>' : '')
+        + (insight ? '<div class="sp-insight"><span class="sp-lbl">Insight</span> ' + _h(insight) + '</div>' : '')
+        + (caveat  ? '<div class="sp-caveat"><span class="sp-lbl">Caveat</span> ' + _h(caveat) + '</div>' : '')
+        + '<span class="sp-expand-hint">▸ click to expand full study</span>';
+    }
+
     function v3StudySection(s, i, statusBadge, phaseBadge, parents, kids) {
       var slug = _h(s.name);
       var sid = {
@@ -4746,6 +4854,8 @@
       // from the sub-nav and rendered at the top of the section.
       var decision = _decideDecision(s);
       var summaryText = _studySummary(s, decision);
+      var controlPanelHtml = _studyControlPanel(s, i, decision);
+      var verdictBadge = _verdictBadge(s, decision);
       var hasDecide = !!(ifPass || ifFail
                          || (decide.implementation_validation && decide.implementation_validation.length)
                          || (decide.biological_validation && decide.biological_validation.length)
@@ -5450,7 +5560,9 @@
       if (isPlanning) {
         // Planning-phase layout — minimal, expert-comment-driven.
         return ''
-          + '<section class="study study-planning" id="study-' + slug + '">'
+          + '<details class="study-fold verdict-' + verdictBadge.cls + '" id="study-' + slug + '">'
+          +   '<summary class="study-panel">' + controlPanelHtml + '</summary>'
+          + '<section class="study study-planning">'
           +   subNav
           +   '<header class="study-header">'
           +     '<h2><span class="study-num">' + (i + 1) + '.</span> ' + _h(s.name) + ' ' + phaseBadge + statusBadge + '</h2>'
@@ -5473,12 +5585,15 @@
           +     limitsHtml        // Limitations
           +     refsHtml          // References
           +   '</details>'
-          + '</section>';
+          + '</section>'
+          + '</details>';
       }
 
       // Post-execution layout — full v3 flow including decision + findings.
       return ''
-        + '<section class="study" id="study-' + slug + '">'
+        + '<details class="study-fold verdict-' + verdictBadge.cls + '" id="study-' + slug + '">'
+        +   '<summary class="study-panel">' + controlPanelHtml + '</summary>'
+        + '<section class="study">'
         +   subNav
         +   '<header class="study-header">'
         +     '<h2><span class="study-num">' + (i + 1) + '.</span> ' + _h(s.name) + ' ' + phaseBadge + statusBadge + '</h2>'
@@ -5503,7 +5618,8 @@
         +   followUpsHtml       // 10. Next steps
         +   limitsHtml          // 11. Limitations
         +   refsHtml            // 12. References
-        + '</section>';
+        + '</section>'
+        + '</details>';
     }
 
     // Render the per-study Conditions block (v4). Returns empty string for
@@ -5838,45 +5954,6 @@
       return {chip: m[1], title: rest};
     }
 
-    var tocStudies = ordered.map(function(s, i) {
-      var anchor = 'study-' + _h(s.name);
-      var statusClass = 'badge-' + _h(s.status || 'planned');
-      var display = _humanizeStudyName(s.name);
-      var beh = s.behavior_tests || s.expected_behavior || [];
-      var nFindings  = (s.findings || []).length;
-      var nRuns      = (s.runs || []).length;
-      var nTests     = beh.length;
-      var nFollowups = (s.follow_up_studies || []).length;
-      // "Blockers" = open follow-ups that the next study depends on
-      // resolving (the seedable, not-done ones). A coarse but useful
-      // signal that the gate isn't clean yet.
-      var nBlockers = (s.follow_up_studies || []).filter(function(f) {
-        return f.status !== 'done' && f.kind !== 'existing';
-      }).length;
-
-      function _pill(n, label) {
-        if (!n) return '';
-        return '<span class="toc-count-pill">' + n + ' ' + label + '</span>';
-      }
-      var counts = ''
-        + _pill(nFindings,  'findings')
-        + _pill(nRuns,      'runs')
-        + _pill(nTests,     'tests')
-        + _pill(nFollowups, 'follow-ups')
-        + _pill(nBlockers,  'blockers');
-
-      var chipHtml = display.chip
-        ? '<span class="toc-chip">' + _h(display.chip) + '</span> '
-        : '';
-      return '<li><a href="#' + anchor + '">' +
-             '<span class="toc-num">' + (i + 1) + '.</span> ' +
-             chipHtml + '<strong>' + _h(display.title) + '</strong>' +
-             ' <span class="toc-status ' + statusClass + '">' + _h(s.status || 'planned') + '</span>' +
-             (counts ? '<div class="toc-counts">' + counts + '</div>' : '') +
-             '<div class="toc-slug muted">' + _h(s.name) + '</div>' +
-             '</a></li>';
-    }).join('');
-
     var nameClean = _h(iset.name);
 
     return ''
@@ -5887,32 +5964,17 @@
       + '*{box-sizing:border-box}'
       + 'html,body{margin:0;padding:0}'
       + 'body{font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;color:#0f172a;line-height:1.55;background:#fff}'
-      // ── layout: sticky TOC sidebar + flex content ──
-      + '.layout{display:flex;align-items:flex-start;min-height:100vh}'
-      + '.toc{position:sticky;top:0;flex:0 0 260px;width:260px;height:100vh;overflow-y:auto;'
-      +     'padding:24px 16px 24px 24px;border-right:1px solid #e2e8f0;background:#f8fafc;font-size:0.9em}'
-      + '.toc h4{margin:0 0 8px 0;font-size:0.78em;text-transform:uppercase;letter-spacing:0.05em;color:#64748b}'
-      + '.toc ul{list-style:none;padding:0;margin:0 0 16px 0}'
-      + '.toc li{margin:0}'
-      + '.toc a{display:block;padding:5px 8px;color:#334155;text-decoration:none;border-radius:4px;font-size:0.93em;'
-      +     'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
-      + '.toc a:hover{background:#e2e8f0;color:#0f172a}'
-      + '.toc a.active{background:#dbeafe;color:#1e40af;font-weight:600}'
-      + '.toc ul.studies a{padding-left:18px;font-family:ui-monospace,monospace;font-size:0.85em;white-space:normal}'
-      + '.toc .toc-num{display:inline-block;color:#94a3b8;width:18px;font-family:ui-monospace,monospace}'
-      + '.toc-status{display:inline-block;font-size:0.7em;padding:1px 6px;border-radius:9999px;font-family:-apple-system,sans-serif;background:#e2e8f0;color:#1e293b;margin-left:4px}'
-      + '.toc-status.badge-planned{background:#f1f5f9;color:#475569}'
-      + '.toc-status.badge-running{background:#dbeafe;color:#1e40af}'
-      + '.toc-status.badge-ran{background:#d1fae5;color:#065f46}'
-      + '.toc-status.badge-complete{background:#d1fae5;color:#064e3b}'
-      + '.toc-status.badge-failed{background:#fee2e2;color:#991b1b}'
-      + '.toc-counts{font-size:0.7em;margin-top:4px;font-family:-apple-system,sans-serif;display:flex;flex-wrap:wrap;gap:3px}'
-      + '.toc-count-pill{display:inline-block;background:#eef2ff;color:#3730a3;padding:1px 7px;border-radius:9999px;font-size:0.92em;line-height:1.4}'
-      + '.toc-chip{display:inline-block;font-family:ui-monospace,monospace;font-size:0.78em;background:#f1f5f9;color:#475569;padding:0 5px;border-radius:3px;margin-right:2px}'
-      + '.toc-slug{font-size:0.66em;color:#94a3b8;margin-top:3px;font-family:ui-monospace,monospace;word-break:break-all}'
-      + '.toc-toggle{display:none;position:fixed;top:12px;right:12px;z-index:100;padding:6px 10px;'
-      +    'background:#0f172a;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85em}'
-      + '.content{flex:1;min-width:0;padding:24px 36px}'
+      // ── layout: sticky top nav + single centered column ──
+      + '.topbar{position:sticky;top:0;z-index:100;display:flex;flex-wrap:wrap;align-items:center;gap:6px;'
+      +     'padding:9px 20px;background:rgba(255,255,255,0.95);backdrop-filter:saturate(140%) blur(6px);'
+      +     'border-bottom:1px solid #e2e8f0}'
+      + '.topbar .tb-title{font-weight:700;font-size:0.92em;color:#0f172a;margin-right:10px;white-space:nowrap}'
+      + '.topbar a{font-size:0.83em;color:#334155;text-decoration:none;padding:4px 12px;border-radius:9999px;background:#f1f5f9;white-space:nowrap}'
+      + '.topbar a:hover{background:#e2e8f0;color:#0f172a}'
+      + '.topbar a.active{background:#dbeafe;color:#1e40af;font-weight:600}'
+      + '.content{max-width:1080px;margin:0 auto;padding:24px 36px}'
+      // Anchor targets clear the sticky bar when jumped to.
+      + '.content [id]{scroll-margin-top:60px}'
       // Cap prose paragraphs only (≈75 chars) so wide-screen lines stay
       // readable, but keep tables, code blocks, and callouts full-width.
       + '.content p, .content li, .content .description p, .qh p{max-width:75ch}'
@@ -6201,15 +6263,12 @@
       + 'footer{margin-top:56px;padding-top:16px;border-top:1px solid #e2e8f0;font-size:0.82em;color:#64748b}'
       // ── responsive ──
       + '@media (max-width:900px){'
-      +   '.layout{flex-direction:column}'
-      +   '.toc{position:relative;width:100%;height:auto;flex:0 0 auto;border-right:0;border-bottom:1px solid #e2e8f0;display:none}'
-      +   '.toc.open{display:block}'
-      +   '.toc-toggle{display:inline-block}'
-      +   '.content{padding:60px 20px 20px 20px;max-width:none}'
+      +   '.content{padding:20px;max-width:none}'
+      +   '.topbar{padding:8px 14px}'
       + '}'
       // ── print ──
       + '@media print{'
-      +   '.toc,.toc-toggle{display:none}'
+      +   '.topbar{display:none}'
       +   '.content{padding:0;max-width:none}'
       +   'details[open]{margin:4px 0}'
       +   'h1,h2,h3{break-after:avoid}'
@@ -6258,27 +6317,72 @@
       + '.expert-question-blocks li{margin:2px 0;font-size:0.92em}'
       + '.expert-question-response p{margin:4px 0;padding:6px 10px;background:#faf5ff;border-radius:4px}'
 
+      // ── collapsible study fold + control-panel summary ──
+      + '.study-fold{border:1px solid #e2e8f0;border-radius:10px;margin:10px 0;background:#fff;scroll-margin-top:16px}'
+      + '.study-fold[open]{box-shadow:0 1px 3px rgba(0,0,0,.07)}'
+      + '.study-fold>.study-panel{cursor:pointer;list-style:none;padding:12px 16px;border-left:4px solid #cbd5e1;border-radius:9px}'
+      + '.study-fold>.study-panel::-webkit-details-marker{display:none}'
+      + '.study-fold>.study-panel:hover{background:#f8fafc}'
+      + '.study-fold[open]>.study-panel{border-bottom:1px solid #e2e8f0;border-radius:9px 9px 0 0;background:#f8fafc}'
+      + '.study-fold.verdict-v-pass>.study-panel{border-left-color:#16a34a}'
+      + '.study-fold.verdict-v-warn>.study-panel{border-left-color:#d97706}'
+      + '.study-fold.verdict-v-block>.study-panel{border-left-color:#dc2626}'
+      + '.study-fold.verdict-v-fail>.study-panel{border-left-color:#dc2626}'
+      + '.study-fold.verdict-v-prelim>.study-panel{border-left-color:#6366f1}'
+      + '.study-fold.verdict-v-cal>.study-panel{border-left-color:#0891b2}'
+      + '.study-fold.verdict-v-none>.study-panel{border-left-color:#94a3b8}'
+      + '.study-fold .study{margin-top:0;padding:8px 16px 4px}'
+      + '.sp-top{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}'
+      + '.sp-num{color:#94a3b8;font-family:ui-monospace,monospace;font-size:0.95em}'
+      + '.sp-title{font-size:1.13em;font-weight:700;color:#0f172a;flex:1;min-width:200px}'
+      + '.sp-verdict{font-size:0.88em;font-weight:700;padding:3px 11px;border-radius:9999px;white-space:nowrap}'
+      + '.sp-verdict.v-pass{background:#dcfce7;color:#166534}'
+      + '.sp-verdict.v-warn{background:#fef9c3;color:#854d0e}'
+      + '.sp-verdict.v-block{background:#fee2e2;color:#991b1b}'
+      + '.sp-verdict.v-prelim{background:#e0e7ff;color:#3730a3}'
+      + '.sp-verdict.v-fail{background:#fee2e2;color:#991b1b}'
+      + '.sp-verdict.v-cal{background:#cffafe;color:#155e75}'
+      + '.sp-verdict.v-none{background:#f1f5f9;color:#475569}'
+      + '.sp-objective{margin:6px 0 2px;color:#334155;font-size:0.97em}'
+      + '.sp-meta{font-size:0.77em;color:#94a3b8;margin:2px 0 6px}'
+      + '.sp-meta code{background:#f1f5f9;padding:0 4px;border-radius:3px;font-size:0.95em;color:#64748b}'
+      + '.sp-quality{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0}'
+      + '.sp-conf,.sp-ev{font-size:0.78em;font-weight:600;padding:2px 9px;border-radius:6px;background:#f1f5f9;color:#475569}'
+      + '.sp-conf-high{background:#dcfce7;color:#166534}'
+      + '.sp-conf-medium{background:#fef9c3;color:#854d0e}'
+      + '.sp-conf-low{background:#fee2e2;color:#991b1b}'
+      + '.sp-conclusion{margin:6px 0;color:#0f172a;font-size:0.95em}'
+      + '.sp-insight{margin:4px 0;color:#0f172a;font-size:0.92em}'
+      + '.sp-caveat{margin:4px 0;color:#7c2d12;font-size:0.92em}'
+      + '.sp-lbl{display:inline-block;font-size:0.7em;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:#64748b;margin-right:5px;vertical-align:1px}'
+      + '.sp-caveat .sp-lbl{color:#b45309}'
+      + '.sp-metrics{display:flex;gap:6px;flex-wrap:wrap;margin:7px 0 3px}'
+      + '.sp-metric{font-size:0.77em;background:#eef2ff;color:#3730a3;padding:2px 9px;border-radius:9999px}'
+      + '.sp-metric-pass{background:#dcfce7;color:#166534}'
+      + '.sp-metric-warn{background:#fef9c3;color:#854d0e}'
+      + '.sp-metric-fail{background:#fee2e2;color:#991b1b}'
+      + '.sp-expand-hint{display:inline-block;font-size:0.73em;color:#94a3b8;margin-top:6px}'
+      + '.study-fold[open] .sp-expand-hint{display:none}'
+      + '.studies-toolbar{display:flex;gap:8px;margin:8px 0 14px}'
+      + '.studies-toolbar button{font:inherit;font-size:0.85em;padding:5px 12px;border:1px solid #cbd5e1;background:#f8fafc;border-radius:6px;cursor:pointer;color:#334155}'
+      + '.studies-toolbar button:hover{background:#e2e8f0}'
+      + '@media print{.sp-expand-hint,.studies-toolbar{display:none}}'
       + '</style></head><body>'
 
-      + '<button class="toc-toggle" onclick="document.querySelector(\'.toc\').classList.toggle(\'open\')">☰ Contents</button>'
-      + '<div class="layout">'
-
-      // ── TOC sidebar ──
-      + '<aside class="toc">'
-      +   '<h4>' + _h(iset.title || iset.name) + '</h4>'
-      +   '<ul>'
-      +     '<li><a href="#top">Top</a></li>'
-      +     ((iset.executive && (iset.executive.what_is_this || iset.executive.verdict)) ? '<li><a href="#executive">Executive summary</a></li>' : '')
-      +     ((iset.scientific_argument && iset.scientific_argument.main_claim) ? '<li><a href="#scientific-argument">Scientific argument</a></li>' : '')
-      +     '<li><a href="#overview">Overview</a></li>'
-      +     (acceptance ? '<li><a href="#acceptance">Acceptance criteria</a></li>' : '')
-      +     '<li><a href="#how-to-read">How to read</a></li>'
-      +     '<li><a href="#studies-heading">Studies (dep. order)</a></li>'
-      +   '</ul>'
-      +   '<ul class="studies">' + tocStudies + '</ul>'
-      +   '<ul><li><a href="#references">References (' + orderedCited.length + ')</a></li>'
-      +   '<li><a href="#footer">About</a></li></ul>'
-      + '</aside>'
+      // ── Sticky top nav — section-level tags only (per-study nav now lives
+      //    in the collapsed control panels). Conditional tags render only when
+      //    the section exists, keeping the bar uncluttered.
+      + '<nav class="topbar">'
+      +   '<span class="tb-title">' + _h(iset.title || iset.name) + '</span>'
+      +   '<a href="#top">Top</a>'
+      +   ((iset.executive && (iset.executive.what_is_this || iset.executive.verdict)) ? '<a href="#executive">Summary</a>' : '')
+      +   ((iset.scientific_argument && iset.scientific_argument.main_claim) ? '<a href="#scientific-argument">Argument</a>' : '')
+      +   '<a href="#overview">Overview</a>'
+      +   (acceptance ? '<a href="#acceptance">Acceptance</a>' : '')
+      +   '<a href="#how-to-read">How to read</a>'
+      +   '<a href="#studies-heading">Studies</a>'
+      +   '<a href="#references">References</a>'
+      + '</nav>'
 
       // ── Main content ──
       + '<main class="content" id="top">'
@@ -6406,6 +6510,11 @@
       +   '<p class="muted small">Want to leave inline feedback? Click the <strong>💬</strong> icon next to any section. "Generate feedback report" (bottom-right) packages every annotation into a single yaml file that comes back via <code>pbg-feedback-import</code>.</p>'
 
       +   '<h2 id="studies-heading">Studies' + (hasDag ? ' (dependency order)' : '') + '</h2>'
+      +   '<p class="muted small">Each study is collapsed to a one-glance control panel — scan top to bottom, then click any panel to expand its full detail.</p>'
+      +   '<div class="studies-toolbar">'
+      +     '<button type="button" onclick="document.querySelectorAll(\'.study-fold\').forEach(function(d){d.open=true})">Expand all</button>'
+      +     '<button type="button" onclick="document.querySelectorAll(\'.study-fold\').forEach(function(d){d.open=false})">Collapse all</button>'
+      +   '</div>'
       +   studiesHtml
 
       +   '<h2 id="references">References <span class="muted small">(' + orderedCited.length + ' cited across this investigation)</span></h2>'
@@ -6420,12 +6529,11 @@
       +   '</footer>'
 
       + '</main>'
-      + '</div>'
 
-      // ── Active-section tracking for TOC links ──
+      // ── Active-section tracking for top-nav links ──
       + '<script>'
       + '(function(){'
-      +   'var links=Array.from(document.querySelectorAll(".toc a"));'
+      +   'var links=Array.from(document.querySelectorAll(".topbar a"));'
       +   'var targets=links.map(function(a){return document.getElementById(a.getAttribute("href").slice(1));})'
       +     '.filter(Boolean);'
       +   'function onScroll(){'
@@ -6436,6 +6544,24 @@
       +   '}'
       +   'window.addEventListener("scroll",onScroll,{passive:true});'
       +   'onScroll();'
+      // Studies are collapsed by default. When the URL targets a study (or any
+      // anchor inside one), open all ancestor <details> so the target is
+      // actually visible, then scroll to it.
+      +   'function openToHash(){'
+      +     'var h=location.hash;if(!h)return;'
+      +     'var el=document.getElementById(decodeURIComponent(h.slice(1)));if(!el)return;'
+      +     'if(el.tagName==="DETAILS")el.open=true;'
+      +     'var d=el.closest?el.closest("details"):null;'
+      +     'while(d){d.open=true;d=d.parentElement?d.parentElement.closest("details"):null;}'
+      +     'try{el.scrollIntoView();}catch(e){}'
+      +   '}'
+      +   'window.addEventListener("hashchange",openToHash);'
+      +   'openToHash();'
+      // Printing / save-as-PDF must show everything — a closed <details> can't
+      // be forced open by CSS, so open them all before print.
+      +   'window.addEventListener("beforeprint",function(){'
+      +     'document.querySelectorAll(".study-fold").forEach(function(d){d.open=true;});'
+      +   '});'
       + '})();'
       + '</script>'
 
