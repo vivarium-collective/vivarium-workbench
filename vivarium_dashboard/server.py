@@ -197,6 +197,7 @@ _POST_STUDY_ALIASES: dict[str, str] = {
 # and inspectable by tests without instantiating the handler.
 _POST_ROUTE_MAP: dict[str, str] = {
     "/api/click":              "_post_click",
+    "/api/feedback-import":    "_post_feedback_import",
     "/api/import":             "_post_import",
     "/api/import-install":     "_post_import_install",
     "/api/dataset":            "_post_dataset",
@@ -3613,6 +3614,37 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     # POST handlers
     # ------------------------------------------------------------------
+
+    def _post_feedback_import(self, body: dict):
+        """POST /api/feedback-import — ingest feedback submitted directly from
+        the report widget (expert-feedback B.2).
+
+        Body is the same ``{meta, annotations}`` payload the widget builds for
+        its YAML download. Writes it to investigations/<inv>/feedback/<ts>.yaml
+        via the shared pbg_superpowers writer, so direct submit and the
+        pbg-feedback-import CLI land identically. Eliminates the
+        download→email→CLI round-trip when the report is viewed live.
+        """
+        try:
+            from pbg_superpowers.feedback_import import (
+                write_feedback_payload, FeedbackImportError,
+            )
+        except ImportError:
+            return self._json(
+                {"error": "pbg-superpowers not available for feedback import"}, 500)
+        try:
+            target = write_feedback_payload(WORKSPACE, body)
+        except FeedbackImportError as e:
+            return self._json({"error": str(e)}, 400)
+        except Exception as e:  # noqa: BLE001
+            return self._json({"error": f"feedback import failed: {e}"}, 500)
+        anns = body.get("annotations") or {}
+        n_entries = sum(len(v or []) for v in anns.values() if isinstance(v, list))
+        return self._json({
+            "ok": True,
+            "path": str(target.relative_to(WORKSPACE)),
+            "n_entries": n_entries,
+        }, 200)
 
     def _post_click(self, body: dict):
         with LOCK:
