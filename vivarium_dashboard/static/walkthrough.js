@@ -4791,8 +4791,27 @@
         +   '<nav class="study-nav-row2">' + links.join('') + '</nav>'
         + '</div>';
 
+      // ── COMPACT REPORT BLOCK (authored: Purpose·Setup·Result·… ) ──────
+      // Leads each study with the uniform human-facing pattern. Reads
+      // s.report; absent → just the plain-English summary below (fallback).
+      var _rep = s.report || {};
+      var reportHtml = '';
+      (function() {
+        var rows = [
+          ['Purpose', _rep.purpose], ['Setup', _rep.setup],
+          ['Result', _rep.result], ['Interpretation', _rep.interpretation],
+          ['Decision', _rep.decision], ['Next action', _rep.next_action],
+        ].filter(function(r) { return r[1]; });
+        if (!rows.length) return;
+        reportHtml = '<div class="study-report">' + rows.map(function(r) {
+          return '<div class="study-report-row"><span class="srl">' + r[0] + '</span>'
+               + '<span class="srv">' + _multiline(r[1]) + '</span></div>';
+        }).join('') + '</div>';
+      })();
+
       // ── PLAIN-ENGLISH SUMMARY ─────────────────────────────────────────
-      var summaryHtml = '<div id="' + sid.summary + '" class="study-summary">'
+      var summaryHtml = reportHtml
+        + '<div id="' + sid.summary + '" class="study-summary">'
         + '<p class="study-summary-text">' + _h(summaryText) + '</p>'
         + '<details class="tech-details"><summary>Purpose &amp; background (study design)</summary>'
         +   (purpose.question         ? '<div class="callout cl-blue"><strong>Question.</strong> ' + _multiline(purpose.question) + '</div>' : '')
@@ -6014,6 +6033,13 @@
       // study summary (plain-English block at top of each study)
       + '.study-summary{padding:14px 16px;margin:12px 0 16px 0;background:#f8fafc;border-left:4px solid #6366f1;border-radius:6px}'
       + '.study-summary-text{margin:0;font-size:1.02em;line-height:1.55;color:#1e293b}'
+      // Compact authored report block (leads each study).
+      + '.study-report{margin:12px 0 14px 0;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden}'
+      + '.study-report-row{display:flex;gap:0;border-bottom:1px solid #eef2f7}'
+      + '.study-report-row:last-child{border-bottom:none}'
+      + '.study-report .srl{flex:0 0 130px;padding:9px 12px;background:#f8fafc;font-weight:600;font-size:0.82em;'
+      +    'text-transform:uppercase;letter-spacing:0.03em;color:#475569}'
+      + '.study-report .srv{flex:1 1 auto;padding:9px 14px;color:#1e293b;min-width:0}'
       + '.tech-details{margin-top:10px;padding:6px 10px;background:#ffffff;border:1px solid #e2e8f0;border-radius:4px;font-size:0.88em}'
       + '.tech-details summary{cursor:pointer;color:#475569;font-weight:500}'
       + '.tech-details summary:hover{color:#0f172a}'
@@ -6242,6 +6268,8 @@
       +   '<h4>' + _h(iset.title || iset.name) + '</h4>'
       +   '<ul>'
       +     '<li><a href="#top">Top</a></li>'
+      +     ((iset.executive && (iset.executive.what_is_this || iset.executive.verdict)) ? '<li><a href="#executive">Executive summary</a></li>' : '')
+      +     ((iset.scientific_argument && iset.scientific_argument.main_claim) ? '<li><a href="#scientific-argument">Scientific argument</a></li>' : '')
       +     '<li><a href="#overview">Overview</a></li>'
       +     (acceptance ? '<li><a href="#acceptance">Acceptance criteria</a></li>' : '')
       +     '<li><a href="#how-to-read">How to read</a></li>'
@@ -6260,6 +6288,60 @@
 
       // Coordinated-generation provenance banner (expert-feedback A.3).
       +   generationBannerHtml
+
+      // ── LAYER 1: EXECUTIVE ─────────────────────────────────────────────
+      // Authored narrative + conclusions for a human reviewer, at the very
+      // top. Reads iset.executive; renders nothing if the field is absent
+      // (older investigations fall back to Overview below).
+      +   (function() {
+            var ex = iset.executive || {};
+            var dn = ex.decisions_needed || [];
+            if (!ex.what_is_this && !ex.verdict && !dn.length) return '';
+            var vs = ex.verdict_status || 'in-progress';
+            var h = '<section id="executive"><h2 style="margin-top:12px">Executive summary</h2>';
+            if (ex.what_is_this)
+              h += '<p>' + _multiline(ex.what_is_this) + '</p>';
+            if (ex.verdict)
+              h += '<div class="callout" style="background:#f8fafc;border-left:5px solid #64748b;border-radius:8px;padding:12px 16px;margin:10px 0">'
+                 + '<span class="badge badge-' + _h(vs) + '">' + _h(vs) + '</span> '
+                 + '<strong>Current verdict.</strong> ' + _multiline(ex.verdict) + '</div>';
+            if (dn.length) {
+              h += '<h3>Decisions needed from reviewers</h3><ol>'
+                 + dn.map(function(d) {
+                     return '<li><strong>' + _h(d.question || '') + '</strong>'
+                       + (d.context ? '<div class="muted small">' + _multiline(d.context) + '</div>' : '')
+                       + '</li>';
+                   }).join('') + '</ol>';
+            }
+            return h + '</section>';
+          })()
+
+      // ── LAYER 2: SCIENTIFIC ARGUMENT ───────────────────────────────────
+      // The claim and the evidence, for the reviewer. Reads
+      // iset.scientific_argument; renders nothing if absent.
+      +   (function() {
+            var sa = iset.scientific_argument || {};
+            var ef = sa.evidence_for || [], ea = sa.evidence_against || [],
+                kf = sa.key_figures || [], cav = sa.caveats || [];
+            if (!sa.main_claim && !ef.length && !ea.length) return '';
+            function _li(x) { return '<li>' + _multiline(typeof x === 'string' ? x : (x.text || JSON.stringify(x))) + '</li>'; }
+            var h = '<section id="scientific-argument"><h2>Scientific argument</h2>';
+            if (sa.main_claim)
+              h += '<p><strong>Main claim.</strong> ' + _multiline(sa.main_claim) + '</p>';
+            if (ef.length || ea.length) {
+              h += '<div style="display:flex;gap:24px;flex-wrap:wrap">';
+              if (ef.length) h += '<div style="flex:1 1 280px"><h3 style="color:#065f46">Evidence for</h3><ul>' + ef.map(_li).join('') + '</ul></div>';
+              if (ea.length) h += '<div style="flex:1 1 280px"><h3 style="color:#9a3412">Evidence against</h3><ul>' + ea.map(_li).join('') + '</ul></div>';
+              h += '</div>';
+            }
+            if (kf.length)
+              h += '<h3>Key figures</h3><ul>' + kf.map(function(k) {
+                return '<li><code>' + _h(k.study || '') + '</code> · <code>' + _h(k.viz || '') + '</code> — ' + _h(k.caption || '') + '</li>';
+              }).join('') + '</ul>';
+            if (cav.length)
+              h += '<h3>Caveats</h3><ul>' + cav.map(_li).join('') + '</ul>';
+            return h + '</section>';
+          })()
 
       // Planning-phase banner: any study that has not yet produced runs
       // is treated as planning, and the whole report leads with a notice

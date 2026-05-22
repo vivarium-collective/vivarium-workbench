@@ -6453,6 +6453,11 @@ if __name__ == "__main__":
             "effective_status": effective_status,
             "expert_docs":      spec.get("expert_docs") or [],
             "acceptance_criteria": spec.get("acceptance_criteria") or [],
+            # Authored synthesis layers for the layered report (executive
+            # summary + scientific argument). Optional — absent on older
+            # investigations, where the report falls back to derived data.
+            "executive":           spec.get("executive") or {},
+            "scientific_argument": spec.get("scientific_argument") or {},
             "studies":          studies_out,
         }, 200)
 
