@@ -5454,19 +5454,36 @@
               // Escape double-quotes for srcdoc attribute.
               var escaped = (emb.html || '').replace(/&/g, '&amp;')
                                             .replace(/"/g, '&quot;');
+              // A "prior / superseded" embed is one explicitly flagged stale, or
+              // whose name/description marks it as a pre-execution, placeholder,
+              // or older-dated preview. These are auto-collapsed (the expert's
+              // "fold these previous results") so they don't dominate the page
+              // with empty placeholder charts — but stay one click away.
+              var meta = ((emb.name || '') + ' ' + (emb.description || '')).toLowerCase();
               var isStale = emb.stale === true
-                || (typeof emb.description === 'string' && emb.description.indexOf('⚠') === 0);
-              var descStyle = isStale
-                ? 'margin:6px 12px;padding:6px 10px;background:#fffbeb;border:1px solid #f59e0b;border-radius:4px;color:#92400e'
-                : 'margin:6px 12px';
-              return '<div class="study-embed-card" style="margin:12px 0;border:1px solid ' + (isStale ? '#f59e0b' : '#e2e8f0') + ';border-radius:6px;background:#fff;overflow:hidden">'
+                || (typeof emb.description === 'string' && emb.description.indexOf('⚠') === 0)
+                || /\b(prior|planning[- ]phase|placeholder|pending refresh|pre-execution|superseded|baseline rerun|will be populated|not yet run)\b/.test(meta);
+              var iframe = '<iframe srcdoc="' + escaped + '" '
+                + 'class="embed-frame" onload="_wireEmbed(this)" '
+                + 'style="width:100%;min-height:200px;border:0;display:block" '
+                + 'title="' + _h(emb.name) + '"></iframe>';
+              if (isStale) {
+                // Collapsed by default; re-fit on expand.
+                return '<details class="study-embed-card stale-embed" ontoggle="_onEmbedToggle(this)" '
+                  + 'style="margin:12px 0;border:1px solid #f59e0b;border-radius:6px;background:#fffdf6;overflow:hidden">'
+                  + '<summary style="padding:8px 12px;cursor:pointer;background:#fffbeb;color:#92400e;font-weight:600;list-style:none">'
+                  +   '⚠ ' + _h(emb.name) + ' <span style="font-weight:400">— prior / superseded result (click to view)</span>'
+                  + '</summary>'
+                  + (emb.description ? '<p class="small" style="margin:6px 12px;color:#92400e">' + _h(emb.description) + '</p>' : '')
+                  + iframe
+                  + '</details>';
+              }
+              return '<div class="study-embed-card" style="margin:12px 0;border:1px solid #e2e8f0;border-radius:6px;background:#fff;overflow:hidden">'
                 + '<div style="padding:8px 12px;border-bottom:1px solid #e5e7eb;background:#f9fafb">'
                 +   '<strong>' + _h(emb.name) + '</strong>'
                 + '</div>'
-                + (emb.description ? '<p class="' + (isStale ? '' : 'muted ') + 'small" style="' + descStyle + '">' + _h(emb.description) + '</p>' : '')
-                + '<iframe srcdoc="' + escaped + '" '
-                +   'style="width:100%;height:680px;border:0;display:block" '
-                +   'loading="lazy" title="' + _h(emb.name) + '"></iframe>'
+                + (emb.description ? '<p class="muted small" style="margin:6px 12px">' + _h(emb.description) + '</p>' : '')
+                + iframe
                 + '</div>';
             }).join('')
           + '</div>';
@@ -5972,13 +5989,14 @@
       + '.topbar a{font-size:0.83em;color:#334155;text-decoration:none;padding:4px 12px;border-radius:9999px;background:#f1f5f9;white-space:nowrap}'
       + '.topbar a:hover{background:#e2e8f0;color:#0f172a}'
       + '.topbar a.active{background:#dbeafe;color:#1e40af;font-weight:600}'
-      + '.content{max-width:1080px;margin:0 auto;padding:24px 36px}'
+      + '.content{max-width:none;margin:0;padding:24px 40px}'
       // Anchor targets clear the sticky bar when jumped to.
       + '.content [id]{scroll-margin-top:60px}'
       // Cap prose paragraphs only (≈75 chars) so wide-screen lines stay
       // readable, but keep tables, code blocks, and callouts full-width.
-      + '.content p, .content li, .content .description p, .qh p{max-width:75ch}'
-      + '.content table, .content .qh, .content details, .content pre{max-width:none}'
+      // Text spans the full content width — no separate prose cap (which used
+      // to stop paragraphs short of the page while headings/rules ran wider).
+      + '.content p, .content li, .content .description p, .qh p{max-width:none}'
       // ── typography ──
       + 'h1{margin:0 0 8px 0;font-size:2em;line-height:1.2}'
       + 'h2{margin:32px 0 12px 0;font-size:1.4em;border-bottom:1px solid #e2e8f0;padding-bottom:6px;scroll-margin-top:16px}'
@@ -6239,7 +6257,7 @@
       // user scrolls past a study, its .study-nav exits its bounding
       // .study div and the next study's nav takes over.
       + '.study{margin-top:40px;padding-top:8px;scroll-margin-top:16px;position:relative}'
-      + '.study-nav{position:sticky;top:0;z-index:20;background:rgba(255,255,255,0.96);backdrop-filter:saturate(120%) blur(2px);'
+      + '.study-nav{position:sticky;top:44px;z-index:20;background:rgba(255,255,255,0.96);backdrop-filter:saturate(120%) blur(2px);'
       +     '-webkit-backdrop-filter:saturate(120%) blur(2px);'
       +     'border-bottom:1px solid #e2e8f0;padding:8px 12px 6px 12px;margin:0 -12px 12px -12px;border-radius:4px}'
       + '.study-nav .study-nav-row1{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:4px}'
@@ -6368,6 +6386,25 @@
       + '.studies-toolbar button:hover{background:#e2e8f0}'
       + '@media print{.sp-expand-hint,.studies-toolbar{display:none}}'
       + '</style></head><body>'
+
+      // Auto-size embedded visualization iframes to their full content so they
+      // render inline with no inner scrollbar. srcdoc iframes are same-origin,
+      // so we can read scrollHeight. Plotly draws async, so re-measure on a
+      // ResizeObserver of the inner doc plus a few timed fallbacks.
+      + '<script>'
+      + 'window._fitEmbed=function(f){try{var d=f.contentDocument||(f.contentWindow&&f.contentWindow.document);if(!d)return;'
+      +   'var h=Math.max(d.documentElement?d.documentElement.scrollHeight:0,d.body?d.body.scrollHeight:0);'
+      +   'if(h>0)f.style.height=(h+24)+"px";}catch(e){}};'
+      + 'window._wireEmbed=function(f){window._fitEmbed(f);'
+      +   'try{var d=f.contentDocument;if(window.ResizeObserver&&d){var ro=new ResizeObserver(function(){window._fitEmbed(f);});'
+      +     'if(d.documentElement)ro.observe(d.documentElement);if(d.body)ro.observe(d.body);}}catch(e){}'
+      +   '[150,500,1200,2500,4000].forEach(function(t){setTimeout(function(){window._fitEmbed(f);},t);});};'
+      // A collapsed (prior/superseded) embed: when expanded, nudge Plotly to
+      // recompute width and re-fit the iframe.
+      + 'window._onEmbedToggle=function(d){if(!d.open)return;var f=d.querySelector(".embed-frame");if(!f)return;'
+      +   'try{f.contentWindow&&f.contentWindow.dispatchEvent(new Event("resize"));}catch(e){}'
+      +   'if(window._wireEmbed)window._wireEmbed(f);};'
+      + '</script>'
 
       // ── Sticky top nav — section-level tags only (per-study nav now lives
       //    in the collapsed control panels). Conditional tags render only when
@@ -6561,6 +6598,16 @@
       // be forced open by CSS, so open them all before print.
       +   'window.addEventListener("beforeprint",function(){'
       +     'document.querySelectorAll(".study-fold").forEach(function(d){d.open=true;});'
+      +   '});'
+      // When a fold opens, re-fit its embeds and nudge Plotly to recompute
+      // width (charts drawn while the fold was collapsed render at 0 width).
+      +   'document.querySelectorAll(".study-fold").forEach(function(d){'
+      +     'd.addEventListener("toggle",function(){if(!d.open)return;'
+      +       'd.querySelectorAll(".embed-frame").forEach(function(f){'
+      +         'try{f.contentWindow&&f.contentWindow.dispatchEvent(new Event("resize"));}catch(e){}'
+      +         'if(window._fitEmbed){window._fitEmbed(f);[120,400,1000].forEach(function(t){setTimeout(function(){window._fitEmbed(f);},t);});}'
+      +       '});'
+      +     '});'
       +   '});'
       + '})();'
       + '</script>'
