@@ -5454,20 +5454,36 @@
               // Escape double-quotes for srcdoc attribute.
               var escaped = (emb.html || '').replace(/&/g, '&amp;')
                                             .replace(/"/g, '&quot;');
+              // A "prior / superseded" embed is one explicitly flagged stale, or
+              // whose name/description marks it as a pre-execution, placeholder,
+              // or older-dated preview. These are auto-collapsed (the expert's
+              // "fold these previous results") so they don't dominate the page
+              // with empty placeholder charts — but stay one click away.
+              var meta = ((emb.name || '') + ' ' + (emb.description || '')).toLowerCase();
               var isStale = emb.stale === true
-                || (typeof emb.description === 'string' && emb.description.indexOf('⚠') === 0);
-              var descStyle = isStale
-                ? 'margin:6px 12px;padding:6px 10px;background:#fffbeb;border:1px solid #f59e0b;border-radius:4px;color:#92400e'
-                : 'margin:6px 12px';
-              return '<div class="study-embed-card" style="margin:12px 0;border:1px solid ' + (isStale ? '#f59e0b' : '#e2e8f0') + ';border-radius:6px;background:#fff;overflow:hidden">'
+                || (typeof emb.description === 'string' && emb.description.indexOf('⚠') === 0)
+                || /\b(prior|planning[- ]phase|placeholder|pending refresh|pre-execution|superseded|baseline rerun|will be populated|not yet run)\b/.test(meta);
+              var iframe = '<iframe srcdoc="' + escaped + '" '
+                + 'class="embed-frame" onload="_wireEmbed(this)" '
+                + 'style="width:100%;min-height:200px;border:0;display:block" '
+                + 'title="' + _h(emb.name) + '"></iframe>';
+              if (isStale) {
+                // Collapsed by default; re-fit on expand.
+                return '<details class="study-embed-card stale-embed" ontoggle="_onEmbedToggle(this)" '
+                  + 'style="margin:12px 0;border:1px solid #f59e0b;border-radius:6px;background:#fffdf6;overflow:hidden">'
+                  + '<summary style="padding:8px 12px;cursor:pointer;background:#fffbeb;color:#92400e;font-weight:600;list-style:none">'
+                  +   '⚠ ' + _h(emb.name) + ' <span style="font-weight:400">— prior / superseded result (click to view)</span>'
+                  + '</summary>'
+                  + (emb.description ? '<p class="small" style="margin:6px 12px;color:#92400e">' + _h(emb.description) + '</p>' : '')
+                  + iframe
+                  + '</details>';
+              }
+              return '<div class="study-embed-card" style="margin:12px 0;border:1px solid #e2e8f0;border-radius:6px;background:#fff;overflow:hidden">'
                 + '<div style="padding:8px 12px;border-bottom:1px solid #e5e7eb;background:#f9fafb">'
                 +   '<strong>' + _h(emb.name) + '</strong>'
                 + '</div>'
-                + (emb.description ? '<p class="' + (isStale ? '' : 'muted ') + 'small" style="' + descStyle + '">' + _h(emb.description) + '</p>' : '')
-                + '<iframe srcdoc="' + escaped + '" '
-                +   'class="embed-frame" onload="_wireEmbed(this)" '
-                +   'style="width:100%;min-height:300px;border:0;display:block" '
-                +   'title="' + _h(emb.name) + '"></iframe>'
+                + (emb.description ? '<p class="muted small" style="margin:6px 12px">' + _h(emb.description) + '</p>' : '')
+                + iframe
                 + '</div>';
             }).join('')
           + '</div>';
@@ -6383,6 +6399,11 @@
       +   'try{var d=f.contentDocument;if(window.ResizeObserver&&d){var ro=new ResizeObserver(function(){window._fitEmbed(f);});'
       +     'if(d.documentElement)ro.observe(d.documentElement);if(d.body)ro.observe(d.body);}}catch(e){}'
       +   '[150,500,1200,2500,4000].forEach(function(t){setTimeout(function(){window._fitEmbed(f);},t);});};'
+      // A collapsed (prior/superseded) embed: when expanded, nudge Plotly to
+      // recompute width and re-fit the iframe.
+      + 'window._onEmbedToggle=function(d){if(!d.open)return;var f=d.querySelector(".embed-frame");if(!f)return;'
+      +   'try{f.contentWindow&&f.contentWindow.dispatchEvent(new Event("resize"));}catch(e){}'
+      +   'if(window._wireEmbed)window._wireEmbed(f);};'
       + '</script>'
 
       // ── Sticky top nav — section-level tags only (per-study nav now lives
