@@ -5973,13 +5973,14 @@
       + '.topbar a{font-size:0.83em;color:#334155;text-decoration:none;padding:4px 12px;border-radius:9999px;background:#f1f5f9;white-space:nowrap}'
       + '.topbar a:hover{background:#e2e8f0;color:#0f172a}'
       + '.topbar a.active{background:#dbeafe;color:#1e40af;font-weight:600}'
-      + '.content{max-width:1080px;margin:0 auto;padding:24px 36px}'
+      + '.content{max-width:none;margin:0;padding:24px 40px}'
       // Anchor targets clear the sticky bar when jumped to.
       + '.content [id]{scroll-margin-top:60px}'
       // Cap prose paragraphs only (≈75 chars) so wide-screen lines stay
       // readable, but keep tables, code blocks, and callouts full-width.
-      + '.content p, .content li, .content .description p, .qh p{max-width:75ch}'
-      + '.content table, .content .qh, .content details, .content pre{max-width:none}'
+      // Text spans the full content width — no separate prose cap (which used
+      // to stop paragraphs short of the page while headings/rules ran wider).
+      + '.content p, .content li, .content .description p, .qh p{max-width:none}'
       // ── typography ──
       + 'h1{margin:0 0 8px 0;font-size:2em;line-height:1.2}'
       + 'h2{margin:32px 0 12px 0;font-size:1.4em;border-bottom:1px solid #e2e8f0;padding-bottom:6px;scroll-margin-top:16px}'
