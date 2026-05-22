@@ -6537,7 +6537,10 @@
       + '<main class="content" id="top">'
 
       +   '<h1>' + _h(iset.title || iset.name) + ' <span class="badge badge-' + _h(iset.status || 'planning') + '">' + _h(iset.status || 'planning') + '</span></h1>'
-      +   '<p class="muted small">Investigation report · <code>' + nameClean + '</code> · generated ' + _h(now) + ' · for expert review prior to execution.</p>'
+      +   '<p class="muted small">Investigation report · <code>' + nameClean + '</code> · generated ' + _h(now) + ' · '
+      +     ((specs || []).some(function(s) { return (s.runs || []).length || (s.findings || []).length; })
+          ? 'for expert review — results below reflect completed runs.'
+          : 'for expert review prior to execution.') + '</p>'
 
       // Coordinated-generation provenance banner (expert-feedback A.3).
       +   generationBannerHtml
