@@ -605,6 +605,20 @@ def _study_detail_spec(name: str):
                 spec["expert_feedback"] = fb
         except Exception:  # noqa: BLE001
             pass
+
+        # Derive-on-read status (round-2 friction #2): compute the observable
+        # status axes from runs.db so the report shows what actually ran, and
+        # flag any stored axis (or legacy planning headline) that contradicts
+        # execution state. Stops the "planning status after execution" drift.
+        try:
+            from pbg_superpowers import study_status as _ss
+            runs = spec.get("runs") or []
+            spec["derived_status"] = _ss.derive_status(spec, runs)
+            diss = _ss.status_disagreements(spec, runs)
+            if diss:
+                spec["status_disagreements"] = diss
+        except Exception:  # noqa: BLE001
+            pass
     return spec
 
 
