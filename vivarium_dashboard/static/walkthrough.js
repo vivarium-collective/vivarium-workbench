@@ -5465,8 +5465,9 @@
                 + '</div>'
                 + (emb.description ? '<p class="' + (isStale ? '' : 'muted ') + 'small" style="' + descStyle + '">' + _h(emb.description) + '</p>' : '')
                 + '<iframe srcdoc="' + escaped + '" '
-                +   'style="width:100%;height:680px;border:0;display:block" '
-                +   'loading="lazy" title="' + _h(emb.name) + '"></iframe>'
+                +   'class="embed-frame" onload="_wireEmbed(this)" '
+                +   'style="width:100%;min-height:300px;border:0;display:block" '
+                +   'title="' + _h(emb.name) + '"></iframe>'
                 + '</div>';
             }).join('')
           + '</div>';
@@ -6369,6 +6370,20 @@
       + '@media print{.sp-expand-hint,.studies-toolbar{display:none}}'
       + '</style></head><body>'
 
+      // Auto-size embedded visualization iframes to their full content so they
+      // render inline with no inner scrollbar. srcdoc iframes are same-origin,
+      // so we can read scrollHeight. Plotly draws async, so re-measure on a
+      // ResizeObserver of the inner doc plus a few timed fallbacks.
+      + '<script>'
+      + 'window._fitEmbed=function(f){try{var d=f.contentDocument||(f.contentWindow&&f.contentWindow.document);if(!d)return;'
+      +   'var h=Math.max(d.documentElement?d.documentElement.scrollHeight:0,d.body?d.body.scrollHeight:0);'
+      +   'if(h>0)f.style.height=(h+24)+"px";}catch(e){}};'
+      + 'window._wireEmbed=function(f){window._fitEmbed(f);'
+      +   'try{var d=f.contentDocument;if(window.ResizeObserver&&d){var ro=new ResizeObserver(function(){window._fitEmbed(f);});'
+      +     'if(d.documentElement)ro.observe(d.documentElement);if(d.body)ro.observe(d.body);}}catch(e){}'
+      +   '[150,500,1200,2500,4000].forEach(function(t){setTimeout(function(){window._fitEmbed(f);},t);});};'
+      + '</script>'
+
       // ── Sticky top nav — section-level tags only (per-study nav now lives
       //    in the collapsed control panels). Conditional tags render only when
       //    the section exists, keeping the bar uncluttered.
@@ -6561,6 +6576,16 @@
       // be forced open by CSS, so open them all before print.
       +   'window.addEventListener("beforeprint",function(){'
       +     'document.querySelectorAll(".study-fold").forEach(function(d){d.open=true;});'
+      +   '});'
+      // When a fold opens, re-fit its embeds and nudge Plotly to recompute
+      // width (charts drawn while the fold was collapsed render at 0 width).
+      +   'document.querySelectorAll(".study-fold").forEach(function(d){'
+      +     'd.addEventListener("toggle",function(){if(!d.open)return;'
+      +       'd.querySelectorAll(".embed-frame").forEach(function(f){'
+      +         'try{f.contentWindow&&f.contentWindow.dispatchEvent(new Event("resize"));}catch(e){}'
+      +         'if(window._fitEmbed){window._fitEmbed(f);[120,400,1000].forEach(function(t){setTimeout(function(){window._fitEmbed(f);},t);});}'
+      +       '});'
+      +     '});'
       +   '});'
       + '})();'
       + '</script>'
