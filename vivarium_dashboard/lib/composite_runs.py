@@ -450,6 +450,132 @@ def inject_emitter_for_paths(state: dict, explicit_paths: list[str]) -> dict:
     return new_state
 
 
+def collect_emit_paths_from_spec(spec: dict) -> list[str]:
+    """Collect observable paths declared by a v4 study yaml, for emitter setup.
+
+    Threaded into ``inject_emitter_for_declared_paths`` so the injected emitter
+    captures the study's biology, not just ``_tick``. Sources:
+      - ``tests[].measure.path``                        — per-test observables
+      - ``behavior_tests[].measure.path``               — legacy v3 fallback
+      - ``visualizations[].inputs_map.*`` / ``.config.inputs_map.*``
+      - ``comparative_visualizations[].observable_path`` — multi-run overlays
+
+    Dotted paths are normalised to slash form. Each path is ALSO emitted in its
+    per-agent form (``agents/0/<path>``): v2ecoli single-cell composites scope
+    listener stores under ``agents.0.``, so the agent-scoped variant is the one
+    that actually carries data; the literal variant is kept too for non-agent
+    composites. Returns a sorted, deduped list.
+    """
+    def _norm(p):
+        if isinstance(p, str):
+            return p.replace(".", "/") if p else None
+        if isinstance(p, (list, tuple)):
+            joined = "/".join(str(x) for x in p if x is not None)
+            return joined or None
+        return None
+
+    paths: set[str] = set()
+    for t in (spec.get("tests") or []) + (spec.get("behavior_tests") or []):
+        if not isinstance(t, dict):
+            continue
+        m = t.get("measure") or {}
+        p = _norm(m.get("path"))
+        if p:
+            paths.add(p)
+    for v in (spec.get("visualizations") or []):
+        if not isinstance(v, dict):
+            continue
+        for im_loc in (v.get("inputs_map"),
+                       (v.get("config") or {}).get("inputs_map")):
+            if isinstance(im_loc, dict):
+                for val in im_loc.values():
+                    p = _norm(val)
+                    if p:
+                        paths.add(p)
+    for cv in (spec.get("comparative_visualizations") or []):
+        if not isinstance(cv, dict):
+            continue
+        p = _norm(cv.get("observable_path") or cv.get("path"))
+        if p:
+            paths.add(p)
+
+    expanded = set(paths)
+    for p in list(paths):
+        if not p.startswith("agents/"):
+            expanded.add(f"agents/0/{p}")
+    return sorted(expanded)
+
+
+def inject_emitter_for_declared_paths(state: dict,
+                                      declared_paths: list[str]) -> dict:
+    """Like :func:`inject_emitter_for_paths` but does NOT pre-validate paths
+    against the initial state tree, and writes the captured state as a NESTED
+    tree (mirroring the wire structure) rather than flat underscore keys.
+
+    Why bypass validation:
+      Many observable stores are created at composite-build/run time by process
+      ``outputs`` wires and aren't present in the spec-time state. v2ecoli's
+      listener Steps materialise ``agents/0/listeners/<...>`` only after the
+      composite runs, so the walk-existing-state approach (_collect_emit_leaves)
+      skips them. This variant trusts the declared paths.
+
+    Why nested vs flat:
+      Flat ``"_".join(path)`` port names produce flat JSON keys that
+      ``json_extract(state, '$.<dotted>.<path>')`` (comparative_viz, study_charts)
+      can't navigate. The nested form mirrors the path hierarchy so the readers
+      resolve it.
+
+    Always also wires ``global_time``: it advances every composite apply, so
+    wiring it guarantees the emitter Step re-fires every tick (an emitter wired
+    only to rarely-mutating listener paths — or to paths absent at init — fires
+    just once, collapsing history to ~1-2 rows). It also supplies the
+    history.global_time x-axis column.
+
+    Idempotent on re-call with the same declared paths.
+    """
+    if not declared_paths:
+        return state
+    paths = list(declared_paths)
+    if "global_time" not in paths:
+        paths.append("global_time")
+
+    wires: dict = {}
+    for raw in paths:
+        parts = [p for p in raw.split("/") if p]
+        if not parts:
+            continue
+        node = wires
+        for p in parts[:-1]:
+            existing = node.get(p)
+            if not isinstance(existing, dict):
+                existing = {}
+                node[p] = existing
+            node = existing
+        node[parts[-1]] = list(parts)
+    if not wires:
+        return state
+
+    def _to_schema(node):
+        if isinstance(node, dict):
+            return {k: _to_schema(v) for k, v in node.items()}
+        return "node"
+    emit_schema = _to_schema(wires)
+
+    new_state = dict(state)
+    existing = state.get("user_emitter")
+    if (isinstance(existing, dict)
+            and (existing.get("config") or {}).get("emit") == emit_schema
+            and existing.get("inputs") == wires):
+        return new_state
+    new_state["user_emitter"] = {
+        "_type": "step",
+        "address": "local:RAMEmitter",
+        "config": {"emit": emit_schema},
+        "inputs": wires,
+    }
+    return new_state
+
+
 def all_store_paths(state: dict) -> list[str]:
     """Return every top-level store key in ``state``, skipping step/process
     nodes.

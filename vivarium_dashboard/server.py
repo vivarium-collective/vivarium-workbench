@@ -1864,7 +1864,7 @@ def _post_study_run_baseline_for_test(ws_root, body):
     timeout_s = int(runtime_cfg.get("subprocess_timeout_s") or 1800)
     # v2ecoli friction #14: derive emit_paths from spec observables so the
     # injected SQLiteEmitter captures real biology, not just ticks.
-    emit_paths = _collect_study_observables(spec)
+    emit_paths = cr.collect_emit_paths_from_spec(spec)
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label=label, sim_name=label,
@@ -2202,7 +2202,7 @@ def _post_study_run_variant_for_test(ws_root, body):
     timeout_s = int(runtime_cfg.get("subprocess_timeout_s") or 1800)
     # v2ecoli friction #14: thread observables to the subprocess (same as
     # baseline path) so variant runs also capture biology in history.state.
-    emit_paths = _collect_study_observables(spec)
+    emit_paths = cr.collect_emit_paths_from_spec(spec)
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label=variant_name,
@@ -2838,7 +2838,7 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                 doc = build_generator(entry, overrides=_payload['overrides'])
                 state = doc.get('state', doc) if isinstance(doc, dict) else doc
                 if _payload.get('emit_paths'):
-                    state = cr.inject_emitter_for_paths(state, _payload['emit_paths'])
+                    state = cr.inject_emitter_for_declared_paths(state, _payload['emit_paths'])
                 state = cr.inject_sqlite_emitter(
                     state, run_id=_payload['run_id'], db_file=_payload['db_file'])
                 composite = Composite({{'state': state}}, core=core)
