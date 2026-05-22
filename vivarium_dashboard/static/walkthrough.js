@@ -4810,6 +4810,58 @@
         + '<span class="sp-expand-hint">▸ click to expand full study</span>';
     }
 
+    // Review-readiness gates — mechanical checks that catch the classes of
+    // problem an expert reviewer keeps flagging, BEFORE the report reaches them.
+    // Computed from already-declared fields (no run data needed), so they fire
+    // at design time. Returns {warns:[html], oks:[text]}.
+    //   Gate 1 (parameter vs reference): a model_setting's `default` is the
+    //     literature/heuristic value; flag when `current` deviates materially.
+    //   Gate 2 (duration vs doubling time): flag when the configured run length
+    //     can't cover one doubling time τ (steadiness claims need ≥ 1 τ).
+    function _reviewReadiness(s) {
+      var cond = (s.conditions && typeof s.conditions === 'object') ? s.conditions : {};
+      var settings = cond.model_settings || cond.expert_inputs || [];
+      var warns = [], oks = [];
+
+      settings.forEach(function(ms) {
+        var def = ms.default, cur = ms.current;
+        if (typeof def === 'number' && typeof cur === 'number' && def !== 0 && cur !== def) {
+          var ratio = cur / def;
+          if (ratio < 0.75 || ratio > 1.34) {
+            var factor = ratio < 1 ? def / cur : ratio;
+            warns.push('Parameter <code>' + _h(ms.name) + '</code> is set to <strong>' + _h(cur)
+              + '</strong> but the heuristic/literature default is <strong>' + _h(def) + '</strong> ('
+              + (factor >= 10 ? Math.round(factor) : factor.toFixed(1)) + '× off). '
+              + 'Justify the deviation in the study or correct it.');
+          }
+        }
+      });
+
+      var tau = null, tauName = null;
+      settings.forEach(function(ms) {
+        var v = (ms.current != null) ? ms.current : ms.default;
+        if (tau == null && typeof v === 'number'
+            && /(^|_)(tau|doubling|generation[_ ]?time)/i.test(ms.name || '')) {
+          tau = v; tauName = ms.name;
+        }
+      });
+      if (tau != null) {
+        var bp = (cond.baseline && cond.baseline.params) || {};
+        var nSteps = bp.n_steps, ts = (typeof bp.time_step === 'number' && bp.time_step > 0) ? bp.time_step : 1;
+        if (typeof nSteps === 'number') {
+          var runMin = nSteps * ts / 60.0;
+          if (runMin < tau) {
+            warns.push('Configured run is ≈ <strong>' + runMin.toFixed(0) + ' min</strong> (n_steps '
+              + nSteps + ' × ' + ts + ' s), shorter than one doubling time τ = <strong>' + _h(tau)
+              + ' min</strong> (<code>' + _h(tauName) + '</code>). Steadiness / steady-state claims need ≥ 1 doubling time.');
+          } else {
+            oks.push('Run ≈ ' + runMin.toFixed(0) + ' min covers ≥ 1 doubling time (τ = ' + tau + ' min).');
+          }
+        }
+      }
+      return {warns: warns, oks: oks};
+    }
+
     function v3StudySection(s, i, statusBadge, phaseBadge, parents, kids) {
       var slug = _h(s.name);
       var sid = {
@@ -4856,6 +4908,14 @@
       var summaryText = _studySummary(s, decision);
       var controlPanelHtml = _studyControlPanel(s, i, decision);
       var verdictBadge = _verdictBadge(s, decision);
+      var _review = _reviewReadiness(s);
+      var reviewHtml = _review.warns.length
+        ? '<div class="review-gate" id="study-' + slug + '-review">'
+          + '<strong>⚠ Review-readiness checks (' + _review.warns.length + ')</strong>'
+          + '<div class="review-gate-sub">Caught before expert review — fix or justify each.</div>'
+          + '<ul>' + _review.warns.map(function(w) { return '<li>' + w + '</li>'; }).join('') + '</ul>'
+          + '</div>'
+        : '';
       var hasDecide = !!(ifPass || ifFail
                          || (decide.implementation_validation && decide.implementation_validation.length)
                          || (decide.biological_validation && decide.biological_validation.length)
@@ -5588,6 +5648,7 @@
           +     '<div class="study-planning-pill">PLANNING — not yet run</div>'
           +   '</header>'
           +   enforcementHtml     // ⚠ declared params not applied (D.2)
+          +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
           +   feedbackHtml        // 💬 imported expert feedback (B.1)
           +   summaryHtml         // Question / purpose
           +   conditionsHtml      // Conditions: variants + model settings (PROMINENT)
@@ -5618,6 +5679,7 @@
         +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
         +   '</header>'
         +   enforcementHtml     // ⚠ declared params not applied (D.2)
+        +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
         +   feedbackHtml        // 💬 imported expert feedback (B.1)
         +   biologyGlanceHtml   // 0. Biology-at-a-glance
         +   embedsHtml          // 0b. Embedded preview HTMLs
@@ -6385,6 +6447,13 @@
       + '.studies-toolbar button{font:inherit;font-size:0.85em;padding:5px 12px;border:1px solid #cbd5e1;background:#f8fafc;border-radius:6px;cursor:pointer;color:#334155}'
       + '.studies-toolbar button:hover{background:#e2e8f0}'
       + '@media print{.sp-expand-hint,.studies-toolbar{display:none}}'
+      // ── review-readiness gate panel ──
+      + '.review-gate{margin:10px 0;padding:10px 14px;background:#fffbeb;border:1px solid #f59e0b;border-left-width:5px;border-radius:6px;color:#92400e}'
+      + '.review-gate>strong{color:#b45309}'
+      + '.review-gate-sub{font-size:0.82em;color:#a16207;margin:2px 0 4px}'
+      + '.review-gate ul{margin:6px 0 0 18px;padding:0}'
+      + '.review-gate li{margin:3px 0}'
+      + '.review-gate code{background:#fef3c7;padding:0 4px;border-radius:3px;font-size:0.92em}'
       + '</style></head><body>'
 
       // Auto-size embedded visualization iframes to their full content so they
