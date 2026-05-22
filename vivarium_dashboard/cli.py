@@ -195,6 +195,25 @@ def cmd_run_composite(args: argparse.Namespace) -> int:
     return execute(Path(args.request))
 
 
+def cmd_prepare_investigation(args: argparse.Namespace) -> int:
+    """CLI handler: prepare an investigation's coordinated generation."""
+    from vivarium_dashboard.lib.prepare_investigation import prepare_investigation
+    workspace = Path(args.workspace).resolve()
+    if not (workspace / "workspace.yaml").is_file():
+        print(f"ERROR: not a workspace (no workspace.yaml): {workspace}", file=sys.stderr)
+        return 2
+    prepare_investigation(
+        workspace,
+        investigation=args.investigation,
+        study=args.study,
+        steps=args.steps,
+        render_only=args.render_only,
+        dashboard_url=args.dashboard_url,
+        param_set=args.param_set,
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vivarium-dashboard")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -228,6 +247,27 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--request", required=True,
                        help="Path to the run-request JSON file")
     p_run.set_defaults(func=cmd_run_composite)
+
+    p_prep = sub.add_parser(
+        "prepare-investigation",
+        help="Run an investigation's baselines + comparison variants and render "
+             "its comparatives as one coordinated generation (requires a running "
+             "dashboard for the workspace)",
+    )
+    p_prep.add_argument("--workspace", default=".", help="Path to workspace root (default: cwd)")
+    p_prep.add_argument("--investigation", default=None,
+                        help="Investigation slug (default: the only one present)")
+    p_prep.add_argument("--study", default=None,
+                        help="Prepare only this study (reuses the current generation)")
+    p_prep.add_argument("--steps", type=int, default=None,
+                        help="Override sim length per run (default: study params)")
+    p_prep.add_argument("--render-only", action="store_true",
+                        help="Skip sims; re-render comparatives from existing runs.db")
+    p_prep.add_argument("--param-set", default=None,
+                        help="Optional params file hashed into the generation's param_set_hash")
+    p_prep.add_argument("--dashboard-url", default=None,
+                        help="Override dashboard URL (default: auto-detect)")
+    p_prep.set_defaults(func=cmd_prepare_investigation)
 
     args = parser.parse_args(argv)
     return args.func(args)
