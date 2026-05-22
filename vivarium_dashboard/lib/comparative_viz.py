@@ -108,24 +108,41 @@ def _extract_trace(db_path: Path,
         if n_rows == 0:
             return [], []
         stride = max(1, n_rows // subsample) if n_rows > 0 else 1
-        sql_path = "$." + observable_path
-        if observable_index is not None and isinstance(observable_index, int):
-            sql_path += f"[{int(observable_index)}]"
+        idx = (f"[{int(observable_index)}]"
+               if observable_index is not None and isinstance(observable_index, int)
+               else "")
+        sql_path = "$." + observable_path + idx
+        # v2ecoli single-cell composites scope listener stores under agents/0/,
+        # so the emitter captures the observable at agents/0/<path>. Try the
+        # literal path first, fall back to the per-agent path — the declared-
+        # path emitter nests captured state to mirror the path, so one resolves.
+        ag_path = "$.agents.0." + observable_path + idx
         cursor = conn.execute(
-            "SELECT global_time, json_extract(state, ?) FROM history "
-            "WHERE simulation_id=? AND (step % ?) = 0 ORDER BY step ASC",
-            (sql_path, sim_id, stride),
+            "SELECT global_time, json_extract(state, ?), json_extract(state, ?) "
+            "FROM history WHERE simulation_id=? AND (step % ?) = 0 ORDER BY step ASC",
+            (sql_path, ag_path, sim_id, stride),
         )
+        def _num(x):
+            # json_extract returns '{}'/'[]' (text) for a path that resolves
+            # to an empty container — the literal listeners/<...> wire captures
+            # an empty store, so it must NOT shadow the agent-scoped value.
+            if x is None or x in ("{}", "[]"):
+                return None
+            try:
+                return float(x)
+            except (TypeError, ValueError):
+                return None
+
         times: list[float] = []
         values: list[float] = []
-        for tm, v in cursor:
-            if v is None:
+        for tm, v, v_ag in cursor:
+            val = _num(v)
+            if val is None:
+                val = _num(v_ag)
+            if val is None:
                 continue
-            try:
-                values.append(float(v))
-                times.append(float(tm))
-            except (TypeError, ValueError):
-                continue
+            values.append(val)
+            times.append(float(tm))
         return times, values
     finally:
         conn.close()

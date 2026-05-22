@@ -1674,6 +1674,25 @@ def _collect_study_observables(spec: dict) -> list[str]:
         elif isinstance(obs, str):
             _push(obs)
 
+    # v4 studies declare their tests under `tests:` (not `behavior_tests:`)
+    # with the same {measure: {path, series_x, ...}} shape, and their overlay
+    # observables under `comparative_visualizations[].observable_path`. Without
+    # reading these, v4 studies (e.g. the dnaa investigation) collect zero
+    # observables and every history row is just `{"_tick": <time>}`.
+    for t in spec.get("tests", []) or []:
+        m = (t or {}).get("measure") if isinstance(t, dict) else None
+        if not isinstance(m, dict):
+            continue
+        _push(m.get("path"))
+        for nested_key in ("series_x", "series_y", "x", "y", "series_a", "series_b"):
+            n = m.get(nested_key)
+            if isinstance(n, dict):
+                _push(n.get("path"))
+
+    for cv in spec.get("comparative_visualizations", []) or []:
+        if isinstance(cv, dict):
+            _push(cv.get("observable_path"))
+
     return out
 
 
@@ -1846,7 +1865,7 @@ def _post_study_run_baseline_for_test(ws_root, body):
     timeout_s = int(runtime_cfg.get("subprocess_timeout_s") or 1800)
     # v2ecoli friction #14: derive emit_paths from spec observables so the
     # injected SQLiteEmitter captures real biology, not just ticks.
-    emit_paths = _collect_study_observables(spec)
+    emit_paths = cr.collect_emit_paths_from_spec(spec)
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label=label, sim_name=label,
@@ -2184,7 +2203,7 @@ def _post_study_run_variant_for_test(ws_root, body):
     timeout_s = int(runtime_cfg.get("subprocess_timeout_s") or 1800)
     # v2ecoli friction #14: thread observables to the subprocess (same as
     # baseline path) so variant runs also capture biology in history.state.
-    emit_paths = _collect_study_observables(spec)
+    emit_paths = cr.collect_emit_paths_from_spec(spec)
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label=variant_name,
@@ -2820,11 +2839,11 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                 doc = build_generator(entry, overrides=_payload['overrides'])
                 state = doc.get('state', doc) if isinstance(doc, dict) else doc
                 if _payload.get('emit_paths'):
-                    state = cr.inject_emitter_for_paths(state, _payload['emit_paths'])
+                    state = cr.inject_emitter_for_declared_paths(state, _payload['emit_paths'])
                 state = cr.inject_sqlite_emitter(
                     state, run_id=_payload['run_id'], db_file=_payload['db_file'])
                 composite = Composite({{'state': state}}, core=core)
-                composite.run(_payload['steps'])
+                cr.run_with_division(composite, _payload['steps'])
                 results = gather_emitter_results(composite)
         """).lstrip("\n")
     else:
@@ -2851,12 +2870,13 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                 from process_bigraph import Composite, gather_emitter_results
                 from process_bigraph.emitter import SQLiteEmitter
                 from bigraph_schema.json_codec import bigraph_json_hook
+                from vivarium_dashboard.lib import composite_runs as cr
                 core = build_core()
                 core.register_link('SQLiteEmitter', SQLiteEmitter)
                 with open({_state_path!r}) as _sf:
                     _state = json.load(_sf, object_hook=bigraph_json_hook)
                 composite = Composite({{'state': _state}}, core=core)
-                composite.run({steps})
+                cr.run_with_division(composite, {steps})
                 results = gather_emitter_results(composite)
         """).lstrip("\n")
 
