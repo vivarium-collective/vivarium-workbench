@@ -234,7 +234,8 @@ def render_comparative_time_series(
         "margin": {"t": 60, "r": 30, "b": 80, "l": 70},
         "plot_bgcolor": "#fafafa",
         "paper_bgcolor": "#fff",
-        "height": 480,
+        "height": 440,
+        "autosize": False,
     }
 
     output_path = Path(output_path)
@@ -247,7 +248,7 @@ def render_comparative_time_series(
         + '<style>body{font-family:-apple-system,"Segoe UI",sans-serif;margin:0;padding:18px 22px;background:#fff;color:#1f2937}'
         + 'h1{font-size:1.15em;margin:0 0 4px 0;color:#0f172a}'
         + '.subtitle{color:#6b7280;font-size:0.9em;margin-bottom:14px}'
-        + '.chart-target{width:100%;min-height:480px}'
+        + '.chart-target{width:100%;height:440px}'
         + '</style></head><body>'
         + '<h1>' + escape(title) + '</h1>'
         + '<div class="subtitle">Comparative time-series — '
