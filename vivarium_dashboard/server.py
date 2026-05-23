@@ -1860,11 +1860,18 @@ def _post_study_run_baseline_for_test(ws_root, body):
 
     params = dict(entry.get("params") or {})
     params_n_steps = params.pop("n_steps", None)
-    steps = int(body.get("steps") or params_n_steps or 5)
     generator_overrides = params
 
     ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text())
     pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+    # XArrayEmitter buffers ~hundreds of ticks before flushing, so the legacy
+    # 5-tick default produces empty zarr stores. Workspaces declare a sensible
+    # baseline run length via runtime.default_n_steps; we fall back to 5 only
+    # if neither the body, the study yaml, nor the workspace specifies one
+    # (preserves the legacy quick-smoke behaviour for SQLite workspaces).
+    _runtime = (ws_data.get("runtime") or {}) if isinstance(ws_data, dict) else {}
+    ws_default_n_steps = _runtime.get("default_n_steps")
+    steps = int(body.get("steps") or params_n_steps or ws_default_n_steps or 5)
 
     state, err = _resolve_study_baseline_state(pkg, spec_id, generator_overrides)
     if err is not None:
@@ -2245,11 +2252,14 @@ def _post_study_run_variant_for_test(ws_root, body):
     params.update(overrides)
 
     params_n_steps = params.pop("n_steps", None)
-    steps = int(body.get("steps") or params_n_steps or 5)
     generator_overrides = params
 
     ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text())
     pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+    # Same workspace-level default as the baseline path — see comment there.
+    _runtime = (ws_data.get("runtime") or {}) if isinstance(ws_data, dict) else {}
+    ws_default_n_steps = _runtime.get("default_n_steps")
+    steps = int(body.get("steps") or params_n_steps or ws_default_n_steps or 5)
 
     state, err = _resolve_study_baseline_state(pkg, spec_id, generator_overrides)
     if err is not None:
