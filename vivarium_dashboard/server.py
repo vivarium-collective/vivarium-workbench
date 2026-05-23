@@ -1907,6 +1907,48 @@ def _post_study_run_baseline_for_test(ws_root, body):
     return response, code
 
 
+def _zarr_store_for_sim(study_db: Path, sim_name: str | None) -> Path | None:
+    """Find the most-recent XArrayEmitter zarr store for a sim_name in a study.
+
+    XArrayEmitter runs (via the subprocess template's xarray branch) write a
+    per-run zarr directory next to the SQLite db at
+    ``<study>/runs.<run_id>.zarr``. To map a sim_name → zarr path:
+
+      1. Read runs_meta from the study's SQLite db to find the latest
+         completed run_id for that sim_name (runs_meta is written for both
+         SQLite-backed AND xarray-backed runs).
+      2. Check whether the corresponding zarr dir exists on disk.
+
+    Returns the zarr path if it exists, else None (caller falls back to SQLite).
+    """
+    if not sim_name or not study_db or not study_db.exists():
+        return None
+    try:
+        import sqlite3
+        conn = sqlite3.connect(str(study_db))
+        try:
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()}
+            if "runs_meta" not in tables:
+                return None
+            row = conn.execute(
+                "SELECT run_id FROM runs_meta WHERE sim_name=? "
+                "AND status='completed' ORDER BY started_at DESC LIMIT 1",
+                (sim_name,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        run_id = row[0]
+    except Exception:
+        return None
+    # Construct the zarr path: <db_stem>.<run_id>.zarr next to the SQLite db.
+    zarr_dir = study_db.parent / f"{study_db.stem}.{run_id}.zarr"
+    return zarr_dir if zarr_dir.is_dir() else None
+
+
 def _render_study_visualizations(study_dir, spec, spec_id):
     """Render canonical + Study-declared visualizations after a completed run.
 
@@ -8794,11 +8836,26 @@ if __name__ == "__main__":
                         continue
                     sim_name = r.get("sim_name") or r.get("variant") or r.get("name")
                     label = r.get("label") or sim_name or "?"
-                    runs.append({
-                        "label": label,
-                        "db_path": study_db,
-                        "sim_name": sim_name,
-                    })
+                    # XArrayEmitter runs write per-run zarr stores alongside
+                    # the SQLite db (one zarr dir per run_id). When the sim's
+                    # most-recent completed run has a zarr store, point
+                    # comparative_viz at it via zarr_path; the zarr-read
+                    # adapter (PR #87) extracts the observable across
+                    # generations. Falls back to SQLite db_path otherwise
+                    # (legacy single-generation runs).
+                    zarr_path = _zarr_store_for_sim(study_db, sim_name)
+                    if zarr_path is not None:
+                        runs.append({
+                            "label": label,
+                            "zarr_path": zarr_path,
+                            "sim_name": sim_name,
+                        })
+                    else:
+                        runs.append({
+                            "label": label,
+                            "db_path": study_db,
+                            "sim_name": sim_name,
+                        })
                 if not runs:
                     continue
                 out_path = viz_dir / f"comparative_{cv['name']}.html"
