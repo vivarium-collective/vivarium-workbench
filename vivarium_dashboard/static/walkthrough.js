@@ -7117,6 +7117,42 @@
 
   // Sidebar grouping: studies-by-investigation, collapsible.
   // Replaces the existing flat-list render in #viv-rail-investigations.
+  // Map a study's free-form status string to a small colored dot. Keeps the
+  // rail rows readable: the study NAME gets the full row width, the dot is a
+  // glanceable status, the full status text is shown in the title tooltip.
+  function _railStatusColor(status) {
+    var s = String(status || '').toLowerCase();
+    if (s.indexOf('fail') !== -1 || s.indexOf('invalid') !== -1) return '#ef4444';   // red
+    if (s.indexOf('pending') !== -1 || s.indexOf('refresh') !== -1) return '#f59e0b';// amber
+    if (s.indexOf('inconclusive') !== -1 || s.indexOf('partial') !== -1) return '#d97706'; // dark amber
+    if (s.indexOf('running') === 0) return '#3b82f6';                                // blue
+    if (s.indexOf('done') === 0 || s.indexOf('ran') === 0 || s.indexOf('complete') !== -1
+        || s.indexOf('evaluated') !== -1 || s.indexOf('confirmed') !== -1 || s.indexOf('passing') !== -1
+        || s.indexOf('-wins') !== -1 || s.indexOf('in-band') !== -1) return '#16a34a'; // green
+    if (s.indexOf('evaluate') === 0) return '#6366f1';                               // indigo (mid-pass action)
+    return '#9ca3af';                                                                // gray (planned/unknown)
+  }
+
+  // Single-row per study: [dot] name [🔒?]. Full status string in tooltip.
+  // Used by both the flat-list and grouped rail layouts.
+  function _railStudyItem(s, opts) {
+    opts = opts || {};
+    var status = s.status || 'planned';
+    var color = _railStatusColor(status);
+    var indent = opts.indent ? '28px' : '12px';
+    var fontSize = opts.indent ? '0.85em' : '0.86em';
+    var nameColor = opts.indent ? '#64748b' : '#374151';
+    var tip = _esc(s.name) + ' — ' + _esc(status) + (s.blocked ? ' (blocked)' : '');
+    return '<a class="viv-rail-sublink" ' +
+           'onclick="event.preventDefault();_openStudyEmbeddedNewTab(\'' + _esc(s.name) + '\');return false;" ' +
+           'href="#" title="' + tip + '" ' +
+           'style="display:flex;align-items:center;gap:8px;padding:4px 14px 4px ' + indent + ';color:' + nameColor + ';text-decoration:none;font-size:' + fontSize + ';">' +
+             '<span aria-hidden="true" style="flex:none;width:8px;height:8px;border-radius:50%;background:' + color + ';display:inline-block"></span>' +
+             '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + _esc(s.name) + '</span>' +
+             (s.blocked ? '<span title="blocked" style="font-size:0.85em;flex:none">🔒</span>' : '') +
+           '</a>';
+  }
+
   function _renderRailInvestigationGroups() {
     var host = document.getElementById('viv-rail-investigations');
     if (!host) return;
@@ -7163,17 +7199,7 @@
     // under the "Studies" rail-section label — no redundant group header.
     if (groups.length === 1 && groups[0].name !== '__ungrouped__') {
       var g = groups[0];
-      host.innerHTML = g.studies.map(function(s) {
-        var status = s.status || 'planned';
-        return '<a class="viv-rail-sublink" ' +
-               'onclick="event.preventDefault();_openStudyEmbeddedNewTab(\'' + _esc(s.name) + '\');return false;" ' +
-               'href="#" ' +
-               'style="display:flex;align-items:baseline;gap:6px;padding:4px 12px;color:#374151;text-decoration:none;font-size:0.86em;">' +
-                 '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + _esc(s.name) + '</span>' +
-                 (s.blocked ? '<span title="blocked" style="font-size:0.85em">🔒</span>' : '') +
-                 '<span class="muted" style="font-size:0.72em">' + _esc(status) + '</span>' +
-               '</a>';
-      }).join('');
+      host.innerHTML = g.studies.map(function(s) { return _railStudyItem(s); }).join('');
       return;
     }
 
@@ -7181,15 +7207,7 @@
     host.innerHTML = groups.map(function(g) {
       var isCollapsed = !!collapsedState[g.name];
       var children = isCollapsed ? '' : g.studies.map(function(s) {
-        var status = s.status || 'planned';
-        return '<a class="viv-rail-sublink" ' +
-               'onclick="event.preventDefault();_openStudyEmbeddedNewTab(\'' + _esc(s.name) + '\');return false;" ' +
-               'href="#" ' +
-               'style="display:flex;align-items:baseline;gap:6px;padding:3px 14px 3px 28px;color:#64748b;text-decoration:none;font-size:0.85em;">' +
-                 '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + _esc(s.name) + '</span>' +
-                 (s.blocked ? '<span title="blocked" style="font-size:0.85em">🔒</span>' : '') +
-                 '<span class="muted" style="font-size:0.72em">' + _esc(status) + '</span>' +
-               '</a>';
+        return _railStudyItem(s, { indent: true });
       }).join('');
       var headerClick = "event.preventDefault(); window._isetRailCollapsed = window._isetRailCollapsed || {}; window._isetRailCollapsed['" + _esc(g.name) + "'] = !window._isetRailCollapsed['" + _esc(g.name) + "']; _renderRailInvestigationGroups();";
       var groupClick = g.name === '__ungrouped__' ? '' :
