@@ -363,18 +363,31 @@ def render_v4_test_charts(spec: dict,
     if not path_specs:
         return []
 
+    # XArrayEmitter runs (workspace ``runtime.default_emitter: xarray``)
+    # write data to per-run zarr stores alongside runs.db — runs.db only
+    # carries runs_meta, not history. Probe the latest zarr first, then
+    # fall back to the SQLite history, then to the workspace default
+    # baseline.
+    study_dir = runs_db.parent if runs_db is not None else None
+    zarr_path = _latest_zarr_for_study(study_dir) if study_dir else None
+
+    sources: list[tuple[str, dict]] = []
+    if zarr_path is not None:
+        sources.append(("study-zarr", _extract_paths_from_zarr(zarr_path, path_specs)))
+
     db_candidates = [(p, lbl) for p, lbl in
                      ((runs_db, "study"), (fallback_db, "default-baseline"))
                      if p is not None and p.is_file()]
-    if not db_candidates:
+    if not db_candidates and not sources:
         return []
 
     # For each db, extract all paths in ONE pass over the latest run's
     # history. Subsample every Nth row when a run is long, so we keep
     # ~200 points per chart regardless of original sample density.
-    by_db: dict[str, dict[tuple[str, int | None], tuple[list, list]]] = {}
     for db_path, label in db_candidates:
-        by_db[label] = _extract_paths_from_db(db_path, path_specs)
+        sources.append((label, _extract_paths_from_db(db_path, path_specs)))
+
+    by_db: dict[str, dict[tuple[str, int | None], tuple[list, list]]] = dict(sources)
 
     charts: list[dict] = []
     for t in tests:
@@ -385,11 +398,11 @@ def render_v4_test_charts(spec: dict,
         idx = measure.get("index")
         key = (path, idx)
 
-        # Per-test fallback: prefer the study db; fall back to default-
-        # baseline if the study db doesn't carry this observable.
+        # Per-test fallback: prefer the latest study zarr (xarray runs),
+        # then the study sqlite db, then the workspace default-baseline.
         xs, ys, used_source = [], [], None
-        for _, label in db_candidates:
-            cand_xs, cand_ys = by_db.get(label, {}).get(key, ([], []))
+        for label, src in sources:
+            cand_xs, cand_ys = src.get(key, ([], []))
             if cand_xs:
                 xs, ys, used_source = cand_xs, cand_ys, label
                 break
@@ -418,6 +431,144 @@ def render_v4_test_charts(spec: dict,
             "data_source": used_source,
         })
     return charts
+
+
+def _latest_zarr_for_study(study_dir: Path) -> Path | None:
+    """Find the most-recent ``runs.*.zarr`` directory under ``study_dir``.
+
+    XArrayEmitter runs write per-run zarr directories at
+    ``<study>/runs.<run_id>.zarr``. We sort by mtime descending and return
+    the first directory that's actually populated (has a
+    ``experiment_id=*`` partition). Returns ``None`` if no zarr stores
+    exist or none have data yet (the empty-store case the smoke tests
+    surfaced when a sim only ran a handful of ticks).
+    """
+    if not study_dir.is_dir():
+        return None
+    candidates = sorted(
+        (p for p in study_dir.glob("runs.*.zarr") if p.is_dir()),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for zarr_dir in candidates:
+        # Cheap check: must contain at least one experiment partition.
+        try:
+            if next(zarr_dir.glob("experiment_id=*"), None) is not None:
+                return zarr_dir
+        except OSError:
+            continue
+    return None
+
+
+def _extract_paths_from_zarr(
+    zarr_path: Path,
+    path_specs: list[tuple[str, int | None]],
+    max_points: int = 200,
+) -> dict[tuple[str, int | None], tuple[list[float], list[float]]]:
+    """Single-pass extraction of N observable paths from a per-run zarr store.
+
+    Mirrors :func:`_extract_paths_from_db`'s signature. Each ``path_spec``
+    is ``(dotted-or-slash path, optional index)``. The path's LAST
+    component is the zarr leaf-node name (XArrayEmitter view leaves are
+    keyed by leaf name, not by the full nested path); for vector leaves
+    (e.g. ``listeners.monomer_counts``), ``index`` selects within the
+    coord dimension (``id_<leaf>``).
+
+    XArrayEmitter store layout (verified 2026-05-23):
+      ``.../lineage_seed=<s>/`` — partition node with ``time_gen=<N>`` data_vars
+      ``.../lineage_seed=<s>/<leaf>/`` — leaf node with ``generation=<N>``
+        value arrays, dimensioned ``(emitstep_gen=<N>[, id_<leaf>])``
+
+    Concatenates across generations into a single trace per path, then
+    subsamples to ``max_points``. Returns ``{(path, index): (times, values)}``
+    with empty tuples for paths that didn't resolve.
+    """
+    out: dict[tuple[str, int | None], tuple[list[float], list[float]]] = {
+        key: ([], []) for key in path_specs
+    }
+    if not path_specs or not zarr_path.exists():
+        return out
+    try:
+        import xarray as xr
+    except ImportError:
+        return out
+    try:
+        dt = xr.open_datatree(str(zarr_path), engine="zarr")
+    except Exception:
+        return out
+
+    # Map each spec to (leaf_name, index). The zarr store keys data vars
+    # by leaf name; we look up by walking dt.subtree once per leaf.
+    leaf_for_spec: dict[tuple[str, int | None], str] = {}
+    for path, idx in path_specs:
+        parts = [p for p in str(path).replace(".", "/").split("/") if p]
+        if not parts:
+            continue
+        if parts[0] == "agents" and len(parts) >= 3:
+            parts = parts[2:]
+        leaf_for_spec[(path, idx)] = parts[-1]
+
+    # Group specs by leaf so one node-walk handles all indices for the
+    # same vector observable.
+    by_leaf: dict[str, list[tuple[str, int | None]]] = {}
+    for key, leaf in leaf_for_spec.items():
+        by_leaf.setdefault(leaf, []).append(key)
+
+    try:
+        for node in dt.subtree:
+            if node.name not in by_leaf:
+                continue
+            parent = node.parent
+            if parent is None:
+                continue
+            specs_for_leaf = by_leaf[node.name]
+            # Discover per-generation (gen_n, var_name, time_var_name).
+            gen_keys: list[tuple[int, str, str]] = []
+            for var_name in (node.data_vars or {}):
+                if not var_name.startswith("generation="):
+                    continue
+                try:
+                    gen_n = int(var_name.split("=", 1)[1])
+                except ValueError:
+                    continue
+                t_name = f"time_gen={gen_n}"
+                if t_name not in (parent.data_vars or {}):
+                    continue
+                gen_keys.append((gen_n, var_name, t_name))
+            gen_keys.sort()
+            # Pull values per generation per spec.
+            for path, idx in specs_for_leaf:
+                times: list[float] = []
+                values: list[float] = []
+                for gen_n, var_name, t_name in gen_keys:
+                    v_arr = node[var_name]
+                    t_arr = parent[t_name].values
+                    if idx is not None and "id_" + node.name in v_arr.dims:
+                        try:
+                            v_arr = v_arr.isel({"id_" + node.name: int(idx)})
+                        except (IndexError, KeyError, ValueError):
+                            continue
+                    elif v_arr.ndim > 1:
+                        # vector leaf with no index supplied — drop
+                        continue
+                    v_vals = v_arr.values
+                    n = min(len(t_arr), len(v_vals))
+                    for i in range(n):
+                        times.append(float(t_arr[i]))
+                        values.append(float(v_vals[i]))
+                if not times:
+                    continue
+                paired = sorted(zip(times, values), key=lambda tv: tv[0])
+                if max_points and len(paired) > max_points:
+                    stride = max(1, len(paired) // max_points)
+                    paired = paired[::stride]
+                out[(path, idx)] = (
+                    [t for t, _ in paired],
+                    [v for _, v in paired],
+                )
+    except Exception:
+        return out
+    return out
 
 
 def _extract_paths_from_db(
