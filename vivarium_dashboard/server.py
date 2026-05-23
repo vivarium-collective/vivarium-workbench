@@ -2918,16 +2918,33 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                 state = doc.get('state', doc) if isinstance(doc, dict) else doc
                 if _payload.get('emit_paths'):
                     state = cr.inject_emitter_for_declared_paths(state, _payload['emit_paths'])
-                if _payload.get('default_emitter') == 'xarray':
+                _use_xarray = _payload.get('default_emitter') == 'xarray'
+                _view = []
+                if _use_xarray:
+                    # Auto-view from the study's declared observables. v0 of
+                    # view_from_emit_paths is scalar-only — vector observables
+                    # (monomer_counts, fork_coordinates, RNAP_coordinates, …)
+                    # are skipped. If a study declares ONLY vector observables
+                    # (e.g. dnaa-01 emits only listeners.monomer_counts), the
+                    # auto-view is empty and the XArrayEmitter constructor
+                    # would crash. In that case, fall back to SQLite for this
+                    # run so the study isn't blocked.
+                    from v2ecoli.library.xarray_run import (
+                        run_multigen_xarray, view_from_emit_paths,
+                    )
+                    _view = view_from_emit_paths(_payload.get('emit_paths') or [])
+                    if not _view:
+                        print('[xarray-run] auto-view is empty (all declared '
+                              'observables are vector / non-listeners-rooted); '
+                              'falling back to SQLite emitter for this run.',
+                              file=sys.stderr)
+                        _use_xarray = False
+                if _use_xarray:
                     # XArray multi-gen path: drive the composite externally past
                     # divisions, per-generation emitter swap; results land in a
                     # partitioned zarr store. See v2ecoli plan
                     # 2026-05-12-migrate-emitters.md task 7.x.
-                    from v2ecoli.library.xarray_run import (
-                        run_multigen_xarray, view_from_emit_paths,
-                    )
                     composite = Composite({{'state': state}}, core=core)
-                    _view = view_from_emit_paths(_payload.get('emit_paths') or [])
                     _md = {{
                         'experiment_id': _payload['run_id'],
                         'variant': 0,
