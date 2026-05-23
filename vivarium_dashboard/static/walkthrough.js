@@ -5645,6 +5645,22 @@
           + '</ul></div>';
       }
 
+      // Status-drift banner (round-2 friction #2). When a stored status axis
+      // (or a "planning" headline) contradicts what actually ran, say so — the
+      // report should never show "planning" on an executed study.
+      var statusDriftHtml = '';
+      var sdis = s.status_disagreements;
+      if (sdis && sdis.length) {
+        statusDriftHtml =
+          '<div class="status-drift-banner" id="study-' + slug + '-status-drift" '
+          + 'style="margin:12px 0;padding:12px 16px;background:#fffbeb;border:1px solid #f59e0b;'
+          + 'border-left-width:5px;border-radius:6px;color:#92400e">'
+          + '<strong>⚠ Status is out of date relative to what ran</strong>'
+          + '<ul class="small" style="margin:8px 0 0 18px">'
+          + sdis.map(function(v) { return '<li>' + _h(v.message || (v.axis + ': ' + v.stored + ' → ' + v.derived)) + '</li>'; }).join('')
+          + '</ul></div>';
+      }
+
       // Charts come from runs.db when present, or fall back to the
       // workspace default-baseline. Wrap them with a BASELINE banner
       // so the expert knows the trace is pre-execution data, not a
@@ -5679,6 +5695,7 @@
           +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
           +     '<div class="study-planning-pill">PLANNING — not yet run</div>'
           +   '</header>'
+          +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
           +   enforcementHtml     // ⚠ declared params not applied (D.2)
           +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
           +   feedbackHtml        // 💬 imported expert feedback (B.1)
@@ -5710,6 +5727,7 @@
         +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
         +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
         +   '</header>'
+        +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
         +   enforcementHtml     // ⚠ declared params not applied (D.2)
         +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
         +   feedbackHtml        // 💬 imported expert feedback (B.1)
