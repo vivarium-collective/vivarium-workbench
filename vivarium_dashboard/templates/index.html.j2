@@ -433,17 +433,34 @@
     </div>
     {% endif %}
     {% else %}
-    {# No GitHub identity → generic prompt linking to gh-cli setup. #}
-    <a class="viv-rail-footer viv-rail-footer-link viv-rail-footer-no-github"
-       href="https://cli.github.com/manual/gh_auth_login"
-       target="_blank" rel="noopener"
-       title="Connect this workspace to GitHub — run `gh auth login`">
+    {# No GitHub identity → in-UI sign-in chip. The github-login.js widget
+       fills this in based on /api/auth/github/status; clicking "Sign in
+       with GitHub" runs the OAuth Device Flow (no terminal required, no
+       AI agent required). Falls back to the gh-cli setup link if the
+       dashboard JS is unavailable. #}
+    <div id="viv-gh-chip"
+         class="viv-rail-footer viv-rail-footer-link viv-rail-footer-no-github"
+         data-state="loading"
+         title="Sign in to GitHub from the dashboard"
+         style="cursor:pointer">
       <div class="viv-avatar viv-avatar-rail" aria-hidden="true">+</div>
       <div class="viv-rail-footer-text">
         <strong>Connect GitHub</strong>
-        <small>run <code>gh auth login</code></small>
+        <small>checking…</small>
       </div>
-    </a>
+    </div>
+    <noscript>
+      <a class="viv-rail-footer viv-rail-footer-link viv-rail-footer-no-github"
+         href="https://cli.github.com/manual/gh_auth_login"
+         target="_blank" rel="noopener"
+         title="Connect this workspace to GitHub — run `gh auth login`">
+        <div class="viv-avatar viv-avatar-rail" aria-hidden="true">+</div>
+        <div class="viv-rail-footer-text">
+          <strong>Connect GitHub</strong>
+          <small>run <code>gh auth login</code></small>
+        </div>
+      </a>
+    </noscript>
     {% endif %}
 
     <button class="viv-rail-toggle" id="viv-rail-toggle" type="button" aria-label="Collapse rail" onclick="_vivToggleRail()">
