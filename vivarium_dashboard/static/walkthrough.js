@@ -6524,11 +6524,13 @@
       + '<script>'
       + 'window._fitEmbed=function(f){try{var d=f.contentDocument||(f.contentWindow&&f.contentWindow.document);if(!d)return;'
       +   'var b=d.body,e=d.documentElement;'
-      +   'var bOverflow=b?(b.style.overflow||(d.defaultView&&d.defaultView.getComputedStyle?d.defaultView.getComputedStyle(b).overflow:"")):"";'
-      +   'var eOverflow=e?(e.style.overflow||(d.defaultView&&d.defaultView.getComputedStyle?d.defaultView.getComputedStyle(e).overflow:"")):"";'
-      +   'var hidden=(bOverflow.indexOf("hidden")>=0||eOverflow.indexOf("hidden")>=0);'
-      +   'var h=hidden'
-      +   '?Math.max(b?b.clientHeight:0,e?e.clientHeight:0)'
+      +   // If the inner body declares a CSS height + overflow:hidden, trust
+      +   // that and use body.clientHeight (NOT html.clientHeight — that just
+      +   // tracks the iframe size and would inflate by +24px each call).
+      +   'var bStyle=b&&d.defaultView&&d.defaultView.getComputedStyle?d.defaultView.getComputedStyle(b):null;'
+      +   'var pinned=bStyle&&(bStyle.overflow||"").indexOf("hidden")>=0&&b.clientHeight>0;'
+      +   'var h=pinned'
+      +   '?b.clientHeight'
       +   ':Math.max(e?e.scrollHeight:0,b?b.scrollHeight:0);'
       +   'if(h>0)f.style.height=(h+24)+"px";}catch(e){}};'
       + 'window._wireEmbed=function(f){window._fitEmbed(f);'
