@@ -2816,6 +2816,20 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
         # Pass (spec_id, overrides) as small JSON; the child builds + injects
         # the SQLiteEmitter + runs entirely in-process.
         _state_path = None
+        # Read workspace-level runtime defaults: emitter selection + multi-gen cap.
+        # Workspaces (e.g. v2ecoli) can opt into XArrayEmitter via
+        # `runtime: { default_emitter: xarray, max_generations: N }`. Default
+        # is SQLite (the dashboard's historical single-generation behaviour).
+        try:
+            _ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+            _runtime = (_ws_data.get("runtime") or {}) if isinstance(_ws_data, dict) else {}
+            _default_emitter = str(_runtime.get("default_emitter") or "sqlite").lower()
+            _max_generations = int(_runtime.get("max_generations") or 3)
+        except Exception:
+            _default_emitter = "sqlite"
+            _max_generations = 3
+        # Derive a zarr store path alongside the SQLite db_file (one per run).
+        _zarr_store = str(Path(db_file).with_suffix("")) + f".{run_id}.zarr"
         payload = {
             "spec_id": spec_id,
             "overrides": overrides or {},
@@ -2828,6 +2842,10 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
             # just `{"_tick": <global_time>}` and every comparative viz
             # renders empty. Empty list = legacy "no observables" behavior.
             "emit_paths": list(emit_paths or []),
+            # XArray opt-in (per workspace.yaml runtime.default_emitter).
+            "default_emitter": _default_emitter,
+            "max_generations": _max_generations,
+            "zarr_store": _zarr_store,
         }
         script = textwrap.dedent(f"""
             import json, sys, traceback
@@ -2854,11 +2872,40 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                 state = doc.get('state', doc) if isinstance(doc, dict) else doc
                 if _payload.get('emit_paths'):
                     state = cr.inject_emitter_for_declared_paths(state, _payload['emit_paths'])
-                state = cr.inject_sqlite_emitter(
-                    state, run_id=_payload['run_id'], db_file=_payload['db_file'])
-                composite = Composite({{'state': state}}, core=core)
-                cr.run_with_division(composite, _payload['steps'])
-                results = gather_emitter_results(composite)
+                if _payload.get('default_emitter') == 'xarray':
+                    # XArray multi-gen path: drive the composite externally past
+                    # divisions, per-generation emitter swap; results land in a
+                    # partitioned zarr store. See v2ecoli plan
+                    # 2026-05-12-migrate-emitters.md task 7.x.
+                    from v2ecoli.library.xarray_run import (
+                        run_multigen_xarray, view_from_emit_paths,
+                    )
+                    composite = Composite({{'state': state}}, core=core)
+                    _view = view_from_emit_paths(_payload.get('emit_paths') or [])
+                    _md = {{
+                        'experiment_id': _payload['run_id'],
+                        'variant': 0,
+                        'lineage_seed': 0,
+                        'time_step': 1.0,
+                        'max_duration': float(_payload['steps']),
+                    }}
+                    _xarr = run_multigen_xarray(
+                        composite,
+                        store_path=_payload['zarr_store'],
+                        view=_view,
+                        metadata_base=_md,
+                        max_steps=_payload['steps'],
+                        max_generations=_payload['max_generations'],
+                    )
+                    results = {{'zarr_store': _xarr['store'],
+                               'generations': _xarr['generations'],
+                               'steps': _xarr['steps']}}
+                else:
+                    state = cr.inject_sqlite_emitter(
+                        state, run_id=_payload['run_id'], db_file=_payload['db_file'])
+                    composite = Composite({{'state': state}}, core=core)
+                    cr.run_with_division(composite, _payload['steps'])
+                    results = gather_emitter_results(composite)
         """).lstrip("\n")
     else:
         # Legacy path: serialize the pre-built state into a tempfile.

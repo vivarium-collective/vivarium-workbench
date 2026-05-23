@@ -245,7 +245,11 @@ def render_comparative_time_series(
         "<!DOCTYPE html><html><head>"
         '<meta charset="utf-8"><title>' + escape(title) + "</title>"
         + _PLOTLY_CDN
-        + '<style>body{font-family:-apple-system,"Segoe UI",sans-serif;margin:0;padding:18px 22px;background:#fff;color:#1f2937}'
+        # Clamp body height so the iframe auto-fit (reads scrollHeight) doesn't
+        # grow past the chart + chrome. Plotly's hover/modal layers can inflate
+        # scrollHeight transiently; overflow:hidden + a fixed height stops that.
+        + '<style>html,body{height:540px;overflow:hidden}'
+        + 'body{font-family:-apple-system,"Segoe UI",sans-serif;margin:0;padding:18px 22px;background:#fff;color:#1f2937}'
         + 'h1{font-size:1.15em;margin:0 0 4px 0;color:#0f172a}'
         + '.subtitle{color:#6b7280;font-size:0.9em;margin-bottom:14px}'
         + '.chart-target{width:100%;height:440px}'

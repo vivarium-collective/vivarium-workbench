@@ -5555,9 +5555,17 @@
               var isStale = emb.stale === true
                 || (typeof emb.description === 'string' && emb.description.indexOf('⚠') === 0)
                 || /\b(prior|planning[- ]phase|placeholder|pending refresh|pre-execution|superseded|baseline rerun|will be populated|not yet run)\b/.test(meta);
+              // If the inner doc declares a fixed CSS height clamp (e.g.
+              // comparative_viz emits `html,body{height:540px;overflow:hidden}`
+              // to bound Plotly's hover-layer scrollHeight inflation), set
+              // the iframe height directly so _fitEmbed's measurements can't
+              // over- or under-grow it. Unclamped embeds (e.g. the tall
+              // chromosome figures) fall through to _fitEmbed's autosize.
+              var _hClamp = (emb.html || '').match(/html,body\{height:(\d+)px/);
+              var _hStyle = _hClamp ? (';height:' + (parseInt(_hClamp[1], 10) + 24) + 'px') : '';
               var iframe = '<iframe srcdoc="' + escaped + '" '
                 + 'class="embed-frame" onload="_wireEmbed(this)" '
-                + 'style="width:100%;min-height:200px;border:0;display:block" '
+                + 'style="width:100%;min-height:200px;border:0;display:block' + _hStyle + '" '
                 + 'title="' + _h(emb.name) + '"></iframe>';
               if (isStale) {
                 // Collapsed by default; re-fit on expand.
@@ -6523,7 +6531,20 @@
       // ResizeObserver of the inner doc plus a few timed fallbacks.
       + '<script>'
       + 'window._fitEmbed=function(f){try{var d=f.contentDocument||(f.contentWindow&&f.contentWindow.document);if(!d)return;'
-      +   'var h=Math.max(d.documentElement?d.documentElement.scrollHeight:0,d.body?d.body.scrollHeight:0);'
+      +   'var b=d.body,e=d.documentElement;'
+      +   // If the inner body declares a fixed CSS height + overflow:hidden,
+      +   // read the DECLARED height directly (b.clientHeight is the laid-out
+      +   // height which is clipped by the iframe viewport, so it shrinks
+      +   // instead of pinning at the CSS value). getComputedStyle.height is
+      +   // a string like "540px" — parse it. Falls back to scrollHeight
+      +   // for unclamped embeds (e.g. tall chromosome figures).
+      +   'var bStyle=b&&d.defaultView&&d.defaultView.getComputedStyle?d.defaultView.getComputedStyle(b):null;'
+      +   'var pinnedH=0;'
+      +   'if(bStyle&&(bStyle.overflow||"").indexOf("hidden")>=0){'
+      +     'var hm=(bStyle.height||"").match(/^(\\d+(?:\\.\\d+)?)px$/);'
+      +     'if(hm)pinnedH=Math.round(parseFloat(hm[1]));'
+      +   '}'
+      +   'var h=pinnedH>0?pinnedH:Math.max(e?e.scrollHeight:0,b?b.scrollHeight:0);'
       +   'if(h>0)f.style.height=(h+24)+"px";}catch(e){}};'
       + 'window._wireEmbed=function(f){window._fitEmbed(f);'
       +   'try{var d=f.contentDocument;if(window.ResizeObserver&&d){var ro=new ResizeObserver(function(){window._fitEmbed(f);});'
