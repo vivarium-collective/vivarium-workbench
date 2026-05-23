@@ -1079,39 +1079,46 @@ When done, summarize which entries got PDFs vs URLs only vs were unresolvable, a
      activates the #viv-gh-chip element on load. No-AI-agent setup path. -->
 <section id="page-github" class="page" data-page="github">
   <h2 class="page-title">GitHub</h2>
-  <p class="page-lead">Sign in to GitHub from the dashboard — no terminal required. Used to create + push workspace repos and to populate the org picker for new workspaces.</p>
 
-  <div class="panel">
-    <h3>Account</h3>
-    <p class="panel-lead">Click to sign in via GitHub's OAuth Device Flow (a browser code-paste, like <code>gh auth login --web</code>). If <code>gh</code> is already authenticated on this machine, the dashboard uses that session automatically.</p>
-    <div id="viv-gh-chip"
-         class="viv-rail-footer viv-rail-footer-link viv-rail-footer-no-github"
-         data-state="loading"
-         title="Sign in to GitHub from the dashboard"
-         style="cursor:pointer;display:inline-flex;max-width:420px">
-      <div class="viv-avatar viv-avatar-rail" aria-hidden="true">+</div>
-      <div class="viv-rail-footer-text">
-        <strong>Connect GitHub</strong>
-        <small>checking…</small>
+  <!-- Row 1: identity + org picker side by side -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:16px">
+    <div class="panel" style="margin:0">
+      <h3 style="margin-top:0">Signed in</h3>
+      <div id="viv-gh-chip"
+           class="viv-rail-footer viv-rail-footer-link viv-rail-footer-no-github"
+           data-state="loading"
+           title="Sign in to GitHub from the dashboard"
+           style="cursor:pointer;display:inline-flex;max-width:100%">
+        <div class="viv-avatar viv-avatar-rail" aria-hidden="true">+</div>
+        <div class="viv-rail-footer-text">
+          <strong>Connect GitHub</strong>
+          <small>checking…</small>
+        </div>
       </div>
+      <p class="muted small" style="margin:10px 0 0">No terminal required. Uses your <code>gh</code> session if present, otherwise OAuth Device Flow (browser code-paste).</p>
+      <noscript>
+        <p class="muted small">Dashboard JS is disabled. Run <code>gh auth login</code> from a terminal to connect.</p>
+      </noscript>
     </div>
-    <noscript>
-      <p class="muted small">Dashboard JS is disabled. Run <code>gh auth login</code> from a terminal to connect this workspace to GitHub.</p>
-    </noscript>
+
+    <div class="panel" style="margin:0">
+      <h3 style="margin-top:0">Default GitHub org</h3>
+      <p class="muted small" style="margin:0 0 10px">Used to pre-fill <strong>org</strong> for new workspaces + "Create GitHub repo" actions. Picks from the orgs your account belongs to.</p>
+      <select id="viv-gh-default-org" style="width:100%;padding:6px 8px;font:inherit;border:1px solid #cbd5e1;border-radius:4px;background:#fff">
+        <option value="">Sign in to load orgs…</option>
+      </select>
+      <p id="viv-gh-default-org-hint" class="muted small" style="margin:8px 0 0"></p>
+    </div>
   </div>
 
-  <!-- Workspace repo status (moved from the topbar — repo + branch + push
-       state + ahead-of-base + uncommitted + PR badge + action buttons).
-       The JS (_refreshGitStatus) targets #viv-git-status by id; it populates
-       this element wherever it lives. -->
-  <div class="panel">
-    <h3>Workspace repo</h3>
-    <p class="panel-lead">Current branch, push state, dirty-tree count, and any linked PR. Action buttons (Link branch, Push, End workstream) appear here when they apply.</p>
+  <!-- Row 2: workspace repo state (full width). The status strip is JS-populated
+       (_refreshGitStatus targets #viv-git-status). Action buttons render into
+       #viv-git-actions so they're a clear separate row, not crammed into the strip. -->
+  <div class="panel" style="margin-top:16px">
+    <h3 style="margin-top:0">This workspace's repo</h3>
     <div id="viv-git-status" class="git-status" hidden></div>
-    <div class="topbar-actions" style="margin-top:10px">
-      <button id="btn-open-pr" class="action-btn" onclick="_openPRDialog()" title="Open PR for current branch">
-        Open PR ↗
-      </button>
+    <div id="viv-git-actions" class="git-status-actions" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px">
+      <button id="btn-open-pr" class="action-btn" onclick="_openPRDialog()" title="Open PR for current branch">Open PR ↗</button>
     </div>
   </div>
 </section>

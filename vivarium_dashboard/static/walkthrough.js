@@ -10497,7 +10497,11 @@
       var openPrBtn = document.getElementById('btn-open-pr');
       if (openPrBtn) openPrBtn.hidden = !!s.pr_url;
 
-      // Action buttons (unified from former _refreshWorkStrip)
+      // Action buttons (Link branch / Push / End workstream). When the
+      // dedicated #viv-git-actions container exists (GitHub tab layout) we
+      // render the action buttons there as a clear separate row alongside
+      // the existing Open-PR button. Otherwise fall back to inline append
+      // for layouts that still embed everything inside #viv-git-status.
       var actions = [];
       if (!s.upstream_repo) {
         actions.push(s.gh_available
@@ -10509,12 +10513,97 @@
       if (s.has_active_workstream) {
         actions.push('<button class="ws-btn ws-end" onclick="_endWork()" title="Switch back to ' + _esc(s.base) + ' (workstream branch is preserved)">End</button>');
       }
-      if (actions.length) {
+      var actionsHost = document.getElementById('viv-git-actions');
+      if (actionsHost) {
+        // Replace any previously-injected actions (preserve the static
+        // Open-PR button that lives in the markup with id="btn-open-pr").
+        actionsHost.querySelectorAll('[data-injected-action]').forEach(function (n) { n.remove(); });
+        if (actions.length) {
+          var tmp = document.createElement('span');
+          tmp.dataset.injectedAction = '1';
+          tmp.innerHTML = actions.join(' ');
+          actionsHost.appendChild(tmp);
+        }
+      } else if (actions.length) {
         box.innerHTML += ' <span class="git-status-actions">' + actions.join(' ') + '</span>';
       }
     }).catch(function () { /* silent */ });
   }
   window._refreshGitStatus = _refreshGitStatus;
+
+  // ------------------------------------------------------------------
+  // GitHub tab — default-org picker. Populates #viv-gh-default-org from
+  // /api/auth/github/orgs once the user is signed in. Persists the
+  // selection to localStorage; new-workspace flows can read it. (Backend
+  // workspace.yaml.github_org persistence is a follow-up; this UX gives
+  // configurability now.)
+  // ------------------------------------------------------------------
+  var GH_DEFAULT_ORG_KEY = 'viv-dashboard-default-github-org';
+
+  function _loadGithubOrgs() {
+    var sel = document.getElementById('viv-gh-default-org');
+    var hint = document.getElementById('viv-gh-default-org-hint');
+    if (!sel) return;
+    sel.disabled = true;
+    fetch('/api/auth/github/orgs').then(function (r) {
+      if (r.status === 401) {
+        sel.innerHTML = '<option value="">Sign in to load orgs…</option>';
+        if (hint) hint.textContent = '';
+        return;
+      }
+      if (!r.ok) {
+        sel.innerHTML = '<option value="">Could not load orgs</option>';
+        if (hint) hint.textContent = 'GitHub returned HTTP ' + r.status + '.';
+        return;
+      }
+      return r.json().then(function (data) {
+        var orgs = (data && data.orgs) || [];
+        var saved = '';
+        try { saved = localStorage.getItem(GH_DEFAULT_ORG_KEY) || ''; } catch (_e) {}
+        sel.innerHTML = orgs.map(function (o) {
+          var login = o.login || o;
+          var label = o.kind === 'user' ? (login + ' (you)') : login;
+          var selAttr = (login === saved) ? ' selected' : '';
+          return '<option value="' + _esc(login) + '"' + selAttr + '>' + _esc(label) + '</option>';
+        }).join('') || '<option value="">No orgs found</option>';
+        if (hint) {
+          hint.textContent = saved
+            ? 'Default: ' + saved + ' (saved in this browser).'
+            : 'Pick one to use as the default for new-repo flows.';
+        }
+      });
+    }).catch(function () {
+      sel.innerHTML = '<option value="">Network error</option>';
+    }).then(function () {
+      sel.disabled = false;
+    });
+  }
+  window._loadGithubOrgs = _loadGithubOrgs;
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var sel = document.getElementById('viv-gh-default-org');
+    if (sel) {
+      sel.addEventListener('change', function () {
+        try { localStorage.setItem(GH_DEFAULT_ORG_KEY, sel.value || ''); } catch (_e) {}
+        var hint = document.getElementById('viv-gh-default-org-hint');
+        if (hint && sel.value) hint.textContent = 'Default: ' + sel.value + ' (saved in this browser).';
+      });
+    }
+    _loadGithubOrgs();
+
+    // Re-load orgs when the github-login chip flips to authenticated. Keeps
+    // github-login.js untouched (no cross-file coupling) — we just observe
+    // the data-state attribute the widget already maintains.
+    var chip = document.getElementById('viv-gh-chip');
+    if (chip && typeof MutationObserver !== 'undefined') {
+      var lastState = chip.dataset.state;
+      new MutationObserver(function () {
+        var s = chip.dataset.state;
+        if (s !== lastState && s === 'in') _loadGithubOrgs();
+        lastState = s;
+      }).observe(chip, { attributes: true, attributeFilter: ['data-state'] });
+    }
+  });
 
   document.addEventListener('DOMContentLoaded', _refreshGitStatus);
 
