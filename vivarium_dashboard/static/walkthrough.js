@@ -5555,9 +5555,17 @@
               var isStale = emb.stale === true
                 || (typeof emb.description === 'string' && emb.description.indexOf('⚠') === 0)
                 || /\b(prior|planning[- ]phase|placeholder|pending refresh|pre-execution|superseded|baseline rerun|will be populated|not yet run)\b/.test(meta);
+              // If the inner doc declares a fixed CSS height clamp (e.g.
+              // comparative_viz emits `html,body{height:540px;overflow:hidden}`
+              // to bound Plotly's hover-layer scrollHeight inflation), set
+              // the iframe height directly so _fitEmbed's measurements can't
+              // over- or under-grow it. Unclamped embeds (e.g. the tall
+              // chromosome figures) fall through to _fitEmbed's autosize.
+              var _hClamp = (emb.html || '').match(/html,body\{height:(\d+)px/);
+              var _hStyle = _hClamp ? (';height:' + (parseInt(_hClamp[1], 10) + 24) + 'px') : '';
               var iframe = '<iframe srcdoc="' + escaped + '" '
                 + 'class="embed-frame" onload="_wireEmbed(this)" '
-                + 'style="width:100%;min-height:200px;border:0;display:block" '
+                + 'style="width:100%;min-height:200px;border:0;display:block' + _hStyle + '" '
                 + 'title="' + _h(emb.name) + '"></iframe>';
               if (isStale) {
                 // Collapsed by default; re-fit on expand.
