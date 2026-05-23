@@ -6524,14 +6524,19 @@
       + '<script>'
       + 'window._fitEmbed=function(f){try{var d=f.contentDocument||(f.contentWindow&&f.contentWindow.document);if(!d)return;'
       +   'var b=d.body,e=d.documentElement;'
-      +   // If the inner body declares a CSS height + overflow:hidden, trust
-      +   // that and use body.clientHeight (NOT html.clientHeight — that just
-      +   // tracks the iframe size and would inflate by +24px each call).
+      +   // If the inner body declares a fixed CSS height + overflow:hidden,
+      +   // read the DECLARED height directly (b.clientHeight is the laid-out
+      +   // height which is clipped by the iframe viewport, so it shrinks
+      +   // instead of pinning at the CSS value). getComputedStyle.height is
+      +   // a string like "540px" — parse it. Falls back to scrollHeight
+      +   // for unclamped embeds (e.g. tall chromosome figures).
       +   'var bStyle=b&&d.defaultView&&d.defaultView.getComputedStyle?d.defaultView.getComputedStyle(b):null;'
-      +   'var pinned=bStyle&&(bStyle.overflow||"").indexOf("hidden")>=0&&b.clientHeight>0;'
-      +   'var h=pinned'
-      +   '?b.clientHeight'
-      +   ':Math.max(e?e.scrollHeight:0,b?b.scrollHeight:0);'
+      +   'var pinnedH=0;'
+      +   'if(bStyle&&(bStyle.overflow||"").indexOf("hidden")>=0){'
+      +     'var hm=(bStyle.height||"").match(/^(\\d+(?:\\.\\d+)?)px$/);'
+      +     'if(hm)pinnedH=Math.round(parseFloat(hm[1]));'
+      +   '}'
+      +   'var h=pinnedH>0?pinnedH:Math.max(e?e.scrollHeight:0,b?b.scrollHeight:0);'
       +   'if(h>0)f.style.height=(h+24)+"px";}catch(e){}};'
       + 'window._wireEmbed=function(f){window._fitEmbed(f);'
       +   'try{var d=f.contentDocument;if(window.ResizeObserver&&d){var ro=new ResizeObserver(function(){window._fitEmbed(f);});'
