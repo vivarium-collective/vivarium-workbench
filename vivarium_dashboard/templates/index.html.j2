@@ -475,13 +475,10 @@
         <span>{{ workspace_name }}{% if active_investigation_name %}:{{ active_investigation_name }}{% endif %} dashboard</span>
       </nav>
       <div class="viv-topbar-actions" id="viv-topbar-actions">
-        <!-- Git status strip + action buttons populated by JS (_refreshGitStatus) -->
-        <div id="viv-git-status" class="git-status" hidden></div>
-        <div class="topbar-actions">
-          <button id="btn-open-pr" class="action-btn" onclick="_openPRDialog()" title="Open PR for current branch">
-            Open PR ↗
-          </button>
-        </div>
+        <!-- Git status strip + Open-PR button were here; moved into the
+             GitHub tab (Workspace → GitHub) for a cleaner topbar. The JS
+             (_refreshGitStatus) still targets #viv-git-status by id and
+             populates it wherever it lives. -->
         <span class="viv-btn viv-tooltip" data-tooltip="Coming soon — share workspace link">Share</span>
         <span class="viv-kebab viv-tooltip" data-tooltip="Workspace settings — coming soon">⋯</span>
         {# Mirrors the rail-footer logic — show GitHub initials/email only
@@ -1101,6 +1098,21 @@ When done, summarize which entries got PDFs vs URLs only vs were unresolvable, a
     <noscript>
       <p class="muted small">Dashboard JS is disabled. Run <code>gh auth login</code> from a terminal to connect this workspace to GitHub.</p>
     </noscript>
+  </div>
+
+  <!-- Workspace repo status (moved from the topbar — repo + branch + push
+       state + ahead-of-base + uncommitted + PR badge + action buttons).
+       The JS (_refreshGitStatus) targets #viv-git-status by id; it populates
+       this element wherever it lives. -->
+  <div class="panel">
+    <h3>Workspace repo</h3>
+    <p class="panel-lead">Current branch, push state, dirty-tree count, and any linked PR. Action buttons (Link branch, Push, End workstream) appear here when they apply.</p>
+    <div id="viv-git-status" class="git-status" hidden></div>
+    <div class="topbar-actions" style="margin-top:10px">
+      <button id="btn-open-pr" class="action-btn" onclick="_openPRDialog()" title="Open PR for current branch">
+        Open PR ↗
+      </button>
+    </div>
   </div>
 </section>
 
