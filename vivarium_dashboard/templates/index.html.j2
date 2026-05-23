@@ -392,6 +392,19 @@
         </span>
         <span class="viv-rail-link-label">Visualizations</span>
       </a>
+      <!-- GitHub: sign-in + org-link controls. Branch + node icon. -->
+      <a href="#github"            class="viv-rail-link menu-link" data-page="github">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <circle cx="6" cy="6" r="2"/>
+            <circle cx="6" cy="18" r="2"/>
+            <circle cx="18" cy="12" r="2"/>
+            <path d="M6 8v8"/>
+            <path d="M6 8a6 6 0 0 0 6 6h4"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">GitHub</span>
+      </a>
     </nav>
 
     <!-- Studies of the active investigation, dependency-ordered. -->
@@ -1062,6 +1075,32 @@ When done, summarize which entries got PDFs vs URLs only vs were unresolvable, a
               style="width:100%; height:calc(100vh - 220px); min-height:600px;
                      border:0; display:block"></iframe>
     </div>
+  </div>
+</section>
+
+<!-- GitHub: in-UI sign-in + (future) org picker. The github-login.js widget
+     activates the #viv-gh-chip element on load. No-AI-agent setup path. -->
+<section id="page-github" class="page" data-page="github">
+  <h2 class="page-title">GitHub</h2>
+  <p class="page-lead">Sign in to GitHub from the dashboard — no terminal required. Used to create + push workspace repos and to populate the org picker for new workspaces.</p>
+
+  <div class="panel">
+    <h3>Account</h3>
+    <p class="panel-lead">Click to sign in via GitHub's OAuth Device Flow (a browser code-paste, like <code>gh auth login --web</code>). If <code>gh</code> is already authenticated on this machine, the dashboard uses that session automatically.</p>
+    <div id="viv-gh-chip"
+         class="viv-rail-footer viv-rail-footer-link viv-rail-footer-no-github"
+         data-state="loading"
+         title="Sign in to GitHub from the dashboard"
+         style="cursor:pointer;display:inline-flex;max-width:420px">
+      <div class="viv-avatar viv-avatar-rail" aria-hidden="true">+</div>
+      <div class="viv-rail-footer-text">
+        <strong>Connect GitHub</strong>
+        <small>checking…</small>
+      </div>
+    </div>
+    <noscript>
+      <p class="muted small">Dashboard JS is disabled. Run <code>gh auth login</code> from a terminal to connect this workspace to GitHub.</p>
+    </noscript>
   </div>
 </section>
 
