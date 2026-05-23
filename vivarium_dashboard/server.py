@@ -198,6 +198,10 @@ _POST_STUDY_ALIASES: dict[str, str] = {
 _POST_ROUTE_MAP: dict[str, str] = {
     "/api/click":              "_post_click",
     "/api/feedback-import":    "_post_feedback_import",
+    # GitHub auth (Phase B-bis, cherry-picked from #65). Lets users sign in
+    # via the dashboard UI instead of a terminal — no AI agent required.
+    "/api/auth/github/start":  "_post_auth_github_start",
+    "/api/auth/github/logout": "_post_auth_github_logout",
     "/api/import":             "_post_import",
     "/api/import-install":     "_post_import_install",
     "/api/dataset":            "_post_dataset",
@@ -3531,6 +3535,13 @@ class Handler(BaseHTTPRequestHandler):
         path_only = self.path.split("?", 1)[0]
         if path_only in ("/", "/index.html"):
             return self._serve_file(WORKSPACE / "reports" / "index.html", "text/html")
+        # GitHub auth (cherry-picked from #65, Phase B-bis).
+        if self.path.startswith("/api/auth/github/status"):
+            return self._get_auth_github_status()
+        if self.path.startswith("/api/auth/github/poll"):
+            return self._get_auth_github_poll()
+        if self.path.startswith("/api/auth/github/orgs"):
+            return self._get_auth_github_orgs()
         if self.path.startswith("/api/workspaces"):
             return self._get_workspaces()
         if self.path.startswith("/api/state"):
@@ -3726,6 +3737,69 @@ class Handler(BaseHTTPRequestHandler):
             "path": str(target.relative_to(WORKSPACE)),
             "n_entries": n_entries,
         }, 200)
+
+    # ------------------------------------------------------------------
+    # GitHub auth (cherry-picked from #65, Phase B-bis).
+    # The lib is vivarium_dashboard/lib/github_auth.py; the JS widget is
+    # static/github-login.js. UI placement (the sign-in chip) is left for a
+    # follow-up PR — the widget is defensive and no-ops without its target.
+    # ------------------------------------------------------------------
+
+    def _post_auth_github_start(self, body: dict):
+        """POST /api/auth/github/start — initiate the Device Flow.
+
+        Returns the user_code + verification_uri the client must display, plus
+        a server-issued flow_id the client passes to ``/poll``. Never returns
+        the device_code (held server-side).
+        """
+        from vivarium_dashboard.lib.github_auth import start_device_flow
+        result = start_device_flow()
+        if "error" in result:
+            # 503 for missing client_id (deployment not configured); 502 for
+            # GitHub-side failures.
+            code = 503 if result["error"] == "no_client_id" else 502
+            return self._json(result, code)
+        return self._json(result, 200)
+
+    def _get_auth_github_poll(self):
+        """GET /api/auth/github/poll?flow_id=<uuid> — poll the token endpoint."""
+        from urllib.parse import parse_qs, urlparse
+        qs = parse_qs(urlparse(self.path).query)
+        flow_id = (qs.get("flow_id") or [""])[0].strip()
+        if not flow_id:
+            return self._json({"status": "error", "detail": "missing_flow_id"}, 400)
+
+        from vivarium_dashboard.lib.github_auth import poll_device_flow
+        result = poll_device_flow(flow_id)
+        # Map outcomes to HTTP codes the client can use without parsing JSON:
+        #   pending → 202, ok → 200, expired → 410, denied → 403, error → 400.
+        status = result.get("status")
+        code = {
+            "ok": 200, "pending": 202, "expired": 410, "denied": 403,
+        }.get(status, 400)
+        return self._json(result, code)
+
+    def _get_auth_github_status(self):
+        """GET /api/auth/github/status — current session, or {authenticated:false}.
+
+        Never includes the token itself."""
+        from vivarium_dashboard.lib.github_auth import status_payload
+        return self._json(status_payload(), 200)
+
+    def _post_auth_github_logout(self, body: dict):
+        """POST /api/auth/github/logout — clear in-memory session + keyring entry."""
+        from vivarium_dashboard.lib.github_auth import logout
+        logout()
+        return self._json({"ok": True}, 200)
+
+    def _get_auth_github_orgs(self):
+        """GET /api/auth/github/orgs — user's personal namespace + orgs."""
+        from vivarium_dashboard.lib.github_auth import list_orgs
+        result = list_orgs()
+        if "error" in result:
+            code = 401 if result["error"] == "unauthenticated" else 502
+            return self._json(result, code)
+        return self._json(result, 200)
 
     def _post_click(self, body: dict):
         with LOCK:
