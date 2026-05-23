@@ -1884,11 +1884,14 @@ def _post_study_run_baseline_for_test(ws_root, body):
     # v2ecoli friction #14: derive emit_paths from spec observables so the
     # injected SQLiteEmitter captures real biology, not just ticks.
     emit_paths = cr.collect_emit_paths_from_spec(spec)
+    # Per-study emitter override (study yaml's runtime.emitter) — wins over
+    # workspace runtime.default_emitter. None ⇒ workspace default applies.
+    study_emitter = runtime_cfg.get("emitter")
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label=label, sim_name=label,
         overrides=generator_overrides, timeout=timeout_s,
-        emit_paths=emit_paths,
+        emit_paths=emit_paths, study_emitter=study_emitter,
     )
     if code == 200:
         # F2: do NOT append to study.yaml.runs[] — the runs_meta row
@@ -2264,11 +2267,14 @@ def _post_study_run_variant_for_test(ws_root, body):
     # v2ecoli friction #14: thread observables to the subprocess (same as
     # baseline path) so variant runs also capture biology in history.state.
     emit_paths = cr.collect_emit_paths_from_spec(spec)
+    # Per-study emitter override — see baseline path for rationale.
+    study_emitter = runtime_cfg.get("emitter")
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label=variant_name,
         sim_name=variant_name, overrides=generator_overrides,
         timeout=timeout_s, emit_paths=emit_paths,
+        study_emitter=study_emitter,
     )
     # F2: no _append_study_run — the runs_meta row is the canonical record;
     # see the matching note in run-baseline above.
@@ -2824,7 +2830,7 @@ def _diagnose_push_error(err: str) -> dict | None:
 
 def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                               label, overrides=None, sim_name=None, timeout=1800,
-                              emit_paths=None):
+                              emit_paths=None, study_emitter=None):
     """Run a resolved composite ``state`` for ``steps`` steps in a subprocess,
     persisting runs_meta + history (via an injected SQLiteEmitter) to
     ``db_file``.
@@ -2866,6 +2872,11 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
         # Workspaces (e.g. v2ecoli) can opt into XArrayEmitter via
         # `runtime: { default_emitter: xarray, max_generations: N }`. Default
         # is SQLite (the dashboard's historical single-generation behaviour).
+        # Per-study override (``study_emitter``) wins over the workspace
+        # default — set it from the study yaml's ``runtime.emitter`` so a
+        # single workspace can mix emitters by study (e.g. xarray for
+        # many-sims aggregation studies, sqlite for ones needing unstructured
+        # state like unique-molecule snapshots for chromosome viz).
         try:
             _ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
             _runtime = (_ws_data.get("runtime") or {}) if isinstance(_ws_data, dict) else {}
@@ -2874,6 +2885,8 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
         except Exception:
             _default_emitter = "sqlite"
             _max_generations = 3
+        if study_emitter:
+            _default_emitter = str(study_emitter).lower()
         # Derive a zarr store path alongside the SQLite db_file (one per run).
         _zarr_store = str(Path(db_file).with_suffix("")) + f".{run_id}.zarr"
         payload = {
