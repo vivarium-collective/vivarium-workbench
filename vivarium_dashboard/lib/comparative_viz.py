@@ -150,7 +150,9 @@ def _extract_trace(db_path: Path,
 
 def _extract_trace_from_zarr(zarr_path: Path,
                              observable_path: str,
-                             subsample: int = 200) -> tuple[list[float], list[float]]:
+                             subsample: int = 200,
+                             observable_index: int | None = None,
+                             ) -> tuple[list[float], list[float]]:
     """Pull (times, values) for one observable from one XArrayEmitter run.
 
     The XArray run path emits per-generation partitions to a zarr store at
@@ -158,6 +160,12 @@ def _extract_trace_from_zarr(zarr_path: Path,
     with arrays like ``number_of_oric`` (one per declared view leaf) dimensioned
     by ``emitstep_gen=<N>`` per generation, and per-generation time coords
     ``time_gen=<N>``. Concatenates across generations into a single trace.
+
+    ``observable_index`` selects within a vector leaf's coord dimension
+    (``id_<leaf>``) — e.g. ``listeners.monomer_counts`` with
+    ``observable_index=3861`` extracts the DnaA count from the 4309-element
+    monomer-count vector. Required for vector observables; ignored for scalar
+    leaves.
 
     Returns ``([], [])`` on any error so a missing path doesn't sink the chart.
     """
@@ -208,10 +216,23 @@ def _extract_trace_from_zarr(zarr_path: Path,
                 gen_keys.append((gen_n, var_name))
             gen_keys.sort()
             for gen_n, var_name in gen_keys:
-                v_arr = node[var_name].values
+                v_var = node[var_name]
                 t_name = f"time_gen={gen_n}"
                 if t_name not in (parent.data_vars or {}):
                     continue
+                # Vector leaf: select within id_<leaf> using observable_index.
+                # Scalar leaves have ndim==1 (only the emitstep dim) so no
+                # indexing is needed; ndim>1 means a coord array is present.
+                if observable_index is not None and ("id_" + leaf) in v_var.dims:
+                    try:
+                        v_var = v_var.isel({"id_" + leaf: int(observable_index)})
+                    except (IndexError, KeyError, ValueError):
+                        continue
+                elif v_var.ndim > 1:
+                    # vector leaf, no index supplied — extracted trace would
+                    # be a 2D slab, can't render as a line. Skip silently.
+                    continue
+                v_arr = v_var.values
                 t_arr = parent[t_name].values
                 n = min(len(t_arr), len(v_arr))
                 for i in range(n):
@@ -263,7 +284,10 @@ def render_comparative_time_series(
         zarr_path = Path(entry["zarr_path"]) if entry.get("zarr_path") else None
         sim_name = entry.get("sim_name")
         if zarr_path is not None:
-            xs, ys = _extract_trace_from_zarr(zarr_path, observable_path, subsample)
+            xs, ys = _extract_trace_from_zarr(
+                zarr_path, observable_path, subsample,
+                observable_index=observable_index,
+            )
             source = "zarr"
         elif db_path is not None:
             xs, ys = _extract_trace(
