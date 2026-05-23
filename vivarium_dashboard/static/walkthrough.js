@@ -5421,6 +5421,46 @@
       // Renders when study.yaml declares any of: biological_summary,
       // study_card, literature_anchors. Designed so a biologist reading
       // the report sees the biology before any code identifier.
+      // ── MECHANISM NARRATIVE (framework: 7 first-class fields any study can
+      // declare). Designed so the report reads as a cumulative mechanism
+      // migration rather than a sequence of implementation tasks. Each
+      // field is independently optional; only declared fields render.
+      //   biological_role         — what mechanism this study introduces
+      //   mechanism_replaced      — what heuristic / placeholder it replaces
+      //   dependency_rationale    — why this study must run at this point in
+      //                              the dependency chain
+      //   primary_claim           — what observable would convince us the
+      //                              mechanism is behaving correctly
+      //   primary_visualization   — the explanatory figure for this claim
+      //   scope_boundary          — what is explicitly in scope
+      //   deferred_biology        — what biology is intentionally deferred to
+      //                              later studies
+      var narrativeFields = [
+        ['biological_role',       'Biological role'],
+        ['mechanism_replaced',    'Mechanism replaced'],
+        ['dependency_rationale',  'Dependency rationale'],
+        ['primary_claim',         'Primary claim'],
+        ['primary_visualization', 'Primary visualization'],
+        ['scope_boundary',        'Scope boundary'],
+        ['deferred_biology',      'Deferred biology'],
+      ];
+      var narrativeRows = [];
+      narrativeFields.forEach(function(pair) {
+        var key = pair[0], label = pair[1];
+        var v = s[key];
+        if (typeof v === 'string' && v.trim()) {
+          narrativeRows.push('<tr><th>' + label + '</th><td>' + _multiline(v) + '</td></tr>');
+        }
+      });
+      var mechanismNarrativeHtml = '';
+      if (narrativeRows.length) {
+        mechanismNarrativeHtml =
+          '<div class="mechanism-narrative">'
+          + '<h3 class="biology-glance-label">Mechanism narrative</h3>'
+          + '<table class="mechanism-narrative-table">' + narrativeRows.join('') + '</table>'
+          + '</div>';
+      }
+
       var biologyGlanceHtml = '';
       if (s.biological_summary || s.study_card || s.literature_anchors) {
         var bgsBits = [];
@@ -5740,6 +5780,7 @@
         +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
         +   feedbackHtml        // 💬 imported expert feedback (B.1)
         +   biologyGlanceHtml   // 0. Biology-at-a-glance
+        +   mechanismNarrativeHtml  // 0a. Mechanism narrative (7 framework fields)
         +   embedsHtml          // 0b. Embedded preview HTMLs
         +   summaryHtml         // 1. Plain-English summary
         +   decisionHtml        // 2. Decision box
@@ -6031,7 +6072,52 @@
         + '</section>';
     }
 
-    var studiesHtml = ordered.map(studySection).join('\n');
+    // ── PARTS grouping (framework): investigation.yaml may declare a `parts`
+    // field grouping studies into conceptual phases (Foundations / Nucleotide
+    // cycle / Chromosome binding / Initiation trigger / Reset mechanisms / …).
+    // When present, render a Part header before each group's studies so the
+    // report reads as a coherent mechanism progression rather than a flat list.
+    // Schema:
+    //   parts:
+    //     - name: "I. Foundations"
+    //       overview: "Optional 1-2 sentence prose..."
+    //       studies: ["dnaa-00-parameter-foundation", "dnaa-01-expression-dynamics"]
+    var studiesHtml;
+    var parts = (iset && Array.isArray(iset.parts)) ? iset.parts : null;
+    if (parts && parts.length) {
+      // Map slug → index in `ordered` so we render each study once even when
+      // a part declares a study not in `ordered` (skip) or `ordered` has a
+      // study not declared in any part (append as "Unassigned" group).
+      var byNameIdx = {};
+      ordered.forEach(function(s, i) { byNameIdx[s && s.name] = i; });
+      var rendered = {};
+      var groupHtmls = [];
+      parts.forEach(function(part) {
+        var partStudies = (part && Array.isArray(part.studies)) ? part.studies : [];
+        var sections = [];
+        partStudies.forEach(function(slug) {
+          var i = byNameIdx[slug];
+          if (i === undefined) return;
+          sections.push(studySection(ordered[i], i));
+          rendered[slug] = true;
+        });
+        if (!sections.length) return;
+        var heading = '<header class="part-heading"><h2 class="part-title">' + _h(part.name || '') + '</h2>'
+          + (part.overview ? '<p class="part-overview">' + _multiline(part.overview) + '</p>' : '')
+          + '</header>';
+        groupHtmls.push('<section class="investigation-part">' + heading + sections.join('\n') + '</section>');
+      });
+      // Catch any unassigned studies (so nothing silently disappears).
+      var unassigned = ordered.filter(function(s) { return s && !rendered[s.name]; });
+      if (unassigned.length) {
+        var stub = '<header class="part-heading"><h2 class="part-title">Other studies</h2></header>';
+        var sec = unassigned.map(function(s) { return studySection(s, byNameIdx[s.name]); }).join('\n');
+        groupHtmls.push('<section class="investigation-part">' + stub + sec + '</section>');
+      }
+      studiesHtml = groupHtmls.join('\n');
+    } else {
+      studiesHtml = ordered.map(studySection).join('\n');
+    }
 
     var acceptance = (iset.acceptance_criteria || []).map(function(c) {
       return '<li><code>' + _h(c.study) + '</code> · <code>' + _h(c.behavior) + '</code></li>';
@@ -6428,6 +6514,17 @@
       + '.study-card-table th{text-align:left;font-weight:600;color:#166534;background:#f0fdf4;padding:6px 10px;white-space:nowrap;vertical-align:top;width:180px;border-bottom:1px solid #bbf7d0}'
       + '.study-card-table td{padding:6px 10px;vertical-align:top;color:#14532d;border-bottom:1px solid #f0fdf4;line-height:1.5}'
       + '.study-card-table tr:last-child th,.study-card-table tr:last-child td{border-bottom:none}'
+      // Investigation Parts grouping: section headings before each study group.
+      + '.investigation-part{margin-bottom:30px}'
+      + '.part-heading{margin:34px 0 10px 0;padding:14px 18px;background:linear-gradient(90deg,#eef2ff 0%,#fff 100%);border-left:4px solid #6366f1;border-radius:4px}'
+      + '.part-title{margin:0;font-size:1.4em;color:#3730a3;font-weight:700}'
+      + '.part-overview{margin:6px 0 0 0;color:#475569;font-size:0.95em;line-height:1.5;white-space:pre-line}'
+      // Mechanism narrative: 7 framework fields any study can declare.
+      + '.mechanism-narrative{margin:18px 0 14px 0;background:#fff;border-radius:6px;padding:10px 14px;border:1px solid #c7d2fe}'
+      + '.mechanism-narrative-table{width:100%;border-collapse:collapse;font-size:0.93em;margin:0}'
+      + '.mechanism-narrative-table th{text-align:left;font-weight:600;color:#3730a3;background:#eef2ff;padding:6px 10px;white-space:nowrap;vertical-align:top;width:190px;border-bottom:1px solid #c7d2fe}'
+      + '.mechanism-narrative-table td{padding:6px 10px;vertical-align:top;color:#1e1b4b;border-bottom:1px solid #eef2ff;line-height:1.55;white-space:pre-line}'
+      + '.mechanism-narrative-table tr:last-child th,.mechanism-narrative-table tr:last-child td{border-bottom:none}'
       + '.literature-anchors{background:#fff;border-radius:6px;padding:10px 14px;border:1px solid #d1fae5}'
       + '.literature-anchor-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}'
       + '.literature-anchor-card{padding:8px 12px;background:#f8fefa;border-left:3px solid #16a34a;border-radius:4px;font-size:0.92em}'
