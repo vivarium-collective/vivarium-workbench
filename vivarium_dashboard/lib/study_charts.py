@@ -475,34 +475,47 @@ def _extract_paths_from_db(
         if not supported:
             return out
 
-        sql_path_for = {}
+        # Two json_extract columns per path: the literal path and the
+        # per-agent (agents/0/) form. v2ecoli single-cell composites scope
+        # listener stores under agents/0/, so the emitter captures observables
+        # there; the literal form covers non-agent composites. Coalesce per row.
+        sql_paths = []  # flat list of (literal, agent) suffixes per supported
         for path, idx in supported:
-            sql_path = "$." + path
-            if idx is not None and isinstance(idx, int):
-                sql_path += f"[{int(idx)}]"
-            sql_path_for[(path, idx)] = sql_path
+            suffix = (f"[{int(idx)}]"
+                      if idx is not None and isinstance(idx, int) else "")
+            sql_paths.append(("$." + path + suffix,
+                              "$.agents.0." + path + suffix))
 
         select_cols = ["global_time"] + [
-            "json_extract(state, ?)" for _ in supported
+            "json_extract(state, ?)" for _ in supported for _ in (0, 1)
         ]
         sql = (
             f"SELECT {', '.join(select_cols)} FROM history "
             f"WHERE simulation_id=? AND (step % ?) = 0 ORDER BY step ASC"
         )
-        params = [sql_path_for[key] for key in supported] + [sim_id, stride]
+        params = [p for pair in sql_paths for p in pair] + [sim_id, stride]
         cursor = conn.execute(sql, params)
+
+        def _num(x):
+            # json_extract returns '{}'/'[]' for empty containers — the literal
+            # path's empty store must not shadow the agent-scoped value.
+            if x is None or x in ("{}", "[]"):
+                return None
+            try:
+                return float(x)
+            except (TypeError, ValueError):
+                return None
 
         for row_tuple in cursor:
             tm = row_tuple[0]
             for i, key in enumerate(supported):
-                v = row_tuple[1 + i]
-                if v is None:
+                val = _num(row_tuple[1 + 2 * i])
+                if val is None:
+                    val = _num(row_tuple[2 + 2 * i])
+                if val is None:
                     continue
-                try:
-                    out[key][1].append(float(v))
-                    out[key][0].append(tm)
-                except (TypeError, ValueError):
-                    continue
+                out[key][1].append(val)
+                out[key][0].append(tm)
         return out
     finally:
         conn.close()

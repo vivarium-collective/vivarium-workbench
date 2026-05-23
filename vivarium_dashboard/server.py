@@ -198,6 +198,7 @@ _POST_STUDY_ALIASES: dict[str, str] = {
 # and inspectable by tests without instantiating the handler.
 _POST_ROUTE_MAP: dict[str, str] = {
     "/api/click":              "_post_click",
+    "/api/feedback-import":    "_post_feedback_import",
     "/api/import":             "_post_import",
     "/api/import-install":     "_post_import_install",
     "/api/dataset":            "_post_dataset",
@@ -625,31 +626,161 @@ def _study_detail_spec(name: str):
                 if e.get("url") not in existing_urls:
                     merged_embeds.append(e)
             spec["embed_visualizations"] = merged_embeds
+
+        # Param-enforcement gate (expert-feedback D.2): if the study declares
+        # `enforced_params`, verify the latest run actually applied them.
+        # Surfaces "declared but not applied" as structured violations the
+        # report renders as a banner, instead of the silent default-use the
+        # reviewer caught. Best-effort — never breaks the study response.
+        try:
+            spec["param_enforcement"] = _compute_param_enforcement(spec)
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Imported expert feedback (expert-feedback B.1): attach any
+        # annotations a reviewer left on this study's sections so the report
+        # shows them back in-context, closing the loop. Best-effort.
+        try:
+            fb = _collect_study_feedback(name)
+            if fb:
+                spec["expert_feedback"] = fb
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Derive-on-read status (round-2 friction #2): compute the observable
+        # status axes from runs.db so the report shows what actually ran, and
+        # flag any stored axis (or legacy planning headline) that contradicts
+        # execution state. Stops the "planning status after execution" drift.
+        try:
+            from pbg_superpowers import study_status as _ss
+            runs = spec.get("runs") or []
+            spec["derived_status"] = _ss.derive_status(spec, runs)
+            diss = _ss.status_disagreements(spec, runs)
+            if diss:
+                spec["status_disagreements"] = diss
+        except Exception:  # noqa: BLE001
+            pass
     return spec
+
+
+def _collect_study_feedback(study_slug: str) -> list[dict]:
+    """Gather imported feedback annotations targeting one study.
+
+    Scans every ``investigations/<inv>/`` for stored feedback (via
+    pbg_superpowers' shared reader) and returns the annotations whose section
+    id matches ``study-<slug>``, newest-first. Cross-investigation because a
+    study's feedback is keyed by the study slug embedded in the section id,
+    not by which investigation exported the report.
+    """
+    from pbg_superpowers.feedback_import import (
+        load_investigation_feedback, feedback_for_study,
+    )
+    inv_root = WORKSPACE / "investigations"
+    if not inv_root.is_dir():
+        return []
+    out: list[dict] = []
+    seen: set[tuple] = set()
+    for inv_dir in sorted(inv_root.iterdir()):
+        if not inv_dir.is_dir():
+            continue
+        by_section = load_investigation_feedback(WORKSPACE, inv_dir.name)
+        for ann in feedback_for_study(by_section, study_slug):
+            key = (ann.get("section"), ann.get("ts"), ann.get("text"))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(ann)
+    out.sort(key=lambda a: a.get("ts") or "", reverse=True)
+    return out
+
+
+def _compute_param_enforcement(spec: dict) -> dict | None:
+    """Compare a study's declared enforced_params against its latest run.
+
+    Returns ``{declared, checked_against_run, violations: [{param, expected,
+    actual, kind, message}]}`` or ``None`` when the study declares no
+    enforced params. The "applied" params are the newest run's recorded
+    overrides (``runs_meta.params_json``), surfaced via ``spec["runs"]``.
+    """
+    from pbg_superpowers.param_enforcement import (
+        load_enforced_params, check_enforced_params,
+    )
+    declared = load_enforced_params(spec)
+    if not declared:
+        return None
+    # Newest run with a params dict (runs are merged newest-first upstream,
+    # but be order-independent and prefer completed runs).
+    runs = spec.get("runs") or []
+    def _ts(r):
+        v = (r or {}).get("started_at")
+        return float(v) if isinstance(v, (int, float)) else 0.0
+    candidate = None
+    for r in sorted(runs, key=_ts, reverse=True):
+        if isinstance(r, dict) and isinstance(r.get("params"), dict):
+            candidate = r
+            break
+    applied = (candidate or {}).get("params") or {}
+    violations = check_enforced_params(declared, applied)
+    return {
+        "declared": declared,
+        "checked_against_run": (candidate or {}).get("run_id"),
+        "violations": [
+            {"param": v.param, "expected": v.expected, "actual": v.actual,
+             "kind": v.kind, "message": v.describe()}
+            for v in violations
+        ],
+    }
+
+
+def _latest_run_timestamp(runs_db: Path) -> float | None:
+    """Return the most recent run's wall-clock time from ``runs_meta``.
+
+    Prefers ``completed_at`` (when the run finished, hence when its viz
+    could have been rendered), falling back to ``started_at``. Returns
+    ``None`` if the table is unreadable or empty.
+
+    Why not ``runs.db`` file mtime: the db is opened in WAL mode, and any
+    *read* connection (including the one render_visualizations uses to draw
+    the charts) can trigger a checkpoint that bumps the file mtime AFTER the
+    viz HTML was written. That made freshly-rendered viz look "older" than
+    the db and get silently dropped. The recorded run timestamps are real
+    data and immune to that race.
+    """
+    try:
+        conn = sqlite3.connect(f"file:{runs_db}?mode=ro", uri=True, timeout=1.0)
+        try:
+            row = conn.execute(
+                "SELECT MAX(COALESCE(completed_at, started_at)) FROM runs_meta"
+            ).fetchone()
+        finally:
+            conn.close()
+        return float(row[0]) if row and row[0] is not None else None
+    except Exception:  # noqa: BLE001 — best-effort freshness probe
+        return None
 
 
 def _discover_viz_html_files(name: str) -> list[dict]:
     """Walk ``studies/<name>/viz/*.html`` and return embed_visualizations entries.
 
     Returns one dict per HTML file, with the shape the study-detail template
-    expects: ``{name, url, description}``. The URL is workspace-relative so
-    the dashboard's static-file fallback serves it.
+    expects: ``{name, url, description, stale}``. The URL is workspace-relative
+    so the dashboard's static-file fallback serves it.
 
-    v2ecoli friction #17 (2026-05-19): the previous unconditional glob
-    surfaced `topology.html` / `workflow.html` rendered eagerly against an
-    empty composite as "(auto)" tabs that persisted forever. Eran flagged
-    them as "way too detailed" and "excessive". Two-pronged gate:
+    v2ecoli friction #17 (2026-05-19): the original unconditional glob
+    surfaced eagerly-rendered ``topology.html`` / ``workflow.html`` as
+    "(auto)" tabs that persisted forever on un-run studies. The first fix
+    added an mtime gate that *silently dropped* any viz older than
+    ``runs.db``. mem3dg-readdy (2026-05-20): that gate dropped legitimate,
+    freshly-rendered charts because a WAL checkpoint on the render's own
+    read connection bumped ``runs.db`` mtime a few seconds *after* the HTML
+    was written — every chart vanished with no error anywhere.
 
-      1. If no `runs.db` exists, no real sims have run → any HTML on disk
-         predates real data and should not be surfaced.
-      2. If `runs.db` exists, only surface viz whose mtime is at least as
-         fresh as `runs.db` mtime. Stale renders (from before the most
-         recent run) drop off automatically without a spec migration.
-
-    This is the "mtime gate" half of friction-log Option A — robust enough
-    without requiring a yaml-schema migration (Option B). Composites that
-    re-render their viz after each run continue to work; composites that
-    rendered once and never again age out naturally.
+    Robustness rule (no silent drops): surface every viz file once a study
+    has actually run. The single hard guard remains "no ``runs.db`` → nothing"
+    (genuine pre-data junk). Past-run staleness is *surfaced*, not swallowed:
+    a viz whose mtime predates the latest recorded run is flagged
+    ``stale: True`` with a note, so the reader sees it and knows to re-run,
+    rather than the chart silently disappearing.
     """
     viz_dir = WORKSPACE / "studies" / name / "viz"
     if not viz_dir.is_dir():
@@ -657,22 +788,31 @@ def _discover_viz_html_files(name: str) -> list[dict]:
     runs_db = WORKSPACE / "studies" / name / "runs.db"
     if not runs_db.is_file():
         return []
-    runs_db_mtime = runs_db.stat().st_mtime
+    # Freshness reference: the latest recorded run time (WAL-immune), not the
+    # db file mtime. A small grace absorbs sub-second render/commit ordering.
+    fresh_ref = _latest_run_timestamp(runs_db)
+    grace_s = 5.0
     out = []
     for html_file in sorted(viz_dir.glob("*.html")):
-        if html_file.stat().st_mtime < runs_db_mtime:
-            continue
+        mtime = html_file.stat().st_mtime
         size_kb = max(1, html_file.stat().st_size // 1024)
         rel = html_file.relative_to(WORKSPACE).as_posix()
+        stale = fresh_ref is not None and mtime + grace_s < fresh_ref
+        desc = (
+            f"Auto-discovered Plotly viz ({size_kb} KB) rendered by "
+            f"render_visualizations against the study's runs.db history."
+        )
+        if stale:
+            desc = (
+                "⚠ May predate the latest run — this chart was "
+                "rendered before the most recent simulation completed; re-run "
+                "the study to refresh it. " + desc
+            )
         out.append({
             "name": f"{html_file.stem} (auto)",
             "url": f"/{rel}",
-            "description": (
-                f"Auto-discovered Plotly viz rendered at "
-                f"{html_file.stat().st_mtime:.0f}s epoch "
-                f"({size_kb} KB). Source: render_visualizations against the "
-                f"latest runs.db history."
-            ),
+            "description": desc,
+            "stale": stale,
         })
     return out
 
@@ -728,11 +868,16 @@ def _read_runs_db_for_study(name: str) -> list[dict]:
         # runs, but older backfilled DBs may only have runs_meta.
         tables = {row[0] for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}
+        # runs_meta.generation_id is a recently-added nullable column; older
+        # DBs won't have it, so probe before selecting it.
+        meta_cols = {row[1] for row in conn.execute("PRAGMA table_info(runs_meta)")} \
+            if "runs_meta" in tables else set()
+        _gen_col = "generation_id" if "generation_id" in meta_cols else "NULL AS generation_id"
         rows_by_id: dict[str, dict] = {}
         if "runs_meta" in tables:
             for r in conn.execute(
                 "SELECT run_id, spec_id, label, params_json, started_at, "
-                "completed_at, n_steps, status, sim_name "
+                f"completed_at, n_steps, status, sim_name, {_gen_col} "
                 "FROM runs_meta ORDER BY started_at DESC"
             ):
                 try:
@@ -740,18 +885,19 @@ def _read_runs_db_for_study(name: str) -> list[dict]:
                 except Exception:
                     params = {}
                 rows_by_id[r["run_id"]] = {
-                    "run_id":       r["run_id"],
-                    "spec_id":      r["spec_id"],
-                    "label":        r["label"] or r["sim_name"] or "",
-                    "sim_name":     r["sim_name"] or r["label"] or "",
-                    "variant":      params.get("variant"),
-                    "composite":    params.get("composite") or r["spec_id"],
-                    "params":       params,
-                    "n_steps":      r["n_steps"],
-                    "status":       r["status"],
-                    "started_at":   r["started_at"],
-                    "completed_at": r["completed_at"],
-                    "source":       "runs_meta",
+                    "run_id":        r["run_id"],
+                    "spec_id":       r["spec_id"],
+                    "label":         r["label"] or r["sim_name"] or "",
+                    "sim_name":      r["sim_name"] or r["label"] or "",
+                    "variant":       params.get("variant"),
+                    "composite":     params.get("composite") or r["spec_id"],
+                    "params":        params,
+                    "n_steps":       r["n_steps"],
+                    "status":        r["status"],
+                    "started_at":    r["started_at"],
+                    "completed_at":  r["completed_at"],
+                    "generation_id": r["generation_id"],
+                    "source":        "runs_meta",
                 }
         if "simulations" in tables:
             for r in conn.execute(
@@ -795,9 +941,22 @@ def _read_runs_db_for_study(name: str) -> list[dict]:
                 return str(v)
         return str(v)
 
+    # Coordinated-generation staleness (expert-feedback A.2): a run from an
+    # older generation than the workspace's current one is flagged so the
+    # report/Runs tab can mark it instead of silently mixing it in.
+    try:
+        from pbg_superpowers import generation as _gen
+        _cur_gen = _gen.current_generation_id(WORKSPACE)
+    except Exception:  # noqa: BLE001
+        _cur_gen = None
+
     out = []
     for r in rows_by_id.values():
         r["started_at_iso"] = _iso(r.get("started_at"))
+        try:
+            r["stale"] = _gen.is_stale(r.get("generation_id"), _cur_gen)
+        except Exception:  # noqa: BLE001
+            r["stale"] = False
         # Compact params summary for the table cell (e.g., "seed=0, rida_rate=4.6").
         params = r.get("params") or {}
         if params:
@@ -1570,6 +1729,25 @@ def _collect_study_observables(spec: dict) -> list[str]:
         elif isinstance(obs, str):
             _push(obs)
 
+    # v4 studies declare their tests under `tests:` (not `behavior_tests:`)
+    # with the same {measure: {path, series_x, ...}} shape, and their overlay
+    # observables under `comparative_visualizations[].observable_path`. Without
+    # reading these, v4 studies (e.g. the dnaa investigation) collect zero
+    # observables and every history row is just `{"_tick": <time>}`.
+    for t in spec.get("tests", []) or []:
+        m = (t or {}).get("measure") if isinstance(t, dict) else None
+        if not isinstance(m, dict):
+            continue
+        _push(m.get("path"))
+        for nested_key in ("series_x", "series_y", "x", "y", "series_a", "series_b"):
+            n = m.get(nested_key)
+            if isinstance(n, dict):
+                _push(n.get("path"))
+
+    for cv in spec.get("comparative_visualizations", []) or []:
+        if isinstance(cv, dict):
+            _push(cv.get("observable_path"))
+
     return out
 
 
@@ -1742,7 +1920,7 @@ def _post_study_run_baseline_for_test(ws_root, body):
     timeout_s = int(runtime_cfg.get("subprocess_timeout_s") or 1800)
     # v2ecoli friction #14: derive emit_paths from spec observables so the
     # injected SQLiteEmitter captures real biology, not just ticks.
-    emit_paths = _collect_study_observables(spec)
+    emit_paths = cr.collect_emit_paths_from_spec(spec)
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label=label, sim_name=label,
@@ -2080,7 +2258,7 @@ def _post_study_run_variant_for_test(ws_root, body):
     timeout_s = int(runtime_cfg.get("subprocess_timeout_s") or 1800)
     # v2ecoli friction #14: thread observables to the subprocess (same as
     # baseline path) so variant runs also capture biology in history.state.
-    emit_paths = _collect_study_observables(spec)
+    emit_paths = cr.collect_emit_paths_from_spec(spec)
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label=variant_name,
@@ -2721,6 +2899,7 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                 from process_bigraph.emitter import SQLiteEmitter
                 from pbg_superpowers.composite_generator import (
                     _REGISTRY, build_generator, discover_generators,
+                    apply_core_extensions,
                 )
                 from vivarium_dashboard.lib import composite_runs as cr
                 from bigraph_schema.json_codec import BigraphJSONEncoder as _BJE
@@ -2729,14 +2908,18 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                 entry = _REGISTRY[_payload['spec_id']]
                 core = build_core()
                 core.register_link('SQLiteEmitter', SQLiteEmitter)
+                # v2ecoli friction #16: register types/processes the composite
+                # needs from packages build_core() doesn't know about (declared
+                # via @composite_generator(core_extensions=[...])).
+                core = apply_core_extensions(entry, core)
                 doc = build_generator(entry, overrides=_payload['overrides'])
                 state = doc.get('state', doc) if isinstance(doc, dict) else doc
                 if _payload.get('emit_paths'):
-                    state = cr.inject_emitter_for_paths(state, _payload['emit_paths'])
+                    state = cr.inject_emitter_for_declared_paths(state, _payload['emit_paths'])
                 state = cr.inject_sqlite_emitter(
                     state, run_id=_payload['run_id'], db_file=_payload['db_file'])
                 composite = Composite({{'state': state}}, core=core)
-                composite.run(_payload['steps'])
+                cr.run_with_division(composite, _payload['steps'])
                 results = gather_emitter_results(composite)
         """).lstrip("\n")
     else:
@@ -2763,12 +2946,13 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                 from process_bigraph import Composite, gather_emitter_results
                 from process_bigraph.emitter import SQLiteEmitter
                 from bigraph_schema.json_codec import bigraph_json_hook
+                from vivarium_dashboard.lib import composite_runs as cr
                 core = build_core()
                 core.register_link('SQLiteEmitter', SQLiteEmitter)
                 with open({_state_path!r}) as _sf:
                     _state = json.load(_sf, object_hook=bigraph_json_hook)
                 composite = Composite({{'state': _state}}, core=core)
-                composite.run({steps})
+                cr.run_with_division(composite, {steps})
                 results = gather_emitter_results(composite)
         """).lstrip("\n")
 
@@ -2797,12 +2981,23 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
             print(traceback.format_exc())
     """)
 
+    # Coordinated-generation stamp (expert-feedback A.2): tag this run with the
+    # workspace's current generation so the report can flag panels from an
+    # older generation as stale. No-op (None) when no generation is active.
+    _generation_id = None
+    try:
+        from pbg_superpowers import generation as _gen
+        _generation_id = _gen.current_generation_id(WORKSPACE)
+    except Exception:  # noqa: BLE001 — generation is advisory, never fatal
+        _generation_id = None
+
     conn = cr.connect(db_file)
     try:
         try:
             cr.save_metadata(conn, spec_id=spec_id, run_id=run_id,
                              params=overrides, label=label,
-                             started_at=time.time(), n_steps=steps)
+                             started_at=time.time(), n_steps=steps,
+                             generation_id=_generation_id)
             if sim_name is not None:
                 conn.execute("UPDATE runs_meta SET sim_name=? WHERE run_id=?",
                              (sim_name, run_id))
@@ -2810,6 +3005,13 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
         except sqlite3.IntegrityError:
             return ({"simulation_id": run_id,
                      "error": "duplicate run_id (rare timing collision) — retry"}, 500)
+        if _generation_id is not None:
+            try:
+                _gen.record_run(WORKSPACE, _generation_id,
+                                study=(sim_name or label or spec_id),
+                                run_id=run_id, sim_name=sim_name)
+            except Exception:  # noqa: BLE001 — manifest index is best-effort
+                pass
 
         # v2ecoli friction #10: persist the rendered script alongside runs.db
         # so "what did the dashboard actually run for this run_id?" is one cat.
@@ -3441,6 +3643,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_work_composite_diff()
         if self.path.startswith("/api/references-bib"):
             return self._get_references_bib()
+        if self.path.startswith("/api/generation"):
+            return self._get_generation()
         if self.path.startswith("/api/investigation-composite-doc"):
             return self._get_investigation_composite_doc()
         if self.path.startswith("/api/investigation/"):
@@ -3569,6 +3773,37 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     # POST handlers
     # ------------------------------------------------------------------
+
+    def _post_feedback_import(self, body: dict):
+        """POST /api/feedback-import — ingest feedback submitted directly from
+        the report widget (expert-feedback B.2).
+
+        Body is the same ``{meta, annotations}`` payload the widget builds for
+        its YAML download. Writes it to investigations/<inv>/feedback/<ts>.yaml
+        via the shared pbg_superpowers writer, so direct submit and the
+        pbg-feedback-import CLI land identically. Eliminates the
+        download→email→CLI round-trip when the report is viewed live.
+        """
+        try:
+            from pbg_superpowers.feedback_import import (
+                write_feedback_payload, FeedbackImportError,
+            )
+        except ImportError:
+            return self._json(
+                {"error": "pbg-superpowers not available for feedback import"}, 500)
+        try:
+            target = write_feedback_payload(WORKSPACE, body)
+        except FeedbackImportError as e:
+            return self._json({"error": str(e)}, 400)
+        except Exception as e:  # noqa: BLE001
+            return self._json({"error": f"feedback import failed: {e}"}, 500)
+        anns = body.get("annotations") or {}
+        n_entries = sum(len(v or []) for v in anns.values() if isinstance(v, list))
+        return self._json({
+            "ok": True,
+            "path": str(target.relative_to(WORKSPACE)),
+            "n_entries": n_entries,
+        }, 200)
 
     def _post_click(self, body: dict):
         with LOCK:
@@ -6008,6 +6243,32 @@ if __name__ == "__main__":
         resp, code = _post_iset_clone_for_test(WORKSPACE, body)
         return self._json(resp, code)
 
+    def _get_generation(self):
+        """GET /api/generation — the workspace's current coordinated generation.
+
+        Returns ``{generation: {generation_id, git_sha, param_set_hash,
+        created_at, label, n_runs}}`` or ``{generation: null}`` when no
+        generation is active. Backs the report's generation banner so the
+        live dashboard and the exported HTML stamp the same provenance
+        (expert-feedback A.3). Best-effort: any error reports null rather
+        than 500, so a missing generation never breaks the report.
+        """
+        try:
+            from pbg_superpowers import generation as _gen
+            g = _gen.current_generation(WORKSPACE)
+        except Exception:  # noqa: BLE001
+            g = None
+        if g is None:
+            return self._json({"generation": None}, 200)
+        return self._json({"generation": {
+            "generation_id": g.generation_id,
+            "git_sha": g.git_sha,
+            "param_set_hash": g.param_set_hash,
+            "created_at": g.created_at,
+            "label": g.label,
+            "n_runs": len(g.runs),
+        }}, 200)
+
     def _get_references_bib(self):
         """GET /api/references-bib — parsed contents of references/papers.bib.
 
@@ -6331,6 +6592,11 @@ if __name__ == "__main__":
             "effective_status": effective_status,
             "expert_docs":      spec.get("expert_docs") or [],
             "acceptance_criteria": spec.get("acceptance_criteria") or [],
+            # Authored synthesis layers for the layered report (executive
+            # summary + scientific argument). Optional — absent on older
+            # investigations, where the report falls back to derived data.
+            "executive":           spec.get("executive") or {},
+            "scientific_argument": spec.get("scientific_argument") or {},
             "studies":          studies_out,
         }, 200)
 
@@ -10203,36 +10469,99 @@ if __name__ == "__main__":
         Each installed module is additionally checked for venv-vs-workspace.yaml
         drift: if the declared Python package is not importable in the workspace
         venv, the module is flagged ``out_of_sync: true`` with a short reason.
+
+        The workspace's own first-party package (workspace.yaml.package_path) is
+        prepended to the list with ``kind: "workspace"`` so the Installed
+        Modules panel can show it. The UI filters it out of Available Modules.
         """
         catalog_path = WORKSPACE / "scripts" / "_catalog" / "modules.json"
-        if not catalog_path.exists():
-            return self._json({"modules": [], "error": "catalog not found"}, 200)
         try:
-            modules = json.loads(catalog_path.read_text())
-            # Annotate with installed status from workspace.yaml imports.
             ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
-            imports = ws_data.get("imports", {}) or {}
-            for m in modules:
-                m["installed"] = m["name"] in imports
-                if m["installed"]:
-                    # Merge live workspace.yaml entry fields (source/ref/path/install_path/package)
-                    # into the catalog item so the UI has authoritative install metadata.
-                    imp = imports.get(m["name"], {}) or {}
-                    for k in ("source", "ref", "path", "install_path", "package"):
-                        v = imp.get(k)
-                        if v is not None:
-                            m[k] = v
-                    # Sync check: is the Python package actually importable?
-                    pkg_name = m.get("package") or m["name"].replace("-", "_")
-                    sync_reason = _check_installed_module_sync(
-                        pkg_name, m.get("install_path")
-                    )
-                    if sync_reason:
-                        m["out_of_sync"] = True
-                        m["out_of_sync_reason"] = sync_reason
-            return self._json({"modules": modules}, 200)
         except Exception as e:
-            return self._json({"modules": [], "error": str(e)}, 500)
+            return self._json({"modules": [], "error": f"workspace.yaml: {e}"}, 500)
+
+        if catalog_path.exists():
+            try:
+                modules = json.loads(catalog_path.read_text())
+            except Exception as e:
+                return self._json({"modules": [], "error": str(e)}, 500)
+        else:
+            modules = []  # catalog is optional; the workspace-self entry still applies
+
+        imports = (ws_data or {}).get("imports", {}) or {}
+        for m in modules:
+            m["installed"] = m["name"] in imports
+            if m["installed"]:
+                # Merge live workspace.yaml entry fields (source/ref/path/install_path/package)
+                # into the catalog item so the UI has authoritative install metadata.
+                imp = imports.get(m["name"], {}) or {}
+                for k in ("source", "ref", "path", "install_path", "package"):
+                    v = imp.get(k)
+                    if v is not None:
+                        m[k] = v
+                # Sync check: is the Python package actually importable?
+                pkg_name = m.get("package") or m["name"].replace("-", "_")
+                sync_reason = _check_installed_module_sync(
+                    pkg_name, m.get("install_path")
+                )
+                if sync_reason:
+                    m["out_of_sync"] = True
+                    m["out_of_sync_reason"] = sync_reason
+
+        ws_self = self._workspace_self_module(ws_data)
+        if ws_self is not None:
+            modules = [ws_self] + modules
+
+        return self._json({"modules": modules}, 200)
+
+    def _workspace_self_module(self, ws_data: dict) -> dict | None:
+        """Synthesize a catalog-style entry for the workspace's own package.
+
+        ``workspace.yaml.package_path`` is the first-party Python package that
+        ``build_core()`` imports — its Processes/Steps/Composites/Types are
+        what the workspace actually runs with. Treating it as just-another
+        installed module in the Installed Modules panel makes that visible.
+
+        Returns None when no package_path is declared OR when the directory
+        doesn't exist on disk (degenerate workspace; nothing to show).
+        """
+        slug = (ws_data or {}).get("name", "") or ""
+        pkg = (ws_data or {}).get("package_path")
+        if not pkg:
+            # Fall back to the same heuristic used elsewhere in the server.
+            pkg = "pbg_" + slug.replace("-", "_") if slug else None
+        if not pkg:
+            return None
+        pkg_dir = WORKSPACE / pkg
+        if not pkg_dir.is_dir():
+            return None
+
+        sync_reason = _check_installed_module_sync(pkg, pkg)
+        # Best-effort current branch — purely cosmetic for the Source column.
+        try:
+            ref = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=WORKSPACE, capture_output=True, text=True, timeout=2,
+            ).stdout.strip() or "—"
+        except (subprocess.TimeoutExpired, OSError):
+            ref = "—"
+        entry: dict = {
+            "kind": "workspace",
+            "name": slug or pkg,
+            "package": pkg,
+            "install_path": pkg,
+            "description": "Workspace's own first-party package — provides the "
+                           "Processes, Steps, Composites, and Types that "
+                           "build_core() registers for this workspace.",
+            "source": "workspace",
+            "ref": ref,
+            "tags": ["workspace"],
+            "installed": True,
+        }
+        if sync_reason:
+            entry["out_of_sync"] = True
+            entry["out_of_sync_reason"] = sync_reason
+        return entry
 
     def _post_catalog_install(self, body: dict):
         """POST /api/catalog-install — install a catalog module.

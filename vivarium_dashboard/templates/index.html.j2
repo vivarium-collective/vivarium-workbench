@@ -884,7 +884,7 @@ When done, summarize which entries got PDFs vs URLs only vs were unresolvable, a
   <!-- Section 2: Installed modules -->
   <section class="panel">
     <h3>Installed modules <span id="installed-modules-count" class="count-badge muted"></span></h3>
-    <p class="panel-lead">Modules currently active in this workspace. Each contributes Processes/Steps and Types to <code>build_core()</code>. Uninstall removes from this workspace's <code>pyproject.toml</code> + <code>workspace.yaml</code> (Available modules above remains in the catalog).</p>
+    <p class="panel-lead">Modules currently active in this workspace. Each contributes Processes/Steps and Types to <code>build_core()</code>. The workspace's own first-party package is always pinned at the top. Uninstall (catalog modules only) removes from this workspace's <code>pyproject.toml</code> + <code>workspace.yaml</code> (Available modules above remains in the catalog).</p>
     <div id="installed-modules-list">
       <p class="empty-state">Loading&hellip;</p>
     </div>

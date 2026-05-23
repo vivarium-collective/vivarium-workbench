@@ -1056,24 +1056,41 @@ def _resolve_observable(observables: dict, path: str) -> list | None:
     """
     if not path:
         return None
+
+    def _walk(parts: list[str]) -> list | None:
+        series = observables.get(parts[0])
+        if series is None:
+            return None
+        if len(parts) == 1:
+            return series
+        out = []
+        for tick_val in series:
+            v = tick_val
+            for seg in parts[1:]:
+                if isinstance(v, dict) and seg in v:
+                    v = v[seg]
+                else:
+                    v = None
+                    break
+            out.append(v)
+        return out
+
+    def _has_scalar(series: list | None) -> bool:
+        return series is not None and any(
+            v is not None and not isinstance(v, (dict, list)) for v in series)
+
     parts = path.split(".")
-    top = parts[0]
-    series = observables.get(top)
-    if series is None:
-        return None
-    if len(parts) == 1:
-        return series
-    out = []
-    for tick_val in series:
-        v = tick_val
-        for seg in parts[1:]:
-            if isinstance(v, dict) and seg in v:
-                v = v[seg]
-            else:
-                v = None
-                break
-        out.append(v)
-    return out
+    res = _walk(parts)
+    # v2ecoli single-cell composites scope every listener store under
+    # agents/0/...; study inputs_map paths are declared in biology form
+    # (listeners.dnaA_binding...). If the literal path yields no usable scalar
+    # (missing, or an empty-container '{}' capture per tick), retry under
+    # agents.0. so the viz gets real data instead of crashing on dicts.
+    if not _has_scalar(res) and parts[0] != "agents":
+        ag = _walk(["agents", "0"] + parts)
+        if _has_scalar(ag):
+            return ag
+    return res
 
 
 def build_viz_composite(viz_spec: dict, gathered: dict, core_registry: dict) -> dict:
