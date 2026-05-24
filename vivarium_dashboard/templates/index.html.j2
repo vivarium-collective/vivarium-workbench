@@ -394,6 +394,19 @@
         </span>
         <span class="viv-rail-link-label">Visualizations</span>
       </a>
+      <!-- GitHub: sign-in + org-link controls. Branch + node icon. -->
+      <a href="#github"            class="viv-rail-link menu-link" data-page="github">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <circle cx="6" cy="6" r="2"/>
+            <circle cx="6" cy="18" r="2"/>
+            <circle cx="18" cy="12" r="2"/>
+            <path d="M6 8v8"/>
+            <path d="M6 8a6 6 0 0 0 6 6h4"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">GitHub</span>
+      </a>
     </nav>
 
     <!-- Studies of the active investigation, dependency-ordered. -->
@@ -464,13 +477,10 @@
         <span>{{ workspace_name }}{% if active_investigation_name %}:{{ active_investigation_name }}{% endif %} dashboard</span>
       </nav>
       <div class="viv-topbar-actions" id="viv-topbar-actions">
-        <!-- Git status strip + action buttons populated by JS (_refreshGitStatus) -->
-        <div id="viv-git-status" class="git-status" hidden></div>
-        <div class="topbar-actions">
-          <button id="btn-open-pr" class="action-btn" onclick="_openPRDialog()" title="Open PR for current branch">
-            Open PR ↗
-          </button>
-        </div>
+        <!-- Git status strip + Open-PR button were here; moved into the
+             GitHub tab (Workspace → GitHub) for a cleaner topbar. The JS
+             (_refreshGitStatus) still targets #viv-git-status by id and
+             populates it wherever it lives. -->
         <span class="viv-btn viv-tooltip" data-tooltip="Coming soon — share workspace link">Share</span>
         <span class="viv-kebab viv-tooltip" data-tooltip="Workspace settings — coming soon">⋯</span>
         <span class="viv-theme-toggle" id="viv-theme-toggle" role="button" tabindex="0" aria-label="Toggle dark mode" title="Toggle dark/light mode">
@@ -1076,6 +1086,118 @@ When done, summarize which entries got PDFs vs URLs only vs were unresolvable, a
   </div>
 </section>
 
+<!-- GitHub: in-UI sign-in + (future) org picker. The github-login.js widget
+     activates the #viv-gh-chip element on load. No-AI-agent setup path. -->
+<section id="page-github" class="page" data-page="github">
+  <h2 class="page-title">GitHub</h2>
+
+  <!-- Settings-style single panel: three sections (Account, Workspace
+       repository, Actions), each a list of label/value rows. Replaces the
+       three-panel layout — easier to scan, easier to extend. -->
+  <div class="panel github-settings">
+    <style>
+      .github-settings .gh-section { padding:18px 0; border-top:1px solid #e5e7eb }
+      .github-settings .gh-section:first-of-type { padding-top:6px; border-top:none }
+      .github-settings .gh-section-title { margin:0 0 14px; font-size:0.95em; color:#1f2937; font-weight:600; letter-spacing:0.02em }
+      .github-settings .gh-row { display:grid; grid-template-columns:180px 1fr; gap:16px; padding:8px 0; align-items:center }
+      .github-settings .gh-row[hidden] { display:none }
+      .github-settings .gh-label { color:#6b7280; font-size:0.88em }
+      .github-settings .gh-value { color:#111827; font-size:0.92em; min-width:0 }
+      .github-settings .gh-value code { font-size:0.92em }
+      .github-settings .gh-value-hint { color:#6b7280; font-size:0.82em; margin-top:4px }
+      .github-settings select.gh-input { width:100%; max-width:380px; padding:6px 8px; font:inherit; border:1px solid #cbd5e1; border-radius:4px; background:#fff }
+      .github-settings .gh-action-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center }
+    </style>
+
+    <!-- ── Account ──────────────────────────────────────────────── -->
+    <div class="gh-section">
+      <h3 class="gh-section-title">Account</h3>
+
+      <div class="gh-row">
+        <div class="gh-label">Signed in as</div>
+        <div class="gh-value">
+          <div id="viv-gh-chip"
+               class="viv-rail-footer viv-rail-footer-link viv-rail-footer-no-github"
+               data-state="loading"
+               title="Sign in to GitHub from the dashboard"
+               style="cursor:pointer;display:inline-flex">
+            <div class="viv-avatar viv-avatar-rail" aria-hidden="true">+</div>
+            <div class="viv-rail-footer-text">
+              <strong>Connect GitHub</strong>
+              <small>checking…</small>
+            </div>
+          </div>
+          <div class="gh-value-hint">No terminal required. Uses your <code>gh</code> session if present, otherwise OAuth Device Flow (browser code-paste).</div>
+          <noscript>
+            <div class="gh-value-hint">Dashboard JS is disabled — run <code>gh auth login</code> from a terminal.</div>
+          </noscript>
+        </div>
+      </div>
+
+      <div class="gh-row">
+        <div class="gh-label">Default org</div>
+        <div class="gh-value">
+          <select id="viv-gh-default-org" class="gh-input">
+            <option value="">Sign in to load orgs…</option>
+          </select>
+          <div id="viv-gh-default-org-hint" class="gh-value-hint">Used to pre-fill <strong>org</strong> for new workspaces and <em>Create GitHub repo</em> actions.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Workspace repository — one row per fact, settings-style ── -->
+    <div class="gh-section">
+      <h3 class="gh-section-title">Workspace repository</h3>
+
+      <div class="gh-row" id="viv-gh-row-repo">
+        <div class="gh-label">Repository</div>
+        <div class="gh-value" id="viv-gh-repo"><span class="muted">loading…</span></div>
+      </div>
+
+      <div class="gh-row" id="viv-gh-row-branch">
+        <div class="gh-label">Branch</div>
+        <div class="gh-value" id="viv-gh-branch"><span class="muted">loading…</span></div>
+      </div>
+
+      <div class="gh-row" id="viv-gh-row-push-state">
+        <div class="gh-label">Push state</div>
+        <div class="gh-value" id="viv-gh-push-state"><span class="muted">loading…</span></div>
+      </div>
+
+      <div class="gh-row" id="viv-gh-row-ahead">
+        <div class="gh-label">Ahead of base</div>
+        <div class="gh-value" id="viv-gh-ahead"><span class="muted">—</span></div>
+      </div>
+
+      <div class="gh-row" id="viv-gh-row-dirty">
+        <div class="gh-label">Working tree</div>
+        <div class="gh-value" id="viv-gh-dirty"><span class="muted">—</span></div>
+      </div>
+
+      <div class="gh-row" id="viv-gh-row-pr">
+        <div class="gh-label">Pull request</div>
+        <div class="gh-value" id="viv-gh-pr"><span class="muted">—</span></div>
+      </div>
+
+      <!-- Legacy hidden host for any code path that still writes to #viv-git-status.
+           The new field-by-field hooks above are the primary surface. -->
+      <div id="viv-git-status" class="git-status" hidden></div>
+    </div>
+
+    <!-- ── Actions ────────────────────────────────────────────────── -->
+    <div class="gh-section">
+      <h3 class="gh-section-title">Actions</h3>
+
+      <div class="gh-row">
+        <div class="gh-label">Repo &amp; branch</div>
+        <div class="gh-value gh-action-row" id="viv-git-actions">
+          <button id="btn-open-pr" class="action-btn" onclick="_openPRDialog()" title="Open PR for current branch">Open PR ↗</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section id="page-studies" class="page" data-page="studies">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
     <h2 class="page-title" style="margin:0">Studies</h2>
@@ -1659,6 +1781,7 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/render-helpers.js"></script>
 <script src="assets/client.js" onerror="/* live mode unavailable */"></script>
 <script src="assets/walkthrough.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* walkthrough unavailable */"></script>
+<script src="assets/github-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* github-login unavailable */"></script>
 <script src="assets/investigations.js" onerror="/* investigations unavailable */"></script>
 <!-- workspace-switcher.js is intentionally not loaded: the left-rail dropdown
      it used to drive has been repurposed into the investigation switcher

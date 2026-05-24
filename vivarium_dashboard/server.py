@@ -199,6 +199,10 @@ _POST_STUDY_ALIASES: dict[str, str] = {
 _POST_ROUTE_MAP: dict[str, str] = {
     "/api/click":              "_post_click",
     "/api/feedback-import":    "_post_feedback_import",
+    # GitHub auth (Phase B-bis, cherry-picked from #65). Lets users sign in
+    # via the dashboard UI instead of a terminal — no AI agent required.
+    "/api/auth/github/start":  "_post_auth_github_start",
+    "/api/auth/github/logout": "_post_auth_github_logout",
     "/api/import":             "_post_import",
     "/api/import-install":     "_post_import_install",
     "/api/dataset":            "_post_dataset",
@@ -1400,21 +1404,24 @@ def _post_iset_create_for_test(ws_root: Path, body: dict) -> tuple[dict, int]:
     if target.exists():
         return {"error": f"investigation '{name}' already exists"}, 409
 
-    spec: dict = {
-        "schema_version": 1,
-        "name": name,
-        "title": name,
-        "status": "planning",
-        "description": overview,
-        "studies": [],
-    }
-    if parent_studies:
-        spec["parent_studies"] = list(parent_studies)
+    # Emit a v2-shape investigation.yaml with the narrative spine commented
+    # in as TODOs (executive / scientific_argument / biological_story /
+    # at_a_glance / glossary / guidelines). The user sees the target shape
+    # — the same shape dnaa-replication evolved through use — without having
+    # to read docs first. All v2 fields are optional, so the spec validates
+    # on day one and the user opts in by uncommenting sections.
+    from vivarium_dashboard.lib.scaffold_yaml import v2_investigation_scaffold
+    body_yaml = v2_investigation_scaffold(
+        name,
+        title=name,
+        overview=overview or None,
+        parent_studies=list(parent_studies) if parent_studies else None,
+    )
 
     inv_dir.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(".yaml.tmp")
     try:
-        tmp.write_text(yaml.safe_dump(spec, sort_keys=False, allow_unicode=True))
+        tmp.write_text(body_yaml)
         os.replace(tmp, target)
     except Exception:
         if tmp.exists():
@@ -1897,11 +1904,18 @@ def _post_study_run_baseline_for_test(ws_root, body):
 
     params = dict(entry.get("params") or {})
     params_n_steps = params.pop("n_steps", None)
-    steps = int(body.get("steps") or params_n_steps or 5)
     generator_overrides = params
 
     ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text())
     pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+    # XArrayEmitter buffers ~hundreds of ticks before flushing, so the legacy
+    # 5-tick default produces empty zarr stores. Workspaces declare a sensible
+    # baseline run length via runtime.default_n_steps; we fall back to 5 only
+    # if neither the body, the study yaml, nor the workspace specifies one
+    # (preserves the legacy quick-smoke behaviour for SQLite workspaces).
+    _runtime = (ws_data.get("runtime") or {}) if isinstance(ws_data, dict) else {}
+    ws_default_n_steps = _runtime.get("default_n_steps")
+    steps = int(body.get("steps") or params_n_steps or ws_default_n_steps or 5)
 
     state, err = _resolve_study_baseline_state(pkg, spec_id, generator_overrides)
     if err is not None:
@@ -1921,11 +1935,14 @@ def _post_study_run_baseline_for_test(ws_root, body):
     # v2ecoli friction #14: derive emit_paths from spec observables so the
     # injected SQLiteEmitter captures real biology, not just ticks.
     emit_paths = cr.collect_emit_paths_from_spec(spec)
+    # Per-study emitter override (study yaml's runtime.emitter) — wins over
+    # workspace runtime.default_emitter. None ⇒ workspace default applies.
+    study_emitter = runtime_cfg.get("emitter")
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label=label, sim_name=label,
         overrides=generator_overrides, timeout=timeout_s,
-        emit_paths=emit_paths,
+        emit_paths=emit_paths, study_emitter=study_emitter,
     )
     if code == 200:
         # F2: do NOT append to study.yaml.runs[] — the runs_meta row
@@ -1945,7 +1962,124 @@ def _post_study_run_baseline_for_test(ws_root, body):
             response.setdefault("viz_files", []).extend(viz_files)
         if viz_errors:
             response.setdefault("viz_errors", []).extend(viz_errors)
+        # post_run_scripts: study-yaml-declared scripts to invoke after the
+        # auto-render dispatch. Pattern for hand-rolled render scripts that
+        # don't fit the @Visualization class registry (e.g. chromosome-state
+        # snapshotters that run their own sim and write HTML directly).
+        # Schema:
+        #   post_run_scripts:
+        #   - path: scripts/render_chromosome_timeline.py
+        #     args: ["--study", "dnaa-02", "--spec", "...", "--steps", "600"]
+        #     timeout_s: 1800
+        script_files, script_errors = _run_post_run_scripts(spec, ws_root)
+        if script_files:
+            response.setdefault("post_run_script_files", []).extend(script_files)
+        if script_errors:
+            response.setdefault("post_run_script_errors", []).extend(script_errors)
     return response, code
+
+
+def _run_post_run_scripts(spec: dict, ws_root: Path) -> tuple[list[str], list[dict]]:
+    """Invoke each ``spec.post_run_scripts[]`` entry as a subprocess.
+
+    Each entry: ``{path: <rel-to-ws>, args: [...], timeout_s: 1800}``.
+    Scripts run with cwd=ws_root using the same Python interpreter as the
+    dashboard. Stdout/stderr are captured but discarded unless the script
+    fails (script's own viz writes go straight to disk). Returns
+    ``(written_files, errors)`` — written_files lists newly-mtime'd HTML
+    files under studies/<slug>/viz/ (for response surfacing).
+    """
+    entries = spec.get("post_run_scripts") or []
+    if not entries:
+        return [], []
+    import sys as _sys
+    import subprocess as _subprocess
+    import time as _time
+
+    written: list[str] = []
+    errors: list[dict] = []
+    t_start = _time.time()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        rel_path = entry.get("path")
+        if not rel_path:
+            continue
+        script_path = ws_root / rel_path
+        if not script_path.is_file():
+            errors.append({"script": rel_path, "error": "script not found"})
+            continue
+        args = [str(a) for a in (entry.get("args") or [])]
+        timeout_s = int(entry.get("timeout_s") or 1800)
+        try:
+            result = _subprocess.run(
+                [_sys.executable, str(script_path), *args],
+                cwd=str(ws_root), timeout=timeout_s,
+                capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                # surface stderr tail for debugging; full stdout/stderr stay
+                # in the script's own logs if it wrote any.
+                tail = (result.stderr or result.stdout or "")[-500:]
+                errors.append({
+                    "script": rel_path, "args": args,
+                    "returncode": result.returncode, "stderr_tail": tail,
+                })
+        except _subprocess.TimeoutExpired:
+            errors.append({"script": rel_path, "error": f"timed out after {timeout_s}s"})
+        except Exception as e:  # noqa: BLE001 — keep other scripts running
+            errors.append({"script": rel_path, "error": f"{type(e).__name__}: {e}"})
+    # collect HTML files written during this batch (mtime newer than start)
+    for study_dir in (ws_root / "studies").iterdir() if (ws_root / "studies").is_dir() else []:
+        viz_dir = study_dir / "viz"
+        if not viz_dir.is_dir():
+            continue
+        for html in viz_dir.glob("*.html"):
+            if html.stat().st_mtime >= t_start:
+                written.append(str(html.relative_to(ws_root)))
+    return written, errors
+
+
+def _zarr_store_for_sim(study_db: Path, sim_name: str | None) -> Path | None:
+    """Find the most-recent XArrayEmitter zarr store for a sim_name in a study.
+
+    XArrayEmitter runs (via the subprocess template's xarray branch) write a
+    per-run zarr directory next to the SQLite db at
+    ``<study>/runs.<run_id>.zarr``. To map a sim_name → zarr path:
+
+      1. Read runs_meta from the study's SQLite db to find the latest
+         completed run_id for that sim_name (runs_meta is written for both
+         SQLite-backed AND xarray-backed runs).
+      2. Check whether the corresponding zarr dir exists on disk.
+
+    Returns the zarr path if it exists, else None (caller falls back to SQLite).
+    """
+    if not sim_name or not study_db or not study_db.exists():
+        return None
+    try:
+        import sqlite3
+        conn = sqlite3.connect(str(study_db))
+        try:
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()}
+            if "runs_meta" not in tables:
+                return None
+            row = conn.execute(
+                "SELECT run_id FROM runs_meta WHERE sim_name=? "
+                "AND status='completed' ORDER BY started_at DESC LIMIT 1",
+                (sim_name,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        run_id = row[0]
+    except Exception:
+        return None
+    # Construct the zarr path: <db_stem>.<run_id>.zarr next to the SQLite db.
+    zarr_dir = study_db.parent / f"{study_db.stem}.{run_id}.zarr"
+    return zarr_dir if zarr_dir.is_dir() else None
 
 
 def _render_study_visualizations(study_dir, spec, spec_id):
@@ -2080,10 +2214,50 @@ def _render_study_visualizations(study_dir, spec, spec_id):
             core_registry=registry,
             build_and_run=build_and_run,
         )
-        return [str(Path(p).relative_to(study_dir)) for p in paths], []
+        written = [str(Path(p).relative_to(study_dir)) for p in paths]
+        # Auto-purge stale viz: after rendering, delete any *.html in
+        # studies/<slug>/viz/ whose mtime is older than the latest run's
+        # started_at AND not in the just-written set. Keeps the report
+        # showing only current-run output without manual cleanup.
+        # `comparative_*` viz are excluded — those are owned by the
+        # investigation-end hook (_render_investigation_comparative_visualisations)
+        # which fires on a different schedule; purging them on a per-study
+        # run would delete legitimately-current cross-run overlays.
+        _purge_stale_viz(study_dir, written)
+        return written, []
     except Exception as e:  # noqa: BLE001
         return [], [{"error": f"render_visualizations failed: "
                      f"{type(e).__name__}: {e}"}]
+
+
+def _purge_stale_viz(study_dir: Path, just_written: list[str]) -> None:
+    """Delete *.html in study_dir/viz/ whose mtime is older than the
+    latest run's started_at AND not in the just-written set AND not
+    a comparative_ viz (those are owned by a separate dispatch).
+
+    No-op on any error — viz cleanup is best-effort, not load-bearing.
+    """
+    try:
+        viz_dir = study_dir / "viz"
+        runs_db = study_dir / "runs.db"
+        if not viz_dir.is_dir() or not runs_db.is_file():
+            return
+        cutoff = _latest_run_timestamp(runs_db)
+        if cutoff is None:
+            return
+        kept_names = {Path(p).name for p in just_written}
+        for html in viz_dir.glob("*.html"):
+            if html.name in kept_names:
+                continue
+            if html.name.startswith("comparative_"):
+                continue
+            try:
+                if html.stat().st_mtime < cutoff:
+                    html.unlink()
+            except OSError:
+                continue
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _post_study_run_all_baselines_for_test(ws_root, body):
@@ -2237,11 +2411,14 @@ def _post_study_run_variant_for_test(ws_root, body):
     params.update(overrides)
 
     params_n_steps = params.pop("n_steps", None)
-    steps = int(body.get("steps") or params_n_steps or 5)
     generator_overrides = params
 
     ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text())
     pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+    # Same workspace-level default as the baseline path — see comment there.
+    _runtime = (ws_data.get("runtime") or {}) if isinstance(ws_data, dict) else {}
+    ws_default_n_steps = _runtime.get("default_n_steps")
+    steps = int(body.get("steps") or params_n_steps or ws_default_n_steps or 5)
 
     state, err = _resolve_study_baseline_state(pkg, spec_id, generator_overrides)
     if err is not None:
@@ -2259,14 +2436,32 @@ def _post_study_run_variant_for_test(ws_root, body):
     # v2ecoli friction #14: thread observables to the subprocess (same as
     # baseline path) so variant runs also capture biology in history.state.
     emit_paths = cr.collect_emit_paths_from_spec(spec)
+    # Per-study emitter override — see baseline path for rationale.
+    study_emitter = runtime_cfg.get("emitter")
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label=variant_name,
         sim_name=variant_name, overrides=generator_overrides,
         timeout=timeout_s, emit_paths=emit_paths,
+        study_emitter=study_emitter,
     )
     # F2: no _append_study_run — the runs_meta row is the canonical record;
     # see the matching note in run-baseline above.
+    if code == 200:
+        # Same canonical-viz + post-run-scripts dispatch as the baseline path
+        # so variants also refresh chromosome viz etc.
+        viz_files, viz_errors = _render_study_visualizations(
+            study_dir, spec, spec_id,
+        )
+        if viz_files:
+            response.setdefault("viz_files", []).extend(viz_files)
+        if viz_errors:
+            response.setdefault("viz_errors", []).extend(viz_errors)
+        script_files, script_errors = _run_post_run_scripts(spec, ws_root)
+        if script_files:
+            response.setdefault("post_run_script_files", []).extend(script_files)
+        if script_errors:
+            response.setdefault("post_run_script_errors", []).extend(script_errors)
     return response, code
 
 
@@ -2840,7 +3035,7 @@ def _diagnose_push_error(err: str) -> dict | None:
 
 def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                               label, overrides=None, sim_name=None, timeout=1800,
-                              emit_paths=None):
+                              emit_paths=None, study_emitter=None):
     """Run a resolved composite ``state`` for ``steps`` steps in a subprocess,
     persisting runs_meta + history (via an injected SQLiteEmitter) to
     ``db_file``.
@@ -2878,6 +3073,27 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
         # Pass (spec_id, overrides) as small JSON; the child builds + injects
         # the SQLiteEmitter + runs entirely in-process.
         _state_path = None
+        # Read workspace-level runtime defaults: emitter selection + multi-gen cap.
+        # Workspaces (e.g. v2ecoli) can opt into XArrayEmitter via
+        # `runtime: { default_emitter: xarray, max_generations: N }`. Default
+        # is SQLite (the dashboard's historical single-generation behaviour).
+        # Per-study override (``study_emitter``) wins over the workspace
+        # default — set it from the study yaml's ``runtime.emitter`` so a
+        # single workspace can mix emitters by study (e.g. xarray for
+        # many-sims aggregation studies, sqlite for ones needing unstructured
+        # state like unique-molecule snapshots for chromosome viz).
+        try:
+            _ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+            _runtime = (_ws_data.get("runtime") or {}) if isinstance(_ws_data, dict) else {}
+            _default_emitter = str(_runtime.get("default_emitter") or "sqlite").lower()
+            _max_generations = int(_runtime.get("max_generations") or 3)
+        except Exception:
+            _default_emitter = "sqlite"
+            _max_generations = 3
+        if study_emitter:
+            _default_emitter = str(study_emitter).lower()
+        # Derive a zarr store path alongside the SQLite db_file (one per run).
+        _zarr_store = str(Path(db_file).with_suffix("")) + f".{run_id}.zarr"
         payload = {
             "spec_id": spec_id,
             "overrides": overrides or {},
@@ -2890,6 +3106,10 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
             # just `{"_tick": <global_time>}` and every comparative viz
             # renders empty. Empty list = legacy "no observables" behavior.
             "emit_paths": list(emit_paths or []),
+            # XArray opt-in (per workspace.yaml runtime.default_emitter).
+            "default_emitter": _default_emitter,
+            "max_generations": _max_generations,
+            "zarr_store": _zarr_store,
         }
         script = textwrap.dedent(f"""
             import json, sys, traceback
@@ -2916,11 +3136,82 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                 state = doc.get('state', doc) if isinstance(doc, dict) else doc
                 if _payload.get('emit_paths'):
                     state = cr.inject_emitter_for_declared_paths(state, _payload['emit_paths'])
-                state = cr.inject_sqlite_emitter(
-                    state, run_id=_payload['run_id'], db_file=_payload['db_file'])
-                composite = Composite({{'state': state}}, core=core)
-                cr.run_with_division(composite, _payload['steps'])
-                results = gather_emitter_results(composite)
+                _use_xarray = _payload.get('default_emitter') == 'xarray'
+                _view = []
+                if _use_xarray:
+                    # Auto-view from the study's declared observables. v0 of
+                    # view_from_emit_paths is scalar-only — vector observables
+                    # (monomer_counts, fork_coordinates, RNAP_coordinates, …)
+                    # are skipped. If a study declares ONLY vector observables
+                    # (e.g. dnaa-01 emits only listeners.monomer_counts), the
+                    # auto-view is empty and the XArrayEmitter constructor
+                    # would crash. In that case, fall back to SQLite for this
+                    # run so the study isn't blocked.
+                    from v2ecoli.library.xarray_run import (
+                        run_multigen_xarray, view_from_emit_paths,
+                    )
+                    _view = view_from_emit_paths(_payload.get('emit_paths') or [])
+                    if not _view:
+                        print('[xarray-run] auto-view is empty (all declared '
+                              'observables are vector / non-listeners-rooted); '
+                              'falling back to SQLite emitter for this run.',
+                              file=sys.stderr)
+                        _use_xarray = False
+                if _use_xarray:
+                    # XArray multi-gen path: drive the composite externally past
+                    # divisions, per-generation emitter swap; results land in a
+                    # partitioned zarr store. See v2ecoli plan
+                    # 2026-05-12-migrate-emitters.md task 7.x.
+                    composite = Composite({{'state': state}}, core=core)
+                    _md = {{
+                        'experiment_id': _payload['run_id'],
+                        'variant': 0,
+                        'lineage_seed': 0,
+                        'time_step': 1.0,
+                        'max_duration': float(_payload['steps']),
+                    }}
+                    _xarr = run_multigen_xarray(
+                        composite,
+                        store_path=_payload['zarr_store'],
+                        view=_view,
+                        metadata_base=_md,
+                        max_steps=_payload['steps'],
+                        max_generations=_payload['max_generations'],
+                    )
+                    results = {{'zarr_store': _xarr['store'],
+                               'generations': _xarr['generations'],
+                               'steps': _xarr['steps']}}
+                else:
+                    _mg = int(_payload.get('max_generations') or 1)
+                    if _mg > 1:
+                        # Multi-gen: workspace-side runner drives the
+                        # SQLiteEmitter externally (mirrors how the
+                        # xarray branch drives XArrayEmitter). The
+                        # composite does NOT get an injected emitter —
+                        # the static `agents/0/...` wiring would write
+                        # empty rows after division. The runner extracts
+                        # the followed agent's state each chunk and
+                        # calls `emitter.update` with it; on division it
+                        # switches to the daughter agent_id.
+                        composite = Composite({{'state': state}}, core=core)
+                        from v2ecoli.library.sqlite_run import run_multigen_sqlite
+                        _sq = run_multigen_sqlite(
+                            composite,
+                            run_id=_payload['run_id'],
+                            db_file=_payload['db_file'],
+                            emit_paths=_payload.get('emit_paths') or [],
+                            max_steps=_payload['steps'],
+                            max_generations=_mg,
+                            core=core,
+                        )
+                        results = {{'steps': _sq['steps'],
+                                   'generations': _sq['generations']}}
+                    else:
+                        state = cr.inject_sqlite_emitter(
+                            state, run_id=_payload['run_id'], db_file=_payload['db_file'])
+                        composite = Composite({{'state': state}}, core=core)
+                        cr.run_with_division(composite, _payload['steps'])
+                        results = gather_emitter_results(composite)
         """).lstrip("\n")
     else:
         # Legacy path: serialize the pre-built state into a tempfile.
@@ -3575,6 +3866,13 @@ class Handler(BaseHTTPRequestHandler):
 
         if path_only in ("/", "/index.html"):
             return self._serve_file(WORKSPACE / "reports" / "index.html", "text/html")
+        # GitHub auth (cherry-picked from #65, Phase B-bis).
+        if self.path.startswith("/api/auth/github/status"):
+            return self._get_auth_github_status()
+        if self.path.startswith("/api/auth/github/poll"):
+            return self._get_auth_github_poll()
+        if self.path.startswith("/api/auth/github/orgs"):
+            return self._get_auth_github_orgs()
         if self.path.startswith("/api/workspaces"):
             return self._get_workspaces()
         # GitHub OAuth (todo #8 Phase B-bis + B-extension).
@@ -3804,6 +4102,69 @@ class Handler(BaseHTTPRequestHandler):
             "path": str(target.relative_to(WORKSPACE)),
             "n_entries": n_entries,
         }, 200)
+
+    # ------------------------------------------------------------------
+    # GitHub auth (cherry-picked from #65, Phase B-bis).
+    # The lib is vivarium_dashboard/lib/github_auth.py; the JS widget is
+    # static/github-login.js. UI placement (the sign-in chip) is left for a
+    # follow-up PR — the widget is defensive and no-ops without its target.
+    # ------------------------------------------------------------------
+
+    def _post_auth_github_start(self, body: dict):
+        """POST /api/auth/github/start — initiate the Device Flow.
+
+        Returns the user_code + verification_uri the client must display, plus
+        a server-issued flow_id the client passes to ``/poll``. Never returns
+        the device_code (held server-side).
+        """
+        from vivarium_dashboard.lib.github_auth import start_device_flow
+        result = start_device_flow()
+        if "error" in result:
+            # 503 for missing client_id (deployment not configured); 502 for
+            # GitHub-side failures.
+            code = 503 if result["error"] == "no_client_id" else 502
+            return self._json(result, code)
+        return self._json(result, 200)
+
+    def _get_auth_github_poll(self):
+        """GET /api/auth/github/poll?flow_id=<uuid> — poll the token endpoint."""
+        from urllib.parse import parse_qs, urlparse
+        qs = parse_qs(urlparse(self.path).query)
+        flow_id = (qs.get("flow_id") or [""])[0].strip()
+        if not flow_id:
+            return self._json({"status": "error", "detail": "missing_flow_id"}, 400)
+
+        from vivarium_dashboard.lib.github_auth import poll_device_flow
+        result = poll_device_flow(flow_id)
+        # Map outcomes to HTTP codes the client can use without parsing JSON:
+        #   pending → 202, ok → 200, expired → 410, denied → 403, error → 400.
+        status = result.get("status")
+        code = {
+            "ok": 200, "pending": 202, "expired": 410, "denied": 403,
+        }.get(status, 400)
+        return self._json(result, code)
+
+    def _get_auth_github_status(self):
+        """GET /api/auth/github/status — current session, or {authenticated:false}.
+
+        Never includes the token itself."""
+        from vivarium_dashboard.lib.github_auth import status_payload
+        return self._json(status_payload(), 200)
+
+    def _post_auth_github_logout(self, body: dict):
+        """POST /api/auth/github/logout — clear in-memory session + keyring entry."""
+        from vivarium_dashboard.lib.github_auth import logout
+        logout()
+        return self._json({"ok": True}, 200)
+
+    def _get_auth_github_orgs(self):
+        """GET /api/auth/github/orgs — user's personal namespace + orgs."""
+        from vivarium_dashboard.lib.github_auth import list_orgs
+        result = list_orgs()
+        if "error" in result:
+            code = 401 if result["error"] == "unauthenticated" else 502
+            return self._json(result, code)
+        return self._json(result, 200)
 
     def _post_click(self, body: dict):
         with LOCK:
@@ -6882,25 +7243,22 @@ if __name__ == "__main__":
             (inv_dir / "data" / ".keep").write_text("")
 
             if is_generator and baseline_name:
-                # v3-shape spec: dotted ref lives in `baseline:`; no sidecar.
-                spec = {
-                    "name": name,
-                    "description": "",
-                    "status": "planned",
-                    "baseline": [
-                        {
-                            "name": baseline_name,
-                            "composite": source,
-                            "params": {},
-                        }
-                    ],
-                    "variants": [],
-                    "interventions": [],
-                    "observables": [],
-                    "visualizations": [],
-                    "runs": [],
-                }
-                (inv_dir / "study.yaml").write_text(yaml.safe_dump(spec, sort_keys=False))
+                # v4-shape scaffold: dotted ref lives in `baseline:` (no
+                # sidecar — sidesteps the "can't serialize live Process
+                # instances" problem for @composite_generator refs). The 14-
+                # section narrative spine is emitted as commented placeholders
+                # so the user sees the target shape — the same shape the
+                # dnaa-replication investigation evolved through use — without
+                # having to read docs first.
+                from vivarium_dashboard.lib.scaffold_yaml import (
+                    v4_study_scaffold,
+                )
+                body_yaml = v4_study_scaffold(
+                    name,
+                    composite=source,
+                    baseline_name=baseline_name,
+                )
+                (inv_dir / "study.yaml").write_text(body_yaml)
             elif source_path and baseline_name:
                 # Legacy v2-shape spec: seed with a baseline composite entry.
                 composites_dir = inv_dir / "composites"
@@ -9351,11 +9709,26 @@ if __name__ == "__main__":
                         continue
                     sim_name = r.get("sim_name") or r.get("variant") or r.get("name")
                     label = r.get("label") or sim_name or "?"
-                    runs.append({
-                        "label": label,
-                        "db_path": study_db,
-                        "sim_name": sim_name,
-                    })
+                    # XArrayEmitter runs write per-run zarr stores alongside
+                    # the SQLite db (one zarr dir per run_id). When the sim's
+                    # most-recent completed run has a zarr store, point
+                    # comparative_viz at it via zarr_path; the zarr-read
+                    # adapter (PR #87) extracts the observable across
+                    # generations. Falls back to SQLite db_path otherwise
+                    # (legacy single-generation runs).
+                    zarr_path = _zarr_store_for_sim(study_db, sim_name)
+                    if zarr_path is not None:
+                        runs.append({
+                            "label": label,
+                            "zarr_path": zarr_path,
+                            "sim_name": sim_name,
+                        })
+                    else:
+                        runs.append({
+                            "label": label,
+                            "db_path": study_db,
+                            "sim_name": sim_name,
+                        })
                 if not runs:
                     continue
                 out_path = viz_dir / f"comparative_{cv['name']}.html"
