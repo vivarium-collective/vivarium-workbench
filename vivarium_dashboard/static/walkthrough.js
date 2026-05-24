@@ -3333,21 +3333,6 @@
         if (!window._isetIndex.length) return;
         var active = window._currentIset;
         if (!active) {
-          // Prefer the slug published by investigation-switcher.js from
-          // /api/investigation-registry — it already does the git-branch
-          // match + running-iset + alphabetical-fallback chain, and
-          // staying consistent with it keeps trigger label + STUDIES
-          // rail + Investigation-tab detail all pointing at the same
-          // iset.
-          var pubSlug = window._currentIsetSlug || '';
-          if (pubSlug) {
-            for (var pi = 0; pi < window._isetIndex.length; pi++) {
-              if (window._isetIndex[pi].name === pubSlug) { active = pubSlug; break; }
-            }
-          }
-        }
-        if (!active) {
-          // Legacy fallback: investigation/<name> branch prefix.
           var branch = (window._gitStatus && window._gitStatus.active_branch) || '';
           var m = /^investigation\/(.+)$/.exec(branch);
           if (m) {
@@ -6050,71 +6035,7 @@
         +   '<nav class="study-nav-row2">' + links.join('') + '</nav>'
         + '</div>';
 
-      // Wrap the v4 narrative-spine section in a <details class="study-fold">
-      // so the Expand all / Collapse all toolbar buttons (which target
-      // .study-fold) actually have something to operate on. v3 studies got
-      // this for free via v3StudySection's <details> wrapper; v4 sections
-      // were left flat and the buttons did nothing on v4-only investigations.
-      // Open by default so existing reader behaviour is unchanged.
-      //
-      // Reuses the v3 `.sp-*` CSS classes so the collapsed-card look matches
-      // what v3 readers already see: num + title + verdict / one-line
-      // objective / slug+depth meta / chips for predictions + variants +
-      // refs / expand hint. Populated from v4 narrative-spine fields:
-      // objective for the one-liner, expected_behavior for the chips, etc.
-      var v4Title    = s.title || _humanizeStudyName(s.name).title;
-      var v4Verdict  = (function() {
-        var st = (s.status || 'planning').toLowerCase();
-        if (st === 'planning' || st === 'planned') return {cls: 'v-prelim', emoji: '📋', label: 'Planned'};
-        if (st === 'running' || st === 'in_progress') return {cls: 'v-cal', emoji: '🔬', label: 'Running'};
-        if (st === 'complete' || st === 'ran' || st === 'passed') return {cls: 'v-pass', emoji: '✅', label: 'Complete'};
-        if (st === 'failed' || st === 'invalid') return {cls: 'v-fail', emoji: '❌', label: 'Failed'};
-        return {cls: 'v-none', emoji: '·', label: _h(s.status || 'planning')};
-      })();
-      var v4Objective = _firstSentence(s.objective || '');
-      var v4Meta = ['<code>' + _h(s.name) + '</code>',
-                    'depth ' + (depthMap[s.name] || 0)];
-      if (s.phase) v4Meta.push('phase ' + _h(s.phase));
-      if (s.topic) v4Meta.push('topic ' + _h(s.topic));
-      // Chip strip: predictions + status breakdown + variants + refs.
-      var v4Chips = [];
-      var ebList = s.expected_behavior || [];
-      if (ebList.length) {
-        var counts = {stub: 0, gated: 0, implemented: 0};
-        ebList.forEach(function(b) {
-          var st = (b && b.status) || 'implemented';
-          if (counts[st] !== undefined) counts[st]++;
-        });
-        v4Chips.push('<span class="sp-metric">' + ebList.length + ' predictions</span>');
-        if (counts.implemented) v4Chips.push('<span class="sp-metric sp-metric-pass">✅ ' + counts.implemented + ' implemented</span>');
-        if (counts.gated)       v4Chips.push('<span class="sp-metric sp-metric-warn">⏳ ' + counts.gated + ' gated</span>');
-        if (counts.stub)        v4Chips.push('<span class="sp-metric">🟡 ' + counts.stub + ' stub</span>');
-      }
-      var nVar = (s.variants || []).length;
-      if (nVar) v4Chips.push('<span class="sp-metric">' + nVar + ' variants</span>');
-      var v4Bib = (s.bibliography && s.bibliography.bib_keys) || [];
-      if (v4Bib.length) v4Chips.push('<span class="sp-metric">' + v4Bib.length + ' refs</span>');
-      var nParents = (s.parent_studies || []).length;
-      if (nParents) v4Chips.push('<span class="sp-metric">depends on ' + nParents + '</span>');
-      var nKids = (children[s.name] || []).length;
-      if (nKids) v4Chips.push('<span class="sp-metric">blocks ' + nKids + '</span>');
-
-      var foldSummary = ''
-        + '<summary class="study-panel">'
-        +   '<div class="sp-top">'
-        +     '<span class="sp-num">' + (i + 1) + '.</span>'
-        +     '<span class="sp-title">' + _h(v4Title) + '</span>'
-        +     '<span class="sp-verdict ' + v4Verdict.cls + '">' + v4Verdict.emoji + ' ' + _h(v4Verdict.label) + '</span>'
-        +   '</div>'
-        +   (v4Objective ? '<div class="sp-objective">' + _h(v4Objective) + '</div>' : '')
-        +   '<div class="sp-meta">' + v4Meta.join(' · ') + '</div>'
-        +   (v4Chips.length ? '<div class="sp-metrics">' + v4Chips.join('') + '</div>' : '')
-        +   '<span class="sp-expand-hint">▸ click to expand full study</span>'
-        + '</summary>';
-
       return ''
-        + '<details class="study-fold" id="study-fold-' + slug + '" open>'
-        + foldSummary
         + '<section class="study" id="study-' + slug + '">'
         +   subNav
         +   '<header class="study-header">'
@@ -6148,8 +6069,7 @@
 
         +   (bibList ? '<div id="' + sidRe + '"><h3>References cited by this study</h3><p>' + bibList + '</p></div>' : '')
 
-        + '</section>'
-        + '</details>';
+        + '</section>';
     }
 
     // ── PARTS grouping (framework): investigation.yaml may declare a `parts`
@@ -6884,24 +6804,8 @@
       +   '<h2 id="studies-heading">Studies' + (hasDag ? ' (dependency order)' : '') + '</h2>'
       +   '<p class="muted small">Each study is collapsed to a one-glance control panel — scan top to bottom, then click any panel to expand its full detail.</p>'
       +   '<div class="studies-toolbar">'
-      +     '<button type="button" id="studies-expand-all">Expand all</button>'
-      +     '<button type="button" id="studies-collapse-all">Collapse all</button>'
-      +     '<script>(function(){'
-      +       'function findFolds(){return Array.from(document.querySelectorAll(".study-fold"));}'
-      +       'function setAll(open){'
-      +         'var folds=findFolds();'
-      +         'console.log("[studies-toolbar] "+(open?"expand":"collapse")+" "+folds.length+" .study-fold elements");'
-      +         'folds.forEach(function(d){d.open=open;});'
-      +         'if(open&&folds.length){folds[0].scrollIntoView({behavior:"smooth",block:"start"});}'
-      +       '}'
-      +       'function wire(){'
-      +         'var ex=document.getElementById("studies-expand-all");'
-      +         'var co=document.getElementById("studies-collapse-all");'
-      +         'if(ex)ex.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();setAll(true);});'
-      +         'if(co)co.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();setAll(false);});'
-      +       '}'
-      +       'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",wire);}else{wire();}'
-      +     '})();</script>'
+      +     '<button type="button" onclick="document.querySelectorAll(\'.study-fold\').forEach(function(d){d.open=true})">Expand all</button>'
+      +     '<button type="button" onclick="document.querySelectorAll(\'.study-fold\').forEach(function(d){d.open=false})">Collapse all</button>'
       +   '</div>'
       +   studiesHtml
 
@@ -7293,24 +7197,6 @@
     });
     var ungrouped = window._investigations.filter(function(s) { return !seen[s.name]; });
     if (ungrouped.length) groups.push({name: '__ungrouped__', title: 'Ungrouped', studies: ungrouped});
-
-    // Scope to current investigation: when the cross-worktree registry
-    // has identified a current iset (window._currentIsetSlug, set by
-    // investigation-switcher.js after fetching /api/investigation-registry)
-    // AND that iset has a group here, drop every other group so the rail
-    // reflects only the studies the user is actively working on. The
-    // iset dropdown at the top of the rail is the way to switch isets;
-    // listing every iset's studies in the rail itself was just noise.
-    // Falls back to the full all-groups render if no current slug is
-    // known yet (registry still loading) or if the current slug doesn't
-    // match any group (defensive).
-    var currentSlug = window._currentIsetSlug || '';
-    if (currentSlug) {
-      var hasCurrent = groups.some(function(g) { return g.name === currentSlug; });
-      if (hasCurrent) {
-        groups = groups.filter(function(g) { return g.name === currentSlug; });
-      }
-    }
 
     // Flat-list mode: when there's exactly one investigation (no
     // ungrouped studies), render its studies as a flat list directly

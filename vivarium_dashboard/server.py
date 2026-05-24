@@ -32,7 +32,6 @@ import os
 import re
 import shutil
 import signal
-import socket
 import sqlite3
 import subprocess
 import sys
@@ -236,10 +235,6 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/open-window":        "_post_open_window",
     "/api/suggest":            "_post_suggest",
     "/api/composite-test-run": "_post_composite_test_run",
-    # UI-authored composites (todo #11). The /draft/<id>/promote variant is
-    # dispatched by prefix in do_POST since the path carries a segment.
-    "/api/composite/create":   "_post_composite_create",
-    "/api/composite/commit":   "_post_composite_commit",
     "/api/iset-create":         "_post_iset_create",
     "/api/iset-clone":          "_post_iset_clone",
     "/api/references-fetch":    "_post_references_fetch",
@@ -292,10 +287,6 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/workspaces/cleanup-stale": "_post_workspaces_cleanup_stale",
     "/api/workspaces/start":         "_post_workspaces_start",
     "/api/workspaces/stop":          "_post_workspaces_stop",
-    "/api/workspaces/create":        "_post_workspaces_create",
-    # GitHub OAuth (todo #8 Phase B-bis).
-    "/api/auth/github/start":  "_post_auth_github_start",
-    "/api/auth/github/logout": "_post_auth_github_logout",
 }
 # Inject study-alias routes into the POST route map (same method name as old).
 for _old, _new in _POST_STUDY_ALIASES.items():
@@ -349,13 +340,7 @@ def _get_registry_data(bypass_cache: bool = False) -> dict:
         # Dedupe while preserving insertion order.
         _workspace_pkgs_repr = repr(list(dict.fromkeys(_ws_import_pkgs)))
 
-        venv_py = WORKSPACE / ".venv" / "bin" / "python3"
-        if venv_py.exists():
-            py_cmd = [str(venv_py), "-c"]
-        elif shutil.which("uv") and (WORKSPACE / "pyproject.toml").exists():
-            py_cmd = ["uv", "run", "--project", str(WORKSPACE), "python3", "-c"]
-        else:
-            py_cmd = [sys.executable, "-c"]
+        py = sys.executable
         script = textwrap.dedent(f"""
 import json, sys
 try:
@@ -465,7 +450,7 @@ except Exception as e:
     print(json.dumps({{"error": f"build_core() failed: {{e}}", "processes": [], "types": []}}))
 """)
         result = subprocess.run(
-            py_cmd + [script],
+            [py, "-c", script],
             cwd=WORKSPACE, capture_output=True, text=True, timeout=15,
         )
         if result.returncode != 0:
@@ -500,34 +485,8 @@ def _save_upload(file_b64: str, target_path: Path) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-WORKSPACE: Path | None = Path("/")  # set by serve(); ``None`` = workspaceless mode
-# Default sentinel kept as ``Path("/")`` rather than ``None`` so unit tests
-# that call pure helpers from this module without going through ``serve()``
-# see the same sentinel they always have (avoids ``None / "studies"`` TypeErrors
-# in fixtures that monkeypatch lazily). ``serve(workspace=None, ...)``
-# explicitly assigns ``WORKSPACE = None`` to enter workspaceless mode; the
-# dispatch guards in ``do_GET`` / ``do_POST`` then short-circuit non-allowlisted
-# routes.
+WORKSPACE: Path = Path("/")  # set by main()
 LOCK = Lock()
-
-# Workspaceless mode (Phase A of todo #8): when WORKSPACE is None, the dashboard
-# acts as a launcher — only the listed routes are reachable. Everything else
-# 409s with {"error": "no workspace bound"}. Pure prefixes (matched with
-# ``startswith``) so query strings and sub-paths under /api/auth/github/ work.
-_WORKSPACELESS_GET_ALLOW: tuple[str, ...] = (
-    "/api/workspaces",
-    "/api/auth/github/",     # Phase B-bis (not yet wired)
-    "/api/compute-backends", # Phase B (not yet wired)
-)
-_WORKSPACELESS_POST_ALLOW: frozenset[str] = frozenset({
-    "/api/workspaces/add",
-    "/api/workspaces/start",
-    "/api/workspaces/forget",
-    "/api/workspaces/cleanup-stale",
-    "/api/workspaces/create",  # Phase C (not yet wired)
-    "/api/auth/github/start",  # Phase B-bis (not yet wired)
-    "/api/auth/github/logout", # Phase B-bis (not yet wired)
-})
 
 # ---------------------------------------------------------------------------
 # Study slug validation
@@ -1257,136 +1216,22 @@ def _peer_current_investigation(url: str) -> dict | None:
     return out
 
 
-# Investigation statuses that should NOT surface in the cross-worktree
-# sidebar. Anything else (planning, running, planned, in_progress, blank…)
-# is treated as "open" and listed. Aligns with /pbg-investigation close,
-# which stamps `status: closed`.
-_INVESTIGATION_STATUS_HIDDEN_FROM_SIDEBAR = frozenset({
-    "closed", "archived", "complete",
-})
-
-
-def _list_other_worktrees(ws_root: Path) -> list[dict]:
-    """Return ``[{path, branch}]`` for every git worktree of ``ws_root``'s
-    repo EXCEPT ``ws_root`` itself.
-
-    Uses ``git worktree list --porcelain`` from inside ``ws_root``. Returns
-    an empty list if ``ws_root`` is not a git checkout, or git is missing,
-    or the command fails. Never raises.
-    """
-    import subprocess
-    try:
-        proc = subprocess.run(
-            ["git", "worktree", "list", "--porcelain"],
-            cwd=str(ws_root),
-            capture_output=True,
-            text=True,
-            timeout=3.0,
-            check=False,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return []
-    if proc.returncode != 0:
-        return []
-    out: list[dict] = []
-    cur: dict = {}
-    self_resolved = str(ws_root.resolve())
-    for line in proc.stdout.splitlines():
-        if line.startswith("worktree "):
-            if cur and cur.get("path") and cur["path"] != self_resolved:
-                out.append(cur)
-            cur = {"path": line[len("worktree "):].strip(), "branch": None}
-        elif line.startswith("branch "):
-            ref = line[len("branch "):].strip()
-            cur["branch"] = ref.split("/")[-1] if ref else None
-        elif line.startswith("detached"):
-            cur["branch"] = None
-    if cur and cur.get("path") and cur["path"] != self_resolved:
-        out.append(cur)
-    return out
-
-
-def _scan_worktree_investigations(worktree_path: str) -> list[dict]:
-    """Walk ``<worktree>/investigations/*/investigation.yaml`` off disk
-    and return slim summaries: ``[{slug, title, status}, ...]``.
-
-    Used to surface dormant investigations whose dashboards are not
-    running. Returns an empty list on any I/O error or invalid YAML.
-    Never raises. Skips entries whose ``status`` matches
-    ``_INVESTIGATION_STATUS_HIDDEN_FROM_SIDEBAR``.
-    """
-    import yaml as _yaml
-    root = Path(worktree_path) / "investigations"
-    if not root.is_dir():
-        return []
-    out: list[dict] = []
-    for child in sorted(root.iterdir()):
-        if not child.is_dir():
-            continue
-        spec_file = child / "investigation.yaml"
-        if not spec_file.is_file():
-            continue
-        try:
-            data = _yaml.safe_load(spec_file.read_text()) or {}
-        except (OSError, _yaml.YAMLError):
-            continue
-        if not isinstance(data, dict):
-            continue
-        slug = data.get("name") or child.name
-        status = (data.get("status") or "").strip().lower()
-        if status in _INVESTIGATION_STATUS_HIDDEN_FROM_SIDEBAR:
-            continue
-        out.append({
-            "slug":   slug,
-            "title":  data.get("title") or slug,
-            "status": data.get("status"),
-        })
-    return out
-
-
 def _build_investigation_registry_for_test(
     ws_root: Path,
     this_url: str,
     *,
     list_servers_fn=None,
     fetch_peer_fn=None,
-    list_worktrees_fn=None,
-    scan_worktree_fn=None,
-    current_branch_fn=None,
 ) -> dict:
     """Pure function backing GET /api/investigation-registry.
 
-    Injectable hooks keep the helper testable without filesystem, HTTP,
-    subprocess, or git I/O.
+    ``list_servers_fn`` and ``fetch_peer_fn`` are injectable to keep the
+    helper testable without filesystem or HTTP I/O.
 
-    Returns four buckets:
-
-      - ``current``         — this dashboard's chosen Investigation.
-                              Picked by (in priority order):
-                                1. investigation whose ``name`` matches the
-                                   current git branch (Investigation ≡ branch
-                                   convention), then
-                                2. any investigation with
-                                   ``effective_status == "running"``, then
-                                3. the first investigation alphabetically.
-      - ``local_siblings``  — every OTHER investigation in THIS workspace
-                              (same on-disk tree as ``current``). Lets the
-                              sidebar list all investigations the user is
-                              actively iterating on without forcing each
-                              one onto its own worktree.
-      - ``running_others``  — peer dashboards' chosen Investigations
-                              (one per live peer), via HTTP probe of
-                              each peer's ``/api/iset-list``.
-      - ``dormant_others``  — open Investigations on OTHER worktrees
-                              that do NOT have a running dashboard.
-                              Read directly off disk via
-                              ``git worktree list`` + filesystem scan.
-                              Entries whose ``status`` is
-                              closed/archived/complete are filtered out
-                              so the sidebar never renders stale rows.
-
-    Contract: previously-existing keys retain their exact shape;
-    ``local_siblings`` and ``dormant_others`` are additive buckets.
+    Returns ``{current: {...}, running_others: [...]}`` where each
+    ``running_others`` entry carries ``{slug, title?, worktree_path, url,
+    effective_status, pid}``. Entries whose peer probe fails (None) are
+    dropped from the list so the sidebar never renders empty rows.
     """
     if list_servers_fn is None:
         try:
@@ -1396,41 +1241,16 @@ def _build_investigation_registry_for_test(
             list_servers_fn = lambda: []
     if fetch_peer_fn is None:
         fetch_peer_fn = _peer_current_investigation
-    if list_worktrees_fn is None:
-        list_worktrees_fn = lambda: _list_other_worktrees(ws_root)
-    if scan_worktree_fn is None:
-        scan_worktree_fn = _scan_worktree_investigations
-    if current_branch_fn is None:
-        def _default_branch_fn():
-            try:
-                from vivarium_dashboard.lib.work_state import _current_git_branch
-                return _current_git_branch(ws_root)
-            except Exception:
-                return None
-        current_branch_fn = _default_branch_fn
 
-    # All local investigations in this workspace, picked apart into
-    # current + siblings. Selection order: git-branch match > running >
-    # alphabetical first.
+    # Current Investigation: pick from this workspace's iset list with the
+    # same heuristic we use for peers (running > first > none).
     invs = _build_iset_summary_for_test(ws_root)
-    chosen_idx: int | None = None
     if invs:
-        cur_branch = current_branch_fn() or ""
-        if cur_branch:
-            for i, iv in enumerate(invs):
-                if iv.get("name") == cur_branch:
-                    chosen_idx = i
-                    break
-        if chosen_idx is None:
-            for i, iv in enumerate(invs):
-                if iv.get("effective_status") == "running":
-                    chosen_idx = i
-                    break
-        if chosen_idx is None:
-            chosen_idx = 0
-
-    if chosen_idx is not None:
-        chosen = invs[chosen_idx]
+        running = next(
+            (i for i in invs if i.get("effective_status") == "running"),
+            None,
+        )
+        chosen = running or invs[0]
         current = {
             "slug":             chosen.get("name"),
             "title":            chosen.get("title", chosen.get("name")),
@@ -1447,24 +1267,10 @@ def _build_investigation_registry_for_test(
             "effective_status": None,
         }
 
-    # local_siblings — everything else in this workspace.
-    siblings: list[dict] = []
-    if invs:
-        for i, iv in enumerate(invs):
-            if i == chosen_idx:
-                continue
-            siblings.append({
-                "slug":             iv.get("name"),
-                "title":            iv.get("title", iv.get("name")),
-                "worktree_path":    str(ws_root.resolve()),
-                "effective_status": iv.get("effective_status"),
-            })
-
     # Running-others: every server record that does NOT point at this
     # worktree path AND has a live PID.
     this_path = str(ws_root.resolve())
     others: list[dict] = []
-    running_paths: set[str] = set()
     for entry in list_servers_fn():
         if entry.get("path") == this_path:
             continue
@@ -1484,32 +1290,8 @@ def _build_investigation_registry_for_test(
             "effective_status": peer.get("effective_status"),
             "pid":              entry.get("pid"),
         })
-        if entry.get("path"):
-            running_paths.add(entry["path"])
 
-    # Dormant-others: open investigations on OTHER worktrees that do NOT
-    # have a live dashboard. Read directly off disk so closed/archived
-    # ones can be filtered without a peer process.
-    dormant: list[dict] = []
-    for wt in list_worktrees_fn():
-        wt_path = wt.get("path")
-        if not wt_path or wt_path == this_path or wt_path in running_paths:
-            continue
-        for inv in scan_worktree_fn(wt_path):
-            dormant.append({
-                "slug":          inv.get("slug"),
-                "title":         inv.get("title"),
-                "worktree_path": wt_path,
-                "branch":        wt.get("branch"),
-                "status":        inv.get("status"),
-            })
-
-    return {
-        "current":         current,
-        "local_siblings":  siblings,
-        "running_others":  others,
-        "dormant_others":  dormant,
-    }
+    return {"current": current, "running_others": others}
 
 
 def _build_iset_detail_for_test(ws_root: Path, name: str) -> tuple[dict, int]:
@@ -3193,27 +2975,6 @@ def _enrich_runs_with_meta(study_dir: Path, runs: list[dict]) -> list[dict]:
     return enriched
 
 
-def _render_workspaceless_landing_html() -> str:
-    """Render templates/landing.html.j2 for the no-workspace-bound mode."""
-    import jinja2
-    env = jinja2.Environment(
-        loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
-        autoescape=True,
-    )
-    tpl = env.get_template("landing.html.j2")
-    return tpl.render(asset_version=_static_asset_version())
-
-
-def _static_asset_version() -> str:
-    """Cheap cache-busting key derived from the package version. ``""`` if
-    unavailable."""
-    try:
-        from importlib.metadata import version
-        return version("vivarium-dashboard")
-    except Exception:
-        return ""
-
-
 def _render_study_detail_html(name: str, spec: dict) -> str:
     """Render study-detail.html via Jinja2."""
     import jinja2
@@ -3716,8 +3477,6 @@ def _dirty_workspace() -> str:
             continue
         if path in submodules:
             continue
-        if path == ".gitmodules":
-            continue
         kept.append(raw)
     return "\n".join(kept)
 
@@ -4141,35 +3900,8 @@ class Handler(BaseHTTPRequestHandler):
             if len(_segs) == 2:
                 return self._get_study_detail_page()
 
-        # Composite Builder page: /composites/new (todo #11). Optional draft
-        # id query string (?draft=<id>) reopens an in-progress draft.
-        _path_only_cb = self.path.split("?", 1)[0]
-        if _path_only_cb == "/composites/new":
-            return self._get_composite_builder_page()
-
         # Strip query string for route matching (self.path includes ?focus=...).
         path_only = self.path.split("?", 1)[0]
-
-        # Workspaceless mode: serve only the landing page, the allowlisted API
-        # routes, and bundled static assets. Everything else 409s.
-        if WORKSPACE is None:
-            if path_only in ("/", "/index.html"):
-                return self._serve_workspaceless_landing()
-            if any(self.path.startswith(p) for p in _WORKSPACELESS_GET_ALLOW):
-                pass  # fall through to the normal GET dispatch below
-            else:
-                static_rel = path_only.lstrip("/")
-                if ".." in static_rel.split("/") or static_rel.startswith("/"):
-                    self.send_response(403); self.end_headers(); return
-                bundled = STATIC_DIR / static_rel
-                if bundled.is_file():
-                    return self._serve_file(bundled, self._guess_mime(static_rel))
-                if static_rel.startswith("assets/"):
-                    bundled_alt = STATIC_DIR / static_rel[len("assets/"):]
-                    if bundled_alt.is_file():
-                        return self._serve_file(bundled_alt, self._guess_mime(static_rel))
-                return self._json({"error": "no workspace bound"}, 409)
-
         if path_only in ("/", "/index.html"):
             return self._serve_file(WORKSPACE / "reports" / "index.html", "text/html")
         # GitHub auth (cherry-picked from #65, Phase B-bis).
@@ -4181,13 +3913,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_auth_github_orgs()
         if self.path.startswith("/api/workspaces"):
             return self._get_workspaces()
-        # GitHub OAuth (todo #8 Phase B-bis + B-extension).
-        if self.path.startswith("/api/auth/github/status"):
-            return self._get_auth_github_status()
-        if self.path.startswith("/api/auth/github/poll"):
-            return self._get_auth_github_poll()
-        if self.path.startswith("/api/auth/github/orgs"):
-            return self._get_auth_github_orgs()
         if self.path.startswith("/api/state"):
             return self._serve_state()
         if self.path.startswith("/api/events"):
@@ -4216,15 +3941,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_composite_state()
         if self.path.startswith("/api/composite-resolve"):
             return self._get_composite_resolve()
-        # UI-authored composites (todo #11). Order matters: the specific
-        # /api/composite/draft/... prefix must be tested before the generic
-        # /api/composites prefix lower in this chain.
-        if self.path.startswith("/api/composite/draft/"):
-            return self._get_composite_draft()
-        # Process introspection (Phase B). Dynamic segment is the process
-        # address; tail is /schema.
-        if self.path.startswith("/api/process/") and self.path.split("?", 1)[0].endswith("/schema"):
-            return self._get_process_schema()
         if self.path.startswith("/api/investigation-viz-html"):
             return self._get_investigation_viz_html()
         if self.path.startswith("/api/investigation-composites"):
@@ -4331,19 +4047,6 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError as e:
             return self._json({"error": f"invalid JSON: {e}"}, 400)
 
-        if WORKSPACE is None and self.path not in _WORKSPACELESS_POST_ALLOW:
-            return self._json({"error": "no workspace bound"}, 409)
-
-        # Dynamic-segment POST routes (composite drafts, todo #11). Matched
-        # before the exact-path route map so /api/composite/draft/<id>/promote
-        # resolves without an entry per draft.
-        if self.path.startswith("/api/composite/draft/"):
-            tail = self.path[len("/api/composite/draft/"):]
-            if tail.endswith("/promote"):
-                draft_id = tail[: -len("/promote")]
-                return self._post_composite_promote(draft_id, body)
-            return self._json({"error": "not found"}, 404)
-
         method_name = _POST_ROUTE_MAP.get(self.path)
         if method_name is None:
             return self._json({"error": "not found"}, 404)
@@ -4355,11 +4058,6 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length).decode()) if length else {}
         except json.JSONDecodeError as e:
             return self._json({"error": f"invalid JSON: {e}"}, 400)
-
-        # Dynamic-segment DELETE: /api/composite/draft/<id> (todo #11).
-        if self.path.startswith("/api/composite/draft/"):
-            draft_id = self.path[len("/api/composite/draft/"):]
-            return self._delete_composite_draft(draft_id)
 
         route_map = {
             "/api/simulation":    self._delete_simulation,
@@ -6063,27 +5761,7 @@ if __name__ == "__main__":
             return self._json({"error": f"PR already exists: {state['pr_url']}", "pr_url": state["pr_url"]}, 409)
 
         base = state.get("base") or "main"
-        # PR title default: prefer the matching investigation's `title:`
-        # field (from investigations/<branch>/investigation.yaml) so the
-        # PR reads like "PDMP whole-cell model reformulation" rather than
-        # the technical "Workstream: <branch>". Branch and investigation
-        # slug are kept in 1:1 correspondence by the Investigation ≡
-        # branch convention, so we look up by branch name. Falls back
-        # to the legacy "Workstream: <branch>" when no matching
-        # investigation.yaml is present (e.g., generic feature branches).
-        def _default_pr_title(branch_name: str) -> str:
-            inv_yaml = WORKSPACE / "investigations" / branch_name / "investigation.yaml"
-            if inv_yaml.is_file():
-                try:
-                    inv_spec = yaml.safe_load(inv_yaml.read_text()) or {}
-                    inv_title = (inv_spec.get("title") or "").strip()
-                    if inv_title:
-                        return inv_title
-                except Exception:
-                    pass
-            return f"Workstream: {branch_name}"
-
-        title = (body.get("title") or "").strip() or _default_pr_title(branch)
+        title = (body.get("title") or "").strip() or f"Workstream: {branch}"
         body_text = (body.get("body") or "").strip() or "Created via pbg-template dashboard."
 
         if not shutil.which("gh"):
@@ -9044,485 +8722,6 @@ if __name__ == "__main__":
             return self._json(resp, 200)
         return self._json(resp, code)
 
-    # ------------------------------------------------------------------
-    # UI-authored composites (todo #11) -- create / draft / promote / commit
-    # ------------------------------------------------------------------
-
-    def _resolve_workspace_pkg(self) -> tuple[str | None, dict | None]:
-        """Resolve the workspace's Python package name from ``workspace.yaml``.
-
-        Mirrors the inline pattern repeated across this file. Returns
-        ``(pkg_name, error_response_dict)`` — the second element is non-None
-        when resolution fails, so the caller can early-return it.
-        """
-        try:
-            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
-        except Exception as e:
-            return None, {"error": f"failed to read workspace.yaml: {e}"}
-        pkg = ws_data.get("package_path") or (
-            "pbg_" + (ws_data.get("name") or "").replace("-", "_")
-        )
-        if not pkg:
-            return None, {"error": "workspace.yaml has no package_path / name"}
-        return pkg, None
-
-    def _post_composite_create(self, body: dict):
-        """POST /api/composite/create — serialize a draft, write it, validate.
-
-        Body shape::
-
-            {
-              "draft_id": "<optional; reuse existing slot>",
-              "draft":    {name, description?, requires?, parameters?, state},
-              "skip_validation": false  # default false — set true for the
-                                        # debounced autosave loop where the
-                                        # cost of build_core() isn't worth it
-            }
-
-        Returns ``{draft_id, path, validation, soft_issues}``. **No git
-        operations** — drafts live under ``.pbg/composite-drafts/`` and are
-        git-ignored.
-        """
-        try:
-            _ws_add_to_sys_path()
-            from vivarium_dashboard.lib.composite_author import (
-                CompositeAuthorError, serialize_composite, soft_check,
-                validate_composite, write_draft,
-            )
-        except ImportError as e:
-            return self._json({"error": f"composite_author unavailable: {e}"}, 500)
-
-        draft = body.get("draft")
-        if not isinstance(draft, dict):
-            return self._json({"error": "'draft' must be a dict"}, 400)
-
-        soft_issues = soft_check(draft)
-
-        try:
-            yaml_text = serialize_composite(draft)
-        except CompositeAuthorError as e:
-            return self._json({"error": str(e), "soft_issues": soft_issues}, 400)
-
-        draft_id_in = body.get("draft_id")
-        try:
-            draft_id, path = write_draft(WORKSPACE, yaml_text, draft_id=draft_id_in)
-        except CompositeAuthorError as e:
-            return self._json({"error": str(e)}, 400)
-        except OSError as e:
-            return self._json({"error": f"could not write draft: {e}"}, 500)
-
-        validation: dict = {"ok": True, "errors": [], "warnings": [], "skipped": True}
-        if not body.get("skip_validation"):
-            report = validate_composite(WORKSPACE, path)
-            validation = {
-                "ok": report.ok,
-                "errors": report.errors,
-                "warnings": report.warnings,
-                "stderr": report.stderr if not report.ok else "",
-                "skipped": False,
-            }
-
-        return self._json({
-            "draft_id": draft_id,
-            "path": str(path.relative_to(WORKSPACE)),
-            "validation": validation,
-            "soft_issues": soft_issues,
-        }, 200)
-
-    def _get_composite_draft(self):
-        """GET /api/composite/draft/<id> — return draft yaml + parsed shape."""
-        try:
-            _ws_add_to_sys_path()
-            from vivarium_dashboard.lib.composite_author import (
-                CompositeAuthorError, read_draft,
-            )
-        except ImportError as e:
-            return self._json({"error": f"composite_author unavailable: {e}"}, 500)
-        path_only = self.path.split("?", 1)[0]
-        draft_id = path_only[len("/api/composite/draft/"):]
-        if not draft_id or "/" in draft_id:
-            return self._json({"error": "invalid draft id"}, 400)
-        try:
-            text, parsed = read_draft(WORKSPACE, draft_id)
-        except CompositeAuthorError as e:
-            return self._json({"error": str(e)}, 404)
-        return self._json({
-            "draft_id": draft_id,
-            "yaml": text,
-            "parsed": parsed,
-        }, 200)
-
-    def _post_composite_promote(self, draft_id: str, body: dict):
-        """POST /api/composite/draft/<id>/promote — move draft → published path.
-
-        Body: ``{name?, overwrite?}``. If ``name`` omitted, the draft's own
-        ``name`` field is used. **Does not commit** — caller commits via
-        :py:meth:`_post_composite_commit`.
-        """
-        try:
-            _ws_add_to_sys_path()
-            from vivarium_dashboard.lib.composite_author import (
-                CompositeAuthorError, promote_draft, validate_composite,
-            )
-        except ImportError as e:
-            return self._json({"error": f"composite_author unavailable: {e}"}, 500)
-
-        pkg, err = self._resolve_workspace_pkg()
-        if err is not None:
-            return self._json(err, 500)
-
-        name = body.get("name")
-        overwrite = bool(body.get("overwrite"))
-        try:
-            target = promote_draft(WORKSPACE, pkg, draft_id,
-                                   name=name, overwrite=overwrite)
-        except CompositeAuthorError as e:
-            return self._json({"error": str(e)}, 400)
-        except OSError as e:
-            return self._json({"error": f"could not promote draft: {e}"}, 500)
-
-        report = validate_composite(WORKSPACE, target)
-        return self._json({
-            "path": str(target.relative_to(WORKSPACE)),
-            "validation": {
-                "ok": report.ok,
-                "errors": report.errors,
-                "warnings": report.warnings,
-                "stderr": report.stderr if not report.ok else "",
-                "skipped": False,
-            },
-        }, 200)
-
-    def _delete_composite_draft(self, draft_id: str):
-        """DELETE /api/composite/draft/<id> — discard a draft."""
-        try:
-            _ws_add_to_sys_path()
-            from vivarium_dashboard.lib.composite_author import (
-                CompositeAuthorError, delete_draft,
-            )
-        except ImportError as e:
-            return self._json({"error": f"composite_author unavailable: {e}"}, 500)
-        try:
-            removed = delete_draft(WORKSPACE, draft_id)
-        except CompositeAuthorError as e:
-            return self._json({"error": str(e)}, 400)
-        return self._json({"removed": removed}, 200)
-
-    def _post_composite_commit(self, body: dict):
-        """POST /api/composite/commit — stage + commit a composite on the
-        active workstream branch.
-
-        Body: ``{path}`` — workspace-relative path to a composite YAML
-        previously written via ``promote``. Re-runs validation; refuses to
-        commit if validation fails (so dashboard never lands a broken file
-        on the workstream branch).
-
-        The commit pre-stages ``path`` explicitly inside the action closure,
-        because ``<pkg>/composites/`` isn't in :func:`_active_branch_action`'s
-        hardcoded allowlist. Pre-staged paths persist through the trailing
-        ``git add --update`` and into the final commit.
-        """
-        try:
-            _ws_add_to_sys_path()
-            from vivarium_dashboard.lib.composite_author import validate_composite
-        except ImportError as e:
-            return self._json({"error": f"composite_author unavailable: {e}"}, 500)
-
-        rel_path = (body.get("path") or "").strip().lstrip("/")
-        if not rel_path:
-            return self._json({"error": "'path' is required"}, 400)
-        # Defensive path containment — reject anything that escapes WORKSPACE.
-        abs_path = (WORKSPACE / rel_path).resolve()
-        try:
-            abs_path.relative_to(WORKSPACE.resolve())
-        except ValueError:
-            return self._json({"error": "path escapes workspace"}, 400)
-        if not abs_path.is_file():
-            return self._json({"error": f"file not found: {rel_path}"}, 404)
-        if not rel_path.endswith(".composite.yaml") and not rel_path.endswith(".composite.yml"):
-            return self._json({"error": "path must point at a .composite.yaml file"}, 400)
-
-        # Defensive re-validation — catches the case where a process was
-        # uninstalled between save and commit.
-        report = validate_composite(WORKSPACE, abs_path)
-        if not report.ok:
-            return self._json({
-                "error": "composite failed validation; refusing to commit",
-                "validation": {
-                    "ok": False,
-                    "errors": report.errors,
-                    "warnings": report.warnings,
-                    "stderr": report.stderr,
-                    "skipped": False,
-                },
-            }, 409)
-
-        composite_name = abs_path.name[: -len(".composite.yaml")] \
-            if rel_path.endswith(".composite.yaml") else abs_path.stem
-        commit_msg = f"feat(composites): add {composite_name!r} via UI builder"
-
-        # We can't go through _active_branch_action because it gates on
-        # `_dirty_workspace()` — and the promoted composite file IS the
-        # working-tree dirt we'd be trying to commit. Inline the
-        # branch-aware commit logic instead, scoped tightly to the one file.
-        _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.work_state import (
-            load_state_or_adopt_current,
-        )
-        state = load_state_or_adopt_current()
-        branch = state.get("active_branch")
-        if not branch:
-            return self._json({
-                "error": "no active workstream — click Start workstream at "
-                         "the top of the dashboard, or check out a feature "
-                         "branch first",
-            }, 409)
-
-        try:
-            current = subprocess.run(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                cwd=WORKSPACE, capture_output=True, text=True, check=True,
-            ).stdout.strip()
-            if current != branch:
-                r = subprocess.run(["git", "checkout", branch], cwd=WORKSPACE,
-                                   capture_output=True, text=True)
-                if r.returncode != 0:
-                    return self._json({
-                        "error": f"could not check out '{branch}': {r.stderr[:200]}"
-                    }, 500)
-
-            rel = str(abs_path.relative_to(WORKSPACE))
-            subprocess.run(
-                ["git", "add", "--", rel],
-                cwd=WORKSPACE, check=True, capture_output=True,
-            )
-            diff = subprocess.run(
-                ["git", "diff", "--cached", "--stat", "--", rel],
-                cwd=WORKSPACE, capture_output=True, text=True, check=True,
-            ).stdout
-            if not diff.strip():
-                return self._json({
-                    "error": "composite file has no changes to commit "
-                             "(already up to date on this branch?)"
-                }, 409)
-            subprocess.run([
-                "git",
-                "-c", "user.email=pbg-template@local",
-                "-c", "user.name=pbg-template",
-                "commit", "-m", commit_msg, "--", rel,
-            ], cwd=WORKSPACE, check=True, capture_output=True)
-            commit_sha = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=WORKSPACE, capture_output=True, text=True, check=True,
-            ).stdout.strip()
-        except subprocess.CalledProcessError as e:
-            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
-            return self._json({"error": f"git operation failed: {stderr[:300]}"}, 500)
-
-        return self._json({
-            "branch": branch,
-            "commit": commit_sha[:7],
-            "message": commit_msg,
-            "path": str(abs_path.relative_to(WORKSPACE)),
-        }, 200)
-
-    def _get_composite_builder_page(self):
-        """GET /composites/new — render the composite-builder page.
-
-        The page is a thin Jinja template (``composite_builder.html.j2``) that
-        loads the vendored Cytoscape build and ``composite-builder.js``. All
-        state lives client-side until the user clicks Save / Commit.
-        """
-        try:
-            tpl_dir = Path(__file__).parent / "templates"
-            tpl_path = tpl_dir / "composite_builder.html.j2"
-            if not tpl_path.is_file():
-                return self._send_html(
-                    "<h1>Composite builder template missing</h1>"
-                    f"<p>Expected at <code>{tpl_path}</code>.</p>",
-                    code=500,
-                )
-            # Reuse the existing tiny-Jinja-substitute helper if present;
-            # otherwise raw read is fine — the template has no variables yet.
-            html = tpl_path.read_text()
-            return self._send_html(html, code=200)
-        except Exception as e:
-            return self._send_html(f"<h1>error rendering builder</h1><pre>{e}</pre>",
-                                   code=500)
-
-    # ------------------------------------------------------------------
-    # Process introspection (Phase B, todo #11)
-    # ------------------------------------------------------------------
-
-    _PROCESS_SCHEMA_CACHE: dict = {}
-    _PROCESS_SCHEMA_TTL: float = 30.0  # seconds; matches _REGISTRY_TTL
-
-    def _get_process_schema(self):
-        """GET /api/process/<address>/schema — introspect a process class's
-        port + config schemas.
-
-        ``<address>`` is the value of the catalog entry's ``address`` field
-        as surfaced by ``/api/registry`` (e.g. ``pbg_increase_demo.processes.IncreaseProcess``
-        or a short name like ``IncreaseProcess``). Caches by address for
-        ``_PROCESS_SCHEMA_TTL`` seconds — palette drags often hit the same
-        address multiple times during a session.
-        """
-        import urllib.parse
-
-        path_only = self.path.split("?", 1)[0]
-        # Strip the /api/process/ prefix and the /schema suffix.
-        body = path_only[len("/api/process/"):]
-        if not body.endswith("/schema"):
-            return self._json({"error": "missing /schema suffix"}, 400)
-        address_raw = body[: -len("/schema")]
-        address = urllib.parse.unquote(address_raw).strip()
-        if not address:
-            return self._json({"error": "address required"}, 400)
-        if any(ch in address for ch in ("'", '"', "\n", "\r")):
-            return self._json({"error": "address contains invalid chars"}, 400)
-
-        # Cache lookup.
-        cache_key = address
-        now = time.time()
-        cached = self._PROCESS_SCHEMA_CACHE.get(cache_key)
-        if cached and (now - cached["ts"]) < self._PROCESS_SCHEMA_TTL:
-            return self._json(cached["data"], 200)
-
-        # Resolve workspace package so the subprocess can build_core().
-        pkg, err = self._resolve_workspace_pkg()
-        if err is not None:
-            return self._json(err, 500)
-
-        venv_py = WORKSPACE / ".venv" / "bin" / "python3"
-        py = str(venv_py) if venv_py.exists() else sys.executable
-
-        # Subprocess script — locate the class in core.link_registry, read
-        # inputs_schema / outputs_schema / config_schema, emit JSON.
-        # ``address`` is interpolated as a Python literal via repr() so any
-        # weird-but-valid chars survive.
-        script = textwrap.dedent(f"""
-            import json, sys, traceback
-            try:
-                from {pkg}.core import build_core
-                core = build_core()
-            except Exception as e:
-                print(json.dumps({{
-                    "error": f"could not build core: {{type(e).__name__}}: {{e}}",
-                    "traceback": traceback.format_exc(limit=5),
-                }}))
-                sys.exit(0)
-
-            address = {address!r}
-            link_reg = getattr(core, 'link_registry', {{}}) or {{}}
-            # Try direct lookup first, then short-name fallback.
-            cls = link_reg.get(address)
-            if cls is None and "." in address:
-                cls = link_reg.get(address.rsplit(".", 1)[-1])
-            if cls is None and ":" in address:
-                cls = link_reg.get(address.split(":", 1)[-1])
-            if cls is None:
-                # Try matching by fully-qualified module.qualname.
-                for name, candidate in link_reg.items():
-                    try:
-                        fq = f"{{candidate.__module__}}.{{candidate.__qualname__}}"
-                    except Exception:
-                        continue
-                    if fq == address:
-                        cls = candidate
-                        break
-            if cls is None:
-                print(json.dumps({{
-                    "error": f"address {{address!r}} not in core.link_registry",
-                    "available_count": len(link_reg),
-                }}))
-                sys.exit(0)
-
-            def _read_schema(attr):
-                val = getattr(cls, attr, None)
-                if callable(val):
-                    try:
-                        val = val(cls)
-                    except TypeError:
-                        try:
-                            val = val()
-                        except Exception:
-                            val = None
-                    except Exception:
-                        val = None
-                return val
-
-            def _ports_from_schema(schema):
-                # Schema can be a dict {{"port_name": "type"|dict}} or a
-                # string like "port:type|other:type" (loom-style). Normalise
-                # to [{{name, type, multiple?}}].
-                out = []
-                if isinstance(schema, dict):
-                    for name, spec in schema.items():
-                        if isinstance(spec, dict):
-                            t = spec.get("_type") or spec.get("type") or ""
-                            multiple = bool(spec.get("_apply") == "set" if isinstance(spec, dict) else False)
-                        else:
-                            t = str(spec) if spec is not None else ""
-                            multiple = False
-                        out.append({{"name": name, "type": t, "multiple": multiple}})
-                elif isinstance(schema, str):
-                    for chunk in schema.split("|"):
-                        chunk = chunk.strip()
-                        if not chunk:
-                            continue
-                        if ":" in chunk:
-                            name, _, t = chunk.partition(":")
-                            out.append({{"name": name.strip(), "type": t.strip(), "multiple": False}})
-                        else:
-                            out.append({{"name": chunk, "type": "", "multiple": False}})
-                return out
-
-            inputs = _ports_from_schema(_read_schema("inputs_schema"))
-            outputs = _ports_from_schema(_read_schema("outputs_schema"))
-            config_schema = _read_schema("config_schema")
-            try:
-                config_schema = json.loads(json.dumps(config_schema, default=str))
-            except Exception:
-                config_schema = None
-
-            try:
-                module = cls.__module__
-                qualname = cls.__qualname__
-            except Exception:
-                module, qualname = "", str(cls)
-
-            print(json.dumps({{
-                "address": address,
-                "resolved": {{"module": module, "qualname": qualname}},
-                "inputs": inputs,
-                "outputs": outputs,
-                "config_schema": config_schema,
-            }}))
-        """)
-
-        try:
-            result = subprocess.run(
-                [py, "-c", script],
-                cwd=WORKSPACE, capture_output=True, text=True, timeout=15,
-            )
-        except subprocess.TimeoutExpired:
-            return self._json({"error": "introspection timed out (15s)"}, 504)
-        if result.returncode != 0:
-            return self._json({
-                "error": f"introspection subprocess failed: {(result.stderr or '').strip()[:300]}",
-            }, 500)
-        try:
-            line = result.stdout.strip().split("\n")[-1]
-            data = json.loads(line)
-        except (json.JSONDecodeError, IndexError):
-            return self._json({
-                "error": f"invalid introspection output: {result.stdout[:300]}",
-            }, 500)
-
-        if "error" not in data:
-            self._PROCESS_SCHEMA_CACHE[cache_key] = {"data": data, "ts": now}
-        return self._json(data, 200)
-
     def _post_investigation_composite_rebuild(self, body: dict):
         """POST /api/investigation-composite-rebuild {investigation, name}
         Re-render a derived composite from its recipe (re-applies overrides on
@@ -11687,16 +10886,6 @@ if __name__ == "__main__":
         self.end_headers()
         self.wfile.write(data)
 
-    def _serve_workspaceless_landing(self):
-        """Render and serve the no-workspace-bound landing page."""
-        html = _render_workspaceless_landing_html().encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(html)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(html)
-
     def _get_workspaces(self):
         """GET /api/workspaces — dropdown payload for the workspace switcher.
 
@@ -11706,56 +10895,31 @@ if __name__ == "__main__":
         """
         from pbg_superpowers import workspace_catalog
 
-        # Workspaceless mode: there's no "current" workspace, so skip the
-        # self-row injection and report `current: null`. The catalog still
-        # populates the list.
-        if WORKSPACE is None:
-            result = {"current": None, "workspaces": []}
-            try:
-                catalog = workspace_catalog.list_workspaces()
-            except Exception:
-                catalog = []
-            current_resolved = None
-        else:
-            current_root = WORKSPACE
-            current_resolved = str(current_root.resolve())
+        current_root = WORKSPACE
+        current_resolved = str(current_root.resolve())
 
-            current_name = self._read_workspace_name(current_root)
-            result = {
-                "current": {"name": current_name, "path": current_resolved},
-                "workspaces": [],
-            }
+        current_name = self._read_workspace_name(current_root)
+        result = {
+            "current": {"name": current_name, "path": current_resolved},
+            "workspaces": [],
+        }
 
-            try:
-                catalog = workspace_catalog.list_workspaces()
-            except Exception:
-                catalog = []
+        try:
+            catalog = workspace_catalog.list_workspaces()
+        except Exception:
+            catalog = []
 
-            if not any(e.get("path") == current_resolved for e in catalog):
-                catalog = [{
-                    "name": current_name,
-                    "path": current_resolved,
-                    "package": None,
-                    "added_at": None,
-                }] + list(catalog)
+        if not any(e.get("path") == current_resolved for e in catalog):
+            catalog = [{
+                "name": current_name,
+                "path": current_resolved,
+                "package": None,
+                "added_at": None,
+            }] + list(catalog)
 
-        import yaml as _yaml
         for entry in catalog:
             path = entry.get("path", "")
             row = {"name": entry.get("name") or Path(path).name, "path": path}
-            ws_path = Path(path)
-            ws_yaml_path = ws_path / "workspace.yaml"
-            if ws_yaml_path.is_file():
-                try:
-                    ws_data = _yaml.safe_load(ws_yaml_path.read_text()) or {}
-                    cb = ws_data.get("compute_backend")
-                    if cb:
-                        row["compute_backend"] = cb
-                    go = ws_data.get("github_org")
-                    if go:
-                        row["github_org"] = go
-                except Exception:
-                    pass  # non-fatal — omit extra fields
             if not Path(path).is_dir():
                 row["status"] = "missing"
             elif path == current_resolved:
@@ -11892,10 +11056,6 @@ if __name__ == "__main__":
 
         log_path = target / ".pbg" / "server" / "start.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        from vivarium_dashboard.lib import github_auth
-        gh_env = github_auth.current_token_env()
-        spawn_env = os.environ.copy()
-        spawn_env.update(gh_env)
         with log_path.open("ab") as logf:
             subprocess.Popen(
                 [sys.executable, "-m", "vivarium_dashboard.cli",
@@ -11904,7 +11064,6 @@ if __name__ == "__main__":
                 start_new_session=True,
                 close_fds=True,
                 cwd=str(target),
-                env=spawn_env,
             )
 
         deadline = time.monotonic() + 8.0
@@ -11920,100 +11079,6 @@ if __name__ == "__main__":
             "log_path": str(log_path),
             "hint": f"tail {log_path}",
         }, 504)
-
-    def _post_workspaces_create(self, body: dict):
-        """POST /api/workspaces/create — scaffold a new workspace + spawn it.
-
-        Body: ``{name: str, backend: "local"|"hpc:ccam", github_org?: str}``.
-        Validates inputs, copies pbg-template, runs template-init.sh, persists
-        ``compute_backend`` in workspace.yaml, ``git init``s, optionally
-        creates/attaches a GitHub remote (injecting the Phase B-bis session
-        token env), registers the workspace, and finally spawns the
-        per-workspace dashboard subprocess + polls for it to register —
-        reusing the same wait-on-server-info pattern as /api/workspaces/start.
-
-        Returns ``{url, pid, path, workspace_yaml, branch, remote_url?,
-        backend, github_org?, warnings?}`` on success.
-        """
-        from vivarium_dashboard.lib.workspace_create import (
-            create_workspace, validate_name, validate_backend, normalise_org,
-            WorkspaceCreateError, _check_singularity_for_hpc,
-        )
-        from vivarium_dashboard.lib import github_auth
-
-        if not isinstance(body, dict):
-            return self._json({"error": "body must be a JSON object"}, 400)
-
-        try:
-            name = validate_name(body.get("name", ""))
-            backend = validate_backend(body.get("backend", ""))
-            github_org = normalise_org(body.get("github_org"))
-        except WorkspaceCreateError as e:
-            return self._json({"error": e.message, **e.detail}, e.code)
-
-        # Auth gate: org-tracked workspaces require a GitHub session so the
-        # gh repo create / push subprocesses can authenticate. The UI guards
-        # against this client-side (Phase B disables the org field when
-        # unauthenticated) — belt-and-braces server-side check.
-        gh_env: dict[str, str] = {}
-        if github_org:
-            gh_env = github_auth.current_token_env()
-            if not gh_env:
-                return self._json({
-                    "error": "github_login_required",
-                    "hint": "Sign in with GitHub first (header chip) or run gh auth login.",
-                }, 401)
-
-        try:
-            result = create_workspace(
-                name=name, backend=backend, github_org=github_org, gh_env=gh_env,
-            )
-        except WorkspaceCreateError as e:
-            return self._json({"error": e.message, **e.detail}, e.code)
-        except Exception as e:  # noqa: BLE001 — last-resort surface
-            return self._json({"error": "create_failed",
-                               "detail": github_auth.mask_token(str(e))}, 500)
-
-        # Spawn the child dashboard for the new workspace and poll until it
-        # registers in ~/.pbg/servers/. Mirrors _post_workspaces_start.
-        target = result.path
-        log_path = target / ".pbg" / "server" / "start.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        spawn_env = os.environ.copy()
-        spawn_env.update(gh_env)  # child inherits the session token (empty when no org)
-        with log_path.open("ab") as logf:
-            subprocess.Popen(
-                [sys.executable, "-m", "vivarium_dashboard.cli",
-                 "serve", "--workspace", str(target)],
-                stdout=logf, stderr=logf, stdin=subprocess.DEVNULL,
-                start_new_session=True, close_fds=True,
-                cwd=str(target), env=spawn_env,
-            )
-
-        from pbg_superpowers import workspace_catalog
-        deadline = time.monotonic() + 12.0
-        entry = None
-        while time.monotonic() < deadline:
-            entry = workspace_catalog.find_running(target)
-            if entry is not None:
-                break
-            time.sleep(0.1)
-
-        response: dict = result.as_dict()
-        warning = _check_singularity_for_hpc(target, backend)
-        if warning:
-            response["warnings"] = [warning]
-
-        if entry is None:
-            response.update({
-                "error": "spawn_timeout",
-                "log_path": str(log_path),
-                "hint": f"workspace scaffolded but dashboard didn't register in time; tail {log_path}",
-            })
-            return self._json(response, 504)
-
-        response.update({"url": entry["url"], "pid": entry["pid"]})
-        return self._json(response, 200)
 
     def _post_workspaces_stop(self, body: dict):
         """POST /api/workspaces/stop — SIGTERM a running workspace's dashboard
@@ -12071,66 +11136,6 @@ if __name__ == "__main__":
             "error": "stop_timeout",
             "hint": f"PID {pid} still alive; SIGKILL it manually if stuck",
         }, 504)
-
-    # ------------------------------------------------------------------
-    # GitHub OAuth (todo #8 Phase B-bis)
-    # ------------------------------------------------------------------
-
-    def _post_auth_github_start(self, body: dict):
-        """POST /api/auth/github/start — initiate the Device Flow.
-
-        Returns the user_code + verification_uri the client must display, plus
-        a server-issued flow_id the client passes to ``/poll``. Never returns
-        the device_code (held server-side).
-        """
-        from vivarium_dashboard.lib.github_auth import start_device_flow
-        result = start_device_flow()
-        if "error" in result:
-            # 503 for missing client_id (deployment not configured); 502 for
-            # GitHub-side failures.
-            code = 503 if result["error"] == "no_client_id" else 502
-            return self._json(result, code)
-        return self._json(result, 200)
-
-    def _get_auth_github_poll(self):
-        """GET /api/auth/github/poll?flow_id=<uuid> — poll the token endpoint."""
-        from urllib.parse import parse_qs, urlparse
-        qs = parse_qs(urlparse(self.path).query)
-        flow_id = (qs.get("flow_id") or [""])[0].strip()
-        if not flow_id:
-            return self._json({"status": "error", "detail": "missing_flow_id"}, 400)
-
-        from vivarium_dashboard.lib.github_auth import poll_device_flow
-        result = poll_device_flow(flow_id)
-        # Map outcomes to HTTP codes the client can use without parsing JSON:
-        #   pending → 202, ok → 200, expired → 410, denied → 403, error → 400.
-        status = result.get("status")
-        code = {
-            "ok": 200, "pending": 202, "expired": 410, "denied": 403,
-        }.get(status, 400)
-        return self._json(result, code)
-
-    def _get_auth_github_status(self):
-        """GET /api/auth/github/status — current session, or {authenticated:false}.
-
-        Never includes the token itself."""
-        from vivarium_dashboard.lib.github_auth import status_payload
-        return self._json(status_payload(), 200)
-
-    def _post_auth_github_logout(self, body: dict):
-        """POST /api/auth/github/logout — clear in-memory session + keyring entry."""
-        from vivarium_dashboard.lib.github_auth import logout
-        logout()
-        return self._json({"ok": True}, 200)
-
-    def _get_auth_github_orgs(self):
-        """GET /api/auth/github/orgs — user's personal namespace + orgs (Phase B-extension)."""
-        from vivarium_dashboard.lib.github_auth import list_orgs
-        result = list_orgs()
-        if "error" in result:
-            code = 401 if result["error"] == "unauthenticated" else 502
-            return self._json(result, code)
-        return self._json(result, 200)
 
     def _read_workspace_name(self, root: Path) -> str:
         """Read `name` from <root>/workspace.yaml; fall back to dir basename."""
@@ -12315,14 +11320,8 @@ STATIC_DIR: Path = PACKAGE_ROOT / "static"
 # Entry point
 # ---------------------------------------------------------------------------
 
-def serve(workspace: Path | None, port: int, host: str = "127.0.0.1") -> int:
-    """Boot the dashboard HTTP server on ``host:port``.
-
-    If ``workspace`` is a path, the dashboard binds to it (the existing
-    per-workspace mode). If ``workspace`` is ``None``, the server runs in
-    workspaceless / launcher mode (Phase A of todo #8): only the workspace
-    switcher, GitHub auth, and workspace-creation routes are reachable;
-    everything else 409s with ``{"error": "no workspace bound"}``.
+def serve(workspace: Path, port: int, host: str = "127.0.0.1") -> int:
+    """Boot the dashboard HTTP server against ``workspace`` on ``host:port``.
 
     ``host`` defaults to ``127.0.0.1`` (loopback only — appropriate for local
     development). Pass ``0.0.0.0`` to bind every interface, which is required
@@ -12332,47 +11331,40 @@ def serve(workspace: Path | None, port: int, host: str = "127.0.0.1") -> int:
     Blocks until the server stops. Returns 0 on clean shutdown.
     """
     global WORKSPACE
-    if workspace is None:
-        WORKSPACE = None
-        print("vivarium-dashboard: no workspace bound — launcher mode", file=sys.stderr)
-    else:
-        WORKSPACE = Path(workspace).resolve()
-        _ws_add_to_sys_path()
-        # Register the active workspace root for ``vivarium_dashboard.lib``
-        # helpers that used to walk up from __file__.
-        from vivarium_dashboard.lib._root import set_workspace_root
-        set_workspace_root(WORKSPACE)
+    WORKSPACE = Path(workspace).resolve()
+    _ws_add_to_sys_path()
+    # Register the active workspace root for ``vivarium_dashboard.lib`` helpers
+    # that used to walk up from __file__.
+    from vivarium_dashboard.lib._root import set_workspace_root
+    set_workspace_root(WORKSPACE)
 
-        # Repair runs left 'running' by a previous crash/restart: a dead or
-        # missing PID becomes 'orphaned'; a live PID is left to keep running.
-        try:
-            from vivarium_dashboard.lib.run_registry import reconcile_stale_runs
-            n = reconcile_stale_runs(WORKSPACE / ".pbg" / "composite-runs.db")
-            if n:
-                print(f"reconciled {n} stale composite run(s) on startup")
-        except Exception as e:  # noqa: BLE001 — never block server boot on this
-            print(f"warning: run reconcile failed: {e}", file=sys.stderr)
+    # Repair runs left 'running' by a previous crash/restart: a dead or
+    # missing PID becomes 'orphaned'; a live PID is left to keep running.
+    try:
+        from vivarium_dashboard.lib.run_registry import reconcile_stale_runs
+        n = reconcile_stale_runs(WORKSPACE / ".pbg" / "composite-runs.db")
+        if n:
+            print(f"reconciled {n} stale composite run(s) on startup")
+    except Exception as e:  # noqa: BLE001 — never block server boot on this
+        print(f"warning: run reconcile failed: {e}", file=sys.stderr)
 
     srv = ThreadingHTTPServer((host, port), Handler)
-    # Write server-info so tests and other tools can detect the server is
-    # ready. When binding 0.0.0.0, advertise the loopback URL since that's
-    # what in-container tooling reaches; the host machine reaches via the
-    # published port mapping. In workspaceless mode there's no workspace-local
-    # dir to write to, so skip — the parent process (cli.cmd_serve) is
-    # responsible for any launcher-level discovery file.
+    # Write server-info so tests and other tools can detect the server is ready.
+    # When binding 0.0.0.0, advertise the loopback URL since that's what
+    # in-container tooling reaches; the host machine reaches via the published
+    # port mapping.
     advertise_host = "127.0.0.1" if host == "0.0.0.0" else host
-    if WORKSPACE is not None:
-        info_dir = WORKSPACE / ".pbg" / "server"
-        info_dir.mkdir(parents=True, exist_ok=True)
-        (info_dir / "server-info").write_text(json.dumps({
-            "port": port,
-            "host": advertise_host,
-            "bind_host": host,
-            "url": f"http://{advertise_host}:{port}",
-            "pid": os.getpid(),
-            "screen_dir": str(info_dir / "content"),
-            "state_dir": str(info_dir / "state"),
-        }))
+    info_dir = WORKSPACE / ".pbg" / "server"
+    info_dir.mkdir(parents=True, exist_ok=True)
+    (info_dir / "server-info").write_text(json.dumps({
+        "port": port,
+        "host": advertise_host,
+        "bind_host": host,
+        "url": f"http://{advertise_host}:{port}",
+        "pid": os.getpid(),
+        "screen_dir": str(info_dir / "content"),
+        "state_dir": str(info_dir / "state"),
+    }))
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
@@ -12384,30 +11376,12 @@ def serve(workspace: Path | None, port: int, host: str = "127.0.0.1") -> int:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--workspace", type=Path, default=None,
-                    help="Path to workspace root. Omit to run in workspaceless "
-                         "launcher mode.")
-    ap.add_argument("--port", type=int, default=0,
-                    help="Port to bind (default: pick a free one and print the URL).")
+    ap.add_argument("--workspace", required=True, type=Path)
+    ap.add_argument("--port", type=int, required=True)
     ap.add_argument("--host", default="127.0.0.1",
                     help="Bind host (default 127.0.0.1; use 0.0.0.0 in containers)")
     args = ap.parse_args()
-    port = args.port
-    if not port:
-        # Same auto-pick path as cli.cmd_serve so `python -m
-        # vivarium_dashboard.server` has parity with `vivarium-dashboard serve`.
-        s = socket.socket()
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
-        s.close()
-        advertise = "127.0.0.1" if args.host == "0.0.0.0" else args.host
-        mode = "launcher" if args.workspace is None else "workspace"
-        print(f"\nvivarium-dashboard ({mode}): http://{advertise}:{port}", file=sys.stderr)
-        if args.host == "0.0.0.0":
-            print("   (bound on all interfaces — reachable from outside this host)",
-                  file=sys.stderr)
-        print("   (Ctrl-C to stop)\n", file=sys.stderr)
-    return serve(args.workspace, port, host=args.host)
+    return serve(args.workspace, args.port, host=args.host)
 
 
 if __name__ == "__main__":
