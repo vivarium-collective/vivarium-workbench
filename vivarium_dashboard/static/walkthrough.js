@@ -6056,11 +6056,60 @@
       // this for free via v3StudySection's <details> wrapper; v4 sections
       // were left flat and the buttons did nothing on v4-only investigations.
       // Open by default so existing reader behaviour is unchanged.
+      //
+      // Reuses the v3 `.sp-*` CSS classes so the collapsed-card look matches
+      // what v3 readers already see: num + title + verdict / one-line
+      // objective / slug+depth meta / chips for predictions + variants +
+      // refs / expand hint. Populated from v4 narrative-spine fields:
+      // objective for the one-liner, expected_behavior for the chips, etc.
+      var v4Title    = s.title || _humanizeStudyName(s.name).title;
+      var v4Verdict  = (function() {
+        var st = (s.status || 'planning').toLowerCase();
+        if (st === 'planning' || st === 'planned') return {cls: 'v-prelim', emoji: '📋', label: 'Planned'};
+        if (st === 'running' || st === 'in_progress') return {cls: 'v-cal', emoji: '🔬', label: 'Running'};
+        if (st === 'complete' || st === 'ran' || st === 'passed') return {cls: 'v-pass', emoji: '✅', label: 'Complete'};
+        if (st === 'failed' || st === 'invalid') return {cls: 'v-fail', emoji: '❌', label: 'Failed'};
+        return {cls: 'v-none', emoji: '·', label: _h(s.status || 'planning')};
+      })();
+      var v4Objective = _firstSentence(s.objective || '');
+      var v4Meta = ['<code>' + _h(s.name) + '</code>',
+                    'depth ' + (depthMap[s.name] || 0)];
+      if (s.phase) v4Meta.push('phase ' + _h(s.phase));
+      if (s.topic) v4Meta.push('topic ' + _h(s.topic));
+      // Chip strip: predictions + status breakdown + variants + refs.
+      var v4Chips = [];
+      var ebList = s.expected_behavior || [];
+      if (ebList.length) {
+        var counts = {stub: 0, gated: 0, implemented: 0};
+        ebList.forEach(function(b) {
+          var st = (b && b.status) || 'implemented';
+          if (counts[st] !== undefined) counts[st]++;
+        });
+        v4Chips.push('<span class="sp-metric">' + ebList.length + ' predictions</span>');
+        if (counts.implemented) v4Chips.push('<span class="sp-metric sp-metric-pass">✅ ' + counts.implemented + ' implemented</span>');
+        if (counts.gated)       v4Chips.push('<span class="sp-metric sp-metric-warn">⏳ ' + counts.gated + ' gated</span>');
+        if (counts.stub)        v4Chips.push('<span class="sp-metric">🟡 ' + counts.stub + ' stub</span>');
+      }
+      var nVar = (s.variants || []).length;
+      if (nVar) v4Chips.push('<span class="sp-metric">' + nVar + ' variants</span>');
+      var v4Bib = (s.bibliography && s.bibliography.bib_keys) || [];
+      if (v4Bib.length) v4Chips.push('<span class="sp-metric">' + v4Bib.length + ' refs</span>');
+      var nParents = (s.parent_studies || []).length;
+      if (nParents) v4Chips.push('<span class="sp-metric">depends on ' + nParents + '</span>');
+      var nKids = (children[s.name] || []).length;
+      if (nKids) v4Chips.push('<span class="sp-metric">blocks ' + nKids + '</span>');
+
       var foldSummary = ''
         + '<summary class="study-panel">'
-        +   '<span class="study-num">' + (i + 1) + '.</span> '
-        +   '<strong>' + _h(s.name) + '</strong> '
-        +   statusBadge
+        +   '<div class="sp-top">'
+        +     '<span class="sp-num">' + (i + 1) + '.</span>'
+        +     '<span class="sp-title">' + _h(v4Title) + '</span>'
+        +     '<span class="sp-verdict ' + v4Verdict.cls + '">' + v4Verdict.emoji + ' ' + _h(v4Verdict.label) + '</span>'
+        +   '</div>'
+        +   (v4Objective ? '<div class="sp-objective">' + _h(v4Objective) + '</div>' : '')
+        +   '<div class="sp-meta">' + v4Meta.join(' · ') + '</div>'
+        +   (v4Chips.length ? '<div class="sp-metrics">' + v4Chips.join('') + '</div>' : '')
+        +   '<span class="sp-expand-hint">▸ click to expand full study</span>'
         + '</summary>';
 
       return ''
