@@ -2023,14 +2023,17 @@ def _post_study_run_baseline_for_test(ws_root, body):
     # v2ecoli friction #14: derive emit_paths from spec observables so the
     # injected SQLiteEmitter captures real biology, not just ticks.
     emit_paths = cr.collect_emit_paths_from_spec(spec)
-    # Per-study emitter override (study yaml's runtime.emitter) — wins over
-    # workspace runtime.default_emitter. None ⇒ workspace default applies.
+    # Per-study overrides — all win over workspace defaults.
     study_emitter = runtime_cfg.get("emitter")
+    study_max_generations = runtime_cfg.get("max_generations")
+    study_single_daughters = runtime_cfg.get("single_daughters")
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label=label, sim_name=label,
         overrides=generator_overrides, timeout=timeout_s,
         emit_paths=emit_paths, study_emitter=study_emitter,
+        study_max_generations=study_max_generations,
+        study_single_daughters=study_single_daughters,
     )
     if code == 200:
         # F2: do NOT append to study.yaml.runs[] — the runs_meta row
@@ -2524,14 +2527,18 @@ def _post_study_run_variant_for_test(ws_root, body):
     # v2ecoli friction #14: thread observables to the subprocess (same as
     # baseline path) so variant runs also capture biology in history.state.
     emit_paths = cr.collect_emit_paths_from_spec(spec)
-    # Per-study emitter override — see baseline path for rationale.
+    # Per-study overrides — see baseline path for rationale.
     study_emitter = runtime_cfg.get("emitter")
+    study_max_generations = runtime_cfg.get("max_generations")
+    study_single_daughters = runtime_cfg.get("single_daughters")
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label=variant_name,
         sim_name=variant_name, overrides=generator_overrides,
         timeout=timeout_s, emit_paths=emit_paths,
         study_emitter=study_emitter,
+        study_max_generations=study_max_generations,
+        study_single_daughters=study_single_daughters,
     )
     # F2: no _append_study_run — the runs_meta row is the canonical record;
     # see the matching note in run-baseline above.
@@ -3102,7 +3109,9 @@ def _diagnose_push_error(err: str) -> dict | None:
 
 def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                               label, overrides=None, sim_name=None, timeout=1800,
-                              emit_paths=None, study_emitter=None):
+                              emit_paths=None, study_emitter=None,
+                              study_max_generations=None,
+                              study_single_daughters=None):
     """Run a resolved composite ``state`` for ``steps`` steps in a subprocess,
     persisting runs_meta + history (via an injected SQLiteEmitter) to
     ``db_file``.
@@ -3154,11 +3163,18 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
             _runtime = (_ws_data.get("runtime") or {}) if isinstance(_ws_data, dict) else {}
             _default_emitter = str(_runtime.get("default_emitter") or "sqlite").lower()
             _max_generations = int(_runtime.get("max_generations") or 3)
+            _single_daughters = bool(_runtime.get("single_daughters") or False)
         except Exception:
             _default_emitter = "sqlite"
             _max_generations = 3
+            _single_daughters = False
         if study_emitter:
             _default_emitter = str(study_emitter).lower()
+        # Per-study overrides win over workspace defaults.
+        if study_max_generations is not None:
+            _max_generations = int(study_max_generations)
+        if study_single_daughters is not None:
+            _single_daughters = bool(study_single_daughters)
         # Derive a zarr store path alongside the SQLite db_file (one per run).
         _zarr_store = str(Path(db_file).with_suffix("")) + f".{run_id}.zarr"
         payload = {
@@ -3176,6 +3192,7 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
             # XArray opt-in (per workspace.yaml runtime.default_emitter).
             "default_emitter": _default_emitter,
             "max_generations": _max_generations,
+            "single_daughters": _single_daughters,
             "zarr_store": _zarr_store,
         }
         script = textwrap.dedent(f"""
@@ -3269,6 +3286,7 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                             emit_paths=_payload.get('emit_paths') or [],
                             max_steps=_payload['steps'],
                             max_generations=_mg,
+                            single_daughters=bool(_payload.get('single_daughters')),
                             core=core,
                         )
                         results = {{'steps': _sq['steps'],
