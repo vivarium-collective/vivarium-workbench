@@ -1918,7 +1918,82 @@ def _post_study_run_baseline_for_test(ws_root, body):
             response.setdefault("viz_files", []).extend(viz_files)
         if viz_errors:
             response.setdefault("viz_errors", []).extend(viz_errors)
+        # post_run_scripts: study-yaml-declared scripts to invoke after the
+        # auto-render dispatch. Pattern for hand-rolled render scripts that
+        # don't fit the @Visualization class registry (e.g. chromosome-state
+        # snapshotters that run their own sim and write HTML directly).
+        # Schema:
+        #   post_run_scripts:
+        #   - path: scripts/render_chromosome_timeline.py
+        #     args: ["--study", "dnaa-02", "--spec", "...", "--steps", "600"]
+        #     timeout_s: 1800
+        script_files, script_errors = _run_post_run_scripts(spec, ws_root)
+        if script_files:
+            response.setdefault("post_run_script_files", []).extend(script_files)
+        if script_errors:
+            response.setdefault("post_run_script_errors", []).extend(script_errors)
     return response, code
+
+
+def _run_post_run_scripts(spec: dict, ws_root: Path) -> tuple[list[str], list[dict]]:
+    """Invoke each ``spec.post_run_scripts[]`` entry as a subprocess.
+
+    Each entry: ``{path: <rel-to-ws>, args: [...], timeout_s: 1800}``.
+    Scripts run with cwd=ws_root using the same Python interpreter as the
+    dashboard. Stdout/stderr are captured but discarded unless the script
+    fails (script's own viz writes go straight to disk). Returns
+    ``(written_files, errors)`` — written_files lists newly-mtime'd HTML
+    files under studies/<slug>/viz/ (for response surfacing).
+    """
+    entries = spec.get("post_run_scripts") or []
+    if not entries:
+        return [], []
+    import sys as _sys
+    import subprocess as _subprocess
+    import time as _time
+
+    written: list[str] = []
+    errors: list[dict] = []
+    t_start = _time.time()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        rel_path = entry.get("path")
+        if not rel_path:
+            continue
+        script_path = ws_root / rel_path
+        if not script_path.is_file():
+            errors.append({"script": rel_path, "error": "script not found"})
+            continue
+        args = [str(a) for a in (entry.get("args") or [])]
+        timeout_s = int(entry.get("timeout_s") or 1800)
+        try:
+            result = _subprocess.run(
+                [_sys.executable, str(script_path), *args],
+                cwd=str(ws_root), timeout=timeout_s,
+                capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                # surface stderr tail for debugging; full stdout/stderr stay
+                # in the script's own logs if it wrote any.
+                tail = (result.stderr or result.stdout or "")[-500:]
+                errors.append({
+                    "script": rel_path, "args": args,
+                    "returncode": result.returncode, "stderr_tail": tail,
+                })
+        except _subprocess.TimeoutExpired:
+            errors.append({"script": rel_path, "error": f"timed out after {timeout_s}s"})
+        except Exception as e:  # noqa: BLE001 — keep other scripts running
+            errors.append({"script": rel_path, "error": f"{type(e).__name__}: {e}"})
+    # collect HTML files written during this batch (mtime newer than start)
+    for study_dir in (ws_root / "studies").iterdir() if (ws_root / "studies").is_dir() else []:
+        viz_dir = study_dir / "viz"
+        if not viz_dir.is_dir():
+            continue
+        for html in viz_dir.glob("*.html"):
+            if html.stat().st_mtime >= t_start:
+                written.append(str(html.relative_to(ws_root)))
+    return written, errors
 
 
 def _zarr_store_for_sim(study_db: Path, sim_name: str | None) -> Path | None:
@@ -2288,6 +2363,21 @@ def _post_study_run_variant_for_test(ws_root, body):
     )
     # F2: no _append_study_run — the runs_meta row is the canonical record;
     # see the matching note in run-baseline above.
+    if code == 200:
+        # Same canonical-viz + post-run-scripts dispatch as the baseline path
+        # so variants also refresh chromosome viz etc.
+        viz_files, viz_errors = _render_study_visualizations(
+            study_dir, spec, spec_id,
+        )
+        if viz_files:
+            response.setdefault("viz_files", []).extend(viz_files)
+        if viz_errors:
+            response.setdefault("viz_errors", []).extend(viz_errors)
+        script_files, script_errors = _run_post_run_scripts(spec, ws_root)
+        if script_files:
+            response.setdefault("post_run_script_files", []).extend(script_files)
+        if script_errors:
+            response.setdefault("post_run_script_errors", []).extend(script_errors)
     return response, code
 
 
