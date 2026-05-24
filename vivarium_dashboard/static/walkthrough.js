@@ -6076,8 +6076,44 @@
                     'depth ' + (depthMap[s.name] || 0)];
       if (s.phase) v4Meta.push('phase ' + _h(s.phase));
       if (s.topic) v4Meta.push('topic ' + _h(s.topic));
-      // Chip strip: predictions + status breakdown + variants + refs.
+
+      // Rich-panel content: an optional `report:` block on the study
+      // YAML (same shape as v3 _studyControlPanel reads) drives the
+      // dnaa-style Confidence/Evidence chips + CONCLUSION/INSIGHT/CAVEAT
+      // rows + status-colored key_metrics. Synthesises sensible
+      // pre-execution scaffold values when the block is missing or
+      // partial, so a fresh investigation lands with a populated card
+      // instead of an empty one.
+      var rep = s.report || {};
+      var v4Conf = (rep.confidence || '').trim();
+      var v4Ev   = (rep.evidence_quality || '').trim();
+      if (!v4Conf && (v4Verdict.label === 'Planned')) v4Conf = 'design-stage';
+      if (!v4Ev   && (v4Verdict.label === 'Planned')) v4Ev   = 'scaffold';
+      var v4Conclusion = rep.conclusion   || _firstSentence(rep.result)
+                       || (v4Verdict.label === 'Planned' && s.hypothesis
+                            ? 'Predicted — ' + _firstSentence(s.hypothesis) : '');
+      var v4Insight    = rep.main_insight || _firstSentence(rep.interpretation);
+      var v4Caveat     = rep.caveat;
+      if (!v4Caveat && Array.isArray(s.limitations) && s.limitations.length) {
+        var l0 = s.limitations[0];
+        v4Caveat = (typeof l0 === 'string') ? l0 : (l0 && (l0.text || l0.limitation)) || '';
+      }
+      var v4LitMatch = (rep.lit_match || '').trim();
+
+      // Chip strip: rich key_metrics (label+value+status) when authored,
+      // else auto-derived prediction-count + status breakdown + variants
+      // + refs + deps.
       var v4Chips = [];
+      (rep.key_metrics || []).forEach(function(m) {
+        if (typeof m === 'string') {
+          v4Chips.push('<span class="sp-metric">' + _h(m) + '</span>');
+        } else if (m && typeof m === 'object') {
+          var st = (m.status || '').toLowerCase();
+          var icon = st === 'pass' ? '✅ ' : st === 'warn' ? '⚠️ ' : st === 'fail' ? '❌ ' : '';
+          var txt = (m.label || '') + (m.value != null ? ': ' + m.value : '');
+          v4Chips.push('<span class="sp-metric sp-metric-' + _h(st || 'plain') + '">' + icon + _h(txt) + '</span>');
+        }
+      });
       var ebList = s.expected_behavior || [];
       if (ebList.length) {
         var counts = {stub: 0, gated: 0, implemented: 0};
@@ -6098,6 +6134,7 @@
       if (nParents) v4Chips.push('<span class="sp-metric">depends on ' + nParents + '</span>');
       var nKids = (children[s.name] || []).length;
       if (nKids) v4Chips.push('<span class="sp-metric">blocks ' + nKids + '</span>');
+      if (v4LitMatch) v4Chips.push('<span class="sp-metric">Lit match: ' + _h(v4LitMatch) + '</span>');
 
       var foldSummary = ''
         + '<summary class="study-panel">'
@@ -6108,20 +6145,45 @@
         +   '</div>'
         +   (v4Objective ? '<div class="sp-objective">' + _h(v4Objective) + '</div>' : '')
         +   '<div class="sp-meta">' + v4Meta.join(' · ') + '</div>'
+        +   ((v4Conf || v4Ev)
+              ? '<div class="sp-quality">'
+                + (v4Conf ? '<span class="sp-conf sp-conf-' + _h(v4Conf.toLowerCase()) + '">Confidence: ' + _h(v4Conf) + '</span>' : '')
+                + (v4Ev   ? '<span class="sp-ev">Evidence: ' + _h(v4Ev) + '</span>' : '')
+                + '</div>'
+              : '')
+        +   (v4Conclusion ? '<div class="sp-conclusion"><span class="sp-lbl">Conclusion</span> ' + _h(v4Conclusion) + '</div>' : '')
         +   (v4Chips.length ? '<div class="sp-metrics">' + v4Chips.join('') + '</div>' : '')
+        +   (v4Insight ? '<div class="sp-insight"><span class="sp-lbl">Insight</span> ' + _h(v4Insight) + '</div>' : '')
+        +   (v4Caveat  ? '<div class="sp-caveat"><span class="sp-lbl">Caveat</span> '   + _h(v4Caveat)  + '</div>' : '')
         +   '<span class="sp-expand-hint">▸ click to expand full study</span>'
         + '</summary>';
+
+      // Dropped chrome on the v4 expanded section to remove three forms
+      // of redundancy with the (now-rich) sp-* summary panel:
+      //   1. subNav (sticky study-nav with chips like Question / Background
+      //      / Predictions / Cited refs) — the sp-metrics chips in the
+      //      summary panel already convey the same counts; the topbar nav
+      //      handles cross-study navigation. Removing it also kills the
+      //      double-sticky stack (topbar + study-fold panel + study-nav).
+      //   2. <header class="study-header"><h2>num. slug status</h2></header>
+      //      — every field is in sp-top + sp-meta of the panel above.
+      //   3. The "Depends on / Blocks" paragraphs that lived in the
+      //      header — these are now shown as the resolved dep list right
+      //      below the summary so the dep slugs (not just counts) stay
+      //      visible while the panel is sticky.
+      var depsLine = '';
+      if (parents || kids) {
+        var bits = [];
+        if (parents) bits.push('<span class="muted">Depends on:</span> ' + parents);
+        if (kids)    bits.push('<span class="muted">Blocks:</span> '     + kids);
+        depsLine = '<p class="study-deps muted small">' + bits.join(' &nbsp;·&nbsp; ') + '</p>';
+      }
 
       return ''
         + '<details class="study-fold" id="study-fold-' + slug + '">'
         + foldSummary
         + '<section class="study" id="study-' + slug + '">'
-        +   subNav
-        +   '<header class="study-header">'
-        +     '<h2><span class="study-num">' + (i + 1) + '.</span> ' + _h(s.name) + ' ' + statusBadge + '</h2>'
-        +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
-        +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
-        +   '</header>'
+        +   depsLine
 
         +   '<div class="qh" id="' + sidQ + '">'
         +     (s.question   ? '<p><strong>Question.</strong> '   + _multiline(s.question)   + '</p>' : '')
