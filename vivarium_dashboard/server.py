@@ -1363,21 +1363,24 @@ def _post_iset_create_for_test(ws_root: Path, body: dict) -> tuple[dict, int]:
     if target.exists():
         return {"error": f"investigation '{name}' already exists"}, 409
 
-    spec: dict = {
-        "schema_version": 1,
-        "name": name,
-        "title": name,
-        "status": "planning",
-        "description": overview,
-        "studies": [],
-    }
-    if parent_studies:
-        spec["parent_studies"] = list(parent_studies)
+    # Emit a v2-shape investigation.yaml with the narrative spine commented
+    # in as TODOs (executive / scientific_argument / biological_story /
+    # at_a_glance / glossary / guidelines). The user sees the target shape
+    # — the same shape dnaa-replication evolved through use — without having
+    # to read docs first. All v2 fields are optional, so the spec validates
+    # on day one and the user opts in by uncommenting sections.
+    from vivarium_dashboard.lib.scaffold_yaml import v2_investigation_scaffold
+    body_yaml = v2_investigation_scaffold(
+        name,
+        title=name,
+        overview=overview or None,
+        parent_studies=list(parent_studies) if parent_studies else None,
+    )
 
     inv_dir.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(".yaml.tmp")
     try:
-        tmp.write_text(yaml.safe_dump(spec, sort_keys=False, allow_unicode=True))
+        tmp.write_text(body_yaml)
         os.replace(tmp, target)
     except Exception:
         if tmp.exists():
@@ -7115,25 +7118,22 @@ if __name__ == "__main__":
             (inv_dir / "data" / ".keep").write_text("")
 
             if is_generator and baseline_name:
-                # v3-shape spec: dotted ref lives in `baseline:`; no sidecar.
-                spec = {
-                    "name": name,
-                    "description": "",
-                    "status": "planned",
-                    "baseline": [
-                        {
-                            "name": baseline_name,
-                            "composite": source,
-                            "params": {},
-                        }
-                    ],
-                    "variants": [],
-                    "interventions": [],
-                    "observables": [],
-                    "visualizations": [],
-                    "runs": [],
-                }
-                (inv_dir / "study.yaml").write_text(yaml.safe_dump(spec, sort_keys=False))
+                # v4-shape scaffold: dotted ref lives in `baseline:` (no
+                # sidecar — sidesteps the "can't serialize live Process
+                # instances" problem for @composite_generator refs). The 14-
+                # section narrative spine is emitted as commented placeholders
+                # so the user sees the target shape — the same shape the
+                # dnaa-replication investigation evolved through use — without
+                # having to read docs first.
+                from vivarium_dashboard.lib.scaffold_yaml import (
+                    v4_study_scaffold,
+                )
+                body_yaml = v4_study_scaffold(
+                    name,
+                    composite=source,
+                    baseline_name=baseline_name,
+                )
+                (inv_dir / "study.yaml").write_text(body_yaml)
             elif source_path and baseline_name:
                 # Legacy v2-shape spec: seed with a baseline composite entry.
                 composites_dir = inv_dir / "composites"
