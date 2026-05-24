@@ -363,18 +363,35 @@ def render_v4_test_charts(spec: dict,
     if not path_specs:
         return []
 
+    # Choose the read source explicitly from runtime.default_emitter. SQLite
+    # is the framework default; we only read zarr when the workspace has
+    # opted in via `runtime.default_emitter: xarray`. No silent disk-probe —
+    # that was the design bug in the prior attempt: it flipped sources based
+    # on whatever happened to be on disk, hiding drift for the sqlite-default
+    # workspaces.
+    emitter_kind = _emitter_choice(spec, runs_db)
+    study_dir = runs_db.parent if runs_db is not None else None
+
+    sources: list[tuple[str, dict]] = []
+    if emitter_kind == "xarray":
+        zarr_path = _latest_zarr_for_study(study_dir) if study_dir else None
+        if zarr_path is not None:
+            sources.append(("study-zarr", _extract_paths_from_zarr(zarr_path, path_specs)))
+
+    # SQLite chain: primary in the default sqlite mode, fallback in xarray
+    # mode (covers per-test observables the zarr store doesn't carry, and
+    # the workspace default-baseline as a last resort).
     db_candidates = [(p, lbl) for p, lbl in
                      ((runs_db, "study"), (fallback_db, "default-baseline"))
                      if p is not None and p.is_file()]
-    if not db_candidates:
+    if not db_candidates and not sources:
         return []
 
     # For each db, extract all paths in ONE pass over the latest run's
     # history. Subsample every Nth row when a run is long, so we keep
     # ~200 points per chart regardless of original sample density.
-    by_db: dict[str, dict[tuple[str, int | None], tuple[list, list]]] = {}
     for db_path, label in db_candidates:
-        by_db[label] = _extract_paths_from_db(db_path, path_specs)
+        sources.append((label, _extract_paths_from_db(db_path, path_specs)))
 
     charts: list[dict] = []
     for t in tests:
@@ -385,11 +402,11 @@ def render_v4_test_charts(spec: dict,
         idx = measure.get("index")
         key = (path, idx)
 
-        # Per-test fallback: prefer the study db; fall back to default-
-        # baseline if the study db doesn't carry this observable.
+        # Per-test fallback in source order: zarr (if xarray) → study sqlite
+        # → workspace default-baseline. First non-empty wins.
         xs, ys, used_source = [], [], None
-        for _, label in db_candidates:
-            cand_xs, cand_ys = by_db.get(label, {}).get(key, ([], []))
+        for label, src in sources:
+            cand_xs, cand_ys = src.get(key, ([], []))
             if cand_xs:
                 xs, ys, used_source = cand_xs, cand_ys, label
                 break
@@ -418,6 +435,156 @@ def render_v4_test_charts(spec: dict,
             "data_source": used_source,
         })
     return charts
+
+
+def _emitter_choice(spec: dict, runs_db: Path | None) -> str:
+    """Return ``'xarray'`` or ``'sqlite'`` per workspace configuration.
+
+    Resolves ``runtime.default_emitter`` from (1) the study spec's runtime
+    block, then (2) workspace.yaml's runtime block, defaulting to
+    ``'sqlite'`` (the framework's documented default). Deliberately does
+    NOT probe disk state — workspaces that haven't opted into xarray must
+    not silently flip read sources, since that hides drift.
+    """
+    spec_rt = (spec or {}).get("runtime") or {}
+    if isinstance(spec_rt, dict) and spec_rt.get("default_emitter") in ("xarray", "sqlite"):
+        return spec_rt["default_emitter"]
+    if runs_db is not None:
+        # runs_db lives at <ws>/studies/<slug>/runs.db
+        ws_yaml = runs_db.parent.parent.parent / "workspace.yaml"
+        if ws_yaml.is_file():
+            try:
+                import yaml as _yaml
+                ws = _yaml.safe_load(ws_yaml.read_text()) or {}
+                ws_rt = ws.get("runtime") or {}
+                if isinstance(ws_rt, dict) and ws_rt.get("default_emitter") in ("xarray", "sqlite"):
+                    return ws_rt["default_emitter"]
+            except (OSError, Exception):  # noqa: BLE001 — read-fail = default
+                pass
+    return "sqlite"
+
+
+def _latest_zarr_for_study(study_dir: Path) -> Path | None:
+    """Find the most-recent ``runs.*.zarr`` directory under ``study_dir``.
+
+    XArrayEmitter runs write per-run zarr directories at
+    ``<study>/runs.<run_id>.zarr``. Sort by mtime descending and return the
+    first directory with a populated ``experiment_id=*`` partition. Returns
+    ``None`` if no zarr stores exist or none have data yet.
+    """
+    if not study_dir or not study_dir.is_dir():
+        return None
+    candidates = sorted(
+        (p for p in study_dir.glob("runs.*.zarr") if p.is_dir()),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for zarr_dir in candidates:
+        try:
+            if next(zarr_dir.glob("experiment_id=*"), None) is not None:
+                return zarr_dir
+        except OSError:
+            continue
+    return None
+
+
+def _extract_paths_from_zarr(
+    zarr_path: Path,
+    path_specs: list[tuple[str, int | None]],
+    max_points: int = 200,
+) -> dict[tuple[str, int | None], tuple[list[float], list[float]]]:
+    """Single-pass extraction of N observable paths from a per-run zarr store.
+
+    Mirrors :func:`_extract_paths_from_db`'s signature. Each ``path_spec``
+    is ``(dotted-or-slash path, optional index)``. The path's LAST
+    component is the zarr leaf-node name (XArrayEmitter view leaves are
+    keyed by leaf name, not by the full nested path); for vector leaves
+    (e.g. ``listeners.monomer_counts``), ``index`` selects within the
+    coord dimension (``id_<leaf>``).
+
+    Concatenates across generations into a single trace per path, then
+    subsamples to ``max_points``. Returns ``{(path, index): (times, values)}``
+    with empty tuples for paths that didn't resolve.
+    """
+    out: dict[tuple[str, int | None], tuple[list[float], list[float]]] = {
+        key: ([], []) for key in path_specs
+    }
+    if not path_specs or not zarr_path.exists():
+        return out
+    try:
+        import xarray as xr
+    except ImportError:
+        return out
+    try:
+        dt = xr.open_datatree(str(zarr_path), engine="zarr")
+    except Exception:
+        return out
+
+    leaf_for_spec: dict[tuple[str, int | None], str] = {}
+    for path, idx in path_specs:
+        parts = [p for p in str(path).replace(".", "/").split("/") if p]
+        if not parts:
+            continue
+        if parts[0] == "agents" and len(parts) >= 3:
+            parts = parts[2:]
+        leaf_for_spec[(path, idx)] = parts[-1]
+
+    by_leaf: dict[str, list[tuple[str, int | None]]] = {}
+    for key, leaf in leaf_for_spec.items():
+        by_leaf.setdefault(leaf, []).append(key)
+
+    try:
+        for node in dt.subtree:
+            if node.name not in by_leaf:
+                continue
+            parent = node.parent
+            if parent is None:
+                continue
+            specs_for_leaf = by_leaf[node.name]
+            gen_keys: list[tuple[int, str, str]] = []
+            for var_name in (node.data_vars or {}):
+                if not var_name.startswith("generation="):
+                    continue
+                try:
+                    gen_n = int(var_name.split("=", 1)[1])
+                except ValueError:
+                    continue
+                t_name = f"time_gen={gen_n}"
+                if t_name not in (parent.data_vars or {}):
+                    continue
+                gen_keys.append((gen_n, var_name, t_name))
+            gen_keys.sort()
+            for path, idx in specs_for_leaf:
+                times: list[float] = []
+                values: list[float] = []
+                for gen_n, var_name, t_name in gen_keys:
+                    v_arr = node[var_name]
+                    t_arr = parent[t_name].values
+                    if idx is not None and "id_" + node.name in v_arr.dims:
+                        try:
+                            v_arr = v_arr.isel({"id_" + node.name: int(idx)})
+                        except (IndexError, KeyError, ValueError):
+                            continue
+                    elif v_arr.ndim > 1:
+                        continue
+                    v_vals = v_arr.values
+                    n = min(len(t_arr), len(v_vals))
+                    for i in range(n):
+                        times.append(float(t_arr[i]))
+                        values.append(float(v_vals[i]))
+                if not times:
+                    continue
+                paired = sorted(zip(times, values), key=lambda tv: tv[0])
+                if max_points and len(paired) > max_points:
+                    stride = max(1, len(paired) // max_points)
+                    paired = paired[::stride]
+                out[(path, idx)] = (
+                    [t for t, _ in paired],
+                    [v for _, v in paired],
+                )
+    except Exception:
+        return out
+    return out
 
 
 def _extract_paths_from_db(
