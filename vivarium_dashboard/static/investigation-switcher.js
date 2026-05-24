@@ -165,6 +165,22 @@
     } else if (typeof window._vivRefreshInvestigationsRail === 'function') {
       try { window._vivRefreshInvestigationsRail(); } catch (_) { /* ignore */ }
     }
+    // If the Investigation tab is currently visible AND showing a
+    // different iset, swap its detail view to the freshly-published
+    // current slug. Without this, the tab stays stuck on whatever it
+    // picked at mount time (typically the alphabetically-first iset).
+    if (slug
+        && typeof window._openInvestigationDetail === 'function'
+        && window._currentIset
+        && window._currentIset !== slug
+        && Array.isArray(window._isetIndex)
+        && window._isetIndex.some((i) => i && i.name === slug)) {
+      const detailEl = document.getElementById('investigation-detail-view');
+      const isVisible = detailEl && detailEl.offsetParent !== null;
+      if (isVisible) {
+        try { window._openInvestigationDetail(slug); } catch (_) { /* ignore */ }
+      }
+    }
   }
 
   // Refresh both label + current-slug on page load — without this, the
