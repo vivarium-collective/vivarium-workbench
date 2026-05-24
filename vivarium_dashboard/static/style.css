@@ -1695,6 +1695,24 @@ body.focus-mode::before{
 }
 
 /* ───────────────────────────────────────────────────────────────────
+ * Workspace Inputs cards — theme-aware backgrounds.
+ *
+ * The card markup (in index.html.j2) historically used inline
+ * style="background:#fff;border:1px solid #e5e7eb" which the template
+ * baked in as a light-mode-only assumption. Moving the background +
+ * border to a CSS class lets these cards adapt when a dark-mode toggle
+ * is in play (see the data-theme="dark" system on
+ * feat/hpc-backend-integration that defines --panel/--border for dark
+ * mode). In light mode (and on main without a theme toggle) these vars
+ * resolve to the same #fff / #e5e7eb the inline styles used to set.
+ * =================================================================== */
+.expert-doc-card,
+.bib-entry {
+  background: var(--panel, #fff);
+  border: 1px solid var(--border, #e5e7eb);
+}
+
+/* ───────────────────────────────────────────────────────────────────
  * v4 narrative-spine forms — editable cards for report, study_card,
  * biological_summary, conclusion_verdicts on the Study Detail page.
  *
