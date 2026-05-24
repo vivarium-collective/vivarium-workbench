@@ -1693,3 +1693,90 @@ body.focus-mode::before{
   display: block;
   background: #fff;
 }
+
+/* ───────────────────────────────────────────────────────────────────
+ * v4 narrative-spine forms — editable cards for report, study_card,
+ * biological_summary, conclusion_verdicts on the Study Detail page.
+ *
+ * Each card lays out as a 2-col grid of label+input rows; "wide" rows
+ * (textareas) span full width with the label above. Inputs save on
+ * blur (text/textarea) or change (select) by POSTing to
+ * /api/study-narrative-set with a dotted path.
+ * =================================================================== */
+.narrative-card {
+  padding: 14px 16px;
+  background: var(--panel, #fff);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+.narrative-card-hint {
+  font-size: 0.78em;
+  color: var(--muted, #6b7280);
+  font-weight: normal;
+  margin-left: 8px;
+}
+.narrative-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, max-content) 1fr;
+  gap: 8px 14px;
+  align-items: start;
+}
+.narrative-row {
+  display: contents;
+}
+.narrative-row-wide {
+  display: block;
+  grid-column: 1 / -1;
+  margin-top: 4px;
+}
+.narrative-row-wide .narrative-label {
+  display: block;
+  margin-bottom: 4px;
+}
+.narrative-label {
+  font-size: 0.86em;
+  font-weight: 600;
+  color: var(--text-secondary, #4b5563);
+  padding-top: 6px;
+}
+.narrative-input {
+  font: inherit;
+  width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--border, #d0d7de);
+  border-radius: 4px;
+  background: var(--bg-alt, #f9fafb);
+  color: var(--text, #1f2937);
+}
+.narrative-input:focus {
+  outline: none;
+  border-color: var(--accent-blue, #2563eb);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+  background: var(--panel, #fff);
+}
+.narrative-textarea {
+  font-family: inherit;
+  resize: vertical;
+  min-height: 38px;
+  line-height: 1.45;
+}
+.narrative-card-input {
+  border-color: transparent;
+  background: transparent;
+  padding: 4px 6px;
+}
+.narrative-card-input:hover,
+.narrative-card-input:focus {
+  border-color: var(--border, #d0d7de);
+  background: var(--bg-alt, #f9fafb);
+}
+.narrative-input.narrative-saved {
+  border-color: var(--accent, #10b981);
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.18);
+  transition: border-color 0.4s ease, box-shadow 0.4s ease;
+}
+.narrative-input.narrative-error {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.18);
+}

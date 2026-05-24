@@ -179,38 +179,112 @@
        a biologist should be able to understand the study's purpose and
        expectations without scrolling into implementation details.
     #}
-    {% if study.biological_summary or study.study_card or study.literature_anchors %}
+    {# v4 narrative-spine: executive `report` card + always-rendered
+       biological_summary + study_card. The report card is the at-a-glance
+       verdict panel the dnaa investigation evolved (verdict, confidence,
+       evidence_quality, main_insight, caveat). Each field is editable
+       in-place via /api/study-narrative-set. Empty-state placeholders
+       guide a new user to fill them in. #}
+    {% set _report = study.report or {} %}
+    <div class="overview-section narrative-card" data-narrative-card="report">
+      <h2 class="overview-label">📋 Report — executive summary
+        <span class="narrative-card-hint">(top-of-page panel for reviewers)</span>
+      </h2>
+      <div class="narrative-grid">
+        <label class="narrative-row">
+          <span class="narrative-label">Verdict</span>
+          <input type="text" class="narrative-input" data-narrative-path="report.verdict"
+                 value="{{ _report.verdict or '' }}"
+                 placeholder="e.g. passing | passing-with-caveats | failing-bio | not-yet-run">
+        </label>
+        <label class="narrative-row">
+          <span class="narrative-label">Confidence</span>
+          <select class="narrative-input" data-narrative-path="report.confidence">
+            <option value="">(unset)</option>
+            <option value="high" {% if _report.confidence == 'high' %}selected{% endif %}>high</option>
+            <option value="medium" {% if _report.confidence == 'medium' %}selected{% endif %}>medium</option>
+            <option value="low" {% if _report.confidence == 'low' %}selected{% endif %}>low</option>
+          </select>
+        </label>
+        <label class="narrative-row">
+          <span class="narrative-label">Evidence quality</span>
+          <input type="text" class="narrative-input" data-narrative-path="report.evidence_quality"
+                 value="{{ _report.evidence_quality or '' }}"
+                 placeholder="e.g. calibrated | literature-matched | aspirational | regression-only">
+        </label>
+        <label class="narrative-row narrative-row-wide">
+          <span class="narrative-label">Main insight</span>
+          <textarea class="narrative-input narrative-textarea" rows="2"
+                    data-narrative-path="report.main_insight"
+                    placeholder="One sentence: the single most important thing this study taught us.">{{ _report.main_insight or '' }}</textarea>
+        </label>
+        <label class="narrative-row narrative-row-wide">
+          <span class="narrative-label">Caveat</span>
+          <textarea class="narrative-input narrative-textarea" rows="2"
+                    data-narrative-path="report.caveat"
+                    placeholder="One sentence: the headline limitation a reviewer needs to know.">{{ _report.caveat or '' }}</textarea>
+        </label>
+        <label class="narrative-row narrative-row-wide">
+          <span class="narrative-label">Conclusion</span>
+          <textarea class="narrative-input narrative-textarea" rows="3"
+                    data-narrative-path="report.conclusion"
+                    placeholder="Multi-sentence: what the runs + tests demonstrated.">{{ _report.conclusion or '' }}</textarea>
+        </label>
+      </div>
+    </div>
+
     <div class="biology-glance">
-      {% if study.biological_summary %}
+      {# Always-render biological_summary: empty-state textarea encourages
+         the user to start writing immediately. #}
       <div class="biology-summary-callout">
         <h2 class="biology-glance-label">Biology — what this study is about</h2>
-        <p class="biology-prose">{{ study.biological_summary }}</p>
+        <textarea class="biology-prose narrative-input narrative-textarea" rows="4"
+                  data-narrative-path="biological_summary"
+                  placeholder="Multi-paragraph plain-English mechanism narrative — the 'textbook write-up' a non-modeler would read.">{{ study.biological_summary or '' }}</textarea>
       </div>
-      {% endif %}
 
-      {% if study.study_card %}
-      {% set _sc = study.study_card %}
+      {# Always-render study_card: 5 editable rows, written one path at a
+         time via /api/study-narrative-set so the YAML round-trips cleanly. #}
+      {% set _sc = study.study_card or {} %}
       <div class="study-card">
         <h2 class="biology-glance-label">Study card</h2>
         <table class="study-card-table">
-          {% if _sc.goal %}
-          <tr><th>Goal</th><td>{{ _sc.goal }}</td></tr>
-          {% endif %}
-          {% if _sc.mechanism %}
-          <tr><th>Mechanism</th><td>{{ _sc.mechanism }}</td></tr>
-          {% endif %}
-          {% if _sc.why_before_next %}
-          <tr><th>Why before next</th><td>{{ _sc.why_before_next }}</td></tr>
-          {% endif %}
-          {% if _sc.expected_result %}
-          <tr><th>Expected result</th><td>{{ _sc.expected_result }}</td></tr>
-          {% endif %}
-          {% if _sc.main_expert_question %}
-          <tr><th>Main expert question</th><td>{{ _sc.main_expert_question }}</td></tr>
-          {% endif %}
+          <tr><th>Goal</th><td>
+            <input type="text" class="narrative-input narrative-card-input"
+                   data-narrative-path="study_card.goal"
+                   value="{{ _sc.goal or '' }}"
+                   placeholder="One sentence — the single most important thing this study does.">
+          </td></tr>
+          <tr><th>Mechanism</th><td>
+            <input type="text" class="narrative-input narrative-card-input"
+                   data-narrative-path="study_card.mechanism"
+                   value="{{ _sc.mechanism or '' }}"
+                   placeholder="One paragraph — how the biology gets the result.">
+          </td></tr>
+          <tr><th>Why before next</th><td>
+            <input type="text" class="narrative-input narrative-card-input"
+                   data-narrative-path="study_card.why_before_next"
+                   value="{{ _sc.why_before_next or '' }}"
+                   placeholder="Why this study must finish before the next one in the DAG.">
+          </td></tr>
+          <tr><th>Expected result</th><td>
+            <input type="text" class="narrative-input narrative-card-input"
+                   data-narrative-path="study_card.expected_result"
+                   value="{{ _sc.expected_result or '' }}"
+                   placeholder="Literature-stated success criterion.">
+          </td></tr>
+          <tr><th>Main expert question</th><td>
+            <input type="text" class="narrative-input narrative-card-input"
+                   data-narrative-path="study_card.main_expert_question"
+                   value="{{ _sc.main_expert_question or '' }}"
+                   placeholder="The one question this study most wants an expert to answer.">
+          </td></tr>
         </table>
       </div>
-      {% endif %}
+
+      {# Legacy literature_anchors render — kept read-only here; editing
+         these is /pbg-study add-literature-anchor for now (list-based UI
+         is a follow-up). #}
 
       {% if study.literature_anchors %}
       <div class="literature-anchors">
@@ -241,7 +315,6 @@
       </div>
       {% endif %}
     </div>
-    {% endif %}
 
     {% if study.findings %}
     <div class="overview-section findings-section">
@@ -1542,6 +1615,81 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
 </section>
 
 <section class="study-tab-panel" data-kind="conclusions" id="panel-conclusions" hidden>
+
+  {# v4 narrative-spine: conclusion_verdicts is a 3-track verdict block
+     the dnaa investigation evolved — regression_compatibility (does code
+     still build cleanly?), biological_validation (does it match
+     literature?), explanatory_gain (did we learn something new?). Each
+     track is independent so a study can be "PASS on regression but MIXED
+     on biology" instead of being forced into one boolean. Edits via
+     /api/study-narrative-set under dotted paths like
+     conclusion_verdicts.biological_validation.result. #}
+  {% set _cv = study.conclusion_verdicts or {} %}
+  {% set _reg = _cv.regression_compatibility or {} %}
+  {% set _bio = _cv.biological_validation or {} %}
+  {% set _exp = _cv.explanatory_gain or {} %}
+  <div class="overview-section narrative-card" data-narrative-card="conclusion_verdicts" style="margin-bottom:18px">
+    <h2 class="overview-label">⚖️ Verdicts — three-track outcome
+      <span class="narrative-card-hint">(regression / biological / explanatory)</span>
+    </h2>
+    <p class="muted" style="margin:0 0 10px 0;font-size:0.88em">
+      Each track is independent. <em>Regression</em> answers "does the code
+      still build and run cleanly?", <em>biological</em> answers "does the
+      model match the literature?", <em>explanatory</em> answers "did we
+      learn something new?". Set the result + basis for each as the runs
+      complete.
+    </p>
+    <div class="narrative-grid">
+      <label class="narrative-row">
+        <span class="narrative-label">Regression compatibility</span>
+        <select class="narrative-input" data-narrative-path="conclusion_verdicts.regression_compatibility.result">
+          <option value="">(unset)</option>
+          <option value="PASS" {% if _reg.result == 'PASS' %}selected{% endif %}>PASS</option>
+          <option value="FAIL" {% if _reg.result == 'FAIL' %}selected{% endif %}>FAIL</option>
+          <option value="MIXED" {% if _reg.result == 'MIXED' %}selected{% endif %}>MIXED</option>
+          <option value="PENDING" {% if _reg.result == 'PENDING' %}selected{% endif %}>PENDING</option>
+        </select>
+      </label>
+      <label class="narrative-row narrative-row-wide">
+        <span class="narrative-label">Regression basis</span>
+        <textarea class="narrative-input narrative-textarea" rows="2"
+                  data-narrative-path="conclusion_verdicts.regression_compatibility.basis"
+                  placeholder="e.g. Builds cleanly; tests pass; pyproject deps unchanged.">{{ _reg.basis or '' }}</textarea>
+      </label>
+      <label class="narrative-row">
+        <span class="narrative-label">Biological validation</span>
+        <select class="narrative-input" data-narrative-path="conclusion_verdicts.biological_validation.result">
+          <option value="">(unset)</option>
+          <option value="PASS" {% if _bio.result == 'PASS' %}selected{% endif %}>PASS</option>
+          <option value="FAIL" {% if _bio.result == 'FAIL' %}selected{% endif %}>FAIL</option>
+          <option value="MIXED" {% if _bio.result == 'MIXED' %}selected{% endif %}>MIXED</option>
+          <option value="PENDING" {% if _bio.result == 'PENDING' %}selected{% endif %}>PENDING</option>
+        </select>
+      </label>
+      <label class="narrative-row narrative-row-wide">
+        <span class="narrative-label">Biological basis</span>
+        <textarea class="narrative-input narrative-textarea" rows="2"
+                  data-narrative-path="conclusion_verdicts.biological_validation.basis"
+                  placeholder="e.g. atp_fraction = 0.997, outside Boesen 2024 band [0.2, 0.5].">{{ _bio.basis or '' }}</textarea>
+      </label>
+      <label class="narrative-row">
+        <span class="narrative-label">Explanatory gain</span>
+        <select class="narrative-input" data-narrative-path="conclusion_verdicts.explanatory_gain.result">
+          <option value="">(unset)</option>
+          <option value="POSITIVE" {% if _exp.result == 'POSITIVE' %}selected{% endif %}>POSITIVE</option>
+          <option value="NEUTRAL" {% if _exp.result == 'NEUTRAL' %}selected{% endif %}>NEUTRAL</option>
+          <option value="NEGATIVE" {% if _exp.result == 'NEGATIVE' %}selected{% endif %}>NEGATIVE</option>
+          <option value="PENDING" {% if _exp.result == 'PENDING' %}selected{% endif %}>PENDING</option>
+        </select>
+      </label>
+      <label class="narrative-row narrative-row-wide">
+        <span class="narrative-label">Explanatory basis</span>
+        <textarea class="narrative-input narrative-textarea" rows="2"
+                  data-narrative-path="conclusion_verdicts.explanatory_gain.basis"
+                  placeholder="e.g. Three findings worth keeping; design_pivot_required closed.">{{ _exp.basis or '' }}</textarea>
+      </label>
+    </div>
+  </div>
 
   {% set _is_v3 = study.conclusion_logic or study.follow_up_studies %}
   {% if _is_v3 %}
