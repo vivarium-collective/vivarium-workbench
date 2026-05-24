@@ -7,7 +7,7 @@ name = "vivarium-dashboard"
 version = "0.1.0"
 description = "Web-based dashboard for Vivarium / process-bigraph workspaces"
 authors = [{name = "Vivarium Collective", email = "team@vivarium-collective.org"}]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "jinja2",
     "pyyaml",
@@ -17,6 +17,7 @@ dependencies = [
     "process-bigraph",
     "bigraph-schema",
     "pbg-superpowers",
+    "keyring>=24",  # secure token storage for the GitHub OAuth Device Flow
 ]
 
 [project.optional-dependencies]

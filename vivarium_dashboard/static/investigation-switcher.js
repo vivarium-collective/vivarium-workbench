@@ -1,28 +1,35 @@
 // Cross-worktree Investigation switcher dropdown for the left rail.
 //
-// Pass C (2026-05-17). The dropdown now reads /api/investigation-registry —
-// an aggregated view across every running dashboard on this host — instead
-// of just this server's /api/iset-list. The convention is one Investigation
-// per worktree per branch, so each entry corresponds to a separate worktree
-// + dashboard server (intentional parallelism).
+// Reads /api/investigation-registry — an aggregated view across every
+// dashboard server on this host AND every open investigation on every
+// sibling git worktree, whether or not its dashboard is running.
 //
 // Layout (top → bottom):
 //
 //   ┌─────────────────────────────────────────────┐
 //   │ Investigations                              │   header
 //   ├─────────────────────────────────────────────┤
-//   │ [active here] <current slug>      [pill]    │   THIS worktree
-//   ├──── OTHER WORKTREES ───────────────────────┤   (hidden if empty)
+//   │ [active here] <current slug>      [pill]    │   THIS workspace, current iset
+//   ├──── ALSO IN THIS WORKSPACE ─────────────────┤   (hidden if empty)
+//   │ <slug>                            [pill]    │   click → activate locally
+//   ├──── OTHER WORKTREES (LIVE) ────────────────┤   (hidden if empty)
 //   │ <slug>                            [pill] →  │   click → open peer URL
-//   │ <slug>                            [pill] →  │
+//   ├──── DORMANT WORKTREES ─────────────────────┤   (hidden if empty)
+//   │ <slug> · <branch> · <status>     [dormant]  │   click → boot-cmd prompt
 //   ├─────────────────────────────────────────────┤
 //   │ + New Investigation                         │
 //   └─────────────────────────────────────────────┘
 //
-// Clicking the current-investigation row opens its detail in-place (same
-// behavior as the legacy switcher). Clicking a row under OTHER WORKTREES
-// opens that peer dashboard in a new tab — it lives in a different worktree
-// and shouldn't be navigated to in this tab.
+// Picker for "current": (a) investigation whose slug matches the current
+// git branch, (b) any with effective_status=running, (c) first
+// alphabetically — server side, in /api/investigation-registry.
+//
+// Click behaviour by section:
+//   - CURRENT / ALSO IN THIS WORKSPACE → activate locally (in-place).
+//   - OTHER WORKTREES (LIVE)           → open peer URL in a new tab.
+//   - DORMANT WORKTREES                → prompt with the boot command
+//                                        (/pbg-investigation open <slug>);
+//                                        no peer URL to navigate to yet.
 //
 // "+ New Investigation" still calls window._openNewIsetModal (provided by
 // walkthrough.js), which scaffolds the YAML in THIS workspace.
@@ -109,17 +116,91 @@
       });
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const data = await resp.json();
-      render(data.current || null, data.running_others || []);
+      render({
+        current:        data.current        || null,
+        localSiblings:  data.local_siblings || [],
+        runningOthers:  data.running_others || [],
+        dormantOthers:  data.dormant_others || [],
+      });
+      updateTriggerLabel(data.current || null);
+      publishCurrentSlug(data.current || null);
     } catch (err) {
       list.innerHTML = '<li class="viv-iset-menu-error">Failed to load: '
         + escapeHtml(String(err)) + '</li>';
     }
   }
 
-  function render(current, others) {
+  // Sync the workspace-switcher trigger button's label with the current
+  // investigation from the registry. The static label is baked into
+  // reports/index.html at /pbg-report time and only carries the iset
+  // suffix when there's exactly one investigation (lib/report.py); this
+  // updates it client-side for multi-iset workspaces and after iset
+  // switches.
+  function updateTriggerLabel(current) {
+    const strong = trigger.querySelector('strong');
+    if (!strong) return;
+    const raw = (strong.textContent || '').trim();
+    const workspaceName = raw.split(':')[0];
+    if (!workspaceName) return;
+    strong.textContent = current && current.slug
+      ? workspaceName + ':' + current.slug
+      : workspaceName;
+  }
+
+  // Surface the current iset slug as a window-level signal so the rail's
+  // STUDIES section (walkthrough.js `_renderRailInvestigationGroups`)
+  // can scope itself to only the current investigation's studies.
+  // Re-rendering the rail after we know the current slug collapses the
+  // multi-investigation groups (e.g., colonies + v2ecoli-pdmp) down to
+  // just one — matching the dropdown's "current" selection.
+  function publishCurrentSlug(current) {
+    const slug = current && current.slug ? current.slug : '';
+    if (window._currentIsetSlug === slug) return;
+    window._currentIsetSlug = slug;
+    if (typeof window._renderRailInvestigationGroups === 'function'
+        && Array.isArray(window._investigations)
+        && Array.isArray(window._isetIndex)
+        && window._investigations.length) {
+      try { window._renderRailInvestigationGroups(); } catch (_) { /* ignore */ }
+    } else if (typeof window._vivRefreshInvestigationsRail === 'function') {
+      try { window._vivRefreshInvestigationsRail(); } catch (_) { /* ignore */ }
+    }
+    // If the Investigation tab is currently visible AND showing a
+    // different iset, swap its detail view to the freshly-published
+    // current slug. Without this, the tab stays stuck on whatever it
+    // picked at mount time (typically the alphabetically-first iset).
+    if (slug
+        && typeof window._openInvestigationDetail === 'function'
+        && window._currentIset
+        && window._currentIset !== slug
+        && Array.isArray(window._isetIndex)
+        && window._isetIndex.some((i) => i && i.name === slug)) {
+      const detailEl = document.getElementById('investigation-detail-view');
+      const isVisible = detailEl && detailEl.offsetParent !== null;
+      if (isVisible) {
+        try { window._openInvestigationDetail(slug); } catch (_) { /* ignore */ }
+      }
+    }
+  }
+
+  // Refresh both label + current-slug on page load — without this, the
+  // label stays stuck on the baked-in static value and the rail keeps
+  // showing every investigation's studies until the user opens the
+  // dropdown.
+  fetch('/api/investigation-registry', { headers: { Accept: 'application/json' } })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => {
+      if (!data) return;
+      updateTriggerLabel(data.current || null);
+      publishCurrentSlug(data.current || null);
+    })
+    .catch(() => { /* leave the baked state in place */ });
+
+  function render({ current, localSiblings, runningOthers, dormantOthers }) {
     const list = menu.querySelector('.viv-iset-menu-list');
     list.innerHTML = '';
 
+    // ── INVESTIGATIONS — this worktree's current investigation. ──
     if (current && current.slug) {
       list.appendChild(renderCurrentRow(current));
     } else {
@@ -129,15 +210,36 @@
       list.appendChild(li);
     }
 
-    if (others && others.length) {
-      const divider = document.createElement('li');
-      divider.className = 'viv-iset-menu-section';
-      divider.textContent = 'OTHER WORKTREES';
-      list.appendChild(divider);
-      others.forEach((peer) => list.appendChild(renderPeerRow(peer)));
+    // ── ALSO IN THIS WORKSPACE — other local investigation.yamls. ──
+    // These are siblings on the same on-disk tree as `current` (no
+    // separate worktree, no separate dashboard). Clicking activates
+    // the investigation detail in this same dashboard.
+    if (localSiblings && localSiblings.length) {
+      appendSectionHeader(list, 'ALSO IN THIS WORKSPACE');
+      localSiblings.forEach((s) => list.appendChild(renderLocalSiblingRow(s)));
     }
-    // If `others` is empty, the OTHER WORKTREES section is omitted entirely
-    // — no empty header, no placeholder row.
+
+    // ── OTHER WORKTREES — peer dashboards live RIGHT NOW. ──
+    if (runningOthers && runningOthers.length) {
+      appendSectionHeader(list, 'OTHER WORKTREES (LIVE)');
+      runningOthers.forEach((peer) => list.appendChild(renderPeerRow(peer)));
+    }
+
+    // ── DORMANT WORKTREES — open investigations on sibling worktrees ──
+    // whose dashboard is not running. Click shows instructions for
+    // booting the peer dashboard. Closed / archived investigations are
+    // already filtered server-side.
+    if (dormantOthers && dormantOthers.length) {
+      appendSectionHeader(list, 'DORMANT WORKTREES');
+      dormantOthers.forEach((d) => list.appendChild(renderDormantRow(d)));
+    }
+  }
+
+  function appendSectionHeader(list, label) {
+    const divider = document.createElement('li');
+    divider.className = 'viv-iset-menu-section';
+    divider.textContent = label;
+    list.appendChild(divider);
   }
 
   function renderCurrentRow(current) {
@@ -163,6 +265,84 @@
     const activate = () => {
       close();
       switchInvestigationLocal(current.slug);
+    };
+    li.addEventListener('click', (e) => { e.stopPropagation(); activate(); });
+    li.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
+    });
+    return li;
+  }
+
+  function renderLocalSiblingRow(s) {
+    const li = document.createElement('li');
+    li.className = 'viv-iset-menu-row viv-iset-menu-row-local-sibling';
+    li.setAttribute('role', 'menuitem');
+    li.tabIndex = 0;
+
+    const effStatus = s.effective_status || 'planning';
+    const pillClass = effStatus.replace(/[^a-z_]/g, '_');
+    const title = s.title || s.slug;
+
+    li.innerHTML = `
+      <div class="viv-iset-menu-row-line1">
+        <strong class="viv-iset-menu-row-title">${escapeHtml(title)}</strong>
+        <span class="status-pill ${escapeHtml(pillClass)} viv-iset-menu-row-pill">${escapeHtml(effStatus)}</span>
+      </div>
+      <div class="viv-iset-menu-row-slug">${escapeHtml(s.slug || '')}</div>
+    `;
+
+    const activate = () => {
+      close();
+      switchInvestigationLocal(s.slug);
+    };
+    li.addEventListener('click', (e) => { e.stopPropagation(); activate(); });
+    li.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
+    });
+    return li;
+  }
+
+  function renderDormantRow(d) {
+    const li = document.createElement('li');
+    li.className = 'viv-iset-menu-row viv-iset-menu-row-dormant';
+    li.setAttribute('role', 'menuitem');
+    li.tabIndex = 0;
+    li.title = `Worktree: ${d.worktree_path}\nBranch: ${d.branch || '(detached)'}\n` +
+               `No dashboard running. Click for instructions to boot it.`;
+
+    const status = d.status || 'open';
+    const title  = d.title  || d.slug;
+    const branch = d.branch || '';
+
+    li.innerHTML = `
+      <div class="viv-iset-menu-row-line1">
+        <strong class="viv-iset-menu-row-title">${escapeHtml(title)}</strong>
+        <span class="viv-iset-menu-row-pill viv-iset-menu-row-pill-dormant">dormant</span>
+      </div>
+      <div class="viv-iset-menu-row-slug">
+        ${escapeHtml(d.slug || '')}
+        ${branch ? `<span class="viv-iset-menu-row-branch"> · ${escapeHtml(branch)}</span>` : ''}
+        ${status ? `<span class="viv-iset-menu-row-status"> · ${escapeHtml(status)}</span>` : ''}
+      </div>
+    `;
+
+    const activate = () => {
+      close();
+      // No live URL to navigate to. Show a small toast with the boot
+      // command. The user invokes /pbg-investigation open <slug> in
+      // their terminal, which creates the worktree (if missing) and
+      // boots its dashboard, after which it'll show up in
+      // OTHER WORKTREES (LIVE) on the next dropdown refresh.
+      const cmd = `/pbg-investigation open ${d.slug}`;
+      const ok = window.prompt(
+        `${title} has no running dashboard.\n\n` +
+        `Run this in your terminal to boot it:\n\n${cmd}\n\n` +
+        `(Press OK to copy to clipboard; Cancel to dismiss.)`,
+        cmd,
+      );
+      if (ok !== null && navigator.clipboard) {
+        navigator.clipboard.writeText(cmd).catch(() => {});
+      }
     };
     li.addEventListener('click', (e) => { e.stopPropagation(); activate(); });
     li.addEventListener('keydown', (e) => {

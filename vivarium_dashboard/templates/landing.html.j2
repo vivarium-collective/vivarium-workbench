@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>vivarium-dashboard</title>
+  <link rel="stylesheet" href="assets/style.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
+  <style>
+    body.viv-landing {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--page, #f7f7f8);
+      color: var(--text, #1a1a1a);
+      padding: 32px;
+      box-sizing: border-box;
+    }
+    body.viv-landing .viv-landing-logo {
+      width: 96px;
+      height: 96px;
+      object-fit: contain;
+    }
+    body.viv-landing h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+    }
+    body.viv-landing .viv-landing-sub {
+      margin: 0;
+      font-size: 14px;
+      color: var(--muted, #666);
+      max-width: 520px;
+      text-align: center;
+      line-height: 1.5;
+    }
+    body.viv-landing .viv-landing-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 8px;
+    }
+    body.viv-landing .viv-landing-btn {
+      appearance: none;
+      border: 1px solid var(--border, #d0d0d4);
+      background: var(--panel, #fff);
+      color: var(--text, #1a1a1a);
+      padding: 10px 18px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    body.viv-landing .viv-landing-btn-primary {
+      background: var(--accent, #2563eb);
+      color: #fff;
+      border-color: var(--accent, #2563eb);
+    }
+    body.viv-landing .viv-landing-btn:hover { filter: brightness(0.97); }
+    /* The switcher modal includes workstream actions in its footer; those are
+       meaningless before any workspace is bound, so hide them in landing mode. */
+    body.viv-landing .viv-workspace-switcher-actions { display: none; }
+
+    /* GitHub auth header (top-right). The chip swaps content based on
+       /api/auth/github/status — managed by github-login.js. */
+    body.viv-landing .viv-gh-header {
+      position: fixed; top: 16px; right: 20px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    body.viv-landing .viv-gh-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-radius: 16px;
+      border: 1px solid var(--border, #d0d0d4);
+      background: var(--panel, #fff); color: var(--text, #1a1a1a);
+      font-size: 13px; font-weight: 600; cursor: pointer;
+      appearance: none;
+    }
+    body.viv-landing .viv-gh-chip:hover { filter: brightness(0.97); }
+    body.viv-landing .viv-gh-chip[data-state="loading"] { opacity: 0.6; cursor: default; }
+    body.viv-landing .viv-gh-source { font-size: 11px; font-weight: 400; color: var(--muted, #666); }
+  </style>
+</head>
+<body class="viv-landing">
+  <div class="viv-gh-header">
+    <span class="viv-theme-toggle" id="viv-theme-toggle" role="button" tabindex="0" aria-label="Toggle dark mode" title="Toggle dark/light mode">
+      <span class="viv-theme-toggle-icon" id="viv-theme-toggle-icon">☀</span>
+      <span class="viv-theme-toggle-track">
+        <span class="viv-theme-toggle-thumb" id="viv-theme-toggle-thumb"></span>
+      </span>
+    </span>
+    <button id="viv-gh-chip" type="button" class="viv-gh-chip" data-state="loading">
+      Loading…
+    </button>
+  </div>
+
+  <img class="viv-landing-logo" src="assets/vivarium-logo.png" alt="vivarium">
+  <h1>No workspace bound</h1>
+  <p class="viv-landing-sub">
+    The dashboard is running without a workspace. Pick an existing one or
+    add a new directory — your selection spawns its own per-workspace
+    dashboard.
+  </p>
+  <div class="viv-landing-actions">
+    <button id="viv-workspace-switcher-trigger" type="button"
+            class="viv-landing-btn viv-landing-btn-primary">
+      Open workspaces…
+    </button>
+  </div>
+
+  <script src="assets/workspace-switcher.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
+  <script src="assets/github-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
+  <script>
+    // Auto-open the switcher modal on first load so the user sees their
+    // options immediately. The trigger click is the same path the user
+    // would take manually — guarantees the modal mounts via its own
+    // lifecycle hooks rather than racing them.
+    window.addEventListener('DOMContentLoaded', () => {
+      const trigger = document.getElementById('viv-workspace-switcher-trigger');
+      if (trigger) trigger.click();
+    });
+
+    // Theme toggle (dark/light mode)
+    function _setTheme(theme) {
+      document.documentElement.setAttribute("data-theme", theme);
+      try { localStorage.setItem("viv-theme", theme); } catch(e) {}
+      var icon = document.getElementById("viv-theme-toggle-icon");
+      if (icon) icon.textContent = theme === "dark" ? "☾" : "☀";
+    }
+    function _toggleTheme() {
+      var theme = document.documentElement.getAttribute("data-theme");
+      _setTheme(theme === "dark" ? "light" : "dark");
+    }
+    (function(){
+      var saved = null;
+      try { saved = localStorage.getItem("viv-theme"); } catch(e) {}
+      var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      _setTheme(theme);
+      var btn = document.getElementById("viv-theme-toggle");
+      if (btn) btn.addEventListener("click", _toggleTheme);
+    })();
+  </script>
+</body>
+</html>

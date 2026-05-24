@@ -15,7 +15,7 @@
   justify-content: center;
 }
 .modal-box {
-  background: #fff;
+  background: var(--panel, #fff);
   border-radius: 8px;
   padding: 24px 28px;
   min-width: 360px;
@@ -24,12 +24,13 @@
   box-shadow: 0 8px 32px rgba(0,0,0,0.18);
   position: relative;
 }
-.modal-box h3 { margin-top: 0; }
-.modal-box label { display: block; margin-bottom: 4px; font-weight: 600; font-size: 0.9em; }
+.modal-box h3 { margin-top: 0; color: var(--text, inherit); }
+.modal-box label { display: block; margin-bottom: 4px; font-weight: 600; font-size: 0.9em; color: var(--text, inherit); }
 .modal-box input, .modal-box select, .modal-box textarea {
   width: 100%; box-sizing: border-box;
-  border: 1px solid #ccc; border-radius: 4px;
+  border: 1px solid var(--border, #ccc); border-radius: 4px;
   padding: 6px 8px; font-size: 0.92em; margin-bottom: 12px;
+  background: var(--panel, #fff); color: var(--text, inherit);
 }
 .modal-box textarea { min-height: 90px; font-family: monospace; }
 .modal-box button[type=submit] {
@@ -39,15 +40,16 @@
 .modal-box button[type=submit]:disabled { opacity: 0.6; cursor: not-allowed; }
 .modal-close {
   position: absolute; top: 10px; right: 14px;
-  background: none; border: none; font-size: 1.3em; cursor: pointer; color: #888;
+  background: none; border: none; font-size: 1.3em; cursor: pointer; color: var(--muted, #888);
 }
 .form-error { color: #c00; font-size: 0.9em; margin-top: 4px; min-height: 1.2em; }
 .action-btn {
   margin-top: 10px; padding: 5px 12px;
-  border: 1px solid #1976d2; background: #e3f2fd;
+  border: 1px solid var(--accent-blue, #1976d2); background: var(--bg-alt, #e3f2fd);
   border-radius: 4px; cursor: pointer; font-size: 0.88em;
+  color: var(--accent-blue, #1976d2);
 }
-.action-btn:hover { background: #bbdefb; }
+.action-btn:hover { background: var(--hover, #bbdefb); }
 .action-btn--secondary {
   margin-top: 10px; padding: 5px 12px;
   border: 1px solid #b91c1c; background: #fef2f2;
@@ -61,16 +63,16 @@
 .action-btn-small:hover { background: #ffcdd2; }
 .pill-btn {
   font-size: 0.78em; padding: 2px 8px; border-radius: 3px;
-  border: 1px solid #666; background: #fff; cursor: pointer; margin-left: 6px;
+  border: 1px solid var(--border, #666); background: var(--panel, #fff); cursor: pointer; margin-left: 6px;
   vertical-align: middle;
 }
-.pill-btn:hover { background: #eee; }
+.pill-btn:hover { background: var(--hover, #eee); }
 .btn-mini {
   font-size: 0.78em; padding: 2px 8px; border-radius: 3px;
-  border: 1px solid #1976d2; background: #e3f2fd; cursor: pointer; margin-left: 8px;
+  border: 1px solid var(--accent-blue, #1976d2); background: var(--bg-alt, #e3f2fd); cursor: pointer; margin-left: 8px;
   vertical-align: middle;
 }
-.btn-mini:hover { background: #bbdefb; }
+.btn-mini:hover { background: var(--hover, #bbdefb); }
 .section-header {
   margin: 28px 0 6px 0;
   padding-bottom: 6px;
@@ -90,7 +92,7 @@
   display: none;
 }
 #run-tests-spinner { display: none; margin-left: 8px; color: #888; }
-.panel-lead { color: #6b7280; margin-bottom: 16px; font-size: 0.92em; }
+.panel-lead { color: var(--muted, #6b7280); margin-bottom: 16px; font-size: 0.92em; }
 .status-pill.installed{ background:#d1fae5; color:#065f46 }
 .status-pill.not_installed{ background:#fef3c7; color:#92400e }
 .registry-hint{
@@ -106,11 +108,11 @@
 .viv-workspace-switcher { position: relative; padding: 8px 12px; }
 .viv-workspace-switcher-trigger {
   display: flex; align-items: center; gap: 6px;
-  width: 100%; padding: 6px 8px; background: #fff;
-  border: 1px solid #ddd; border-radius: 4px; cursor: pointer;
-  font-size: 13px;
+  width: 100%; padding: 6px 8px; background: var(--panel, #fff);
+  border: 1px solid var(--border, #ddd); border-radius: 4px; cursor: pointer;
+  font-size: 13px; color: var(--text, inherit);
 }
-.viv-workspace-switcher-trigger:hover { background: #f5f5f5; }
+.viv-workspace-switcher-trigger:hover { background: var(--hover, #f5f5f5); }
 .viv-workspace-switcher-glyph { color: #2ea043; font-size: 14px; }
 .viv-glyph-running { color: #2ea043; }
 .viv-glyph-stopped { color: #999; }
@@ -135,7 +137,7 @@
 .viv-ws-modal-card {
   width: min(720px, 90vw);
   max-height: 80vh;
-  background: #fff;
+  background: var(--panel, #fff);
   border-radius: 8px;
   box-shadow: 0 16px 48px rgba(0,0,0,0.18);
   display: flex; flex-direction: column;
@@ -143,25 +145,25 @@
 }
 .viv-ws-modal-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 18px; border-bottom: 1px solid #eee;
+  padding: 14px 18px; border-bottom: 1px solid var(--border, #eee);
 }
 .viv-ws-modal-header h2 {
-  margin: 0; font-size: 15px; font-weight: 600; color: #333;
+  margin: 0; font-size: 15px; font-weight: 600; color: var(--text, #333);
 }
 .viv-ws-modal-close {
   background: none; border: none; cursor: pointer;
-  font-size: 18px; color: #666; padding: 0 4px;
+  font-size: 18px; color: var(--muted, #666); padding: 0 4px;
 }
-.viv-ws-modal-close:hover { color: #000; }
+.viv-ws-modal-close:hover { color: var(--text, #000); }
 .viv-ws-modal-list {
   list-style: none; margin: 0; padding: 0;
   overflow-y: auto; flex: 1;
 }
 .viv-ws-modal-footer {
-  padding: 10px 18px; border-top: 1px solid #eee;
+  padding: 10px 18px; border-top: 1px solid var(--border, #eee);
 }
 .viv-ws-modal-add {
-  background: none; border: none; color: #0366d6;
+  background: none; border: none; color: var(--accent-blue, #0366d6);
   cursor: pointer; font-size: 13px; padding: 0;
 }
 .viv-ws-modal-add:hover { text-decoration: underline; }
@@ -169,29 +171,29 @@
 /* Rows */
 .viv-ws-row {
   padding: 10px 18px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--border, #f0f0f0);
   cursor: pointer;
 }
 .viv-ws-row:last-child { border-bottom: none; }
-.viv-ws-row:hover { background: #f6f8fa; }
-.viv-ws-row-current { cursor: default; background: #f8f9fb; }
-.viv-ws-row-current:hover { background: #f8f9fb; }
+.viv-ws-row:hover { background: var(--hover, #f6f8fa); }
+.viv-ws-row-current { cursor: default; background: var(--bg-alt, #f8f9fb); }
+.viv-ws-row-current:hover { background: var(--bg-alt, #f8f9fb); }
 .viv-ws-line1 {
   display: flex; align-items: center; gap: 10px;
 }
 .viv-ws-row .viv-ws-glyph { width: 18px; text-align: center; font-size: 14px; }
-.viv-ws-name { flex: 1; font-size: 13px; }
-.viv-ws-name small { color: #777; font-weight: normal; }
+.viv-ws-name { flex: 1; font-size: 13px; color: var(--text, #1f2937); }
+.viv-ws-name small { color: var(--muted, #777); font-weight: normal; }
 .viv-ws-path {
-  font-size: 11px; color: #888;
+  font-size: 11px; color: var(--muted, #888);
   margin-top: 3px; margin-left: 28px;
   word-break: break-all;
 }
 .viv-ws-action {
   font-size: 11px; padding: 4px 10px; cursor: pointer;
-  border: 1px solid #ccc; background: #fff; border-radius: 3px;
+  border: 1px solid var(--border, #ccc); background: var(--panel, #fff); border-radius: 3px;
 }
-.viv-ws-action:hover { background: #f0f0f0; }
+.viv-ws-action:hover { background: var(--hover, #f0f0f0); }
 .viv-ws-action:disabled { opacity: 0.6; cursor: progress; }
 .viv-ws-action-danger { color: #cf222e; border-color: #f6c4c9; }
 .viv-ws-action-danger:hover { background: #fdecef; }
@@ -199,20 +201,20 @@
 .viv-ws-action-warn:hover { background: #fff5e1; }
 .viv-ws-action-muted { color: #666; }
 .viv-ws-loading {
-  padding: 16px 18px; color: #999; font-size: 12px;
+  padding: 16px 18px; color: var(--muted, #999); font-size: 12px;
 }
 /* .viv-ws-error reused from v1; no rule change needed. */
 .mode-selector { margin: 0.5rem 0; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; }
 .mode-selector legend { font-weight: bold; padding: 0 0.3rem; }
 .mode-selector label { display: block; margin: 0.3rem 0; font-weight: normal; }
 .viv-workspace-switcher-actions {
-  border-top: 1px solid #eee; margin-top: 0.4rem; padding-top: 0.4rem;
+  border-top: 1px solid var(--border, #eee); margin-top: 0.4rem; padding-top: 0.4rem;
 }
 .viv-workspace-switcher-actions button {
   display: block; width: 100%; text-align: left;
   padding: 0.4rem 0.6rem; background: transparent; border: none; cursor: pointer;
 }
-.viv-workspace-switcher-actions button:hover { background: #f0f0f0; }
+.viv-workspace-switcher-actions button:hover { background: var(--hover, #f0f0f0); }
 
 /* Investigation switcher dropdown (anchored under the rail trigger). */
 .viv-workspace-switcher { position: relative; }
@@ -223,8 +225,8 @@
   left: 12px;
   right: 12px;
   z-index: 1500;
-  background: #fff;
-  border: 1px solid #d0d7de;
+  background: var(--panel, #fff);
+  border: 1px solid var(--border, #d0d7de);
   border-radius: 6px;
   box-shadow: 0 12px 28px rgba(0,0,0,0.14);
   max-height: 60vh;
@@ -234,21 +236,21 @@
 .viv-iset-menu.open { display: block; }
 .viv-iset-menu-header {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
-  color: #6b7280; padding: 8px 12px 4px;
+  color: var(--muted, #6b7280); padding: 8px 12px 4px;
 }
 .viv-iset-menu-list { list-style: none; margin: 0; padding: 0; }
 .viv-iset-menu-row {
   padding: 8px 12px; cursor: pointer;
-  border-top: 1px solid #f3f4f6;
+  border-top: 1px solid var(--border, #f3f4f6);
 }
 .viv-iset-menu-row:first-child { border-top: none; }
-.viv-iset-menu-row:hover, .viv-iset-menu-row:focus { background: #f6f8fa; outline: none; }
-.viv-iset-menu-row-current { background: #eef4ff; }
-.viv-iset-menu-row-current:hover { background: #e3eefe; }
+.viv-iset-menu-row:hover, .viv-iset-menu-row:focus { background: var(--hover, #f6f8fa); outline: none; }
+.viv-iset-menu-row-current { background: var(--bg-alt, #eef4ff); }
+.viv-iset-menu-row-current:hover { background: var(--bg-alt, #e3eefe); }
 .viv-iset-menu-row-line1 {
   display: flex; align-items: center; gap: 8px;
 }
-.viv-iset-menu-row-title { flex: 1; font-size: 13px; color: #111827; }
+.viv-iset-menu-row-title { flex: 1; font-size: 13px; color: var(--text, #111827); }
 .viv-iset-menu-row-pill {
   font-size: 0.7em !important;
   padding: 1px 7px !important;
@@ -256,34 +258,34 @@
 }
 .viv-iset-menu-row-slug {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px; color: #6b7280; margin-top: 2px;
+  font-size: 11px; color: var(--muted, #6b7280); margin-top: 2px;
 }
-.viv-iset-menu-row-current-tag { color: #1e40af; font-weight: 600; font-family: inherit; }
+.viv-iset-menu-row-current-tag { color: var(--accent-blue, #1e40af); font-weight: 600; font-family: inherit; }
 .viv-iset-menu-loading, .viv-iset-menu-empty, .viv-iset-menu-error {
-  padding: 10px 12px; color: #6b7280; font-size: 12px;
+  padding: 10px 12px; color: var(--muted, #6b7280); font-size: 12px;
 }
 .viv-iset-menu-error { color: #b91c1c; }
-.viv-iset-menu-divider { border-top: 1px solid #e5e7eb; }
+.viv-iset-menu-divider { border-top: 1px solid var(--border, #e5e7eb); }
 .viv-iset-menu-new {
   display: block; width: 100%; text-align: left;
   background: none; border: none; cursor: pointer;
-  padding: 10px 12px; font-size: 13px; color: #0366d6;
+  padding: 10px 12px; font-size: 13px; color: var(--accent-blue, #0366d6);
 }
-.viv-iset-menu-new:hover { background: #f6f8fa; }
+.viv-iset-menu-new:hover { background: var(--hover, #f6f8fa); }
 /* Pass C: cross-worktree section divider + peer-row arrow */
 .viv-iset-menu-section {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
-  color: #6b7280; padding: 10px 12px 4px;
-  border-top: 1px solid #e5e7eb;
-  background: #fafbfc;
+  color: var(--muted, #6b7280); padding: 10px 12px 4px;
+  border-top: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-alt, #fafbfc);
   list-style: none;
 }
 .viv-iset-menu-row-peer { padding-right: 28px; position: relative; }
 .viv-iset-menu-row-arrow {
-  color: #6b7280; font-size: 14px; padding-left: 6px;
+  color: var(--muted, #6b7280); font-size: 14px; padding-left: 6px;
   flex: 0 0 auto;
 }
-.viv-iset-menu-row-peer:hover .viv-iset-menu-row-arrow { color: #0366d6; }
+.viv-iset-menu-row-peer:hover .viv-iset-menu-row-arrow { color: var(--accent-blue, #0366d6); }
 </style>
 </head><body>
 
@@ -493,6 +495,12 @@
              populates it wherever it lives. -->
         <span class="viv-btn viv-tooltip" data-tooltip="Coming soon — share workspace link">Share</span>
         <span class="viv-kebab viv-tooltip" data-tooltip="Workspace settings — coming soon">⋯</span>
+        <span class="viv-theme-toggle" id="viv-theme-toggle" role="button" tabindex="0" aria-label="Toggle dark mode" title="Toggle dark/light mode">
+          <span class="viv-theme-toggle-icon" id="viv-theme-toggle-icon">☀</span>
+          <span class="viv-theme-toggle-track">
+            <span class="viv-theme-toggle-thumb" id="viv-theme-toggle-thumb"></span>
+          </span>
+        </span>
         {# Mirrors the rail-footer logic — show GitHub initials/email only
            when `gh auth login` succeeded; otherwise a generic prompt that
            opens the gh-cli setup docs, so screenshots of this workspace
@@ -778,8 +786,11 @@ When done, summarize which entries got PDFs vs URLs only vs were unresolvable, a
 
   <!-- Available Composites (workspace-local discovery) -->
   <div class="panel">
-    <h3>Available Composites <span id="composite-count" class="count-badge"></span></h3>
-    <p class="panel-lead">Discoverable composite documents from <code>pbg_&lt;slug&gt;/composites/*.composite.{yaml,json}</code>. Each one packages a runnable simulation state with parameters you can configure. Click <strong>Explore</strong> to open it in Composite Explorer.</p>
+    <h3>
+      Available Composites <span id="composite-count" class="count-badge"></span>
+      <a href="/composites/new" class="primary-btn" style="margin-left: 12px; font-size: 13px; text-decoration: none;" title="Author a new composite in the visual builder">+ Create</a>
+    </h3>
+    <p class="panel-lead">Discoverable composite documents from <code>pbg_&lt;slug&gt;/composites/*.composite.{yaml,json}</code>. Each one packages a runnable simulation state with parameters you can configure. Click <strong>Explore</strong> to open it in Composite Explorer, or <strong>+ Create</strong> above to build a new one visually.</p>
     <div class="card-browse-toolbar" id="composite-toolbar">
       <input type="search" class="card-browse-search" id="composite-search" placeholder="Filter composites…">
       <div class="card-browse-chips" id="composite-tag-chips"></div>
@@ -946,7 +957,7 @@ When done, summarize which entries got PDFs vs URLs only vs were unresolvable, a
 
   <!-- "+ New Investigation" modal. Hidden by default. -->
   <div id="new-iset-modal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.4); z-index:1000; align-items:center; justify-content:center;">
-    <div style="background:#fff; border-radius:8px; padding:20px 22px; width:min(540px, 92vw); max-height:90vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,0.2);">
+    <div style="background:var(--panel,#fff); border-radius:8px; padding:20px 22px; width:min(540px, 92vw); max-height:90vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,0.2);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
         <h3 style="margin:0">New Investigation</h3>
         <button class="btn-mini" onclick="_closeNewIsetModal()">×</button>
@@ -2035,5 +2046,24 @@ function runTests() {
       if (output) { output.style.display = "block"; output.textContent = "Network error: " + err; }
     });
 }
+// Theme toggle (dark/light mode)
+function _setTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  try { localStorage.setItem("viv-theme", theme); } catch(e) {}
+  var icon = document.getElementById("viv-theme-toggle-icon");
+  if (icon) icon.textContent = theme === "dark" ? "☾" : "☀";
+}
+function _toggleTheme() {
+  var theme = document.documentElement.getAttribute("data-theme");
+  _setTheme(theme === "dark" ? "light" : "dark");
+}
+(function(){
+  var saved = null;
+  try { saved = localStorage.getItem("viv-theme"); } catch(e) {}
+  var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  _setTheme(theme);
+  var btn = document.getElementById("viv-theme-toggle");
+  if (btn) btn.addEventListener("click", _toggleTheme);
+})();
 </script>
 </body></html>
