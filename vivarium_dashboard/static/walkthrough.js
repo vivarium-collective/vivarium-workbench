@@ -6050,7 +6050,22 @@
         +   '<nav class="study-nav-row2">' + links.join('') + '</nav>'
         + '</div>';
 
+      // Wrap the v4 narrative-spine section in a <details class="study-fold">
+      // so the Expand all / Collapse all toolbar buttons (which target
+      // .study-fold) actually have something to operate on. v3 studies got
+      // this for free via v3StudySection's <details> wrapper; v4 sections
+      // were left flat and the buttons did nothing on v4-only investigations.
+      // Open by default so existing reader behaviour is unchanged.
+      var foldSummary = ''
+        + '<summary class="study-panel">'
+        +   '<span class="study-num">' + (i + 1) + '.</span> '
+        +   '<strong>' + _h(s.name) + '</strong> '
+        +   statusBadge
+        + '</summary>';
+
       return ''
+        + '<details class="study-fold" id="study-fold-' + slug + '" open>'
+        + foldSummary
         + '<section class="study" id="study-' + slug + '">'
         +   subNav
         +   '<header class="study-header">'
@@ -6084,7 +6099,8 @@
 
         +   (bibList ? '<div id="' + sidRe + '"><h3>References cited by this study</h3><p>' + bibList + '</p></div>' : '')
 
-        + '</section>';
+        + '</section>'
+        + '</details>';
     }
 
     // ── PARTS grouping (framework): investigation.yaml may declare a `parts`
