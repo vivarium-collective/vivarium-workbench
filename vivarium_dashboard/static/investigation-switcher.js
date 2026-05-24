@@ -122,11 +122,63 @@
         runningOthers:  data.running_others || [],
         dormantOthers:  data.dormant_others || [],
       });
+      updateTriggerLabel(data.current || null);
+      publishCurrentSlug(data.current || null);
     } catch (err) {
       list.innerHTML = '<li class="viv-iset-menu-error">Failed to load: '
         + escapeHtml(String(err)) + '</li>';
     }
   }
+
+  // Sync the workspace-switcher trigger button's label with the current
+  // investigation from the registry. The static label is baked into
+  // reports/index.html at /pbg-report time and only carries the iset
+  // suffix when there's exactly one investigation (lib/report.py); this
+  // updates it client-side for multi-iset workspaces and after iset
+  // switches.
+  function updateTriggerLabel(current) {
+    const strong = trigger.querySelector('strong');
+    if (!strong) return;
+    const raw = (strong.textContent || '').trim();
+    const workspaceName = raw.split(':')[0];
+    if (!workspaceName) return;
+    strong.textContent = current && current.slug
+      ? workspaceName + ':' + current.slug
+      : workspaceName;
+  }
+
+  // Surface the current iset slug as a window-level signal so the rail's
+  // STUDIES section (walkthrough.js `_renderRailInvestigationGroups`)
+  // can scope itself to only the current investigation's studies.
+  // Re-rendering the rail after we know the current slug collapses the
+  // multi-investigation groups (e.g., colonies + v2ecoli-pdmp) down to
+  // just one — matching the dropdown's "current" selection.
+  function publishCurrentSlug(current) {
+    const slug = current && current.slug ? current.slug : '';
+    if (window._currentIsetSlug === slug) return;
+    window._currentIsetSlug = slug;
+    if (typeof window._renderRailInvestigationGroups === 'function'
+        && Array.isArray(window._investigations)
+        && Array.isArray(window._isetIndex)
+        && window._investigations.length) {
+      try { window._renderRailInvestigationGroups(); } catch (_) { /* ignore */ }
+    } else if (typeof window._vivRefreshInvestigationsRail === 'function') {
+      try { window._vivRefreshInvestigationsRail(); } catch (_) { /* ignore */ }
+    }
+  }
+
+  // Refresh both label + current-slug on page load — without this, the
+  // label stays stuck on the baked-in static value and the rail keeps
+  // showing every investigation's studies until the user opens the
+  // dropdown.
+  fetch('/api/investigation-registry', { headers: { Accept: 'application/json' } })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => {
+      if (!data) return;
+      updateTriggerLabel(data.current || null);
+      publishCurrentSlug(data.current || null);
+    })
+    .catch(() => { /* leave the baked state in place */ });
 
   function render({ current, localSiblings, runningOthers, dormantOthers }) {
     const list = menu.querySelector('.viv-iset-menu-list');
