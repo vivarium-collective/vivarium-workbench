@@ -10467,12 +10467,88 @@
   // Top-bar live git-status strip
   // -------------------------------------------------------------------------
 
+  // Populate the GitHub tab's "Workspace repository" rows. Hides each row
+  // when its value is empty so the settings page stays tidy. Pass null to
+  // reset all rows to a "no branch" state.
+  function _setRow(id, html, hint) {
+    var row = document.getElementById('viv-gh-row-' + id);
+    var val = document.getElementById('viv-gh-' + id);
+    if (!row || !val) return;
+    if (html == null || html === '') { row.hidden = true; return; }
+    row.hidden = false;
+    val.innerHTML = html + (hint ? '<div class="gh-value-hint">' + hint + '</div>' : '');
+  }
+
+  function _renderGitStatusRows(s) {
+    if (!document.getElementById('viv-gh-row-repo')) return;  // page not present
+    if (s == null) {
+      _setRow('repo', '<span class="muted">not a git workspace</span>');
+      ['branch', 'push-state', 'ahead', 'dirty', 'pr'].forEach(function (id) { _setRow(id, ''); });
+      return;
+    }
+    // Repository
+    _setRow('repo', s.upstream_repo
+      ? '<a href="' + s.repo_url + '" target="_blank" rel="noopener">' + _esc(s.upstream_repo) + '</a> ↗'
+      : '<span class="muted">no upstream remote configured</span>');
+    // Branch
+    _setRow('branch', s.branch
+      ? (s.branch_url
+          ? '<a href="' + s.branch_url + '" target="_blank" rel="noopener"><code>' + _esc(s.branch) + '</code></a> ↗'
+          : '<code>' + _esc(s.branch) + '</code>')
+      : '<span class="muted">no branch</span>');
+    // Push state
+    var stateMap = {
+      pushed:   '<span class="git-badge git-badge-ok">✓ pushed</span>',
+      ahead:    '<span class="git-badge git-badge-ahead">↑ ' + s.ahead + ' ahead of remote</span>',
+      behind:   '<span class="git-badge git-badge-behind">↓ ' + s.behind + ' behind remote</span>',
+      diverged: '<span class="git-badge git-badge-warn">! diverged from remote</span>',
+    };
+    _setRow('push-state', stateMap[s.push_state] || '<span class="git-badge git-badge-warn">⊘ no origin</span>');
+    // Ahead of base
+    if (s.ahead_of_base > 0) {
+      var aheadHtml = s.compare_url
+        ? '<a href="' + s.compare_url + '" target="_blank" rel="noopener">' + s.ahead_of_base + ' commits ahead of <code>' + _esc(s.base) + '</code></a> ↗'
+        : s.ahead_of_base + ' commits ahead of <code>' + _esc(s.base) + '</code>';
+      _setRow('ahead', aheadHtml);
+    } else {
+      _setRow('ahead', s.base
+        ? '<span class="muted">up to date with <code>' + _esc(s.base) + '</code></span>'
+        : '');
+    }
+    // Working tree
+    if (s.dirty_count > 0) {
+      _setRow('dirty',
+        '<a href="#" onclick="event.preventDefault();_toggleDirtyPanel();return false">'
+        + s.dirty_count + ' uncommitted file' + (s.dirty_count === 1 ? '' : 's') + '</a>',
+        'Click to view + stage');
+    } else {
+      _setRow('dirty', '<span class="muted">clean</span>');
+    }
+    // Pull request
+    if (s.pr_url) {
+      var prState = (s.pr_state || 'open').toLowerCase();
+      _setRow('pr', '<a class="git-badge git-badge-pr pr-state-' + prState + '" href="'
+        + s.pr_url + '" target="_blank" rel="noopener">PR #' + s.pr_number + ' ↗</a>'
+        + ' <span class="muted small">(' + _esc(prState) + ')</span>');
+    } else {
+      _setRow('pr', '<span class="muted">no PR linked yet</span>');
+    }
+  }
+
   function _refreshGitStatus() {
     fetch('/api/git-status').then(function (r) { return r.json(); }).then(function (s) {
+      // Legacy single-string box (still populated for any consumer that
+      // reads it). The GitHub-tab settings page renders the same data into
+      // individual rows via _renderGitStatusRows below.
       var box = document.getElementById('viv-git-status');
-      if (!box) return;
-      if (!s.branch) { box.hidden = true; return; }
-      box.hidden = false;
+      if (box) {
+        if (!s.branch) { box.hidden = true; }
+        else { box.hidden = false; }
+      }
+      if (!s.branch) {
+        _renderGitStatusRows(null);
+        return;
+      }
 
       // push-state badge
       var stateBadge;
@@ -10509,7 +10585,10 @@
         ? ' <a class="git-badge git-badge-pr pr-state-' + prState + '" href="' + s.pr_url + '" target="_blank" rel="noopener">PR #' + s.pr_number + ' ↗</a>'
         : '';
 
-      box.innerHTML = repoPart + branchPart + ' ' + stateBadge + aheadOfBasePart + dirtyPart + prPart;
+      if (box) box.innerHTML = repoPart + branchPart + ' ' + stateBadge + aheadOfBasePart + dirtyPart + prPart;
+
+      // Settings-style per-row population for the GitHub tab.
+      _renderGitStatusRows(s);
 
       // Goal 5: hide "Open PR" button when a PR already exists
       var openPrBtn = document.getElementById('btn-open-pr');
@@ -10575,14 +10654,15 @@
         return;
       }
       return r.json().then(function (data) {
+        // API shape: {login, orgs: [{name, kind: "personal"|"org"}, ...]}
         var orgs = (data && data.orgs) || [];
         var saved = '';
         try { saved = localStorage.getItem(GH_DEFAULT_ORG_KEY) || ''; } catch (_e) {}
         sel.innerHTML = orgs.map(function (o) {
-          var login = o.login || o;
-          var label = o.kind === 'user' ? (login + ' (you)') : login;
-          var selAttr = (login === saved) ? ' selected' : '';
-          return '<option value="' + _esc(login) + '"' + selAttr + '>' + _esc(label) + '</option>';
+          var name = (o && o.name) ? o.name : String(o || '');
+          var label = (o && o.kind === 'personal') ? (name + ' (personal)') : name;
+          var selAttr = (name === saved) ? ' selected' : '';
+          return '<option value="' + _esc(name) + '"' + selAttr + '>' + _esc(label) + '</option>';
         }).join('') || '<option value="">No orgs found</option>';
         if (hint) {
           hint.textContent = saved
