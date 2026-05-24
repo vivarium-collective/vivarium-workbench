@@ -6558,7 +6558,11 @@
       + '.study-fold>.study-panel{cursor:pointer;list-style:none;padding:12px 16px;border-left:4px solid #cbd5e1;border-radius:9px}'
       + '.study-fold>.study-panel::-webkit-details-marker{display:none}'
       + '.study-fold>.study-panel:hover{background:#f8fafc}'
-      + '.study-fold[open]>.study-panel{border-bottom:1px solid #e2e8f0;border-radius:9px 9px 0 0;background:#f8fafc}'
+      // When a study is open: make its header sticky so the collapse arrow
+      // stays in view while scrolling inside the study. One click collapses
+      // and the next study floats into view — no scrolling back to the top.
+      + '.study-fold[open]>.study-panel{position:sticky;top:0;z-index:10;border-bottom:1px solid #e2e8f0;border-radius:9px 9px 0 0;background:#f8fafc;box-shadow:0 1px 4px rgba(0,0,0,.06)}'
+      + '.study-fold[open]>.study-panel::after{content:"▴ click to collapse";float:right;font-size:0.75em;color:#64748b;font-weight:normal;margin-left:12px;line-height:inherit}'
       + '.study-fold.verdict-v-pass>.study-panel{border-left-color:#16a34a}'
       + '.study-fold.verdict-v-warn>.study-panel{border-left-color:#d97706}'
       + '.study-fold.verdict-v-block>.study-panel{border-left-color:#dc2626}'
