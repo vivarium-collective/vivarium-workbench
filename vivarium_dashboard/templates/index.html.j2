@@ -608,52 +608,14 @@
       <button class="action-btn" onclick="openModal('modal-reference')">+ Add reference (PDF)</button>
     </div>
 
-    {# Build the list of entries that have neither a committed PDF nor an
-       open-access PDF link nor a publisher URL — i.e. those a Claude Code
-       session needs to research by hand. #}
+    {# Per-entry "needs research" predicate: an entry needs a Claude Code
+       handoff when it has no committed PDF, no open-access PDF link, no
+       publisher URL, and no DOI. The list is needed below so each
+       bib-entry card can render its own hand-off button — the previous
+       bulk-banner UX (one big button covering all unresolved entries
+       at once) was replaced by per-entry actions so users can triage
+       the bibliography one paper at a time. #}
     {% set _pdf_keys = (references_pdfs or []) | map(attribute='bib_key') | list %}
-    {% set _need_ai = [] %}
-    {% for e in (bib_entries or []) %}
-      {% if e.key not in _pdf_keys and not e.oa_pdf_url and not e.publisher_url and not (e.enriched_doi or e.doi) %}
-        {% set _ = _need_ai.append(e) %}
-      {% endif %}
-    {% endfor %}
-
-    {% if _need_ai %}
-    <details style="margin-bottom:14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px">
-      <summary style="cursor:pointer;font-weight:600;color:#1e40af">
-        🤖 Hand off {{ _need_ai|length }} unresolved reference{% if _need_ai|length != 1 %}s{% endif %} to a Claude Code session
-      </summary>
-      <p style="margin:10px 0 6px 0;font-size:0.88em;color:#1e3a8a">
-        These entries have no committed PDF, no open-access link, and no DOI/publisher URL. Copy the prompt below into <strong>any Claude Code session running in this workspace</strong>; it will search for each paper, download PDFs where openly available, and add DOI / URL fields to <code>references/papers.bib</code>.
-      </p>
-      <textarea id="refs-ai-prompt" readonly
-                style="width:100%;min-height:200px;padding:10px;border:1px solid #cbd5e1;border-radius:4px;font-family:ui-monospace,monospace;font-size:0.82em;background:#fff;resize:vertical">For each of the bib entries listed below in `references/papers.bib`, do the following — work entry by entry, committing as you go:
-
-1. Search the web for the paper using its title + first author + year. Use WebSearch / WebFetch to find the canonical publisher page.
-2. Note the DOI and the publisher URL.
-3. If an open-access PDF is available (publisher, arXiv, bioRxiv, PubMed Central, author's site, institutional repository, etc.), download it to `references/{bib_key}.pdf` and add the entry to `workspace.yaml.references_pdfs` with the sha256 of the downloaded file.
-4. Edit the entry in `references/papers.bib` to add `doi = {...}` and `url = {...}` fields where missing. Preserve the existing entry structure.
-5. If you cannot find a freely-available PDF but can identify a stable URL (publisher page, paywall landing page, indexed search result), just add the `url` / `doi` and skip the PDF download.
-6. After updating papers.bib + workspace.yaml, run `python scripts/lint-workspace.py` to confirm nothing is broken.
-
-You can also short-circuit DOI + Unpaywall lookup by calling the dashboard's existing endpoint:
-    curl -X POST -H 'Content-Type: application/json' -d '{"key":"<bibkey>"}' http://localhost:8765/api/references-fetch
-
-…but treat that as a fallback — manual search usually finds links Unpaywall misses (paywalled DOIs the publisher hosts a free PDF for, preprint servers, etc.).
-
-Entries to research:
-{% for e in _need_ai %}
-- {{ e.key }} — "{{ e.title }}" ({{ e.author }}, {{ e.year }}{% if e.journal %}, {{ e.journal }}{% endif %})
-{%- endfor %}
-
-When done, summarize which entries got PDFs vs URLs only vs were unresolvable, and commit the workspace changes on the active workstream branch.</textarea>
-      <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
-        <button class="btn-mini" onclick="_copyRefsAiPrompt(this)" title="Copy prompt to clipboard">📋 Copy prompt</button>
-        <span class="muted" style="font-size:0.78em">Paste into a Claude Code session running in this workspace.</span>
-      </div>
-    </details>
-    {% endif %}
 
     {% if references_pdfs %}
     <details style="margin-bottom:12px">
@@ -703,6 +665,23 @@ When done, summarize which entries got PDFs vs URLs only vs were unresolvable, a
             {% if e.has_notes_md %}
             <span style="font-size:0.7em;background:#dcfce7;color:#166534;padding:1px 7px;border-radius:9999px">notes ✎</span>
             {% endif %}
+            {# Per-entry "needs research" handoff: shown only when this
+               specific reference has no committed PDF, no OA link, no
+               publisher URL, and no DOI. Clicking copies a per-entry
+               Claude Code prompt to clipboard. Replaces the previous
+               bulk "hand off N references" banner — users now triage
+               one paper at a time. #}
+            {% if e.key not in _pdf_keys and not e.oa_pdf_url and not e.publisher_url and not (e.enriched_doi or e.doi) %}
+            <button class="ref-handoff-btn"
+                    data-bib-key="{{ e.key }}"
+                    data-bib-title="{{ e.title }}"
+                    data-bib-author="{{ e.author }}"
+                    data-bib-year="{{ e.year }}"
+                    data-bib-journal="{{ e.journal }}"
+                    onclick="event.stopPropagation();event.preventDefault();_handOffRef(this)"
+                    title="Copy a per-entry Claude Code research prompt to your clipboard"
+                    style="font-size:0.72em;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;padding:1px 8px;border-radius:9999px;cursor:pointer;font-family:inherit">🤖 Hand off</button>
+            {% endif %}
           </div>
           <div style="margin-top:5px;font-weight:500">{{ e.title }}</div>
           <div class="muted" style="font-size:0.85em;margin-top:3px">{{ e.author }}</div>
@@ -740,29 +719,66 @@ When done, summarize which entries got PDFs vs URLs only vs were unresolvable, a
         });
       }
 
-      // Copy the "hand off to Claude Code" prompt to the user's clipboard.
-      // The textarea is already on the page (rendered server-side); we just
-      // shovel its value into the clipboard API. Falls back to the
-      // execCommand path for older browsers / non-HTTPS contexts.
-      function _copyRefsAiPrompt(btn) {
-        var ta = document.getElementById('refs-ai-prompt');
-        if (!ta) return;
+      // Per-entry "hand off to Claude" — builds a focused single-entry
+      // research prompt and copies it to the user's clipboard. Pasted into
+      // any Claude Code session running in this workspace, the agent
+      // searches for the paper, downloads an OA PDF if available, and
+      // updates references/papers.bib + workspace.yaml.references_pdfs.
+      // Replaces the previous bulk "hand off N references" banner: users
+      // now triage one paper at a time as they're browsing the
+      // bibliography.
+      function _handOffRef(btn) {
+        var d = btn.dataset;
+        var citation = '- ' + d.bibKey + ' — "' + d.bibTitle + '" (' +
+                       d.bibAuthor + ', ' + d.bibYear +
+                       (d.bibJournal ? ', ' + d.bibJournal : '') + ')';
+        var prompt =
+          'Resolve this reference in `references/papers.bib`:\n\n' +
+          citation + '\n\n' +
+          'Do the following, then commit on the active workstream branch:\n\n' +
+          '1. Search the web for the paper using its title + first author + year.\n' +
+          '   Use WebSearch / WebFetch to find the canonical publisher page.\n' +
+          '2. Note the DOI and the publisher URL.\n' +
+          '3. If an open-access PDF is available (publisher, arXiv, bioRxiv,\n' +
+          '   PubMed Central, author site, institutional repository, …),\n' +
+          '   download it to `references/' + d.bibKey + '.pdf` and add the\n' +
+          '   entry to `workspace.yaml.references_pdfs` with the sha256 of\n' +
+          '   the downloaded file.\n' +
+          '4. Edit the entry in `references/papers.bib` to add `doi = {...}`\n' +
+          '   and `url = {...}` fields where missing. Preserve the existing\n' +
+          '   entry structure.\n' +
+          '5. If you cannot find a freely-available PDF but can identify a\n' +
+          '   stable URL, just add the `url` / `doi` and skip the PDF download.\n' +
+          '6. After updating, run `python scripts/lint-workspace.py` to confirm\n' +
+          '   nothing is broken.\n\n' +
+          'Short-circuit DOI + Unpaywall lookup with:\n' +
+          '    curl -X POST -H \'Content-Type: application/json\' \\\n' +
+          '         -d \'{"key":"' + d.bibKey + '"}\' \\\n' +
+          '         http://localhost:8765/api/references-fetch\n\n' +
+          '…but treat that as a fallback — manual search usually finds links\n' +
+          'Unpaywall misses (paywalled DOIs the publisher hosts a free PDF\n' +
+          'for, preprint servers, etc.).\n';
         var done = function(ok) {
-          if (!btn) return;
           var orig = btn.textContent;
-          btn.textContent = ok ? '✓ Copied' : '⚠ Copy failed — select + Cmd+C';
+          btn.textContent = ok ? '✓ Copied' : '⚠ Copy failed';
           btn.disabled = true;
           setTimeout(function() { btn.textContent = orig; btn.disabled = false; }, 1800);
         };
         if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(ta.value).then(function() { done(true); },
-                                                       function() { done(false); });
+          navigator.clipboard.writeText(prompt).then(function() { done(true); },
+                                                      function() { done(false); });
         } else {
+          // Fallback: stash in a temporary textarea + execCommand for
+          // older browsers / non-HTTPS contexts.
+          var ta = document.createElement('textarea');
+          ta.value = prompt;
+          document.body.appendChild(ta);
           ta.select();
           try { done(document.execCommand('copy')); } catch (e) { done(false); }
+          document.body.removeChild(ta);
         }
       }
-      window._copyRefsAiPrompt = _copyRefsAiPrompt;
+      window._handOffRef = _handOffRef;
     </script>
     {% else %}
     <p style="color:#888;font-style:italic">No bibliography entries yet. Add some to <code>references/papers.bib</code>.</p>
