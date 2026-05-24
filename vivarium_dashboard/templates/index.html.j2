@@ -554,7 +554,7 @@
     {% if expert_docs %}
     <div class="expert-docs-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:14px;margin-bottom:12px">
     {% for doc in expert_docs %}
-      <div class="expert-doc-card" style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px">
+      <div class="expert-doc-card" style="border-radius:8px;padding:14px 16px">
         <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px;flex-wrap:wrap">
           <strong style="font-size:1.02em;flex:1">{{ doc.name }}</strong>
           {% if doc.file_exists %}
@@ -680,7 +680,7 @@ When done, summarize which entries got PDFs vs URLs only vs were unresolvable, a
     <div id="bib-entries-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px">
     {% for e in bib_entries %}
       <details class="bib-entry" data-key="{{ e.key|lower }}" data-title="{{ e.title|lower }}" data-author="{{ e.author|lower }}" data-year="{{ e.year }}"
-               style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px">
+               style="border-radius:8px;padding:10px 14px">
         <summary style="cursor:pointer;list-style:none">
           <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
             <code style="background:#f1f5f9;padding:1px 6px;border-radius:3px;font-size:0.82em">{{ e.key }}</code>
