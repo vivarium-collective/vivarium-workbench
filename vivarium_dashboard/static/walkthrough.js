@@ -6703,8 +6703,31 @@
       // When a study is open: make its header sticky so the collapse arrow
       // stays in view while scrolling inside the study. One click collapses
       // and the next study floats into view — no scrolling back to the top.
-      + '.study-fold[open]>.study-panel{position:sticky;top:0;z-index:10;border-bottom:1px solid #e2e8f0;border-radius:9px 9px 0 0;background:#f8fafc;box-shadow:0 1px 4px rgba(0,0,0,.06)}'
-      + '.study-fold[open]>.study-panel::after{content:"▴ click to collapse";float:right;font-size:0.75em;color:#64748b;font-weight:normal;margin-left:12px;line-height:inherit}'
+      + '.study-fold[open]>.study-panel{position:sticky;top:0;z-index:10;padding:8px 16px;border-bottom:1px solid #e2e8f0;border-radius:9px 9px 0 0;background:#f8fafc;box-shadow:0 1px 4px rgba(0,0,0,.06)}'
+      // Sticky-when-open: hide all the rich rows so the sticky strip is
+      // just the title row + a prominent collapse button. The same rich
+      // content is still visible immediately below in the expanded body,
+      // so nothing is lost; it just stops being duplicated as you scroll.
+      + '.study-fold[open]>.study-panel .sp-objective,'
+      + '.study-fold[open]>.study-panel .sp-meta,'
+      + '.study-fold[open]>.study-panel .sp-quality,'
+      + '.study-fold[open]>.study-panel .sp-conclusion,'
+      + '.study-fold[open]>.study-panel .sp-metrics,'
+      + '.study-fold[open]>.study-panel .sp-insight,'
+      + '.study-fold[open]>.study-panel .sp-caveat{display:none}'
+      // Prominent collapse affordance (open state). Replaces the small
+      // float:right hint with a button-style chip in the top-right of
+      // the sticky strip; visible at a glance + obvious click target.
+      + '.study-fold[open]>.study-panel{display:flex;align-items:center;gap:12px}'
+      + '.study-fold[open]>.study-panel>.sp-top{flex:1;min-width:0;margin:0}'
+      + '.study-fold[open]>.study-panel::after{'
+      +   'content:"▴ collapse";'
+      +   'display:inline-flex;align-items:center;'
+      +   'font-size:0.82em;font-weight:600;color:#1e40af;'
+      +   'background:#dbeafe;border:1px solid #93c5fd;border-radius:6px;'
+      +   'padding:4px 11px;flex:none;'
+      + '}'
+      + '.study-fold[open]>.study-panel:hover::after{background:#bfdbfe;border-color:#60a5fa;color:#1e3a8a}'
       + '.study-fold.verdict-v-pass>.study-panel{border-left-color:#16a34a}'
       + '.study-fold.verdict-v-warn>.study-panel{border-left-color:#d97706}'
       + '.study-fold.verdict-v-block>.study-panel{border-left-color:#dc2626}'
