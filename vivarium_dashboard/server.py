@@ -1256,22 +1256,123 @@ def _peer_current_investigation(url: str) -> dict | None:
     return out
 
 
+# Investigation statuses that should NOT surface in the cross-worktree
+# sidebar. Anything else (planning, running, planned, in_progress, blank…)
+# is treated as "open" and listed. Aligns with /pbg-investigation close,
+# which stamps `status: closed`.
+_INVESTIGATION_STATUS_HIDDEN_FROM_SIDEBAR = frozenset({
+    "closed", "archived", "complete",
+})
+
+
+def _list_other_worktrees(ws_root: Path) -> list[dict]:
+    """Return ``[{path, branch}]`` for every git worktree of ``ws_root``'s
+    repo EXCEPT ``ws_root`` itself.
+
+    Uses ``git worktree list --porcelain`` from inside ``ws_root``. Returns
+    an empty list if ``ws_root`` is not a git checkout, or git is missing,
+    or the command fails. Never raises.
+    """
+    import subprocess
+    try:
+        proc = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=str(ws_root),
+            capture_output=True,
+            text=True,
+            timeout=3.0,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return []
+    if proc.returncode != 0:
+        return []
+    out: list[dict] = []
+    cur: dict = {}
+    self_resolved = str(ws_root.resolve())
+    for line in proc.stdout.splitlines():
+        if line.startswith("worktree "):
+            if cur and cur.get("path") and cur["path"] != self_resolved:
+                out.append(cur)
+            cur = {"path": line[len("worktree "):].strip(), "branch": None}
+        elif line.startswith("branch "):
+            ref = line[len("branch "):].strip()
+            cur["branch"] = ref.split("/")[-1] if ref else None
+        elif line.startswith("detached"):
+            cur["branch"] = None
+    if cur and cur.get("path") and cur["path"] != self_resolved:
+        out.append(cur)
+    return out
+
+
+def _scan_worktree_investigations(worktree_path: str) -> list[dict]:
+    """Walk ``<worktree>/investigations/*/investigation.yaml`` off disk
+    and return slim summaries: ``[{slug, title, status}, ...]``.
+
+    Used to surface dormant investigations whose dashboards are not
+    running. Returns an empty list on any I/O error or invalid YAML.
+    Never raises. Skips entries whose ``status`` matches
+    ``_INVESTIGATION_STATUS_HIDDEN_FROM_SIDEBAR``.
+    """
+    import yaml as _yaml
+    root = Path(worktree_path) / "investigations"
+    if not root.is_dir():
+        return []
+    out: list[dict] = []
+    for child in sorted(root.iterdir()):
+        if not child.is_dir():
+            continue
+        spec_file = child / "investigation.yaml"
+        if not spec_file.is_file():
+            continue
+        try:
+            data = _yaml.safe_load(spec_file.read_text()) or {}
+        except (OSError, _yaml.YAMLError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        slug = data.get("name") or child.name
+        status = (data.get("status") or "").strip().lower()
+        if status in _INVESTIGATION_STATUS_HIDDEN_FROM_SIDEBAR:
+            continue
+        out.append({
+            "slug":   slug,
+            "title":  data.get("title") or slug,
+            "status": data.get("status"),
+        })
+    return out
+
+
 def _build_investigation_registry_for_test(
     ws_root: Path,
     this_url: str,
     *,
     list_servers_fn=None,
     fetch_peer_fn=None,
+    list_worktrees_fn=None,
+    scan_worktree_fn=None,
 ) -> dict:
     """Pure function backing GET /api/investigation-registry.
 
-    ``list_servers_fn`` and ``fetch_peer_fn`` are injectable to keep the
-    helper testable without filesystem or HTTP I/O.
+    Injectable hooks keep the helper testable without filesystem, HTTP,
+    or subprocess I/O.
 
-    Returns ``{current: {...}, running_others: [...]}`` where each
-    ``running_others`` entry carries ``{slug, title?, worktree_path, url,
-    effective_status, pid}``. Entries whose peer probe fails (None) are
-    dropped from the list so the sidebar never renders empty rows.
+    Returns three buckets:
+
+      - ``current``         — this dashboard's chosen Investigation.
+      - ``running_others``  — peer dashboards' chosen Investigations
+                              (one per live peer), via HTTP probe of
+                              each peer's ``/api/iset-list``.
+      - ``dormant_others``  — open Investigations on OTHER worktrees
+                              that do NOT have a running dashboard.
+                              Read directly off disk via
+                              ``git worktree list`` + filesystem scan.
+                              Entries whose ``status`` is
+                              closed/archived/complete are filtered out
+                              so the sidebar never renders stale rows.
+
+    Contract: previously-existing keys ``current`` and ``running_others``
+    retain their exact shape; ``dormant_others`` is a new additive bucket.
     """
     if list_servers_fn is None:
         try:
@@ -1281,6 +1382,10 @@ def _build_investigation_registry_for_test(
             list_servers_fn = lambda: []
     if fetch_peer_fn is None:
         fetch_peer_fn = _peer_current_investigation
+    if list_worktrees_fn is None:
+        list_worktrees_fn = lambda: _list_other_worktrees(ws_root)
+    if scan_worktree_fn is None:
+        scan_worktree_fn = _scan_worktree_investigations
 
     # Current Investigation: pick from this workspace's iset list with the
     # same heuristic we use for peers (running > first > none).
@@ -1311,6 +1416,7 @@ def _build_investigation_registry_for_test(
     # worktree path AND has a live PID.
     this_path = str(ws_root.resolve())
     others: list[dict] = []
+    running_paths: set[str] = set()
     for entry in list_servers_fn():
         if entry.get("path") == this_path:
             continue
@@ -1330,8 +1436,31 @@ def _build_investigation_registry_for_test(
             "effective_status": peer.get("effective_status"),
             "pid":              entry.get("pid"),
         })
+        if entry.get("path"):
+            running_paths.add(entry["path"])
 
-    return {"current": current, "running_others": others}
+    # Dormant-others: open investigations on OTHER worktrees that do NOT
+    # have a live dashboard. Read directly off disk so closed/archived
+    # ones can be filtered without a peer process.
+    dormant: list[dict] = []
+    for wt in list_worktrees_fn():
+        wt_path = wt.get("path")
+        if not wt_path or wt_path == this_path or wt_path in running_paths:
+            continue
+        for inv in scan_worktree_fn(wt_path):
+            dormant.append({
+                "slug":          inv.get("slug"),
+                "title":         inv.get("title"),
+                "worktree_path": wt_path,
+                "branch":        wt.get("branch"),
+                "status":        inv.get("status"),
+            })
+
+    return {
+        "current":         current,
+        "running_others":  others,
+        "dormant_others":  dormant,
+    }
 
 
 def _build_iset_detail_for_test(ws_root: Path, name: str) -> tuple[dict, int]:
