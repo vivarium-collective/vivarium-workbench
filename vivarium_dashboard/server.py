@@ -2170,10 +2170,50 @@ def _render_study_visualizations(study_dir, spec, spec_id):
             core_registry=registry,
             build_and_run=build_and_run,
         )
-        return [str(Path(p).relative_to(study_dir)) for p in paths], []
+        written = [str(Path(p).relative_to(study_dir)) for p in paths]
+        # Auto-purge stale viz: after rendering, delete any *.html in
+        # studies/<slug>/viz/ whose mtime is older than the latest run's
+        # started_at AND not in the just-written set. Keeps the report
+        # showing only current-run output without manual cleanup.
+        # `comparative_*` viz are excluded — those are owned by the
+        # investigation-end hook (_render_investigation_comparative_visualisations)
+        # which fires on a different schedule; purging them on a per-study
+        # run would delete legitimately-current cross-run overlays.
+        _purge_stale_viz(study_dir, written)
+        return written, []
     except Exception as e:  # noqa: BLE001
         return [], [{"error": f"render_visualizations failed: "
                      f"{type(e).__name__}: {e}"}]
+
+
+def _purge_stale_viz(study_dir: Path, just_written: list[str]) -> None:
+    """Delete *.html in study_dir/viz/ whose mtime is older than the
+    latest run's started_at AND not in the just-written set AND not
+    a comparative_ viz (those are owned by a separate dispatch).
+
+    No-op on any error — viz cleanup is best-effort, not load-bearing.
+    """
+    try:
+        viz_dir = study_dir / "viz"
+        runs_db = study_dir / "runs.db"
+        if not viz_dir.is_dir() or not runs_db.is_file():
+            return
+        cutoff = _latest_run_timestamp(runs_db)
+        if cutoff is None:
+            return
+        kept_names = {Path(p).name for p in just_written}
+        for html in viz_dir.glob("*.html"):
+            if html.name in kept_names:
+                continue
+            if html.name.startswith("comparative_"):
+                continue
+            try:
+                if html.stat().st_mtime < cutoff:
+                    html.unlink()
+            except OSError:
+                continue
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _post_study_run_all_baselines_for_test(ws_root, body):
