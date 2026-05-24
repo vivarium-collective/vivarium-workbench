@@ -6113,7 +6113,7 @@
         + '</summary>';
 
       return ''
-        + '<details class="study-fold" id="study-fold-' + slug + '" open>'
+        + '<details class="study-fold" id="study-fold-' + slug + '">'
         + foldSummary
         + '<section class="study" id="study-' + slug + '">'
         +   subNav
