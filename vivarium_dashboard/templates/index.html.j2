@@ -379,22 +379,34 @@
         </span>
         <span class="viv-rail-link-label">Simulations DB</span>
       </a>
-      <!-- Visualizations: axes + scientific curve + data points -->
+      <!-- Visualizations: axes + line-chart polyline + data points.
+           Polyline style (vs the previous smooth sigmoid) reads more
+           clearly as "scientific plot" at rail-icon size — matches the
+           chart-icon convention common across viz / analytics UIs and
+           the mockup's iconography. -->
       <a href="#visualizations"    class="viv-rail-link menu-link" data-page="visualizations">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
             <!-- L-shaped axes -->
             <path d="M4 4 V20 H20"/>
-            <!-- smooth sigmoid-style curve rising left → right -->
-            <path d="M6 17 C 8.5 17, 10 13, 12 11 S 16.5 6.5, 19 6.5"/>
-            <!-- data points on the curve -->
-            <circle cx="9.2" cy="14.8" r="1.1" fill="currentColor" stroke="none"/>
-            <circle cx="14" cy="8.7" r="1.1" fill="currentColor" stroke="none"/>
+            <!-- chart polyline: low-left → peak → dip → higher peak → settle -->
+            <path d="M7 16 L 10 11 L 13 14 L 16 8 L 19 10"/>
+            <!-- data points at each vertex -->
+            <circle cx="7"  cy="16" r="1.05" fill="currentColor" stroke="none"/>
+            <circle cx="10" cy="11" r="1.05" fill="currentColor" stroke="none"/>
+            <circle cx="13" cy="14" r="1.05" fill="currentColor" stroke="none"/>
+            <circle cx="16" cy="8"  r="1.05" fill="currentColor" stroke="none"/>
+            <circle cx="19" cy="10" r="1.05" fill="currentColor" stroke="none"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Visualizations</span>
       </a>
-      <!-- GitHub: sign-in + org-link controls. Branch + node icon. -->
+      <!-- Branch: workspace branch + remote (formerly "GitHub"). The icon
+           is a branch-and-node glyph; renaming the label to "Branch"
+           better reflects that this tab is about the local branch state,
+           the workspace repo's remote, and PR/merge actions — not just
+           GitHub-the-product. Hash route #github kept for back-compat
+           with bookmarks. -->
       <a href="#github"            class="viv-rail-link menu-link" data-page="github">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
@@ -405,7 +417,7 @@
             <path d="M6 8a6 6 0 0 0 6 6h4"/>
           </svg>
         </span>
-        <span class="viv-rail-link-label">GitHub</span>
+        <span class="viv-rail-link-label">Branch</span>
       </a>
     </nav>
 
@@ -554,7 +566,7 @@
     {% if expert_docs %}
     <div class="expert-docs-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:14px;margin-bottom:12px">
     {% for doc in expert_docs %}
-      <div class="expert-doc-card" style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px">
+      <div class="expert-doc-card" style="border-radius:8px;padding:14px 16px">
         <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px;flex-wrap:wrap">
           <strong style="font-size:1.02em;flex:1">{{ doc.name }}</strong>
           {% if doc.file_exists %}
@@ -680,7 +692,7 @@ When done, summarize which entries got PDFs vs URLs only vs were unresolvable, a
     <div id="bib-entries-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px">
     {% for e in bib_entries %}
       <details class="bib-entry" data-key="{{ e.key|lower }}" data-title="{{ e.title|lower }}" data-author="{{ e.author|lower }}" data-year="{{ e.year }}"
-               style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px">
+               style="border-radius:8px;padding:10px 14px">
         <summary style="cursor:pointer;list-style:none">
           <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
             <code style="background:#f1f5f9;padding:1px 6px;border-radius:3px;font-size:0.82em">{{ e.key }}</code>
@@ -1089,7 +1101,7 @@ When done, summarize which entries got PDFs vs URLs only vs were unresolvable, a
 <!-- GitHub: in-UI sign-in + (future) org picker. The github-login.js widget
      activates the #viv-gh-chip element on load. No-AI-agent setup path. -->
 <section id="page-github" class="page" data-page="github">
-  <h2 class="page-title">GitHub</h2>
+  <h2 class="page-title">Branch</h2>
 
   <!-- Settings-style single panel: three sections (Account, Workspace
        repository, Actions), each a list of label/value rows. Replaces the

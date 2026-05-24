@@ -265,6 +265,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/investigation-group-update":       "_post_investigation_group_update",
     # Study-specific POST endpoints (no investigation alias).
     "/api/study-set-objective":         "_post_study_set_objective",
+    "/api/study-narrative-set":         "_post_study_narrative_set",
     "/api/study-expert-input-set":      "_post_study_expert_input_set",
     "/api/study-rename":                "_post_study_rename",
     "/api/investigation-run-unblocked": "_post_investigation_run_unblocked",
@@ -1706,6 +1707,134 @@ def _post_study_set_objective_for_test(ws_root: Path, body: dict):
     sf.write_text(yaml.safe_dump(spec, sort_keys=False))
     return {"ok": True}, 200
 
+
+# ---------------------------------------------------------------------------
+# v4 narrative-spine field writer — generic dotted-path setter.
+# ---------------------------------------------------------------------------
+
+# Top-level v4 narrative-spine fields the writer is allowed to touch. Restricts
+# the dotted-path entry point so a malformed body can't rewrite arbitrary spec
+# keys (e.g. `baseline` or `name`).
+_NARRATIVE_ALLOWED_ROOTS = frozenset({
+    "report",
+    "study_card",
+    "biological_summary",
+    "conclusion_verdicts",
+    "literature_anchors",
+    "design_pivot_required",
+})
+
+# Enum constraints the schema declares — enforced server-side too so the form
+# UI gets a clean 400 on a bad value instead of a silent write that later fails
+# lint. The schema is permissive for free-form fields; only the truly-enum
+# leaves are validated here.
+_NARRATIVE_ENUM_LEAVES: dict[str, frozenset[str]] = {
+    "report.confidence": frozenset({"high", "medium", "low"}),
+    "conclusion_verdicts.regression_compatibility.result":
+        frozenset({"PASS", "FAIL", "MIXED", "PENDING"}),
+    "conclusion_verdicts.biological_validation.result":
+        frozenset({"PASS", "FAIL", "MIXED", "PENDING"}),
+    "conclusion_verdicts.explanatory_gain.result":
+        frozenset({"POSITIVE", "NEUTRAL", "NEGATIVE", "PENDING"}),
+}
+
+
+def _post_study_narrative_set_for_test(ws_root: Path, body: dict):
+    """Set one v4 narrative-spine field on study.yaml at a dotted path.
+
+    Body shape:
+        {study: "<slug>", path: "<dotted-path>", value: <any>}
+
+    The dotted path's first segment must be one of the allowlisted v4
+    narrative-spine roots (report, study_card, biological_summary,
+    conclusion_verdicts, literature_anchors, design_pivot_required). Intermediate
+    dicts are created on demand. An empty-string or null value REMOVES the
+    leaf (and prunes empty parent dicts up the chain) so the YAML stays tidy
+    after a user clears a field.
+
+    Examples:
+        path="biological_summary"                                 value="DnaA cycles..."
+        path="study_card.goal"                                    value="Split DnaA species"
+        path="report.confidence"                                  value="high"
+        path="conclusion_verdicts.biological_validation.result"   value="MIXED"
+        path="conclusion_verdicts.biological_validation.basis"    value="atp_fraction = 0.997..."
+
+    The handler is intentionally generic — one route serves every scalar
+    narrative-spine field rather than 10+ /api/study-set-<field> endpoints.
+    Returns (response_dict, status_code).
+    """
+    import os
+
+    name = (body.get("study") or "").strip()
+    path = (body.get("path") or "").strip()
+    if not name:
+        return {"error": "missing study"}, 400
+    if not path:
+        return {"error": "missing path"}, 400
+    if "value" not in body:
+        return {"error": "missing value"}, 400
+    value = body["value"]
+
+    parts = path.split(".")
+    if not parts or not parts[0]:
+        return {"error": "empty path"}, 400
+    if parts[0] not in _NARRATIVE_ALLOWED_ROOTS:
+        return {
+            "error": f"path must start with one of "
+                     f"{sorted(_NARRATIVE_ALLOWED_ROOTS)}, got {parts[0]!r}",
+        }, 400
+
+    # Enum guard on the few leaves the schema strictly enums. Empty-string and
+    # null are allowed through (they trigger the remove-leaf branch below).
+    if value not in (None, "") and path in _NARRATIVE_ENUM_LEAVES:
+        allowed = _NARRATIVE_ENUM_LEAVES[path]
+        if value not in allowed:
+            return {
+                "error": f"{path}: value {value!r} not in allowed enum "
+                         f"{sorted(allowed)}",
+            }, 400
+
+    sf = ws_root / "studies" / name / "study.yaml"
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text()) or {}
+    if not isinstance(spec, dict):
+        return {"error": "study.yaml is not a mapping"}, 500
+
+    # Walk parents, creating dicts as needed.
+    cur = spec
+    for p in parts[:-1]:
+        if p not in cur or not isinstance(cur[p], dict):
+            cur[p] = {}
+        cur = cur[p]
+    leaf = parts[-1]
+
+    if value in (None, ""):
+        # Clear-out path: pop the leaf, then prune empty parent dicts walking
+        # back up so a fully-cleared section disappears from the YAML.
+        cur.pop(leaf, None)
+        # Re-walk to prune empty parents (top-down detection of empties).
+        for i in range(len(parts) - 1, 0, -1):
+            ancestor_path = parts[:i]
+            ancestor = spec
+            for p in ancestor_path[:-1]:
+                ancestor = ancestor.get(p, {})
+                if not isinstance(ancestor, dict):
+                    break
+            else:
+                last = ancestor_path[-1]
+                if last in ancestor and ancestor[last] == {}:
+                    ancestor.pop(last, None)
+                    continue
+            break
+    else:
+        cur[leaf] = value
+
+    tmp = sf.with_suffix(".yaml.tmp")
+    tmp.write_text(yaml.safe_dump(spec, sort_keys=False, allow_unicode=True))
+    os.replace(tmp, sf)
+    return {"ok": True}, 200
 
 
 def _post_study_rename_for_test(ws_root: Path, body: dict):
@@ -9552,6 +9681,16 @@ if __name__ == "__main__":
     def _post_study_set_objective(self, body: dict):
         """POST /api/study-set-objective {study, text}"""
         response, code = _post_study_set_objective_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    def _post_study_narrative_set(self, body: dict):
+        """POST /api/study-narrative-set {study, path, value}
+
+        Generic writer for v4 narrative-spine fields (report / study_card /
+        biological_summary / conclusion_verdicts / literature_anchors /
+        design_pivot_required). See ``_post_study_narrative_set_for_test``.
+        """
+        response, code = _post_study_narrative_set_for_test(WORKSPACE, body)
         return self._json(response, code)
 
     def _post_study_expert_input_set(self, body: dict):

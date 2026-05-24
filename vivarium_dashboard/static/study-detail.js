@@ -192,6 +192,45 @@
     makeEditable(el);
   });
 
+  // --- v4 narrative-spine forms: report / study_card / biological_summary /
+  // conclusion_verdicts. Every [data-narrative-path] input saves to the
+  // generic /api/study-narrative-set on blur (text/textarea) or change
+  // (select). The path is a dotted route into the v4 narrative-spine
+  // sub-tree; the backend resolves it, creates parents as needed, and
+  // atomically writes study.yaml.
+  function _saveNarrative(el) {
+    var path = el.dataset.narrativePath;
+    if (!path) return;
+    var value = el.value;
+    el.classList.remove('narrative-saved', 'narrative-error');
+    return api('POST', '/api/study-narrative-set', {
+      study: studyName(),
+      path: path,
+      value: value,
+    }).then(function(res) {
+      // api() returns {status, body}. 200 + body.ok === success.
+      if (res && res.status === 200 && res.body && res.body.ok) {
+        el.classList.add('narrative-saved');
+        setTimeout(function() { el.classList.remove('narrative-saved'); }, 700);
+      } else {
+        el.classList.add('narrative-error');
+        var detail = (res && res.body && res.body.error) || (res && res.status) || 'unknown';
+        el.title = 'Save failed: ' + detail;
+      }
+    }).catch(function(e) {
+      el.classList.add('narrative-error');
+      el.title = 'Network error: ' + (e && e.message || e);
+    });
+  }
+  document.querySelectorAll('[data-narrative-path]').forEach(function(el) {
+    var tag = (el.tagName || '').toLowerCase();
+    // Selects save on change (immediate, no need to wait for blur). Text
+    // inputs + textareas save on blur so the user can type without round-
+    // tripping per keystroke.
+    var evt = (tag === 'select') ? 'change' : 'blur';
+    el.addEventListener(evt, function() { _saveNarrative(el); });
+  });
+
   var statusSel = document.getElementById('status-select');
   if (statusSel) {
     statusSel.addEventListener('change', function() {
