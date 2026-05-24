@@ -7198,6 +7198,24 @@
     var ungrouped = window._investigations.filter(function(s) { return !seen[s.name]; });
     if (ungrouped.length) groups.push({name: '__ungrouped__', title: 'Ungrouped', studies: ungrouped});
 
+    // Scope to current investigation: when the cross-worktree registry
+    // has identified a current iset (window._currentIsetSlug, set by
+    // investigation-switcher.js after fetching /api/investigation-registry)
+    // AND that iset has a group here, drop every other group so the rail
+    // reflects only the studies the user is actively working on. The
+    // iset dropdown at the top of the rail is the way to switch isets;
+    // listing every iset's studies in the rail itself was just noise.
+    // Falls back to the full all-groups render if no current slug is
+    // known yet (registry still loading) or if the current slug doesn't
+    // match any group (defensive).
+    var currentSlug = window._currentIsetSlug || '';
+    if (currentSlug) {
+      var hasCurrent = groups.some(function(g) { return g.name === currentSlug; });
+      if (hasCurrent) {
+        groups = groups.filter(function(g) { return g.name === currentSlug; });
+      }
+    }
+
     // Flat-list mode: when there's exactly one investigation (no
     // ungrouped studies), render its studies as a flat list directly
     // under the "Studies" rail-section label — no redundant group header.
