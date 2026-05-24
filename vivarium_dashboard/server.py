@@ -3080,8 +3080,24 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                     state = cr.inject_sqlite_emitter(
                         state, run_id=_payload['run_id'], db_file=_payload['db_file'])
                     composite = Composite({{'state': state}}, core=core)
-                    cr.run_with_division(composite, _payload['steps'])
-                    results = gather_emitter_results(composite)
+                    _mg = int(_payload.get('max_generations') or 1)
+                    if _mg > 1:
+                        # Workspace-side multi-gen runner (mirrors the
+                        # xarray branch's `run_multigen_xarray` import).
+                        # v2ecoli owns the daughter-walk rule + lineage
+                        # convention (dashboard PR #104 design call:
+                        # framework code stays workspace-agnostic).
+                        from v2ecoli.library.sqlite_run import run_multigen_sqlite
+                        _sq = run_multigen_sqlite(
+                            composite,
+                            max_steps=_payload['steps'],
+                            max_generations=_mg,
+                        )
+                        results = gather_emitter_results(composite)
+                        results['_multigen'] = _sq
+                    else:
+                        cr.run_with_division(composite, _payload['steps'])
+                        results = gather_emitter_results(composite)
         """).lstrip("\n")
     else:
         # Legacy path: serialize the pre-built state into a tempfile.
