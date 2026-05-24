@@ -325,16 +325,20 @@
         </span>
         <span class="viv-rail-link-label">Inputs</span>
       </a>
-      <!-- Registry: 3×2 grid of stores — the type catalog (R_T) -->
+      <!-- Registry: 3×2 grid of stores — the type catalog. Top row of
+           circles (continuous-type stores) over a bottom row of squares
+           (discrete/struct-type stores). The mixed-shape pair reads as
+           "different KINDS of stores" rather than a uniform grid, which
+           better matches the registry's heterogeneous-types semantics. -->
       <a href="#registry"          class="viv-rail-link menu-link" data-page="registry">
         <span class="viv-rail-link-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <circle cx="6" cy="7" r="2.2"/>
+            <circle cx="6"  cy="7" r="2.2"/>
             <circle cx="12" cy="7" r="2.2"/>
             <circle cx="18" cy="7" r="2.2"/>
-            <circle cx="6" cy="17" r="2.2"/>
-            <circle cx="12" cy="17" r="2.2"/>
-            <circle cx="18" cy="17" r="2.2"/>
+            <rect x="3.8"  y="14.8" width="4.4" height="4.4" rx="0.3"/>
+            <rect x="9.8"  y="14.8" width="4.4" height="4.4" rx="0.3"/>
+            <rect x="15.8" y="14.8" width="4.4" height="4.4" rx="0.3"/>
           </svg>
         </span>
         <span class="viv-rail-link-label">Registry</span>
