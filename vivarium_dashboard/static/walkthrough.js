@@ -6136,6 +6136,16 @@
       if (nKids) v4Chips.push('<span class="sp-metric">blocks ' + nKids + '</span>');
       if (v4LitMatch) v4Chips.push('<span class="sp-metric">Lit match: ' + _h(v4LitMatch) + '</span>');
 
+      // Section-nav chips inside the sticky panel. CSS hides this row
+      // when the fold is COLLAPSED (it would just duplicate the
+      // metric chips below); when OPEN, the rich rows are hidden and
+      // this nav becomes the primary content of the sticky strip, so
+      // the user can jump to Question / Background / Predictions / etc.
+      // without scrolling back to the topbar.
+      var spSectionNav = links.length
+        ? '<nav class="sp-section-nav">' + links.join('') + '</nav>'
+        : '';
+
       var foldSummary = ''
         + '<summary class="study-panel">'
         +   '<div class="sp-top">'
@@ -6143,6 +6153,7 @@
         +     '<span class="sp-title">' + _h(v4Title) + '</span>'
         +     '<span class="sp-verdict ' + v4Verdict.cls + '">' + v4Verdict.emoji + ' ' + _h(v4Verdict.label) + '</span>'
         +   '</div>'
+        +   spSectionNav
         +   (v4Objective ? '<div class="sp-objective">' + _h(v4Objective) + '</div>' : '')
         +   '<div class="sp-meta">' + v4Meta.join(' · ') + '</div>'
         +   ((v4Conf || v4Ev)
@@ -6704,10 +6715,10 @@
       // stays in view while scrolling inside the study. One click collapses
       // and the next study floats into view — no scrolling back to the top.
       + '.study-fold[open]>.study-panel{position:sticky;top:0;z-index:10;padding:8px 16px;border-bottom:1px solid #e2e8f0;border-radius:9px 9px 0 0;background:#f8fafc;box-shadow:0 1px 4px rgba(0,0,0,.06)}'
-      // Sticky-when-open: hide all the rich rows so the sticky strip is
-      // just the title row + a prominent collapse button. The same rich
-      // content is still visible immediately below in the expanded body,
-      // so nothing is lost; it just stops being duplicated as you scroll.
+      // Sticky-when-open: hide the rich content rows (still visible
+      // below in the expanded body — no information lost, just no
+      // longer duplicated). The section-nav row stays visible to
+      // serve as the in-study jump-target navigation.
       + '.study-fold[open]>.study-panel .sp-objective,'
       + '.study-fold[open]>.study-panel .sp-meta,'
       + '.study-fold[open]>.study-panel .sp-quality,'
@@ -6715,11 +6726,28 @@
       + '.study-fold[open]>.study-panel .sp-metrics,'
       + '.study-fold[open]>.study-panel .sp-insight,'
       + '.study-fold[open]>.study-panel .sp-caveat{display:none}'
+      // Section-nav chips: hidden in the collapsed card (would
+      // duplicate the metric chips); shown ONLY when the fold is
+      // open so the sticky strip provides in-study navigation.
+      + '.sp-section-nav{display:none}'
+      + '.study-fold[open]>.study-panel .sp-section-nav{'
+      +   'display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 0;width:100%'
+      + '}'
+      + '.sp-section-nav a{'
+      +   'display:inline-block;padding:2px 10px;border-radius:9999px;'
+      +   'font-size:0.83em;color:#3b82f6;text-decoration:none;'
+      +   'background:#eff6ff;border:1px solid transparent'
+      + '}'
+      + '.sp-section-nav a:hover{background:#dbeafe;border-color:#bfdbfe}'
+      + '.sp-section-nav .sn-count{'
+      +   'display:inline-block;margin-left:5px;padding:0 6px;border-radius:9999px;'
+      +   'background:rgba(59,130,246,0.13);color:#3b82f6;font-size:0.85em;'
+      + '}'
       // Prominent collapse affordance (open state). Replaces the small
       // float:right hint with a button-style chip in the top-right of
       // the sticky strip; visible at a glance + obvious click target.
-      + '.study-fold[open]>.study-panel{display:flex;align-items:center;gap:12px}'
-      + '.study-fold[open]>.study-panel>.sp-top{flex:1;min-width:0;margin:0}'
+      + '.study-fold[open]>.study-panel{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}'
+      + '.study-fold[open]>.study-panel>.sp-top{flex:1 1 auto;min-width:0;margin:0}'
       + '.study-fold[open]>.study-panel::after{'
       +   'content:"▴ collapse";'
       +   'display:inline-flex;align-items:center;'
