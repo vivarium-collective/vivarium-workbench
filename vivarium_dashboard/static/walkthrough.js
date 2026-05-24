@@ -3333,6 +3333,21 @@
         if (!window._isetIndex.length) return;
         var active = window._currentIset;
         if (!active) {
+          // Prefer the slug published by investigation-switcher.js from
+          // /api/investigation-registry — it already does the git-branch
+          // match + running-iset + alphabetical-fallback chain, and
+          // staying consistent with it keeps trigger label + STUDIES
+          // rail + Investigation-tab detail all pointing at the same
+          // iset.
+          var pubSlug = window._currentIsetSlug || '';
+          if (pubSlug) {
+            for (var pi = 0; pi < window._isetIndex.length; pi++) {
+              if (window._isetIndex[pi].name === pubSlug) { active = pubSlug; break; }
+            }
+          }
+        }
+        if (!active) {
+          // Legacy fallback: investigation/<name> branch prefix.
           var branch = (window._gitStatus && window._gitStatus.active_branch) || '';
           var m = /^investigation\/(.+)$/.exec(branch);
           if (m) {
