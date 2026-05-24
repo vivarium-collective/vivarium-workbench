@@ -1894,15 +1894,11 @@ def _post_study_run_baseline_for_test(ws_root, body):
     # Per-study emitter override (study yaml's runtime.emitter) — wins over
     # workspace runtime.default_emitter. None ⇒ workspace default applies.
     study_emitter = runtime_cfg.get("emitter")
-    # Per-study multi-gen cap (runtime.max_generations) — wins over workspace
-    # runtime.max_generations. None ⇒ per-emitter default (xarray=3, sqlite=1).
-    study_max_generations = runtime_cfg.get("max_generations")
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label=label, sim_name=label,
         overrides=generator_overrides, timeout=timeout_s,
         emit_paths=emit_paths, study_emitter=study_emitter,
-        study_max_generations=study_max_generations,
     )
     if code == 200:
         # F2: do NOT append to study.yaml.runs[] — the runs_meta row
@@ -2358,14 +2354,12 @@ def _post_study_run_variant_for_test(ws_root, body):
     emit_paths = cr.collect_emit_paths_from_spec(spec)
     # Per-study emitter override — see baseline path for rationale.
     study_emitter = runtime_cfg.get("emitter")
-    study_max_generations = runtime_cfg.get("max_generations")
     response, code = _run_composite_subprocess(
         pkg=pkg, state=state, steps=steps, db_file=db_file,
         run_id=run_id, spec_id=spec_id, label=variant_name,
         sim_name=variant_name, overrides=generator_overrides,
         timeout=timeout_s, emit_paths=emit_paths,
         study_emitter=study_emitter,
-        study_max_generations=study_max_generations,
     )
     # F2: no _append_study_run — the runs_meta row is the canonical record;
     # see the matching note in run-baseline above.
@@ -2936,8 +2930,7 @@ def _diagnose_push_error(err: str) -> dict | None:
 
 def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                               label, overrides=None, sim_name=None, timeout=1800,
-                              emit_paths=None, study_emitter=None,
-                              study_max_generations=None):
+                              emit_paths=None, study_emitter=None):
     """Run a resolved composite ``state`` for ``steps`` steps in a subprocess,
     persisting runs_meta + history (via an injected SQLiteEmitter) to
     ``db_file``.
@@ -2988,23 +2981,12 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
             _ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
             _runtime = (_ws_data.get("runtime") or {}) if isinstance(_ws_data, dict) else {}
             _default_emitter = str(_runtime.get("default_emitter") or "sqlite").lower()
-            _workspace_max_gen = _runtime.get("max_generations")
+            _max_generations = int(_runtime.get("max_generations") or 3)
         except Exception:
             _default_emitter = "sqlite"
-            _workspace_max_gen = None
+            _max_generations = 3
         if study_emitter:
             _default_emitter = str(study_emitter).lower()
-        # max_generations: per-study override > workspace > per-emitter
-        # default. The per-emitter defaults preserve historical behaviour:
-        # xarray = 3 (multi-gen native via run_multigen_xarray); sqlite = 1
-        # (single generation via run_with_division — now follows daughters
-        # past division if max_generations > 1, the recent infra fix).
-        if study_max_generations is not None:
-            _max_generations = int(study_max_generations)
-        elif _workspace_max_gen is not None:
-            _max_generations = int(_workspace_max_gen)
-        else:
-            _max_generations = 3 if _default_emitter == "xarray" else 1
         # Derive a zarr store path alongside the SQLite db_file (one per run).
         _zarr_store = str(Path(db_file).with_suffix("")) + f".{run_id}.zarr"
         payload = {
@@ -3098,13 +3080,7 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                     state = cr.inject_sqlite_emitter(
                         state, run_id=_payload['run_id'], db_file=_payload['db_file'])
                     composite = Composite({{'state': state}}, core=core)
-                    # Sqlite path now follows daughters across up to
-                    # max_generations divisions (default 1 = legacy
-                    # halt-at-first-division). History rows span generations
-                    # naturally as the followed agent_id changes.
-                    cr.run_with_division(
-                        composite, _payload['steps'],
-                        max_generations=_payload.get('max_generations', 1))
+                    cr.run_with_division(composite, _payload['steps'])
                     results = gather_emitter_results(composite)
         """).lstrip("\n")
     else:
