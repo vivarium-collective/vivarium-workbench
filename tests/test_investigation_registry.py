@@ -177,8 +177,12 @@ def test_registry_shape_matches_documented_contract(tmp_path):
         list_servers_fn=lambda: servers,
         fetch_peer_fn=lambda u: {"slug": "p-iset", "title": "P-Iset",
                                  "effective_status": "running"},
+        list_worktrees_fn=lambda: [],
+        scan_worktree_fn=lambda _p: [],
     )
-    assert set(out.keys()) == {"current", "running_others"}
+    assert set(out.keys()) == {
+        "current", "local_siblings", "running_others", "dormant_others",
+    }
     assert set(out["current"].keys()) == {
         "slug", "title", "worktree_path", "url", "effective_status",
     }
@@ -186,3 +190,230 @@ def test_registry_shape_matches_documented_contract(tmp_path):
         "slug", "title", "worktree_path", "url",
         "effective_status", "pid",
     }
+
+
+# ---------------------------------------------------------------------------
+# dormant_others: open investigations on other worktrees with no live server
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# current: picker prefers git-branch match
+# ---------------------------------------------------------------------------
+
+
+def test_current_prefers_investigation_matching_git_branch(tmp_path):
+    """If the current git branch matches an investigation slug, pick it
+    even when another investigation is alphabetically first or has
+    effective_status=running."""
+    ws = tmp_path / "ws"; ws.mkdir()
+    _write_iset(ws, "alpha")
+    _write_iset(ws, "beta", status="running")
+    _write_iset(ws, "v2ecoli-pdmp")
+
+    out = _build_investigation_registry_for_test(
+        ws,
+        this_url="http://127.0.0.1:1",
+        list_servers_fn=lambda: [],
+        fetch_peer_fn=lambda u: None,
+        list_worktrees_fn=lambda: [],
+        scan_worktree_fn=lambda _p: [],
+        current_branch_fn=lambda: "v2ecoli-pdmp",
+    )
+    assert out["current"]["slug"] == "v2ecoli-pdmp"
+    sibling_slugs = {s["slug"] for s in out["local_siblings"]}
+    assert sibling_slugs == {"alpha", "beta"}
+
+
+def test_current_falls_back_to_first_when_branch_does_not_match(tmp_path):
+    ws = tmp_path / "ws"; ws.mkdir()
+    _write_iset(ws, "alpha")
+    _write_iset(ws, "beta")
+    out = _build_investigation_registry_for_test(
+        ws,
+        this_url="http://127.0.0.1:1",
+        list_servers_fn=lambda: [],
+        fetch_peer_fn=lambda u: None,
+        list_worktrees_fn=lambda: [],
+        scan_worktree_fn=lambda _p: [],
+        current_branch_fn=lambda: "some-random-branch",
+    )
+    # No git-branch match → fall back to alphabetical first.
+    assert out["current"]["slug"] == "alpha"
+    assert [s["slug"] for s in out["local_siblings"]] == ["beta"]
+
+
+# ---------------------------------------------------------------------------
+# local_siblings: other investigations in this same workspace
+# ---------------------------------------------------------------------------
+
+
+def test_local_siblings_lists_other_local_investigations(tmp_path):
+    ws = tmp_path / "ws"; ws.mkdir()
+    _write_iset(ws, "alpha", title="Alpha", status="planning")
+    _write_iset(ws, "beta",  title="Beta",  status="planning")
+    _write_iset(ws, "gamma", title="Gamma", status="planning")
+
+    out = _build_investigation_registry_for_test(
+        ws,
+        this_url="http://127.0.0.1:1",
+        list_servers_fn=lambda: [],
+        fetch_peer_fn=lambda u: None,
+        list_worktrees_fn=lambda: [],
+        scan_worktree_fn=lambda _p: [],
+        current_branch_fn=lambda: None,
+    )
+    # current is alpha (alphabetical fallback); the other two are siblings.
+    assert out["current"]["slug"] == "alpha"
+    sibling_slugs = [s["slug"] for s in out["local_siblings"]]
+    assert sibling_slugs == ["beta", "gamma"]
+    # Shape: every sibling carries slug/title/worktree_path/effective_status.
+    assert set(out["local_siblings"][0].keys()) == {
+        "slug", "title", "worktree_path", "effective_status",
+    }
+
+
+def test_local_siblings_empty_when_only_one_investigation(tmp_path):
+    ws = tmp_path / "ws"; ws.mkdir()
+    _write_iset(ws, "alpha")
+    out = _build_investigation_registry_for_test(
+        ws,
+        this_url="http://127.0.0.1:1",
+        list_servers_fn=lambda: [],
+        fetch_peer_fn=lambda u: None,
+        list_worktrees_fn=lambda: [],
+        scan_worktree_fn=lambda _p: [],
+        current_branch_fn=lambda: None,
+    )
+    assert out["current"]["slug"] == "alpha"
+    assert out["local_siblings"] == []
+
+
+def test_dormant_lists_open_investigations_on_other_worktrees(tmp_path):
+    ws = tmp_path / "ws"; ws.mkdir()
+    _write_iset(ws, "self-inv")
+
+    sibling = tmp_path / "sibling"
+    _write_iset(sibling, "sibling-inv", title="Sibling Inv", status="planning")
+
+    out = _build_investigation_registry_for_test(
+        ws,
+        this_url="http://127.0.0.1:1",
+        list_servers_fn=lambda: [],
+        fetch_peer_fn=lambda u: None,
+        list_worktrees_fn=lambda: [{"path": str(sibling), "branch": "sib-branch"}],
+        scan_worktree_fn=lambda p: [
+            {"slug": "sibling-inv", "title": "Sibling Inv", "status": "planning"}
+        ],
+    )
+    assert len(out["dormant_others"]) == 1
+    e = out["dormant_others"][0]
+    assert e["slug"] == "sibling-inv"
+    assert e["title"] == "Sibling Inv"
+    assert e["worktree_path"] == str(sibling)
+    assert e["branch"] == "sib-branch"
+    assert e["status"] == "planning"
+
+
+def test_dormant_skips_worktree_with_live_dashboard(tmp_path):
+    """A worktree with a live dashboard belongs in running_others, not
+    dormant_others — the registry must not double-list it."""
+    ws = tmp_path / "ws"; ws.mkdir()
+    _write_iset(ws, "self-inv")
+
+    other = tmp_path / "other"
+    servers = [
+        {"name": "p", "path": str(other), "url": "http://127.0.0.1:2",
+         "pid": 222, "_alive": True, "_file": "/tmp/p.json"},
+    ]
+    out = _build_investigation_registry_for_test(
+        ws,
+        this_url="http://127.0.0.1:1",
+        list_servers_fn=lambda: servers,
+        fetch_peer_fn=lambda u: {"slug": "live-inv", "title": "Live",
+                                 "effective_status": "running"},
+        list_worktrees_fn=lambda: [{"path": str(other), "branch": "b"}],
+        scan_worktree_fn=lambda p: [
+            {"slug": "live-inv", "title": "Live", "status": "running"}
+        ],
+    )
+    assert any(o["slug"] == "live-inv" for o in out["running_others"])
+    assert out["dormant_others"] == []
+
+
+def test_dormant_excludes_self_worktree(tmp_path):
+    """An investigation in ws_root itself must never appear in
+    dormant_others (it's already in `current`)."""
+    ws = tmp_path / "ws"; ws.mkdir()
+    _write_iset(ws, "self-inv")
+    out = _build_investigation_registry_for_test(
+        ws,
+        this_url="http://127.0.0.1:1",
+        list_servers_fn=lambda: [],
+        fetch_peer_fn=lambda u: None,
+        list_worktrees_fn=lambda: [{"path": str(ws.resolve()), "branch": "main"}],
+        scan_worktree_fn=lambda p: [
+            {"slug": "self-inv", "title": "Self", "status": "planning"}
+        ],
+    )
+    assert out["dormant_others"] == []
+
+
+def test_dormant_filters_closed_and_archived_statuses(tmp_path):
+    """Investigations with status closed/archived/complete must not
+    appear in the dormant bucket."""
+    from vivarium_dashboard.server import _scan_worktree_investigations
+
+    wt = tmp_path / "wt"
+    for slug, status in [
+        ("open-one",     "planning"),
+        ("closed-one",   "closed"),
+        ("archived-one", "archived"),
+        ("complete-one", "complete"),
+        ("running-one",  "running"),
+    ]:
+        _write_iset(wt, slug, status=status)
+
+    found = _scan_worktree_investigations(str(wt))
+    slugs = {e["slug"] for e in found}
+    assert slugs == {"open-one", "running-one"}
+
+
+def test_dormant_handles_missing_investigations_dir(tmp_path):
+    """A worktree with no investigations/ directory contributes nothing."""
+    from vivarium_dashboard.server import _scan_worktree_investigations
+    assert _scan_worktree_investigations(str(tmp_path / "nope")) == []
+
+
+def test_list_other_worktrees_excludes_self(tmp_path):
+    """_list_other_worktrees must NEVER yield ws_root itself, regardless
+    of how git resolves the porcelain output. (Sanity check on real git;
+    skipped if git is unavailable.)"""
+    import shutil, subprocess
+    if shutil.which("git") is None:
+        return
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=str(repo), check=True)
+    # Make a commit so worktree-add works.
+    (repo / "README.md").write_text("x\n")
+    subprocess.run(["git", "add", "."], cwd=str(repo), check=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-q", "-m", "init"], cwd=str(repo), check=True)
+    # Add a sibling worktree on a new branch.
+    sib = tmp_path / "sib"
+    subprocess.run(["git", "worktree", "add", "-q", "-b", "sib-branch",
+                    str(sib)], cwd=str(repo), check=True)
+
+    from vivarium_dashboard.server import _list_other_worktrees
+    out = _list_other_worktrees(repo)
+    paths = {e["path"] for e in out}
+    # The repo itself must not appear; the sibling must.
+    assert str(repo.resolve()) not in paths
+    assert str(sib.resolve()) in paths
+
+
+def test_list_other_worktrees_handles_non_git_dir(tmp_path):
+    """Non-git dirs return [] without raising."""
+    from vivarium_dashboard.server import _list_other_worktrees
+    assert _list_other_worktrees(tmp_path) == []

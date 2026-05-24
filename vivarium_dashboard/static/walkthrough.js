@@ -3333,6 +3333,21 @@
         if (!window._isetIndex.length) return;
         var active = window._currentIset;
         if (!active) {
+          // Prefer the slug published by investigation-switcher.js from
+          // /api/investigation-registry — it already does the git-branch
+          // match + running-iset + alphabetical-fallback chain, and
+          // staying consistent with it keeps trigger label + STUDIES
+          // rail + Investigation-tab detail all pointing at the same
+          // iset.
+          var pubSlug = window._currentIsetSlug || '';
+          if (pubSlug) {
+            for (var pi = 0; pi < window._isetIndex.length; pi++) {
+              if (window._isetIndex[pi].name === pubSlug) { active = pubSlug; break; }
+            }
+          }
+        }
+        if (!active) {
+          // Legacy fallback: investigation/<name> branch prefix.
           var branch = (window._gitStatus && window._gitStatus.active_branch) || '';
           var m = /^investigation\/(.+)$/.exec(branch);
           if (m) {
@@ -6035,14 +6050,151 @@
         +   '<nav class="study-nav-row2">' + links.join('') + '</nav>'
         + '</div>';
 
+      // Wrap the v4 narrative-spine section in a <details class="study-fold">
+      // so the Expand all / Collapse all toolbar buttons (which target
+      // .study-fold) actually have something to operate on. v3 studies got
+      // this for free via v3StudySection's <details> wrapper; v4 sections
+      // were left flat and the buttons did nothing on v4-only investigations.
+      // Open by default so existing reader behaviour is unchanged.
+      //
+      // Reuses the v3 `.sp-*` CSS classes so the collapsed-card look matches
+      // what v3 readers already see: num + title + verdict / one-line
+      // objective / slug+depth meta / chips for predictions + variants +
+      // refs / expand hint. Populated from v4 narrative-spine fields:
+      // objective for the one-liner, expected_behavior for the chips, etc.
+      var v4Title    = s.title || _humanizeStudyName(s.name).title;
+      var v4Verdict  = (function() {
+        var st = (s.status || 'planning').toLowerCase();
+        if (st === 'planning' || st === 'planned') return {cls: 'v-prelim', emoji: '📋', label: 'Planned'};
+        if (st === 'running' || st === 'in_progress') return {cls: 'v-cal', emoji: '🔬', label: 'Running'};
+        if (st === 'complete' || st === 'ran' || st === 'passed') return {cls: 'v-pass', emoji: '✅', label: 'Complete'};
+        if (st === 'failed' || st === 'invalid') return {cls: 'v-fail', emoji: '❌', label: 'Failed'};
+        return {cls: 'v-none', emoji: '·', label: _h(s.status || 'planning')};
+      })();
+      var v4Objective = _firstSentence(s.objective || '');
+      var v4Meta = ['<code>' + _h(s.name) + '</code>',
+                    'depth ' + (depthMap[s.name] || 0)];
+      if (s.phase) v4Meta.push('phase ' + _h(s.phase));
+      if (s.topic) v4Meta.push('topic ' + _h(s.topic));
+
+      // Rich-panel content: an optional `report:` block on the study
+      // YAML (same shape as v3 _studyControlPanel reads) drives the
+      // dnaa-style Confidence/Evidence chips + CONCLUSION/INSIGHT/CAVEAT
+      // rows + status-colored key_metrics. Synthesises sensible
+      // pre-execution scaffold values when the block is missing or
+      // partial, so a fresh investigation lands with a populated card
+      // instead of an empty one.
+      var rep = s.report || {};
+      var v4Conf = (rep.confidence || '').trim();
+      var v4Ev   = (rep.evidence_quality || '').trim();
+      if (!v4Conf && (v4Verdict.label === 'Planned')) v4Conf = 'design-stage';
+      if (!v4Ev   && (v4Verdict.label === 'Planned')) v4Ev   = 'scaffold';
+      var v4Conclusion = rep.conclusion   || _firstSentence(rep.result)
+                       || (v4Verdict.label === 'Planned' && s.hypothesis
+                            ? 'Predicted — ' + _firstSentence(s.hypothesis) : '');
+      var v4Insight    = rep.main_insight || _firstSentence(rep.interpretation);
+      var v4Caveat     = rep.caveat;
+      if (!v4Caveat && Array.isArray(s.limitations) && s.limitations.length) {
+        var l0 = s.limitations[0];
+        v4Caveat = (typeof l0 === 'string') ? l0 : (l0 && (l0.text || l0.limitation)) || '';
+      }
+      var v4LitMatch = (rep.lit_match || '').trim();
+
+      // Chip strip: rich key_metrics (label+value+status) when authored,
+      // else auto-derived prediction-count + status breakdown + variants
+      // + refs + deps.
+      var v4Chips = [];
+      (rep.key_metrics || []).forEach(function(m) {
+        if (typeof m === 'string') {
+          v4Chips.push('<span class="sp-metric">' + _h(m) + '</span>');
+        } else if (m && typeof m === 'object') {
+          var st = (m.status || '').toLowerCase();
+          var icon = st === 'pass' ? '✅ ' : st === 'warn' ? '⚠️ ' : st === 'fail' ? '❌ ' : '';
+          var txt = (m.label || '') + (m.value != null ? ': ' + m.value : '');
+          v4Chips.push('<span class="sp-metric sp-metric-' + _h(st || 'plain') + '">' + icon + _h(txt) + '</span>');
+        }
+      });
+      var ebList = s.expected_behavior || [];
+      if (ebList.length) {
+        var counts = {stub: 0, gated: 0, implemented: 0};
+        ebList.forEach(function(b) {
+          var st = (b && b.status) || 'implemented';
+          if (counts[st] !== undefined) counts[st]++;
+        });
+        v4Chips.push('<span class="sp-metric">' + ebList.length + ' predictions</span>');
+        if (counts.implemented) v4Chips.push('<span class="sp-metric sp-metric-pass">✅ ' + counts.implemented + ' implemented</span>');
+        if (counts.gated)       v4Chips.push('<span class="sp-metric sp-metric-warn">⏳ ' + counts.gated + ' gated</span>');
+        if (counts.stub)        v4Chips.push('<span class="sp-metric">🟡 ' + counts.stub + ' stub</span>');
+      }
+      var nVar = (s.variants || []).length;
+      if (nVar) v4Chips.push('<span class="sp-metric">' + nVar + ' variants</span>');
+      var v4Bib = (s.bibliography && s.bibliography.bib_keys) || [];
+      if (v4Bib.length) v4Chips.push('<span class="sp-metric">' + v4Bib.length + ' refs</span>');
+      var nParents = (s.parent_studies || []).length;
+      if (nParents) v4Chips.push('<span class="sp-metric">depends on ' + nParents + '</span>');
+      var nKids = (children[s.name] || []).length;
+      if (nKids) v4Chips.push('<span class="sp-metric">blocks ' + nKids + '</span>');
+      if (v4LitMatch) v4Chips.push('<span class="sp-metric">Lit match: ' + _h(v4LitMatch) + '</span>');
+
+      // Section-nav chips inside the sticky panel. CSS hides this row
+      // when the fold is COLLAPSED (it would just duplicate the
+      // metric chips below); when OPEN, the rich rows are hidden and
+      // this nav becomes the primary content of the sticky strip, so
+      // the user can jump to Question / Background / Predictions / etc.
+      // without scrolling back to the topbar.
+      var spSectionNav = links.length
+        ? '<nav class="sp-section-nav">' + links.join('') + '</nav>'
+        : '';
+
+      var foldSummary = ''
+        + '<summary class="study-panel">'
+        +   '<div class="sp-top">'
+        +     '<span class="sp-num">' + (i + 1) + '.</span>'
+        +     '<span class="sp-title">' + _h(v4Title) + '</span>'
+        +     '<span class="sp-verdict ' + v4Verdict.cls + '">' + v4Verdict.emoji + ' ' + _h(v4Verdict.label) + '</span>'
+        +   '</div>'
+        +   spSectionNav
+        +   (v4Objective ? '<div class="sp-objective">' + _h(v4Objective) + '</div>' : '')
+        +   '<div class="sp-meta">' + v4Meta.join(' · ') + '</div>'
+        +   ((v4Conf || v4Ev)
+              ? '<div class="sp-quality">'
+                + (v4Conf ? '<span class="sp-conf sp-conf-' + _h(v4Conf.toLowerCase()) + '">Confidence: ' + _h(v4Conf) + '</span>' : '')
+                + (v4Ev   ? '<span class="sp-ev">Evidence: ' + _h(v4Ev) + '</span>' : '')
+                + '</div>'
+              : '')
+        +   (v4Conclusion ? '<div class="sp-conclusion"><span class="sp-lbl">Conclusion</span> ' + _h(v4Conclusion) + '</div>' : '')
+        +   (v4Chips.length ? '<div class="sp-metrics">' + v4Chips.join('') + '</div>' : '')
+        +   (v4Insight ? '<div class="sp-insight"><span class="sp-lbl">Insight</span> ' + _h(v4Insight) + '</div>' : '')
+        +   (v4Caveat  ? '<div class="sp-caveat"><span class="sp-lbl">Caveat</span> '   + _h(v4Caveat)  + '</div>' : '')
+        +   '<span class="sp-expand-hint">▸ click to expand full study</span>'
+        + '</summary>';
+
+      // Dropped chrome on the v4 expanded section to remove three forms
+      // of redundancy with the (now-rich) sp-* summary panel:
+      //   1. subNav (sticky study-nav with chips like Question / Background
+      //      / Predictions / Cited refs) — the sp-metrics chips in the
+      //      summary panel already convey the same counts; the topbar nav
+      //      handles cross-study navigation. Removing it also kills the
+      //      double-sticky stack (topbar + study-fold panel + study-nav).
+      //   2. <header class="study-header"><h2>num. slug status</h2></header>
+      //      — every field is in sp-top + sp-meta of the panel above.
+      //   3. The "Depends on / Blocks" paragraphs that lived in the
+      //      header — these are now shown as the resolved dep list right
+      //      below the summary so the dep slugs (not just counts) stay
+      //      visible while the panel is sticky.
+      var depsLine = '';
+      if (parents || kids) {
+        var bits = [];
+        if (parents) bits.push('<span class="muted">Depends on:</span> ' + parents);
+        if (kids)    bits.push('<span class="muted">Blocks:</span> '     + kids);
+        depsLine = '<p class="study-deps muted small">' + bits.join(' &nbsp;·&nbsp; ') + '</p>';
+      }
+
       return ''
+        + '<details class="study-fold" id="study-fold-' + slug + '">'
+        + foldSummary
         + '<section class="study" id="study-' + slug + '">'
-        +   subNav
-        +   '<header class="study-header">'
-        +     '<h2><span class="study-num">' + (i + 1) + '.</span> ' + _h(s.name) + ' ' + statusBadge + '</h2>'
-        +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
-        +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
-        +   '</header>'
+        +   depsLine
 
         +   '<div class="qh" id="' + sidQ + '">'
         +     (s.question   ? '<p><strong>Question.</strong> '   + _multiline(s.question)   + '</p>' : '')
@@ -6069,7 +6221,8 @@
 
         +   (bibList ? '<div id="' + sidRe + '"><h3>References cited by this study</h3><p>' + bibList + '</p></div>' : '')
 
-        + '</section>';
+        + '</section>'
+        + '</details>';
     }
 
     // ── PARTS grouping (framework): investigation.yaml may declare a `parts`
@@ -6561,8 +6714,45 @@
       // When a study is open: make its header sticky so the collapse arrow
       // stays in view while scrolling inside the study. One click collapses
       // and the next study floats into view — no scrolling back to the top.
-      + '.study-fold[open]>.study-panel{position:sticky;top:0;z-index:10;border-bottom:1px solid #e2e8f0;border-radius:9px 9px 0 0;background:#f8fafc;box-shadow:0 1px 4px rgba(0,0,0,.06)}'
-      + '.study-fold[open]>.study-panel::after{content:"▴ click to collapse";float:right;font-size:0.75em;color:#64748b;font-weight:normal;margin-left:12px;line-height:inherit}'
+      + '.study-fold[open]>.study-panel{position:sticky;top:0;z-index:10;padding:8px 16px;border-bottom:1px solid #e2e8f0;border-radius:9px 9px 0 0;background:#f8fafc;box-shadow:0 1px 4px rgba(0,0,0,.06)}'
+      // Sticky-when-open: hide the rich content rows (still visible
+      // below in the expanded body — no information lost, just no
+      // longer duplicated). The section-nav row stays visible to
+      // serve as the in-study jump-target navigation.
+      + '.study-fold[open]>.study-panel .sp-objective,'
+      + '.study-fold[open]>.study-panel .sp-meta,'
+      + '.study-fold[open]>.study-panel .sp-quality,'
+      + '.study-fold[open]>.study-panel .sp-conclusion,'
+      + '.study-fold[open]>.study-panel .sp-metrics,'
+      + '.study-fold[open]>.study-panel .sp-insight,'
+      + '.study-fold[open]>.study-panel .sp-caveat{display:none}'
+      // Section-nav chips: hidden in the collapsed card (would
+      // duplicate the metric chips); shown ONLY when the fold is
+      // open so the sticky strip provides in-study navigation.
+      + '.sp-section-nav{display:none}'
+      + '.study-fold[open]>.study-panel .sp-section-nav{'
+      +   'display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 0;width:100%'
+      + '}'
+      + '.sp-section-nav a{'
+      +   'display:inline-block;padding:2px 10px;border-radius:9999px;'
+      +   'font-size:0.83em;color:#3b82f6;text-decoration:none;'
+      +   'background:#eff6ff;border:1px solid transparent'
+      + '}'
+      + '.sp-section-nav a:hover{background:#dbeafe;border-color:#bfdbfe}'
+      + '.sp-section-nav .sn-count{'
+      +   'display:inline-block;margin-left:5px;padding:0 6px;border-radius:9999px;'
+      +   'background:rgba(59,130,246,0.13);color:#3b82f6;font-size:0.85em;'
+      + '}'
+      // Prominent collapse affordance (open state). Replaces the small
+      // float:right hint with a button-style chip in the top-right of
+      // the sticky strip; visible at a glance + obvious click target.
+      + '.study-fold[open]>.study-panel{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}'
+      + '.study-fold[open]>.study-panel>.sp-top{flex:1 1 auto;min-width:0;margin:0}'
+      + '.study-fold[open]>.study-panel::after{'
+      +   'content:"▴ click to collapse full study";'
+      +   'font-size:0.73em;color:#94a3b8;font-weight:normal;flex:none;'
+      + '}'
+      + '.study-fold[open]>.study-panel:hover::after{color:#64748b}'
       + '.study-fold.verdict-v-pass>.study-panel{border-left-color:#16a34a}'
       + '.study-fold.verdict-v-warn>.study-panel{border-left-color:#d97706}'
       + '.study-fold.verdict-v-block>.study-panel{border-left-color:#dc2626}'
@@ -6804,8 +6994,24 @@
       +   '<h2 id="studies-heading">Studies' + (hasDag ? ' (dependency order)' : '') + '</h2>'
       +   '<p class="muted small">Each study is collapsed to a one-glance control panel — scan top to bottom, then click any panel to expand its full detail.</p>'
       +   '<div class="studies-toolbar">'
-      +     '<button type="button" onclick="document.querySelectorAll(\'.study-fold\').forEach(function(d){d.open=true})">Expand all</button>'
-      +     '<button type="button" onclick="document.querySelectorAll(\'.study-fold\').forEach(function(d){d.open=false})">Collapse all</button>'
+      +     '<button type="button" id="studies-expand-all">Expand all</button>'
+      +     '<button type="button" id="studies-collapse-all">Collapse all</button>'
+      +     '<script>(function(){'
+      +       'function findFolds(){return Array.from(document.querySelectorAll(".study-fold"));}'
+      +       'function setAll(open){'
+      +         'var folds=findFolds();'
+      +         'console.log("[studies-toolbar] "+(open?"expand":"collapse")+" "+folds.length+" .study-fold elements");'
+      +         'folds.forEach(function(d){d.open=open;});'
+      +         'if(open&&folds.length){folds[0].scrollIntoView({behavior:"smooth",block:"start"});}'
+      +       '}'
+      +       'function wire(){'
+      +         'var ex=document.getElementById("studies-expand-all");'
+      +         'var co=document.getElementById("studies-collapse-all");'
+      +         'if(ex)ex.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();setAll(true);});'
+      +         'if(co)co.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();setAll(false);});'
+      +       '}'
+      +       'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",wire);}else{wire();}'
+      +     '})();</script>'
       +   '</div>'
       +   studiesHtml
 
@@ -7197,6 +7403,24 @@
     });
     var ungrouped = window._investigations.filter(function(s) { return !seen[s.name]; });
     if (ungrouped.length) groups.push({name: '__ungrouped__', title: 'Ungrouped', studies: ungrouped});
+
+    // Scope to current investigation: when the cross-worktree registry
+    // has identified a current iset (window._currentIsetSlug, set by
+    // investigation-switcher.js after fetching /api/investigation-registry)
+    // AND that iset has a group here, drop every other group so the rail
+    // reflects only the studies the user is actively working on. The
+    // iset dropdown at the top of the rail is the way to switch isets;
+    // listing every iset's studies in the rail itself was just noise.
+    // Falls back to the full all-groups render if no current slug is
+    // known yet (registry still loading) or if the current slug doesn't
+    // match any group (defensive).
+    var currentSlug = window._currentIsetSlug || '';
+    if (currentSlug) {
+      var hasCurrent = groups.some(function(g) { return g.name === currentSlug; });
+      if (hasCurrent) {
+        groups = groups.filter(function(g) { return g.name === currentSlug; });
+      }
+    }
 
     // Flat-list mode: when there's exactly one investigation (no
     // ungrouped studies), render its studies as a flat list directly
