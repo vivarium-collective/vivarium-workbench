@@ -3077,11 +3077,36 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
                                'generations': _xarr['generations'],
                                'steps': _xarr['steps']}}
                 else:
-                    state = cr.inject_sqlite_emitter(
-                        state, run_id=_payload['run_id'], db_file=_payload['db_file'])
-                    composite = Composite({{'state': state}}, core=core)
-                    cr.run_with_division(composite, _payload['steps'])
-                    results = gather_emitter_results(composite)
+                    _mg = int(_payload.get('max_generations') or 1)
+                    if _mg > 1:
+                        # Multi-gen: workspace-side runner drives the
+                        # SQLiteEmitter externally (mirrors how the
+                        # xarray branch drives XArrayEmitter). The
+                        # composite does NOT get an injected emitter —
+                        # the static `agents/0/...` wiring would write
+                        # empty rows after division. The runner extracts
+                        # the followed agent's state each chunk and
+                        # calls `emitter.update` with it; on division it
+                        # switches to the daughter agent_id.
+                        composite = Composite({{'state': state}}, core=core)
+                        from v2ecoli.library.sqlite_run import run_multigen_sqlite
+                        _sq = run_multigen_sqlite(
+                            composite,
+                            run_id=_payload['run_id'],
+                            db_file=_payload['db_file'],
+                            emit_paths=_payload.get('emit_paths') or [],
+                            max_steps=_payload['steps'],
+                            max_generations=_mg,
+                            core=core,
+                        )
+                        results = {{'steps': _sq['steps'],
+                                   'generations': _sq['generations']}}
+                    else:
+                        state = cr.inject_sqlite_emitter(
+                            state, run_id=_payload['run_id'], db_file=_payload['db_file'])
+                        composite = Composite({{'state': state}}, core=core)
+                        cr.run_with_division(composite, _payload['steps'])
+                        results = gather_emitter_results(composite)
         """).lstrip("\n")
     else:
         # Legacy path: serialize the pre-built state into a tempfile.
