@@ -1286,8 +1286,11 @@ def _scan_worktree_investigations(worktree_path: str) -> list[dict]:
         if not spec_file.is_file():
             continue
         try:
-            data = _yaml.safe_load(spec_file.read_text()) or {}
-        except (OSError, _yaml.YAMLError):
+            # Force utf-8 — Path.read_text() defaults to locale encoding,
+            # which crashed on ASCII locales when a sibling worktree's
+            # investigation.yaml contained UTF-8 chars (e.g. → in titles).
+            data = _yaml.safe_load(spec_file.read_text(encoding="utf-8")) or {}
+        except (OSError, UnicodeDecodeError, _yaml.YAMLError):
             continue
         if not isinstance(data, dict):
             continue
