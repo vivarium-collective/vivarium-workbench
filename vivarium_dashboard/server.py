@@ -1311,15 +1311,28 @@ def _build_investigation_registry_for_test(
     fetch_peer_fn=None,
     list_worktrees_fn=None,
     scan_worktree_fn=None,
+    current_branch_fn=None,
 ) -> dict:
     """Pure function backing GET /api/investigation-registry.
 
     Injectable hooks keep the helper testable without filesystem, HTTP,
-    or subprocess I/O.
+    subprocess, or git I/O.
 
-    Returns three buckets:
+    Returns four buckets:
 
       - ``current``         — this dashboard's chosen Investigation.
+                              Picked by (in priority order):
+                                1. investigation whose ``name`` matches the
+                                   current git branch (Investigation ≡ branch
+                                   convention), then
+                                2. any investigation with
+                                   ``effective_status == "running"``, then
+                                3. the first investigation alphabetically.
+      - ``local_siblings``  — every OTHER investigation in THIS workspace
+                              (same on-disk tree as ``current``). Lets the
+                              sidebar list all investigations the user is
+                              actively iterating on without forcing each
+                              one onto its own worktree.
       - ``running_others``  — peer dashboards' chosen Investigations
                               (one per live peer), via HTTP probe of
                               each peer's ``/api/iset-list``.
@@ -1331,8 +1344,8 @@ def _build_investigation_registry_for_test(
                               closed/archived/complete are filtered out
                               so the sidebar never renders stale rows.
 
-    Contract: previously-existing keys ``current`` and ``running_others``
-    retain their exact shape; ``dormant_others`` is a new additive bucket.
+    Contract: previously-existing keys retain their exact shape;
+    ``local_siblings`` and ``dormant_others`` are additive buckets.
     """
     if list_servers_fn is None:
         try:
@@ -1346,16 +1359,37 @@ def _build_investigation_registry_for_test(
         list_worktrees_fn = lambda: _list_other_worktrees(ws_root)
     if scan_worktree_fn is None:
         scan_worktree_fn = _scan_worktree_investigations
+    if current_branch_fn is None:
+        def _default_branch_fn():
+            try:
+                from vivarium_dashboard.lib.work_state import _current_git_branch
+                return _current_git_branch(ws_root)
+            except Exception:
+                return None
+        current_branch_fn = _default_branch_fn
 
-    # Current Investigation: pick from this workspace's iset list with the
-    # same heuristic we use for peers (running > first > none).
+    # All local investigations in this workspace, picked apart into
+    # current + siblings. Selection order: git-branch match > running >
+    # alphabetical first.
     invs = _build_iset_summary_for_test(ws_root)
+    chosen_idx: int | None = None
     if invs:
-        running = next(
-            (i for i in invs if i.get("effective_status") == "running"),
-            None,
-        )
-        chosen = running or invs[0]
+        cur_branch = current_branch_fn() or ""
+        if cur_branch:
+            for i, iv in enumerate(invs):
+                if iv.get("name") == cur_branch:
+                    chosen_idx = i
+                    break
+        if chosen_idx is None:
+            for i, iv in enumerate(invs):
+                if iv.get("effective_status") == "running":
+                    chosen_idx = i
+                    break
+        if chosen_idx is None:
+            chosen_idx = 0
+
+    if chosen_idx is not None:
+        chosen = invs[chosen_idx]
         current = {
             "slug":             chosen.get("name"),
             "title":            chosen.get("title", chosen.get("name")),
@@ -1371,6 +1405,19 @@ def _build_investigation_registry_for_test(
             "url":              this_url,
             "effective_status": None,
         }
+
+    # local_siblings — everything else in this workspace.
+    siblings: list[dict] = []
+    if invs:
+        for i, iv in enumerate(invs):
+            if i == chosen_idx:
+                continue
+            siblings.append({
+                "slug":             iv.get("name"),
+                "title":            iv.get("title", iv.get("name")),
+                "worktree_path":    str(ws_root.resolve()),
+                "effective_status": iv.get("effective_status"),
+            })
 
     # Running-others: every server record that does NOT point at this
     # worktree path AND has a live PID.
@@ -1418,6 +1465,7 @@ def _build_investigation_registry_for_test(
 
     return {
         "current":         current,
+        "local_siblings":  siblings,
         "running_others":  others,
         "dormant_others":  dormant,
     }

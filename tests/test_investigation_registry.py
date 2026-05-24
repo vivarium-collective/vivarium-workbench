@@ -180,7 +180,9 @@ def test_registry_shape_matches_documented_contract(tmp_path):
         list_worktrees_fn=lambda: [],
         scan_worktree_fn=lambda _p: [],
     )
-    assert set(out.keys()) == {"current", "running_others", "dormant_others"}
+    assert set(out.keys()) == {
+        "current", "local_siblings", "running_others", "dormant_others",
+    }
     assert set(out["current"].keys()) == {
         "slug", "title", "worktree_path", "url", "effective_status",
     }
@@ -193,6 +195,98 @@ def test_registry_shape_matches_documented_contract(tmp_path):
 # ---------------------------------------------------------------------------
 # dormant_others: open investigations on other worktrees with no live server
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# current: picker prefers git-branch match
+# ---------------------------------------------------------------------------
+
+
+def test_current_prefers_investigation_matching_git_branch(tmp_path):
+    """If the current git branch matches an investigation slug, pick it
+    even when another investigation is alphabetically first or has
+    effective_status=running."""
+    ws = tmp_path / "ws"; ws.mkdir()
+    _write_iset(ws, "alpha")
+    _write_iset(ws, "beta", status="running")
+    _write_iset(ws, "v2ecoli-pdmp")
+
+    out = _build_investigation_registry_for_test(
+        ws,
+        this_url="http://127.0.0.1:1",
+        list_servers_fn=lambda: [],
+        fetch_peer_fn=lambda u: None,
+        list_worktrees_fn=lambda: [],
+        scan_worktree_fn=lambda _p: [],
+        current_branch_fn=lambda: "v2ecoli-pdmp",
+    )
+    assert out["current"]["slug"] == "v2ecoli-pdmp"
+    sibling_slugs = {s["slug"] for s in out["local_siblings"]}
+    assert sibling_slugs == {"alpha", "beta"}
+
+
+def test_current_falls_back_to_first_when_branch_does_not_match(tmp_path):
+    ws = tmp_path / "ws"; ws.mkdir()
+    _write_iset(ws, "alpha")
+    _write_iset(ws, "beta")
+    out = _build_investigation_registry_for_test(
+        ws,
+        this_url="http://127.0.0.1:1",
+        list_servers_fn=lambda: [],
+        fetch_peer_fn=lambda u: None,
+        list_worktrees_fn=lambda: [],
+        scan_worktree_fn=lambda _p: [],
+        current_branch_fn=lambda: "some-random-branch",
+    )
+    # No git-branch match → fall back to alphabetical first.
+    assert out["current"]["slug"] == "alpha"
+    assert [s["slug"] for s in out["local_siblings"]] == ["beta"]
+
+
+# ---------------------------------------------------------------------------
+# local_siblings: other investigations in this same workspace
+# ---------------------------------------------------------------------------
+
+
+def test_local_siblings_lists_other_local_investigations(tmp_path):
+    ws = tmp_path / "ws"; ws.mkdir()
+    _write_iset(ws, "alpha", title="Alpha", status="planning")
+    _write_iset(ws, "beta",  title="Beta",  status="planning")
+    _write_iset(ws, "gamma", title="Gamma", status="planning")
+
+    out = _build_investigation_registry_for_test(
+        ws,
+        this_url="http://127.0.0.1:1",
+        list_servers_fn=lambda: [],
+        fetch_peer_fn=lambda u: None,
+        list_worktrees_fn=lambda: [],
+        scan_worktree_fn=lambda _p: [],
+        current_branch_fn=lambda: None,
+    )
+    # current is alpha (alphabetical fallback); the other two are siblings.
+    assert out["current"]["slug"] == "alpha"
+    sibling_slugs = [s["slug"] for s in out["local_siblings"]]
+    assert sibling_slugs == ["beta", "gamma"]
+    # Shape: every sibling carries slug/title/worktree_path/effective_status.
+    assert set(out["local_siblings"][0].keys()) == {
+        "slug", "title", "worktree_path", "effective_status",
+    }
+
+
+def test_local_siblings_empty_when_only_one_investigation(tmp_path):
+    ws = tmp_path / "ws"; ws.mkdir()
+    _write_iset(ws, "alpha")
+    out = _build_investigation_registry_for_test(
+        ws,
+        this_url="http://127.0.0.1:1",
+        list_servers_fn=lambda: [],
+        fetch_peer_fn=lambda u: None,
+        list_worktrees_fn=lambda: [],
+        scan_worktree_fn=lambda _p: [],
+        current_branch_fn=lambda: None,
+    )
+    assert out["current"]["slug"] == "alpha"
+    assert out["local_siblings"] == []
 
 
 def test_dormant_lists_open_investigations_on_other_worktrees(tmp_path):
