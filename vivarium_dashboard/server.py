@@ -5956,7 +5956,27 @@ if __name__ == "__main__":
             return self._json({"error": f"PR already exists: {state['pr_url']}", "pr_url": state["pr_url"]}, 409)
 
         base = state.get("base") or "main"
-        title = (body.get("title") or "").strip() or f"Workstream: {branch}"
+        # PR title default: prefer the matching investigation's `title:`
+        # field (from investigations/<branch>/investigation.yaml) so the
+        # PR reads like "PDMP whole-cell model reformulation" rather than
+        # the technical "Workstream: <branch>". Branch and investigation
+        # slug are kept in 1:1 correspondence by the Investigation ≡
+        # branch convention, so we look up by branch name. Falls back
+        # to the legacy "Workstream: <branch>" when no matching
+        # investigation.yaml is present (e.g., generic feature branches).
+        def _default_pr_title(branch_name: str) -> str:
+            inv_yaml = WORKSPACE / "investigations" / branch_name / "investigation.yaml"
+            if inv_yaml.is_file():
+                try:
+                    inv_spec = yaml.safe_load(inv_yaml.read_text()) or {}
+                    inv_title = (inv_spec.get("title") or "").strip()
+                    if inv_title:
+                        return inv_title
+                except Exception:
+                    pass
+            return f"Workstream: {branch_name}"
+
+        title = (body.get("title") or "").strip() or _default_pr_title(branch)
         body_text = (body.get("body") or "").strip() or "Created via pbg-template dashboard."
 
         if not shutil.which("gh"):
