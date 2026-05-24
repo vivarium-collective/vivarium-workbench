@@ -76,67 +76,32 @@ def connect(db_file: str | Path) -> sqlite3.Connection:
     return conn
 
 
-def run_with_division(composite, steps: int, chunk: int = 100,
-                      max_generations: int = 1,
-                      initial_agent_id: str = "0") -> int:
-    """Run ``composite`` up to ``steps`` ticks, following daughters across
-    up to ``max_generations`` cell divisions.
+def run_with_division(composite, steps: int, chunk: int = 100) -> int:
+    """Run ``composite`` up to ``steps`` ticks, stopping cleanly at division.
 
-    v2ecoli single-cell composites signal division in one of two ways:
-    ``composite.run()`` raises (terminal — break unconditionally), or the
-    followed agent is removed from ``state['agents']`` and replaced by
-    daughter agent_ids (the normal case).
+    v2ecoli single-cell composites signal cell division in one of two ways:
+    ``composite.run()`` raises, or ``agents['0']`` is removed from the state.
+    The dashboard runs each study as a single generation, so either signal
+    means the cell cycle finished — we stop and let the caller gather whatever
+    the emitter captured up to that point.
 
-    Behaviour:
-      max_generations=1 (default): historical — stop at first division.
-        Mirrors the legacy ``scripts/run_default_baseline.py`` loop. Any
-        sim that needs more than one generation passes a higher cap.
-      max_generations>1: pick the first sorted new agent_id as the daughter
-        to follow, continue running. Emitter (sqlite or otherwise) keeps
-        writing history under whatever ``agent_id`` is current — the resulting
-        db spans N generations naturally. Matches the daughter-selection
-        rule used by ``v2ecoli.library.xarray_run.run_multigen_xarray``.
-
-    A composite that *raises* (not just division-via-state-mutation) always
-    breaks regardless of ``max_generations`` — the underlying error is
-    terminal, not a routine handoff.
-
-    Returns ticks actually run.
+    Running ``steps`` in one ``composite.run(steps)`` call (the old behaviour)
+    instead crashed the whole run at division, so any run length that crossed
+    the division point failed with a 502. Mirrors the chunked, division-aware
+    loop in ``scripts/run_default_baseline.py``. Returns ticks actually run.
     """
     steps = int(steps)
     done = 0
-    followed = initial_agent_id
-    gen = 1
-    state = (getattr(composite, "state", None) or {})
-    prev_ids = set((state.get("agents") or {}).keys())
     while done < steps:
         n = min(chunk, steps - done)
         try:
             composite.run(n)
         except Exception:
-            break  # terminal — composite raised
+            break  # division — composite raised
         done += n
         agents = (getattr(composite, "state", None) or {}).get("agents") or {}
-        curr_ids = set(agents.keys())
-        if followed not in agents:
-            # The followed agent is gone — division happened (or composite
-            # state was reshaped). For max_generations=1, stop. Otherwise
-            # follow the first sorted new agent_id; if none appeared we have
-            # nothing left to follow, so stop.
-            if gen >= max_generations:
-                break
-            new_ids = sorted(curr_ids - prev_ids)
-            if not new_ids:
-                # parent gone but no new agent? state is in a weird shape;
-                # try the smallest remaining id as a best effort.
-                remaining = sorted(curr_ids)
-                if not remaining:
-                    break
-                followed = remaining[0]
-            else:
-                followed = new_ids[0]
-            gen += 1
-        prev_ids = curr_ids
+        if agents.get("0") is None:
+            break  # division — parent agent removed
     return done
 
 
