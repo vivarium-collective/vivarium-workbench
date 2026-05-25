@@ -5749,9 +5749,26 @@
               // chromosome figures) fall through to _fitEmbed's autosize.
               var _hClamp = (emb.html || '').match(/html,body\{height:(\d+)px/);
               var _hStyle = _hClamp ? (';height:' + (parseInt(_hClamp[1], 10) + 24) + 'px') : '';
+              // Infrastructural no-scrollbar guarantee:
+              //   scrolling="no"     — kills the browser iframe scrollbar
+              //                        regardless of any size mismatch
+              //                        between _fitEmbed's measurement
+              //                        and the inner content's actual
+              //                        rendered height. Plotly's legend-
+              //                        overflow scrollbars previously
+              //                        leaked through because the chart
+              //                        div was sized for the chart but
+              //                        not the wrapped legend rows.
+              //   min-height:520px   — under-measured iframes still show
+              //                        enough vertical space for the
+              //                        typical Plotly chart (340 chart
+              //                        area + 6-row wrapped legend ≈
+              //                        508 px). _fitEmbed grows beyond
+              //                        this when scrollHeight is larger.
               var iframe = '<iframe srcdoc="' + escaped + '" '
                 + 'class="embed-frame" onload="_wireEmbed(this)" '
-                + 'style="width:100%;min-height:200px;border:0;display:block' + _hStyle + '" '
+                + 'scrolling="no" '
+                + 'style="width:100%;min-height:520px;border:0;display:block;overflow:hidden' + _hStyle + '" '
                 + 'title="' + _h(emb.name) + '"></iframe>';
               if (isStale) {
                 // Collapsed by default; re-fit on expand.
@@ -6969,7 +6986,18 @@
       +     'var hm=(bStyle.height||"").match(/^(\\d+(?:\\.\\d+)?)px$/);'
       +     'if(hm)pinnedH=Math.round(parseFloat(hm[1]));'
       +   '}'
-      +   'var h=pinnedH>0?pinnedH:Math.max(e?e.scrollHeight:0,b?b.scrollHeight:0);'
+      +   // Plotly charts that overflow their fixed-height div report the
+      +   // chart-div height in scrollHeight, not the legend overflow. Walk
+      +   // any .plotly-graph-div / [id^="dnaa-"] / [id="chart"] children
+      +   // and add their full computed scrollHeight to the measurement so
+      +   // the iframe grows to fit the chart + ITS internal legend.
+      +   'var plotlyMax=0;try{var charts=d.querySelectorAll(\'.plotly-graph-div, [data-plotly], div[id]\');'
+      +     'for(var ci=0;ci<charts.length;ci++){var c=charts[ci];'
+      +       'var rect=c.getBoundingClientRect&&c.getBoundingClientRect();var top=rect?rect.top:0;'
+      +       'var ch=Math.max(c.scrollHeight||0,c.offsetHeight||0,c.clientHeight||0);'
+      +       'var totalTo=top+ch;if(totalTo>plotlyMax)plotlyMax=totalTo;}}catch(_e){}'
+      +   'var docH=Math.max(e?e.scrollHeight:0,b?b.scrollHeight:0,plotlyMax);'
+      +   'var h=pinnedH>0?pinnedH:docH;'
       +   'if(h>0)f.style.height=(h+24)+"px";}catch(e){}};'
       + 'window._wireEmbed=function(f){window._fitEmbed(f);'
       +   'try{var d=f.contentDocument;if(window.ResizeObserver&&d){var ro=new ResizeObserver(function(){window._fitEmbed(f);});'
