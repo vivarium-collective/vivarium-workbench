@@ -222,6 +222,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/simulation":                   "_post_simulation",
     "/api/run-tests":          "_post_run_tests",
     "/api/render":             "_post_render",
+    "/api/study-report-single": "_post_study_report_single",
     "/api/work-start":         "_post_work_start",
     "/api/work-push":          "_post_work_push",
     "/api/work-attach-report": "_post_work_attach_report",
@@ -6365,6 +6366,33 @@ if __name__ == "__main__":
             render_workspace_report(WORKSPACE)
             return self._json({"ok": True}, 200)
         except Exception as e:
+            return self._json({"error": str(e)}, 500)
+
+    def _post_study_report_single(self, body: dict):
+        """POST /api/study-report-single — render a standalone HTML report
+        for ONE study (the investigation's ``focus_study`` or an explicit
+        ``study`` override).
+
+        Body (accepts either):
+            {"investigation": "<slug>"}   resolves focus_study from yaml
+            {"study": "<slug>"}           explicit override (wins if both set)
+
+        Response: ``{html_path, size_bytes, study, investigation?}``.
+
+        Why this exists: the full investigation report walks the reviewer
+        through every study in the DAG. The domain expert reviews one
+        study at a time and approves it before unblocking the next — this
+        endpoint emits ONLY the focus study's content, no overview /
+        comparative / cross-study sections.
+        """
+        try:
+            _ws_add_to_sys_path()
+            from vivarium_dashboard.lib.single_study_report import (
+                build_single_study_report_for_test,
+            )
+            resp, code = build_single_study_report_for_test(WORKSPACE, body)
+            return self._json(resp, code)
+        except Exception as e:  # noqa: BLE001
             return self._json({"error": str(e)}, 500)
 
     # ------------------------------------------------------------------
