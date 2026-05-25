@@ -47,6 +47,11 @@ def _ws(tmp_path, monkeypatch):
              "source": "spatio_flux.composites.metabolism.monod_kinetics",
              "document": "./composites/monod_kinetics.yaml"},
         ],
+        # `objective` is needed for test_overview_panel_has_objective_editable:
+        # the template gates the editable objective field on `{% if
+        # study.objective %}` (empty fields aren't rendered to keep the
+        # page tidy); the test asserts the affordance exists.
+        "objective": "Compare growth kinetics across substrate-affinity variants.",
         "comparisons": [], "conclusions": "", "question": "",
         "hypothesis": "", "status": "draft",
     }))
@@ -71,17 +76,23 @@ def test_study_detail_spec_returns_none_for_missing(_ws):
 
 
 def test_study_detail_page_has_eight_tabs(_ws):
-    """The 8-tab scaffold is present: Overview · Baseline · Variants · Interventions · Tests · Runs · Visualizations · Conclusions."""
+    """The 8-tab scaffold is present: Overview · Baseline · Variants · Interventions · Tests · Runs · Visualizations · Conclusions.
+
+    (The page may also render additional v4 tabs like Build / Simulations /
+    Observables on top of these — the contract this test guards is "the
+    eight base tabs are all present", not "exactly eight". Tabs have
+    accreted as the platform grew; the count check was brittle.)
+    """
     from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
     spec = _study_detail_spec("study-monod_kinetics-096184")
     html = _render_study_detail_html("study-monod_kinetics-096184", spec)
-    # Eight buttons
+    # Eight required buttons
     for kind in ("overview", "baseline", "variants", "interventions", "tests", "runs", "visualizations", "conclusions"):
         assert f'class="study-tab' in html
         assert f'data-kind="{kind}"' in html
-    # Eight panels
+    # At least eight panels (additional v4 panels are allowed)
     panels = html.count('class="study-tab-panel')
-    assert panels == 8, f"expected 8 panel elements, got {panels}"
+    assert panels >= 8, f"expected at least 8 panel elements, got {panels}"
     # The Overview tab is active by default — must have both active class and overview kind on a button
     assert 'class="study-tab active" data-kind="overview"' in html or \
            'data-kind="overview" class="study-tab active"' in html or \

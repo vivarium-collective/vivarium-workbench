@@ -3183,10 +3183,20 @@ def _render_study_detail_html(name: str, spec: dict) -> str:
 
 
 def _jinja_fmt_ts(ts) -> str:
-    """Format a unix timestamp as 'YYYY-MM-DD HH:MM' UTC, or '' if missing."""
+    """Format a unix timestamp as 'YYYY-MM-DD HH:MM' UTC, or '' if missing.
+
+    Returns '' for None, empty values, AND undefined (Jinja's Undefined
+    sentinel — e.g. when the template walks `r.meta_started_at or
+    r.started_at` against a dict that has neither key). The previous
+    `(TypeError, ValueError)` excludes Jinja's UndefinedError, which
+    escaped here as a template-render failure for every <tr> in the
+    Runs table whenever the merged run dict was missing both fields
+    (the seven test_study_detail_page failures all triggered through
+    this path).
+    """
     try:
         ts = float(ts)
-    except (TypeError, ValueError):
+    except Exception:
         return ""
     if not ts:
         return ""
@@ -3195,10 +3205,13 @@ def _jinja_fmt_ts(ts) -> str:
 
 
 def _jinja_fmt_duration(seconds) -> str:
-    """Format a duration in seconds as '12s', '1m 30s', '2h 15m', or '' if missing."""
+    """Format a duration in seconds as '12s', '1m 30s', '2h 15m', or '' if missing.
+
+    Same Undefined-tolerance contract as _jinja_fmt_ts above.
+    """
     try:
         seconds = float(seconds)
-    except (TypeError, ValueError):
+    except Exception:
         return ""
     if seconds < 0:
         return ""
