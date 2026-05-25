@@ -681,6 +681,17 @@ def load_spec(path: Path) -> dict:
     if not spec.get("name"):
         raise InvestigationSpecError("missing required field: name")
 
+    # ``study_card`` is rendered by walkthrough.js as a multi-row table reading
+    # sc.goal / sc.mechanism / sc.why_before_next / sc.expected_result /
+    # sc.main_expert_question. If an author wrote the field as a plain string
+    # (a common mistake — early scaffold templates suggested prose), the
+    # renderer silently drops it (sc.goal is undefined on a string). Auto-
+    # promote string -> {goal: string} so the card renders the authored prose
+    # in the "Goal" row instead of being empty.
+    sc = spec.get("study_card")
+    if isinstance(sc, str) and sc.strip():
+        spec["study_card"] = {"goal": sc.strip()}
+
     # NEW v4 study shape (question / assumptions / conditions / tests / status).
     # Distinct from the legacy "v4 = v3 + extras" shape by the presence of a
     # top-level ``conditions:`` block. Validate the new fields, then project

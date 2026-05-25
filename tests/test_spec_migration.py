@@ -2,7 +2,11 @@
 import textwrap
 import yaml
 
-from vivarium_dashboard.lib.spec_migration import migrate_study_to_v2_vocabulary, migrate_v2_to_v3
+from vivarium_dashboard.lib.spec_migration import (
+    migrate_study_to_v2_vocabulary,
+    migrate_v2_to_v3,
+    migrate_v3_to_v4,
+)
 
 
 def _write(tmp_path, body):
@@ -261,3 +265,62 @@ def test_migrate_v2_to_v3_preserves_existing_interventions():
         "interventions": [{"name": "hi-glu", "description": "glucose 25mM"}],
     })
     assert out["interventions"] == [{"name": "hi-glu", "description": "glucose 25mM"}]
+
+
+# ---------------------------------------------------------------------------
+# migrate_v3_to_v4 — tests/conditions interaction (fix 2026-05-25)
+# ---------------------------------------------------------------------------
+
+
+def test_migrate_v3_to_v4_skips_tests_rewrite_when_conditions_present():
+    """v3 spec WITH a conditions: block is on the v4-redesign path. The
+    redesign owns tests[] as a LIST of pass/fail criteria; the legacy
+    tests-dict rewrite would cause the redesign validator to reject the
+    study with 'v4 study: tests must be a list'. Skip the rewrite."""
+    spec = {
+        "schema_version": 3,
+        "name": "redesign-bound",
+        "conditions": {
+            "baseline": {"composite": "pkg.composites.x"},
+            "variants": [],
+            "model_settings": [],
+        },
+        "tests": [
+            {"name": "t1", "measure": {"source": "x", "observable": "y"}},
+        ],
+    }
+    out = migrate_v3_to_v4(spec)
+    assert out["schema_version"] == 4
+    # tests[] is left as-is (list of dicts), NOT rewritten to {auto_discover,...}
+    assert isinstance(out["tests"], list)
+    assert out["tests"][0]["name"] == "t1"
+
+
+def test_migrate_v3_to_v4_still_rewrites_tests_on_legacy_path():
+    """v3 spec WITHOUT conditions: stays on the legacy v4 = v3 + extras
+    path. tests[] is rewritten to the {auto_discover, data_source, ...}
+    dict shape the legacy validator expects."""
+    spec = {
+        "schema_version": 3,
+        "name": "legacy-bound",
+        "baseline": [{"name": "b1", "composite": "pkg.composites.x"}],
+    }
+    out = migrate_v3_to_v4(spec)
+    assert out["schema_version"] == 4
+    assert isinstance(out["tests"], dict)
+    assert out["tests"]["auto_discover"] is True
+    assert out["tests"]["data_source"] == "latest_run"
+
+
+def test_migrate_v3_to_v4_preserves_pre_authored_list_tests():
+    """Defensive: even without conditions:, if tests is already a list,
+    don't clobber it. The author has chosen the redesign shape explicitly."""
+    spec = {
+        "schema_version": 3,
+        "name": "list-tests",
+        "baseline": [{"name": "b1", "composite": "pkg.composites.x"}],
+        "tests": [{"name": "t1"}],
+    }
+    out = migrate_v3_to_v4(spec)
+    assert isinstance(out["tests"], list)
+    assert out["tests"] == [{"name": "t1"}]
