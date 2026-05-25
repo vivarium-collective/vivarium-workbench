@@ -830,7 +830,13 @@
   window._composites = [];
   window._compositesFilter = { search: '', tags: new Set() };
   window._compositesView = 'grid';
-  window._compositesSort = 'name';
+  // Default sort: workspace-local composites first, then alphabetical.
+  // Surfaces the composites the current investigation actually needs
+  // ahead of the full list of every installed pbg-* package's composites
+  // — the Composites tab grew unwieldy as more pbg-* packages came
+  // online. Other sorts (name / module / kind) remain available via the
+  // dropdown.
+  window._compositesSort = 'workspace-first';
 
   function _buildCompositeChips() {
     var chipsEl = document.getElementById('composite-tag-chips');
@@ -870,7 +876,7 @@
   window._setCompositeView = _setCompositeView;
 
   function _setCompositesSort(value) {
-    window._compositesSort = value || 'name';
+    window._compositesSort = value || 'workspace-first';
     _renderComposites();
   }
   window._setCompositesSort = _setCompositesSort;
@@ -895,7 +901,13 @@
       return true;
     });
 
-    // Apply sort toggle (Name / Module / Kind). Ties break on name.
+    // Apply sort toggle (Workspace first / Name / Module / Kind). Ties
+    // break on name. Workspace-first puts composites whose `module` starts
+    // with the workspace's own package prefix (backend-annotated as
+    // `workspace_local: true` on each /api/composites record) at the top,
+    // followed by every-installed-pbg-* composites alphabetically. When
+    // grouping, _renderGroupedComposites below inserts a visual section
+    // divider between the two groups.
     var sorted = composites.slice();
     if (window._compositesSort === 'module') {
       sorted.sort(function(a, b) {
@@ -905,6 +917,13 @@
     } else if (window._compositesSort === 'kind') {
       sorted.sort(function(a, b) {
         return (a.kind || '').localeCompare(b.kind || '')
+          || (a.name || '').localeCompare(b.name || '');
+      });
+    } else if (window._compositesSort === 'workspace-first') {
+      sorted.sort(function(a, b) {
+        var aw = a.workspace_local ? 0 : 1;
+        var bw = b.workspace_local ? 0 : 1;
+        return (aw - bw)
           || (a.name || '').localeCompare(b.name || '');
       });
     } else {
@@ -929,15 +948,38 @@
       return '<div class="composite-module"><small>Module:</small> ' +
         '<code>' + _esc(mod) + '</code>' + kindBadge + '</div>';
     }
+    function _wsTag(c) {
+      // Small "📦 workspace" pill on cards whose composite lives in the
+      // workspace's own package. Helps the user scan quickly even when
+      // the workspace-first sort isn't active.
+      return c.workspace_local
+        ? '<span class="composite-ws-tag">📦 workspace</span>' : '';
+    }
+    // Section-divider injector — emits a thin "Other modules" separator
+    // between the last workspace-local item and the first non-local item
+    // when the workspace-first sort is active and both groups are present.
+    // Returns '' otherwise so existing layouts are byte-identical.
+    function _maybeDivider(prev, cur) {
+      if (window._compositesSort !== 'workspace-first') return '';
+      if (!prev || !cur) return '';
+      if (prev.workspace_local && !cur.workspace_local) {
+        return '<div class="composite-section-divider">'
+             + '<span>Other installed pbg-* modules</span></div>';
+      }
+      return '';
+    }
 
     if (window._compositesView === 'list') {
       container.className = 'composite-list';
+      var prevC = null;
       var rows = composites.map(function(c) {
         var tagPills = (c.tags || []).map(function(t) {
           return '<span class="tag-pill">' + _esc(t) + '</span>';
         }).join('');
-        return '<div class="composite-list-row">' +
-          '<span class="name">' + _esc(c.name) + '</span>' +
+        var divider = _maybeDivider(prevC, c);
+        prevC = c;
+        return divider + '<div class="composite-list-row">' +
+          '<span class="name">' + _esc(c.name) + ' ' + _wsTag(c) + '</span>' +
           '<span class="desc">' + tagPills + ' ' + _esc(c.description || '(no description)') +
             _moduleLine(c) +
           '</span>' +
@@ -947,6 +989,7 @@
       container.innerHTML = rows.join('');
     } else {
       container.className = 'module-grid';
+      var prevG = null;
       var cards = composites.map(function(c) {
         var paramSummary = '';
         var paramKeys = Object.keys(c.parameters || {});
@@ -968,8 +1011,10 @@
               return '<span class="tag-pill" style="background:#e0e7ff;color:#3730a3">' + _esc(t) + '</span>';
             }).join(' ') + '</div>';
         }
-        return '<div class="module-card">' +
-          '<div class="module-card-header"><strong>' + _esc(c.name) + '</strong></div>' +
+        var divider = _maybeDivider(prevG, c);
+        prevG = c;
+        return divider + '<div class="module-card' + (c.workspace_local ? ' module-card-workspace' : '') + '">' +
+          '<div class="module-card-header"><strong>' + _esc(c.name) + '</strong> ' + _wsTag(c) + '</div>' +
           '<p class="module-desc">' + _esc(c.description || '(no description)') + '</p>' +
           _moduleLine(c) +
           requires +

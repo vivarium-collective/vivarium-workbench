@@ -1798,3 +1798,54 @@ body.focus-mode::before{
   border-color: #dc2626;
   box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.18);
 }
+
+/* ───────────────────────────────────────────────────────────────────
+ * Composites tab — workspace-first ordering chrome.
+ *
+ * Each composite card carries a `workspace_local` flag from the
+ * /api/composites response. The new "Workspace first" sort (now the
+ * default) puts these at the top. We also surface the distinction
+ * visually so the user can scan it regardless of the active sort:
+ *
+ *   .composite-ws-tag         small "📦 workspace" pill next to the name
+ *   .module-card-workspace    subtle left-border accent on workspace cards
+ *   .composite-section-divider  thin "Other installed pbg-* modules"
+ *                               separator emitted between groups when
+ *                               the workspace-first sort is active
+ * =================================================================== */
+.composite-ws-tag {
+  display: inline-block;
+  background: #dcfce7;
+  color: #065f46;
+  font-size: 0.7em;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 9999px;
+  margin-left: 4px;
+  vertical-align: middle;
+  letter-spacing: 0.02em;
+}
+.module-card.module-card-workspace {
+  border-left: 3px solid #10b981;
+}
+.composite-section-divider {
+  grid-column: 1 / -1;            /* span all grid columns */
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 6px 0;
+  color: var(--muted, #94a3b8);
+  font-size: 0.78em;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.composite-section-divider::before,
+.composite-section-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border, #e2e8f0);
+}
+.composite-list .composite-section-divider {
+  margin: 10px 0 4px 0;
+}

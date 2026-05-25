@@ -9979,6 +9979,17 @@ if __name__ == "__main__":
             except Exception:
                 pass
             specs = discover_all_composites(WORKSPACE, pkg)
+            # Workspace-local prefix for the workspace_local flag below.
+            # The composite's `module` is its dotted Python path, e.g.
+            # "pbg_v2ecoli.composites.baseline_recipes.dnaa_02". A
+            # composite is workspace-local when its module starts with the
+            # workspace's own package prefix (followed by . or end-of-string,
+            # so "pbg_v2ecoli_other" doesn't false-positive against
+            # "pbg_v2ecoli"). The dashboard's Composites tab uses this to
+            # sort workspace-authored composites to the top — surfacing the
+            # ones the current investigation actually needs, ahead of the
+            # full list of every installed pbg-* package's composites.
+            ws_prefix_dot = pkg + "."
             out = []
             for s in specs.values():
                 rec = {k: v for k, v in s.items() if not k.startswith("_")}
@@ -9989,8 +10000,12 @@ if __name__ == "__main__":
                 # that don't declare one).
                 if "default_n_steps" not in rec:
                     rec["default_n_steps"] = None
+                mod = rec.get("module") or ""
+                rec["workspace_local"] = bool(
+                    mod == pkg or mod.startswith(ws_prefix_dot)
+                )
                 out.append(rec)
-            return self._json({"composites": out}, 200)
+            return self._json({"composites": out, "workspace_package": pkg}, 200)
         except Exception as e:
             return self._json({"composites": [], "error": str(e)}, 200)
 
