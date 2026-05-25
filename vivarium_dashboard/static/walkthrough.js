@@ -5747,17 +5747,21 @@
 
       if (isPlanning) {
         // Planning-phase layout — minimal, expert-comment-driven.
+        // The <header class="study-header"> chrome (num + slug + phase
+        // badge + status badge + Depends on + Blocks) was REMOVED because
+        // every field is already in the sticky control panel above
+        // (sp-top + sp-meta from _studyControlPanel). The v4 render path
+        // dropped this same header at line ~6172 for the same reason;
+        // this is the v3 sibling fix. Anchor (#study-<slug>) is on the
+        // <details> element itself, not the h2, so URL hashes still
+        // resolve. The "PLANNING — not yet run" pill is preserved as a
+        // standalone callout because the sticky panel doesn't render it.
         return ''
           + '<details class="study-fold verdict-' + verdictBadge.cls + '" id="study-' + slug + '">'
           +   '<summary class="study-panel">' + controlPanelHtml + '</summary>'
           + '<section class="study study-planning">'
           +   subNav
-          +   '<header class="study-header">'
-          +     '<h2><span class="study-num">' + (i + 1) + '.</span> ' + _h(s.name) + ' ' + phaseBadge + statusBadge + '</h2>'
-          +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
-          +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
-          +     '<div class="study-planning-pill">PLANNING — not yet run</div>'
-          +   '</header>'
+          +   '<div class="study-planning-pill">PLANNING — not yet run</div>'
           +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
           +   enforcementHtml     // ⚠ declared params not applied (D.2)
           +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
@@ -5780,16 +5784,15 @@
       }
 
       // Post-execution layout — full v3 flow including decision + findings.
+      // <header class="study-header"> dropped for the same reason as the
+      // planning path + the v4 path: every field (num, slug, phase badge,
+      // status badge, Depends on, Blocks) is already in the sticky control
+      // panel's sp-top + sp-meta rows above.
       return ''
         + '<details class="study-fold verdict-' + verdictBadge.cls + '" id="study-' + slug + '">'
         +   '<summary class="study-panel">' + controlPanelHtml + '</summary>'
         + '<section class="study">'
         +   subNav
-        +   '<header class="study-header">'
-        +     '<h2><span class="study-num">' + (i + 1) + '.</span> ' + _h(s.name) + ' ' + phaseBadge + statusBadge + '</h2>'
-        +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
-        +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
-        +   '</header>'
         +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
         +   enforcementHtml     // ⚠ declared params not applied (D.2)
         +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
