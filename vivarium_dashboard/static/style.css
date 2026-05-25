@@ -1849,3 +1849,96 @@ body.focus-mode::before{
 .composite-list .composite-section-divider {
   margin: 10px 0 4px 0;
 }
+
+/* ───────────────────────────────────────────────────────────────────
+ * Registry page — page-level sub-tabs (Modules / Discovered registry).
+ *
+ * The Registry page used to stack three panels (Available modules →
+ * Installed modules → Discovered registry), forcing users to scroll
+ * through a long catalog grid every time they wanted the build_core()
+ * introspection. Split into two sub-tabs so the user picks once.
+ * =================================================================== */
+.registry-subtabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  margin: -4px 0 16px 0;
+}
+.registry-subtab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 9px 16px 11px;
+  margin-bottom: -1px;
+  font: inherit;
+  font-size: 0.95em;
+  font-weight: 600;
+  color: var(--muted, #6b7280);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.registry-subtab:hover { color: var(--text, #1f2937); }
+.registry-subtab.active {
+  color: var(--accent-blue, #2563eb);
+  border-bottom-color: var(--accent-blue, #2563eb);
+}
+.registry-subtab-panel { display: none; }
+.registry-subtab-panel.active { display: block; }
+
+/* ───────────────────────────────────────────────────────────────────
+ * Catalog grid — workspace-package + installed-first chrome.
+ *
+ * After the Installed-modules table got folded into the catalog grid,
+ * each card visually distinguishes itself by tier:
+ *   .module-card-workspace   workspace's own first-party package (top
+ *                            anchor; uninstallable)
+ *   .module-card-installed   installed catalog modules
+ *   (no class)               available-to-install catalog modules
+ *
+ * The .module-section-divider separator marks the boundary between
+ * tiers (workspace → installed → available) so the user can see at a
+ * glance what's already in the workspace vs what's still browseable.
+ * =================================================================== */
+.module-card-workspace {
+  border-left: 3px solid #2563eb;
+  background: var(--bg-alt, #f8fafc);
+}
+.module-card-installed {
+  border-left: 3px solid #10b981;
+}
+.module-row-workspace {
+  background: var(--bg-alt, #f8fafc);
+  border-left: 3px solid #2563eb;
+  padding-left: 9px;
+}
+.module-installed-meta {
+  margin: 4px 0;
+  line-height: 1.5;
+  font-size: 0.85em;
+  color: var(--muted, #6b7280);
+}
+.module-installed-meta code {
+  font-size: 0.92em;
+}
+.module-section-divider {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 6px 0;
+  color: var(--muted, #94a3b8);
+  font-size: 0.78em;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.module-section-divider::before,
+.module-section-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border, #e2e8f0);
+}
+.module-list .module-section-divider {
+  margin: 10px 0 4px 0;
+}
