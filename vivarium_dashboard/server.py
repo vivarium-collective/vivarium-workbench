@@ -5995,6 +5995,26 @@ if __name__ == "__main__":
         title = (body.get("title") or "").strip() or _default_pr_title(branch)
         body_text = (body.get("body") or "").strip() or "Created via pbg-template dashboard."
 
+        # Investigation PR convention: if the branch touches anything under
+        # investigations/ AND the title isn't already prefixed, prepend
+        # `investigation: `. Investigation PRs are living integration
+        # branches — not merge targets — so they need to be visually
+        # distinguishable in the PR list. Combined with the `draft=True`
+        # default below, this enforces the convention end-to-end without
+        # asking the user to remember it.
+        if not title.lower().startswith("investigation:"):
+            try:
+                _diff = subprocess.run(
+                    ["git", "diff", "--name-only", f"{base}...{branch}"],
+                    cwd=WORKSPACE, capture_output=True, text=True, timeout=10,
+                )
+                if _diff.returncode == 0 and any(
+                    line.startswith("investigations/") for line in _diff.stdout.splitlines()
+                ):
+                    title = f"investigation: {title}"
+            except Exception:  # noqa: BLE001 — heuristic is best-effort
+                pass
+
         if not shutil.which("gh"):
             try:
                 from vivarium_dashboard.lib.report import _detect_github_repo
