@@ -5747,7 +5747,14 @@
               // the iframe height directly so _fitEmbed's measurements can't
               // over- or under-grow it. Unclamped embeds (e.g. the tall
               // chromosome figures) fall through to _fitEmbed's autosize.
-              var _hClamp = (emb.html || '').match(/html,body\{height:(\d+)px/);
+              // Lenient regex: matches `html,body { ... height: NNNpx ... }`
+              // regardless of property order inside the rule. Earlier strict
+              // form `/html,body\{height:(\d+)px/` only matched when `height:`
+              // was the FIRST property; viz authors who put `margin:0;padding:0;`
+              // first lost the clamp and got auto-resized to scrollHeight
+              // (which misreports for matplotlib-PNG bodies and for charts
+              // whose legend overflows the chart div).
+              var _hClamp = (emb.html || '').match(/html\s*,\s*body\s*\{[^}]*\bheight\s*:\s*(\d+)px/);
               var _hStyle = _hClamp ? (';height:' + (parseInt(_hClamp[1], 10) + 24) + 'px') : '';
               // Infrastructural no-scrollbar guarantee:
               //   scrolling="no"     — kills the browser iframe scrollbar

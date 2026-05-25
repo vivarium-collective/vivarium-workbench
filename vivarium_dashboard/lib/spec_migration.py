@@ -173,6 +173,15 @@ def migrate_v3_to_v4(spec: dict) -> dict:
     """Migrate a v3 study spec to v4 in-memory by adding the tests / references /
     implementation_tasks fields. Idempotent. Only touches specs with
     ``schema_version == 3``.
+
+    Important: there are TWO v4 shapes — legacy "v4 = v3 + extras"
+    (tests is a dict of {auto_discover, data_source, pytest_args}) and
+    the redesigned v4 (tests is a LIST of pass/fail criteria). The
+    redesign is signaled by a top-level ``conditions:`` block. If a v3
+    spec already has ``conditions:``, the author is on the redesign
+    path — DON'T rewrite tests[] to the legacy dict shape, because the
+    redesign validator will then reject it with "v4 study: 'tests' must
+    be a list" and the study appears INVALID in the dashboard.
     """
     if spec.get("schema_version") != 3:
         return spec
@@ -180,13 +189,23 @@ def migrate_v3_to_v4(spec: dict) -> dict:
     out = dict(spec)
     out["schema_version"] = 4
 
-    existing_tests = out.get("tests") or {}
-    out["tests"] = {
-        "auto_discover": existing_tests.get("auto_discover", True),
-        "data_source": existing_tests.get("data_source", "latest_run"),
-        "pytest_args": existing_tests.get("pytest_args", []),
-        "last_results": existing_tests.get("last_results"),
-    }
+    # Skip the legacy-tests rewrite when the spec is on the v4-redesign path.
+    # The redesign validator owns the tests[] shape (a list of dicts with
+    # name/measure/pass_if). Tests are left as-is so the redesign validator
+    # sees them in their authored form.
+    if not isinstance(out.get("conditions"), dict):
+        existing_tests = out.get("tests") or {}
+        # Defensive: existing_tests might be a list authored against the
+        # redesign shape even without conditions:. If so, don't clobber it.
+        if isinstance(existing_tests, list):
+            pass  # leave authored list intact
+        else:
+            out["tests"] = {
+                "auto_discover": existing_tests.get("auto_discover", True),
+                "data_source": existing_tests.get("data_source", "latest_run"),
+                "pytest_args": existing_tests.get("pytest_args", []),
+                "last_results": existing_tests.get("last_results"),
+            }
     out.setdefault("references", [])
     out.setdefault("implementation_tasks", "")
     return out
