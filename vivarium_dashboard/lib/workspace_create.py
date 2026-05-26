@@ -357,10 +357,9 @@ def _persist_github_org(workspace_yaml: Path, github_org: str | None) -> None:
 def _maybe_remove_singularity(target: Path, backend: str) -> None:
     """Delete ``Singularity.def`` when backend is not HPC.
 
-    Phase E ships ``Singularity.def.j2`` in pbg-template so HPC workspaces
-    carry the file by default; until that ships, this function is a no-op
-    for HPC backends (the file simply isn't there yet — flagged by the
-    caller via :func:`_check_singularity_for_hpc`).
+    ``pbg-template`` ships ``Singularity.def.j2``; ``template-init.sh``
+    renders it to ``Singularity.def`` at scaffold time. For non-HPC backends
+    the rendered file is removed here; for HPC backends it stays.
     """
     if backend.startswith("hpc:"):
         return
@@ -371,16 +370,16 @@ def _maybe_remove_singularity(target: Path, backend: str) -> None:
 
 def _check_singularity_for_hpc(target: Path, backend: str) -> str | None:
     """If backend is HPC and Singularity.def is missing, return a warning
-    string describing the deferred-to-Phase-E gap. Otherwise return None."""
+    string (stale/incompatible pbg-template). Otherwise return None."""
     if not backend.startswith("hpc:"):
         return None
     if (target / "Singularity.def").is_file():
         return None
     return (
         "Singularity.def not present in the scaffolded workspace — the "
-        "pbg-template checkout may predate the Singularity.def.j2 template. "
+        "pbg-template checkout may be stale or incompatible. "
         "compute_backend metadata is set; add a Singularity.def manually or "
-        "re-scaffold against a newer pbg-template to populate it."
+        "re-scaffold against a current pbg-template to populate it."
     )
 
 
