@@ -233,3 +233,42 @@ def test_handler_includes_report_narrative_slots(_ws):
     assert "RESULT_TEXT" in text
     assert "DECISION_TEXT" in text
     assert "Study narrative" in text
+
+
+def test_renders_sticky_strip_with_title_and_section_nav(_ws):
+    """Single-study reports get a sticky top-of-page strip with the
+    title + verdict + jump nav to Overview / Biology / Visualisations.
+    Stays pinned via CSS position:sticky so the user can navigate
+    long viz-heavy reports without scrolling back to the topbar."""
+    _write_study(_ws, "s1", report={
+        "title": "My Study",
+        "verdict": "passing",
+        "conclusion": "All good.",
+    }, biological_summary="Mechanism prose.")
+    resp, code = build_single_study_report_for_test(_ws, {"study": "s1"})
+    assert code == 200
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    # Sticky strip + nav present
+    assert 'class="ssr-sticky-strip"' in text
+    assert 'class="ssr-sticky-title"' in text
+    assert 'class="ssr-section-nav"' in text
+    assert 'position: sticky' in text
+    # Jump anchors target the section IDs
+    assert 'href="#overview"' in text
+    assert 'href="#biology"' in text
+    assert 'id="overview"' in text
+    assert 'id="biology"' in text
+
+
+def test_section_nav_omits_chips_for_empty_sections(_ws):
+    """If a section would render empty, its jump chip is suppressed —
+    dead-end nav links are worse than no nav. The Overview chip still
+    renders here because the report block contributes head_blocks."""
+    _write_study(_ws, "s1", report={"title": "T", "conclusion": "x"})
+    # No biological_summary / readouts / viz → those chips should be absent.
+    resp, code = build_single_study_report_for_test(_ws, {"study": "s1"})
+    assert code == 200
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'href="#overview"' in text       # has head_blocks
+    assert 'href="#biology"' not in text    # no biological_summary
+    assert 'href="#viz"' not in text        # no viz embeds

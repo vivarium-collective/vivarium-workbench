@@ -293,6 +293,36 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
             f'<strong>Caveat:</strong> {_multiline(caveat)}</div>'
         )
 
+    # Build the section-nav jump chips. Each chip targets an in-page
+    # anchor (#overview / #biology / #viz). Only show the chip when the
+    # corresponding section will actually render — empty-section chips
+    # are dead-ends that confuse navigation. Mirrors the same pattern
+    # the investigation report's sticky panel uses (`sp-section-nav`)
+    # so single-study + investigation reports feel consistent.
+    nav_chips = []
+    if head_blocks or metrics_html:
+        nav_chips.append('<a href="#overview">Overview</a>')
+    if biology_html:
+        nav_chips.append('<a href="#biology">Biology</a>')
+    if viz_html:
+        nav_chips.append('<a href="#viz">Visualisations</a>')
+    nav_html = (
+        '<nav class="ssr-section-nav">' + "".join(nav_chips) + '</nav>'
+    ) if nav_chips else ""
+
+    # Sticky strip rendered as a sibling of the header so it stays
+    # pinned at the top of the viewport as the user scrolls past the
+    # overview into long viz sections (the scroll problem the user hit
+    # in 2026-05-25 viz-heavy reports). Layout: one line — title +
+    # verdict-badge on the left, section-nav chips on the right.
+    sticky_html = (
+        '<div class="ssr-sticky-strip">'
+        f'  <span class="ssr-sticky-title">{_h(title)}</span>'
+        f'  {badge}'
+        f'  {nav_html}'
+        '</div>'
+    )
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -300,17 +330,51 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
 <title>{_h(title)} — single-study report</title>
 <style>
   body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-         color:#0f172a; max-width:980px; margin:0 auto; padding:32px; line-height:1.5; }}
+         color:#0f172a; max-width:980px; margin:0 auto; padding:0 32px 32px; line-height:1.5; }}
   h1 {{ margin:0 0 4px; font-size:1.9em }}
   h2 {{ border-bottom:1px solid #e2e8f0; padding-bottom:6px; margin-top:32px; font-size:1.35em }}
   h3 {{ font-size:1.05em }}
   code {{ background:#f1f5f9; padding:1px 6px; border-radius:4px; font-size:0.9em }}
   iframe {{ background:#fff }}
+  /* Sticky strip — pinned at the top of the viewport once the user
+     scrolls past the page header. Keeps the title + verdict + jump
+     nav visible regardless of scroll depth. The negative left/right
+     margin + page-width padding extends the strip's background
+     edge-to-edge while the inner content respects the max-width body. */
+  .ssr-sticky-strip {{
+    position: sticky; top: 0; z-index: 50;
+    margin: 0 -32px 0 -32px; padding: 10px 32px;
+    background: rgba(248, 250, 252, 0.96);
+    backdrop-filter: blur(4px);
+    border-bottom: 1px solid #e2e8f0;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    font-size: 0.92em;
+  }}
+  .ssr-sticky-title {{ font-weight: 600; color: #0f172a;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 48ch;
+  }}
+  .ssr-section-nav {{ display: inline-flex; gap: 4px; flex-wrap: wrap;
+    margin-left: auto;
+  }}
+  .ssr-section-nav a {{
+    color: #2563eb; text-decoration: none;
+    padding: 3px 10px; border-radius: 9999px;
+    background: rgba(37, 99, 235, 0.08);
+    font-size: 0.9em;
+  }}
+  .ssr-section-nav a:hover {{ background: rgba(37, 99, 235, 0.16); }}
+  /* Page sections under the sticky strip — scroll-margin-top so
+     hash-anchors land below the sticky header, not under it. */
+  section[id], h1, h2 {{ scroll-margin-top: 56px; }}
+  body > header {{ padding-top: 32px; }}
   .footer {{ margin-top:48px; padding-top:16px; border-top:1px solid #e2e8f0;
             color:#64748b; font-size:0.85em }}
 </style>
 </head>
 <body>
+{sticky_html}
+
 <header>
   {inv_chip}
   <h1>{_h(title)}</h1>
@@ -320,14 +384,18 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
   {quality_html}
 </header>
 
-<section class="overview">
+<section class="overview" id="overview">
   {"".join(head_blocks)}
   {metrics_html}
 </section>
 
+<section id="biology">
 {biology_html}
+</section>
 
+<section id="viz">
 {viz_html}
+</section>
 
 <div class="footer">
   Generated {_h(generated_at)} by vivarium-dashboard single-study report.
