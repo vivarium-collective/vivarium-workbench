@@ -470,12 +470,48 @@ except Exception as e:
                     "processes": [],
                     "types": [],
                 }
+
+        # Annotate emitter entries with is_workspace_default per
+        # workspace.yaml::runtime.default_emitter. ws_data was loaded above;
+        # treat the emitter-name match permissively (case-insensitive substring
+        # against the class name, e.g. 'parquet' → ParquetEmitter).
+        _mark_default_emitter(data, ws_data)
     except Exception as e:
         data = {"error": str(e), "processes": [], "types": []}
 
     _REGISTRY_CACHE["data"] = data
     _REGISTRY_CACHE["ts"] = now
     return data
+
+
+def _mark_default_emitter(data: dict, ws_data: dict | None) -> None:
+    """Set ``is_workspace_default: True`` on emitter entries that match
+    ``ws_data['runtime']['default_emitter']``.
+
+    The match is a case-insensitive substring check against the entry's
+    ``name`` (e.g. ``'parquet'`` matches ``ParquetEmitter``). All emitter
+    entries get the field set explicitly (True or False) so the frontend
+    can render the badge consistently. No-op when ``ws_data`` is missing
+    or has no runtime block.
+    """
+    if not isinstance(data, dict):
+        return
+    processes = data.get("processes") or []
+    default_emitter = ""
+    if isinstance(ws_data, dict):
+        rt = ws_data.get("runtime") or {}
+        if isinstance(rt, dict):
+            default_emitter = str(rt.get("default_emitter") or "").strip().lower()
+    needle = default_emitter
+    for p in processes:
+        if not isinstance(p, dict):
+            continue
+        if p.get("kind") != "emitter":
+            continue
+        name = str(p.get("name") or "")
+        p["is_workspace_default"] = bool(needle) and (needle in name.lower())
+    # Expose the resolved value at the top level for convenience / debugging.
+    data["default_emitter"] = default_emitter or None
 
 
 def _save_upload(file_b64: str, target_path: Path) -> str:

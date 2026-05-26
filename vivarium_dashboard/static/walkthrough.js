@@ -633,8 +633,15 @@
       ? ' <small style="color:#888">(aliases: ' + p.aliases.map(_esc).join(', ') + ')</small>'
       : '';
     var sourceAttr = p.source ? ' data-source="' + _esc(p.source) + '"' : '';
+    // Workspace-default badge: shown only on emitter entries whose class
+    // matches workspace.yaml::runtime.default_emitter (see server-side
+    // _mark_default_emitter()). Keeps users aware which emitter their
+    // study runs will pick by default.
+    var defaultBadge = p.is_workspace_default
+      ? ' <span class="count-badge" style="background:#1f7a36;color:#fff;font-size:0.7em;padding:1px 6px;border-radius:3px;margin-left:6px;vertical-align:middle" title="Workspace default per runtime.default_emitter in workspace.yaml">DEFAULT</span>'
+      : '';
     return '<div class="registry-entry"' + sourceAttr + '>' +
-      '<strong>' + _esc(p.name) + '</strong>' + aliases + '<br>' +
+      '<strong>' + _esc(p.name) + '</strong>' + defaultBadge + aliases + '<br>' +
       '<small><code>' + _esc(p.address) + '</code></small>' +
       (p.schema_preview
         ? '<details><summary>config schema</summary><pre class="json-tree">' + _esc(p.schema_preview) + '</pre></details>'
