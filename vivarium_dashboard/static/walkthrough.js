@@ -431,7 +431,7 @@
     var focus = params.get('focus');
     var focusedPage = null;
     if (focus) {
-      var validPages = ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'investigations', 'studies', 'simulations', 'composite-explore'];
+      var validPages = ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'investigations', 'studies', 'simulations', 'composite-explore', 'github'];
       if (validPages.indexOf(focus) >= 0) {
         document.body.classList.add('focus-mode', 'focus-' + focus);
         _switchPage(focus);
@@ -446,7 +446,7 @@
     if (!focusedPage) {
       function fromHash() {
         var h = (window.location.hash || '').replace(/^#/, '');
-        var validPages = ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'investigations', 'studies', 'simulations', 'composite-explore'];
+        var validPages = ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'investigations', 'studies', 'simulations', 'composite-explore', 'github'];
         _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
       }
       window.addEventListener('hashchange', fromHash);
@@ -4351,10 +4351,17 @@
             .then(function(j) { return {name: s.name, charts: j.charts || []}; })
             .catch(function() { return {name: s.name, charts: []}; });
         });
+        // Current coordinated generation — stamps the report's provenance
+        // banner (expert-feedback A.3). Best-effort: null when none active.
+        var genFetch = fetch('/api/generation')
+          .then(function(r) { return r.ok ? r.json() : {generation: null}; })
+          .then(function(j) { return (j && j.generation) || null; })
+          .catch(function() { return null; });
         return Promise.all([Promise.all(studyFetches), bibFetch,
-                            Promise.all(chartFetches)]).then(function(arr) {
+                            Promise.all(chartFetches), genFetch]).then(function(arr) {
           var chartsByStudy = {};
           arr[2].forEach(function(c) { chartsByStudy[c.name] = c.charts; });
+          var generation = arr[3];
           // Second pass: now that we have the specs, fetch each study's
           // embed_visualizations URLs so the downloaded report can inline
           // them as <iframe srcdoc="...">. This makes the file truly
@@ -4388,14 +4395,15 @@
               if (e && e.name) embedsByStudy[e.name] = e.embeds;
             });
             return {iset: iset, specs: specs, bibEntries: arr[1],
-                    chartsByStudy: chartsByStudy, embedsByStudy: embedsByStudy};
+                    chartsByStudy: chartsByStudy, embedsByStudy: embedsByStudy,
+                    generation: generation};
           });
         });
       })
       .then(function(bundle) {
         var html = _buildInvestigationReportHtml(bundle.iset, bundle.specs,
                                                   bundle.bibEntries, bundle.chartsByStudy,
-                                                  bundle.embedsByStudy);
+                                                  bundle.embedsByStudy, bundle.generation);
         var dateStr = new Date().toISOString().slice(0, 10);
         var filename = 'investigation-' + name + '-' + dateStr + '.html';
         _triggerDownload(filename, html, 'text/html');
@@ -4440,13 +4448,66 @@
   }
 
   // Construct the report's HTML body from the investigation + per-study specs.
-  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy) {
+  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy, generation) {
     bibEntries = bibEntries || [];
     chartsByStudy = chartsByStudy || {};
     embedsByStudy = embedsByStudy || {};
+    generation = generation || null;
     var bibByKey = {};
     bibEntries.forEach(function(e) { bibByKey[e.key] = e; });
     var now = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+
+    // ── Coordinated-generation banner (expert-feedback A.3) ──────────────
+    // One prominent provenance stamp so the reviewer knows every panel below
+    // reflects a single (git_sha, params) state — and a loud warning when
+    // displayed runs span more than one generation (the "results are mixed,
+    // some 5/17 some 5/19" complaint). Built once, here, so live + exported
+    // reports stamp identically.
+    function _genBannerHtml() {
+      // Gather the distinct generation ids actually present in displayed runs.
+      var seen = {};
+      specs.forEach(function(s) {
+        (s.runs || []).forEach(function(r) {
+          var g = r && r.generation_id;
+          if (g) seen[g] = true;
+        });
+      });
+      var distinct = Object.keys(seen);
+      var curId = generation && generation.generation_id;
+      var bits = [];
+      if (curId) bits.push('<code>' + _h(curId) + '</code>');
+      if (generation && generation.git_sha) bits.push('git <code>' + _h(generation.git_sha) + '</code>');
+      if (generation && generation.param_set_hash) bits.push('params <code>' + _h(generation.param_set_hash) + '</code>');
+      if (generation && generation.created_at) bits.push(_h(String(generation.created_at).replace('T', ' ').slice(0, 16)));
+      // A report mixes generations if displayed runs carry >1 distinct id, or
+      // any displayed run's generation differs from the current one.
+      var mixes = distinct.length > 1
+        || (curId && distinct.some(function(g) { return g !== curId; }));
+      var head, body, bg, border, fg;
+      if (!curId && !distinct.length) {
+        return '';  // no generation model in play — say nothing
+      }
+      if (mixes) {
+        bg = '#fffbeb'; border = '#f59e0b'; fg = '#92400e';
+        head = '⚠ This report mixes results from more than one generation';
+        body = 'Panels below do not all reflect the same code + parameter state. '
+             + 'Re-run the whole investigation as one generation, then re-export, '
+             + 'so every result is coordinated.'
+             + (distinct.length ? ' Generations present: '
+                 + distinct.map(function(g){return '<code>'+_h(g)+'</code>';}).join(', ') + '.' : '');
+      } else {
+        bg = '#f0fdf4'; border = '#16a34a'; fg = '#166534';
+        head = 'Coordinated generation';
+        body = 'Every result below reflects one snapshot: ' + bits.join(' · ') + '.';
+      }
+      return '<div class="generation-banner" id="generation-banner" '
+        + 'style="margin:16px 0;padding:12px 16px;background:' + bg + ';border:1px solid '
+        + border + ';border-left-width:5px;border-radius:6px;color:' + fg + '">'
+        + '<strong>' + head + '</strong>'
+        + '<div class="small" style="margin-top:4px">' + body + '</div>'
+        + '</div>';
+    }
+    var generationBannerHtml = _genBannerHtml();
 
     // Topological depth ordering of the studies (same as the dashboard DAG).
     var depthMap = {};
@@ -4641,6 +4702,166 @@
       return sentences.join(' ');
     }
 
+    // First sentence of a (possibly multi-line) prose blob — used to derive a
+    // one-liner for the collapsed control panel when no explicit one-liner was
+    // authored. Collapses whitespace/newlines first.
+    function _firstSentence(text) {
+      if (!text) return '';
+      var t = String(text).replace(/\s+/g, ' ').trim();
+      var m = /^(.*?[.!?])(\s|$)/.exec(t);
+      return m ? m[1] : t;
+    }
+
+    // Verdict vocabulary for the collapsed control panel. An authored
+    // `report.verdict` (one of the keys below) wins; otherwise we derive it
+    // from the gate decision class so older studies still get a sensible badge.
+    var VERDICT_MAP = {
+      'passing':              {emoji: '✅', label: 'Passing',                       cls: 'v-pass'},
+      'passing-with-caveats': {emoji: '⚠️', label: 'Passing with caveats',          cls: 'v-warn'},
+      'blocked':              {emoji: '⛔', label: 'Blocked',                       cls: 'v-block'},
+      'preliminary':          {emoji: '🧪', label: 'Preliminary',                   cls: 'v-prelim'},
+      'failing-bio':          {emoji: '❌', label: 'Failing biological validation', cls: 'v-fail'},
+      'calibrating':          {emoji: '🔄', label: 'Calibration in progress',       cls: 'v-cal'},
+      'not-started':          {emoji: '📋', label: 'Not started',                   cls: 'v-none'}
+    };
+    function _verdictBadge(s, decision) {
+      var key = ((s.report || {}).verdict || '').trim().toLowerCase();
+      if (VERDICT_MAP[key]) return VERDICT_MAP[key];
+      switch (decision.cls) {
+        case 'dec-passed':     return VERDICT_MAP['passing'];
+        case 'dec-needscal':   return VERDICT_MAP['calibrating'];
+        case 'dec-blocked':    return VERDICT_MAP['blocked'];
+        case 'dec-notstarted': return VERDICT_MAP['not-started'];
+        default:               return VERDICT_MAP['preliminary'];
+      }
+    }
+
+    // The collapsed study header — a scannable "scientific control panel".
+    // Ordering follows the spec: identity → verdict → confidence/evidence →
+    // objective → conclusion → metrics → insight → caveat. Every field is
+    // optional; an absent field simply doesn't render. Authored one-liners
+    // (report.objective/conclusion/main_insight/caveat) win; otherwise we
+    // derive from the longer report prose so nothing is silently blank.
+    function _studyControlPanel(s, i, decision) {
+      var rep = s.report || {};
+      var v = _verdictBadge(s, decision);
+      var title = rep.title || _humanizeStudyName(s.name).title;
+      var objective  = rep.objective    || _firstSentence(rep.purpose)
+                        || _firstSentence((s.purpose || {}).question);
+      var conclusion = rep.conclusion   || _firstSentence(rep.result);
+      var insight    = rep.main_insight || _firstSentence(rep.interpretation);
+      var caveat = rep.caveat;
+      if (!caveat && Array.isArray(s.limitations) && s.limitations.length) {
+        var l0 = s.limitations[0];
+        caveat = (typeof l0 === 'string') ? l0 : (l0 && (l0.text || l0.limitation)) || '';
+      }
+
+      // Metadata: keep machine ids visually secondary.
+      var runs = s.runs || [];
+      var latest = runs.length ? runs[runs.length - 1] : null;
+      var updated = (latest && (latest.created_at || latest.timestamp)) || s.last_run || '';
+      if (updated) updated = String(updated).replace('T', ' ').slice(0, 16);
+      var sha = (generation && generation.git_sha) ? String(generation.git_sha).slice(0, 7) : '';
+      var meta = ['<code>' + _h(s.name) + '</code>', 'depth ' + (depthMap[s.name] || 0)];
+      if (updated) meta.push('updated ' + _h(updated));
+      if (sha) meta.push('git <code>' + _h(sha) + '</code>');
+
+      var conf = (rep.confidence || '').trim();
+      var ev   = (rep.evidence_quality || '').trim();
+
+      // Metrics strip: authored key_metrics (strings or {label,value,status})
+      // plus an auto-derived test pass ratio and literature-match chip.
+      var chips = [];
+      (rep.key_metrics || []).forEach(function(m) {
+        if (typeof m === 'string') {
+          chips.push('<span class="sp-metric">' + _h(m) + '</span>');
+        } else if (m && typeof m === 'object') {
+          var st = (m.status || '').toLowerCase();
+          var icon = st === 'pass' ? '✅ ' : st === 'warn' ? '⚠️ ' : st === 'fail' ? '❌ ' : '';
+          var txt = (m.label || '') + (m.value != null ? ': ' + m.value : '');
+          chips.push('<span class="sp-metric sp-metric-' + _h(st || 'plain') + '">' + icon + _h(txt) + '</span>');
+        }
+      });
+      var nPass = (decision.passed || []).length, nFail = (decision.failed || []).length;
+      if (nPass + nFail) {
+        chips.push('<span class="sp-metric sp-metric-' + (nFail ? 'warn' : 'pass') + '">'
+                   + nPass + '/' + (nPass + nFail) + ' tests passing</span>');
+      }
+      if (rep.lit_match) chips.push('<span class="sp-metric">Lit match: ' + _h(rep.lit_match) + '</span>');
+
+      return ''
+        + '<div class="sp-top">'
+        +   '<span class="sp-num">' + (i + 1) + '.</span>'
+        +   '<span class="sp-title">' + _h(title) + '</span>'
+        +   '<span class="sp-verdict ' + v.cls + '">' + v.emoji + ' ' + _h(v.label) + '</span>'
+        + '</div>'
+        + (objective ? '<div class="sp-objective">' + _h(objective) + '</div>' : '')
+        + '<div class="sp-meta">' + meta.join(' · ') + '</div>'
+        + ((conf || ev)
+            ? '<div class="sp-quality">'
+              + (conf ? '<span class="sp-conf sp-conf-' + _h(conf.toLowerCase()) + '">Confidence: ' + _h(conf) + '</span>' : '')
+              + (ev   ? '<span class="sp-ev">Evidence: ' + _h(ev) + '</span>' : '')
+              + '</div>'
+            : '')
+        + (conclusion ? '<div class="sp-conclusion"><span class="sp-lbl">Conclusion</span> ' + _h(conclusion) + '</div>' : '')
+        + (chips.length ? '<div class="sp-metrics">' + chips.join('') + '</div>' : '')
+        + (insight ? '<div class="sp-insight"><span class="sp-lbl">Insight</span> ' + _h(insight) + '</div>' : '')
+        + (caveat  ? '<div class="sp-caveat"><span class="sp-lbl">Caveat</span> ' + _h(caveat) + '</div>' : '')
+        + '<span class="sp-expand-hint">▸ click to expand full study</span>';
+    }
+
+    // Review-readiness gates — mechanical checks that catch the classes of
+    // problem an expert reviewer keeps flagging, BEFORE the report reaches them.
+    // Computed from already-declared fields (no run data needed), so they fire
+    // at design time. Returns {warns:[html], oks:[text]}.
+    //   Gate 1 (parameter vs reference): a model_setting's `default` is the
+    //     literature/heuristic value; flag when `current` deviates materially.
+    //   Gate 2 (duration vs doubling time): flag when the configured run length
+    //     can't cover one doubling time τ (steadiness claims need ≥ 1 τ).
+    function _reviewReadiness(s) {
+      var cond = (s.conditions && typeof s.conditions === 'object') ? s.conditions : {};
+      var settings = cond.model_settings || cond.expert_inputs || [];
+      var warns = [], oks = [];
+
+      settings.forEach(function(ms) {
+        var def = ms.default, cur = ms.current;
+        if (typeof def === 'number' && typeof cur === 'number' && def !== 0 && cur !== def) {
+          var ratio = cur / def;
+          if (ratio < 0.75 || ratio > 1.34) {
+            var factor = ratio < 1 ? def / cur : ratio;
+            warns.push('Parameter <code>' + _h(ms.name) + '</code> is set to <strong>' + _h(cur)
+              + '</strong> but the heuristic/literature default is <strong>' + _h(def) + '</strong> ('
+              + (factor >= 10 ? Math.round(factor) : factor.toFixed(1)) + '× off). '
+              + 'Justify the deviation in the study or correct it.');
+          }
+        }
+      });
+
+      var tau = null, tauName = null;
+      settings.forEach(function(ms) {
+        var v = (ms.current != null) ? ms.current : ms.default;
+        if (tau == null && typeof v === 'number'
+            && /(^|_)(tau|doubling|generation[_ ]?time)/i.test(ms.name || '')) {
+          tau = v; tauName = ms.name;
+        }
+      });
+      if (tau != null) {
+        var bp = (cond.baseline && cond.baseline.params) || {};
+        var nSteps = bp.n_steps, ts = (typeof bp.time_step === 'number' && bp.time_step > 0) ? bp.time_step : 1;
+        if (typeof nSteps === 'number') {
+          var runMin = nSteps * ts / 60.0;
+          if (runMin < tau) {
+            warns.push('Configured run is ≈ <strong>' + runMin.toFixed(0) + ' min</strong> (n_steps '
+              + nSteps + ' × ' + ts + ' s), shorter than one doubling time τ = <strong>' + _h(tau)
+              + ' min</strong> (<code>' + _h(tauName) + '</code>). Steadiness / steady-state claims need ≥ 1 doubling time.');
+          } else {
+            oks.push('Run ≈ ' + runMin.toFixed(0) + ' min covers ≥ 1 doubling time (τ = ' + tau + ' min).');
+          }
+        }
+      }
+      return {warns: warns, oks: oks};
+    }
+
     function v3StudySection(s, i, statusBadge, phaseBadge, parents, kids) {
       var slug = _h(s.name);
       var sid = {
@@ -4685,6 +4906,16 @@
       // from the sub-nav and rendered at the top of the section.
       var decision = _decideDecision(s);
       var summaryText = _studySummary(s, decision);
+      var controlPanelHtml = _studyControlPanel(s, i, decision);
+      var verdictBadge = _verdictBadge(s, decision);
+      var _review = _reviewReadiness(s);
+      var reviewHtml = _review.warns.length
+        ? '<div class="review-gate" id="study-' + slug + '-review">'
+          + '<strong>⚠ Review-readiness checks (' + _review.warns.length + ')</strong>'
+          + '<div class="review-gate-sub">Caught before expert review — fix or justify each.</div>'
+          + '<ul>' + _review.warns.map(function(w) { return '<li>' + w + '</li>'; }).join('') + '</ul>'
+          + '</div>'
+        : '';
       var hasDecide = !!(ifPass || ifFail
                          || (decide.implementation_validation && decide.implementation_validation.length)
                          || (decide.biological_validation && decide.biological_validation.length)
@@ -4730,8 +4961,27 @@
         +   '<nav class="study-nav-row2">' + links.join('') + '</nav>'
         + '</div>';
 
+      // ── COMPACT REPORT BLOCK (authored: Purpose·Setup·Result·… ) ──────
+      // Leads each study with the uniform human-facing pattern. Reads
+      // s.report; absent → just the plain-English summary below (fallback).
+      var _rep = s.report || {};
+      var reportHtml = '';
+      (function() {
+        var rows = [
+          ['Purpose', _rep.purpose], ['Setup', _rep.setup],
+          ['Result', _rep.result], ['Interpretation', _rep.interpretation],
+          ['Decision', _rep.decision], ['Next action', _rep.next_action],
+        ].filter(function(r) { return r[1]; });
+        if (!rows.length) return;
+        reportHtml = '<div class="study-report">' + rows.map(function(r) {
+          return '<div class="study-report-row"><span class="srl">' + r[0] + '</span>'
+               + '<span class="srv">' + _multiline(r[1]) + '</span></div>';
+        }).join('') + '</div>';
+      })();
+
       // ── PLAIN-ENGLISH SUMMARY ─────────────────────────────────────────
-      var summaryHtml = '<div id="' + sid.summary + '" class="study-summary">'
+      var summaryHtml = reportHtml
+        + '<div id="' + sid.summary + '" class="study-summary">'
         + '<p class="study-summary-text">' + _h(summaryText) + '</p>'
         + '<details class="tech-details"><summary>Purpose &amp; background (study design)</summary>'
         +   (purpose.question         ? '<div class="callout cl-blue"><strong>Question.</strong> ' + _multiline(purpose.question) + '</div>' : '')
@@ -4890,43 +5140,63 @@
       // ── WHAT DID/WILL WE RUN? (Simulations) ──────────────────────────
       var simsHtml = '';
       if (sims.length) {
+        function _short(model) {
+          if (!model) return '';
+          var p = String(model).split('.');
+          return p[p.length - 1];
+        }
+        // The first sim is the reference; describe each row as its diff from it.
+        var baseSim = sims[0] || {};
+        var baseParams = baseSim.params || {};
+        var baseModel = baseSim.base_model;
+        function _changes(sim) {
+          var bits = [];
+          if (sim === baseSim) return '<em class="muted">reference baseline</em>';
+          if (sim.base_model && sim.base_model !== baseModel)
+            bits.push('different model <code>' + _h(_short(sim.base_model)) + '</code>');
+          // perturbation dict wins; else diff params vs the baseline sim
+          var changed = sim.perturbation && Object.keys(sim.perturbation).length
+            ? sim.perturbation
+            : (function() {
+                var d = {}, p = sim.params || {};
+                Object.keys(p).forEach(function(k) {
+                  if (k === 'seed' || k === 'cache_dir' || k === 'n_steps') return;
+                  if (JSON.stringify(p[k]) !== JSON.stringify(baseParams[k])) d[k] = p[k];
+                });
+                return d;
+              })();
+          var keys = Object.keys(changed).filter(function(k){return changed[k] !== null;});
+          if (keys.length) bits.push(keys.slice(0, 6).map(function(k) {
+            return '<code>' + _h(k) + '=' + _h(JSON.stringify(changed[k])) + '</code>';
+          }).join(' '));
+          return bits.length ? bits.join('; ') : '<em class="muted">same params, longer/other</em>';
+        }
+        var rows = sims.map(function(sim) {
+          var statusClass = sim.status === 'ready' ? 'sim-status-ready'
+                          : sim.status === 'gated' ? 'sim-status-gated'
+                          : sim.status === 'ran' ? 'sim-status-ran' : 'sim-status-unknown';
+          var statusPill = sim.status ? '<span class="sim-status-pill ' + statusClass + '">' + _h(sim.status) + '</span>' : '<span class="muted small">—</span>';
+          var runParts = [];
+          if (sim.condition) runParts.push(_h(sim.condition));
+          var ns = (sim.params && sim.params.n_steps);
+          if (sim.duration_min != null) runParts.push(_h(sim.duration_min) + ' min');
+          else if (ns != null) runParts.push(_h(ns) + ' steps');
+          if (sim.seeds && sim.seeds.length) runParts.push(sim.seeds.length + ' seed' + (sim.seeds.length === 1 ? '' : 's'));
+          var tests = sim.applies_tests || sim.tests || [];
+          var feeds = (Array.isArray(tests) && tests.length)
+            ? '<div class="sim-feeds muted small">feeds: ' + tests.map(function(t){return '<code>' + _h(t) + '</code>';}).join(' ') + '</div>' : '';
+          return '<tr>'
+            + '<td><strong>' + _h(sim.name || '(unnamed)') + '</strong>' + feeds + '</td>'
+            + '<td><code>' + _h(_short(sim.base_model)) + '</code></td>'
+            + '<td>' + _changes(sim) + '</td>'
+            + '<td class="muted small">' + (runParts.join(' · ') || '—') + '</td>'
+            + '<td>' + statusPill + '</td>'
+            + '</tr>';
+        }).join('');
         simsHtml = '<div id="' + sid.sims + '"><h3>What did/will we run? <span class="muted small">(' + sims.length + ' simulations)</span></h3>'
-          + '<p class="muted small" style="margin:0 0 8px 0">Each card describes one concrete run: what we change vs the baseline, the environmental condition, how long it runs, which measurements get collected, and which tests it feeds.</p>'
-          + sims.map(function(sim) {
-              var statusClass = sim.status === 'ready' ? 'sim-status-ready'
-                              : sim.status === 'gated' ? 'sim-status-gated'
-                              : sim.status === 'ran' ? 'sim-status-ran' : 'sim-status-unknown';
-              var statusPill = sim.status ? '<span class="sim-status-pill ' + statusClass + '">' + _h(sim.status) + '</span>' : '';
-              var pertHtml = '';
-              if (sim.perturbation && Object.keys(sim.perturbation).length) {
-                var pertLines = Object.entries(sim.perturbation).map(function(kv){return '<li>' + _h(kv[0]) + ' set to ' + _h(JSON.stringify(kv[1])) + '</li>';}).join('');
-                pertHtml = '<div class="sim-pert"><strong>What we change:</strong><ul>' + pertLines + '</ul></div>';
-              } else {
-                pertHtml = '<div class="sim-pert sim-pert-none">Unmodified baseline — no perturbation.</div>';
-              }
-              var metaParts = [];
-              if (sim.condition)  metaParts.push('Condition: ' + _h(sim.condition));
-              if (sim.duration_min != null) metaParts.push(_h(sim.duration_min) + ' min');
-              if (sim.seeds && sim.seeds.length) metaParts.push(sim.seeds.length + ' seed' + (sim.seeds.length === 1 ? '' : 's'));
-              var metaHtml = metaParts.length ? '<div class="sim-meta">' + metaParts.join(' &middot; ') + '</div>' : '';
-              var blockedHtml = '';
-              if (sim.status === 'gated' && sim.blocked_by_requirements && sim.blocked_by_requirements.length) {
-                blockedHtml = '<div class="sim-blocked">⛔ Blocked by ' + sim.blocked_by_requirements.length + ' open requirement(s) — see <em>What to build / fix</em> below.</div>';
-              }
-              var techParts = [];
-              if (sim.base_model) techParts.push('Base model: <code>' + _h(sim.base_model) + '</code>');
-              if (sim.seeds && sim.seeds.length) techParts.push('Seeds: ' + sim.seeds.join(', '));
-              if (sim.readouts && sim.readouts.length) techParts.push('Readouts: ' + sim.readouts.map(function(r){return '<code>' + _h(r) + '</code>';}).join(', '));
-              var appliesTests = sim.applies_tests || sim.tests || [];
-              if (Array.isArray(appliesTests) && appliesTests.length) techParts.push('Feeds tests: ' + appliesTests.map(function(t){return '<code>' + _h(t) + '</code>';}).join(', '));
-              if (sim.blocked_by_requirements && sim.blocked_by_requirements.length) techParts.push('Blocked by: ' + sim.blocked_by_requirements.map(function(b){return '<code>' + _h(b) + '</code>';}).join(', '));
-              var techDisc = techParts.length ? '<details class="tech-details"><summary>Technical details</summary>' + techParts.join('<br>') + '</details>' : '';
-
-              return '<div class="sim-card sim-' + statusClass + '">'
-                   +   '<div class="sim-header"><strong class="sim-name">' + _h(sim.name || '(unnamed)') + '</strong>' + statusPill + '</div>'
-                   +   pertHtml + metaHtml + blockedHtml + techDisc
-                   + '</div>';
-            }).join('')
+          + '<p class="muted small" style="margin:0 0 8px 0">One row per concrete run: the model composite, what changes vs the reference baseline, the condition / length, and its status.</p>'
+          + '<table class="sim-table"><thead><tr><th>Simulation</th><th>Model</th><th>Changes vs baseline</th><th>Run</th><th>Status</th></tr></thead>'
+          + '<tbody>' + rows + '</tbody></table>'
           + '</div>';
       }
 
@@ -4951,20 +5221,20 @@
       var readoutsHtml = readouts.length
         ? '<div id="' + sid.readouts + '"><h3>What did/will we measure? <span class="muted small">(' + readouts.length + ' readouts)</span></h3>'
           + '<p class="muted small" style="margin:0 0 8px 0">Quantities we extract from each simulation run to evaluate the study\'s tests.</p>'
+          + '<table class="readout-table"><thead><tr><th>Readout</th><th>Status</th><th>Path</th><th>Description</th></tr></thead><tbody>'
           + readouts.map(function(r) {
-              var techBits = [];
-              if (r.path || r.identifier) techBits.push('Path: <code>' + _h(r.path || r.identifier) + '</code>');
-              if (r.units) techBits.push('Units: ' + _h(r.units));
-              if (r.blocked_by_requirements && r.blocked_by_requirements.length)
-                techBits.push('Blocked by: ' + r.blocked_by_requirements.map(function(b){return '<code>' + _h(b) + '</code>';}).join(', '));
-              var techDisc = techBits.length ? '<details class="tech-details"><summary>Technical details</summary>' + techBits.join('<br>') + '</details>' : '';
-              return '<div class="readout-card">'
-                   +   '<strong>' + _h(r.name || '') + '</strong>'
-                   +   (r.status ? ' <span class="muted small">(' + _h(r.status) + ')</span>' : '')
-                   +   '<div class="readout-desc">' + _h(r.notes || r.description || '') + '</div>'
-                   +   techDisc
-                   + '</div>';
+              var path = r.path || r.identifier || r.store_path;
+              var blocked = (r.blocked_by_requirements && r.blocked_by_requirements.length)
+                ? '<div class="muted small">⛔ blocked by ' + r.blocked_by_requirements.map(function(b){return '<code>' + _h(b) + '</code>';}).join(', ') + '</div>' : '';
+              return '<tr>'
+                + '<td><strong>' + _h(r.name || '') + '</strong></td>'
+                + '<td class="muted small">' + (r.status ? _h(r.status) : '—') + '</td>'
+                + '<td>' + (path ? '<code>' + _h(path) + '</code>' : '<span class="muted">—</span>')
+                  + (r.units ? ' <span class="muted small">(' + _h(r.units) + ')</span>' : '') + '</td>'
+                + '<td>' + _h(r.notes || r.description || '') + blocked + '</td>'
+                + '</tr>';
             }).join('')
+          + '</tbody></table>'
           + '</div>'
         : '';
 
@@ -5001,6 +5271,18 @@
               if (t.measure) techBits.push('Measure: <code>' + _h(JSON.stringify(t.measure)) + '</code>');
               if (t.pass_if) techBits.push('Pass condition: <code>' + _h(JSON.stringify(t.pass_if)) + '</code>');
               else if (t.expect) techBits.push('Expect: <code>' + _h(JSON.stringify(t.expect)) + '</code>');
+              // The Python that actually evaluates this test: the declarative
+              // (kind, op) dispatch into the generic evaluator. There is no
+              // per-test Python — evaluate() handles every test by kind + op.
+              (function() {
+                var kind = (t.measure && t.measure.kind) || null;
+                var op = (t.pass_if && t.pass_if.op) || (t.expect && t.expect.op) || null;
+                if (!kind && !op) return;
+                var ref = 'Python: <code>vivarium_dashboard/lib/expected_behavior.py</code> → <code>evaluate()</code>';
+                if (kind) ref += '; measure kind <code>' + _h(kind) + '</code> via <code>_series_for_simple_kind()</code>/<code>_measure()</code>';
+                if (op) ref += '; op <code>' + _h(op) + '</code> via <code>_check()</code>';
+                techBits.push(ref);
+              })();
               if (t.requires_simulation) techBits.push('Requires sim: <code>' + _h(t.requires_simulation) + '</code>');
               if (t.cites && t.cites.length) techBits.push('Cites: ' + t.cites.map(function(c){return '<code>' + _h(c) + '</code>';}).join(', '));
               if (t.calibration_anchor) techBits.push('Calibration anchor: ⚠️ <code>' + _h(JSON.stringify(t.calibration_anchor)) + '</code>');
@@ -5139,6 +5421,46 @@
       // Renders when study.yaml declares any of: biological_summary,
       // study_card, literature_anchors. Designed so a biologist reading
       // the report sees the biology before any code identifier.
+      // ── MECHANISM NARRATIVE (framework: 7 first-class fields any study can
+      // declare). Designed so the report reads as a cumulative mechanism
+      // migration rather than a sequence of implementation tasks. Each
+      // field is independently optional; only declared fields render.
+      //   biological_role         — what mechanism this study introduces
+      //   mechanism_replaced      — what heuristic / placeholder it replaces
+      //   dependency_rationale    — why this study must run at this point in
+      //                              the dependency chain
+      //   primary_claim           — what observable would convince us the
+      //                              mechanism is behaving correctly
+      //   primary_visualization   — the explanatory figure for this claim
+      //   scope_boundary          — what is explicitly in scope
+      //   deferred_biology        — what biology is intentionally deferred to
+      //                              later studies
+      var narrativeFields = [
+        ['biological_role',       'Biological role'],
+        ['mechanism_replaced',    'Mechanism replaced'],
+        ['dependency_rationale',  'Dependency rationale'],
+        ['primary_claim',         'Primary claim'],
+        ['primary_visualization', 'Primary visualization'],
+        ['scope_boundary',        'Scope boundary'],
+        ['deferred_biology',      'Deferred biology'],
+      ];
+      var narrativeRows = [];
+      narrativeFields.forEach(function(pair) {
+        var key = pair[0], label = pair[1];
+        var v = s[key];
+        if (typeof v === 'string' && v.trim()) {
+          narrativeRows.push('<tr><th>' + label + '</th><td>' + _multiline(v) + '</td></tr>');
+        }
+      });
+      var mechanismNarrativeHtml = '';
+      if (narrativeRows.length) {
+        mechanismNarrativeHtml =
+          '<div class="mechanism-narrative">'
+          + '<h3 class="biology-glance-label">Mechanism narrative</h3>'
+          + '<table class="mechanism-narrative-table">' + narrativeRows.join('') + '</table>'
+          + '</div>';
+      }
+
       var biologyGlanceHtml = '';
       if (s.biological_summary || s.study_card || s.literature_anchors) {
         var bgsBits = [];
@@ -5264,19 +5586,44 @@
               // Escape double-quotes for srcdoc attribute.
               var escaped = (emb.html || '').replace(/&/g, '&amp;')
                                             .replace(/"/g, '&quot;');
+              // A "prior / superseded" embed is one explicitly flagged stale, or
+              // whose name/description marks it as a pre-execution, placeholder,
+              // or older-dated preview. These are auto-collapsed (the expert's
+              // "fold these previous results") so they don't dominate the page
+              // with empty placeholder charts — but stay one click away.
+              var meta = ((emb.name || '') + ' ' + (emb.description || '')).toLowerCase();
               var isStale = emb.stale === true
-                || (typeof emb.description === 'string' && emb.description.indexOf('⚠') === 0);
-              var descStyle = isStale
-                ? 'margin:6px 12px;padding:6px 10px;background:#fffbeb;border:1px solid #f59e0b;border-radius:4px;color:#92400e'
-                : 'margin:6px 12px';
-              return '<div class="study-embed-card" style="margin:12px 0;border:1px solid ' + (isStale ? '#f59e0b' : '#e2e8f0') + ';border-radius:6px;background:#fff;overflow:hidden">'
+                || (typeof emb.description === 'string' && emb.description.indexOf('⚠') === 0)
+                || /\b(prior|planning[- ]phase|placeholder|pending refresh|pre-execution|superseded|baseline rerun|will be populated|not yet run)\b/.test(meta);
+              // If the inner doc declares a fixed CSS height clamp (e.g.
+              // comparative_viz emits `html,body{height:540px;overflow:hidden}`
+              // to bound Plotly's hover-layer scrollHeight inflation), set
+              // the iframe height directly so _fitEmbed's measurements can't
+              // over- or under-grow it. Unclamped embeds (e.g. the tall
+              // chromosome figures) fall through to _fitEmbed's autosize.
+              var _hClamp = (emb.html || '').match(/html,body\{height:(\d+)px/);
+              var _hStyle = _hClamp ? (';height:' + (parseInt(_hClamp[1], 10) + 24) + 'px') : '';
+              var iframe = '<iframe srcdoc="' + escaped + '" '
+                + 'class="embed-frame" onload="_wireEmbed(this)" '
+                + 'style="width:100%;min-height:200px;border:0;display:block' + _hStyle + '" '
+                + 'title="' + _h(emb.name) + '"></iframe>';
+              if (isStale) {
+                // Collapsed by default; re-fit on expand.
+                return '<details class="study-embed-card stale-embed" ontoggle="_onEmbedToggle(this)" '
+                  + 'style="margin:12px 0;border:1px solid #f59e0b;border-radius:6px;background:#fffdf6;overflow:hidden">'
+                  + '<summary style="padding:8px 12px;cursor:pointer;background:#fffbeb;color:#92400e;font-weight:600;list-style:none">'
+                  +   '⚠ ' + _h(emb.name) + ' <span style="font-weight:400">— prior / superseded result (click to view)</span>'
+                  + '</summary>'
+                  + (emb.description ? '<p class="small" style="margin:6px 12px;color:#92400e">' + _h(emb.description) + '</p>' : '')
+                  + iframe
+                  + '</details>';
+              }
+              return '<div class="study-embed-card" style="margin:12px 0;border:1px solid #e2e8f0;border-radius:6px;background:#fff;overflow:hidden">'
                 + '<div style="padding:8px 12px;border-bottom:1px solid #e5e7eb;background:#f9fafb">'
                 +   '<strong>' + _h(emb.name) + '</strong>'
                 + '</div>'
-                + (emb.description ? '<p class="' + (isStale ? '' : 'muted ') + 'small" style="' + descStyle + '">' + _h(emb.description) + '</p>' : '')
-                + '<iframe srcdoc="' + escaped + '" '
-                +   'style="width:100%;height:680px;border:0;display:block" '
-                +   'loading="lazy" title="' + _h(emb.name) + '"></iframe>'
+                + (emb.description ? '<p class="muted small" style="margin:6px 12px">' + _h(emb.description) + '</p>' : '')
+                + iframe
                 + '</div>';
             }).join('')
           + '</div>';
@@ -5295,6 +5642,72 @@
       // Once runs land, the full flow returns.
       var hasRuns = (s.runs || []).length > 0 || (s.findings || []).length > 0;
       var isPlanning = !hasRuns;
+
+      // Param-enforcement banner (expert-feedback D.2). When the study
+      // declares enforced_params and its latest run didn't apply them, show
+      // the violations prominently so "declared but not implemented" is
+      // visible — the exact thing the reviewer caught manually.
+      var enforcementHtml = '';
+      var pe = s.param_enforcement;
+      if (pe && pe.violations && pe.violations.length) {
+        enforcementHtml =
+          '<div class="param-enforcement-banner" id="study-' + slug + '-enforcement" '
+          + 'style="margin:12px 0;padding:12px 16px;background:#fffbeb;border:1px solid #f59e0b;'
+          + 'border-left-width:5px;border-radius:6px;color:#92400e">'
+          + '<strong>⚠ Declared parameters were not applied to the latest run</strong>'
+          + '<div class="small" style="margin-top:4px">This study declares '
+          + 'enforced parameters, but the most recent run did not apply '
+          + (pe.violations.length === 1 ? 'one of them' : (pe.violations.length + ' of them'))
+          + ' — results below may reflect composite defaults rather than the '
+          + 'intended values. Re-run after wiring these in.</div>'
+          + '<ul class="small" style="margin:8px 0 0 18px">'
+          + pe.violations.map(function(v) {
+              return '<li>' + _h(v.message || (v.param + ': declared ' + v.expected)) + '</li>';
+            }).join('')
+          + '</ul></div>';
+      }
+
+      // Imported expert feedback (expert-feedback B.1). Shows the reviewer's
+      // own annotations back, in-context per study, so the loop closes: the
+      // next report makes clear what was said and lets the team show it's
+      // addressed. Newest-first; author + timestamp preserved.
+      var feedbackHtml = '';
+      var fb = s.expert_feedback;
+      if (fb && fb.length) {
+        feedbackHtml =
+          '<div class="expert-feedback-panel" id="study-' + slug + '-imported-feedback" '
+          + 'style="margin:12px 0;padding:12px 16px;background:#eff6ff;border:1px solid #3b82f6;'
+          + 'border-left-width:5px;border-radius:6px;color:#1e3a5f">'
+          + '<strong>💬 Expert feedback (' + fb.length + ')</strong>'
+          + '<ul style="list-style:none;margin:8px 0 0;padding:0">'
+          + fb.map(function(a) {
+              var who = _h(a.author || 'reviewer');
+              var when = a.ts ? _h(String(a.ts).replace('T', ' ').slice(0, 16)) : '';
+              return '<li style="margin:6px 0;padding:6px 10px;background:#fff;'
+                + 'border:1px solid #dbeafe;border-radius:4px">'
+                + '<div class="small" style="color:#3b82f6;font-weight:600">'
+                +   who + (when ? ' · ' + when : '') + '</div>'
+                + '<div style="margin-top:2px">' + _h(a.text || '') + '</div>'
+                + '</li>';
+            }).join('')
+          + '</ul></div>';
+      }
+
+      // Status-drift banner (round-2 friction #2). When a stored status axis
+      // (or a "planning" headline) contradicts what actually ran, say so — the
+      // report should never show "planning" on an executed study.
+      var statusDriftHtml = '';
+      var sdis = s.status_disagreements;
+      if (sdis && sdis.length) {
+        statusDriftHtml =
+          '<div class="status-drift-banner" id="study-' + slug + '-status-drift" '
+          + 'style="margin:12px 0;padding:12px 16px;background:#fffbeb;border:1px solid #f59e0b;'
+          + 'border-left-width:5px;border-radius:6px;color:#92400e">'
+          + '<strong>⚠ Status is out of date relative to what ran</strong>'
+          + '<ul class="small" style="margin:8px 0 0 18px">'
+          + sdis.map(function(v) { return '<li>' + _h(v.message || (v.axis + ': ' + v.stored + ' → ' + v.derived)) + '</li>'; }).join('')
+          + '</ul></div>';
+      }
 
       // Charts come from runs.db when present, or fall back to the
       // workspace default-baseline. Wrap them with a BASELINE banner
@@ -5320,7 +5733,9 @@
       if (isPlanning) {
         // Planning-phase layout — minimal, expert-comment-driven.
         return ''
-          + '<section class="study study-planning" id="study-' + slug + '">'
+          + '<details class="study-fold verdict-' + verdictBadge.cls + '" id="study-' + slug + '">'
+          +   '<summary class="study-panel">' + controlPanelHtml + '</summary>'
+          + '<section class="study study-planning">'
           +   subNav
           +   '<header class="study-header">'
           +     '<h2><span class="study-num">' + (i + 1) + '.</span> ' + _h(s.name) + ' ' + phaseBadge + statusBadge + '</h2>'
@@ -5328,6 +5743,10 @@
           +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
           +     '<div class="study-planning-pill">PLANNING — not yet run</div>'
           +   '</header>'
+          +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
+          +   enforcementHtml     // ⚠ declared params not applied (D.2)
+          +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
+          +   feedbackHtml        // 💬 imported expert feedback (B.1)
           +   summaryHtml         // Question / purpose
           +   conditionsHtml      // Conditions: variants + model settings (PROMINENT)
           +   testsHtml           // Expected behavior / tests (PROMINENT for comments)
@@ -5341,19 +5760,27 @@
           +     limitsHtml        // Limitations
           +     refsHtml          // References
           +   '</details>'
-          + '</section>';
+          + '</section>'
+          + '</details>';
       }
 
       // Post-execution layout — full v3 flow including decision + findings.
       return ''
-        + '<section class="study" id="study-' + slug + '">'
+        + '<details class="study-fold verdict-' + verdictBadge.cls + '" id="study-' + slug + '">'
+        +   '<summary class="study-panel">' + controlPanelHtml + '</summary>'
+        + '<section class="study">'
         +   subNav
         +   '<header class="study-header">'
         +     '<h2><span class="study-num">' + (i + 1) + '.</span> ' + _h(s.name) + ' ' + phaseBadge + statusBadge + '</h2>'
         +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
         +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
         +   '</header>'
+        +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
+        +   enforcementHtml     // ⚠ declared params not applied (D.2)
+        +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
+        +   feedbackHtml        // 💬 imported expert feedback (B.1)
         +   biologyGlanceHtml   // 0. Biology-at-a-glance
+        +   mechanismNarrativeHtml  // 0a. Mechanism narrative (7 framework fields)
         +   embedsHtml          // 0b. Embedded preview HTMLs
         +   summaryHtml         // 1. Plain-English summary
         +   decisionHtml        // 2. Decision box
@@ -5369,7 +5796,8 @@
         +   followUpsHtml       // 10. Next steps
         +   limitsHtml          // 11. Limitations
         +   refsHtml            // 12. References
-        + '</section>';
+        + '</section>'
+        + '</details>';
     }
 
     // Render the per-study Conditions block (v4). Returns empty string for
@@ -5644,7 +6072,52 @@
         + '</section>';
     }
 
-    var studiesHtml = ordered.map(studySection).join('\n');
+    // ── PARTS grouping (framework): investigation.yaml may declare a `parts`
+    // field grouping studies into conceptual phases (Foundations / Nucleotide
+    // cycle / Chromosome binding / Initiation trigger / Reset mechanisms / …).
+    // When present, render a Part header before each group's studies so the
+    // report reads as a coherent mechanism progression rather than a flat list.
+    // Schema:
+    //   parts:
+    //     - name: "I. Foundations"
+    //       overview: "Optional 1-2 sentence prose..."
+    //       studies: ["dnaa-00-parameter-foundation", "dnaa-01-expression-dynamics"]
+    var studiesHtml;
+    var parts = (iset && Array.isArray(iset.parts)) ? iset.parts : null;
+    if (parts && parts.length) {
+      // Map slug → index in `ordered` so we render each study once even when
+      // a part declares a study not in `ordered` (skip) or `ordered` has a
+      // study not declared in any part (append as "Unassigned" group).
+      var byNameIdx = {};
+      ordered.forEach(function(s, i) { byNameIdx[s && s.name] = i; });
+      var rendered = {};
+      var groupHtmls = [];
+      parts.forEach(function(part) {
+        var partStudies = (part && Array.isArray(part.studies)) ? part.studies : [];
+        var sections = [];
+        partStudies.forEach(function(slug) {
+          var i = byNameIdx[slug];
+          if (i === undefined) return;
+          sections.push(studySection(ordered[i], i));
+          rendered[slug] = true;
+        });
+        if (!sections.length) return;
+        var heading = '<header class="part-heading"><h2 class="part-title">' + _h(part.name || '') + '</h2>'
+          + (part.overview ? '<p class="part-overview">' + _multiline(part.overview) + '</p>' : '')
+          + '</header>';
+        groupHtmls.push('<section class="investigation-part">' + heading + sections.join('\n') + '</section>');
+      });
+      // Catch any unassigned studies (so nothing silently disappears).
+      var unassigned = ordered.filter(function(s) { return s && !rendered[s.name]; });
+      if (unassigned.length) {
+        var stub = '<header class="part-heading"><h2 class="part-title">Other studies</h2></header>';
+        var sec = unassigned.map(function(s) { return studySection(s, byNameIdx[s.name]); }).join('\n');
+        groupHtmls.push('<section class="investigation-part">' + stub + sec + '</section>');
+      }
+      studiesHtml = groupHtmls.join('\n');
+    } else {
+      studiesHtml = ordered.map(studySection).join('\n');
+    }
 
     var acceptance = (iset.acceptance_criteria || []).map(function(c) {
       return '<li><code>' + _h(c.study) + '</code> · <code>' + _h(c.behavior) + '</code></li>';
@@ -5704,45 +6177,6 @@
       return {chip: m[1], title: rest};
     }
 
-    var tocStudies = ordered.map(function(s, i) {
-      var anchor = 'study-' + _h(s.name);
-      var statusClass = 'badge-' + _h(s.status || 'planned');
-      var display = _humanizeStudyName(s.name);
-      var beh = s.behavior_tests || s.expected_behavior || [];
-      var nFindings  = (s.findings || []).length;
-      var nRuns      = (s.runs || []).length;
-      var nTests     = beh.length;
-      var nFollowups = (s.follow_up_studies || []).length;
-      // "Blockers" = open follow-ups that the next study depends on
-      // resolving (the seedable, not-done ones). A coarse but useful
-      // signal that the gate isn't clean yet.
-      var nBlockers = (s.follow_up_studies || []).filter(function(f) {
-        return f.status !== 'done' && f.kind !== 'existing';
-      }).length;
-
-      function _pill(n, label) {
-        if (!n) return '';
-        return '<span class="toc-count-pill">' + n + ' ' + label + '</span>';
-      }
-      var counts = ''
-        + _pill(nFindings,  'findings')
-        + _pill(nRuns,      'runs')
-        + _pill(nTests,     'tests')
-        + _pill(nFollowups, 'follow-ups')
-        + _pill(nBlockers,  'blockers');
-
-      var chipHtml = display.chip
-        ? '<span class="toc-chip">' + _h(display.chip) + '</span> '
-        : '';
-      return '<li><a href="#' + anchor + '">' +
-             '<span class="toc-num">' + (i + 1) + '.</span> ' +
-             chipHtml + '<strong>' + _h(display.title) + '</strong>' +
-             ' <span class="toc-status ' + statusClass + '">' + _h(s.status || 'planned') + '</span>' +
-             (counts ? '<div class="toc-counts">' + counts + '</div>' : '') +
-             '<div class="toc-slug muted">' + _h(s.name) + '</div>' +
-             '</a></li>';
-    }).join('');
-
     var nameClean = _h(iset.name);
 
     return ''
@@ -5753,36 +6187,22 @@
       + '*{box-sizing:border-box}'
       + 'html,body{margin:0;padding:0}'
       + 'body{font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;color:#0f172a;line-height:1.55;background:#fff}'
-      // ── layout: sticky TOC sidebar + flex content ──
-      + '.layout{display:flex;align-items:flex-start;min-height:100vh}'
-      + '.toc{position:sticky;top:0;flex:0 0 260px;width:260px;height:100vh;overflow-y:auto;'
-      +     'padding:24px 16px 24px 24px;border-right:1px solid #e2e8f0;background:#f8fafc;font-size:0.9em}'
-      + '.toc h4{margin:0 0 8px 0;font-size:0.78em;text-transform:uppercase;letter-spacing:0.05em;color:#64748b}'
-      + '.toc ul{list-style:none;padding:0;margin:0 0 16px 0}'
-      + '.toc li{margin:0}'
-      + '.toc a{display:block;padding:5px 8px;color:#334155;text-decoration:none;border-radius:4px;font-size:0.93em;'
-      +     'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
-      + '.toc a:hover{background:#e2e8f0;color:#0f172a}'
-      + '.toc a.active{background:#dbeafe;color:#1e40af;font-weight:600}'
-      + '.toc ul.studies a{padding-left:18px;font-family:ui-monospace,monospace;font-size:0.85em;white-space:normal}'
-      + '.toc .toc-num{display:inline-block;color:#94a3b8;width:18px;font-family:ui-monospace,monospace}'
-      + '.toc-status{display:inline-block;font-size:0.7em;padding:1px 6px;border-radius:9999px;font-family:-apple-system,sans-serif;background:#e2e8f0;color:#1e293b;margin-left:4px}'
-      + '.toc-status.badge-planned{background:#f1f5f9;color:#475569}'
-      + '.toc-status.badge-running{background:#dbeafe;color:#1e40af}'
-      + '.toc-status.badge-ran{background:#d1fae5;color:#065f46}'
-      + '.toc-status.badge-complete{background:#d1fae5;color:#064e3b}'
-      + '.toc-status.badge-failed{background:#fee2e2;color:#991b1b}'
-      + '.toc-counts{font-size:0.7em;margin-top:4px;font-family:-apple-system,sans-serif;display:flex;flex-wrap:wrap;gap:3px}'
-      + '.toc-count-pill{display:inline-block;background:#eef2ff;color:#3730a3;padding:1px 7px;border-radius:9999px;font-size:0.92em;line-height:1.4}'
-      + '.toc-chip{display:inline-block;font-family:ui-monospace,monospace;font-size:0.78em;background:#f1f5f9;color:#475569;padding:0 5px;border-radius:3px;margin-right:2px}'
-      + '.toc-slug{font-size:0.66em;color:#94a3b8;margin-top:3px;font-family:ui-monospace,monospace;word-break:break-all}'
-      + '.toc-toggle{display:none;position:fixed;top:12px;right:12px;z-index:100;padding:6px 10px;'
-      +    'background:#0f172a;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85em}'
-      + '.content{flex:1;min-width:0;padding:24px 36px}'
+      // ── layout: sticky top nav + single centered column ──
+      + '.topbar{position:sticky;top:0;z-index:100;display:flex;flex-wrap:wrap;align-items:center;gap:6px;'
+      +     'padding:9px 20px;background:rgba(255,255,255,0.95);backdrop-filter:saturate(140%) blur(6px);'
+      +     'border-bottom:1px solid #e2e8f0}'
+      + '.topbar .tb-title{font-weight:700;font-size:0.92em;color:#0f172a;margin-right:10px;white-space:nowrap}'
+      + '.topbar a{font-size:0.83em;color:#334155;text-decoration:none;padding:4px 12px;border-radius:9999px;background:#f1f5f9;white-space:nowrap}'
+      + '.topbar a:hover{background:#e2e8f0;color:#0f172a}'
+      + '.topbar a.active{background:#dbeafe;color:#1e40af;font-weight:600}'
+      + '.content{max-width:none;margin:0;padding:24px 40px}'
+      // Anchor targets clear the sticky bar when jumped to.
+      + '.content [id]{scroll-margin-top:60px}'
       // Cap prose paragraphs only (≈75 chars) so wide-screen lines stay
       // readable, but keep tables, code blocks, and callouts full-width.
-      + '.content p, .content li, .content .description p, .qh p{max-width:75ch}'
-      + '.content table, .content .qh, .content details, .content pre{max-width:none}'
+      // Text spans the full content width — no separate prose cap (which used
+      // to stop paragraphs short of the page while headings/rules ran wider).
+      + '.content p, .content li, .content .description p, .qh p{max-width:none}'
       // ── typography ──
       + 'h1{margin:0 0 8px 0;font-size:2em;line-height:1.2}'
       + 'h2{margin:32px 0 12px 0;font-size:1.4em;border-bottom:1px solid #e2e8f0;padding-bottom:6px;scroll-margin-top:16px}'
@@ -5899,6 +6319,13 @@
       // study summary (plain-English block at top of each study)
       + '.study-summary{padding:14px 16px;margin:12px 0 16px 0;background:#f8fafc;border-left:4px solid #6366f1;border-radius:6px}'
       + '.study-summary-text{margin:0;font-size:1.02em;line-height:1.55;color:#1e293b}'
+      // Compact authored report block (leads each study).
+      + '.study-report{margin:12px 0 14px 0;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden}'
+      + '.study-report-row{display:flex;gap:0;border-bottom:1px solid #eef2f7}'
+      + '.study-report-row:last-child{border-bottom:none}'
+      + '.study-report .srl{flex:0 0 130px;padding:9px 12px;background:#f8fafc;font-weight:600;font-size:0.82em;'
+      +    'text-transform:uppercase;letter-spacing:0.03em;color:#475569}'
+      + '.study-report .srv{flex:1 1 auto;padding:9px 14px;color:#1e293b;min-width:0}'
       + '.tech-details{margin-top:10px;padding:6px 10px;background:#ffffff;border:1px solid #e2e8f0;border-radius:4px;font-size:0.88em}'
       + '.tech-details summary{cursor:pointer;color:#475569;font-weight:500}'
       + '.tech-details summary:hover{color:#0f172a}'
@@ -6036,7 +6463,7 @@
       // user scrolls past a study, its .study-nav exits its bounding
       // .study div and the next study's nav takes over.
       + '.study{margin-top:40px;padding-top:8px;scroll-margin-top:16px;position:relative}'
-      + '.study-nav{position:sticky;top:0;z-index:20;background:rgba(255,255,255,0.96);backdrop-filter:saturate(120%) blur(2px);'
+      + '.study-nav{position:sticky;top:44px;z-index:20;background:rgba(255,255,255,0.96);backdrop-filter:saturate(120%) blur(2px);'
       +     '-webkit-backdrop-filter:saturate(120%) blur(2px);'
       +     'border-bottom:1px solid #e2e8f0;padding:8px 12px 6px 12px;margin:0 -12px 12px -12px;border-radius:4px}'
       + '.study-nav .study-nav-row1{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:4px}'
@@ -6060,15 +6487,12 @@
       + 'footer{margin-top:56px;padding-top:16px;border-top:1px solid #e2e8f0;font-size:0.82em;color:#64748b}'
       // ── responsive ──
       + '@media (max-width:900px){'
-      +   '.layout{flex-direction:column}'
-      +   '.toc{position:relative;width:100%;height:auto;flex:0 0 auto;border-right:0;border-bottom:1px solid #e2e8f0;display:none}'
-      +   '.toc.open{display:block}'
-      +   '.toc-toggle{display:inline-block}'
-      +   '.content{padding:60px 20px 20px 20px;max-width:none}'
+      +   '.content{padding:20px;max-width:none}'
+      +   '.topbar{padding:8px 14px}'
       + '}'
       // ── print ──
       + '@media print{'
-      +   '.toc,.toc-toggle{display:none}'
+      +   '.topbar{display:none}'
       +   '.content{padding:0;max-width:none}'
       +   'details[open]{margin:4px 0}'
       +   'h1,h2,h3{break-after:avoid}'
@@ -6090,6 +6514,17 @@
       + '.study-card-table th{text-align:left;font-weight:600;color:#166534;background:#f0fdf4;padding:6px 10px;white-space:nowrap;vertical-align:top;width:180px;border-bottom:1px solid #bbf7d0}'
       + '.study-card-table td{padding:6px 10px;vertical-align:top;color:#14532d;border-bottom:1px solid #f0fdf4;line-height:1.5}'
       + '.study-card-table tr:last-child th,.study-card-table tr:last-child td{border-bottom:none}'
+      // Investigation Parts grouping: section headings before each study group.
+      + '.investigation-part{margin-bottom:30px}'
+      + '.part-heading{margin:34px 0 10px 0;padding:14px 18px;background:linear-gradient(90deg,#eef2ff 0%,#fff 100%);border-left:4px solid #6366f1;border-radius:4px}'
+      + '.part-title{margin:0;font-size:1.4em;color:#3730a3;font-weight:700}'
+      + '.part-overview{margin:6px 0 0 0;color:#475569;font-size:0.95em;line-height:1.5;white-space:pre-line}'
+      // Mechanism narrative: 7 framework fields any study can declare.
+      + '.mechanism-narrative{margin:18px 0 14px 0;background:#fff;border-radius:6px;padding:10px 14px;border:1px solid #c7d2fe}'
+      + '.mechanism-narrative-table{width:100%;border-collapse:collapse;font-size:0.93em;margin:0}'
+      + '.mechanism-narrative-table th{text-align:left;font-weight:600;color:#3730a3;background:#eef2ff;padding:6px 10px;white-space:nowrap;vertical-align:top;width:190px;border-bottom:1px solid #c7d2fe}'
+      + '.mechanism-narrative-table td{padding:6px 10px;vertical-align:top;color:#1e1b4b;border-bottom:1px solid #eef2ff;line-height:1.55;white-space:pre-line}'
+      + '.mechanism-narrative-table tr:last-child th,.mechanism-narrative-table tr:last-child td{border-bottom:none}'
       + '.literature-anchors{background:#fff;border-radius:6px;padding:10px 14px;border:1px solid #d1fae5}'
       + '.literature-anchor-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}'
       + '.literature-anchor-card{padding:8px 12px;background:#f8fefa;border-left:3px solid #16a34a;border-radius:4px;font-size:0.92em}'
@@ -6117,31 +6552,192 @@
       + '.expert-question-blocks li{margin:2px 0;font-size:0.92em}'
       + '.expert-question-response p{margin:4px 0;padding:6px 10px;background:#faf5ff;border-radius:4px}'
 
+      // ── collapsible study fold + control-panel summary ──
+      + '.study-fold{border:1px solid #e2e8f0;border-radius:10px;margin:10px 0;background:#fff;scroll-margin-top:16px}'
+      + '.study-fold[open]{box-shadow:0 1px 3px rgba(0,0,0,.07)}'
+      + '.study-fold>.study-panel{cursor:pointer;list-style:none;padding:12px 16px;border-left:4px solid #cbd5e1;border-radius:9px}'
+      + '.study-fold>.study-panel::-webkit-details-marker{display:none}'
+      + '.study-fold>.study-panel:hover{background:#f8fafc}'
+      // When a study is open: make its header sticky so the collapse arrow
+      // stays in view while scrolling inside the study. One click collapses
+      // and the next study floats into view — no scrolling back to the top.
+      + '.study-fold[open]>.study-panel{position:sticky;top:0;z-index:10;border-bottom:1px solid #e2e8f0;border-radius:9px 9px 0 0;background:#f8fafc;box-shadow:0 1px 4px rgba(0,0,0,.06)}'
+      + '.study-fold[open]>.study-panel::after{content:"▴ click to collapse";float:right;font-size:0.75em;color:#64748b;font-weight:normal;margin-left:12px;line-height:inherit}'
+      + '.study-fold.verdict-v-pass>.study-panel{border-left-color:#16a34a}'
+      + '.study-fold.verdict-v-warn>.study-panel{border-left-color:#d97706}'
+      + '.study-fold.verdict-v-block>.study-panel{border-left-color:#dc2626}'
+      + '.study-fold.verdict-v-fail>.study-panel{border-left-color:#dc2626}'
+      + '.study-fold.verdict-v-prelim>.study-panel{border-left-color:#6366f1}'
+      + '.study-fold.verdict-v-cal>.study-panel{border-left-color:#0891b2}'
+      + '.study-fold.verdict-v-none>.study-panel{border-left-color:#94a3b8}'
+      + '.study-fold .study{margin-top:0;padding:8px 16px 4px}'
+      + '.sp-top{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}'
+      + '.sp-num{color:#94a3b8;font-family:ui-monospace,monospace;font-size:0.95em}'
+      + '.sp-title{font-size:1.13em;font-weight:700;color:#0f172a;flex:1;min-width:200px}'
+      + '.sp-verdict{font-size:0.88em;font-weight:700;padding:3px 11px;border-radius:9999px;white-space:nowrap}'
+      + '.sp-verdict.v-pass{background:#dcfce7;color:#166534}'
+      + '.sp-verdict.v-warn{background:#fef9c3;color:#854d0e}'
+      + '.sp-verdict.v-block{background:#fee2e2;color:#991b1b}'
+      + '.sp-verdict.v-prelim{background:#e0e7ff;color:#3730a3}'
+      + '.sp-verdict.v-fail{background:#fee2e2;color:#991b1b}'
+      + '.sp-verdict.v-cal{background:#cffafe;color:#155e75}'
+      + '.sp-verdict.v-none{background:#f1f5f9;color:#475569}'
+      + '.sp-objective{margin:6px 0 2px;color:#334155;font-size:0.97em}'
+      + '.sp-meta{font-size:0.77em;color:#94a3b8;margin:2px 0 6px}'
+      + '.sp-meta code{background:#f1f5f9;padding:0 4px;border-radius:3px;font-size:0.95em;color:#64748b}'
+      + '.sp-quality{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0}'
+      + '.sp-conf,.sp-ev{font-size:0.78em;font-weight:600;padding:2px 9px;border-radius:6px;background:#f1f5f9;color:#475569}'
+      + '.sp-conf-high{background:#dcfce7;color:#166534}'
+      + '.sp-conf-medium{background:#fef9c3;color:#854d0e}'
+      + '.sp-conf-low{background:#fee2e2;color:#991b1b}'
+      + '.sp-conclusion{margin:6px 0;color:#0f172a;font-size:0.95em}'
+      + '.sp-insight{margin:4px 0;color:#0f172a;font-size:0.92em}'
+      + '.sp-caveat{margin:4px 0;color:#7c2d12;font-size:0.92em}'
+      + '.sp-lbl{display:inline-block;font-size:0.7em;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:#64748b;margin-right:5px;vertical-align:1px}'
+      + '.sp-caveat .sp-lbl{color:#b45309}'
+      + '.sp-metrics{display:flex;gap:6px;flex-wrap:wrap;margin:7px 0 3px}'
+      + '.sp-metric{font-size:0.77em;background:#eef2ff;color:#3730a3;padding:2px 9px;border-radius:9999px}'
+      + '.sp-metric-pass{background:#dcfce7;color:#166534}'
+      + '.sp-metric-warn{background:#fef9c3;color:#854d0e}'
+      + '.sp-metric-fail{background:#fee2e2;color:#991b1b}'
+      + '.sp-expand-hint{display:inline-block;font-size:0.73em;color:#94a3b8;margin-top:6px}'
+      + '.study-fold[open] .sp-expand-hint{display:none}'
+      + '.studies-toolbar{display:flex;gap:8px;margin:8px 0 14px}'
+      + '.studies-toolbar button{font:inherit;font-size:0.85em;padding:5px 12px;border:1px solid #cbd5e1;background:#f8fafc;border-radius:6px;cursor:pointer;color:#334155}'
+      + '.studies-toolbar button:hover{background:#e2e8f0}'
+      + '@media print{.sp-expand-hint,.studies-toolbar{display:none}}'
+      // ── review-readiness gate panel ──
+      + '.review-gate{margin:10px 0;padding:10px 14px;background:#fffbeb;border:1px solid #f59e0b;border-left-width:5px;border-radius:6px;color:#92400e}'
+      + '.review-gate>strong{color:#b45309}'
+      + '.review-gate-sub{font-size:0.82em;color:#a16207;margin:2px 0 4px}'
+      + '.review-gate ul{margin:6px 0 0 18px;padding:0}'
+      + '.review-gate li{margin:3px 0}'
+      + '.review-gate code{background:#fef3c7;padding:0 4px;border-radius:3px;font-size:0.92em}'
+      // ── compact sim / readout tables ──
+      + '.sim-table,.readout-table{width:100%;border-collapse:collapse;font-size:0.9em;margin:4px 0 8px}'
+      + '.sim-table th,.readout-table th{text-align:left;padding:5px 8px;border-bottom:2px solid #e2e8f0;color:#475569;font-size:0.86em;font-weight:600}'
+      + '.sim-table td,.readout-table td{padding:5px 8px;border-bottom:1px solid #f1f5f9;vertical-align:top}'
+      + '.sim-table tr:hover,.readout-table tr:hover{background:#f8fafc}'
+      + '.sim-table code,.readout-table code{background:#f1f5f9;padding:0 4px;border-radius:3px;font-size:0.92em}'
+      + '.sim-feeds,.sim-table .sim-feeds code{font-size:0.82em}'
+      + '.sim-status-pill{display:inline-block;font-size:0.8em;padding:1px 8px;border-radius:9999px;background:#e2e8f0;color:#1e293b}'
+      + '.sim-status-ready,.sim-status-pill.sim-status-ready{background:#dcfce7;color:#166534}'
+      + '.sim-status-ran,.sim-status-pill.sim-status-ran{background:#dbeafe;color:#1e40af}'
+      + '.sim-status-gated,.sim-status-pill.sim-status-gated{background:#fef9c3;color:#854d0e}'
       + '</style></head><body>'
 
-      + '<button class="toc-toggle" onclick="document.querySelector(\'.toc\').classList.toggle(\'open\')">☰ Contents</button>'
-      + '<div class="layout">'
+      // Auto-size embedded visualization iframes to their full content so they
+      // render inline with no inner scrollbar. srcdoc iframes are same-origin,
+      // so we can read scrollHeight. Plotly draws async, so re-measure on a
+      // ResizeObserver of the inner doc plus a few timed fallbacks.
+      + '<script>'
+      + 'window._fitEmbed=function(f){try{var d=f.contentDocument||(f.contentWindow&&f.contentWindow.document);if(!d)return;'
+      +   'var b=d.body,e=d.documentElement;'
+      +   // If the inner body declares a fixed CSS height + overflow:hidden,
+      +   // read the DECLARED height directly (b.clientHeight is the laid-out
+      +   // height which is clipped by the iframe viewport, so it shrinks
+      +   // instead of pinning at the CSS value). getComputedStyle.height is
+      +   // a string like "540px" — parse it. Falls back to scrollHeight
+      +   // for unclamped embeds (e.g. tall chromosome figures).
+      +   'var bStyle=b&&d.defaultView&&d.defaultView.getComputedStyle?d.defaultView.getComputedStyle(b):null;'
+      +   'var pinnedH=0;'
+      +   'if(bStyle&&(bStyle.overflow||"").indexOf("hidden")>=0){'
+      +     'var hm=(bStyle.height||"").match(/^(\\d+(?:\\.\\d+)?)px$/);'
+      +     'if(hm)pinnedH=Math.round(parseFloat(hm[1]));'
+      +   '}'
+      +   'var h=pinnedH>0?pinnedH:Math.max(e?e.scrollHeight:0,b?b.scrollHeight:0);'
+      +   'if(h>0)f.style.height=(h+24)+"px";}catch(e){}};'
+      + 'window._wireEmbed=function(f){window._fitEmbed(f);'
+      +   'try{var d=f.contentDocument;if(window.ResizeObserver&&d){var ro=new ResizeObserver(function(){window._fitEmbed(f);});'
+      +     'if(d.documentElement)ro.observe(d.documentElement);if(d.body)ro.observe(d.body);}}catch(e){}'
+      +   '[150,500,1200,2500,4000].forEach(function(t){setTimeout(function(){window._fitEmbed(f);},t);});};'
+      // A collapsed (prior/superseded) embed: when expanded, nudge Plotly to
+      // recompute width and re-fit the iframe.
+      + 'window._onEmbedToggle=function(d){if(!d.open)return;var f=d.querySelector(".embed-frame");if(!f)return;'
+      +   'try{f.contentWindow&&f.contentWindow.dispatchEvent(new Event("resize"));}catch(e){}'
+      +   'if(window._wireEmbed)window._wireEmbed(f);};'
+      + '</script>'
 
-      // ── TOC sidebar ──
-      + '<aside class="toc">'
-      +   '<h4>' + _h(iset.title || iset.name) + '</h4>'
-      +   '<ul>'
-      +     '<li><a href="#top">Top</a></li>'
-      +     '<li><a href="#overview">Overview</a></li>'
-      +     (acceptance ? '<li><a href="#acceptance">Acceptance criteria</a></li>' : '')
-      +     '<li><a href="#how-to-read">How to read</a></li>'
-      +     '<li><a href="#studies-heading">Studies (dep. order)</a></li>'
-      +   '</ul>'
-      +   '<ul class="studies">' + tocStudies + '</ul>'
-      +   '<ul><li><a href="#references">References (' + orderedCited.length + ')</a></li>'
-      +   '<li><a href="#footer">About</a></li></ul>'
-      + '</aside>'
+      // ── Sticky top nav — section-level tags only (per-study nav now lives
+      //    in the collapsed control panels). Conditional tags render only when
+      //    the section exists, keeping the bar uncluttered.
+      + '<nav class="topbar">'
+      +   '<span class="tb-title">' + _h(iset.title || iset.name) + '</span>'
+      +   '<a href="#top">Top</a>'
+      +   ((iset.executive && (iset.executive.what_is_this || iset.executive.verdict)) ? '<a href="#executive">Summary</a>' : '')
+      +   ((iset.scientific_argument && iset.scientific_argument.main_claim) ? '<a href="#scientific-argument">Argument</a>' : '')
+      +   '<a href="#overview">Overview</a>'
+      +   (acceptance ? '<a href="#acceptance">Acceptance</a>' : '')
+      +   '<a href="#how-to-read">How to read</a>'
+      +   '<a href="#studies-heading">Studies</a>'
+      +   '<a href="#references">References</a>'
+      + '</nav>'
 
       // ── Main content ──
       + '<main class="content" id="top">'
 
       +   '<h1>' + _h(iset.title || iset.name) + ' <span class="badge badge-' + _h(iset.status || 'planning') + '">' + _h(iset.status || 'planning') + '</span></h1>'
-      +   '<p class="muted small">Investigation report · <code>' + nameClean + '</code> · generated ' + _h(now) + ' · for expert review prior to execution.</p>'
+      +   '<p class="muted small">Investigation report · <code>' + nameClean + '</code> · generated ' + _h(now) + ' · '
+      +     ((specs || []).some(function(s) { return (s.runs || []).length || (s.findings || []).length; })
+          ? 'for expert review — results below reflect completed runs.'
+          : 'for expert review prior to execution.') + '</p>'
+
+      // Coordinated-generation provenance banner (expert-feedback A.3).
+      +   generationBannerHtml
+
+      // ── LAYER 1: EXECUTIVE ─────────────────────────────────────────────
+      // Authored narrative + conclusions for a human reviewer, at the very
+      // top. Reads iset.executive; renders nothing if the field is absent
+      // (older investigations fall back to Overview below).
+      +   (function() {
+            var ex = iset.executive || {};
+            var dn = ex.decisions_needed || [];
+            if (!ex.what_is_this && !ex.verdict && !dn.length) return '';
+            var vs = ex.verdict_status || 'in-progress';
+            var h = '<section id="executive"><h2 style="margin-top:12px">Executive summary</h2>';
+            if (ex.what_is_this)
+              h += '<p>' + _multiline(ex.what_is_this) + '</p>';
+            if (ex.verdict)
+              h += '<div class="callout" style="background:#f8fafc;border-left:5px solid #64748b;border-radius:8px;padding:12px 16px;margin:10px 0">'
+                 + '<span class="badge badge-' + _h(vs) + '">' + _h(vs) + '</span> '
+                 + '<strong>Current verdict.</strong> ' + _multiline(ex.verdict) + '</div>';
+            if (dn.length) {
+              h += '<h3>Decisions needed from reviewers</h3><ol>'
+                 + dn.map(function(d) {
+                     return '<li><strong>' + _h(d.question || '') + '</strong>'
+                       + (d.context ? '<div class="muted small">' + _multiline(d.context) + '</div>' : '')
+                       + '</li>';
+                   }).join('') + '</ol>';
+            }
+            return h + '</section>';
+          })()
+
+      // ── LAYER 2: SCIENTIFIC ARGUMENT ───────────────────────────────────
+      // The claim and the evidence, for the reviewer. Reads
+      // iset.scientific_argument; renders nothing if absent.
+      +   (function() {
+            var sa = iset.scientific_argument || {};
+            var ef = sa.evidence_for || [], ea = sa.evidence_against || [],
+                kf = sa.key_figures || [], cav = sa.caveats || [];
+            if (!sa.main_claim && !ef.length && !ea.length) return '';
+            function _li(x) { return '<li>' + _multiline(typeof x === 'string' ? x : (x.text || JSON.stringify(x))) + '</li>'; }
+            var h = '<section id="scientific-argument"><h2>Scientific argument</h2>';
+            if (sa.main_claim)
+              h += '<p><strong>Main claim.</strong> ' + _multiline(sa.main_claim) + '</p>';
+            if (ef.length || ea.length) {
+              h += '<div style="display:flex;gap:24px;flex-wrap:wrap">';
+              if (ef.length) h += '<div style="flex:1 1 280px"><h3 style="color:#065f46">Evidence for</h3><ul>' + ef.map(_li).join('') + '</ul></div>';
+              if (ea.length) h += '<div style="flex:1 1 280px"><h3 style="color:#9a3412">Evidence against</h3><ul>' + ea.map(_li).join('') + '</ul></div>';
+              h += '</div>';
+            }
+            if (kf.length)
+              h += '<h3>Key figures</h3><ul>' + kf.map(function(k) {
+                return '<li><code>' + _h(k.study || '') + '</code> · <code>' + _h(k.viz || '') + '</code> — ' + _h(k.caption || '') + '</li>';
+              }).join('') + '</ul>';
+            if (cav.length)
+              h += '<h3>Caveats</h3><ul>' + cav.map(_li).join('') + '</ul>';
+            return h + '</section>';
+          })()
 
       // Planning-phase banner: any study that has not yet produced runs
       // is treated as planning, and the whole report leads with a notice
@@ -6206,6 +6802,11 @@
       +   '<p class="muted small">Want to leave inline feedback? Click the <strong>💬</strong> icon next to any section. "Generate feedback report" (bottom-right) packages every annotation into a single yaml file that comes back via <code>pbg-feedback-import</code>.</p>'
 
       +   '<h2 id="studies-heading">Studies' + (hasDag ? ' (dependency order)' : '') + '</h2>'
+      +   '<p class="muted small">Each study is collapsed to a one-glance control panel — scan top to bottom, then click any panel to expand its full detail.</p>'
+      +   '<div class="studies-toolbar">'
+      +     '<button type="button" onclick="document.querySelectorAll(\'.study-fold\').forEach(function(d){d.open=true})">Expand all</button>'
+      +     '<button type="button" onclick="document.querySelectorAll(\'.study-fold\').forEach(function(d){d.open=false})">Collapse all</button>'
+      +   '</div>'
       +   studiesHtml
 
       +   '<h2 id="references">References <span class="muted small">(' + orderedCited.length + ' cited across this investigation)</span></h2>'
@@ -6220,12 +6821,11 @@
       +   '</footer>'
 
       + '</main>'
-      + '</div>'
 
-      // ── Active-section tracking for TOC links ──
+      // ── Active-section tracking for top-nav links ──
       + '<script>'
       + '(function(){'
-      +   'var links=Array.from(document.querySelectorAll(".toc a"));'
+      +   'var links=Array.from(document.querySelectorAll(".topbar a"));'
       +   'var targets=links.map(function(a){return document.getElementById(a.getAttribute("href").slice(1));})'
       +     '.filter(Boolean);'
       +   'function onScroll(){'
@@ -6236,6 +6836,34 @@
       +   '}'
       +   'window.addEventListener("scroll",onScroll,{passive:true});'
       +   'onScroll();'
+      // Studies are collapsed by default. When the URL targets a study (or any
+      // anchor inside one), open all ancestor <details> so the target is
+      // actually visible, then scroll to it.
+      +   'function openToHash(){'
+      +     'var h=location.hash;if(!h)return;'
+      +     'var el=document.getElementById(decodeURIComponent(h.slice(1)));if(!el)return;'
+      +     'if(el.tagName==="DETAILS")el.open=true;'
+      +     'var d=el.closest?el.closest("details"):null;'
+      +     'while(d){d.open=true;d=d.parentElement?d.parentElement.closest("details"):null;}'
+      +     'try{el.scrollIntoView();}catch(e){}'
+      +   '}'
+      +   'window.addEventListener("hashchange",openToHash);'
+      +   'openToHash();'
+      // Printing / save-as-PDF must show everything — a closed <details> can't
+      // be forced open by CSS, so open them all before print.
+      +   'window.addEventListener("beforeprint",function(){'
+      +     'document.querySelectorAll(".study-fold").forEach(function(d){d.open=true;});'
+      +   '});'
+      // When a fold opens, re-fit its embeds and nudge Plotly to recompute
+      // width (charts drawn while the fold was collapsed render at 0 width).
+      +   'document.querySelectorAll(".study-fold").forEach(function(d){'
+      +     'd.addEventListener("toggle",function(){if(!d.open)return;'
+      +       'd.querySelectorAll(".embed-frame").forEach(function(f){'
+      +         'try{f.contentWindow&&f.contentWindow.dispatchEvent(new Event("resize"));}catch(e){}'
+      +         'if(window._fitEmbed){window._fitEmbed(f);[120,400,1000].forEach(function(t){setTimeout(function(){window._fitEmbed(f);},t);});}'
+      +       '});'
+      +     '});'
+      +   '});'
       + '})();'
       + '</script>'
 
@@ -6396,13 +7024,36 @@
       +   'window.addEventListener("scroll",function(){if(openEd){var sid=openEd.getAttribute("data-fb-sid");var host=sid&&document.getElementById(sid);var btn=host&&host.querySelector(":scope>.fb-add");if(btn)positionEditor(openEd,btn);}},{passive:true});'
       +   'function countAll(){var d=load();var n=0;Object.keys(d).forEach(function(k){n+=(d[k]||[]).length;});return n;}'
       +   'function updateBadges(){var d=load();document.querySelectorAll(".fb-add").forEach(function(b){var sid=b.parentElement&&b.parentElement.id;if(!sid)return;b.classList.toggle("has-fb",((d[sid]||[]).length>0));});}'
-      +   'function updateBarCount(){var c=countAll();var s=document.querySelector(".fb-count");var nt="("+c+")";if(s&&s.textContent!==nt)s.textContent=nt;var btn=document.querySelector(".fb-bar-btn");if(btn)btn.disabled=c===0;}'
+      +   'function updateBarCount(){var c=countAll();var nt="("+c+")";document.querySelectorAll(".fb-count").forEach(function(s){if(s.textContent!==nt)s.textContent=nt;});document.querySelectorAll(".fb-bar-btn").forEach(function(btn){btn.disabled=c===0;});}'
+      // B.2: when the report is viewed live (served by the dashboard over
+      // http/https) offer a one-click "Send to dashboard" that POSTs the
+      // annotations straight to /api/feedback-import — no download → email →
+      // CLI. Offline (file://) keeps the YAML download as the only path.
+      +   'var CAN_POST=(location.protocol==="http:"||location.protocol==="https:");'
       +   'function ensureBar(){'
       +     'if(document.querySelector(".fb-bar"))return;'
       +     'var bar=document.createElement("div");bar.className="fb-bar";'
-      +     'bar.innerHTML="<button type=\\"button\\" class=\\"fb-bar-btn\\" title=\\"Download all your annotations as a yaml file; send it back to the investigation\\">Generate feedback report <span class=\\"fb-count\\">(0)</span></button>";'
+      +     'var html="";'
+      +     'if(CAN_POST){html+="<button type=\\"button\\" class=\\"fb-bar-btn fb-send-btn\\" title=\\"Send your annotations straight to the dashboard\\">Send to dashboard <span class=\\"fb-count\\">(0)</span></button>";html+="<button type=\\"button\\" class=\\"fb-bar-btn fb-dl-btn\\" style=\\"margin-left:6px;background:#f1f5f9;color:#334155;border-color:#cbd5e1\\" title=\\"Or download a yaml to send back manually\\">Download .yaml</button>";}'
+      +     'else{html+="<button type=\\"button\\" class=\\"fb-bar-btn fb-dl-btn\\" title=\\"Download all your annotations as a yaml file; send it back to the investigation\\">Generate feedback report <span class=\\"fb-count\\">(0)</span></button>";}'
+      +     'bar.innerHTML=html;'
       +     'document.body.appendChild(bar);'
-      +     'bar.querySelector(".fb-bar-btn").addEventListener("click",function(e){e.preventDefault();e.stopPropagation();downloadFeedback();});'
+      +     'var sb=bar.querySelector(".fb-send-btn");if(sb)sb.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();submitFeedback();});'
+      +     'var db=bar.querySelector(".fb-dl-btn");if(db)db.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();downloadFeedback();});'
+      +   '}'
+      +   'function submitFeedback(){'
+      +     'var d=load();if(!countAll()){alert("No feedback yet — click 💬 next to any section first.");return;}'
+      +     'var ts=new Date().toISOString();'
+      +     'var meta={investigation:INV,report_id:REPORT_ID,generated_at:ts,page_title:document.title,source_url:location.href};'
+      +     'var sb=document.querySelector(".fb-send-btn");if(sb){sb.disabled=true;sb.textContent="Sending…";}'
+      +     'fetch("/api/feedback-import",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({meta:meta,annotations:d})})'
+      +       '.then(function(r){return r.json().catch(function(){return {};}).then(function(j){return {ok:r.ok,j:j};});})'
+      +       '.then(function(res){'
+      +         'if(res.ok&&res.j&&res.j.ok){alert("Sent "+(res.j.n_entries||countAll())+" annotation(s) to the dashboard.\\nSaved at "+res.j.path);}'
+      +         'else{alert("Could not send to the dashboard ("+((res.j&&res.j.error)||"error")+"). Falling back to a .yaml download.");downloadFeedback();}'
+      +       '})'
+      +       '.catch(function(err){alert("Could not reach the dashboard ("+err+"). Falling back to a .yaml download.");downloadFeedback();})'
+      +       '.then(function(){var b=document.querySelector(".fb-send-btn");if(b){b.disabled=false;b.innerHTML="Send to dashboard <span class=\\"fb-count\\">("+countAll()+")</span>";}});'
       +   '}'
       +   'function serialiseYaml(meta,data){'
       +     'var L=["# Inline feedback report","# Generated from the v2ecoli inline-feedback widget.","# Import with: pbg-feedback-import <this-file>"];'
@@ -6470,6 +7121,42 @@
 
   // Sidebar grouping: studies-by-investigation, collapsible.
   // Replaces the existing flat-list render in #viv-rail-investigations.
+  // Map a study's free-form status string to a small colored dot. Keeps the
+  // rail rows readable: the study NAME gets the full row width, the dot is a
+  // glanceable status, the full status text is shown in the title tooltip.
+  function _railStatusColor(status) {
+    var s = String(status || '').toLowerCase();
+    if (s.indexOf('fail') !== -1 || s.indexOf('invalid') !== -1) return '#ef4444';   // red
+    if (s.indexOf('pending') !== -1 || s.indexOf('refresh') !== -1) return '#f59e0b';// amber
+    if (s.indexOf('inconclusive') !== -1 || s.indexOf('partial') !== -1) return '#d97706'; // dark amber
+    if (s.indexOf('running') === 0) return '#3b82f6';                                // blue
+    if (s.indexOf('done') === 0 || s.indexOf('ran') === 0 || s.indexOf('complete') !== -1
+        || s.indexOf('evaluated') !== -1 || s.indexOf('confirmed') !== -1 || s.indexOf('passing') !== -1
+        || s.indexOf('-wins') !== -1 || s.indexOf('in-band') !== -1) return '#16a34a'; // green
+    if (s.indexOf('evaluate') === 0) return '#6366f1';                               // indigo (mid-pass action)
+    return '#9ca3af';                                                                // gray (planned/unknown)
+  }
+
+  // Single-row per study: [dot] name [🔒?]. Full status string in tooltip.
+  // Used by both the flat-list and grouped rail layouts.
+  function _railStudyItem(s, opts) {
+    opts = opts || {};
+    var status = s.status || 'planned';
+    var color = _railStatusColor(status);
+    var indent = opts.indent ? '28px' : '12px';
+    var fontSize = opts.indent ? '0.85em' : '0.86em';
+    var nameColor = opts.indent ? '#64748b' : '#374151';
+    var tip = _esc(s.name) + ' — ' + _esc(status) + (s.blocked ? ' (blocked)' : '');
+    return '<a class="viv-rail-sublink" ' +
+           'onclick="event.preventDefault();_openStudyEmbeddedNewTab(\'' + _esc(s.name) + '\');return false;" ' +
+           'href="#" title="' + tip + '" ' +
+           'style="display:flex;align-items:center;gap:8px;padding:4px 14px 4px ' + indent + ';color:' + nameColor + ';text-decoration:none;font-size:' + fontSize + ';">' +
+             '<span aria-hidden="true" style="flex:none;width:8px;height:8px;border-radius:50%;background:' + color + ';display:inline-block"></span>' +
+             '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + _esc(s.name) + '</span>' +
+             (s.blocked ? '<span title="blocked" style="font-size:0.85em;flex:none">🔒</span>' : '') +
+           '</a>';
+  }
+
   function _renderRailInvestigationGroups() {
     var host = document.getElementById('viv-rail-investigations');
     if (!host) return;
@@ -6516,17 +7203,7 @@
     // under the "Studies" rail-section label — no redundant group header.
     if (groups.length === 1 && groups[0].name !== '__ungrouped__') {
       var g = groups[0];
-      host.innerHTML = g.studies.map(function(s) {
-        var status = s.status || 'planned';
-        return '<a class="viv-rail-sublink" ' +
-               'onclick="event.preventDefault();_openStudyEmbeddedNewTab(\'' + _esc(s.name) + '\');return false;" ' +
-               'href="#" ' +
-               'style="display:flex;align-items:baseline;gap:6px;padding:4px 12px;color:#374151;text-decoration:none;font-size:0.86em;">' +
-                 '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + _esc(s.name) + '</span>' +
-                 (s.blocked ? '<span title="blocked" style="font-size:0.85em">🔒</span>' : '') +
-                 '<span class="muted" style="font-size:0.72em">' + _esc(status) + '</span>' +
-               '</a>';
-      }).join('');
+      host.innerHTML = g.studies.map(function(s) { return _railStudyItem(s); }).join('');
       return;
     }
 
@@ -6534,15 +7211,7 @@
     host.innerHTML = groups.map(function(g) {
       var isCollapsed = !!collapsedState[g.name];
       var children = isCollapsed ? '' : g.studies.map(function(s) {
-        var status = s.status || 'planned';
-        return '<a class="viv-rail-sublink" ' +
-               'onclick="event.preventDefault();_openStudyEmbeddedNewTab(\'' + _esc(s.name) + '\');return false;" ' +
-               'href="#" ' +
-               'style="display:flex;align-items:baseline;gap:6px;padding:3px 14px 3px 28px;color:#64748b;text-decoration:none;font-size:0.85em;">' +
-                 '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + _esc(s.name) + '</span>' +
-                 (s.blocked ? '<span title="blocked" style="font-size:0.85em">🔒</span>' : '') +
-                 '<span class="muted" style="font-size:0.72em">' + _esc(status) + '</span>' +
-               '</a>';
+        return _railStudyItem(s, { indent: true });
       }).join('');
       var headerClick = "event.preventDefault(); window._isetRailCollapsed = window._isetRailCollapsed || {}; window._isetRailCollapsed['" + _esc(g.name) + "'] = !window._isetRailCollapsed['" + _esc(g.name) + "']; _renderRailInvestigationGroups();";
       var groupClick = g.name === '__ungrouped__' ? '' :
@@ -9802,12 +10471,88 @@
   // Top-bar live git-status strip
   // -------------------------------------------------------------------------
 
+  // Populate the GitHub tab's "Workspace repository" rows. Hides each row
+  // when its value is empty so the settings page stays tidy. Pass null to
+  // reset all rows to a "no branch" state.
+  function _setRow(id, html, hint) {
+    var row = document.getElementById('viv-gh-row-' + id);
+    var val = document.getElementById('viv-gh-' + id);
+    if (!row || !val) return;
+    if (html == null || html === '') { row.hidden = true; return; }
+    row.hidden = false;
+    val.innerHTML = html + (hint ? '<div class="gh-value-hint">' + hint + '</div>' : '');
+  }
+
+  function _renderGitStatusRows(s) {
+    if (!document.getElementById('viv-gh-row-repo')) return;  // page not present
+    if (s == null) {
+      _setRow('repo', '<span class="muted">not a git workspace</span>');
+      ['branch', 'push-state', 'ahead', 'dirty', 'pr'].forEach(function (id) { _setRow(id, ''); });
+      return;
+    }
+    // Repository
+    _setRow('repo', s.upstream_repo
+      ? '<a href="' + s.repo_url + '" target="_blank" rel="noopener">' + _esc(s.upstream_repo) + '</a> ↗'
+      : '<span class="muted">no upstream remote configured</span>');
+    // Branch
+    _setRow('branch', s.branch
+      ? (s.branch_url
+          ? '<a href="' + s.branch_url + '" target="_blank" rel="noopener"><code>' + _esc(s.branch) + '</code></a> ↗'
+          : '<code>' + _esc(s.branch) + '</code>')
+      : '<span class="muted">no branch</span>');
+    // Push state
+    var stateMap = {
+      pushed:   '<span class="git-badge git-badge-ok">✓ pushed</span>',
+      ahead:    '<span class="git-badge git-badge-ahead">↑ ' + s.ahead + ' ahead of remote</span>',
+      behind:   '<span class="git-badge git-badge-behind">↓ ' + s.behind + ' behind remote</span>',
+      diverged: '<span class="git-badge git-badge-warn">! diverged from remote</span>',
+    };
+    _setRow('push-state', stateMap[s.push_state] || '<span class="git-badge git-badge-warn">⊘ no origin</span>');
+    // Ahead of base
+    if (s.ahead_of_base > 0) {
+      var aheadHtml = s.compare_url
+        ? '<a href="' + s.compare_url + '" target="_blank" rel="noopener">' + s.ahead_of_base + ' commits ahead of <code>' + _esc(s.base) + '</code></a> ↗'
+        : s.ahead_of_base + ' commits ahead of <code>' + _esc(s.base) + '</code>';
+      _setRow('ahead', aheadHtml);
+    } else {
+      _setRow('ahead', s.base
+        ? '<span class="muted">up to date with <code>' + _esc(s.base) + '</code></span>'
+        : '');
+    }
+    // Working tree
+    if (s.dirty_count > 0) {
+      _setRow('dirty',
+        '<a href="#" onclick="event.preventDefault();_toggleDirtyPanel();return false">'
+        + s.dirty_count + ' uncommitted file' + (s.dirty_count === 1 ? '' : 's') + '</a>',
+        'Click to view + stage');
+    } else {
+      _setRow('dirty', '<span class="muted">clean</span>');
+    }
+    // Pull request
+    if (s.pr_url) {
+      var prState = (s.pr_state || 'open').toLowerCase();
+      _setRow('pr', '<a class="git-badge git-badge-pr pr-state-' + prState + '" href="'
+        + s.pr_url + '" target="_blank" rel="noopener">PR #' + s.pr_number + ' ↗</a>'
+        + ' <span class="muted small">(' + _esc(prState) + ')</span>');
+    } else {
+      _setRow('pr', '<span class="muted">no PR linked yet</span>');
+    }
+  }
+
   function _refreshGitStatus() {
     fetch('/api/git-status').then(function (r) { return r.json(); }).then(function (s) {
+      // Legacy single-string box (still populated for any consumer that
+      // reads it). The GitHub-tab settings page renders the same data into
+      // individual rows via _renderGitStatusRows below.
       var box = document.getElementById('viv-git-status');
-      if (!box) return;
-      if (!s.branch) { box.hidden = true; return; }
-      box.hidden = false;
+      if (box) {
+        if (!s.branch) { box.hidden = true; }
+        else { box.hidden = false; }
+      }
+      if (!s.branch) {
+        _renderGitStatusRows(null);
+        return;
+      }
 
       // push-state badge
       var stateBadge;
@@ -9844,13 +10589,20 @@
         ? ' <a class="git-badge git-badge-pr pr-state-' + prState + '" href="' + s.pr_url + '" target="_blank" rel="noopener">PR #' + s.pr_number + ' ↗</a>'
         : '';
 
-      box.innerHTML = repoPart + branchPart + ' ' + stateBadge + aheadOfBasePart + dirtyPart + prPart;
+      if (box) box.innerHTML = repoPart + branchPart + ' ' + stateBadge + aheadOfBasePart + dirtyPart + prPart;
+
+      // Settings-style per-row population for the GitHub tab.
+      _renderGitStatusRows(s);
 
       // Goal 5: hide "Open PR" button when a PR already exists
       var openPrBtn = document.getElementById('btn-open-pr');
       if (openPrBtn) openPrBtn.hidden = !!s.pr_url;
 
-      // Action buttons (unified from former _refreshWorkStrip)
+      // Action buttons (Link branch / Push / End workstream). When the
+      // dedicated #viv-git-actions container exists (GitHub tab layout) we
+      // render the action buttons there as a clear separate row alongside
+      // the existing Open-PR button. Otherwise fall back to inline append
+      // for layouts that still embed everything inside #viv-git-status.
       var actions = [];
       if (!s.upstream_repo) {
         actions.push(s.gh_available
@@ -9862,12 +10614,98 @@
       if (s.has_active_workstream) {
         actions.push('<button class="ws-btn ws-end" onclick="_endWork()" title="Switch back to ' + _esc(s.base) + ' (workstream branch is preserved)">End</button>');
       }
-      if (actions.length) {
+      var actionsHost = document.getElementById('viv-git-actions');
+      if (actionsHost) {
+        // Replace any previously-injected actions (preserve the static
+        // Open-PR button that lives in the markup with id="btn-open-pr").
+        actionsHost.querySelectorAll('[data-injected-action]').forEach(function (n) { n.remove(); });
+        if (actions.length) {
+          var tmp = document.createElement('span');
+          tmp.dataset.injectedAction = '1';
+          tmp.innerHTML = actions.join(' ');
+          actionsHost.appendChild(tmp);
+        }
+      } else if (actions.length) {
         box.innerHTML += ' <span class="git-status-actions">' + actions.join(' ') + '</span>';
       }
     }).catch(function () { /* silent */ });
   }
   window._refreshGitStatus = _refreshGitStatus;
+
+  // ------------------------------------------------------------------
+  // GitHub tab — default-org picker. Populates #viv-gh-default-org from
+  // /api/auth/github/orgs once the user is signed in. Persists the
+  // selection to localStorage; new-workspace flows can read it. (Backend
+  // workspace.yaml.github_org persistence is a follow-up; this UX gives
+  // configurability now.)
+  // ------------------------------------------------------------------
+  var GH_DEFAULT_ORG_KEY = 'viv-dashboard-default-github-org';
+
+  function _loadGithubOrgs() {
+    var sel = document.getElementById('viv-gh-default-org');
+    var hint = document.getElementById('viv-gh-default-org-hint');
+    if (!sel) return;
+    sel.disabled = true;
+    fetch('/api/auth/github/orgs').then(function (r) {
+      if (r.status === 401) {
+        sel.innerHTML = '<option value="">Sign in to load orgs…</option>';
+        if (hint) hint.textContent = '';
+        return;
+      }
+      if (!r.ok) {
+        sel.innerHTML = '<option value="">Could not load orgs</option>';
+        if (hint) hint.textContent = 'GitHub returned HTTP ' + r.status + '.';
+        return;
+      }
+      return r.json().then(function (data) {
+        // API shape: {login, orgs: [{name, kind: "personal"|"org"}, ...]}
+        var orgs = (data && data.orgs) || [];
+        var saved = '';
+        try { saved = localStorage.getItem(GH_DEFAULT_ORG_KEY) || ''; } catch (_e) {}
+        sel.innerHTML = orgs.map(function (o) {
+          var name = (o && o.name) ? o.name : String(o || '');
+          var label = (o && o.kind === 'personal') ? (name + ' (personal)') : name;
+          var selAttr = (name === saved) ? ' selected' : '';
+          return '<option value="' + _esc(name) + '"' + selAttr + '>' + _esc(label) + '</option>';
+        }).join('') || '<option value="">No orgs found</option>';
+        if (hint) {
+          hint.textContent = saved
+            ? 'Default: ' + saved + ' (saved in this browser).'
+            : 'Pick one to use as the default for new-repo flows.';
+        }
+      });
+    }).catch(function () {
+      sel.innerHTML = '<option value="">Network error</option>';
+    }).then(function () {
+      sel.disabled = false;
+    });
+  }
+  window._loadGithubOrgs = _loadGithubOrgs;
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var sel = document.getElementById('viv-gh-default-org');
+    if (sel) {
+      sel.addEventListener('change', function () {
+        try { localStorage.setItem(GH_DEFAULT_ORG_KEY, sel.value || ''); } catch (_e) {}
+        var hint = document.getElementById('viv-gh-default-org-hint');
+        if (hint && sel.value) hint.textContent = 'Default: ' + sel.value + ' (saved in this browser).';
+      });
+    }
+    _loadGithubOrgs();
+
+    // Re-load orgs when the github-login chip flips to authenticated. Keeps
+    // github-login.js untouched (no cross-file coupling) — we just observe
+    // the data-state attribute the widget already maintains.
+    var chip = document.getElementById('viv-gh-chip');
+    if (chip && typeof MutationObserver !== 'undefined') {
+      var lastState = chip.dataset.state;
+      new MutationObserver(function () {
+        var s = chip.dataset.state;
+        if (s !== lastState && s === 'in') _loadGithubOrgs();
+        lastState = s;
+      }).observe(chip, { attributes: true, attributeFilter: ['data-state'] });
+    }
+  });
 
   document.addEventListener('DOMContentLoaded', _refreshGitStatus);
 

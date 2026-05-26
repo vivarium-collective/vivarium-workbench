@@ -113,10 +113,18 @@ def test_iset_create_success_writes_yaml(_ws):
     assert p.is_file()
     spec = yaml.safe_load(p.read_text())
     assert spec["name"] == "my-investigation"
-    assert spec["description"] == "Why this matters"
+    assert spec["description"].strip() == "Why this matters"
     assert spec["status"] == "planning"
     assert spec["studies"] == []
-    assert spec["schema_version"] == 1
+    # v2 scaffold: schema_version bumped to 2 to surface the narrative spine
+    # (executive / scientific_argument / biological_story / at_a_glance /
+    # glossary / guidelines) as commented placeholders.
+    assert spec["schema_version"] == 2
+    # The text body includes the narrative-spine TODO comments.
+    text = p.read_text()
+    assert "executive:" in text
+    assert "biological_story:" in text
+    assert "scientific_argument:" in text
 
 
 def test_iset_create_returns_detail_shape(_ws):
@@ -137,7 +145,10 @@ def test_iset_create_with_parent_studies(_ws):
     spec = yaml.safe_load(
         (_ws / "investigations" / "child" / "investigation.yaml").read_text()
     )
-    assert spec["parent_studies"] == ["study-a", "study-b"]
+    # v2 scaffold routes the `parent_studies` body param into `studies:` (the
+    # actual schema field). The original endpoint wrote a top-level
+    # `parent_studies:` field that did not exist in investigation.schema.json.
+    assert spec["studies"] == ["study-a", "study-b"]
 
 
 def test_iset_create_rejects_bad_slug_uppercase(_ws):

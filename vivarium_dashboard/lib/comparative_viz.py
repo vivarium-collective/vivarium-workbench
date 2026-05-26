@@ -108,27 +108,149 @@ def _extract_trace(db_path: Path,
         if n_rows == 0:
             return [], []
         stride = max(1, n_rows // subsample) if n_rows > 0 else 1
-        sql_path = "$." + observable_path
-        if observable_index is not None and isinstance(observable_index, int):
-            sql_path += f"[{int(observable_index)}]"
+        idx = (f"[{int(observable_index)}]"
+               if observable_index is not None and isinstance(observable_index, int)
+               else "")
+        sql_path = "$." + observable_path + idx
+        # v2ecoli single-cell composites scope listener stores under agents/0/,
+        # so the emitter captures the observable at agents/0/<path>. Try the
+        # literal path first, fall back to the per-agent path — the declared-
+        # path emitter nests captured state to mirror the path, so one resolves.
+        ag_path = "$.agents.0." + observable_path + idx
         cursor = conn.execute(
-            "SELECT global_time, json_extract(state, ?) FROM history "
-            "WHERE simulation_id=? AND (step % ?) = 0 ORDER BY step ASC",
-            (sql_path, sim_id, stride),
+            "SELECT global_time, json_extract(state, ?), json_extract(state, ?) "
+            "FROM history WHERE simulation_id=? AND (step % ?) = 0 ORDER BY step ASC",
+            (sql_path, ag_path, sim_id, stride),
         )
+        def _num(x):
+            # json_extract returns '{}'/'[]' (text) for a path that resolves
+            # to an empty container — the literal listeners/<...> wire captures
+            # an empty store, so it must NOT shadow the agent-scoped value.
+            if x is None or x in ("{}", "[]"):
+                return None
+            try:
+                return float(x)
+            except (TypeError, ValueError):
+                return None
+
         times: list[float] = []
         values: list[float] = []
-        for tm, v in cursor:
-            if v is None:
+        for tm, v, v_ag in cursor:
+            val = _num(v)
+            if val is None:
+                val = _num(v_ag)
+            if val is None:
                 continue
-            try:
-                values.append(float(v))
-                times.append(float(tm))
-            except (TypeError, ValueError):
-                continue
+            values.append(val)
+            times.append(float(tm))
         return times, values
     finally:
         conn.close()
+
+
+def _extract_trace_from_zarr(zarr_path: Path,
+                             observable_path: str,
+                             subsample: int = 200,
+                             observable_index: int | None = None,
+                             ) -> tuple[list[float], list[float]]:
+    """Pull (times, values) for one observable from one XArrayEmitter run.
+
+    The XArray run path emits per-generation partitions to a zarr store at
+    ``<study>/runs.<run_id>.zarr/experiment_id=<id>/variant=<v>/lineage_seed=<s>/``
+    with arrays like ``number_of_oric`` (one per declared view leaf) dimensioned
+    by ``emitstep_gen=<N>`` per generation, and per-generation time coords
+    ``time_gen=<N>``. Concatenates across generations into a single trace.
+
+    ``observable_index`` selects within a vector leaf's coord dimension
+    (``id_<leaf>``) — e.g. ``listeners.monomer_counts`` with
+    ``observable_index=3861`` extracts the DnaA count from the 4309-element
+    monomer-count vector. Required for vector observables; ignored for scalar
+    leaves.
+
+    Returns ``([], [])`` on any error so a missing path doesn't sink the chart.
+    """
+    if not zarr_path.exists():
+        return [], []
+    # observable_path may be dotted ("listeners.replication_data.number_of_oric")
+    # or slash-separated, with an optional agents/<id>/ prefix. The zarr leaf
+    # name is just the LAST component (set as "path" in the view config).
+    parts = [p for p in str(observable_path).replace(".", "/").split("/") if p]
+    if not parts:
+        return [], []
+    if parts[0] == "agents" and len(parts) >= 3:
+        parts = parts[2:]
+    leaf = parts[-1]
+
+    try:
+        import xarray as xr
+    except ImportError:
+        return [], []
+    try:
+        dt = xr.open_datatree(str(zarr_path), engine="zarr")
+    except Exception:
+        return [], []
+
+    times: list[float] = []
+    values: list[float] = []
+    # XArrayEmitter store layout (verified 2026-05-23):
+    #   .../lineage_seed=<s>/                      ← partition; has time_gen=<N> data_vars
+    #   .../lineage_seed=<s>/<leaf>/               ← LEAF NODE (named after observable)
+    #     data_vars: generation=1, generation=2, ...   ← per-generation value arrays
+    # Both leaf data_vars and partition time_gen=<N> share dim emitstep_gen=<N>.
+    try:
+        for node in dt.subtree:
+            if node.name != leaf:
+                continue
+            parent = node.parent
+            if parent is None:
+                continue
+            # Per-generation pairs; sort by N for time-ordered concat.
+            gen_keys: list[tuple[int, str]] = []
+            for var_name in (node.data_vars or {}):
+                if not var_name.startswith("generation="):
+                    continue
+                try:
+                    gen_n = int(var_name.split("=", 1)[1])
+                except ValueError:
+                    continue
+                gen_keys.append((gen_n, var_name))
+            gen_keys.sort()
+            for gen_n, var_name in gen_keys:
+                v_var = node[var_name]
+                t_name = f"time_gen={gen_n}"
+                if t_name not in (parent.data_vars or {}):
+                    continue
+                # Vector leaf: select within id_<leaf> using observable_index.
+                # Scalar leaves have ndim==1 (only the emitstep dim) so no
+                # indexing is needed; ndim>1 means a coord array is present.
+                if observable_index is not None and ("id_" + leaf) in v_var.dims:
+                    try:
+                        v_var = v_var.isel({"id_" + leaf: int(observable_index)})
+                    except (IndexError, KeyError, ValueError):
+                        continue
+                elif v_var.ndim > 1:
+                    # vector leaf, no index supplied — extracted trace would
+                    # be a 2D slab, can't render as a line. Skip silently.
+                    continue
+                v_arr = v_var.values
+                t_arr = parent[t_name].values
+                n = min(len(t_arr), len(v_arr))
+                for i in range(n):
+                    times.append(float(t_arr[i]))
+                    values.append(float(v_arr[i]))
+    except Exception:
+        return [], []
+
+    # Sort by time + subsample.
+    if not times:
+        return [], []
+    paired = sorted(zip(times, values), key=lambda tv: tv[0])
+    if subsample and len(paired) > subsample:
+        stride = max(1, len(paired) // subsample)
+        paired = paired[::stride]
+    times = [t for t, _ in paired]
+    values = [v for _, v in paired]
+    return times, values
 
 
 def render_comparative_time_series(
@@ -145,9 +267,13 @@ def render_comparative_time_series(
 ) -> Path:
     """Render N runs as overlaid Plotly traces in a single HTML file.
 
-    ``runs`` is a list of ``{"label": str, "db_path": Path or str}``.
-    Each run becomes one trace; missing data renders as an empty trace
-    so the legend still shows the label.
+    ``runs`` is a list of ``{"label": str, ...}``. Each run must carry EITHER:
+      - ``"db_path": Path | str`` — SQLite emitter output (the historical path), OR
+      - ``"zarr_path": Path | str`` — XArrayEmitter output (per-generation
+        partitioned zarr store; required for multi-generation runs).
+
+    Each run becomes one trace; missing data renders as an empty trace so
+    the legend still shows the label.
 
     Returns ``output_path`` (the path the HTML was written to).
     """
@@ -155,18 +281,27 @@ def render_comparative_time_series(
     for entry in runs:
         label = str(entry.get("label", "?"))
         db_path = Path(entry["db_path"]) if entry.get("db_path") else None
+        zarr_path = Path(entry["zarr_path"]) if entry.get("zarr_path") else None
         sim_name = entry.get("sim_name")
-        if db_path is None:
-            traces.append({"label": label, "x": [], "y": [], "note": "(no db_path)"})
+        if zarr_path is not None:
+            xs, ys = _extract_trace_from_zarr(
+                zarr_path, observable_path, subsample,
+                observable_index=observable_index,
+            )
+            source = "zarr"
+        elif db_path is not None:
+            xs, ys = _extract_trace(
+                db_path, observable_path, observable_index, subsample, sim_name,
+            )
+            source = "sqlite"
+        else:
+            traces.append({"label": label, "x": [], "y": [], "note": "(no db_path or zarr_path)"})
             continue
-        xs, ys = _extract_trace(
-            db_path, observable_path, observable_index, subsample, sim_name,
-        )
         if not xs:
             note = f"(no data: {observable_path!r}"
             if sim_name:
                 note += f" sim={sim_name!r}"
-            note += ")"
+            note += f", source={source})"
         else:
             note = ""
         traces.append({"label": label, "x": xs, "y": ys, "note": note})
@@ -217,7 +352,8 @@ def render_comparative_time_series(
         "margin": {"t": 60, "r": 30, "b": 80, "l": 70},
         "plot_bgcolor": "#fafafa",
         "paper_bgcolor": "#fff",
-        "height": 480,
+        "height": 440,
+        "autosize": False,
     }
 
     output_path = Path(output_path)
@@ -227,10 +363,14 @@ def render_comparative_time_series(
         "<!DOCTYPE html><html><head>"
         '<meta charset="utf-8"><title>' + escape(title) + "</title>"
         + _PLOTLY_CDN
-        + '<style>body{font-family:-apple-system,"Segoe UI",sans-serif;margin:0;padding:18px 22px;background:#fff;color:#1f2937}'
+        # Clamp body height so the iframe auto-fit (reads scrollHeight) doesn't
+        # grow past the chart + chrome. Plotly's hover/modal layers can inflate
+        # scrollHeight transiently; overflow:hidden + a fixed height stops that.
+        + '<style>html,body{height:540px;overflow:hidden}'
+        + 'body{font-family:-apple-system,"Segoe UI",sans-serif;margin:0;padding:18px 22px;background:#fff;color:#1f2937}'
         + 'h1{font-size:1.15em;margin:0 0 4px 0;color:#0f172a}'
         + '.subtitle{color:#6b7280;font-size:0.9em;margin-bottom:14px}'
-        + '.chart-target{width:100%;min-height:480px}'
+        + '.chart-target{width:100%;height:440px}'
         + '</style></head><body>'
         + '<h1>' + escape(title) + '</h1>'
         + '<div class="subtitle">Comparative time-series — '

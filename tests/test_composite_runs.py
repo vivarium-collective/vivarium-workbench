@@ -368,10 +368,37 @@ def test_connect_adds_new_columns_to_legacy_db(tmp_path):
 
     conn = connect(db_file)
     cols = {row[1] for row in conn.execute("PRAGMA table_info(runs_meta)")}
-    assert {"pid", "progress_step", "log_path", "heartbeat_at"} <= cols
+    assert {"pid", "progress_step", "log_path", "heartbeat_at",
+            "generation_id"} <= cols
     # Legacy row survived.
     row = conn.execute("SELECT spec_id FROM runs_meta WHERE run_id='r-old'").fetchone()
     assert row["spec_id"] == "s"
+
+
+def test_save_metadata_stamps_generation_id(tmp_path):
+    """Expert-feedback A.2: a run can carry the workspace's current
+    coordinated-generation id so the report can flag stale panels."""
+    conn = connect(tmp_path / "runs.db")
+    save_metadata(conn, spec_id="s", run_id="r1", params={}, label="",
+                  started_at=1.0, n_steps=10,
+                  generation_id="gen-20260521T084700Z-a1b2c3")
+    meta = query_run_meta(conn, run_id="r1")
+    assert meta["generation_id"] == "gen-20260521T084700Z-a1b2c3"
+
+
+def test_save_metadata_generation_id_defaults_none(tmp_path):
+    conn = connect(tmp_path / "runs.db")
+    save_metadata(conn, spec_id="s", run_id="r1", params={}, label="",
+                  started_at=1.0, n_steps=10)
+    assert query_run_meta(conn, run_id="r1")["generation_id"] is None
+
+
+def test_query_runs_includes_generation_id(tmp_path):
+    conn = connect(tmp_path / "runs.db")
+    save_metadata(conn, spec_id="s", run_id="r1", params={}, label="",
+                  started_at=1.0, n_steps=10, generation_id="gen-X")
+    runs = query_runs(conn, spec_id="s")
+    assert runs[0]["generation_id"] == "gen-X"
 
 
 def test_save_metadata_stores_requested_n_steps_and_log_path(tmp_path):

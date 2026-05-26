@@ -87,7 +87,7 @@ def seed_followup_study(workspace: Path, parent_name: str,
         expected = "TBD — populate before exiting Design phase."
 
     child_spec: dict = {
-        "schema_version": 3,
+        "schema_version": 4,
         "name": new_name,
         "created": today,
         "status": "planned",
@@ -99,7 +99,8 @@ def seed_followup_study(workspace: Path, parent_name: str,
             "kind": fu.get("kind"),
         },
 
-        # Dashboard v3 compatibility — placeholder baseline; user wires real one.
+        # Required by the schema. Placeholder; user wires the real composite
+        # before exiting Design.
         "baseline": [{
             "name": "baseline-placeholder",
             "composite": "v2ecoli.composites.baseline.baseline",
@@ -145,11 +146,42 @@ def seed_followup_study(workspace: Path, parent_name: str,
             "expert": parent_spec.get("bibliography", {}).get("expert", []),
             "bib_keys": [],
         },
-        "runs": [],
         "conclusion": None,
         "parent_studies": [parent_name],
         "tests": {"auto_discover": True, "data_source": "latest_run",
                   "pytest_args": [], "last_results": None},
+    }
+
+    # v4 narrative-spine fields, populated as placeholders so the seeded
+    # study is dnaa-style on day one. The user fills in the report /
+    # study_card / verdicts when the simulations run.
+    child_spec["report"] = {
+        "title": title,
+        "verdict": "not-yet-run",
+        "confidence": "low",
+        "evidence_quality": "aspirational",
+        "objective": question,
+        "conclusion": "",
+        "main_insight": "",
+        "caveat": "",
+        "key_metrics": [],
+    }
+    child_spec["study_card"] = {
+        "goal": title,
+        "mechanism": mechanism if mechanism else "",
+        "why_before_next": "TBD — explain why this study unblocks downstream work.",
+        "expected_result": "",
+        "main_expert_question": "",
+    }
+    child_spec["biological_summary"] = (
+        "(TBD — multi-paragraph plain-English mechanism narrative.)"
+    )
+    child_spec["literature_anchors"] = []
+    child_spec["design_pivot_required"] = []
+    child_spec["conclusion_verdicts"] = {
+        "regression_compatibility": {"result": "PENDING", "basis": ""},
+        "biological_validation": {"result": "PENDING", "basis": ""},
+        "explanatory_gain": {"result": "PENDING", "basis": ""},
     }
 
     new_yaml = new_dir / "study.yaml"
@@ -158,7 +190,9 @@ def seed_followup_study(workspace: Path, parent_name: str,
         f"follow_up_studies[{followup_idx}] ('{title}').\n"
         f"# Original kind: {fu.get('kind') or 'other'}. "
         f"Effort estimate: {fu.get('effort') or '?'}.\n"
-        "# Walk through Design → Build → Simulate → Evaluate → Decide; fill TBD fields as you go.\n\n"
+        "# schema v4 — 14-section narrative spine. Fill the placeholder fields\n"
+        "# (report / study_card / biological_summary / literature_anchors / etc.)\n"
+        "# as the study matures. See NEXT_STEPS.md for the full pattern.\n\n"
     )
     new_yaml.write_text(header + yaml.safe_dump(
         child_spec, sort_keys=False, default_flow_style=False, allow_unicode=True))
