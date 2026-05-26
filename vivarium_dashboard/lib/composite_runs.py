@@ -455,6 +455,8 @@ def collect_emit_paths_from_spec(spec: dict) -> list[str]:
 
     Threaded into ``inject_emitter_for_declared_paths`` so the injected emitter
     captures the study's biology, not just ``_tick``. Sources:
+      - ``readouts[].store_path``                       — v2ecoli explicit
+                                                          per-readout paths
       - ``tests[].measure.path``                        — per-test observables
       - ``behavior_tests[].measure.path``               — legacy v3 fallback
       - ``visualizations[].inputs_map.*`` / ``.config.inputs_map.*``
@@ -475,6 +477,12 @@ def collect_emit_paths_from_spec(spec: dict) -> list[str]:
         return None
 
     paths: set[str] = set()
+    for r in (spec.get("readouts") or []):
+        if not isinstance(r, dict):
+            continue
+        p = _norm(r.get("store_path"))
+        if p:
+            paths.add(p)
     for t in (spec.get("tests") or []) + (spec.get("behavior_tests") or []):
         if not isinstance(t, dict):
             continue

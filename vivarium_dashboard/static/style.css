@@ -1630,3 +1630,234 @@ body.focus-mode::before{
   background: var(--panel, #fff);
   border: 1px solid var(--border, #e5e7eb);
 }
+
+/* ───────────────────────────────────────────────────────────────────
+ * v4 narrative-spine forms — editable cards for report, study_card,
+ * biological_summary, conclusion_verdicts on the Study Detail page.
+ *
+ * Each card lays out as a 2-col grid of label+input rows; "wide" rows
+ * (textareas) span full width with the label above. Inputs save on
+ * blur (text/textarea) or change (select) by POSTing to
+ * /api/study-narrative-set with a dotted path.
+ * =================================================================== */
+.narrative-card {
+  padding: 14px 16px;
+  background: var(--panel, #fff);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+.narrative-card-hint {
+  font-size: 0.78em;
+  color: var(--muted, #6b7280);
+  font-weight: normal;
+  margin-left: 8px;
+}
+.narrative-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, max-content) 1fr;
+  gap: 8px 14px;
+  align-items: start;
+}
+.narrative-row {
+  display: contents;
+}
+.narrative-row-wide {
+  display: block;
+  grid-column: 1 / -1;
+  margin-top: 4px;
+}
+.narrative-row-wide .narrative-label {
+  display: block;
+  margin-bottom: 4px;
+}
+.narrative-label {
+  font-size: 0.86em;
+  font-weight: 600;
+  color: var(--text-secondary, #4b5563);
+  padding-top: 6px;
+}
+.narrative-input {
+  font: inherit;
+  width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--border, #d0d7de);
+  border-radius: 4px;
+  background: var(--bg-alt, #f9fafb);
+  color: var(--text, #1f2937);
+}
+.narrative-input:focus {
+  outline: none;
+  border-color: var(--accent-blue, #2563eb);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+  background: var(--panel, #fff);
+}
+.narrative-textarea {
+  font-family: inherit;
+  resize: vertical;
+  min-height: 38px;
+  line-height: 1.45;
+}
+.narrative-card-input {
+  border-color: transparent;
+  background: transparent;
+  padding: 4px 6px;
+}
+.narrative-card-input:hover,
+.narrative-card-input:focus {
+  border-color: var(--border, #d0d7de);
+  background: var(--bg-alt, #f9fafb);
+}
+.narrative-input.narrative-saved {
+  border-color: var(--accent, #10b981);
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.18);
+  transition: border-color 0.4s ease, box-shadow 0.4s ease;
+}
+.narrative-input.narrative-error {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.18);
+}
+
+/* ───────────────────────────────────────────────────────────────────
+ * Composites tab — workspace-first ordering chrome.
+ *
+ * Each composite card carries a `workspace_local` flag from the
+ * /api/composites response. The new "Workspace first" sort (now the
+ * default) puts these at the top. We also surface the distinction
+ * visually so the user can scan it regardless of the active sort:
+ *
+ *   .composite-ws-tag         small "📦 workspace" pill next to the name
+ *   .module-card-workspace    subtle left-border accent on workspace cards
+ *   .composite-section-divider  thin "Other installed pbg-* modules"
+ *                               separator emitted between groups when
+ *                               the workspace-first sort is active
+ * =================================================================== */
+.composite-ws-tag {
+  display: inline-block;
+  background: #dcfce7;
+  color: #065f46;
+  font-size: 0.7em;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 9999px;
+  margin-left: 4px;
+  vertical-align: middle;
+  letter-spacing: 0.02em;
+}
+.module-card.module-card-workspace {
+  border-left: 3px solid #10b981;
+}
+.composite-section-divider {
+  grid-column: 1 / -1;            /* span all grid columns */
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 6px 0;
+  color: var(--muted, #94a3b8);
+  font-size: 0.78em;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.composite-section-divider::before,
+.composite-section-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border, #e2e8f0);
+}
+.composite-list .composite-section-divider {
+  margin: 10px 0 4px 0;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+ * Registry page — page-level sub-tabs (Modules / Discovered registry).
+ *
+ * The Registry page used to stack three panels (Available modules →
+ * Installed modules → Discovered registry), forcing users to scroll
+ * through a long catalog grid every time they wanted the build_core()
+ * introspection. Split into two sub-tabs so the user picks once.
+ * =================================================================== */
+.registry-subtabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  margin: -4px 0 16px 0;
+}
+.registry-subtab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 9px 16px 11px;
+  margin-bottom: -1px;
+  font: inherit;
+  font-size: 0.95em;
+  font-weight: 600;
+  color: var(--muted, #6b7280);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.registry-subtab:hover { color: var(--text, #1f2937); }
+.registry-subtab.active {
+  color: var(--accent-blue, #2563eb);
+  border-bottom-color: var(--accent-blue, #2563eb);
+}
+.registry-subtab-panel { display: none; }
+.registry-subtab-panel.active { display: block; }
+
+/* ───────────────────────────────────────────────────────────────────
+ * Catalog grid — workspace-package + installed-first chrome.
+ *
+ * After the Installed-modules table got folded into the catalog grid,
+ * each card visually distinguishes itself by tier:
+ *   .module-card-workspace   workspace's own first-party package (top
+ *                            anchor; uninstallable)
+ *   .module-card-installed   installed catalog modules
+ *   (no class)               available-to-install catalog modules
+ *
+ * The .module-section-divider separator marks the boundary between
+ * tiers (workspace → installed → available) so the user can see at a
+ * glance what's already in the workspace vs what's still browseable.
+ * =================================================================== */
+.module-card-workspace {
+  border-left: 3px solid #2563eb;
+  background: var(--bg-alt, #f8fafc);
+}
+.module-card-installed {
+  border-left: 3px solid #10b981;
+}
+.module-row-workspace {
+  background: var(--bg-alt, #f8fafc);
+  border-left: 3px solid #2563eb;
+  padding-left: 9px;
+}
+.module-installed-meta {
+  margin: 4px 0;
+  line-height: 1.5;
+  font-size: 0.85em;
+  color: var(--muted, #6b7280);
+}
+.module-installed-meta code {
+  font-size: 0.92em;
+}
+.module-section-divider {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 6px 0;
+  color: var(--muted, #94a3b8);
+  font-size: 0.78em;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.module-section-divider::before,
+.module-section-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border, #e2e8f0);
+}
+.module-list .module-section-divider {
+  margin: 10px 0 4px 0;
+}

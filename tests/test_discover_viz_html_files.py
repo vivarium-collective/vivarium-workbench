@@ -115,3 +115,42 @@ def test_mixed_fresh_and_stale_both_surface(_ws):
     _touch(_ws / "studies" / "s1" / "viz" / "fresh.html", mtime=now + 1)
     out = {e["name"]: e["stale"] for e in _discover_viz_html_files("s1")}
     assert out == {"fresh (auto)": False, "stale (auto)": True}
+
+
+# ---------------------------------------------------------------------------
+# Second source: reports/figures/<name>/*.html (hand-authored cross-skill output)
+# Added 2026-05-25 after v2ecoli-pdmp friction (had to author embed_visualizations:
+# entries by hand because auto-discovery only knew about studies/<name>/viz/).
+# ---------------------------------------------------------------------------
+
+
+def test_discovers_reports_figures_without_runs_db_gate(_ws):
+    """reports/figures/<name>/*.html surfaces even with no runs.db. These
+    are hand-authored (not run-derived), so the runs.db gate doesn't apply."""
+    from vivarium_dashboard.server import _discover_viz_html_files
+    now = time.time()
+    _touch(_ws / "reports" / "figures" / "s1" / "diagram.html", mtime=now)
+    _touch(_ws / "reports" / "figures" / "s1" / "summary.html", mtime=now)
+    # NO runs.db — would have hidden source 1 viz, but source 2 is unaffected.
+    out = _discover_viz_html_files("s1")
+    assert len(out) == 2
+    names = sorted(e["name"] for e in out)
+    assert names == ["diagram", "summary"]
+    # Hand-authored URL path uses reports/figures/<name>/
+    urls = sorted(e["url"] for e in out)
+    assert urls == ["/reports/figures/s1/diagram.html", "/reports/figures/s1/summary.html"]
+    # No stale flag on the hand-authored side.
+    assert all(e["stale"] is False for e in out)
+
+
+def test_both_sources_concat(_ws):
+    """A study with BOTH studies/<name>/viz/*.html (auto) and
+    reports/figures/<name>/*.html (hand-authored) shows ALL entries."""
+    from vivarium_dashboard.server import _discover_viz_html_files
+    now = time.time()
+    _runs_db(_ws / "studies" / "s1" / "runs.db", latest_completed_at=now)
+    _touch(_ws / "studies" / "s1" / "viz" / "auto.html", mtime=now + 1)
+    _touch(_ws / "reports" / "figures" / "s1" / "hand.html", mtime=now)
+    out = _discover_viz_html_files("s1")
+    names = sorted(e["name"] for e in out)
+    assert names == ["auto (auto)", "hand"]

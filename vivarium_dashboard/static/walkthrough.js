@@ -830,7 +830,13 @@
   window._composites = [];
   window._compositesFilter = { search: '', tags: new Set() };
   window._compositesView = 'grid';
-  window._compositesSort = 'name';
+  // Default sort: workspace-local composites first, then alphabetical.
+  // Surfaces the composites the current investigation actually needs
+  // ahead of the full list of every installed pbg-* package's composites
+  // — the Composites tab grew unwieldy as more pbg-* packages came
+  // online. Other sorts (name / module / kind) remain available via the
+  // dropdown.
+  window._compositesSort = 'workspace-first';
 
   function _buildCompositeChips() {
     var chipsEl = document.getElementById('composite-tag-chips');
@@ -870,7 +876,7 @@
   window._setCompositeView = _setCompositeView;
 
   function _setCompositesSort(value) {
-    window._compositesSort = value || 'name';
+    window._compositesSort = value || 'workspace-first';
     _renderComposites();
   }
   window._setCompositesSort = _setCompositesSort;
@@ -895,7 +901,13 @@
       return true;
     });
 
-    // Apply sort toggle (Name / Module / Kind). Ties break on name.
+    // Apply sort toggle (Workspace first / Name / Module / Kind). Ties
+    // break on name. Workspace-first puts composites whose `module` starts
+    // with the workspace's own package prefix (backend-annotated as
+    // `workspace_local: true` on each /api/composites record) at the top,
+    // followed by every-installed-pbg-* composites alphabetically. When
+    // grouping, _renderGroupedComposites below inserts a visual section
+    // divider between the two groups.
     var sorted = composites.slice();
     if (window._compositesSort === 'module') {
       sorted.sort(function(a, b) {
@@ -905,6 +917,13 @@
     } else if (window._compositesSort === 'kind') {
       sorted.sort(function(a, b) {
         return (a.kind || '').localeCompare(b.kind || '')
+          || (a.name || '').localeCompare(b.name || '');
+      });
+    } else if (window._compositesSort === 'workspace-first') {
+      sorted.sort(function(a, b) {
+        var aw = a.workspace_local ? 0 : 1;
+        var bw = b.workspace_local ? 0 : 1;
+        return (aw - bw)
           || (a.name || '').localeCompare(b.name || '');
       });
     } else {
@@ -929,15 +948,38 @@
       return '<div class="composite-module"><small>Module:</small> ' +
         '<code>' + _esc(mod) + '</code>' + kindBadge + '</div>';
     }
+    function _wsTag(c) {
+      // Small "📦 workspace" pill on cards whose composite lives in the
+      // workspace's own package. Helps the user scan quickly even when
+      // the workspace-first sort isn't active.
+      return c.workspace_local
+        ? '<span class="composite-ws-tag">📦 workspace</span>' : '';
+    }
+    // Section-divider injector — emits a thin "Other modules" separator
+    // between the last workspace-local item and the first non-local item
+    // when the workspace-first sort is active and both groups are present.
+    // Returns '' otherwise so existing layouts are byte-identical.
+    function _maybeDivider(prev, cur) {
+      if (window._compositesSort !== 'workspace-first') return '';
+      if (!prev || !cur) return '';
+      if (prev.workspace_local && !cur.workspace_local) {
+        return '<div class="composite-section-divider">'
+             + '<span>Other installed pbg-* modules</span></div>';
+      }
+      return '';
+    }
 
     if (window._compositesView === 'list') {
       container.className = 'composite-list';
+      var prevC = null;
       var rows = composites.map(function(c) {
         var tagPills = (c.tags || []).map(function(t) {
           return '<span class="tag-pill">' + _esc(t) + '</span>';
         }).join('');
-        return '<div class="composite-list-row">' +
-          '<span class="name">' + _esc(c.name) + '</span>' +
+        var divider = _maybeDivider(prevC, c);
+        prevC = c;
+        return divider + '<div class="composite-list-row">' +
+          '<span class="name">' + _esc(c.name) + ' ' + _wsTag(c) + '</span>' +
           '<span class="desc">' + tagPills + ' ' + _esc(c.description || '(no description)') +
             _moduleLine(c) +
           '</span>' +
@@ -947,6 +989,7 @@
       container.innerHTML = rows.join('');
     } else {
       container.className = 'module-grid';
+      var prevG = null;
       var cards = composites.map(function(c) {
         var paramSummary = '';
         var paramKeys = Object.keys(c.parameters || {});
@@ -968,8 +1011,10 @@
               return '<span class="tag-pill" style="background:#e0e7ff;color:#3730a3">' + _esc(t) + '</span>';
             }).join(' ') + '</div>';
         }
-        return '<div class="module-card">' +
-          '<div class="module-card-header"><strong>' + _esc(c.name) + '</strong></div>' +
+        var divider = _maybeDivider(prevG, c);
+        prevG = c;
+        return divider + '<div class="module-card' + (c.workspace_local ? ' module-card-workspace' : '') + '">' +
+          '<div class="module-card-header"><strong>' + _esc(c.name) + '</strong> ' + _wsTag(c) + '</div>' +
           '<p class="module-desc">' + _esc(c.description || '(no description)') + '</p>' +
           _moduleLine(c) +
           requires +
@@ -1145,19 +1190,26 @@
     var search = f.search.toLowerCase();
     var activeTags = f.tags;
     var modules = window._catalogModules.filter(function(m) {
-      // The workspace's own first-party package is surfaced in
-      // Installed modules only — it's not an installable catalog item.
-      if (m.kind === 'workspace') return false;
-      // Search filter
-      if (search) {
+      // The workspace's own first-party package (kind === 'workspace')
+      // used to be filtered out here because it had its own dedicated
+      // row in the now-removed "Installed modules" table. After the
+      // page-reorg (separate Installed panel folded into this catalog
+      // grid), it gets pinned at the very top instead — see the
+      // installed-first sort below.
+      // Search filter — workspace package is exempt from text-search
+      // hiding (it should always show as the pinned "your workspace"
+      // card so users have a stable anchor at the top of the grid).
+      if (search && m.kind !== 'workspace') {
         var haystack = (m.name + ' ' + (m.description || '') + ' ' + (m.tags || []).join(' ')).toLowerCase();
         if (haystack.indexOf(search) === -1) return false;
       }
-      // Installed filter
-      if (f.installed === 'installed' && !m.installed) return false;
-      if (f.installed === 'uninstalled' && m.installed) return false;
-      // Tag chip filter (OR within: pass if any selected tag matches)
-      if (activeTags.size > 0) {
+      // Installed filter — workspace package always passes (it's
+      // structurally installed).
+      if (f.installed === 'installed' && !m.installed && m.kind !== 'workspace') return false;
+      if (f.installed === 'uninstalled' && (m.installed || m.kind === 'workspace')) return false;
+      // Tag chip filter (OR within: pass if any selected tag matches).
+      // Workspace package is exempt (no tags).
+      if (activeTags.size > 0 && m.kind !== 'workspace') {
         var mTags = m.tags || [];
         var match = false;
         activeTags.forEach(function(t) { if (mTags.indexOf(t) !== -1) match = true; });
@@ -1166,53 +1218,132 @@
       return true;
     });
 
+    // Sort: workspace package first (anchor), then installed modules
+    // (alphabetical), then everything else (alphabetical). This is the
+    // visible expression of "what's in your workspace surfaces first;
+    // browse-everything is secondary" — the same pattern the Composites
+    // tab adopted (workspace-first sort) for the same reason.
+    modules.sort(function(a, b) {
+      var aw = a.kind === 'workspace' ? 0 : 1;
+      var bw = b.kind === 'workspace' ? 0 : 1;
+      if (aw !== bw) return aw - bw;
+      var ai = a.installed ? 0 : 1;
+      var bi = b.installed ? 0 : 1;
+      if (ai !== bi) return ai - bi;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+
     if (!modules.length) {
       grid.innerHTML = '<p class="empty-state">No modules match the current filter.</p>';
       grid.className = '';
       return;
     }
 
+    function _installedMeta(m) {
+      // Source / ref / path rows that used to live in the now-removed
+      // "Installed modules" table. Surface them inline on installed
+      // cards so the info isn't lost.
+      if (!m.installed && m.kind !== 'workspace') return '';
+      var bits = [];
+      if (m.source) bits.push('<small class="muted">Source: <code>' + _esc(m.source) + '</code>' +
+        (m.ref ? ' @ <code>' + _esc(m.ref) + '</code>' : '') + '</small>');
+      var path = m.install_path || m.path;
+      if (path) bits.push('<small class="muted">Path: <code>' + _esc(path) + '</code></small>');
+      return bits.length ? '<div class="module-installed-meta">' + bits.join('<br>') + '</div>' : '';
+    }
+
+    function _actionFor(m) {
+      // Workspace's own first-party package is not uninstallable — show
+      // a "first-party" pill. Otherwise: Install or Uninstall.
+      if (m.kind === 'workspace') {
+        return '<span class="status-pill installed" title="The workspace\'s own first-party package. Always present; cannot be uninstalled.">first-party</span>';
+      }
+      if (m.installed) {
+        return '<span class="status-pill installed">installed</span>' +
+          ' <button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
+      }
+      return '<button class="action-btn" onclick="_installFromCatalog(\'' + _esc(m.name) + '\')">Install</button>';
+    }
+
+    // Section divider injected at boundaries: workspace → installed →
+    // available. Spans all grid columns; styled in style.css under
+    // .module-section-divider.
+    function _maybeSectionDivider(prev, cur) {
+      if (!prev || !cur) return '';
+      var prevSection = prev.kind === 'workspace' ? 0 : (prev.installed ? 1 : 2);
+      var curSection  = cur.kind  === 'workspace' ? 0 : (cur.installed  ? 1 : 2);
+      if (prevSection === curSection) return '';
+      var label = (curSection === 1)
+        ? 'Installed in this workspace'
+        : 'Available to install';
+      return '<div class="module-section-divider"><span>' + label + '</span></div>';
+    }
+
     if (window._catalogView === 'list') {
       grid.className = 'module-list';
+      var prevL = null;
       var rows = modules.map(function(m) {
-        var actionBtn = m.installed
-          ? '<span class="status-pill installed">installed</span>' +
-            ' <button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>'
-          : '<button class="action-btn" onclick="_installFromCatalog(\'' + _esc(m.name) + '\')">Install</button>';
+        var divider = _maybeSectionDivider(prevL, m);
+        prevL = m;
         var tagPills = (m.tags || []).map(function(t) {
           return '<span class="tag-pill">' + _esc(t) + '</span>';
         }).join('');
-        return '<div class="module-list-row">' +
+        return divider + '<div class="module-list-row' + (m.kind === 'workspace' ? ' module-row-workspace' : '') + '">' +
           '<span class="name">' + _esc(m.name) + '</span>' +
-          '<span class="desc">' + tagPills + ' ' + _esc(m.description || '') + '</span>' +
-          '<span>' + actionBtn + '</span>' +
+          '<span class="desc">' + tagPills + ' ' + _esc(m.description || '') + _installedMeta(m) + '</span>' +
+          '<span>' + _actionFor(m) + '</span>' +
           '</div>';
       });
       grid.innerHTML = rows.join('');
     } else {
       grid.className = 'module-grid';
+      var prevG = null;
       var cards = modules.map(function(m) {
-        var actionBtn = m.installed
-          ? '<span class="status-pill installed">installed</span>' +
-            ' <button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>'
-          : '<button class="action-btn" onclick="_installFromCatalog(\'' + _esc(m.name) + '\')">Install</button>';
+        var divider = _maybeSectionDivider(prevG, m);
+        prevG = m;
         var tags = (m.tags || []).map(function(t) {
           return '<span class="tag-pill">' + _esc(t) + '</span>';
         }).join(' ');
         var homepage = m.homepage
           ? '<a href="' + _esc(m.homepage) + '" target="_blank" class="module-link">GitHub &#8599;</a>'
           : '';
-        return '<div class="module-card">' +
+        var workspaceCls = (m.kind === 'workspace') ? ' module-card-workspace'
+                          : (m.installed ? ' module-card-installed' : '');
+        return divider + '<div class="module-card' + workspaceCls + '">' +
           '<div class="module-card-header"><strong>' + _esc(m.name) + '</strong> ' + homepage + '</div>' +
           '<p class="module-desc">' + _esc(m.description) + '</p>' +
           '<div class="module-tags">' + tags + '</div>' +
-          '<div class="module-action">' + actionBtn + '</div>' +
+          _installedMeta(m) +
+          '<div class="module-action">' + _actionFor(m) + '</div>' +
           '</div>';
       });
       grid.innerHTML = cards.join('');
     }
   }
   window._renderCatalog = _renderCatalog;
+
+  // Registry page sub-tab toggle. Two sub-tabs: "modules" (the catalog
+  // grid above, where the workspace package + installed modules now
+  // pin at top) and "discovered" (the live build_core() introspection
+  // — Processes / Steps / Emitters / Visualizations / Types). The old
+  // layout stacked these as three scrolling panels; sub-tabs let users
+  // flip without scrolling.
+  function _setRegistrySubtab(name) {
+    name = name || 'modules';
+    document.querySelectorAll('.registry-subtab').forEach(function(el) {
+      el.classList.toggle('active', el.dataset.subtab === name);
+    });
+    document.querySelectorAll('.registry-subtab-panel').forEach(function(el) {
+      el.classList.toggle('active', el.dataset.subtab === name);
+    });
+    // First time the discovered subtab opens, ensure registry is
+    // populated (it's lazy-loaded). _loadRegistry no-ops on second call
+    // unless force=true, so this is cheap when called repeatedly.
+    if (name === 'discovered' && typeof _loadRegistry === 'function') {
+      _loadRegistry(false);
+    }
+  }
+  window._setRegistrySubtab = _setRegistrySubtab;
 
   // -------------------------------------------------------------------------
   // Installed modules: dynamic render from /api/catalog (single source of truth)
@@ -3333,6 +3464,21 @@
         if (!window._isetIndex.length) return;
         var active = window._currentIset;
         if (!active) {
+          // Prefer the slug published by investigation-switcher.js from
+          // /api/investigation-registry — it already does the git-branch
+          // match + running-iset + alphabetical-fallback chain, and
+          // staying consistent with it keeps trigger label + STUDIES
+          // rail + Investigation-tab detail all pointing at the same
+          // iset.
+          var pubSlug = window._currentIsetSlug || '';
+          if (pubSlug) {
+            for (var pi = 0; pi < window._isetIndex.length; pi++) {
+              if (window._isetIndex[pi].name === pubSlug) { active = pubSlug; break; }
+            }
+          }
+        }
+        if (!active) {
+          // Legacy fallback: investigation/<name> branch prefix.
           var branch = (window._gitStatus && window._gitStatus.active_branch) || '';
           var m = /^investigation\/(.+)$/.exec(branch);
           if (m) {
@@ -5601,11 +5747,35 @@
               // the iframe height directly so _fitEmbed's measurements can't
               // over- or under-grow it. Unclamped embeds (e.g. the tall
               // chromosome figures) fall through to _fitEmbed's autosize.
-              var _hClamp = (emb.html || '').match(/html,body\{height:(\d+)px/);
+              // Lenient regex: matches `html,body { ... height: NNNpx ... }`
+              // regardless of property order inside the rule. Earlier strict
+              // form `/html,body\{height:(\d+)px/` only matched when `height:`
+              // was the FIRST property; viz authors who put `margin:0;padding:0;`
+              // first lost the clamp and got auto-resized to scrollHeight
+              // (which misreports for matplotlib-PNG bodies and for charts
+              // whose legend overflows the chart div).
+              var _hClamp = (emb.html || '').match(/html\s*,\s*body\s*\{[^}]*\bheight\s*:\s*(\d+)px/);
               var _hStyle = _hClamp ? (';height:' + (parseInt(_hClamp[1], 10) + 24) + 'px') : '';
+              // Infrastructural no-scrollbar guarantee:
+              //   scrolling="no"     — kills the browser iframe scrollbar
+              //                        regardless of any size mismatch
+              //                        between _fitEmbed's measurement
+              //                        and the inner content's actual
+              //                        rendered height. Plotly's legend-
+              //                        overflow scrollbars previously
+              //                        leaked through because the chart
+              //                        div was sized for the chart but
+              //                        not the wrapped legend rows.
+              //   min-height:520px   — under-measured iframes still show
+              //                        enough vertical space for the
+              //                        typical Plotly chart (340 chart
+              //                        area + 6-row wrapped legend ≈
+              //                        508 px). _fitEmbed grows beyond
+              //                        this when scrollHeight is larger.
               var iframe = '<iframe srcdoc="' + escaped + '" '
                 + 'class="embed-frame" onload="_wireEmbed(this)" '
-                + 'style="width:100%;min-height:200px;border:0;display:block' + _hStyle + '" '
+                + 'scrolling="no" '
+                + 'style="width:100%;min-height:520px;border:0;display:block;overflow:hidden' + _hStyle + '" '
                 + 'title="' + _h(emb.name) + '"></iframe>';
               if (isStale) {
                 // Collapsed by default; re-fit on expand.
@@ -5732,17 +5902,21 @@
 
       if (isPlanning) {
         // Planning-phase layout — minimal, expert-comment-driven.
+        // The <header class="study-header"> chrome (num + slug + phase
+        // badge + status badge + Depends on + Blocks) was REMOVED because
+        // every field is already in the sticky control panel above
+        // (sp-top + sp-meta from _studyControlPanel). The v4 render path
+        // dropped this same header at line ~6172 for the same reason;
+        // this is the v3 sibling fix. Anchor (#study-<slug>) is on the
+        // <details> element itself, not the h2, so URL hashes still
+        // resolve. The "PLANNING — not yet run" pill is preserved as a
+        // standalone callout because the sticky panel doesn't render it.
         return ''
           + '<details class="study-fold verdict-' + verdictBadge.cls + '" id="study-' + slug + '">'
           +   '<summary class="study-panel">' + controlPanelHtml + '</summary>'
           + '<section class="study study-planning">'
           +   subNav
-          +   '<header class="study-header">'
-          +     '<h2><span class="study-num">' + (i + 1) + '.</span> ' + _h(s.name) + ' ' + phaseBadge + statusBadge + '</h2>'
-          +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
-          +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
-          +     '<div class="study-planning-pill">PLANNING — not yet run</div>'
-          +   '</header>'
+          +   '<div class="study-planning-pill">PLANNING — not yet run</div>'
           +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
           +   enforcementHtml     // ⚠ declared params not applied (D.2)
           +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
@@ -5765,16 +5939,15 @@
       }
 
       // Post-execution layout — full v3 flow including decision + findings.
+      // <header class="study-header"> dropped for the same reason as the
+      // planning path + the v4 path: every field (num, slug, phase badge,
+      // status badge, Depends on, Blocks) is already in the sticky control
+      // panel's sp-top + sp-meta rows above.
       return ''
         + '<details class="study-fold verdict-' + verdictBadge.cls + '" id="study-' + slug + '">'
         +   '<summary class="study-panel">' + controlPanelHtml + '</summary>'
         + '<section class="study">'
         +   subNav
-        +   '<header class="study-header">'
-        +     '<h2><span class="study-num">' + (i + 1) + '.</span> ' + _h(s.name) + ' ' + phaseBadge + statusBadge + '</h2>'
-        +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
-        +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
-        +   '</header>'
         +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
         +   enforcementHtml     // ⚠ declared params not applied (D.2)
         +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
@@ -6035,14 +6208,151 @@
         +   '<nav class="study-nav-row2">' + links.join('') + '</nav>'
         + '</div>';
 
+      // Wrap the v4 narrative-spine section in a <details class="study-fold">
+      // so the Expand all / Collapse all toolbar buttons (which target
+      // .study-fold) actually have something to operate on. v3 studies got
+      // this for free via v3StudySection's <details> wrapper; v4 sections
+      // were left flat and the buttons did nothing on v4-only investigations.
+      // Open by default so existing reader behaviour is unchanged.
+      //
+      // Reuses the v3 `.sp-*` CSS classes so the collapsed-card look matches
+      // what v3 readers already see: num + title + verdict / one-line
+      // objective / slug+depth meta / chips for predictions + variants +
+      // refs / expand hint. Populated from v4 narrative-spine fields:
+      // objective for the one-liner, expected_behavior for the chips, etc.
+      var v4Title    = s.title || _humanizeStudyName(s.name).title;
+      var v4Verdict  = (function() {
+        var st = (s.status || 'planning').toLowerCase();
+        if (st === 'planning' || st === 'planned') return {cls: 'v-prelim', emoji: '📋', label: 'Planned'};
+        if (st === 'running' || st === 'in_progress') return {cls: 'v-cal', emoji: '🔬', label: 'Running'};
+        if (st === 'complete' || st === 'ran' || st === 'passed') return {cls: 'v-pass', emoji: '✅', label: 'Complete'};
+        if (st === 'failed' || st === 'invalid') return {cls: 'v-fail', emoji: '❌', label: 'Failed'};
+        return {cls: 'v-none', emoji: '·', label: _h(s.status || 'planning')};
+      })();
+      var v4Objective = _firstSentence(s.objective || '');
+      var v4Meta = ['<code>' + _h(s.name) + '</code>',
+                    'depth ' + (depthMap[s.name] || 0)];
+      if (s.phase) v4Meta.push('phase ' + _h(s.phase));
+      if (s.topic) v4Meta.push('topic ' + _h(s.topic));
+
+      // Rich-panel content: an optional `report:` block on the study
+      // YAML (same shape as v3 _studyControlPanel reads) drives the
+      // dnaa-style Confidence/Evidence chips + CONCLUSION/INSIGHT/CAVEAT
+      // rows + status-colored key_metrics. Synthesises sensible
+      // pre-execution scaffold values when the block is missing or
+      // partial, so a fresh investigation lands with a populated card
+      // instead of an empty one.
+      var rep = s.report || {};
+      var v4Conf = (rep.confidence || '').trim();
+      var v4Ev   = (rep.evidence_quality || '').trim();
+      if (!v4Conf && (v4Verdict.label === 'Planned')) v4Conf = 'design-stage';
+      if (!v4Ev   && (v4Verdict.label === 'Planned')) v4Ev   = 'scaffold';
+      var v4Conclusion = rep.conclusion   || _firstSentence(rep.result)
+                       || (v4Verdict.label === 'Planned' && s.hypothesis
+                            ? 'Predicted — ' + _firstSentence(s.hypothesis) : '');
+      var v4Insight    = rep.main_insight || _firstSentence(rep.interpretation);
+      var v4Caveat     = rep.caveat;
+      if (!v4Caveat && Array.isArray(s.limitations) && s.limitations.length) {
+        var l0 = s.limitations[0];
+        v4Caveat = (typeof l0 === 'string') ? l0 : (l0 && (l0.text || l0.limitation)) || '';
+      }
+      var v4LitMatch = (rep.lit_match || '').trim();
+
+      // Chip strip: rich key_metrics (label+value+status) when authored,
+      // else auto-derived prediction-count + status breakdown + variants
+      // + refs + deps.
+      var v4Chips = [];
+      (rep.key_metrics || []).forEach(function(m) {
+        if (typeof m === 'string') {
+          v4Chips.push('<span class="sp-metric">' + _h(m) + '</span>');
+        } else if (m && typeof m === 'object') {
+          var st = (m.status || '').toLowerCase();
+          var icon = st === 'pass' ? '✅ ' : st === 'warn' ? '⚠️ ' : st === 'fail' ? '❌ ' : '';
+          var txt = (m.label || '') + (m.value != null ? ': ' + m.value : '');
+          v4Chips.push('<span class="sp-metric sp-metric-' + _h(st || 'plain') + '">' + icon + _h(txt) + '</span>');
+        }
+      });
+      var ebList = s.expected_behavior || [];
+      if (ebList.length) {
+        var counts = {stub: 0, gated: 0, implemented: 0};
+        ebList.forEach(function(b) {
+          var st = (b && b.status) || 'implemented';
+          if (counts[st] !== undefined) counts[st]++;
+        });
+        v4Chips.push('<span class="sp-metric">' + ebList.length + ' predictions</span>');
+        if (counts.implemented) v4Chips.push('<span class="sp-metric sp-metric-pass">✅ ' + counts.implemented + ' implemented</span>');
+        if (counts.gated)       v4Chips.push('<span class="sp-metric sp-metric-warn">⏳ ' + counts.gated + ' gated</span>');
+        if (counts.stub)        v4Chips.push('<span class="sp-metric">🟡 ' + counts.stub + ' stub</span>');
+      }
+      var nVar = (s.variants || []).length;
+      if (nVar) v4Chips.push('<span class="sp-metric">' + nVar + ' variants</span>');
+      var v4Bib = (s.bibliography && s.bibliography.bib_keys) || [];
+      if (v4Bib.length) v4Chips.push('<span class="sp-metric">' + v4Bib.length + ' refs</span>');
+      var nParents = (s.parent_studies || []).length;
+      if (nParents) v4Chips.push('<span class="sp-metric">depends on ' + nParents + '</span>');
+      var nKids = (children[s.name] || []).length;
+      if (nKids) v4Chips.push('<span class="sp-metric">blocks ' + nKids + '</span>');
+      if (v4LitMatch) v4Chips.push('<span class="sp-metric">Lit match: ' + _h(v4LitMatch) + '</span>');
+
+      // Section-nav chips inside the sticky panel. CSS hides this row
+      // when the fold is COLLAPSED (it would just duplicate the
+      // metric chips below); when OPEN, the rich rows are hidden and
+      // this nav becomes the primary content of the sticky strip, so
+      // the user can jump to Question / Background / Predictions / etc.
+      // without scrolling back to the topbar.
+      var spSectionNav = links.length
+        ? '<nav class="sp-section-nav">' + links.join('') + '</nav>'
+        : '';
+
+      var foldSummary = ''
+        + '<summary class="study-panel">'
+        +   '<div class="sp-top">'
+        +     '<span class="sp-num">' + (i + 1) + '.</span>'
+        +     '<span class="sp-title">' + _h(v4Title) + '</span>'
+        +     '<span class="sp-verdict ' + v4Verdict.cls + '">' + v4Verdict.emoji + ' ' + _h(v4Verdict.label) + '</span>'
+        +   '</div>'
+        +   spSectionNav
+        +   (v4Objective ? '<div class="sp-objective">' + _h(v4Objective) + '</div>' : '')
+        +   '<div class="sp-meta">' + v4Meta.join(' · ') + '</div>'
+        +   ((v4Conf || v4Ev)
+              ? '<div class="sp-quality">'
+                + (v4Conf ? '<span class="sp-conf sp-conf-' + _h(v4Conf.toLowerCase()) + '">Confidence: ' + _h(v4Conf) + '</span>' : '')
+                + (v4Ev   ? '<span class="sp-ev">Evidence: ' + _h(v4Ev) + '</span>' : '')
+                + '</div>'
+              : '')
+        +   (v4Conclusion ? '<div class="sp-conclusion"><span class="sp-lbl">Conclusion</span> ' + _h(v4Conclusion) + '</div>' : '')
+        +   (v4Chips.length ? '<div class="sp-metrics">' + v4Chips.join('') + '</div>' : '')
+        +   (v4Insight ? '<div class="sp-insight"><span class="sp-lbl">Insight</span> ' + _h(v4Insight) + '</div>' : '')
+        +   (v4Caveat  ? '<div class="sp-caveat"><span class="sp-lbl">Caveat</span> '   + _h(v4Caveat)  + '</div>' : '')
+        +   '<span class="sp-expand-hint">▸ click to expand full study</span>'
+        + '</summary>';
+
+      // Dropped chrome on the v4 expanded section to remove three forms
+      // of redundancy with the (now-rich) sp-* summary panel:
+      //   1. subNav (sticky study-nav with chips like Question / Background
+      //      / Predictions / Cited refs) — the sp-metrics chips in the
+      //      summary panel already convey the same counts; the topbar nav
+      //      handles cross-study navigation. Removing it also kills the
+      //      double-sticky stack (topbar + study-fold panel + study-nav).
+      //   2. <header class="study-header"><h2>num. slug status</h2></header>
+      //      — every field is in sp-top + sp-meta of the panel above.
+      //   3. The "Depends on / Blocks" paragraphs that lived in the
+      //      header — these are now shown as the resolved dep list right
+      //      below the summary so the dep slugs (not just counts) stay
+      //      visible while the panel is sticky.
+      var depsLine = '';
+      if (parents || kids) {
+        var bits = [];
+        if (parents) bits.push('<span class="muted">Depends on:</span> ' + parents);
+        if (kids)    bits.push('<span class="muted">Blocks:</span> '     + kids);
+        depsLine = '<p class="study-deps muted small">' + bits.join(' &nbsp;·&nbsp; ') + '</p>';
+      }
+
       return ''
+        + '<details class="study-fold" id="study-fold-' + slug + '">'
+        + foldSummary
         + '<section class="study" id="study-' + slug + '">'
-        +   subNav
-        +   '<header class="study-header">'
-        +     '<h2><span class="study-num">' + (i + 1) + '.</span> ' + _h(s.name) + ' ' + statusBadge + '</h2>'
-        +     (parents ? '<p class="muted small">Depends on: ' + parents + '</p>' : '<p class="muted small">Root study (no dependencies).</p>')
-        +     (kids    ? '<p class="muted small">Blocks: '     + kids    + '</p>' : '')
-        +   '</header>'
+        +   depsLine
 
         +   '<div class="qh" id="' + sidQ + '">'
         +     (s.question   ? '<p><strong>Question.</strong> '   + _multiline(s.question)   + '</p>' : '')
@@ -6069,7 +6379,8 @@
 
         +   (bibList ? '<div id="' + sidRe + '"><h3>References cited by this study</h3><p>' + bibList + '</p></div>' : '')
 
-        + '</section>';
+        + '</section>'
+        + '</details>';
     }
 
     // ── PARTS grouping (framework): investigation.yaml may declare a `parts`
@@ -6561,8 +6872,45 @@
       // When a study is open: make its header sticky so the collapse arrow
       // stays in view while scrolling inside the study. One click collapses
       // and the next study floats into view — no scrolling back to the top.
-      + '.study-fold[open]>.study-panel{position:sticky;top:0;z-index:10;border-bottom:1px solid #e2e8f0;border-radius:9px 9px 0 0;background:#f8fafc;box-shadow:0 1px 4px rgba(0,0,0,.06)}'
-      + '.study-fold[open]>.study-panel::after{content:"▴ click to collapse";float:right;font-size:0.75em;color:#64748b;font-weight:normal;margin-left:12px;line-height:inherit}'
+      + '.study-fold[open]>.study-panel{position:sticky;top:0;z-index:10;padding:8px 16px;border-bottom:1px solid #e2e8f0;border-radius:9px 9px 0 0;background:#f8fafc;box-shadow:0 1px 4px rgba(0,0,0,.06)}'
+      // Sticky-when-open: hide the rich content rows (still visible
+      // below in the expanded body — no information lost, just no
+      // longer duplicated). The section-nav row stays visible to
+      // serve as the in-study jump-target navigation.
+      + '.study-fold[open]>.study-panel .sp-objective,'
+      + '.study-fold[open]>.study-panel .sp-meta,'
+      + '.study-fold[open]>.study-panel .sp-quality,'
+      + '.study-fold[open]>.study-panel .sp-conclusion,'
+      + '.study-fold[open]>.study-panel .sp-metrics,'
+      + '.study-fold[open]>.study-panel .sp-insight,'
+      + '.study-fold[open]>.study-panel .sp-caveat{display:none}'
+      // Section-nav chips: hidden in the collapsed card (would
+      // duplicate the metric chips); shown ONLY when the fold is
+      // open so the sticky strip provides in-study navigation.
+      + '.sp-section-nav{display:none}'
+      + '.study-fold[open]>.study-panel .sp-section-nav{'
+      +   'display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 0;width:100%'
+      + '}'
+      + '.sp-section-nav a{'
+      +   'display:inline-block;padding:2px 10px;border-radius:9999px;'
+      +   'font-size:0.83em;color:#3b82f6;text-decoration:none;'
+      +   'background:#eff6ff;border:1px solid transparent'
+      + '}'
+      + '.sp-section-nav a:hover{background:#dbeafe;border-color:#bfdbfe}'
+      + '.sp-section-nav .sn-count{'
+      +   'display:inline-block;margin-left:5px;padding:0 6px;border-radius:9999px;'
+      +   'background:rgba(59,130,246,0.13);color:#3b82f6;font-size:0.85em;'
+      + '}'
+      // Prominent collapse affordance (open state). Replaces the small
+      // float:right hint with a button-style chip in the top-right of
+      // the sticky strip; visible at a glance + obvious click target.
+      + '.study-fold[open]>.study-panel{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}'
+      + '.study-fold[open]>.study-panel>.sp-top{flex:1 1 auto;min-width:0;margin:0}'
+      + '.study-fold[open]>.study-panel::after{'
+      +   'content:"▴ click to collapse full study";'
+      +   'font-size:0.73em;color:#94a3b8;font-weight:normal;flex:none;'
+      + '}'
+      + '.study-fold[open]>.study-panel:hover::after{color:#64748b}'
       + '.study-fold.verdict-v-pass>.study-panel{border-left-color:#16a34a}'
       + '.study-fold.verdict-v-warn>.study-panel{border-left-color:#d97706}'
       + '.study-fold.verdict-v-block>.study-panel{border-left-color:#dc2626}'
@@ -6645,7 +6993,18 @@
       +     'var hm=(bStyle.height||"").match(/^(\\d+(?:\\.\\d+)?)px$/);'
       +     'if(hm)pinnedH=Math.round(parseFloat(hm[1]));'
       +   '}'
-      +   'var h=pinnedH>0?pinnedH:Math.max(e?e.scrollHeight:0,b?b.scrollHeight:0);'
+      +   // Plotly charts that overflow their fixed-height div report the
+      +   // chart-div height in scrollHeight, not the legend overflow. Walk
+      +   // any .plotly-graph-div / [id^="dnaa-"] / [id="chart"] children
+      +   // and add their full computed scrollHeight to the measurement so
+      +   // the iframe grows to fit the chart + ITS internal legend.
+      +   'var plotlyMax=0;try{var charts=d.querySelectorAll(\'.plotly-graph-div, [data-plotly], div[id]\');'
+      +     'for(var ci=0;ci<charts.length;ci++){var c=charts[ci];'
+      +       'var rect=c.getBoundingClientRect&&c.getBoundingClientRect();var top=rect?rect.top:0;'
+      +       'var ch=Math.max(c.scrollHeight||0,c.offsetHeight||0,c.clientHeight||0);'
+      +       'var totalTo=top+ch;if(totalTo>plotlyMax)plotlyMax=totalTo;}}catch(_e){}'
+      +   'var docH=Math.max(e?e.scrollHeight:0,b?b.scrollHeight:0,plotlyMax);'
+      +   'var h=pinnedH>0?pinnedH:docH;'
       +   'if(h>0)f.style.height=(h+24)+"px";}catch(e){}};'
       + 'window._wireEmbed=function(f){window._fitEmbed(f);'
       +   'try{var d=f.contentDocument;if(window.ResizeObserver&&d){var ro=new ResizeObserver(function(){window._fitEmbed(f);});'
@@ -6804,8 +7163,24 @@
       +   '<h2 id="studies-heading">Studies' + (hasDag ? ' (dependency order)' : '') + '</h2>'
       +   '<p class="muted small">Each study is collapsed to a one-glance control panel — scan top to bottom, then click any panel to expand its full detail.</p>'
       +   '<div class="studies-toolbar">'
-      +     '<button type="button" onclick="document.querySelectorAll(\'.study-fold\').forEach(function(d){d.open=true})">Expand all</button>'
-      +     '<button type="button" onclick="document.querySelectorAll(\'.study-fold\').forEach(function(d){d.open=false})">Collapse all</button>'
+      +     '<button type="button" id="studies-expand-all">Expand all</button>'
+      +     '<button type="button" id="studies-collapse-all">Collapse all</button>'
+      +     '<script>(function(){'
+      +       'function findFolds(){return Array.from(document.querySelectorAll(".study-fold"));}'
+      +       'function setAll(open){'
+      +         'var folds=findFolds();'
+      +         'console.log("[studies-toolbar] "+(open?"expand":"collapse")+" "+folds.length+" .study-fold elements");'
+      +         'folds.forEach(function(d){d.open=open;});'
+      +         'if(open&&folds.length){folds[0].scrollIntoView({behavior:"smooth",block:"start"});}'
+      +       '}'
+      +       'function wire(){'
+      +         'var ex=document.getElementById("studies-expand-all");'
+      +         'var co=document.getElementById("studies-collapse-all");'
+      +         'if(ex)ex.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();setAll(true);});'
+      +         'if(co)co.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();setAll(false);});'
+      +       '}'
+      +       'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",wire);}else{wire();}'
+      +     '})();</script>'
       +   '</div>'
       +   studiesHtml
 
@@ -7197,6 +7572,24 @@
     });
     var ungrouped = window._investigations.filter(function(s) { return !seen[s.name]; });
     if (ungrouped.length) groups.push({name: '__ungrouped__', title: 'Ungrouped', studies: ungrouped});
+
+    // Scope to current investigation: when the cross-worktree registry
+    // has identified a current iset (window._currentIsetSlug, set by
+    // investigation-switcher.js after fetching /api/investigation-registry)
+    // AND that iset has a group here, drop every other group so the rail
+    // reflects only the studies the user is actively working on. The
+    // iset dropdown at the top of the rail is the way to switch isets;
+    // listing every iset's studies in the rail itself was just noise.
+    // Falls back to the full all-groups render if no current slug is
+    // known yet (registry still loading) or if the current slug doesn't
+    // match any group (defensive).
+    var currentSlug = window._currentIsetSlug || '';
+    if (currentSlug) {
+      var hasCurrent = groups.some(function(g) { return g.name === currentSlug; });
+      if (hasCurrent) {
+        groups = groups.filter(function(g) { return g.name === currentSlug; });
+      }
+    }
 
     // Flat-list mode: when there's exactly one investigation (no
     // ungrouped studies), render its studies as a flat list directly

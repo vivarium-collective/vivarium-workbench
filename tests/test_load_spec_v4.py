@@ -86,3 +86,63 @@ def test_load_spec_v4_yaml_passes_through(tmp_path):
     }))
     spec = load_spec(spec_path)
     assert spec["schema_version"] == 4
+
+
+def test_load_spec_promotes_study_card_string_to_dict(tmp_path):
+    """study_card authored as a plain string (a common scaffold-template
+    mistake) silently renders nothing — the dashboard walkthrough reads
+    sc.goal / sc.mechanism / etc. on a dict. load_spec auto-promotes
+    string -> {goal: string} so the authored prose surfaces in the Goal row."""
+    spec_path = tmp_path / "spec.yaml"
+    spec_path.write_text(yaml.safe_dump({
+        "schema_version": 3,
+        "name": "stringy-card",
+        "baseline": [{"name": "b", "composite": "pkg.c", "params": {}}],
+        "study_card": "This study tests the X mechanism under Y conditions.",
+    }))
+    spec = load_spec(spec_path)
+    assert isinstance(spec["study_card"], dict)
+    assert spec["study_card"]["goal"] == "This study tests the X mechanism under Y conditions."
+
+
+def test_load_spec_leaves_study_card_dict_intact(tmp_path):
+    """Already-dict study_card MUST NOT be touched — preserves authored
+    goal/mechanism/why_before_next/etc. fields exactly."""
+    spec_path = tmp_path / "spec.yaml"
+    spec_path.write_text(yaml.safe_dump({
+        "schema_version": 3,
+        "name": "dicty-card",
+        "baseline": [{"name": "b", "composite": "pkg.c", "params": {}}],
+        "study_card": {
+            "goal": "Test X",
+            "mechanism": "via Y",
+            "why_before_next": "Z gates downstream",
+        },
+    }))
+    spec = load_spec(spec_path)
+    assert spec["study_card"]["goal"] == "Test X"
+    assert spec["study_card"]["mechanism"] == "via Y"
+    assert spec["study_card"]["why_before_next"] == "Z gates downstream"
+
+
+def test_load_spec_v3_redesign_path_keeps_tests_as_list(tmp_path):
+    """v3 spec with conditions: block + list tests[] must NOT have tests[]
+    rewritten to a dict by migrate_v3_to_v4, or the v4-redesign validator
+    rejects it with 'tests must be a list' and the study appears INVALID."""
+    spec_path = tmp_path / "spec.yaml"
+    spec_path.write_text(yaml.safe_dump({
+        "schema_version": 3,
+        "name": "redesign-study",
+        "question": "Does X work?",
+        "conditions": {
+            "baseline": {"composite": "pkg.composites.x"},
+            "variants": [],
+            "model_settings": [],
+        },
+        "tests": [{"name": "t1", "description": "X works."}],
+    }))
+    spec = load_spec(spec_path)
+    assert spec["schema_version"] == 4
+    # tests[] must remain a list — the v4-redesign validator demands it.
+    assert isinstance(spec["tests"], list)
+    assert spec["tests"][0]["name"] == "t1"
