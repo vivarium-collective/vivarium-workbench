@@ -215,13 +215,47 @@ def _render_viz_embeds(viz_entries: list[dict]) -> str:
             # Each viz HTML may contain its own <html>/<body>; we wrap in
             # an iframe srcdoc so it stays sandboxed and CSS doesn't bleed
             # into the surrounding report.
-            f'<iframe srcdoc="{_h(entry["html"])}" '
-            f'style="width:100%;height:520px;border:0" loading="lazy"></iframe>'
+            # scrolling="no" + min-height + the _fitEmbed script below
+            # match the walkthrough.js infrastructural guarantee (PR #121):
+            # iframes never get inner scrollbars; their height grows to
+            # match the rendered content (including Plotly legends that
+            # overflow the chart container).
+            f'<iframe scrolling="no" srcdoc="{_h(entry["html"])}" '
+            f'class="viz-iframe" '
+            f'style="width:100%;min-height:520px;border:0;'
+            f'display:block;overflow:hidden" loading="lazy"></iframe>'
             f'</section>'
         )
+    # Walk every .viz-iframe and size it to its content's scrollHeight,
+    # measuring chart-div children too (Plotly's legend overflow is not in
+    # body.scrollHeight). Re-runs on resize + after a few delays so
+    # Plotly's async render lands. Copied/condensed from walkthrough.js.
+    fit_script = (
+        '<script>'
+        '(function(){'
+        'function fit(f){try{var d=f.contentDocument||(f.contentWindow&&f.contentWindow.document);'
+        'if(!d)return;var e=d.documentElement,b=d.body,plotlyMax=0;'
+        'try{var charts=d.querySelectorAll(".plotly-graph-div, [data-plotly], div[id]");'
+        'for(var i=0;i<charts.length;i++){var c=charts[i];'
+        'var ch=Math.max(c.scrollHeight||0,c.offsetHeight||0,c.clientHeight||0);'
+        'if(ch>plotlyMax)plotlyMax=ch+c.offsetTop;}}catch(e){}'
+        'var h=Math.max(e?e.scrollHeight:0,b?b.scrollHeight:0,plotlyMax);'
+        'if(h>0)f.style.height=h+"px";}catch(err){}}'
+        'function wireAll(){var frames=document.querySelectorAll(".viz-iframe");'
+        'frames.forEach(function(f){f.addEventListener("load",function(){fit(f);'
+        '[150,500,1200,2500,4000].forEach(function(t){setTimeout(function(){fit(f);},t);});'
+        'if(window.ResizeObserver){try{var d=f.contentDocument;if(d){'
+        'var ro=new ResizeObserver(function(){fit(f);});ro.observe(d.documentElement);}}catch(e){}}});'
+        'if(f.contentDocument&&f.contentDocument.readyState==="complete")fit(f);});}'
+        'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",wireAll);}'
+        'else{wireAll();}'
+        '})();'
+        '</script>'
+    )
     return (
         '<section class="visualizations"><h2>Visualizations</h2>'
         + "".join(blocks)
+        + fit_script
         + '</section>'
     )
 
