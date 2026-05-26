@@ -1259,8 +1259,33 @@
         return '<span class="status-pill installed" title="The workspace\'s own first-party package. Always present; cannot be uninstalled.">first-party</span>';
       }
       if (m.installed) {
-        return '<span class="status-pill installed">installed</span>' +
-          ' <button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
+        // Render the install-source badge + a context-appropriate action.
+        // Three install-source layers (see server.py:_get_catalog):
+        //   imports   — workspace.yaml.imports declared it; uninstall is
+        //               the simple two-file edit (workspace.yaml + pyproject)
+        //   pyproject — declared in pyproject.toml only; uninstall flow
+        //               still works (drops the dep + re-locks the venv)
+        //   venv      — present in venv via another package's transitive
+        //               dep; cannot be uninstalled directly (the user has
+        //               to remove the parent). Show "via X, Y" hint instead.
+        var src = m.install_source || 'imports';
+        var srcBadge = '';
+        var action = '';
+        if (src === 'venv') {
+          var via = (m.installed_via || []);
+          var viaText = via.length
+            ? 'via ' + via.slice(0, 3).map(_esc).join(', ') + (via.length > 3 ? ' +' + (via.length - 3) : '')
+            : 'transitive';
+          srcBadge = '<span class="install-src-pill install-src-venv" title="Brought in by another installed package; cannot be uninstalled directly.">📦 ' + viaText + '</span>';
+          action = '<span class="muted" style="font-size:0.78em" title="Remove the parent package to drop this transitive dependency.">(remove parent to uninstall)</span>';
+        } else if (src === 'pyproject') {
+          srcBadge = '<span class="install-src-pill install-src-pyproject" title="Declared in pyproject.toml [project.dependencies]; workspace.yaml.imports does not have an explicit entry.">📋 via pyproject</span>';
+          action = '<button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
+        } else {
+          srcBadge = '<span class="status-pill installed">installed</span>';
+          action = '<button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
+        }
+        return srcBadge + ' ' + action;
       }
       return '<button class="action-btn" onclick="_installFromCatalog(\'' + _esc(m.name) + '\')">Install</button>';
     }

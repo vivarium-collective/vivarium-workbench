@@ -4111,6 +4111,106 @@ def _check_installed_module_sync(pkg_name: str, install_path: str | None) -> str
     return None
 
 
+# Cached for the lifetime of a request. The bulk-venv-probe takes ~200ms;
+# cache invalidation is fine because each Handler instance is per-request.
+_CATALOG_VENV_PROBE_SCRIPT = r'''
+import importlib.metadata as md, json, re, sys
+out = {}
+for d in md.distributions():
+    name = (d.metadata.get("Name") or "").lower()
+    if not name:
+        continue
+    requires_raw = list(d.requires or [])
+    requires_names = []
+    for r in requires_raw:
+        # Bare-name extract: strip version markers, extras, environment markers.
+        bare = re.split(r"[\s;<>=!~\[]", r, 1)[0].strip().lower()
+        if bare:
+            requires_names.append(bare)
+    out[name] = {"version": d.version, "requires": requires_names}
+json.dump(out, sys.stdout)
+'''
+
+
+def _detect_workspace_venv_distributions(ws_root: Path) -> dict[str, dict]:
+    """Single bulk venv probe — returns {package_name_lower: {version, requires, requires_by}}.
+
+    Used by `/api/catalog` to detect packages that are installed in the
+    workspace venv but NOT declared in workspace.yaml.imports — the
+    transitive-dependency case (e.g., v2ecoli depends on viva-munk via
+    pyproject.toml, viva-munk shows up in the venv but workspace.yaml has
+    no entry for it).
+
+    `requires_by` is the reverse index: for each package, which OTHER
+    installed packages declared it as a dependency. Lets the UI show
+    "transitive: brought in by X, Y" for venv-only-installed catalog
+    entries.
+
+    Returns {} if the venv is missing, probe times out, or JSON parse
+    fails — caller should degrade gracefully (no transitive detection).
+    """
+    venv_py = ws_root / ".venv" / "bin" / "python3"
+    if not venv_py.is_file():
+        return {}
+    try:
+        result = subprocess.run(
+            [str(venv_py), "-c", _CATALOG_VENV_PROBE_SCRIPT],
+            cwd=ws_root, capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return {}
+        data = json.loads(result.stdout)
+    except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError):
+        return {}
+    # Build reverse index: requires_by[child] = [parent_pkgs]
+    rev: dict[str, list[str]] = {}
+    for name, info in data.items():
+        for req in info.get("requires", []):
+            rev.setdefault(req, []).append(name)
+    for name, info in data.items():
+        info["requires_by"] = sorted(rev.get(name, []))
+    return data
+
+
+def _read_workspace_pyproject_deps(ws_root: Path) -> set[str]:
+    """Return the set of declared dependencies (bare package names, lowercased)
+    from the workspace's pyproject.toml `[project.dependencies]`.
+
+    Used by `/api/catalog` to mark a catalog module as installed when the
+    workspace's pyproject.toml declares it directly — even if
+    workspace.yaml.imports has no entry. This is the SECOND of three
+    install-source layers the dashboard now checks (after
+    workspace.yaml.imports, before raw venv presence).
+
+    Returns empty set on parse failure or missing file — degrades gracefully.
+    """
+    pyp = ws_root / "pyproject.toml"
+    if not pyp.is_file():
+        return set()
+    try:
+        import tomllib
+    except ImportError:
+        try:
+            import tomli as tomllib   # type: ignore
+        except ImportError:
+            return set()
+    try:
+        data = tomllib.loads(pyp.read_text())
+    except Exception:
+        return set()
+    deps = ((data.get("project") or {}).get("dependencies") or [])
+    out: set[str] = set()
+    for d in deps:
+        if not isinstance(d, str):
+            continue
+        # Strip version markers / extras / env markers — same regex as the
+        # venv probe so the two sources can be compared directly.
+        bare = re.split(r"[\s;<>=!~\[]", d, 1)[0].strip().lower()
+        if bare:
+            out.add(bare)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # HTTP handler
 # ---------------------------------------------------------------------------
@@ -10718,10 +10818,48 @@ if __name__ == "__main__":
         else:
             modules = []  # catalog is optional; the workspace-self entry still applies
 
+        # Three install-source layers, in priority order:
+        #   1. workspace.yaml.imports — explicit declaration by the workspace
+        #      (the dashboard's canonical install record)
+        #   2. pyproject.toml [project.dependencies] — the project declares it
+        #      as a direct dep (e.g. v2ecoli's pyproject lists pbg-copasi
+        #      directly; the workspace.yaml.imports stays empty because the
+        #      user never went through the dashboard install flow)
+        #   3. Bulk venv probe — the package is in the venv but neither
+        #      declared layer mentions it (transitive: brought in by another
+        #      installed package)
+        # The dashboard surfaces all three as `installed: true` but stamps
+        # `install_source` + (for #3) `installed_via: [parent_pkgs]` so the UI
+        # can render the distinction (declared cards look pinned-by-user;
+        # pyproject cards show a "via pyproject" pill; venv-transitive cards
+        # show "transitive via X, Y" with no Uninstall affordance — the user
+        # has to remove the parent to remove the dep).
         imports = (ws_data or {}).get("imports", {}) or {}
+        pyproject_deps = _read_workspace_pyproject_deps(WORKSPACE)
+        venv_dists = _detect_workspace_venv_distributions(WORKSPACE)
+
+        def _name_variants(m: dict) -> list[str]:
+            """Module's name, pypi_name, and snake_case package name —
+            all lowercased — for fuzzy matching against pyproject.toml /
+            venv-distribution name conventions (which vary: PyPI names
+            use dashes; Python imports use underscores; uppercase varies)."""
+            out = [m["name"].lower()]
+            pn = m.get("pypi_name")
+            if pn:
+                out.append(pn.lower())
+            pkg = m.get("package") or m["name"].replace("-", "_")
+            out.append(pkg.lower())
+            return out
+
         for m in modules:
-            m["installed"] = m["name"] in imports
-            if m["installed"]:
+            variants = _name_variants(m)
+            declared = m["name"] in imports
+            in_pyproject = any(v in pyproject_deps for v in variants)
+            in_venv = any(v in venv_dists for v in variants)
+
+            if declared:
+                m["installed"] = True
+                m["install_source"] = "imports"
                 # Merge live workspace.yaml entry fields (source/ref/path/install_path/package)
                 # into the catalog item so the UI has authoritative install metadata.
                 imp = imports.get(m["name"], {}) or {}
@@ -10729,14 +10867,37 @@ if __name__ == "__main__":
                     v = imp.get(k)
                     if v is not None:
                         m[k] = v
-                # Sync check: is the Python package actually importable?
-                pkg_name = m.get("package") or m["name"].replace("-", "_")
-                sync_reason = _check_installed_module_sync(
-                    pkg_name, m.get("install_path")
-                )
-                if sync_reason:
-                    m["out_of_sync"] = True
-                    m["out_of_sync_reason"] = sync_reason
+            elif in_pyproject:
+                m["installed"] = True
+                m["install_source"] = "pyproject"
+            elif in_venv:
+                m["installed"] = True
+                m["install_source"] = "venv"
+                # Trace which installed parent(s) require this — best-effort,
+                # empty when no installed package declares it (then it's a
+                # direct-but-undeclared install, e.g. someone pip-installed
+                # by hand).
+                parents: list[str] = []
+                for v in variants:
+                    info = venv_dists.get(v)
+                    if info:
+                        parents.extend(info.get("requires_by") or [])
+                        break
+                m["installed_via"] = sorted(set(parents))
+            else:
+                m["installed"] = False
+
+            if m["installed"]:
+                # Sync check (only meaningful for declared/pyproject paths;
+                # venv-transitive is already venv-confirmed).
+                if m.get("install_source") in ("imports", "pyproject"):
+                    pkg_name = m.get("package") or m["name"].replace("-", "_")
+                    sync_reason = _check_installed_module_sync(
+                        pkg_name, m.get("install_path")
+                    )
+                    if sync_reason:
+                        m["out_of_sync"] = True
+                        m["out_of_sync_reason"] = sync_reason
 
         ws_self = self._workspace_self_module(ws_data)
         if ws_self is not None:
