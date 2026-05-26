@@ -4210,6 +4210,11 @@ class Handler(BaseHTTPRequestHandler):
         if _path_only_cb == "/composites/new":
             return self._get_composite_builder_page()
 
+        # HPC dashboard page: /hpc/<backend>
+        _hpc_segs = _path_only_cb.strip("/").split("/")
+        if len(_hpc_segs) == 2 and _hpc_segs[0] == "hpc":
+            return self._get_hpc_page(_hpc_segs[1])
+
         # Strip query string for route matching (self.path includes ?focus=...).
         path_only = self.path.split("?", 1)[0]
 
@@ -4342,6 +4347,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_visualization_classes()
         if self.path.startswith("/api/ui-config"):
             return self._get_ui_config()
+        if self.path.startswith("/api/compute-backends"):
+            return self._get_compute_backends()
+        if self.path.startswith("/api/hpc/"):
+            return self._dispatch_hpc_get(path_only)
         if self.path.startswith("/api/git-status"):
             return self._get_git_status()
         # Serve the bundled loom-explore viewer.
@@ -4406,6 +4415,9 @@ class Handler(BaseHTTPRequestHandler):
                 draft_id = tail[: -len("/promote")]
                 return self._post_composite_promote(draft_id, body)
             return self._json({"error": "not found"}, 404)
+
+        if self.path.startswith("/api/hpc/"):
+            return self._dispatch_hpc_post(self.path, body)
 
         method_name = _POST_ROUTE_MAP.get(self.path)
         if method_name is None:
@@ -8103,6 +8115,232 @@ if __name__ == "__main__":
             out.append({"address": f"local:{name}", "name": name, "doc": doc})
         return out
 
+    # -----------------------------------------------------------------------
+    # HPC compute backend routes (Todo #10 Phase 5)
+    # -----------------------------------------------------------------------
+
+    def _get_compute_backends(self):
+        """GET /api/compute-backends — list registered compute backends."""
+        from vivarium_dashboard.lib.workspace_create import ALLOWED_BACKENDS
+        _META = {
+            "local":    {"label": "Local machine",   "description": "Run on this host"},
+            "hpc:ccam": {"label": "HPC: CCAM",        "description": "CCAM cluster via SLURM + Apptainer/Singularity"},
+        }
+        backends = []
+        for bid in ALLOWED_BACKENDS:
+            meta = _META.get(bid, {"label": bid, "description": ""})
+            backends.append({"id": bid, **meta})
+        return self._json({"backends": backends}, 200)
+
+    def _dispatch_hpc_get(self, path_only: str):
+        """Route /api/hpc/<backend>/... GET requests."""
+        segs = path_only.strip("/").split("/")
+        # ["api", "hpc", "<backend>", sub, ...]
+        if len(segs) < 4:
+            return self._json({"error": "not found"}, 404)
+        backend = segs[2]
+        tail = segs[3:]
+        if tail[0] == "status":
+            return self._get_hpc_status(backend)
+        if tail[0] == "slurm":
+            return self._get_hpc_slurm(backend)
+        if tail[0] == "runs":
+            return self._get_hpc_runs(backend)
+        if tail[0] == "build" and len(tail) >= 2:
+            job_id = tail[1]
+            if len(tail) >= 3 and tail[2] == "log":
+                return self._get_hpc_build_log(backend, job_id)
+            return self._get_hpc_build_status(backend, job_id)
+        if tail[0] == "run" and len(tail) >= 2:
+            return self._get_hpc_run_status(backend, tail[1])
+        return self._json({"error": "not found"}, 404)
+
+    def _dispatch_hpc_post(self, path: str, body: dict):
+        """Route /api/hpc/<backend>/... POST requests."""
+        path_only = path.split("?", 1)[0]
+        segs = path_only.strip("/").split("/")
+        if len(segs) < 4:
+            return self._json({"error": "not found"}, 404)
+        backend = segs[2]
+        tail = segs[3:]
+        if len(tail) == 1 and tail[0] == "build":
+            return self._post_hpc_build(backend, body)
+        if len(tail) == 1 and tail[0] == "run":
+            return self._post_hpc_run(backend, body)
+        if len(tail) == 3 and tail[0] == "run" and tail[2] == "cancel":
+            return self._post_hpc_run_cancel(backend, tail[1], body)
+        return self._json({"error": "not found"}, 404)
+
+    def _hpc_503(self, exc):
+        return self._json({
+            "error": "hpc_not_configured",
+            "hint": "Fill in workspace/.pbg/hpc.env — see .pbg/hpc.env.example",
+            "missing_fields": list(getattr(exc, "missing", [])),
+        }, 503)
+
+    def _get_hpc_status(self, backend: str):
+        """GET /api/hpc/<backend>/status — SSH reachability + singularity probe."""
+        if WORKSPACE is None:
+            return self._json({"error": "no workspace bound"}, 409)
+        try:
+            from vivarium_dashboard.lib.hpc_dispatch import check_connectivity
+            from vivarium_dashboard.lib.hpc_settings import get_hpc_settings, HpcNotConfiguredError
+            return self._json(check_connectivity(get_hpc_settings(str(WORKSPACE))), 200)
+        except HpcNotConfiguredError as exc:
+            return self._hpc_503(exc)
+        except Exception as exc:
+            from vivarium_dashboard.lib.hpc_dispatch import _mask
+            from vivarium_dashboard.lib.hpc_settings import get_hpc_settings
+            try:
+                msg = _mask(str(exc)[:500], get_hpc_settings(str(WORKSPACE)))
+            except Exception:
+                msg = str(exc)[:500]
+            return self._json({"error": msg}, 500)
+
+    def _get_hpc_slurm(self, backend: str):
+        """GET /api/hpc/<backend>/slurm — squeue + sinfo snapshot."""
+        if WORKSPACE is None:
+            return self._json({"error": "no workspace bound"}, 409)
+        try:
+            from vivarium_dashboard.lib.hpc_dispatch import check_slurm
+            from vivarium_dashboard.lib.hpc_settings import get_hpc_settings, HpcNotConfiguredError
+            return self._json(check_slurm(get_hpc_settings(str(WORKSPACE))), 200)
+        except HpcNotConfiguredError as exc:
+            return self._hpc_503(exc)
+        except Exception as exc:
+            return self._json({"error": str(exc)[:500]}, 500)
+
+    def _post_hpc_build(self, backend: str, body: dict):
+        """POST /api/hpc/<backend>/build — rsync workspace + sbatch Singularity build."""
+        if WORKSPACE is None:
+            return self._json({"error": "no workspace bound"}, 409)
+        try:
+            from vivarium_dashboard.lib.hpc_dispatch import submit_build_job
+            from vivarium_dashboard.lib.hpc_settings import get_hpc_settings, HpcNotConfiguredError
+            result = submit_build_job(get_hpc_settings(str(WORKSPACE)), WORKSPACE)
+            return self._json(result, 202)
+        except HpcNotConfiguredError as exc:
+            return self._hpc_503(exc)
+        except Exception as exc:
+            from vivarium_dashboard.lib.hpc_dispatch import _mask
+            from vivarium_dashboard.lib.hpc_settings import get_hpc_settings
+            try:
+                msg = _mask(str(exc)[:500], get_hpc_settings(str(WORKSPACE)))
+            except Exception:
+                msg = str(exc)[:500]
+            return self._json({"error": msg}, 500)
+
+    def _get_hpc_build_status(self, backend: str, job_id: str):
+        """GET /api/hpc/<backend>/build/<slurm_job_id> — poll build job state."""
+        if WORKSPACE is None:
+            return self._json({"error": "no workspace bound"}, 409)
+        try:
+            from vivarium_dashboard.lib.hpc_dispatch import get_job_status
+            from vivarium_dashboard.lib.hpc_settings import get_hpc_settings, HpcNotConfiguredError
+            return self._json(get_job_status(get_hpc_settings(str(WORKSPACE)), int(job_id)), 200)
+        except HpcNotConfiguredError as exc:
+            return self._hpc_503(exc)
+        except (ValueError, TypeError):
+            return self._json({"error": f"invalid job id: {job_id!r}"}, 400)
+        except Exception as exc:
+            return self._json({"error": str(exc)[:500]}, 500)
+
+    def _get_hpc_build_log(self, backend: str, job_id: str):
+        """GET /api/hpc/<backend>/build/<slurm_job_id>/log — tail sbatch output log."""
+        if WORKSPACE is None:
+            return self._json({"error": "no workspace bound"}, 409)
+        try:
+            from vivarium_dashboard.lib.hpc_dispatch import _ssh
+            from vivarium_dashboard.lib.hpc_settings import get_hpc_settings, HpcNotConfiguredError
+            settings = get_hpc_settings(str(WORKSPACE))
+            log_base = settings.hpc_log_base_path or f"{settings.hpc_repo_base_path}/logs"
+            ws_name = WORKSPACE.name
+            cmd = (
+                f"tail -n 200 {log_base}/{ws_name}/*-{job_id}.out 2>/dev/null "
+                f"|| echo '(log not yet available)'"
+            )
+            r = _ssh(settings, cmd, timeout=30)
+            return self._json({"log": r.stdout, "job_id": job_id}, 200)
+        except HpcNotConfiguredError as exc:
+            return self._hpc_503(exc)
+        except Exception as exc:
+            return self._json({"error": str(exc)[:500]}, 500)
+
+    def _post_hpc_run(self, backend: str, body: dict):
+        """POST /api/hpc/<backend>/run — submit a Singularity exec SLURM job."""
+        if WORKSPACE is None:
+            return self._json({"error": "no workspace bound"}, 409)
+        command = (body.get("command") or "").strip()
+        if not command:
+            return self._json({"error": "command required"}, 400)
+        resources = {
+            "cpus": body.get("cpus", 1),
+            "mem_gb": body.get("mem_gb", 4),
+            "time_min": body.get("time_min", 60),
+        }
+        try:
+            from vivarium_dashboard.lib.hpc_dispatch import submit_run_job
+            from vivarium_dashboard.lib.hpc_settings import get_hpc_settings, HpcNotConfiguredError
+            result = submit_run_job(get_hpc_settings(str(WORKSPACE)), WORKSPACE, command, resources)
+            return self._json(result, 202)
+        except HpcNotConfiguredError as exc:
+            return self._hpc_503(exc)
+        except Exception as exc:
+            from vivarium_dashboard.lib.hpc_dispatch import _mask
+            from vivarium_dashboard.lib.hpc_settings import get_hpc_settings
+            try:
+                msg = _mask(str(exc)[:500], get_hpc_settings(str(WORKSPACE)))
+            except Exception:
+                msg = str(exc)[:500]
+            return self._json({"error": msg}, 500)
+
+    def _get_hpc_run_status(self, backend: str, job_id: str):
+        """GET /api/hpc/<backend>/run/<slurm_job_id> — squeue → scontrol job state."""
+        if WORKSPACE is None:
+            return self._json({"error": "no workspace bound"}, 409)
+        try:
+            from vivarium_dashboard.lib.hpc_dispatch import get_job_status
+            from vivarium_dashboard.lib.hpc_settings import get_hpc_settings, HpcNotConfiguredError
+            return self._json(get_job_status(get_hpc_settings(str(WORKSPACE)), int(job_id)), 200)
+        except HpcNotConfiguredError as exc:
+            return self._hpc_503(exc)
+        except (ValueError, TypeError):
+            return self._json({"error": f"invalid job id: {job_id!r}"}, 400)
+        except Exception as exc:
+            return self._json({"error": str(exc)[:500]}, 500)
+
+    def _post_hpc_run_cancel(self, backend: str, job_id: str, body: dict):
+        """POST /api/hpc/<backend>/run/<slurm_job_id>/cancel — scancel."""
+        if WORKSPACE is None:
+            return self._json({"error": "no workspace bound"}, 409)
+        try:
+            from vivarium_dashboard.lib.hpc_dispatch import cancel_job
+            from vivarium_dashboard.lib.hpc_settings import get_hpc_settings, HpcNotConfiguredError
+            cancel_job(get_hpc_settings(str(WORKSPACE)), int(job_id))
+            return self._json({"cancelled": int(job_id)}, 200)
+        except HpcNotConfiguredError as exc:
+            return self._hpc_503(exc)
+        except (ValueError, TypeError):
+            return self._json({"error": f"invalid job id: {job_id!r}"}, 400)
+        except Exception as exc:
+            return self._json({"error": str(exc)[:500]}, 500)
+
+    def _get_hpc_runs(self, backend: str):
+        """GET /api/hpc/<backend>/runs — list recent HPC jobs from .pbg/hpc/ scripts."""
+        if WORKSPACE is None:
+            return self._json({"error": "no workspace bound"}, 409)
+        hpc_dir = WORKSPACE / ".pbg" / "hpc"
+        if not hpc_dir.is_dir():
+            return self._json({"jobs": []}, 200)
+        runs = sorted(hpc_dir.glob("run-*.sh"), key=lambda p: p.stat().st_mtime, reverse=True)
+        builds = sorted(hpc_dir.glob("build-*.sh"), key=lambda p: p.stat().st_mtime, reverse=True)
+        jobs = [{"type": "run",   "id": p.stem[len("run-"):],   "script": p.name,
+                 "mtime": int(p.stat().st_mtime)} for p in runs[:20]]
+        jobs += [{"type": "build", "id": p.stem[len("build-"):], "script": p.name,
+                  "mtime": int(p.stat().st_mtime)} for p in builds[:10]]
+        jobs.sort(key=lambda j: j["mtime"], reverse=True)
+        return self._json({"jobs": jobs}, 200)
+
     def _get_ui_config(self):
         """GET /api/ui-config — return UI feature flags from workspace.yaml."""
         try:
@@ -8856,8 +9094,8 @@ if __name__ == "__main__":
         slug = re.sub(r"-+", "-", slug)
         auto_name = f"study-{slug}-{uuid.uuid4().hex[:6]}"
 
-        inv_dir = WORKSPACE / "studies" / auto_name
-        if inv_dir.exists() or (WORKSPACE / "investigations" / auto_name).exists():
+        inv_dir = WORKSPACE / "investigations" / auto_name
+        if inv_dir.exists() or (WORKSPACE / "studies" / auto_name).exists():
             # Collision is astronomically unlikely with 24 bits of entropy, but
             # if it happens (e.g. a test seeds uuid), surface it rather than
             # silently overwriting.
@@ -9435,6 +9673,29 @@ if __name__ == "__main__":
             "message": commit_msg,
             "path": str(abs_path.relative_to(WORKSPACE)),
         }, 200)
+
+    def _get_hpc_page(self, backend: str):
+        """GET /hpc/<backend> — render the HPC dashboard page."""
+        import jinja2
+        from vivarium_dashboard.lib.workspace_create import ALLOWED_BACKENDS
+        if backend not in ALLOWED_BACKENDS:
+            return self._send_html(
+                f"<h1>Unknown backend</h1>"
+                f"<p><code>{backend!r}</code> is not a registered compute backend.</p>",
+                code=404,
+            )
+        try:
+            env = jinja2.Environment(
+                loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
+                autoescape=True,
+            )
+            tpl = env.get_template("hpc_dashboard.html.j2")
+            html = tpl.render(backend=backend)
+            return self._send_html(html, code=200)
+        except Exception as e:
+            return self._send_html(
+                f"<h1>error rendering HPC page</h1><pre>{e}</pre>", code=500
+            )
 
     def _get_composite_builder_page(self):
         """GET /composites/new — render the composite-builder page.

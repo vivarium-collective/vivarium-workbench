@@ -288,14 +288,43 @@
   // / trailing must be alphanumeric. Single-char names like "x" pass.
   const SLUG_RE = /^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$|^[a-z0-9]$/;
 
-  // Backend dropdown options — hardcoded for v1 per Phase B plan. Switch to
-  // GET /api/compute-backends once we have a second HPC site.
-  const BACKENDS = [
+  // Backend dropdown options — seeded with static defaults; updated
+  // asynchronously from GET /api/compute-backends on each modal open.
+  let BACKENDS = [
     { value: 'local',    label: 'local',
       hint: 'Run simulations on this machine.' },
     { value: 'hpc:ccam', label: 'hpc:ccam',
       hint: 'Scaffolds a Singularity.def 1:1 with the Dockerfile; runs via SLURM/Singularity over SSH.' },
   ];
+
+  async function _refreshBackendSelect() {
+    try {
+      const r = await fetch('/api/compute-backends');
+      if (!r.ok) return;
+      const data = await r.json().catch(() => null);
+      if (!data || !Array.isArray(data.backends)) return;
+      BACKENDS = data.backends.map((b) => ({
+        value: b.id,
+        label: b.id,
+        hint: b.description || '',
+      }));
+    } catch (_) {
+      return; // leave static fallback intact
+    }
+    if (!createModal) return;
+    const sel = createModal.querySelector('#viv-ws-create-backend');
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = BACKENDS.map((b) =>
+      `<option value="${escapeHtml(b.value)}">${escapeHtml(b.label)}</option>`
+    ).join('');
+    if (BACKENDS.some((b) => b.value === cur)) sel.value = cur;
+    const hintEl = createModal.querySelector('.viv-ws-backend-hint');
+    if (hintEl) {
+      const found = BACKENDS.find((x) => x.value === sel.value);
+      hintEl.textContent = found ? found.hint : '';
+    }
+  }
 
   let createModal = null;
   let createEscHandler = null;
@@ -474,6 +503,8 @@
     // the form is usable as free-text while the request is in flight or if
     // it fails.
     loadOrgsIntoSelect().catch(() => { /* leave as free-text */ });
+    // Refresh backend list from server; falls back to static defaults on error.
+    _refreshBackendSelect().catch(() => { /* leave static fallback */ });
   }
 
   function closeCreate() {

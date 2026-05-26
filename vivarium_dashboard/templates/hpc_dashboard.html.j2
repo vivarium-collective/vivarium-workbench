@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HPC: {{ backend }} · Vivarium Dashboard</title>
+  <link rel="stylesheet" href="/assets/style.css">
+  <style>
+    body.viv-hpc-page {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--page, #f7f7f8);
+      color: var(--text, #1a1a1a);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .viv-hpc-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border, #d0d0d4);
+      background: var(--panel, #fff);
+      flex: 0 0 auto;
+    }
+    .viv-hpc-header a {
+      color: var(--muted, #666);
+      text-decoration: none;
+      font-size: 13px;
+    }
+    .viv-hpc-header a:hover { color: var(--text, #1a1a1a); }
+    .viv-hpc-header h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      flex: 1;
+    }
+    .viv-hpc-header h1 code {
+      font-size: 14px;
+      background: var(--page, #f7f7f8);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .viv-hpc-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+    .viv-hpc-chip-loading  { background: var(--page, #f0f0f2); color: var(--muted, #777); border-color: var(--border, #d0d0d4); }
+    .viv-hpc-chip-ok       { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+    .viv-hpc-chip-warn     { background: #fef9c3; color: #854d0e; border-color: #fde68a; }
+    .viv-hpc-chip-error    { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+
+    .viv-hpc-main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto 1fr;
+      gap: 0;
+      max-width: 1200px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 20px;
+      box-sizing: border-box;
+      align-content: start;
+    }
+    @media (max-width: 800px) {
+      .viv-hpc-main { grid-template-columns: 1fr; }
+    }
+
+    .viv-hpc-section {
+      background: var(--panel, #fff);
+      border: 1px solid var(--border, #d0d0d4);
+      border-radius: 8px;
+      padding: 18px 20px;
+      margin: 8px;
+    }
+    .viv-hpc-section h2 {
+      margin: 0 0 10px;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text, #1a1a1a);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .viv-hpc-section h3 {
+      margin: 16px 0 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text, #1a1a1a);
+    }
+    .viv-hpc-section p {
+      margin: 0 0 12px;
+      font-size: 13px;
+      color: var(--muted, #666);
+      line-height: 1.5;
+    }
+    #hpc-run-panel {
+      grid-column: 1 / -1;
+    }
+
+    .viv-hpc-btn {
+      appearance: none;
+      border: 1px solid var(--border, #d0d0d4);
+      background: var(--panel, #fff);
+      color: var(--text, #1a1a1a);
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .viv-hpc-btn:hover { filter: brightness(0.97); }
+    .viv-hpc-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .viv-hpc-btn-primary {
+      background: var(--accent, #2563eb);
+      color: #fff;
+      border-color: var(--accent, #2563eb);
+    }
+    .viv-hpc-btn-danger {
+      background: #dc2626;
+      color: #fff;
+      border-color: #dc2626;
+    }
+    .viv-hpc-btn-sm {
+      appearance: none;
+      border: 1px solid var(--border, #d0d0d4);
+      background: var(--panel, #fff);
+      color: var(--muted, #666);
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .viv-hpc-btn-sm:hover { color: var(--text, #1a1a1a); }
+
+    .viv-hpc-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+
+    .viv-hpc-status-box {
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      border: 1px solid var(--border, #d0d0d4);
+      background: var(--page, #f7f7f8);
+      margin: 8px 0;
+    }
+    .viv-hpc-status-box.ok    { background: #f0fdf4; border-color: #bbf7d0; }
+    .viv-hpc-status-box.error { background: #fef2f2; border-color: #fecaca; }
+    .viv-hpc-status-box.warn  { background: #fffbeb; border-color: #fde68a; }
+
+    .viv-hpc-log {
+      background: #0f1419;
+      color: #c8d3d9;
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      padding: 12px;
+      border-radius: 6px;
+      overflow-x: auto;
+      white-space: pre;
+      max-height: 300px;
+      overflow-y: auto;
+      margin: 8px 0 0;
+    }
+
+    .viv-hpc-form {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .viv-hpc-form label {
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .viv-hpc-form input[type="text"] {
+      padding: 7px 10px;
+      border: 1px solid var(--border, #d0d0d4);
+      border-radius: 5px;
+      font-size: 13px;
+      background: var(--panel, #fff);
+      color: var(--text, #1a1a1a);
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .viv-req { color: #dc2626; }
+    .viv-hpc-resources {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .viv-hpc-resources label {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .viv-hpc-resources input[type="number"] {
+      padding: 5px 8px;
+      border: 1px solid var(--border, #d0d0d4);
+      border-radius: 5px;
+      font-size: 13px;
+      width: 80px;
+      background: var(--panel, #fff);
+      color: var(--text, #1a1a1a);
+    }
+    .viv-hpc-run-error {
+      color: #dc2626;
+      font-size: 12px;
+      min-height: 16px;
+    }
+
+    .viv-hpc-slurm-info {
+      font-size: 13px;
+      color: var(--muted, #666);
+    }
+    .viv-hpc-slurm-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .viv-hpc-slurm-table th,
+    .viv-hpc-slurm-table td {
+      text-align: left;
+      padding: 4px 8px;
+      border-bottom: 1px solid var(--border, #e5e5e7);
+    }
+    .viv-hpc-slurm-table th { font-weight: 600; color: var(--muted, #666); }
+
+    .viv-hpc-job-history {
+      font-size: 13px;
+    }
+    .viv-hpc-job-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 10px;
+      border: 1px solid var(--border, #d0d0d4);
+      border-radius: 6px;
+      margin-bottom: 6px;
+      background: var(--page, #f7f7f8);
+    }
+    .viv-hpc-job-type {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--accent, #2563eb);
+      color: #fff;
+    }
+    .viv-hpc-job-type.build { background: #7c3aed; }
+    .viv-hpc-job-id {
+      font-family: monospace;
+      font-size: 12px;
+      color: var(--muted, #555);
+      flex: 1;
+    }
+    .viv-hpc-job-time {
+      font-size: 11px;
+      color: var(--muted, #888);
+    }
+    .viv-hpc-503 {
+      padding: 10px 12px;
+      border: 1px solid #fde68a;
+      background: #fffbeb;
+      border-radius: 6px;
+      font-size: 13px;
+      color: #92400e;
+    }
+    .viv-hpc-503 strong { display: block; margin-bottom: 4px; }
+    .viv-hpc-503 code {
+      font-size: 12px;
+      background: #fef3c7;
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body class="viv-hpc-page">
+  <header class="viv-hpc-header">
+    <a href="/">← Dashboard</a>
+    <h1>HPC Backend: <code>{{ backend }}</code></h1>
+    <span id="hpc-conn-chip" class="viv-hpc-chip viv-hpc-chip-loading" title="">checking…</span>
+  </header>
+
+  <main class="viv-hpc-main">
+    <!-- Section 1: Build Panel -->
+    <section class="viv-hpc-section" id="hpc-build-panel">
+      <h2>Container Build</h2>
+      <p>Build the Singularity/Apptainer image on the cluster from the workspace's current Singularity.def.</p>
+      <div class="viv-hpc-actions">
+        <button id="hpc-build-btn" class="viv-hpc-btn viv-hpc-btn-primary">Start Build</button>
+        <button id="hpc-build-cancel-btn" class="viv-hpc-btn viv-hpc-btn-danger" hidden>Cancel</button>
+      </div>
+      <div id="hpc-build-status" class="viv-hpc-status-box" hidden></div>
+      <pre id="hpc-build-log" class="viv-hpc-log" hidden></pre>
+    </section>
+
+    <!-- Section 2: Cluster Status -->
+    <section class="viv-hpc-section" id="hpc-cluster-panel">
+      <h2>
+        Cluster Status
+        <button id="hpc-slurm-refresh" class="viv-hpc-btn-sm" title="Refresh">↻</button>
+      </h2>
+      <div id="hpc-slurm-info" class="viv-hpc-slurm-info">Loading…</div>
+    </section>
+
+    <!-- Section 3: Run Form + Job History (full width) -->
+    <section class="viv-hpc-section" id="hpc-run-panel">
+      <h2>Run Simulation</h2>
+      <form id="hpc-run-form" class="viv-hpc-form" novalidate>
+        <label for="hpc-run-cmd">Command <span class="viv-req">*</span></label>
+        <input id="hpc-run-cmd" type="text"
+               placeholder="e.g. python simulate.py --params params.json"
+               autocomplete="off" required>
+
+        <div class="viv-hpc-resources">
+          <label>CPUs
+            <input id="hpc-run-cpus" type="number" min="1" max="64" value="4">
+          </label>
+          <label>Memory (GB)
+            <input id="hpc-run-mem" type="number" min="1" max="512" value="8">
+          </label>
+          <label>Time (min)
+            <input id="hpc-run-time" type="number" min="1" max="10080" value="60">
+          </label>
+        </div>
+
+        <div class="viv-hpc-run-error" role="alert" aria-live="polite"></div>
+        <div class="viv-hpc-actions">
+          <button type="submit" id="hpc-run-submit" class="viv-hpc-btn viv-hpc-btn-primary">
+            Submit Job
+          </button>
+        </div>
+      </form>
+
+      <h3>Recent Jobs</h3>
+      <div id="hpc-job-history" class="viv-hpc-job-history">Loading…</div>
+    </section>
+  </main>
+
+  <script>
+    // Backend identifier injected at render time — used by hpc-dispatch.js.
+    const _HPC_BACKEND = {{ backend | tojson }};
+  </script>
+  <script src="/assets/hpc-dispatch.js"></script>
+</body>
+</html>
