@@ -1942,3 +1942,38 @@ body.focus-mode::before{
 .module-list .module-section-divider {
   margin: 10px 0 4px 0;
 }
+
+/* ───────────────────────────────────────────────────────────────────
+ * Catalog install-source pills (Registry → Modules sub-tab).
+ *
+ * Each catalog module the dashboard marks as installed carries an
+ * `install_source` of `imports` (workspace.yaml — original flow),
+ * `pyproject` (declared in pyproject.toml only — typical for workspaces
+ * that pre-date the imports flow, e.g. v2ecoli with pbg-copasi), or
+ * `venv` (present in venv as a transitive dep of another installed
+ * package — e.g. spatio_flux brought in by viva-munk).
+ *
+ * The pill colour signals provenance so a quick scan tells the user
+ * WHICH layer installed each module — and whether an Uninstall button
+ * even makes sense.
+ * =================================================================== */
+.install-src-pill {
+  display: inline-block;
+  font-size: 0.78em;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 9999px;
+  margin-right: 4px;
+  vertical-align: middle;
+  letter-spacing: 0.01em;
+}
+.install-src-pyproject {
+  background: #dbeafe;        /* light blue — declared in workspace's own pyproject */
+  color: #1e40af;
+  border: 1px solid rgba(37, 99, 235, 0.25);
+}
+.install-src-venv {
+  background: #fef3c7;        /* amber — transitive; user can't uninstall directly */
+  color: #92400e;
+  border: 1px solid rgba(217, 119, 6, 0.25);
+}
