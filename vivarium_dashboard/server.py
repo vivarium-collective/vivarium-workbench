@@ -1680,6 +1680,38 @@ def _build_investigation_registry_for_test(
     }
 
 
+def _coerce_list_field(spec: dict, field: str, *, source: str = "<unknown>") -> list:
+    """Read ``spec[field]`` and return it as a list.
+
+    Workspace yamls evolve. A field documented as ``list[T]`` sometimes
+    arrives as a dict (e.g. a grouped/nested shape an investigation author
+    introduced before the renderer learned about it). Returning the dict
+    untouched would crash the client renderer:
+
+        TypeError: (iset.acceptance_criteria || []).map is not a function
+
+    This helper coerces non-list values to ``[]`` and prints a one-line
+    warning to stderr that names the field and the workspace file, so the
+    operator knows where the schema drift is without having to bisect a
+    JS stack trace.
+
+    Use at every ``spec.get("...") or []`` site where the JS contract is a
+    list (``.map`` / ``.forEach`` / ``.length`` on the client side).
+    """
+    value = spec.get(field)
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    print(
+        f"warning: {source}: field {field!r} expected list, got "
+        f"{type(value).__name__} — degrading to empty list. Check the "
+        f"workspace yaml schema.",
+        file=sys.stderr,
+    )
+    return []
+
+
 def _build_iset_detail_for_test(ws_root: Path, name: str) -> tuple[dict, int]:
     """Pure function backing ``GET /api/iset/<name>`` — returns
     (response_dict, status_code). Used by the HTTP handler and unit tests.
@@ -1721,8 +1753,8 @@ def _build_iset_detail_for_test(ws_root: Path, name: str) -> tuple[dict, int]:
         "hypothesis":       spec.get("hypothesis", ""),
         "status":           author_status,
         "effective_status": effective_status,
-        "expert_docs":      spec.get("expert_docs") or [],
-        "acceptance_criteria": spec.get("acceptance_criteria") or [],
+        "expert_docs":      _coerce_list_field(spec, "expert_docs", source=str(spec_path)),
+        "acceptance_criteria": _coerce_list_field(spec, "acceptance_criteria", source=str(spec_path)),
         "studies":          studies_out,
     }, 200
 
@@ -7736,8 +7768,8 @@ if __name__ == "__main__":
             "hypothesis":       spec.get("hypothesis", ""),
             "status":           spec.get("status", "planning"),
             "effective_status": effective_status,
-            "expert_docs":      spec.get("expert_docs") or [],
-            "acceptance_criteria": spec.get("acceptance_criteria") or [],
+            "expert_docs":      _coerce_list_field(spec, "expert_docs", source=str(spec_path)),
+            "acceptance_criteria": _coerce_list_field(spec, "acceptance_criteria", source=str(spec_path)),
             # Authored synthesis layers for the layered report (executive
             # summary + scientific argument). Optional — absent on older
             # investigations, where the report falls back to derived data.
