@@ -6462,9 +6462,12 @@
       studiesHtml = ordered.map(studySection).join('\n');
     }
 
-    var acceptance = (iset.acceptance_criteria || []).map(function(c) {
-      return '<li><code>' + _h(c.study) + '</code> · <code>' + _h(c.behavior) + '</code></li>';
-    }).join('');
+    /* `acceptance` variable removed: it built an <ol> of acceptance_criteria
+       entries that fed the top-of-report "Acceptance criteria" section
+       (now removed). The acceptance_criteria field on investigation.yaml
+       still exists in the schema; per-study behavior_tests +
+       conclusion_verdicts carry the same signal more actionably. */
+    var acceptance = '';
 
     // ── Collect the union of bib keys cited across all studies + iset ──
     var citedKeys = new Set();
@@ -7058,7 +7061,7 @@
       +   ((iset.executive && (iset.executive.what_is_this || iset.executive.verdict)) ? '<a href="#executive">Summary</a>' : '')
       +   ((iset.scientific_argument && iset.scientific_argument.main_claim) ? '<a href="#scientific-argument">Argument</a>' : '')
       +   '<a href="#overview">Overview</a>'
-      +   (acceptance ? '<a href="#acceptance">Acceptance</a>' : '')
+      /* "Acceptance" nav link removed alongside the section it pointed to */
       +   '<a href="#how-to-read">How to read</a>'
       +   '<a href="#studies-heading">Studies</a>'
       +   '<a href="#references">References</a>'
@@ -7169,9 +7172,12 @@
       +   (iset.hypothesis ? '<p><strong>Hypothesis.</strong> ' + _multiline(iset.hypothesis) + '</p>' : '')
       +   (iset.description ? '<div class="description"><p>' + _multiline(iset.description) + '</p></div>' : '')
 
-      +   (acceptance ? '<h2 id="acceptance">Acceptance criteria</h2>'
-                      + '<p class="muted small">Behavioral tests across the studies that must pass for this investigation to be considered complete.</p>'
-                      + '<ol>' + acceptance + '</ol>' : '')
+      /* Removed: top-of-report "Acceptance criteria" section.
+         Per-study behavior_tests + conclusion_verdicts (the v4 way
+         studies signal pass/fail) already convey "what must pass for
+         this investigation to be considered complete." The top-of-
+         report ordered list of acceptance criteria duplicated that
+         signal in a less-actionable form. */
 
       +   '<h2 id="how-to-read">How to read this report</h2>'
       +   '<p>Each section below is one study, '
