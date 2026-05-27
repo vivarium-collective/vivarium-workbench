@@ -1513,34 +1513,34 @@
       <p><strong>Module:</strong> <code id="ce-module"></code> <span id="ce-kind" class="kind-badge"></span></p>
     </div>
 
-    <!-- 4-tab shell: Graph | Configure | Run | Results (todo #16)
-         All tabs live inside one panel card; the tab bar sits at its top. -->
-    <div class="panel" style="padding:0">
+    <!-- Loom-explore graph (always visible — has its own View/Run/… nav inside) -->
+    <div class="panel">
+      <div class="loom-frame-toolbar" style="display:flex;justify-content:flex-end;margin-bottom:6px">
+        <button class="btn-mini" onclick="_popoutLoom('composite-explore-frame')" title="Open in a separate window.">Pop out &#8599;</button>
+      </div>
+      <iframe id="composite-explore-frame"
+              src="/loom-explore/index.html"
+              title="Composite Explorer"
+              style="width:100%;height:720px;border:1px solid #ddd;background:#fff"></iframe>
+    </div>
+
+    <!-- Post-run actions: shown after explore:run-complete postMessage -->
+    <div id="ce-post-run-bar" style="display:none;margin-top:8px;padding:12px 16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;align-items:center;gap:12px">
+      <span style="flex:1;color:#166534;font-size:0.9em">Run complete. Save this run as a Study to track variants and conclusions.</span>
+      <button id="save-as-study-btn" class="action-btn" onclick="_ceOpenSaveAsStudyModal()" style="background:#16a34a;border-color:#16a34a">Save as Study</button>
+    </div>
+
+    <!-- HPC tab panel: Configure | Run | Results (todo #16)
+         Separate from the loom-explore so we don't collide with its own nav. -->
+    <div class="panel" style="padding:0;margin-top:12px">
       <div class="ce-tab-bar" role="tablist" style="margin:0;padding:10px 16px 0">
-        <button class="ce-tab-btn active" data-cetab="graph"     onclick="_setCeTab('graph')"     role="tab">Graph</button>
-        <button class="ce-tab-btn"        data-cetab="configure" onclick="_setCeTab('configure')" role="tab">Configure</button>
+        <button class="ce-tab-btn active" data-cetab="configure" onclick="_setCeTab('configure')" role="tab">Configure</button>
         <button class="ce-tab-btn"        data-cetab="run"       onclick="_setCeTab('run')"       role="tab">Run</button>
         <button class="ce-tab-btn"        data-cetab="results"   onclick="_setCeTab('results')"   role="tab" id="ce-tab-results-btn">Results</button>
       </div>
 
-      <!-- ── Graph tab ───────────────────────────────────────────────── -->
-      <div id="ce-tab-graph" class="ce-tab-panel active" style="padding:12px 16px 16px">
-        <div class="loom-frame-toolbar" style="display:flex;justify-content:flex-end;margin-bottom:6px">
-          <button class="btn-mini" onclick="_popoutLoom('composite-explore-frame')" title="Open in a separate window.">Pop out &#8599;</button>
-        </div>
-        <iframe id="composite-explore-frame"
-                src="/loom-explore/index.html"
-                title="Composite Explorer"
-                style="width:100%;height:720px;border:1px solid #ddd;background:#fff"></iframe>
-        <!-- Post-run actions: shown after explore:run-complete postMessage -->
-        <div id="ce-post-run-bar" style="display:none;margin-top:8px;padding:12px 16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;align-items:center;gap:12px">
-          <span style="flex:1;color:#166534;font-size:0.9em">Run complete. Save this run as a Study to track variants and conclusions.</span>
-          <button id="save-as-study-btn" class="action-btn" onclick="_ceOpenSaveAsStudyModal()" style="background:#16a34a;border-color:#16a34a">Save as Study</button>
-        </div>
-      </div>
-
       <!-- ── Configure tab ───────────────────────────────────────────── -->
-      <div id="ce-tab-configure" class="ce-tab-panel" style="padding:12px 16px 16px">
+      <div id="ce-tab-configure" class="ce-tab-panel active" style="padding:12px 16px 16px">
         <h3 style="margin-top:0">HPC Run Configuration</h3>
         <p class="muted" style="font-size:0.88em">
           Parameters saved to this composite's <code>hpc_run_config</code> field.
@@ -1679,7 +1679,7 @@
         </div>
       </div>
 
-    </div><!-- /.panel (tab container) -->
+    </div><!-- /.panel (HPC tabs) -->
 
   </div>
 </section>
@@ -2330,7 +2330,7 @@ function _toggleTheme() {
   function _ceRestoreTab () {
     var saved = null;
     try { saved = sessionStorage.getItem("ce-tab"); } catch (e) {}
-    _setCeTab(saved || "graph");
+    _setCeTab(saved || "configure");
   }
 
   // Hook into the existing composite-selection flow: the main dashboard sets
