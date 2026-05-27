@@ -4363,7 +4363,15 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/ui-config"):
             return self._get_ui_config()
         if self.path.startswith("/api/compute-backends"):
-            return self._get_compute_backends()
+            # /api/compute-backends                 → list
+            # /api/compute-backends/<id>/status     → probe one backend
+            sub = path_only[len("/api/compute-backends"):].strip("/")
+            if not sub:
+                return self._get_compute_backends()
+            segs = sub.split("/")
+            if len(segs) == 2 and segs[1] == "status":
+                return self._get_compute_backend_status(segs[0])
+            return self._json({"error": "not found"}, 404)
         if self.path.startswith("/api/hpc/"):
             return self._dispatch_hpc_get(path_only)
         if self.path.startswith("/api/git-status"):
@@ -8139,18 +8147,66 @@ if __name__ == "__main__":
     # HPC compute backend routes (Todo #10 Phase 5)
     # -----------------------------------------------------------------------
 
+    _BACKEND_META = {
+        "local":    {"label": "Local machine", "description": "Run on this host",                                     "kind": "local"},
+        "hpc:ccam": {"label": "HPC: CCAM",     "description": "CCAM cluster via SLURM + Apptainer/Singularity",        "kind": "hpc"},
+    }
+
     def _get_compute_backends(self):
-        """GET /api/compute-backends — list registered compute backends."""
+        """GET /api/compute-backends — list registered compute backends.
+
+        Set ``?status=1`` to inline a probe per backend (slower; SSH per HPC entry).
+        Without it, the response carries only metadata.
+        """
         from vivarium_dashboard.lib.workspace_create import ALLOWED_BACKENDS
-        _META = {
-            "local":    {"label": "Local machine",   "description": "Run on this host"},
-            "hpc:ccam": {"label": "HPC: CCAM",        "description": "CCAM cluster via SLURM + Apptainer/Singularity"},
-        }
+        want_status = self.path.split("?", 1)[-1].find("status=1") >= 0 if "?" in self.path else False
         backends = []
         for bid in ALLOWED_BACKENDS:
-            meta = _META.get(bid, {"label": bid, "description": ""})
-            backends.append({"id": bid, **meta})
+            meta = self._BACKEND_META.get(bid, {"label": bid, "description": "", "kind": "unknown"})
+            entry = {"id": bid, **meta}
+            if want_status:
+                entry["status"] = self._probe_backend(bid)
+            backends.append(entry)
         return self._json({"backends": backends}, 200)
+
+    def _get_compute_backend_status(self, bid: str):
+        """GET /api/compute-backends/<id>/status — probe one backend.
+
+        Returns ``{ok: bool, ...}``. For ``local`` always ``{ok: true}``. For
+        HPC backends, delegates to :func:`hpc_dispatch.check_connectivity` and
+        maps the result to a uniform shape so callers don't need to special-case
+        per-backend response keys.
+        """
+        from vivarium_dashboard.lib.workspace_create import ALLOWED_BACKENDS
+        if bid not in ALLOWED_BACKENDS:
+            return self._json({"error": "unknown backend", "id": bid}, 404)
+        return self._json(self._probe_backend(bid), 200)
+
+    def _probe_backend(self, bid: str) -> dict:
+        """Return a uniform ``{ok, kind, message?, detail?}`` shape for any backend."""
+        meta = self._BACKEND_META.get(bid, {"kind": "unknown"})
+        kind = meta.get("kind", "unknown")
+        if kind == "local":
+            return {"ok": True, "kind": "local", "message": "local host"}
+        if kind == "hpc":
+            if WORKSPACE is None:
+                return {"ok": False, "kind": "hpc", "message": "no workspace bound"}
+            try:
+                from vivarium_dashboard.lib.hpc_dispatch import check_connectivity
+                from vivarium_dashboard.lib.hpc_settings import get_hpc_settings, HpcNotConfiguredError
+                detail = check_connectivity(get_hpc_settings(str(WORKSPACE)))
+                ok = bool(detail.get("reachable") and detail.get("singularity_available"))
+                return {"ok": ok, "kind": "hpc", "message": detail.get("message", ""), "detail": detail}
+            except HpcNotConfiguredError as exc:
+                return {
+                    "ok": False,
+                    "kind": "hpc",
+                    "message": "hpc_not_configured",
+                    "missing_fields": list(getattr(exc, "missing", [])),
+                }
+            except Exception as exc:
+                return {"ok": False, "kind": "hpc", "message": str(exc)[:500]}
+        return {"ok": False, "kind": "unknown", "message": f"unknown backend kind: {kind}"}
 
     def _dispatch_hpc_get(self, path_only: str):
         """Route /api/hpc/<backend>/... GET requests."""
