@@ -4325,6 +4325,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_investigations()
         if self.path.startswith("/api/study-export"):
             return self._get_study_export()
+        # More-specific composite sub-resource routes must come BEFORE the
+        # /api/composites catch-all so they aren't swallowed by _get_composites.
+        if self.path.startswith("/api/composite/"):
+            tail = self.path[len("/api/composite/"):]
+            # /api/composite/<id>/hpc-config
+            if tail.endswith("/hpc-config"):
+                spec_id = tail[: -len("/hpc-config")]
+                return self._get_composite_hpc_config(spec_id)
+            # /api/composite/<id>/runs/<run_id>/summary
+            parts = tail.split("/")
+            if len(parts) == 4 and parts[1] == "runs" and parts[3] == "summary":
+                return self._get_composite_run_summary(parts[0], parts[2])
+            # /api/composite/<id>/runs
+            if len(parts) == 2 and parts[1] == "runs":
+                return self._get_composite_hpc_runs(parts[0])
         if self.path.startswith("/api/composites"):
             return self._get_composites()
         if self.path.startswith("/api/system-deps-check"):
@@ -4418,6 +4433,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path.startswith("/api/hpc/"):
             return self._dispatch_hpc_post(self.path, body)
+
+        # /api/composite/<id>/hpc-config  (save HPC run config into composite doc)
+        if self.path.startswith("/api/composite/") and self.path.endswith("/hpc-config"):
+            spec_id = self.path[len("/api/composite/"): -len("/hpc-config")]
+            return self._post_composite_hpc_config(spec_id, body)
 
         method_name = _POST_ROUTE_MAP.get(self.path)
         if method_name is None:
@@ -8290,12 +8310,17 @@ if __name__ == "__main__":
             return self._json({"error": str(exc)[:500]}, 500)
 
     def _post_hpc_run(self, backend: str, body: dict):
-        """POST /api/hpc/<backend>/run — submit a Singularity exec SLURM job."""
+        """POST /api/hpc/<backend>/run — submit a Singularity exec SLURM job.
+
+        Optional body field ``composite_id`` tags the run record so the
+        composite-explore Results tab can list runs for a given composite.
+        """
         if WORKSPACE is None:
             return self._json({"error": "no workspace bound"}, 409)
         command = (body.get("command") or "").strip()
         if not command:
             return self._json({"error": "command required"}, 400)
+        composite_id = (body.get("composite_id") or "").strip() or None
         resources = {
             "cpus": body.get("cpus", 1),
             "mem_gb": body.get("mem_gb", 4),
@@ -8305,6 +8330,27 @@ if __name__ == "__main__":
             from vivarium_dashboard.lib.hpc_dispatch import submit_run_job
             from vivarium_dashboard.lib.hpc_settings import get_hpc_settings, HpcNotConfiguredError
             result = submit_run_job(get_hpc_settings(str(WORKSPACE)), WORKSPACE, command, resources)
+            # Write a metadata sidecar so composite-explore Results tab can
+            # filter runs by composite_id.
+            if composite_id:
+                import datetime as _dt
+                hpc_dir = WORKSPACE / ".pbg" / "hpc"
+                hpc_dir.mkdir(parents=True, exist_ok=True)
+                meta = {
+                    "run_id":       result["run_id"],
+                    "slurm_job_id": result["slurm_job_id"],
+                    "log_path":     result.get("log_path", ""),
+                    "composite_id": composite_id,
+                    "backend":      backend,
+                    "command":      command,
+                    "submitted_at": _dt.datetime.utcnow().isoformat() + "Z",
+                    "cpus":         resources["cpus"],
+                    "mem_gb":       resources["mem_gb"],
+                    "time_min":     resources["time_min"],
+                }
+                (hpc_dir / f"run-{result['run_id']}.meta.json").write_text(
+                    json.dumps(meta, indent=2)
+                )
             return self._json(result, 202)
         except HpcNotConfiguredError as exc:
             return self._hpc_503(exc)
@@ -10991,6 +11037,122 @@ if __name__ == "__main__":
             return self._json({"composites": out, "workspace_package": pkg}, 200)
         except Exception as e:
             return self._json({"composites": [], "error": str(e)}, 200)
+
+    # ------------------------------------------------------------------
+    # Composite HPC-config sub-resource  (todo #16)
+    # ------------------------------------------------------------------
+
+    def _composite_file_and_data(self, spec_id: str):
+        """Resolve spec_id → (Path, dict).  Returns (None, None) if not found."""
+        if WORKSPACE is None:
+            return None, None
+        try:
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+            pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+        except Exception:
+            pkg = ""
+        from vivarium_dashboard.lib.composite_lookup import find_composite_path
+        path = find_composite_path(WORKSPACE, pkg, spec_id)
+        if path is None or not path.is_file():
+            return None, None
+        raw = path.read_text()
+        try:
+            data = json.loads(raw)
+        except Exception:
+            data = yaml.safe_load(raw) or {}
+        return path, data
+
+    def _get_composite_hpc_config(self, spec_id: str):
+        """GET /api/composite/<id>/hpc-config — return hpc_run_config from composite doc."""
+        path, data = self._composite_file_and_data(spec_id)
+        if path is None:
+            return self._json({"error": f"composite not found: {spec_id}"}, 404)
+        cfg = data.get("hpc_run_config") or {}
+        return self._json({"hpc_run_config": cfg, "spec_id": spec_id}, 200)
+
+    def _post_composite_hpc_config(self, spec_id: str, body: dict):
+        """POST /api/composite/<id>/hpc-config — merge hpc_run_config into composite doc."""
+        path, data = self._composite_file_and_data(spec_id)
+        if path is None:
+            return self._json({"error": f"composite not found: {spec_id}"}, 404)
+        new_cfg = body.get("hpc_run_config") or {}
+        # Merge (not replace) so partial updates don't wipe other keys.
+        existing = data.get("hpc_run_config") or {}
+        existing.update(new_cfg)
+        data["hpc_run_config"] = existing
+        # Write back, preserving file format.
+        if path.suffix == ".json":
+            path.write_text(json.dumps(data, indent=2))
+        else:
+            path.write_text(yaml.dump(data, allow_unicode=True, sort_keys=False))
+        # Commit the change (inline pattern — no _active_branch_action needed for single file).
+        try:
+            import subprocess as _sp
+            _sp.run(["git", "-C", str(WORKSPACE), "add", str(path)],
+                    capture_output=True, timeout=10)
+            _sp.run(
+                ["git", "-C", str(WORKSPACE), "commit", "-m",
+                 f"chore(composite): update hpc_run_config for {spec_id.split('.')[-1]}",
+                 "--", str(path)],
+                capture_output=True, timeout=15,
+            )
+        except Exception:
+            pass  # Best-effort; don't fail the save if git is unavailable.
+        return self._json({"ok": True, "spec_id": spec_id, "hpc_run_config": existing}, 200)
+
+    def _get_composite_hpc_runs(self, spec_id: str):
+        """GET /api/composite/<id>/runs — list HPC run records tagged to this composite."""
+        if WORKSPACE is None:
+            return self._json({"error": "no workspace bound"}, 409)
+        hpc_dir = WORKSPACE / ".pbg" / "hpc"
+        runs = []
+        if hpc_dir.is_dir():
+            for meta_file in sorted(hpc_dir.glob("run-*.meta.json"),
+                                    key=lambda p: p.stat().st_mtime, reverse=True):
+                try:
+                    meta = json.loads(meta_file.read_text())
+                except Exception:
+                    continue
+                if meta.get("composite_id") == spec_id:
+                    runs.append(meta)
+        return self._json({"runs": runs, "spec_id": spec_id}, 200)
+
+    def _get_composite_run_summary(self, spec_id: str, run_id: str):
+        """GET /api/composite/<id>/runs/<run_id>/summary — SSH-parse terminal JSON from log."""
+        if WORKSPACE is None:
+            return self._json({"error": "no workspace bound"}, 409)
+        hpc_dir = WORKSPACE / ".pbg" / "hpc"
+        meta_file = hpc_dir / f"run-{run_id}.meta.json"
+        if not meta_file.is_file():
+            return self._json({"error": f"run {run_id} not found"}, 404)
+        try:
+            meta = json.loads(meta_file.read_text())
+        except Exception:
+            return self._json({"error": "corrupt meta file"}, 500)
+        log_path = meta.get("log_path", "")
+        if not log_path:
+            return self._json({"summary": None, "meta": meta}, 200)
+        try:
+            from vivarium_dashboard.lib.hpc_dispatch import _ssh
+            from vivarium_dashboard.lib.hpc_settings import get_hpc_settings, HpcNotConfiguredError
+            r = _ssh(get_hpc_settings(str(WORKSPACE)),
+                     f"tail -n 30 {log_path} 2>/dev/null", timeout=20)
+            # Extract the last {...} JSON block from the log tail.
+            import re as _re
+            blocks = _re.findall(r'\{[^{}]+\}', r.stdout, _re.DOTALL)
+            summary = None
+            for blk in reversed(blocks):
+                try:
+                    obj = json.loads(blk)
+                    if "status" in obj or "n_ticks" in obj:
+                        summary = obj
+                        break
+                except Exception:
+                    continue
+            return self._json({"summary": summary, "meta": meta}, 200)
+        except Exception as exc:
+            return self._json({"summary": None, "meta": meta,
+                               "error": str(exc)[:300]}, 200)
 
     def _get_composite_state(self):
         """GET /api/composite-state?ref=<id-or-path>
