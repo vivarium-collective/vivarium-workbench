@@ -479,15 +479,19 @@ def build_run_script(
 
     exec_lines = _singularity_exec_lines(settings, remote_ws, ws_name, command)
 
-    # Non-empty guard on exit mirrors sms-api parca job (lines 409-413).
+    # Non-empty guard: accept output in results/ OR out/sim_data/ so both
+    # ParCa (writes out/sim_data/parca_state.pkl) and Colony (writes results/)
+    # exit 0 on success.  Mirrors sms-api parca job (lines 409-413) but
+    # generalised for the two-step v2ecoli dispatch.
+    parca_out_dir = f"{remote_ws}/out/sim_data"
     post_guard = dedent(f"""\
 
-        if [ ! "$(ls -A "{results_dir}" 2>/dev/null)" ]; then
-            echo "Results directory {results_dir} is empty after run — job likely failed."
+        if [ ! "$(ls -A "{results_dir}" 2>/dev/null)" ] && [ ! "$(ls -A "{parca_out_dir}" 2>/dev/null)" ]; then
+            echo "Neither {results_dir} nor {parca_out_dir} has output after run — job likely failed."
             exit 1
         fi
 
-        echo "Run {run_id} completed. Results at {results_dir}."
+        echo "Run {run_id} completed."
         """)
 
     return "\n".join(header) + "\n" + guards_and_exec + "\n".join(exec_lines) + post_guard
