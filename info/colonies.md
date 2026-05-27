@@ -31,7 +31,7 @@ git push → GitHub Actions builds Docker image → pushes to ghcr.io/vivarium-c
 Phase 1 ──► Build SIF image        (one-time per code change, ~5-10 min —
                 │                   pulls from GHCR, no local Docker needed)
 Phase 2 ──► Run ParCa              (one-time per parameter configuration,
-                │                   generates out/cache used by colony)
+                │                   generates out/sim_data/cache used by colony)
                 ▼
 Phase 3 ──► Run Colony simulation  (repeatable — reuses SIF and ParCa cache)
 ```
@@ -190,59 +190,59 @@ status at page load:
 
 ## Phase 2 — Run ParCa: Generate Parameter Cache *(one-time per simulation configuration)*
 
-> **Skip this phase** if `out/cache` already exists on the cluster from a
-> previous run (same container version, same parameter configuration).
+> **Skip this phase** if `out/sim_data/cache/` already exists on the cluster
+> from a previous run (same container version, same parameter configuration).
 > Jump directly to [§ Phase 3](#phase-3--run-colony-simulation-repeatable).
 
 ParCa ("Parameter Calculator") generates a compiled parameter cache in
-`out/cache/`. Colony simulations **will fail immediately** if this cache is
-absent — ParCa must complete successfully before any colony run.
+`out/sim_data/cache/`. Colony simulations **will fail immediately** if this
+cache is absent — ParCa must complete successfully before any colony run.
 
 The cache is persistent on the cluster filesystem (bind-mounted as
 `{remote_workspace}/out:/app/out`) and is reused across all colony runs until
 you delete it or change the model parameters that affect it.
 
+ParCa also automatically writes `out/sim_data/parca_state.pkl` (the raw
+parameter pickle) and generates the colony bundle
+(`initial_state.json` + `sim_data_cache.dill`) in `out/sim_data/cache/` at
+the end of the same job — no separate conversion step is needed.
+
 ### Steps in the dashboard
 
 1. Navigate to **`http://localhost:9863/hpc/ccam`**
 
-2. In the **Run Simulation** panel, fill in the **Command** field:
+2. Find the **▶ Run ParCa** panel. The pre-filled defaults are ready to use:
 
-   ```
-   uv run v2ecoli-parca --cache-dir out/cache
-   ```
-
-3. Set resources appropriate for ParCa — these are reasonable defaults:
-
-   | Field | Recommended value | Notes |
+   | Field | Default | Notes |
    |---|---|---|
-   | CPUs | `8` | ParCa is moderately parallelised |
-   | Memory (GB) | `16` | Large parameter matrices; more is safer |
-   | Time (min) | `120` | Typically completes in 30–60 min |
+   | Mode | `fast` (~30 min) | Use `full` for a production-quality parameter set (several hours) |
+   | CPUs | `8` | Controls parallelism for TF-condition fitting steps |
+   | Mem (GB) | `16` | Large parameter matrices; more is safer |
+   | Time (min) | `240` | Conservative ceiling; fast mode usually finishes in 30–60 min |
 
-4. Click **Submit Job**
+   The **Command preview** below the fields shows the exact command that will
+   run on the cluster. You can append extra flags (e.g. `--no-operons`,
+   `--resume-from-step 6`) in the **Extra args** field.
 
-5. The submission line below the form shows:
+3. Click **▶ Run ParCa**
+
+4. The status box below the button shows:
    ```
-   Submitted: SLURM job 2142778
+   ParCa · SLURM <job_id>: PENDING
    ```
-   The job appears immediately in the **Recent Jobs** list below the form.
+   and transitions to `RUNNING` then `COMPLETED` automatically (polls every 15 s).
 
-6. The job state polls automatically every 10 seconds. Wait for it to reach
-   **COMPLETED** (green text in the state column).
+5. Once **COMPLETED**, click **Fetch Log** to verify the run succeeded and see
+   timing output. The ParCa log ends with:
+   ```
+   Colony cache bundle complete (…s): out/sim_data/cache/
+   ```
+   confirming the colony bundle is ready.
 
-   Typical ParCa wall-time: **30–60 minutes** depending on model scale.
-
-7. Once COMPLETED, the `out/cache/` directory exists on the cluster and is
-   ready for colony runs.
-
-> **Note:** If ParCa fails (state: `FAILED`), retrieve the SLURM job ID from
-> the Recent Jobs list and check the log on the cluster:
-> ```bash
-> ssh svc_vivarium@login.hpc.cam.uchc.edu \
->   "cat /projects/SMS/sms_api/prod/htclogs/v2ecoli/*-<JOB_ID>.out"
-> ```
-> Fix the issue, then re-submit.
+> **If ParCa fails** (`FAILED` status), click **Fetch Log** to read the SLURM
+> output directly in the dashboard. Fix the issue and resubmit — the **Extra
+> args** field accepts `--resume-from-step N --resume-pickle out/sim_data/checkpoint_step_N.pkl`
+> to restart from the last successful checkpoint without re-running all 9 steps.
 
 ---
 
@@ -250,7 +250,7 @@ you delete it or change the model parameters that affect it.
 
 > **Prerequisite check:**
 > - ✅ Phase 1 complete: `v2ecoli.sif` exists on the cluster
-> - ✅ Phase 2 complete: `out/cache/` exists on the cluster
+> - ✅ Phase 2 complete: `out/sim_data/cache/` exists on the cluster
 >
 > If either is missing, complete the relevant phase above first.
 
@@ -262,39 +262,28 @@ different parameters without re-running Phase 1 or Phase 2.
 
 1. Navigate to **`http://localhost:9863/hpc/ccam`**
 
-2. In the **Run Simulation** panel, fill in the **Command** field:
+2. Find the **🧬 Run Colony** panel. Adjust parameters as needed:
 
-   ```
-   uv run v2ecoli-colony --n-cells 4 --duration-min 50 --cache-dir out/cache
-   ```
-
-   **Key parameters:**
-
-   | Parameter | Default | Description |
+   | Field | Default | Description |
    |---|---|---|
-   | `--n-cells` | `4` | Number of cells in the colony |
-   | `--duration-min` | `50` | Simulated time in minutes of cell growth |
-   | `--cache-dir` | `out/cache` | Location of the ParCa cache — **do not change** unless you re-ran ParCa to a different path |
-
-3. Set SLURM resources:
-
-   | Field | Recommended value | Notes |
-   |---|---|---|
+   | n-cells | `4` | Number of cells in the colony |
+   | duration (min) | `50` | Simulated time in minutes of cell growth |
+   | Cache dir | `out/sim_data/cache` | ParCa cache location — **must match Phase 2 output** |
    | CPUs | `4` | One core per cell is a reasonable starting point |
-   | Memory (GB) | `8` | Scale up for larger colonies or longer durations |
-   | Time (min) | `60` | Add buffer for larger runs; adjust to `--duration-min` |
+   | Mem (GB) | `32` | Scale up for larger colonies or longer durations |
+   | Time (min) | `120` | Conservative ceiling; adjust to `--duration-min` |
 
-4. Click **Submit Job**
+   The **Command preview** shows the exact command before you submit.
+   Append flags such as `--seed 42` or `--output-dir results/run-2` in
+   the **Extra args** field.
 
-5. Monitor the run in the **Recent Jobs** list. State transitions:
-   ```
-   PENDING → RUNNING → COMPLETED
-   ```
-   Each state polls every 10 seconds automatically.
+3. Click **🧬 Run Colony**
 
-6. Results land in `{remote_workspace}/results/` (bind-mounted as
-   `/app/results` inside the container). Retrieve them via `rsync` or
-   `scp` after the job completes:
+4. The status box shows `Colony · SLURM <job_id>: PENDING` and polls every 15 s.
+   Click **Fetch Log** at any point to see live container output.
+
+5. Results land in `{remote_workspace}/results/` on the cluster. Retrieve them
+   after `COMPLETED`:
 
    ```bash
    rsync -avz \
@@ -304,27 +293,20 @@ different parameters without re-running Phase 1 or Phase 2.
 
 ### Running multiple colony experiments
 
-Each **Submit Job** click creates an independent SLURM job. You can queue
-several colony runs simultaneously (different `--n-cells`, `--duration-min`,
-or seed values) — they will run in parallel (subject to cluster availability)
-and write to separate subdirectories under `results/`.
+Each **🧬 Run Colony** click submits an independent SLURM job. You can queue
+several runs simultaneously (different `n-cells`, `duration`, or seed values)
+by adjusting the fields and clicking the button again — they will run in
+parallel (subject to cluster availability) and write to separate subdirectories
+under `results/`.
 
-To vary parameters, simply change the command field before each submission.
-Example batch of three runs:
+Example: to run three variants back-to-back, set the **Extra args** field and
+click the button three times:
 
-```
-# Run 1 — small colony, short duration
-uv run v2ecoli-colony --n-cells 2 --duration-min 30 --cache-dir out/cache
-
-# Run 2 — standard colony
-uv run v2ecoli-colony --n-cells 4 --duration-min 50 --cache-dir out/cache
-
-# Run 3 — larger colony, longer duration
-uv run v2ecoli-colony --n-cells 8 --duration-min 100 --cache-dir out/cache
-```
-
-All three can be submitted back-to-back from the dashboard before any of them
-starts running.
+| n-cells | duration | Extra args |
+|---|---|---|
+| 2 | 30 | *(none)* |
+| 4 | 50 | *(none)* |
+| 8 | 100 | `--seed 42` |
 
 ---
 
@@ -401,8 +383,10 @@ causes of failure:
 
 ### Colony fails with "cache not found" or similar
 
-ParCa has not run yet (or ran with a different `--cache-dir`). Run Phase 2
-before re-submitting Colony.
+ParCa has not run yet (or ran with a different `--cache-dir`). The default
+cache location is `out/sim_data/cache` — make sure the **Cache dir** field
+in the 🧬 Run Colony panel matches where ParCa wrote its output.
+Run Phase 2 before re-submitting Colony.
 
 ### Job stuck in PENDING for a long time
 
@@ -443,6 +427,7 @@ rsync -avz \
 | `GET` | `/api/hpc/hpc:ccam/build/<id>` | Poll build job state |
 | `POST` | `/api/hpc/hpc:ccam/run` | Submit simulation job |
 | `GET` | `/api/hpc/hpc:ccam/run/<job_id>` | Poll run job state |
+| `GET` | `/api/hpc/hpc:ccam/run/<run_hex_id>/log` | Tail SLURM output log (200 lines) |
 | `POST` | `/api/hpc/hpc:ccam/run/<job_id>/cancel` | Cancel a job |
 | `GET` | `/api/hpc/hpc:ccam/runs` | List recent jobs |
 
@@ -466,4 +451,4 @@ rsync -avz \
 
 ---
 
-*Last updated: 2026-05-27 · Vivarium Dashboard `feat/hpc-backend-integration`*
+*Last updated: 2026-05-27 · Vivarium Dashboard `feat/hpc-backend-integration` — dedicated Run ParCa / Run Colony panels added*
