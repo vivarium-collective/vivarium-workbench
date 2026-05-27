@@ -466,6 +466,7 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         owner_html_url=owner.get("html_url") or "",
         owner_initials=owner.get("initials") or "",
         owner_source=owner.get("source") or "",
+        compute_backend=ws.get("compute_backend") or "",
     ), encoding="utf-8")
     return out
 

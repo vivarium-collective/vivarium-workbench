@@ -387,7 +387,7 @@ class TestBuildRunScript:
     def test_bind_mount_in_script(self) -> None:
         s = _settings()
         script = build_run_script(s, "myws", "abc123", "python run.py")
-        assert "--bind" in script
+        assert "-B" in script  # sms-api uses short flag
         assert "/app/results" in script
 
     def test_resource_defaults_reflected(self) -> None:
@@ -402,7 +402,7 @@ class TestBuildRunScript:
         s = _settings()
         script = build_run_script(s, "myws", "abc123", "cmd")
         assert script.startswith("#!/bin/bash")
-        assert "set -euo pipefail" in script
+        assert "set -e" in script  # mirrors sms-api parca script (set -e, not pipefail)
 
 
 class TestBuildImageScript:
@@ -440,7 +440,8 @@ class TestGetJobStatus:
         def _mock(settings, cmd, **kwargs):
             call_count["n"] += 1
             if "squeue" in cmd:
-                return _ok("RUNNING None 2026-01-01T10:00 01:23")
+                # squeue format: "%i %j %T %R %M" → job_id name state reason elapsed
+                return _ok("12345 myjob RUNNING None 01:23")
             return _ok()
 
         with patch("vivarium_dashboard.lib.hpc_dispatch._ssh", side_effect=_mock):
@@ -508,12 +509,13 @@ class TestSubmitBuildJob:
         s = _settings()
         ws = tmp_path / "myws"
         ws.mkdir()
+        (ws / "Singularity.def").write_text("Bootstrap: docker\nFrom: python:3.12-slim\n")
 
-        def _ssh_mock(settings, cmd, **kwargs):
-            return _ok("Submitted batch job 777")
-
+        # sbatch --parsable returns a bare integer (mirrors sms-api SlurmService.submit_job)
         with patch("vivarium_dashboard.lib.hpc_dispatch.rsync_workspace") as mock_rsync, \
-             patch("vivarium_dashboard.lib.hpc_dispatch._ssh", side_effect=_ssh_mock):
+             patch("vivarium_dashboard.lib.hpc_dispatch._scp_file"), \
+             patch("vivarium_dashboard.lib.hpc_dispatch._ssh",
+                   return_value=_ok("777")):
             result = submit_build_job(s, ws)
 
         assert mock_rsync.called
@@ -525,22 +527,34 @@ class TestSubmitBuildJob:
         s = _settings()
         ws = tmp_path / "myws"
         ws.mkdir()
+        (ws / "Singularity.def").write_text("Bootstrap: docker\nFrom: python:3.12-slim\n")
 
         with patch("vivarium_dashboard.lib.hpc_dispatch.rsync_workspace"), \
+             patch("vivarium_dashboard.lib.hpc_dispatch._scp_file"), \
              patch("vivarium_dashboard.lib.hpc_dispatch._ssh",
-                   return_value=_ok("Submitted batch job 99")):
+                   return_value=_ok("99")):
             submit_build_job(s, ws)
 
         hpc_dir = ws / ".pbg" / "hpc"
-        scripts = list(hpc_dir.glob("build-*.sh"))
+        scripts = list(hpc_dir.glob("build-*.sbatch"))
         assert len(scripts) == 1
+
+    def test_raises_on_missing_singularity_def(self, tmp_path: Path) -> None:
+        s = _settings()
+        ws = tmp_path / "myws"
+        ws.mkdir()
+        # No Singularity.def — should raise before any network call.
+        with pytest.raises(RuntimeError, match="Singularity.def"):
+            submit_build_job(s, ws)
 
     def test_raises_on_sbatch_failure(self, tmp_path: Path) -> None:
         s = _settings()
         ws = tmp_path / "myws"
         ws.mkdir()
+        (ws / "Singularity.def").write_text("Bootstrap: docker\nFrom: python:3.12-slim\n")
 
         with patch("vivarium_dashboard.lib.hpc_dispatch.rsync_workspace"), \
+             patch("vivarium_dashboard.lib.hpc_dispatch._scp_file"), \
              patch("vivarium_dashboard.lib.hpc_dispatch._ssh",
                    return_value=_fail("sbatch: error: invalid partition", returncode=1)):
             with pytest.raises(RuntimeError, match="sbatch failed"):
@@ -558,9 +572,11 @@ class TestSubmitRunJob:
         ws = tmp_path / "myws"
         ws.mkdir()
 
+        # sbatch --parsable returns a bare integer (mirrors sms-api SlurmService.submit_job)
         with patch("vivarium_dashboard.lib.hpc_dispatch.rsync_workspace"), \
+             patch("vivarium_dashboard.lib.hpc_dispatch._scp_file"), \
              patch("vivarium_dashboard.lib.hpc_dispatch._ssh",
-                   return_value=_ok("Submitted batch job 555")):
+                   return_value=_ok("555")):
             result = submit_run_job(s, ws, "python run.py", {"cpus": 2, "mem_gb": 8})
 
         assert result["slurm_job_id"] == 555
@@ -572,11 +588,12 @@ class TestSubmitRunJob:
         ws.mkdir()
 
         with patch("vivarium_dashboard.lib.hpc_dispatch.rsync_workspace"), \
+             patch("vivarium_dashboard.lib.hpc_dispatch._scp_file"), \
              patch("vivarium_dashboard.lib.hpc_dispatch._ssh",
-                   return_value=_ok("Submitted batch job 1")):
+                   return_value=_ok("1")):
             submit_run_job(s, ws, "cmd", {})
 
-        scripts = list((ws / ".pbg" / "hpc").glob("run-*.sh"))
+        scripts = list((ws / ".pbg" / "hpc").glob("run-*.sbatch"))
         assert len(scripts) == 1
 
     def test_script_content_uses_resources(self, tmp_path: Path) -> None:
@@ -585,12 +602,13 @@ class TestSubmitRunJob:
         ws.mkdir()
 
         with patch("vivarium_dashboard.lib.hpc_dispatch.rsync_workspace"), \
+             patch("vivarium_dashboard.lib.hpc_dispatch._scp_file"), \
              patch("vivarium_dashboard.lib.hpc_dispatch._ssh",
-                   return_value=_ok("Submitted batch job 2")):
+                   return_value=_ok("2")):
             submit_run_job(s, ws, "python run.py",
                            {"cpus": 4, "mem_gb": 16, "time_min": 30})
 
-        script_text = next((ws / ".pbg" / "hpc").glob("run-*.sh")).read_text()
+        script_text = next((ws / ".pbg" / "hpc").glob("run-*.sbatch")).read_text()
         assert "--cpus-per-task=4" in script_text
         assert "--mem=16G" in script_text
         assert "--time=30" in script_text

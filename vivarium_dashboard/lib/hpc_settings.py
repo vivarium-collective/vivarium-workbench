@@ -39,6 +39,9 @@ class HpcSettings(BaseSettings):
     # Non-sensitive tunables with safe defaults
     singularity_cmd: str = "apptainer"  # or "singularity"
     timeout_connect: int = 5            # SSH ConnectTimeout seconds
+    apptainer_tmpdir: str = "/tmp/apptainer"  # noqa: S108 — intentional /tmp for fast
+                                              # metadata ops during builds (avoids NFS).
+                                              # mirrors sms_api/config.py:apptainer_tmpdir
 
 
 class HpcNotConfiguredError(RuntimeError):

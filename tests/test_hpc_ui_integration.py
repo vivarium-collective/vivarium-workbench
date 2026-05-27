@@ -71,22 +71,25 @@ class TestComputeBackends:
 class TestHpcPage:
     def test_valid_backend_returns_200(self, dashboard_client, ws):
         client = dashboard_client(ws)
-        r = client.get("/hpc/hpc:ccam")
+        r = client.get("/hpc/ccam")
         assert r.status_code == 200
 
     def test_valid_backend_returns_html(self, dashboard_client, ws):
         client = dashboard_client(ws)
-        r = client.get("/hpc/hpc:ccam")
+        r = client.get("/hpc/ccam")
         assert "text/html" in r.text or "<html" in r.text.lower()
 
     def test_page_embeds_backend_name(self, dashboard_client, ws):
         client = dashboard_client(ws)
-        r = client.get("/hpc/hpc:ccam")
-        assert "hpc:ccam" in r.text
+        r = client.get("/hpc/ccam")
+        # The page injects the backend segment into _HPC_BACKEND JS var (e.g. "ccam"),
+        # not the full "hpc:ccam" id — the JS layer adds the prefix when needed.
+        assert "_HPC_BACKEND" in r.text
+        assert '"ccam"' in r.text
 
     def test_page_references_hpc_dispatch_js(self, dashboard_client, ws):
         client = dashboard_client(ws)
-        r = client.get("/hpc/hpc:ccam")
+        r = client.get("/hpc/ccam")
         assert "hpc-dispatch.js" in r.text
 
     def test_unknown_backend_returns_404(self, dashboard_client, ws):

@@ -9678,10 +9678,11 @@ if __name__ == "__main__":
         """GET /hpc/<backend> — render the HPC dashboard page."""
         import jinja2
         from vivarium_dashboard.lib.workspace_create import ALLOWED_BACKENDS
-        if backend not in ALLOWED_BACKENDS:
+        full_id = f"hpc:{backend}"
+        if full_id not in ALLOWED_BACKENDS:
             return self._send_html(
                 f"<h1>Unknown backend</h1>"
-                f"<p><code>{backend!r}</code> is not a registered compute backend.</p>",
+                f"<p><code>{full_id!r}</code> is not a registered compute backend.</p>",
                 code=404,
             )
         try:
@@ -12743,6 +12744,12 @@ def serve(workspace: Path | None, port: int, host: str = "127.0.0.1") -> int:
                 print(f"reconciled {n} stale composite run(s) on startup")
         except Exception as e:  # noqa: BLE001 — never block server boot on this
             print(f"warning: run reconcile failed: {e}", file=sys.stderr)
+
+        try:
+            from vivarium_dashboard.lib.report import render_workspace_report
+            render_workspace_report(WORKSPACE)
+        except Exception as e:  # noqa: BLE001 — never block server boot on report failure
+            print(f"warning: workspace report render failed: {e}", file=sys.stderr)
 
     srv = ThreadingHTTPServer((host, port), Handler)
     # Write server-info so tests and other tools can detect the server is

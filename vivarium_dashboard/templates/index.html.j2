@@ -423,6 +423,19 @@
         </span>
         <span class="viv-rail-link-label">Branch</span>
       </a>
+      {%- if compute_backend and compute_backend.startswith('hpc:') %}
+      <a href="/hpc/{{ compute_backend[4:] }}" class="viv-rail-link" target="_blank" rel="noopener">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+            <line x1="6" y1="6" x2="6.01" y2="6"/>
+            <line x1="6" y1="18" x2="6.01" y2="18"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">HPC: {{ compute_backend[4:]|upper }}</span>
+      </a>
+      {%- endif %}
     </nav>
 
     <!-- Studies of the active investigation, dependency-ordered. -->
