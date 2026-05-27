@@ -6982,29 +6982,18 @@
       + '.sp-metric-fail{background:#fee2e2;color:#991b1b}'
       + '.sp-expand-hint{display:inline-block;font-size:0.73em;color:#94a3b8;margin-top:6px}'
       + '.study-fold[open] .sp-expand-hint{display:none}'
-      /* sp-collapse-hint: the OPEN-state symmetric partner of
-         sp-expand-hint. Real DOM element (vs the previous ::after
-         pseudo-element which was easy to miss in devtools and tended
-         to wrap with the section-nav chips). Visual treatment matches
-         sp-expand-hint (same font-size + grey + hover-darker) so the
-         two affordances feel like a pair. Positioned bottom-right of
-         the sticky panel via `flex-basis:100% + text-align:right`,
-         which forces a row-break after the section-nav chips and
-         right-aligns the hint inside the new row — mirroring where
-         the expand-hint lands on collapsed cards. The whole <summary>
-         is the click target; the hint doesn't need its own handler. */
+      /* sp-collapse-hint: the OPEN-state partner of sp-expand-hint.
+         Styled identically (same font-size, grey, margin) so the two
+         affordances feel like the same control in two states. Lands on
+         its own row below the section-nav chips because sp-section-nav
+         is width:100% — no flex-basis trick needed. Left-aligned to
+         match where the expand-hint sits on collapsed cards. */
       + '.sp-collapse-hint{display:none}'
-      + '.study-fold[open] .sp-collapse-hint{'
-      +   'display:block;flex-basis:100%;text-align:right;'
-      +   'font-size:0.78em;color:#64748b;font-weight:500;'
-      +   'margin-top:6px;'
-      +   'transition:color 0.12s;'
-      + '}'
-      + '.study-fold[open]>.study-panel:hover .sp-collapse-hint{color:#334155}'
+      + '.study-fold[open] .sp-collapse-hint{display:inline-block;font-size:0.73em;color:#94a3b8;margin-top:6px}'
       + '.studies-toolbar{display:flex;gap:8px;margin:8px 0 14px}'
       + '.studies-toolbar button{font:inherit;font-size:0.85em;padding:5px 12px;border:1px solid #cbd5e1;background:#f8fafc;border-radius:6px;cursor:pointer;color:#334155}'
       + '.studies-toolbar button:hover{background:#e2e8f0}'
-      + '@media print{.sp-expand-hint,.studies-toolbar{display:none}}'
+      + '@media print{.sp-expand-hint,.sp-collapse-hint,.studies-toolbar{display:none}}'
       // ── review-readiness gate panel ──
       + '.review-gate{margin:10px 0;padding:10px 14px;background:#fffbeb;border:1px solid #f59e0b;border-left-width:5px;border-radius:6px;color:#92400e}'
       + '.review-gate>strong{color:#b45309}'
