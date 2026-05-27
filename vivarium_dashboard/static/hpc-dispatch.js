@@ -13,6 +13,7 @@
  *   GET  /api/hpc/{backend}/build/{job_id}/log
  *   POST /api/hpc/{backend}/run
  *   GET  /api/hpc/{backend}/run/{job_id}
+ *   GET  /api/hpc/{backend}/run/{run_hex_id}/log
  *   POST /api/hpc/{backend}/run/{job_id}/cancel
  */
 (function () {
@@ -238,7 +239,190 @@
     $('hpc-build-btn').textContent = 'Start Build';
   }
 
-  // ---- Run panel -----------------------------------------------------------
+  // ---- Quick-launch helpers (ParCa / Colony) --------------------------------
+
+  /**
+   * Generic quick-job poll: polls status every 15 s and updates statusEl.
+   * Stops when the job reaches a terminal state.
+   * @returns the interval ID so the caller can store / cancel it.
+   */
+  function _startQuickPoll(backend, slurmJobId, statusEl, label) {
+    const TERMINAL = new Set(['COMPLETED', 'FAILED', 'TIMEOUT', 'CANCELLED', 'NODE_FAIL']);
+    const tid = setInterval(async () => {
+      try {
+        const s = await jget(`/api/hpc/${backend}/run/${slurmJobId}`);
+        const state = (s.state || '').toUpperCase();
+        _setQuickStatus(statusEl, state, label, slurmJobId);
+        if (TERMINAL.has(state)) clearInterval(tid);
+      } catch (_) { /* non-fatal */ }
+    }, 15000);
+    return tid;
+  }
+
+  function _setQuickStatus(statusEl, state, label, jobId) {
+    if (!statusEl) return;
+    statusEl.hidden = false;
+    const TERMINAL = new Set(['COMPLETED', 'FAILED', 'TIMEOUT', 'CANCELLED', 'NODE_FAIL']);
+    const running = ['PENDING', 'RUNNING', 'CONFIGURING', 'COMPLETING'];
+    const cls = state === 'COMPLETED' ? 'ok'
+              : ['FAILED', 'TIMEOUT', 'CANCELLED', 'NODE_FAIL'].includes(state) ? 'error'
+              : running.includes(state) ? ''
+              : '';
+    statusEl.className = `viv-hpc-status-box ${cls}`;
+    statusEl.textContent = `${label} · SLURM ${jobId}: ${state || '…'}`;
+  }
+
+  /**
+   * Fetch run log via /api/hpc/{backend}/run/{run_id}/log and display it.
+   */
+  async function fetchRunLog(backend, runId, logEl) {
+    if (!runId || !logEl) return;
+    logEl.textContent = 'Fetching log…';
+    logEl.hidden = false;
+    try {
+      const data = await jget(`/api/hpc/${backend}/run/${runId}/log`);
+      logEl.textContent = data.log || '(empty)';
+      logEl.scrollTop = logEl.scrollHeight;
+    } catch (err) {
+      logEl.textContent = `Error fetching log: ${err.message}`;
+    }
+  }
+
+  // ---- ParCa panel ----------------------------------------------------------
+
+  /** Build the parca command string from form values. */
+  function _buildParcaCmd() {
+    const mode   = ($('hpc-parca-mode')  || {}).value || 'fast';
+    const cpus   = parseInt(($('hpc-parca-cpus')  || {}).value || '8', 10);
+    const extra  = (($('hpc-parca-extra') || {}).value || '').trim();
+    let cmd = `uv run v2ecoli-parca --mode ${mode} --cpus ${cpus}`;
+    if (extra) cmd += ` ${extra}`;
+    return cmd;
+  }
+
+  function _updateParcaPreview() {
+    const el = $('hpc-parca-preview');
+    if (el) el.textContent = _buildParcaCmd();
+  }
+
+  async function submitParCa(backend) {
+    const errEl    = $('hpc-parca-error');
+    const submitBtn = $('hpc-parca-submit');
+    const statusEl  = $('hpc-parca-status');
+    const logEl     = $('hpc-parca-log');
+    const logBtn    = $('hpc-parca-log-btn');
+
+    const cmd    = _buildParcaCmd();
+    const cpus   = parseInt(($('hpc-parca-cpus') || {}).value || '8', 10);
+    const mem_gb = parseInt(($('hpc-parca-mem')  || {}).value || '16', 10);
+    const time_min = parseInt(($('hpc-parca-time') || {}).value || '240', 10);
+
+    if (errEl) errEl.textContent = '';
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Submitting…';
+
+    try {
+      const data = await jpost(`/api/hpc/${backend}/run`, {
+        command: cmd,
+        cpus,
+        mem_gb,
+        time_min,
+      });
+      const jobId = data.slurm_job_id;
+      const runId = data.run_id;
+      _setQuickStatus(statusEl, 'PENDING', 'ParCa', jobId);
+      loadJobHistory(backend);
+
+      // Wire up log button
+      if (logBtn && runId) {
+        logBtn.hidden = false;
+        logBtn.onclick = () => fetchRunLog(backend, runId, logEl);
+      }
+
+      // Start polling
+      _startQuickPoll(backend, jobId, statusEl, 'ParCa');
+
+    } catch (err) {
+      if (err.status === 503) {
+        if (errEl) { errEl.innerHTML = ''; errEl.appendChild(_hpc503Warning(err.body)); }
+      } else {
+        if (errEl) errEl.textContent = `Error: ${err.message}`;
+      }
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = '▶ Run ParCa';
+    }
+  }
+
+  // ---- Colony panel ---------------------------------------------------------
+
+  /** Build the colony command string from form values. */
+  function _buildColonyCmd() {
+    const nCells   = parseInt(($('hpc-colony-ncells')   || {}).value || '4', 10);
+    const duration = parseInt(($('hpc-colony-duration') || {}).value || '50', 10);
+    const cacheDir = (($('hpc-colony-cache')  || {}).value || 'out/sim_data/cache').trim();
+    const extra    = (($('hpc-colony-extra')  || {}).value || '').trim();
+    let cmd = `uv run v2ecoli-colony --n-cells ${nCells} --duration-min ${duration}`;
+    if (cacheDir) cmd += ` --cache-dir ${cacheDir}`;
+    if (extra) cmd += ` ${extra}`;
+    return cmd;
+  }
+
+  function _updateColonyPreview() {
+    const el = $('hpc-colony-preview');
+    if (el) el.textContent = _buildColonyCmd();
+  }
+
+  async function submitColony(backend) {
+    const errEl     = $('hpc-colony-error');
+    const submitBtn = $('hpc-colony-submit');
+    const statusEl  = $('hpc-colony-status');
+    const logEl     = $('hpc-colony-log');
+    const logBtn    = $('hpc-colony-log-btn');
+
+    const cmd    = _buildColonyCmd();
+    const cpus   = parseInt(($('hpc-colony-cpus') || {}).value || '4', 10);
+    const mem_gb = parseInt(($('hpc-colony-mem')  || {}).value || '32', 10);
+    const time_min = parseInt(($('hpc-colony-time') || {}).value || '120', 10);
+
+    if (errEl) errEl.textContent = '';
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Submitting…';
+
+    try {
+      const data = await jpost(`/api/hpc/${backend}/run`, {
+        command: cmd,
+        cpus,
+        mem_gb,
+        time_min,
+      });
+      const jobId = data.slurm_job_id;
+      const runId = data.run_id;
+      _setQuickStatus(statusEl, 'PENDING', 'Colony', jobId);
+      loadJobHistory(backend);
+
+      // Wire up log button
+      if (logBtn && runId) {
+        logBtn.hidden = false;
+        logBtn.onclick = () => fetchRunLog(backend, runId, logEl);
+      }
+
+      // Start polling
+      _startQuickPoll(backend, jobId, statusEl, 'Colony');
+
+    } catch (err) {
+      if (err.status === 503) {
+        if (errEl) { errEl.innerHTML = ''; errEl.appendChild(_hpc503Warning(err.body)); }
+      } else {
+        if (errEl) errEl.textContent = `Error: ${err.message}`;
+      }
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = '🧬 Run Colony';
+    }
+  }
+
+  // ---- Custom run panel ----------------------------------------------------
 
   let _runPollTimers = {};
 
@@ -262,7 +446,7 @@
 
   async function submitRun(backend) {
     const cmdEl = $('hpc-run-cmd');
-    const errEl = document.querySelector('.viv-hpc-run-error');
+    const errEl = document.querySelector('#hpc-custom-panel .viv-hpc-run-error');
     const submitBtn = $('hpc-run-submit');
     const cmd = (cmdEl && cmdEl.value || '').trim();
     if (!cmd) {
@@ -358,6 +542,27 @@
     }
   }
 
+  // ---- Live preview wiring ------------------------------------------------
+
+  function _bindPreviewUpdates() {
+    // ParCa preview
+    const parcaInputIds = ['hpc-parca-mode', 'hpc-parca-cpus', 'hpc-parca-extra'];
+    parcaInputIds.forEach((id) => {
+      const el = $(id);
+      if (el) el.addEventListener('input', _updateParcaPreview);
+    });
+
+    // Colony preview
+    const colonyInputIds = [
+      'hpc-colony-ncells', 'hpc-colony-duration',
+      'hpc-colony-cache', 'hpc-colony-extra',
+    ];
+    colonyInputIds.forEach((id) => {
+      const el = $(id);
+      if (el) el.addEventListener('input', _updateColonyPreview);
+    });
+  }
+
   // ---- Init ----------------------------------------------------------------
 
   function initHpcPage(backend) {
@@ -365,6 +570,7 @@
     loadSlurmStatus(backend);
     loadJobHistory(backend);
 
+    // Build panel
     const buildBtn = $('hpc-build-btn');
     if (buildBtn) buildBtn.addEventListener('click', () => startBuild(backend));
 
@@ -374,8 +580,20 @@
     const slurmRefresh = $('hpc-slurm-refresh');
     if (slurmRefresh) slurmRefresh.addEventListener('click', () => loadSlurmStatus(backend));
 
+    // ParCa panel
+    const parcaForm = $('hpc-parca-form');
+    if (parcaForm) parcaForm.addEventListener('submit', (e) => { e.preventDefault(); submitParCa(backend); });
+
+    // Colony panel
+    const colonyForm = $('hpc-colony-form');
+    if (colonyForm) colonyForm.addEventListener('submit', (e) => { e.preventDefault(); submitColony(backend); });
+
+    // Custom command panel
     const runForm = $('hpc-run-form');
     if (runForm) runForm.addEventListener('submit', (e) => { e.preventDefault(); submitRun(backend); });
+
+    // Live command previews
+    _bindPreviewUpdates();
   }
 
   document.addEventListener('DOMContentLoaded', () => {

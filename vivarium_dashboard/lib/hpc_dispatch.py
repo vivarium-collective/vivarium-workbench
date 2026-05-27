@@ -858,4 +858,4 @@ def submit_run_job(
         )
     slurm_job_id = int(r.stdout.strip())
     log_path = f"{log_dir}/vivarium-{ws_name}-{run_id}.out"
-    return {"slurm_job_id": slurm_job_id, "log_path": log_path}
+    return {"slurm_job_id": slurm_job_id, "log_path": log_path, "run_id": run_id}

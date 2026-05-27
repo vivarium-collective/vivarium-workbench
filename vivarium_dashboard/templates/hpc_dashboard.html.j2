@@ -63,7 +63,6 @@
       flex: 1;
       display: grid;
       grid-template-columns: 1fr 1fr;
-      grid-template-rows: auto 1fr;
       gap: 0;
       max-width: 1200px;
       width: 100%;
@@ -104,7 +103,8 @@
       color: var(--muted, #666);
       line-height: 1.5;
     }
-    #hpc-run-panel {
+    #hpc-run-panel,
+    #hpc-custom-panel {
       grid-column: 1 / -1;
     }
 
@@ -196,11 +196,20 @@
       width: 100%;
       box-sizing: border-box;
     }
+    .viv-hpc-form select {
+      padding: 6px 8px;
+      border: 1px solid var(--border, #d0d0d4);
+      border-radius: 5px;
+      font-size: 13px;
+      background: var(--panel, #fff);
+      color: var(--text, #1a1a1a);
+    }
     .viv-req { color: #dc2626; }
     .viv-hpc-resources {
       display: flex;
-      gap: 12px;
+      gap: 10px;
       flex-wrap: wrap;
+      align-items: flex-end;
     }
     .viv-hpc-resources label {
       display: flex;
@@ -214,7 +223,7 @@
       border: 1px solid var(--border, #d0d0d4);
       border-radius: 5px;
       font-size: 13px;
-      width: 80px;
+      width: 72px;
       background: var(--panel, #fff);
       color: var(--text, #1a1a1a);
     }
@@ -222,6 +231,32 @@
       color: #dc2626;
       font-size: 12px;
       min-height: 16px;
+    }
+    .viv-hpc-cmd-preview {
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 11px;
+      color: var(--muted, #888);
+      background: var(--page, #f4f4f6);
+      border: 1px solid var(--border, #d0d0d4);
+      border-radius: 5px;
+      padding: 6px 10px;
+      white-space: nowrap;
+      overflow-x: auto;
+      margin: 2px 0 0;
+    }
+    .viv-hpc-cmd-preview-label {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--muted, #999);
+      margin-top: 6px;
+    }
+    .viv-hpc-extra-label {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--muted, #666);
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
     }
 
     .viv-hpc-slurm-info {
@@ -298,10 +333,11 @@
   </header>
 
   <main class="viv-hpc-main">
+
     <!-- Section 1: Build Panel -->
     <section class="viv-hpc-section" id="hpc-build-panel">
-      <h2>Container Build</h2>
-      <p>Build the Singularity/Apptainer image on the cluster from the workspace's current Singularity.def.</p>
+      <h2>🔨 Container Build</h2>
+      <p>Pull the workspace image from GHCR and convert it to a Singularity/Apptainer SIF on the cluster.</p>
       <div class="viv-hpc-actions">
         <button id="hpc-build-btn" class="viv-hpc-btn viv-hpc-btn-primary">Start Build</button>
         <button id="hpc-build-cancel-btn" class="viv-hpc-btn viv-hpc-btn-danger" hidden>Cancel</button>
@@ -313,19 +349,106 @@
     <!-- Section 2: Cluster Status -->
     <section class="viv-hpc-section" id="hpc-cluster-panel">
       <h2>
-        Cluster Status
+        📡 Cluster Status
         <button id="hpc-slurm-refresh" class="viv-hpc-btn-sm" title="Refresh">↻</button>
       </h2>
       <div id="hpc-slurm-info" class="viv-hpc-slurm-info">Loading…</div>
     </section>
 
-    <!-- Section 3: Run Form + Job History (full width) -->
-    <section class="viv-hpc-section" id="hpc-run-panel">
-      <h2>Run Simulation</h2>
+    <!-- Section 3: Run ParCa -->
+    <section class="viv-hpc-section" id="hpc-parca-panel">
+      <h2>▶ Run ParCa</h2>
+      <p>Generate simulation data on the cluster. Writes <code>out/sim_data/parca_state.pkl</code> and the colony cache bundle (<code>initial_state.json</code>, <code>sim_data_cache.dill</code>). Run this before colony.</p>
+      <form id="hpc-parca-form" class="viv-hpc-form" novalidate>
+        <div class="viv-hpc-resources">
+          <label>Mode
+            <select id="hpc-parca-mode">
+              <option value="fast">fast (~30 min)</option>
+              <option value="full">full (hrs)</option>
+            </select>
+          </label>
+          <label>CPUs
+            <input id="hpc-parca-cpus" type="number" min="1" max="64" value="8">
+          </label>
+          <label>Mem (GB)
+            <input id="hpc-parca-mem" type="number" min="1" max="512" value="16">
+          </label>
+          <label>Time (min)
+            <input id="hpc-parca-time" type="number" min="1" max="10080" value="240">
+          </label>
+        </div>
+        <label class="viv-hpc-extra-label">Extra args
+          <input id="hpc-parca-extra" type="text"
+                 placeholder="--no-operons  --resume-from-step 6  --outdir out/custom">
+        </label>
+        <div class="viv-hpc-cmd-preview-label">Command preview</div>
+        <div id="hpc-parca-preview" class="viv-hpc-cmd-preview">uv run v2ecoli-parca --mode fast --cpus 8</div>
+        <div class="viv-hpc-run-error" id="hpc-parca-error" role="alert" aria-live="polite"></div>
+        <div class="viv-hpc-actions" style="margin-top:4px;margin-bottom:0">
+          <button type="submit" id="hpc-parca-submit" class="viv-hpc-btn viv-hpc-btn-primary">
+            ▶ Run ParCa
+          </button>
+          <button type="button" id="hpc-parca-log-btn" class="viv-hpc-btn-sm" hidden>
+            Fetch Log
+          </button>
+        </div>
+      </form>
+      <div id="hpc-parca-status" class="viv-hpc-status-box" hidden></div>
+      <pre id="hpc-parca-log" class="viv-hpc-log" hidden></pre>
+    </section>
+
+    <!-- Section 4: Run Colony -->
+    <section class="viv-hpc-section" id="hpc-colony-panel">
+      <h2>🧬 Run Colony</h2>
+      <p>Run a multi-cell whole-cell E. coli colony simulation. Requires a completed ParCa run (cache bundle) first.</p>
+      <form id="hpc-colony-form" class="viv-hpc-form" novalidate>
+        <div class="viv-hpc-resources">
+          <label>n-cells
+            <input id="hpc-colony-ncells" type="number" min="1" max="64" value="4">
+          </label>
+          <label>duration (min)
+            <input id="hpc-colony-duration" type="number" min="1" max="10080" value="50">
+          </label>
+          <label>CPUs
+            <input id="hpc-colony-cpus" type="number" min="1" max="64" value="4">
+          </label>
+          <label>Mem (GB)
+            <input id="hpc-colony-mem" type="number" min="1" max="512" value="32">
+          </label>
+          <label>Time (min)
+            <input id="hpc-colony-time" type="number" min="1" max="10080" value="120">
+          </label>
+        </div>
+        <label class="viv-hpc-extra-label">Cache dir
+          <input id="hpc-colony-cache" type="text" value="out/sim_data/cache">
+        </label>
+        <label class="viv-hpc-extra-label">Extra args
+          <input id="hpc-colony-extra" type="text"
+                 placeholder="--seed 42  --output-dir results/colony-run-1">
+        </label>
+        <div class="viv-hpc-cmd-preview-label">Command preview</div>
+        <div id="hpc-colony-preview" class="viv-hpc-cmd-preview">uv run v2ecoli-colony --n-cells 4 --duration-min 50 --cache-dir out/sim_data/cache</div>
+        <div class="viv-hpc-run-error" id="hpc-colony-error" role="alert" aria-live="polite"></div>
+        <div class="viv-hpc-actions" style="margin-top:4px;margin-bottom:0">
+          <button type="submit" id="hpc-colony-submit" class="viv-hpc-btn viv-hpc-btn-primary">
+            🧬 Run Colony
+          </button>
+          <button type="button" id="hpc-colony-log-btn" class="viv-hpc-btn-sm" hidden>
+            Fetch Log
+          </button>
+        </div>
+      </form>
+      <div id="hpc-colony-status" class="viv-hpc-status-box" hidden></div>
+      <pre id="hpc-colony-log" class="viv-hpc-log" hidden></pre>
+    </section>
+
+    <!-- Section 5: Custom Command + Job History (full width) -->
+    <section class="viv-hpc-section" id="hpc-custom-panel">
+      <h2>⌨ Custom Command</h2>
       <form id="hpc-run-form" class="viv-hpc-form" novalidate>
         <label for="hpc-run-cmd">Command <span class="viv-req">*</span></label>
         <input id="hpc-run-cmd" type="text"
-               placeholder="e.g. python simulate.py --params params.json"
+               placeholder="e.g. uv run python scripts/my_analysis.py --params params.json"
                autocomplete="off" required>
 
         <div class="viv-hpc-resources">
@@ -351,6 +474,7 @@
       <h3>Recent Jobs</h3>
       <div id="hpc-job-history" class="viv-hpc-job-history">Loading…</div>
     </section>
+
   </main>
 
   <script>

@@ -8152,6 +8152,8 @@ if __name__ == "__main__":
                 return self._get_hpc_build_log(backend, job_id)
             return self._get_hpc_build_status(backend, job_id)
         if tail[0] == "run" and len(tail) >= 2:
+            if len(tail) >= 3 and tail[2] == "log":
+                return self._get_hpc_run_log(backend, tail[1])
             return self._get_hpc_run_status(backend, tail[1])
         return self._json({"error": "not found"}, 404)
 
@@ -8261,6 +8263,27 @@ if __name__ == "__main__":
             )
             r = _ssh(settings, cmd, timeout=30)
             return self._json({"log": r.stdout, "job_id": job_id}, 200)
+        except HpcNotConfiguredError as exc:
+            return self._hpc_503(exc)
+        except Exception as exc:
+            return self._json({"error": str(exc)[:500]}, 500)
+
+    def _get_hpc_run_log(self, backend: str, run_id: str):
+        """GET /api/hpc/<backend>/run/<run_hex_id>/log — tail sbatch output log."""
+        if WORKSPACE is None:
+            return self._json({"error": "no workspace bound"}, 409)
+        try:
+            from vivarium_dashboard.lib.hpc_dispatch import _ssh
+            from vivarium_dashboard.lib.hpc_settings import get_hpc_settings, HpcNotConfiguredError
+            settings = get_hpc_settings(str(WORKSPACE))
+            log_base = settings.hpc_log_base_path or f"{settings.hpc_repo_base_path}/logs"
+            ws_name = WORKSPACE.name
+            cmd = (
+                f"tail -n 200 {log_base}/{ws_name}/*-{run_id}.out 2>/dev/null "
+                f"|| echo '(log not yet available)'"
+            )
+            r = _ssh(settings, cmd, timeout=30)
+            return self._json({"log": r.stdout, "run_id": run_id}, 200)
         except HpcNotConfiguredError as exc:
             return self._hpc_503(exc)
         except Exception as exc:
