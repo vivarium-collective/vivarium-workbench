@@ -78,6 +78,22 @@ def _mask(text: str, settings: HpcSettings) -> str:
     return text
 
 
+def _build_tag_list(local_sha: str, branch_tag: str) -> str:
+    """Return a space-separated bash word list of GHCR tags to try in order.
+
+    Order: sha-<sha> → <branch-tag> → latest.
+    Only non-empty, distinct tags are included.
+    """
+    seen: set[str] = set()
+    tags: list[str] = []
+    for raw in (f"sha-{local_sha}" if local_sha else "", branch_tag, "latest"):
+        t = raw.strip()
+        if t and t not in seen:
+            seen.add(t)
+            tags.append(t)
+    return " ".join(tags)
+
+
 def _infer_ghcr_image(local_ws: Path) -> str | None:
     """Derive a GHCR image ref from the workspace's git remote origin.
 
@@ -316,6 +332,9 @@ def build_image_script(
     ws_name: str,
     build_id: str,
     ghcr_image: str,
+    *,
+    local_sha: str = "",
+    branch_tag: str = "",
 ) -> str:
     """Return an sbatch script that pulls ``ws_name`` from GHCR and converts to SIF.
 
@@ -325,14 +344,15 @@ def build_image_script(
 
     The Docker image is built by GitHub Actions
     (``.github/workflows/build-and-push.yml``) on every push and tagged as
-    ``sha-<7-char-sha>`` (pinned) and ``:latest`` (rolling default branch).
+    ``sha-<7-char-sha>`` (pinned), ``<branch-name>`` (rolling), and ``:latest``
+    (only on the default branch).
 
-    Tag strategy (tried in order):
+    Tag strategy (tried in order, baked in at submit time from local workspace):
       1. ``sha-<short-sha>`` — pinned to exact commit; best reproducibility.
-         SHA is read from the remote workspace if it exists, or from the local
-         workspace at submit time.
-      2. ``:latest`` — fallback when the exact sha tag isn't on GHCR yet
-         (e.g. CI is still running, or this is the first push on a new branch).
+      2. ``<branch-tag>``    — branch name tag (slash → hyphen); available on
+                               every push including non-default branches.
+      3. ``:latest``         — rolling default-branch tag; fallback when no
+                               sha or branch tag is available.
     """
     remote_ws = f"{settings.hpc_repo_base_path}/{ws_name}"
     image_base = settings.hpc_image_base_path or remote_ws
@@ -379,25 +399,27 @@ def build_image_script(
 
         mkdir -p "{image_base}"
 
-        # Resolve the sha-pinned tag from the remote workspace (best-effort).
-        # Falls back to :latest when the workspace hasn't been synced yet or
-        # the commit isn't tagged on GHCR (CI still running / new branch).
-        GIT_SHA=$(cd "{remote_ws}" 2>/dev/null && \\
-            git rev-parse --short HEAD 2>/dev/null || echo "")
-        PRIMARY="${{GIT_SHA:+sha-$GIT_SHA}}"
-        PRIMARY="${{PRIMARY:-latest}}"
-
+        # Tag order baked in at submit time from the local workspace:
+        #   1. sha-<short-sha>  — pinned; best reproducibility
+        #   2. <branch-tag>     — branch push tag (slash → hyphen); works on non-default branches
+        #   3. latest           — default-branch rolling tag; last resort
         GHCR_IMAGE="{ghcr_image}"
-        echo "=== Pulling $GHCR_IMAGE:$PRIMARY → {sif_path} ==="
-
-        # OCI pull + SIF conversion — no fakeroot flag required.
-        if ! $CONTAINER_CMD build --force --disable-cache \\
-            "{sif_path}" \\
-            "docker://$GHCR_IMAGE:$PRIMARY" 2>&1; then
-            echo "SHA-tagged image unavailable; falling back to :latest ..."
-            $CONTAINER_CMD build --force --disable-cache \\
+        TAGS=({_build_tag_list(local_sha, branch_tag)})
+        SUCCESS=0
+        for TAG in "${{TAGS[@]}}"; do
+            echo "=== Trying $GHCR_IMAGE:$TAG → {sif_path} ==="
+            if $CONTAINER_CMD build --force --disable-cache \\
                 "{sif_path}" \\
-                "docker://$GHCR_IMAGE:latest"
+                "docker://$GHCR_IMAGE:$TAG" 2>&1; then
+                SUCCESS=1
+                break
+            else
+                echo "Tag $TAG unavailable, trying next..."
+            fi
+        done
+        if [ "$SUCCESS" -eq 0 ]; then
+            echo "ERROR: all tags exhausted: ${{TAGS[*]}}"
+            exit 1
         fi
 
         echo "Build completed. Image saved to {sif_path}."
@@ -657,8 +679,28 @@ def submit_build_job(settings: HpcSettings, local_ws: Path) -> dict:
 
     build_id = uuid.uuid4().hex[:8]
 
+    # Gather git metadata from the LOCAL workspace at submit time so the
+    # sbatch script has baked-in tags and never relies on the remote workspace
+    # path existing (which it doesn't until the first rsync).
+    def _git_local(cmd: list[str]) -> str:
+        try:
+            return subprocess.run(
+                ["git", "-C", str(local_ws)] + cmd,
+                capture_output=True, text=True, timeout=5, check=False,
+            ).stdout.strip()
+        except Exception:
+            return ""
+
+    local_sha = _git_local(["rev-parse", "--short", "HEAD"])
+    # GitHub Actions tags branch names with '/' replaced by '-'.
+    raw_branch = _git_local(["rev-parse", "--abbrev-ref", "HEAD"])
+    branch_tag = raw_branch.replace("/", "-") if raw_branch else ""
+
     # Step 1: generate sbatch script and write it locally.
-    script_text = build_image_script(settings, ws_name, build_id, ghcr_image)
+    script_text = build_image_script(
+        settings, ws_name, build_id, ghcr_image,
+        local_sha=local_sha, branch_tag=branch_tag,
+    )
     hpc_dir = local_ws / ".pbg" / "hpc"
     hpc_dir.mkdir(parents=True, exist_ok=True)
     local_script = hpc_dir / f"build-{build_id}.sbatch"

@@ -13,6 +13,7 @@ import pytest
 
 from vivarium_dashboard.lib.hpc_dispatch import (
     _base_ssh_opts,
+    _build_tag_list,
     _infer_ghcr_image,
     _mask,
     _socket_path,
@@ -406,6 +407,26 @@ class TestBuildRunScript:
         assert "set -e" in script  # mirrors sms-api parca script (set -e, not pipefail)
 
 
+class TestBuildTagList:
+    def test_full_list(self) -> None:
+        assert _build_tag_list("abc1234", "my-branch") == "sha-abc1234 my-branch latest"
+
+    def test_no_sha(self) -> None:
+        assert _build_tag_list("", "my-branch") == "my-branch latest"
+
+    def test_no_branch(self) -> None:
+        assert _build_tag_list("abc1234", "") == "sha-abc1234 latest"
+
+    def test_empty_both_falls_back_to_latest(self) -> None:
+        assert _build_tag_list("", "") == "latest"
+
+    def test_no_duplicates_when_branch_is_latest(self) -> None:
+        # branch_tag "latest" must not appear twice
+        result = _build_tag_list("abc1234", "latest")
+        assert result == "sha-abc1234 latest"
+        assert result.count("latest") == 1
+
+
 class TestBuildImageScript:
     def test_contains_partition(self) -> None:
         s = _settings()
@@ -415,7 +436,6 @@ class TestBuildImageScript:
     def test_uses_ghcr_docker_pull(self) -> None:
         s = _settings()
         script = build_image_script(s, "myws", "build01", "ghcr.io/test/myws")
-        # GHCR-pull approach: no --fakeroot, uses docker:// URI
         assert "docker://" in script
         assert "ghcr.io/test/myws" in script
         assert "--fakeroot" not in script
@@ -429,6 +449,20 @@ class TestBuildImageScript:
         s = _settings()
         script = build_image_script(s, "myws", "build01", "ghcr.io/test/myws")
         assert "myws.sif" in script
+
+    def test_baked_sha_tag_in_script(self) -> None:
+        s = _settings()
+        script = build_image_script(s, "myws", "build01", "ghcr.io/test/myws",
+                                    local_sha="abc1234", branch_tag="my-branch")
+        assert "sha-abc1234" in script
+        assert "my-branch" in script
+        # No runtime git rev-parse — SHA is baked in at generation time
+        assert "git rev-parse" not in script
+
+    def test_no_runtime_git_lookup(self) -> None:
+        s = _settings()
+        script = build_image_script(s, "myws", "build01", "ghcr.io/test/myws")
+        assert "git rev-parse" not in script
 
 
 # ---------------------------------------------------------------------------
