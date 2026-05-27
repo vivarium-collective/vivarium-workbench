@@ -306,6 +306,11 @@ def _singularity_exec_lines(
     """
     image_base = settings.hpc_image_base_path or remote_ws
     sif_path = f"{image_base}/{ws_name}.sif"
+    # Embed the user command inside a bash -c single-quoted string.
+    # Single quotes in the command itself would break the outer quoting, so
+    # escape them with the standard "exit-quote, add literal quote,
+    # re-enter-quote" trick: ' → '\'' — safe for all POSIX shells.
+    _cmd = command.replace("uv run ", "", 1).replace("'", "'\\''")
     return [
         "# Prefer apptainer, fall back to singularity (mirrors sms-api runtime detection)",
         "if command -v apptainer &>/dev/null; then",
@@ -328,7 +333,7 @@ def _singularity_exec_lines(
         f'    -B "{remote_ws}/results:/app/results" \\',
         f'    -B "{remote_ws}/out:/app/out" \\',
         f'    "{sif_path}" \\',
-        f'    bash -c \'export PATH=/app/.venv/bin:"$PATH"; exec {command.replace("uv run ", "", 1)}\'',
+        f'    bash -c \'export PATH=/app/.venv/bin:"$PATH"; exec {_cmd}\'',
     ]
 
 

@@ -5,6 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>HPC: {{ backend }} · Vivarium Dashboard</title>
   <link rel="stylesheet" href="/assets/style.css">
+  <!-- Inline theme init — runs before CSS paint to avoid flash of wrong theme -->
+  <script>
+    (function(){
+      var t = null;
+      try { t = localStorage.getItem("viv-theme"); } catch(e) {}
+      document.documentElement.setAttribute("data-theme",
+        t || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+    })();
+  </script>
   <style>
     body.viv-hpc-page {
       margin: 0;
@@ -363,6 +372,12 @@
     <a href="/">← Dashboard</a>
     <h1>HPC Backend: <code>{{ backend }}</code></h1>
     <span id="hpc-conn-chip" class="viv-hpc-chip viv-hpc-chip-loading" title="">checking…</span>
+    <span class="viv-theme-toggle" id="viv-theme-toggle" role="button" tabindex="0" aria-label="Toggle dark mode" title="Toggle dark/light mode">
+      <span class="viv-theme-toggle-icon" id="viv-theme-toggle-icon">☀</span>
+      <span class="viv-theme-toggle-track">
+        <span class="viv-theme-toggle-thumb" id="viv-theme-toggle-thumb"></span>
+      </span>
+    </span>
   </header>
 
   <main class="viv-hpc-main">
@@ -525,6 +540,26 @@
   <script>
     // Backend identifier injected at render time — used by hpc-dispatch.js.
     const _HPC_BACKEND = {{ backend | tojson }};
+
+    // Theme toggle — mirrors main dashboard (index.html.j2)
+    function _setTheme(theme) {
+      document.documentElement.setAttribute("data-theme", theme);
+      try { localStorage.setItem("viv-theme", theme); } catch(e) {}
+      var icon = document.getElementById("viv-theme-toggle-icon");
+      if (icon) icon.textContent = theme === "dark" ? "☾" : "☀";
+    }
+    function _toggleTheme() {
+      var theme = document.documentElement.getAttribute("data-theme");
+      _setTheme(theme === "dark" ? "light" : "dark");
+    }
+    (function(){
+      var saved = null;
+      try { saved = localStorage.getItem("viv-theme"); } catch(e) {}
+      var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      _setTheme(theme);
+      var btn = document.getElementById("viv-theme-toggle");
+      if (btn) btn.addEventListener("click", _toggleTheme);
+    })();
   </script>
   <script src="/assets/hpc-dispatch.js"></script>
 </body>
