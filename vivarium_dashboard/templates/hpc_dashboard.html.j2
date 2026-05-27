@@ -177,6 +177,39 @@
       margin: 8px 0 0;
     }
 
+    /* ---- Progress bars -------------------------------------------------- */
+    .viv-hpc-progress-wrap {
+      margin: 10px 0 4px;
+    }
+    .viv-hpc-progress-track {
+      height: 6px;
+      background: var(--border, #e0e0e4);
+      border-radius: 4px;
+      overflow: hidden;
+      position: relative;
+    }
+    .viv-hpc-progress-bar {
+      height: 100%;
+      border-radius: 4px;
+      background: var(--accent, #2563eb);
+      transition: width 0.4s ease;
+      width: 0%;
+    }
+    .viv-hpc-progress-bar.indeterminate {
+      width: 40%;
+      animation: hpc-shimmer 1.6s ease-in-out infinite;
+    }
+    @keyframes hpc-shimmer {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(300%); }
+    }
+    .viv-hpc-progress-label {
+      font-size: 11px;
+      color: var(--muted, #888);
+      margin-top: 4px;
+      min-height: 14px;
+    }
+
     .viv-hpc-form {
       display: flex;
       flex-direction: column;
@@ -343,6 +376,12 @@
         <button id="hpc-build-cancel-btn" class="viv-hpc-btn viv-hpc-btn-danger" hidden>Cancel</button>
       </div>
       <div id="hpc-build-status" class="viv-hpc-status-box" hidden></div>
+      <div class="viv-hpc-progress-wrap" id="hpc-build-progress" hidden>
+        <div class="viv-hpc-progress-track">
+          <div class="viv-hpc-progress-bar indeterminate" id="hpc-build-bar"></div>
+        </div>
+        <div class="viv-hpc-progress-label" id="hpc-build-prog-label">Starting build…</div>
+      </div>
       <pre id="hpc-build-log" class="viv-hpc-log" hidden></pre>
     </section>
 
@@ -388,12 +427,15 @@
           <button type="submit" id="hpc-parca-submit" class="viv-hpc-btn viv-hpc-btn-primary">
             ▶ Run ParCa
           </button>
-          <button type="button" id="hpc-parca-log-btn" class="viv-hpc-btn-sm" hidden>
-            Fetch Log
-          </button>
         </div>
       </form>
       <div id="hpc-parca-status" class="viv-hpc-status-box" hidden></div>
+      <div class="viv-hpc-progress-wrap" id="hpc-parca-progress" hidden>
+        <div class="viv-hpc-progress-track">
+          <div class="viv-hpc-progress-bar" id="hpc-parca-bar" style="width:0%"></div>
+        </div>
+        <div class="viv-hpc-progress-label" id="hpc-parca-prog-label">Step 0 / 9</div>
+      </div>
       <pre id="hpc-parca-log" class="viv-hpc-log" hidden></pre>
     </section>
 
@@ -433,12 +475,15 @@
           <button type="submit" id="hpc-colony-submit" class="viv-hpc-btn viv-hpc-btn-primary">
             🧬 Run Colony
           </button>
-          <button type="button" id="hpc-colony-log-btn" class="viv-hpc-btn-sm" hidden>
-            Fetch Log
-          </button>
         </div>
       </form>
       <div id="hpc-colony-status" class="viv-hpc-status-box" hidden></div>
+      <div class="viv-hpc-progress-wrap" id="hpc-colony-progress" hidden>
+        <div class="viv-hpc-progress-track">
+          <div class="viv-hpc-progress-bar indeterminate" id="hpc-colony-bar"></div>
+        </div>
+        <div class="viv-hpc-progress-label" id="hpc-colony-prog-label">Starting…</div>
+      </div>
       <pre id="hpc-colony-log" class="viv-hpc-log" hidden></pre>
     </section>
 
