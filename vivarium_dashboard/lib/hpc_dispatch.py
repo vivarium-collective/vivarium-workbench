@@ -637,6 +637,11 @@ def rsync_workspace(settings: HpcSettings, local_ws: Path) -> None:
         "--exclude=.pbg/runs/",
         "--exclude=.pbg/state.json",
         "--exclude=.pbg/hpc/",
+        # Never clobber cluster-generated outputs: ParCa cache lives in out/
+        # and colony results accumulate in results/. Both are bind-mounted into
+        # the container; rsync must not delete them between runs.
+        "--exclude=out/",
+        "--exclude=results/",
         "-e", _ssh_opt_str(settings),
         str(local_ws) + "/",
         remote_dest,
