@@ -13,6 +13,7 @@ import pytest
 
 from vivarium_dashboard.lib.hpc_dispatch import (
     _base_ssh_opts,
+    _infer_ghcr_image,
     _mask,
     _socket_path,
     _ssh,
@@ -408,23 +409,78 @@ class TestBuildRunScript:
 class TestBuildImageScript:
     def test_contains_partition(self) -> None:
         s = _settings()
-        script = build_image_script(s, "myws", "build01")
+        script = build_image_script(s, "myws", "build01", "ghcr.io/test/myws")
         assert f"--partition={s.slurm_partition}" in script
 
-    def test_references_singularity_def(self) -> None:
+    def test_uses_ghcr_docker_pull(self) -> None:
         s = _settings()
-        script = build_image_script(s, "myws", "build01")
-        assert "Singularity.def" in script
+        script = build_image_script(s, "myws", "build01", "ghcr.io/test/myws")
+        # GHCR-pull approach: no --fakeroot, uses docker:// URI
+        assert "docker://" in script
+        assert "ghcr.io/test/myws" in script
+        assert "--fakeroot" not in script
 
-    def test_build_fakeroot_flag(self) -> None:
+    def test_no_fakeroot_flag(self) -> None:
         s = _settings()
-        script = build_image_script(s, "myws", "build01")
-        assert "--fakeroot" in script
+        script = build_image_script(s, "myws", "build01", "ghcr.io/test/myws")
+        assert "--fakeroot" not in script
 
     def test_sif_output_path_contains_ws_name(self) -> None:
         s = _settings()
-        script = build_image_script(s, "myws", "build01")
+        script = build_image_script(s, "myws", "build01", "ghcr.io/test/myws")
         assert "myws.sif" in script
+
+
+# ---------------------------------------------------------------------------
+# _infer_ghcr_image — git remote → GHCR URL derivation
+# ---------------------------------------------------------------------------
+
+
+class TestInferGhcrImage:
+    def _run_ok(self, stdout: str):
+        m = MagicMock(spec=subprocess.CompletedProcess)
+        m.returncode = 0
+        m.stdout = stdout
+        m.stderr = ""
+        return m
+
+    def test_https_github_url(self, tmp_path: Path) -> None:
+        with patch("subprocess.run",
+                   return_value=self._run_ok(
+                       "https://github.com/vivarium-collective/v2ecoli.git\n"
+                   )):
+            result = _infer_ghcr_image(tmp_path)
+        assert result == "ghcr.io/vivarium-collective/v2ecoli"
+
+    def test_ssh_github_url(self, tmp_path: Path) -> None:
+        with patch("subprocess.run",
+                   return_value=self._run_ok(
+                       "git@github.com:myorg/myrepo\n"
+                   )):
+            result = _infer_ghcr_image(tmp_path)
+        assert result == "ghcr.io/myorg/myrepo"
+
+    def test_non_github_url_returns_none(self, tmp_path: Path) -> None:
+        with patch("subprocess.run",
+                   return_value=self._run_ok(
+                       "https://gitlab.com/myorg/myrepo.git\n"
+                   )):
+            result = _infer_ghcr_image(tmp_path)
+        assert result is None
+
+    def test_no_remote_returns_none(self, tmp_path: Path) -> None:
+        with patch("subprocess.run",
+                   return_value=self._run_ok("")):
+            result = _infer_ghcr_image(tmp_path)
+        assert result is None
+
+    def test_lowercases_org_and_repo(self, tmp_path: Path) -> None:
+        with patch("subprocess.run",
+                   return_value=self._run_ok(
+                       "https://github.com/MyOrg/MyRepo.git\n"
+                   )):
+            result = _infer_ghcr_image(tmp_path)
+        assert result == "ghcr.io/myorg/myrepo"
 
 
 # ---------------------------------------------------------------------------
@@ -505,31 +561,32 @@ class TestCancelJob:
 
 
 class TestSubmitBuildJob:
-    def test_calls_rsync_and_sbatch(self, tmp_path: Path) -> None:
+    def test_calls_sbatch_returns_result(self, tmp_path: Path) -> None:
         s = _settings()
         ws = tmp_path / "myws"
         ws.mkdir()
-        (ws / "Singularity.def").write_text("Bootstrap: docker\nFrom: python:3.12-slim\n")
 
-        # sbatch --parsable returns a bare integer (mirrors sms-api SlurmService.submit_job)
-        with patch("vivarium_dashboard.lib.hpc_dispatch.rsync_workspace") as mock_rsync, \
+        # No rsync in build job — code lives in GHCR image, not local workspace.
+        # _infer_ghcr_image is mocked to avoid subprocess git call.
+        with patch("vivarium_dashboard.lib.hpc_dispatch._infer_ghcr_image",
+                   return_value="ghcr.io/test/myws"), \
              patch("vivarium_dashboard.lib.hpc_dispatch._scp_file"), \
              patch("vivarium_dashboard.lib.hpc_dispatch._ssh",
                    return_value=_ok("777")):
             result = submit_build_job(s, ws)
 
-        assert mock_rsync.called
         assert result["slurm_job_id"] == 777
         assert "build_id" in result
         assert "log_path" in result
+        assert result["ghcr_image"] == "ghcr.io/test/myws"
 
     def test_script_written_to_pbg_hpc(self, tmp_path: Path) -> None:
         s = _settings()
         ws = tmp_path / "myws"
         ws.mkdir()
-        (ws / "Singularity.def").write_text("Bootstrap: docker\nFrom: python:3.12-slim\n")
 
-        with patch("vivarium_dashboard.lib.hpc_dispatch.rsync_workspace"), \
+        with patch("vivarium_dashboard.lib.hpc_dispatch._infer_ghcr_image",
+                   return_value="ghcr.io/test/myws"), \
              patch("vivarium_dashboard.lib.hpc_dispatch._scp_file"), \
              patch("vivarium_dashboard.lib.hpc_dispatch._ssh",
                    return_value=_ok("99")):
@@ -539,26 +596,45 @@ class TestSubmitBuildJob:
         scripts = list(hpc_dir.glob("build-*.sbatch"))
         assert len(scripts) == 1
 
-    def test_raises_on_missing_singularity_def(self, tmp_path: Path) -> None:
+    def test_raises_without_ghcr_image(self, tmp_path: Path) -> None:
         s = _settings()
         ws = tmp_path / "myws"
         ws.mkdir()
-        # No Singularity.def — should raise before any network call.
-        with pytest.raises(RuntimeError, match="Singularity.def"):
-            submit_build_job(s, ws)
+        # Neither settings.ghcr_image nor git remote available → should raise.
+        with patch("vivarium_dashboard.lib.hpc_dispatch._infer_ghcr_image",
+                   return_value=None):
+            with pytest.raises(RuntimeError, match="GHCR image"):
+                submit_build_job(s, ws)
 
     def test_raises_on_sbatch_failure(self, tmp_path: Path) -> None:
         s = _settings()
         ws = tmp_path / "myws"
         ws.mkdir()
-        (ws / "Singularity.def").write_text("Bootstrap: docker\nFrom: python:3.12-slim\n")
 
-        with patch("vivarium_dashboard.lib.hpc_dispatch.rsync_workspace"), \
+        with patch("vivarium_dashboard.lib.hpc_dispatch._infer_ghcr_image",
+                   return_value="ghcr.io/test/myws"), \
              patch("vivarium_dashboard.lib.hpc_dispatch._scp_file"), \
              patch("vivarium_dashboard.lib.hpc_dispatch._ssh",
                    return_value=_fail("sbatch: error: invalid partition", returncode=1)):
             with pytest.raises(RuntimeError, match="sbatch failed"):
                 submit_build_job(s, ws)
+
+    def test_settings_ghcr_image_takes_priority(self, tmp_path: Path) -> None:
+        """Explicit GHCR_IMAGE in hpc.env overrides git-remote inference."""
+        s = _settings(ghcr_image="ghcr.io/explicit/override")
+        ws = tmp_path / "myws"
+        ws.mkdir()
+
+        with patch("vivarium_dashboard.lib.hpc_dispatch._infer_ghcr_image",
+                   return_value="ghcr.io/inferred/should-not-be-used") as mock_infer, \
+             patch("vivarium_dashboard.lib.hpc_dispatch._scp_file"), \
+             patch("vivarium_dashboard.lib.hpc_dispatch._ssh",
+                   return_value=_ok("42")):
+            result = submit_build_job(s, ws)
+
+        assert result["ghcr_image"] == "ghcr.io/explicit/override"
+        # _infer_ghcr_image should not be called when settings has the value
+        assert not mock_infer.called
 
 
 # ---------------------------------------------------------------------------

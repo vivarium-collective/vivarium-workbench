@@ -15,13 +15,24 @@ Pattern mirrors ~/sms/sms-api/sms_api/simulation/simulation_service.py
   submit_run_job    ≈  SimulationServiceHpc.submit_parca_job (run-job variant)
   _scp_file         ≈  SlurmService.scp_upload + submit_job (SCP step)
 
-Build pipeline (no Docker anywhere):
-  1. rsync workspace to cluster
-  2. write sbatch script locally
-  3. scp script to cluster     ← _scp_file()
-  4. sbatch --parsable          → int job_id
-  5. cluster builds SIF via:   apptainer build --fakeroot --force --disable-cache
-                                    {sif} Singularity.def
+Build pipeline (GHCR-pull — no Docker locally, no --fakeroot):
+  1. Infer GHCR image ref from git remote origin
+       github.com/org/repo → ghcr.io/org/repo
+       (override via GHCR_IMAGE in .pbg/hpc.env)
+  2. Write sbatch script locally
+  3. SCP script to cluster          ← _scp_file()
+  4. sbatch --parsable               → int job_id
+  5. Cluster builds SIF via:
+       apptainer build docker://ghcr.io/org/repo:sha-<hash> ws.sif
+     No --fakeroot required: OCI registry pull → SIF conversion uses no
+     user-namespace mapping.  Docker image is built by GitHub Actions
+     (.github/workflows/build-and-push.yml) on every push.
+
+Run pipeline (unchanged):
+  1. rsync workspace to cluster (bind-mount targets: out/, results/)
+  2. Write sbatch run script locally
+  3. SCP + sbatch --parsable
+  4. singularity exec -B out:/app/out -B results:/app/results {sif} <cmd>
 """
 from __future__ import annotations
 
@@ -65,6 +76,35 @@ def _mask(text: str, settings: HpcSettings) -> str:
     if settings.slurm_submit_user and len(settings.slurm_submit_user) >= 3:
         text = text.replace(settings.slurm_submit_user, "<user>")
     return text
+
+
+def _infer_ghcr_image(local_ws: Path) -> str | None:
+    """Derive a GHCR image ref from the workspace's git remote origin.
+
+    Converts GitHub SSH/HTTPS remote URLs to a ``ghcr.io`` image reference::
+
+        https://github.com/vivarium-collective/v2ecoli.git
+        git@github.com:vivarium-collective/v2ecoli.git
+          → ghcr.io/vivarium-collective/v2ecoli
+
+    Returns ``None`` if the workspace has no GitHub remote or git is not
+    available.  The caller should fall back to ``HpcSettings.ghcr_image``
+    or raise a descriptive error.
+    """
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(local_ws), "remote", "get-url", "origin"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+        m = re.match(
+            r"(?:https://github\.com/|git@github\.com:)([^/]+)/([^/.]+?)(?:\.git)?$",
+            r.stdout.strip(),
+        )
+        if m:
+            return f"ghcr.io/{m.group(1).lower()}/{m.group(2).lower()}"
+    except Exception:
+        pass
+    return None
 
 
 def _base_ssh_opts(settings: HpcSettings) -> list[str]:
@@ -275,20 +315,24 @@ def build_image_script(
     settings: HpcSettings,
     ws_name: str,
     build_id: str,
+    ghcr_image: str,
 ) -> str:
-    """Return the text of an sbatch script that builds ``ws_name.sif``.
+    """Return an sbatch script that pulls ``ws_name`` from GHCR and converts to SIF.
 
-    Mirrors SimulationServiceHpc.submit_build_image_job() sbatch content
-    from ~/sms/sms-api/sms_api/simulation/simulation_service.py:
+    No ``--fakeroot`` required: ``apptainer build docker://...`` is a pure OCI
+    registry pull + SIF conversion — it uses Apptainer's own HTTP client, not
+    the Docker daemon, and requires no user-namespace mapping.
 
-      - apptainer/singularity runtime detection
-      - APPTAINER_CACHEDIR + APPTAINER_TMPDIR (avoids NFS issues on compute nodes)
-      - skip if SIF already exists
-      - repo.tar creation honouring .dockerignore
-      - apptainer build --fakeroot --force --disable-cache {sif} Singularity.def
+    The Docker image is built by GitHub Actions
+    (``.github/workflows/build-and-push.yml``) on every push and tagged as
+    ``sha-<7-char-sha>`` (pinned) and ``:latest`` (rolling default branch).
 
-    The workspace is rsync'd to the cluster before this script is submitted,
-    so Step 1 of the sms-api pattern (git clone) becomes an existence check.
+    Tag strategy (tried in order):
+      1. ``sha-<short-sha>`` — pinned to exact commit; best reproducibility.
+         SHA is read from the remote workspace if it exists, or from the local
+         workspace at submit time.
+      2. ``:latest`` — fallback when the exact sha tag isn't on GHCR yet
+         (e.g. CI is still running, or this is the first push on a new branch).
     """
     remote_ws = f"{settings.hpc_repo_base_path}/{ws_name}"
     image_base = settings.hpc_image_base_path or remote_ws
@@ -312,97 +356,50 @@ def build_image_script(
         set -eu
         env
 
-        # --- Container runtime detection (mirrors sms-api) ---
+        # --- Container runtime detection ---
         if command -v apptainer &>/dev/null; then
             CONTAINER_CMD="apptainer"
-            echo "Using apptainer for container build"
+            echo "Using apptainer"
         elif command -v singularity &>/dev/null; then
             CONTAINER_CMD="singularity"
-            echo "Using singularity for container build"
+            echo "Using singularity"
         else
             echo "ERROR: Neither apptainer nor singularity found in PATH"
             exit 1
         fi
 
-        # TMPDIR: local disk (not NFS) for fast metadata ops during builds.
-        # CACHEDIR: shared storage, layer caching across nodes.
         export APPTAINER_CACHEDIR=${{APPTAINER_CACHEDIR:-$HOME/.apptainer/cache}}
         export APPTAINER_TMPDIR="{apptainer_tmpdir}"
         mkdir -p "$APPTAINER_CACHEDIR" "$APPTAINER_TMPDIR"
 
-        # --- Step 1: Confirm workspace exists (rsync ran before submission) ---
-        echo "=== Step 1: Verifying workspace ==="
-        REPO_PATH="{remote_ws}"
-        if [ ! -d "$REPO_PATH" ]; then
-            echo "ERROR: Workspace not found at $REPO_PATH"
-            echo "       rsync_workspace() should have run before submit_build_job()"
-            exit 1
-        fi
-        echo "Workspace found at $REPO_PATH"
-
-        # If both repo and image already exist, skip the whole build.
         if [ -f "{sif_path}" ]; then
             echo "Image {sif_path} already exists. Skipping build."
             exit 0
         fi
 
-        # --- Step 2: Build Apptainer image ---
-        echo "=== Step 2: Building Apptainer image ==="
         mkdir -p "{image_base}"
 
-        echo "Building {ws_name}.sif on $(hostname) from $REPO_PATH ..."
-        cd "$REPO_PATH"
+        # Resolve the sha-pinned tag from the remote workspace (best-effort).
+        # Falls back to :latest when the workspace hasn't been synced yet or
+        # the commit isn't tagged on GHCR (CI still running / new branch).
+        GIT_SHA=$(cd "{remote_ws}" 2>/dev/null && \\
+            git rev-parse --short HEAD 2>/dev/null || echo "")
+        PRIMARY="${{GIT_SHA:+sha-$GIT_SHA}}"
+        PRIMARY="${{PRIMARY:-latest}}"
 
-        GIT_HASH=$(git rev-parse HEAD 2>/dev/null || echo "no-git")
-        GIT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "detached")
-        TIMESTAMP=$(date '+%Y%m%d.%H%M%S')
+        GHCR_IMAGE="{ghcr_image}"
+        echo "=== Pulling $GHCR_IMAGE:$PRIMARY → {sif_path} ==="
 
-        # Create git diff for traceability (mirrors sms-api source-info pattern).
-        mkdir -p source-info
-        git diff HEAD > source-info/git_diff.txt 2>/dev/null || true
-
-        # Create repo.tar honouring .dockerignore (mirrors sms-api lines 272-296).
-        echo "Creating repo tarball..."
-        EXCLUDE_PATTERNS=$(mktemp)
-        if [ -f .dockerignore ]; then
-            grep -v "^#" .dockerignore | grep -v "^$" | grep -v "^!" | while read -r pattern; do
-                if [[ "$pattern" == /* ]]; then
-                    echo ".${{pattern}}/*" >> "$EXCLUDE_PATTERNS"
-                elif [[ "$pattern" == */ ]]; then
-                    echo "./${{pattern}}*" >> "$EXCLUDE_PATTERNS"
-                else
-                    echo "./${{pattern}}" >> "$EXCLUDE_PATTERNS"
-                    echo "./${{pattern}}/*" >> "$EXCLUDE_PATTERNS"
-                fi
-            done
-        fi
-
-        FIND_CMD="find . -type f"
-        while read -r pattern; do
-            FIND_CMD="$FIND_CMD ! -path \\"$pattern\\""
-        done < "$EXCLUDE_PATTERNS"
-
-        TEMP_FILE_LIST=$(mktemp)
-        eval "$FIND_CMD -print0" > "$TEMP_FILE_LIST"
-        tar -cf repo.tar --null -T "$TEMP_FILE_LIST"
-        rm -f "$EXCLUDE_PATTERNS" "$TEMP_FILE_LIST"
-        echo "Created repo.tar ($(du -sh repo.tar | awk '{{print $1}}'))"
-
-        echo "=== Building Container Image: {sif_path} ==="
-        echo "=== git hash $GIT_HASH, git branch $GIT_BRANCH ==="
-
-        # --fakeroot --force --disable-cache mirrors sms-api line 318 exactly.
-        # --disable-cache: ensures correct architecture is pulled for multi-arch
-        #   base images (avoids wrong-arch cached layers).
-        if ! $CONTAINER_CMD build --fakeroot --force --disable-cache \\
+        # OCI pull + SIF conversion — no fakeroot flag required.
+        if ! $CONTAINER_CMD build --force --disable-cache \\
             "{sif_path}" \\
-            "Singularity.def"; then
-            echo "ERROR: Container build failed."
-            exit 1
+            "docker://$GHCR_IMAGE:$PRIMARY" 2>&1; then
+            echo "SHA-tagged image unavailable; falling back to :latest ..."
+            $CONTAINER_CMD build --force --disable-cache \\
+                "{sif_path}" \\
+                "docker://$GHCR_IMAGE:latest"
         fi
-        echo "Container build successful!"
 
-        rm -f repo.tar
         echo "Build completed. Image saved to {sif_path}."
         """)
 
@@ -627,50 +624,53 @@ def rsync_workspace(settings: HpcSettings, local_ws: Path) -> None:
 
 
 def submit_build_job(settings: HpcSettings, local_ws: Path) -> dict:
-    """rsync workspace, SCP an sbatch build script, and submit it.
+    """Infer GHCR image, SCP an sbatch build script, and submit it.
 
-    Mirrors SimulationServiceHpc.submit_build_image_job():
-      1. rsync_workspace  (our equivalent of sms-api's git-clone-on-cluster step)
-      2. build_image_script → write locally
+    GHCR-pull build pipeline (no Docker locally, no --fakeroot on cluster):
+      1. Infer GHCR image ref from git remote origin
+           (override via GHCR_IMAGE in workspace/.pbg/hpc.env)
+      2. build_image_script → write sbatch locally
       3. _scp_file         (≈ SlurmService.scp_upload)
-      4. sbatch --parsable (≈ SlurmService.submit_job sbatch step)
+      4. sbatch --parsable  → int job_id
 
-    The workspace must contain a ``Singularity.def`` at its root — this is
-    the definition file the cluster build script passes to apptainer.
+    No ``rsync_workspace()`` call: the code lives in the GHCR image (built by
+    GitHub Actions on every push) — no workspace files are needed on the cluster
+    for the build step.  ``rsync_workspace()`` is still called by
+    ``submit_run_job()`` to place bind-mount targets (``out/``, ``results/``)
+    before the first simulation run.
 
     Returns::
 
-        {"build_id": str, "slurm_job_id": int, "log_path": str}
+        {"build_id": str, "slurm_job_id": int, "log_path": str, "ghcr_image": str}
     """
     require_configured(settings)
     ws_name = local_ws.name
 
-    if not (local_ws / "Singularity.def").exists():
+    # Explicit setting takes priority; fall back to git-remote inference.
+    ghcr_image = settings.ghcr_image or _infer_ghcr_image(local_ws)
+    if not ghcr_image:
         raise RuntimeError(
-            f"Workspace {ws_name} is missing Singularity.def — "
-            "cannot submit a build job without a container definition file."
+            f"Cannot determine GHCR image for workspace '{ws_name}'. "
+            "Either set GHCR_IMAGE in workspace/.pbg/hpc.env, or ensure the "
+            "workspace has a GitHub remote (git remote get-url origin)."
         )
 
     build_id = uuid.uuid4().hex[:8]
 
-    # Step 1: sync workspace source to cluster.
-    rsync_workspace(settings, local_ws)
-
-    # Step 2: generate sbatch script and write it locally (in .pbg/hpc/ for
-    # auditability — mirrors sms-api's tempfile approach but persisted).
-    script_text = build_image_script(settings, ws_name, build_id)
+    # Step 1: generate sbatch script and write it locally.
+    script_text = build_image_script(settings, ws_name, build_id, ghcr_image)
     hpc_dir = local_ws / ".pbg" / "hpc"
     hpc_dir.mkdir(parents=True, exist_ok=True)
     local_script = hpc_dir / f"build-{build_id}.sbatch"
     local_script.write_text(script_text)
 
-    # Step 3: SCP script to cluster (≈ SlurmService.scp_upload).
+    # Step 2: SCP script to cluster (≈ SlurmService.scp_upload).
     log_base = settings.hpc_log_base_path or f"{settings.hpc_repo_base_path}/logs"
     log_dir = f"{log_base}/{ws_name}"
     remote_script = f"{log_dir}/build-{build_id}.sbatch"
     _scp_file(settings, local_script, remote_script, timeout=30)
 
-    # Step 4: sbatch --parsable → int job_id (≈ SlurmService.submit_job sbatch step).
+    # Step 3: sbatch --parsable → int job_id.
     r = _ssh(settings, f"sbatch --parsable {remote_script}", timeout=30)
     if r.returncode != 0:
         raise RuntimeError(
@@ -678,7 +678,12 @@ def submit_build_job(settings: HpcSettings, local_ws: Path) -> dict:
         )
     slurm_job_id = int(r.stdout.strip())
     log_path = f"{log_dir}/vivarium-build-{ws_name}-{build_id}.out"
-    return {"build_id": build_id, "slurm_job_id": slurm_job_id, "log_path": log_path}
+    return {
+        "build_id": build_id,
+        "slurm_job_id": slurm_job_id,
+        "log_path": log_path,
+        "ghcr_image": ghcr_image,
+    }
 
 
 def get_job_status(settings: HpcSettings, slurm_job_id: int) -> dict:

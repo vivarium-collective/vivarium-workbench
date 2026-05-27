@@ -43,6 +43,13 @@ class HpcSettings(BaseSettings):
                                               # metadata ops during builds (avoids NFS).
                                               # mirrors sms_api/config.py:apptainer_tmpdir
 
+    # GHCR image reference for the SIF build job.
+    # Auto-inferred from git remote origin when empty:
+    #   github.com/org/repo → ghcr.io/org/repo
+    # Override here only when the workspace repo is not on GitHub or the GHCR
+    # image lives under a different org/name than the source repo.
+    ghcr_image: str = ""  # e.g. ghcr.io/vivarium-collective/v2ecoli
+
 
 class HpcNotConfiguredError(RuntimeError):
     """Raised when required HPC settings are missing."""
