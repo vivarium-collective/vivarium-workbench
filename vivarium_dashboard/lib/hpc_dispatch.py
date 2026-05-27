@@ -317,9 +317,15 @@ def _singularity_exec_lines(
         "fi",
         "",
         f'mkdir -p "{remote_ws}/results" "{remote_ws}/out"',
-        f'cd "{remote_ws}"',
         "",
+        # --pwd /app sets the working directory inside the container to /app so
+        # that `uv run` resolves /app/pyproject.toml + /app/.venv (the image's
+        # pre-built, Cython-compiled environment) instead of the bind-mounted
+        # workspace .venv (which has no compiled .so extensions).
+        # Output paths remain correct: parca writes to out/sim_data/ → /app/out/sim_data/
+        # which is bind-mounted from {remote_ws}/out.
         '"$SIF_CMD" exec \\',
+        '    --pwd /app \\',
         f'    -B "{remote_ws}/results:/app/results" \\',
         f'    -B "{remote_ws}/out:/app/out" \\',
         f'    "{sif_path}" \\',
