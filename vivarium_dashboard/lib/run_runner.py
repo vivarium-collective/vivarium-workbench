@@ -36,7 +36,7 @@ class RunRequest:
 
     @classmethod
     def from_file(cls, path: Path) -> "RunRequest":
-        data = json.loads(Path(path).read_text())
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
         return cls(
             run_id=data["run_id"],
             spec_id=data["spec_id"],
@@ -82,7 +82,7 @@ def _resolve_state(req: RunRequest) -> dict:
             f"composite spec not found: {req.spec_id} "
             f"(not a registered generator, no spec file)"
         )
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     spec = json.loads(text) if path.suffix.lower() == ".json" else __import__(
         "yaml").safe_load(text)
     return substitute_parameters(spec.get("state") or {},

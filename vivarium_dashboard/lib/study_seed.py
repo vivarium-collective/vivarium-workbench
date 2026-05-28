@@ -54,7 +54,7 @@ def seed_followup_study(workspace: Path, parent_name: str,
     if not parent_yaml.is_file():
         raise FileNotFoundError(f"parent study not found: {parent_yaml}")
 
-    parent_spec = yaml.safe_load(parent_yaml.read_text()) or {}
+    parent_spec = yaml.safe_load(parent_yaml.read_text(encoding="utf-8")) or {}
     follow_ups = parent_spec.get("follow_up_studies") or []
     if followup_idx >= len(follow_ups):
         raise IndexError(f"followup_idx {followup_idx} out of range "
@@ -220,7 +220,7 @@ def _add_to_parent_investigations(workspace: Path, parent_name: str,
     updated: list[Path] = []
     for inv_yaml in invs_root.glob("*/investigation.yaml"):
         try:
-            text = inv_yaml.read_text()
+            text = inv_yaml.read_text(encoding="utf-8")
             spec = yaml.safe_load(text) or {}
         except Exception:
             continue

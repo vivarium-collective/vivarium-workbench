@@ -56,7 +56,7 @@ def run_study_tests(workspace: Path, slug: str) -> StudyTestsResult:
     if not spec_path.exists():
         raise FileNotFoundError(f"study not found: {spec_path}")
 
-    spec = yaml.safe_load(spec_path.read_text()) or {}
+    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
     pytest_args = (spec.get("tests") or {}).get("pytest_args", []) or []
 
     if not tests_dir.is_dir() or not any(tests_dir.glob("test_*.py")):
@@ -95,7 +95,7 @@ def run_study_tests(workspace: Path, slug: str) -> StudyTestsResult:
             _write_last_results(spec_path, result)
             return result
 
-        report = json.loads(json_report.read_text())
+        report = json.loads(json_report.read_text(encoding="utf-8"))
         tests = []
         for t in report.get("tests", []):
             entry = {
@@ -124,7 +124,7 @@ def run_study_tests(workspace: Path, slug: str) -> StudyTestsResult:
 
 
 def _write_last_results(spec_path: Path, result: StudyTestsResult) -> None:
-    spec = yaml.safe_load(spec_path.read_text()) or {}
+    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
     spec.setdefault("tests", {})
     spec["tests"]["last_results"] = {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),

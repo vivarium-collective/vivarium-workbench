@@ -189,7 +189,7 @@ def _recall_login() -> str | None:
     try:
         p = _last_login_path()
         if p.is_file():
-            v = p.read_text().strip()
+            v = p.read_text(encoding="utf-8").strip()
             return v or None
     except OSError:
         pass

@@ -35,7 +35,7 @@ def _dashboard_url(ws: Path, override: str | None = None) -> str:
     info = ws / ".pbg" / "dashboard" / "dashboard-info"
     if info.is_file():
         try:
-            return json.loads(info.read_text())["url"].rstrip("/")
+            return json.loads(info.read_text(encoding="utf-8"))["url"].rstrip("/")
         except Exception:
             pass
     return "http://localhost:8765"
@@ -72,7 +72,7 @@ def _investigations(ws: Path) -> list[str]:
 
 def _study_slugs(ws: Path, inv_slug: str) -> list[str]:
     spec = yaml.safe_load((ws / "investigations" / inv_slug
-                           / "investigation.yaml").read_text()) or {}
+                           / "investigation.yaml").read_text(encoding="utf-8")) or {}
     out = []
     for s in (spec.get("studies") or []):
         out.append(s if isinstance(s, str) else (s.get("study") or s.get("name")))
@@ -85,7 +85,7 @@ def prepare_study(ws: Path, slug: str, dash: str, steps: int | None,
     sf = ws / "studies" / slug / "study.yaml"
     if not sf.is_file():
         return {"study": slug, "skipped": "no study.yaml"}
-    spec = yaml.safe_load(sf.read_text()) or {}
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     cvs = spec.get("comparative_visualizations") or []
     if not cvs:
         return {"study": slug, "skipped": "no comparative_visualizations"}

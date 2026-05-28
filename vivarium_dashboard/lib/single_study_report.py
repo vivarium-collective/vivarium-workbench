@@ -40,7 +40,7 @@ def resolve_focus_study(ws_root: Path, investigation_slug: str) -> Optional[str]
     if not inv_path.is_file():
         return None
     try:
-        spec = yaml.safe_load(inv_path.read_text()) or {}
+        spec = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
     except Exception:
         return None
     val = spec.get("focus_study")
@@ -60,7 +60,7 @@ def _load_study_spec(ws_root: Path, study_slug: str) -> dict:
             f"study.yaml not found for {study_slug!r} (looked under studies/ and investigations/)"
         )
     try:
-        return yaml.safe_load(p.read_text()) or {}
+        return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as e:
         raise ValueError(f"failed to parse {p}: {e}") from e
 

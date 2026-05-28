@@ -136,7 +136,7 @@ def _count_bib_entries(ws_root: Path) -> int:
     if not bib_file.exists():
         return 0
     try:
-        text = bib_file.read_text()
+        text = bib_file.read_text(encoding="utf-8")
         return sum(1 for line in text.splitlines() if line.strip().startswith("@"))
     except Exception:
         return 0
@@ -170,7 +170,7 @@ def _parse_bib_entries(ws_root: Path) -> list[dict]:
     bib_file = ws_root / "references" / "papers.bib"
     if not bib_file.exists():
         return []
-    text = bib_file.read_text()
+    text = bib_file.read_text(encoding="utf-8")
 
     import re
 
@@ -360,10 +360,10 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     """Build <ws_root>/reports/index.html from workspace.yaml + pending branches."""
     ws_root = ws_root or _ws_root()
     today = today or date.today().isoformat()
-    ws = yaml.safe_load((ws_root / "workspace.yaml").read_text())
+    ws = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8"))
     decisions_file = ws_root / "docs" / "decisions.yaml"
     decisions = (
-        (yaml.safe_load(decisions_file.read_text()) or {}).get("decisions", [])
+        (yaml.safe_load(decisions_file.read_text(encoding="utf-8")) or {}).get("decisions", [])
         if decisions_file.exists() else []
     )
     import vivarium_dashboard as _pkg
@@ -414,7 +414,7 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         )
         if len(inv_dirs) == 1:
             try:
-                inv_spec = yaml.safe_load((inv_dirs[0] / "investigation.yaml").read_text()) or {}
+                inv_spec = yaml.safe_load((inv_dirs[0] / "investigation.yaml").read_text(encoding="utf-8")) or {}
                 active_investigation_name = inv_spec.get("name") or inv_dirs[0].name
             except Exception:
                 active_investigation_name = inv_dirs[0].name

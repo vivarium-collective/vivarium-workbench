@@ -656,13 +656,13 @@ def load_spec(path: Path) -> dict:
     # before parsing. The migration helper is idempotent and atomic.
     # ------------------------------------------------------------------
     try:
-        _peek = yaml.safe_load(path.read_text()) or {}
+        _peek = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as e:
         raise InvestigationSpecError(f"malformed YAML: {e}") from e
     if isinstance(_peek, dict) and "composites" in _peek and "variants" not in _peek:
         migrate_study_to_v2_vocabulary(path)
 
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     try:
         spec = yaml.safe_load(text) or {}
     except yaml.YAMLError as e:
@@ -1405,7 +1405,7 @@ def update_spec_status(ws_root: Path, name: str, *, status: str,
     if status not in _VALID_STATUSES:
         raise ValueError(f"invalid status {status!r}; must be one of {sorted(_VALID_STATUSES)}")
     spec_path = Path(ws_root) / "investigations" / name / "spec.yaml"
-    spec = yaml.safe_load(spec_path.read_text()) or {}
+    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
     spec["status"] = status
     if last_run is not None:
         spec["last_run"] = last_run
@@ -1451,7 +1451,7 @@ def _load_composite_doc(inv_dir: Path, composite_name: str) -> dict:
         raise FileNotFoundError(
             f"composite document not found: {doc_path}"
         )
-    return yaml.safe_load(doc_path.read_text()) or {}
+    return yaml.safe_load(doc_path.read_text(encoding="utf-8")) or {}
 
 
 def _apply_parameter_overrides(doc: dict, params: dict) -> dict:

@@ -26,7 +26,7 @@ def load_state() -> dict:
     if not p.exists():
         return {}
     try:
-        return json.loads(p.read_text()) or {}
+        return json.loads(p.read_text(encoding="utf-8")) or {}
     except (json.JSONDecodeError, OSError):
         return {}
 

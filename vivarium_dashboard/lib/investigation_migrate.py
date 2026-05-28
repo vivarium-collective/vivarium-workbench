@@ -23,7 +23,7 @@ def needs_migration(spec_path: Path) -> bool:
     if not spec_path.is_file():
         return False
     try:
-        spec = yaml.safe_load(spec_path.read_text()) or {}
+        spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError:
         return False
     return bool(spec.get('composite')) and not spec.get('composites')
@@ -167,7 +167,7 @@ def migrate_investigation(spec_path: Path, workspace_root: Path) -> dict:
     """Migrate the spec at ``spec_path`` in-place. Returns the new spec dict."""
     spec_path = Path(spec_path)
     workspace_root = Path(workspace_root)
-    spec = yaml.safe_load(spec_path.read_text()) or {}
+    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
     if spec.get('composites'):
         return spec  # idempotent
 

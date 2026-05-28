@@ -63,7 +63,7 @@ def add_dependency(pyproject_path: Path, package: str, *, version_spec: str | No
     if not pyproject_path.exists():
         raise FileNotFoundError(pyproject_path)
 
-    text = pyproject_path.read_text()
+    text = pyproject_path.read_text(encoding="utf-8")
     data = tomllib.loads(text)
     deps = data.get("project", {}).get("dependencies", []) or []
 
@@ -109,7 +109,7 @@ def remove_dependency(pyproject_path: Path, package: str) -> bool:
     if not pyproject_path.exists():
         raise FileNotFoundError(pyproject_path)
 
-    text = pyproject_path.read_text()
+    text = pyproject_path.read_text(encoding="utf-8")
     data = tomllib.loads(text)
     deps = data.get("project", {}).get("dependencies", []) or []
 
@@ -147,7 +147,7 @@ def remove_uv_source(pyproject_path: Path, package: str) -> bool:
     if not pyproject_path.exists():
         raise FileNotFoundError(pyproject_path)
 
-    text = pyproject_path.read_text()
+    text = pyproject_path.read_text(encoding="utf-8")
     data = tomllib.loads(text)
     existing_sources = data.get("tool", {}).get("uv", {}).get("sources", {}) or {}
     if package not in existing_sources:
@@ -188,7 +188,7 @@ def add_uv_source(
     if not path and not git:
         raise ValueError("either path or git must be provided")
 
-    text = pyproject_path.read_text()
+    text = pyproject_path.read_text(encoding="utf-8")
     data = tomllib.loads(text)
     existing_sources = data.get("tool", {}).get("uv", {}).get("sources", {}) or {}
     if package in existing_sources:
