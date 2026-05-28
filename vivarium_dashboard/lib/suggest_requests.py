@@ -41,6 +41,6 @@ def read_response(ws_root: Path, req_id: str) -> dict | None:
     if not resp_path.exists():
         return None
     try:
-        return json.loads(resp_path.read_text())
+        return json.loads(resp_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return None

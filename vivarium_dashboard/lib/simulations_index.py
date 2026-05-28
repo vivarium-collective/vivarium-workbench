@@ -184,7 +184,7 @@ def _study_yaml_run_ids(yaml_path: Path) -> list[str]:
     """Extract run_ids from a study.yaml's runs[]. Accepts list-of-strings
     or list-of-dicts ({run_id: ...}). Malformed yaml → []."""
     try:
-        data = yaml.safe_load(yaml_path.read_text()) or {}
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError:
         warnings.warn(f"simulations_index: malformed yaml at {yaml_path}")
         return []
@@ -266,7 +266,7 @@ def _parquet_sim_name_from_yaml(yaml_path: Path, experiment_id: str) -> str | No
     if not yaml_path.is_file():
         return None
     try:
-        data = yaml.safe_load(yaml_path.read_text()) or {}
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
     except (yaml.YAMLError, OSError):
         return None
     for entry in data.get("runs") or []:
@@ -537,7 +537,7 @@ def _rewrite_study_yaml_without(yaml_path: Path, run_id: str) -> bool:
     a runs[] entry was removed, False if nothing changed. Raises OSError
     on write failure (caller catches per-file).
     """
-    data = yaml.safe_load(yaml_path.read_text()) or {}
+    data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
     if not isinstance(data, dict):
         return False
     runs = data.get("runs") or []

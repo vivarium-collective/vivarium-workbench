@@ -28,7 +28,7 @@ _INLINE_PLACEHOLDER = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 
 
 def load_spec(path: Path) -> dict:
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     if path.suffix.lower() == ".json":
         return json.loads(text)
     return yaml.safe_load(text)

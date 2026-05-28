@@ -292,7 +292,7 @@ def discover_static_study_charts(charts_dir: Path) -> list[dict]:
     out: list[dict] = []
     for svg_path in sorted(charts_dir.glob("*.svg")):
         try:
-            svg_text = svg_path.read_text()
+            svg_text = svg_path.read_text(encoding="utf-8")
         except Exception:
             continue
         meta_path = svg_path.with_suffix(".meta.json")
@@ -302,7 +302,7 @@ def discover_static_study_charts(charts_dir: Path) -> list[dict]:
         interpretation = ""
         if meta_path.exists():
             try:
-                meta = json.loads(meta_path.read_text())
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
                 if isinstance(meta, dict):
                     title = str(meta.get("title", title)) or title
                     caption = str(meta.get("caption", "")) or ""
@@ -465,7 +465,7 @@ def _emitter_choice(spec: dict, runs_db: Path | None) -> str:
         if ws_yaml.is_file():
             try:
                 import yaml as _yaml
-                ws = _yaml.safe_load(ws_yaml.read_text()) or {}
+                ws = _yaml.safe_load(ws_yaml.read_text(encoding="utf-8")) or {}
                 ws_rt = ws.get("runtime") or {}
                 if isinstance(ws_rt, dict) and ws_rt.get("default_emitter") in _ACCEPTED:
                     return ws_rt["default_emitter"]

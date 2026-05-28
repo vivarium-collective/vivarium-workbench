@@ -17,7 +17,7 @@ def _schema_path() -> Path:
 
 def _validator() -> Draft7Validator:
     return Draft7Validator(
-        json.loads(_schema_path().read_text()),
+        json.loads(_schema_path().read_text(encoding="utf-8")),
         format_checker=FormatChecker(),
     )
 
@@ -30,7 +30,7 @@ def validate_workspace(data: dict) -> None:
 
 
 def load_workspace(path: Path | str) -> dict:
-    data = yaml.safe_load(Path(path).read_text())
+    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     validate_workspace(data)
     return data
 
