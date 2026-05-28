@@ -217,6 +217,169 @@ def _build_run_to_studies_map(workspace: Path) -> dict[str, list[str]]:
     return result
 
 
+# ---------------------------------------------------------------------------
+# Parquet hive discovery (workspace-default emitter per 2026-05-27 migration)
+# ---------------------------------------------------------------------------
+#
+# ParquetEmitter runs land at
+#   studies/<study_slug>/parquet-runs/<experiment_id>/{configuration,history,success}/...
+# with the configuration/ subdir holding the per-generation metadata
+# (study_slug, investigation_slug, generation, agent_id) the runner passed
+# at construction. We discover them by walking the per-study parquet-runs/
+# dirs and build the same dict shape sqlite_emitter readers produce, so
+# the merge logic in list_simulations doesn't have to special-case parquet.
+# ---------------------------------------------------------------------------
+
+
+def _discover_parquet_hives(workspace: Path) -> list[tuple[Path, str]]:
+    """Yield (experiment_dir, study_slug) for every per-study parquet
+    experiment under ``studies/*/parquet-runs/<exp_id>/``.
+
+    Skips entries without a ``history/`` subdir (in-progress writes whose
+    first emit hasn't flushed yet). Deterministic order: study slug first,
+    then by experiment_id directory mtime descending.
+    """
+    out: list[tuple[Path, str]] = []
+    studies_root = workspace / "studies"
+    if not studies_root.is_dir():
+        return out
+    for sdir in sorted(studies_root.iterdir()):
+        if not sdir.is_dir():
+            continue
+        parquet_runs = sdir / "parquet-runs"
+        if not parquet_runs.is_dir():
+            continue
+        exps = [p for p in parquet_runs.iterdir()
+                if p.is_dir() and (p / "history").is_dir()]
+        exps.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        for p in exps:
+            out.append((p, sdir.name))
+    return out
+
+
+def _parquet_sim_name_from_yaml(yaml_path: Path, experiment_id: str) -> str | None:
+    """Look up the human-readable sim name from the study.yaml's runs[]
+    by matching ``simulation_id``. Returns None when the yaml is missing
+    (e.g. cross-investigation pseudo-studies whose parquet-runs/ dir
+    exists without a study.yaml), unreadable, or has no matching entry.
+    """
+    if not yaml_path.is_file():
+        return None
+    try:
+        data = yaml.safe_load(yaml_path.read_text()) or {}
+    except (yaml.YAMLError, OSError):
+        return None
+    for entry in data.get("runs") or []:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("simulation_id") == experiment_id:
+            return entry.get("simulation") or None
+    return None
+
+
+def _read_parquet_hive(exp_dir: Path, study_slug: str, workspace: Path) -> dict | None:
+    """Read one parquet experiment's metadata + counts and return the
+    dashboard's standard run-dict shape. Returns None on read failure so
+    a broken hive doesn't take down the whole simulations index.
+    """
+    try:
+        import polars as pl  # lazy; not every dashboard install has it
+    except ImportError:
+        warnings.warn(
+            "simulations_index: polars unavailable; "
+            f"skipping parquet hive at {exp_dir}"
+        )
+        return None
+
+    experiment_id = exp_dir.name
+    history = exp_dir / "history"
+    config = exp_dir / "configuration"
+    success = exp_dir / "success"
+
+    # Pull metadata from the configuration parquet (one row per generation;
+    # use the first for study/investigation slugs since both rows carry the
+    # same values for those columns by construction).
+    investigation_slug = None
+    metadata_slug = None
+    try:
+        if config.is_dir():
+            cfg_df = pl.read_parquet(str(config / "**" / "*.pq"))
+            if cfg_df.height > 0:
+                first = cfg_df.row(0, named=True)
+                metadata_slug = first.get("study_slug") or None
+                investigation_slug = first.get("investigation_slug") or None
+    except Exception as e:  # noqa: BLE001
+        warnings.warn(
+            f"simulations_index: parquet config read failed at {exp_dir}: {e}"
+        )
+
+    # Row count = total emit count across all generations.
+    try:
+        n_rows = int(
+            pl.scan_parquet(str(history / "**" / "*.pq"))
+              .select(pl.len())
+              .collect()
+              .item()
+        )
+    except Exception:
+        n_rows = 0
+
+    # Status: success/ subdir means ParquetEmitter.close(success=True) ran.
+    status = "completed" if success.is_dir() else "running"
+
+    # Timestamps come from the filesystem since ParquetEmitter doesn't
+    # stamp them itself. configuration/ is written at construction;
+    # success/ at clean close.
+    try:
+        started_at = config.stat().st_mtime if config.is_dir() else exp_dir.stat().st_mtime
+    except OSError:
+        started_at = None
+    try:
+        completed_at = success.stat().st_mtime if success.is_dir() else None
+    except OSError:
+        completed_at = None
+
+    # sim_name: try the study.yaml first (gives the human-readable label),
+    # then fall back to the experiment_id (UUID; informative but not pretty).
+    yaml_path = workspace / "studies" / study_slug / "study.yaml"
+    sim_name = _parquet_sim_name_from_yaml(yaml_path, experiment_id) or experiment_id
+
+    # Workspace-relative path for the dashboard's UI (drill-down links).
+    db_path = str(exp_dir.relative_to(workspace))
+
+    return {
+        "run_id":             experiment_id,
+        "spec_id":            "",
+        "sim_name":           sim_name,
+        "label":              sim_name,
+        "status":             status,
+        "n_steps":            n_rows,
+        "progress_step":      max(n_rows - 1, 0),
+        "started_at":         started_at,
+        "completed_at":       completed_at,
+        "db_path":            db_path,
+        "source":             "parquet",
+        "studies":            [],
+        # Prefer the slug recorded in metadata (authoritative for cross-
+        # investigation reference runs whose path-slug is a pseudo-study);
+        # fall back to the path slug for older hives.
+        "study_slug":         metadata_slug or study_slug,
+        "investigation_slug": investigation_slug,
+    }
+
+
+def _read_parquet_hives(workspace: Path) -> list[dict]:
+    """Discover + read every parquet experiment under the workspace.
+    Skips broken hives (returns the rest) so one bad write doesn't blank
+    the Simulations tab."""
+    out: list[dict] = []
+    for exp_dir, study_slug in _discover_parquet_hives(workspace):
+        row = _read_parquet_hive(exp_dir, study_slug, workspace)
+        if row is not None:
+            out.append(row)
+    return out
+
+
 def list_simulations(workspace: Path) -> list[dict]:
     """Return every persisted simulation in ``workspace``, newest first.
 
@@ -253,6 +416,11 @@ def list_simulations(workspace: Path) -> list[dict]:
         # two are non-overlapping per DB.
         rows.extend(_read_runs_meta(db_path, db_rel))
         rows.extend(_read_sqlite_emitter(db_path, db_rel))
+    # Workspace-default emitter (post-2026-05-27 parquet migration). Each
+    # row is shaped exactly like a sqlite_emitter row so the merge logic
+    # below treats them uniformly. Source-tag "parquet" lets the frontend
+    # render an emitter badge.
+    rows.extend(_read_parquet_hives(workspace))
 
     # Deduplicate by run_id, preferring runs_meta over sqlite_emitter (so
     # spec_id / status / n_steps come from the canonical bookkeeping table).
