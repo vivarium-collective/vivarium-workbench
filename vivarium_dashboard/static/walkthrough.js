@@ -6915,7 +6915,16 @@
       // When a study is open: make its header sticky so the collapse arrow
       // stays in view while scrolling inside the study. One click collapses
       // and the next study floats into view — no scrolling back to the top.
-      + '.study-fold[open]>.study-panel{position:sticky;top:0;z-index:10;padding:8px 16px;border-bottom:1px solid #e2e8f0;border-radius:9px 9px 0 0;background:#f8fafc;box-shadow:0 1px 4px rgba(0,0,0,.06)}'
+      // Stick BELOW the topbar (which sits at top:0, z:100), not at top:0.
+      // Otherwise the topbar (higher z-index) visually covers the panel and
+      // every interactive element inside it — including the collapse hint —
+      // becomes invisible the moment the user scrolls. The 44px offset
+      // matches the existing `.study-nav{top:44px}` convention (topbar is
+      // ~44px tall after its 9px padding + ~26px line content). Friction
+      // report 2026-05-28: "click to collapse goes out of view when we
+      // scroll" — was actually the entire sticky panel disappearing
+      // behind the topbar, not just the hint.
+      + '.study-fold[open]>.study-panel{position:sticky;top:44px;z-index:10;padding:8px 16px;border-bottom:1px solid #e2e8f0;border-radius:9px 9px 0 0;background:#f8fafc;box-shadow:0 1px 4px rgba(0,0,0,.06)}'
       // Sticky-when-open: hide the rich content rows (still visible
       // below in the expanded body — no information lost, just no
       // longer duplicated). The section-nav row stays visible to
