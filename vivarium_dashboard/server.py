@@ -3372,6 +3372,41 @@ def _has_origin_remote() -> bool:
     return "origin" in (r.stdout or "").split()
 
 
+def _stale_branch_threshold() -> int:
+    """Commits-behind-main threshold above which a branch is flagged stale.
+
+    Default 20 (matches the dnaa-biology friction report's "24 commits
+    behind, two trivial conflicts" anchor). Override per-server with
+    PBG_STALE_BRANCH_THRESHOLD=<int>."""
+    raw = os.environ.get("PBG_STALE_BRANCH_THRESHOLD")
+    if raw:
+        try:
+            n = int(raw)
+            return max(n, 1)
+        except ValueError:
+            pass
+    return 20
+
+
+def _commits_behind(branch: str, base: str = "main") -> tuple[int, str]:
+    """Return (commits_behind, ref_used). Probes origin/<base> first
+    (matches what `git merge origin/<base>` would have to fast-forward
+    over — the actual integration cost). Falls back to local <base>.
+    Returns (0, "") on any git failure so callers don't have to
+    branch on the error case."""
+    for ref in (f"origin/{base}", base):
+        r = subprocess.run(
+            ["git", "rev-list", "--count", f"{branch}..{ref}"],
+            cwd=WORKSPACE, capture_output=True, text=True, check=False,
+        )
+        if r.returncode == 0:
+            try:
+                return int(r.stdout.strip() or 0), ref
+            except ValueError:
+                pass
+    return 0, ""
+
+
 def _diagnose_push_error(err: str) -> dict | None:
     """Return a structured diagnosis for known push failure patterns, else None."""
     if not err:
@@ -4391,6 +4426,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_workspace_manifest()
         if self.path.startswith("/api/work-status"):
             return self._get_work_status()
+        if self.path.startswith("/api/branch-staleness"):
+            return self._get_branch_staleness()
         if self.path.startswith("/api/dirty-status"):
             return self._get_dirty_status()
         if self.path.startswith("/api/suggest-poll"):
@@ -6315,6 +6352,14 @@ if __name__ == "__main__":
                            cwd=WORKSPACE, capture_output=True, text=True)
         commits_ahead = int(r.stdout.strip() or 0) if r.returncode == 0 else 0
 
+        # commits behind base — surfaces the friction-#5 case where a long-running
+        # investigation branch drifts so far that framework migrations need
+        # manual conflict-resolution. Computed against origin/<base> when present
+        # (matches what a `git merge origin/main` would have to fast-forward
+        # over) and falls back to local <base>.
+        commits_behind, behind_ref = _commits_behind(branch, base)
+        stale_threshold = _stale_branch_threshold()
+
         # unpushed commits
         if state.get("pushed"):
             r2 = subprocess.run(["git", "rev-list", "--count", f"origin/{branch}..{branch}"],
@@ -6328,12 +6373,54 @@ if __name__ == "__main__":
             "branch": branch,
             "base": base,
             "commits_ahead": commits_ahead,
+            "commits_behind": commits_behind,
+            "behind_ref": behind_ref,
+            "stale": commits_behind >= stale_threshold,
+            "stale_threshold": stale_threshold,
             "unpushed": unpushed,
             "pushed": state.get("pushed", False),
             "has_origin": _has_origin_remote(),
             "gh_available": shutil.which("gh") is not None,
             "pr_number": state.get("pr_number"),
             "pr_url": state.get("pr_url"),
+        }, 200)
+
+    def _get_branch_staleness(self):
+        """Generic helper: how many commits is <branch> behind <base>?
+
+        Query string: ?branch=<name>&base=<name>. Both optional —
+        branch defaults to the workspace's current HEAD; base defaults
+        to 'main'. Probes origin/<base> first (so the answer matches
+        what a merge from upstream would have to fast-forward over),
+        falls back to local <base>.
+
+        Surfaces friction note 2026-05-27 #5: long-running investigation
+        branches drift, and when framework migrations land on main, the
+        eventual merge produces "trivial but tedious" conflicts. A skill
+        or UI calls this endpoint to warn the user before the drift gets
+        painful.
+        """
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        branch = (qs.get("branch") or [None])[0]
+        base = (qs.get("base") or ["main"])[0]
+
+        if not branch:
+            r = subprocess.run(["git", "branch", "--show-current"],
+                               cwd=WORKSPACE, capture_output=True, text=True)
+            branch = r.stdout.strip() if r.returncode == 0 else ""
+        if not branch:
+            return self._json({"error": "could not determine current branch + no ?branch= given"}, 400)
+
+        commits_behind, behind_ref = _commits_behind(branch, base)
+        threshold = _stale_branch_threshold()
+        return self._json({
+            "branch": branch,
+            "base": base,
+            "behind_ref": behind_ref,
+            "commits_behind": commits_behind,
+            "stale_threshold": threshold,
+            "stale": commits_behind >= threshold,
         }, 200)
 
     def _post_work_end(self, body: dict):
