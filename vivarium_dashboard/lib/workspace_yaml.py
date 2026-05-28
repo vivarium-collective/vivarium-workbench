@@ -37,4 +37,4 @@ def load_workspace(path: Path | str) -> dict:
 
 def save_workspace(path: Path | str, data: dict) -> None:
     validate_workspace(data)
-    Path(path).write_text(yaml.safe_dump(data, sort_keys=False))
+    Path(path).write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")

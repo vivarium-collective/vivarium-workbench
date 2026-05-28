@@ -11277,6 +11277,109 @@ if __name__ == "__main__":
 
         return self._json(resp, code)
 
+    def _uninstall_unmanaged_or_404(self, name: str):
+        """Handle uninstall for catalog modules NOT in workspace.yaml.imports.
+
+        Three cases:
+        1. Not in venv either → genuinely already uninstalled (200).
+        2. In venv but other installed packages require it (transitive with
+           real parents) → 409, tell the user to uninstall the parent(s) first.
+        3. In venv with no parent (unmanaged orphan) → pip uninstall +
+           best-effort remove of untracked external/<name>/ checkout. No
+           pyproject/workspace.yaml edits to make (nothing claims it).
+
+        Skips the _commit_or_run wrapper because case 3 has no tracked-file
+        changes to commit (external/<name>/ is removed only if untracked).
+        """
+        venv_dists = _detect_workspace_venv_distributions(WORKSPACE)
+
+        # Resolve catalog metadata so we know the actual python pkg / pypi name.
+        catalog_path = WORKSPACE / "scripts" / "_catalog" / "modules.json"
+        catalog_pkg = name.replace("-", "_")
+        catalog_pypi = name
+        if catalog_path.exists():
+            try:
+                for cat_m in json.loads(catalog_path.read_text(encoding="utf-8")):
+                    if cat_m.get("name") == name:
+                        catalog_pkg = cat_m.get("package") or catalog_pkg
+                        catalog_pypi = cat_m.get("pypi_name") or name
+                        break
+            except Exception:
+                pass
+
+        variants = {name.lower(), catalog_pkg.lower(), catalog_pypi.lower()}
+        dist_info = None
+        matched_dist = None
+        for v in variants:
+            if v in venv_dists:
+                dist_info = venv_dists[v]
+                matched_dist = v
+                break
+
+        if dist_info is None:
+            return self._json({"ok": True, "already_uninstalled": True}, 200)
+
+        parents = dist_info.get("requires_by") or []
+        if parents:
+            return self._json({
+                "error": f"{name} is required by {', '.join(parents)} — uninstall the parent(s) first",
+                "transitive_via": parents,
+                "module": name,
+            }, 409)
+
+        # Orphaned venv install — safe to remove directly.
+        venv_py = WORKSPACE / ".venv" / "bin" / "python3"
+        uv_path = shutil.which("uv")
+        target = catalog_pypi or matched_dist
+        if uv_path and venv_py.exists():
+            uninstall_cmd = [uv_path, "pip", "uninstall", "--python", str(venv_py), target]
+        else:
+            venv_pip = WORKSPACE / ".venv" / "bin" / "pip"
+            if venv_pip.exists():
+                uninstall_cmd = [str(venv_pip), "uninstall", "-y", target]
+            else:
+                return self._json({"error": "no venv pip/uv available to uninstall"}, 500)
+
+        log: list[str] = []
+        try:
+            r = subprocess.run(
+                uninstall_cmd, cwd=WORKSPACE, capture_output=True, text=True, timeout=60,
+            )
+            log.append((r.stdout + "\n" + r.stderr).strip()[-2000:])
+        except Exception as e:
+            log.append(f"pip uninstall failed: {e}")
+
+        # Remove untracked external/<name>/ checkout if present and NOT a
+        # registered submodule (deinit/git-rm flow is reserved for the
+        # imports-declared path).
+        ext_path = WORKSPACE / "external" / name
+        if ext_path.exists():
+            gm = WORKSPACE / ".gitmodules"
+            is_submodule = False
+            if gm.exists():
+                try:
+                    is_submodule = f"external/{name}" in gm.read_text(encoding="utf-8")
+                except Exception:
+                    pass
+            if is_submodule:
+                log.append(f"external/{name} is a tracked submodule; left in place")
+            else:
+                try:
+                    shutil.rmtree(ext_path)
+                    log.append(f"removed external/{name}/")
+                except Exception as e:
+                    log.append(f"rm external/{name} failed: {e}")
+
+        global _REGISTRY_CACHE
+        _REGISTRY_CACHE["data"] = None
+
+        return self._json({
+            "ok": True,
+            "module": name,
+            "install_mode": "unmanaged",
+            "log": "\n".join(log)[-500:],
+        }, 200)
+
     def _post_catalog_uninstall(self, body: dict):
         """POST /api/catalog-uninstall — remove a catalog module from this workspace.
 
@@ -11301,7 +11404,13 @@ if __name__ == "__main__":
         ws = load_workspace(ws_file)
         imports = ws.get("imports") or {}
         if name not in imports:
-            return self._json({"ok": True, "already_uninstalled": True}, 200)
+            # Either truly not installed, OR an "unmanaged" venv install
+            # (editable/hand-installed without a workspace.yaml.imports
+            # declaration — common when a previous workspace flow added the
+            # package as an editable submodule and the user later wants it
+            # gone). Detect the latter and run a minimal uninstall:
+            # pip uninstall + best-effort remove of untracked external/<name>/.
+            return self._uninstall_unmanaged_or_404(name)
 
         entry = imports[name]
         mode = entry.get("mode", "reference")  # "pypi" or "reference"

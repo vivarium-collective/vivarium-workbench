@@ -1280,11 +1280,17 @@
         var action = '';
         if (src === 'venv') {
           var via = (m.installed_via || []);
-          var viaText = via.length
-            ? 'via ' + via.slice(0, 3).map(_esc).join(', ') + (via.length > 3 ? ' +' + (via.length - 3) : '')
-            : 'transitive';
-          srcBadge = '<span class="install-src-pill install-src-venv" title="Brought in by another installed package; cannot be uninstalled directly.">📦 ' + viaText + '</span>';
-          action = '<span class="muted" style="font-size:0.78em" title="Remove the parent package to drop this transitive dependency.">(remove parent to uninstall)</span>';
+          if (via.length === 0) {
+            // No parent claims it — orphaned editable / hand-installed pkg.
+            // Workspace.yaml doesn't declare it and no installed dep requires
+            // it. User can uninstall directly from the dashboard.
+            srcBadge = '<span class="install-src-pill install-src-unmanaged" title="Installed in the venv but not declared in workspace.yaml.imports and not required by any installed package. Safe to uninstall.">📦 unmanaged</span>';
+            action = '<button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
+          } else {
+            var viaText = 'via ' + via.slice(0, 3).map(_esc).join(', ') + (via.length > 3 ? ' +' + (via.length - 3) : '');
+            srcBadge = '<span class="install-src-pill install-src-venv" title="Brought in by another installed package; cannot be uninstalled directly.">📦 ' + viaText + '</span>';
+            action = '<span class="muted" style="font-size:0.78em" title="Remove the parent package to drop this transitive dependency.">(remove parent to uninstall)</span>';
+          }
         } else if (src === 'pyproject') {
           srcBadge = '<span class="install-src-pill install-src-pyproject" title="Declared in pyproject.toml [project.dependencies]; workspace.yaml.imports does not have an explicit entry.">📋 via pyproject</span>';
           action = '<button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
