@@ -313,6 +313,11 @@ def test_dormant_lists_open_investigations_on_other_worktrees(tmp_path):
     assert e["worktree_path"] == str(sibling)
     assert e["branch"] == "sib-branch"
     assert e["status"] == "planning"
+    # Single-worktree investigations carry a one-item variants list so
+    # the client can render uniformly regardless of dedupe count.
+    assert e["variants"] == [
+        {"worktree_path": str(sibling), "branch": "sib-branch", "status": "planning"}
+    ]
 
 
 def test_dormant_skips_worktree_with_live_dashboard(tmp_path):
@@ -417,3 +422,101 @@ def test_list_other_worktrees_handles_non_git_dir(tmp_path):
     """Non-git dirs return [] without raising."""
     from vivarium_dashboard.server import _list_other_worktrees
     assert _list_other_worktrees(tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# dormant_others: dedupe by slug across worktrees of the same repo
+# ---------------------------------------------------------------------------
+
+
+def test_dormant_dedupes_same_slug_across_worktrees(tmp_path):
+    """Multiple worktrees of the same repo carrying the same
+    `investigations/<slug>/investigation.yaml` collapse into one row
+    with a `variants` list of every worktree+branch that contains it."""
+    ws = tmp_path / "ws"; ws.mkdir()
+    wt_a = tmp_path / "wt_a"
+    wt_b = tmp_path / "wt_b"
+    wt_c = tmp_path / "wt_c"
+
+    def scan(p):
+        # Every worktree has the same investigation slug `colonies`.
+        return [{"slug": "colonies", "title": "Colony Composite",
+                 "status": "in_progress"}]
+
+    out = _build_investigation_registry_for_test(
+        ws,
+        this_url="http://127.0.0.1:1",
+        list_servers_fn=lambda: [],
+        fetch_peer_fn=lambda u: None,
+        list_worktrees_fn=lambda: [
+            {"path": str(wt_a), "branch": "main"},
+            {"path": str(wt_b), "branch": "plasmids"},
+            {"path": str(wt_c), "branch": "colonies"},
+        ],
+        scan_worktree_fn=scan,
+    )
+    assert len(out["dormant_others"]) == 1
+    row = out["dormant_others"][0]
+    assert row["slug"] == "colonies"
+    assert row["title"] == "Colony Composite"
+    # Canonical worktree is the one whose branch matches the slug
+    # (Investigation ≡ branch convention).
+    assert row["worktree_path"] == str(wt_c)
+    assert row["branch"] == "colonies"
+    # variants lists every worktree carrying this slug, canonical first.
+    assert len(row["variants"]) == 3
+    assert row["variants"][0] == {
+        "worktree_path": str(wt_c), "branch": "colonies",
+        "status": "in_progress",
+    }
+    other_paths = {v["worktree_path"] for v in row["variants"][1:]}
+    assert other_paths == {str(wt_a), str(wt_b)}
+
+
+def test_dormant_dedupe_no_branch_match_picks_first_alphabetical(tmp_path):
+    """When no worktree's branch matches the investigation slug, the
+    canonical entry is the first alphabetical branch."""
+    ws = tmp_path / "ws"; ws.mkdir()
+    wt_z = tmp_path / "wt_z"
+    wt_a = tmp_path / "wt_a"
+
+    out = _build_investigation_registry_for_test(
+        ws,
+        this_url="http://127.0.0.1:1",
+        list_servers_fn=lambda: [],
+        fetch_peer_fn=lambda u: None,
+        list_worktrees_fn=lambda: [
+            {"path": str(wt_z), "branch": "zeta"},
+            {"path": str(wt_a), "branch": "alpha"},
+        ],
+        scan_worktree_fn=lambda p: [
+            {"slug": "shared-inv", "title": "Shared", "status": "planning"}
+        ],
+    )
+    assert len(out["dormant_others"]) == 1
+    row = out["dormant_others"][0]
+    assert row["branch"] == "alpha"
+    assert row["worktree_path"] == str(wt_a)
+    assert [v["branch"] for v in row["variants"]] == ["alpha", "zeta"]
+
+
+def test_dormant_distinct_slugs_stay_separate(tmp_path):
+    """Different investigation slugs on the same worktree stay separate."""
+    ws = tmp_path / "ws"; ws.mkdir()
+    sib = tmp_path / "sib"
+
+    out = _build_investigation_registry_for_test(
+        ws,
+        this_url="http://127.0.0.1:1",
+        list_servers_fn=lambda: [],
+        fetch_peer_fn=lambda u: None,
+        list_worktrees_fn=lambda: [{"path": str(sib), "branch": "b"}],
+        scan_worktree_fn=lambda p: [
+            {"slug": "inv-a", "title": "A", "status": "planning"},
+            {"slug": "inv-b", "title": "B", "status": "in_progress"},
+        ],
+    )
+    slugs = sorted(e["slug"] for e in out["dormant_others"])
+    assert slugs == ["inv-a", "inv-b"]
+    for row in out["dormant_others"]:
+        assert len(row["variants"]) == 1
