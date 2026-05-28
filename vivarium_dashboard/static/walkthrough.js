@@ -6990,12 +6990,21 @@
       + '.study-fold[open] .sp-expand-hint{display:none}'
       /* sp-collapse-hint: the OPEN-state partner of sp-expand-hint.
          Styled identically (same font-size, grey, margin) so the two
-         affordances feel like the same control in two states. Lands on
-         its own row below the section-nav chips because sp-section-nav
-         is width:100% — no flex-basis trick needed. Left-aligned to
-         match where the expand-hint sits on collapsed cards. */
+         affordances feel like the same control in two states.
+
+         `flex: 0 0 100% + order: 100` guarantees it always lands on
+         its own row at the very bottom of the sticky panel, regardless
+         of whether sp-section-nav rendered (some studies have no nav
+         links — without the flex-basis trick the hint would float onto
+         the title row next to the verdict, which is what triggered the
+         2026-05-28 "click to collapse is in the wrong menu bar" report).
+         Default block text-align is left, matching where the expand-hint
+         sits on collapsed cards. */
       + '.sp-collapse-hint{display:none}'
-      + '.study-fold[open] .sp-collapse-hint{display:inline-block;font-size:0.73em;color:#94a3b8;margin-top:6px}'
+      + '.study-fold[open] .sp-collapse-hint{'
+      +   'display:block;flex:0 0 100%;order:100;'
+      +   'font-size:0.73em;color:#94a3b8;margin-top:6px'
+      + '}'
       + '.studies-toolbar{display:flex;gap:8px;margin:8px 0 14px}'
       + '.studies-toolbar button{font:inherit;font-size:0.85em;padding:5px 12px;border:1px solid #cbd5e1;background:#f8fafc;border-radius:6px;cursor:pointer;color:#334155}'
       + '.studies-toolbar button:hover{background:#e2e8f0}'
