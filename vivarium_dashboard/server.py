@@ -1440,9 +1440,15 @@ def _build_investigation_registry_for_test(
                               that do NOT have a running dashboard.
                               Read directly off disk via
                               ``git worktree list`` + filesystem scan.
-                              Entries whose ``status`` is
-                              closed/archived/complete are filtered out
-                              so the sidebar never renders stale rows.
+                              **Deduplicated by slug** across worktrees:
+                              each unique investigation appears once,
+                              with the canonical worktree promoted to
+                              the entry's ``worktree_path``/``branch``/
+                              ``status`` fields and every other worktree
+                              listed under ``variants``. Entries whose
+                              ``status`` is closed/archived/complete are
+                              filtered out so the sidebar never renders
+                              stale rows.
 
     Contract: previously-existing keys retain their exact shape;
     ``local_siblings`` and ``dormant_others`` are additive buckets.
@@ -1549,19 +1555,59 @@ def _build_investigation_registry_for_test(
     # Dormant-others: open investigations on OTHER worktrees that do NOT
     # have a live dashboard. Read directly off disk so closed/archived
     # ones can be filtered without a peer process.
-    dormant: list[dict] = []
+    #
+    # Worktrees of the same git repo typically share the same
+    # `investigations/<slug>/investigation.yaml` files (the directory is
+    # tracked in git), so the same slug appears once per worktree. The
+    # sidebar previously rendered N near-identical rows; instead, dedupe
+    # by slug and attach a `variants` list of every worktree+branch that
+    # contains it. The primary entry's worktree_path/branch/status pick
+    # the worktree whose branch matches the slug (Investigation ≡ branch
+    # convention) when possible, otherwise the first alphabetical branch.
+    dormant_by_slug: dict[str, dict] = {}
     for wt in list_worktrees_fn():
         wt_path = wt.get("path")
         if not wt_path or wt_path == this_path or wt_path in running_paths:
             continue
         for inv in scan_worktree_fn(wt_path):
-            dormant.append({
-                "slug":          inv.get("slug"),
-                "title":         inv.get("title"),
+            slug = inv.get("slug")
+            if not slug:
+                continue
+            variant = {
                 "worktree_path": wt_path,
                 "branch":        wt.get("branch"),
                 "status":        inv.get("status"),
+            }
+            bucket = dormant_by_slug.setdefault(slug, {
+                "slug":     slug,
+                "title":    inv.get("title"),
+                "variants": [],
             })
+            bucket["variants"].append(variant)
+            # Keep title fresh if a later variant has one and the bucket lost
+            # it (defensive — shouldn't happen, but the first scan might
+            # have returned None).
+            if not bucket.get("title") and inv.get("title"):
+                bucket["title"] = inv.get("title")
+
+    dormant: list[dict] = []
+    for slug, bucket in sorted(dormant_by_slug.items()):
+        variants = bucket["variants"]
+        # Pick the canonical variant: branch == slug first, then first
+        # alphabetical by branch name (None branches sort last).
+        def _variant_sort_key(v: dict) -> tuple:
+            br = v.get("branch") or ""
+            return (br != slug, br or "￿")
+        variants_sorted = sorted(variants, key=_variant_sort_key)
+        primary = variants_sorted[0]
+        dormant.append({
+            "slug":          slug,
+            "title":         bucket["title"] or slug,
+            "worktree_path": primary["worktree_path"],
+            "branch":        primary["branch"],
+            "status":        primary["status"],
+            "variants":      variants_sorted,
+        })
 
     return {
         "current":         current,

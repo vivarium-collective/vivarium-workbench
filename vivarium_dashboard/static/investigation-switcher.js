@@ -307,12 +307,29 @@
     li.className = 'viv-iset-menu-row viv-iset-menu-row-dormant';
     li.setAttribute('role', 'menuitem');
     li.tabIndex = 0;
-    li.title = `Worktree: ${d.worktree_path}\nBranch: ${d.branch || '(detached)'}\n` +
+
+    const status   = d.status || 'open';
+    const title    = d.title  || d.slug;
+    const branch   = d.branch || '';
+    // variants is server-side dedupe of worktrees carrying the same
+    // investigation slug. Always includes the canonical worktree as the
+    // first entry; older servers may omit it, so default to [d].
+    const variants = Array.isArray(d.variants) && d.variants.length
+      ? d.variants
+      : [{ worktree_path: d.worktree_path, branch: d.branch, status: d.status }];
+    const extraCount = Math.max(0, variants.length - 1);
+
+    // Tooltip lists every worktree carrying this investigation.
+    const tooltipLines = variants.map((v) => {
+      const br = v.branch || '(detached)';
+      return `${v.worktree_path} (${br})`;
+    });
+    li.title = `${title}\n${tooltipLines.join('\n')}\n` +
                `No dashboard running. Click for instructions to boot it.`;
 
-    const status = d.status || 'open';
-    const title  = d.title  || d.slug;
-    const branch = d.branch || '';
+    const variantsBadge = extraCount > 0
+      ? `<span class="viv-iset-menu-row-variants" title="${escapeHtml(tooltipLines.join('\n'))}"> · +${extraCount} worktree${extraCount === 1 ? '' : 's'}</span>`
+      : '';
 
     li.innerHTML = `
       <div class="viv-iset-menu-row-line1">
@@ -323,6 +340,7 @@
         ${escapeHtml(d.slug || '')}
         ${branch ? `<span class="viv-iset-menu-row-branch"> · ${escapeHtml(branch)}</span>` : ''}
         ${status ? `<span class="viv-iset-menu-row-status"> · ${escapeHtml(status)}</span>` : ''}
+        ${variantsBadge}
       </div>
     `;
 
