@@ -28,6 +28,26 @@
     }
   });
 
+  // sn-collapse-hint click → toggle the parent <details.study-fold> closed.
+  // The official click target for <details> is <summary>, but study-nav
+  // (where this hint lives — see CSS comment) is INSIDE <section>, not
+  // <summary>, so the native toggle doesn't fire. Manual handler.
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (t && t.classList && t.classList.contains("sn-collapse-hint")) {
+      var details = t.closest("details.study-fold");
+      if (details) {
+        details.open = false;
+        // After collapsing, scroll the (now-collapsed) study card into
+        // view so the user keeps spatial context — otherwise the
+        // scroll position jumps unpredictably.
+        details.scrollIntoView({behavior: "smooth", block: "start"});
+      }
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
+
   // Global listener for postMessage events from loom-explore iframes.
   window.addEventListener('message', function(ev) {
     if (ev.data && ev.data.type === 'explore:ready') {
@@ -5144,6 +5164,7 @@
         +     '<span class="study-nav-deps muted small">' + dependsBrief + '</span>'
         +   '</div>'
         +   '<nav class="study-nav-row2">' + links.join('') + '</nav>'
+        +   '<span class="sn-collapse-hint" data-collapse="study">▴ click to collapse full study</span>'
         + '</div>';
 
       // ── COMPACT REPORT BLOCK (authored: Purpose·Setup·Result·… ) ──────
@@ -6245,6 +6266,7 @@
         +     '<span class="study-nav-deps muted small">' + dependsBrief + '</span>'
         +   '</div>'
         +   '<nav class="study-nav-row2">' + links.join('') + '</nav>'
+        +   '<span class="sn-collapse-hint" data-collapse="study">▴ click to collapse full study</span>'
         + '</div>';
 
       // Wrap the v4 narrative-spine section in a <details class="study-fold">
@@ -6828,6 +6850,19 @@
       + '.study-nav-row2 a{display:inline-block;padding:2px 10px;border-radius:9999px;font-size:0.83em;color:#3b82f6;text-decoration:none;background:#eff6ff;border:1px solid transparent}'
       + '.study-nav-row2 a:hover{background:#dbeafe;border-color:#bfdbfe}'
       + '.sn-count{display:inline-block;margin-left:4px;font-size:0.8em;color:#64748b;background:#fff;padding:0 5px;border-radius:9999px;border:1px solid #e2e8f0}'
+      /* sn-collapse-hint: the click-to-collapse affordance ON the visible
+         sticky strip (study-nav). Previous attempt put it inside the
+         per-study panel (which is the OFFICIAL <summary> click target for
+         the <details>), but study-nav has higher z-index than the panel at
+         top:44px, so the panel is covered and the in-panel hint is
+         invisible during scroll. Putting the hint here means the click
+         handler has to manually toggle the parent <details>.open — see
+         the DOMContentLoaded handler near the bottom of this file. Styled
+         to match sp-expand-hint (small grey, left-aligned, same font-size)
+         so it reads as the same control in two states. */
+      + '.sn-collapse-hint{display:none}'
+      + '.study-fold[open] .sn-collapse-hint{display:block;font-size:0.73em;color:#94a3b8;margin-top:6px;cursor:pointer}'
+      + '.study-fold[open] .sn-collapse-hint:hover{color:#334155}'
       // Scroll-margin so links to sub-sections don't get hidden under the
       // sticky study-nav.
       + '.study [id^="study-"]{scroll-margin-top:96px}'
