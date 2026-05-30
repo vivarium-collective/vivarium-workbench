@@ -200,12 +200,18 @@ def _render_svg(title: str, y_label: str, xs: list[float], ys: list[float],
         for y in yticks
     )
 
-    # X-axis (time): 5 ticks
+    # X-axis (time): 5 ticks. Times are emitted in seconds; label in MINUTES
+    # (Rashmi 2026-05-30: "mark the x axis time in minutes"). Tick positions are
+    # unchanged (proportional to the seconds range); only the labels convert.
     xticks = [x_min + (x_max - x_min) * f for f in (0.0, 0.25, 0.5, 0.75, 1.0)]
     xtick_text = "".join(
         f'<text x="{sx(x):.1f}" y="{pad_t+plot_h+14:.1f}" font-size="10" fill="#64748b" '
-        f'text-anchor="middle">{_fmt(x)}s</text>'
+        f'text-anchor="middle">{_fmt(x / 60.0)}</text>'
         for x in xticks
+    )
+    xtick_text += (
+        f'<text x="{pad_l + plot_w / 2:.1f}" y="{pad_t+plot_h+30:.1f}" font-size="10" '
+        f'fill="#64748b" text-anchor="middle">time (min)</text>'
     )
 
     # Legend
