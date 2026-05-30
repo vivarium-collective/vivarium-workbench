@@ -1147,6 +1147,36 @@ def compute_investigation_status(
     return "planning"
 
 
+def compute_study_effective_status(status: str, has_runs: bool = False) -> str:
+    """Derive a single study's effective status from its declared status
+    plus the presence of accumulated runs.
+
+    Mirrors the rule precedence of ``compute_investigation_status`` but for
+    one study at a time, so the iset-detail response can render badges that
+    reflect observed activity (e.g. a study whose YAML still says
+    ``planned`` but has ≥1 run on disk should read as ``running``).
+
+    Rules in order (first match wins):
+
+    1. ``status in {failed, invalid}`` → ``"failed"``.
+    2. ``status in {complete, ran}`` → ``"complete"``.
+    3. ``status in {running, implementing, runnable, analyzing}`` OR
+       ``has_runs == True`` → ``"running"``.
+    4. ``status in {planned, planning}`` → ``"planned"`` (normalized).
+    5. Anything else (including the empty string / None) → ``"planned"``.
+    """
+    s = (status or "").strip()
+    if s in _STUDY_STATUS_FAILED:
+        return "failed"
+    if s in _STUDY_STATUS_COMPLETE:
+        return "complete"
+    if s in _STUDY_STATUS_RUNNING or has_runs:
+        return "running"
+    if s in _STUDY_STATUS_PLANNED:
+        return "planned"
+    return "planned"
+
+
 def _read_study_status(ws_root: Path, slug: str) -> tuple[str, bool]:
     """Read (status, has_runs) for a member study referenced by an iset.
 
@@ -7532,14 +7562,19 @@ if __name__ == "__main__":
             question = (purpose.get("question") if isinstance(purpose, dict) else None) or study_spec.get("question", "")
             follow_ups = study_spec.get("follow_up_studies") or []
             findings = study_spec.get("findings") or []
+            n_runs_for_study = _count_runs_for_study(
+                study_spec["name"], study_spec)  # F2
+            raw_status = study_spec.get("status", "planned")
             studies_out.append({
                 "name":            study_spec["name"],
-                "status":          study_spec.get("status", "planned"),
+                "status":          raw_status,
+                "effective_status": compute_study_effective_status(
+                    raw_status, has_runs=n_runs_for_study > 0),
                 "phase":           study_spec.get("phase"),
                 "question":        question,
                 "n_variants":      len(sim_set) if sim_set else len(study_spec.get("variants") or []),
                 "n_interventions": len(study_spec.get("interventions") or []),
-                "n_runs":          _count_runs_for_study(study_spec["name"], study_spec),  # F2
+                "n_runs":          n_runs_for_study,
                 "baseline_source": _format_baseline_source(study_spec),
                 "parent_studies":  _normalize_parents(study_spec),
                 "n_behaviors":     len(beh_tests),

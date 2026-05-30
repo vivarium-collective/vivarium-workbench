@@ -4296,14 +4296,20 @@
     // Render nodes (study cards).
     studies.forEach(function(s) {
       var p = pos[s.name];
+      // Prefer the server-derived `effective_status` (rolls up declared
+      // status + run-count signal); fall back to the raw author-declared
+      // `status` for back-compat with older servers.
+      var liveStatus = s.effective_status || s.status || 'planned';
       var statusColor = ({
         planned:    '#94a3b8',
+        planning:   '#94a3b8',
         running:    '#3b82f6',
+        in_progress:'#3b82f6',
         ran:        '#10b981',
         complete:   '#059669',
         failed:     '#dc2626',
         invalid:    '#dc2626',
-      })[s.status] || '#94a3b8';
+      })[liveStatus] || '#94a3b8';
 
       var node = document.createElement('div');
       node.className = 'iset-dag-node';
@@ -4347,7 +4353,14 @@
         '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:4px">' +
           '<strong style="font-size:0.95em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _esc(s.name) + '</strong>' +
           '<span style="white-space:nowrap">' + phaseChip +
-            '<span class="status-pill" style="background:#f1f5f9;color:#475569;font-size:0.7em;padding:1px 6px;">' + _esc(s.status || 'planned') + '</span>' +
+            '<span class="status-pill" title="' +
+              (s.effective_status && s.status && s.effective_status !== s.status
+                ? 'effective: ' + _esc(s.effective_status) + ' (declared: ' + _esc(s.status) + ')'
+                : 'status: ' + _esc(liveStatus)) +
+              '" style="background:#f1f5f9;color:#475569;font-size:0.7em;padding:1px 6px;' +
+              (s.effective_status && s.status && s.effective_status !== s.status
+                ? 'border:1px dashed #f59e0b;'
+                : '') + '">' + _esc(liveStatus) + '</span>' +
           '</span>' +
         '</div>' +
         '<div style="font-size:0.78em;color:#64748b;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
