@@ -5826,16 +5826,25 @@
               //                        leaked through because the chart
               //                        div was sized for the chart but
               //                        not the wrapped legend rows.
-              //   min-height:520px   — under-measured iframes still show
-              //                        enough vertical space for the
-              //                        typical Plotly chart (340 chart
-              //                        area + 6-row wrapped legend ≈
-              //                        508 px). _fitEmbed grows beyond
-              //                        this when scrollHeight is larger.
+              //   min-height:1200px  — under-measured iframes still show
+              //                        enough vertical space for typical
+              //                        multi-panel figures (e.g. 2×3 grid
+              //                        cell_mass / growth_rate / RNA /
+              //                        ribosome activity panels — these
+              //                        rendered at ~1280 px tall and the
+              //                        previous 720 px floor clipped them).
+              //                        The _fitEmbed walk extends to svg/
+              //                        img/canvas (see below) and uses
+              //                        img.naturalHeight to pre-measure
+              //                        before the browser has laid out
+              //                        the data: URL, so iframes grow
+              //                        correctly — this floor is the
+              //                        safety net for first-paint before
+              //                        any timers fire.
               var iframe = '<iframe srcdoc="' + escaped + '" '
                 + 'class="embed-frame" onload="_wireEmbed(this)" '
                 + 'scrolling="no" '
-                + 'style="width:100%;min-height:520px;border:0;display:block;overflow:hidden' + _hStyle + '" '
+                + 'style="width:100%;min-height:1200px;border:0;display:block;overflow:hidden' + _hStyle + '" '
                 + 'title="' + _h(emb.name) + '"></iframe>';
               if (isStale) {
                 // Collapsed by default; re-fit on expand.
@@ -6571,6 +6580,38 @@
       + '.topbar a{font-size:0.83em;color:#334155;text-decoration:none;padding:4px 12px;border-radius:9999px;background:#f1f5f9;white-space:nowrap}'
       + '.topbar a:hover{background:#e2e8f0;color:#0f172a}'
       + '.topbar a.active{background:#dbeafe;color:#1e40af;font-weight:600}'
+      /* iset switcher dropdown at the right end of the topbar (margin-left:auto
+         pushes it past the section links). Calls /api/investigation-registry
+         to list peer dashboards; click a peer row to navigate. Trigger styled
+         like the section-anchor chips but with a subtle distinguishing border
+         so it doesn't look like just another anchor. */
+      + '.tb-iset-switcher{margin-left:auto;display:inline-flex;align-items:center;gap:5px;'
+      +     'font:inherit;font-size:0.83em;color:#334155;'
+      +     'padding:4px 12px;border-radius:9999px;background:#fff;border:1px solid #cbd5e1;cursor:pointer;'
+      +     'white-space:nowrap}'
+      + '.tb-iset-switcher:hover{background:#f1f5f9;border-color:#94a3b8}'
+      + '.tb-iset-switcher[aria-expanded="true"]{background:#dbeafe;border-color:#3b82f6;color:#1e40af}'
+      + '.tb-iset-switcher-icon{font-size:1.05em;line-height:1}'
+      + '.tb-iset-switcher-arrow{font-size:0.7em;color:#94a3b8;margin-left:1px}'
+      + '.tb-iset-menu{position:fixed;z-index:200;min-width:320px;max-width:480px;max-height:70vh;overflow-y:auto;'
+      +     'background:#fff;border:1px solid #cbd5e1;border-radius:8px;'
+      +     'box-shadow:0 8px 24px rgba(0,0,0,0.12);padding:6px 0}'
+      + '.tb-iset-menu[hidden]{display:none}'
+      + '.tb-iset-menu-section{padding:6px 14px 4px;font-size:0.7em;font-weight:700;letter-spacing:0.05em;'
+      +     'text-transform:uppercase;color:#94a3b8}'
+      + '.tb-iset-menu-row{display:flex;align-items:center;gap:8px;padding:7px 14px;cursor:pointer;border:0;background:none;'
+      +     'width:100%;text-align:left;font:inherit;color:#0f172a;font-size:0.86em}'
+      + '.tb-iset-menu-row:hover{background:#f1f5f9}'
+      + '.tb-iset-menu-row-current{background:#dbeafe;color:#1e40af;cursor:default}'
+      + '.tb-iset-menu-row-current:hover{background:#dbeafe}'
+      + '.tb-iset-menu-slug{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+      + '.tb-iset-menu-pill{font-size:0.7em;font-weight:600;padding:2px 7px;border-radius:9999px;'
+      +     'background:#f1f5f9;color:#64748b;white-space:nowrap}'
+      + '.tb-iset-menu-pill-here{background:#dcfce7;color:#166534}'
+      + '.tb-iset-menu-pill-running{background:#fef9c3;color:#854d0e}'
+      + '.tb-iset-menu-pill-dormant{background:#f1f5f9;color:#64748b}'
+      + '.tb-iset-menu-empty,.tb-iset-menu-error{padding:10px 14px;font-size:0.82em;color:#64748b}'
+      + '.tb-iset-menu-error{color:#991b1b}'
       + '.content{max-width:none;margin:0;padding:24px 40px}'
       // Anchor targets clear the sticky bar when jumped to.
       + '.content [id]{scroll-margin-top:60px}'
@@ -7073,44 +7114,124 @@
       + '.sim-status-gated,.sim-status-pill.sim-status-gated{background:#fef9c3;color:#854d0e}'
       + '</style></head><body>'
 
-      // Auto-size embedded visualization iframes to their full content so they
-      // render inline with no inner scrollbar. srcdoc iframes are same-origin,
-      // so we can read scrollHeight. Plotly draws async, so re-measure on a
-      // ResizeObserver of the inner doc plus a few timed fallbacks.
+      // ── Embed autosize (self-reporting child pattern) ──────────────
+      //
+      // Each embed-frame iframe runs its own ResizeObserver +
+      // MutationObserver inside its document and posts the measured
+      // height to this parent via postMessage. The parent maps
+      // event.source → iframe element and sets iframe.style.height.
+      //
+      // Why self-reporting instead of parent-side measurement: prior
+      // _fitEmbed used a selector walk
+      // (.plotly-graph-div / [data-plotly] / div[id] / svg / img / canvas)
+      // to find tall children and sum their bounding rects. Every new
+      // content type the walk didn't recognize (`<table>` from fetch,
+      // `<video>`, etc.) under-measured → iframe clipped. The
+      // MutationObserver here catches DOM changes that don't immediately
+      // trigger a size change on body (e.g. table populated from a
+      // fetch); the ResizeObserver catches everything else. body
+      // .scrollHeight is ground truth in the iframe's own document, no
+      // selector needed.
+      //
+      // The child function is defined here in the parent context only so
+      // its source can be extracted via .toString() and injected into
+      // each iframe's <head>. It does NOT execute in the parent.
       + '<script>'
-      + 'window._fitEmbed=function(f){try{var d=f.contentDocument||(f.contentWindow&&f.contentWindow.document);if(!d)return;'
-      +   'var b=d.body,e=d.documentElement;'
-      +   // If the inner body declares a fixed CSS height + overflow:hidden,
-      +   // read the DECLARED height directly (b.clientHeight is the laid-out
-      +   // height which is clipped by the iframe viewport, so it shrinks
-      +   // instead of pinning at the CSS value). getComputedStyle.height is
-      +   // a string like "540px" — parse it. Falls back to scrollHeight
-      +   // for unclamped embeds (e.g. tall chromosome figures).
-      +   'var bStyle=b&&d.defaultView&&d.defaultView.getComputedStyle?d.defaultView.getComputedStyle(b):null;'
-      +   'var pinnedH=0;'
-      +   'if(bStyle&&(bStyle.overflow||"").indexOf("hidden")>=0){'
-      +     'var hm=(bStyle.height||"").match(/^(\\d+(?:\\.\\d+)?)px$/);'
-      +     'if(hm)pinnedH=Math.round(parseFloat(hm[1]));'
+      + 'window.__embedReg=window.__embedReg||new Map();'
+      // Parent receiver — install once.
+      + 'if(!window.__embedRecv){window.__embedRecv=true;'
+      +   'window.addEventListener("message",function(ev){'
+      +     'if(!ev.data||ev.data.type!=="embed-autosize:height")return;'
+      +     'var f=window.__embedReg.get(ev.source);if(!f)return;'
+      +     'var h=Math.max(0,+ev.data.height||0);'
+      +     'if(h>0)f.style.height=(h+24)+"px";'
+      +   '});'
+      + '}'
+      // Child function — its .toString() is what runs inside each iframe.
+      //
+      // Height measurement uses a SENTINEL: an invisible 0×0 div appended
+      // as the last child of body. Its top position (relative to body's
+      // top) IS the content height — independent of body's laid-out
+      // height, html element height, or `height: 100%` style inheritance.
+      // Avoids the feedback loop where html.scrollHeight grows with the
+      // iframe's own viewport size, which then makes us report a larger
+      // height, which grows the iframe again, ad infinitum.
+      + 'window.__embedChildFn=function(){'
+      +   'if(window.__ec)return;window.__ec=1;'
+      +   'var sentinel=null;'
+      +   'function ensureSentinel(){'
+      +     'if(sentinel&&sentinel.parentNode===document.body)return;'
+      +     'sentinel=document.createElement("div");'
+      +     'sentinel.setAttribute("data-ec-sentinel","1");'
+      +     'sentinel.style.cssText="height:0;width:0;visibility:hidden;clear:both;margin:0;padding:0";'
+      +     'document.body.appendChild(sentinel);'
       +   '}'
-      +   // Plotly charts that overflow their fixed-height div report the
-      +   // chart-div height in scrollHeight, not the legend overflow. Walk
-      +   // any .plotly-graph-div / [id^="dnaa-"] / [id="chart"] children
-      +   // and add their full computed scrollHeight to the measurement so
-      +   // the iframe grows to fit the chart + ITS internal legend.
-      +   'var plotlyMax=0;try{var charts=d.querySelectorAll(\'.plotly-graph-div, [data-plotly], div[id]\');'
-      +     'for(var ci=0;ci<charts.length;ci++){var c=charts[ci];'
-      +       'var rect=c.getBoundingClientRect&&c.getBoundingClientRect();var top=rect?rect.top:0;'
-      +       'var ch=Math.max(c.scrollHeight||0,c.offsetHeight||0,c.clientHeight||0);'
-      +       'var totalTo=top+ch;if(totalTo>plotlyMax)plotlyMax=totalTo;}}catch(_e){}'
-      +   'var docH=Math.max(e?e.scrollHeight:0,b?b.scrollHeight:0,plotlyMax);'
-      +   'var h=pinnedH>0?pinnedH:docH;'
-      +   'if(h>0)f.style.height=(h+24)+"px";}catch(e){}};'
-      + 'window._wireEmbed=function(f){window._fitEmbed(f);'
-      +   'try{var d=f.contentDocument;if(window.ResizeObserver&&d){var ro=new ResizeObserver(function(){window._fitEmbed(f);});'
-      +     'if(d.documentElement)ro.observe(d.documentElement);if(d.body)ro.observe(d.body);}}catch(e){}'
-      +   '[150,500,1200,2500,4000].forEach(function(t){setTimeout(function(){window._fitEmbed(f);},t);});};'
-      // A collapsed (prior/superseded) embed: when expanded, nudge Plotly to
-      // recompute width and re-fit the iframe.
+      +   'function m(){var d=document,b=d.body;if(!b)return;'
+      // Honor explicit pinned height (height + overflow:hidden in inner CSS).
+      +     'var p=0;if(window.getComputedStyle){var bs=getComputedStyle(b);'
+      +       'if(bs&&(bs.overflow||"").indexOf("hidden")>=0){'
+      +         'var hm=(bs.height||"").match(/^(\\d+(?:\\.\\d+)?)px$/);'
+      +         'if(hm)p=Math.round(parseFloat(hm[1]));}}'
+      +     'var h;'
+      +     'if(p>0){h=p;}else{'
+      +       'ensureSentinel();'
+      +       'var bRect=b.getBoundingClientRect();'
+      +       'var sRect=sentinel.getBoundingClientRect();'
+      +       'h=Math.max(0,Math.ceil(sRect.top-bRect.top));'
+      // Fallback if sentinel reads 0 (e.g. body itself has display:none).
+      +       'if(h===0)h=b.scrollHeight||0;'
+      +     '}'
+      +     'try{window.parent.postMessage({type:"embed-autosize:height",height:h},"*");}catch(_){}'
+      +   '}'
+      +   'function init(){ensureSentinel();m();'
+      // Only observe body. Observing documentElement caused the runaway
+      // feedback loop (html scrollHeight grows with iframe viewport).
+      +     'if(window.ResizeObserver&&document.body){'
+      +       'var ro=new ResizeObserver(m);ro.observe(document.body);}'
+      +     'if(window.MutationObserver&&document.body){var mo=new MutationObserver(function(muts){'
+      // Skip mutations triggered by our own sentinel insertion to avoid
+      // a measurement immediately re-firing measurement.
+      +       'for(var i=0;i<muts.length;i++){'
+      +         'var t=muts[i].target;'
+      +         'if(t&&t.getAttribute&&t.getAttribute("data-ec-sentinel"))return;}'
+      +       'm();'
+      +     '});'
+      +       'mo.observe(document.body,{childList:1,subtree:1,attributes:1,'
+      +         'attributeFilter:["style","class","src","open","hidden"]});}'
+      // Per-image load handlers catch late-decoded images that don't
+      // trigger body resize until they finish decoding.
+      +     'if(document.body){var ii=document.body.querySelectorAll("img");'
+      +       'for(var i=0;i<ii.length;i++){'
+      +         'if(!ii[i].complete)ii[i].addEventListener("load",m);}}'
+      +     'window.addEventListener("load",m);'
+      // Belt-and-suspenders timed safety net for content loaded by
+      // async scripts that don't mutate body's observable surface.
+      +     '[100,500,2000].forEach(function(t){setTimeout(m,t);});'
+      +   '}'
+      +   'if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init);'
+      +   'else init();'
+      + '};'
+      // Stash the child source for injection.
+      + 'window.__embedChildJs="("+window.__embedChildFn.toString()+")();";'
+      // _wireEmbed: register the iframe in the parent map, inject the
+      // child autosize script into its head. Idempotent — re-wiring
+      // an already-wired iframe is a no-op.
+      + 'window._wireEmbed=function(f){try{'
+      +   'var cw=f.contentWindow;if(cw)window.__embedReg.set(cw,f);'
+      +   'var inj=function(){try{var d=f.contentDocument;if(!d||!d.head)return;'
+      +     'if(d.head.querySelector("script[data-ec]"))return;'
+      +     'var s=d.createElement("script");s.setAttribute("data-ec","1");'
+      +     's.textContent=window.__embedChildJs;'
+      +     'd.head.appendChild(s);}catch(_e){}};'
+      +   'if(f.contentDocument&&f.contentDocument.readyState!=="loading")inj();'
+      +   'else f.addEventListener("load",inj,{once:true});'
+      + '}catch(e){}};'
+      // _fitEmbed: back-compat shim. A few call sites elsewhere still
+      // invoke _fitEmbed directly; forward to _wireEmbed so they pick
+      // up the new child-injection path without code changes.
+      + 'window._fitEmbed=function(f){if(window._wireEmbed)window._wireEmbed(f);};'
+      // Collapsed-embed toggle: when a <details> opens an embed, kick
+      // the iframe to re-measure (in case it was paused while hidden).
       + 'window._onEmbedToggle=function(d){if(!d.open)return;var f=d.querySelector(".embed-frame");if(!f)return;'
       +   'try{f.contentWindow&&f.contentWindow.dispatchEvent(new Event("resize"));}catch(e){}'
       +   'if(window._wireEmbed)window._wireEmbed(f);};'
@@ -7118,7 +7239,10 @@
 
       // ── Sticky top nav — section-level tags only (per-study nav now lives
       //    in the collapsed control panels). Conditional tags render only when
-      //    the section exists, keeping the bar uncluttered.
+      //    the section exists, keeping the bar uncluttered. Trailing switcher
+      //    dropdown lists peer investigations from /api/investigation-registry
+      //    so the user can jump between live dashboards without leaving the
+      //    page — see _wireIsetSwitcher below for the click + render logic.
       + '<nav class="topbar">'
       +   '<span class="tb-title">' + _h(iset.title || iset.name) + '</span>'
       +   '<a href="#top">Top</a>'
@@ -7129,7 +7253,82 @@
       +   '<a href="#how-to-read">How to read</a>'
       +   '<a href="#studies-heading">Studies</a>'
       +   '<a href="#references">References</a>'
+      +   '<button type="button" class="tb-iset-switcher" id="tb-iset-switcher-trigger" aria-haspopup="true" aria-expanded="false">'
+      +     '<span class="tb-iset-switcher-icon">⇄</span>'
+      +     '<span>Switch investigation</span>'
+      +     '<span class="tb-iset-switcher-arrow">▾</span>'
+      +   '</button>'
+      +   '<div class="tb-iset-menu" id="tb-iset-menu" role="menu" hidden></div>'
       + '</nav>'
+      + '<script>(function(){'
+      // Topbar investigation switcher. Polishes the existing
+      // /api/investigation-registry data — the live dashboard already
+      // surfaces this via its left-rail switcher; this brings the same
+      // navigation to the report pages, where the rail isn't present.
+      // Self-contained: no dep on index.html.j2 chrome.
+      +     'var trigger=document.getElementById("tb-iset-switcher-trigger");'
+      +     'var menu=document.getElementById("tb-iset-menu");'
+      +     'if(!trigger||!menu){return;}'
+      +     'var loaded=false;'
+      +     'function esc(s){return String(s||"").replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c];});}'
+      +     'function row(p,kind){'
+      +       'var pill="";'
+      +       'if(kind==="current"){pill="<span class=\\"tb-iset-menu-pill tb-iset-menu-pill-here\\">here</span>";}'
+      +       'else if(kind==="running"){pill="<span class=\\"tb-iset-menu-pill tb-iset-menu-pill-running\\">running</span>";}'
+      +       'else if(kind==="dormant"){pill="<span class=\\"tb-iset-menu-pill tb-iset-menu-pill-dormant\\">dormant</span>";}'
+      +       'var cls="tb-iset-menu-row"+(kind==="current"?" tb-iset-menu-row-current":"");'
+      +       'var dataUrl=p.url?(" data-url=\\""+esc(p.url)+"\\""):"";'
+      +       'var dataSlug=p.slug?(" data-slug=\\""+esc(p.slug)+"\\""):"";'
+      +       'return "<button type=\\"button\\" class=\\""+cls+"\\""+dataUrl+dataSlug+">'
+      +         '<span class=\\"tb-iset-menu-slug\\">"+esc(p.title||p.slug||"(unnamed)")+"</span>"+pill+"</button>";'
+      +     '}'
+      +     'function position(){'
+      +       'var r=trigger.getBoundingClientRect();'
+      +       'menu.style.top=(r.bottom+6)+"px";'
+      // Right-align the menu to the trigger so it doesn't overflow the right edge.
+      +       'menu.style.right=Math.max(8,window.innerWidth-r.right)+"px";'
+      +       'menu.style.left="auto";'
+      +     '}'
+      +     'function render(data){'
+      +       'var html="";'
+      +       'if(data.current){html+="<div class=\\"tb-iset-menu-section\\">CURRENT</div>"+row(data.current,"current");}'
+      +       'var running=(data.running_others||[]).filter(function(p){return p&&p.url;});'
+      +       'if(running.length){html+="<div class=\\"tb-iset-menu-section\\">OTHER LIVE DASHBOARDS</div>";running.forEach(function(p){html+=row(p,"running");});}'
+      +       'var siblings=(data.local_siblings||[]);'
+      +       'if(siblings.length){html+="<div class=\\"tb-iset-menu-section\\">ALSO IN THIS WORKTREE</div>";siblings.forEach(function(p){html+=row(p,"sibling");});}'
+      +       'var dormant=(data.dormant_others||[]);'
+      +       'if(dormant.length){html+="<div class=\\"tb-iset-menu-section\\">DORMANT (NO LIVE DASHBOARD)</div>";dormant.forEach(function(p){html+=row(p,"dormant");});}'
+      +       'if(!html){html="<div class=\\"tb-iset-menu-empty\\">No other investigations found.</div>";}'
+      +       'menu.innerHTML=html;'
+      +     '}'
+      +     'function refresh(){'
+      +       'menu.innerHTML="<div class=\\"tb-iset-menu-empty\\">Loading…</div>";'
+      +       'fetch("/api/investigation-registry",{headers:{Accept:"application/json"}})'
+      +         '.then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})'
+      +         '.then(render)'
+      +         '.catch(function(e){menu.innerHTML="<div class=\\"tb-iset-menu-error\\">Failed to load: "+esc(String(e))+"</div>";});'
+      +     '}'
+      +     'function openMenu(){menu.hidden=false;position();trigger.setAttribute("aria-expanded","true");if(!loaded){loaded=true;refresh();}}'
+      +     'function closeMenu(){menu.hidden=true;trigger.setAttribute("aria-expanded","false");}'
+      +     'trigger.addEventListener("click",function(e){'
+      +       'e.stopPropagation();'
+      +       'if(menu.hidden){openMenu();}else{closeMenu();}'
+      +     '});'
+      +     'menu.addEventListener("click",function(e){'
+      +       'var btn=e.target.closest(".tb-iset-menu-row");'
+      +       'if(!btn||btn.classList.contains("tb-iset-menu-row-current"))return;'
+      +       'var url=btn.getAttribute("data-url");'
+      +       'var slug=btn.getAttribute("data-slug");'
+      +       'if(url){window.location.href=url;}'
+      +       'else if(slug){alert("This investigation is dormant. Start its dashboard with:\\n  /pbg-investigation open "+slug);closeMenu();}'
+      +     '});'
+      +     'document.addEventListener("click",function(e){'
+      +       'if(menu.hidden)return;'
+      +       'if(!menu.contains(e.target)&&!trigger.contains(e.target))closeMenu();'
+      +     '});'
+      +     'document.addEventListener("keydown",function(e){if(e.key==="Escape")closeMenu();});'
+      +     'window.addEventListener("resize",function(){if(!menu.hidden)position();});'
+      +   '})();</script>'
 
       // ── Main content ──
       + '<main class="content" id="top">'

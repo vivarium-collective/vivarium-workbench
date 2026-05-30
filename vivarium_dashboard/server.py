@@ -1481,9 +1481,15 @@ def _build_investigation_registry_for_test(
     chosen_idx: int | None = None
     if invs:
         cur_branch = current_branch_fn() or ""
-        if cur_branch:
+        # Strip the canonical "investigation/" prefix so an investigation
+        # slug ("dnaa-replication") matches its conventional branch
+        # ("investigation/dnaa-replication"). Without this strip, the
+        # heuristic falls through to "running" / alphabetical-first and
+        # mislabels the workspace switcher.
+        cur_branch_slug = cur_branch.removeprefix("investigation/") if cur_branch else ""
+        if cur_branch_slug:
             for i, iv in enumerate(invs):
-                if iv.get("name") == cur_branch:
+                if iv.get("name") == cur_branch_slug:
                     chosen_idx = i
                     break
         if chosen_idx is None:
@@ -4392,6 +4398,18 @@ class Handler(BaseHTTPRequestHandler):
         # Strip query string for route matching (self.path includes ?focus=...).
         path_only = self.path.split("?", 1)[0]
         if path_only in ("/", "/index.html"):
+            # Render the SPA shell from index.html.j2 BEFORE serving so the
+            # live dashboard is decoupled from the static reports/index.html
+            # artifact other tools may overwrite for offline-viewing purposes
+            # (e.g. pbg_superpowers /pbg-report writes a slim workspace-only
+            # report there). If render fails, fall back to whatever's on disk.
+            try:
+                from vivarium_dashboard.lib.report import render_workspace_report
+                render_workspace_report(WORKSPACE)
+            except Exception as _render_exc:  # noqa: BLE001 — never block load
+                import sys as _sys
+                print(f"[dashboard] / re-render failed; serving on-disk file: "
+                      f"{type(_render_exc).__name__}: {_render_exc}", file=_sys.stderr)
             return self._serve_file(WORKSPACE / "reports" / "index.html", "text/html")
         # GitHub auth (cherry-picked from #65, Phase B-bis).
         if self.path.startswith("/api/auth/github/status"):
