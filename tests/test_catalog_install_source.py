@@ -130,6 +130,14 @@ def _patched_server(monkeypatch, _ws_with_catalog):
     # Stub the sync-check so it never shells out to a real venv.
     monkeypatch.setattr(srv, "_check_installed_module_sync",
                         lambda pkg, path: None)
+    # The catalog is now sourced via _module_registry (canonical pbg-superpowers
+    # registry + workspace overlay) rather than a per-workspace modules.json.
+    # Feed this test's controlled 3-entry catalog through that seam so the
+    # install-source annotation logic is exercised against a known set.
+    fixture_modules = json.loads(
+        (_ws_with_catalog / "scripts" / "_catalog" / "modules.json").read_text())
+    monkeypatch.setattr(srv.Handler, "_module_registry",
+                        lambda self: [dict(m) for m in fixture_modules])
     return srv
 
 
@@ -143,6 +151,8 @@ def _run_get_catalog(srv) -> list[dict]:
         # implementation (it only reads WORKSPACE + shells out for the
         # git branch, both of which work fine from the stub context).
         _workspace_self_module = srv.Handler._workspace_self_module
+        # _module_registry is monkeypatched on Handler by _patched_server.
+        _module_registry = srv.Handler._module_registry
         def _json(self, payload, code):
             captured["payload"] = payload
             captured["code"] = code
@@ -199,3 +209,27 @@ def test_uninstalled_module_has_no_install_source(_patched_server, monkeypatch):
     assert sf["installed"] is False
     assert "install_source" not in sf
     assert "installed_via" not in sf
+
+
+def test_module_registry_is_canonical_plus_overlay(tmp_path, monkeypatch):
+    """The registry is now the canonical pbg-superpowers list (single source
+    of truth) merged with the workspace's optional overlay.json — NOT a
+    vendored per-workspace modules.json."""
+    import vivarium_dashboard.server as srv
+    ws = tmp_path / "ws"
+    (ws / "scripts" / "_catalog").mkdir(parents=True)
+    monkeypatch.setattr(srv, "WORKSPACE", ws)
+
+    # No per-workspace catalog file at all → still populated from canonical.
+    reg = srv.Handler._module_registry(object())
+    names = {m["name"] for m in reg}
+    assert "v2ecoli" in names                 # a known canonical module
+    assert "pbg-physicell" not in names       # removed from the ecosystem
+    assert len(names) > 10
+
+    # A local-only module added via overlay.json appears on top of canonical.
+    (ws / "scripts" / "_catalog" / "overlay.json").write_text(
+        json.dumps([{"name": "pbg-localonly", "description": "local"}]))
+    names2 = {m["name"] for m in srv.Handler._module_registry(object())}
+    assert "pbg-localonly" in names2
+    assert names2 >= names

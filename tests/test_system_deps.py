@@ -80,7 +80,10 @@ def sys_deps_server(tmp_path, monkeypatch):
             ],
         },
     }]
-    (catalog_dir / "modules.json").write_text(json.dumps(catalog))
+    # Workspace-local module via the per-workspace overlay (the registry is
+    # now canonical pbg-superpowers list + this overlay; the synthetic module
+    # isn't in the canonical list, so it must live in the overlay).
+    (catalog_dir / "overlay.json").write_text(json.dumps(catalog))
 
     # Ensure the venv-python path used by the helper resolves to *some*
     # python: point .venv/bin/python3 at the host interpreter so the

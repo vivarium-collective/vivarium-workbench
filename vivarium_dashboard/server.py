@@ -10862,13 +10862,7 @@ if __name__ == "__main__":
         if not name:
             return self._json({"error": "name required"}, 400)
 
-        catalog_path = WORKSPACE / "scripts" / "_catalog" / "modules.json"
-        if not catalog_path.is_file():
-            return self._json({"error": "catalog not found"}, 404)
-        try:
-            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
-        except Exception as e:
-            return self._json({"error": f"catalog parse failed: {e}"}, 500)
+        catalog = self._module_registry()
         entry = next((m for m in catalog if m.get("name") == name), None)
         if entry is None:
             return self._json({"error": f"unknown module: {name}"}, 404)
@@ -10916,13 +10910,7 @@ if __name__ == "__main__":
         if not name or not check_names:
             return self._json({"error": "name + check_names required"}, 400)
 
-        catalog_path = WORKSPACE / "scripts" / "_catalog" / "modules.json"
-        if not catalog_path.is_file():
-            return self._json({"error": "catalog not found"}, 404)
-        try:
-            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
-        except Exception as e:
-            return self._json({"error": f"catalog parse failed: {e}"}, 500)
+        catalog = self._module_registry()
         entry = next((m for m in catalog if m.get("name") == name), None)
         if entry is None:
             return self._json({"error": f"unknown module: {name}"}, 404)
@@ -10994,6 +10982,28 @@ if __name__ == "__main__":
             "recheck": recheck,
         }, 200)
 
+    def _module_registry(self) -> list[dict]:
+        """The available-modules registry (single source of truth).
+
+        The canonical curated list ships with pbg-superpowers
+        (``pbg_superpowers.catalog.load_registry``), merged with this
+        workspace's optional ``scripts/_catalog/overlay.json`` for local-only
+        modules. Falls back to a legacy per-workspace
+        ``scripts/_catalog/modules.json`` only when the installed
+        pbg-superpowers predates the canonical registry.
+        """
+        try:
+            from pbg_superpowers.catalog import load_registry
+            return load_registry(WORKSPACE)
+        except Exception:
+            legacy = WORKSPACE / "scripts" / "_catalog" / "modules.json"
+            if legacy.is_file():
+                try:
+                    return json.loads(legacy.read_text(encoding="utf-8"))
+                except Exception:
+                    return []
+            return []
+
     def _get_catalog(self):
         """GET /api/catalog — return the curated module catalog with installed annotations.
 
@@ -11005,19 +11015,12 @@ if __name__ == "__main__":
         prepended to the list with ``kind: "workspace"`` so the Installed
         Modules panel can show it. The UI filters it out of Available Modules.
         """
-        catalog_path = WORKSPACE / "scripts" / "_catalog" / "modules.json"
         try:
             ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
         except Exception as e:
             return self._json({"modules": [], "error": f"workspace.yaml: {e}"}, 500)
 
-        if catalog_path.exists():
-            try:
-                modules = json.loads(catalog_path.read_text(encoding="utf-8"))
-            except Exception as e:
-                return self._json({"modules": [], "error": str(e)}, 500)
-        else:
-            modules = []  # catalog is optional; the workspace-self entry still applies
+        modules = self._module_registry()  # canonical (pbg-superpowers) + overlay
 
         # Three install-source layers, in priority order:
         #   1. workspace.yaml.imports — explicit declaration by the workspace
@@ -11168,14 +11171,8 @@ if __name__ == "__main__":
         if not name:
             return self._json({"error": "missing name"}, 400)
 
-        # Load catalog entry.
-        catalog_path = WORKSPACE / "scripts" / "_catalog" / "modules.json"
-        if not catalog_path.exists():
-            return self._json({"error": "catalog not found"}, 404)
-        try:
-            modules = json.loads(catalog_path.read_text(encoding="utf-8"))
-        except Exception as e:
-            return self._json({"error": f"catalog parse failed: {e}"}, 500)
+        # Load catalog entry from the canonical registry (+ workspace overlay).
+        modules = self._module_registry()
         entry = next((m for m in modules if m["name"] == name), None)
         if not entry:
             return self._json({"error": f"module '{name}' not in catalog"}, 404)
@@ -11427,18 +11424,16 @@ if __name__ == "__main__":
         venv_dists = _detect_workspace_venv_distributions(WORKSPACE)
 
         # Resolve catalog metadata so we know the actual python pkg / pypi name.
-        catalog_path = WORKSPACE / "scripts" / "_catalog" / "modules.json"
         catalog_pkg = name.replace("-", "_")
         catalog_pypi = name
-        if catalog_path.exists():
-            try:
-                for cat_m in json.loads(catalog_path.read_text(encoding="utf-8")):
-                    if cat_m.get("name") == name:
-                        catalog_pkg = cat_m.get("package") or catalog_pkg
-                        catalog_pypi = cat_m.get("pypi_name") or name
-                        break
-            except Exception:
-                pass
+        try:
+            for cat_m in self._module_registry():
+                if cat_m.get("name") == name:
+                    catalog_pkg = cat_m.get("package") or catalog_pkg
+                    catalog_pypi = cat_m.get("pypi_name") or name
+                    break
+        except Exception:
+            pass
 
         variants = {name.lower(), catalog_pkg.lower(), catalog_pypi.lower()}
         dist_info = None
