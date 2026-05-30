@@ -5826,16 +5826,24 @@
               //                        leaked through because the chart
               //                        div was sized for the chart but
               //                        not the wrapped legend rows.
-              //   min-height:520px   — under-measured iframes still show
-              //                        enough vertical space for the
-              //                        typical Plotly chart (340 chart
-              //                        area + 6-row wrapped legend ≈
-              //                        508 px). _fitEmbed grows beyond
-              //                        this when scrollHeight is larger.
+              //   min-height:720px   — under-measured iframes still show
+              //                        enough vertical space for typical
+              //                        2-chart figures (e.g. side-by-side
+              //                        cell_mass + growth_rate panels;
+              //                        previous 520 px floor clipped the
+              //                        chart area when _fitEmbed could not
+              //                        find an [id] or .plotly-graph-div
+              //                        to measure — hand-rolled matplotlib-
+              //                        SVG figures fall in that gap). The
+              //                        _fitEmbed walk now extends to svg/
+              //                        img/canvas (see below) so the
+              //                        autosize catches those too; this
+              //                        floor is the safety net for the
+              //                        first paint before fitEmbed runs.
               var iframe = '<iframe srcdoc="' + escaped + '" '
                 + 'class="embed-frame" onload="_wireEmbed(this)" '
                 + 'scrolling="no" '
-                + 'style="width:100%;min-height:520px;border:0;display:block;overflow:hidden' + _hStyle + '" '
+                + 'style="width:100%;min-height:720px;border:0;display:block;overflow:hidden' + _hStyle + '" '
                 + 'title="' + _h(emb.name) + '"></iframe>';
               if (isStale) {
                 // Collapsed by default; re-fit on expand.
@@ -7127,12 +7135,16 @@
       +   // Plotly charts that overflow their fixed-height div report the
       +   // chart-div height in scrollHeight, not the legend overflow. Walk
       +   // any .plotly-graph-div / [id^="dnaa-"] / [id="chart"] children
-      +   // and add their full computed scrollHeight to the measurement so
+      +   // AND raw <svg>, <img>, <canvas> elements (hand-rolled figures
+      +   // and matplotlib SVG/PNG exports don't have id="" — without the
+      +   // svg/img/canvas selector the measurement ignored their bottoms
+      +   // and the iframe under-grew, clipping the chart area).
+      +   // Add their full computed scrollHeight to the measurement so
       +   // the iframe grows to fit the chart + ITS internal legend.
-      +   'var plotlyMax=0;try{var charts=d.querySelectorAll(\'.plotly-graph-div, [data-plotly], div[id]\');'
+      +   'var plotlyMax=0;try{var charts=d.querySelectorAll(\'.plotly-graph-div, [data-plotly], div[id], svg, img, canvas\');'
       +     'for(var ci=0;ci<charts.length;ci++){var c=charts[ci];'
       +       'var rect=c.getBoundingClientRect&&c.getBoundingClientRect();var top=rect?rect.top:0;'
-      +       'var ch=Math.max(c.scrollHeight||0,c.offsetHeight||0,c.clientHeight||0);'
+      +       'var ch=Math.max(c.scrollHeight||0,c.offsetHeight||0,c.clientHeight||0,rect?rect.height:0);'
       +       'var totalTo=top+ch;if(totalTo>plotlyMax)plotlyMax=totalTo;}}catch(_e){}'
       +   'var docH=Math.max(e?e.scrollHeight:0,b?b.scrollHeight:0,plotlyMax);'
       +   'var h=pinnedH>0?pinnedH:docH;'
