@@ -690,6 +690,12 @@ def _extract_paths_from_parquet(
         available = {r[0] for r in schema_rows}
         if "global_time" not in available:
             return out
+        # ``global_time`` resets to 0 at the start of each generation (every
+        # generation is a freshly-built composite). Without accounting for
+        # that, ORDER BY global_time overlaps all generations onto one cycle.
+        # When the hive carries a ``generation`` partition, lay the lineage out
+        # sequentially via a cumulative-time offset.
+        has_gen = "generation" in available
 
         # Resolve final column per spec; fall back to stripping an
         # ``agents__<id>__`` prefix if present in the flattened column name
@@ -736,7 +742,29 @@ def _extract_paths_from_parquet(
                 continue
             stride = max(1, n_rows // max_points) if n_rows > max_points else 1
             try:
-                if stride > 1:
+                if has_gen:
+                    # Cumulative lineage time: normalise each generation to
+                    # start at 0 (gt - gmin), then offset by the summed
+                    # durations of all prior generations. Correct whether
+                    # global_time resets per gen (gmin≈0) or is already
+                    # cumulative (gmin large → the subtraction is a no-op net
+                    # of the offset). CAST so "10" sorts after "2".
+                    sql = (
+                        f"WITH base AS (SELECT CAST(generation AS BIGINT) AS g, "
+                        f"  global_time AS gt, {value_expr} AS v "
+                        f"  FROM read_parquet('{glob}', hive_partitioning=1) "
+                        f"  WHERE {value_expr} IS NOT NULL AND generation IS NOT NULL), "
+                        f"stats AS (SELECT g, MIN(gt) AS gmin, MAX(gt) AS gmax "
+                        f"  FROM base GROUP BY g), "
+                        f"off AS (SELECT g, gmin, COALESCE(SUM(gmax - gmin) OVER "
+                        f"  (ORDER BY g ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS off "
+                        f"  FROM stats), "
+                        f"seq AS (SELECT (b.gt - o.gmin + o.off) AS t, b.v AS v, "
+                        f"  row_number() OVER (ORDER BY b.g, b.gt) AS rn "
+                        f"  FROM base b JOIN off o ON b.g = o.g) "
+                        f"SELECT t, v FROM seq WHERE (rn - 1) % {max(1, stride)} = 0 ORDER BY t"
+                    )
+                elif stride > 1:
                     sql = (
                         f"SELECT global_time, v FROM ("
                         f"  SELECT global_time, {value_expr} AS v, "
