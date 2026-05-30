@@ -5826,24 +5826,25 @@
               //                        leaked through because the chart
               //                        div was sized for the chart but
               //                        not the wrapped legend rows.
-              //   min-height:720px   — under-measured iframes still show
+              //   min-height:1200px  — under-measured iframes still show
               //                        enough vertical space for typical
-              //                        2-chart figures (e.g. side-by-side
-              //                        cell_mass + growth_rate panels;
-              //                        previous 520 px floor clipped the
-              //                        chart area when _fitEmbed could not
-              //                        find an [id] or .plotly-graph-div
-              //                        to measure — hand-rolled matplotlib-
-              //                        SVG figures fall in that gap). The
-              //                        _fitEmbed walk now extends to svg/
-              //                        img/canvas (see below) so the
-              //                        autosize catches those too; this
-              //                        floor is the safety net for the
-              //                        first paint before fitEmbed runs.
+              //                        multi-panel figures (e.g. 2×3 grid
+              //                        cell_mass / growth_rate / RNA /
+              //                        ribosome activity panels — these
+              //                        rendered at ~1280 px tall and the
+              //                        previous 720 px floor clipped them).
+              //                        The _fitEmbed walk extends to svg/
+              //                        img/canvas (see below) and uses
+              //                        img.naturalHeight to pre-measure
+              //                        before the browser has laid out
+              //                        the data: URL, so iframes grow
+              //                        correctly — this floor is the
+              //                        safety net for first-paint before
+              //                        any timers fire.
               var iframe = '<iframe srcdoc="' + escaped + '" '
                 + 'class="embed-frame" onload="_wireEmbed(this)" '
                 + 'scrolling="no" '
-                + 'style="width:100%;min-height:720px;border:0;display:block;overflow:hidden' + _hStyle + '" '
+                + 'style="width:100%;min-height:1200px;border:0;display:block;overflow:hidden' + _hStyle + '" '
                 + 'title="' + _h(emb.name) + '"></iframe>';
               if (isStale) {
                 // Collapsed by default; re-fit on expand.
@@ -7139,12 +7140,16 @@
       +   // and matplotlib SVG/PNG exports don't have id="" — without the
       +   // svg/img/canvas selector the measurement ignored their bottoms
       +   // and the iframe under-grew, clipping the chart area).
-      +   // Add their full computed scrollHeight to the measurement so
-      +   // the iframe grows to fit the chart + ITS internal legend.
+      +   // For <img>, also use naturalHeight scaled by the rendered
+      +   // width / naturalWidth — that's the true rendered height even
+      +   // before the browser has done layout, so we don't get a 0×0
+      +   // measurement on the first pre-load tick.
       +   'var plotlyMax=0;try{var charts=d.querySelectorAll(\'.plotly-graph-div, [data-plotly], div[id], svg, img, canvas\');'
       +     'for(var ci=0;ci<charts.length;ci++){var c=charts[ci];'
       +       'var rect=c.getBoundingClientRect&&c.getBoundingClientRect();var top=rect?rect.top:0;'
       +       'var ch=Math.max(c.scrollHeight||0,c.offsetHeight||0,c.clientHeight||0,rect?rect.height:0);'
+      +       'if(c.tagName==="IMG"&&c.naturalHeight){var nw=c.naturalWidth||1;var rw=(c.clientWidth||(rect?rect.width:0)||nw);'
+      +         'var ih=Math.round(c.naturalHeight*rw/nw);if(ih>ch)ch=ih;}'
       +       'var totalTo=top+ch;if(totalTo>plotlyMax)plotlyMax=totalTo;}}catch(_e){}'
       +   'var docH=Math.max(e?e.scrollHeight:0,b?b.scrollHeight:0,plotlyMax);'
       +   'var h=pinnedH>0?pinnedH:docH;'
