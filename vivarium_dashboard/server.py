@@ -1481,9 +1481,15 @@ def _build_investigation_registry_for_test(
     chosen_idx: int | None = None
     if invs:
         cur_branch = current_branch_fn() or ""
-        if cur_branch:
+        # Strip the canonical "investigation/" prefix so an investigation
+        # slug ("dnaa-replication") matches its conventional branch
+        # ("investigation/dnaa-replication"). Without this strip, the
+        # heuristic falls through to "running" / alphabetical-first and
+        # mislabels the workspace switcher.
+        cur_branch_slug = cur_branch.removeprefix("investigation/") if cur_branch else ""
+        if cur_branch_slug:
             for i, iv in enumerate(invs):
-                if iv.get("name") == cur_branch:
+                if iv.get("name") == cur_branch_slug:
                     chosen_idx = i
                     break
         if chosen_idx is None:
