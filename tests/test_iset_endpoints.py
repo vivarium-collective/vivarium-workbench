@@ -13,6 +13,7 @@ import yaml
 
 from vivarium_dashboard.server import (
     compute_investigation_status,
+    compute_study_effective_status,
     _post_iset_create_for_test,
     _post_iset_clone_for_test,
     _build_iset_summary_for_test,
@@ -85,6 +86,53 @@ def test_compute_status_planning_when_empty():
 def test_compute_status_unknown_status_treated_as_planning():
     # Garbage / unrecognized status values fall through to the 'else' bucket.
     assert compute_investigation_status(["weird-thing"]) == "planning"
+
+
+# ---------------------------------------------------------------------------
+# Part 1b: compute_study_effective_status — per-study derivation
+# ---------------------------------------------------------------------------
+
+
+def test_study_effective_failed_when_status_failed():
+    assert compute_study_effective_status("failed") == "failed"
+
+
+def test_study_effective_failed_when_status_invalid():
+    assert compute_study_effective_status("invalid") == "failed"
+
+
+def test_study_effective_complete_when_status_complete():
+    assert compute_study_effective_status("complete") == "complete"
+    assert compute_study_effective_status("ran") == "complete"
+
+
+def test_study_effective_running_when_status_running():
+    assert compute_study_effective_status("running") == "running"
+    assert compute_study_effective_status("implementing") == "running"
+    assert compute_study_effective_status("runnable") == "running"
+    assert compute_study_effective_status("analyzing") == "running"
+
+
+def test_study_effective_running_when_planned_but_has_runs():
+    # The whole point of effective_status: a study whose YAML still says
+    # 'planned' but has accumulated runs on disk should read as running.
+    assert compute_study_effective_status("planned", has_runs=True) == "running"
+
+
+def test_study_effective_planned_when_planned_no_runs():
+    assert compute_study_effective_status("planned") == "planned"
+    assert compute_study_effective_status("planning") == "planned"
+
+
+def test_study_effective_planned_when_empty_or_unknown():
+    assert compute_study_effective_status("") == "planned"
+    assert compute_study_effective_status("weird-thing") == "planned"
+    assert compute_study_effective_status(None) == "planned"
+
+
+def test_study_effective_failed_beats_runs():
+    # A failed study with runs on disk is still failed, not running.
+    assert compute_study_effective_status("failed", has_runs=True) == "failed"
 
 
 # ---------------------------------------------------------------------------
