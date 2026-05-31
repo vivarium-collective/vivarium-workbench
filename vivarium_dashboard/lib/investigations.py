@@ -19,6 +19,7 @@ from typing import Any
 import yaml
 
 from .spec_migration import migrate_study_to_v2_vocabulary, migrate_v2_to_v3, migrate_v3_to_v4
+from .workspace_paths import WorkspacePaths
 
 
 class InvestigationSpecError(ValueError):
@@ -1189,7 +1190,8 @@ def load_overlays(spec: dict, viz_config: dict, ws_root: Path,
     """
     overlays = viz_config.get("overlays") or []
     payload: list[dict] = []
-    inv_dir = Path(ws_root) / "investigations" / investigation_name
+    investigations_dir = WorkspacePaths.load(ws_root).investigations
+    inv_dir = investigations_dir / investigation_name
 
     for ov in overlays:
         kind = ov.get("kind")
@@ -1228,7 +1230,7 @@ def load_overlays(spec: dict, viz_config: dict, ws_root: Path,
             })
         elif kind == "cross-investigation-series":
             other_name = ov.get("investigation", "")
-            other_db = Path(ws_root) / "investigations" / other_name / "runs.db"
+            other_db = investigations_dir / other_name / "runs.db"
             if not other_db.is_file():
                 payload.append({
                     "kind": "warning",
@@ -1404,7 +1406,7 @@ def update_spec_status(ws_root: Path, name: str, *, status: str,
     """
     if status not in _VALID_STATUSES:
         raise ValueError(f"invalid status {status!r}; must be one of {sorted(_VALID_STATUSES)}")
-    spec_path = Path(ws_root) / "investigations" / name / "spec.yaml"
+    spec_path = WorkspacePaths.load(ws_root).investigations / name / "spec.yaml"
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
     spec["status"] = status
     if last_run is not None:
@@ -1413,7 +1415,7 @@ def update_spec_status(ws_root: Path, name: str, *, status: str,
 
 
 def _lock_path(ws_root: Path, name: str) -> Path:
-    return Path(ws_root) / "investigations" / name / ".run.lock"
+    return WorkspacePaths.load(ws_root).investigations / name / ".run.lock"
 
 
 def acquire_run_lock(ws_root: Path, name: str) -> bool:
@@ -1528,7 +1530,7 @@ def run_investigation(ws_root: Path, name: str, *,
     from vivarium_dashboard.lib import composite_runs as cr
 
     ws_root = Path(ws_root)
-    inv_dir = ws_root / "investigations" / name
+    inv_dir = WorkspacePaths.load(ws_root).investigations / name
     spec_path = inv_dir / "spec.yaml"
     if not spec_path.is_file():
         # v3 convention uses study.yaml; fall back to it when spec.yaml is absent.

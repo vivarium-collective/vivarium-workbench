@@ -44,6 +44,8 @@ from threading import Lock
 
 import yaml
 
+from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+
 
 def _strip_process_instances(state):
     """Strip live Process/Step instances from a state tree before JSON encoding.
@@ -557,6 +559,21 @@ def _save_upload(file_b64: str, target_path: Path) -> str:
 WORKSPACE: Path = Path("/")  # set by main()
 LOCK = Lock()
 
+# Resolve the workspace directory layout from the active WORKSPACE (its optional
+# `layout:` map; flat defaults otherwise). Keyed on WORKSPACE so tests that
+# monkeypatch the global pick up the right layout.
+_WP_CACHE: dict[str, WorkspacePaths] = {}
+
+
+def workspace_paths() -> WorkspacePaths:
+    """Directory layout for the active workspace (see lib.workspace_paths)."""
+    key = str(Path(WORKSPACE).resolve())
+    wp = _WP_CACHE.get(key)
+    if wp is None:
+        wp = WorkspacePaths.load(WORKSPACE)
+        _WP_CACHE[key] = wp
+    return wp
+
 # ---------------------------------------------------------------------------
 # Study slug validation
 # ---------------------------------------------------------------------------
@@ -580,10 +597,10 @@ def _study_dir(name: str):
     Pre-Phase-1 investigations live in ``investigations/<name>/``. The aliased
     /api/study-* handlers must find both.
     """
-    studies_path = WORKSPACE / "studies" / name
+    studies_path = workspace_paths().studies / name
     if studies_path.is_dir():
         return studies_path
-    return WORKSPACE / "investigations" / name
+    return workspace_paths().investigations / name
 
 
 def _study_spec_file(study_dir):
@@ -712,7 +729,7 @@ def _collect_study_feedback(study_slug: str) -> list[dict]:
     from pbg_superpowers.feedback_import import (
         load_investigation_feedback, feedback_for_study,
     )
-    inv_root = WORKSPACE / "investigations"
+    inv_root = workspace_paths().investigations
     if not inv_root.is_dir():
         return []
     out: list[dict] = []
@@ -834,8 +851,8 @@ def _discover_viz_html_files(name: str) -> list[dict]:
     out: list[dict] = []
 
     # Source 1: studies/<name>/viz/*.html (auto-rendered from runs.db).
-    viz_dir = WORKSPACE / "studies" / name / "viz"
-    runs_db = WORKSPACE / "studies" / name / "runs.db"
+    viz_dir = workspace_paths().studies / name / "viz"
+    runs_db = workspace_paths().studies / name / "runs.db"
     if viz_dir.is_dir() and runs_db.is_file():
         # Freshness reference: the latest recorded run time (WAL-immune), not the
         # db file mtime. A small grace absorbs sub-second render/commit ordering.
@@ -865,7 +882,7 @@ def _discover_viz_html_files(name: str) -> list[dict]:
 
     # Source 2: reports/figures/<name>/*.html (hand-authored cross-skill output).
     # No runs.db gate — these aren't auto-rendered.
-    figures_dir = WORKSPACE / "reports" / "figures" / name
+    figures_dir = workspace_paths().reports / "figures" / name
     if figures_dir.is_dir():
         for html_file in sorted(figures_dir.glob("*.html")):
             size_kb = max(1, html_file.stat().st_size // 1024)
@@ -892,7 +909,7 @@ def _discover_investigation_viz_html_files(inv_slug: str) -> list[dict]:
     investigation-detail endpoint can splice these into
     ``embed_visualizations``.
     """
-    viz_dir = WORKSPACE / "investigations" / inv_slug / "viz"
+    viz_dir = workspace_paths().investigations / inv_slug / "viz"
     if not viz_dir.is_dir():
         return []
     out = []
@@ -923,7 +940,7 @@ def _read_runs_db_for_study(name: str) -> list[dict]:
     Returns ``[]`` if the db doesn't exist or has neither table.
     """
     import sqlite3, json as _json, datetime as _dt
-    runs_db = WORKSPACE / "studies" / name / "runs.db"
+    runs_db = workspace_paths().studies / name / "runs.db"
     if not runs_db.is_file():
         return []
     conn = sqlite3.connect(str(runs_db))
@@ -4444,7 +4461,7 @@ class Handler(BaseHTTPRequestHandler):
                 import sys as _sys
                 print(f"[dashboard] / re-render failed; serving on-disk file: "
                       f"{type(_render_exc).__name__}: {_render_exc}", file=_sys.stderr)
-            return self._serve_file(WORKSPACE / "reports" / "index.html", "text/html")
+            return self._serve_file(workspace_paths().reports / "index.html", "text/html")
         # GitHub auth (cherry-picked from #65, Phase B-bis).
         if self.path.startswith("/api/auth/github/status"):
             return self._get_auth_github_status()
@@ -4580,7 +4597,7 @@ class Handler(BaseHTTPRequestHandler):
         primary = WORKSPACE / rel
         if primary.is_file():
             return self._serve_file(primary, self._guess_mime(rel))
-        fallback = WORKSPACE / "reports" / rel
+        fallback = workspace_paths().reports / rel
         return self._serve_file(fallback, self._guess_mime(rel))
 
     def do_POST(self):
@@ -4715,7 +4732,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _post_click(self, body: dict):
         with LOCK:
-            events = WORKSPACE / ".pbg" / "server" / "state" / "events"
+            events = workspace_paths().pbg / "server" / "state" / "events"
             events.parent.mkdir(parents=True, exist_ok=True)
             with events.open("a") as f:
                 f.write(json.dumps(body) + "\n")
@@ -4891,8 +4908,8 @@ class Handler(BaseHTTPRequestHandler):
             commit_msg += " (metadata pending)"
 
         def action():
-            bib_file = WORKSPACE / "references" / "papers.bib"
-            claims_file = WORKSPACE / "references" / "claims.yaml"
+            bib_file = workspace_paths().references / "papers.bib"
+            claims_file = workspace_paths().references / "claims.yaml"
             pdf_dest_rel = f"references/papers/{bib_key}.pdf"
             pdf_dest = WORKSPACE / pdf_dest_rel
 
@@ -4973,8 +4990,8 @@ class Handler(BaseHTTPRequestHandler):
         commit_msg = f"feat(5): add reference '{bibkey}'"
 
         def action():
-            bib_file = WORKSPACE / "references" / "papers.bib"
-            claims_file = WORKSPACE / "references" / "claims.yaml"
+            bib_file = workspace_paths().references / "papers.bib"
+            claims_file = workspace_paths().references / "claims.yaml"
 
             if bib_file.exists():
                 existing_text = bib_file.read_text(encoding="utf-8")
@@ -5256,7 +5273,7 @@ class Handler(BaseHTTPRequestHandler):
         if not description.strip():
             return self._json({"error": "visualization has no description — edit it first"}, 400)
 
-        req_dir = WORKSPACE / ".pbg" / "viz-requests"
+        req_dir = workspace_paths().pbg / "viz-requests"
         req_dir.mkdir(parents=True, exist_ok=True)
         req_path = req_dir / f"{name}.md"
 
@@ -5355,10 +5372,10 @@ if __name__ == "__main__":
             return self._json({"status": "missing", "name": name}, 200)
 
         pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-        response_path = WORKSPACE / ".pbg" / "viz-responses" / f"{name}.py"
-        staged_path = WORKSPACE / ".pbg" / "visualizations-staged" / f"{name}.py"
+        response_path = workspace_paths().pbg / "viz-responses" / f"{name}.py"
+        staged_path = workspace_paths().pbg / "visualizations-staged" / f"{name}.py"
         committed_path = WORKSPACE / pkg / "visualizations" / f"{name}.py"
-        request_path = WORKSPACE / ".pbg" / "viz-requests" / f"{name}.md"
+        request_path = workspace_paths().pbg / "viz-requests" / f"{name}.md"
 
         if committed_path.exists():
             status = "committed"
@@ -5389,10 +5406,10 @@ if __name__ == "__main__":
         name = (body.get("name") or "").strip()
         if not name:
             return self._json({"error": "missing name"}, 400)
-        src = WORKSPACE / ".pbg" / "viz-responses" / f"{name}.py"
+        src = workspace_paths().pbg / "viz-responses" / f"{name}.py"
         if not src.exists():
             return self._json({"error": f"no skill response yet — run /pbg-viz {name} first"}, 404)
-        dest_dir = WORKSPACE / ".pbg" / "visualizations-staged"
+        dest_dir = workspace_paths().pbg / "visualizations-staged"
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / f"{name}.py"
         shutil.copy2(src, dest)
@@ -5403,7 +5420,7 @@ if __name__ == "__main__":
 
         Body: {names?: list[str]} — if omitted, commits all staged.
         """
-        staged_dir = WORKSPACE / ".pbg" / "visualizations-staged"
+        staged_dir = workspace_paths().pbg / "visualizations-staged"
         if not staged_dir.is_dir():
             return self._json({"error": "no staged visualizations"}, 404)
 
@@ -5519,7 +5536,7 @@ if __name__ == "__main__":
             f"`html`, `json`, and standard `plotly`/`matplotlib` imports allowed).\n"
         )
 
-        req_dir = WORKSPACE / ".pbg" / "viz-requests"
+        req_dir = workspace_paths().pbg / "viz-requests"
         req_dir.mkdir(parents=True, exist_ok=True)
         req_path = req_dir / f"{name}.md"
         req_path.write_text(body_md)
@@ -5827,7 +5844,7 @@ if __name__ == "__main__":
 
         Returns JSON with returncode, stdout, stderr.
         """
-        test_dir = WORKSPACE / "tests"
+        test_dir = workspace_paths().tests
         cmd = [sys.executable, "-m", "pytest", "-v", str(test_dir)]
         try:
             result = subprocess.run(
@@ -6053,7 +6070,7 @@ if __name__ == "__main__":
         commit_message = (body.get("commit_message") or
                           f"docs(report): attach {filename}").strip()
 
-        reports_dir = WORKSPACE / "reports"
+        reports_dir = workspace_paths().reports
         reports_dir.mkdir(parents=True, exist_ok=True)
         out_path = reports_dir / filename
         out_path.write_text(html)
@@ -6313,7 +6330,7 @@ if __name__ == "__main__":
         # to the legacy "Workstream: <branch>" when no matching
         # investigation.yaml is present (e.g., generic feature branches).
         def _default_pr_title(branch_name: str) -> str:
-            inv_yaml = WORKSPACE / "investigations" / branch_name / "investigation.yaml"
+            inv_yaml = workspace_paths().investigations / branch_name / "investigation.yaml"
             if inv_yaml.is_file():
                 try:
                     inv_spec = yaml.safe_load(inv_yaml.read_text(encoding="utf-8")) or {}
@@ -6869,7 +6886,7 @@ if __name__ == "__main__":
         if not spec_id:
             return self._json({"runs": [], "error": "missing spec_id"}, 400)
 
-        db_file = WORKSPACE / ".pbg" / "composite-runs.db"
+        db_file = workspace_paths().pbg / "composite-runs.db"
         if not db_file.is_file():
             return self._json({"runs": []}, 200)
         conn = cr.connect(db_file)
@@ -6892,7 +6909,7 @@ if __name__ == "__main__":
             return self._json({"error": "use /state subpath"}, 400)
         run_id = rest
 
-        db_file = WORKSPACE / ".pbg" / "composite-runs.db"
+        db_file = workspace_paths().pbg / "composite-runs.db"
         if not db_file.is_file():
             return self._json({"error": "no run database"}, 404)
         conn = cr.connect(db_file)
@@ -6925,7 +6942,7 @@ if __name__ == "__main__":
         except ValueError:
             return self._json({"error": "step must be int"}, 400)
 
-        db_file = WORKSPACE / ".pbg" / "composite-runs.db"
+        db_file = workspace_paths().pbg / "composite-runs.db"
         if not db_file.is_file():
             return self._json({"error": "no run database"}, 404)
         conn = cr.connect(db_file)
@@ -6955,7 +6972,7 @@ if __name__ == "__main__":
             return self._json({"error": "bad route"}, 400)
         run_id = rest[: -len("/status")]
 
-        db_file = WORKSPACE / ".pbg" / "composite-runs.db"
+        db_file = workspace_paths().pbg / "composite-runs.db"
         if not db_file.is_file():
             return self._json({"error": "no run database"}, 404)
         conn = cr.connect(db_file)
@@ -6981,7 +6998,7 @@ if __name__ == "__main__":
                 if log_full.is_file():
                     resp["error"] = log_full.read_text(encoding="utf-8")[-2000:]
         elif meta["status"] == "completed":
-            viz_file = WORKSPACE / ".pbg" / "runs" / run_id / "viz.json"
+            viz_file = workspace_paths().pbg / "runs" / run_id / "viz.json"
             if viz_file.is_file():
                 try:
                     resp["viz_html"] = json.loads(viz_file.read_text(encoding="utf-8"))
@@ -7480,9 +7497,9 @@ if __name__ == "__main__":
         name = path[len("/api/study-charts/"):].strip("/")
         if not name:
             return self._json({"error": "missing study name"}, 400)
-        runs_db = WORKSPACE / "studies" / name / "runs.db"
-        charts_dir = WORKSPACE / "studies" / name / "charts"
-        spec_path = WORKSPACE / "studies" / name / "study.yaml"
+        runs_db = workspace_paths().studies / name / "runs.db"
+        charts_dir = workspace_paths().studies / name / "charts"
+        spec_path = workspace_paths().studies / name / "study.yaml"
         try:
             # Detect v4: study.yaml with schema_version: 4 → render charts
             # per-test from tests[].measure.path, with default-baseline
@@ -7533,7 +7550,7 @@ if __name__ == "__main__":
         if not name:
             return self._json({"error": "investigation name required"}, 400)
 
-        spec_path = WORKSPACE / "investigations" / name / "investigation.yaml"
+        spec_path = workspace_paths().investigations / name / "investigation.yaml"
         if not spec_path.is_file():
             return self._json({"error": f"no investigation.yaml at {spec_path}"}, 404)
         try:
@@ -7554,10 +7571,10 @@ if __name__ == "__main__":
 
         studies_out = []
         for slug in (spec.get("studies") or []):
-            study_dir = WORKSPACE / "studies" / slug
+            study_dir = workspace_paths().studies / slug
             sp = study_dir / "study.yaml"
             if not sp.is_file():
-                sp = WORKSPACE / "investigations" / slug / "spec.yaml"
+                sp = workspace_paths().investigations / slug / "spec.yaml"
             if not sp.is_file():
                 studies_out.append({"name": slug, "status": "missing", "error": "study.yaml not found"})
                 continue
@@ -7891,8 +7908,8 @@ if __name__ == "__main__":
         if not re.match(r"^[a-zA-Z0-9_-]+$", name):
             return self._json({"error": "name must match [a-zA-Z0-9_-]+"}, 400)
 
-        inv_dir = WORKSPACE / "studies" / name
-        if inv_dir.exists() or (WORKSPACE / "investigations" / name).exists():
+        inv_dir = workspace_paths().studies / name
+        if inv_dir.exists() or (workspace_paths().investigations / name).exists():
             return self._json({"error": f"investigation '{name}' already exists"}, 409)
 
         # Resolve source composite if provided. YAML refs land in the
@@ -8708,8 +8725,8 @@ if __name__ == "__main__":
             # data. Show a friendly stub instead of erroring out, so the user
             # sees what's there and what to do next.
             desc = entry.get("description") or "(no description)"
-            resp_path = WORKSPACE / ".pbg" / "viz-responses" / f"{name}.py"
-            req_path = WORKSPACE / ".pbg" / "viz-requests" / f"{name}.md"
+            resp_path = workspace_paths().pbg / "viz-responses" / f"{name}.py"
+            req_path = workspace_paths().pbg / "viz-requests" / f"{name}.md"
             if resp_path.is_file():
                 status_block = (
                     '<p style="margin:8px 0;color:#1f7a3a">'
@@ -9099,8 +9116,8 @@ if __name__ == "__main__":
         slug = re.sub(r"-+", "-", slug)
         auto_name = f"study-{slug}-{uuid.uuid4().hex[:6]}"
 
-        inv_dir = WORKSPACE / "studies" / auto_name
-        if inv_dir.exists() or (WORKSPACE / "investigations" / auto_name).exists():
+        inv_dir = workspace_paths().studies / auto_name
+        if inv_dir.exists() or (workspace_paths().investigations / auto_name).exists():
             # Collision is astronomically unlikely with 24 bits of entropy, but
             # if it happens (e.g. a test seeds uuid), surface it rather than
             # silently overwriting.
@@ -9737,7 +9754,7 @@ if __name__ == "__main__":
         inv_slug = ((body or {}).get("investigation") or "").strip()
         if not inv_slug:
             return self._json({"error": "investigation is required"}, 400)
-        inv_yaml = WORKSPACE / "investigations" / inv_slug / "investigation.yaml"
+        inv_yaml = workspace_paths().investigations / inv_slug / "investigation.yaml"
         if not inv_yaml.is_file():
             return self._json({"error": f"investigation not found: {inv_slug}"}, 404)
         try:
@@ -9766,10 +9783,10 @@ if __name__ == "__main__":
                 continue
             if studies_filter and member_name not in studies_filter:
                 continue
-            spec_path = WORKSPACE / "studies" / member_name / "study.yaml"
+            spec_path = workspace_paths().studies / member_name / "study.yaml"
             if not spec_path.is_file():
                 # legacy: investigations/<name>/spec.yaml
-                spec_path = WORKSPACE / "investigations" / member_name / "spec.yaml"
+                spec_path = workspace_paths().investigations / member_name / "spec.yaml"
             if not spec_path.is_file():
                 skipped.append({"study": member_name, "variant": "?",
                                 "status": "skipped",
@@ -9895,7 +9912,7 @@ if __name__ == "__main__":
             study_slug = member if isinstance(member, str) else (member or {}).get("study")
             if not study_slug:
                 continue
-            spec_path = WORKSPACE / "studies" / study_slug / "study.yaml"
+            spec_path = workspace_paths().studies / study_slug / "study.yaml"
             if not spec_path.is_file():
                 continue
             try:
@@ -9905,9 +9922,9 @@ if __name__ == "__main__":
             specs = study_spec.get("comparative_visualizations") or []
             if not specs:
                 continue
-            viz_dir = WORKSPACE / "studies" / study_slug / "viz"
+            viz_dir = workspace_paths().studies / study_slug / "viz"
             viz_dir.mkdir(parents=True, exist_ok=True)
-            study_db = WORKSPACE / "studies" / study_slug / "runs.db"
+            study_db = workspace_paths().studies / study_slug / "runs.db"
             if not study_db.is_file():
                 continue
             for cv in specs:
@@ -10017,7 +10034,7 @@ if __name__ == "__main__":
         slug = (body or {}).get("study")
         if not slug:
             return self._json({"error": "missing 'study' in body"}, 400)
-        spec_path = WORKSPACE / "studies" / slug / "study.yaml"
+        spec_path = workspace_paths().studies / slug / "study.yaml"
         if not spec_path.exists():
             return self._json({"error": f"study not found: {slug}"}, 404)
         try:
@@ -10038,7 +10055,7 @@ if __name__ == "__main__":
         name = (params.get("study", [""])[0] or "").strip()
         if not name:
             return self._json({"error": "missing study"}, 400)
-        src = WORKSPACE / "studies" / name
+        src = workspace_paths().studies / name
         if not src.is_dir():
             return self._json({"error": "study not found"}, 404)
         data = _study_export_zip(WORKSPACE, name)
@@ -10646,7 +10663,7 @@ if __name__ == "__main__":
         ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
         pkg = ws_data.get("package_path") or (
             "pbg_" + ws_data.get("name", "").replace("-", "_"))
-        db_file = str(WORKSPACE / ".pbg" / "composite-runs.db")
+        db_file = str(workspace_paths().pbg / "composite-runs.db")
 
         if run_registry.count_running(db_file) >= run_registry.CONCURRENCY_CAP:
             return self._json(
@@ -10654,7 +10671,7 @@ if __name__ == "__main__":
                 429)
 
         run_id = cr.generate_run_id(spec_id, overrides)
-        run_dir = WORKSPACE / ".pbg" / "runs" / run_id
+        run_dir = workspace_paths().pbg / "runs" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         log_rel = str((run_dir / "run.log").relative_to(WORKSPACE))
         request_path = run_dir / "request.json"
@@ -10889,7 +10906,7 @@ if __name__ == "__main__":
         route = (body.get("route") or "/").strip()
         if not route.startswith("/"):
             route = "/" + route
-        info_file = WORKSPACE / ".pbg" / "server" / "server-info"
+        info_file = workspace_paths().pbg / "server" / "server-info"
         if not info_file.is_file():
             return self._json(
                 {"error": "server-info file not found - is the dashboard running?"},
@@ -11063,7 +11080,7 @@ if __name__ == "__main__":
             from pbg_superpowers.catalog import load_registry
             return load_registry(WORKSPACE)
         except Exception:
-            legacy = WORKSPACE / "scripts" / "_catalog" / "modules.json"
+            legacy = workspace_paths().scripts / "_catalog" / "modules.json"
             if legacy.is_file():
                 try:
                     return json.loads(legacy.read_text(encoding="utf-8"))
@@ -11350,7 +11367,7 @@ if __name__ == "__main__":
                 try:
                     add_dependency(WORKSPACE / "pyproject.toml", pypi_name)
                 except Exception as e:
-                    log_dir = WORKSPACE / ".pbg"
+                    log_dir = workspace_paths().pbg
                     log_dir.mkdir(parents=True, exist_ok=True)
                     (log_dir / "catalog-install.log").write_text(
                         f"pyproject edit failed for {name}: {e}\n"
@@ -11430,7 +11447,7 @@ if __name__ == "__main__":
                     )
                 except Exception as e:
                     # Don't fail the whole install if pyproject edit fails — log it.
-                    log_dir = WORKSPACE / ".pbg"
+                    log_dir = workspace_paths().pbg
                     log_dir.mkdir(parents=True, exist_ok=True)
                     (log_dir / "catalog-install.log").write_text(
                         f"pyproject edit failed for {name}: {e}\n"
@@ -12016,7 +12033,7 @@ if __name__ == "__main__":
         self.wfile.write(body)
 
     def _serve_guidance(self):
-        content_dir = WORKSPACE / ".pbg" / "server" / "content"
+        content_dir = workspace_paths().pbg / "server" / "content"
         if not content_dir.exists():
             self.send_response(204)
             self.end_headers()
@@ -12197,7 +12214,7 @@ def serve(workspace: Path, port: int, host: str = "127.0.0.1") -> int:
     # missing PID becomes 'orphaned'; a live PID is left to keep running.
     try:
         from vivarium_dashboard.lib.run_registry import reconcile_stale_runs
-        n = reconcile_stale_runs(WORKSPACE / ".pbg" / "composite-runs.db")
+        n = reconcile_stale_runs(workspace_paths().pbg / "composite-runs.db")
         if n:
             print(f"reconciled {n} stale composite run(s) on startup")
     except Exception as e:  # noqa: BLE001 — never block server boot on this
@@ -12209,7 +12226,7 @@ def serve(workspace: Path, port: int, host: str = "127.0.0.1") -> int:
     # in-container tooling reaches; the host machine reaches via the published
     # port mapping.
     advertise_host = "127.0.0.1" if host == "0.0.0.0" else host
-    info_dir = WORKSPACE / ".pbg" / "server"
+    info_dir = workspace_paths().pbg / "server"
     info_dir.mkdir(parents=True, exist_ok=True)
     (info_dir / "server-info").write_text(json.dumps({
         "port": port,

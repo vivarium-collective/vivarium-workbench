@@ -21,6 +21,7 @@ import yaml
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from ._root import workspace_root
+from .workspace_paths import WorkspacePaths
 
 
 def _ws_root() -> Path:
@@ -132,7 +133,7 @@ def _load_document(ws_root: Path, package_path: str | None) -> dict:
 
 def _count_bib_entries(ws_root: Path) -> int:
     """Count @-entries in references/papers.bib."""
-    bib_file = ws_root / "references" / "papers.bib"
+    bib_file = WorkspacePaths.load(ws_root).references / "papers.bib"
     if not bib_file.exists():
         return 0
     try:
@@ -167,7 +168,8 @@ def _parse_bib_entries(ws_root: Path) -> list[dict]:
           has_notes_md: bool,     # whether references/notes/<key>.md exists
         }
     """
-    bib_file = ws_root / "references" / "papers.bib"
+    references_dir = WorkspacePaths.load(ws_root).references
+    bib_file = references_dir / "papers.bib"
     if not bib_file.exists():
         return []
     text = bib_file.read_text(encoding="utf-8")
@@ -230,7 +232,7 @@ def _parse_bib_entries(ws_root: Path) -> list[dict]:
             _absorb_kv("".join(buf), fields)
 
         # Check for an accompanying reading-notes markdown file.
-        notes_md = ws_root / "references" / "notes" / f"{key}.md"
+        notes_md = references_dir / "notes" / f"{key}.md"
 
         entry = {
             "key": key,
@@ -359,9 +361,10 @@ def _detect_github_repo(ws_root: Path) -> str | None:
 def render_workspace_report(ws_root: Path | None = None, *, today: str | None = None) -> Path:
     """Build <ws_root>/reports/index.html from workspace.yaml + pending branches."""
     ws_root = ws_root or _ws_root()
+    wp = WorkspacePaths.load(ws_root)
     today = today or date.today().isoformat()
     ws = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8"))
-    decisions_file = ws_root / "docs" / "decisions.yaml"
+    decisions_file = wp.docs / "decisions.yaml"
     decisions = (
         (yaml.safe_load(decisions_file.read_text(encoding="utf-8")) or {}).get("decisions", [])
         if decisions_file.exists() else []
@@ -370,9 +373,9 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     template_dir = Path(_pkg.__file__).parent / "templates"
     env = _env(template_dir)
     tpl = env.get_template("index.html.j2")
-    out = ws_root / "reports" / "index.html"
+    out = wp.reports / "index.html"
     out.parent.mkdir(parents=True, exist_ok=True)
-    _copy_assets(ws_root / "reports" / "assets")
+    _copy_assets(wp.reports / "assets")
 
     references_count = _count_bib_entries(ws_root)
     bib_entries = _parse_bib_entries(ws_root)
@@ -406,7 +409,7 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     # Multiple investigations → leave blank; the workspace switcher
     # already exposes a per-investigation selector.
     active_investigation_name = ""
-    inv_root = ws_root / "investigations"
+    inv_root = wp.investigations
     if inv_root.is_dir():
         inv_dirs = sorted(
             d for d in inv_root.iterdir()
@@ -423,7 +426,7 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     # stale walkthrough.js / style.css if the URL doesn't change, even
     # when the plugin ships a newer version. Computing a version stamp
     # from the asset mtimes makes the URL change whenever the file does.
-    assets_dir = ws_root / "reports" / "assets"
+    assets_dir = wp.reports / "assets"
     def _mtime(rel: str) -> str:
         p = assets_dir / rel
         try:
