@@ -26,6 +26,8 @@ from typing import Optional
 
 import yaml
 
+from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+
 
 # ---------------------------------------------------------------------------
 # Pure helpers
@@ -36,7 +38,7 @@ def resolve_focus_study(ws_root: Path, investigation_slug: str) -> Optional[str]
     ``focus_study`` field. Returns None if the file is missing or the
     field is absent.
     """
-    inv_path = Path(ws_root) / "investigations" / investigation_slug / "investigation.yaml"
+    inv_path = WorkspacePaths.load(ws_root).investigations / investigation_slug / "investigation.yaml"
     if not inv_path.is_file():
         return None
     try:
@@ -51,10 +53,11 @@ def _load_study_spec(ws_root: Path, study_slug: str) -> dict:
     """Return the parsed ``studies/<slug>/study.yaml``. Raises FileNotFoundError
     if missing, ValueError on parse error.
     """
-    p = Path(ws_root) / "studies" / study_slug / "study.yaml"
+    wp = WorkspacePaths.load(ws_root)
+    p = wp.studies / study_slug / "study.yaml"
     if not p.is_file():
         # Legacy fallback: investigations/<slug>/spec.yaml (pre-studies layout)
-        p = Path(ws_root) / "investigations" / study_slug / "spec.yaml"
+        p = wp.investigations / study_slug / "spec.yaml"
     if not p.is_file():
         raise FileNotFoundError(
             f"study.yaml not found for {study_slug!r} (looked under studies/ and investigations/)"
@@ -72,7 +75,7 @@ def _collect_viz_html(ws_root: Path, study_slug: str) -> list[dict]:
     The HTML is inlined verbatim so the report opens standalone in a browser
     without needing the dashboard server to be running.
     """
-    viz_dir = Path(ws_root) / "studies" / study_slug / "viz"
+    viz_dir = WorkspacePaths.load(ws_root).studies / study_slug / "viz"
     if not viz_dir.is_dir():
         return []
     entries = []
@@ -473,7 +476,7 @@ def render_single_study_report(
         generated_at=generated_at,
     )
 
-    out_dir = Path(out_dir) if out_dir is not None else (ws_root / "reports")
+    out_dir = Path(out_dir) if out_dir is not None else WorkspacePaths.load(ws_root).reports
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"single-study-{study_slug}.html"
     out_path.write_text(html, encoding="utf-8")

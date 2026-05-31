@@ -21,6 +21,7 @@ from pathlib import Path
 import yaml
 
 from vivarium_dashboard.lib import composite_runs as cr
+from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 
 
 class RunNotFound(Exception):
@@ -39,14 +40,15 @@ def _discover_dbs(workspace: Path) -> list[tuple[Path, str]]:
     reference state — surfaces in the Simulations DB tab so evaluators can
     open it, and is read as a fallback when a study has no runs of its own.
     """
+    wp = WorkspacePaths.load(workspace)
     dbs: list[tuple[Path, str]] = []
-    scratch = workspace / ".pbg" / "composite-runs.db"
+    scratch = wp.pbg / "composite-runs.db"
     if scratch.is_file():
         dbs.append((scratch, ".pbg/composite-runs.db"))
-    default_baseline = workspace / ".pbg" / "default-baseline" / "runs.db"
+    default_baseline = wp.pbg / "default-baseline" / "runs.db"
     if default_baseline.is_file():
         dbs.append((default_baseline, ".pbg/default-baseline/runs.db"))
-    studies_root = workspace / "studies"
+    studies_root = wp.studies
     if studies_root.is_dir():
         for sdir in sorted(studies_root.iterdir()):
             if not sdir.is_dir():
@@ -64,7 +66,7 @@ def discover_default_baseline_db(workspace: Path) -> Path | None:
     fall back to this db so the evaluator sees the cell's baseline
     behaviour against the study's measure paths.
     """
-    p = Path(workspace) / ".pbg" / "default-baseline" / "runs.db"
+    p = WorkspacePaths.load(workspace).pbg / "default-baseline" / "runs.db"
     return p if p.is_file() else None
 
 
@@ -203,7 +205,7 @@ def _study_yaml_run_ids(yaml_path: Path) -> list[str]:
 def _build_run_to_studies_map(workspace: Path) -> dict[str, list[str]]:
     """Return ``{run_id: [study_name, ...]}`` across every study.yaml."""
     result: dict[str, list[str]] = {}
-    studies_root = workspace / "studies"
+    studies_root = WorkspacePaths.load(workspace).studies
     if not studies_root.is_dir():
         return result
     for sdir in sorted(studies_root.iterdir()):
@@ -240,7 +242,7 @@ def _discover_parquet_hives(workspace: Path) -> list[tuple[Path, str]]:
     then by experiment_id directory mtime descending.
     """
     out: list[tuple[Path, str]] = []
-    studies_root = workspace / "studies"
+    studies_root = WorkspacePaths.load(workspace).studies
     if not studies_root.is_dir():
         return out
     for sdir in sorted(studies_root.iterdir()):
@@ -341,7 +343,7 @@ def _read_parquet_hive(exp_dir: Path, study_slug: str, workspace: Path) -> dict 
 
     # sim_name: try the study.yaml first (gives the human-readable label),
     # then fall back to the experiment_id (UUID; informative but not pretty).
-    yaml_path = workspace / "studies" / study_slug / "study.yaml"
+    yaml_path = WorkspacePaths.load(workspace).studies / study_slug / "study.yaml"
     sim_name = _parquet_sim_name_from_yaml(yaml_path, experiment_id) or experiment_id
 
     # Workspace-relative path for the dashboard's UI (drill-down links).
@@ -589,10 +591,11 @@ def delete_simulation(workspace: Path, run_id: str) -> dict:
         raise RunNotFound(run_id)
     db_path, _ = located
 
+    wp = WorkspacePaths.load(workspace)
     errors: list[str] = []
     deleted_rows, deleted_history = _delete_db_rows(db_path, run_id)
 
-    run_dir = workspace / ".pbg" / "runs" / run_id
+    run_dir = wp.pbg / "runs" / run_id
     removed_dir = run_dir.exists()
     if removed_dir:
         shutil.rmtree(run_dir, ignore_errors=True)
@@ -602,7 +605,7 @@ def delete_simulation(workspace: Path, run_id: str) -> dict:
             removed_dir = False
 
     unlinked: list[str] = []
-    studies_root = workspace / "studies"
+    studies_root = wp.studies
     if studies_root.is_dir():
         for sdir in sorted(studies_root.iterdir()):
             if not sdir.is_dir():

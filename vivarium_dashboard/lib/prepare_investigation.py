@@ -28,11 +28,13 @@ from pathlib import Path
 
 import yaml
 
+from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+
 
 def _dashboard_url(ws: Path, override: str | None = None) -> str:
     if override:
         return override.rstrip("/")
-    info = ws / ".pbg" / "dashboard" / "dashboard-info"
+    info = WorkspacePaths.load(ws).pbg / "dashboard" / "dashboard-info"
     if info.is_file():
         try:
             return json.loads(info.read_text(encoding="utf-8"))["url"].rstrip("/")
@@ -62,7 +64,7 @@ def _post(url: str, payload: dict, timeout: float = 1800.0) -> tuple[int, dict]:
 
 
 def _investigations(ws: Path) -> list[str]:
-    inv_root = ws / "investigations"
+    inv_root = WorkspacePaths.load(ws).investigations
     if not inv_root.is_dir():
         return []
     return sorted(
@@ -71,7 +73,7 @@ def _investigations(ws: Path) -> list[str]:
 
 
 def _study_slugs(ws: Path, inv_slug: str) -> list[str]:
-    spec = yaml.safe_load((ws / "investigations" / inv_slug
+    spec = yaml.safe_load((WorkspacePaths.load(ws).investigations / inv_slug
                            / "investigation.yaml").read_text(encoding="utf-8")) or {}
     out = []
     for s in (spec.get("studies") or []):
@@ -82,7 +84,8 @@ def _study_slugs(ws: Path, inv_slug: str) -> list[str]:
 def prepare_study(ws: Path, slug: str, dash: str, steps: int | None,
                   render_only: bool) -> dict:
     """Run baseline + comparison variants for one study, render comparatives."""
-    sf = ws / "studies" / slug / "study.yaml"
+    studies_dir = WorkspacePaths.load(ws).studies
+    sf = studies_dir / slug / "study.yaml"
     if not sf.is_file():
         return {"study": slug, "skipped": "no study.yaml"}
     spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
@@ -121,8 +124,8 @@ def prepare_study(ws: Path, slug: str, dash: str, steps: int | None,
             print(f"  ran {sn} ({kind}): HTTP {code} run_id={run_id}", flush=True)
 
     from vivarium_dashboard.lib.comparative_viz import render_comparative_time_series
-    study_db = ws / "studies" / slug / "runs.db"
-    viz_dir = ws / "studies" / slug / "viz"
+    study_db = studies_dir / slug / "runs.db"
+    viz_dir = studies_dir / slug / "viz"
     viz_dir.mkdir(parents=True, exist_ok=True)
     rendered = []
     for cv in cvs:
@@ -204,7 +207,7 @@ def prepare_investigation(workspace: Path | str, *,
     full_run = not study
     print("\n=== SUMMARY ===")
     if generation_id:
-        manifest = ws / ".pbg" / "generations" / f"{generation_id}.json"
+        manifest = WorkspacePaths.load(ws).pbg / "generations" / f"{generation_id}.json"
         print(f"generation {generation_id} → {manifest}"
               f"{'' if full_run else '  (PARTIAL: single study; current pointer unchanged)'}")
         reloaded = _gen.read_generation(ws, generation_id)

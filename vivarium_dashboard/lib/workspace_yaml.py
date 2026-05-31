@@ -12,7 +12,8 @@ class WorkspaceValidationError(Exception):
 
 def _schema_path() -> Path:
     from ._root import workspace_root
-    return workspace_root() / ".pbg" / "schemas" / "workspace.schema.json"
+    from .workspace_paths import WorkspacePaths
+    return WorkspacePaths.load(workspace_root()).pbg / "schemas" / "workspace.schema.json"
 
 
 def _validator() -> Draft7Validator:
