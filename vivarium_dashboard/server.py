@@ -691,6 +691,10 @@ def _study_detail_spec(name: str):
             diss = _ss.status_disagreements(spec, runs)
             if diss:
                 spec["status_disagreements"] = diss
+            # Single-sourced reviewer-facing run/test/verdict summary — the
+            # downloadable report's per-study clarity strip renders from this so
+            # the markers are derived once (here) and shown consistently.
+            spec["clarity_summary"] = _ss.study_clarity_summary(spec, runs)
         except Exception:  # noqa: BLE001
             pass
     return spec
@@ -7079,6 +7083,16 @@ if __name__ == "__main__":
                     })
             finally:
                 conn.close()
+
+        # Single-sourced reviewer-facing run/test/verdict summary for the
+        # downloadable report's per-study clarity strip (see study_status).
+        try:
+            from pbg_superpowers import study_status as _ss
+            if isinstance(spec, dict):
+                spec["clarity_summary"] = _ss.study_clarity_summary(
+                    spec, spec.get("runs") or [])
+        except Exception:  # noqa: BLE001
+            pass
 
         return self._json({
             "name": name,

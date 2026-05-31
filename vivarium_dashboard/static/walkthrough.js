@@ -4953,6 +4953,73 @@
       }
     }
 
+    // The reviewer-facing "Ran · Tests · Verdict" clarity strip. Prefers the
+    // server-computed `s.clarity_summary` (single-sourced from
+    // pbg_superpowers.study_status.study_clarity_summary) and falls back to an
+    // equivalent client-side computation so the strip renders even against an
+    // older server. Answers, at a glance: did this study run? were the tests
+    // run (pass/fail)? did it pass? (dnaa-replication reviewer feedback.)
+    function _clarityStrip(s) {
+      var cs = (s || {}).clarity_summary;
+      if (!cs) {
+        var runs = (s && s.runs) || [];
+        var done = function (r) {
+          var st = ((r && r.status) || '').toLowerCase();
+          return st === 'completed' || st === 'complete' || st === 'ran' || st === 'done';
+        };
+        var nC = runs.filter(done).length;
+        var ranStatus = nC ? 'ran'
+          : (runs.some(function (r) { return ((r && r.status) || '').toLowerCase() === 'running'; }) ? 'running' : 'not_run');
+        var tests = (s && (s.tests || s.behavior_tests || s.expected_behavior)) || [];
+        var latest = runs.length ? runs[runs.length - 1] : null;
+        var outc = (latest && latest.outcomes) || {};
+        var c = { pass: 0, fail: 0, skip: 0, pending: 0, total: tests.length };
+        tests.forEach(function (t) {
+          var o = outc[t.name];
+          var r = (((o && o.result) != null ? o.result : o) || '').toString().toLowerCase();
+          if (r === 'pass' || r === 'passed' || r === 'ok') c.pass++;
+          else if (r === 'fail' || r === 'failed' || r === 'error') c.fail++;
+          else if (r === 'skip' || r === 'skipped' || r === 'inconclusive' || r === 'partial') c.skip++;
+          else c.pending++;
+        });
+        var gate = ((s && s.gate_status) || '').toLowerCase();
+        var verd;
+        if (gate === 'passed') verd = { label: 'Passed', glyph: '✅', cls: 'v-pass' };
+        else if (gate === 'failed' || gate === 'failed_evaluation') verd = { label: 'Failing', glyph: '❌', cls: 'v-fail' };
+        else if (gate === 'blocked') verd = { label: 'Blocked', glyph: '⛔', cls: 'v-block' };
+        else if (gate === 'needs_calibration') verd = { label: 'Needs calibration', glyph: '🔄', cls: 'v-cal' };
+        else if (gate === 'in_progress') verd = { label: 'In progress', glyph: '🔶', cls: 'v-warn' };
+        else if (ranStatus !== 'ran') verd = { label: 'Not run', glyph: '○', cls: 'v-none' };
+        else if (c.fail) verd = { label: 'Failing', glyph: '❌', cls: 'v-fail' };
+        else if (c.pending && c.total) verd = { label: 'Tests pending', glyph: '⏳', cls: 'v-warn' };
+        else if (c.pass) verd = { label: 'Passed', glyph: '✅', cls: 'v-pass' };
+        else verd = { label: 'In progress', glyph: '🔶', cls: 'v-warn' };
+        var parts = [];
+        if (c.pass) parts.push(c.pass + '✓');
+        if (c.fail) parts.push(c.fail + '✗');
+        if (c.skip) parts.push(c.skip + '⏭');
+        if (c.pending) parts.push(c.pending + '⏳');
+        cs = {
+          ran: { status: ranStatus, label: ranStatus === 'ran' ? ('Ran · ' + nC + ' run' + (nC !== 1 ? 's' : '')) : (ranStatus === 'running' ? 'Running…' : 'Not run') },
+          tests: { label: c.total ? ('Tests: ' + parts.join(' · ')) : 'No tests declared', total: c.total, pending: c.pending },
+          verdict: verd, ambiguities: []
+        };
+      }
+      var ranOn = cs.ran.status === 'ran';
+      var pill = 'display:inline-block;padding:2px 9px;border-radius:9999px;font-size:0.78em;font-weight:600;margin-right:6px;';
+      var ranBg = ranOn ? 'background:#dbeafe;color:#1e40af' : (cs.ran.status === 'running' ? 'background:#fef3c7;color:#92400e' : 'background:#f1f5f9;color:#475569');
+      var tBg = (cs.tests.pending && cs.tests.total) ? 'background:#fef3c7;color:#92400e' : 'background:#f1f5f9;color:#334155';
+      var amb = (cs.ambiguities && cs.ambiguities.length)
+        ? '<span style="' + pill + 'background:#fef3c7;color:#92400e" title="' + _h(cs.ambiguities.join(' | ')) + '">⚠ ' + cs.ambiguities.length + ' clarity note' + (cs.ambiguities.length > 1 ? 's' : '') + '</span>'
+        : '';
+      return '<div class="sp-clarity" style="margin:6px 0 2px 0">'
+        + '<span style="' + pill + ranBg + '">' + (ranOn ? '▶' : (cs.ran.status === 'running' ? '…' : '○')) + ' ' + _h(cs.ran.label) + '</span>'
+        + '<span style="' + pill + tBg + '">' + _h(cs.tests.label) + '</span>'
+        + '<span class="sp-verdict ' + cs.verdict.cls + '" style="' + pill + '">' + cs.verdict.glyph + ' ' + _h(cs.verdict.label) + '</span>'
+        + amb
+        + '</div>';
+    }
+
     // The collapsed study header — a scannable "scientific control panel".
     // Ordering follows the spec: identity → verdict → confidence/evidence →
     // objective → conclusion → metrics → insight → caveat. Every field is
@@ -5012,6 +5079,7 @@
         +   '<span class="sp-title">' + _h(title) + '</span>'
         +   '<span class="sp-verdict ' + v.cls + '">' + v.emoji + ' ' + _h(v.label) + '</span>'
         + '</div>'
+        + _clarityStrip(s)
         + (objective ? '<div class="sp-objective">' + _h(objective) + '</div>' : '')
         + '<div class="sp-meta">' + meta.join(' · ') + '</div>'
         + ((conf || ev)
@@ -5465,7 +5533,21 @@
         if (latestRun && latestRun.outcomes) {
           Object.keys(latestRun.outcomes).forEach(function(k) { outcomeByTest[k] = latestRun.outcomes[k]; });
         }
-        testsHtml = '<div id="' + sid.tests + '"><h3>How do we judge success? <span class="muted small">(' + tests.length + ' tests)</span></h3>'
+        // At-a-glance summary so a reviewer doesn't have to count pills.
+        var _tc = { PASS: 0, FAIL: 0, SKIP: 0, PENDING: 0 };
+        tests.forEach(function(t) {
+          var o = outcomeByTest[t.name];
+          var r = o ? o.result : (t.status === 'gated' ? 'GATED' : 'PENDING');
+          if (r === 'PASS') _tc.PASS++; else if (r === 'FAIL') _tc.FAIL++;
+          else if (r === 'SKIP') _tc.SKIP++; else _tc.PENDING++;
+        });
+        var _tcParts = [];
+        if (_tc.PASS) _tcParts.push(_tc.PASS + ' ✓ passed');
+        if (_tc.FAIL) _tcParts.push(_tc.FAIL + ' ✗ failed');
+        if (_tc.SKIP) _tcParts.push(_tc.SKIP + ' ⏭ skipped');
+        if (_tc.PENDING) _tcParts.push(_tc.PENDING + ' ⏳ pending');
+        var _tcSummary = _tcParts.length ? (' — ' + _tcParts.join(' · ')) : '';
+        testsHtml = '<div id="' + sid.tests + '"><h3>How do we judge success? <span class="muted small">(' + tests.length + ' tests' + _tcSummary + ')</span></h3>'
           + '<p class="muted small" style="margin:0 0 8px 0">Each test makes a specific scientific claim. The latest result (pass/fail) appears as a pill when we have evidence; the technical assertion is hidden by default.</p>'
           + tests.map(function(t) {
               var name = t.name || '(unnamed)';
