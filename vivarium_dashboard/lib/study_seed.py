@@ -23,6 +23,8 @@ from pathlib import Path
 
 import yaml
 
+from .workspace_paths import WorkspacePaths
+
 
 def _slugify(text: str, max_len: int = 60) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
@@ -48,7 +50,7 @@ def seed_followup_study(workspace: Path, parent_name: str,
     if followup_idx < 0:
         raise ValueError("followup_idx must be non-negative")
 
-    studies_root = Path(workspace) / "studies"
+    studies_root = WorkspacePaths.load(workspace).studies
     parent_dir = studies_root / parent_name
     parent_yaml = parent_dir / "study.yaml"
     if not parent_yaml.is_file():
@@ -214,7 +216,7 @@ def _add_to_parent_investigations(workspace: Path, parent_name: str,
     back to a minimal text-append that preserves the rest of the file
     byte-for-byte.
     """
-    invs_root = Path(workspace) / "investigations"
+    invs_root = WorkspacePaths.load(workspace).investigations
     if not invs_root.is_dir():
         return []
     updated: list[Path] = []

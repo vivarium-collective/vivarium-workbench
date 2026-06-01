@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 import yaml
 
+from .workspace_paths import WorkspacePaths
+
 
 class StudyTestsConcurrentError(RuntimeError):
     """Raised when a second test run is requested while one is already running."""
@@ -23,7 +25,7 @@ class StudyTestsResult:
 
 
 def _study_paths(workspace: Path, slug: str) -> tuple[Path, Path, Path]:
-    study_dir = Path(workspace) / "studies" / slug
+    study_dir = WorkspacePaths.load(workspace).studies / slug
     tests_dir = study_dir / "tests"
     spec_path = study_dir / "study.yaml"
     return study_dir, tests_dir, spec_path
@@ -31,7 +33,7 @@ def _study_paths(workspace: Path, slug: str) -> tuple[Path, Path, Path]:
 
 @contextmanager
 def _study_lock(workspace: Path, slug: str):
-    lockdir = workspace / ".pbg" / "study-test-results"
+    lockdir = WorkspacePaths.load(workspace).pbg / "study-test-results"
     lockdir.mkdir(parents=True, exist_ok=True)
     lockfile = lockdir / f"{slug}.lock"
     if lockfile.exists():
@@ -68,7 +70,7 @@ def run_study_tests(workspace: Path, slug: str) -> StudyTestsResult:
         return result
 
     with _study_lock(workspace, slug):
-        results_dir = workspace / ".pbg" / "study-test-results"
+        results_dir = WorkspacePaths.load(workspace).pbg / "study-test-results"
         results_dir.mkdir(parents=True, exist_ok=True)
         json_report = results_dir / f"{slug}.json"
         if json_report.exists():
