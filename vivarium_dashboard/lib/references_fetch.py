@@ -96,7 +96,8 @@ def resolve_contact_email(ws_root: Path) -> str:
 
 
 def _cache_path(ws_root: Path) -> Path:
-    return ws_root / "references" / _CACHE_FILENAME
+    from .workspace_paths import WorkspacePaths
+    return WorkspacePaths.load(ws_root).references / _CACHE_FILENAME
 
 
 def load_cache(ws_root: Path) -> dict[str, EnrichmentRecord]:
