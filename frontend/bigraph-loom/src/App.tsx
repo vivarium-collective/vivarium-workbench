@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow, Background, Controls, ReactFlowProvider,
-  useNodesState, useEdgesState,
+  useNodesState, useEdgesState, getNodesBounds, getViewportForBounds,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { toPng, toSvg } from 'html-to-image';
 
 // ProcessNode and StoreNode are default exports from the loom node modules
 import ProcessNode from './nodes/ProcessNode';
@@ -276,6 +277,45 @@ export default function App() {
     })();
   }, [compositeId, state, raw, collapsed, hidden, setNodes, setEdges]);
 
+  // Export the CURRENT layout (all nodes in their positions) to an image on a
+  // WHITE background. Captures the React Flow viewport element via html-to-image,
+  // framed to the full nodes bounds (not just the on-screen viewport).
+  const [showExport, setShowExport] = useState(false);
+  const exportImage = useCallback(async (format: 'png' | 'svg' | 'pdf') => {
+    setShowExport(false);
+    const el = canvasWrapRef.current?.querySelector('.react-flow__viewport') as HTMLElement | null;
+    if (!el || nodes.length === 0) return;
+    const bounds = getNodesBounds(nodes as any);
+    const PAD = 60, MAX = 5000;
+    const rawW = bounds.width + PAD * 2, rawH = bounds.height + PAD * 2;
+    const scale = Math.min(1, MAX / Math.max(rawW, rawH, 1));
+    const w = Math.max(1, Math.ceil(rawW * scale)), h = Math.max(1, Math.ceil(rawH * scale));
+    const vp = getViewportForBounds(bounds, w, h, 0.02, 4, 0.08);
+    const style = {
+      width: `${w}px`, height: `${h}px`,
+      transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`,
+    };
+    const baseName = (name || compositeId || 'composite').replace(/[^\w.-]+/g, '_');
+    const grab = (url: string, ext: string) => {
+      const a = document.createElement('a');
+      a.href = url; a.download = `${baseName}.${ext}`; a.click();
+    };
+    try {
+      if (format === 'svg') {
+        grab(await toSvg(el, { backgroundColor: '#ffffff', width: w, height: h, style }), 'svg');
+      } else {
+        const png = await toPng(el, { backgroundColor: '#ffffff', width: w, height: h, style, pixelRatio: 2 });
+        if (format === 'png') { grab(png, 'png'); return; }
+        const { jsPDF } = await import('jspdf');
+        const pdf = new jsPDF({ orientation: w >= h ? 'landscape' : 'portrait', unit: 'px', format: [w, h] });
+        pdf.addImage(png, 'PNG', 0, 0, w, h);
+        pdf.save(`${name}.pdf`);
+      }
+    } catch (err) {
+      console.error('[bigraph-loom] export failed', err);
+    }
+  }, [nodes, name, compositeId]);
+
   const handleNodeClick = useCallback((_: any, node: any) => {
     const payload = {
       path: node.data?.path ?? [],
@@ -428,21 +468,60 @@ export default function App() {
             <EmitContext.Provider value={emitSet}>
               {/* Canvas column — flex:1. Holds the Re-layout button + ReactFlow. */}
               <div ref={canvasWrapRef} style={{ flex: 1, position: 'relative', minWidth: 0 }}>
-                {/* Re-layout button — top-right of the canvas. Re-runs auto-layout
-                    on the CURRENT visible set (after hiding/collapsing nodes),
-                    consolidating them into a tight view, and fits the viewport. */}
-                <button
-                  onClick={handleResetLayout}
-                  title="Re-run auto-layout on the currently visible nodes and fit the view"
-                  style={{
-                    position: 'absolute', top: 8, right: 8, zIndex: 10,
-                    padding: '4px 10px', fontSize: 12,
-                    background: '#fff', border: '1px solid #d1d5db',
-                    borderRadius: 4, cursor: 'pointer', color: '#374151',
-                  }}
-                >
-                  Re-layout
-                </button>
+                {/* Top-right toolbar: Re-layout + Download (current layout, white bg). */}
+                <div style={{
+                  position: 'absolute', top: 8, right: 8, zIndex: 10,
+                  display: 'flex', gap: 6,
+                }}>
+                  <button
+                    onClick={handleResetLayout}
+                    title="Re-run auto-layout on the currently visible nodes and fit the view"
+                    style={{
+                      padding: '4px 10px', fontSize: 12,
+                      background: '#fff', border: '1px solid #d1d5db',
+                      borderRadius: 4, cursor: 'pointer', color: '#374151',
+                    }}
+                  >
+                    Re-layout
+                  </button>
+                  <div style={{ position: 'relative' }}>
+                    <button
+                      onClick={() => setShowExport((v) => !v)}
+                      title="Download the current layout as an image (white background)"
+                      style={{
+                        padding: '4px 10px', fontSize: 12,
+                        background: '#fff', border: '1px solid #d1d5db',
+                        borderRadius: 4, cursor: 'pointer', color: '#374151',
+                      }}
+                    >
+                      Download ▾
+                    </button>
+                    {showExport && (
+                      <div style={{
+                        position: 'absolute', top: '100%', right: 0, marginTop: 4,
+                        background: '#fff', border: '1px solid #d1d5db', borderRadius: 4,
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.12)', overflow: 'hidden',
+                        minWidth: 90,
+                      }}>
+                        {(['png', 'svg', 'pdf'] as const).map((fmt) => (
+                          <button
+                            key={fmt}
+                            onClick={() => exportImage(fmt)}
+                            style={{
+                              display: 'block', width: '100%', textAlign: 'left',
+                              padding: '6px 12px', fontSize: 12, border: 0,
+                              background: '#fff', cursor: 'pointer', color: '#374151',
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = '#f3f4f6')}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = '#fff')}
+                          >
+                            {fmt.toUpperCase()}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
                 <ReactFlow
                   nodes={nodes}
                   edges={edges}
