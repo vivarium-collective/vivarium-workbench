@@ -10601,6 +10601,8 @@ if __name__ == "__main__":
                     doc = build_generator(entry)
                 except Exception as e:  # noqa: BLE001
                     return self._json({"error": f"generator build failed: {e}"}, 400)
+                from vivarium_dashboard.lib.process_docs import attach_process_docs
+                attach_process_docs(doc)  # per-process docstrings for the inspector
                 return self._json({"state": doc, "kind": "generator",
                                     "module": entry.module}, 200)
         except ImportError:
@@ -10633,6 +10635,8 @@ if __name__ == "__main__":
         except Exception as e:
             return self._json({"error": f"parse failed: {e}"}, 500)
 
+        from vivarium_dashboard.lib.process_docs import attach_process_docs
+        attach_process_docs(doc)  # per-process docstrings for the inspector
         return self._json({"state": doc, "kind": "spec"}, 200)
 
     def _get_composite_resolve(self):
