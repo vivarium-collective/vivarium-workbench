@@ -26,6 +26,7 @@ from vivarium_dashboard.lib.hpc_dispatch import (
     get_job_status,
     open_socket,
     rsync_workspace,
+    rsync_workspace_back,
     submit_build_job,
     submit_run_job,
 )
@@ -351,6 +352,112 @@ class TestRsyncWorkspace:
         with patch("subprocess.run", return_value=_fail("rsync: connection failed", returncode=23)):
             with pytest.raises(RuntimeError, match="rsync failed"):
                 rsync_workspace(s, ws)
+
+
+# ---------------------------------------------------------------------------
+# rsync_workspace_back — pull results/ and out/ back from HPC
+# ---------------------------------------------------------------------------
+
+
+class TestRsyncWorkspaceBack:
+
+    def _ok_with_stats(self, total_bytes: int = 0) -> MagicMock:
+        m = MagicMock(spec=subprocess.CompletedProcess)
+        m.returncode = 0
+        m.stdout = f"some rsync output\nTotal transferred file size: {total_bytes} bytes\nmore output\n"
+        m.stderr = ""
+        return m
+
+    def test_pulls_results_and_out(self, tmp_path: Path) -> None:
+        s = _settings()
+        ws = tmp_path / "my-workspace"
+        ws.mkdir()
+        with patch("subprocess.run", return_value=self._ok_with_stats(50000)):
+            result = rsync_workspace_back(s, ws)
+
+        assert result["state"] == "ok"
+        assert result["dirs"] == ["results", "out"]
+        assert result["bytes"] == 100000  # 2 calls × 50000
+
+    def test_creates_local_dirs(self, tmp_path: Path) -> None:
+        s = _settings()
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        assert not (ws / "results").exists()
+        assert not (ws / "out").exists()
+
+        with patch("subprocess.run", return_value=self._ok_with_stats(0)):
+            rsync_workspace_back(s, ws)
+
+        assert (ws / "results").is_dir()
+        assert (ws / "out").is_dir()
+
+    def test_contains_partial_flag(self, tmp_path: Path) -> None:
+        s = _settings()
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        with patch("subprocess.run", return_value=self._ok_with_stats(0)) as mock_run:
+            rsync_workspace_back(s, ws)
+        args = mock_run.call_args[0][0]
+        assert "--partial" in args
+        assert "--inplace" in args
+
+    def test_destination_contains_user_and_host(self, tmp_path: Path) -> None:
+        s = _settings()
+        ws = tmp_path / "myws"
+        ws.mkdir()
+        with patch("subprocess.run", return_value=self._ok_with_stats(0)) as mock_run:
+            rsync_workspace_back(s, ws)
+        args = mock_run.call_args[0][0]
+        dest = args[-1]
+        # dest is local dir, source is remote
+        assert s.slurm_submit_user in mock_run.call_args[0][0][-2]
+        assert s.slurm_submit_host in mock_run.call_args[0][0][-2]
+
+    def test_uses_ssh_e_opt(self, tmp_path: Path) -> None:
+        s = _settings()
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        with patch("subprocess.run", return_value=self._ok_with_stats(0)) as mock_run:
+            rsync_workspace_back(s, ws)
+        args = mock_run.call_args[0][0]
+        e_idx = args.index("-e")
+        ssh_opt = args[e_idx + 1]
+        assert s.slurm_submit_key_path in ssh_opt
+
+    def test_partial_transfer_returns_partial_state(self, tmp_path: Path) -> None:
+        s = _settings()
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        m = MagicMock(spec=subprocess.CompletedProcess)
+        m.returncode = 23
+        m.stdout = "Total transferred file size: 12345 bytes\n"
+        m.stderr = "rsync warning: some files vanished"
+        with patch("subprocess.run", return_value=m):
+            result = rsync_workspace_back(s, ws)
+        assert result["state"] == "partial"
+        assert result["bytes"] == 24690  # 2 calls × 12345
+
+    def test_raises_on_hard_failure(self, tmp_path: Path) -> None:
+        s = _settings()
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        m = MagicMock(spec=subprocess.CompletedProcess)
+        m.returncode = 10
+        m.stdout = ""
+        m.stderr = "rsync: connection refused"
+        with patch("subprocess.run", return_value=m):
+            with pytest.raises(RuntimeError, match="rsync pullback"):
+                rsync_workspace_back(s, ws)
+
+    def test_returns_duration_in_result(self, tmp_path: Path) -> None:
+        s = _settings()
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        with patch("subprocess.run", return_value=self._ok_with_stats(0)):
+            result = rsync_workspace_back(s, ws)
+        assert isinstance(result["duration_s"], float)
+        assert result["duration_s"] >= 0
 
 
 # ---------------------------------------------------------------------------

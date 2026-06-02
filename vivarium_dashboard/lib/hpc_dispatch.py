@@ -664,6 +664,97 @@ def rsync_workspace(settings: HpcSettings, local_ws: Path) -> None:
         )
 
 
+def rsync_workspace_back(
+    settings: HpcSettings,
+    local_ws: Path,
+    remote_path: str | None = None,
+) -> dict:
+    """rsync the HPC remote ``results/`` and ``out/`` directories back to the local workspace.
+
+    This is the reverse of ``rsync_workspace()``: after a SLURM job completes
+    on the cluster, call this to pull generated artifacts (simulation output,
+    ParCa cache, colony results) back to the local machine.
+
+    Uses ``--partial --inplace`` so a re-pull after a partial failure is cheap.
+
+    Args:
+        settings: HPC cluster connection settings.
+        local_ws: Local workspace directory (must exist).
+        remote_path: Override the remote path.  Defaults to
+            ``{hpc_repo_base_path}/{ws_name}``.
+
+    Returns:
+        A dict with keys:
+
+        - ``state``: ``"ok"`` if rsync succeeded, ``"partial"`` if it returned
+          a non-warning exit code that still transferred some data
+          (exit 23 or 24).
+        - ``bytes``: total bytes transferred as reported by ``--info=stats2``
+          (int, 0 if parsing fails).
+        - ``duration_s``: wall-clock seconds for the rsync call (float).
+        - ``dirs``: list of dirs pulled (``["results", "out"]``).
+
+    Raises:
+        RuntimeError: rsync failed with an exit code that does not indicate
+            partial transfer (anything other than 0, 23, 24).
+    """
+    import time
+
+    require_configured(settings)
+    ws_name = local_ws.name
+    target = f"{settings.slurm_submit_user}@{settings.slurm_submit_host}"
+    remote_base = remote_path or f"{settings.hpc_repo_base_path}/{ws_name}"
+    remote_root = f"{target}:{remote_base}"
+
+    t0 = time.monotonic()
+    dirs = ["results", "out"]
+    total_bytes = 0
+    final_state = "ok"
+
+    for d in dirs:
+        local_dest = local_ws / d
+        local_dest.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            "rsync", "-az", "--partial", "--inplace",
+            "--no-o", "--no-g", "--omit-dir-times",
+            "--info=stats2",
+            "-e", _ssh_opt_str(settings),
+            f"{remote_root}/{d}/",
+            str(local_dest) + "/",
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if r.returncode == 0:
+            # Parse total bytes from stats line like:
+            # "Total transferred file size: 12345678 bytes"
+            for line in r.stdout.splitlines():
+                m = re.search(r"Total transferred file size:\s+(\d+)", line)
+                if m:
+                    total_bytes += int(m.group(1))
+                    break
+        elif r.returncode in (23, 24):
+            # 23 = partial transfer due to error, 24 = partial transfer
+            # due to vanished source files — still useful, mark partial
+            final_state = "partial"
+            for line in r.stdout.splitlines():
+                m = re.search(r"Total transferred file size:\s+(\d+)", line)
+                if m:
+                    total_bytes += int(m.group(1))
+                    break
+        else:
+            raise RuntimeError(
+                f"rsync pullback for {d}/ failed (exit {r.returncode}): "
+                f"{_mask(r.stderr[-1000:], settings)}"
+            )
+
+    duration_s = time.monotonic() - t0
+    return {
+        "state": final_state,
+        "bytes": total_bytes,
+        "duration_s": round(duration_s, 2),
+        "dirs": dirs,
+    }
+
+
 def submit_build_job(settings: HpcSettings, local_ws: Path) -> dict:
     """Infer GHCR image, SCP an sbatch build script, and submit it.
 

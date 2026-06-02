@@ -8726,6 +8726,8 @@ if __name__ == "__main__":
         if tail[0] == "run" and len(tail) >= 2:
             if len(tail) >= 3 and tail[2] == "log":
                 return self._get_hpc_run_log(backend, tail[1])
+            if len(tail) >= 3 and tail[2] == "pullback":
+                return self._get_hpc_run_pullback(backend, tail[1])
             return self._get_hpc_run_status(backend, tail[1])
         return self._json({"error": "not found"}, 404)
 
@@ -8743,6 +8745,8 @@ if __name__ == "__main__":
             return self._post_hpc_run(backend, body)
         if len(tail) == 3 and tail[0] == "run" and tail[2] == "cancel":
             return self._post_hpc_run_cancel(backend, tail[1], body)
+        if len(tail) == 3 and tail[0] == "run" and tail[2] == "pullback":
+            return self._post_hpc_run_pullback(backend, tail[1], body)
         return self._json({"error": "not found"}, 404)
 
     def _hpc_503(self, exc):
@@ -8945,6 +8949,82 @@ if __name__ == "__main__":
             return self._json({"error": f"invalid job id: {job_id!r}"}, 400)
         except Exception as exc:
             return self._json({"error": str(exc)[:500]}, 500)
+
+    def _get_hpc_run_pullback(self, backend: str, run_id: str):
+        """GET /api/hpc/<backend>/run/<run_id>/pullback — read pullback state from meta sidecar."""
+        if WORKSPACE is None:
+            return self._json({"error": "no workspace bound"}, 409)
+        meta_path = WORKSPACE / ".pbg" / "hpc" / f"run-{run_id}.meta.json"
+        if not meta_path.is_file():
+            return self._json({"state": "not_started", "run_id": run_id}, 200)
+        try:
+            meta = json.loads(meta_path.read_text())
+            pullback = meta.get("pullback", {"state": "not_started"})
+            pullback["run_id"] = run_id
+            return self._json(pullback, 200)
+        except Exception as exc:
+            return self._json({"error": f"failed to read pullback state: {exc}"}, 500)
+
+    def _post_hpc_run_pullback(self, backend: str, run_id: str, body: dict):
+        """POST /api/hpc/<backend>/run/<run_id>/pullback — trigger results pullback.
+
+        Idempotent: if a successful or in-progress pullback already exists in the
+        meta sidecar, returns the existing record without re-rsyncing.
+        """
+        if WORKSPACE is None:
+            return self._json({"error": "no workspace bound"}, 409)
+        meta_path = WORKSPACE / ".pbg" / "hpc" / f"run-{run_id}.meta.json"
+        if meta_path.is_file():
+            try:
+                existing = json.loads(meta_path.read_text())
+                prev = existing.get("pullback", {})
+                if prev.get("state") in ("ok", "in_progress"):
+                    result = dict(prev)
+                    result["run_id"] = run_id
+                    return self._json(result, 200)
+            except Exception:
+                pass  # Corrupt sidecar — re-run pullback
+
+        try:
+            from vivarium_dashboard.lib.hpc_dispatch import rsync_workspace_back
+            from vivarium_dashboard.lib.hpc_settings import (
+                HpcNotConfiguredError, get_hpc_settings,
+            )
+
+            settings = get_hpc_settings(str(WORKSPACE))
+            pullback_result = rsync_workspace_back(settings, WORKSPACE)
+
+            pullback_state = {
+                "state": pullback_result["state"],
+                "bytes": pullback_result["bytes"],
+                "duration_s": pullback_result["duration_s"],
+                "started_at": body.get("started_at", ""),
+            }
+
+            # Persist to meta sidecar
+            import datetime as _dt
+            meta_path.parent.mkdir(parents=True, exist_ok=True)
+            if meta_path.is_file():
+                meta = json.loads(meta_path.read_text())
+            else:
+                meta = {"run_id": run_id}
+            meta["pullback"] = pullback_state
+            meta["pullback"]["completed_at"] = _dt.datetime.utcnow().isoformat() + "Z"
+            meta_path.write_text(json.dumps(meta, indent=2))
+
+            result = dict(meta["pullback"])
+            result["run_id"] = run_id
+            return self._json(result, 202)
+        except HpcNotConfiguredError as exc:
+            return self._hpc_503(exc)
+        except Exception as exc:
+            from vivarium_dashboard.lib.hpc_dispatch import _mask
+            from vivarium_dashboard.lib.hpc_settings import get_hpc_settings
+            try:
+                msg = _mask(str(exc)[:500], get_hpc_settings(str(WORKSPACE)))
+            except Exception:
+                msg = str(exc)[:500]
+            return self._json({"error": msg}, 500)
 
     def _get_hpc_runs(self, backend: str):
         """GET /api/hpc/<backend>/runs — list recent HPC jobs from .pbg/hpc/ scripts."""
