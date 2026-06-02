@@ -1154,48 +1154,54 @@ def compute_investigation_status(
     if statuses and all(s in _STUDY_STATUS_COMPLETE for s in statuses):
         return "complete"
 
-    # 3: anything in the "active" set OR runs accumulated → running.
+    # 3: anything in the "active" set → running. (Mere accumulated runs no
+    # longer count as running — completed history is not active execution.)
     if any(s in _STUDY_STATUS_RUNNING for s in statuses):
         return "running"
-    if any(has_runs):
-        return "running"
 
-    # 4: at least one done but not all → mixed-progress.
-    if any(s in _STUDY_STATUS_COMPLETE for s in statuses):
+    # 4: at least one done OR any accumulated runs, but not all → mixed-progress.
+    if any(s in _STUDY_STATUS_COMPLETE for s in statuses) or any(has_runs):
         return "in_progress"
 
     # 5: default.
     return "planning"
 
 
-def compute_study_effective_status(status: str, has_runs: bool = False) -> str:
+def compute_study_effective_status(
+    status: str, has_runs: bool = False, has_active_run: bool = False
+) -> str:
     """Derive a single study's effective status from its declared status
-    plus the presence of accumulated runs.
+    plus whether a run is *actively executing right now*.
 
-    Mirrors the rule precedence of ``compute_investigation_status`` but for
-    one study at a time, so the iset-detail response can render badges that
-    reflect observed activity (e.g. a study whose YAML still says
-    ``planned`` but has ≥1 run on disk should read as ``running``).
+    ``"running"`` means a run is genuinely in flight — NOT merely that the
+    study has accumulated run history. (The earlier rule mapped any
+    ``has_runs == True`` to ``"running"``, which mislabelled every study
+    with completed runs as actively running.) A study that ran and finished
+    but hasn't cleared its gate reflects its *declared* status instead, so
+    the badge reads honestly (e.g. ``in_progress`` / ``characterization-
+    complete``) rather than a misleading ``running``.
 
     Rules in order (first match wins):
 
     1. ``status in {failed, invalid}`` → ``"failed"``.
     2. ``status in {complete, ran}`` → ``"complete"``.
     3. ``status in {running, implementing, runnable, analyzing}`` OR
-       ``has_runs == True`` → ``"running"``.
+       ``has_active_run == True`` → ``"running"``.
     4. ``status in {planned, planning}`` → ``"planned"`` (normalized).
-    5. Anything else (including the empty string / None) → ``"planned"``.
+    5. Anything else → reflect the declared status verbatim (e.g.
+       ``in_progress``, ``characterization-complete``), or ``"planned"`` when
+       empty. ``has_runs`` no longer forces ``"running"``.
     """
     s = (status or "").strip()
     if s in _STUDY_STATUS_FAILED:
         return "failed"
     if s in _STUDY_STATUS_COMPLETE:
         return "complete"
-    if s in _STUDY_STATUS_RUNNING or has_runs:
+    if s in _STUDY_STATUS_RUNNING or has_active_run:
         return "running"
     if s in _STUDY_STATUS_PLANNED:
         return "planned"
-    return "planned"
+    return s or "planned"
 
 
 def _read_study_status(ws_root: Path, slug: str) -> tuple[str, bool]:
@@ -2139,6 +2145,84 @@ def _count_runs_for_study(name: str, spec: dict | None = None) -> int:
     return max(db_count, spec_count)
 
 
+def _has_active_run_for_study(
+    name: str, spec: dict | None = None, *, freshness_s: float = 300.0
+) -> bool:
+    """True only if a run for this study is *actively executing right now*.
+
+    "Active" = a run whose status is ``running`` AND whose heartbeat is fresh
+    (within ``freshness_s``). This deliberately excludes (a) completed runs —
+    accumulated history is not active execution — and (b) stale ``running``
+    rows left behind by a crashed/abandoned process (no recent heartbeat).
+    Used by :func:`compute_study_effective_status` so a study that merely ran
+    and finished does not badge as "running".
+    """
+    import time as _t
+    now = _t.time()
+
+    def _fresh(hb) -> bool:
+        if hb is None:
+            return False
+        try:
+            return (now - float(hb)) <= freshness_s
+        except (TypeError, ValueError):
+            return False
+
+    # study.yaml runs[] (a backfilled/legacy run may carry status + heartbeat).
+    for r in ((spec or {}).get("runs") or []):
+        if not isinstance(r, dict):
+            continue
+        if str(r.get("status") or "").strip().lower() == "running" and _fresh(
+            r.get("heartbeat_at")
+        ):
+            return True
+
+    # studies/<name>/runs.db rows.
+    try:
+        for r in _read_runs_db_for_study(name):
+            if str((r or {}).get("status") or "").strip().lower() == "running" and _fresh(
+                (r or {}).get("heartbeat_at")
+            ):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _investigation_emitter_for_study(study_name: str | None) -> str | None:
+    """Preferred emitter declared by the investigation that owns this study.
+
+    Reads ``investigations/<slug>/investigation.yaml`` → ``runtime.default_emitter``
+    for whichever investigation lists ``study_name`` in its ``studies[]``.
+    Sits in the emitter-precedence chain BETWEEN the per-study
+    ``runtime.emitter`` override (higher) and the workspace default (lower),
+    so an investigation can standardise its emitter once — e.g. the PDMP
+    investigation declares ``xarray`` and every member study runs XArray
+    without per-study config. Returns the emitter name or None.
+    """
+    if not study_name:
+        return None
+    inv_dir = WORKSPACE / "investigations"
+    if not inv_dir.is_dir():
+        return None
+    try:
+        for invf in sorted(inv_dir.glob("*/investigation.yaml")):
+            try:
+                inv = yaml.safe_load(invf.read_text(encoding="utf-8")) or {}
+            except Exception:
+                continue
+            studies = inv.get("studies") or []
+            names = [s if isinstance(s, str) else (s or {}).get("study")
+                     for s in studies]
+            if study_name in names:
+                rt = inv.get("runtime") or {}
+                em = str((rt or {}).get("default_emitter") or "").strip().lower()
+                return em or None
+    except Exception:
+        return None
+    return None
+
+
 def _collect_study_observables(spec: dict) -> list[str]:
     """Return slash-joined observable store paths declared by the study spec.
 
@@ -2403,8 +2487,9 @@ def _post_study_run_baseline_for_test(ws_root, body):
     # v2ecoli friction #14: derive emit_paths from spec observables so the
     # injected SQLiteEmitter captures real biology, not just ticks.
     emit_paths = cr.collect_emit_paths_from_spec(spec)
-    # Per-study overrides — all win over workspace defaults.
-    study_emitter = runtime_cfg.get("emitter")
+    # Per-study overrides — all win over workspace defaults. Emitter precedence:
+    # study runtime.emitter > investigation runtime.default_emitter > workspace.
+    study_emitter = runtime_cfg.get("emitter") or _investigation_emitter_for_study(spec.get("name"))
     study_max_generations = runtime_cfg.get("max_generations")
     study_single_daughters = runtime_cfg.get("single_daughters")
     response, code = _run_composite_subprocess(
@@ -2907,8 +2992,9 @@ def _post_study_run_variant_for_test(ws_root, body):
     # v2ecoli friction #14: thread observables to the subprocess (same as
     # baseline path) so variant runs also capture biology in history.state.
     emit_paths = cr.collect_emit_paths_from_spec(spec)
-    # Per-study overrides — see baseline path for rationale.
-    study_emitter = runtime_cfg.get("emitter")
+    # Per-study overrides — see baseline path for rationale. Emitter precedence:
+    # study runtime.emitter > investigation runtime.default_emitter > workspace.
+    study_emitter = runtime_cfg.get("emitter") or _investigation_emitter_for_study(spec.get("name"))
     study_max_generations = runtime_cfg.get("max_generations")
     study_single_daughters = runtime_cfg.get("single_daughters")
     response, code = _run_composite_subprocess(
@@ -7600,7 +7686,10 @@ if __name__ == "__main__":
                 "name":            study_spec["name"],
                 "status":          raw_status,
                 "effective_status": compute_study_effective_status(
-                    raw_status, has_runs=n_runs_for_study > 0),
+                    raw_status,
+                    has_runs=n_runs_for_study > 0,
+                    has_active_run=_has_active_run_for_study(
+                        study_spec["name"], study_spec)),
                 "phase":           study_spec.get("phase"),
                 "question":        question,
                 "n_variants":      len(sim_set) if sim_set else len(study_spec.get("variants") or []),
