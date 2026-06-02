@@ -1,7 +1,7 @@
 # loom-explore View-tab features: movable sidebar, node/process toggles, process description
 
 **Date:** 2026-06-02
-**Repo:** `bigraph-loom-explore` (branch `feat/inspector-sidebar-features`)
+**Repo:** `vivarium-dashboard` → vendored source at `frontend/bigraph-loom/` (package `bigraph-loom`).
 **Status:** design approved; spec under review
 
 ## Summary
@@ -109,11 +109,11 @@ checkbox; hidden items disappear from the canvas.
 
 ## Build / deploy
 
-1. Implement on `feat/inspector-sidebar-features`.
-2. `npm run build` → `dist/`.
-3. Copy `dist/*` → `vivarium-dashboard/vivarium_dashboard/static/loom-explore/`
-   (the dashboard's committed bundle). Restart the dashboard
-   (`python -m pbg_superpowers.dashboard restart`).
+1. Implement in `frontend/bigraph-loom/src/`.
+2. `npm run build` (outputs to `../../vivarium_dashboard/static/loom-explore/`).
+3. `npm run build` writes straight into `vivarium_dashboard/static/loom-explore/`
+   (vite `outDir`); the dashboard serves it live (no restart needed for static
+   assets; restart only if Python changed).
 4. The backend description step (if needed, Feature 3 path 2) is a separate small
    change in the **vivarium-dashboard** repo — note it carries another session's
    uncommitted WIP (see prior commits), so commit only the specific file(s) touched.

@@ -97,6 +97,7 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
           path,
           inputPorts,
           outputPorts,
+          description: node.doc ?? node._doc ?? node.description ?? undefined,
           // Extra schema data consumed by ProcessNode (as any cast in the component)
           ...(Object.keys(inputPortsSchema).length ? { inputPortsSchema } : {}),
           ...(Object.keys(outputPortsSchema).length ? { outputPortsSchema } : {}),

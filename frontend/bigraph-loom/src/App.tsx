@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow, Background, Controls, ReactFlowProvider,
   useNodesState, useEdgesState,
@@ -15,7 +15,7 @@ import {
   applySavedPositions, positionsFromNodes, debounce,
 } from './layoutStore';
 import { stateToReactFlow, topLevelStorePaths } from './convert';
-import { InspectorPanel } from './panels/InspectorPanel';
+import { Sidebar } from './panels/Sidebar';
 import { RunPanel } from './panels/RunPanel';
 import { ResultsPanel } from './panels/ResultsPanel';
 import { VisualizationsPanel } from './panels/VisualizationsPanel';
@@ -40,6 +40,8 @@ export default function App() {
   const [selection, setSelection] = useState<Omit<ExploreInspectMsg, 'type'> | null>(null);
   // Collapsed group-node ids — children of these nodes are filtered out of the graph.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Explicitly hidden node ids (via the sidebar Processes/Nodes toggles).
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
   // Explicit-emit store paths (joined by '/'). Descendants inherit emission.
   // Seeded with every top-level store so all states emit by default.
   const [emitSet, setEmitSet] = useState<Set<string>>(
@@ -78,6 +80,7 @@ export default function App() {
     const off = onCompositeLoad((msg) => {
       setState(msg.state);
       setCollapsed(new Set());  // reset folding when a new composite loads
+      setHidden(new Set());     // reset show/hide selections too
       // All states emit by default: seed with every top-level store and
       // broadcast so the dashboard's run-emit selection stays in sync.
       const seeded = new Set(topLevelStorePaths(msg.state));
@@ -152,12 +155,14 @@ export default function App() {
       return false;
     };
 
-    const visibleNodes = raw.nodes.filter((n) => !isHidden(n)).map((n) => {
-      if (collapsed.has(n.id)) {
-        return { ...n, data: { ...n.data, isCollapsed: true } as any };
-      }
-      return n;
-    });
+    const visibleNodes = raw.nodes
+      .filter((n) => !isHidden(n) && !hidden.has(n.id))
+      .map((n) => {
+        if (collapsed.has(n.id)) {
+          return { ...n, data: { ...n.data, isCollapsed: true } as any };
+        }
+        return n;
+      });
     const visibleIds = new Set(visibleNodes.map((n) => n.id));
     const visibleEdges = raw.edges.filter(
       (e) => visibleIds.has(e.source) && visibleIds.has(e.target),
@@ -173,7 +178,7 @@ export default function App() {
     })();
 
     return () => { cancelled = true; };
-  }, [state, collapsed, compositeId, setNodes, setEdges]);
+  }, [state, collapsed, hidden, compositeId, setNodes, setEdges]);
 
   // Persist node positions on every change. The layout effect itself sets
   // node positions; we save those too so the layout is "pinned" the first
@@ -201,9 +206,11 @@ export default function App() {
         }
         return false;
       };
-      const visibleNodes = raw.nodes.filter((n) => !isHidden(n)).map((n) =>
-        collapsed.has(n.id) ? { ...n, data: { ...n.data, isCollapsed: true } as any } : n,
-      );
+      const visibleNodes = raw.nodes
+        .filter((n) => !isHidden(n) && !hidden.has(n.id))
+        .map((n) =>
+          collapsed.has(n.id) ? { ...n, data: { ...n.data, isCollapsed: true } as any } : n,
+        );
       const visibleIds = new Set(visibleNodes.map((n) => n.id));
       const visibleEdges = raw.edges.filter(
         (e) => visibleIds.has(e.source) && visibleIds.has(e.target),
@@ -212,7 +219,7 @@ export default function App() {
       setNodes(laid as any);
       setEdges(visibleEdges as any);
     })();
-  }, [compositeId, state, collapsed, setNodes, setEdges]);
+  }, [compositeId, state, collapsed, hidden, setNodes, setEdges]);
 
   const handleNodeClick = useCallback((_: any, node: any) => {
     const payload = {
@@ -242,6 +249,30 @@ export default function App() {
     },
     [setState],
   );
+
+  // All nodes (pre-visibility-filter) for the sidebar Processes/Nodes lists, so
+  // hidden nodes can still be listed and re-shown. The graph itself renders the
+  // filtered `nodes` array.
+  const allNodes = useMemo(() => (state ? stateToReactFlow(state).nodes : []), [state]);
+
+  const toggleHidden = useCallback((id: string) => {
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const showAll = useCallback((kind: 'process' | 'store') => {
+    setHidden((prev) => {
+      const ids = new Set(
+        allNodes.filter((n) => n.type === kind).map((n) => n.id),
+      );
+      const next = new Set([...prev].filter((id) => !ids.has(id)));
+      return next;
+    });
+  }, [allNodes]);
 
   const handleEmitToggle = useCallback((path: string[], on: boolean) => {
     setEmitSet((prev) => {
@@ -336,47 +367,55 @@ export default function App() {
               its node-position state on tab switches; we hide it instead. */}
           <div style={{
             position: 'absolute', inset: 0,
-            display: tab === 'view' ? 'block' : 'none',
+            display: tab === 'view' ? 'flex' : 'none',
+            flexDirection: 'row',
           }}>
-            {/* Reset layout button — top-right of the View tab. Wipes the saved
-                layout for the current composite and re-runs auto-layout. */}
-            <button
-              onClick={handleResetLayout}
-              title="Discard saved positions for this composite and re-run auto-layout"
-              style={{
-                position: 'absolute', top: 8, right: 8, zIndex: 10,
-                padding: '4px 10px', fontSize: 12,
-                background: '#fff', border: '1px solid #d1d5db',
-                borderRadius: 4, cursor: 'pointer', color: '#374151',
-              }}
-            >
-              Reset layout
-            </button>
             <EmitContext.Provider value={emitSet}>
-              <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                nodeTypes={NODE_TYPES}
-                edgeTypes={EDGE_TYPES}
-                onNodeClick={handleNodeClick}
-                onNodeDoubleClick={handleNodeDoubleClick}
-                fitView
-                /* Read-only viewer for wiring/structure, but users CAN rearrange
-                   node positions by dragging individual nodes. What's forbidden:
-                   new edges, edge reconnects, and any delete. */
-                nodesDraggable
-                nodesConnectable={false}
-                edgesReconnectable={false}
-                connectOnClick={false}
-                deleteKeyCode={null}
-              >
-                <Background />
-                <Controls />
-              </ReactFlow>
-              <InspectorPanel
+              {/* Canvas column — flex:1. Holds the Reset button + ReactFlow. */}
+              <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
+                {/* Reset layout button — top-right of the canvas. Wipes the saved
+                    layout for the current composite and re-runs auto-layout. */}
+                <button
+                  onClick={handleResetLayout}
+                  title="Discard saved positions for this composite and re-run auto-layout"
+                  style={{
+                    position: 'absolute', top: 8, right: 8, zIndex: 10,
+                    padding: '4px 10px', fontSize: 12,
+                    background: '#fff', border: '1px solid #d1d5db',
+                    borderRadius: 4, cursor: 'pointer', color: '#374151',
+                  }}
+                >
+                  Reset layout
+                </button>
+                <ReactFlow
+                  nodes={nodes}
+                  edges={edges}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  nodeTypes={NODE_TYPES}
+                  edgeTypes={EDGE_TYPES}
+                  onNodeClick={handleNodeClick}
+                  onNodeDoubleClick={handleNodeDoubleClick}
+                  fitView
+                  /* Read-only viewer for wiring/structure, but users CAN rearrange
+                     node positions by dragging individual nodes. What's forbidden:
+                     new edges, edge reconnects, and any delete. */
+                  nodesDraggable
+                  nodesConnectable={false}
+                  edgesReconnectable={false}
+                  connectOnClick={false}
+                  deleteKeyCode={null}
+                >
+                  <Background />
+                  <Controls />
+                </ReactFlow>
+              </div>
+              <Sidebar
                 selection={selection}
+                nodes={allNodes}
+                hidden={hidden}
+                onToggleHidden={toggleHidden}
+                onShowAll={showAll}
                 emitSet={emitSet}
                 onEmitToggle={handleEmitToggle}
               />

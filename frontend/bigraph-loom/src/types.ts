@@ -17,6 +17,7 @@ export interface ProcessNodeData {
   path: string[];
   inputPorts: string[];
   outputPorts: string[];
+  description?: string;
 }
 
 export type BigraphNodeData = StoreNodeData | ProcessNodeData;
