@@ -12,6 +12,7 @@ this into a per-study chart-spec block (likely `readouts:` driven).
 """
 from __future__ import annotations
 
+import base64
 import json
 import re
 import sqlite3
@@ -265,16 +266,53 @@ def _table_exists(conn, name: str) -> bool:
     return row is not None
 
 
+# Raster chart formats surfaced alongside inline SVGs. Each maps to the MIME
+# type used to build a self-contained ``data:`` URI (so a downloaded report
+# keeps its figures with no server round-trip — same self-contained philosophy
+# as inlining SVG). GIF is included so animations (e.g. chromosome-cycle /
+# colony movies rendered to .gif) play in the report.
+_RASTER_CHART_MIME = {".png": "image/png", ".gif": "image/gif"}
+
+
+def _static_chart_meta(asset_path: Path) -> dict:
+    """Read the optional ``<name>.meta.json`` sidecar for a chart asset."""
+    meta_path = asset_path.with_suffix(".meta.json")
+    title, caption, simulations, interpretation = asset_path.stem, "", "", ""
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            if isinstance(meta, dict):
+                title = str(meta.get("title", title)) or title
+                caption = str(meta.get("caption", "")) or ""
+                simulations = str(meta.get("simulations", "")) or ""
+                interpretation = str(meta.get("interpretation", "")) or ""
+        except Exception:
+            pass
+    return {"title": title, "caption": caption,
+            "simulations": simulations, "interpretation": interpretation}
+
+
 def discover_static_study_charts(charts_dir: Path) -> list[dict]:
-    """Return inline-SVG chart records for any `*.svg` under ``charts_dir``.
+    """Return chart records for pre-rendered figures under ``charts_dir``.
 
     Companion to ``render_study_charts``: where that one runs SQL against
-    ``runs.db`` to draw fresh plots, this one surfaces SVGs the study has
+    ``runs.db`` to draw fresh plots, this one surfaces figures the study has
     ALREADY rendered to disk (e.g. domain-specific chromosome maps,
-    DnaA-box layouts) so the dashboard's chart panel includes them.
+    DnaA-box layouts, matplotlib trajectory PNGs, animated GIFs) so the
+    dashboard's chart panel + the investigation report include them.
 
-    Convention: each ``<name>.svg`` may have a sibling ``<name>.meta.json``
-    of shape::
+    Discovers two media families:
+
+    * ``*.svg`` — inlined verbatim into the record's ``svg`` field
+      (``media: "svg"``).
+    * ``*.png`` / ``*.gif`` — embedded as a self-contained base64 ``data:``
+      URI in the record's ``img`` field (``media: "png"`` / ``"gif"``), so the
+      figure survives in a downloaded/standalone report with no server.
+      A raster file is SKIPPED when a same-stem ``*.svg`` exists — the vector
+      version wins (avoids showing ``foo.svg`` and ``foo.png`` twice).
+
+    Convention: each ``<name>.{svg,png,gif}`` may have a sibling
+    ``<name>.meta.json`` of shape::
 
         {
           "title":          "...",   # display heading
@@ -285,46 +323,48 @@ def discover_static_study_charts(charts_dir: Path) -> list[dict]:
 
     The last two are optional and surface as separate paragraphs below
     the chart so an evaluator gets both the provenance and the read.
-    Files are returned sorted by filename — the ``00_summary.svg`` /
-    ``01_*.svg`` naming convention used in this workspace gives a
-    natural display order.
+    Records are returned sorted by filename stem — the ``00_summary`` /
+    ``01_*`` naming convention used in this workspace gives a natural
+    display order across both media families.
 
-    Returns ``[]`` if the directory doesn't exist, has no SVGs, or any I/O
-    fails (treated as "no charts" rather than an error so the panel can
+    Returns ``[]`` if the directory doesn't exist, has no figures, or any
+    I/O fails (treated as "no charts" rather than an error so the panel can
     still render the live charts).
     """
     if not charts_dir.exists() or not charts_dir.is_dir():
         return []
     out: list[dict] = []
-    for svg_path in sorted(charts_dir.glob("*.svg")):
+    svg_stems = {p.stem for p in charts_dir.glob("*.svg")}
+    # Vector SVGs — inlined verbatim.
+    for svg_path in charts_dir.glob("*.svg"):
         try:
             svg_text = svg_path.read_text(encoding="utf-8")
         except Exception:
             continue
-        meta_path = svg_path.with_suffix(".meta.json")
-        title = svg_path.stem
-        caption = ""
-        simulations = ""
-        interpretation = ""
-        if meta_path.exists():
-            try:
-                meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                if isinstance(meta, dict):
-                    title = str(meta.get("title", title)) or title
-                    caption = str(meta.get("caption", "")) or ""
-                    simulations = str(meta.get("simulations", "")) or ""
-                    interpretation = str(meta.get("interpretation", "")) or ""
-            except Exception:
-                pass
         out.append({
             "key": svg_path.stem,
-            "title": title,
-            "caption": caption,
-            "simulations": simulations,
-            "interpretation": interpretation,
+            **_static_chart_meta(svg_path),
             "svg": svg_text,
+            "media": "svg",
             "source": "static",
         })
+    # Raster PNG/GIF — base64 data-URI so downloaded reports stay self-contained.
+    for ext, mime in _RASTER_CHART_MIME.items():
+        for img_path in charts_dir.glob("*" + ext):
+            if img_path.stem in svg_stems:
+                continue  # a vector version exists — prefer it
+            try:
+                b64 = base64.b64encode(img_path.read_bytes()).decode("ascii")
+            except Exception:
+                continue
+            out.append({
+                "key": img_path.stem,
+                **_static_chart_meta(img_path),
+                "img": f"data:{mime};base64,{b64}",
+                "media": ext.lstrip("."),
+                "source": "static",
+            })
+    out.sort(key=lambda r: r["key"])
     return out
 
 

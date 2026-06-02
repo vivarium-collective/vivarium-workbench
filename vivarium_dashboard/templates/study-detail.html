@@ -139,7 +139,7 @@
 .chart-card{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 12px 12px 12px}
 /* SVGs scale to fit their card; preserves aspect ratio so a 1400×484
    chart shrinks instead of overflowing horizontally + clipping. */
-.chart-card svg{display:block;width:100%;max-width:100%;height:auto}
+.chart-card svg,.chart-card img.chart-img{display:block;width:100%;max-width:100%;height:auto}
 .chart-caption{font-size:0.83em;color:#475569;margin-top:4px;line-height:1.4}
 /* findings */
 .findings-section{padding:14px 16px;background:#fafbff;border:1px solid #c7d2fe;border-radius:8px}
@@ -1502,9 +1502,9 @@
     {% set _border = '#10b981' if _cls == 'primary' else ('#3b82f6' if _cls == 'supporting' else ('#f59e0b' if _cls == 'diagnostic' else ('#94a3b8' if _cls == 'regression' else '#cbd5e1'))) %}
     {% set _out = _outcomes.get(b.name) %}
     {% set _res = _out.result if _out else None %}
-    {% set _pill_bg = '#d1fae5' if _res == 'PASS' else ('#fee2e2' if _res == 'FAIL' else ('#fef3c7' if _res == 'SKIP' else '#f1f5f9')) %}
-    {% set _pill_fg = '#065f46' if _res == 'PASS' else ('#991b1b' if _res == 'FAIL' else ('#92400e' if _res == 'SKIP' else '#475569')) %}
-    {% set _pill_text = ('✓ PASS' if _res == 'PASS' else ('✗ FAIL' if _res == 'FAIL' else ('⏭ SKIP' if _res == 'SKIP' else '⏳ pending'))) %}
+    {% set _pill_bg = '#d1fae5' if _res == 'PASS' else ('#fee2e2' if _res == 'FAIL' else ('#fef3c7' if _res == 'SKIP' else ('#fde68a' if _res == 'PARTIAL' else '#f1f5f9'))) %}
+    {% set _pill_fg = '#065f46' if _res == 'PASS' else ('#991b1b' if _res == 'FAIL' else ('#92400e' if _res == 'SKIP' else ('#92400e' if _res == 'PARTIAL' else '#475569'))) %}
+    {% set _pill_text = ('✓ PASS' if _res == 'PASS' else ('✗ FAIL' if _res == 'FAIL' else ('⏭ SKIP' if _res == 'SKIP' else ('◐ partial' if _res == 'PARTIAL' else '⏳ pending')))) %}
     <li class="expected-behavior-item" id="bt-{{ b.name or loop.index0 }}"
         data-pytest-node="{{ b.name or '' }}"
         data-classification="{{ _cls }}"

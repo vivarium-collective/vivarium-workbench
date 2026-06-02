@@ -58,12 +58,13 @@ def test_compute_status_running_when_child_analyzing():
     assert compute_investigation_status(["planned", "analyzing"]) == "running"
 
 
-def test_compute_status_running_when_child_has_accumulated_runs():
+def test_compute_status_in_progress_when_child_has_accumulated_runs():
     # No child is in a 'running' status but at least one has runs accumulated
-    # → still treat as 'running' per the derivation rules.
+    # → 'in_progress'. Accumulated (completed) run history is NOT active
+    # execution, so it no longer maps to 'running'.
     statuses = ["planned", "planned"]
     has_runs = [False, True]
-    assert compute_investigation_status(statuses, has_runs=has_runs) == "running"
+    assert compute_investigation_status(statuses, has_runs=has_runs) == "in_progress"
 
 
 def test_compute_status_in_progress_when_some_but_not_all_complete():
@@ -113,10 +114,15 @@ def test_study_effective_running_when_status_running():
     assert compute_study_effective_status("analyzing") == "running"
 
 
-def test_study_effective_running_when_planned_but_has_runs():
-    # The whole point of effective_status: a study whose YAML still says
-    # 'planned' but has accumulated runs on disk should read as running.
-    assert compute_study_effective_status("planned", has_runs=True) == "running"
+def test_study_effective_running_only_when_active_run():
+    # 'running' means a run is genuinely in flight, NOT merely that the study
+    # has accumulated run history. A planned study with finished runs reads as
+    # 'planned'; only an active run (has_active_run) makes it 'running'.
+    assert compute_study_effective_status("planned", has_runs=True) == "planned"
+    assert (
+        compute_study_effective_status("planned", has_runs=True, has_active_run=True)
+        == "running"
+    )
 
 
 def test_study_effective_planned_when_planned_no_runs():
@@ -124,10 +130,13 @@ def test_study_effective_planned_when_planned_no_runs():
     assert compute_study_effective_status("planning") == "planned"
 
 
-def test_study_effective_planned_when_empty_or_unknown():
+def test_study_effective_reflects_declared_when_empty_or_unknown():
+    # Empty / None normalize to 'planned'; any other declared status is
+    # reflected verbatim (e.g. 'in_progress', 'characterization-complete')
+    # rather than being flattened to 'planned'.
     assert compute_study_effective_status("") == "planned"
-    assert compute_study_effective_status("weird-thing") == "planned"
     assert compute_study_effective_status(None) == "planned"
+    assert compute_study_effective_status("weird-thing") == "weird-thing"
 
 
 def test_study_effective_failed_beats_runs():

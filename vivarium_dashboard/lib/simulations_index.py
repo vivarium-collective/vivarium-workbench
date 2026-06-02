@@ -382,6 +382,89 @@ def _read_parquet_hives(workspace: Path) -> list[dict]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# XArray (zarr) run discovery — the XArrayEmitter writes zarr stores under
+# ``.pbg/runs/<run_id>/[seed_NN/]store.zarr`` (the PDMP investigation's default
+# emitter). These never register a runs_meta row unless backfilled, so the
+# Simulations DB must also discover them on disk to be XArray-aware.
+# ---------------------------------------------------------------------------
+
+def _discover_xarray_runs(workspace: Path) -> list[dict]:
+    """Yield one row per ``.pbg/runs/<run_id>/`` dir that contains a
+    ``store.zarr`` (directly or under ``seed_*/``). Shaped like the other
+    readers (source/emitter = 'xarray') so the merge logic treats them
+    uniformly. Metadata is recovered from the filesystem: ``run_id`` from the
+    dir name, ``n_steps`` from the ``emitstep_gen=*`` partition count, and
+    timestamps from mtime. Status is ``completed`` (a persisted zarr store is
+    a finished write)."""
+    runs_dir = Path(workspace) / ".pbg" / "runs"
+    if not runs_dir.is_dir():
+        return []
+    out: list[dict] = []
+    for run_dir in sorted(p for p in runs_dir.iterdir() if p.is_dir()):
+        # XArray stores nest at variable depth: <run>/store.zarr,
+        # <run>/seed_NN/store.zarr (ensembles), or
+        # <run>/<param-combo>/seed_NN/store.zarr (param-sweep ensembles).
+        zarrs = (list(run_dir.glob("store.zarr"))
+                 + list(run_dir.glob("*/store.zarr"))
+                 + list(run_dir.glob("*/*/store.zarr")))
+        if not zarrs:
+            continue
+        run_id = run_dir.name
+        # Ensemble size = number of leaf zarr stores (seeds × param combos).
+        n_leaves = len(zarrs)
+        n_steps = None
+        try:
+            mtime = run_dir.stat().st_mtime
+        except OSError:
+            mtime = None
+        out.append({
+            "run_id": run_id,
+            "spec_id": None,
+            "sim_name": run_id,
+            "label": run_id,
+            "status": "completed",
+            "n_steps": n_steps,
+            "progress_step": 0,
+            "ensemble_size": n_leaves,   # # of leaf zarr stores (seeds × params)
+            "started_at": mtime,
+            "completed_at": mtime,
+            "db_path": str(run_dir.relative_to(workspace)),
+            "studies": [],
+            "study_slug": None,
+            "investigation_slug": None,
+            "source": "xarray",
+        })
+    return out
+
+
+def _emitter_for_row(workspace: Path, row: dict) -> str:
+    """Resolve the emitter that persisted a row: 'parquet' / 'xarray' / 'sqlite'.
+
+    parquet/xarray are known from their source tag; for SQLite-table rows
+    (runs_meta / sqlite_emitter) we still check whether a zarr store exists on
+    disk for the run_id (a backfilled XArray run lands in runs_meta but its
+    data lives in zarr) before defaulting to 'sqlite'."""
+    src = row.get("source")
+    if src == "parquet":
+        return "parquet"
+    if src == "xarray":
+        return "xarray"
+    rid = row.get("run_id")
+    if rid:
+        run_dir = Path(workspace) / ".pbg" / "runs" / str(rid)
+        try:
+            if run_dir.is_dir() and (
+                list(run_dir.glob("store.zarr"))
+                or list(run_dir.glob("*/store.zarr"))
+                or list(run_dir.glob("*/*/store.zarr"))
+            ):
+                return "xarray"
+        except Exception:
+            pass
+    return "sqlite"
+
+
 def list_simulations(workspace: Path) -> list[dict]:
     """Return every persisted simulation in ``workspace``, newest first.
 
@@ -423,6 +506,10 @@ def list_simulations(workspace: Path) -> list[dict]:
     # below treats them uniformly. Source-tag "parquet" lets the frontend
     # render an emitter badge.
     rows.extend(_read_parquet_hives(workspace))
+    # XArray (zarr) runs persisted under .pbg/runs/<id>/store.zarr — the PDMP
+    # investigation's default emitter. Surfaced live so they show even when no
+    # runs_meta row was recorded; dedup below merges with any backfilled row.
+    rows.extend(_discover_xarray_runs(workspace))
 
     # Deduplicate by run_id, preferring runs_meta over sqlite_emitter (so
     # spec_id / status / n_steps come from the canonical bookkeeping table).
@@ -483,6 +570,9 @@ def list_simulations(workspace: Path) -> list[dict]:
         # written before sqlite_emitter() stamped the column.
         if not r.get("study_slug") and r.get("studies"):
             r["study_slug"] = r["studies"][0]
+        # Emitter-awareness: tag each row with the emitter that persisted it
+        # (xarray / parquet / sqlite) so the Simulations DB can show a column.
+        r["emitter"] = _emitter_for_row(workspace, r)
     return rows
 
 

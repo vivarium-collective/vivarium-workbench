@@ -4846,22 +4846,23 @@
       }
 
       var outcomes = latest.outcomes || {};
-      var passed = [], failed = [];
+      var passed = [], failed = [], partial = [];
       Object.keys(outcomes).forEach(function(name) {
         var res = (outcomes[name] || {}).result;
         if (res === 'PASS') passed.push(name);
         if (res === 'FAIL') failed.push(name);
+        if (res === 'PARTIAL') partial.push(name);
       });
       var calibration = openFollowups.filter(function(f){return f.kind === 'calibration_task';});
       var infra       = openFollowups.filter(function(f){return f.kind === 'infrastructure_fix';});
       var newWork     = openFollowups.filter(function(f){return f.kind === 'new';});
 
-      if (failed.length === 0 && passed.length > 0) {
+      if (failed.length === 0 && partial.length === 0 && passed.length > 0) {
         var enables = (s.pipeline_gate && s.pipeline_gate.enables) || [];
         return {
           label: 'Passed',
           cls:   'dec-passed',
-          passed: passed, failed: [], blocks: [],
+          passed: passed, failed: [], partial: [], blocks: [],
           next: enables.length
             ? 'Gate cleared. Next: ' + enables.join(', ')
             : 'Gate cleared. No declared downstream studies — review pipeline_gate.enables.'
@@ -4884,9 +4885,16 @@
           next: nextStr
         };
       }
+      if (partial.length > 0) {
+        return {
+          label: 'Partial', cls: 'dec-inprogress',
+          passed: passed, failed: failed, partial: partial, blocks: [],
+          next: partial.length + ' test(s) ran but did not meet the gate threshold — see findings.'
+        };
+      }
       return {
         label: 'In progress', cls: 'dec-inprogress',
-        passed: passed, failed: failed, blocks: [],
+        passed: passed, failed: failed, partial: partial, blocks: [],
         next: 'Continue analysing run outcomes.'
       };
     }
@@ -5499,7 +5507,13 @@
               if (c.interpretation) capHtml +=
                   '<div class="chart-interpretation"><strong>What it means.</strong> '
                   + _h(c.interpretation) + '</div>';
-              return '<div class="chart-card">' + c.svg + capHtml + '</div>';
+              // SVG records inline c.svg; PNG/GIF records embed a self-contained
+              // data-URI in c.img (rendered as <img> so it survives in a
+              // downloaded standalone report).
+              var media = c.img
+                ? '<img class="chart-img" src="' + c.img + '" alt="' + _h(c.key || 'chart') + '" loading="lazy">'
+                : (c.svg || '');
+              return '<div class="chart-card">' + media + capHtml + '</div>';
             }).join('')
           + '</div>'
         : '';
@@ -5534,16 +5548,18 @@
           Object.keys(latestRun.outcomes).forEach(function(k) { outcomeByTest[k] = latestRun.outcomes[k]; });
         }
         // At-a-glance summary so a reviewer doesn't have to count pills.
-        var _tc = { PASS: 0, FAIL: 0, SKIP: 0, PENDING: 0 };
+        var _tc = { PASS: 0, FAIL: 0, PARTIAL: 0, SKIP: 0, PENDING: 0 };
         tests.forEach(function(t) {
           var o = outcomeByTest[t.name];
           var r = o ? o.result : (t.status === 'gated' ? 'GATED' : 'PENDING');
           if (r === 'PASS') _tc.PASS++; else if (r === 'FAIL') _tc.FAIL++;
+          else if (r === 'PARTIAL') _tc.PARTIAL++;
           else if (r === 'SKIP') _tc.SKIP++; else _tc.PENDING++;
         });
         var _tcParts = [];
         if (_tc.PASS) _tcParts.push(_tc.PASS + ' ✓ passed');
         if (_tc.FAIL) _tcParts.push(_tc.FAIL + ' ✗ failed');
+        if (_tc.PARTIAL) _tcParts.push(_tc.PARTIAL + ' ◐ partial');
         if (_tc.SKIP) _tcParts.push(_tc.SKIP + ' ⏭ skipped');
         if (_tc.PENDING) _tcParts.push(_tc.PENDING + ' ⏳ pending');
         var _tcSummary = _tcParts.length ? (' — ' + _tcParts.join(' · ')) : '';
@@ -5554,9 +5570,9 @@
               var cls = t.classification || 'unclassified';
               var out = outcomeByTest[name];
               var result = out ? out.result : (t.status === 'gated' ? 'GATED' : 'PENDING');
-              var resBg = result === 'PASS' ? '#d1fae5' : (result === 'FAIL' ? '#fee2e2' : (result === 'SKIP' ? '#fef3c7' : '#f1f5f9'));
-              var resFg = result === 'PASS' ? '#065f46' : (result === 'FAIL' ? '#991b1b' : (result === 'SKIP' ? '#92400e' : '#475569'));
-              var resGlyph = result === 'PASS' ? '✓' : (result === 'FAIL' ? '✗' : '⏳');
+              var resBg = result === 'PASS' ? '#d1fae5' : (result === 'FAIL' ? '#fee2e2' : (result === 'SKIP' ? '#fef3c7' : (result === 'PARTIAL' ? '#fde68a' : '#f1f5f9')));
+              var resFg = result === 'PASS' ? '#065f46' : (result === 'FAIL' ? '#991b1b' : (result === 'SKIP' ? '#92400e' : (result === 'PARTIAL' ? '#92400e' : '#475569')));
+              var resGlyph = result === 'PASS' ? '✓' : (result === 'FAIL' ? '✗' : (result === 'PARTIAL' ? '◐' : '⏳'));
               // Claim: the English description, first sentence.
               var claim = (t.description || t.en || '').split('\n')[0].split('. ')[0];
               if (claim.length > 220) claim = claim.slice(0, 217) + '…';
@@ -6771,7 +6787,7 @@
       // ratio so a 1400×484 chart shrinks to (e.g.) 800×276 instead of
       // overflowing horizontally + clipping content.
       + '.chart-card{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 12px 12px 12px;margin:10px 0}'
-      + '.chart-card svg{display:block;width:100%;max-width:100%;height:auto}'
+      + '.chart-card svg,.chart-card img.chart-img{display:block;width:100%;max-width:100%;height:auto}'
       + '.chart-caption{font-size:0.83em;color:#475569;margin-top:4px;line-height:1.4}'
       + '.chart-simulations{font-size:0.9em;color:#1e3a8a;background:#dbeafe;border-left:3px solid #2563eb;padding:6px 10px;margin-top:8px;border-radius:0 3px 3px 0;line-height:1.5}'
       + '.chart-simulations strong{color:#1e40af}'
@@ -10500,6 +10516,20 @@
       _escSim(status || '?') + '</span>';
   }
 
+  function _simEmitterChip(emitter) {
+    // Which emitter persisted the run: xarray (zarr) / parquet / sqlite.
+    var colors = {
+      xarray:  ['#ede9fe', '#5b21b6'],
+      parquet: ['#fef3c7', '#92400e'],
+      sqlite:  ['#e0f2fe', '#075985'],
+    };
+    var e = (emitter || '').toLowerCase();
+    var c = colors[e] || ['#e5e7eb', '#374151'];
+    return '<span title="emitter / persistence format" style="background:' + c[0] +
+      '; color:' + c[1] + '; padding:2px 8px; border-radius:10px; font-size:12px;">' +
+      _escSim(emitter || '—') + '</span>';
+  }
+
   function _simStudyChips(studies) {
     if (!studies || !studies.length) return '<span style="color:#9ca3af;">—</span>';
     return studies.map(function (name) {
@@ -10546,7 +10576,8 @@
     }
     var stepsTxt = (sim.status === 'running')
       ? (sim.progress_step || 0) + '/' + (sim.n_steps || '?')
-      : (sim.n_steps != null ? String(sim.n_steps) : '—');
+      : (sim.n_steps != null ? String(sim.n_steps)
+         : (sim.ensemble_size ? (sim.ensemble_size + '× ens') : '—'));
     var label = sim.sim_name || sim.label || '';
     var startedFull = sim.started_at
       ? new Date(sim.started_at * 1000).toISOString()
@@ -10574,6 +10605,7 @@
       '<td style="padding:6px 8px;">' + investigationCell + '</td>' +
       '<td style="padding:6px 8px;">' + _simStudyChips(sim.studies) + '</td>' +
       '<td style="padding:6px 8px;">' + _simStatusChip(sim.status) + '</td>' +
+      '<td style="padding:6px 8px;">' + _simEmitterChip(sim.emitter) + '</td>' +
       '<td style="padding:6px 8px;">' + _escSim(stepsTxt) + '</td>' +
       '<td style="padding:6px 8px; color:#374151;">' + _escSim(label) + '</td>' +
       '<td style="padding:6px 8px; color:#6b7280;" title="' + _escSim(startedFull) +
