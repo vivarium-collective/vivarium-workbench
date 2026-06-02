@@ -61,6 +61,30 @@ function resolveWirePath(parentPath: string[], target: unknown): string[] {
  * process/step. Mirrors the dashboard's `all_store_paths`; used to seed the
  * View tab's emit selection so all states emit by default.
  */
+/**
+ * Group-store node ids to collapse BY DEFAULT, so a huge whole-cell composite
+ * opens as a light overview instead of laying out + rendering hundreds of deep
+ * nodes (ELK layout of ~300 nested stores is the load bottleneck). Collapses
+ * every container store at depth >= `minDepth` (e.g. agents.0.listeners and
+ * below), leaving the top levels + processes visible. Users expand by
+ * double-clicking or via the Nodes tab.
+ */
+export function defaultCollapsedIds(state: any, minDepth = 3): Set<string> {
+  const root = state?.state ?? state ?? {};
+  const out = new Set<string>();
+  function walk(node: any, path: string[]) {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+    if (node._type === 'process' || node._type === 'step') return;
+    if ('_type' in node) return;  // typed leaf store
+    if (path.length >= minDepth && Object.keys(node).length > 0) {
+      out.add(path.join('.'));
+    }
+    for (const [k, v] of Object.entries(node)) walk(v, [...path, k]);
+  }
+  walk(root, []);
+  return out;
+}
+
 export function topLevelStorePaths(state: any): string[] {
   const root = state?.state ?? state ?? {};
   return Object.entries(root)

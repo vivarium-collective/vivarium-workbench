@@ -15,7 +15,7 @@ import {
   loadLayout, saveLayout, clearLayout,
   applySavedPositions, positionsFromNodes, debounce,
 } from './layoutStore';
-import { stateToReactFlow, topLevelStorePaths } from './convert';
+import { stateToReactFlow, topLevelStorePaths, defaultCollapsedIds } from './convert';
 import { isHiddenByAncestor, retargetEdgesToVisible } from './panels/filterHidden';
 import { Sidebar } from './panels/Sidebar';
 import { RunPanel } from './panels/RunPanel';
@@ -60,7 +60,9 @@ export default function App() {
   const [state, setState] = useState<any | null>(decodeUrlComposite());
   const [selection, setSelection] = useState<Omit<ExploreInspectMsg, 'type'> | null>(null);
   // Collapsed group-node ids — children of these nodes are filtered out of the graph.
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [collapsed, setCollapsed] = useState<Set<string>>(
+    () => defaultCollapsedIds(decodeUrlComposite()),
+  );
   // Explicitly hidden node ids (via the sidebar Processes/Nodes toggles).
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   // Explicit-emit store paths (joined by '/'). Descendants inherit emission.
@@ -106,7 +108,7 @@ export default function App() {
   useEffect(() => {
     const off = onCompositeLoad((msg) => {
       setState(msg.state);
-      setCollapsed(new Set());  // reset folding when a new composite loads
+      setCollapsed(defaultCollapsedIds(msg.state));  // light overview by default
       setHidden(new Set());     // reset show/hide selections too
       // All states emit by default: seed with every top-level store and
       // broadcast so the dashboard's run-emit selection stays in sync.
@@ -145,6 +147,7 @@ export default function App() {
         if (data?.state && !state) {
           setState(data.state);
           setEmitSet(new Set(topLevelStorePaths(data.state)));
+          setCollapsed(defaultCollapsedIds(data.state));
         }
       })
       .catch(() => { /* fall through to postMessage path */ });
