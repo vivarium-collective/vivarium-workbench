@@ -233,15 +233,53 @@ def _build_run_to_studies_map(workspace: Path) -> dict[str, list[str]]:
 # ---------------------------------------------------------------------------
 
 
-def _discover_parquet_hives(workspace: Path) -> list[tuple[Path, str]]:
-    """Yield (experiment_dir, study_slug) for every per-study parquet
-    experiment under ``studies/*/parquet-runs/<exp_id>/``.
+def _find_hive_dir(run_dir: Path, max_depth: int = 3) -> Path | None:
+    """Shallowest directory at/under ``run_dir`` that looks like a
+    ParquetEmitter hive — i.e. has both ``configuration/`` and ``history/``
+    children. Returns None if none is found within ``max_depth`` levels.
 
-    Skips entries without a ``history/`` subdir (in-progress writes whose
-    first emit hasn't flushed yet). Deterministic order: study slug first,
-    then by experiment_id directory mtime descending.
+    Why a search instead of a fixed path: the runner/sweep wrappers nest the
+    emitter hive below the run dir the user launched, at variable depth and
+    under variably-named intermediate dirs, e.g.::
+
+        parquet-runs/<run>/                                   (flat — hive IS the run dir)
+        parquet-runs/<run>/parquet/<experiment_id>/           (sweep output)
+        parquet-runs/<run>/<inner>/                           (single repro run)
+
+    BFS so the closest hive wins; the partition dirs themselves
+    (history/configuration/success) are never descended into.
     """
-    out: list[tuple[Path, str]] = []
+    from collections import deque
+    queue: deque[tuple[Path, int]] = deque([(run_dir, 0)])
+    while queue:
+        d, depth = queue.popleft()
+        if (d / "history").is_dir() and (d / "configuration").is_dir():
+            return d
+        if depth >= max_depth:
+            continue
+        try:
+            children = sorted(c for c in d.iterdir()
+                              if c.is_dir()
+                              and c.name not in ("history", "configuration", "success"))
+        except OSError:
+            continue
+        for c in children:
+            queue.append((c, depth + 1))
+    return None
+
+
+def _discover_parquet_hives(workspace: Path) -> list[tuple[Path, Path, str]]:
+    """Yield ``(hive_dir, run_dir, study_slug)`` for every per-study parquet
+    run under ``studies/*/parquet-runs/<run>/``.
+
+    ``run_dir`` is the directory the user launched (the unique, meaningful run
+    key); ``hive_dir`` is the ParquetEmitter hive located beneath it (see
+    :func:`_find_hive_dir` — it may be the run dir itself for the flat shape,
+    or nested for sweep output). Run dirs without any hive (in-progress writes
+    whose first emit hasn't flushed yet) are skipped. Deterministic order:
+    study slug first, then run dir mtime descending.
+    """
+    out: list[tuple[Path, Path, str]] = []
     studies_root = WorkspacePaths.load(workspace).studies
     if not studies_root.is_dir():
         return out
@@ -251,11 +289,12 @@ def _discover_parquet_hives(workspace: Path) -> list[tuple[Path, str]]:
         parquet_runs = sdir / "parquet-runs"
         if not parquet_runs.is_dir():
             continue
-        exps = [p for p in parquet_runs.iterdir()
-                if p.is_dir() and (p / "history").is_dir()]
-        exps.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        for p in exps:
-            out.append((p, sdir.name))
+        run_dirs = [p for p in parquet_runs.iterdir() if p.is_dir()]
+        run_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        for run_dir in run_dirs:
+            hive = _find_hive_dir(run_dir)
+            if hive is not None:
+                out.append((hive, run_dir, sdir.name))
     return out
 
 
@@ -279,24 +318,32 @@ def _parquet_sim_name_from_yaml(yaml_path: Path, experiment_id: str) -> str | No
     return None
 
 
-def _read_parquet_hive(exp_dir: Path, study_slug: str, workspace: Path) -> dict | None:
-    """Read one parquet experiment's metadata + counts and return the
-    dashboard's standard run-dict shape. Returns None on read failure so
-    a broken hive doesn't take down the whole simulations index.
+def _read_parquet_hive(
+    hive_dir: Path, run_dir: Path, study_slug: str, workspace: Path
+) -> dict | None:
+    """Read one parquet run's metadata + counts and return the dashboard's
+    standard run-dict shape. Returns None on read failure so a broken hive
+    doesn't take down the whole simulations index.
+
+    ``run_dir`` is the directory the user launched (the unique run key);
+    ``hive_dir`` is the ParquetEmitter hive located beneath it, which holds
+    the ``configuration/`` / ``history/`` / ``success/`` partitions. For the
+    flat layout the two are the same dir.
     """
     try:
         import polars as pl  # lazy; not every dashboard install has it
     except ImportError:
         warnings.warn(
             "simulations_index: polars unavailable; "
-            f"skipping parquet hive at {exp_dir}"
+            f"skipping parquet hive at {hive_dir}"
         )
         return None
 
-    experiment_id = exp_dir.name
-    history = exp_dir / "history"
-    config = exp_dir / "configuration"
-    success = exp_dir / "success"
+    experiment_id = hive_dir.name
+    run_id = run_dir.name
+    history = hive_dir / "history"
+    config = hive_dir / "configuration"
+    success = hive_dir / "success"
 
     # Pull metadata from the configuration parquet (one row per generation;
     # use the first for study/investigation slugs since both rows carry the
@@ -333,7 +380,7 @@ def _read_parquet_hive(exp_dir: Path, study_slug: str, workspace: Path) -> dict 
     # stamp them itself. configuration/ is written at construction;
     # success/ at clean close.
     try:
-        started_at = config.stat().st_mtime if config.is_dir() else exp_dir.stat().st_mtime
+        started_at = config.stat().st_mtime if config.is_dir() else run_dir.stat().st_mtime
     except OSError:
         started_at = None
     try:
@@ -341,16 +388,23 @@ def _read_parquet_hive(exp_dir: Path, study_slug: str, workspace: Path) -> dict 
     except OSError:
         completed_at = None
 
-    # sim_name: try the study.yaml first (gives the human-readable label),
-    # then fall back to the experiment_id (UUID; informative but not pretty).
+    # sim_name: try the study.yaml first (gives the human-readable label) —
+    # matched on the run id, then the inner experiment id — and finally fall
+    # back to the run id (meaningful; the inner experiment id may be a shared
+    # label reused across runs, so it's the worse default).
     yaml_path = WorkspacePaths.load(workspace).studies / study_slug / "study.yaml"
-    sim_name = _parquet_sim_name_from_yaml(yaml_path, experiment_id) or experiment_id
+    sim_name = (
+        _parquet_sim_name_from_yaml(yaml_path, run_id)
+        or _parquet_sim_name_from_yaml(yaml_path, experiment_id)
+        or run_id
+    )
 
-    # Workspace-relative path for the dashboard's UI (drill-down links).
-    db_path = str(exp_dir.relative_to(workspace))
+    # Workspace-relative path for the dashboard's UI (drill-down links) — the
+    # hive dir, where configuration/ + history/ live.
+    db_path = str(hive_dir.relative_to(workspace))
 
     return {
-        "run_id":             experiment_id,
+        "run_id":             run_id,
         "spec_id":            "",
         "sim_name":           sim_name,
         "label":              sim_name,
@@ -375,8 +429,8 @@ def _read_parquet_hives(workspace: Path) -> list[dict]:
     Skips broken hives (returns the rest) so one bad write doesn't blank
     the Simulations tab."""
     out: list[dict] = []
-    for exp_dir, study_slug in _discover_parquet_hives(workspace):
-        row = _read_parquet_hive(exp_dir, study_slug, workspace)
+    for hive_dir, run_dir, study_slug in _discover_parquet_hives(workspace):
+        row = _read_parquet_hive(hive_dir, run_dir, study_slug, workspace)
         if row is not None:
             out.append(row)
     return out

@@ -491,3 +491,43 @@ def test_list_parquet_skips_hive_without_history_dir(tmp_path):
     (sdir / "parquet-runs" / "skeletal-exp").mkdir(parents=True)
     sims = [s for s in list_simulations(ws) if s["source"] == "parquet"]
     assert sims == []
+
+
+def _mk_hive_dirs(hive: Path):
+    """Create the bare configuration/ + history/ + success/ marker dirs that
+    identify a ParquetEmitter hive (no parquet files — discovery only checks
+    for the dirs, so this stays polars-free)."""
+    (hive / "configuration").mkdir(parents=True)
+    (hive / "history").mkdir(parents=True)
+    (hive / "success").mkdir(parents=True)
+
+
+def test_discover_parquet_hives_finds_nested_and_flat(tmp_path):
+    """The real ParquetEmitter/sweep output nests the hive below the run dir
+    the user launched: ``parquet-runs/<run>/parquet/<experiment_id>/`` or
+    ``parquet-runs/<run>/<inner>/``. Discovery must locate the hive at variable
+    depth, key the row by the *run* dir (unique + user-meaningful), and still
+    handle the flat ``parquet-runs/<run>/`` shape. Regression: previously only
+    the flat depth-0 shape was found, so nested sweeps showed 0 runs.
+    """
+    from vivarium_dashboard.lib.simulations_index import _discover_parquet_hives
+
+    pr = tmp_path / "studies" / "s1" / "parquet-runs"
+    # flat: hive IS the run dir
+    _mk_hive_dirs(pr / "flat-run")
+    # nested under parquet/: two distinct runs sharing one inner experiment id
+    _mk_hive_dirs(pr / "sweep-a" / "parquet" / "equilibrium")
+    _mk_hive_dirs(pr / "sweep-b" / "parquet" / "equilibrium")
+    # nested one level under an arbitrarily-named inner dir
+    _mk_hive_dirs(pr / "burnedin" / "repro")
+    # a run dir with no hive anywhere → skipped
+    (pr / "no-hive" / "run_seed0").mkdir(parents=True)
+
+    found = _discover_parquet_hives(tmp_path)
+    # one row per run dir that contains a hive (run dirs are unique keys)
+    run_dirs = sorted(rd.name for (_hive, rd, _slug) in found)
+    assert run_dirs == ["burnedin", "flat-run", "sweep-a", "sweep-b"]
+    # each tuple's hive dir actually contains the hive markers
+    for hive, _run, slug in found:
+        assert (hive / "history").is_dir() and (hive / "configuration").is_dir()
+        assert slug == "s1"
