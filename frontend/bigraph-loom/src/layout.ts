@@ -74,6 +74,10 @@ export async function applyLayout(
   const compoundParent = new Map<string, string>();
   const childrenByParent = new Map<string, string[]>([[ROOT, []]]);
   for (const n of nodes) {
+    // Processes are NOT laid out by ELK with the store hierarchy — they would
+    // pile into a horizontal row at the agent's layer. Instead they go in a
+    // vertical column to the right of the store hierarchy (see below).
+    if (n.type === "process") continue;
     const pk = parentPathKey(n);
     let parentId: string = ROOT;
     if (pk) {
@@ -169,6 +173,23 @@ export async function applyLayout(
     }
   }
   walk({ id: ROOT, children: result.children });
+
+  // Place process nodes in a VERTICAL COLUMN to the right of the laid-out store
+  // hierarchy, evenly spaced — instead of ELK's horizontal row. Wires (process
+  // port ↔ store) then run left→right from the stores to this column.
+  const storePts = [...positions.values()];
+  if (storePts.length > 0) {
+    const PROC_H = 60, GAP_X = 240, V_SPACE = 50;
+    const maxRight = Math.max(...storePts.map((p) => p.x)) + 80; // +store circle width
+    const minY = Math.min(...storePts.map((p) => p.y));
+    const procColX = maxRight + GAP_X;
+    let i = 0;
+    for (const n of nodes) {
+      if (n.type !== "process") continue;
+      positions.set(n.id, { x: procColX, y: minY + i * (PROC_H + V_SPACE) });
+      i += 1;
+    }
+  }
 
   return nodes.map((n) => {
     const p = positions.get(n.id);
