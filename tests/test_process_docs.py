@@ -37,3 +37,25 @@ def test_existing_doc_not_overwritten():
     doc = {"_type": "process", "address": "local:json.JSONDecoder", "doc": "custom"}
     attach_process_docs(doc)
     assert doc["doc"] == "custom"
+
+
+from vivarium_dashboard.lib.process_docs import summarize_large_values
+
+
+def test_summarize_collapses_large_lists_keeps_structure():
+    doc = {"state": {"agents": {"0": {
+        "bulk": [["x", 0, 0.0]] * 100,                       # big array → summary
+        "small": [1, 2, 3],                                   # small → kept
+        "p": {"_type": "process", "address": "local:json.JSONDecoder",
+              "inputs": {"a": ["bulk"]}},                     # wiring untouched
+    }}}}
+    out = summarize_large_values(doc, max_list=40)
+    a = out["state"]["agents"]["0"]
+    assert a["bulk"] == "⟨100 items⟩"
+    assert a["small"] == [1, 2, 3]
+    assert a["p"]["inputs"] == {"a": ["bulk"]}   # process wiring preserved
+
+
+def test_summarize_handles_tuples_and_long_strings():
+    assert summarize_large_values(tuple(range(50)), max_list=40) == "⟨50 items⟩"
+    assert summarize_large_values("x" * 5000, max_str=100).endswith("…")

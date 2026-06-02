@@ -36,6 +36,38 @@ def _doc_for_address(address: str) -> str:
         return ""
 
 
+def summarize_large_values(node: Any, max_list: int = 40, max_str: int = 2000) -> Any:
+    """Return a copy of a composite-state doc with large leaf VALUES summarized.
+
+    A whole-cell `bulk` store is a multi-MB array of thousands of molecules; the
+    Composite Explorer only renders structure (it shows `Array(N)` anyway), so
+    sending the raw values makes the response ~5 MB and ~1s. Replace any list
+    longer than `max_list` with a short ``⟨N items⟩`` string and truncate very
+    long strings. Process wiring (port→path lists, all short) and docstrings are
+    left intact. Pure — does not mutate its input.
+    """
+    if isinstance(node, dict):
+        return {k: summarize_large_values(v, max_list, max_str) for k, v in node.items()}
+    if isinstance(node, (list, tuple)):
+        if len(node) > max_list:
+            return f"⟨{len(node)} items⟩"
+        return [summarize_large_values(v, max_list, max_str) for v in node]
+    if isinstance(node, str):
+        return node[:max_str] + "…" if len(node) > max_str else node
+    if isinstance(node, (bytes, bytearray)):
+        return f"⟨{len(node)} bytes⟩"
+    # Array-like that isn't a list/tuple/str — e.g. a numpy (structured) array,
+    # which is how vEcoli's `bulk` store arrives BEFORE JSON-encoding. Summarize
+    # by length; leave small ones for the JSON encoder.
+    try:
+        n = len(node)
+    except TypeError:
+        return node
+    if n > max_list:
+        return f"⟨{n} items⟩"
+    return node
+
+
 def attach_process_docs(doc: Any) -> Any:
     """Walk a composite-state document in place, attaching ``doc`` to each process.
 

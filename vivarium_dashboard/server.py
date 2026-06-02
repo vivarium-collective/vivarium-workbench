@@ -152,6 +152,12 @@ def _json_body(data) -> bytes:
 _REGISTRY_CACHE: dict = {"data": None, "ts": 0.0}
 _REGISTRY_TTL = 30.0  # seconds
 
+# Cache of built composite-state payloads for /api/composite-state, keyed by ref:
+# {ref: (built_at_epoch, payload_dict)}. Building a whole-cell composite is ~1s+;
+# this makes repeat opens + pop-outs instant. Short TTL so code edits are picked up.
+_COMPOSITE_STATE_CACHE: dict = {}
+_COMPOSITE_STATE_TTL_S = 300.0
+
 # Canonical investigation Overview status values (see Task A3.5 / set-overview).
 _VALID_OVERVIEW_STATUSES = {"draft", "in-progress", "completed", "archived"}
 
@@ -10586,6 +10592,19 @@ if __name__ == "__main__":
         if not ref:
             return self._json({"error": "ref required"}, 400)
 
+        # Building a whole-cell composite (build_generator) takes ~3s and is
+        # re-run on every explorer open / pop-out. Cache the built (and value-
+        # summarized) doc per ref with a short TTL so repeat opens are instant
+        # but code edits are still picked up. Checked FIRST so a hit skips the
+        # per-request sys.path + registry setup entirely. Bypass with ?fresh=1.
+        import time as _time
+        fresh = qs.get("fresh") in ("1", "true", "yes")
+        cache = _COMPOSITE_STATE_CACHE
+        if not fresh:
+            hit = cache.get(ref)
+            if hit is not None and (_time.time() - hit[0]) < _COMPOSITE_STATE_TTL_S:
+                return self._json({**hit[1], "cached": True}, 200)
+
         _ws_add_to_sys_path()
 
         # Generator-kind branch: resolve via pbg-superpowers' live registry.
@@ -10601,10 +10620,16 @@ if __name__ == "__main__":
                     doc = build_generator(entry)
                 except Exception as e:  # noqa: BLE001
                     return self._json({"error": f"generator build failed: {e}"}, 400)
-                from vivarium_dashboard.lib.process_docs import attach_process_docs
+                from vivarium_dashboard.lib.process_docs import (
+                    attach_process_docs, summarize_large_values,
+                )
+                doc = summarize_large_values(doc)  # shrink ~5MB bulk values → tiny
                 attach_process_docs(doc)  # per-process docstrings for the inspector
-                return self._json({"state": doc, "kind": "generator",
-                                    "module": entry.module}, 200)
+                payload = {"state": doc, "kind": "generator", "module": entry.module}
+                cache[ref] = (_time.time(), payload)
+                if len(cache) > 16:  # cap memory; drop the oldest entry
+                    cache.pop(next(iter(cache)))
+                return self._json(payload, 200)
         except ImportError:
             pass
 
