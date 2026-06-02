@@ -22,7 +22,7 @@ def _pick_free_port() -> int:
 def _workspace_name(workspace: Path) -> str:
     """Read `name` from <workspace>/workspace.yaml, falling back to dir name."""
     try:
-        data = yaml.safe_load((workspace / "workspace.yaml").read_text()) or {}
+        data = yaml.safe_load((workspace / "workspace.yaml").read_text(encoding="utf-8")) or {}
         return data.get("name") or workspace.name
     except (OSError, yaml.YAMLError):
         return workspace.name
@@ -148,7 +148,7 @@ def migrate_investigations_to_studies(ws_root: Path, dry_run: bool = False) -> d
         if not spec_path.is_file():
             continue
         try:
-            spec = yaml.safe_load(spec_path.read_text()) or {}
+            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 v3 = migrate_v2_to_v3(spec)
