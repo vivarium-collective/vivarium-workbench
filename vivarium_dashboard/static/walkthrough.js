@@ -48,7 +48,7 @@
     }
   });
 
-  // Global listener for postMessage events from loom-explore iframes.
+  // Global listener for postMessage events from bigraph-loom iframes.
   window.addEventListener('message', function(ev) {
     if (ev.data && ev.data.type === 'explore:ready') {
       // Mark the source iframe as ready so callers can post immediately.
@@ -62,7 +62,7 @@
       });
     }
     if (ev.data && ev.data.type === 'explore:inspect') {
-      console.log('[loom-explore inspect]', ev.data);
+      console.log('[bigraph-loom inspect]', ev.data);
       // TODO: cross-panel highlighting (out of scope for this task)
     }
     if (ev.data && ev.data.type === 'explore:emit-changed') {
@@ -75,7 +75,7 @@
     }
   });
 
-  // Pop the current loom-explore iframe contents into a separate window.
+  // Pop the current bigraph-loom iframe contents into a separate window.
   // We re-send the last-posted {type:'composite:load', state, metadata} payload
   // once the popup signals explore:ready (with a 2s failsafe re-post).
   function _popoutLoom(iframeId) {
@@ -91,7 +91,7 @@
     // message we re-send after explore:ready still wins for metadata, but the
     // URL gives the popup a synchronous bootstrap value.
     var meta = snapshot.metadata || {};
-    var url = '/loom-explore/index.html';
+    var url = '/bigraph-loom/index.html';
     if (meta.id) {
       url += '?id=' + encodeURIComponent(meta.id);
     }
@@ -277,7 +277,7 @@
 
   function _applyCompositeViewMode() {
     var cfg = window._uiConfig || {};
-    var mode = cfg.composite_view || 'loom-explore';
+    var mode = cfg.composite_view || 'bigraph-loom';
     var iframe = document.getElementById('composite-explore-frame');
     var svgLegacy = document.getElementById('composite-explore-svg-legacy');
     if (!iframe || !svgLegacy) return;
@@ -3146,7 +3146,7 @@
         if (stepsInput) {
           stepsInput.value = (data.default_n_steps != null) ? data.default_n_steps : 5;
         }
-        // Send wiring state to loom-explore iframe via postMessage
+        // Send wiring state to bigraph-loom iframe via postMessage
         // "library" = the package the composite ships in; data.module is the
         // submodule path (e.g. "pbg_biomodels.composites") — drop the
         // conventional .composites suffix to get the library name.
@@ -3191,7 +3191,7 @@
       });
   }
 
-  // _loadCompositeExplorer: send composite state to the loom-explore iframe.
+  // _loadCompositeExplorer: send composite state to the bigraph-loom iframe.
   // Can be called with a pre-resolved state object (from _ceFetch) or with
   // just a ref string, in which case it fetches /api/composite-state first.
   // When ui.composite_view === 'bigraph-viz', uses the legacy SVG path instead.
@@ -3201,7 +3201,7 @@
     _applyCompositeViewMode();
 
     var cfg = window._uiConfig || {};
-    if ((cfg.composite_view || 'loom-explore') === 'bigraph-viz') {
+    if ((cfg.composite_view || 'bigraph-loom') === 'bigraph-viz') {
       _legacyLoadCompositeSvg(ref);
       return;
     }
@@ -8605,7 +8605,7 @@
               '</button>' +
             '</div>' +
             '<iframe id="inv-composite-explore-frame"' +
-                    ' src="/loom-explore/index.html"' +
+                    ' src="/bigraph-loom/index.html"' +
                     ' title="Composite wiring"' +
                     ' style="width:100%;height:520px;border:1px solid #ddd;background:#fff;display:none">' +
             '</iframe>' +

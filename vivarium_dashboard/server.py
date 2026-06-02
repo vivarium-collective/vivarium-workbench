@@ -152,6 +152,12 @@ def _json_body(data) -> bytes:
 _REGISTRY_CACHE: dict = {"data": None, "ts": 0.0}
 _REGISTRY_TTL = 30.0  # seconds
 
+# Cache of built composite-state payloads for /api/composite-state, keyed by ref:
+# {ref: (built_at_epoch, payload_dict)}. Building a whole-cell composite is ~1s+;
+# this makes repeat opens + pop-outs instant. Short TTL so code edits are picked up.
+_COMPOSITE_STATE_CACHE: dict = {}
+_COMPOSITE_STATE_TTL_S = 300.0
+
 # Canonical investigation Overview status values (see Task A3.5 / set-overview).
 _VALID_OVERVIEW_STATUSES = {"draft", "in-progress", "completed", "archived"}
 
@@ -4675,17 +4681,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_ui_config()
         if self.path.startswith("/api/git-status"):
             return self._get_git_status()
-        # Serve the bundled loom-explore viewer.
-        if self.path.startswith("/loom-explore"):
+        # Serve the bigraph-loom viewer at /bigraph-loom. The bundle comes from
+        # the standalone `bigraph-loom` package (a dependency), via
+        # bigraph_loom.asset_dir(), rather than a vendored copy.
+        if self.path.startswith("/bigraph-loom"):
             # Strip query string before resolving to the file on disk; popup
             # URLs include ?id=<ref> which would otherwise prevent the
             # static handler from finding index.html.
             loom_path = self.path.split("?", 1)[0]
-            rel = loom_path[len("/loom-explore"):].lstrip("/") or "index.html"
+            rel = loom_path[len("/bigraph-loom"):].lstrip("/") or "index.html"
             if ".." in rel.split("/"):
                 self.send_response(403); self.end_headers(); return
-            # Bundled inside the vivarium-dashboard package (was workspace-vendored).
-            target = STATIC_DIR / "loom-explore" / rel
+            from bigraph_loom import asset_dir
+            target = asset_dir() / rel
             return self._serve_file(target, self._guess_mime(rel))
 
         # Generic static file serving — also strip query strings so any
@@ -7865,7 +7873,7 @@ if __name__ == "__main__":
     def _get_investigation_composite_doc(self):
         """GET /api/investigation-composite-doc?investigation=<n>&composite=<c>
         Returns: {state: <parsed composite YAML>}
-        Used by the Composites tab's loom-explore iframe to fetch the
+        Used by the Composites tab's bigraph-loom iframe to fetch the
         composite document as JSON (the iframe can't parse YAML in-browser
         without bundling a parser).
         """
@@ -8492,7 +8500,7 @@ if __name__ == "__main__":
             ws = {}
         ui = ws.get("ui") or {}
         return self._json({
-            "composite_view": ui.get("composite_view", "loom-explore"),
+            "composite_view": ui.get("composite_view", "bigraph-loom"),
         }, 200)
 
     def _get_visualization_classes(self):
@@ -10618,6 +10626,19 @@ if __name__ == "__main__":
         if not ref:
             return self._json({"error": "ref required"}, 400)
 
+        # Building a whole-cell composite (build_generator) takes ~3s and is
+        # re-run on every explorer open / pop-out. Cache the built (and value-
+        # summarized) doc per ref with a short TTL so repeat opens are instant
+        # but code edits are still picked up. Checked FIRST so a hit skips the
+        # per-request sys.path + registry setup entirely. Bypass with ?fresh=1.
+        import time as _time
+        fresh = qs.get("fresh") in ("1", "true", "yes")
+        cache = _COMPOSITE_STATE_CACHE
+        if not fresh:
+            hit = cache.get(ref)
+            if hit is not None and (_time.time() - hit[0]) < _COMPOSITE_STATE_TTL_S:
+                return self._json({**hit[1], "cached": True}, 200)
+
         _ws_add_to_sys_path()
 
         # Generator-kind branch: resolve via pbg-superpowers' live registry.
@@ -10633,8 +10654,16 @@ if __name__ == "__main__":
                     doc = build_generator(entry)
                 except Exception as e:  # noqa: BLE001
                     return self._json({"error": f"generator build failed: {e}"}, 400)
-                return self._json({"state": doc, "kind": "generator",
-                                    "module": entry.module}, 200)
+                from vivarium_dashboard.lib.process_docs import (
+                    attach_process_docs, summarize_large_values,
+                )
+                doc = summarize_large_values(doc)  # shrink ~5MB bulk values → tiny
+                attach_process_docs(doc)  # per-process docstrings for the inspector
+                payload = {"state": doc, "kind": "generator", "module": entry.module}
+                cache[ref] = (_time.time(), payload)
+                if len(cache) > 16:  # cap memory; drop the oldest entry
+                    cache.pop(next(iter(cache)))
+                return self._json(payload, 200)
         except ImportError:
             pass
 
@@ -10665,6 +10694,8 @@ if __name__ == "__main__":
         except Exception as e:
             return self._json({"error": f"parse failed: {e}"}, 500)
 
+        from vivarium_dashboard.lib.process_docs import attach_process_docs
+        attach_process_docs(doc)  # per-process docstrings for the inspector
         return self._json({"state": doc, "kind": "spec"}, 200)
 
     def _get_composite_resolve(self):
@@ -10715,6 +10746,12 @@ if __name__ == "__main__":
             else:
                 state = doc
             svg = _render_composite_svg(state, pkg)
+            # Attach per-process docstrings so the explorer inspector's
+            # Description section is populated on the composite-resolve path
+            # too (not just /api/composite-state). Done after the SVG render
+            # so the bigraph-viz subprocess sees clean state.
+            from vivarium_dashboard.lib.process_docs import attach_process_docs
+            attach_process_docs(state)
             return self._json({
                 "id": spec_id,
                 "name": entry.name,
@@ -10746,6 +10783,8 @@ if __name__ == "__main__":
         svg = _render_composite_svg(state, pkg)
 
         from vivarium_dashboard.lib.composite_lookup import _derive_module_from_spec_id
+        from vivarium_dashboard.lib.process_docs import attach_process_docs
+        attach_process_docs(state)  # per-process docstrings for the inspector
         return self._json({
             "id": spec_id,
             "name": spec.get("name", spec_id.rsplit(".composites.", 1)[-1]),

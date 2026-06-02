@@ -15,8 +15,9 @@ dependencies = [
     "pypdf>=4.0",
     "numpy",
     "process-bigraph",
-    "bigraph-schema",
+    "bigraph-schema>=1.4.1",
     "pbg-superpowers",
+    "bigraph-loom @ git+https://github.com/vivarium-collective/bigraph-loom.git@main",
 ]
 
 [project.optional-dependencies]
