@@ -15,7 +15,7 @@ import {
   applySavedPositions, positionsFromNodes, debounce,
 } from './layoutStore';
 import { stateToReactFlow, topLevelStorePaths } from './convert';
-import { isHiddenByAncestor } from './panels/filterHidden';
+import { isHiddenByAncestor, retargetEdgesToVisible } from './panels/filterHidden';
 import { Sidebar } from './panels/Sidebar';
 import { RunPanel } from './panels/RunPanel';
 import { ResultsPanel } from './panels/ResultsPanel';
@@ -199,9 +199,9 @@ export default function App() {
         return n;
       });
     const visibleIds = new Set(visibleNodes.map((n) => n.id));
-    const visibleEdges = raw.edges.filter(
-      (e) => visibleIds.has(e.source) && visibleIds.has(e.target),
-    );
+    // Re-target wires into collapsed/hidden branches to the nearest visible
+    // ancestor (so a process still shows a wire to the branch it connects into).
+    const visibleEdges = retargetEdgesToVisible(raw.edges as any[], visibleIds);
 
     (async () => {
       const saved = loadLayout(compositeId);
@@ -246,9 +246,7 @@ export default function App() {
           collapsed.has(n.id) ? { ...n, data: { ...n.data, isCollapsed: true } as any } : n,
         );
       const visibleIds = new Set(visibleNodes.map((n) => n.id));
-      const visibleEdges = raw.edges.filter(
-        (e) => visibleIds.has(e.source) && visibleIds.has(e.target),
-      );
+      const visibleEdges = retargetEdgesToVisible(raw.edges as any[], visibleIds);
       const laid = await applyLayout(visibleNodes as any, visibleEdges as any);
       setNodes(laid as any);
       setEdges(visibleEdges as any);

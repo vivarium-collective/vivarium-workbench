@@ -26,6 +26,47 @@ export function isHiddenByAncestor(path: string[], hidden: Set<string>): boolean
 }
 
 /**
+ * Nearest VISIBLE node id for a (possibly hidden/collapsed) node id: the id
+ * itself if visible, else the longest ancestor-prefix id that is visible.
+ * Node ids are dotted paths. Returns null if nothing on the path is visible.
+ */
+export function nearestVisibleId(id: string, visibleIds: Set<string>): string | null {
+  if (visibleIds.has(id)) return id;
+  const parts = id.split('.');
+  for (let i = parts.length - 1; i > 0; i--) {
+    const anc = parts.slice(0, i).join('.');
+    if (visibleIds.has(anc)) return anc;
+  }
+  return null;
+}
+
+/**
+ * Re-target edges so a wire to a node inside a collapsed/hidden branch is drawn
+ * to the nearest VISIBLE ancestor (the branch node) instead of being dropped.
+ * Unchanged edges pass through as-is; re-targeted edges are de-duped per
+ * (source,target,edgeType) so a heavily-wired collapsed branch shows one wire
+ * per kind rather than dozens of overlapping ones. Self-loops are dropped.
+ * Pure — does not mutate its inputs.
+ */
+export function retargetEdgesToVisible<
+  E extends { source: string; target: string; data?: { edgeType?: string } },
+>(edges: E[], visibleIds: Set<string>): E[] {
+  const out: E[] = [];
+  const seen = new Set<string>();
+  for (const e of edges) {
+    const s = nearestVisibleId(e.source, visibleIds);
+    const t = nearestVisibleId(e.target, visibleIds);
+    if (!s || !t || s === t) continue;
+    if (s === e.source && t === e.target) { out.push(e); continue; }
+    const key = `${s}__${t}__${e.data?.edgeType ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ ...e, source: s, target: t });
+  }
+  return out;
+}
+
+/**
  * Drop nodes whose id is in `hidden`, and drop any edge touching a dropped node.
  * Pure — does not mutate its inputs.
  */

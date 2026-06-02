@@ -40,6 +40,23 @@ function displayValue(value: any): string | null {
 }
 
 /**
+ * Resolve a process port's wire target to an ABSOLUTE store path. Targets are
+ * written RELATIVE to the process's parent store (e.g. a process at
+ * `agents.0.foo` wiring port→`['bulk']` means `agents.0.bulk`, and
+ * `['unique','RNA']` means `agents.0.unique.RNA`). `'..'` walks up. Without this
+ * the joined target never matches a store node id and the wire is dropped.
+ */
+function resolveWirePath(parentPath: string[], target: unknown): string[] {
+  const segs = Array.isArray(target) ? (target as unknown[]).map(String) : [String(target)];
+  const out = [...parentPath];
+  for (const seg of segs) {
+    if (seg === '..') out.pop();
+    else if (seg !== '.') out.push(seg);
+  }
+  return out;
+}
+
+/**
  * Top-level store keys of a composite state — every key whose node is not a
  * process/step. Mirrors the dashboard's `all_store_paths`; used to seed the
  * View tab's emit selection so all states emit by default.
@@ -84,6 +101,7 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
 
     if (node._type === 'process' || node._type === 'step') {
       const id = pathKey(path);
+      const parentPath = path.slice(0, -1);  // wire targets are relative to this
       const inputPorts = Object.keys(node.inputs ?? {});
       const outputPorts = Object.keys(node.outputs ?? {});
 
@@ -121,7 +139,7 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
       // Wire edges: inputs arrive at this process node from store nodes.
       // Convention: input wires leave the store's LEFT side and enter the process's LEFT side.
       for (const [port, target] of Object.entries(node.inputs ?? {})) {
-        const tid = Array.isArray(target) ? (target as string[]).join('.') : String(target);
+        const tid = pathKey(resolveWirePath(parentPath, target));
         edges.push({
           id: `${id}--in--${port}`,
           source: tid,
@@ -139,7 +157,7 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
       // Wire edges: outputs leave this process node to store nodes.
       // Convention: output wires leave the process's RIGHT side and enter the store's RIGHT side.
       for (const [port, target] of Object.entries(node.outputs ?? {})) {
-        const tid = Array.isArray(target) ? (target as string[]).join('.') : String(target);
+        const tid = pathKey(resolveWirePath(parentPath, target));
         edges.push({
           id: `${id}--out--${port}`,
           source: id,
