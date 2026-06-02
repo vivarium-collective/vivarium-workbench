@@ -1,9 +1,47 @@
 """Tests for the canonical workspace-layout resolver."""
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from vivarium_dashboard.lib.workspace_paths import (
     WorkspacePaths, LAYOUT_DEFAULTS, package_slug,
 )
+
+
+def test_load_handles_non_ascii_yaml_under_ascii_locale(tmp_path):
+    """workspace.yaml is UTF-8 (em dashes etc. are common in titles); loading
+    it must not depend on the process locale.
+
+    Regression for the Simulations DB crash when the dashboard server ran under
+    a US-ASCII locale: ``'ascii' codec can't decode byte 0xe2 ...`` raised from
+    ``WorkspacePaths.load`` because ``read_text()`` used the locale default
+    instead of UTF-8.
+    """
+    # An em dash -> bytes e2 80 94, undecodable as ascii.
+    (tmp_path / "workspace.yaml").write_text(
+        'name: demo\ntitle: "Colony — HPC readiness"\n', encoding="utf-8"
+    )
+    # Run the loader in a child forced into a non-UTF-8 locale, reproducing the
+    # server's environment. Pre-fix this raises UnicodeDecodeError; the explicit
+    # encoding="utf-8" makes it locale-independent.
+    env = {
+        **os.environ,
+        "LC_ALL": "C", "LANG": "C", "LC_CTYPE": "C",
+        "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0",
+    }
+    code = (
+        "from pathlib import Path;"
+        "from vivarium_dashboard.lib.workspace_paths import WorkspacePaths;"
+        f"print(WorkspacePaths.load(Path(r'{tmp_path}')).studies)"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code], env=env, capture_output=True, text=True
+    )
+    assert proc.returncode == 0, (
+        f"WorkspacePaths.load crashed under ascii locale:\n{proc.stderr}"
+    )
+    assert "studies" in proc.stdout
 
 
 def test_flat_defaults_when_no_layout(tmp_path):

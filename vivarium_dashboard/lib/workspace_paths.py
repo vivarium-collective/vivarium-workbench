@@ -98,7 +98,7 @@ class WorkspacePaths:
         wf = root / "workspace.yaml"
         config: dict = {}
         if wf.exists():
-            config = yaml.safe_load(wf.read_text()) or {}
+            config = yaml.safe_load(wf.read_text(encoding="utf-8")) or {}
         return cls.from_config(root, config)
 
     def dir(self, name: str) -> Path:
