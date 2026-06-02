@@ -333,38 +333,49 @@ export default function App() {
   // WHITE background. Captures the React Flow viewport element via html-to-image,
   // framed to the full nodes bounds (not just the on-screen viewport).
   const [showExport, setShowExport] = useState(false);
+  // While true, onlyRenderVisibleElements is disabled so the WHOLE graph (all
+  // nodes AND edges) is in the DOM for html-to-image to capture. Otherwise the
+  // off-viewport edges are culled and the export comes out wireless.
+  const [exporting, setExporting] = useState(false);
   const exportImage = useCallback(async (format: 'png' | 'svg' | 'pdf') => {
     setShowExport(false);
-    const el = canvasWrapRef.current?.querySelector('.react-flow__viewport') as HTMLElement | null;
-    if (!el || nodes.length === 0) return;
-    const bounds = getNodesBounds(nodes as any);
-    const PAD = 60, MAX = 5000;
-    const rawW = bounds.width + PAD * 2, rawH = bounds.height + PAD * 2;
-    const scale = Math.min(1, MAX / Math.max(rawW, rawH, 1));
-    const w = Math.max(1, Math.ceil(rawW * scale)), h = Math.max(1, Math.ceil(rawH * scale));
-    const vp = getViewportForBounds(bounds, w, h, 0.02, 4, 0.08);
-    const style = {
-      width: `${w}px`, height: `${h}px`,
-      transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`,
-    };
-    const baseName = (name || compositeId || 'composite').replace(/[^\w.-]+/g, '_');
-    const grab = (url: string, ext: string) => {
-      const a = document.createElement('a');
-      a.href = url; a.download = `${baseName}.${ext}`; a.click();
-    };
+    if (nodes.length === 0) return;
+    setExporting(true);  // render everything, then wait for React Flow to paint
+    await new Promise((r) => setTimeout(r, 250));
     try {
+      const el = canvasWrapRef.current?.querySelector('.react-flow__viewport') as HTMLElement | null;
+      if (!el) return;
+      const bounds = getNodesBounds(nodes as any);
+      const PAD = 60, MAX = 6000;
+      const rawW = bounds.width + PAD * 2, rawH = bounds.height + PAD * 2;
+      const scale = Math.min(1, MAX / Math.max(rawW, rawH, 1));
+      const w = Math.max(1, Math.ceil(rawW * scale)), h = Math.max(1, Math.ceil(rawH * scale));
+      const vp = getViewportForBounds(bounds, w, h, 0.02, 4, 0.08);
+      const style = {
+        width: `${w}px`, height: `${h}px`,
+        transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`,
+      };
+      const baseName = (name || compositeId || 'composite').replace(/[^\w.-]+/g, '_');
+      const grab = (url: string, ext: string) => {
+        const a = document.createElement('a');
+        a.href = url; a.download = `${baseName}.${ext}`; a.click();
+      };
       if (format === 'svg') {
         grab(await toSvg(el, { backgroundColor: '#ffffff', width: w, height: h, style }), 'svg');
       } else {
         const png = await toPng(el, { backgroundColor: '#ffffff', width: w, height: h, style, pixelRatio: 2 });
-        if (format === 'png') { grab(png, 'png'); return; }
-        const { jsPDF } = await import('jspdf');
-        const pdf = new jsPDF({ orientation: w >= h ? 'landscape' : 'portrait', unit: 'px', format: [w, h] });
-        pdf.addImage(png, 'PNG', 0, 0, w, h);
-        pdf.save(`${name}.pdf`);
+        if (format === 'png') { grab(png, 'png'); }
+        else {
+          const { jsPDF } = await import('jspdf');
+          const pdf = new jsPDF({ orientation: w >= h ? 'landscape' : 'portrait', unit: 'px', format: [w, h] });
+          pdf.addImage(png, 'PNG', 0, 0, w, h);
+          pdf.save(`${baseName}.pdf`);
+        }
       }
     } catch (err) {
       console.error('[bigraph-loom] export failed', err);
+    } finally {
+      setExporting(false);
     }
   }, [nodes, name, compositeId]);
 
@@ -588,7 +599,7 @@ export default function App() {
                   fitViewOptions={{ padding: 0.2 }}
                   /* Big composites have hundreds of nodes + custom floating edges;
                      only render what's in the viewport so pan/zoom stays smooth. */
-                  onlyRenderVisibleElements
+                  onlyRenderVisibleElements={!exporting}
                   minZoom={0.02}
                   /* Read-only viewer for wiring/structure, but users CAN rearrange
                      node positions by dragging individual nodes. What's forbidden:
