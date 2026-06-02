@@ -529,6 +529,29 @@
     });
   }
 
+  // Coerce a value to an Array. Use everywhere a YAML/JSON field is
+  // SUPPOSED to be a list but a caller might supply a dict (e.g. a
+  // grouped/nested shape). Prevents
+  //   "(x || []).map is not a function"
+  // class of bugs from crashing report generation. Logs a single warning
+  // per (label, type) so we notice schema drift without spamming the
+  // console. Returns []; the caller's report degrades gracefully (empty
+  // section) instead of throwing.
+  var _asListWarned = new Set();
+  function _asList(value, label) {
+    if (Array.isArray(value)) return value;
+    if (value === null || value === undefined) return [];
+    var type = (typeof value === 'object') ? 'object' : (typeof value);
+    var key = (label || '?') + ':' + type;
+    if (!_asListWarned.has(key)) {
+      _asListWarned.add(key);
+      console.warn('[walkthrough] expected array for ' + (label || '<unlabeled field>') +
+                   ', got ' + type + ' — degrading to empty list. ' +
+                   'Check the workspace yaml schema.');
+    }
+    return [];
+  }
+
   function _filterVizCatalog(query) {
     var rows = document.querySelectorAll('#viz-picker-container .picker-row');
     var q = (query || '').toLowerCase().trim();
@@ -6616,7 +6639,10 @@
        entries that fed the top-of-report "Acceptance criteria" section
        (now removed). The acceptance_criteria field on investigation.yaml
        still exists in the schema; per-study behavior_tests +
-       conclusion_verdicts carry the same signal more actionably. */
+       conclusion_verdicts carry the same signal more actionably.
+       The defensive `_asList` coercion this fix added at the (now-deleted)
+       render site is superseded; the durable guard lives server-side in
+       `_coerce_list_field`. `_asList` is kept as a reusable helper. */
     var acceptance = '';
 
     // ── Collect the union of bib keys cited across all studies + iset ──

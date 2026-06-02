@@ -484,3 +484,88 @@ def test_iset_detail_multiaxis_status_partial(_ws):
     assert s["implementation_status"] is None
     assert s["evaluation_status"] is None
     assert s["expert_review_status"] is None
+
+
+# ---------------------------------------------------------------------------
+# Part 5: schema-drift defense — non-list acceptance_criteria / expert_docs
+# must degrade gracefully, not break report generation.
+#
+# Backstory: an investigation author grouped acceptance_criteria into
+# {investigation_terminal: [...], per_study_gating: [...]} — semantically
+# reasonable, but the dashboard's walkthrough renderer expects a list and
+# crashed with "(iset.acceptance_criteria || []).map is not a function".
+# The fix moved the grouping into a per-entry `gating:` tag and added
+# `_coerce_list_field` on the server so any future non-list value degrades
+# to [] with a single stderr warning rather than 500-ing the endpoint.
+# ---------------------------------------------------------------------------
+
+from vivarium_dashboard.server import _coerce_list_field
+
+
+def test_coerce_list_field_passes_through_list():
+    assert _coerce_list_field({"x": [1, 2, 3]}, "x") == [1, 2, 3]
+
+
+def test_coerce_list_field_returns_empty_for_missing():
+    assert _coerce_list_field({}, "missing") == []
+
+
+def test_coerce_list_field_returns_empty_for_explicit_none():
+    assert _coerce_list_field({"x": None}, "x") == []
+
+
+def test_coerce_list_field_coerces_dict_to_empty(capsys):
+    """The bug-class fix: a dict where a list was expected does NOT raise;
+    it degrades to [] and prints a stderr warning naming the field."""
+    out = _coerce_list_field({"acceptance_criteria": {"a": [1]}},
+                              "acceptance_criteria", source="my.yaml")
+    assert out == []
+    captured = capsys.readouterr()
+    assert "acceptance_criteria" in captured.err
+    assert "my.yaml" in captured.err
+    assert "dict" in captured.err
+
+
+def test_coerce_list_field_coerces_string_to_empty(capsys):
+    """Other non-list types also degrade rather than raise."""
+    out = _coerce_list_field({"x": "oops"}, "x", source="s.yaml")
+    assert out == []
+    err = capsys.readouterr().err
+    assert "expected list" in err
+    assert "str" in err
+
+
+def test_iset_detail_with_dict_acceptance_criteria_does_not_500(_ws, capsys):
+    """End-to-end: a grouped (dict-shaped) acceptance_criteria field on an
+    investigation.yaml must NOT 500 the /api/iset/<name> endpoint. It must
+    return 200 with acceptance_criteria coerced to []."""
+    _write_iset(
+        _ws, "inv", status="planning", studies=[],
+        # Grouped shape — the original chris-feedback integration attempt
+        # that broke the renderer.
+        acceptance_criteria={
+            "investigation_terminal": [{"study": "a", "behavior": "b"}],
+            "per_study_gating":       [{"study": "c", "behavior": "d"}],
+        },
+    )
+    resp, code = _build_iset_detail_for_test(_ws, "inv")
+    assert code == 200, resp
+    assert resp["acceptance_criteria"] == []
+    err = capsys.readouterr().err
+    assert "acceptance_criteria" in err
+    assert "dict" in err
+
+
+def test_iset_detail_with_list_acceptance_criteria_passes_through(_ws):
+    """Sanity: a list-shaped acceptance_criteria flows through unchanged."""
+    crits = [
+        {"study": "s1", "behavior": "b1", "gating": "investigation_terminal"},
+        {"study": "s1", "behavior": "b2", "gating": "per_study"},
+    ]
+    _write_iset(
+        _ws, "inv", status="planning", studies=[],
+        acceptance_criteria=crits,
+    )
+    resp, code = _build_iset_detail_for_test(_ws, "inv")
+    assert code == 200, resp
+    assert resp["acceptance_criteria"] == crits
