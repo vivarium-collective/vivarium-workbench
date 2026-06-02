@@ -42,11 +42,11 @@ export function nearestVisibleId(id: string, visibleIds: Set<string>): string | 
 
 /**
  * Re-target edges so a wire to a node inside a collapsed/hidden branch is drawn
- * to the nearest VISIBLE ancestor (the branch node) instead of being dropped.
- * Unchanged edges pass through as-is; re-targeted edges are de-duped per
- * (source,target,edgeType) so a heavily-wired collapsed branch shows one wire
- * per kind rather than dozens of overlapping ones. Self-loops are dropped.
- * Pure — does not mutate its inputs.
+ * to the nearest VISIBLE ancestor (the branch node) instead of being dropped,
+ * AND de-dupe ALL edges per (source,target,edgeType). A process commonly wires
+ * several ports to the same store; rendering one custom floating edge per port
+ * is the main source of lag on big composites, so collapse them to one line per
+ * (pair, direction). Self-loops are dropped. Pure — does not mutate its inputs.
  */
 export function retargetEdgesToVisible<
   E extends { source: string; target: string; data?: { edgeType?: string } },
@@ -57,11 +57,10 @@ export function retargetEdgesToVisible<
     const s = nearestVisibleId(e.source, visibleIds);
     const t = nearestVisibleId(e.target, visibleIds);
     if (!s || !t || s === t) continue;
-    if (s === e.source && t === e.target) { out.push(e); continue; }
     const key = `${s}__${t}__${e.data?.edgeType ?? ''}`;
-    if (seen.has(key)) continue;
+    if (seen.has(key)) continue;  // collapse multi-port / overlapping wires to one
     seen.add(key);
-    out.push({ ...e, source: s, target: t });
+    out.push(s === e.source && t === e.target ? e : { ...e, source: s, target: t });
   }
   return out;
 }

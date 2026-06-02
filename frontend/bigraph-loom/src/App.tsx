@@ -534,6 +534,10 @@ export default function App() {
                   onNodeDoubleClick={handleNodeDoubleClick}
                   fitView
                   fitViewOptions={{ padding: 0.2 }}
+                  /* Big composites have hundreds of nodes + custom floating edges;
+                     only render what's in the viewport so pan/zoom stays smooth. */
+                  onlyRenderVisibleElements
+                  minZoom={0.02}
                   /* Read-only viewer for wiring/structure, but users CAN rearrange
                      node positions by dragging individual nodes. What's forbidden:
                      new edges, edge reconnects, and any delete. */
