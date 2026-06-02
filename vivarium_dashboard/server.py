@@ -10712,6 +10712,12 @@ if __name__ == "__main__":
             else:
                 state = doc
             svg = _render_composite_svg(state, pkg)
+            # Attach per-process docstrings so the explorer inspector's
+            # Description section is populated on the composite-resolve path
+            # too (not just /api/composite-state). Done after the SVG render
+            # so the bigraph-viz subprocess sees clean state.
+            from vivarium_dashboard.lib.process_docs import attach_process_docs
+            attach_process_docs(state)
             return self._json({
                 "id": spec_id,
                 "name": entry.name,
@@ -10743,6 +10749,8 @@ if __name__ == "__main__":
         svg = _render_composite_svg(state, pkg)
 
         from vivarium_dashboard.lib.composite_lookup import _derive_module_from_spec_id
+        from vivarium_dashboard.lib.process_docs import attach_process_docs
+        attach_process_docs(state)  # per-process docstrings for the inspector
         return self._json({
             "id": spec_id,
             "name": spec.get("name", spec_id.rsplit(".composites.", 1)[-1]),
