@@ -178,7 +178,7 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
           targetHandle: port,          // process's left input port
           label: port,
           animated: false,
-          style: { strokeDasharray: '5,5' },  // wire convention: dashed
+          style: { stroke: '#94a3b8', strokeDasharray: '5,5' },  // wire convention: dashed (inline stroke so image export captures it)
           markerEnd: WIRE_ARROW,       // arrow at the process's input port
           data: { edgeType: 'input' },
         });
@@ -196,7 +196,7 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
           targetHandle: 'right-in',    // store's right handle
           label: port,
           animated: false,
-          style: { strokeDasharray: '5,5' },  // wire convention: dashed
+          style: { stroke: '#94a3b8', strokeDasharray: '5,5' },  // wire convention: dashed (inline stroke so image export captures it)
           markerEnd: WIRE_ARROW,       // arrow at the store's incoming side
           data: { edgeType: 'output' },
         });
@@ -252,7 +252,7 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
           sourceHandle: 'bottom-place',  // parent store's bottom handle
           targetHandle: 'top-place',     // child store's top handle
           animated: false,
-          style: { strokeWidth: 2.5 },  // place convention: thick solid
+          style: { stroke: '#64748b', strokeWidth: 2.5 },  // place convention: thick solid (inline stroke for export)
           data: { edgeType: 'place' },
         });
       }
