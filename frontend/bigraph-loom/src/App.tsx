@@ -87,10 +87,12 @@ export default function App() {
   const [trajectory, setTrajectory] = useState<TrajectoryRow[] | null>(null);
   const [vizHtml, setVizHtml] = useState<Record<string, { html: string }> | null>(null);
   const readyFiredRef = useRef(false);
-  // React Flow instance, captured via onInit, so Re-layout can fitView() the
+  // React Flow instance, captured via onInit, so Re-layout can frame the
   // freshly-consolidated set (App is the ReactFlowProvider's PARENT, so it can't
-  // call useReactFlow() directly).
+  // call useReactFlow() directly). canvasWrapRef measures the viewport size so
+  // we can compute the zoom deterministically.
   const rfRef = useRef<any>(null);
+  const canvasWrapRef = useRef<HTMLDivElement | null>(null);
 
   // Use React Flow's controlled-state hooks so drag changes persist across
   // re-renders. Without these, every parent re-render would reset positions
@@ -250,18 +252,27 @@ export default function App() {
       const laid = await applyLayout(visibleNodes as any, visibleEdges as any);
       setNodes(laid as any);
       setEdges(visibleEdges as any);
-      // Frame the freshly-consolidated set. Compute the bounds from the layout
-      // positions ourselves and use fitBounds — this does NOT depend on React
-      // Flow having measured the new DOM nodes yet (fitView() before measurement
-      // pans to stale/empty coords, which is why the graph went "out of view").
+      // Frame the freshly-consolidated set DETERMINISTICALLY: compute the layout
+      // bounds + the viewport pixel size ourselves, derive zoom, and setCenter().
+      // This depends on NOTHING that React Flow measures asynchronously — earlier
+      // fitView()/fitBounds() ran before DOM measurement and panned to empty space.
       const b = boundsOf(laid as any);
       setTimeout(() => {
         const inst = rfRef.current;
-        if (!inst) return;
-        if (b && typeof inst.fitBounds === 'function') {
-          inst.fitBounds(b, { padding: 0.12, duration: 400 });
+        if (!inst || !b) return;
+        const el = canvasWrapRef.current;
+        const vw = el?.clientWidth || 900;
+        const vh = el?.clientHeight || 650;
+        const PAD = 1.18; // ~9% margin each side
+        const zoom = Math.max(0.05, Math.min(1.5,
+          vw / (b.width * PAD || 1), vh / (b.height * PAD || 1)));
+        const cx = b.x + b.width / 2;
+        const cy = b.y + b.height / 2;
+        if (typeof inst.setCenter === 'function') {
+          inst.setCenter(cx, cy, { zoom, duration: 400 });
         } else {
-          inst.fitView?.({ padding: 0.2, duration: 400 });
+          inst.setViewport?.({ x: vw / 2 - cx * zoom, y: vh / 2 - cy * zoom, zoom },
+            { duration: 400 });
         }
       }, 60);
     })();
@@ -417,8 +428,8 @@ export default function App() {
             flexDirection: 'row',
           }}>
             <EmitContext.Provider value={emitSet}>
-              {/* Canvas column — flex:1. Holds the Reset button + ReactFlow. */}
-              <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
+              {/* Canvas column — flex:1. Holds the Re-layout button + ReactFlow. */}
+              <div ref={canvasWrapRef} style={{ flex: 1, position: 'relative', minWidth: 0 }}>
                 {/* Re-layout button — top-right of the canvas. Re-runs auto-layout
                     on the CURRENT visible set (after hiding/collapsing nodes),
                     consolidating them into a tight view, and fits the viewport. */}

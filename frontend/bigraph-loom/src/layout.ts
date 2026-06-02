@@ -174,21 +174,28 @@ export async function applyLayout(
   }
   walk({ id: ROOT, children: result.children });
 
-  // Place process nodes in a VERTICAL COLUMN to the right of the laid-out store
-  // hierarchy, evenly spaced — instead of ELK's horizontal row. Wires (process
-  // port ↔ store) then run left→right from the stores to this column.
+  // Place process nodes in a GRID of vertical columns to the right of the
+  // laid-out store hierarchy, evenly spaced — instead of ELK's horizontal row.
+  // A single column of N processes is ~N*110px tall; for big composites that's
+  // thousands of px and frames as an unusable sliver. So wrap into columns once
+  // a column reaches ~14 rows, keeping the block roughly square and easy to fit.
   const storePts = [...positions.values()];
-  if (storePts.length > 0) {
-    const PROC_H = 60, GAP_X = 240, V_SPACE = 50;
+  const procNodes = nodes.filter((n) => n.type === "process");
+  if (storePts.length > 0 && procNodes.length > 0) {
+    const PROC_W = 140, PROC_H = 60, GAP_X = 240, H_SPACE = 70, V_SPACE = 50;
     const maxRight = Math.max(...storePts.map((p) => p.x)) + 80; // +store circle width
     const minY = Math.min(...storePts.map((p) => p.y));
     const procColX = maxRight + GAP_X;
-    let i = 0;
-    for (const n of nodes) {
-      if (n.type !== "process") continue;
-      positions.set(n.id, { x: procColX, y: minY + i * (PROC_H + V_SPACE) });
-      i += 1;
-    }
+    // Aim for a roughly-square block: rows ≈ ceil(sqrt(n)), capped to a sane band.
+    const maxRows = Math.min(16, Math.max(6, Math.ceil(Math.sqrt(procNodes.length))));
+    procNodes.forEach((n, i) => {
+      const col = Math.floor(i / maxRows);
+      const row = i % maxRows;
+      positions.set(n.id, {
+        x: procColX + col * (PROC_W + H_SPACE),
+        y: minY + row * (PROC_H + V_SPACE),
+      });
+    });
   }
 
   return nodes.map((n) => {
