@@ -40,7 +40,12 @@
     var title = c.title
       ? '<div class="chart-title">' + c.title + '</div>'
       : '';
-    return '<div class="chart-card">' + title + c.svg +
+    // SVG records carry inline markup in c.svg; PNG/GIF records carry a
+    // self-contained data-URI in c.img (rendered as <img>).
+    var media = c.img
+      ? '<img class="chart-img" src="' + c.img + '" alt="' + (c.key || 'chart') + '" loading="lazy">'
+      : (c.svg || '');
+    return '<div class="chart-card">' + title + media +
            '<div class="chart-caption">' + (c.caption || '') + '</div></div>';
   }
   function _loadCharts(panelId) {
