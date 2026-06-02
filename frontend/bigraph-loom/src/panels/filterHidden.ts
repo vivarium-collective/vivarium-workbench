@@ -66,6 +66,24 @@ export function retargetEdgesToVisible<
 }
 
 /**
+ * Compute the set of node ids that should be visually hidden (via React Flow's
+ * `node.hidden` CSS flag) given the `hidden` selection set. A node is hidden
+ * when it OR any ancestor store is in `hidden`. Reads each node's path from
+ * `data.path`. Pure — does not mutate its inputs.
+ */
+export function hiddenNodeIds<N extends { id: string; data?: { path?: string[] } }>(
+  nodes: N[],
+  hidden: Set<string>,
+): Set<string> {
+  const out = new Set<string>();
+  if (hidden.size === 0) return out;
+  for (const n of nodes) {
+    if (isHiddenByAncestor(n.data?.path ?? [], hidden)) out.add(n.id);
+  }
+  return out;
+}
+
+/**
  * Drop nodes whose id is in `hidden`, and drop any edge touching a dropped node.
  * Pure — does not mutate its inputs.
  */

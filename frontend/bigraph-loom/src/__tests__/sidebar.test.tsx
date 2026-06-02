@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
-import { filterHidden, clampSidebarWidth, isHiddenByAncestor } from '../panels/filterHidden';
+import { filterHidden, clampSidebarWidth, isHiddenByAncestor, hiddenNodeIds } from '../panels/filterHidden';
 import { Sidebar, buildNodeTree } from '../panels/Sidebar';
 import type { ExploreInspectMsg } from '../api';
 
@@ -56,6 +56,39 @@ describe('isHiddenByAncestor', () => {
   it('treats the empty path as the <root> node id', () => {
     expect(isHiddenByAncestor([], new Set(['<root>']))).toBe(true);
     expect(isHiddenByAncestor([], new Set(['bulk']))).toBe(false);
+  });
+});
+
+describe('hiddenNodeIds', () => {
+  const node = (path: string[]) => ({
+    id: path.length ? path.join('.') : '<root>',
+    data: { path },
+  });
+  const nodes = [
+    node(['bulk']),
+    node(['bulk', 'ATP']),
+    node(['bulk', 'GTP']),
+    node(['listeners']),
+  ];
+
+  it('returns an empty set when nothing is hidden', () => {
+    expect(hiddenNodeIds(nodes, new Set()).size).toBe(0);
+  });
+
+  it('includes a hidden node and all its descendants (cascade)', () => {
+    const ids = hiddenNodeIds(nodes, new Set(['bulk']));
+    expect([...ids].sort()).toEqual(['bulk', 'bulk.ATP', 'bulk.GTP']);
+    expect(ids.has('listeners')).toBe(false);
+  });
+
+  it('includes only the matching leaf when a leaf is hidden', () => {
+    const ids = hiddenNodeIds(nodes, new Set(['bulk.ATP']));
+    expect([...ids]).toEqual(['bulk.ATP']);
+  });
+
+  it('treats missing data.path as the <root> id', () => {
+    const ids = hiddenNodeIds([{ id: '<root>' }], new Set(['<root>']));
+    expect(ids.has('<root>')).toBe(true);
   });
 });
 

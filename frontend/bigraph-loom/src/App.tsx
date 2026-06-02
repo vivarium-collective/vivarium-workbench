@@ -16,7 +16,7 @@ import {
   applySavedPositions, positionsFromNodes, debounce,
 } from './layoutStore';
 import { stateToReactFlow, topLevelStorePaths, defaultCollapsedIds } from './convert';
-import { isHiddenByAncestor, retargetEdgesToVisible } from './panels/filterHidden';
+import { isHiddenByAncestor, retargetEdgesToVisible, hiddenNodeIds } from './panels/filterHidden';
 import { Sidebar } from './panels/Sidebar';
 import { RunPanel } from './panels/RunPanel';
 import { ResultsPanel } from './panels/ResultsPanel';
@@ -184,14 +184,16 @@ export default function App() {
     }
     let cancelled = false;
 
-    // Collapsed groups hide their descendants (path-prefix check). Hidden nodes
-    // cascade the same way — hiding a parent store drops its entire subtree.
+    // Collapsed groups hide their descendants (path-prefix check). ELK lays out
+    // the FULL collapsed-visible set regardless of `hidden` — explicitly-hidden
+    // nodes keep their slot and are toggled off via React Flow's `node.hidden`
+    // CSS flag in the separate effect below (no relayout, no remount).
     const isHidden = (n: any) => {
       const path: string[] = n.data?.path ?? [];
       for (let i = 1; i < path.length; i++) {
         if (collapsed.has(path.slice(0, i).join('.'))) return true;
       }
-      return isHiddenByAncestor(path, hidden);
+      return false;
     };
 
     const visibleNodes = raw.nodes
@@ -203,21 +205,54 @@ export default function App() {
         return n;
       });
     const visibleIds = new Set(visibleNodes.map((n) => n.id));
-    // Re-target wires into collapsed/hidden branches to the nearest visible
-    // ancestor (so a process still shows a wire to the branch it connects into).
+    // Re-target wires into collapsed branches to the nearest visible ancestor
+    // (so a process still shows a wire to the branch it connects into).
     const visibleEdges = retargetEdgesToVisible(raw.edges as any[], visibleIds);
 
     (async () => {
       const saved = loadLayout(compositeId);
       const laid = await applyLayout(visibleNodes as any, visibleEdges as any);
-      const withSaved = applySavedPositions(laid as any, saved);
+      const withSaved = applySavedPositions(laid as any, saved) as any[];
       if (cancelled) return;
-      setNodes(withSaved as any);
+      // Preserve object identity for nodes that didn't move (or change hidden
+      // state) so React Flow does NOT unmount+remount them on collapse/expand.
+      setNodes((prev: any[]) => {
+        const prevById = new Map(prev.map((n) => [n.id, n]));
+        return withSaved.map((n) => {
+          const p = prevById.get(n.id);
+          if (p
+            && p.position?.x === n.position?.x
+            && p.position?.y === n.position?.y
+            && (p.hidden ?? false) === (n.hidden ?? false)) {
+            return p;
+          }
+          return p ? { ...p, position: n.position, data: n.data } : n;
+        });
+      });
       setEdges(visibleEdges as any);
     })();
 
     return () => { cancelled = true; };
-  }, [state, raw, collapsed, hidden, compositeId, setNodes, setEdges]);
+  }, [state, raw, collapsed, compositeId, setNodes, setEdges]);
+
+  // Toggle the `hidden` CSS flag on existing nodes/edges WITHOUT relayout or
+  // remount. O(changed nodes): only nodes/edges whose hidden state actually
+  // flips get a new object; everything else keeps identity, so React Flow
+  // leaves the DOM untouched (no ELK, no blank flash). Hidden nodes keep their
+  // layout slot until the user clicks Re-layout (which re-packs).
+  useEffect(() => {
+    // Derive the hidden-id set from the memoized full node list (stable; has
+    // data.path). Edges then hide when either endpoint is hidden.
+    const hiddenIds = hiddenNodeIds(raw.nodes as any[], hidden);
+    setNodes((ns: any[]) => ns.map((n) => {
+      const h = hiddenIds.has(n.id);
+      return (n.hidden ?? false) === h ? n : { ...n, hidden: h };
+    }));
+    setEdges((es: any[]) => es.map((e) => {
+      const h = hiddenIds.has(e.source) || hiddenIds.has(e.target);
+      return (e.hidden ?? false) === h ? e : { ...e, hidden: h };
+    }));
+  }, [hidden, raw, setNodes, setEdges]);
 
   // Persist node positions on every change. The layout effect itself sets
   // node positions; we save those too so the layout is "pinned" the first
@@ -251,8 +286,22 @@ export default function App() {
         );
       const visibleIds = new Set(visibleNodes.map((n) => n.id));
       const visibleEdges = retargetEdgesToVisible(raw.edges as any[], visibleIds);
-      const laid = await applyLayout(visibleNodes as any, visibleEdges as any);
-      setNodes(laid as any);
+      const laid = await applyLayout(visibleNodes as any, visibleEdges as any) as any[];
+      // Reuse unchanged node objects so consolidating the layout doesn't remount
+      // nodes that kept their position + hidden state.
+      setNodes((prev: any[]) => {
+        const prevById = new Map(prev.map((n) => [n.id, n]));
+        return laid.map((n) => {
+          const p = prevById.get(n.id);
+          if (p
+            && p.position?.x === n.position?.x
+            && p.position?.y === n.position?.y
+            && (p.hidden ?? false) === (n.hidden ?? false)) {
+            return p;
+          }
+          return p ? { ...p, position: n.position, data: n.data } : n;
+        });
+      });
       setEdges(visibleEdges as any);
       // Frame the freshly-consolidated set DETERMINISTICALLY: compute the layout
       // bounds + the viewport pixel size ourselves, derive zoom, and setCenter().
