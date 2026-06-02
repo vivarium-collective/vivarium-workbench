@@ -68,6 +68,10 @@ export default function App() {
   const [trajectory, setTrajectory] = useState<TrajectoryRow[] | null>(null);
   const [vizHtml, setVizHtml] = useState<Record<string, { html: string }> | null>(null);
   const readyFiredRef = useRef(false);
+  // React Flow instance, captured via onInit, so Re-layout can fitView() the
+  // freshly-consolidated set (App is the ReactFlowProvider's PARENT, so it can't
+  // call useReactFlow() directly).
+  const rfRef = useRef<any>(null);
 
   // Use React Flow's controlled-state hooks so drag changes persist across
   // re-renders. Without these, every parent re-render would reset positions
@@ -227,6 +231,9 @@ export default function App() {
       const laid = await applyLayout(visibleNodes as any, visibleEdges as any);
       setNodes(laid as any);
       setEdges(visibleEdges as any);
+      // Frame the freshly-consolidated set. Defer past the render so React Flow
+      // has measured the new node positions before fitting.
+      setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 400 }), 80);
     })();
   }, [compositeId, state, raw, collapsed, hidden, setNodes, setEdges]);
 
@@ -382,11 +389,12 @@ export default function App() {
             <EmitContext.Provider value={emitSet}>
               {/* Canvas column — flex:1. Holds the Reset button + ReactFlow. */}
               <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
-                {/* Reset layout button — top-right of the canvas. Wipes the saved
-                    layout for the current composite and re-runs auto-layout. */}
+                {/* Re-layout button — top-right of the canvas. Re-runs auto-layout
+                    on the CURRENT visible set (after hiding/collapsing nodes),
+                    consolidating them into a tight view, and fits the viewport. */}
                 <button
                   onClick={handleResetLayout}
-                  title="Discard saved positions for this composite and re-run auto-layout"
+                  title="Re-run auto-layout on the currently visible nodes and fit the view"
                   style={{
                     position: 'absolute', top: 8, right: 8, zIndex: 10,
                     padding: '4px 10px', fontSize: 12,
@@ -394,11 +402,12 @@ export default function App() {
                     borderRadius: 4, cursor: 'pointer', color: '#374151',
                   }}
                 >
-                  Reset layout
+                  Re-layout
                 </button>
                 <ReactFlow
                   nodes={nodes}
                   edges={edges}
+                  onInit={(inst) => { rfRef.current = inst; }}
                   onNodesChange={onNodesChange}
                   onEdgesChange={onEdgesChange}
                   nodeTypes={NODE_TYPES}
@@ -406,6 +415,7 @@ export default function App() {
                   onNodeClick={handleNodeClick}
                   onNodeDoubleClick={handleNodeDoubleClick}
                   fitView
+                  fitViewOptions={{ padding: 0.2 }}
                   /* Read-only viewer for wiring/structure, but users CAN rearrange
                      node positions by dragging individual nodes. What's forbidden:
                      new edges, edge reconnects, and any delete. */
