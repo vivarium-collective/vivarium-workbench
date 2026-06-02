@@ -19,8 +19,37 @@ import importlib
 from typing import Any
 
 
+def _describe_class(cls: Any) -> str:
+    """Formal description for a process/step class, via ``Edge.describe()``.
+
+    The inspector shows each process's standardized formal description. As of
+    ``bigraph_schema`` 1.4.x, ``Edge.describe()`` returns the class-level
+    ``description`` (a markdown/LaTeX string) and falls back to the docstring.
+    We call the *real* ``describe()`` so any subclass override is honored, but
+    on an UNINITIALIZED instance (``cls.__new__`` — no ``core``/config needed),
+    since ``describe()`` only reads class-level data.
+
+    Graceful fallbacks keep this working on older ``bigraph_schema`` (no
+    ``describe()``): prefer the ``description`` attribute, then the docstring.
+    """
+    try:
+        inst = cls.__new__(cls)  # uninitialized — skips __init__/core requirement
+        describe = getattr(inst, "describe", None)
+        if callable(describe):
+            text = describe()
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+    except Exception:
+        pass
+    desc = getattr(cls, "description", "")
+    if isinstance(desc, str) and desc.strip():
+        return desc.strip()
+    doc = getattr(cls, "__doc__", None)
+    return doc.strip() if isinstance(doc, str) else ""
+
+
 def _doc_for_address(address: str) -> str:
-    """Return the (stripped) class docstring for a ``local:<dotted.path>`` address, or ''."""
+    """Return the formal description for a ``local:<dotted.path>`` address, or ''."""
     if not isinstance(address, str) or not address:
         return ""
     addr = address.split(":", 1)[1] if ":" in address else address
@@ -30,8 +59,9 @@ def _doc_for_address(address: str) -> str:
     try:
         mod = importlib.import_module(module_path)
         cls = getattr(mod, cls_name, None)
-        doc = getattr(cls, "__doc__", None)
-        return doc.strip() if isinstance(doc, str) else ""
+        if cls is None:
+            return ""
+        return _describe_class(cls)
     except Exception:
         return ""
 
