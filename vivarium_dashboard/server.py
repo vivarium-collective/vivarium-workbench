@@ -4649,7 +4649,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_ui_config()
         if self.path.startswith("/api/git-status"):
             return self._get_git_status()
-        # Serve the bundled loom-explore viewer.
+        # Serve the bigraph-loom viewer. The URL prefix stays /loom-explore for
+        # backward-compat, but the bundle now comes from the standalone
+        # `bigraph-loom` package (a dependency) rather than a vendored copy.
         if self.path.startswith("/loom-explore"):
             # Strip query string before resolving to the file on disk; popup
             # URLs include ?id=<ref> which would otherwise prevent the
@@ -4658,8 +4660,8 @@ class Handler(BaseHTTPRequestHandler):
             rel = loom_path[len("/loom-explore"):].lstrip("/") or "index.html"
             if ".." in rel.split("/"):
                 self.send_response(403); self.end_headers(); return
-            # Bundled inside the vivarium-dashboard package (was workspace-vendored).
-            target = STATIC_DIR / "loom-explore" / rel
+            from bigraph_loom import asset_dir
+            target = asset_dir() / rel
             return self._serve_file(target, self._guess_mime(rel))
 
         # Generic static file serving — also strip query strings so any

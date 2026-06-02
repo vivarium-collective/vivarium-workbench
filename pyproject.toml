@@ -17,6 +17,7 @@ dependencies = [
     "process-bigraph",
     "bigraph-schema",
     "pbg-superpowers",
+    "bigraph-loom",
 ]
 
 [project.optional-dependencies]

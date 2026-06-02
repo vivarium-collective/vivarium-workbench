@@ -78,8 +78,10 @@ experience, see the
 
 - **Workspace inputs** — workspace.yaml summary, dependencies, scaffolding status.
 - **Registry** — every Process / Step / Composite the workspace can import.
-- **Composites** — composite browser with an embedded loom-explore view of the
-  state-tree (the bigraph).
+- **Composites** — composite browser with an embedded
+  [bigraph-loom](https://github.com/vivarium-collective/bigraph-loom) view of
+  the state-tree (the bigraph), served from the `bigraph-loom` package at
+  `/loom-explore`.
 - **Studies** — canonical 8-section view (Purpose · Pipeline gate · Build ·
   Simulations · Readouts · Tests · Limitations · References) with phase chip
   and rolled-up `effective_status`.
