@@ -45,6 +45,8 @@ from threading import Lock
 
 import yaml
 
+from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+
 
 def _strip_process_instances(state):
     """Strip live Process/Step instances from a state tree before JSON encoding.
@@ -328,23 +330,55 @@ def _get_registry_data(bypass_cache: bool = False) -> dict:
 
     try:
         ws_yaml = WORKSPACE / "workspace.yaml"
-        ws_data = yaml.safe_load(ws_yaml.read_text())
+        ws_data = yaml.safe_load(ws_yaml.read_text(encoding="utf-8"))
         slug = ws_data.get("name", "")
         # Support explicit package_path in workspace.yaml (most reliable).
         package_name = ws_data.get("package_path") or ("pbg_" + slug.replace("-", "_"))
 
-        # Build the set of top-level package names that this workspace explicitly
-        # owns or imports.  Used inside the subprocess to tag each discovered class.
-        # imports is a dict keyed by catalog name; the Python package name lives
-        # in imports[name].get("package") or falls back to name.replace("-", "_").
-        imports_dict = ws_data.get("imports", {}) or {}
+        # Build the set of top-level package names that this workspace
+        # explicitly owns or imports. Used inside the subprocess to tag
+        # each discovered class.
+        #
+        # ``workspace.yaml.imports`` ships in two shapes across the
+        # ecosystem:
+        #   * dict (older convention, keyed by catalog name):
+        #       imports:
+        #         pbg-oxidizeme:
+        #           package: pbg_oxidizeme
+        #           source:  https://github.com/.../pbg-oxidizeme
+        #   * list of dicts (v2ecoli + newer pbg-template workspaces):
+        #       imports:
+        #         - name:    pbg_oxidizeme
+        #           source:  https://github.com/.../pbg-oxidizeme
+        #
+        # Normalize both into the loop so the registry endpoint doesn't
+        # crash with "'list' object has no attribute 'items'" when the
+        # workspace uses the list form.
+        imports_raw = ws_data.get("imports") or []
         _ws_import_pkgs: list[str] = []
-        for cat_name, imp_val in imports_dict.items():
-            if isinstance(imp_val, dict):
-                pkg = imp_val.get("package") or cat_name.replace("-", "_")
-            else:
-                pkg = cat_name.replace("-", "_")
-            _ws_import_pkgs.append(pkg.split(".")[0])
+        if isinstance(imports_raw, dict):
+            for cat_name, imp_val in imports_raw.items():
+                if isinstance(imp_val, dict):
+                    pkg = imp_val.get("package") or cat_name.replace("-", "_")
+                else:
+                    pkg = cat_name.replace("-", "_")
+                _ws_import_pkgs.append(pkg.split(".")[0])
+        elif isinstance(imports_raw, list):
+            for entry in imports_raw:
+                if isinstance(entry, dict):
+                    # name is the catalog identity; package is the
+                    # importable Python package name (defaults to name
+                    # with dashes → underscores).
+                    cat_name = entry.get("name") or ""
+                    pkg = entry.get("package") or cat_name.replace("-", "_")
+                elif isinstance(entry, str):
+                    pkg = entry.replace("-", "_")
+                else:
+                    continue
+                if pkg:
+                    _ws_import_pkgs.append(pkg.split(".")[0])
+        # Any other shape (e.g. None) yields no imports — registry just
+        # shows the workspace's own package + framework classes.
         # The workspace's own package is always "in_workspace".
         _ws_import_pkgs.append(package_name.split(".")[0])
         # Dedupe while preserving insertion order.
@@ -485,12 +519,48 @@ except Exception as e:
                     "processes": [],
                     "types": [],
                 }
+
+        # Annotate emitter entries with is_workspace_default per
+        # workspace.yaml::runtime.default_emitter. ws_data was loaded above;
+        # treat the emitter-name match permissively (case-insensitive substring
+        # against the class name, e.g. 'parquet' → ParquetEmitter).
+        _mark_default_emitter(data, ws_data)
     except Exception as e:
         data = {"error": str(e), "processes": [], "types": []}
 
     _REGISTRY_CACHE["data"] = data
     _REGISTRY_CACHE["ts"] = now
     return data
+
+
+def _mark_default_emitter(data: dict, ws_data: dict | None) -> None:
+    """Set ``is_workspace_default: True`` on emitter entries that match
+    ``ws_data['runtime']['default_emitter']``.
+
+    The match is a case-insensitive substring check against the entry's
+    ``name`` (e.g. ``'parquet'`` matches ``ParquetEmitter``). All emitter
+    entries get the field set explicitly (True or False) so the frontend
+    can render the badge consistently. No-op when ``ws_data`` is missing
+    or has no runtime block.
+    """
+    if not isinstance(data, dict):
+        return
+    processes = data.get("processes") or []
+    default_emitter = ""
+    if isinstance(ws_data, dict):
+        rt = ws_data.get("runtime") or {}
+        if isinstance(rt, dict):
+            default_emitter = str(rt.get("default_emitter") or "").strip().lower()
+    needle = default_emitter
+    for p in processes:
+        if not isinstance(p, dict):
+            continue
+        if p.get("kind") != "emitter":
+            continue
+        name = str(p.get("name") or "")
+        p["is_workspace_default"] = bool(needle) and (needle in name.lower())
+    # Expose the resolved value at the top level for convenience / debugging.
+    data["default_emitter"] = default_emitter or None
 
 
 def _save_upload(file_b64: str, target_path: Path) -> str:
@@ -517,18 +587,23 @@ LOCK = Lock()
 # ``startswith``) so query strings and sub-paths under /api/auth/github/ work.
 _WORKSPACELESS_GET_ALLOW: tuple[str, ...] = (
     "/api/workspaces",
-    "/api/auth/github/",     # Phase B-bis (not yet wired)
-    "/api/compute-backends", # Phase B (not yet wired)
+    "/api/auth/github/",
+    "/api/compute-backends",
 )
 _WORKSPACELESS_POST_ALLOW: frozenset[str] = frozenset({
     "/api/workspaces/add",
     "/api/workspaces/start",
     "/api/workspaces/forget",
     "/api/workspaces/cleanup-stale",
-    "/api/workspaces/create",  # Phase C (not yet wired)
-    "/api/auth/github/start",  # Phase B-bis (not yet wired)
-    "/api/auth/github/logout", # Phase B-bis (not yet wired)
+    "/api/workspaces/create",
+    "/api/auth/github/start",
+    "/api/auth/github/logout",
 })
+
+# Resolve the workspace directory layout from the active WORKSPACE (its optional
+# `layout:` map; flat defaults otherwise). Keyed on WORKSPACE so tests that
+# monkeypatch the global pick up the right layout.
+_WP_CACHE: dict[str, WorkspacePaths] = {}
 
 # ---------------------------------------------------------------------------
 # Study slug validation
@@ -553,10 +628,10 @@ def _study_dir(name: str):
     Pre-Phase-1 investigations live in ``investigations/<name>/``. The aliased
     /api/study-* handlers must find both.
     """
-    studies_path = WORKSPACE / "studies" / name
+    studies_path = workspace_paths().studies / name
     if studies_path.is_dir():
         return studies_path
-    return WORKSPACE / "investigations" / name
+    return workspace_paths().investigations / name
 
 
 def _study_spec_file(study_dir):
@@ -664,6 +739,10 @@ def _study_detail_spec(name: str):
             diss = _ss.status_disagreements(spec, runs)
             if diss:
                 spec["status_disagreements"] = diss
+            # Single-sourced reviewer-facing run/test/verdict summary — the
+            # downloadable report's per-study clarity strip renders from this so
+            # the markers are derived once (here) and shown consistently.
+            spec["clarity_summary"] = _ss.study_clarity_summary(spec, runs)
         except Exception:  # noqa: BLE001
             pass
     return spec
@@ -681,7 +760,7 @@ def _collect_study_feedback(study_slug: str) -> list[dict]:
     from pbg_superpowers.feedback_import import (
         load_investigation_feedback, feedback_for_study,
     )
-    inv_root = WORKSPACE / "investigations"
+    inv_root = workspace_paths().investigations
     if not inv_root.is_dir():
         return []
     out: list[dict] = []
@@ -803,8 +882,8 @@ def _discover_viz_html_files(name: str) -> list[dict]:
     out: list[dict] = []
 
     # Source 1: studies/<name>/viz/*.html (auto-rendered from runs.db).
-    viz_dir = WORKSPACE / "studies" / name / "viz"
-    runs_db = WORKSPACE / "studies" / name / "runs.db"
+    viz_dir = workspace_paths().studies / name / "viz"
+    runs_db = workspace_paths().studies / name / "runs.db"
     if viz_dir.is_dir() and runs_db.is_file():
         # Freshness reference: the latest recorded run time (WAL-immune), not the
         # db file mtime. A small grace absorbs sub-second render/commit ordering.
@@ -834,7 +913,7 @@ def _discover_viz_html_files(name: str) -> list[dict]:
 
     # Source 2: reports/figures/<name>/*.html (hand-authored cross-skill output).
     # No runs.db gate — these aren't auto-rendered.
-    figures_dir = WORKSPACE / "reports" / "figures" / name
+    figures_dir = workspace_paths().reports / "figures" / name
     if figures_dir.is_dir():
         for html_file in sorted(figures_dir.glob("*.html")):
             size_kb = max(1, html_file.stat().st_size // 1024)
@@ -861,7 +940,7 @@ def _discover_investigation_viz_html_files(inv_slug: str) -> list[dict]:
     investigation-detail endpoint can splice these into
     ``embed_visualizations``.
     """
-    viz_dir = WORKSPACE / "investigations" / inv_slug / "viz"
+    viz_dir = workspace_paths().investigations / inv_slug / "viz"
     if not viz_dir.is_dir():
         return []
     out = []
@@ -892,7 +971,7 @@ def _read_runs_db_for_study(name: str) -> list[dict]:
     Returns ``[]`` if the db doesn't exist or has neither table.
     """
     import sqlite3, json as _json, datetime as _dt
-    runs_db = WORKSPACE / "studies" / name / "runs.db"
+    runs_db = workspace_paths().studies / name / "runs.db"
     if not runs_db.is_file():
         return []
     conn = sqlite3.connect(str(runs_db))
@@ -1106,18 +1185,54 @@ def compute_investigation_status(
     if statuses and all(s in _STUDY_STATUS_COMPLETE for s in statuses):
         return "complete"
 
-    # 3: anything in the "active" set OR runs accumulated → running.
+    # 3: anything in the "active" set → running. (Mere accumulated runs no
+    # longer count as running — completed history is not active execution.)
     if any(s in _STUDY_STATUS_RUNNING for s in statuses):
         return "running"
-    if any(has_runs):
-        return "running"
 
-    # 4: at least one done but not all → mixed-progress.
-    if any(s in _STUDY_STATUS_COMPLETE for s in statuses):
+    # 4: at least one done OR any accumulated runs, but not all → mixed-progress.
+    if any(s in _STUDY_STATUS_COMPLETE for s in statuses) or any(has_runs):
         return "in_progress"
 
     # 5: default.
     return "planning"
+
+
+def compute_study_effective_status(
+    status: str, has_runs: bool = False, has_active_run: bool = False
+) -> str:
+    """Derive a single study's effective status from its declared status
+    plus whether a run is *actively executing right now*.
+
+    ``"running"`` means a run is genuinely in flight — NOT merely that the
+    study has accumulated run history. (The earlier rule mapped any
+    ``has_runs == True`` to ``"running"``, which mislabelled every study
+    with completed runs as actively running.) A study that ran and finished
+    but hasn't cleared its gate reflects its *declared* status instead, so
+    the badge reads honestly (e.g. ``in_progress`` / ``characterization-
+    complete``) rather than a misleading ``running``.
+
+    Rules in order (first match wins):
+
+    1. ``status in {failed, invalid}`` → ``"failed"``.
+    2. ``status in {complete, ran}`` → ``"complete"``.
+    3. ``status in {running, implementing, runnable, analyzing}`` OR
+       ``has_active_run == True`` → ``"running"``.
+    4. ``status in {planned, planning}`` → ``"planned"`` (normalized).
+    5. Anything else → reflect the declared status verbatim (e.g.
+       ``in_progress``, ``characterization-complete``), or ``"planned"`` when
+       empty. ``has_runs`` no longer forces ``"running"``.
+    """
+    s = (status or "").strip()
+    if s in _STUDY_STATUS_FAILED:
+        return "failed"
+    if s in _STUDY_STATUS_COMPLETE:
+        return "complete"
+    if s in _STUDY_STATUS_RUNNING or has_active_run:
+        return "running"
+    if s in _STUDY_STATUS_PLANNED:
+        return "planned"
+    return s or "planned"
 
 
 def _read_study_status(ws_root: Path, slug: str) -> tuple[str, bool]:
@@ -1135,7 +1250,7 @@ def _read_study_status(ws_root: Path, slug: str) -> tuple[str, bool]:
         if not sp.is_file():
             continue
         try:
-            spec = yaml.safe_load(sp.read_text()) or {}
+            spec = yaml.safe_load(sp.read_text(encoding="utf-8")) or {}
         except Exception:
             return "planning", False
         status = spec.get("status") or "planning"
@@ -1173,7 +1288,7 @@ def _read_study_multiaxis_status(ws_root: Path, slug: str) -> dict:
         if not sp.is_file():
             continue
         try:
-            spec = yaml.safe_load(sp.read_text()) or {}
+            spec = yaml.safe_load(sp.read_text(encoding="utf-8")) or {}
         except Exception:
             return {axis: None for axis in _MULTIAXIS_STATUS_FIELDS}
         return {axis: spec.get(axis) for axis in _MULTIAXIS_STATUS_FIELDS}
@@ -1190,7 +1305,7 @@ def _build_iset_summary_for_test(ws_root: Path) -> list[dict]:
     out: list[dict] = []
     for d in _iter_iset_dirs(ws_root):
         try:
-            spec = yaml.safe_load((d / "investigation.yaml").read_text()) or {}
+            spec = yaml.safe_load((d / "investigation.yaml").read_text(encoding="utf-8")) or {}
         except Exception as e:
             out.append({"name": d.name, "error": f"parse failed: {e}"})
             continue
@@ -1356,7 +1471,7 @@ def _scan_worktree_investigations(worktree_path: str) -> list[dict]:
         if not spec_file.is_file():
             continue
         try:
-            # Force utf-8 — Path.read_text() defaults to locale encoding,
+            # Force utf-8 — Path.read_text(encoding="utf-8") defaults to locale encoding,
             # which crashed on ASCII locales when a sibling worktree's
             # investigation.yaml contained UTF-8 chars (e.g. → in titles).
             data = _yaml.safe_load(spec_file.read_text(encoding="utf-8")) or {}
@@ -1413,9 +1528,15 @@ def _build_investigation_registry_for_test(
                               that do NOT have a running dashboard.
                               Read directly off disk via
                               ``git worktree list`` + filesystem scan.
-                              Entries whose ``status`` is
-                              closed/archived/complete are filtered out
-                              so the sidebar never renders stale rows.
+                              **Deduplicated by slug** across worktrees:
+                              each unique investigation appears once,
+                              with the canonical worktree promoted to
+                              the entry's ``worktree_path``/``branch``/
+                              ``status`` fields and every other worktree
+                              listed under ``variants``. Entries whose
+                              ``status`` is closed/archived/complete are
+                              filtered out so the sidebar never renders
+                              stale rows.
 
     Contract: previously-existing keys retain their exact shape;
     ``local_siblings`` and ``dormant_others`` are additive buckets.
@@ -1448,9 +1569,15 @@ def _build_investigation_registry_for_test(
     chosen_idx: int | None = None
     if invs:
         cur_branch = current_branch_fn() or ""
-        if cur_branch:
+        # Strip the canonical "investigation/" prefix so an investigation
+        # slug ("dnaa-replication") matches its conventional branch
+        # ("investigation/dnaa-replication"). Without this strip, the
+        # heuristic falls through to "running" / alphabetical-first and
+        # mislabels the workspace switcher.
+        cur_branch_slug = cur_branch.removeprefix("investigation/") if cur_branch else ""
+        if cur_branch_slug:
             for i, iv in enumerate(invs):
-                if iv.get("name") == cur_branch:
+                if iv.get("name") == cur_branch_slug:
                     chosen_idx = i
                     break
         if chosen_idx is None:
@@ -1522,19 +1649,59 @@ def _build_investigation_registry_for_test(
     # Dormant-others: open investigations on OTHER worktrees that do NOT
     # have a live dashboard. Read directly off disk so closed/archived
     # ones can be filtered without a peer process.
-    dormant: list[dict] = []
+    #
+    # Worktrees of the same git repo typically share the same
+    # `investigations/<slug>/investigation.yaml` files (the directory is
+    # tracked in git), so the same slug appears once per worktree. The
+    # sidebar previously rendered N near-identical rows; instead, dedupe
+    # by slug and attach a `variants` list of every worktree+branch that
+    # contains it. The primary entry's worktree_path/branch/status pick
+    # the worktree whose branch matches the slug (Investigation ≡ branch
+    # convention) when possible, otherwise the first alphabetical branch.
+    dormant_by_slug: dict[str, dict] = {}
     for wt in list_worktrees_fn():
         wt_path = wt.get("path")
         if not wt_path or wt_path == this_path or wt_path in running_paths:
             continue
         for inv in scan_worktree_fn(wt_path):
-            dormant.append({
-                "slug":          inv.get("slug"),
-                "title":         inv.get("title"),
+            slug = inv.get("slug")
+            if not slug:
+                continue
+            variant = {
                 "worktree_path": wt_path,
                 "branch":        wt.get("branch"),
                 "status":        inv.get("status"),
+            }
+            bucket = dormant_by_slug.setdefault(slug, {
+                "slug":     slug,
+                "title":    inv.get("title"),
+                "variants": [],
             })
+            bucket["variants"].append(variant)
+            # Keep title fresh if a later variant has one and the bucket lost
+            # it (defensive — shouldn't happen, but the first scan might
+            # have returned None).
+            if not bucket.get("title") and inv.get("title"):
+                bucket["title"] = inv.get("title")
+
+    dormant: list[dict] = []
+    for slug, bucket in sorted(dormant_by_slug.items()):
+        variants = bucket["variants"]
+        # Pick the canonical variant: branch == slug first, then first
+        # alphabetical by branch name (None branches sort last).
+        def _variant_sort_key(v: dict) -> tuple:
+            br = v.get("branch") or ""
+            return (br != slug, br or "￿")
+        variants_sorted = sorted(variants, key=_variant_sort_key)
+        primary = variants_sorted[0]
+        dormant.append({
+            "slug":          slug,
+            "title":         bucket["title"] or slug,
+            "worktree_path": primary["worktree_path"],
+            "branch":        primary["branch"],
+            "status":        primary["status"],
+            "variants":      variants_sorted,
+        })
 
     return {
         "current":         current,
@@ -1542,6 +1709,38 @@ def _build_investigation_registry_for_test(
         "running_others":  others,
         "dormant_others":  dormant,
     }
+
+
+def _coerce_list_field(spec: dict, field: str, *, source: str = "<unknown>") -> list:
+    """Read ``spec[field]`` and return it as a list.
+
+    Workspace yamls evolve. A field documented as ``list[T]`` sometimes
+    arrives as a dict (e.g. a grouped/nested shape an investigation author
+    introduced before the renderer learned about it). Returning the dict
+    untouched would crash the client renderer:
+
+        TypeError: (iset.acceptance_criteria || []).map is not a function
+
+    This helper coerces non-list values to ``[]`` and prints a one-line
+    warning to stderr that names the field and the workspace file, so the
+    operator knows where the schema drift is without having to bisect a
+    JS stack trace.
+
+    Use at every ``spec.get("...") or []`` site where the JS contract is a
+    list (``.map`` / ``.forEach`` / ``.length`` on the client side).
+    """
+    value = spec.get(field)
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    print(
+        f"warning: {source}: field {field!r} expected list, got "
+        f"{type(value).__name__} — degrading to empty list. Check the "
+        f"workspace yaml schema.",
+        file=sys.stderr,
+    )
+    return []
 
 
 def _build_iset_detail_for_test(ws_root: Path, name: str) -> tuple[dict, int]:
@@ -1554,7 +1753,7 @@ def _build_iset_detail_for_test(ws_root: Path, name: str) -> tuple[dict, int]:
     if not spec_path.is_file():
         return {"error": f"no investigation.yaml at {spec_path}"}, 404
     try:
-        spec = yaml.safe_load(spec_path.read_text()) or {}
+        spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
     except Exception as e:
         return {"error": f"parse failed: {e}"}, 500
 
@@ -1585,8 +1784,8 @@ def _build_iset_detail_for_test(ws_root: Path, name: str) -> tuple[dict, int]:
         "hypothesis":       spec.get("hypothesis", ""),
         "status":           author_status,
         "effective_status": effective_status,
-        "expert_docs":      spec.get("expert_docs") or [],
-        "acceptance_criteria": spec.get("acceptance_criteria") or [],
+        "expert_docs":      _coerce_list_field(spec, "expert_docs", source=str(spec_path)),
+        "acceptance_criteria": _coerce_list_field(spec, "acceptance_criteria", source=str(spec_path)),
         "studies":          studies_out,
     }, 200
 
@@ -1734,7 +1933,7 @@ def _post_study_set_objective_for_test(ws_root: Path, body: dict):
     sf = ws_root / "studies" / name / "study.yaml"
     if not sf.is_file():
         return {"error": "study not found"}, 404
-    spec = yaml.safe_load(sf.read_text()) or {}
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     spec["objective"] = text
     sf.write_text(yaml.safe_dump(spec, sort_keys=False))
     return {"ok": True}, 200
@@ -1830,7 +2029,7 @@ def _post_study_narrative_set_for_test(ws_root: Path, body: dict):
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec = yaml.safe_load(sf.read_text()) or {}
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     if not isinstance(spec, dict):
         return {"error": "study.yaml is not a mapping"}, 500
 
@@ -1885,7 +2084,7 @@ def _post_study_rename_for_test(ws_root: Path, body: dict):
         return {"error": f"study {new_name!r} already exists"}, 409
     src.rename(dst)
     sf = dst / "study.yaml"
-    spec = yaml.safe_load(sf.read_text()) or {}
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     spec["name"] = new_name
     sf.write_text(yaml.safe_dump(spec, sort_keys=False))
     return {"ok": True, "name": new_name}, 200
@@ -2007,6 +2206,84 @@ def _count_runs_for_study(name: str, spec: dict | None = None) -> int:
     # If they ever diverge below, max() preserves the union — better to
     # over-report than under-report when both sources should agree.
     return max(db_count, spec_count)
+
+
+def _has_active_run_for_study(
+    name: str, spec: dict | None = None, *, freshness_s: float = 300.0
+) -> bool:
+    """True only if a run for this study is *actively executing right now*.
+
+    "Active" = a run whose status is ``running`` AND whose heartbeat is fresh
+    (within ``freshness_s``). This deliberately excludes (a) completed runs —
+    accumulated history is not active execution — and (b) stale ``running``
+    rows left behind by a crashed/abandoned process (no recent heartbeat).
+    Used by :func:`compute_study_effective_status` so a study that merely ran
+    and finished does not badge as "running".
+    """
+    import time as _t
+    now = _t.time()
+
+    def _fresh(hb) -> bool:
+        if hb is None:
+            return False
+        try:
+            return (now - float(hb)) <= freshness_s
+        except (TypeError, ValueError):
+            return False
+
+    # study.yaml runs[] (a backfilled/legacy run may carry status + heartbeat).
+    for r in ((spec or {}).get("runs") or []):
+        if not isinstance(r, dict):
+            continue
+        if str(r.get("status") or "").strip().lower() == "running" and _fresh(
+            r.get("heartbeat_at")
+        ):
+            return True
+
+    # studies/<name>/runs.db rows.
+    try:
+        for r in _read_runs_db_for_study(name):
+            if str((r or {}).get("status") or "").strip().lower() == "running" and _fresh(
+                (r or {}).get("heartbeat_at")
+            ):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _investigation_emitter_for_study(study_name: str | None) -> str | None:
+    """Preferred emitter declared by the investigation that owns this study.
+
+    Reads ``investigations/<slug>/investigation.yaml`` → ``runtime.default_emitter``
+    for whichever investigation lists ``study_name`` in its ``studies[]``.
+    Sits in the emitter-precedence chain BETWEEN the per-study
+    ``runtime.emitter`` override (higher) and the workspace default (lower),
+    so an investigation can standardise its emitter once — e.g. the PDMP
+    investigation declares ``xarray`` and every member study runs XArray
+    without per-study config. Returns the emitter name or None.
+    """
+    if not study_name:
+        return None
+    inv_dir = WORKSPACE / "investigations"
+    if not inv_dir.is_dir():
+        return None
+    try:
+        for invf in sorted(inv_dir.glob("*/investigation.yaml")):
+            try:
+                inv = yaml.safe_load(invf.read_text(encoding="utf-8")) or {}
+            except Exception:
+                continue
+            studies = inv.get("studies") or []
+            names = [s if isinstance(s, str) else (s or {}).get("study")
+                     for s in studies]
+            if study_name in names:
+                rt = inv.get("runtime") or {}
+                em = str((rt or {}).get("default_emitter") or "").strip().lower()
+                return em or None
+    except Exception:
+        return None
+    return None
 
 
 def _collect_study_observables(spec: dict) -> list[str]:
@@ -2212,7 +2489,7 @@ def _post_study_run_baseline_for_test(ws_root, body):
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec = yaml.safe_load(sf.read_text()) or {}
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     # Auto-migrate legacy v2-shape specs (baseline: <str>, variants: [...]) to
     # the v3 list shape this handler expects. In-memory only; doesn't rewrite
     # the file. Keeps legacy investigations/spec.yaml usable.
@@ -2244,7 +2521,7 @@ def _post_study_run_baseline_for_test(ws_root, body):
     params_n_steps = params.pop("n_steps", None)
     generator_overrides = params
 
-    ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text())
+    ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8"))
     pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
     # XArrayEmitter buffers ~hundreds of ticks before flushing, so the legacy
     # 5-tick default produces empty zarr stores. Workspaces declare a sensible
@@ -2273,8 +2550,9 @@ def _post_study_run_baseline_for_test(ws_root, body):
     # v2ecoli friction #14: derive emit_paths from spec observables so the
     # injected SQLiteEmitter captures real biology, not just ticks.
     emit_paths = cr.collect_emit_paths_from_spec(spec)
-    # Per-study overrides — all win over workspace defaults.
-    study_emitter = runtime_cfg.get("emitter")
+    # Per-study overrides — all win over workspace defaults. Emitter precedence:
+    # study runtime.emitter > investigation runtime.default_emitter > workspace.
+    study_emitter = runtime_cfg.get("emitter") or _investigation_emitter_for_study(spec.get("name"))
     study_max_generations = runtime_cfg.get("max_generations")
     study_single_daughters = runtime_cfg.get("single_daughters")
     response, code = _run_composite_subprocess(
@@ -2466,7 +2744,7 @@ def _render_study_visualizations(study_dir, spec, spec_id):
     # by name, before render_visualizations gets a chance to KeyError.
     name_to_class: dict[str, str] = {}
     try:
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")) or {}
         for ws_viz in ws_data.get("visualizations", []) or []:
             if isinstance(ws_viz, dict) and ws_viz.get("name") and ws_viz.get("class"):
                 name_to_class[ws_viz["name"]] = ws_viz["class"]
@@ -2488,7 +2766,7 @@ def _render_study_visualizations(study_dir, spec, spec_id):
     # dict). Mirrors the legacy /api/investigation-run wiring.
     _ws_add_to_sys_path()
     try:
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
         pkg_name = ws_data.get("package_path") or (
             "pbg_" + ws_data.get("name", "").replace("-", "_"))
         core_module = __import__(f"{pkg_name}.core", fromlist=["build_core"])
@@ -2640,7 +2918,7 @@ def _post_study_run_all_baselines_for_test(ws_root, body):
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec = yaml.safe_load(sf.read_text()) or {}
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     from vivarium_dashboard.lib.spec_migration import migrate_v2_to_v3
     spec = migrate_v2_to_v3(spec)
     # v4-redesign projection: synthesises legacy fields (baseline list,
@@ -2705,7 +2983,7 @@ def _post_study_run_variant_for_test(ws_root, body):
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec = yaml.safe_load(sf.read_text()) or {}
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     # Auto-migrate legacy v2-shape specs to v3 list shape (see run-baseline).
     from vivarium_dashboard.lib.spec_migration import migrate_v2_to_v3
     spec = migrate_v2_to_v3(spec)
@@ -2754,7 +3032,7 @@ def _post_study_run_variant_for_test(ws_root, body):
     params_n_steps = params.pop("n_steps", None)
     generator_overrides = params
 
-    ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text())
+    ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8"))
     pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
     # Same workspace-level default as the baseline path — see comment there.
     _runtime = (ws_data.get("runtime") or {}) if isinstance(ws_data, dict) else {}
@@ -2777,8 +3055,9 @@ def _post_study_run_variant_for_test(ws_root, body):
     # v2ecoli friction #14: thread observables to the subprocess (same as
     # baseline path) so variant runs also capture biology in history.state.
     emit_paths = cr.collect_emit_paths_from_spec(spec)
-    # Per-study overrides — see baseline path for rationale.
-    study_emitter = runtime_cfg.get("emitter")
+    # Per-study overrides — see baseline path for rationale. Emitter precedence:
+    # study runtime.emitter > investigation runtime.default_emitter > workspace.
+    study_emitter = runtime_cfg.get("emitter") or _investigation_emitter_for_study(spec.get("name"))
     study_max_generations = runtime_cfg.get("max_generations")
     study_single_daughters = runtime_cfg.get("single_daughters")
     response, code = _run_composite_subprocess(
@@ -2837,7 +3116,7 @@ def _post_study_variant_add_for_test(ws_root, body):
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec = yaml.safe_load(sf.read_text()) or {}
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     baseline = spec.get("baseline") or []
     baseline_names = {b.get("name") for b in baseline if isinstance(b, dict)}
     if base_composite not in baseline_names:
@@ -2866,7 +3145,7 @@ def _post_study_variant_delete_for_test(ws_root, body):
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec = yaml.safe_load(sf.read_text()) or {}
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     variants = spec.get("variants") or []
     remaining = [v for v in variants if v.get("name") != variant_name]
     if len(remaining) == len(variants):
@@ -2899,7 +3178,7 @@ def _post_study_variant_set_params_for_test(ws_root, body):
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec = yaml.safe_load(sf.read_text()) or {}
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     variants = spec.get("variants") or []
     for v in variants:
         if isinstance(v, dict) and v.get("name") == variant_name:
@@ -2941,7 +3220,7 @@ def _post_study_baseline_add_for_test(ws_root, body):
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec = yaml.safe_load(sf.read_text()) or {}
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     baseline = spec.setdefault("baseline", [])
     if any(b.get("name") == entry_name for b in baseline if isinstance(b, dict)):
         return {"error": f"baseline entry {entry_name!r} already exists"}, 409
@@ -2972,7 +3251,7 @@ def _post_study_baseline_remove_for_test(ws_root, body):
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec = yaml.safe_load(sf.read_text()) or {}
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     baseline = spec.get("baseline") or []
     remaining = [b for b in baseline
                  if not (isinstance(b, dict) and b.get("name") == entry_name)]
@@ -3018,7 +3297,7 @@ def _post_study_intervention_add_for_test(ws_root, body):
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec = yaml.safe_load(sf.read_text()) or {}
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     interventions = spec.setdefault("interventions", [])
     if any(i.get("name") == name for i in interventions if isinstance(i, dict)):
         return {"error": f"intervention {name!r} already exists"}, 409
@@ -3042,7 +3321,7 @@ def _post_study_intervention_update_for_test(ws_root, body):
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec = yaml.safe_load(sf.read_text()) or {}
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     for i in spec.get("interventions") or []:
         if isinstance(i, dict) and i.get("name") == name:
             i["description"] = description
@@ -3065,7 +3344,7 @@ def _post_study_intervention_delete_for_test(ws_root, body):
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec = yaml.safe_load(sf.read_text()) or {}
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     interventions = spec.get("interventions") or []
     remaining = [i for i in interventions
                  if not (isinstance(i, dict) and i.get("name") == name)]
@@ -3101,7 +3380,7 @@ def _post_study_run_delete_for_test(ws_root, body):
         finally:
             conn.close()
 
-    spec = yaml.safe_load(sf.read_text()) or {}
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     spec["runs"] = [r for r in (spec.get("runs") or []) if r.get("run_id") != run_id]
     sf.write_text(yaml.safe_dump(spec, sort_keys=False))
     return {"ok": True}, 200
@@ -3131,7 +3410,7 @@ def _post_study_runs_clear_for_test(ws_root, body):
         finally:
             conn.close()
 
-    spec = yaml.safe_load(sf.read_text()) or {}
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     spec["runs"] = []
     sf.write_text(yaml.safe_dump(spec, sort_keys=False))
     return {"ok": True}, 200
@@ -3150,7 +3429,7 @@ def _post_study_comparison_add_for_test(ws_root, body):
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec = yaml.safe_load(sf.read_text()) or {}
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     comparisons = spec.setdefault("comparisons", [])
     name = (body.get("name") or "").strip() or f"comparison-{len(comparisons) + 1}"
     comparisons.append({"name": name, "run_ids": list(run_ids)})
@@ -3347,7 +3626,7 @@ def _submodule_paths() -> set[str]:
     if not gm.exists():
         return set()
     paths: set[str] = set()
-    for line in gm.read_text().splitlines():
+    for line in gm.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line.startswith("path"):
             _, _, val = line.partition("=")
@@ -3364,6 +3643,41 @@ def _has_origin_remote() -> bool:
         cwd=WORKSPACE, capture_output=True, text=True, check=False,
     )
     return "origin" in (r.stdout or "").split()
+
+
+def _stale_branch_threshold() -> int:
+    """Commits-behind-main threshold above which a branch is flagged stale.
+
+    Default 20 (matches the dnaa-biology friction report's "24 commits
+    behind, two trivial conflicts" anchor). Override per-server with
+    PBG_STALE_BRANCH_THRESHOLD=<int>."""
+    raw = os.environ.get("PBG_STALE_BRANCH_THRESHOLD")
+    if raw:
+        try:
+            n = int(raw)
+            return max(n, 1)
+        except ValueError:
+            pass
+    return 20
+
+
+def _commits_behind(branch: str, base: str = "main") -> tuple[int, str]:
+    """Return (commits_behind, ref_used). Probes origin/<base> first
+    (matches what `git merge origin/<base>` would have to fast-forward
+    over — the actual integration cost). Falls back to local <base>.
+    Returns (0, "") on any git failure so callers don't have to
+    branch on the error case."""
+    for ref in (f"origin/{base}", base):
+        r = subprocess.run(
+            ["git", "rev-list", "--count", f"{branch}..{ref}"],
+            cwd=WORKSPACE, capture_output=True, text=True, check=False,
+        )
+        if r.returncode == 0:
+            try:
+                return int(r.stdout.strip() or 0), ref
+            except ValueError:
+                pass
+    return 0, ""
 
 
 def _diagnose_push_error(err: str) -> dict | None:
@@ -3443,7 +3757,7 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
         # many-sims aggregation studies, sqlite for ones needing unstructured
         # state like unique-molecule snapshots for chromosome viz).
         try:
-            _ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+            _ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")) or {}
             _runtime = (_ws_data.get("runtime") or {}) if isinstance(_ws_data, dict) else {}
             _default_emitter = str(_runtime.get("default_emitter") or "sqlite").lower()
             _max_generations = int(_runtime.get("max_generations") or 3)
@@ -4175,6 +4489,106 @@ def _check_installed_module_sync(pkg_name: str, install_path: str | None) -> str
     return None
 
 
+# Cached for the lifetime of a request. The bulk-venv-probe takes ~200ms;
+# cache invalidation is fine because each Handler instance is per-request.
+_CATALOG_VENV_PROBE_SCRIPT = r'''
+import importlib.metadata as md, json, re, sys
+out = {}
+for d in md.distributions():
+    name = (d.metadata.get("Name") or "").lower()
+    if not name:
+        continue
+    requires_raw = list(d.requires or [])
+    requires_names = []
+    for r in requires_raw:
+        # Bare-name extract: strip version markers, extras, environment markers.
+        bare = re.split(r"[\s;<>=!~\[]", r, 1)[0].strip().lower()
+        if bare:
+            requires_names.append(bare)
+    out[name] = {"version": d.version, "requires": requires_names}
+json.dump(out, sys.stdout)
+'''
+
+
+def _detect_workspace_venv_distributions(ws_root: Path) -> dict[str, dict]:
+    """Single bulk venv probe — returns {package_name_lower: {version, requires, requires_by}}.
+
+    Used by `/api/catalog` to detect packages that are installed in the
+    workspace venv but NOT declared in workspace.yaml.imports — the
+    transitive-dependency case (e.g., v2ecoli depends on viva-munk via
+    pyproject.toml, viva-munk shows up in the venv but workspace.yaml has
+    no entry for it).
+
+    `requires_by` is the reverse index: for each package, which OTHER
+    installed packages declared it as a dependency. Lets the UI show
+    "transitive: brought in by X, Y" for venv-only-installed catalog
+    entries.
+
+    Returns {} if the venv is missing, probe times out, or JSON parse
+    fails — caller should degrade gracefully (no transitive detection).
+    """
+    venv_py = ws_root / ".venv" / "bin" / "python3"
+    if not venv_py.is_file():
+        return {}
+    try:
+        result = subprocess.run(
+            [str(venv_py), "-c", _CATALOG_VENV_PROBE_SCRIPT],
+            cwd=ws_root, capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return {}
+        data = json.loads(result.stdout)
+    except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError):
+        return {}
+    # Build reverse index: requires_by[child] = [parent_pkgs]
+    rev: dict[str, list[str]] = {}
+    for name, info in data.items():
+        for req in info.get("requires", []):
+            rev.setdefault(req, []).append(name)
+    for name, info in data.items():
+        info["requires_by"] = sorted(rev.get(name, []))
+    return data
+
+
+def _read_workspace_pyproject_deps(ws_root: Path) -> set[str]:
+    """Return the set of declared dependencies (bare package names, lowercased)
+    from the workspace's pyproject.toml `[project.dependencies]`.
+
+    Used by `/api/catalog` to mark a catalog module as installed when the
+    workspace's pyproject.toml declares it directly — even if
+    workspace.yaml.imports has no entry. This is the SECOND of three
+    install-source layers the dashboard now checks (after
+    workspace.yaml.imports, before raw venv presence).
+
+    Returns empty set on parse failure or missing file — degrades gracefully.
+    """
+    pyp = ws_root / "pyproject.toml"
+    if not pyp.is_file():
+        return set()
+    try:
+        import tomllib
+    except ImportError:
+        try:
+            import tomli as tomllib   # type: ignore
+        except ImportError:
+            return set()
+    try:
+        data = tomllib.loads(pyp.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+    deps = ((data.get("project") or {}).get("dependencies") or [])
+    out: set[str] = set()
+    for d in deps:
+        if not isinstance(d, str):
+            continue
+        # Strip version markers / extras / env markers — same regex as the
+        # venv probe so the two sources can be compared directly.
+        bare = re.split(r"[\s;<>=!~\[]", d, 1)[0].strip().lower()
+        if bare:
+            out.add(bare)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # HTTP handler
 # ---------------------------------------------------------------------------
@@ -4239,7 +4653,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "no workspace bound"}, 409)
 
         if path_only in ("/", "/index.html"):
-            return self._serve_file(WORKSPACE / "reports" / "index.html", "text/html")
+            # Render the SPA shell from index.html.j2 BEFORE serving so the
+            # live dashboard is decoupled from the static reports/index.html
+            # artifact other tools may overwrite for offline-viewing purposes
+            # (e.g. pbg_superpowers /pbg-report writes a slim workspace-only
+            # report there). If render fails, fall back to whatever's on disk.
+            try:
+                from vivarium_dashboard.lib.report import render_workspace_report
+                render_workspace_report(WORKSPACE)
+            except Exception as _render_exc:  # noqa: BLE001 — never block load
+                import sys as _sys
+                print(f"[dashboard] / re-render failed; serving on-disk file: "
+                      f"{type(_render_exc).__name__}: {_render_exc}", file=_sys.stderr)
+            return self._serve_file(workspace_paths().reports / "index.html", "text/html")
         # GitHub auth (cherry-picked from #65, Phase B-bis).
         if self.path.startswith("/api/auth/github/status"):
             return self._get_auth_github_status()
@@ -4350,6 +4776,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_workspace_manifest()
         if self.path.startswith("/api/work-status"):
             return self._get_work_status()
+        if self.path.startswith("/api/branch-staleness"):
+            return self._get_branch_staleness()
         if self.path.startswith("/api/dirty-status"):
             return self._get_dirty_status()
         if self.path.startswith("/api/suggest-poll"):
@@ -4416,7 +4844,7 @@ class Handler(BaseHTTPRequestHandler):
         primary = WORKSPACE / rel
         if primary.is_file():
             return self._serve_file(primary, self._guess_mime(rel))
-        fallback = WORKSPACE / "reports" / rel
+        fallback = workspace_paths().reports / rel
         return self._serve_file(fallback, self._guess_mime(rel))
 
     def do_POST(self):
@@ -4577,7 +5005,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _post_click(self, body: dict):
         with LOCK:
-            events = WORKSPACE / ".pbg" / "server" / "state" / "events"
+            events = workspace_paths().pbg / "server" / "state" / "events"
             events.parent.mkdir(parents=True, exist_ok=True)
             with events.open("a") as f:
                 f.write(json.dumps(body) + "\n")
@@ -4753,13 +5181,13 @@ class Handler(BaseHTTPRequestHandler):
             commit_msg += " (metadata pending)"
 
         def action():
-            bib_file = WORKSPACE / "references" / "papers.bib"
-            claims_file = WORKSPACE / "references" / "claims.yaml"
+            bib_file = workspace_paths().references / "papers.bib"
+            claims_file = workspace_paths().references / "claims.yaml"
             pdf_dest_rel = f"references/papers/{bib_key}.pdf"
             pdf_dest = WORKSPACE / pdf_dest_rel
 
             if bib_file.exists():
-                existing_text = bib_file.read_text()
+                existing_text = bib_file.read_text(encoding="utf-8")
                 if re.search(rf"@\w+\{{{re.escape(bib_key)},", existing_text):
                     raise ValueError(f"BibTeX key '{bib_key}' already exists in papers.bib")
 
@@ -4767,7 +5195,7 @@ class Handler(BaseHTTPRequestHandler):
 
             bibtex_entry = build_bibtex(bib_key, title, authors, year, journal, doi)
             bib_file.parent.mkdir(parents=True, exist_ok=True)
-            existing_bib = bib_file.read_text() if bib_file.exists() else ""
+            existing_bib = bib_file.read_text(encoding="utf-8") if bib_file.exists() else ""
             with bib_file.open("a") as f:
                 if existing_bib and not existing_bib.endswith("\n"):
                     f.write("\n")
@@ -4792,7 +5220,7 @@ class Handler(BaseHTTPRequestHandler):
                 existing_claims: dict = {}
                 if claims_file.exists():
                     try:
-                        existing_claims = _yaml.safe_load(claims_file.read_text()) or {}
+                        existing_claims = _yaml.safe_load(claims_file.read_text(encoding="utf-8")) or {}
                     except Exception:
                         existing_claims = {}
                 for claim_id in claim_ids:
@@ -4835,11 +5263,11 @@ class Handler(BaseHTTPRequestHandler):
         commit_msg = f"feat(5): add reference '{bibkey}'"
 
         def action():
-            bib_file = WORKSPACE / "references" / "papers.bib"
-            claims_file = WORKSPACE / "references" / "claims.yaml"
+            bib_file = workspace_paths().references / "papers.bib"
+            claims_file = workspace_paths().references / "claims.yaml"
 
             if bib_file.exists():
-                existing_text = bib_file.read_text()
+                existing_text = bib_file.read_text(encoding="utf-8")
                 if f"{{{bibkey}," in existing_text or f"{{{bibkey} " in existing_text:
                     raise ValueError(f"BibTeX key '{bibkey}' already exists in papers.bib")
 
@@ -4852,7 +5280,7 @@ class Handler(BaseHTTPRequestHandler):
                 existing_claims: dict = {}
                 if claims_file.exists():
                     try:
-                        existing_claims = _yaml.safe_load(claims_file.read_text()) or {}
+                        existing_claims = _yaml.safe_load(claims_file.read_text(encoding="utf-8")) or {}
                     except Exception:
                         existing_claims = {}
                 for claim_id, bkey in claim_mappings.items():
@@ -5109,7 +5537,7 @@ class Handler(BaseHTTPRequestHandler):
         if not name or not re.match(r"^[a-zA-Z0-9_-]+$", name):
             return self._json({"error": "invalid name"}, 400)
 
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
         viz = next((v for v in (ws_data.get("visualizations") or []) if v.get("name") == name), None)
         if not viz:
             return self._json({"error": f"visualization '{name}' not registered (Add it first)"}, 404)
@@ -5118,7 +5546,7 @@ class Handler(BaseHTTPRequestHandler):
         if not description.strip():
             return self._json({"error": "visualization has no description — edit it first"}, 400)
 
-        req_dir = WORKSPACE / ".pbg" / "viz-requests"
+        req_dir = workspace_paths().pbg / "viz-requests"
         req_dir.mkdir(parents=True, exist_ok=True)
         req_path = req_dir / f"{name}.md"
 
@@ -5211,16 +5639,16 @@ if __name__ == "__main__":
         if not name:
             return self._json({"error": "missing name"}, 400)
 
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
         viz = next((v for v in (ws_data.get("visualizations") or []) if v.get("name") == name), None)
         if not viz:
             return self._json({"status": "missing", "name": name}, 200)
 
         pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-        response_path = WORKSPACE / ".pbg" / "viz-responses" / f"{name}.py"
-        staged_path = WORKSPACE / ".pbg" / "visualizations-staged" / f"{name}.py"
+        response_path = workspace_paths().pbg / "viz-responses" / f"{name}.py"
+        staged_path = workspace_paths().pbg / "visualizations-staged" / f"{name}.py"
         committed_path = WORKSPACE / pkg / "visualizations" / f"{name}.py"
-        request_path = WORKSPACE / ".pbg" / "viz-requests" / f"{name}.md"
+        request_path = workspace_paths().pbg / "viz-requests" / f"{name}.md"
 
         if committed_path.exists():
             status = "committed"
@@ -5251,10 +5679,10 @@ if __name__ == "__main__":
         name = (body.get("name") or "").strip()
         if not name:
             return self._json({"error": "missing name"}, 400)
-        src = WORKSPACE / ".pbg" / "viz-responses" / f"{name}.py"
+        src = workspace_paths().pbg / "viz-responses" / f"{name}.py"
         if not src.exists():
             return self._json({"error": f"no skill response yet — run /pbg-viz {name} first"}, 404)
-        dest_dir = WORKSPACE / ".pbg" / "visualizations-staged"
+        dest_dir = workspace_paths().pbg / "visualizations-staged"
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / f"{name}.py"
         shutil.copy2(src, dest)
@@ -5265,7 +5693,7 @@ if __name__ == "__main__":
 
         Body: {names?: list[str]} — if omitted, commits all staged.
         """
-        staged_dir = WORKSPACE / ".pbg" / "visualizations-staged"
+        staged_dir = workspace_paths().pbg / "visualizations-staged"
         if not staged_dir.is_dir():
             return self._json({"error": "no staged visualizations"}, 404)
 
@@ -5278,7 +5706,7 @@ if __name__ == "__main__":
         if not names:
             return self._json({"error": "no staged visualizations match"}, 404)
 
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
         pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
         target_dir = WORKSPACE / pkg / "visualizations"
 
@@ -5322,7 +5750,7 @@ if __name__ == "__main__":
             return self._json({"error": "description is required"}, 400)
 
         snake = name.lower().replace("-", "_")
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")) or {}
         pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
         target = f"{pkg}/visualizations/{snake}.py"
 
@@ -5381,7 +5809,7 @@ if __name__ == "__main__":
             f"`html`, `json`, and standard `plotly`/`matplotlib` imports allowed).\n"
         )
 
-        req_dir = WORKSPACE / ".pbg" / "viz-requests"
+        req_dir = workspace_paths().pbg / "viz-requests"
         req_dir.mkdir(parents=True, exist_ok=True)
         req_path = req_dir / f"{name}.md"
         req_path.write_text(body_md)
@@ -5409,7 +5837,7 @@ if __name__ == "__main__":
             return self._json({"error": "name is required"}, 400)
 
         snake = name.lower().replace("-", "_")
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")) or {}
         pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
         target_rel = f"{pkg}/visualizations/{snake}.py"
         target_abs = WORKSPACE / target_rel
@@ -5689,7 +6117,7 @@ if __name__ == "__main__":
 
         Returns JSON with returncode, stdout, stderr.
         """
-        test_dir = WORKSPACE / "tests"
+        test_dir = workspace_paths().tests
         cmd = [sys.executable, "-m", "pytest", "-v", str(test_dir)]
         try:
             result = subprocess.run(
@@ -5715,7 +6143,7 @@ if __name__ == "__main__":
         name = (body.get("name") or "").strip()
         if not name:
             return self._json({"error": "missing name"}, 400)
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
         imports = ws_data.get("imports", {})
         if name not in imports:
             return self._json({"error": f"import '{name}' not registered"}, 404)
@@ -5915,7 +6343,7 @@ if __name__ == "__main__":
         commit_message = (body.get("commit_message") or
                           f"docs(report): attach {filename}").strip()
 
-        reports_dir = WORKSPACE / "reports"
+        reports_dir = workspace_paths().reports
         reports_dir.mkdir(parents=True, exist_ok=True)
         out_path = reports_dir / filename
         out_path.write_text(html)
@@ -6105,7 +6533,7 @@ if __name__ == "__main__":
         ws_path = WORKSPACE / "workspace.yaml"
         if ws_path.exists():
             try:
-                ws_data = yaml.safe_load(ws_path.read_text()) or {}
+                ws_data = yaml.safe_load(ws_path.read_text(encoding="utf-8")) or {}
                 ur = (ws_data.get("upstream_repo") or "").strip()
                 if ur:
                     return ur
@@ -6175,10 +6603,10 @@ if __name__ == "__main__":
         # to the legacy "Workstream: <branch>" when no matching
         # investigation.yaml is present (e.g., generic feature branches).
         def _default_pr_title(branch_name: str) -> str:
-            inv_yaml = WORKSPACE / "investigations" / branch_name / "investigation.yaml"
+            inv_yaml = workspace_paths().investigations / branch_name / "investigation.yaml"
             if inv_yaml.is_file():
                 try:
-                    inv_spec = yaml.safe_load(inv_yaml.read_text()) or {}
+                    inv_spec = yaml.safe_load(inv_yaml.read_text(encoding="utf-8")) or {}
                     inv_title = (inv_spec.get("title") or "").strip()
                     if inv_title:
                         return inv_title
@@ -6247,7 +6675,7 @@ if __name__ == "__main__":
             return self._json({"error": f"invalid kind (must be one of {VALID_KINDS})"}, 400)
 
         # Build context: workspace name + description, workstream info, recent commits.
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
         from vivarium_dashboard.lib.work_state import load_state
         state = load_state() or {}
         branch = state.get("active_branch")
@@ -6312,6 +6740,14 @@ if __name__ == "__main__":
                            cwd=WORKSPACE, capture_output=True, text=True)
         commits_ahead = int(r.stdout.strip() or 0) if r.returncode == 0 else 0
 
+        # commits behind base — surfaces the friction-#5 case where a long-running
+        # investigation branch drifts so far that framework migrations need
+        # manual conflict-resolution. Computed against origin/<base> when present
+        # (matches what a `git merge origin/main` would have to fast-forward
+        # over) and falls back to local <base>.
+        commits_behind, behind_ref = _commits_behind(branch, base)
+        stale_threshold = _stale_branch_threshold()
+
         # unpushed commits
         if state.get("pushed"):
             r2 = subprocess.run(["git", "rev-list", "--count", f"origin/{branch}..{branch}"],
@@ -6325,12 +6761,54 @@ if __name__ == "__main__":
             "branch": branch,
             "base": base,
             "commits_ahead": commits_ahead,
+            "commits_behind": commits_behind,
+            "behind_ref": behind_ref,
+            "stale": commits_behind >= stale_threshold,
+            "stale_threshold": stale_threshold,
             "unpushed": unpushed,
             "pushed": state.get("pushed", False),
             "has_origin": _has_origin_remote(),
             "gh_available": shutil.which("gh") is not None,
             "pr_number": state.get("pr_number"),
             "pr_url": state.get("pr_url"),
+        }, 200)
+
+    def _get_branch_staleness(self):
+        """Generic helper: how many commits is <branch> behind <base>?
+
+        Query string: ?branch=<name>&base=<name>. Both optional —
+        branch defaults to the workspace's current HEAD; base defaults
+        to 'main'. Probes origin/<base> first (so the answer matches
+        what a merge from upstream would have to fast-forward over),
+        falls back to local <base>.
+
+        Surfaces friction note 2026-05-27 #5: long-running investigation
+        branches drift, and when framework migrations land on main, the
+        eventual merge produces "trivial but tedious" conflicts. A skill
+        or UI calls this endpoint to warn the user before the drift gets
+        painful.
+        """
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        branch = (qs.get("branch") or [None])[0]
+        base = (qs.get("base") or ["main"])[0]
+
+        if not branch:
+            r = subprocess.run(["git", "branch", "--show-current"],
+                               cwd=WORKSPACE, capture_output=True, text=True)
+            branch = r.stdout.strip() if r.returncode == 0 else ""
+        if not branch:
+            return self._json({"error": "could not determine current branch + no ?branch= given"}, 400)
+
+        commits_behind, behind_ref = _commits_behind(branch, base)
+        threshold = _stale_branch_threshold()
+        return self._json({
+            "branch": branch,
+            "base": base,
+            "behind_ref": behind_ref,
+            "commits_behind": commits_behind,
+            "stale_threshold": threshold,
+            "stale": commits_behind >= threshold,
         }, 200)
 
     def _post_work_end(self, body: dict):
@@ -6681,7 +7159,7 @@ if __name__ == "__main__":
         if not spec_id:
             return self._json({"runs": [], "error": "missing spec_id"}, 400)
 
-        db_file = WORKSPACE / ".pbg" / "composite-runs.db"
+        db_file = workspace_paths().pbg / "composite-runs.db"
         if not db_file.is_file():
             return self._json({"runs": []}, 200)
         conn = cr.connect(db_file)
@@ -6704,7 +7182,7 @@ if __name__ == "__main__":
             return self._json({"error": "use /state subpath"}, 400)
         run_id = rest
 
-        db_file = WORKSPACE / ".pbg" / "composite-runs.db"
+        db_file = workspace_paths().pbg / "composite-runs.db"
         if not db_file.is_file():
             return self._json({"error": "no run database"}, 404)
         conn = cr.connect(db_file)
@@ -6737,7 +7215,7 @@ if __name__ == "__main__":
         except ValueError:
             return self._json({"error": "step must be int"}, 400)
 
-        db_file = WORKSPACE / ".pbg" / "composite-runs.db"
+        db_file = workspace_paths().pbg / "composite-runs.db"
         if not db_file.is_file():
             return self._json({"error": "no run database"}, 404)
         conn = cr.connect(db_file)
@@ -6767,7 +7245,7 @@ if __name__ == "__main__":
             return self._json({"error": "bad route"}, 400)
         run_id = rest[: -len("/status")]
 
-        db_file = WORKSPACE / ".pbg" / "composite-runs.db"
+        db_file = workspace_paths().pbg / "composite-runs.db"
         if not db_file.is_file():
             return self._json({"error": "no run database"}, 404)
         conn = cr.connect(db_file)
@@ -6791,12 +7269,12 @@ if __name__ == "__main__":
                 resp["log_path"] = log_rel
                 log_full = WORKSPACE / log_rel
                 if log_full.is_file():
-                    resp["error"] = log_full.read_text()[-2000:]
+                    resp["error"] = log_full.read_text(encoding="utf-8")[-2000:]
         elif meta["status"] == "completed":
-            viz_file = WORKSPACE / ".pbg" / "runs" / run_id / "viz.json"
+            viz_file = workspace_paths().pbg / "runs" / run_id / "viz.json"
             if viz_file.is_file():
                 try:
-                    resp["viz_html"] = json.loads(viz_file.read_text())
+                    resp["viz_html"] = json.loads(viz_file.read_text(encoding="utf-8"))
                 except json.JSONDecodeError:
                     pass
         return self._json(resp, 200)
@@ -6896,6 +7374,16 @@ if __name__ == "__main__":
             finally:
                 conn.close()
 
+        # Single-sourced reviewer-facing run/test/verdict summary for the
+        # downloadable report's per-study clarity strip (see study_status).
+        try:
+            from pbg_superpowers import study_status as _ss
+            if isinstance(spec, dict):
+                spec["clarity_summary"] = _ss.study_clarity_summary(
+                    spec, spec.get("runs") or [])
+        except Exception:  # noqa: BLE001
+            pass
+
         return self._json({
             "name": name,
             "spec": spec,
@@ -6982,7 +7470,7 @@ if __name__ == "__main__":
         if not composite_path.is_file():
             return self._json({"error": f"composite document not found: {composite_path}"}, 404)
         try:
-            doc = yaml.safe_load(composite_path.read_text()) or {}
+            doc = yaml.safe_load(composite_path.read_text(encoding="utf-8")) or {}
         except Exception as e:
             return self._json({"error": f"failed to parse composite: {e}"}, 500)
         return self._json({"nodes": walk_state_tree(doc)}, 200)
@@ -7282,9 +7770,9 @@ if __name__ == "__main__":
         name = path[len("/api/study-charts/"):].strip("/")
         if not name:
             return self._json({"error": "missing study name"}, 400)
-        runs_db = WORKSPACE / "studies" / name / "runs.db"
-        charts_dir = WORKSPACE / "studies" / name / "charts"
-        spec_path = WORKSPACE / "studies" / name / "study.yaml"
+        runs_db = workspace_paths().studies / name / "runs.db"
+        charts_dir = workspace_paths().studies / name / "charts"
+        spec_path = workspace_paths().studies / name / "study.yaml"
         try:
             # Detect v4: study.yaml with schema_version: 4 → render charts
             # per-test from tests[].measure.path, with default-baseline
@@ -7292,7 +7780,7 @@ if __name__ == "__main__":
             spec = None
             if spec_path.is_file():
                 try:
-                    spec = _yaml.safe_load(spec_path.read_text())
+                    spec = _yaml.safe_load(spec_path.read_text(encoding="utf-8"))
                 except Exception:
                     spec = None
             is_v4 = isinstance(spec, dict) and spec.get("schema_version") == 4
@@ -7335,11 +7823,11 @@ if __name__ == "__main__":
         if not name:
             return self._json({"error": "investigation name required"}, 400)
 
-        spec_path = WORKSPACE / "investigations" / name / "investigation.yaml"
+        spec_path = workspace_paths().investigations / name / "investigation.yaml"
         if not spec_path.is_file():
             return self._json({"error": f"no investigation.yaml at {spec_path}"}, 404)
         try:
-            spec = yaml.safe_load(spec_path.read_text()) or {}
+            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
         except Exception as e:
             return self._json({"error": f"parse failed: {e}"}, 500)
 
@@ -7356,10 +7844,10 @@ if __name__ == "__main__":
 
         studies_out = []
         for slug in (spec.get("studies") or []):
-            study_dir = WORKSPACE / "studies" / slug
+            study_dir = workspace_paths().studies / slug
             sp = study_dir / "study.yaml"
             if not sp.is_file():
-                sp = WORKSPACE / "investigations" / slug / "spec.yaml"
+                sp = workspace_paths().investigations / slug / "spec.yaml"
             if not sp.is_file():
                 studies_out.append({"name": slug, "status": "missing", "error": "study.yaml not found"})
                 continue
@@ -7378,14 +7866,22 @@ if __name__ == "__main__":
             question = (purpose.get("question") if isinstance(purpose, dict) else None) or study_spec.get("question", "")
             follow_ups = study_spec.get("follow_up_studies") or []
             findings = study_spec.get("findings") or []
+            n_runs_for_study = _count_runs_for_study(
+                study_spec["name"], study_spec)  # F2
+            raw_status = study_spec.get("status", "planned")
             studies_out.append({
                 "name":            study_spec["name"],
-                "status":          study_spec.get("status", "planned"),
+                "status":          raw_status,
+                "effective_status": compute_study_effective_status(
+                    raw_status,
+                    has_runs=n_runs_for_study > 0,
+                    has_active_run=_has_active_run_for_study(
+                        study_spec["name"], study_spec)),
                 "phase":           study_spec.get("phase"),
                 "question":        question,
                 "n_variants":      len(sim_set) if sim_set else len(study_spec.get("variants") or []),
                 "n_interventions": len(study_spec.get("interventions") or []),
-                "n_runs":          _count_runs_for_study(study_spec["name"], study_spec),  # F2
+                "n_runs":          n_runs_for_study,
                 "baseline_source": _format_baseline_source(study_spec),
                 "parent_studies":  _normalize_parents(study_spec),
                 "n_behaviors":     len(beh_tests),
@@ -7427,8 +7923,8 @@ if __name__ == "__main__":
             "hypothesis":       spec.get("hypothesis", ""),
             "status":           spec.get("status", "planning"),
             "effective_status": effective_status,
-            "expert_docs":      spec.get("expert_docs") or [],
-            "acceptance_criteria": spec.get("acceptance_criteria") or [],
+            "expert_docs":      _coerce_list_field(spec, "expert_docs", source=str(spec_path)),
+            "acceptance_criteria": _coerce_list_field(spec, "acceptance_criteria", source=str(spec_path)),
             # Authored synthesis layers for the layered report (executive
             # summary + scientific argument). Optional — absent on older
             # investigations, where the report falls back to derived data.
@@ -7459,7 +7955,7 @@ if __name__ == "__main__":
         if not spec_path.is_file():
             return self._json({"error": f"no study.yaml or spec.yaml at {_study_dir(slug)}"}, 404)
         try:
-            spec = yaml.safe_load(spec_path.read_text()) or {}
+            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
         except Exception as e:
             return self._json({"error": f"failed to parse study spec: {e}"}, 500)
 
@@ -7500,7 +7996,7 @@ if __name__ == "__main__":
         if nodes is None:
             from vivarium_dashboard.lib.composite_recipes import walk_state_snapshot
             try:
-                doc = json.loads(source_file.read_text())
+                doc = json.loads(source_file.read_text(encoding="utf-8"))
             except Exception as e:
                 return self._json({"error": f"failed to parse {source_file.name}: {e}"}, 500)
             nodes = walk_state_snapshot(doc, max_depth=max_depth)
@@ -7538,7 +8034,7 @@ if __name__ == "__main__":
         if not path.is_file():
             return self._json({"error": "composite document not found"}, 404)
         try:
-            doc = yaml.safe_load(path.read_text()) or {}
+            doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         except Exception as e:
             return self._json({"error": f"parse failed: {e}"}, 500)
         return self._json({"state": doc}, 200)
@@ -7688,8 +8184,8 @@ if __name__ == "__main__":
         if not re.match(r"^[a-zA-Z0-9_-]+$", name):
             return self._json({"error": "name must match [a-zA-Z0-9_-]+"}, 400)
 
-        inv_dir = WORKSPACE / "studies" / name
-        if inv_dir.exists() or (WORKSPACE / "investigations" / name).exists():
+        inv_dir = workspace_paths().studies / name
+        if inv_dir.exists() or (workspace_paths().investigations / name).exists():
             return self._json({"error": f"investigation '{name}' already exists"}, 409)
 
         # Resolve source composite if provided. YAML refs land in the
@@ -7822,7 +8318,7 @@ if __name__ == "__main__":
             return self._json({"error": "name is required"}, 400)
 
         # Resolve workspace package
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
         pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
 
         def run_one_composite(*, spec_id, overrides, steps, sim_name, run_id, db_file,
@@ -7858,7 +8354,7 @@ if __name__ == "__main__":
                 path = find_composite_path(WORKSPACE, pkg, spec_id)
                 if path is None:
                     return {"status": "failed", "error": f"composite not found: {spec_id}"}
-                text = path.read_text()
+                text = path.read_text(encoding="utf-8")
                 spec = json.loads(text) if path.suffix.lower() == ".json" else yaml.safe_load(text)
                 state = substitute_parameters(spec.get("state") or {},
                                               spec.get("parameters") or {},
@@ -7990,7 +8486,7 @@ if __name__ == "__main__":
             return self._json({"error": f"spec error: {e}"}, 400)
 
         # Discover workspace package + build core (mirror _post_investigation_run)
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
         pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
         sys.path.insert(0, str(WORKSPACE))
         try:
@@ -8059,7 +8555,7 @@ if __name__ == "__main__":
             return self._json({"error": f"investigation '{inv}' not found"}, 404)
 
         def action():
-            spec = _y.safe_load(spec_path.read_text()) or {}
+            spec = _y.safe_load(spec_path.read_text(encoding="utf-8")) or {}
             vizzes = spec.setdefault("visualizations", []) or []
             if any(v.get("name") == viz_name for v in vizzes):
                 raise RuntimeError(f"visualization '{viz_name}' already exists in spec")
@@ -8083,7 +8579,7 @@ if __name__ == "__main__":
         """
         _ws_add_to_sys_path()
         try:
-            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
             pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
             sys.path.insert(0, str(WORKSPACE))
             core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
@@ -8469,7 +8965,7 @@ if __name__ == "__main__":
     def _get_ui_config(self):
         """GET /api/ui-config — return UI feature flags from workspace.yaml."""
         try:
-            ws = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+            ws = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")) or {}
         except Exception:
             ws = {}
         ui = ws.get("ui") or {}
@@ -8495,7 +8991,7 @@ if __name__ == "__main__":
         Returns: [{name, class, address, config, description?}, ...]
         """
         try:
-            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
         except Exception:
             ws_data = {}
         out = []
@@ -8565,7 +9061,7 @@ if __name__ == "__main__":
         On failure, returns (None, {})."""
         _ws_add_to_sys_path()
         try:
-            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
             pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
             sys.path.insert(0, str(WORKSPACE))
             core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
@@ -8583,7 +9079,7 @@ if __name__ == "__main__":
         except ImportError:
             return registry
         try:
-            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")) or {}
             pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
             import pkgutil, importlib
             viz_pkg = importlib.import_module(f"{pkg}.visualizations")
@@ -8812,7 +9308,7 @@ if __name__ == "__main__":
         if not name:
             return self._json({"error": "name is required"}, 400)
         try:
-            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
         except Exception:
             ws_data = {}
         entry = next(
@@ -8828,8 +9324,8 @@ if __name__ == "__main__":
             # data. Show a friendly stub instead of erroring out, so the user
             # sees what's there and what to do next.
             desc = entry.get("description") or "(no description)"
-            resp_path = WORKSPACE / ".pbg" / "viz-responses" / f"{name}.py"
-            req_path = WORKSPACE / ".pbg" / "viz-requests" / f"{name}.md"
+            resp_path = workspace_paths().pbg / "viz-responses" / f"{name}.py"
+            req_path = workspace_paths().pbg / "viz-requests" / f"{name}.md"
             if resp_path.is_file():
                 status_block = (
                     '<p style="margin:8px 0;color:#1f7a3a">'
@@ -8944,7 +9440,7 @@ if __name__ == "__main__":
         except InvestigationSpecError as e:
             return self._json({"error": str(e)}, 400)
 
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
         pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
 
         # Resolve which composite to run. v2 studies have `baseline` + `variants[]`
@@ -8971,7 +9467,7 @@ if __name__ == "__main__":
             sidecar_path = (inv_dir / sidecar_rel).resolve()
             if not sidecar_path.is_file():
                 return self._json({"error": f"composite sidecar not found: {sidecar_path}"}, 404)
-            text = sidecar_path.read_text()
+            text = sidecar_path.read_text(encoding="utf-8")
             composite_doc = (json.loads(text) if sidecar_path.suffix.lower() == ".json"
                               else yaml.safe_load(text)) or {}
         elif spec.get("composite"):
@@ -8980,7 +9476,7 @@ if __name__ == "__main__":
             path = find_composite_path(WORKSPACE, pkg, composite_name)
             if path is None:
                 return self._json({"error": f"composite not found: {composite_name}"}, 404)
-            text = path.read_text()
+            text = path.read_text(encoding="utf-8")
             composite_doc = (json.loads(text) if path.suffix.lower() == ".json"
                               else yaml.safe_load(text)) or {}
         else:
@@ -9142,7 +9638,7 @@ if __name__ == "__main__":
 
         # Resolve composite_name → dotted source ref via the workspace catalog.
         try:
-            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")) or {}
         except Exception as e:
             return self._json({"error": f"failed to read workspace.yaml: {e}"}, 500)
         pkg = ws_data.get("package_path") or (
@@ -9219,8 +9715,8 @@ if __name__ == "__main__":
         slug = re.sub(r"-+", "-", slug)
         auto_name = f"study-{slug}-{uuid.uuid4().hex[:6]}"
 
-        inv_dir = WORKSPACE / "investigations" / auto_name
-        if inv_dir.exists() or (WORKSPACE / "studies" / auto_name).exists():
+        inv_dir = workspace_paths().studies / auto_name
+        if inv_dir.exists() or (workspace_paths().investigations / auto_name).exists():
             # Collision is astronomically unlikely with 24 bits of entropy, but
             # if it happens (e.g. a test seeds uuid), surface it rather than
             # silently overwriting.
@@ -9325,7 +9821,7 @@ if __name__ == "__main__":
                 shutil.copy2(source_path, sidecar)
             else:
                 sidecar.write_text(yaml.safe_dump(generator_doc, sort_keys=False))
-            spec = yaml.safe_load(spec_path.read_text()) or {}
+            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
             composites = spec.setdefault('composites', [])
             composites.append({
                 'name': comp_name,
@@ -9378,7 +9874,7 @@ if __name__ == "__main__":
             apply_parameter_overrides, apply_process_overrides,
         )
         import copy
-        parent_doc = yaml.safe_load(parent.read_text()) or {}
+        parent_doc = yaml.safe_load(parent.read_text(encoding="utf-8")) or {}
         derived_doc = copy.deepcopy(parent_doc)
         try:
             if body.get('parameter_overrides'):
@@ -9394,7 +9890,7 @@ if __name__ == "__main__":
 
         def do_action():
             derived.write_text(yaml.safe_dump(derived_doc, sort_keys=False))
-            spec = yaml.safe_load(spec_path.read_text()) or {}
+            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
             variants = spec.setdefault('variants', [])
             entry = {'name': comp_name, 'extends': extends,
                      'document': f'./composites/{comp_name}.yaml'}
@@ -9458,7 +9954,7 @@ if __name__ == "__main__":
         # Resolve workspace package path using the same pattern as other
         # handlers (e.g. _post_investigation_create_from_composite).
         try:
-            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")) or {}
         except Exception as e:
             return self._json({"error": f"failed to read workspace.yaml: {e}"}, 500)
         pkg = ws_data.get("package_path") or (
@@ -9492,13 +9988,13 @@ if __name__ == "__main__":
 
         def do_action():
             catalog_dir.mkdir(parents=True, exist_ok=True)
-            doc = yaml.safe_load(sidecar.read_text()) or {}
+            doc = yaml.safe_load(sidecar.read_text(encoding="utf-8")) or {}
             doc['name'] = target_name
             if description is not None:
                 doc['description'] = description
             target_path.write_text(yaml.safe_dump(doc, sort_keys=False))
             # Mark variant promoted in spec.yaml
-            spec = yaml.safe_load(spec_path.read_text()) or {}
+            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
             for v in (spec.get('variants') or []):
                 if v.get('name') == variant_name:
                     v['promoted'] = True
@@ -10039,7 +10535,7 @@ if __name__ == "__main__":
         spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
-        spec = yaml.safe_load(spec_path.read_text()) or {}
+        spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
         entry = next((c for c in (spec.get('composites') or [])
                       if c.get('name') == comp_name), None)
         if entry is None:
@@ -10055,7 +10551,7 @@ if __name__ == "__main__":
             apply_parameter_overrides, apply_process_overrides,
         )
         import copy
-        parent_doc = yaml.safe_load(parent_path.read_text()) or {}
+        parent_doc = yaml.safe_load(parent_path.read_text(encoding="utf-8")) or {}
         derived_doc = copy.deepcopy(parent_doc)
         try:
             if entry.get('parameter_overrides'):
@@ -10098,7 +10594,7 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): set observables"
 
         def do_action():
-            spec = yaml.safe_load(spec_path.read_text()) or {}
+            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
             if emit_all:
                 spec['observables'] = [{'path': []}]
             else:
@@ -10130,7 +10626,7 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): set conclusions"
 
         def do_action():
-            spec = yaml.safe_load(spec_path.read_text()) or {}
+            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
             spec['conclusions'] = markdown
             spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
 
@@ -10165,7 +10661,7 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): set overview metadata"
 
         def do_action():
-            spec = yaml.safe_load(spec_path.read_text()) or {}
+            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
             for key in ("question", "hypothesis", "status", "topic"):
                 if key in fields:
                     spec[key] = fields[key]
@@ -10225,7 +10721,7 @@ if __name__ == "__main__":
         if not spec_path or not spec_path.is_file():
             return self._json({"error": f"study not found: {slug}"}, 404)
         try:
-            spec = _yaml.safe_load(spec_path.read_text()) or {}
+            spec = _yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
         except _yaml.YAMLError as e:
             return self._json({"error": f"yaml parse failed: {e}"}, 500)
 
@@ -10365,11 +10861,11 @@ if __name__ == "__main__":
         inv_slug = ((body or {}).get("investigation") or "").strip()
         if not inv_slug:
             return self._json({"error": "investigation is required"}, 400)
-        inv_yaml = WORKSPACE / "investigations" / inv_slug / "investigation.yaml"
+        inv_yaml = workspace_paths().investigations / inv_slug / "investigation.yaml"
         if not inv_yaml.is_file():
             return self._json({"error": f"investigation not found: {inv_slug}"}, 404)
         try:
-            iset = _yaml.safe_load(inv_yaml.read_text()) or {}
+            iset = _yaml.safe_load(inv_yaml.read_text(encoding="utf-8")) or {}
         except _yaml.YAMLError as e:
             return self._json({"error": f"yaml parse failed: {e}"}, 500)
 
@@ -10394,17 +10890,17 @@ if __name__ == "__main__":
                 continue
             if studies_filter and member_name not in studies_filter:
                 continue
-            spec_path = WORKSPACE / "studies" / member_name / "study.yaml"
+            spec_path = workspace_paths().studies / member_name / "study.yaml"
             if not spec_path.is_file():
                 # legacy: investigations/<name>/spec.yaml
-                spec_path = WORKSPACE / "investigations" / member_name / "spec.yaml"
+                spec_path = workspace_paths().investigations / member_name / "spec.yaml"
             if not spec_path.is_file():
                 skipped.append({"study": member_name, "variant": "?",
                                 "status": "skipped",
                                 "error": "study.yaml not found"})
                 continue
             try:
-                spec = _yaml.safe_load(spec_path.read_text()) or {}
+                spec = _yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
             except _yaml.YAMLError as e:
                 skipped.append({"study": member_name, "variant": "?",
                                 "status": "skipped", "error": f"yaml: {e}"})
@@ -10523,19 +11019,19 @@ if __name__ == "__main__":
             study_slug = member if isinstance(member, str) else (member or {}).get("study")
             if not study_slug:
                 continue
-            spec_path = WORKSPACE / "studies" / study_slug / "study.yaml"
+            spec_path = workspace_paths().studies / study_slug / "study.yaml"
             if not spec_path.is_file():
                 continue
             try:
-                study_spec = _yaml.safe_load(spec_path.read_text()) or {}
+                study_spec = _yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
             except _yaml.YAMLError:
                 continue
             specs = study_spec.get("comparative_visualizations") or []
             if not specs:
                 continue
-            viz_dir = WORKSPACE / "studies" / study_slug / "viz"
+            viz_dir = workspace_paths().studies / study_slug / "viz"
             viz_dir.mkdir(parents=True, exist_ok=True)
-            study_db = WORKSPACE / "studies" / study_slug / "runs.db"
+            study_db = workspace_paths().studies / study_slug / "runs.db"
             if not study_db.is_file():
                 continue
             for cv in specs:
@@ -10645,7 +11141,7 @@ if __name__ == "__main__":
         slug = (body or {}).get("study")
         if not slug:
             return self._json({"error": "missing 'study' in body"}, 400)
-        spec_path = WORKSPACE / "studies" / slug / "study.yaml"
+        spec_path = workspace_paths().studies / slug / "study.yaml"
         if not spec_path.exists():
             return self._json({"error": f"study not found: {slug}"}, 404)
         try:
@@ -10666,7 +11162,7 @@ if __name__ == "__main__":
         name = (params.get("study", [""])[0] or "").strip()
         if not name:
             return self._json({"error": "missing study"}, 400)
-        src = WORKSPACE / "studies" / name
+        src = workspace_paths().studies / name
         if not src.is_dir():
             return self._json({"error": "study not found"}, 404)
         data = _study_export_zip(WORKSPACE, name)
@@ -10721,7 +11217,7 @@ if __name__ == "__main__":
         spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
-        spec = yaml.safe_load(spec_path.read_text()) or {}
+        spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
 
         # Dependents: runs[].composite, visualizations[].config.sources, composites[].extends
         dependents = []
@@ -10783,7 +11279,7 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): add comparison {cmp_name}"
 
         def do_action():
-            spec = yaml.safe_load(spec_path.read_text()) or {}
+            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
             cmps = list(spec.get("comparisons") or [])
             if any(c.get("name") == cmp_name for c in cmps):
                 raise ValueError(f"comparison {cmp_name!r} already exists")
@@ -10825,7 +11321,7 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): update comparison {cmp_name}"
 
         def do_action():
-            spec = yaml.safe_load(spec_path.read_text()) or {}
+            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
             cmps = spec.get("comparisons") or []
             idx = next((i for i, c in enumerate(cmps) if c.get("name") == cmp_name), None)
             if idx is None:
@@ -10858,7 +11354,7 @@ if __name__ == "__main__":
         spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
-        spec = yaml.safe_load(spec_path.read_text()) or {}
+        spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
         dependents = [
             v.get("name", "<unnamed>")
             for v in (spec.get("visualizations") or [])
@@ -10876,7 +11372,7 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): delete comparison {cmp_name}"
 
         def do_action():
-            data = yaml.safe_load(spec_path.read_text()) or {}
+            data = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
             data["comparisons"] = [
                 c for c in (data.get("comparisons") or []) if c.get("name") != cmp_name
             ]
@@ -10915,7 +11411,7 @@ if __name__ == "__main__":
 
         # Validate variant refs against declared variants up-front so the
         # error code is 400 (bad input) rather than 500 from do_action.
-        spec_peek = yaml.safe_load(spec_path.read_text()) or {}
+        spec_peek = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
         declared = {v.get("name") for v in (spec_peek.get("variants") or [])
                     if isinstance(v, dict)}
         unknown = [v for v in variants if v not in declared]
@@ -10928,7 +11424,7 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): add group {grp_name}"
 
         def do_action():
-            spec = yaml.safe_load(spec_path.read_text()) or {}
+            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
             grps = list(spec.get("groups") or [])
             if any(g.get("name") == grp_name for g in grps):
                 raise ValueError(f"group {grp_name!r} already exists")
@@ -10973,7 +11469,7 @@ if __name__ == "__main__":
                 return self._json(
                     {"error": "variants must be a non-empty list"}, 400,
                 )
-            spec_peek = yaml.safe_load(spec_path.read_text()) or {}
+            spec_peek = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
             declared = {v.get("name") for v in (spec_peek.get("variants") or [])
                         if isinstance(v, dict)}
             unknown = [v for v in new_vars if v not in declared]
@@ -10986,7 +11482,7 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): update group {grp_name}"
 
         def do_action():
-            spec = yaml.safe_load(spec_path.read_text()) or {}
+            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
             grps = spec.get("groups") or []
             idx = next((i for i, g in enumerate(grps) if g.get("name") == grp_name), None)
             if idx is None:
@@ -11018,7 +11514,7 @@ if __name__ == "__main__":
         spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
-        spec_peek = yaml.safe_load(spec_path.read_text()) or {}
+        spec_peek = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
         if not any(g.get("name") == grp_name
                    for g in (spec_peek.get("groups") or [])):
             return self._json({"error": f"group {grp_name!r} not found"}, 404)
@@ -11026,7 +11522,7 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): delete group {grp_name}"
 
         def do_action():
-            data = yaml.safe_load(spec_path.read_text()) or {}
+            data = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
             data["groups"] = [
                 g for g in (data.get("groups") or []) if g.get("name") != grp_name
             ]
@@ -11053,7 +11549,7 @@ if __name__ == "__main__":
             return self._json({"composites": [], "error": str(e)}, 200)
 
         try:
-            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
             pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
             # Eagerly import the workspace package so any @composite_generator
             # decorators inside it fire and register into pbg-superpowers'
@@ -11248,7 +11744,7 @@ if __name__ == "__main__":
         # Try to resolve as a dotted spec ID via composite_lookup.
         try:
             from vivarium_dashboard.lib.composite_lookup import find_composite_path
-            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
             pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
             found = find_composite_path(WORKSPACE, pkg, ref)
             if found is not None:
@@ -11266,7 +11762,7 @@ if __name__ == "__main__":
             return self._json({"error": f"composite not found: {ref}"}, 404)
 
         try:
-            text = path.read_text()
+            text = path.read_text(encoding="utf-8")
             doc = json.loads(text) if path.suffix.lower() == ".json" else (yaml.safe_load(text) or {})
         except Exception as e:
             return self._json({"error": f"parse failed: {e}"}, 500)
@@ -11296,7 +11792,7 @@ if __name__ == "__main__":
         if not spec_id:
             return self._json({"error": "missing id"}, 400)
 
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
         pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
 
         # Generator-kind branch: resolve via pbg-superpowers' live registry.
@@ -11339,7 +11835,7 @@ if __name__ == "__main__":
         if path is None:
             return self._json({"error": f"spec file not found for id {spec_id}"}, 404)
 
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         if path.suffix.lower() == ".json":
             spec = json.loads(text)
         else:
@@ -11387,10 +11883,10 @@ if __name__ == "__main__":
         if not spec_id:
             return self._json({"error": "missing id"}, 400)
 
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
         pkg = ws_data.get("package_path") or (
             "pbg_" + ws_data.get("name", "").replace("-", "_"))
-        db_file = str(WORKSPACE / ".pbg" / "composite-runs.db")
+        db_file = str(workspace_paths().pbg / "composite-runs.db")
 
         if run_registry.count_running(db_file) >= run_registry.CONCURRENCY_CAP:
             return self._json(
@@ -11398,7 +11894,7 @@ if __name__ == "__main__":
                 429)
 
         run_id = cr.generate_run_id(spec_id, overrides)
-        run_dir = WORKSPACE / ".pbg" / "runs" / run_id
+        run_dir = workspace_paths().pbg / "runs" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         log_rel = str((run_dir / "run.log").relative_to(WORKSPACE))
         request_path = run_dir / "request.json"
@@ -11472,7 +11968,7 @@ if __name__ == "__main__":
             # manifest still surfaces basic identity for partially-formed
             # workspaces (test fixtures, migrations in progress, ...).
             try:
-                ws = yaml.safe_load(ws_path.read_text()) or {}
+                ws = yaml.safe_load(ws_path.read_text(encoding="utf-8")) or {}
             except Exception:
                 ws = {}
         try:
@@ -11504,7 +12000,7 @@ if __name__ == "__main__":
                 from vivarium_dashboard.lib.workspace_yaml import load_workspace
                 ws = load_workspace(WORKSPACE / "workspace.yaml")
             except Exception:
-                ws = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+                ws = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")) or {}
             pkg = ws.get("package_path") or (
                 "pbg_" + (ws.get("name") or "").replace("-", "_")
             )
@@ -11609,7 +12105,7 @@ if __name__ == "__main__":
             description = ""
             if skill_md.is_file():
                 try:
-                    text = skill_md.read_text()
+                    text = skill_md.read_text(encoding="utf-8")
                 except Exception:
                     text = ""
                 m = re.search(r"^description:\s*(.+?)$", text, re.MULTILINE)
@@ -11633,14 +12129,14 @@ if __name__ == "__main__":
         route = (body.get("route") or "/").strip()
         if not route.startswith("/"):
             route = "/" + route
-        info_file = WORKSPACE / ".pbg" / "server" / "server-info"
+        info_file = workspace_paths().pbg / "server" / "server-info"
         if not info_file.is_file():
             return self._json(
                 {"error": "server-info file not found - is the dashboard running?"},
                 503,
             )
         try:
-            info = json.loads(info_file.read_text())
+            info = json.loads(info_file.read_text(encoding="utf-8"))
         except Exception as e:
             return self._json({"error": f"server-info parse failed: {e}"}, 500)
         url = (info.get("url") or "").rstrip("/") + route
@@ -11673,13 +12169,7 @@ if __name__ == "__main__":
         if not name:
             return self._json({"error": "name required"}, 400)
 
-        catalog_path = WORKSPACE / "scripts" / "_catalog" / "modules.json"
-        if not catalog_path.is_file():
-            return self._json({"error": "catalog not found"}, 404)
-        try:
-            catalog = json.loads(catalog_path.read_text())
-        except Exception as e:
-            return self._json({"error": f"catalog parse failed: {e}"}, 500)
+        catalog = self._module_registry()
         entry = next((m for m in catalog if m.get("name") == name), None)
         if entry is None:
             return self._json({"error": f"unknown module: {name}"}, 404)
@@ -11727,13 +12217,7 @@ if __name__ == "__main__":
         if not name or not check_names:
             return self._json({"error": "name + check_names required"}, 400)
 
-        catalog_path = WORKSPACE / "scripts" / "_catalog" / "modules.json"
-        if not catalog_path.is_file():
-            return self._json({"error": "catalog not found"}, 404)
-        try:
-            catalog = json.loads(catalog_path.read_text())
-        except Exception as e:
-            return self._json({"error": f"catalog parse failed: {e}"}, 500)
+        catalog = self._module_registry()
         entry = next((m for m in catalog if m.get("name") == name), None)
         if entry is None:
             return self._json({"error": f"unknown module: {name}"}, 404)
@@ -11805,6 +12289,28 @@ if __name__ == "__main__":
             "recheck": recheck,
         }, 200)
 
+    def _module_registry(self) -> list[dict]:
+        """The available-modules registry (single source of truth).
+
+        The canonical curated list ships with pbg-superpowers
+        (``pbg_superpowers.catalog.load_registry``), merged with this
+        workspace's optional ``scripts/_catalog/overlay.json`` for local-only
+        modules. Falls back to a legacy per-workspace
+        ``scripts/_catalog/modules.json`` only when the installed
+        pbg-superpowers predates the canonical registry.
+        """
+        try:
+            from pbg_superpowers.catalog import load_registry
+            return load_registry(WORKSPACE)
+        except Exception:
+            legacy = workspace_paths().scripts / "_catalog" / "modules.json"
+            if legacy.is_file():
+                try:
+                    return json.loads(legacy.read_text(encoding="utf-8"))
+                except Exception:
+                    return []
+            return []
+
     def _get_catalog(self):
         """GET /api/catalog — return the curated module catalog with installed annotations.
 
@@ -11816,24 +12322,55 @@ if __name__ == "__main__":
         prepended to the list with ``kind: "workspace"`` so the Installed
         Modules panel can show it. The UI filters it out of Available Modules.
         """
-        catalog_path = WORKSPACE / "scripts" / "_catalog" / "modules.json"
         try:
-            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
         except Exception as e:
             return self._json({"modules": [], "error": f"workspace.yaml: {e}"}, 500)
 
-        if catalog_path.exists():
-            try:
-                modules = json.loads(catalog_path.read_text())
-            except Exception as e:
-                return self._json({"modules": [], "error": str(e)}, 500)
-        else:
-            modules = []  # catalog is optional; the workspace-self entry still applies
+        modules = self._module_registry()  # canonical (pbg-superpowers) + overlay
 
+        # Three install-source layers, in priority order:
+        #   1. workspace.yaml.imports — explicit declaration by the workspace
+        #      (the dashboard's canonical install record)
+        #   2. pyproject.toml [project.dependencies] — the project declares it
+        #      as a direct dep (e.g. v2ecoli's pyproject lists pbg-copasi
+        #      directly; the workspace.yaml.imports stays empty because the
+        #      user never went through the dashboard install flow)
+        #   3. Bulk venv probe — the package is in the venv but neither
+        #      declared layer mentions it (transitive: brought in by another
+        #      installed package)
+        # The dashboard surfaces all three as `installed: true` but stamps
+        # `install_source` + (for #3) `installed_via: [parent_pkgs]` so the UI
+        # can render the distinction (declared cards look pinned-by-user;
+        # pyproject cards show a "via pyproject" pill; venv-transitive cards
+        # show "transitive via X, Y" with no Uninstall affordance — the user
+        # has to remove the parent to remove the dep).
         imports = (ws_data or {}).get("imports", {}) or {}
+        pyproject_deps = _read_workspace_pyproject_deps(WORKSPACE)
+        venv_dists = _detect_workspace_venv_distributions(WORKSPACE)
+
+        def _name_variants(m: dict) -> list[str]:
+            """Module's name, pypi_name, and snake_case package name —
+            all lowercased — for fuzzy matching against pyproject.toml /
+            venv-distribution name conventions (which vary: PyPI names
+            use dashes; Python imports use underscores; uppercase varies)."""
+            out = [m["name"].lower()]
+            pn = m.get("pypi_name")
+            if pn:
+                out.append(pn.lower())
+            pkg = m.get("package") or m["name"].replace("-", "_")
+            out.append(pkg.lower())
+            return out
+
         for m in modules:
-            m["installed"] = m["name"] in imports
-            if m["installed"]:
+            variants = _name_variants(m)
+            declared = m["name"] in imports
+            in_pyproject = any(v in pyproject_deps for v in variants)
+            in_venv = any(v in venv_dists for v in variants)
+
+            if declared:
+                m["installed"] = True
+                m["install_source"] = "imports"
                 # Merge live workspace.yaml entry fields (source/ref/path/install_path/package)
                 # into the catalog item so the UI has authoritative install metadata.
                 imp = imports.get(m["name"], {}) or {}
@@ -11841,14 +12378,37 @@ if __name__ == "__main__":
                     v = imp.get(k)
                     if v is not None:
                         m[k] = v
-                # Sync check: is the Python package actually importable?
-                pkg_name = m.get("package") or m["name"].replace("-", "_")
-                sync_reason = _check_installed_module_sync(
-                    pkg_name, m.get("install_path")
-                )
-                if sync_reason:
-                    m["out_of_sync"] = True
-                    m["out_of_sync_reason"] = sync_reason
+            elif in_pyproject:
+                m["installed"] = True
+                m["install_source"] = "pyproject"
+            elif in_venv:
+                m["installed"] = True
+                m["install_source"] = "venv"
+                # Trace which installed parent(s) require this — best-effort,
+                # empty when no installed package declares it (then it's a
+                # direct-but-undeclared install, e.g. someone pip-installed
+                # by hand).
+                parents: list[str] = []
+                for v in variants:
+                    info = venv_dists.get(v)
+                    if info:
+                        parents.extend(info.get("requires_by") or [])
+                        break
+                m["installed_via"] = sorted(set(parents))
+            else:
+                m["installed"] = False
+
+            if m["installed"]:
+                # Sync check (only meaningful for declared/pyproject paths;
+                # venv-transitive is already venv-confirmed).
+                if m.get("install_source") in ("imports", "pyproject"):
+                    pkg_name = m.get("package") or m["name"].replace("-", "_")
+                    sync_reason = _check_installed_module_sync(
+                        pkg_name, m.get("install_path")
+                    )
+                    if sync_reason:
+                        m["out_of_sync"] = True
+                        m["out_of_sync_reason"] = sync_reason
 
         ws_self = self._workspace_self_module(ws_data)
         if ws_self is not None:
@@ -11918,14 +12478,8 @@ if __name__ == "__main__":
         if not name:
             return self._json({"error": "missing name"}, 400)
 
-        # Load catalog entry.
-        catalog_path = WORKSPACE / "scripts" / "_catalog" / "modules.json"
-        if not catalog_path.exists():
-            return self._json({"error": "catalog not found"}, 404)
-        try:
-            modules = json.loads(catalog_path.read_text())
-        except Exception as e:
-            return self._json({"error": f"catalog parse failed: {e}"}, 500)
+        # Load catalog entry from the canonical registry (+ workspace overlay).
+        modules = self._module_registry()
         entry = next((m for m in modules if m["name"] == name), None)
         if not entry:
             return self._json({"error": f"module '{name}' not in catalog"}, 404)
@@ -12036,7 +12590,7 @@ if __name__ == "__main__":
                 try:
                     add_dependency(WORKSPACE / "pyproject.toml", pypi_name)
                 except Exception as e:
-                    log_dir = WORKSPACE / ".pbg"
+                    log_dir = workspace_paths().pbg
                     log_dir.mkdir(parents=True, exist_ok=True)
                     (log_dir / "catalog-install.log").write_text(
                         f"pyproject edit failed for {name}: {e}\n"
@@ -12116,7 +12670,7 @@ if __name__ == "__main__":
                     )
                 except Exception as e:
                     # Don't fail the whole install if pyproject edit fails — log it.
-                    log_dir = WORKSPACE / ".pbg"
+                    log_dir = workspace_paths().pbg
                     log_dir.mkdir(parents=True, exist_ok=True)
                     (log_dir / "catalog-install.log").write_text(
                         f"pyproject edit failed for {name}: {e}\n"
@@ -12160,6 +12714,107 @@ if __name__ == "__main__":
 
         return self._json(resp, code)
 
+    def _uninstall_unmanaged_or_404(self, name: str):
+        """Handle uninstall for catalog modules NOT in workspace.yaml.imports.
+
+        Three cases:
+        1. Not in venv either → genuinely already uninstalled (200).
+        2. In venv but other installed packages require it (transitive with
+           real parents) → 409, tell the user to uninstall the parent(s) first.
+        3. In venv with no parent (unmanaged orphan) → pip uninstall +
+           best-effort remove of untracked external/<name>/ checkout. No
+           pyproject/workspace.yaml edits to make (nothing claims it).
+
+        Skips the _commit_or_run wrapper because case 3 has no tracked-file
+        changes to commit (external/<name>/ is removed only if untracked).
+        """
+        venv_dists = _detect_workspace_venv_distributions(WORKSPACE)
+
+        # Resolve catalog metadata so we know the actual python pkg / pypi name.
+        catalog_pkg = name.replace("-", "_")
+        catalog_pypi = name
+        try:
+            for cat_m in self._module_registry():
+                if cat_m.get("name") == name:
+                    catalog_pkg = cat_m.get("package") or catalog_pkg
+                    catalog_pypi = cat_m.get("pypi_name") or name
+                    break
+        except Exception:
+            pass
+
+        variants = {name.lower(), catalog_pkg.lower(), catalog_pypi.lower()}
+        dist_info = None
+        matched_dist = None
+        for v in variants:
+            if v in venv_dists:
+                dist_info = venv_dists[v]
+                matched_dist = v
+                break
+
+        if dist_info is None:
+            return self._json({"ok": True, "already_uninstalled": True}, 200)
+
+        parents = dist_info.get("requires_by") or []
+        if parents:
+            return self._json({
+                "error": f"{name} is required by {', '.join(parents)} — uninstall the parent(s) first",
+                "transitive_via": parents,
+                "module": name,
+            }, 409)
+
+        # Orphaned venv install — safe to remove directly.
+        venv_py = WORKSPACE / ".venv" / "bin" / "python3"
+        uv_path = shutil.which("uv")
+        target = catalog_pypi or matched_dist
+        if uv_path and venv_py.exists():
+            uninstall_cmd = [uv_path, "pip", "uninstall", "--python", str(venv_py), target]
+        else:
+            venv_pip = WORKSPACE / ".venv" / "bin" / "pip"
+            if venv_pip.exists():
+                uninstall_cmd = [str(venv_pip), "uninstall", "-y", target]
+            else:
+                return self._json({"error": "no venv pip/uv available to uninstall"}, 500)
+
+        log: list[str] = []
+        try:
+            r = subprocess.run(
+                uninstall_cmd, cwd=WORKSPACE, capture_output=True, text=True, timeout=60,
+            )
+            log.append((r.stdout + "\n" + r.stderr).strip()[-2000:])
+        except Exception as e:
+            log.append(f"pip uninstall failed: {e}")
+
+        # Remove untracked external/<name>/ checkout if present and NOT a
+        # registered submodule (deinit/git-rm flow is reserved for the
+        # imports-declared path).
+        ext_path = WORKSPACE / "external" / name
+        if ext_path.exists():
+            gm = WORKSPACE / ".gitmodules"
+            is_submodule = False
+            if gm.exists():
+                try:
+                    is_submodule = f"external/{name}" in gm.read_text(encoding="utf-8")
+                except Exception:
+                    pass
+            if is_submodule:
+                log.append(f"external/{name} is a tracked submodule; left in place")
+            else:
+                try:
+                    shutil.rmtree(ext_path)
+                    log.append(f"removed external/{name}/")
+                except Exception as e:
+                    log.append(f"rm external/{name} failed: {e}")
+
+        global _REGISTRY_CACHE
+        _REGISTRY_CACHE["data"] = None
+
+        return self._json({
+            "ok": True,
+            "module": name,
+            "install_mode": "unmanaged",
+            "log": "\n".join(log)[-500:],
+        }, 200)
+
     def _post_catalog_uninstall(self, body: dict):
         """POST /api/catalog-uninstall — remove a catalog module from this workspace.
 
@@ -12184,7 +12839,13 @@ if __name__ == "__main__":
         ws = load_workspace(ws_file)
         imports = ws.get("imports") or {}
         if name not in imports:
-            return self._json({"ok": True, "already_uninstalled": True}, 200)
+            # Either truly not installed, OR an "unmanaged" venv install
+            # (editable/hand-installed without a workspace.yaml.imports
+            # declaration — common when a previous workspace flow added the
+            # package as an editable submodule and the user later wants it
+            # gone). Detect the latter and run a minimal uninstall:
+            # pip uninstall + best-effort remove of untracked external/<name>/.
+            return self._uninstall_unmanaged_or_404(name)
 
         entry = imports[name]
         mode = entry.get("mode", "reference")  # "pypi" or "reference"
@@ -12768,7 +13429,7 @@ if __name__ == "__main__":
     def _read_workspace_name(self, root: Path) -> str:
         """Read `name` from <root>/workspace.yaml; fall back to dir basename."""
         try:
-            data = yaml.safe_load((root / "workspace.yaml").read_text()) or {}
+            data = yaml.safe_load((root / "workspace.yaml").read_text(encoding="utf-8")) or {}
             return data.get("name") or root.name
         except Exception:
             return root.name
@@ -12779,7 +13440,7 @@ if __name__ == "__main__":
             self.send_response(404)
             self.end_headers()
             return
-        ws = yaml.safe_load(ws_file.read_text())
+        ws = yaml.safe_load(ws_file.read_text(encoding="utf-8"))
         body = json.dumps(ws).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -12789,7 +13450,7 @@ if __name__ == "__main__":
         self.wfile.write(body)
 
     def _serve_guidance(self):
-        content_dir = WORKSPACE / ".pbg" / "server" / "content"
+        content_dir = workspace_paths().pbg / "server" / "content"
         if not content_dir.exists():
             self.send_response(204)
             self.end_headers()
@@ -12811,7 +13472,7 @@ if __name__ == "__main__":
         try:
             while True:
                 if ws_file.exists():
-                    text = ws_file.read_text()
+                    text = ws_file.read_text(encoding="utf-8")
                     if text != last_state:
                         try:
                             payload = json.dumps(yaml.safe_load(text))
@@ -12980,7 +13641,7 @@ def serve(workspace: Path | None, port: int, host: str = "127.0.0.1") -> int:
         # missing PID becomes 'orphaned'; a live PID is left to keep running.
         try:
             from vivarium_dashboard.lib.run_registry import reconcile_stale_runs
-            n = reconcile_stale_runs(WORKSPACE / ".pbg" / "composite-runs.db")
+            n = reconcile_stale_runs(workspace_paths().pbg / "composite-runs.db")
             if n:
                 print(f"reconciled {n} stale composite run(s) on startup")
         except Exception as e:  # noqa: BLE001 — never block server boot on this
@@ -13000,8 +13661,9 @@ def serve(workspace: Path | None, port: int, host: str = "127.0.0.1") -> int:
     # dir to write to, so skip — the parent process (cli.cmd_serve) is
     # responsible for any launcher-level discovery file.
     advertise_host = "127.0.0.1" if host == "0.0.0.0" else host
+    advertise_host = "127.0.0.1" if host == "0.0.0.0" else host
     if WORKSPACE is not None:
-        info_dir = WORKSPACE / ".pbg" / "server"
+        info_dir = workspace_paths().pbg / "server"
         info_dir.mkdir(parents=True, exist_ok=True)
         (info_dir / "server-info").write_text(json.dumps({
             "port": port,

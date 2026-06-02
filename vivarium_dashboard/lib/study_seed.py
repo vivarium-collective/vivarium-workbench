@@ -23,6 +23,8 @@ from pathlib import Path
 
 import yaml
 
+from .workspace_paths import WorkspacePaths
+
 
 def _slugify(text: str, max_len: int = 60) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
@@ -48,13 +50,13 @@ def seed_followup_study(workspace: Path, parent_name: str,
     if followup_idx < 0:
         raise ValueError("followup_idx must be non-negative")
 
-    studies_root = Path(workspace) / "studies"
+    studies_root = WorkspacePaths.load(workspace).studies
     parent_dir = studies_root / parent_name
     parent_yaml = parent_dir / "study.yaml"
     if not parent_yaml.is_file():
         raise FileNotFoundError(f"parent study not found: {parent_yaml}")
 
-    parent_spec = yaml.safe_load(parent_yaml.read_text()) or {}
+    parent_spec = yaml.safe_load(parent_yaml.read_text(encoding="utf-8")) or {}
     follow_ups = parent_spec.get("follow_up_studies") or []
     if followup_idx >= len(follow_ups):
         raise IndexError(f"followup_idx {followup_idx} out of range "
@@ -214,13 +216,13 @@ def _add_to_parent_investigations(workspace: Path, parent_name: str,
     back to a minimal text-append that preserves the rest of the file
     byte-for-byte.
     """
-    invs_root = Path(workspace) / "investigations"
+    invs_root = WorkspacePaths.load(workspace).investigations
     if not invs_root.is_dir():
         return []
     updated: list[Path] = []
     for inv_yaml in invs_root.glob("*/investigation.yaml"):
         try:
-            text = inv_yaml.read_text()
+            text = inv_yaml.read_text(encoding="utf-8")
             spec = yaml.safe_load(text) or {}
         except Exception:
             continue

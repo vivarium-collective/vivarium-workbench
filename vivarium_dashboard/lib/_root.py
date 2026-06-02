@@ -13,13 +13,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+from .workspace_paths import WorkspacePaths
+
 _WS_ROOT: Optional[Path] = None
+_WS_PATHS: Optional[WorkspacePaths] = None
 
 
 def set_workspace_root(path: Path | str) -> None:
     """Register the active workspace root. Call once at server startup."""
-    global _WS_ROOT
+    global _WS_ROOT, _WS_PATHS
     _WS_ROOT = Path(path).resolve()
+    _WS_PATHS = None  # invalidate cached layout
 
 
 def get_workspace_root() -> Optional[Path]:
@@ -47,3 +51,21 @@ def workspace_root() -> Path:
         f"ancestor of {here}; call vivarium_dashboard.lib._root.set_workspace_root() "
         "or run from inside a workspace"
     )
+
+
+def workspace_paths() -> WorkspacePaths:
+    """Return the resolved directory layout for the active workspace.
+
+    Reads the optional ``layout:`` map from ``workspace.yaml`` once and caches
+    it; the cache is invalidated whenever :func:`set_workspace_root` is called.
+    Call sites use this instead of joining literal directory names::
+
+        from vivarium_dashboard.lib._root import workspace_paths
+        wp = workspace_paths()
+        path = wp.studies / name          # not: workspace_root() / "studies" / name
+    """
+    global _WS_PATHS
+    root = workspace_root()
+    if _WS_PATHS is None or _WS_PATHS.root != root:
+        _WS_PATHS = WorkspacePaths.load(root)
+    return _WS_PATHS

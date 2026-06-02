@@ -344,3 +344,150 @@ def test_delete_tolerates_non_dict_study_yaml(tmp_path):
     assert summary["deleted_rows"] == 1
     assert summary["unlinked_studies"] == []   # nothing to unlink
     assert summary["errors"] == []             # tolerated, not error'd
+
+
+# ---------------------------------------------------------------------------
+# Parquet hive discovery (added 2026-05-27 for workspace-default parquet
+# emitter parity — list_simulations now surfaces ParquetEmitter runs
+# alongside the sqlite ones so the dashboard's Simulations tab covers
+# both emitter generations).
+# ---------------------------------------------------------------------------
+
+
+def _write_parquet_hive(study_dir, experiment_id, *,
+                        study_slug, investigation_slug,
+                        n_history_rows=5, completed=True):
+    """Build a minimal ParquetEmitter-shaped hive at
+    ``<study_dir>/parquet-runs/<experiment_id>/``.
+
+    Writes one row to configuration/ (metadata), n_history_rows to
+    history/ (the captured trajectory), and an empty success/ subdir
+    when ``completed=True`` so the scanner reads ``status=completed``.
+    """
+    import polars as pl
+    exp = study_dir / "parquet-runs" / experiment_id
+    # History — minimal columns the scanner reads (only the row count
+    # matters; column shape mirrors what the runner emits).
+    hive_part = (
+        f"experiment_id={experiment_id}/variant=0/lineage_seed=0/"
+        f"generation=1/agent_id=0"
+    )
+    history = exp / "history" / hive_part
+    history.mkdir(parents=True)
+    pl.DataFrame({
+        "global_time": [float(i) for i in range(n_history_rows)],
+        "listeners__mass__cell_mass": [1000.0 + i for i in range(n_history_rows)],
+    }).write_parquet(history / "0.pq")
+    # Configuration — the scanner reads study_slug + investigation_slug
+    # from this dict (so its values can authoritatively override the
+    # path-derived slug for cross-investigation references).
+    config = exp / "configuration" / hive_part
+    config.mkdir(parents=True)
+    pl.DataFrame({
+        "experiment_id":      [experiment_id],
+        "variant":            [0],
+        "lineage_seed":       [0],
+        "generation":         ["1"],
+        "agent_id":           ["0"],
+        "study_slug":         [study_slug],
+        "investigation_slug": [investigation_slug],
+    }).write_parquet(config / "config.pq")
+    # success/ marker — empty dir is enough; presence drives status="completed".
+    if completed:
+        (exp / "success" / hive_part).mkdir(parents=True)
+    return exp
+
+
+def test_list_surfaces_parquet_runs_alongside_sqlite(tmp_path):
+    """A workspace with both sqlite + parquet runs surfaces both shapes
+    via list_simulations under their respective `source` tags. This is
+    the load-bearing test for the 2026-05-27 parquet migration."""
+    ws = tmp_path / "ws"
+    (ws / ".pbg").mkdir(parents=True)
+    # One sqlite run via the existing helper.
+    _seed_run(ws / ".pbg" / "composite-runs.db",
+              spec_id="pkg.x", run_id="sqlite-r1", started_at=1.0)
+    # One parquet run.
+    sdir = ws / "studies" / "mbp-02-population-aggregation"
+    sdir.mkdir(parents=True)
+    (sdir / "study.yaml").write_text(yaml.safe_dump({
+        "name": "mbp-02-population-aggregation",
+        "runs": [{
+            "simulation":    "aggregator-cpa1-multigen",
+            "simulation_id": "parquet-exp-1",
+        }],
+    }))
+    _write_parquet_hive(
+        sdir, "parquet-exp-1",
+        study_slug="mbp-02-population-aggregation",
+        investigation_slug="multiscale-bioprocess",
+        n_history_rows=720,
+    )
+
+    sims = list_simulations(ws)
+    # runs_meta rows don't carry a `source` field — _row_to_dict predates
+    # the source tag; group untagged rows under "sqlite" for assertion.
+    by_source: dict[str, list[dict]] = {}
+    for s in sims:
+        by_source.setdefault(s.get("source") or "sqlite", []).append(s)
+    assert "sqlite" in by_source
+    assert "parquet" in by_source
+    parquet_rows = by_source["parquet"]
+    assert len(parquet_rows) == 1
+    p = parquet_rows[0]
+    assert p["run_id"]              == "parquet-exp-1"
+    assert p["sim_name"]            == "aggregator-cpa1-multigen"
+    assert p["status"]              == "completed"
+    assert p["n_steps"]             == 720
+    assert p["study_slug"]          == "mbp-02-population-aggregation"
+    assert p["investigation_slug"]  == "multiscale-bioprocess"
+    assert p["db_path"].endswith("parquet-runs/parquet-exp-1")
+
+
+def test_list_parquet_status_running_when_no_success_marker(tmp_path):
+    """An in-progress parquet hive (no success/ subdir) surfaces as
+    `status=running` so the dashboard's UI can render the spinner."""
+    ws = tmp_path / "ws"
+    sdir = ws / "studies" / "mbp-02-population-aggregation"
+    sdir.mkdir(parents=True)
+    _write_parquet_hive(
+        sdir, "in-flight-exp",
+        study_slug="mbp-02-population-aggregation",
+        investigation_slug="multiscale-bioprocess",
+        n_history_rows=42, completed=False,
+    )
+    sims = [s for s in list_simulations(ws) if s["source"] == "parquet"]
+    assert len(sims) == 1
+    assert sims[0]["status"] == "running"
+    assert sims[0]["completed_at"] is None
+
+
+def test_list_parquet_falls_back_to_experiment_id_when_no_study_yaml(tmp_path):
+    """Cross-investigation pseudo-studies (parquet-runs/ dir but no
+    study.yaml) still surface — sim_name falls back to the
+    experiment_id."""
+    ws = tmp_path / "ws"
+    sdir = ws / "studies" / "multiscale-bioprocess-reference"
+    sdir.mkdir(parents=True)
+    # NO study.yaml written.
+    _write_parquet_hive(
+        sdir, "ref-exp-uuid",
+        study_slug="multiscale-bioprocess-reference",
+        investigation_slug="multiscale-bioprocess",
+    )
+    sims = [s for s in list_simulations(ws) if s["source"] == "parquet"]
+    assert len(sims) == 1
+    assert sims[0]["sim_name"] == "ref-exp-uuid"      # UUID fallback
+    assert sims[0]["study_slug"] == "multiscale-bioprocess-reference"
+
+
+def test_list_parquet_skips_hive_without_history_dir(tmp_path):
+    """A parquet-runs/<exp>/ dir without a history/ subdir (in-progress
+    write before first emit) is skipped, not surfaced as a broken row."""
+    ws = tmp_path / "ws"
+    sdir = ws / "studies" / "mbp-02-population-aggregation"
+    sdir.mkdir(parents=True)
+    # Build the experiment dir but NO history/ subdir.
+    (sdir / "parquet-runs" / "skeletal-exp").mkdir(parents=True)
+    sims = [s for s in list_simulations(ws) if s["source"] == "parquet"]
+    assert sims == []

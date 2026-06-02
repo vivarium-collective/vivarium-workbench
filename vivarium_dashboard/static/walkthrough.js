@@ -28,6 +28,26 @@
     }
   });
 
+  // sn-collapse-hint click → toggle the parent <details.study-fold> closed.
+  // The official click target for <details> is <summary>, but study-nav
+  // (where this hint lives — see CSS comment) is INSIDE <section>, not
+  // <summary>, so the native toggle doesn't fire. Manual handler.
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (t && t.classList && t.classList.contains("sn-collapse-hint")) {
+      var details = t.closest("details.study-fold");
+      if (details) {
+        details.open = false;
+        // After collapsing, scroll the (now-collapsed) study card into
+        // view so the user keeps spatial context — otherwise the
+        // scroll position jumps unpredictably.
+        details.scrollIntoView({behavior: "smooth", block: "start"});
+      }
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
+
   // Global listener for postMessage events from loom-explore iframes.
   window.addEventListener('message', function(ev) {
     if (ev.data && ev.data.type === 'explore:ready') {
@@ -509,6 +529,29 @@
     });
   }
 
+  // Coerce a value to an Array. Use everywhere a YAML/JSON field is
+  // SUPPOSED to be a list but a caller might supply a dict (e.g. a
+  // grouped/nested shape). Prevents
+  //   "(x || []).map is not a function"
+  // class of bugs from crashing report generation. Logs a single warning
+  // per (label, type) so we notice schema drift without spamming the
+  // console. Returns []; the caller's report degrades gracefully (empty
+  // section) instead of throwing.
+  var _asListWarned = new Set();
+  function _asList(value, label) {
+    if (Array.isArray(value)) return value;
+    if (value === null || value === undefined) return [];
+    var type = (typeof value === 'object') ? 'object' : (typeof value);
+    var key = (label || '?') + ':' + type;
+    if (!_asListWarned.has(key)) {
+      _asListWarned.add(key);
+      console.warn('[walkthrough] expected array for ' + (label || '<unlabeled field>') +
+                   ', got ' + type + ' — degrading to empty list. ' +
+                   'Check the workspace yaml schema.');
+    }
+    return [];
+  }
+
   function _filterVizCatalog(query) {
     var rows = document.querySelectorAll('#viz-picker-container .picker-row');
     var q = (query || '').toLowerCase().trim();
@@ -633,8 +676,15 @@
       ? ' <small style="color:#888">(aliases: ' + p.aliases.map(_esc).join(', ') + ')</small>'
       : '';
     var sourceAttr = p.source ? ' data-source="' + _esc(p.source) + '"' : '';
+    // Workspace-default badge: shown only on emitter entries whose class
+    // matches workspace.yaml::runtime.default_emitter (see server-side
+    // _mark_default_emitter()). Keeps users aware which emitter their
+    // study runs will pick by default.
+    var defaultBadge = p.is_workspace_default
+      ? ' <span class="count-badge" style="background:#1f7a36;color:#fff;font-size:0.7em;padding:1px 6px;border-radius:3px;margin-left:6px;vertical-align:middle" title="Workspace default per runtime.default_emitter in workspace.yaml">DEFAULT</span>'
+      : '';
     return '<div class="registry-entry"' + sourceAttr + '>' +
-      '<strong>' + _esc(p.name) + '</strong>' + aliases + '<br>' +
+      '<strong>' + _esc(p.name) + '</strong>' + defaultBadge + aliases + '<br>' +
       '<small><code>' + _esc(p.address) + '</code></small>' +
       (p.schema_preview
         ? '<details><summary>config schema</summary><pre class="json-tree">' + _esc(p.schema_preview) + '</pre></details>'
@@ -1259,8 +1309,39 @@
         return '<span class="status-pill installed" title="The workspace\'s own first-party package. Always present; cannot be uninstalled.">first-party</span>';
       }
       if (m.installed) {
-        return '<span class="status-pill installed">installed</span>' +
-          ' <button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
+        // Render the install-source badge + a context-appropriate action.
+        // Three install-source layers (see server.py:_get_catalog):
+        //   imports   — workspace.yaml.imports declared it; uninstall is
+        //               the simple two-file edit (workspace.yaml + pyproject)
+        //   pyproject — declared in pyproject.toml only; uninstall flow
+        //               still works (drops the dep + re-locks the venv)
+        //   venv      — present in venv via another package's transitive
+        //               dep; cannot be uninstalled directly (the user has
+        //               to remove the parent). Show "via X, Y" hint instead.
+        var src = m.install_source || 'imports';
+        var srcBadge = '';
+        var action = '';
+        if (src === 'venv') {
+          var via = (m.installed_via || []);
+          if (via.length === 0) {
+            // No parent claims it — orphaned editable / hand-installed pkg.
+            // Workspace.yaml doesn't declare it and no installed dep requires
+            // it. User can uninstall directly from the dashboard.
+            srcBadge = '<span class="install-src-pill install-src-unmanaged" title="Installed in the venv but not declared in workspace.yaml.imports and not required by any installed package. Safe to uninstall.">📦 unmanaged</span>';
+            action = '<button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
+          } else {
+            var viaText = 'via ' + via.slice(0, 3).map(_esc).join(', ') + (via.length > 3 ? ' +' + (via.length - 3) : '');
+            srcBadge = '<span class="install-src-pill install-src-venv" title="Brought in by another installed package; cannot be uninstalled directly.">📦 ' + viaText + '</span>';
+            action = '<span class="muted" style="font-size:0.78em" title="Remove the parent package to drop this transitive dependency.">(remove parent to uninstall)</span>';
+          }
+        } else if (src === 'pyproject') {
+          srcBadge = '<span class="install-src-pill install-src-pyproject" title="Declared in pyproject.toml [project.dependencies]; workspace.yaml.imports does not have an explicit entry.">📋 via pyproject</span>';
+          action = '<button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
+        } else {
+          srcBadge = '<span class="status-pill installed">installed</span>';
+          action = '<button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
+        }
+        return srcBadge + ' ' + action;
       }
       return '<button class="action-btn" onclick="_installFromCatalog(\'' + _esc(m.name) + '\')">Install</button>';
     }
@@ -4238,14 +4319,20 @@
     // Render nodes (study cards).
     studies.forEach(function(s) {
       var p = pos[s.name];
+      // Prefer the server-derived `effective_status` (rolls up declared
+      // status + run-count signal); fall back to the raw author-declared
+      // `status` for back-compat with older servers.
+      var liveStatus = s.effective_status || s.status || 'planned';
       var statusColor = ({
         planned:    '#94a3b8',
+        planning:   '#94a3b8',
         running:    '#3b82f6',
+        in_progress:'#3b82f6',
         ran:        '#10b981',
         complete:   '#059669',
         failed:     '#dc2626',
         invalid:    '#dc2626',
-      })[s.status] || '#94a3b8';
+      })[liveStatus] || '#94a3b8';
 
       var node = document.createElement('div');
       node.className = 'iset-dag-node';
@@ -4289,7 +4376,14 @@
         '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:4px">' +
           '<strong style="font-size:0.95em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _esc(s.name) + '</strong>' +
           '<span style="white-space:nowrap">' + phaseChip +
-            '<span class="status-pill" style="background:#f1f5f9;color:#475569;font-size:0.7em;padding:1px 6px;">' + _esc(s.status || 'planned') + '</span>' +
+            '<span class="status-pill" title="' +
+              (s.effective_status && s.status && s.effective_status !== s.status
+                ? 'effective: ' + _esc(s.effective_status) + ' (declared: ' + _esc(s.status) + ')'
+                : 'status: ' + _esc(liveStatus)) +
+              '" style="background:#f1f5f9;color:#475569;font-size:0.7em;padding:1px 6px;' +
+              (s.effective_status && s.status && s.effective_status !== s.status
+                ? 'border:1px dashed #f59e0b;'
+                : '') + '">' + _esc(liveStatus) + '</span>' +
           '</span>' +
         '</div>' +
         '<div style="font-size:0.78em;color:#64748b;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
@@ -4775,22 +4869,23 @@
       }
 
       var outcomes = latest.outcomes || {};
-      var passed = [], failed = [];
+      var passed = [], failed = [], partial = [];
       Object.keys(outcomes).forEach(function(name) {
         var res = (outcomes[name] || {}).result;
         if (res === 'PASS') passed.push(name);
         if (res === 'FAIL') failed.push(name);
+        if (res === 'PARTIAL') partial.push(name);
       });
       var calibration = openFollowups.filter(function(f){return f.kind === 'calibration_task';});
       var infra       = openFollowups.filter(function(f){return f.kind === 'infrastructure_fix';});
       var newWork     = openFollowups.filter(function(f){return f.kind === 'new';});
 
-      if (failed.length === 0 && passed.length > 0) {
+      if (failed.length === 0 && partial.length === 0 && passed.length > 0) {
         var enables = (s.pipeline_gate && s.pipeline_gate.enables) || [];
         return {
           label: 'Passed',
           cls:   'dec-passed',
-          passed: passed, failed: [], blocks: [],
+          passed: passed, failed: [], partial: [], blocks: [],
           next: enables.length
             ? 'Gate cleared. Next: ' + enables.join(', ')
             : 'Gate cleared. No declared downstream studies — review pipeline_gate.enables.'
@@ -4813,9 +4908,16 @@
           next: nextStr
         };
       }
+      if (partial.length > 0) {
+        return {
+          label: 'Partial', cls: 'dec-inprogress',
+          passed: passed, failed: failed, partial: partial, blocks: [],
+          next: partial.length + ' test(s) ran but did not meet the gate threshold — see findings.'
+        };
+      }
       return {
         label: 'In progress', cls: 'dec-inprogress',
-        passed: passed, failed: failed, blocks: [],
+        passed: passed, failed: failed, partial: partial, blocks: [],
         next: 'Continue analysing run outcomes.'
       };
     }
@@ -4882,6 +4984,73 @@
       }
     }
 
+    // The reviewer-facing "Ran · Tests · Verdict" clarity strip. Prefers the
+    // server-computed `s.clarity_summary` (single-sourced from
+    // pbg_superpowers.study_status.study_clarity_summary) and falls back to an
+    // equivalent client-side computation so the strip renders even against an
+    // older server. Answers, at a glance: did this study run? were the tests
+    // run (pass/fail)? did it pass? (dnaa-replication reviewer feedback.)
+    function _clarityStrip(s) {
+      var cs = (s || {}).clarity_summary;
+      if (!cs) {
+        var runs = (s && s.runs) || [];
+        var done = function (r) {
+          var st = ((r && r.status) || '').toLowerCase();
+          return st === 'completed' || st === 'complete' || st === 'ran' || st === 'done';
+        };
+        var nC = runs.filter(done).length;
+        var ranStatus = nC ? 'ran'
+          : (runs.some(function (r) { return ((r && r.status) || '').toLowerCase() === 'running'; }) ? 'running' : 'not_run');
+        var tests = (s && (s.tests || s.behavior_tests || s.expected_behavior)) || [];
+        var latest = runs.length ? runs[runs.length - 1] : null;
+        var outc = (latest && latest.outcomes) || {};
+        var c = { pass: 0, fail: 0, skip: 0, pending: 0, total: tests.length };
+        tests.forEach(function (t) {
+          var o = outc[t.name];
+          var r = (((o && o.result) != null ? o.result : o) || '').toString().toLowerCase();
+          if (r === 'pass' || r === 'passed' || r === 'ok') c.pass++;
+          else if (r === 'fail' || r === 'failed' || r === 'error') c.fail++;
+          else if (r === 'skip' || r === 'skipped' || r === 'inconclusive' || r === 'partial') c.skip++;
+          else c.pending++;
+        });
+        var gate = ((s && s.gate_status) || '').toLowerCase();
+        var verd;
+        if (gate === 'passed') verd = { label: 'Passed', glyph: '✅', cls: 'v-pass' };
+        else if (gate === 'failed' || gate === 'failed_evaluation') verd = { label: 'Failing', glyph: '❌', cls: 'v-fail' };
+        else if (gate === 'blocked') verd = { label: 'Blocked', glyph: '⛔', cls: 'v-block' };
+        else if (gate === 'needs_calibration') verd = { label: 'Needs calibration', glyph: '🔄', cls: 'v-cal' };
+        else if (gate === 'in_progress') verd = { label: 'In progress', glyph: '🔶', cls: 'v-warn' };
+        else if (ranStatus !== 'ran') verd = { label: 'Not run', glyph: '○', cls: 'v-none' };
+        else if (c.fail) verd = { label: 'Failing', glyph: '❌', cls: 'v-fail' };
+        else if (c.pending && c.total) verd = { label: 'Tests pending', glyph: '⏳', cls: 'v-warn' };
+        else if (c.pass) verd = { label: 'Passed', glyph: '✅', cls: 'v-pass' };
+        else verd = { label: 'In progress', glyph: '🔶', cls: 'v-warn' };
+        var parts = [];
+        if (c.pass) parts.push(c.pass + '✓');
+        if (c.fail) parts.push(c.fail + '✗');
+        if (c.skip) parts.push(c.skip + '⏭');
+        if (c.pending) parts.push(c.pending + '⏳');
+        cs = {
+          ran: { status: ranStatus, label: ranStatus === 'ran' ? ('Ran · ' + nC + ' run' + (nC !== 1 ? 's' : '')) : (ranStatus === 'running' ? 'Running…' : 'Not run') },
+          tests: { label: c.total ? ('Tests: ' + parts.join(' · ')) : 'No tests declared', total: c.total, pending: c.pending },
+          verdict: verd, ambiguities: []
+        };
+      }
+      var ranOn = cs.ran.status === 'ran';
+      var pill = 'display:inline-block;padding:2px 9px;border-radius:9999px;font-size:0.78em;font-weight:600;margin-right:6px;';
+      var ranBg = ranOn ? 'background:#dbeafe;color:#1e40af' : (cs.ran.status === 'running' ? 'background:#fef3c7;color:#92400e' : 'background:#f1f5f9;color:#475569');
+      var tBg = (cs.tests.pending && cs.tests.total) ? 'background:#fef3c7;color:#92400e' : 'background:#f1f5f9;color:#334155';
+      var amb = (cs.ambiguities && cs.ambiguities.length)
+        ? '<span style="' + pill + 'background:#fef3c7;color:#92400e" title="' + _h(cs.ambiguities.join(' | ')) + '">⚠ ' + cs.ambiguities.length + ' clarity note' + (cs.ambiguities.length > 1 ? 's' : '') + '</span>'
+        : '';
+      return '<div class="sp-clarity" style="margin:6px 0 2px 0">'
+        + '<span style="' + pill + ranBg + '">' + (ranOn ? '▶' : (cs.ran.status === 'running' ? '…' : '○')) + ' ' + _h(cs.ran.label) + '</span>'
+        + '<span style="' + pill + tBg + '">' + _h(cs.tests.label) + '</span>'
+        + '<span class="sp-verdict ' + cs.verdict.cls + '" style="' + pill + '">' + cs.verdict.glyph + ' ' + _h(cs.verdict.label) + '</span>'
+        + amb
+        + '</div>';
+    }
+
     // The collapsed study header — a scannable "scientific control panel".
     // Ordering follows the spec: identity → verdict → confidence/evidence →
     // objective → conclusion → metrics → insight → caveat. Every field is
@@ -4941,6 +5110,7 @@
         +   '<span class="sp-title">' + _h(title) + '</span>'
         +   '<span class="sp-verdict ' + v.cls + '">' + v.emoji + ' ' + _h(v.label) + '</span>'
         + '</div>'
+        + _clarityStrip(s)
         + (objective ? '<div class="sp-objective">' + _h(objective) + '</div>' : '')
         + '<div class="sp-meta">' + meta.join(' · ') + '</div>'
         + ((conf || ev)
@@ -4953,7 +5123,8 @@
         + (chips.length ? '<div class="sp-metrics">' + chips.join('') + '</div>' : '')
         + (insight ? '<div class="sp-insight"><span class="sp-lbl">Insight</span> ' + _h(insight) + '</div>' : '')
         + (caveat  ? '<div class="sp-caveat"><span class="sp-lbl">Caveat</span> ' + _h(caveat) + '</div>' : '')
-        + '<span class="sp-expand-hint">▸ click to expand full study</span>';
+        + '<span class="sp-expand-hint">▸ click to expand full study</span>'
+        + '<span class="sp-collapse-hint">▴ click to collapse full study</span>';
     }
 
     // Review-readiness gates — mechanical checks that catch the classes of
@@ -5105,6 +5276,7 @@
         +     '<span class="study-nav-deps muted small">' + dependsBrief + '</span>'
         +   '</div>'
         +   '<nav class="study-nav-row2">' + links.join('') + '</nav>'
+        +   '<span class="sn-collapse-hint" data-collapse="study">▴ click to collapse full study</span>'
         + '</div>';
 
       // ── COMPACT REPORT BLOCK (authored: Purpose·Setup·Result·… ) ──────
@@ -5358,7 +5530,13 @@
               if (c.interpretation) capHtml +=
                   '<div class="chart-interpretation"><strong>What it means.</strong> '
                   + _h(c.interpretation) + '</div>';
-              return '<div class="chart-card">' + c.svg + capHtml + '</div>';
+              // SVG records inline c.svg; PNG/GIF records embed a self-contained
+              // data-URI in c.img (rendered as <img> so it survives in a
+              // downloaded standalone report).
+              var media = c.img
+                ? '<img class="chart-img" src="' + c.img + '" alt="' + _h(c.key || 'chart') + '" loading="lazy">'
+                : (c.svg || '');
+              return '<div class="chart-card">' + media + capHtml + '</div>';
             }).join('')
           + '</div>'
         : '';
@@ -5392,16 +5570,32 @@
         if (latestRun && latestRun.outcomes) {
           Object.keys(latestRun.outcomes).forEach(function(k) { outcomeByTest[k] = latestRun.outcomes[k]; });
         }
-        testsHtml = '<div id="' + sid.tests + '"><h3>How do we judge success? <span class="muted small">(' + tests.length + ' tests)</span></h3>'
+        // At-a-glance summary so a reviewer doesn't have to count pills.
+        var _tc = { PASS: 0, FAIL: 0, PARTIAL: 0, SKIP: 0, PENDING: 0 };
+        tests.forEach(function(t) {
+          var o = outcomeByTest[t.name];
+          var r = o ? o.result : (t.status === 'gated' ? 'GATED' : 'PENDING');
+          if (r === 'PASS') _tc.PASS++; else if (r === 'FAIL') _tc.FAIL++;
+          else if (r === 'PARTIAL') _tc.PARTIAL++;
+          else if (r === 'SKIP') _tc.SKIP++; else _tc.PENDING++;
+        });
+        var _tcParts = [];
+        if (_tc.PASS) _tcParts.push(_tc.PASS + ' ✓ passed');
+        if (_tc.FAIL) _tcParts.push(_tc.FAIL + ' ✗ failed');
+        if (_tc.PARTIAL) _tcParts.push(_tc.PARTIAL + ' ◐ partial');
+        if (_tc.SKIP) _tcParts.push(_tc.SKIP + ' ⏭ skipped');
+        if (_tc.PENDING) _tcParts.push(_tc.PENDING + ' ⏳ pending');
+        var _tcSummary = _tcParts.length ? (' — ' + _tcParts.join(' · ')) : '';
+        testsHtml = '<div id="' + sid.tests + '"><h3>How do we judge success? <span class="muted small">(' + tests.length + ' tests' + _tcSummary + ')</span></h3>'
           + '<p class="muted small" style="margin:0 0 8px 0">Each test makes a specific scientific claim. The latest result (pass/fail) appears as a pill when we have evidence; the technical assertion is hidden by default.</p>'
           + tests.map(function(t) {
               var name = t.name || '(unnamed)';
               var cls = t.classification || 'unclassified';
               var out = outcomeByTest[name];
               var result = out ? out.result : (t.status === 'gated' ? 'GATED' : 'PENDING');
-              var resBg = result === 'PASS' ? '#d1fae5' : (result === 'FAIL' ? '#fee2e2' : (result === 'SKIP' ? '#fef3c7' : '#f1f5f9'));
-              var resFg = result === 'PASS' ? '#065f46' : (result === 'FAIL' ? '#991b1b' : (result === 'SKIP' ? '#92400e' : '#475569'));
-              var resGlyph = result === 'PASS' ? '✓' : (result === 'FAIL' ? '✗' : '⏳');
+              var resBg = result === 'PASS' ? '#d1fae5' : (result === 'FAIL' ? '#fee2e2' : (result === 'SKIP' ? '#fef3c7' : (result === 'PARTIAL' ? '#fde68a' : '#f1f5f9')));
+              var resFg = result === 'PASS' ? '#065f46' : (result === 'FAIL' ? '#991b1b' : (result === 'SKIP' ? '#92400e' : (result === 'PARTIAL' ? '#92400e' : '#475569')));
+              var resGlyph = result === 'PASS' ? '✓' : (result === 'FAIL' ? '✗' : (result === 'PARTIAL' ? '◐' : '⏳'));
               // Claim: the English description, first sentence.
               var claim = (t.description || t.en || '').split('\n')[0].split('. ')[0];
               if (claim.length > 220) claim = claim.slice(0, 217) + '…';
@@ -5766,16 +5960,25 @@
               //                        leaked through because the chart
               //                        div was sized for the chart but
               //                        not the wrapped legend rows.
-              //   min-height:520px   — under-measured iframes still show
-              //                        enough vertical space for the
-              //                        typical Plotly chart (340 chart
-              //                        area + 6-row wrapped legend ≈
-              //                        508 px). _fitEmbed grows beyond
-              //                        this when scrollHeight is larger.
+              //   min-height:1200px  — under-measured iframes still show
+              //                        enough vertical space for typical
+              //                        multi-panel figures (e.g. 2×3 grid
+              //                        cell_mass / growth_rate / RNA /
+              //                        ribosome activity panels — these
+              //                        rendered at ~1280 px tall and the
+              //                        previous 720 px floor clipped them).
+              //                        The _fitEmbed walk extends to svg/
+              //                        img/canvas (see below) and uses
+              //                        img.naturalHeight to pre-measure
+              //                        before the browser has laid out
+              //                        the data: URL, so iframes grow
+              //                        correctly — this floor is the
+              //                        safety net for first-paint before
+              //                        any timers fire.
               var iframe = '<iframe srcdoc="' + escaped + '" '
                 + 'class="embed-frame" onload="_wireEmbed(this)" '
                 + 'scrolling="no" '
-                + 'style="width:100%;min-height:520px;border:0;display:block;overflow:hidden' + _hStyle + '" '
+                + 'style="width:100%;min-height:1200px;border:0;display:block;overflow:hidden' + _hStyle + '" '
                 + 'title="' + _h(emb.name) + '"></iframe>';
               if (isStale) {
                 // Collapsed by default; re-fit on expand.
@@ -6206,6 +6409,7 @@
         +     '<span class="study-nav-deps muted small">' + dependsBrief + '</span>'
         +   '</div>'
         +   '<nav class="study-nav-row2">' + links.join('') + '</nav>'
+        +   '<span class="sn-collapse-hint" data-collapse="study">▴ click to collapse full study</span>'
         + '</div>';
 
       // Wrap the v4 narrative-spine section in a <details class="study-fold">
@@ -6325,6 +6529,7 @@
         +   (v4Insight ? '<div class="sp-insight"><span class="sp-lbl">Insight</span> ' + _h(v4Insight) + '</div>' : '')
         +   (v4Caveat  ? '<div class="sp-caveat"><span class="sp-lbl">Caveat</span> '   + _h(v4Caveat)  + '</div>' : '')
         +   '<span class="sp-expand-hint">▸ click to expand full study</span>'
+        +   '<span class="sp-collapse-hint">▴ click to collapse full study</span>'
         + '</summary>';
 
       // Dropped chrome on the v4 expanded section to remove three forms
@@ -6430,9 +6635,15 @@
       studiesHtml = ordered.map(studySection).join('\n');
     }
 
-    var acceptance = (iset.acceptance_criteria || []).map(function(c) {
-      return '<li><code>' + _h(c.study) + '</code> · <code>' + _h(c.behavior) + '</code></li>';
-    }).join('');
+    /* `acceptance` variable removed: it built an <ol> of acceptance_criteria
+       entries that fed the top-of-report "Acceptance criteria" section
+       (now removed). The acceptance_criteria field on investigation.yaml
+       still exists in the schema; per-study behavior_tests +
+       conclusion_verdicts carry the same signal more actionably.
+       The defensive `_asList` coercion this fix added at the (now-deleted)
+       render site is superseded; the durable guard lives server-side in
+       `_coerce_list_field`. `_asList` is kept as a reusable helper. */
+    var acceptance = '';
 
     // ── Collect the union of bib keys cited across all studies + iset ──
     var citedKeys = new Set();
@@ -6506,6 +6717,38 @@
       + '.topbar a{font-size:0.83em;color:#334155;text-decoration:none;padding:4px 12px;border-radius:9999px;background:#f1f5f9;white-space:nowrap}'
       + '.topbar a:hover{background:#e2e8f0;color:#0f172a}'
       + '.topbar a.active{background:#dbeafe;color:#1e40af;font-weight:600}'
+      /* iset switcher dropdown at the right end of the topbar (margin-left:auto
+         pushes it past the section links). Calls /api/investigation-registry
+         to list peer dashboards; click a peer row to navigate. Trigger styled
+         like the section-anchor chips but with a subtle distinguishing border
+         so it doesn't look like just another anchor. */
+      + '.tb-iset-switcher{margin-left:auto;display:inline-flex;align-items:center;gap:5px;'
+      +     'font:inherit;font-size:0.83em;color:#334155;'
+      +     'padding:4px 12px;border-radius:9999px;background:#fff;border:1px solid #cbd5e1;cursor:pointer;'
+      +     'white-space:nowrap}'
+      + '.tb-iset-switcher:hover{background:#f1f5f9;border-color:#94a3b8}'
+      + '.tb-iset-switcher[aria-expanded="true"]{background:#dbeafe;border-color:#3b82f6;color:#1e40af}'
+      + '.tb-iset-switcher-icon{font-size:1.05em;line-height:1}'
+      + '.tb-iset-switcher-arrow{font-size:0.7em;color:#94a3b8;margin-left:1px}'
+      + '.tb-iset-menu{position:fixed;z-index:200;min-width:320px;max-width:480px;max-height:70vh;overflow-y:auto;'
+      +     'background:#fff;border:1px solid #cbd5e1;border-radius:8px;'
+      +     'box-shadow:0 8px 24px rgba(0,0,0,0.12);padding:6px 0}'
+      + '.tb-iset-menu[hidden]{display:none}'
+      + '.tb-iset-menu-section{padding:6px 14px 4px;font-size:0.7em;font-weight:700;letter-spacing:0.05em;'
+      +     'text-transform:uppercase;color:#94a3b8}'
+      + '.tb-iset-menu-row{display:flex;align-items:center;gap:8px;padding:7px 14px;cursor:pointer;border:0;background:none;'
+      +     'width:100%;text-align:left;font:inherit;color:#0f172a;font-size:0.86em}'
+      + '.tb-iset-menu-row:hover{background:#f1f5f9}'
+      + '.tb-iset-menu-row-current{background:#dbeafe;color:#1e40af;cursor:default}'
+      + '.tb-iset-menu-row-current:hover{background:#dbeafe}'
+      + '.tb-iset-menu-slug{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+      + '.tb-iset-menu-pill{font-size:0.7em;font-weight:600;padding:2px 7px;border-radius:9999px;'
+      +     'background:#f1f5f9;color:#64748b;white-space:nowrap}'
+      + '.tb-iset-menu-pill-here{background:#dcfce7;color:#166534}'
+      + '.tb-iset-menu-pill-running{background:#fef9c3;color:#854d0e}'
+      + '.tb-iset-menu-pill-dormant{background:#f1f5f9;color:#64748b}'
+      + '.tb-iset-menu-empty,.tb-iset-menu-error{padding:10px 14px;font-size:0.82em;color:#64748b}'
+      + '.tb-iset-menu-error{color:#991b1b}'
       + '.content{max-width:none;margin:0;padding:24px 40px}'
       // Anchor targets clear the sticky bar when jumped to.
       + '.content [id]{scroll-margin-top:60px}'
@@ -6570,7 +6813,7 @@
       // ratio so a 1400×484 chart shrinks to (e.g.) 800×276 instead of
       // overflowing horizontally + clipping content.
       + '.chart-card{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 12px 12px 12px;margin:10px 0}'
-      + '.chart-card svg{display:block;width:100%;max-width:100%;height:auto}'
+      + '.chart-card svg,.chart-card img.chart-img{display:block;width:100%;max-width:100%;height:auto}'
       + '.chart-caption{font-size:0.83em;color:#475569;margin-top:4px;line-height:1.4}'
       + '.chart-simulations{font-size:0.9em;color:#1e3a8a;background:#dbeafe;border-left:3px solid #2563eb;padding:6px 10px;margin-top:8px;border-radius:0 3px 3px 0;line-height:1.5}'
       + '.chart-simulations strong{color:#1e40af}'
@@ -6785,6 +7028,19 @@
       + '.study-nav-row2 a{display:inline-block;padding:2px 10px;border-radius:9999px;font-size:0.83em;color:#3b82f6;text-decoration:none;background:#eff6ff;border:1px solid transparent}'
       + '.study-nav-row2 a:hover{background:#dbeafe;border-color:#bfdbfe}'
       + '.sn-count{display:inline-block;margin-left:4px;font-size:0.8em;color:#64748b;background:#fff;padding:0 5px;border-radius:9999px;border:1px solid #e2e8f0}'
+      /* sn-collapse-hint: the click-to-collapse affordance ON the visible
+         sticky strip (study-nav). Previous attempt put it inside the
+         per-study panel (which is the OFFICIAL <summary> click target for
+         the <details>), but study-nav has higher z-index than the panel at
+         top:44px, so the panel is covered and the in-panel hint is
+         invisible during scroll. Putting the hint here means the click
+         handler has to manually toggle the parent <details>.open — see
+         the DOMContentLoaded handler near the bottom of this file. Styled
+         to match sp-expand-hint (small grey, left-aligned, same font-size)
+         so it reads as the same control in two states. */
+      + '.sn-collapse-hint{display:none}'
+      + '.study-fold[open] .sn-collapse-hint{display:block;font-size:0.73em;color:#94a3b8;margin-top:6px;cursor:pointer}'
+      + '.study-fold[open] .sn-collapse-hint:hover{color:#334155}'
       // Scroll-margin so links to sub-sections don't get hidden under the
       // sticky study-nav.
       + '.study [id^="study-"]{scroll-margin-top:96px}'
@@ -6872,7 +7128,16 @@
       // When a study is open: make its header sticky so the collapse arrow
       // stays in view while scrolling inside the study. One click collapses
       // and the next study floats into view — no scrolling back to the top.
-      + '.study-fold[open]>.study-panel{position:sticky;top:0;z-index:10;padding:8px 16px;border-bottom:1px solid #e2e8f0;border-radius:9px 9px 0 0;background:#f8fafc;box-shadow:0 1px 4px rgba(0,0,0,.06)}'
+      // Stick BELOW the topbar (which sits at top:0, z:100), not at top:0.
+      // Otherwise the topbar (higher z-index) visually covers the panel and
+      // every interactive element inside it — including the collapse hint —
+      // becomes invisible the moment the user scrolls. The 44px offset
+      // matches the existing `.study-nav{top:44px}` convention (topbar is
+      // ~44px tall after its 9px padding + ~26px line content). Friction
+      // report 2026-05-28: "click to collapse goes out of view when we
+      // scroll" — was actually the entire sticky panel disappearing
+      // behind the topbar, not just the hint.
+      + '.study-fold[open]>.study-panel{position:sticky;top:44px;z-index:10;padding:8px 16px;border-bottom:1px solid #e2e8f0;border-radius:9px 9px 0 0;background:#f8fafc;box-shadow:0 1px 4px rgba(0,0,0,.06)}'
       // Sticky-when-open: hide the rich content rows (still visible
       // below in the expanded body — no information lost, just no
       // longer duplicated). The section-nav row stays visible to
@@ -6906,11 +7171,6 @@
       // the sticky strip; visible at a glance + obvious click target.
       + '.study-fold[open]>.study-panel{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}'
       + '.study-fold[open]>.study-panel>.sp-top{flex:1 1 auto;min-width:0;margin:0}'
-      + '.study-fold[open]>.study-panel::after{'
-      +   'content:"▴ click to collapse full study";'
-      +   'font-size:0.73em;color:#94a3b8;font-weight:normal;flex:none;'
-      + '}'
-      + '.study-fold[open]>.study-panel:hover::after{color:#64748b}'
       + '.study-fold.verdict-v-pass>.study-panel{border-left-color:#16a34a}'
       + '.study-fold.verdict-v-warn>.study-panel{border-left-color:#d97706}'
       + '.study-fold.verdict-v-block>.study-panel{border-left-color:#dc2626}'
@@ -6950,10 +7210,27 @@
       + '.sp-metric-fail{background:#fee2e2;color:#991b1b}'
       + '.sp-expand-hint{display:inline-block;font-size:0.73em;color:#94a3b8;margin-top:6px}'
       + '.study-fold[open] .sp-expand-hint{display:none}'
+      /* sp-collapse-hint: the OPEN-state partner of sp-expand-hint.
+         Styled identically (same font-size, grey, margin) so the two
+         affordances feel like the same control in two states.
+
+         `flex: 0 0 100% + order: 100` guarantees it always lands on
+         its own row at the very bottom of the sticky panel, regardless
+         of whether sp-section-nav rendered (some studies have no nav
+         links — without the flex-basis trick the hint would float onto
+         the title row next to the verdict, which is what triggered the
+         2026-05-28 "click to collapse is in the wrong menu bar" report).
+         Default block text-align is left, matching where the expand-hint
+         sits on collapsed cards. */
+      + '.sp-collapse-hint{display:none}'
+      + '.study-fold[open] .sp-collapse-hint{'
+      +   'display:block;flex:0 0 100%;order:100;'
+      +   'font-size:0.73em;color:#94a3b8;margin-top:6px'
+      + '}'
       + '.studies-toolbar{display:flex;gap:8px;margin:8px 0 14px}'
       + '.studies-toolbar button{font:inherit;font-size:0.85em;padding:5px 12px;border:1px solid #cbd5e1;background:#f8fafc;border-radius:6px;cursor:pointer;color:#334155}'
       + '.studies-toolbar button:hover{background:#e2e8f0}'
-      + '@media print{.sp-expand-hint,.studies-toolbar{display:none}}'
+      + '@media print{.sp-expand-hint,.sp-collapse-hint,.studies-toolbar{display:none}}'
       // ── review-readiness gate panel ──
       + '.review-gate{margin:10px 0;padding:10px 14px;background:#fffbeb;border:1px solid #f59e0b;border-left-width:5px;border-radius:6px;color:#92400e}'
       + '.review-gate>strong{color:#b45309}'
@@ -6974,44 +7251,124 @@
       + '.sim-status-gated,.sim-status-pill.sim-status-gated{background:#fef9c3;color:#854d0e}'
       + '</style></head><body>'
 
-      // Auto-size embedded visualization iframes to their full content so they
-      // render inline with no inner scrollbar. srcdoc iframes are same-origin,
-      // so we can read scrollHeight. Plotly draws async, so re-measure on a
-      // ResizeObserver of the inner doc plus a few timed fallbacks.
+      // ── Embed autosize (self-reporting child pattern) ──────────────
+      //
+      // Each embed-frame iframe runs its own ResizeObserver +
+      // MutationObserver inside its document and posts the measured
+      // height to this parent via postMessage. The parent maps
+      // event.source → iframe element and sets iframe.style.height.
+      //
+      // Why self-reporting instead of parent-side measurement: prior
+      // _fitEmbed used a selector walk
+      // (.plotly-graph-div / [data-plotly] / div[id] / svg / img / canvas)
+      // to find tall children and sum their bounding rects. Every new
+      // content type the walk didn't recognize (`<table>` from fetch,
+      // `<video>`, etc.) under-measured → iframe clipped. The
+      // MutationObserver here catches DOM changes that don't immediately
+      // trigger a size change on body (e.g. table populated from a
+      // fetch); the ResizeObserver catches everything else. body
+      // .scrollHeight is ground truth in the iframe's own document, no
+      // selector needed.
+      //
+      // The child function is defined here in the parent context only so
+      // its source can be extracted via .toString() and injected into
+      // each iframe's <head>. It does NOT execute in the parent.
       + '<script>'
-      + 'window._fitEmbed=function(f){try{var d=f.contentDocument||(f.contentWindow&&f.contentWindow.document);if(!d)return;'
-      +   'var b=d.body,e=d.documentElement;'
-      +   // If the inner body declares a fixed CSS height + overflow:hidden,
-      +   // read the DECLARED height directly (b.clientHeight is the laid-out
-      +   // height which is clipped by the iframe viewport, so it shrinks
-      +   // instead of pinning at the CSS value). getComputedStyle.height is
-      +   // a string like "540px" — parse it. Falls back to scrollHeight
-      +   // for unclamped embeds (e.g. tall chromosome figures).
-      +   'var bStyle=b&&d.defaultView&&d.defaultView.getComputedStyle?d.defaultView.getComputedStyle(b):null;'
-      +   'var pinnedH=0;'
-      +   'if(bStyle&&(bStyle.overflow||"").indexOf("hidden")>=0){'
-      +     'var hm=(bStyle.height||"").match(/^(\\d+(?:\\.\\d+)?)px$/);'
-      +     'if(hm)pinnedH=Math.round(parseFloat(hm[1]));'
+      + 'window.__embedReg=window.__embedReg||new Map();'
+      // Parent receiver — install once.
+      + 'if(!window.__embedRecv){window.__embedRecv=true;'
+      +   'window.addEventListener("message",function(ev){'
+      +     'if(!ev.data||ev.data.type!=="embed-autosize:height")return;'
+      +     'var f=window.__embedReg.get(ev.source);if(!f)return;'
+      +     'var h=Math.max(0,+ev.data.height||0);'
+      +     'if(h>0)f.style.height=(h+24)+"px";'
+      +   '});'
+      + '}'
+      // Child function — its .toString() is what runs inside each iframe.
+      //
+      // Height measurement uses a SENTINEL: an invisible 0×0 div appended
+      // as the last child of body. Its top position (relative to body's
+      // top) IS the content height — independent of body's laid-out
+      // height, html element height, or `height: 100%` style inheritance.
+      // Avoids the feedback loop where html.scrollHeight grows with the
+      // iframe's own viewport size, which then makes us report a larger
+      // height, which grows the iframe again, ad infinitum.
+      + 'window.__embedChildFn=function(){'
+      +   'if(window.__ec)return;window.__ec=1;'
+      +   'var sentinel=null;'
+      +   'function ensureSentinel(){'
+      +     'if(sentinel&&sentinel.parentNode===document.body)return;'
+      +     'sentinel=document.createElement("div");'
+      +     'sentinel.setAttribute("data-ec-sentinel","1");'
+      +     'sentinel.style.cssText="height:0;width:0;visibility:hidden;clear:both;margin:0;padding:0";'
+      +     'document.body.appendChild(sentinel);'
       +   '}'
-      +   // Plotly charts that overflow their fixed-height div report the
-      +   // chart-div height in scrollHeight, not the legend overflow. Walk
-      +   // any .plotly-graph-div / [id^="dnaa-"] / [id="chart"] children
-      +   // and add their full computed scrollHeight to the measurement so
-      +   // the iframe grows to fit the chart + ITS internal legend.
-      +   'var plotlyMax=0;try{var charts=d.querySelectorAll(\'.plotly-graph-div, [data-plotly], div[id]\');'
-      +     'for(var ci=0;ci<charts.length;ci++){var c=charts[ci];'
-      +       'var rect=c.getBoundingClientRect&&c.getBoundingClientRect();var top=rect?rect.top:0;'
-      +       'var ch=Math.max(c.scrollHeight||0,c.offsetHeight||0,c.clientHeight||0);'
-      +       'var totalTo=top+ch;if(totalTo>plotlyMax)plotlyMax=totalTo;}}catch(_e){}'
-      +   'var docH=Math.max(e?e.scrollHeight:0,b?b.scrollHeight:0,plotlyMax);'
-      +   'var h=pinnedH>0?pinnedH:docH;'
-      +   'if(h>0)f.style.height=(h+24)+"px";}catch(e){}};'
-      + 'window._wireEmbed=function(f){window._fitEmbed(f);'
-      +   'try{var d=f.contentDocument;if(window.ResizeObserver&&d){var ro=new ResizeObserver(function(){window._fitEmbed(f);});'
-      +     'if(d.documentElement)ro.observe(d.documentElement);if(d.body)ro.observe(d.body);}}catch(e){}'
-      +   '[150,500,1200,2500,4000].forEach(function(t){setTimeout(function(){window._fitEmbed(f);},t);});};'
-      // A collapsed (prior/superseded) embed: when expanded, nudge Plotly to
-      // recompute width and re-fit the iframe.
+      +   'function m(){var d=document,b=d.body;if(!b)return;'
+      // Honor explicit pinned height (height + overflow:hidden in inner CSS).
+      +     'var p=0;if(window.getComputedStyle){var bs=getComputedStyle(b);'
+      +       'if(bs&&(bs.overflow||"").indexOf("hidden")>=0){'
+      +         'var hm=(bs.height||"").match(/^(\\d+(?:\\.\\d+)?)px$/);'
+      +         'if(hm)p=Math.round(parseFloat(hm[1]));}}'
+      +     'var h;'
+      +     'if(p>0){h=p;}else{'
+      +       'ensureSentinel();'
+      +       'var bRect=b.getBoundingClientRect();'
+      +       'var sRect=sentinel.getBoundingClientRect();'
+      +       'h=Math.max(0,Math.ceil(sRect.top-bRect.top));'
+      // Fallback if sentinel reads 0 (e.g. body itself has display:none).
+      +       'if(h===0)h=b.scrollHeight||0;'
+      +     '}'
+      +     'try{window.parent.postMessage({type:"embed-autosize:height",height:h},"*");}catch(_){}'
+      +   '}'
+      +   'function init(){ensureSentinel();m();'
+      // Only observe body. Observing documentElement caused the runaway
+      // feedback loop (html scrollHeight grows with iframe viewport).
+      +     'if(window.ResizeObserver&&document.body){'
+      +       'var ro=new ResizeObserver(m);ro.observe(document.body);}'
+      +     'if(window.MutationObserver&&document.body){var mo=new MutationObserver(function(muts){'
+      // Skip mutations triggered by our own sentinel insertion to avoid
+      // a measurement immediately re-firing measurement.
+      +       'for(var i=0;i<muts.length;i++){'
+      +         'var t=muts[i].target;'
+      +         'if(t&&t.getAttribute&&t.getAttribute("data-ec-sentinel"))return;}'
+      +       'm();'
+      +     '});'
+      +       'mo.observe(document.body,{childList:1,subtree:1,attributes:1,'
+      +         'attributeFilter:["style","class","src","open","hidden"]});}'
+      // Per-image load handlers catch late-decoded images that don't
+      // trigger body resize until they finish decoding.
+      +     'if(document.body){var ii=document.body.querySelectorAll("img");'
+      +       'for(var i=0;i<ii.length;i++){'
+      +         'if(!ii[i].complete)ii[i].addEventListener("load",m);}}'
+      +     'window.addEventListener("load",m);'
+      // Belt-and-suspenders timed safety net for content loaded by
+      // async scripts that don't mutate body's observable surface.
+      +     '[100,500,2000].forEach(function(t){setTimeout(m,t);});'
+      +   '}'
+      +   'if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init);'
+      +   'else init();'
+      + '};'
+      // Stash the child source for injection.
+      + 'window.__embedChildJs="("+window.__embedChildFn.toString()+")();";'
+      // _wireEmbed: register the iframe in the parent map, inject the
+      // child autosize script into its head. Idempotent — re-wiring
+      // an already-wired iframe is a no-op.
+      + 'window._wireEmbed=function(f){try{'
+      +   'var cw=f.contentWindow;if(cw)window.__embedReg.set(cw,f);'
+      +   'var inj=function(){try{var d=f.contentDocument;if(!d||!d.head)return;'
+      +     'if(d.head.querySelector("script[data-ec]"))return;'
+      +     'var s=d.createElement("script");s.setAttribute("data-ec","1");'
+      +     's.textContent=window.__embedChildJs;'
+      +     'd.head.appendChild(s);}catch(_e){}};'
+      +   'if(f.contentDocument&&f.contentDocument.readyState!=="loading")inj();'
+      +   'else f.addEventListener("load",inj,{once:true});'
+      + '}catch(e){}};'
+      // _fitEmbed: back-compat shim. A few call sites elsewhere still
+      // invoke _fitEmbed directly; forward to _wireEmbed so they pick
+      // up the new child-injection path without code changes.
+      + 'window._fitEmbed=function(f){if(window._wireEmbed)window._wireEmbed(f);};'
+      // Collapsed-embed toggle: when a <details> opens an embed, kick
+      // the iframe to re-measure (in case it was paused while hidden).
       + 'window._onEmbedToggle=function(d){if(!d.open)return;var f=d.querySelector(".embed-frame");if(!f)return;'
       +   'try{f.contentWindow&&f.contentWindow.dispatchEvent(new Event("resize"));}catch(e){}'
       +   'if(window._wireEmbed)window._wireEmbed(f);};'
@@ -7019,18 +7376,96 @@
 
       // ── Sticky top nav — section-level tags only (per-study nav now lives
       //    in the collapsed control panels). Conditional tags render only when
-      //    the section exists, keeping the bar uncluttered.
+      //    the section exists, keeping the bar uncluttered. Trailing switcher
+      //    dropdown lists peer investigations from /api/investigation-registry
+      //    so the user can jump between live dashboards without leaving the
+      //    page — see _wireIsetSwitcher below for the click + render logic.
       + '<nav class="topbar">'
       +   '<span class="tb-title">' + _h(iset.title || iset.name) + '</span>'
       +   '<a href="#top">Top</a>'
       +   ((iset.executive && (iset.executive.what_is_this || iset.executive.verdict)) ? '<a href="#executive">Summary</a>' : '')
       +   ((iset.scientific_argument && iset.scientific_argument.main_claim) ? '<a href="#scientific-argument">Argument</a>' : '')
       +   '<a href="#overview">Overview</a>'
-      +   (acceptance ? '<a href="#acceptance">Acceptance</a>' : '')
+      /* "Acceptance" nav link removed alongside the section it pointed to */
       +   '<a href="#how-to-read">How to read</a>'
       +   '<a href="#studies-heading">Studies</a>'
       +   '<a href="#references">References</a>'
+      +   '<button type="button" class="tb-iset-switcher" id="tb-iset-switcher-trigger" aria-haspopup="true" aria-expanded="false">'
+      +     '<span class="tb-iset-switcher-icon">⇄</span>'
+      +     '<span>Switch investigation</span>'
+      +     '<span class="tb-iset-switcher-arrow">▾</span>'
+      +   '</button>'
+      +   '<div class="tb-iset-menu" id="tb-iset-menu" role="menu" hidden></div>'
       + '</nav>'
+      + '<script>(function(){'
+      // Topbar investigation switcher. Polishes the existing
+      // /api/investigation-registry data — the live dashboard already
+      // surfaces this via its left-rail switcher; this brings the same
+      // navigation to the report pages, where the rail isn't present.
+      // Self-contained: no dep on index.html.j2 chrome.
+      +     'var trigger=document.getElementById("tb-iset-switcher-trigger");'
+      +     'var menu=document.getElementById("tb-iset-menu");'
+      +     'if(!trigger||!menu){return;}'
+      +     'var loaded=false;'
+      +     'function esc(s){return String(s||"").replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c];});}'
+      +     'function row(p,kind){'
+      +       'var pill="";'
+      +       'if(kind==="current"){pill="<span class=\\"tb-iset-menu-pill tb-iset-menu-pill-here\\">here</span>";}'
+      +       'else if(kind==="running"){pill="<span class=\\"tb-iset-menu-pill tb-iset-menu-pill-running\\">running</span>";}'
+      +       'else if(kind==="dormant"){pill="<span class=\\"tb-iset-menu-pill tb-iset-menu-pill-dormant\\">dormant</span>";}'
+      +       'var cls="tb-iset-menu-row"+(kind==="current"?" tb-iset-menu-row-current":"");'
+      +       'var dataUrl=p.url?(" data-url=\\""+esc(p.url)+"\\""):"";'
+      +       'var dataSlug=p.slug?(" data-slug=\\""+esc(p.slug)+"\\""):"";'
+      +       'return "<button type=\\"button\\" class=\\""+cls+"\\""+dataUrl+dataSlug+">'
+      +         '<span class=\\"tb-iset-menu-slug\\">"+esc(p.title||p.slug||"(unnamed)")+"</span>"+pill+"</button>";'
+      +     '}'
+      +     'function position(){'
+      +       'var r=trigger.getBoundingClientRect();'
+      +       'menu.style.top=(r.bottom+6)+"px";'
+      // Right-align the menu to the trigger so it doesn't overflow the right edge.
+      +       'menu.style.right=Math.max(8,window.innerWidth-r.right)+"px";'
+      +       'menu.style.left="auto";'
+      +     '}'
+      +     'function render(data){'
+      +       'var html="";'
+      +       'if(data.current){html+="<div class=\\"tb-iset-menu-section\\">CURRENT</div>"+row(data.current,"current");}'
+      +       'var running=(data.running_others||[]).filter(function(p){return p&&p.url;});'
+      +       'if(running.length){html+="<div class=\\"tb-iset-menu-section\\">OTHER LIVE DASHBOARDS</div>";running.forEach(function(p){html+=row(p,"running");});}'
+      +       'var siblings=(data.local_siblings||[]);'
+      +       'if(siblings.length){html+="<div class=\\"tb-iset-menu-section\\">ALSO IN THIS WORKTREE</div>";siblings.forEach(function(p){html+=row(p,"sibling");});}'
+      +       'var dormant=(data.dormant_others||[]);'
+      +       'if(dormant.length){html+="<div class=\\"tb-iset-menu-section\\">DORMANT (NO LIVE DASHBOARD)</div>";dormant.forEach(function(p){html+=row(p,"dormant");});}'
+      +       'if(!html){html="<div class=\\"tb-iset-menu-empty\\">No other investigations found.</div>";}'
+      +       'menu.innerHTML=html;'
+      +     '}'
+      +     'function refresh(){'
+      +       'menu.innerHTML="<div class=\\"tb-iset-menu-empty\\">Loading…</div>";'
+      +       'fetch("/api/investigation-registry",{headers:{Accept:"application/json"}})'
+      +         '.then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})'
+      +         '.then(render)'
+      +         '.catch(function(e){menu.innerHTML="<div class=\\"tb-iset-menu-error\\">Failed to load: "+esc(String(e))+"</div>";});'
+      +     '}'
+      +     'function openMenu(){menu.hidden=false;position();trigger.setAttribute("aria-expanded","true");if(!loaded){loaded=true;refresh();}}'
+      +     'function closeMenu(){menu.hidden=true;trigger.setAttribute("aria-expanded","false");}'
+      +     'trigger.addEventListener("click",function(e){'
+      +       'e.stopPropagation();'
+      +       'if(menu.hidden){openMenu();}else{closeMenu();}'
+      +     '});'
+      +     'menu.addEventListener("click",function(e){'
+      +       'var btn=e.target.closest(".tb-iset-menu-row");'
+      +       'if(!btn||btn.classList.contains("tb-iset-menu-row-current"))return;'
+      +       'var url=btn.getAttribute("data-url");'
+      +       'var slug=btn.getAttribute("data-slug");'
+      +       'if(url){window.location.href=url;}'
+      +       'else if(slug){alert("This investigation is dormant. Start its dashboard with:\\n  /pbg-investigation open "+slug);closeMenu();}'
+      +     '});'
+      +     'document.addEventListener("click",function(e){'
+      +       'if(menu.hidden)return;'
+      +       'if(!menu.contains(e.target)&&!trigger.contains(e.target))closeMenu();'
+      +     '});'
+      +     'document.addEventListener("keydown",function(e){if(e.key==="Escape")closeMenu();});'
+      +     'window.addEventListener("resize",function(){if(!menu.hidden)position();});'
+      +   '})();</script>'
 
       // ── Main content ──
       + '<main class="content" id="top">'
@@ -7137,9 +7572,12 @@
       +   (iset.hypothesis ? '<p><strong>Hypothesis.</strong> ' + _multiline(iset.hypothesis) + '</p>' : '')
       +   (iset.description ? '<div class="description"><p>' + _multiline(iset.description) + '</p></div>' : '')
 
-      +   (acceptance ? '<h2 id="acceptance">Acceptance criteria</h2>'
-                      + '<p class="muted small">Behavioral tests across the studies that must pass for this investigation to be considered complete.</p>'
-                      + '<ol>' + acceptance + '</ol>' : '')
+      /* Removed: top-of-report "Acceptance criteria" section.
+         Per-study behavior_tests + conclusion_verdicts (the v4 way
+         studies signal pass/fail) already convey "what must pass for
+         this investigation to be considered complete." The top-of-
+         report ordered list of acceptance criteria duplicated that
+         signal in a less-actionable form. */
 
       +   '<h2 id="how-to-read">How to read this report</h2>'
       +   '<p>Each section below is one study, '
@@ -10104,6 +10542,20 @@
       _escSim(status || '?') + '</span>';
   }
 
+  function _simEmitterChip(emitter) {
+    // Which emitter persisted the run: xarray (zarr) / parquet / sqlite.
+    var colors = {
+      xarray:  ['#ede9fe', '#5b21b6'],
+      parquet: ['#fef3c7', '#92400e'],
+      sqlite:  ['#e0f2fe', '#075985'],
+    };
+    var e = (emitter || '').toLowerCase();
+    var c = colors[e] || ['#e5e7eb', '#374151'];
+    return '<span title="emitter / persistence format" style="background:' + c[0] +
+      '; color:' + c[1] + '; padding:2px 8px; border-radius:10px; font-size:12px;">' +
+      _escSim(emitter || '—') + '</span>';
+  }
+
   function _simStudyChips(studies) {
     if (!studies || !studies.length) return '<span style="color:#9ca3af;">—</span>';
     return studies.map(function (name) {
@@ -10150,7 +10602,8 @@
     }
     var stepsTxt = (sim.status === 'running')
       ? (sim.progress_step || 0) + '/' + (sim.n_steps || '?')
-      : (sim.n_steps != null ? String(sim.n_steps) : '—');
+      : (sim.n_steps != null ? String(sim.n_steps)
+         : (sim.ensemble_size ? (sim.ensemble_size + '× ens') : '—'));
     var label = sim.sim_name || sim.label || '';
     var startedFull = sim.started_at
       ? new Date(sim.started_at * 1000).toISOString()
@@ -10178,6 +10631,7 @@
       '<td style="padding:6px 8px;">' + investigationCell + '</td>' +
       '<td style="padding:6px 8px;">' + _simStudyChips(sim.studies) + '</td>' +
       '<td style="padding:6px 8px;">' + _simStatusChip(sim.status) + '</td>' +
+      '<td style="padding:6px 8px;">' + _simEmitterChip(sim.emitter) + '</td>' +
       '<td style="padding:6px 8px;">' + _escSim(stepsTxt) + '</td>' +
       '<td style="padding:6px 8px; color:#374151;">' + _escSim(label) + '</td>' +
       '<td style="padding:6px 8px; color:#6b7280;" title="' + _escSim(startedFull) +

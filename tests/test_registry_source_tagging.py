@@ -237,3 +237,119 @@ def test_registry_with_declared_import_marks_it_in_workspace(tmp_path, monkeypat
     finally:
         httpd.shutdown()
         thread.join(timeout=2)
+
+
+def test_registry_imports_as_list_of_dicts(tmp_path, monkeypatch):
+    """v2ecoli + newer pbg-template workspaces ship workspace.yaml.imports
+    as a list of dicts (each with ``name`` + optional ``package``), not
+    as the older dict-keyed-by-catalog-name shape. The registry endpoint
+    must accept both — older shapes broke with ``'list' object has no
+    attribute 'items'``."""
+    ws_root = tmp_path
+
+    pkg_dir = ws_root / "pbg_ws_list_imports"
+    pkg_dir.mkdir()
+    (pkg_dir / "__init__.py").write_text("")
+    (pkg_dir / "core.py").write_text(
+        "from bigraph_schema import allocate_core\n\n"
+        "def build_core():\n"
+        "    return allocate_core()\n"
+    )
+
+    # List-of-dicts shape (mirrors v2ecoli workspace.yaml).
+    (ws_root / "workspace.yaml").write_text(yaml.dump({
+        "name": "ws-list-imports",
+        "package_path": "pbg_ws_list_imports",
+        "visualizations": [],
+        "observables": [],
+        "simulations": [],
+        "imports": [
+            {
+                "name": "spatio_flux",
+                "source": "https://github.com/vivarium-collective/spatio-flux",
+                "description": "test",
+            },
+            # Entry with explicit `package` override.
+            {
+                "name": "some-catalog-name",
+                "package": "spatio_flux",
+            },
+            # String entry (defensive — bare names).
+            "bigraph_schema",
+        ],
+    }, sort_keys=False))
+
+    monkeypatch.syspath_prepend(str(ws_root))
+
+    import importlib
+    import vivarium_dashboard.server as srv
+    importlib.reload(srv)
+    monkeypatch.setattr(srv, "WORKSPACE", ws_root)
+    srv._REGISTRY_CACHE["data"] = None
+    srv._REGISTRY_CACHE["ts"] = 0.0
+
+    httpd = srv.ThreadingHTTPServer(("127.0.0.1", 0), srv.Handler)
+    port = httpd.server_address[1]
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        code, body = _get(f"http://127.0.0.1:{port}/api/registry")
+        assert code == 200, body
+        # No ``error`` field — the list shape parsed cleanly.
+        assert body.get("error") is None, f"unexpected error: {body.get('error')!r}"
+        ws_pkgs = body.get("workspace_pkgs", [])
+        # All three import-shape variants should resolve to package names.
+        assert "pbg_ws_list_imports" in ws_pkgs, f"ws_pkgs={ws_pkgs!r}"
+        assert "spatio_flux" in ws_pkgs, f"name-only entry missing: {ws_pkgs!r}"
+        assert "bigraph_schema" in ws_pkgs, f"string entry missing: {ws_pkgs!r}"
+    finally:
+        httpd.shutdown()
+        thread.join(timeout=2)
+
+
+def test_registry_imports_missing_or_none(tmp_path, monkeypatch):
+    """Workspace without an ``imports`` field (or ``imports: null``) — the
+    registry shows the workspace's own package + framework classes
+    without crashing."""
+    ws_root = tmp_path
+    pkg_dir = ws_root / "pbg_ws_no_imports"
+    pkg_dir.mkdir()
+    (pkg_dir / "__init__.py").write_text("")
+    (pkg_dir / "core.py").write_text(
+        "from bigraph_schema import allocate_core\n\n"
+        "def build_core():\n"
+        "    return allocate_core()\n"
+    )
+    (ws_root / "workspace.yaml").write_text(yaml.dump({
+        "name": "ws-no-imports",
+        "package_path": "pbg_ws_no_imports",
+        "visualizations": [],
+        "observables": [],
+        "simulations": [],
+        # No imports field at all.
+    }, sort_keys=False))
+
+    monkeypatch.syspath_prepend(str(ws_root))
+
+    import importlib
+    import vivarium_dashboard.server as srv
+    importlib.reload(srv)
+    monkeypatch.setattr(srv, "WORKSPACE", ws_root)
+    srv._REGISTRY_CACHE["data"] = None
+    srv._REGISTRY_CACHE["ts"] = 0.0
+
+    httpd = srv.ThreadingHTTPServer(("127.0.0.1", 0), srv.Handler)
+    port = httpd.server_address[1]
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        code, body = _get(f"http://127.0.0.1:{port}/api/registry")
+        assert code == 200, body
+        assert body.get("error") is None
+        ws_pkgs = body.get("workspace_pkgs", [])
+        assert ws_pkgs == ["pbg_ws_no_imports"]
+    finally:
+        httpd.shutdown()
+        thread.join(timeout=2)

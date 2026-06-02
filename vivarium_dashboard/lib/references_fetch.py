@@ -70,7 +70,7 @@ def resolve_contact_email(ws_root: Path) -> str:
     if ws_file.exists():
         try:
             import yaml  # local import; the dashboard imports yaml elsewhere
-            data = yaml.safe_load(ws_file.read_text()) or {}
+            data = yaml.safe_load(ws_file.read_text(encoding="utf-8")) or {}
             email = data.get("maintainer_email")
             if isinstance(email, str) and "@" in email:
                 return email
@@ -96,7 +96,8 @@ def resolve_contact_email(ws_root: Path) -> str:
 
 
 def _cache_path(ws_root: Path) -> Path:
-    return ws_root / "references" / _CACHE_FILENAME
+    from .workspace_paths import WorkspacePaths
+    return WorkspacePaths.load(ws_root).references / _CACHE_FILENAME
 
 
 def load_cache(ws_root: Path) -> dict[str, EnrichmentRecord]:
@@ -105,7 +106,7 @@ def load_cache(ws_root: Path) -> dict[str, EnrichmentRecord]:
     if not p.exists():
         return {}
     try:
-        raw = json.loads(p.read_text()) or {}
+        raw = json.loads(p.read_text(encoding="utf-8")) or {}
     except (json.JSONDecodeError, OSError):
         return {}
     return {k: EnrichmentRecord(**v) for k, v in raw.items() if isinstance(v, dict)}

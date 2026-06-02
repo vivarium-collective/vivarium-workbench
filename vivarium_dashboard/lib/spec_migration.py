@@ -10,7 +10,7 @@ def migrate_study_to_v2_vocabulary(spec_path: pathlib.Path) -> bool:
 
     Returns True if a migration was applied, False if the file was already v2.
     """
-    text = spec_path.read_text()
+    text = spec_path.read_text(encoding="utf-8")
     data = yaml.safe_load(text) or {}
     if 'variants' in data:
         # Ensure new top-level fields present for idempotency.

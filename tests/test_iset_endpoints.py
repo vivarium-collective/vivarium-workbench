@@ -13,6 +13,7 @@ import yaml
 
 from vivarium_dashboard.server import (
     compute_investigation_status,
+    compute_study_effective_status,
     _post_iset_create_for_test,
     _post_iset_clone_for_test,
     _build_iset_summary_for_test,
@@ -57,12 +58,13 @@ def test_compute_status_running_when_child_analyzing():
     assert compute_investigation_status(["planned", "analyzing"]) == "running"
 
 
-def test_compute_status_running_when_child_has_accumulated_runs():
+def test_compute_status_in_progress_when_child_has_accumulated_runs():
     # No child is in a 'running' status but at least one has runs accumulated
-    # → still treat as 'running' per the derivation rules.
+    # → 'in_progress'. Accumulated (completed) run history is NOT active
+    # execution, so it no longer maps to 'running'.
     statuses = ["planned", "planned"]
     has_runs = [False, True]
-    assert compute_investigation_status(statuses, has_runs=has_runs) == "running"
+    assert compute_investigation_status(statuses, has_runs=has_runs) == "in_progress"
 
 
 def test_compute_status_in_progress_when_some_but_not_all_complete():
@@ -85,6 +87,61 @@ def test_compute_status_planning_when_empty():
 def test_compute_status_unknown_status_treated_as_planning():
     # Garbage / unrecognized status values fall through to the 'else' bucket.
     assert compute_investigation_status(["weird-thing"]) == "planning"
+
+
+# ---------------------------------------------------------------------------
+# Part 1b: compute_study_effective_status — per-study derivation
+# ---------------------------------------------------------------------------
+
+
+def test_study_effective_failed_when_status_failed():
+    assert compute_study_effective_status("failed") == "failed"
+
+
+def test_study_effective_failed_when_status_invalid():
+    assert compute_study_effective_status("invalid") == "failed"
+
+
+def test_study_effective_complete_when_status_complete():
+    assert compute_study_effective_status("complete") == "complete"
+    assert compute_study_effective_status("ran") == "complete"
+
+
+def test_study_effective_running_when_status_running():
+    assert compute_study_effective_status("running") == "running"
+    assert compute_study_effective_status("implementing") == "running"
+    assert compute_study_effective_status("runnable") == "running"
+    assert compute_study_effective_status("analyzing") == "running"
+
+
+def test_study_effective_running_only_when_active_run():
+    # 'running' means a run is genuinely in flight, NOT merely that the study
+    # has accumulated run history. A planned study with finished runs reads as
+    # 'planned'; only an active run (has_active_run) makes it 'running'.
+    assert compute_study_effective_status("planned", has_runs=True) == "planned"
+    assert (
+        compute_study_effective_status("planned", has_runs=True, has_active_run=True)
+        == "running"
+    )
+
+
+def test_study_effective_planned_when_planned_no_runs():
+    assert compute_study_effective_status("planned") == "planned"
+    assert compute_study_effective_status("planning") == "planned"
+
+
+def test_study_effective_reflects_declared_when_empty_or_unknown():
+    # Empty / None normalize to 'planned'; any other declared status is
+    # reflected verbatim (e.g. 'in_progress', 'characterization-complete')
+    # rather than being flattened to 'planned'.
+    assert compute_study_effective_status("") == "planned"
+    assert compute_study_effective_status(None) == "planned"
+    assert compute_study_effective_status("weird-thing") == "weird-thing"
+
+
+def test_study_effective_failed_beats_runs():
+    # A failed study with runs on disk is still failed, not running.
+    assert compute_study_effective_status("failed", has_runs=True) == "failed"
 
 
 # ---------------------------------------------------------------------------
@@ -427,3 +484,88 @@ def test_iset_detail_multiaxis_status_partial(_ws):
     assert s["implementation_status"] is None
     assert s["evaluation_status"] is None
     assert s["expert_review_status"] is None
+
+
+# ---------------------------------------------------------------------------
+# Part 5: schema-drift defense — non-list acceptance_criteria / expert_docs
+# must degrade gracefully, not break report generation.
+#
+# Backstory: an investigation author grouped acceptance_criteria into
+# {investigation_terminal: [...], per_study_gating: [...]} — semantically
+# reasonable, but the dashboard's walkthrough renderer expects a list and
+# crashed with "(iset.acceptance_criteria || []).map is not a function".
+# The fix moved the grouping into a per-entry `gating:` tag and added
+# `_coerce_list_field` on the server so any future non-list value degrades
+# to [] with a single stderr warning rather than 500-ing the endpoint.
+# ---------------------------------------------------------------------------
+
+from vivarium_dashboard.server import _coerce_list_field
+
+
+def test_coerce_list_field_passes_through_list():
+    assert _coerce_list_field({"x": [1, 2, 3]}, "x") == [1, 2, 3]
+
+
+def test_coerce_list_field_returns_empty_for_missing():
+    assert _coerce_list_field({}, "missing") == []
+
+
+def test_coerce_list_field_returns_empty_for_explicit_none():
+    assert _coerce_list_field({"x": None}, "x") == []
+
+
+def test_coerce_list_field_coerces_dict_to_empty(capsys):
+    """The bug-class fix: a dict where a list was expected does NOT raise;
+    it degrades to [] and prints a stderr warning naming the field."""
+    out = _coerce_list_field({"acceptance_criteria": {"a": [1]}},
+                              "acceptance_criteria", source="my.yaml")
+    assert out == []
+    captured = capsys.readouterr()
+    assert "acceptance_criteria" in captured.err
+    assert "my.yaml" in captured.err
+    assert "dict" in captured.err
+
+
+def test_coerce_list_field_coerces_string_to_empty(capsys):
+    """Other non-list types also degrade rather than raise."""
+    out = _coerce_list_field({"x": "oops"}, "x", source="s.yaml")
+    assert out == []
+    err = capsys.readouterr().err
+    assert "expected list" in err
+    assert "str" in err
+
+
+def test_iset_detail_with_dict_acceptance_criteria_does_not_500(_ws, capsys):
+    """End-to-end: a grouped (dict-shaped) acceptance_criteria field on an
+    investigation.yaml must NOT 500 the /api/iset/<name> endpoint. It must
+    return 200 with acceptance_criteria coerced to []."""
+    _write_iset(
+        _ws, "inv", status="planning", studies=[],
+        # Grouped shape — the original chris-feedback integration attempt
+        # that broke the renderer.
+        acceptance_criteria={
+            "investigation_terminal": [{"study": "a", "behavior": "b"}],
+            "per_study_gating":       [{"study": "c", "behavior": "d"}],
+        },
+    )
+    resp, code = _build_iset_detail_for_test(_ws, "inv")
+    assert code == 200, resp
+    assert resp["acceptance_criteria"] == []
+    err = capsys.readouterr().err
+    assert "acceptance_criteria" in err
+    assert "dict" in err
+
+
+def test_iset_detail_with_list_acceptance_criteria_passes_through(_ws):
+    """Sanity: a list-shaped acceptance_criteria flows through unchanged."""
+    crits = [
+        {"study": "s1", "behavior": "b1", "gating": "investigation_terminal"},
+        {"study": "s1", "behavior": "b2", "gating": "per_study"},
+    ]
+    _write_iset(
+        _ws, "inv", status="planning", studies=[],
+        acceptance_criteria=crits,
+    )
+    resp, code = _build_iset_detail_for_test(_ws, "inv")
+    assert code == 200, resp
+    assert resp["acceptance_criteria"] == crits

@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from ._root import workspace_root
+from .workspace_paths import WorkspacePaths
 
 
 _STATE_FILENAME = "state.json"
@@ -17,7 +18,7 @@ _PROTECTED_BRANCHES = frozenset({"main", "master", "develop", "trunk", "HEAD"})
 
 
 def _state_path() -> Path:
-    return workspace_root() / ".pbg" / _STATE_FILENAME
+    return WorkspacePaths.load(workspace_root()).pbg / _STATE_FILENAME
 
 
 def load_state() -> dict:
@@ -26,7 +27,7 @@ def load_state() -> dict:
     if not p.exists():
         return {}
     try:
-        return json.loads(p.read_text()) or {}
+        return json.loads(p.read_text(encoding="utf-8")) or {}
     except (json.JSONDecodeError, OSError):
         return {}
 

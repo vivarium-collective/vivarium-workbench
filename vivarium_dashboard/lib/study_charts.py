@@ -12,6 +12,7 @@ this into a per-study chart-spec block (likely `readouts:` driven).
 """
 from __future__ import annotations
 
+import base64
 import json
 import re
 import sqlite3
@@ -200,12 +201,18 @@ def _render_svg(title: str, y_label: str, xs: list[float], ys: list[float],
         for y in yticks
     )
 
-    # X-axis (time): 5 ticks
+    # X-axis (time): 5 ticks. Times are emitted in seconds; label in MINUTES
+    # (Rashmi 2026-05-30: "mark the x axis time in minutes"). Tick positions are
+    # unchanged (proportional to the seconds range); only the labels convert.
     xticks = [x_min + (x_max - x_min) * f for f in (0.0, 0.25, 0.5, 0.75, 1.0)]
     xtick_text = "".join(
         f'<text x="{sx(x):.1f}" y="{pad_t+plot_h+14:.1f}" font-size="10" fill="#64748b" '
-        f'text-anchor="middle">{_fmt(x)}s</text>'
+        f'text-anchor="middle">{_fmt(x / 60.0)}</text>'
         for x in xticks
+    )
+    xtick_text += (
+        f'<text x="{pad_l + plot_w / 2:.1f}" y="{pad_t+plot_h+30:.1f}" font-size="10" '
+        f'fill="#64748b" text-anchor="middle">time (min)</text>'
     )
 
     # Legend
@@ -259,16 +266,53 @@ def _table_exists(conn, name: str) -> bool:
     return row is not None
 
 
+# Raster chart formats surfaced alongside inline SVGs. Each maps to the MIME
+# type used to build a self-contained ``data:`` URI (so a downloaded report
+# keeps its figures with no server round-trip — same self-contained philosophy
+# as inlining SVG). GIF is included so animations (e.g. chromosome-cycle /
+# colony movies rendered to .gif) play in the report.
+_RASTER_CHART_MIME = {".png": "image/png", ".gif": "image/gif"}
+
+
+def _static_chart_meta(asset_path: Path) -> dict:
+    """Read the optional ``<name>.meta.json`` sidecar for a chart asset."""
+    meta_path = asset_path.with_suffix(".meta.json")
+    title, caption, simulations, interpretation = asset_path.stem, "", "", ""
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            if isinstance(meta, dict):
+                title = str(meta.get("title", title)) or title
+                caption = str(meta.get("caption", "")) or ""
+                simulations = str(meta.get("simulations", "")) or ""
+                interpretation = str(meta.get("interpretation", "")) or ""
+        except Exception:
+            pass
+    return {"title": title, "caption": caption,
+            "simulations": simulations, "interpretation": interpretation}
+
+
 def discover_static_study_charts(charts_dir: Path) -> list[dict]:
-    """Return inline-SVG chart records for any `*.svg` under ``charts_dir``.
+    """Return chart records for pre-rendered figures under ``charts_dir``.
 
     Companion to ``render_study_charts``: where that one runs SQL against
-    ``runs.db`` to draw fresh plots, this one surfaces SVGs the study has
+    ``runs.db`` to draw fresh plots, this one surfaces figures the study has
     ALREADY rendered to disk (e.g. domain-specific chromosome maps,
-    DnaA-box layouts) so the dashboard's chart panel includes them.
+    DnaA-box layouts, matplotlib trajectory PNGs, animated GIFs) so the
+    dashboard's chart panel + the investigation report include them.
 
-    Convention: each ``<name>.svg`` may have a sibling ``<name>.meta.json``
-    of shape::
+    Discovers two media families:
+
+    * ``*.svg`` — inlined verbatim into the record's ``svg`` field
+      (``media: "svg"``).
+    * ``*.png`` / ``*.gif`` — embedded as a self-contained base64 ``data:``
+      URI in the record's ``img`` field (``media: "png"`` / ``"gif"``), so the
+      figure survives in a downloaded/standalone report with no server.
+      A raster file is SKIPPED when a same-stem ``*.svg`` exists — the vector
+      version wins (avoids showing ``foo.svg`` and ``foo.png`` twice).
+
+    Convention: each ``<name>.{svg,png,gif}`` may have a sibling
+    ``<name>.meta.json`` of shape::
 
         {
           "title":          "...",   # display heading
@@ -279,46 +323,48 @@ def discover_static_study_charts(charts_dir: Path) -> list[dict]:
 
     The last two are optional and surface as separate paragraphs below
     the chart so an evaluator gets both the provenance and the read.
-    Files are returned sorted by filename — the ``00_summary.svg`` /
-    ``01_*.svg`` naming convention used in this workspace gives a
-    natural display order.
+    Records are returned sorted by filename stem — the ``00_summary`` /
+    ``01_*`` naming convention used in this workspace gives a natural
+    display order across both media families.
 
-    Returns ``[]`` if the directory doesn't exist, has no SVGs, or any I/O
-    fails (treated as "no charts" rather than an error so the panel can
+    Returns ``[]`` if the directory doesn't exist, has no figures, or any
+    I/O fails (treated as "no charts" rather than an error so the panel can
     still render the live charts).
     """
     if not charts_dir.exists() or not charts_dir.is_dir():
         return []
     out: list[dict] = []
-    for svg_path in sorted(charts_dir.glob("*.svg")):
+    svg_stems = {p.stem for p in charts_dir.glob("*.svg")}
+    # Vector SVGs — inlined verbatim.
+    for svg_path in charts_dir.glob("*.svg"):
         try:
-            svg_text = svg_path.read_text()
+            svg_text = svg_path.read_text(encoding="utf-8")
         except Exception:
             continue
-        meta_path = svg_path.with_suffix(".meta.json")
-        title = svg_path.stem
-        caption = ""
-        simulations = ""
-        interpretation = ""
-        if meta_path.exists():
-            try:
-                meta = json.loads(meta_path.read_text())
-                if isinstance(meta, dict):
-                    title = str(meta.get("title", title)) or title
-                    caption = str(meta.get("caption", "")) or ""
-                    simulations = str(meta.get("simulations", "")) or ""
-                    interpretation = str(meta.get("interpretation", "")) or ""
-            except Exception:
-                pass
         out.append({
             "key": svg_path.stem,
-            "title": title,
-            "caption": caption,
-            "simulations": simulations,
-            "interpretation": interpretation,
+            **_static_chart_meta(svg_path),
             "svg": svg_text,
+            "media": "svg",
             "source": "static",
         })
+    # Raster PNG/GIF — base64 data-URI so downloaded reports stay self-contained.
+    for ext, mime in _RASTER_CHART_MIME.items():
+        for img_path in charts_dir.glob("*" + ext):
+            if img_path.stem in svg_stems:
+                continue  # a vector version exists — prefer it
+            try:
+                b64 = base64.b64encode(img_path.read_bytes()).decode("ascii")
+            except Exception:
+                continue
+            out.append({
+                "key": img_path.stem,
+                **_static_chart_meta(img_path),
+                "img": f"data:{mime};base64,{b64}",
+                "media": ext.lstrip("."),
+                "source": "static",
+            })
+    out.sort(key=lambda r: r["key"])
     return out
 
 
@@ -377,10 +423,14 @@ def render_v4_test_charts(spec: dict,
         zarr_path = _latest_zarr_for_study(study_dir) if study_dir else None
         if zarr_path is not None:
             sources.append(("study-zarr", _extract_paths_from_zarr(zarr_path, path_specs)))
+    elif emitter_kind == "parquet":
+        hive_root = _latest_parquet_for_study(study_dir) if study_dir else None
+        if hive_root is not None:
+            sources.append(("study-parquet", _extract_paths_from_parquet(hive_root, path_specs)))
 
     # SQLite chain: primary in the default sqlite mode, fallback in xarray
-    # mode (covers per-test observables the zarr store doesn't carry, and
-    # the workspace default-baseline as a last resort).
+    # and parquet modes (covers per-test observables the alt store doesn't
+    # carry, and the workspace default-baseline as a last resort).
     db_candidates = [(p, lbl) for p, lbl in
                      ((runs_db, "study"), (fallback_db, "default-baseline"))
                      if p is not None and p.is_file()]
@@ -424,7 +474,12 @@ def render_v4_test_charts(spec: dict,
         if t.get("status"):
             caption_bits.append(f"Current verdict: {t['status']}")
         if used_source == "default-baseline":
-            caption_bits.append("⚠ Drawn from workspace default-baseline (study has no runs for this observable yet).")
+            suffix = " (parquet)" if emitter_kind == "parquet" else ""
+            caption_bits.append(
+                "⚠ Drawn from workspace default-baseline"
+                + suffix
+                + " (study has no runs for this observable yet)."
+            )
         charts.append({
             "key": f"v4-{t.get('name','test')}",
             "title": title,
@@ -438,16 +493,17 @@ def render_v4_test_charts(spec: dict,
 
 
 def _emitter_choice(spec: dict, runs_db: Path | None) -> str:
-    """Return ``'xarray'`` or ``'sqlite'`` per workspace configuration.
+    """Return ``'xarray'``, ``'parquet'``, or ``'sqlite'`` per workspace config.
 
     Resolves ``runtime.default_emitter`` from (1) the study spec's runtime
     block, then (2) workspace.yaml's runtime block, defaulting to
     ``'sqlite'`` (the framework's documented default). Deliberately does
-    NOT probe disk state — workspaces that haven't opted into xarray must
-    not silently flip read sources, since that hides drift.
+    NOT probe disk state — workspaces that haven't opted into xarray /
+    parquet must not silently flip read sources, since that hides drift.
     """
+    _ACCEPTED = ("xarray", "sqlite", "parquet")
     spec_rt = (spec or {}).get("runtime") or {}
-    if isinstance(spec_rt, dict) and spec_rt.get("default_emitter") in ("xarray", "sqlite"):
+    if isinstance(spec_rt, dict) and spec_rt.get("default_emitter") in _ACCEPTED:
         return spec_rt["default_emitter"]
     if runs_db is not None:
         # runs_db lives at <ws>/studies/<slug>/runs.db
@@ -455,9 +511,9 @@ def _emitter_choice(spec: dict, runs_db: Path | None) -> str:
         if ws_yaml.is_file():
             try:
                 import yaml as _yaml
-                ws = _yaml.safe_load(ws_yaml.read_text()) or {}
+                ws = _yaml.safe_load(ws_yaml.read_text(encoding="utf-8")) or {}
                 ws_rt = ws.get("runtime") or {}
-                if isinstance(ws_rt, dict) and ws_rt.get("default_emitter") in ("xarray", "sqlite"):
+                if isinstance(ws_rt, dict) and ws_rt.get("default_emitter") in _ACCEPTED:
                     return ws_rt["default_emitter"]
             except (OSError, Exception):  # noqa: BLE001 — read-fail = default
                 pass
@@ -585,6 +641,212 @@ def _extract_paths_from_zarr(
     except Exception:
         return out
     return out
+
+
+def _latest_parquet_for_study(study_dir: Path) -> Path | None:
+    """Find the most-recent parquet hive root under ``study_dir``.
+
+    ParquetEmitter runs write hive-partitioned parquet at
+    ``<study>/parquet-runs/<experiment_id>/history/experiment_id=.../...``.
+    Pick the most recently modified ``<experiment_id>`` subdir and return
+    its ``history/`` directory as the hive root. Returns ``None`` if no
+    parquet runs exist or none have a populated ``history/`` dir yet.
+    """
+    if not study_dir or not study_dir.is_dir():
+        return None
+    parquet_runs = study_dir / "parquet-runs"
+    if not parquet_runs.is_dir():
+        return None
+    candidates = sorted(
+        (p for p in parquet_runs.iterdir() if p.is_dir()),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for exp_dir in candidates:
+        history = exp_dir / "history"
+        if not history.is_dir():
+            continue
+        try:
+            if next(history.glob("experiment_id=*"), None) is not None:
+                return history
+        except OSError:
+            continue
+    return None
+
+
+def _extract_paths_from_parquet(
+    hive_root: Path,
+    path_specs: list[tuple[str, int | None]],
+    max_points: int = 200,
+) -> dict[tuple[str, int | None], tuple[list[float], list[float]]]:
+    """Single-pass extraction of N observable paths from a hive-partitioned
+    parquet run via one DuckDB query.
+
+    Mirrors :func:`_extract_paths_from_db`'s signature. Each ``path_spec``
+    is ``(dotted-or-slash path, optional index)``. ParquetEmitter flattens
+    nested observable paths into column names by replacing the separator
+    with ``__`` (e.g. ``listeners.mass.cell_mass`` → column
+    ``listeners__mass__cell_mass``). For array-valued columns, ``idx``
+    selects element ``idx+1`` (DuckDB lists are 1-indexed).
+
+    Subsamples to ~``max_points`` per spec. Returns
+    ``{(path, index): (times, values)}`` with empty tuples for paths that
+    didn't resolve.
+    """
+    out: dict[tuple[str, int | None], tuple[list[float], list[float]]] = {
+        key: ([], []) for key in path_specs
+    }
+    if not path_specs or not hive_root.exists():
+        return out
+    try:
+        import duckdb
+    except ImportError:
+        return out
+
+    # Resolve column name per spec. The path's last components join via __;
+    # for v2ecoli single-cell composites the listener stores are scoped
+    # under agents/0/, so try the literal column first and fall back to a
+    # name that's stripped of an ``agents.<id>.`` prefix. Skip paths with
+    # characters that aren't safe as a column identifier — same defensive
+    # filter as the sqlite branch.
+    def _flatten(path: str) -> str:
+        return re.sub(r"[./]+", "__", path).strip("_")
+
+    supported: list[tuple[str, int | None, str]] = []
+    for path, idx in path_specs:
+        if not re.match(r"^[A-Za-z0-9_./]+$", str(path)):
+            continue
+        col = _flatten(str(path))
+        supported.append((path, idx, col))
+    if not supported:
+        return out
+
+    glob = str(hive_root).replace("'", "''") + "/**/*.pq"
+    try:
+        conn = duckdb.connect(":memory:")
+    except Exception:
+        return out
+    try:
+        try:
+            schema_rows = conn.execute(
+                f"DESCRIBE SELECT * FROM read_parquet('{glob}', hive_partitioning=1) LIMIT 0"
+            ).fetchall()
+        except Exception:
+            return out
+        available = {r[0] for r in schema_rows}
+        if "global_time" not in available:
+            return out
+        # ``global_time`` resets to 0 at the start of each generation (every
+        # generation is a freshly-built composite). Without accounting for
+        # that, ORDER BY global_time overlaps all generations onto one cycle.
+        # When the hive carries a ``generation`` partition, lay the lineage out
+        # sequentially via a cumulative-time offset.
+        has_gen = "generation" in available
+
+        # Resolve final column per spec; fall back to stripping an
+        # ``agents__<id>__`` prefix if present in the flattened column name
+        # (mirrors the sqlite branch's $.agents.0.<path> fallback).
+        resolved: list[tuple[tuple[str, int | None], str]] = []
+        for path, idx, col in supported:
+            chosen = None
+            if col in available:
+                chosen = col
+            else:
+                # try stripping a leading agents__<id>__
+                stripped = re.sub(r"^agents__[^_]+__", "", col)
+                if stripped in available:
+                    chosen = stripped
+            if chosen is None:
+                continue
+            resolved.append(((path, idx), chosen))
+        if not resolved:
+            return out
+
+        # Build SELECT expressions: scalar columns pass through;
+        # array-typed columns get a 1-indexed lookup. Probe the column
+        # type from the schema (DESCRIBE returns (name, type, ...)).
+        type_by_col = {r[0]: (r[1] or "") for r in schema_rows}
+
+        # Extract one path at a time to keep SQL simple and to subsample
+        # per-trace (paths can have different valid-row counts when null).
+        for (path, idx), col in resolved:
+            col_type = type_by_col.get(col, "")
+            is_list = col_type.endswith("[]") or col_type.startswith(("LIST", "ARRAY"))
+            if idx is not None and is_list:
+                value_expr = f'"{col}"[{int(idx) + 1}]'
+            elif idx is not None and not is_list:
+                # idx supplied but column is scalar — skip to avoid SQL error
+                continue
+            else:
+                value_expr = f'"{col}"'
+            try:
+                n_rows = conn.execute(
+                    f"SELECT COUNT(*) FROM read_parquet('{glob}', hive_partitioning=1) "
+                    f"WHERE {value_expr} IS NOT NULL"
+                ).fetchone()[0] or 0
+            except Exception:
+                continue
+            stride = max(1, n_rows // max_points) if n_rows > max_points else 1
+            try:
+                if has_gen:
+                    # Cumulative lineage time: normalise each generation to
+                    # start at 0 (gt - gmin), then offset by the summed
+                    # durations of all prior generations. Correct whether
+                    # global_time resets per gen (gmin≈0) or is already
+                    # cumulative (gmin large → the subtraction is a no-op net
+                    # of the offset). CAST so "10" sorts after "2".
+                    sql = (
+                        f"WITH base AS (SELECT CAST(generation AS BIGINT) AS g, "
+                        f"  global_time AS gt, {value_expr} AS v "
+                        f"  FROM read_parquet('{glob}', hive_partitioning=1) "
+                        f"  WHERE {value_expr} IS NOT NULL AND generation IS NOT NULL), "
+                        f"stats AS (SELECT g, MIN(gt) AS gmin, MAX(gt) AS gmax "
+                        f"  FROM base GROUP BY g), "
+                        f"off AS (SELECT g, gmin, COALESCE(SUM(gmax - gmin) OVER "
+                        f"  (ORDER BY g ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS off "
+                        f"  FROM stats), "
+                        f"seq AS (SELECT (b.gt - o.gmin + o.off) AS t, b.v AS v, "
+                        f"  row_number() OVER (ORDER BY b.g, b.gt) AS rn "
+                        f"  FROM base b JOIN off o ON b.g = o.g) "
+                        f"SELECT t, v FROM seq WHERE (rn - 1) % {max(1, stride)} = 0 ORDER BY t"
+                    )
+                elif stride > 1:
+                    sql = (
+                        f"SELECT global_time, v FROM ("
+                        f"  SELECT global_time, {value_expr} AS v, "
+                        f"         row_number() OVER (ORDER BY global_time) AS rn "
+                        f"  FROM read_parquet('{glob}', hive_partitioning=1) "
+                        f"  WHERE {value_expr} IS NOT NULL"
+                        f") WHERE (rn - 1) % {stride} = 0 ORDER BY global_time"
+                    )
+                else:
+                    sql = (
+                        f"SELECT global_time, {value_expr} AS v "
+                        f"FROM read_parquet('{glob}', hive_partitioning=1) "
+                        f"WHERE {value_expr} IS NOT NULL "
+                        f"ORDER BY global_time"
+                    )
+                rows = conn.execute(sql).fetchall()
+            except Exception:
+                continue
+            times: list[float] = []
+            values: list[float] = []
+            for tm, v in rows:
+                if tm is None or v is None:
+                    continue
+                try:
+                    times.append(float(tm))
+                    values.append(float(v))
+                except (TypeError, ValueError):
+                    continue
+            if times:
+                out[(path, idx)] = (times, values)
+        return out
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _extract_paths_from_db(
