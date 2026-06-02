@@ -334,27 +334,85 @@ function InspectorTab(props: {
       )}
 
       {hasDescription && (
-        <div style={{ margin: '8px 0' }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4 }}>
-            Description
-          </div>
+        <InspectorSection title="Description">
           <pre style={{
             fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-            background: '#f7f7f7', padding: 6, margin: 0, borderRadius: 4,
-            fontFamily: 'system-ui, sans-serif', color: '#374151',
+            background: '#f7f7f7', padding: 8, margin: 0, borderRadius: 4,
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', color: '#1f2937',
+            lineHeight: 1.5,
           }}>
             {description as string}
           </pre>
-        </div>
+        </InspectorSection>
       )}
 
-      <pre style={{
-        fontSize: 11, background: '#f7f7f7', padding: 6,
-        overflow: 'auto', maxHeight: 320, margin: 0,
-      }}>
-        {JSON.stringify(sel.details, null, 2)}
-      </pre>
+      {sel.kind === 'process' ? (
+        <ProcessSchemaSections details={sel.details as Record<string, unknown>} />
+      ) : (
+        <InspectorSection title="Details">
+          <SchemaBlock value={sel.details} />
+        </InspectorSection>
+      )}
     </div>
+  );
+}
+
+/** A labeled inspector section. */
+function InspectorSection(props: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ margin: '10px 0' }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4 }}>
+        {props.title}
+      </div>
+      {props.children}
+    </div>
+  );
+}
+
+/** A pretty-printed JSON block, or an em-dash when empty. */
+function SchemaBlock(props: { value: unknown }) {
+  const v = props.value;
+  const empty = v == null
+    || (typeof v === 'object' && v !== null && Object.keys(v as object).length === 0);
+  if (empty) return <div style={{ fontSize: 12, color: '#9ca3af' }}>—</div>;
+  return (
+    <pre style={{
+      fontSize: 11, background: '#f7f7f7', padding: 8, margin: 0, borderRadius: 4,
+      overflow: 'auto', maxHeight: 260, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', color: '#1f2937',
+    }}>
+      {JSON.stringify(v, null, 2)}
+    </pre>
+  );
+}
+
+/** Process inspector: config / input schema / output schema as distinct sections. */
+function ProcessSchemaSections(props: { details: Record<string, unknown> }) {
+  const d = props.details;
+  return (
+    <>
+      {typeof d.address === 'string' && d.address && (
+        <InspectorSection title="Address">
+          <code style={{ fontSize: 11, color: '#374151', wordBreak: 'break-all' }}>
+            {d.address as string}
+          </code>
+        </InspectorSection>
+      )}
+      <InspectorSection title="Config schema">
+        <SchemaBlock value={d.config} />
+      </InspectorSection>
+      <InspectorSection title="Input schema">
+        <SchemaBlock value={d.inputSchema} />
+      </InspectorSection>
+      <InspectorSection title="Output schema">
+        <SchemaBlock value={d.outputSchema} />
+      </InspectorSection>
+      {(d.inputPortsSchema != null || d.outputPortsSchema != null) && (
+        <InspectorSection title="Wiring">
+          <SchemaBlock value={{ inputs: d.inputPortsSchema, outputs: d.outputPortsSchema }} />
+        </InspectorSection>
+      )}
+    </>
   );
 }
 

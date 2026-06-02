@@ -153,6 +153,11 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
           inputPorts,
           outputPorts,
           description: node.doc ?? node._doc ?? node.description ?? undefined,
+          // Port TYPE schemas (from the process spec's _inputs/_outputs), shown
+          // as separate sections in the inspector. Distinct from the wiring
+          // (inputPortsSchema/outputPortsSchema = where each port connects).
+          inputSchema: node._inputs ?? undefined,
+          outputSchema: node._outputs ?? undefined,
           // Extra schema data consumed by ProcessNode (as any cast in the component)
           ...(Object.keys(inputPortsSchema).length ? { inputPortsSchema } : {}),
           ...(Object.keys(outputPortsSchema).length ? { outputPortsSchema } : {}),
