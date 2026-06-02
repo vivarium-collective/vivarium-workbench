@@ -17,20 +17,6 @@ export interface SidebarProps {
   onEmitToggle: (path: string[], emit: boolean) => void;
 }
 
-// --- emit helpers (ported from InspectorPanel) ---------------------------
-
-function isExplicitEmit(path: string[], explicit: Set<string>): boolean {
-  return explicit.has(path.join('/'));
-}
-
-function findInheritedFrom(path: string[], explicit: Set<string>): string | null {
-  for (let i = 0; i < path.length - 1; i++) {
-    const prefix = path.slice(0, i + 1).join('/');
-    if (explicit.has(prefix)) return prefix;
-  }
-  return null;
-}
-
 // --- store-node tree (for the hierarchical Nodes tab) --------------------
 //
 // Ported from bigraph-viz2's `buildNodeTree` / `renderNodes`. The loom's store
@@ -246,11 +232,7 @@ export function Sidebar(props: SidebarProps) {
       {/* body */}
       <div style={{ flex: 1, overflow: 'auto', padding: 10 }}>
         {tab === 'inspector' && (
-          <InspectorTab
-            selection={props.selection}
-            emitSet={props.emitSet}
-            onEmitToggle={props.onEmitToggle}
-          />
+          <InspectorTab selection={props.selection} />
         )}
         {tab === 'processes' && (
           <ToggleListTab
@@ -284,17 +266,12 @@ const railBtnStyle: React.CSSProperties = {
 
 function InspectorTab(props: {
   selection: Selection;
-  emitSet: Set<string>;
-  onEmitToggle: (path: string[], emit: boolean) => void;
 }) {
   const sel = props.selection;
   if (!sel) {
     return <p style={{ color: '#888', fontSize: 12 }}>Click a node to inspect.</p>;
   }
 
-  const isStore = sel.kind === 'store';
-  const explicit = isStore && isExplicitEmit(sel.path, props.emitSet);
-  const inheritedFrom = isStore ? findInheritedFrom(sel.path, props.emitSet) : null;
   const description = (sel.details as { description?: unknown })?.description;
   const hasDescription = typeof description === 'string' && description.trim().length > 0;
 
@@ -304,34 +281,6 @@ function InspectorTab(props: {
       <p style={{ fontFamily: 'monospace', fontSize: 12, margin: '4px 0' }}>
         {sel.path.length ? sel.path.join('.') : '<root>'}
       </p>
-
-      {isStore && (
-        <div style={{
-          margin: '8px 0', padding: '8px 10px',
-          background: explicit ? '#dcfce7' : inheritedFrom ? '#f3f4f6' : '#fafafa',
-          border: '1px solid ' + (explicit ? '#86efac' : '#e5e7eb'),
-          borderRadius: 4, fontSize: 12,
-        }}>
-          {inheritedFrom ? (
-            <span>
-              <strong>Emit:</strong> inherited from{' '}
-              <code style={{ background: '#fff', padding: '1px 4px', borderRadius: 2 }}>
-                {inheritedFrom.split('/').join('.')}
-              </code>
-            </span>
-          ) : (
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={explicit}
-                onChange={(ev) => props.onEmitToggle(sel.path, ev.target.checked)}
-              />
-              <strong>Emit this store</strong>
-              <span style={{ color: '#6b7280' }}>(includes descendants)</span>
-            </label>
-          )}
-        </div>
-      )}
 
       {hasDescription && (
         <InspectorSection title="Description">
