@@ -49,7 +49,7 @@ def _copy_assets(target_dir: Path) -> None:
     installed ``vivarium_dashboard`` package — not under the workspace's
     ``scripts/`` tree. We copy the flat top-level files in
     ``vivarium_dashboard/static/`` (everything except the nested
-    ``loom-explore/`` viewer, which the server streams directly).
+    ``bigraph-loom/`` viewer, which the server streams directly).
     """
     import vivarium_dashboard as _pkg
     static_dir = Path(_pkg.__file__).parent / "static"
@@ -57,7 +57,7 @@ def _copy_assets(target_dir: Path) -> None:
     if static_dir.is_dir():
         for path in static_dir.iterdir():
             if path.is_dir() or path.name.startswith("."):
-                continue  # skip nested dirs (e.g. loom-explore/) and dotfiles
+                continue  # skip nested dirs (e.g. bigraph-loom/) and dotfiles
             shutil.copy2(path, target_dir / path.name)
 
 

@@ -4649,15 +4649,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_ui_config()
         if self.path.startswith("/api/git-status"):
             return self._get_git_status()
-        # Serve the bigraph-loom viewer. The URL prefix stays /loom-explore for
-        # backward-compat, but the bundle now comes from the standalone
-        # `bigraph-loom` package (a dependency) rather than a vendored copy.
-        if self.path.startswith("/loom-explore"):
+        # Serve the bigraph-loom viewer at /bigraph-loom. The bundle comes from
+        # the standalone `bigraph-loom` package (a dependency), via
+        # bigraph_loom.asset_dir(), rather than a vendored copy.
+        if self.path.startswith("/bigraph-loom"):
             # Strip query string before resolving to the file on disk; popup
             # URLs include ?id=<ref> which would otherwise prevent the
             # static handler from finding index.html.
             loom_path = self.path.split("?", 1)[0]
-            rel = loom_path[len("/loom-explore"):].lstrip("/") or "index.html"
+            rel = loom_path[len("/bigraph-loom"):].lstrip("/") or "index.html"
             if ".." in rel.split("/"):
                 self.send_response(403); self.end_headers(); return
             from bigraph_loom import asset_dir
@@ -7841,7 +7841,7 @@ if __name__ == "__main__":
     def _get_investigation_composite_doc(self):
         """GET /api/investigation-composite-doc?investigation=<n>&composite=<c>
         Returns: {state: <parsed composite YAML>}
-        Used by the Composites tab's loom-explore iframe to fetch the
+        Used by the Composites tab's bigraph-loom iframe to fetch the
         composite document as JSON (the iframe can't parse YAML in-browser
         without bundling a parser).
         """
@@ -8468,7 +8468,7 @@ if __name__ == "__main__":
             ws = {}
         ui = ws.get("ui") or {}
         return self._json({
-            "composite_view": ui.get("composite_view", "loom-explore"),
+            "composite_view": ui.get("composite_view", "bigraph-loom"),
         }, 200)
 
     def _get_visualization_classes(self):
