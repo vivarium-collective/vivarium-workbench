@@ -27,6 +27,19 @@ type RFEdge = {
 const WIRE_ARROW = { type: MarkerType.ArrowClosed, width: 14, height: 14, color: '#475569' };
 
 /**
+ * Compact display string for a store leaf value. CRITICAL for big composites:
+ * a whole-cell `bulk` store is a multi-MB array of thousands of molecules —
+ * `String(value)` on that stringifies megabytes into a node label and makes
+ * rendering crawl. Summarize arrays as `Array(N)` and truncate long scalars.
+ */
+function displayValue(value: any): string | null {
+  if (value == null) return null;
+  if (Array.isArray(value)) return `Array(${value.length})`;
+  const s = String(value);
+  return s.length > 80 ? s.slice(0, 77) + '…' : s;
+}
+
+/**
  * Top-level store keys of a composite state — every key whose node is not a
  * process/step. Mirrors the dashboard's `all_store_paths`; used to seed the
  * View tab's emit selection so all states emit by default.
@@ -60,8 +73,8 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
         data: {
           label: path[path.length - 1] ?? '<root>',
           nodeType: 'store',
-          value: node == null ? null : String(node),
-          valueType: typeof node,
+          value: displayValue(node),
+          valueType: Array.isArray(node) ? 'array' : typeof node,
           path,
         } satisfies StoreNodeData,
         position: { x: 0, y: 0 },
@@ -152,7 +165,7 @@ export function stateToReactFlow(state: any): { nodes: RFNode[]; edges: RFEdge[]
         data: {
           label: path[path.length - 1] ?? '<root>',
           nodeType: 'store',
-          value: node._default != null ? String(node._default) : undefined,
+          value: node._default != null ? (displayValue(node._default) ?? undefined) : undefined,
           valueType: String(node._type),
           path,
         } satisfies StoreNodeData,

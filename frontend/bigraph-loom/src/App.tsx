@@ -15,6 +15,7 @@ import {
   applySavedPositions, positionsFromNodes, debounce,
 } from './layoutStore';
 import { stateToReactFlow, topLevelStorePaths } from './convert';
+import { isHiddenByAncestor } from './panels/filterHidden';
 import { Sidebar } from './panels/Sidebar';
 import { RunPanel } from './panels/RunPanel';
 import { ResultsPanel } from './panels/ResultsPanel';
@@ -135,6 +136,14 @@ export default function App() {
     );
   }
 
+  // Walk the composite state ONCE per state change. On the whole-cell baseline
+  // the state is ~6 MB / 345 nodes, so this graph walk is expensive; the layout
+  // effect, the reset handler, and the sidebar lists all derive from this.
+  const raw = useMemo(
+    () => (state ? stateToReactFlow(state) : { nodes: [] as any[], edges: [] as any[] }),
+    [state],
+  );
+
   // (Re)generate nodes + edges whenever the composite state OR the set of
   // collapsed groups changes. Saved positions take precedence over the
   // ELK-computed positions — drags survive page reloads and collapse/expand.
@@ -145,18 +154,19 @@ export default function App() {
       return;
     }
     let cancelled = false;
-    const raw = stateToReactFlow(state);
 
+    // Collapsed groups hide their descendants (path-prefix check). Hidden nodes
+    // cascade the same way — hiding a parent store drops its entire subtree.
     const isHidden = (n: any) => {
       const path: string[] = n.data?.path ?? [];
       for (let i = 1; i < path.length; i++) {
         if (collapsed.has(path.slice(0, i).join('.'))) return true;
       }
-      return false;
+      return isHiddenByAncestor(path, hidden);
     };
 
     const visibleNodes = raw.nodes
-      .filter((n) => !isHidden(n) && !hidden.has(n.id))
+      .filter((n) => !isHidden(n))
       .map((n) => {
         if (collapsed.has(n.id)) {
           return { ...n, data: { ...n.data, isCollapsed: true } as any };
@@ -178,7 +188,7 @@ export default function App() {
     })();
 
     return () => { cancelled = true; };
-  }, [state, collapsed, hidden, compositeId, setNodes, setEdges]);
+  }, [state, raw, collapsed, hidden, compositeId, setNodes, setEdges]);
 
   // Persist node positions on every change. The layout effect itself sets
   // node positions; we save those too so the layout is "pinned" the first
@@ -198,16 +208,15 @@ export default function App() {
     // `compositeId` changes, and we keep `compositeId` stable. So instead,
     // we directly invoke the layout pipeline here.
     (async () => {
-      const raw = stateToReactFlow(state);
       const isHidden = (n: any) => {
         const path: string[] = n.data?.path ?? [];
         for (let i = 1; i < path.length; i++) {
           if (collapsed.has(path.slice(0, i).join('.'))) return true;
         }
-        return false;
+        return isHiddenByAncestor(path, hidden);
       };
       const visibleNodes = raw.nodes
-        .filter((n) => !isHidden(n) && !hidden.has(n.id))
+        .filter((n) => !isHidden(n))
         .map((n) =>
           collapsed.has(n.id) ? { ...n, data: { ...n.data, isCollapsed: true } as any } : n,
         );
@@ -219,7 +228,7 @@ export default function App() {
       setNodes(laid as any);
       setEdges(visibleEdges as any);
     })();
-  }, [compositeId, state, collapsed, hidden, setNodes, setEdges]);
+  }, [compositeId, state, raw, collapsed, hidden, setNodes, setEdges]);
 
   const handleNodeClick = useCallback((_: any, node: any) => {
     const payload = {
@@ -252,8 +261,8 @@ export default function App() {
 
   // All nodes (pre-visibility-filter) for the sidebar Processes/Nodes lists, so
   // hidden nodes can still be listed and re-shown. The graph itself renders the
-  // filtered `nodes` array.
-  const allNodes = useMemo(() => (state ? stateToReactFlow(state).nodes : []), [state]);
+  // filtered `nodes` array. Derived from the single `raw` walk above.
+  const allNodes = raw.nodes;
 
   const toggleHidden = useCallback((id: string) => {
     setHidden((prev) => {
