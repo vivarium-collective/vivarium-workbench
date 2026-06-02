@@ -348,14 +348,6 @@ body.focus-mode .page.active{ display:block !important; min-height:0 !important 
 .ce-param-input{ flex:1 1 auto; max-width:320px }
 .ce-param-desc{ margin-left:190px }
 
-/* Add a slim header in focus mode so the user knows what they're looking at */
-body.focus-mode::before{
-  content: "Focus mode — close this tab when done";
-  display:block; background:#fef3c7; color:#92400e;
-  padding:6px 16px; font-size:0.82em; font-weight:500;
-  border-bottom:1px solid #fcd34d;
-}
-
 /* ── Registry kind pickers: Emitters + Visualizations (v0.4.12) ──────── */
 .picker-row{
   display:flex; gap:12px; align-items:flex-start; justify-content:space-between;
