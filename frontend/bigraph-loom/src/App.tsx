@@ -32,6 +32,25 @@ import type { ExploreInspectMsg, ParameterDecl } from './api';
 const NODE_TYPES = { process: ProcessNode, store: StoreNode };
 const EDGE_TYPES = { floating: FloatingStoreEdge };
 
+/** Bounding rect of laid-out nodes, using known node sizes (process 140×60,
+ *  store 80×80) so we can frame the graph without waiting for DOM measurement. */
+function boundsOf(nodes: any[]): { x: number; y: number; width: number; height: number } | null {
+  if (!nodes.length) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of nodes) {
+    const x = n.position?.x ?? 0;
+    const y = n.position?.y ?? 0;
+    const w = n.type === 'process' ? 140 : 80;
+    const h = n.type === 'process' ? 60 : 80;
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x + w > maxX) maxX = x + w;
+    if (y + h > maxY) maxY = y + h;
+  }
+  if (!isFinite(minX)) return null;
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
 type TabId = 'view' | 'configure' | 'run' | 'results' | 'visualizations' | 'document';
 
 type TrajectoryRow = { step: number; time?: number; state: Record<string, unknown> };
@@ -231,9 +250,20 @@ export default function App() {
       const laid = await applyLayout(visibleNodes as any, visibleEdges as any);
       setNodes(laid as any);
       setEdges(visibleEdges as any);
-      // Frame the freshly-consolidated set. Defer past the render so React Flow
-      // has measured the new node positions before fitting.
-      setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 400 }), 80);
+      // Frame the freshly-consolidated set. Compute the bounds from the layout
+      // positions ourselves and use fitBounds — this does NOT depend on React
+      // Flow having measured the new DOM nodes yet (fitView() before measurement
+      // pans to stale/empty coords, which is why the graph went "out of view").
+      const b = boundsOf(laid as any);
+      setTimeout(() => {
+        const inst = rfRef.current;
+        if (!inst) return;
+        if (b && typeof inst.fitBounds === 'function') {
+          inst.fitBounds(b, { padding: 0.12, duration: 400 });
+        } else {
+          inst.fitView?.({ padding: 0.2, duration: 400 });
+        }
+      }, 60);
     })();
   }, [compositeId, state, raw, collapsed, hidden, setNodes, setEdges]);
 
