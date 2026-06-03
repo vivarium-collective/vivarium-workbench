@@ -1901,3 +1901,28 @@ body.focus-mode::before{
   color: #991b1b;
   border: 1px solid rgba(220, 38, 38, 0.3);
 }
+
+/* ── Embedded-visualization accordions (Visualizations tab) ───────────
+   Each visualization card is a <details><summary> so users can collapse
+   it. The caret span inside summary rotates on open/close. */
+.embed-viz-card > summary::-webkit-details-marker { display: none; }
+.embed-viz-card > summary::marker { content: ''; }
+.embed-viz-card[open] > summary .embed-viz-caret {
+  transform: rotate(90deg);
+}
+.embed-viz-card > summary:hover {
+  background: #f1f5f9 !important;
+}
+[data-theme="dark"] .embed-viz-card {
+  background: var(--panel) !important;
+  border-color: var(--border) !important;
+}
+[data-theme="dark"] .embed-viz-card > summary {
+  background: #1e293b !important;
+}
+[data-theme="dark"] .embed-viz-card > summary:hover {
+  background: #334155 !important;
+}
+[data-theme="dark"] .embed-viz-card > summary .embed-viz-caret {
+  border-left-color: #94a3b8 !important;
+}

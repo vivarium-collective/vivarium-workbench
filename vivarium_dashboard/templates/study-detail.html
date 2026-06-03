@@ -1627,26 +1627,38 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
     #}
     {% if study.embed_visualizations %}
     <div class="embed-viz-section" style="margin-bottom:24px">
-      <h3 class="section-title">Embedded visualizations</h3>
+      <h3 class="section-title">
+        Embedded visualizations
+        <span class="muted" style="font-weight:normal;font-size:0.78em;margin-left:8px">
+          ({{ study.embed_visualizations|length }})
+        </span>
+      </h3>
       <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
-        Self-contained HTML pages produced by the study's runner. Each iframe
-        below is a standalone artefact you can also open in a separate tab.
+        Self-contained HTML pages produced by the study's runner. Each artefact below
+        is collapsed by default — click to expand. Newest at top.
       </p>
       {% for v in study.embed_visualizations %}
-      <div class="embed-viz-card" style="border:1px solid #e2e8f0;border-radius:6px;margin-bottom:14px;background:#fff">
-        <div style="display:flex;align-items:center;gap:12px;padding:8px 12px;border-bottom:1px solid #e5e7eb;background:#f9fafb">
-          <strong style="flex:1">{{ v.name }}</strong>
-          <a href="{{ v.url }}" target="_blank" class="btn-mini">Open in new tab ↗</a>
-        </div>
+      {# Each viz is a <details> accordion.  Closed by default so users don't
+         have to scroll through long lists of iframes; the iframe inside loads
+         lazily (browser defers fetching until the accordion is expanded). #}
+      <details class="embed-viz-card" style="border:1px solid #e2e8f0;border-radius:6px;margin-bottom:8px;background:#fff;overflow:hidden">
+        <summary style="display:flex;align-items:center;gap:12px;padding:8px 12px;background:#f9fafb;cursor:pointer;list-style:none;user-select:none">
+          <span class="embed-viz-caret" aria-hidden="true" style="display:inline-block;width:0;height:0;border-left:5px solid #64748b;border-top:4px solid transparent;border-bottom:4px solid transparent;transition:transform 0.15s ease;flex-shrink:0"></span>
+          <strong style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ v.name }}">{{ v.name }}</strong>
+          {% if v.url %}
+          <code class="muted" style="font-size:0.76em;font-weight:normal" title="{{ v.url }}">{{ v.url.split('/')[-1] if '/' in v.url else v.url }}</code>
+          {% endif %}
+          <a href="{{ v.url }}" target="_blank" class="btn-mini" onclick="event.stopPropagation()" title="Open in a new tab">Open ↗</a>
+        </summary>
         {% if v.description %}
-        <p class="muted" style="margin:6px 12px;font-size:0.88em">{{ v.description }}</p>
+        <p class="muted" style="margin:8px 12px 0;font-size:0.88em">{{ v.description }}</p>
         {% endif %}
         <iframe src="{{ v.url }}"
                 style="width:100%;min-height:200px;border:0;display:block"
                 loading="lazy" title="{{ v.name }}"
                 onload="(function(f){try{var d=f.contentDocument;if(!d)return;var b=d.body,e=d.documentElement;var bStyle=b&&d.defaultView&&d.defaultView.getComputedStyle?d.defaultView.getComputedStyle(b):null;var pinnedH=0;if(bStyle&&(bStyle.overflow||'').indexOf('hidden')>=0){var hm=(bStyle.height||'').match(/^(\d+(?:\.\d+)?)px$/);if(hm)pinnedH=Math.round(parseFloat(hm[1]));}var h=pinnedH>0?pinnedH:Math.max(e?e.scrollHeight:0,b?b.scrollHeight:0);if(h>0)f.style.height=(h+24)+'px';}catch(e){}})(this)"
                 ></iframe>
-      </div>
+      </details>
       {% endfor %}
     </div>
     {% endif %}
