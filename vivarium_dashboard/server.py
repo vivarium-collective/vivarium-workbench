@@ -12321,26 +12321,29 @@ if __name__ == "__main__":
         ``module`` so dashboards can tell static specs from
         ``@composite_generator`` functions. Generator entries also include
         ``default_n_steps`` (int | None) for UI pre-fill.
+
+        ``?refresh=1`` busts the discovery cache (workspace-side subprocess
+        re-runs).  Mtime on ``<ws>/pyproject.toml`` also auto-invalidates.
         """
-        import importlib as _importlib
+        from urllib.parse import urlparse, parse_qs
         _ws_add_to_sys_path()
         try:
             from vivarium_dashboard.lib.composite_lookup import discover_all_composites
         except ImportError as e:
             return self._json({"composites": [], "error": str(e)}, 200)
 
+        qs = parse_qs(urlparse(self.path).query)
+        bypass_cache = (qs.get("refresh") or ["0"])[0] in ("1", "true", "yes")
+
         try:
             ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
             pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-            # Eagerly import the workspace package so any @composite_generator
-            # decorators inside it fire and register into pbg-superpowers'
-            # _REGISTRY before discover_all_composites calls discover_generators().
-            # The workspace is already on sys.path via _ws_add_to_sys_path().
-            try:
-                _importlib.import_module(pkg)
-            except Exception:
-                pass
-            specs = discover_all_composites(WORKSPACE, pkg)
+            # @composite_generator-decorated builders are now discovered
+            # via a workspace-venv subprocess inside discover_all_composites
+            # (the dashboard's venv usually lacks workspace deps like
+            # wholecell).  Results are cached with a 60s TTL + pyproject.toml
+            # mtime invalidation.
+            specs = discover_all_composites(WORKSPACE, pkg, bypass_cache=bypass_cache)
             # Workspace-local prefix for the workspace_local flag below.
             # The composite's `module` is its dotted Python path, e.g.
             # "pbg_v2ecoli.composites.baseline_recipes.dnaa_02". A
