@@ -710,15 +710,24 @@ def _study_detail_spec(name: str):
             auto_embeds = _discover_viz_html_files(name)
         except Exception:
             auto_embeds = []
-        if auto_embeds:
+        # Also resolve any spec.visualizations entries whose address is
+        # ``html:<workspace-relative-path>`` into iframe embeds — these are
+        # the user-curated reports declared in study.yaml.
+        try:
+            address_embeds = _resolve_html_address_embeds(spec)
+        except Exception:
+            address_embeds = []
+        combined = address_embeds + auto_embeds
+        if combined:
             existing_urls = {
                 (e or {}).get("url")
                 for e in (spec.get("embed_visualizations") or [])
             }
             merged_embeds = list(spec.get("embed_visualizations") or [])
-            for e in auto_embeds:
+            for e in combined:
                 if e.get("url") not in existing_urls:
                     merged_embeds.append(e)
+                    existing_urls.add(e.get("url"))
             spec["embed_visualizations"] = merged_embeds
 
         # Param-enforcement gate (expert-feedback D.2): if the study declares
@@ -940,6 +949,62 @@ def _discover_viz_html_files(name: str) -> list[dict]:
                 "stale": False,
             })
 
+    # Source 3: out/colony/*.html — v2ecoli's colony_report.py default output
+    # directory.  After an HPC array run completes and rsync_workspace_back
+    # pulls the cluster's out/ tree down, the colony report lands here.
+    if WORKSPACE is not None:
+        colony_out = WORKSPACE / "out" / "colony"
+        if colony_out.is_dir():
+            for html_file in sorted(colony_out.glob("*.html")):
+                size_kb = max(1, html_file.stat().st_size // 1024)
+                rel = html_file.relative_to(WORKSPACE).as_posix()
+                out.append({
+                    "name": f"{html_file.stem} (colony)",
+                    "url": f"/{rel}",
+                    "description": (
+                        f"Colony report ({size_kb} KB) from out/colony/ — "
+                        "produced by v2ecoli colony_report.py and pulled back "
+                        "from the HPC cluster after a colony array run."
+                    ),
+                    "stale": False,
+                })
+
+    return out
+
+
+def _resolve_html_address_embeds(spec: dict) -> list[dict]:
+    """Convert ``visualizations[*].address: html:<relpath>`` entries to embeds.
+
+    Each viz entry whose ``address`` begins with ``html:`` is surfaced in the
+    Visualizations tab as an iframe embed.  The path is workspace-relative;
+    the dashboard's generic static-file fallback serves it.  Missing files
+    are returned with a ``_missing`` flag so the UI can render a placeholder
+    instead of a broken iframe.
+    """
+    out: list[dict] = []
+    if WORKSPACE is None:
+        return out
+    for v in (spec.get("visualizations") or []):
+        if not isinstance(v, dict):
+            continue
+        addr = (v.get("address") or "").strip()
+        if not addr.startswith("html:"):
+            continue
+        rel = addr[len("html:"):].strip().lstrip("/")
+        if not rel or ".." in rel.split("/"):
+            continue
+        full = WORKSPACE / rel
+        exists = full.is_file()
+        desc = v.get("description") or f"HTML report at {rel}"
+        if not exists:
+            desc = f"⚠ Not yet generated — expected at {rel}. " + desc
+        out.append({
+            "name": v.get("name") or rel,
+            "url": f"/{rel}",
+            "description": desc,
+            "stale": False,
+            "_missing": not exists,
+        })
     return out
 
 
@@ -8623,6 +8688,10 @@ if __name__ == "__main__":
                     "base_model": base_model,
                     "overrides": overrides,
                     "steps": steps,
+                    # Carry the entry name so report_generator resolution can
+                    # look up per-entry overrides at dispatch time.
+                    "entry_name": entry_name,
+                    "_entry": entry,
                 })
         elif is_multi:
             observables = spec.get("observables") or []
@@ -8679,22 +8748,7 @@ if __name__ == "__main__":
         if not tasks:
             return self._json({"error": "no tasks resolved from investigation spec"}, 400)
 
-        param_values: list[dict] = []
-        for t in tasks:
-            payload: dict = {
-                "run_id": t["run_id"],
-                "steps": t["steps"],
-                "pkg": pkg,
-            }
-            if "base_model" in t:
-                # v3 path: runner imports base_model + builds composite
-                payload["base_model"] = t["base_model"]
-                payload["overrides"] = t.get("overrides") or {}
-            else:
-                # v2 path: pre-resolved state dict
-                payload["state_json"] = t["state_json"]
-            encoded = _b64.b64encode(json.dumps(payload).encode()).decode()
-            param_values.append({"params_b64": encoded})
+        generate_report = bool(body.get("generate_report"))
 
         settings = get_hpc_settings(str(WORKSPACE))
         ws_name = WORKSPACE.name
@@ -8702,33 +8756,102 @@ if __name__ == "__main__":
         image_base = settings.hpc_image_base_path or remote_ws
         sif_path = f"{image_base}/{ws_name}.sif"
 
-        # Ship the standalone runner to the workspace so the container can
-        # exec it directly. The runner is mostly stdlib + process_bigraph,
-        # which lives in /app/.venv/ inside the v2ecoli SIF — vivarium_dashboard
-        # itself isn't installed in the image.
-        from vivarium_dashboard.lib.hpc_dispatch import _scp_file as _hpc_scp
-        import vivarium_dashboard.lib.run_investigation_task as _runner_mod
-        runner_local = Path(_runner_mod.__file__)
-        runner_remote = f"{remote_ws}/.pbg/runners/run_investigation_task.py"
-        try:
-            from vivarium_dashboard.lib.hpc_dispatch import _ssh as _hpc_ssh
-            _hpc_ssh(settings, f"mkdir -p {remote_ws}/.pbg/runners", timeout=30)
-            _hpc_scp(settings, runner_local, runner_remote, timeout=30)
-        except Exception as exc:
-            return self._json({"error": f"failed to stage runner script: {exc}"[:500]}, 500)
+        if generate_report:
+            # Spec-driven dispatch: each task's report_generator is resolved
+            # per-entry (with top-level study.report_generator as fallback).
+            # The dashboard never knows what the report script does — it just
+            # renders the declared args and invokes the script via apptainer.
+            from vivarium_dashboard.lib.report_generator import (
+                resolve_for_entry, build_dispatch, ReportGeneratorError,
+            )
+            generators: list[dict] = []
+            missing: list[str] = []
+            for t in tasks:
+                entry = t.get("_entry") or {}
+                gen = resolve_for_entry(spec, entry)
+                if gen is None:
+                    missing.append(t.get("entry_name") or t["run_id"])
+                else:
+                    generators.append(gen)
+            if missing and generators:
+                return self._json({
+                    "error": (
+                        "generate_report=True but the following tasks have no "
+                        "report_generator declared (neither per-entry nor "
+                        f"top-level): {missing!r}"
+                    )
+                }, 400)
+            if not generators:
+                return self._json({
+                    "error": (
+                        "generate_report=True but no report_generator is "
+                        "declared on this study (top-level or any "
+                        "simulation_set entry)"
+                    )
+                }, 400)
+            try:
+                param_values, cmd_tmpl = build_dispatch(
+                    tasks, generators,
+                    remote_ws=remote_ws, sif_path=sif_path,
+                )
+            except ReportGeneratorError as exc:
+                return self._json({"error": str(exc)[:500]}, 400)
+        else:
+            # Standard path: encode {base_model | state_json} for the runner.
+            # core_bootstrap (study-level) is threaded through the payload so
+            # the runner can register workspace-specific types without the
+            # dashboard importing them.
+            core_bootstrap = spec.get("core_bootstrap")
+            if core_bootstrap is not None and not isinstance(core_bootstrap, str):
+                return self._json({
+                    "error": (
+                        "study.core_bootstrap must be a string (dotted path "
+                        f"like 'mypkg.hpc:bootstrap_core'); got {type(core_bootstrap).__name__}"
+                    )
+                }, 400)
+            param_values = []
+            for t in tasks:
+                payload: dict = {
+                    "run_id": t["run_id"],
+                    "steps": t["steps"],
+                    "pkg": pkg,
+                }
+                if core_bootstrap:
+                    payload["core_bootstrap"] = core_bootstrap
+                if "base_model" in t:
+                    # v3: runner imports base_model + builds composite
+                    payload["base_model"] = t["base_model"]
+                    payload["overrides"] = t.get("overrides") or {}
+                else:
+                    # v2: pre-resolved state dict
+                    payload["state_json"] = t["state_json"]
+                encoded = _b64.b64encode(json.dumps(payload).encode()).decode()
+                param_values.append({"params_b64": encoded})
 
-        # Wrap the runner invocation in apptainer exec with the same bind
-        # mounts and venv-on-PATH pattern that submit_run_job uses, so
-        # process_bigraph + EcoliWCM resolve correctly.
-        cmd_tmpl = (
-            f"apptainer exec "
-            f"-B {remote_ws}/results:/app/results "
-            f"-B {remote_ws}/out:/app/out "
-            f"-B {remote_ws}:/workspace "
-            f"{sif_path} "
-            "bash -c 'export PATH=/app/.venv/bin:$PATH; "
-            "exec /app/.venv/bin/python3 /workspace/.pbg/runners/run_investigation_task.py {params_b64}'"
-        )
+            # Ship the standalone runner to the workspace so the container
+            # can exec it directly.  Mostly stdlib + process_bigraph (the
+            # latter lives in the workspace's SIF under /app/.venv/ —
+            # vivarium_dashboard itself isn't installed in the image).
+            from vivarium_dashboard.lib.hpc_dispatch import _scp_file as _hpc_scp
+            import vivarium_dashboard.lib.run_investigation_task as _runner_mod
+            runner_local = Path(_runner_mod.__file__)
+            runner_remote = f"{remote_ws}/.pbg/runners/run_investigation_task.py"
+            try:
+                from vivarium_dashboard.lib.hpc_dispatch import _ssh as _hpc_ssh
+                _hpc_ssh(settings, f"mkdir -p {remote_ws}/.pbg/runners", timeout=30)
+                _hpc_scp(settings, runner_local, runner_remote, timeout=30)
+            except Exception as exc:
+                return self._json({"error": f"failed to stage runner script: {exc}"[:500]}, 500)
+
+            cmd_tmpl = (
+                f"apptainer exec "
+                f"-B {remote_ws}/results:/app/results "
+                f"-B {remote_ws}/out:/app/out "
+                f"-B {remote_ws}:/workspace "
+                f"{sif_path} "
+                "bash -c 'export PATH=/app/.venv/bin:$PATH; "
+                "exec /app/.venv/bin/python3 /workspace/.pbg/runners/run_investigation_task.py {params_b64}'"
+            )
 
         resources = {
             "cpus": body.get("cpus", 1),

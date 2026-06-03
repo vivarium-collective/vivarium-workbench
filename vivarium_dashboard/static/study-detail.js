@@ -756,7 +756,19 @@
   // 4-task subset of a 6-entry simulation_set.
   api('GET', '/api/study/' + encodeURIComponent(STUDY_NAME)).then(function(r) {
     if (r.status !== 200 || !r.body || !r.body.spec) return;
-    var simSet = r.body.spec.simulation_set || [];
+    var spec = r.body.spec;
+    var simSet = spec.simulation_set || [];
+
+    // Surface the "generate report" checkbox only when the study declares
+    // a report_generator (top-level or on any simulation_set entry).
+    // The dashboard never knows what the report script does — just whether
+    // the workspace has wired one in.
+    var hasReportGen = !!spec.report_generator || simSet.some(function(e) {
+      return e && e.report_generator;
+    });
+    var reportWrap = document.getElementById('hpc-generate-report-wrap');
+    if (reportWrap) reportWrap.style.display = hasReportGen ? '' : 'none';
+
     if (!simSet.length) return;
     var picker = document.getElementById('hpc-subset-picker');
     var list = document.getElementById('hpc-subset-list');
@@ -1032,6 +1044,8 @@
       if (n > 0) body.steps_override = n;
     }
     if (gatedEl && gatedEl.checked) body.include_gated = true;
+    var reportEl = document.getElementById('hpc-generate-report');
+    if (reportEl && reportEl.checked) body.generate_report = true;
     var checked = Array.prototype.map.call(
       document.querySelectorAll('.hpc-subset-cb:checked'),
       function(cb) { return cb.value; }

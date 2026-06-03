@@ -428,6 +428,187 @@ class TestV3SimulationSetParsing:
         # Falls back to status==ready (1 entry, build-smoke-n2)
         assert len(captured["param_values"]) == 1
 
+    # ------------------------------------------------------------------
+    # Spec-driven report_generator dispatch (todo #22)
+    # ------------------------------------------------------------------
+
+    def _spec_with_top_level_generator(self) -> dict:
+        """v3 spec with a top-level report_generator block applied to all
+        simulation_set entries.  Mirrors the shape `/pbg-expert ./` is
+        expected to emit for a colony-like reporter."""
+        spec = self._make_v3_spec()
+        spec["report_generator"] = {
+            "script": "reports/colony_report.py",
+            "args": {
+                "duration": "{steps_clamped:5}",
+                "seed": "{overrides[seed]}",
+                "n-adder": "{overrides[n_cells]}",
+                "out": "/app/out/colony/{run_id}.html",
+            },
+            "output_dir": "out/colony",
+        }
+        return spec
+
+    def test_generate_report_dispatches_via_spec(self, monkeypatch):
+        """generate_report=True + top-level report_generator → CLI dispatch (no b64 payload)."""
+        spec = self._spec_with_top_level_generator()
+        response, captured = self._run_hpc_branch(
+            spec,
+            {"name": "colonies-01", "include_gated": True, "generate_report": True},
+            monkeypatch,
+        )
+        assert "param_values" in captured, f"submit not called; response={response}"
+        for pv in captured["param_values"]:
+            assert "params_b64" not in pv
+            # Slot names are sanitized: "n-adder" → "n_adder"
+            assert {"run_id", "duration", "seed", "n_adder", "out"} <= set(pv.keys())
+            assert all(isinstance(pv[k], str) for k in ("duration", "seed", "n_adder", "out"))
+
+    def test_generate_report_renders_overrides_into_args(self, monkeypatch):
+        """{overrides[n_cells]} substitutes per-task from the entry's perturbation."""
+        spec = self._spec_with_top_level_generator()
+        response, captured = self._run_hpc_branch(
+            spec,
+            {
+                "name": "colonies-01",
+                "include_names": ["nsweep-n4"],
+                "generate_report": True,
+            },
+            monkeypatch,
+        )
+        assert "param_values" in captured, f"submit not called; response={response}"
+        assert len(captured["param_values"]) == 1
+        assert captured["param_values"][0]["n_adder"] == "4"
+
+    def test_generate_report_steps_clamped_caps_duration(self, monkeypatch):
+        """{steps_clamped:5} caps steps_override=999 → 5."""
+        spec = self._spec_with_top_level_generator()
+        response, captured = self._run_hpc_branch(
+            spec,
+            {
+                "name": "colonies-01",
+                "include_names": ["build-smoke-n2"],
+                "generate_report": True,
+                "steps_override": 999,
+            },
+            monkeypatch,
+        )
+        assert "param_values" in captured, f"submit not called; response={response}"
+        assert captured["param_values"][0]["duration"] == "5"
+
+    def test_generate_report_without_declaration_returns_400(self, monkeypatch):
+        """generate_report=True on a study with no report_generator → 400."""
+        spec = self._make_v3_spec()  # no report_generator block
+        response, captured = self._run_hpc_branch(
+            spec,
+            {"name": "colonies-01", "generate_report": True},
+            monkeypatch,
+        )
+        # response is (status_code, body_dict)
+        status, body = response
+        assert status == 400
+        assert "report_generator" in body.get("error", "")
+        # And submit was never called.
+        assert "param_values" not in captured
+
+    def test_generate_report_per_entry_override_wins(self, monkeypatch):
+        """A simulation_set entry's report_generator overrides the top-level one."""
+        spec = self._spec_with_top_level_generator()
+        spec["simulation_set"][0]["report_generator"] = {
+            "script": "reports/colony_report.py",
+            "args": {
+                "duration": "11",   # static override
+                "seed": "{overrides[seed]}",
+                "n-adder": "{overrides[n_cells]}",
+                "out": "/app/out/colony/override_{run_id}.html",
+            },
+            "output_dir": "out/colony",
+        }
+        response, captured = self._run_hpc_branch(
+            spec,
+            {"name": "colonies-01", "generate_report": True},
+            monkeypatch,
+        )
+        assert "param_values" in captured, f"submit not called; response={response}"
+        # Single entry dispatched (build-smoke-n2, ready); its duration came
+        # from the per-entry override, not the top-level steps_clamped.
+        assert captured["param_values"][0]["duration"] == "11"
+
+    def test_generate_report_partial_declaration_returns_400(self, monkeypatch):
+        """If some tasks have a generator and others don't, dispatch fails 400."""
+        spec = self._make_v3_spec()  # no top-level
+        # Declare only on the first entry; the others (when include_gated)
+        # will have no resolved generator.
+        spec["simulation_set"][0]["report_generator"] = {
+            "script": "reports/colony_report.py",
+            "args": {"out": "/app/out/colony/{run_id}.html"},
+        }
+        response, captured = self._run_hpc_branch(
+            spec,
+            {"name": "colonies-01", "include_gated": True, "generate_report": True},
+            monkeypatch,
+        )
+        status, body = response
+        assert status == 400
+        assert "no report_generator declared" in body.get("error", "")
+        assert "param_values" not in captured
+
+    def test_generate_report_false_uses_standard_runner_path(self, monkeypatch):
+        """Even when report_generator is declared, generate_report=False/absent
+        uses the b64-payload runner path."""
+        spec = self._spec_with_top_level_generator()
+        response, captured = self._run_hpc_branch(
+            spec,
+            {"name": "colonies-01"},  # no generate_report
+            monkeypatch,
+        )
+        assert "param_values" in captured, f"submit not called; response={response}"
+        # Standard runner path → each pv is {"params_b64": "..."}
+        for pv in captured["param_values"]:
+            assert "params_b64" in pv
+
+    # ------------------------------------------------------------------
+    # core_bootstrap threading (todo #22 G2)
+    # ------------------------------------------------------------------
+
+    def test_core_bootstrap_threads_through_runner_payload(self, monkeypatch):
+        """study.core_bootstrap is encoded into the runner payload verbatim."""
+        import base64 as _b64
+        spec = self._make_v3_spec()
+        spec["core_bootstrap"] = "my_workspace.hpc:bootstrap_core"
+        response, captured = self._run_hpc_branch(
+            spec, {"name": "colonies-01"}, monkeypatch,
+        )
+        assert "param_values" in captured, f"submit not called; response={response}"
+        payload = json.loads(
+            _b64.b64decode(captured["param_values"][0]["params_b64"]).decode()
+        )
+        assert payload.get("core_bootstrap") == "my_workspace.hpc:bootstrap_core"
+
+    def test_core_bootstrap_absent_when_not_declared(self, monkeypatch):
+        """No core_bootstrap declared → field omitted from payload (runner uses fallback)."""
+        import base64 as _b64
+        spec = self._make_v3_spec()
+        response, captured = self._run_hpc_branch(
+            spec, {"name": "colonies-01"}, monkeypatch,
+        )
+        assert "param_values" in captured, f"submit not called; response={response}"
+        payload = json.loads(
+            _b64.b64decode(captured["param_values"][0]["params_b64"]).decode()
+        )
+        assert "core_bootstrap" not in payload
+
+    def test_core_bootstrap_non_string_returns_400(self, monkeypatch):
+        """study.core_bootstrap must be a string."""
+        spec = self._make_v3_spec()
+        spec["core_bootstrap"] = ["not", "a", "string"]
+        response, captured = self._run_hpc_branch(
+            spec, {"name": "colonies-01"}, monkeypatch,
+        )
+        status, body = response
+        assert status == 400
+        assert "core_bootstrap" in body.get("error", "")
+
 
 # ---------------------------------------------------------------------------
 # Test: v3 runner branch (base_model importlib path)

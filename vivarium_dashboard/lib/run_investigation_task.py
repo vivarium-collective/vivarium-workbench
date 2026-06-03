@@ -67,11 +67,14 @@ def main() -> None:
     steps = int(params.get("steps", 1))
     pkg = params.get("pkg", "")
     base_model = params.get("base_model")
+    core_bootstrap = params.get("core_bootstrap")
 
     try:
         import importlib
         from process_bigraph import Composite
         from process_bigraph.emitter import SQLiteEmitter
+
+        core = _build_core(core_bootstrap, pkg)
 
         if base_model:
             # v3 path: import + call the builder, inject emitter, run.
@@ -87,51 +90,16 @@ def main() -> None:
                 )
             state = doc["state"]
             _inject_sqlite_emitter(state, run_id=run_id)
-            # The builder bootstrapped a core internally but didn't return it.
-            # Reconstruct one with the same registrations so the Composite can
-            # resolve types like `pymunk_agent`.  We try the v2ecoli + viva_munk
-            # combo (the only known case today) and fall back to the workspace
-            # package's `core.build_core()` for non-pymunk composites.
-            core = None
-            try:
-                from viva_munk import core_import as _vm_core_import
-                from v2ecoli.bridge import EcoliWCM
-                from v2ecoli.types import ECOLI_TYPES
-                core = _vm_core_import()
-                core.register_types(ECOLI_TYPES)
-                core.register_link("EcoliWCM", EcoliWCM)
-            except ImportError:
-                if pkg:
-                    try:
-                        core_mod = importlib.import_module(f"{pkg}.core")
-                        build_core = getattr(core_mod, "build_core", None)
-                        if build_core:
-                            core = build_core()
-                    except Exception:
-                        core = None
-            if core is not None:
-                core.register_link("SQLiteEmitter", SQLiteEmitter)
-                composite = Composite({"state": state}, core=core)
-            else:
-                composite = Composite({"state": state})
-            composite.run(steps)
-            print("@@@OK@@@")
-            return
-
-        # v2 path (legacy): pre-resolved state_json.
-        state_json = params.get("state_json", "{}")
-        state = json.loads(state_json)
-
-        if pkg:
-            mod = importlib.import_module(f"{pkg}.core")
-            build_core = getattr(mod, "build_core")
-            core = build_core()
         else:
-            from process_bigraph.core import core as _core
-            core = _core
+            # v2 path (legacy): pre-resolved state_json.
+            state_json = params.get("state_json", "{}")
+            state = json.loads(state_json)
 
-        core.register_link("SQLiteEmitter", SQLiteEmitter)
-        composite = Composite({"state": state}, core=core)
+        if core is not None:
+            core.register_link("SQLiteEmitter", SQLiteEmitter)
+            composite = Composite({"state": state}, core=core)
+        else:
+            composite = Composite({"state": state})
         composite.run(steps)
         print("@@@OK@@@")
     except Exception as exc:
@@ -139,6 +107,46 @@ def main() -> None:
         print(f"@@@ERROR@@@ run_id={run_id} {exc}", file=sys.stderr)
         print(traceback.format_exc(), file=sys.stderr)
         sys.exit(1)
+
+
+def _build_core(core_bootstrap, pkg):
+    """Resolve a ``process_bigraph`` Core for the current workspace.
+
+    Resolution order:
+
+    1. ``core_bootstrap`` — dotted path of the form ``module:function`` or
+       ``module.function``.  The named function takes no arguments and
+       returns a configured Core with all type/link registrations the
+       workspace's composites need.  This is the standardized hook
+       declared by the workspace's ``study.yaml:core_bootstrap``.
+    2. ``{pkg}.core.build_core()`` — fallback for workspaces that follow
+       the pbg-template convention of exposing ``core`` at the workspace
+       package root.
+    3. ``None`` — caller uses the process_bigraph default core.
+
+    The runner does **not** import any workspace-specific package by
+    name.  Workspaces that need custom registrations declare a
+    ``core_bootstrap`` (typically emitted by ``/pbg-expert ./``).
+    """
+    import importlib
+
+    if core_bootstrap:
+        if ":" in core_bootstrap:
+            mod_path, fn = core_bootstrap.rsplit(":", 1)
+        else:
+            mod_path, fn = core_bootstrap.rsplit(".", 1)
+        mod = importlib.import_module(mod_path)
+        builder = getattr(mod, fn)
+        return builder()
+    if pkg:
+        try:
+            core_mod = importlib.import_module(f"{pkg}.core")
+        except Exception:
+            return None
+        build_core = getattr(core_mod, "build_core", None)
+        if build_core:
+            return build_core()
+    return None
 
 
 if __name__ == "__main__":
