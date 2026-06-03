@@ -1677,16 +1677,53 @@ def run_investigation(ws_root: Path, name: str, *,
         release_run_lock(ws_root, name)
 
 
+#: Address schemes whose visualizations are NOT process_bigraph Visualization
+#: classes and so should NOT be rendered by ``render_visualizations``.  These
+#: are handled by other dashboard pipelines (static GIF/HTML files, the
+#: study_charts auto-discovery, parquet-emitter charts, …).  Rendering them
+#: here would destructively overwrite their actual files with error stubs.
+_NON_RENDERABLE_VIZ_SCHEMES = frozenset({
+    "gif", "png", "svg", "jpg", "jpeg", "webp",   # static image files
+    "html",                                       # static HTML files (todo #22)
+    "dashboard",                                  # dashboard-internal pipelines
+    "parquet",                                    # parquet-emitter charts
+    "file",                                       # generic file references
+    "url", "http", "https",                       # external links
+})
+
+
+def _is_renderable_address(address: str) -> bool:
+    """Return True iff ``address`` references a process_bigraph Visualization class.
+
+    Class-bound addresses look like ``local:TimeSeriesPlot`` or
+    ``pbg_superpowers:Heatmap`` — a scheme followed by a Python class
+    identifier.  Static / dashboard-internal references use distinct
+    schemes (gif, html, dashboard, …) and must be skipped to avoid
+    overwriting their real artefacts.
+    """
+    if not address or ":" not in address:
+        return False
+    scheme = address.split(":", 1)[0].strip().lower()
+    return scheme not in _NON_RENDERABLE_VIZ_SCHEMES
+
+
 def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
                           core_registry: dict,
                           build_and_run=None) -> list[Path]:
-    """Render every viz in ``spec.visualizations`` against the investigation's runs.db.
+    """Render every renderable viz in ``spec.visualizations`` against ``runs.db``.
 
-    For each viz:
+    For each viz whose ``address`` references a process_bigraph
+    Visualization class:
+
       1. Build the viz composite via ``build_viz_composite``.
       2. Run it for 1 step via ``build_and_run(doc, core_registry) -> str``.
       3. Write the resulting HTML to ``<inv_dir>/viz/<viz_name>.html``.
       4. On any error, write an error stub HTML (other vizzes still render).
+
+    Visualizations whose ``address`` uses a non-class scheme (``gif:``,
+    ``html:``, ``dashboard:``, ``parquet:``, …) are **skipped**.  They
+    are produced by other pipelines and their static files must not be
+    overwritten by this renderer.  See ``_NON_RENDERABLE_VIZ_SCHEMES``.
 
     Args:
         spec: investigation spec dict
@@ -1694,26 +1731,29 @@ def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
         name: investigation name (used only for error messages / doc purposes)
         core_registry: mapping of class key -> Visualization class
         build_and_run: callable(doc, core_registry) -> str that runs the composite
-            and returns an HTML string.  Must be provided when there are
-            visualizations to render; raises ValueError otherwise.
+            and returns an HTML string.  Required when there are renderable
+            visualizations; ignored otherwise.
     """
     inv_dir = Path(inv_dir)
     viz_dir = inv_dir / "viz"
     viz_dir.mkdir(parents=True, exist_ok=True)
 
-    visualizations = spec.get("visualizations") or []
-    if not visualizations:
+    all_vizzes = spec.get("visualizations") or []
+    renderable = [v for v in all_vizzes if _is_renderable_address(v.get("address", ""))]
+
+    if not renderable:
         return []
 
     if build_and_run is None:
         raise ValueError(
             "render_visualizations requires a build_and_run hook "
-            "(production path: see server._post_investigation_run_viz_hook)."
+            "when at least one visualization is class-bound "
+            "(production path: see server._post_investigation_render_viz)."
         )
 
     gathered = gather_emitter_outputs(inv_dir / "runs.db")
     paths = []
-    for viz_spec in visualizations:
+    for viz_spec in renderable:
         target = viz_dir / f"{viz_spec['name']}.html"
         try:
             doc = build_viz_composite(viz_spec, gathered, core_registry)

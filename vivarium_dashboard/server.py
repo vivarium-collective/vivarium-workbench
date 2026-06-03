@@ -9027,71 +9027,209 @@ if __name__ == "__main__":
     def _post_investigation_render_viz(self, body: dict):
         """POST /api/investigation-render-viz {name} — re-render visualizations
         against the investigation's existing emitter data. No simulation re-run.
+
+        Implementation: spawns ``vivarium_dashboard.lib.run_render_viz`` in
+        a subprocess scoped to the workspace's own venv (via ``uv run
+        --directory <workspace>``).  Workspaces ship heavy scientific
+        deps (wholecell, viva_munk, …) that the dashboard's own venv
+        does NOT have; running the render in-process crashes with
+        ``No module named 'wholecell'`` for v2ecoli-style workspaces.
+
+        The runner reads a request JSON, builds the workspace's core
+        via the spec-declared ``core_bootstrap`` (or the pbg-template
+        ``{pkg}.core.build_core()`` convention as fallback), renders
+        every ``spec.visualizations[*]`` entry, and writes a response
+        JSON.  The HTTP handler is purely orchestration: it doesn't
+        import workspace packages directly.
         """
-        _ws_add_to_sys_path()
         from vivarium_dashboard.lib.investigations import (
-            load_spec, render_visualizations, InvestigationSpecError,
+            load_spec, InvestigationSpecError,
         )
 
         name = (body.get("name") or "").strip()
         if not name:
             return self._json({"error": "name is required"}, 400)
+        if WORKSPACE is None:
+            return self._json({"error": "no workspace bound"}, 409)
+
         inv_dir = _study_dir(name)
         spec_path = _study_spec_path(name)
         if not spec_path.is_file():
             return self._json({"error": f"investigation '{name}' not found"}, 404)
+
+        # Validate the spec dashboard-side too so the user gets a fast
+        # 400 instead of waiting for the subprocess to confirm.
         try:
             spec = load_spec(spec_path)
         except InvestigationSpecError as e:
             return self._json({"error": f"spec error: {e}"}, 400)
 
-        # Discover workspace package + build core (mirror _post_investigation_run)
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
-        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-        sys.path.insert(0, str(WORKSPACE))
+        # Resolve the workspace package + optional core_bootstrap
+        # declaration.  Both are passed to the subprocess; the dashboard
+        # never imports workspace-specific code itself.
         try:
-            core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
-            core = core_module.build_core()
-            registry = dict(core.link_registry)
-        except Exception as e:
-            return self._json({"error": f"failed to build core: {e}"}, 500)
-
-        try:
-            from pbg_superpowers.visualizations import (
-                TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap,
+            ws_data = yaml.safe_load(
+                (WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")
             )
-            registry["TimeSeriesPlot"] = TimeSeriesPlot
-            registry["ParamVsObservable"] = ParamVsObservable
-            registry["Distribution"] = Distribution
-            registry["PhaseSpace"] = PhaseSpace
-            registry["Heatmap"] = Heatmap
-        except ImportError:
-            pass
+        except (OSError, yaml.YAMLError) as e:
+            return self._json({"error": f"workspace.yaml unreadable: {e}"}, 500)
+        pkg = ws_data.get("package_path") or (
+            "pbg_" + ws_data.get("name", "").replace("-", "_")
+        )
+        core_bootstrap = spec.get("core_bootstrap")
 
-        from process_bigraph import Composite
+        # Pre-flight: if spec.visualizations is empty, skip the
+        # subprocess entirely.  Saves ~1s of cold-import overhead and
+        # keeps the response shape consistent.
+        if not (spec.get("visualizations") or []):
+            return self._json({
+                "ok": True, "investigation": name,
+                "n_visualizations": 0, "viz_paths": [],
+            }, 200)
 
-        def build_and_run(viz_doc, registry_arg):
-            composite = Composite({'state': viz_doc}, core=core)
-            composite.run(1)
-            state = composite.state
-            html = state.get('output_store')
-            if isinstance(html, dict):
-                html = html.get('value') or html.get('_value') or ''
-            return html if isinstance(html, str) else ''
+        # Build the request file under the workspace's .pbg/ tree.  Each
+        # request gets a unique id so concurrent invocations don't
+        # collide and so failures can be inspected post-mortem.
+        import uuid as _uuid
+        request_id = _uuid.uuid4().hex
+        render_dir = WORKSPACE / ".pbg" / "render-viz"
+        render_dir.mkdir(parents=True, exist_ok=True)
+        req_path = render_dir / f"{request_id}.req.json"
+        resp_path = render_dir / f"{request_id}.resp.json"
+
+        request_payload = {
+            "request_id": request_id,
+            "study_name": name,
+            "spec_path": str(spec_path),
+            "inv_dir": str(inv_dir),
+            "workspace": str(WORKSPACE),
+            "pkg": pkg,
+            "core_bootstrap": core_bootstrap,
+        }
+        req_path.write_text(json.dumps(request_payload, indent=2))
+
+        # Invocation: ``uv run --directory <ws>`` activates the
+        # workspace's pyproject env.  Every pbg-template-derived
+        # workspace has ``vivarium-dashboard`` as a dep, so the
+        # ``-m vivarium_dashboard.lib.run_render_viz`` import resolves
+        # inside the subprocess.  Fall back to the workspace's
+        # ``.venv/bin/python`` if ``uv`` isn't on PATH.
+        timeout_s = int(body.get("timeout_s") or 120)
+        runner_args = [
+            "python", "-m", "vivarium_dashboard.lib.run_render_viz",
+            str(req_path),
+        ]
+        cmd_via_uv = ["uv", "run", "--directory", str(WORKSPACE), *runner_args]
+        ws_venv_python = WORKSPACE / ".venv" / "bin" / "python"
+        cmd_via_venv = [
+            str(ws_venv_python), "-m", "vivarium_dashboard.lib.run_render_viz",
+            str(req_path),
+        ]
+
+        # Inject the running dashboard's source root onto PYTHONPATH so
+        # the subprocess imports the same vivarium_dashboard code the
+        # running server is running, regardless of which version the
+        # workspace's venv happens to have installed.  The workspace's
+        # venv still provides every OTHER package (wholecell, v2ecoli,
+        # process_bigraph, …) — only the dashboard module is overridden.
+        # This keeps dev/production behaviour consistent: in production
+        # both paths converge to the same installed version; in dev the
+        # checkout wins, which is what a developer wants.
+        import vivarium_dashboard as _vd
+        dashboard_src_root = str(Path(_vd.__file__).resolve().parent.parent)
+        subprocess_env = os.environ.copy()
+        existing_pp = subprocess_env.get("PYTHONPATH", "")
+        subprocess_env["PYTHONPATH"] = (
+            dashboard_src_root + (os.pathsep + existing_pp if existing_pp else "")
+        )
+
+        proc_err = None
+        try:
+            try:
+                proc = subprocess.run(
+                    cmd_via_uv, capture_output=True, text=True,
+                    timeout=timeout_s, cwd=str(WORKSPACE),
+                    env=subprocess_env,
+                )
+            except FileNotFoundError:
+                # `uv` not installed — try the workspace's .venv directly.
+                if not ws_venv_python.is_file():
+                    return self._json({
+                        "error": (
+                            "no workspace runner available: neither `uv` "
+                            "nor a workspace .venv/bin/python was found. "
+                            "Install uv (https://docs.astral.sh/uv/) or "
+                            "create the workspace venv with "
+                            "`uv sync` / `python -m venv`."
+                        ),
+                    }, 500)
+                proc = subprocess.run(
+                    cmd_via_venv, capture_output=True, text=True,
+                    timeout=timeout_s, cwd=str(WORKSPACE),
+                    env=subprocess_env,
+                )
+        except subprocess.TimeoutExpired:
+            return self._json({
+                "error": (
+                    f"render-viz runner timed out after {timeout_s}s. "
+                    "If the workspace's core_bootstrap is heavy (e.g. ParCa "
+                    "cache hydration), set body.timeout_s to a higher value."
+                ),
+                "request_path": str(req_path),
+            }, 504)
+        except Exception as e:
+            return self._json({
+                "error": f"render-viz subprocess failed to launch: "
+                         f"{type(e).__name__}: {e}",
+            }, 500)
+
+        # Runner always writes the response file on controlled errors;
+        # only an uncontrolled crash (segfault, sys.exit before the
+        # exception handler) would leave it absent.
+        if not resp_path.is_file():
+            proc_err = (proc.stderr or proc.stdout or "(no output)").strip()[-1000:]
+            return self._json({
+                "error": (
+                    "render-viz subprocess produced no response file "
+                    f"(exit={proc.returncode}). Likely an uncontrolled crash."
+                ),
+                "stderr_tail": proc_err,
+                "request_path": str(req_path),
+            }, 500)
 
         try:
-            viz_paths = render_visualizations(
-                spec, inv_dir, name,
-                core_registry=registry, build_and_run=build_and_run,
-            )
-        except Exception as e:
-            return self._json({"error": f"render failed: {type(e).__name__}: {e}"}, 500)
+            response = json.loads(resp_path.read_text())
+        except (OSError, json.JSONDecodeError) as e:
+            return self._json({
+                "error": f"render-viz response file unreadable: {e}",
+                "request_path": str(req_path),
+            }, 500)
 
+        # On success: clean up the request/response pair (they were
+        # workspace-internal scratch).  On failure: leave them for
+        # debugging.
+        if response.get("ok"):
+            for p in (req_path, resp_path):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+            return self._json({
+                "ok": True, "investigation": name,
+                "n_visualizations": response.get("n_visualizations", 0),
+                "viz_paths": response.get("viz_paths") or [],
+            }, 200)
+
+        # Render reported a controlled failure — surface its error
+        # verbatim plus a pointer to the retained request/response
+        # files for post-mortem.
+        err = response.get("error") or "render failed (no detail)"
         return self._json({
-            "ok": True, "investigation": name,
-            "n_visualizations": len(viz_paths),
-            "viz_paths": [str(p) for p in viz_paths],
-        }, 200)
+            "error": err,
+            "request_path": str(req_path),
+            "response_path": str(resp_path),
+            "traceback": response.get("traceback"),
+        }, 500)
 
     def _post_investigation_add_viz(self, body: dict):
         """POST /api/investigation-add-viz {investigation, name, address, config}

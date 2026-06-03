@@ -896,3 +896,99 @@ def test_effective_status_ignores_null_multi_axis_fields():
         result = effective_status(spec)
     assert result == "draft"
     assert [w for w in captured if issubclass(w.category, DeprecationWarning)]
+
+
+# ---------------------------------------------------------------------------
+# render_visualizations — non-class viz schemes are SKIPPED, not error-stubbed
+# ---------------------------------------------------------------------------
+
+
+class TestRenderVisualizationsSchemeFilter:
+    """Visualizations whose ``address`` uses a non-class scheme (gif, html,
+    dashboard, parquet, …) must NOT be passed through the renderer — they
+    are handled by other dashboard pipelines, and overwriting their files
+    with error stubs is destructive."""
+
+    def test_non_class_addresses_are_skipped(self, tmp_path):
+        from vivarium_dashboard.lib.investigations import render_visualizations
+        inv_dir = tmp_path / "inv"
+        inv_dir.mkdir()
+        (inv_dir / "runs.db").touch()  # gather_emitter_outputs needs the file
+        spec = {
+            'visualizations': [
+                {'name': 'colony-gif',   'address': 'gif:colony.gif'},
+                {'name': 'perf-charts',  'address': 'dashboard:study_charts'},
+                {'name': 'html-report',  'address': 'html:reports/r.html'},
+                {'name': 'parquet-tsp',  'address': 'parquet:obs.parquet'},
+            ],
+        }
+        # build_and_run intentionally omitted — none of these should be
+        # rendered.  Passing None must NOT raise (the contract only
+        # requires build_and_run when at least one renderable viz exists).
+        paths = render_visualizations(
+            spec, inv_dir, 'inv', core_registry={}, build_and_run=None,
+        )
+        assert paths == []
+        # No HTML files written under viz/
+        viz_dir = inv_dir / "viz"
+        assert not any(viz_dir.glob("*.html"))
+
+    def test_mixed_class_and_non_class_renders_only_class_entries(self, tmp_path):
+        """A spec with both schemes renders class-bound entries and skips
+        the others — without disturbing the static files."""
+        from vivarium_dashboard.lib.investigations import render_visualizations
+
+        inv_dir = tmp_path / "investigations" / "inv"
+        inv_dir.mkdir(parents=True)
+        _setup_db_with_schema(inv_dir)
+
+        # Pre-create a fake static GIF reference target — must NOT be touched.
+        viz_dir = inv_dir / "viz"
+        viz_dir.mkdir()
+        static_target = viz_dir / "colony-gif.html"
+        original_static = "<!-- workspace's own GIF embed; do not overwrite -->"
+        static_target.write_text(original_static)
+
+        class _Stub:
+            @classmethod
+            def is_visualization(cls): return True
+            def inputs(self): return {}
+            def outputs(self): return {'html': 'string'}
+
+        spec = {
+            'visualizations': [
+                {'name': 'levels',     'address': 'local:TimeSeriesPlot',
+                 'config': {'title': 'T'}},
+                {'name': 'colony-gif', 'address': 'gif:colony.gif'},
+            ],
+        }
+
+        def fake_build_and_run(doc, registry_arg):
+            return '<p>rendered</p>'
+
+        paths = render_visualizations(
+            spec, inv_dir, 'inv',
+            core_registry={'TimeSeriesPlot': _Stub},
+            build_and_run=fake_build_and_run,
+        )
+        # Only the class-bound 'levels' rendered
+        assert len(paths) == 1
+        assert paths[0].name == 'levels.html'
+        # The GIF placeholder was NOT overwritten
+        assert static_target.read_text() == original_static
+
+    def test_is_renderable_address_helper(self):
+        from vivarium_dashboard.lib.investigations import _is_renderable_address
+        # Renderable: class-bound schemes
+        assert _is_renderable_address('local:TimeSeriesPlot')
+        assert _is_renderable_address('pbg_superpowers:Heatmap')
+        # Not renderable: static / pipeline schemes
+        assert not _is_renderable_address('gif:colony.gif')
+        assert not _is_renderable_address('html:report.html')
+        assert not _is_renderable_address('dashboard:study_charts')
+        assert not _is_renderable_address('parquet:obs.parquet')
+        # Case-insensitive on scheme
+        assert not _is_renderable_address('GIF:foo.gif')
+        # Empty / malformed
+        assert not _is_renderable_address('')
+        assert not _is_renderable_address('no-colon-here')
