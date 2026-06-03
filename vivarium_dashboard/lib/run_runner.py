@@ -50,10 +50,14 @@ class RunRequest:
         )
 
 
-def _resolve_state(req: RunRequest) -> dict:
+def _resolve_state(req: RunRequest) -> tuple[dict, dict | None]:
     """Resolve the composite state — generator entry first, then file spec.
 
-    Mirrors the resolution the old _post_composite_test_run handler did.
+    Returns ``(state, spec)`` where ``spec`` is the parsed static-spec dict for
+    the file-based branch (so the caller can read its ``emitters:`` default-emitter
+    declaration via the convention) or ``None`` for a generator (generators carry
+    their own emitter resolution internally; the convention isn't applied to them
+    here). Mirrors the resolution the old _post_composite_test_run handler did.
     Raises a clear error if neither path yields a state.
     """
     # Generator-kind branch.
@@ -67,8 +71,8 @@ def _resolve_state(req: RunRequest) -> dict:
         if entry is not None:
             doc = build_generator(entry, overrides=req.overrides)
             if isinstance(doc, dict) and isinstance(doc.get("state"), dict):
-                return doc["state"]
-            return doc
+                return doc["state"], None
+            return doc, None
     except ImportError:
         pass
 
@@ -85,9 +89,36 @@ def _resolve_state(req: RunRequest) -> dict:
     text = path.read_text(encoding="utf-8")
     spec = json.loads(text) if path.suffix.lower() == ".json" else __import__(
         "yaml").safe_load(text)
-    return substitute_parameters(spec.get("state") or {},
-                                 spec.get("parameters") or {},
-                                 req.overrides)
+    state = substitute_parameters(spec.get("state") or {},
+                                  spec.get("parameters") or {},
+                                  req.overrides)
+    return state, spec
+
+
+def _flush_parquet_emitters(composite) -> int:
+    """Close every parquet-family emitter in a composite so its trailing batch
+    lands on disk. Generic: targets any node ``instance`` exposing ``out_uri``
+    and a callable ``close`` (ParquetEmitter, DataFrameParquetEmitter, ...), so
+    run_runner needn't import workspace-specific emitter classes. Returns count.
+    """
+    closed = 0
+
+    def _walk(node):
+        nonlocal closed
+        if isinstance(node, dict):
+            inst = node.get("instance")
+            close = getattr(inst, "close", None)
+            if callable(close) and hasattr(inst, "out_uri") and not getattr(inst, "_closed", False):
+                try:
+                    close(success=True)
+                    closed += 1
+                except Exception:
+                    traceback.print_exc()
+            for v in node.values():
+                _walk(v)
+
+    _walk(getattr(composite, "state", None) or {})
+    return closed
 
 
 def _emit_paths_for(req: RunRequest, state: dict) -> list[str]:
@@ -268,7 +299,7 @@ def execute(request_path: Path) -> int:
     conn = cr.connect(req.db_file)
     try:
         try:
-            state = _resolve_state(req)
+            state, spec = _resolve_state(req)
         except FileNotFoundError as e:
             # Most common: the ParCa cache (out/cache/initial_state.json) is
             # missing. Fail fast with a legible message rather than a crash.
@@ -279,20 +310,35 @@ def execute(request_path: Path) -> int:
                                  status="failed")
             return 1
 
-        emit_paths = _emit_paths_for(req, state)
-        if emit_paths:
-            state = cr.inject_emitter_for_paths(state, emit_paths)
-        state = cr.inject_sqlite_emitter(state, run_id=req.run_id,
-                                         db_file=req.db_file)
-
         # build_core lives in the workspace's own package (e.g.
         # pbg_ws_increase_demo.core). Import it dynamically by package name.
         core_mod = __import__(f"{req.pkg}.core", fromlist=["build_core"])
         from process_bigraph import Composite
-        from process_bigraph.emitter import SQLiteEmitter
-
         core = core_mod.build_core()
-        core.register_link("SQLiteEmitter", SQLiteEmitter)
+
+        # Composite default-emitter convention: when a static spec declares an
+        # `emitters:` default sink, install it (per-run out_dir + experiment_id
+        # layered on) instead of the dashboard's RAM+SQLite injection. The
+        # workspace's build_core() registers the declared emitter address; an
+        # unregistered address degrades to RAMEmitter inside the installer.
+        from pbg_superpowers.composite_generator import (
+            emitter_defaults, install_default_emitters,
+        )
+        declared = emitter_defaults(spec) if spec is not None else []
+        use_convention = bool(declared)
+        if use_convention:
+            state = install_default_emitters(
+                state, spec, run_id=req.run_id,
+                out_dir=str(run_dir / "parquet"), core=core)
+        else:
+            emit_paths = _emit_paths_for(req, state)
+            if emit_paths:
+                state = cr.inject_emitter_for_paths(state, emit_paths)
+            state = cr.inject_sqlite_emitter(state, run_id=req.run_id,
+                                             db_file=req.db_file)
+            from process_bigraph.emitter import SQLiteEmitter
+            core.register_link("SQLiteEmitter", SQLiteEmitter)
+
         composite = Composite({"state": state}, core=core)
 
         started = time.monotonic()
@@ -308,6 +354,13 @@ def execute(request_path: Path) -> int:
                 cr.complete_metadata(conn, run_id=req.run_id, n_steps=step,
                                      status="failed")
                 return 1
+
+        # Flush convention-installed parquet sinks: their trailing (< batch_size)
+        # rows live in memory until close(). Generic over emitter class — any
+        # emitter exposing out_uri + close() (ParquetEmitter, the tyssue
+        # DataFrameParquetEmitter, ...) is flushed here.
+        if use_convention:
+            _flush_parquet_emitters(composite)
 
         _render_viz(
             composite, run_dir,
