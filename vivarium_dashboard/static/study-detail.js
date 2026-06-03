@@ -884,17 +884,62 @@
     var nRunning = data.n_running || 0;
     var nPending = data.n_pending || 0;
     var status = data.status || 'unknown';
+    var jobId = data.slurm_job_array_id;
+    var submittedAt = data.submitted_at;
+    var backend = data.backend || '';
 
-    var html = '<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">' +
-      '<span class="run-status run-status-' + status + '">array: ' + status + '</span>' +
-      '<span style="font-size:0.88em">' + nTotal + ' tasks · ' +
+    // Header line — the at-a-glance "what just happened" summary.
+    // Status pill + cluster-visible array id + backend + submitted-ago.
+    var headerBits = [
+      '<span class="run-status run-status-' + status + '" ' +
+        'title="Aggregate SLURM array state across all tasks. ' +
+        '\'completed\' = every task reached COMPLETED.">array: ' + status + '</span>',
+    ];
+    if (jobId !== undefined && jobId !== null) {
+      headerBits.push(
+        '<span style="font-size:0.88em" ' +
+          'title="SLURM array job id assigned by sbatch. Use ' +
+          '`scontrol show job ' + jobId + '` on the cluster for raw state.">' +
+          'array <code>' + jobId + '</code></span>'
+      );
+    }
+    if (backend) {
+      headerBits.push(
+        '<span class="muted" style="font-size:0.85em" ' +
+          'title="Compute backend the array dispatched to.">on <code>' +
+          backend + '</code></span>'
+      );
+    }
+    if (submittedAt) {
+      headerBits.push(
+        '<span class="muted" style="font-size:0.85em" ' +
+          'title="Submission time (UTC): ' + submittedAt + '">' +
+          'submitted ' + _formatAgo(submittedAt) + '</span>'
+      );
+    }
+
+    // Counts line — secondary, smaller.
+    var counts =
+      '<span style="font-size:0.85em" ' +
+        'title="Per-task SLURM states. Pending = queued; running = on a ' +
+        'compute node; completed = exited 0; failed = nonzero exit / ' +
+        'timeout / node-fail.">' +
+      nTotal + ' task' + (nTotal === 1 ? '' : 's') + ' · ' +
       '<span style="color:#64748b">' + nPending + ' pending</span> · ' +
       '<span style="color:#2563eb">' + nRunning + ' running</span> · ' +
       '<span style="color:#16a34a">' + nCompleted + ' completed</span> · ' +
       '<span style="color:#dc2626">' + nFailed + ' failed</span>' +
-      '</span></div>';
+      '</span>';
 
-    container.innerHTML = html;
+    container.innerHTML =
+      '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:4px">' +
+        headerBits.join('') +
+      '</div>' +
+      '<div>' + counts + '</div>';
+
+    // One-time pipeline help row, rendered above the table.  Explains
+    // what the chips mean for users who haven't seen them before.
+    _renderHpcPipelineHelp();
 
     // Per-task table
     var table = document.getElementById('hpc-array-tasks-table');
@@ -933,7 +978,7 @@
         '<td><span class="run-status run-status-' + (task.state || 'unknown').toLowerCase() + '">' + (task.state || '—') + '</span></td>' +
         '<td>' + (task.exit_code || '—') + '</td>' +
         '<td>' + (task.elapsed || '—') + '</td>' +
-        '<td>' + renderPullbackCell(task.state, runId, s.pullback, s.pullbackError) + '</td>';
+        '<td>' + renderPullbackCell(task.state, runId, s.pullback, s.pullbackError, s.pullbackBytes) + '</td>';
       tbody.appendChild(tr);
       // Hidden log-pane row, inserted right after the task row.
       var logTr = document.createElement('tr');
@@ -980,26 +1025,94 @@
     }
   });
 
-  function renderPullbackCell(taskState, runId, pullbackState, errMsg) {
+  // ------------------------------------------------------------------
+  // Helpers for the aggregate-chip header (Path C item — UX clarity)
+  // ------------------------------------------------------------------
+
+  function _formatAgo(isoTimestamp) {
+    // Returns "12s ago", "5m ago", "2h ago", "3d ago" — small, readable.
+    // Falls back to the raw timestamp on parse failure.
+    try {
+      var then = new Date(isoTimestamp).getTime();
+      var diff = Math.max(0, Math.floor((Date.now() - then) / 1000));
+      if (diff < 60)   return diff + 's ago';
+      if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+      if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+      return Math.floor(diff / 86400) + 'd ago';
+    } catch (e) {
+      return String(isoTimestamp);
+    }
+  }
+
+  function _formatBytes(n) {
+    if (!n || n <= 0) return '';
+    if (n < 1024)         return n + ' B';
+    if (n < 1024 * 1024)  return (n / 1024).toFixed(1) + ' KB';
+    if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+    return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+  }
+
+  function _renderHpcPipelineHelp() {
+    // Inline explanatory row — rendered once, kept in sync with table
+    // visibility.  Users seeing the chips for the first time get a
+    // single sentence describing what's happening end-to-end.
+    var host = document.getElementById('hpc-pipeline-help');
+    if (!host) return;
+    if (host.dataset.populated === '1') return;
+    host.dataset.populated = '1';
+    host.innerHTML =
+      '<div class="muted" style="font-size:0.83em;line-height:1.4;' +
+        'padding:6px 10px;background:#f8fafc;border:1px solid #e2e8f0;' +
+        'border-radius:4px;margin:8px 0">' +
+      '<strong>How this works:</strong> the array dispatches one task ' +
+      'per <code>simulation_set</code> entry to the cluster as a single ' +
+      'SLURM job. Each task runs inside the workspace SIF; when it ' +
+      'reaches <code>COMPLETED</code>, its <code>results/</code> and ' +
+      '<code>out/</code> directories rsync back to your local workspace ' +
+      '(the <em>Pullback</em> column). Reports and HTML artefacts then ' +
+      'auto-appear in the <strong>Visualizations</strong> tab.' +
+      '</div>';
+  }
+
+  function renderPullbackCell(taskState, runId, pullbackState, errMsg, bytes) {
+    // Non-terminal SLURM state: the pullback chip doesn't apply yet.
     if (taskState !== 'COMPLETED' && taskState !== 'FAILED') {
-      return '<span class="muted" style="font-size:0.82em">' +
+      var preTitle = (
+        taskState === 'PENDING'   ? 'task queued on SLURM; nothing to sync yet' :
+        taskState === 'RUNNING'   ? 'task running on the cluster; results will sync when it completes' :
+        taskState === 'CANCELLED' ? 'task was cancelled before completion' :
+        'awaiting a terminal SLURM state'
+      );
+      return '<span class="muted" style="font-size:0.82em" title="' + preTitle + '">' +
              (taskState === 'RUNNING' ? 'running…' : '—') + '</span>';
     }
     if (pullbackState === 'in_flight') {
-      return '<span style="color:#2563eb;font-size:0.82em">⟳ syncing…</span>';
+      return '<span style="color:#2563eb;font-size:0.82em" ' +
+             'title="rsync is pulling results/&lt;run_id&gt;/ and out/ ' +
+             'from the cluster back to your workspace…">⟳ syncing…</span>';
     }
     if (pullbackState === 'synced') {
-      return '<span style="color:#16a34a;font-size:0.82em">✓ synced</span>';
+      var label = '✓ synced';
+      var sizeLabel = _formatBytes(bytes);
+      if (sizeLabel) label += ' (' + sizeLabel + ')';
+      return '<span style="color:#16a34a;font-size:0.82em" ' +
+             'title="results/&lt;run_id&gt;/ and out/ have been rsynced ' +
+             'back. Any HTML/GIF artefacts are now visible in the ' +
+             'Visualizations tab.">' + label + '</span>';
     }
     if (pullbackState === 'failed') {
-      var title = (errMsg || 'pullback failed').replace(/"/g, '&quot;');
+      var title = ('pullback failed — click to retry. error: ' +
+                   (errMsg || 'unknown')).replace(/"/g, '&quot;');
       return '<button class="btn-pullback-task" data-run-id="' + runId +
              '" title="' + title + '" ' +
              'style="font-size:0.82em;padding:2px 8px;color:#dc2626;border:1px solid #fecaca">' +
              '✗ failed — ↻ retry</button>';
     }
     // idle — completed but not yet synced (e.g. page reloaded mid-array)
-    return '<button class="btn-pullback-task" data-run-id="' + runId + '" style="font-size:0.82em;padding:2px 8px">sync results</button>';
+    return '<button class="btn-pullback-task" data-run-id="' + runId + '" ' +
+           'title="task COMPLETED on the cluster but results have not ' +
+           'been pulled back yet. Click to rsync now." ' +
+           'style="font-size:0.82em;padding:2px 8px">sync results</button>';
   }
 
   function rerenderArrayTable() {
@@ -1017,6 +1130,13 @@
         if ((r.status === 200 || r.status === 202) && (body.state === 'ok' || body.state === 'partial')) {
           s.pullback = 'synced';
           s.pullbackError = null;
+          // Capture transferred-bytes so the chip can show size.  May be
+          // 0 on subsequent calls (rsync idempotent — nothing new to
+          // transfer); we keep the previous non-zero size in that case
+          // so the chip stays informative across re-syncs.
+          if (typeof body.bytes === 'number' && body.bytes > 0) {
+            s.pullbackBytes = body.bytes;
+          }
         } else if (r.status === 200 && body.state === 'in_progress') {
           s.pullback = 'in_flight';  // already in progress server-side; next poll re-renders
         } else {

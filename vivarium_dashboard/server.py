@@ -8947,6 +8947,9 @@ if __name__ == "__main__":
                 "run_ids": meta.get("run_ids", []),
                 "status": meta.get("status"),
                 "submitted_at": meta.get("submitted_at"),
+                # Surface the backend the array dispatched to so the UI can
+                # show "array on hpc:ccam" / "array on local" etc.
+                "backend": meta.get("backend"),
             },
             200,
         )
