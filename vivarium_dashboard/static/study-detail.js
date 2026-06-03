@@ -917,10 +917,18 @@
     var btn = this;
     btn.disabled = true;
     btn.textContent = 'Submitting…';
-    api('POST', '/api/investigation-run', {
+    var stepsEl = document.getElementById('hpc-steps-override');
+    var gatedEl = document.getElementById('hpc-include-gated');
+    var body = {
       name: STUDY_NAME,
-      compute_backend: getComputeBackend()
-    }).then(function(r) {
+      compute_backend: getComputeBackend(),
+    };
+    if (stepsEl && stepsEl.value) {
+      var n = parseInt(stepsEl.value, 10);
+      if (n > 0) body.steps_override = n;
+    }
+    if (gatedEl && gatedEl.checked) body.include_gated = true;
+    api('POST', '/api/investigation-run', body).then(function(r) {
       if (r.status === 202) {
         btn.textContent = 'Submitted ✓';
         pollHpcArrayStatus();

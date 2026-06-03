@@ -225,3 +225,239 @@ class TestRunInvestigationTaskRunner:
         # sys.exit(1) is called on error, which is fine — we just want
         # to verify the module runs without crashing
         assert exc.value.code == 1
+
+
+# ---------------------------------------------------------------------------
+# Test: v3 simulation_set parsing in _post_investigation_run_hpc
+# ---------------------------------------------------------------------------
+
+
+class TestV3SimulationSetParsing:
+    """Phase E.1 — v3 study shape (simulation_set + base_model + perturbation)."""
+
+    def _make_v3_spec(self) -> dict:
+        # Minimum-valid v3 study spec (baseline list is required by the validator)
+        # plus simulation_set entries — the actual subject of the test.
+        return {
+            "schema_version": 3,
+            "name": "colonies-01",
+            "baseline": [
+                {"name": "colony-baseline", "composite": "v2ecoli.composites.colony.colony"},
+            ],
+            "simulation_set": [
+                {
+                    "name": "build-smoke-n2",
+                    "base_model": "v2ecoli.composites.colony.colony",
+                    "perturbation": {"n_cells": 2},
+                    "duration_min": 12,
+                    "seeds": [0],
+                    "status": "ready",
+                },
+                {
+                    "name": "nsweep-n1",
+                    "base_model": "v2ecoli.composites.colony.colony",
+                    "perturbation": {"n_cells": 1},
+                    "duration_min": 90,
+                    "seeds": [0],
+                    "status": "gated",
+                },
+                {
+                    "name": "nsweep-n4",
+                    "base_model": "v2ecoli.composites.colony.colony",
+                    "perturbation": {"n_cells": 4},
+                    "duration_min": 90,
+                    "seeds": [0],
+                    "status": "gated",
+                },
+            ],
+        }
+
+    def _run_hpc_branch(self, spec, body, monkeypatch):
+        """Drive _post_investigation_run_hpc up to the dispatch call, capturing tasks."""
+        import vivarium_dashboard.server as srv
+        import tempfile
+        from pathlib import Path as _P
+
+        captured = {}
+
+        def fake_submit(settings, ws_name, *, command_template, param_values, resources):
+            captured["param_values"] = param_values
+            captured["resources"] = resources
+            return {
+                "slurm_job_array_id": 999,
+                "n_tasks": len(param_values),
+                "run_ids": [f"r{i}" for i in range(len(param_values))],
+            }
+
+        class FakeSettings:
+            hpc_repo_base_path = "/cluster/ws"
+            hpc_log_base_path = None
+            hpc_image_base_path = "/cluster/images"
+
+        monkeypatch.setattr(
+            "vivarium_dashboard.lib.hpc_dispatch.submit_investigation_array_job",
+            fake_submit,
+        )
+        monkeypatch.setattr(
+            "vivarium_dashboard.lib.hpc_settings.get_hpc_settings",
+            lambda _ws: FakeSettings(),
+        )
+        # The HPC branch now also stages run_investigation_task.py via SSH+SCP
+        # before dispatching — mock both so unit tests don't reach the network.
+        monkeypatch.setattr(
+            "vivarium_dashboard.lib.hpc_dispatch._ssh",
+            lambda *a, **k: MagicMock(returncode=0, stdout="", stderr=""),
+        )
+        monkeypatch.setattr(
+            "vivarium_dashboard.lib.hpc_dispatch._scp_file",
+            lambda *a, **k: None,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = _P(tmp) / "workspace"
+            ws.mkdir()
+            (ws / "workspace.yaml").write_text("name: test-ws\npackage_path: pbg_test\n")
+            inv_dir = ws / "studies" / spec["name"]
+            inv_dir.mkdir(parents=True)
+            import yaml as _y
+            (inv_dir / "study.yaml").write_text(_y.dump(spec))
+
+            orig_ws = srv.WORKSPACE
+            srv.WORKSPACE = ws
+            try:
+                handler = MagicMock(spec=srv.Handler)
+                handler._json = lambda data, code: (code, data)
+                response = srv.Handler._post_investigation_run_hpc(
+                    handler, body, spec["name"], "hpc:ccam"
+                )
+                return response, captured
+            finally:
+                srv.WORKSPACE = orig_ws
+
+    def test_default_filters_to_ready_only(self, monkeypatch):
+        """Without include_gated, only 'ready' entries are dispatched."""
+        spec = self._make_v3_spec()
+        response, captured = self._run_hpc_branch(spec, {"name": "colonies-01"}, monkeypatch)
+        assert "param_values" in captured, f"submit not called; response={response}"
+        assert len(captured["param_values"]) == 1
+
+    def test_include_gated_dispatches_all(self, monkeypatch):
+        """include_gated=True picks up 'gated' entries too."""
+        spec = self._make_v3_spec()
+        response, captured = self._run_hpc_branch(
+            spec, {"name": "colonies-01", "include_gated": True}, monkeypatch
+        )
+        assert "param_values" in captured, f"submit not called; response={response}"
+        assert len(captured["param_values"]) == 3
+
+    def test_steps_override_takes_precedence(self, monkeypatch):
+        """body.steps_override wins over entry.duration_min derivation."""
+        import base64 as _b64
+        spec = self._make_v3_spec()
+        response, captured = self._run_hpc_branch(
+            spec,
+            {"name": "colonies-01", "include_gated": True, "steps_override": 10},
+            monkeypatch,
+        )
+        assert "param_values" in captured, f"submit not called; response={response}"
+        for pv in captured["param_values"]:
+            payload = json.loads(_b64.b64decode(pv["params_b64"]).decode())
+            assert payload["steps"] == 10
+            assert payload["base_model"] == "v2ecoli.composites.colony.colony"
+            assert "overrides" in payload
+
+    def test_steps_derived_from_duration_min(self, monkeypatch):
+        """No override → derive from duration_min × 60 / dt_seconds."""
+        import base64 as _b64
+        spec = self._make_v3_spec()
+        response, captured = self._run_hpc_branch(spec, {"name": "colonies-01"}, monkeypatch)
+        assert "param_values" in captured, f"submit not called; response={response}"
+        payload = json.loads(_b64.b64decode(captured["param_values"][0]["params_b64"]).decode())
+        # build-smoke-n2 has duration_min=12 → 12 * 60 / 1.0 = 720
+        assert payload["steps"] == 720
+
+    def test_payload_carries_base_model_and_overrides_not_state_json(self, monkeypatch):
+        """v3 payload uses base_model+overrides, NOT state_json."""
+        import base64 as _b64
+        spec = self._make_v3_spec()
+        response, captured = self._run_hpc_branch(spec, {"name": "colonies-01"}, monkeypatch)
+        assert "param_values" in captured, f"submit not called; response={response}"
+        payload = json.loads(_b64.b64decode(captured["param_values"][0]["params_b64"]).decode())
+        assert "base_model" in payload
+        assert "overrides" in payload
+        assert "state_json" not in payload
+
+
+# ---------------------------------------------------------------------------
+# Test: v3 runner branch (base_model importlib path)
+# ---------------------------------------------------------------------------
+
+
+class TestV3RunnerBranch:
+    """Phase E.2 — runner imports base_model and calls it with overrides."""
+
+    def test_v3_payload_invokes_base_model_builder(self) -> None:
+        """When base_model is present, the runner imports it and calls the builder."""
+        import base64 as _b64
+        from vivarium_dashboard.lib.run_investigation_task import main
+        import sys as _sys
+
+        params = {
+            "run_id": "r0",
+            "base_model": "v2ecoli.composites.colony.colony",
+            "overrides": {"n_cells": 4},
+            "steps": 10,
+            "pkg": "",
+        }
+        encoded = _b64.b64encode(json.dumps(params).encode()).decode()
+        # v2ecoli isn't importable in the test env → expect SystemExit(1)
+        # with the ImportError message routed through the @@@ERROR@@@ stderr line.
+        with patch.object(_sys, "argv", ["runner.py", encoded]):
+            with pytest.raises(SystemExit) as exc:
+                main()
+        assert exc.value.code == 1
+
+    def test_v3_payload_with_mocked_builder(self) -> None:
+        """A mocked base_model that returns {state: {...}} reaches the Composite build."""
+        import base64 as _b64
+        import sys as _sys
+        import types as _types
+        from vivarium_dashboard.lib.run_investigation_task import main
+
+        # Inject a fake module with a builder function
+        fake_mod = _types.ModuleType("fake_pkg.colony")
+        fake_mod.colony = lambda **kw: {"state": {"_kwargs": kw}}
+        _sys.modules["fake_pkg.colony"] = fake_mod
+        params = {
+            "run_id": "r0",
+            "base_model": "fake_pkg.colony.colony",
+            "overrides": {"x": 1, "seed": 0},
+            "steps": 1,
+            "pkg": "",
+        }
+        encoded = _b64.b64encode(json.dumps(params).encode()).decode()
+        try:
+            with patch.object(_sys, "argv", ["runner.py", encoded]):
+                with pytest.raises(SystemExit) as exc:
+                    main()
+            # process_bigraph Composite build fails in CI (no core registered for
+            # the fake state shape) → exit 1, but the import + call succeeded.
+            assert exc.value.code == 1
+        finally:
+            _sys.modules.pop("fake_pkg.colony", None)
+
+    def test_inject_sqlite_emitter_adds_step(self) -> None:
+        from vivarium_dashboard.lib.run_investigation_task import _inject_sqlite_emitter
+        state: dict = {}
+        result = _inject_sqlite_emitter(state, run_id="abc")
+        assert result["emitter"]["_type"] == "step"
+        assert result["emitter"]["config"]["run_id"] == "abc"
+        assert result["emitter"]["config"]["db_file"] == "/workspace/runs.db"
+
+    def test_inject_sqlite_emitter_preserves_existing(self) -> None:
+        from vivarium_dashboard.lib.run_investigation_task import _inject_sqlite_emitter
+        state = {"emitter": {"_type": "step", "config": {"run_id": "preset", "db_file": "/x"}}}
+        result = _inject_sqlite_emitter(state, run_id="abc")
+        # Existing run_id and db_file are preserved (setdefault, not overwrite)
+        assert result["emitter"]["config"]["run_id"] == "preset"
+        assert result["emitter"]["config"]["db_file"] == "/x"

@@ -717,7 +717,9 @@ def rsync_workspace_back(
         cmd = [
             "rsync", "-az", "--partial", "--inplace",
             "--no-o", "--no-g", "--omit-dir-times",
-            "--info=stats2",
+            # `--stats` works on rsync 2.6.9 (macOS-bundled) through 3.x.
+            # `--info=stats2` is rsync 3+ only and breaks on macOS.
+            "--stats",
             "-e", _ssh_opt_str(settings),
             f"{remote_root}/{d}/",
             str(local_dest) + "/",
@@ -1029,22 +1031,36 @@ def submit_investigation_array_job(
 
     exec_lines = _singularity_exec_lines(settings, remote_ws, ws_name, command_template)
 
+    # Use json.dumps for both PARAMS_JSON and the command template so any
+    # embedded quotes (single or double) get safely escaped — otherwise a
+    # template containing bash -c 'cd /workspace ...' collides with the Python
+    # triple-quoted string delimiter and crashes the per-task interpreter with
+    # SyntaxError.  Escape closing braces for python's str.format too.
+    tmpl_repr = _json.dumps(command_template)
     body_lines = [
         "set -euo pipefail",
         "",
-        "PARAMS_JSON='" + params_json + "'",
+        # Quote the JSON via a bash heredoc so embedded single-quotes survive.
+        "PARAMS_JSON=$(cat <<'PARAMS_EOF'",
+        params_json,
+        "PARAMS_EOF",
+        ")",
         "TASK_ID=${SLURM_ARRAY_TASK_ID:-0}",
         "",
         "# Pick this task's params from the JSON array.",
         'TASK_PARAMS=$(echo "$PARAMS_JSON" | python3 -c "import json,sys; data=json.load(sys.stdin); p=data[$TASK_ID]; print(json.dumps(p))")',
         "",
         "# Build the per-task command by substituting {param} placeholders.",
-        'CMD=$(echo "$TASK_PARAMS" | python3 -c "',
-        "import json, sys",
-        "params = json.load(sys.stdin)",
-        "tmpl = '''" + command_template + "'''",
+        # `<<'PYEOF'` (quoted sentinel) keeps Python source literal — no shell
+        # expansion inside.  TASK_PARAMS reaches the script via env, not stdin,
+        # because the heredoc IS the stdin of `python3` once we use `<<`.
+        "CMD=$(TASK_PARAMS=\"$TASK_PARAMS\" python3 <<'PYEOF'",
+        "import json, os",
+        "params = json.loads(os.environ['TASK_PARAMS'])",
+        "tmpl = " + tmpl_repr,
         "print(tmpl.format(**params))",
-        '")',
+        "PYEOF",
+        ")",
         "",
         'echo "Task $TASK_ID / ${SLURM_ARRAY_TASK_COUNT}: params=$TASK_PARAMS"',
         'echo "Command: $CMD"',
@@ -1115,15 +1131,25 @@ def get_array_job_status(
         timeout=30,
     )
     if r.returncode == 0 and r.stdout.strip():
-        # scontrol outputs one line per array task when using --oneliner
+        # scontrol --oneliner emits two formats:
+        #   pending   : "JobId=NNNN_[i] ArrayJobId=NNNN JobState=PENDING ..."
+        #   launched  : "JobId=NNNN+i ArrayJobId=NNNN ArrayTaskId=i JobState=... "
+        # ArrayTaskId is the reliable per-task index regardless of phase.
         for line in r.stdout.splitlines():
-            m = re.search(r"JobId=(\d+)_\[(\d+)\]", line)
-            if not m:
+            task_id_m = re.search(r"ArrayTaskId=(\d+)", line)
+            if not task_id_m:
+                # Fallback: pre-launch packed notation
+                m = re.search(r"JobId=\d+_\[(\d+)\]", line)
+                if not m:
+                    continue
+                task_id = int(m.group(1))
+            else:
+                task_id = int(task_id_m.group(1))
+            if task_id in seen_ids:
                 continue
-            task_id = int(m.group(2))
             state_m = re.search(r"JobState=(\S+)", line)
             exit_m = re.search(r"ExitCode=(\S+)", line)
-            elapsed_m = re.search(r"Elapsed=(\S+)", line)
+            elapsed_m = re.search(r"RunTime=(\S+)", line) or re.search(r"Elapsed=(\S+)", line)
             results.append({
                 "task_id": task_id,
                 "state": state_m.group(1) if state_m else "UNKNOWN",
@@ -1133,7 +1159,7 @@ def get_array_job_status(
             seen_ids.add(task_id)
 
     if results:
-        return results
+        return sorted(results, key=lambda d: d["task_id"])
 
     # Strategy 2: sacct -j (covers completed array tasks where scontrol is silent).
     r2 = _ssh(
@@ -1146,18 +1172,24 @@ def get_array_job_status(
             line = line.strip()
             if not line:
                 continue
-            # sacct produces lines like "1234_[0]|COMPLETED|0:0|00:01:00"
-            m = re.search(r"(\d+)_\[(\d+)\]\|(\S+)\|(\S+)\|(\S+)", line)
-            if m:
-                task_id = int(m.group(2))
-                if task_id in seen_ids:
-                    continue
-                results.append({
-                    "task_id": task_id,
-                    "state": m.group(3),
-                    "exit_code": m.group(4),
-                    "elapsed": m.group(5),
-                })
-                seen_ids.add(task_id)
+            # sacct emits per-task rows like "NNNN_i|STATE|exit|elapsed" plus
+            # noisy step rows "NNNN_i.batch|..." and "NNNN_i.extern|..." which
+            # we want to skip.
+            m = (
+                re.match(r"(\d+)_(\d+)\|(\S+)\|(\S+)\|(\S+)$", line)
+                or re.match(r"(\d+)_\[(\d+)\]\|(\S+)\|(\S+)\|(\S+)$", line)
+            )
+            if not m:
+                continue
+            task_id = int(m.group(2))
+            if task_id in seen_ids:
+                continue
+            results.append({
+                "task_id": task_id,
+                "state": m.group(3),
+                "exit_code": m.group(4),
+                "elapsed": m.group(5),
+            })
+            seen_ids.add(task_id)
 
-    return results
+    return sorted(results, key=lambda d: d["task_id"])

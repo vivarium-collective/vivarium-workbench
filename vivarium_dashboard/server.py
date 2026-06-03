@@ -8571,11 +8571,48 @@ if __name__ == "__main__":
             "pbg_" + ws_data.get("name", "").replace("-", "_")
         )
 
-        is_multi = ("variants" in spec or "composites" in spec) and "runs" in spec
+        is_v3 = spec.get("schema_version") == 3 or "simulation_set" in spec
+        is_multi = not is_v3 and ("variants" in spec or "composites" in spec) and "runs" in spec
         inv_dir = _study_dir(name)
         tasks: list[dict] = []
 
-        if is_multi:
+        if is_v3:
+            # v3 study shape: simulation_set entries with base_model + perturbation.
+            # Composite is built on the HPC side from the importable base_model
+            # (no YAML to resolve locally), so we pass {base_model, overrides}
+            # to the runner instead of a pre-resolved state_json.
+            sim_set = spec.get("simulation_set") or []
+            include_gated = bool(body.get("include_gated"))
+            body_steps_override = body.get("steps_override")
+            for entry in sim_set:
+                status = (entry.get("status") or "").lower()
+                if status != "ready" and not include_gated:
+                    continue
+                base_model = entry.get("base_model")
+                if not base_model:
+                    return self._json(
+                        {"error": f"simulation_set entry '{entry.get('name')}' missing base_model"},
+                        400,
+                    )
+                overrides = dict(entry.get("perturbation") or {})
+                seeds = entry.get("seeds") or [0]
+                overrides.setdefault("seed", seeds[0])
+                if body_steps_override is not None:
+                    steps = int(body_steps_override)
+                elif entry.get("steps") is not None:
+                    steps = int(entry["steps"])
+                else:
+                    dur_min = entry.get("duration_min", 60)
+                    dt = entry.get("dt_seconds", 1.0)
+                    steps = max(1, int(dur_min * 60 / dt))
+                run_id = cr.generate_run_id(base_model, overrides)
+                tasks.append({
+                    "run_id": run_id,
+                    "base_model": base_model,
+                    "overrides": overrides,
+                    "steps": steps,
+                })
+        elif is_multi:
             observables = spec.get("observables") or []
             for run_entry in spec.get("runs") or []:
                 composite_name = run_entry["composite"]
@@ -8632,26 +8669,53 @@ if __name__ == "__main__":
 
         param_values: list[dict] = []
         for t in tasks:
-            encoded = _b64.b64encode(
-                json.dumps(
-                    {
-                        "run_id": t["run_id"],
-                        "state_json": t["state_json"],
-                        "steps": t["steps"],
-                        "pkg": pkg,
-                    }
-                ).encode()
-            ).decode()
+            payload: dict = {
+                "run_id": t["run_id"],
+                "steps": t["steps"],
+                "pkg": pkg,
+            }
+            if "base_model" in t:
+                # v3 path: runner imports base_model + builds composite
+                payload["base_model"] = t["base_model"]
+                payload["overrides"] = t.get("overrides") or {}
+            else:
+                # v2 path: pre-resolved state dict
+                payload["state_json"] = t["state_json"]
+            encoded = _b64.b64encode(json.dumps(payload).encode()).decode()
             param_values.append({"params_b64": encoded})
 
         settings = get_hpc_settings(str(WORKSPACE))
         ws_name = WORKSPACE.name
         remote_ws = f"{settings.hpc_repo_base_path}/{ws_name}"
-        sif_path = settings.hpc_sif_path or f"{remote_ws}/{ws_name}.sif"
+        image_base = settings.hpc_image_base_path or remote_ws
+        sif_path = f"{image_base}/{ws_name}.sif"
+
+        # Ship the standalone runner to the workspace so the container can
+        # exec it directly. The runner is mostly stdlib + process_bigraph,
+        # which lives in /app/.venv/ inside the v2ecoli SIF — vivarium_dashboard
+        # itself isn't installed in the image.
+        from vivarium_dashboard.lib.hpc_dispatch import _scp_file as _hpc_scp
+        import vivarium_dashboard.lib.run_investigation_task as _runner_mod
+        runner_local = Path(_runner_mod.__file__)
+        runner_remote = f"{remote_ws}/.pbg/runners/run_investigation_task.py"
+        try:
+            from vivarium_dashboard.lib.hpc_dispatch import _ssh as _hpc_ssh
+            _hpc_ssh(settings, f"mkdir -p {remote_ws}/.pbg/runners", timeout=30)
+            _hpc_scp(settings, runner_local, runner_remote, timeout=30)
+        except Exception as exc:
+            return self._json({"error": f"failed to stage runner script: {exc}"[:500]}, 500)
+
+        # Wrap the runner invocation in apptainer exec with the same bind
+        # mounts and venv-on-PATH pattern that submit_run_job uses, so
+        # process_bigraph + EcoliWCM resolve correctly.
         cmd_tmpl = (
-            f"apptainer exec --containall --bind {remote_ws}:/workspace "
-            f"{sif_path} bash -c 'cd /workspace && "
-            f"python3 -m vivarium_dashboard.lib.run_investigation_task {{params_b64}}'"
+            f"apptainer exec "
+            f"-B {remote_ws}/results:/app/results "
+            f"-B {remote_ws}/out:/app/out "
+            f"-B {remote_ws}:/workspace "
+            f"{sif_path} "
+            "bash -c 'export PATH=/app/.venv/bin:$PATH; "
+            "exec /app/.venv/bin/python3 /workspace/.pbg/runners/run_investigation_task.py {params_b64}'"
         )
 
         resources = {

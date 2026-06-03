@@ -1476,8 +1476,16 @@
     <h3 class="section-title">HPC Array Runs</h3>
     <p class="muted" style="margin:0 0 10px 0;font-size:0.88em">
       Runs dispatched to an HPC cluster via SLURM job arrays.
-      <button id="btn-run-hpc-array" class="btn btn-primary" style="margin-left:12px;padding:3px 12px;font-size:0.85em">Run HPC array job</button>
     </p>
+    <div style="display:flex;align-items:center;gap:12px;margin:0 0 10px 0;font-size:0.85em;flex-wrap:wrap">
+      <label for="hpc-steps-override" title="Override per-task simulation step count. Useful for smoke-testing a long sweep at low cost.">
+        steps: <input id="hpc-steps-override" type="number" min="1" value="10" style="width:64px;padding:2px 4px;border:1px solid #cbd5e1;border-radius:3px">
+      </label>
+      <label title="By default only simulation_set entries with status: ready are dispatched. Check to also include 'gated' entries.">
+        <input id="hpc-include-gated" type="checkbox"> include gated
+      </label>
+      <button id="btn-run-hpc-array" class="btn btn-primary" style="padding:3px 12px;font-size:0.85em">Run HPC array job</button>
+    </div>
     <div id="hpc-array-status">
       <p class="muted">No HPC array runs yet.</p>
     </div>
