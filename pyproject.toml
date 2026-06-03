@@ -27,9 +27,17 @@ dev = ["pytest>=7.4", "pytest-timeout", "pytest-json-report>=1.5"]
 [project.scripts]
 vivarium-dashboard = "vivarium_dashboard.cli:main"
 
-[tool.hatch.build.targets.wheel]
-packages = ["vivarium_dashboard"]
+# bigraph-loom is a PEP 508 direct git URL (not on PyPI), so the wheel build
+# backend must opt into direct references — without this, hatchling refuses the
+# build on stricter uv/hatchling versions.
+[tool.hatch.metadata]
+allow-direct-references = true
 
-[tool.hatch.build.targets.wheel.force-include]
-"vivarium_dashboard/static" = "vivarium_dashboard/static"
-"vivarium_dashboard/templates" = "vivarium_dashboard/templates"
+[tool.hatch.build.targets.wheel]
+# `packages` already ships everything tracked under vivarium_dashboard/,
+# including static/ and templates/. A force-include of those same paths added
+# each data file a SECOND time, which hatchling rejects ("A second file is
+# being added to the wheel archive at the same path: .../static/client.js") and
+# broke every non-editable/wheel build (e.g. uv sync of the git dependency in
+# Docker). They stay shipped via `packages`; no force-include needed.
+packages = ["vivarium_dashboard"]
