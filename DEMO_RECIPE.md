@@ -141,12 +141,20 @@ per the schema in `info/hpc.md` works too.
 #### Step C2: Open the investigation detail page
 - Refresh the dashboard's study detail page in the browser
 - Expected: a `generate report` checkbox appears next to `include gated`
-  in the HPC run controls. If it's hidden, the study has no
-  `report_generator` declared — return to Step C1.
+  in the HPC run controls **and is pre-checked**. If it's hidden, the
+  study has no `report_generator` declared — return to Step C1.
+- The report HTML is treated as the primary desired output artifact
+  for any reportable study; the checkbox defaults to ON whenever the
+  workspace declares a report_generator. Uncheck only when you want
+  to inspect the standard runner path's behaviour without running
+  the report script (advanced use).
 
 #### Step C3: Submit with report generation
-- Optionally pick a subset of `simulation_set` entries
-- Check `generate report`
+- Optionally pick a subset of `simulation_set` entries (or leave all
+  unchecked to dispatch every `status: ready` entry — the default
+  generate_report=ON means a report will still be produced)
+- Confirm `generate report` is checked (it is by default for
+  reportable studies)
 - Click `Run HPC array job`
 - Expected: array dispatch fires; each task invokes the declared
   script with the rendered args; outputs land in the workspace's

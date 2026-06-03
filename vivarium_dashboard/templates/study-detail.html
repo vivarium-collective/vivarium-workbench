@@ -1484,7 +1484,7 @@
       <label title="By default only simulation_set entries with status: ready are dispatched. Check to also include 'gated' entries. Ignored when a subset is explicitly selected below.">
         <input id="hpc-include-gated" type="checkbox"> include gated
       </label>
-      <label id="hpc-generate-report-wrap" title="When checked, each task runs the report script declared by the study's report_generator block and writes its output under the declared output_dir. The Visualizations tab auto-discovers and iframe-renders the results after pullback." style="display:none">
+      <label id="hpc-generate-report-wrap" title="Default ON for studies that declare a report_generator (the report HTML is the primary desired artifact, viewed in the Visualizations tab). Uncheck to dispatch via the standard runner path instead — useful for inspecting the workspace composite's own emitter behaviour without running the report script." style="display:none">
         <input id="hpc-generate-report" type="checkbox"> generate report
       </label>
       <button id="btn-run-hpc-array" class="btn btn-primary" style="padding:3px 12px;font-size:0.85em">Run HPC array job</button>

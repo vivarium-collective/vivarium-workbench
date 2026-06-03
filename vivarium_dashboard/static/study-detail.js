@@ -760,14 +760,19 @@
     var simSet = spec.simulation_set || [];
 
     // Surface the "generate report" checkbox only when the study declares
-    // a report_generator (top-level or on any simulation_set entry).
-    // The dashboard never knows what the report script does — just whether
-    // the workspace has wired one in.
+    // a report_generator (top-level or on any simulation_set entry).  When
+    // present, default-check it: the report-generator output is the primary
+    // desired artifact for any reportable simulation (it's what renders in
+    // the Visualizations tab).  The checkbox remains as an opt-out for users
+    // who want to inspect the standard runner path's behaviour without
+    // editing the spec.
     var hasReportGen = !!spec.report_generator || simSet.some(function(e) {
       return e && e.report_generator;
     });
     var reportWrap = document.getElementById('hpc-generate-report-wrap');
+    var reportEl = document.getElementById('hpc-generate-report');
     if (reportWrap) reportWrap.style.display = hasReportGen ? '' : 'none';
+    if (reportEl && hasReportGen) reportEl.checked = true;
 
     if (!simSet.length) return;
     var picker = document.getElementById('hpc-subset-picker');
