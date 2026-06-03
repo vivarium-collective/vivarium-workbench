@@ -731,7 +731,11 @@
   // Per-run_id state for auto-pullback on COMPLETED edge.
   //   prevState: last polled SLURM state (string)
   //   pullback:  'idle' | 'in_flight' | 'synced' | 'failed'
+  //   pullbackError: last error message from a failed POST (for the chip's tooltip)
   var _taskState = {};
+  // Cached last array-status payload so we can re-render the table on
+  // pullback state changes without waiting for the next 10s poll tick.
+  var _lastArrayStatus = null;
 
   function getComputeBackend() {
     var sel = document.getElementById('compute-backend-select');
@@ -743,6 +747,44 @@
     if (!el) return;
     el.textContent = msg;
     el.style.color = ok ? '#16a34a' : '#dc2626';
+  }
+
+  // Populate the simulation_set subset picker from the study spec.
+  // Each entry becomes a checkbox; checking any of them switches the
+  // server-side filter from "status==ready (+ optional gated)" to the
+  // explicit name list. Useful for the boss's exact "nsweep-n{1,2,4,8}"
+  // 4-task subset of a 6-entry simulation_set.
+  api('GET', '/api/study/' + encodeURIComponent(STUDY_NAME)).then(function(r) {
+    if (r.status !== 200 || !r.body || !r.body.spec) return;
+    var simSet = r.body.spec.simulation_set || [];
+    if (!simSet.length) return;
+    var picker = document.getElementById('hpc-subset-picker');
+    var list = document.getElementById('hpc-subset-list');
+    if (!picker || !list) return;
+    list.innerHTML = '';
+    simSet.forEach(function(entry) {
+      var name = entry.name || '';
+      var status = entry.status || '';
+      var statusColor = status === 'ready' ? '#16a34a' :
+                        status === 'gated' ? '#d97706' : '#64748b';
+      var label = document.createElement('label');
+      label.style.cssText = 'display:inline-flex;align-items:center;gap:4px;cursor:pointer';
+      label.innerHTML =
+        '<input type="checkbox" class="hpc-subset-cb" value="' + name + '"> ' +
+        '<code>' + name + '</code> ' +
+        '<span style="color:' + statusColor + ';font-size:0.78em">' + status + '</span>';
+      list.appendChild(label);
+    });
+    picker.style.display = '';
+  });
+
+  var _clearBtn = document.getElementById('hpc-subset-clear');
+  if (_clearBtn) {
+    _clearBtn.addEventListener('click', function() {
+      document.querySelectorAll('.hpc-subset-cb').forEach(function(cb) {
+        cb.checked = false;
+      });
+    });
   }
 
   // Probe backends on load
@@ -815,6 +857,7 @@
   }
 
   function renderHpcArrayStatus(data) {
+    _lastArrayStatus = data;
     var container = document.getElementById('hpc-array-status');
     if (!container) return;
 
@@ -853,6 +896,7 @@
     tbody.innerHTML = '';
     tasks.forEach(function(task, idx) {
       var runId = runIds[idx] || task.run_id || '—';
+      var taskIdx = task.task_id !== undefined ? task.task_id : idx;
       var s = _taskState[runId] || (_taskState[runId] = { prevState: null, pullback: 'idle' });
 
       // Auto-pullback on PENDING/RUNNING → COMPLETED edge.
@@ -865,17 +909,61 @@
       var tr = document.createElement('tr');
       tr.style.fontSize = '0.85em';
       tr.innerHTML =
-        '<td>' + (task.task_id !== undefined ? task.task_id : idx) + '</td>' +
+        '<td><button class="btn-task-log-toggle" data-task-idx="' + taskIdx + '" ' +
+            'style="font-size:0.78em;padding:1px 5px;margin-right:4px" title="show task log">▸</button>' +
+            taskIdx + '</td>' +
         '<td><code>' + runId + '</code></td>' +
         '<td><span class="run-status run-status-' + (task.state || 'unknown').toLowerCase() + '">' + (task.state || '—') + '</span></td>' +
         '<td>' + (task.exit_code || '—') + '</td>' +
         '<td>' + (task.elapsed || '—') + '</td>' +
-        '<td>' + renderPullbackCell(task.state, runId, s.pullback) + '</td>';
+        '<td>' + renderPullbackCell(task.state, runId, s.pullback, s.pullbackError) + '</td>';
       tbody.appendChild(tr);
+      // Hidden log-pane row, inserted right after the task row.
+      var logTr = document.createElement('tr');
+      logTr.id = 'hpc-task-log-row-' + taskIdx;
+      logTr.style.display = 'none';
+      logTr.innerHTML =
+        '<td colspan="6" style="padding:0">' +
+        '<pre id="hpc-task-log-pre-' + taskIdx +
+        '" style="margin:0;padding:8px 10px;background:#0f172a;color:#e2e8f0;' +
+        'font-size:0.78em;max-height:280px;overflow:auto;white-space:pre-wrap">' +
+        '(loading…)</pre></td>';
+      tbody.appendChild(logTr);
     });
   }
 
-  function renderPullbackCell(taskState, runId, pullbackState) {
+  // Task log expand/collapse — fetches /api/investigation-array-task-log on demand.
+  document.addEventListener('click', function(ev) {
+    var btn = ev.target.closest('.btn-task-log-toggle');
+    if (!btn) return;
+    var taskIdx = btn.dataset.taskIdx;
+    var row = document.getElementById('hpc-task-log-row-' + taskIdx);
+    var pre = document.getElementById('hpc-task-log-pre-' + taskIdx);
+    if (!row || !pre) return;
+    if (row.style.display === 'none') {
+      row.style.display = '';
+      btn.textContent = '▾';
+      btn.title = 'hide task log';
+      pre.textContent = '(loading…)';
+      api('GET', '/api/investigation-array-task-log?name=' +
+          encodeURIComponent(STUDY_NAME) + '&task_idx=' + encodeURIComponent(taskIdx) +
+          '&tail=200').then(function(r) {
+        if (r.status === 200 && r.body && typeof r.body.log === 'string') {
+          pre.textContent = r.body.log || '(log empty — task may not have started yet)';
+        } else {
+          pre.textContent = 'failed to load log: ' + ((r.body && r.body.error) || r.status);
+        }
+      }).catch(function(err) {
+        pre.textContent = 'log fetch error: ' + err;
+      });
+    } else {
+      row.style.display = 'none';
+      btn.textContent = '▸';
+      btn.title = 'show task log';
+    }
+  });
+
+  function renderPullbackCell(taskState, runId, pullbackState, errMsg) {
     if (taskState !== 'COMPLETED' && taskState !== 'FAILED') {
       return '<span class="muted" style="font-size:0.82em">' +
              (taskState === 'RUNNING' ? 'running…' : '—') + '</span>';
@@ -887,28 +975,44 @@
       return '<span style="color:#16a34a;font-size:0.82em">✓ synced</span>';
     }
     if (pullbackState === 'failed') {
-      return '<button class="btn-pullback-task" data-run-id="' + runId + '" style="font-size:0.82em;padding:2px 8px;color:#dc2626">↻ retry</button>';
+      var title = (errMsg || 'pullback failed').replace(/"/g, '&quot;');
+      return '<button class="btn-pullback-task" data-run-id="' + runId +
+             '" title="' + title + '" ' +
+             'style="font-size:0.82em;padding:2px 8px;color:#dc2626;border:1px solid #fecaca">' +
+             '✗ failed — ↻ retry</button>';
     }
     // idle — completed but not yet synced (e.g. page reloaded mid-array)
     return '<button class="btn-pullback-task" data-run-id="' + runId + '" style="font-size:0.82em;padding:2px 8px">sync results</button>';
   }
 
+  function rerenderArrayTable() {
+    // Repaint the table from cached status so a chip state change is visible
+    // immediately instead of waiting up to 10s for the next poll tick.
+    if (_lastArrayStatus) renderHpcArrayStatus(_lastArrayStatus);
+  }
+
   function firePullback(runId) {
+    rerenderArrayTable();  // flip chip to ⟳ syncing immediately
     api('POST', '/api/hpc/' + getComputeBackend() + '/run/' + encodeURIComponent(runId) + '/pullback', {})
       .then(function(r) {
         var s = _taskState[runId] || (_taskState[runId] = {});
         var body = r.body || {};
         if ((r.status === 200 || r.status === 202) && (body.state === 'ok' || body.state === 'partial')) {
           s.pullback = 'synced';
+          s.pullbackError = null;
         } else if (r.status === 200 && body.state === 'in_progress') {
           s.pullback = 'in_flight';  // already in progress server-side; next poll re-renders
         } else {
           s.pullback = 'failed';
+          s.pullbackError = (body && body.error) || ('HTTP ' + r.status);
         }
+        rerenderArrayTable();  // flip chip to ✓ or ✗ without waiting for the next poll
       })
-      .catch(function() {
+      .catch(function(err) {
         var s = _taskState[runId] || (_taskState[runId] = {});
         s.pullback = 'failed';
+        s.pullbackError = String(err);
+        rerenderArrayTable();
       });
   }
 
@@ -928,6 +1032,11 @@
       if (n > 0) body.steps_override = n;
     }
     if (gatedEl && gatedEl.checked) body.include_gated = true;
+    var checked = Array.prototype.map.call(
+      document.querySelectorAll('.hpc-subset-cb:checked'),
+      function(cb) { return cb.value; }
+    );
+    if (checked.length) body.include_names = checked;
     api('POST', '/api/investigation-run', body).then(function(r) {
       if (r.status === 202) {
         btn.textContent = 'Submitted ✓';

@@ -387,6 +387,47 @@ class TestV3SimulationSetParsing:
         assert "overrides" in payload
         assert "state_json" not in payload
 
+    def test_include_names_picks_exact_subset(self, monkeypatch):
+        """body.include_names short-circuits status filtering and picks only the named entries."""
+        spec = self._make_v3_spec()
+        response, captured = self._run_hpc_branch(
+            spec,
+            {"name": "colonies-01", "include_names": ["nsweep-n1", "nsweep-n4"]},
+            monkeypatch,
+        )
+        assert "param_values" in captured, f"submit not called; response={response}"
+        # Only the two named gated entries — even though they're status=gated
+        # and include_gated wasn't set.  The explicit subset overrides the filter.
+        assert len(captured["param_values"]) == 2
+
+    def test_include_names_overrides_include_gated(self, monkeypatch):
+        """When include_names is given, include_gated is ignored — only named entries dispatch."""
+        spec = self._make_v3_spec()
+        response, captured = self._run_hpc_branch(
+            spec,
+            {
+                "name": "colonies-01",
+                "include_names": ["build-smoke-n2"],
+                "include_gated": True,
+            },
+            monkeypatch,
+        )
+        assert "param_values" in captured, f"submit not called; response={response}"
+        # include_gated would normally pick all 3 entries; include_names trumps it.
+        assert len(captured["param_values"]) == 1
+
+    def test_empty_include_names_falls_back_to_status_filter(self, monkeypatch):
+        """An empty list shouldn't trigger the subset path."""
+        spec = self._make_v3_spec()
+        response, captured = self._run_hpc_branch(
+            spec,
+            {"name": "colonies-01", "include_names": []},
+            monkeypatch,
+        )
+        assert "param_values" in captured, f"submit not called; response={response}"
+        # Falls back to status==ready (1 entry, build-smoke-n2)
+        assert len(captured["param_values"]) == 1
+
 
 # ---------------------------------------------------------------------------
 # Test: v3 runner branch (base_model importlib path)

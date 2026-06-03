@@ -1481,10 +1481,18 @@
       <label for="hpc-steps-override" title="Override per-task simulation step count. Useful for smoke-testing a long sweep at low cost.">
         steps: <input id="hpc-steps-override" type="number" min="1" value="10" style="width:64px;padding:2px 4px;border:1px solid #cbd5e1;border-radius:3px">
       </label>
-      <label title="By default only simulation_set entries with status: ready are dispatched. Check to also include 'gated' entries.">
+      <label title="By default only simulation_set entries with status: ready are dispatched. Check to also include 'gated' entries. Ignored when a subset is explicitly selected below.">
         <input id="hpc-include-gated" type="checkbox"> include gated
       </label>
       <button id="btn-run-hpc-array" class="btn btn-primary" style="padding:3px 12px;font-size:0.85em">Run HPC array job</button>
+    </div>
+    {# Per-entry subset picker — populated by JS from spec.simulation_set #}
+    <div id="hpc-subset-picker" style="margin:0 0 10px 0;font-size:0.85em;border:1px dashed #cbd5e1;border-radius:4px;padding:8px 10px;display:none">
+      <div style="margin-bottom:6px;color:#475569">
+        Subset (overrides status filter when any boxes are checked):
+        <button id="hpc-subset-clear" type="button" style="font-size:0.78em;padding:1px 6px;margin-left:8px">clear</button>
+      </div>
+      <div id="hpc-subset-list" style="display:flex;flex-wrap:wrap;gap:8px 14px"></div>
     </div>
     <div id="hpc-array-status">
       <p class="muted">No HPC array runs yet.</p>

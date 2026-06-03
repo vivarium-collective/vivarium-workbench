@@ -4775,6 +4775,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_process_schema()
         if self.path.startswith("/api/investigation-array-status"):
             return self._get_investigation_array_status()
+        if self.path.startswith("/api/investigation-array-task-log"):
+            return self._get_investigation_array_task_log()
         if self.path.startswith("/api/investigation-viz-html"):
             return self._get_investigation_viz_html()
         if self.path.startswith("/api/investigation-composites"):
@@ -8584,10 +8586,20 @@ if __name__ == "__main__":
             sim_set = spec.get("simulation_set") or []
             include_gated = bool(body.get("include_gated"))
             body_steps_override = body.get("steps_override")
+            # Optional explicit subset: when ``include_names`` is given (and
+            # non-empty), it short-circuits the status filter and we dispatch
+            # exactly the entries the user picked from the UI subset list.
+            include_names_raw = body.get("include_names") or []
+            include_names = {n for n in include_names_raw if isinstance(n, str)}
             for entry in sim_set:
-                status = (entry.get("status") or "").lower()
-                if status != "ready" and not include_gated:
-                    continue
+                entry_name = entry.get("name") or ""
+                if include_names:
+                    if entry_name not in include_names:
+                        continue
+                else:
+                    status = (entry.get("status") or "").lower()
+                    if status != "ready" and not include_gated:
+                        continue
                 base_model = entry.get("base_model")
                 if not base_model:
                     return self._json(
@@ -8812,6 +8824,79 @@ if __name__ == "__main__":
                 "run_ids": meta.get("run_ids", []),
                 "status": meta.get("status"),
                 "submitted_at": meta.get("submitted_at"),
+            },
+            200,
+        )
+
+    def _get_investigation_array_task_log(self):
+        """GET /api/investigation-array-task-log — tail one array task's log.
+
+        Query params:
+          ``name=<investigation-slug>``  ``task_idx=<int>``  ``tail=<int>`` (default 200)
+
+        Reads the array meta sidecar to find the SLURM array id, then SSHs
+        to the cluster and ``tail``s the per-task log file at
+        ``{hpc_log_base_path}/<ws>/<array-name>_<task_idx>.out``.
+        """
+        from urllib.parse import urlparse, parse_qs
+
+        from vivarium_dashboard.lib.hpc_dispatch import _ssh, _mask
+        from vivarium_dashboard.lib.hpc_settings import get_hpc_settings, HpcNotConfiguredError
+
+        if WORKSPACE is None:
+            return self._json({"error": "no workspace bound"}, 409)
+        qs = parse_qs(urlparse(self.path).query)
+        name_list = qs.get("name")
+        idx_list = qs.get("task_idx")
+        if not name_list or not idx_list:
+            return self._json({"error": "query params 'name' and 'task_idx' required"}, 400)
+        name = name_list[0].strip()
+        try:
+            task_idx = int(idx_list[0])
+        except ValueError:
+            return self._json({"error": "task_idx must be an integer"}, 400)
+        tail_n = int((qs.get("tail") or ["200"])[0])
+
+        inv_dir = _study_dir(name)
+        meta_path = inv_dir / "hpc-array-meta.json"
+        if not meta_path.is_file():
+            return self._json({"error": f"no HPC array job for '{name}'"}, 404)
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        slurm_array_id = meta.get("slurm_job_array_id")
+        if slurm_array_id is None:
+            return self._json({"error": "meta sidecar missing slurm_job_array_id"}, 500)
+
+        try:
+            settings = get_hpc_settings(str(WORKSPACE))
+        except HpcNotConfiguredError as exc:
+            return self._hpc_503(exc)
+
+        ws_name = WORKSPACE.name
+        log_base = settings.hpc_log_base_path or f"{settings.hpc_repo_base_path}/logs"
+        # The sbatch's -o was set to {log_dir}/{array_job_name}_%a.out in
+        # submit_investigation_array_job.  We don't have array_job_name on
+        # this side, so glob.
+        log_dir = f"{log_base}/{ws_name}"
+        # Glob for any matching array log; %a expands to the task index.
+        glob_pattern = f"{log_dir}/viv-array-*_{task_idx}.out"
+        # `ls -t` picks the most recent if multiple matches exist.
+        cmd = f"ls -t {glob_pattern} 2>/dev/null | head -1 | xargs -r tail -n {tail_n}"
+        try:
+            r = _ssh(settings, cmd, timeout=30)
+        except Exception as exc:
+            return self._json({"error": f"ssh failed: {_mask(str(exc), settings)[:300]}"}, 500)
+        if r.returncode != 0:
+            return self._json(
+                {"error": f"tail failed: {_mask(r.stderr[:300], settings)}"},
+                500,
+            )
+        return self._json(
+            {
+                "name": name,
+                "task_idx": task_idx,
+                "slurm_job_array_id": slurm_array_id,
+                "tail": tail_n,
+                "log": r.stdout,
             },
             200,
         )
