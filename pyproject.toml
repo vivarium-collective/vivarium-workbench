@@ -27,6 +27,10 @@ dev = ["pytest>=7.4", "pytest-timeout", "pytest-json-report>=1.5"]
 [project.scripts]
 vivarium-dashboard = "vivarium_dashboard.cli:main"
 
+# Allow the PEP 508 direct git URL for bigraph-loom (not on PyPI).
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["vivarium_dashboard"]
 
