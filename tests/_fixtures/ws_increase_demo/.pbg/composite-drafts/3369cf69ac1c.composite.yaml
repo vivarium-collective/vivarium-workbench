@@ -1,0 +1,16 @@
+name: ''
+description: ''
+requires:
+  processes:
+  - IncreaseProcess
+parameters: {}
+state:
+  proc_1:
+    _type: process
+    address: pbg_ws_increase_demo.processes.IncreaseProcess
+    config:
+      rate: null
+    inputs: {}
+    outputs: {}
+    interval: 1
+  store_1: null

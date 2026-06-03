@@ -1,0 +1,39 @@
+name: ''
+description: ''
+requires:
+  processes:
+  - BigraphicalReactiveSystem
+  - DynamicWorker
+parameters: {}
+state:
+  p2:
+    _type: process
+    address: process_bigraph.processes.dynamic_structure.DynamicWorker
+    config:
+      process_id: null
+      growth_rate: null
+      spawn_growth_rate: null
+      propensity_spawn: null
+      propensity_remove: null
+      propensity_rewire: null
+      threshold_spawn: null
+      threshold_remove: null
+      threshold_rewire: null
+      max_pool_size: null
+      spawn_value: null
+    inputs: {}
+    outputs:
+      targets:
+      - store_2
+    interval: 1
+  p1:
+    _type: process
+    address: process_bigraph.processes.bigraphical_reactive_system.BigraphicalReactiveSystem
+    config: {}
+    inputs:
+      state:
+      - store_2
+    outputs: {}
+    interval: 1
+  store_1: null
+  store_2: null

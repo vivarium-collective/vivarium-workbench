@@ -1,0 +1,20 @@
+name: ''
+description: ''
+requires:
+  processes:
+  - Divide
+  - IncreaseProcess
+parameters: {}
+state:
+  Increase:
+    _type: process
+    address: pbg_ws_increase_demo.processes.IncreaseProcess
+    config:
+      rate: null
+    inputs:
+      level:
+      - v0
+    outputs: {}
+    interval: 1
+  v0: 3
+  v_i: 2

@@ -1,0 +1,178 @@
+{
+  "name": "v2ecoli colony",
+  "description": "Two-cell E. coli colony \u2014 whole-cell model (WCM) agents in a Pymunk multibody environment. Requires ParCa cache (run v2ecoli-parca first to populate out/cache).",
+  "tags": [
+    "colony",
+    "ecoli",
+    "wcm",
+    "hpc"
+  ],
+  "state": {
+    "cells": {
+      "a_4e811b": {
+        "id": "a_4e811b",
+        "type": "segment",
+        "mass": 0.04,
+        "length": 2.0,
+        "radius": 0.5,
+        "angle": 2.642529177293657,
+        "location": [
+          18.444218515250483,
+          17.579544029403024
+        ],
+        "velocity": [
+          -0.10330693556657507,
+          -0.007330650517280543
+        ],
+        "elasticity": 0.0,
+        "adhesins": 1.0,
+        "ecoli": {
+          "_type": "process",
+          "address": "local:EcoliWCM",
+          "config": {
+            "cache_dir": "out/cache",
+            "seed": 0
+          },
+          "interval": 1.0,
+          "inputs": {
+            "local": [
+              "local"
+            ],
+            "agent_id": [
+              "id"
+            ],
+            "location": [
+              "location"
+            ],
+            "angle": [
+              "angle"
+            ]
+          },
+          "outputs": {
+            "mass": [
+              "mass"
+            ],
+            "length": [
+              "length"
+            ],
+            "volume": [
+              "volume"
+            ],
+            "exchange": [
+              "exchange"
+            ],
+            "agents": [
+              "..",
+              "..",
+              "cells"
+            ]
+          }
+        },
+        "local": {},
+        "volume": 0.0,
+        "exchange": {}
+      },
+      "a_4d3076": {
+        "id": "a_4d3076",
+        "type": "segment",
+        "mass": 0.04,
+        "length": 2.0,
+        "radius": 0.5,
+        "angle": 1.9057700639797035,
+        "location": [
+          14.049341374504143,
+          17.837985890347724
+        ],
+        "velocity": [
+          -0.16506884958036672,
+          -0.09536991124763994
+        ],
+        "elasticity": 0.0,
+        "adhesins": 1.0,
+        "ecoli": {
+          "_type": "process",
+          "address": "local:EcoliWCM",
+          "config": {
+            "cache_dir": "out/cache",
+            "seed": 1
+          },
+          "interval": 1.0,
+          "inputs": {
+            "local": [
+              "local"
+            ],
+            "agent_id": [
+              "id"
+            ],
+            "location": [
+              "location"
+            ],
+            "angle": [
+              "angle"
+            ]
+          },
+          "outputs": {
+            "mass": [
+              "mass"
+            ],
+            "length": [
+              "length"
+            ],
+            "volume": [
+              "volume"
+            ],
+            "exchange": [
+              "exchange"
+            ],
+            "agents": [
+              "..",
+              "..",
+              "cells"
+            ]
+          }
+        },
+        "local": {},
+        "volume": 0.0,
+        "exchange": {}
+      }
+    },
+    "multibody": {
+      "_type": "process",
+      "address": "local:PymunkProcess",
+      "config": {
+        "env_size": 30,
+        "jitter_per_second": 0.5,
+        "damping_per_second": 0.5
+      },
+      "interval": 1.0,
+      "inputs": {
+        "segment_cells": [
+          "cells"
+        ]
+      },
+      "outputs": {
+        "segment_cells": [
+          "cells"
+        ]
+      }
+    },
+    "emitter": {
+      "_type": "step",
+      "address": "local:RAMEmitter",
+      "config": {
+        "emit": {
+          "agents": "node",
+          "time": "node"
+        }
+      },
+      "inputs": {
+        "agents": [
+          "cells"
+        ],
+        "time": [
+          "global_time"
+        ]
+      }
+    }
+  }
+}

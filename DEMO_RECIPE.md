@@ -167,4 +167,25 @@ per the schema in `info/hpc.md` works too.
   others don't, no top-level fallback) returns a 400 naming the
   missing entries.
 
+#### Step C5: Verify auto-render after pullback (todo #23)
+- Watch the HPC array status panel after submitting an array run
+- After all per-task pullback chips reach `✓ synced`, a new status
+  chip appears below the array status row:
+  - `⟳ rendering report…` (transient, ~1–3 seconds)
+  - then one of:
+    - `✓ report rendered (N visualization[s]) — view` (clicking
+      `view` reloads the page so the freshly-rendered HTML appears in
+      the Visualizations tab)
+    - `✓ all tasks synced — no spec-declared visualizations to render`
+      (the study has no `visualizations:` block; report_generator
+      outputs, if any, are already auto-discovered)
+    - `✗ report render failed — retry` (clicking `retry` re-fires
+      the POST)
+- No manual click is required between submitting the array job and
+  seeing the report (Acceptance criterion #5 from todo #21, closed
+  via todo #23).
+- If a task's SLURM run FAILED and its pullback also failed, the chip
+  waits until that task's pullback chip settles (synced or failed)
+  before firing or skipping the render.
+
 ---

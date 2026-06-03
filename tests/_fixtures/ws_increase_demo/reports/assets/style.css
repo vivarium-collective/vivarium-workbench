@@ -1,0 +1,1863 @@
+:root{
+  --bg:#fafafa;--panel:#fff;--border:#e2e6eb;--accent:#3a8;--accent2:#7c3aed;
+  --string:#059669;--num:#2563eb;--bool:#d97706;--gray:#666;
+  --text:#1f2937;--text-secondary:#4b5563;--muted:#6b7280;
+  --bg-alt:#f3f4f6;--hover:#f3f4f6;--panel-alt:#f9fafb;
+  --accent-blue:#3b82f6;
+  --topbar-bg:#fff;--rail-bg:#fafafa;
+}
+[data-theme="dark"]{
+  --bg:#0f172a;--panel:#1e293b;--border:#334155;--gray:#94a3b8;
+  --text:#e2e8f0;--text-secondary:#cbd5e1;--muted:#94a3b8;
+  --bg-alt:#1e293b;--hover:#334155;--panel-alt:#1e293b;
+  --accent:#34d399;--accent2:#a78bfa;
+  --accent-blue:#60a5fa;--string:#6ee7b7;--num:#60a5fa;--bool:#fbbf24;
+  --topbar-bg:#1e293b;--rail-bg:#0f172a;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,Segoe UI,sans-serif;color:var(--text);background:var(--bg);line-height:1.55}
+header{position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--border);padding:14px 20px;z-index:50}
+h1{margin:0;font-size:1.4em;color:var(--text)}
+h2{margin-top:0;color:var(--text)}
+h3{color:var(--text)}
+.subtitle{color:var(--gray);font-size:0.92em}
+main{padding:20px;margin:0 auto}
+/* Other dashboard pages keep their own narrower cap via `.viv-content > .page`
+ * (max-width:1200px, line 862). Studies + Investigations + the embedded
+ * study-detail page fill the whole window. */
+#page-studies, .viv-content > #page-studies,
+#page-investigations, .viv-content > #page-investigations
+  {max-width:none;width:auto}
+.viv-content:has(> #page-investigations.active){
+  padding:8px 12px !important;
+  width:100% !important;
+  max-width:none !important;
+}
+#page-investigations.active{
+  max-width:none !important;
+  width:100% !important;
+  margin:0 !important;
+  box-sizing:border-box;
+}
+#investigation-dag-shell{ width: 100% !important; }
+#investigation-study-embed-panel{
+  width: 100% !important; max-width: none !important;
+  margin-top: 16px !important;
+  /* Sticky so the embedded study iframe stays visible as the user
+   * scrolls the SPA past the investigation DAG above. Without this,
+   * the SPA scroll lifts the iframe off-screen and the iframe's own
+   * sticky nav has no chance to engage — the bar is technically
+   * pinned, but pinned to a top edge the user can no longer see. */
+  position: -webkit-sticky;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+#investigation-study-embed-frame{
+  width: 100% !important;
+  height: 85vh !important;
+  min-height: 600px !important;
+}
+main.study-page{max-width:none;padding:12px 16px;width:100%;box-sizing:border-box}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Studies-tab fullscreen layout.
+ *
+ * Problem this fixes: viv-content has padding 24px + overflow-y:auto, the
+ * embedded study iframe was sized via calc(100vh - 160px), and the iframe
+ * itself scrolls. That stacks 24px margins all around with one outer
+ * scrollbar and one iframe scrollbar.
+ *
+ * Solution: when Studies is the active page, kill viv-content's own
+ * padding + scroll, lay out #page-studies as a flex column, and let
+ * the embedded study panel flex-grow into the remaining viewport area.
+ * The iframe takes 100% of its (flex-sized) parent — no calc, no nested
+ * scroll.
+ * ───────────────────────────────────────────────────────────────────── */
+/* `.viv-content > .page { max-width: 1200px; margin: 0 auto }` at line ~862
+ * clamps the Studies content. Override with high specificity on every
+ * relevant element so the layout uses the full content area. Keep block
+ * flow + .viv-content's natural overflow-y:auto so the user can scroll
+ * past the cards to see an embedded study below. */
+.viv-content:has(> #page-studies.active){
+  padding:8px 12px !important;
+  width:100% !important;
+  max-width:none !important;
+  /* overflow:auto stays as the .viv-content default — single scrollbar. */
+}
+.viv-content > #page-studies.active,
+#page-studies.active{
+  max-width:none !important;
+  width:100% !important;
+  margin:0 !important;
+  box-sizing:border-box;
+}
+#page-studies.active > .page-lead{ max-width:none }
+/* Cards: tight to content (no stretch-to-row-max), wider minmax than the
+ * default 280px so the grid breathes on big screens. */
+#page-studies.active > #investigations-grid{
+  width:100% !important; max-width:none !important;
+  grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)) !important;
+  align-items:start;
+  gap:12px;
+}
+#page-studies.active .investigation-card{
+  align-self:start;
+}
+/* Embedded study: full content width, fixed comfortable height. Iframe
+ * scrolls its own content; the page scrolls past the grid to reach it.
+ * Sticky in the SPA so the iframe stays in view as the user scrolls
+ * past the Studies grid above — without this, the iframe scrolls off
+ * the top and the .study-tabs inside it (also sticky) end up pinned
+ * to an edge the user can no longer see. */
+#study-detail-panel{
+  width:100% !important; max-width:none !important;
+  margin-top:16px !important;
+  position: -webkit-sticky;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+#study-detail-frame{
+  width:100% !important;
+  height:85vh !important;
+  min-height:600px !important;
+}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:18px;margin-bottom:18px}
+.guidance{background:linear-gradient(180deg,#fff7e6,#fff);border:2px solid #f5b042;display:none}
+.guidance.active{display:block}
+table{width:100%;border-collapse:collapse;font-size:0.92em}
+th,td{padding:6px 8px;border-bottom:1px solid var(--border);text-align:left}
+th{background:rgba(0,0,0,0.03);color:var(--text)}
+td{color:var(--text-secondary)}
+.tracker{display:flex;gap:6px;flex-wrap:wrap}
+.tracker .pill{flex:1;min-width:120px;padding:10px;border-radius:4px;font-size:0.86em}
+.pill.complete{background:#d1fae5}
+.pill.in_progress{background:#fef3c7}
+.pill.gate_pending{background:#fee2e2}
+.pill.planned{background:#f3f4f6;color:#888}
+.json-tree{font-family:ui-monospace,Menlo,monospace;font-size:0.86em}
+.json-tree .key{color:var(--accent2)}
+.json-tree .str{color:var(--string)}
+.json-tree .num{color:var(--num)}
+.json-tree .bool{color:var(--bool)}
+.json-tree summary{cursor:pointer;user-select:none}
+code{font-family:ui-monospace,Menlo,monospace;background:rgba(0,0,0,0.04);padding:1px 4px;border-radius:3px}
+[data-theme="dark"] code{background:rgba(255,255,255,0.08)}
+img{max-width:100%}
+.stage-label{
+  display:inline-block;
+  font-size:0.7em;
+  background:#f5b042;
+  color:#fff;
+  padding:2px 8px;
+  border-radius:10px;
+  margin-left:8px;
+  vertical-align:middle;
+  letter-spacing:0.05em;
+}
+.stage-label.optional{background:#7c7c7c}
+.stage-explainer{color:var(--gray);font-size:0.92em;margin:-4px 0 12px}
+.status-pill{
+  font-size:0.78em; padding:2px 10px; border-radius:10px;
+}
+.status-pill.complete{background:#d1fae5; color:#065f46}
+.status-pill.in_progress{background:#fef3c7; color:#92400e}
+.status-pill.gate_pending{background:#fee2e2; color:#991b1b}
+.status-pill.planned{background:#e5e7eb; color:#4b5563}
+.status-pill.planning{background:#e5e7eb; color:#4b5563}
+.status-pill.running{background:#dbeafe; color:#1e40af}
+.status-pill.failed{background:#fee2e2; color:#991b1b}
+.source-artifact{ background:var(--bg-alt); padding:8px 12px; border-radius:4px;
+                  font-size:0.92em; margin:0 0 12px }
+.stage-track{display:flex;gap:4px;margin:8px 0;flex-wrap:wrap}
+.stage-track .step{flex:1;min-width:90px;padding:8px;border-radius:4px;font-size:0.78em;text-align:center}
+.stage-track .step.done{background:#d1fae5}
+.stage-track .step.todo{background:#f3f4f6;color:#888}
+.stage-track .step.partial{background:#fef3c7}
+.stage-track .step.next{background:#fff7e6;border:2px solid #f5b042;color:#a86b00;font-weight:600}
+.drop-zone{
+  border:2px dashed #c0c0c0;
+  border-radius:6px;
+  padding:24px;
+  text-align:center;
+  color:#666;
+  background:rgba(0,0,0,0.02);
+  margin:8px 0;
+  cursor:pointer;
+  transition:all 0.15s ease;
+}
+.drop-zone.drag-over{
+  border-color:#3a8;
+  background:rgba(58,168,136,0.08);
+  color:#3a8;
+}
+.drop-zone .file-info{
+  font-family:ui-monospace,Menlo,monospace;
+  font-size:0.85em;
+  color:#333;
+  margin-top:8px;
+}
+.drop-zone .file-hash{
+  font-family:ui-monospace,Menlo,monospace;
+  font-size:0.75em;
+  color:#888;
+  word-break:break-all;
+}
+.top-header{
+  background:var(--panel);border-bottom:1px solid var(--border);
+  padding:14px 20px;
+}
+.top-menu{
+  display:flex; gap:4px; border-bottom:2px solid var(--border);
+  margin-bottom:24px; padding:0 8px;
+  background:var(--panel);
+}
+.top-menu .menu-link{
+  padding:12px 20px; text-decoration:none; color:var(--muted);
+  font-weight:500; border-bottom:3px solid transparent;
+  margin-bottom:-2px; transition:all 0.15s;
+}
+.top-menu .menu-link:hover{ color:var(--text); background:var(--hover) }
+.top-menu .menu-link.active{
+  color:var(--text); border-bottom-color:var(--accent-blue);
+}
+.page{ display:none }
+.page.active{ display:block }
+.page-title{ margin-top:0; color:var(--text) }
+.page-lead{ color:var(--muted); margin-bottom:20px; max-width:680px }
+.count-badge{ font-size:0.78em; color:var(--muted); font-weight:normal }
+.registry-schema{
+  display:inline-block; max-width:480px; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; vertical-align:middle; font-size:0.85em;
+}
+.muted{ color:var(--muted) }
+.empty-state{ color:var(--muted); font-style:italic }
+.file-status{
+  display:inline-block; padding:2px 8px; border-radius:4px;
+  font-size:0.82em; font-weight:500; margin-right:6px;
+}
+.file-status.status-ok{ background:#d1fae5; color:#065f46 }
+.file-status.status-missing{ background:#fee2e2; color:#991b1b }
+.file-status.status-mismatch{ background:#fef3c7; color:#92400e }
+.file-link{
+  font-size:0.82em; color:#1e40af; text-decoration:none;
+  background:#eff6ff; padding:2px 8px; border-radius:4px;
+}
+.file-link:hover{ background:#dbeafe; text-decoration:underline }
+.module-grid{
+  display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));
+  gap:14px; margin:8px 0;
+}
+.module-card{
+  background:var(--panel); border:1px solid var(--border); border-radius:8px;
+  padding:14px 16px; display:flex; flex-direction:column; gap:8px;
+}
+.module-card-header{
+  display:flex; justify-content:space-between; align-items:center;
+}
+.module-card-header strong{ font-size:1.05em }
+.module-link{
+  font-size:0.85em; color:#1e40af; text-decoration:none;
+}
+.module-link:hover{ text-decoration:underline }
+.module-desc{ color:var(--text-secondary); font-size:0.9em; margin:0; line-height:1.4 }
+.module-tags{ display:flex; gap:4px; flex-wrap:wrap }
+.tag-pill{
+  background:#eff6ff; color:#1e40af; padding:2px 8px;
+  border-radius:999px; font-size:0.78em;
+}
+.module-action{ margin-top:auto }
+
+/* ── Visualization lifecycle (v0.4.2) ─────────────────────────────────── */
+.viz-status-described{ background:#e5e7eb; color:#374151 }
+.viz-status-requested{ background:#fef3c7; color:#92400e }
+.viz-status-created{ background:#dbeafe; color:#1e40af }
+.viz-status-added{ background:#fed7aa; color:#9a3412 }
+.viz-status-committed{ background:#d1fae5; color:#065f46 }
+.viz-actions{ display:flex; gap:6px; flex-wrap:wrap }
+.viz-description{ max-width:480px; color:#374151; font-size:0.92em }
+
+/* ── Suggest buttons (v0.4.8) ─────────────────────────────────────────── */
+.input-with-suggest{
+  display:flex; gap:6px; align-items:flex-start;
+}
+.input-with-suggest input,
+.input-with-suggest textarea{
+  flex:1; min-width:0;
+}
+.btn-suggest{
+  background:#eff6ff; border:1px solid #3b82f6; color:#1e40af;
+  border-radius:4px; padding:6px 12px; cursor:pointer; font-size:0.85em;
+  white-space:nowrap; align-self:stretch;
+}
+.btn-suggest:hover{ background:#dbeafe }
+.btn-suggest:disabled{ opacity:0.6; cursor:default }
+
+/* ── Focus mode (v0.5.0) ──────────────────────────────────────────────── */
+/* ?focus=<panel> hides the menu, strip, branch timeline, and
+ * non-target pages, leaving just the requested panel visible. Useful for
+ * skill-driven modal-like interactions. */
+body.focus-mode header.top-header{ display:none }
+body.focus-mode nav.top-menu{ display:none }
+body.focus-mode .page{ display:none }
+body.focus-mode .page.active{ display:block }
+body.focus-mode main.pages{ padding-top:8px }
+body.focus-mode .page-lead-supplement{ display:none }
+
+/* v2 layout (viv-rail / viv-topbar): focus mode hides the whole rail +
+ * topbar so the popped-out window is content-only. Explicit sizing on
+ * .viv-main + .viv-content prevents the flex collapse that left popouts
+ * blank when the topbar was hidden but the flex container still expected
+ * a topbar-shaped child. */
+body.focus-mode .viv-rail{ display:none !important }
+body.focus-mode .viv-topbar{ display:none !important }
+body.focus-mode .viv-layout{ height:100vh !important; display:flex !important; flex-direction:row !important }
+body.focus-mode .viv-main{
+  display:flex !important; flex-direction:column !important;
+  flex:1 1 100% !important; width:100% !important;
+  min-width:0 !important; margin:0 !important;
+  overflow:hidden !important;
+}
+body.focus-mode .viv-content{
+  flex:1 1 auto !important;
+  width:100% !important; height:100% !important;
+  overflow-y:auto !important;
+  padding:12px 16px !important;
+  display:block !important;
+}
+body.focus-mode .page.active{ display:block !important; min-height:0 !important }
+
+/* ── Composite explorer diagram (v0.5.1.6) ─────────────────────────────
+ * Server preserves graphviz's natural pt dimensions; CSS only shrinks
+ * the SVG if the container is narrower. For wider containers, the SVG
+ * renders at its natural pt size and we center it. No forced stretching.
+ *
+ * The lingering rendering issues (huge labels/circles) are a bigraph-viz
+ * default-sizing concern; see task #85 for the upstream PR.
+ */
+#ce-diagram{
+  max-height: 800px;
+  overflow: auto;
+  text-align: center;
+}
+#ce-diagram svg{
+  max-width: 100%;
+  max-height: 760px;
+  width: auto;
+  height: auto;
+  display: inline-block;
+}
+
+/* ── Composite explorer parameters list (v0.5.2) ──────────────────────── */
+#ce-parameters{ display:flex; flex-direction:column; gap:10px }
+.ce-param-row{
+  display:flex; flex-direction:column; gap:2px;
+  padding:8px 10px; border:1px solid #e5e7eb; border-radius:4px;
+  background:#fff;
+}
+.ce-param-label{
+  display:flex; align-items:center; gap:10px; margin:0;
+}
+.ce-param-name{ flex:0 0 auto; min-width:180px }
+.ce-param-input{ flex:1 1 auto; max-width:320px }
+.ce-param-desc{ margin-left:190px }
+
+/* Add a slim header in focus mode so the user knows what they're looking at */
+body.focus-mode::before{
+  content: "Focus mode — close this tab when done";
+  display:block; background:#fef3c7; color:#92400e;
+  padding:6px 16px; font-size:0.82em; font-weight:500;
+  border-bottom:1px solid #fcd34d;
+}
+
+/* ── Registry kind pickers: Emitters + Visualizations (v0.4.12) ──────── */
+.picker-row{
+  display:flex; gap:12px; align-items:flex-start; justify-content:space-between;
+  padding:10px 12px; border-bottom:1px solid #e5e7eb;
+}
+.picker-row:last-child{ border-bottom:none }
+.picker-row-main{ flex:1; min-width:0 }
+.picker-row-main code{ font-size:0.82em }
+.picker-row-main details{ margin-top:4px }
+.picker-row-main details summary{ cursor:pointer; font-size:0.85em }
+.picker-row-actions{ flex-shrink:0 }
+
+/* ── Emitter Use feedback + Composite picker (v0.4.14) ───────────────── */
+.apply-banner{
+  background:#dbeafe; color:#1e40af; padding:8px 14px;
+  border-radius:4px; margin:0 0 12px; font-size:0.9em;
+  animation: fadeOut 4s ease-out forwards;
+}
+@keyframes fadeOut{
+  0%,70% { opacity:1; }
+  100%   { opacity:0; }
+}
+.highlight-flash{
+  animation: highlightFlash 1.5s ease-out;
+}
+@keyframes highlightFlash{
+  0%,30% { box-shadow:0 0 0 3px #fef3c7; background:#fffbeb; }
+  100%   { box-shadow:none; background:transparent; }
+}
+
+/* ── Composite explorer — workbench tabs (v0.5.4) ────────────────────── */
+.ce-tab-strip{
+  display:flex; gap:2px; margin:12px 0; padding:0;
+  border-bottom:2px solid #e5e7eb;
+}
+.ce-tab{
+  background:transparent; border:none; padding:8px 16px;
+  font-size:0.9em; font-weight:500; color:#64748b; cursor:pointer;
+  border-bottom:2px solid transparent; margin-bottom:-2px;
+}
+.ce-tab:hover{ color:#1e293b; background:#f8fafc }
+.ce-tab.active{
+  color:#1e293b; border-bottom-color:#3b82f6; font-weight:600;
+}
+.ce-tab-badge{
+  display:inline-block; background:#e2e8f0; color:#475569;
+  border-radius:9999px; padding:0 6px; margin-left:4px;
+  font-size:0.75em; font-weight:600;
+}
+.ce-tab-panel{ display:none }
+.ce-tab-panel.active{ display:block }
+
+/* State tree (collapsible JSON) */
+.ce-state-tree{
+  font-family:"SF Mono",Menlo,Monaco,monospace;
+  font-size:0.82em; line-height:1.5;
+  background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px;
+  padding:10px 14px; max-height:520px; overflow:auto;
+}
+.ce-jt-key{ color:#7c3aed; font-weight:600 }
+.ce-jt-str{ color:#059669 }
+.ce-jt-num{ color:#2563eb }
+.ce-jt-bool{ color:#d97706 }
+.ce-jt-null{ color:#94a3b8 }
+.ce-jt-toggle{ cursor:pointer; user-select:none; color:#94a3b8; margin-right:4px }
+.ce-jt-toggle:hover{ color:#1e293b }
+.ce-jt-collapsed{ display:none }
+.ce-jt-bracket{ color:#64748b }
+
+/* History table */
+#ce-history-body table{ width:100%; border-collapse:collapse; font-size:0.85em }
+#ce-history-body th, #ce-history-body td{ padding:6px 8px; border-bottom:1px solid #e5e7eb; text-align:left }
+#ce-history-body th{ background:#f8fafc; font-weight:600 }
+.ce-history-status{ display:inline-block; padding:2px 8px; border-radius:9999px; font-size:0.75em; font-weight:600 }
+.ce-history-status.completed{ background:#d1fae5; color:#065f46 }
+.ce-history-status.running{ background:#fef3c7; color:#92400e }
+.ce-history-status.failed{ background:#fee2e2; color:#991b1b }
+
+/* Compare diff table */
+.ce-diff-table{ width:100%; border-collapse:collapse; font-size:0.85em; margin-top:12px }
+.ce-diff-table th, .ce-diff-table td{ padding:6px 8px; border:1px solid #e5e7eb }
+.ce-diff-table td.differs{ background:#fef9c3 }
+.ce-compare-legend{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:8px; font-size:0.85em }
+.ce-compare-legend .swatch{ display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:middle }
+
+/* "Create simulation" panel accent (was inline style on the HTML element) */
+.ce-create-sim-panel{ background:#eff6ff }
+
+/* ── Card browse toolbar (v0.5.6) ────────────────────────────────────── */
+.card-browse-toolbar{
+  display:flex; flex-wrap:wrap; gap:10px; align-items:center;
+  margin:0 0 12px; padding:10px 12px;
+  background:var(--bg-alt); border:1px solid var(--border); border-radius:6px;
+}
+.card-browse-search{
+  flex:1 1 220px; min-width:200px; max-width:380px;
+  padding:6px 10px; border:1px solid var(--border); border-radius:4px;
+  font-size:0.9em; background:var(--panel); color:var(--text);
+}
+.card-browse-chips{
+  display:flex; flex-wrap:wrap; gap:4px; flex:2 1 auto;
+}
+.card-browse-chip{
+  padding:3px 10px; border:1px solid var(--border); border-radius:9999px;
+  background:var(--panel); cursor:pointer; font-size:0.78em; color:var(--text-secondary);
+  user-select:none; transition:all 0.1s;
+}
+.card-browse-chip:hover{ border-color:var(--accent-blue); color:var(--accent-blue) }
+.card-browse-chip.active{
+  background:var(--accent-blue); border-color:var(--accent-blue); color:#fff;
+}
+.card-browse-options{
+  display:flex; align-items:center; gap:14px;
+  font-size:0.85em; color:var(--text-secondary);
+}
+.card-browse-options label{ cursor:pointer }
+.card-browse-view-toggle{ display:inline-flex; gap:2px; margin-left:6px }
+.view-btn{
+  background:var(--panel); border:1px solid var(--border); padding:3px 9px;
+  font-size:1em; cursor:pointer; line-height:1;
+}
+.view-btn.active{ background:var(--accent-blue); border-color:var(--accent-blue); color:#fff }
+
+/* List view rows */
+.module-list, .composite-list{ display:flex; flex-direction:column; gap:6px }
+.module-list-row, .composite-list-row{
+  display:grid; grid-template-columns:auto 1fr auto; gap:14px; align-items:center;
+  padding:8px 12px; background:var(--panel); border:1px solid var(--border); border-radius:6px;
+  font-size:0.92em;
+}
+.module-list-row .name, .composite-list-row .name{ font-weight:600 }
+.module-list-row .desc, .composite-list-row .desc{
+  color:var(--muted); font-size:0.88em; min-width:0;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.module-list-row .tag-pill, .composite-list-row .tag-pill{
+  background:#e0e7ff; color:#3730a3; padding:1px 7px; border-radius:9999px;
+  font-size:0.72em; margin-right:3px;
+}
+
+/* Module-source line + kind badge for composite cards/rows (Sim Setup) */
+.composite-list-row .composite-module,
+.module-card .composite-module{
+  font-size:0.84em; color:#4b5563;
+  margin-top:4px;
+}
+.composite-module code{
+  background:var(--bg-alt); padding:1px 6px; border-radius:4px; font-size:0.95em;
+}
+.kind-badge{
+  background:#dbeafe; color:#1e40af;
+  padding:1px 6px; border-radius:4px;
+  font-size:0.78em; font-weight:600;
+  margin-left:6px;
+}
+.composites-sort-select{
+  padding:4px 8px; border:1px solid #cbd5e1; border-radius:4px;
+  background:#fff; font-size:0.85em; color:#374151;
+  margin-left:6px; cursor:pointer;
+}
+
+/* ── Investigations page (v0.5.0) ───────────────────────────────────── */
+#investigations-grid{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+  gap:12px; margin-top:8px;
+}
+.investigation-card{
+  background:var(--panel); border:1px solid var(--border); border-radius:8px;
+  padding:14px 16px; cursor:pointer; transition:box-shadow 0.1s, border-color 0.1s;
+}
+.investigation-card:hover{
+  border-color:var(--accent-blue); box-shadow:0 2px 8px rgba(0,0,0,0.06);
+}
+.investigation-card .name{ font-weight:600; font-size:1.04em; margin-bottom:4px }
+.investigation-card .composite{ font-size:0.82em; color:#6b7280; font-family:monospace }
+.investigation-card .meta{ display:flex; gap:8px; font-size:0.78em; color:#94a3b8; margin-top:6px }
+.investigation-card .status-pill{ font-size:0.75em; padding:2px 8px; border-radius:9999px }
+
+#investigations-grid.list-view{ display:flex; flex-direction:column; gap:6px }
+#investigations-grid.list-view .investigation-card{ display:grid; grid-template-columns:1fr 2fr auto auto; gap:14px; align-items:center; padding:8px 12px }
+#investigations-grid.list-view .investigation-card .composite{ font-size:0.84em }
+#investigations-grid.list-view .investigation-card .meta{ margin-top:0 }
+
+.investigation-detail{
+  background:var(--bg-alt); border:1px solid var(--border); border-radius:8px;
+  padding:16px;
+}
+.investigation-detail-header{
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  margin-bottom:12px;
+}
+.investigation-detail-tabs{
+  display:flex; gap:2px; border-bottom:2px solid #e5e7eb; margin:0 0 12px;
+}
+.investigation-detail-tab{
+  background:transparent; border:none; padding:6px 14px;
+  font-size:0.88em; color:#64748b; cursor:pointer;
+  border-bottom:2px solid transparent; margin-bottom:-2px;
+}
+.investigation-detail-tab.active{
+  color:#1e293b; font-weight:600; border-bottom-color:#3b82f6;
+}
+.investigation-detail-panel{ display:none }
+.investigation-detail-panel.active{ display:block }
+.viz-frame{
+  width:100%; height:420px; border:1px solid #e5e7eb; border-radius:6px;
+  margin-bottom:10px; background:#fff;
+}
+.spec-yaml-pre{
+  background:#f8fafc; border:1px solid #e5e7eb; border-radius:6px;
+  padding:10px 14px; font-family:"SF Mono",Menlo,monospace; font-size:0.82em;
+  overflow:auto; max-height:480px;
+}
+
+/* Richer Investigations cards ------------------------------------------------ */
+.investigation-card .ic-header{
+  display:flex; align-items:flex-start; justify-content:space-between;
+  gap:12px; margin-bottom:6px;
+}
+.investigation-card .ic-title{
+  font-weight:600; font-size:1.02em; color:var(--text);
+}
+.investigation-card .ic-status{
+  flex:none;
+}
+.investigation-card .ic-baseline{
+  font-size:0.86em; color:var(--text-secondary); margin-bottom:6px;
+}
+.investigation-card .ic-baseline code{
+  font-size:0.95em; background:#f3f4f6; padding:1px 6px; border-radius:4px;
+}
+.investigation-card .ic-conclusions{
+  font-size:0.86em; color:var(--muted); line-height:1.4; margin:8px 0;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+  overflow:hidden;
+}
+.investigation-card .ic-meta{
+  display:flex; gap:14px; flex-wrap:wrap;
+  font-size:0.8em; color:#6b7280;
+}
+.investigation-card .ic-meta .ic-lastrun{
+  margin-left:auto;
+}
+
+/* Studies (formerly Investigations) focus-mode: hide index chrome, show only the detail -------- */
+#page-studies.inv-focus-mode #investigations-toolbar,
+#page-studies.inv-focus-mode .investigations-search,
+#page-studies.inv-focus-mode #investigations-tag-chips,
+#page-studies.inv-focus-mode #investigations-grid,
+#page-studies.inv-focus-mode .page-title,
+#page-studies.inv-focus-mode .page-lead{
+  display:none;
+}
+/* The page-title shares a flex-row with the "+ New investigation" button.
+ * Hide that wrapper entirely while focused so the button doesn't dangle. */
+#page-studies.inv-focus-mode > div:first-child{
+  display:none;
+}
+#page-studies.inv-focus-mode #investigation-detail{
+  display:block;
+}
+.inv-detail-back a:hover{
+  text-decoration:underline;
+}
+
+/* ============================================================================
+ * Vivarium chrome — left rail + topbar (V2 of vivarium-chrome-design)
+ * Activated when <body> wraps content in .viv-layout. Old top-banner styles
+ * stay intact for fallback / partial rollout.
+ * ============================================================================ */
+
+/* Layout shell -------------------------------------------------------------- */
+.viv-layout{
+  display:flex; height:100vh; width:100%; overflow:hidden;
+  font-family:-apple-system,"Segoe UI",sans-serif; color:var(--text);
+}
+
+/* Left rail ----------------------------------------------------------------- */
+.viv-rail{
+  width:240px; flex:0 0 240px;
+  display:flex; flex-direction:column;
+  background:var(--rail-bg); border-right:1px solid var(--border);
+  padding:16px 0 8px;
+  transition:width 0.18s ease, flex-basis 0.18s ease;
+  position:relative;
+  overflow:hidden;
+}
+.viv-rail-header{
+  display:flex; align-items:center; gap:10px;
+  padding:0 16px 14px;
+  border-bottom:1px solid var(--border);
+}
+.viv-rail-logo{
+  width:36px; height:36px; flex:0 0 36px;
+  border-radius:6px;
+  display:block;
+  object-fit:contain;
+  background:var(--panel);
+}
+.viv-rail-logo[role="presentation"]{
+  /* Fallback emoji rendering when no img is provided */
+  display:flex; align-items:center; justify-content:center;
+  font-size:1.4em;
+  background:linear-gradient(135deg,#3b82f6,#7c3aed);
+  color:#fff;
+}
+.viv-rail-brand{
+  display:flex; flex-direction:column; min-width:0;
+}
+.viv-rail-brand-title{
+  font-size:0.95em; font-weight:600; color:var(--text); line-height:1.2;
+}
+.viv-rail-brand-sub{
+  font-size:0.74em; color:var(--muted); line-height:1.2;
+}
+
+.viv-workspace-switcher{
+  margin:12px 12px 4px;
+  padding:8px 10px;
+  background:var(--panel); border:1px solid var(--border); border-radius:6px;
+  font-size:0.86em; color:var(--text);
+  display:flex; align-items:center; justify-content:space-between;
+  cursor:pointer; user-select:none;
+}
+.viv-workspace-switcher:hover{ background:var(--hover) }
+.viv-workspace-switcher .viv-ws-name{
+  font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.viv-workspace-switcher .viv-ws-caret{ color:#9ca3af; font-size:0.78em }
+
+.viv-rail-scroll{
+  flex:1 1 auto; overflow-y:auto; overflow-x:hidden;
+  padding:8px 0 4px;
+}
+
+.viv-rail-section{
+  padding:10px 0 6px;
+}
+.viv-rail-section + .viv-rail-section{
+  border-top:1px solid var(--border); margin-top:4px;
+}
+.viv-rail-section-label{
+  padding:0 16px 6px;
+  font-size:0.68em; font-weight:600; letter-spacing:0.08em;
+  text-transform:uppercase; color:var(--muted);
+}
+.viv-rail-link{
+  display:flex; align-items:center; gap:12px;
+  padding:8px 16px;
+  text-decoration:none; color:var(--text-secondary);
+  font-size:0.92em;
+  border-left:3px solid transparent;
+  cursor:pointer;
+  transition:background 0.1s, color 0.1s;
+}
+.viv-rail-link:hover{ background:var(--hover); color:var(--text) }
+.viv-rail-link.active{
+  background:var(--bg-alt); color:var(--accent-blue); font-weight:600;
+  border-left-color:var(--accent-blue);
+}
+.viv-rail-link.active .viv-rail-link-icon{ color:var(--accent-blue) }
+.viv-rail-link-icon{
+  display:flex; align-items:center; justify-content:center;
+  width:20px; height:20px; flex:0 0 20px;
+  color:var(--muted);
+}
+.viv-rail-link-svg{
+  width:18px; height:18px;
+  display:block;
+}
+.viv-rail-link-label{
+  flex:1 1 auto; min-width:0;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.viv-rail-link-badge{
+  background:var(--border); color:var(--text-secondary);
+  font-size:0.72em; padding:1px 7px; border-radius:9999px;
+  flex:0 0 auto;
+}
+.viv-rail-link.active .viv-rail-link-badge{ background:var(--accent-blue); color:#fff }
+
+/* Investigations group block ----------------------------------------------- */
+.viv-rail-investigations-group{
+  margin:2px 0 4px;
+}
+.viv-rail-investigations-group-header{
+  display:flex; align-items:center; gap:8px;
+  padding:6px 16px;
+  font-size:0.84em; color:var(--text); font-weight:500;
+  cursor:pointer; user-select:none;
+}
+.viv-rail-investigations-group-header:hover{ background:var(--hover) }
+.viv-rail-investigations-group-arrow{
+  display:inline-block; width:10px; color:#9ca3af; font-size:0.78em;
+  transition:transform 0.15s ease;
+}
+.viv-rail-investigations-group.collapsed .viv-rail-investigations-group-arrow{
+  transform:rotate(-90deg);
+}
+.viv-rail-investigations-group-name{
+  flex:1 1 auto; min-width:0;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.viv-rail-investigations-group-count{
+  background:#e5e7eb; color:#4b5563;
+  font-size:0.7em; padding:1px 7px; border-radius:9999px;
+}
+.viv-rail-investigations-group-items{
+  display:flex; flex-direction:column;
+  padding:2px 0 4px;
+}
+.viv-rail-investigations-group.collapsed .viv-rail-investigations-group-items{
+  display:none;
+}
+.viv-rail-investigations-group-items .viv-rail-link{
+  padding:5px 16px 5px 36px;
+  font-size:0.86em; color:var(--text-secondary);
+}
+.viv-rail-investigations-group-items .viv-rail-link.active{
+  background:var(--bg-alt); color:var(--accent-blue);
+}
+.viv-rail-investigations-group-items .viv-rail-link-sub{
+  display:block; font-size:0.74em; color:var(--muted);
+  margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+
+/* Focused-study rail state (single-investigation view) -------------------- */
+.viv-rail-focused-study{
+  margin:4px 8px; padding:8px 12px;
+  background:#eff6ff; border-left:3px solid #3b82f6;
+  border-radius:0 6px 6px 0;
+}
+.viv-rail-focused-study .viv-rail-link.active{
+  background:transparent; color:#1e40af; border-left:none; padding:4px 0;
+}
+.viv-rail-focused-study .viv-rail-study-icon{
+  color:#3b82f6;
+}
+.viv-rail-focused-hint{
+  display:block; padding:4px 0 6px 28px; color:#6b7280; font-size:0.78em;
+}
+.viv-rail-focused-study .viv-rail-back-link{
+  padding:4px 0 4px 28px; font-size:0.85em; color:#6b7280; border-left:none;
+}
+.viv-rail-focused-study .viv-rail-back-link:hover{ color:#3b82f6 }
+
+/* Rail footer (user identity) ---------------------------------------------- */
+.viv-rail-footer{
+  display:flex; align-items:center; gap:10px;
+  padding:10px 16px;
+  border-top:1px solid var(--border);
+  margin-top:auto;
+}
+.viv-rail-footer-avatar{
+  width:30px; height:30px; flex:0 0 30px;
+  border-radius:50%;
+  background:#c7d2fe; color:#1e3a8a;
+  display:flex; align-items:center; justify-content:center;
+  font-size:0.78em; font-weight:600;
+}
+.viv-rail-footer-name{
+  font-size:0.86em; font-weight:600; color:var(--text); line-height:1.2;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.viv-rail-footer-email{
+  font-size:0.74em; color:var(--muted); line-height:1.2;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.viv-rail-footer-text{
+  display:flex; flex-direction:column; min-width:0; flex:1 1 auto;
+}
+
+/* Rail collapse toggle ----------------------------------------------------- */
+.viv-rail-toggle{
+  position:absolute; top:14px; right:8px;
+  width:28px; height:28px;
+  border:1px solid transparent; background:transparent;
+  border-radius:6px;
+  cursor:pointer; color:#6b7280;
+  display:flex; align-items:center; justify-content:center;
+  padding:0;
+  transition:background 0.15s, color 0.15s, border-color 0.15s;
+  z-index:2;
+}
+.viv-rail-toggle:hover{
+  background:#f3f4f6; color:#1f2937; border-color:#e5e7eb;
+}
+.viv-rail-toggle-svg{
+  width:16px; height:16px;
+  display:block;
+  transition:transform 0.2s;
+}
+.viv-rail.viv-rail-collapsed .viv-rail-toggle{
+  /* Center the button when rail is narrow */
+  top:14px; right:14px;
+}
+.viv-rail.viv-rail-collapsed .viv-rail-toggle-svg{
+  transform:rotate(180deg);
+}
+
+/* Collapsed-rail state ----------------------------------------------------- */
+.viv-rail.viv-rail-collapsed{
+  width:56px; flex-basis:56px;
+}
+.viv-rail.viv-rail-collapsed .viv-rail-header{
+  padding:0 8px 14px; justify-content:center;
+}
+.viv-rail.viv-rail-collapsed .viv-rail-brand{ display:none }
+.viv-rail.viv-rail-collapsed .viv-workspace-switcher{ display:none }
+.viv-rail.viv-rail-collapsed .viv-rail-section-label{ display:none }
+.viv-rail.viv-rail-collapsed .viv-rail-link{
+  padding:8px 0; justify-content:center; gap:0;
+}
+.viv-rail.viv-rail-collapsed .viv-rail-link-label{ display:none }
+.viv-rail.viv-rail-collapsed .viv-rail-link-badge{ display:none }
+.viv-rail.viv-rail-collapsed .viv-rail-investigations-group-header{
+  justify-content:center; padding:6px 0;
+}
+.viv-rail.viv-rail-collapsed .viv-rail-investigations-group-name{ display:none }
+.viv-rail.viv-rail-collapsed .viv-rail-investigations-group-count{ display:none }
+.viv-rail.viv-rail-collapsed .viv-rail-investigations-group-items{ display:none }
+/* The rail's "Studies" list (rendered into #viv-rail-investigations by
+ * _renderRailInvestigationGroups in walkthrough.js) emits .viv-rail-iset-group
+ * + .viv-rail-sublink children — different class names than the older
+ * .viv-rail-investigations-group-* rules above match. When the rail is
+ * collapsed those leaked through and wrapped to single-character columns
+ * (see screenshot in friction log). Hide the whole host + its enclosing
+ * .viv-rail-section so the collapsed rail shows only the top-level icons. */
+.viv-rail.viv-rail-collapsed #viv-rail-investigations{ display:none }
+.viv-rail.viv-rail-collapsed .viv-rail-section:has(#viv-rail-investigations){ display:none }
+.viv-rail.viv-rail-collapsed .viv-rail-footer{
+  padding:10px 8px; justify-content:center;
+}
+.viv-rail.viv-rail-collapsed .viv-rail-footer-text{ display:none }
+
+/* Main column -------------------------------------------------------------- */
+.viv-main{
+  flex:1 1 auto;
+  display:flex; flex-direction:column;
+  min-width:0;
+  background:var(--bg);
+  overflow:hidden;
+}
+
+/* Slim topbar -------------------------------------------------------------- */
+.viv-topbar{
+  height:56px; flex:0 0 56px;
+  padding:0 24px;
+  background:var(--topbar-bg); border-bottom:1px solid var(--border);
+  display:flex; align-items:center; justify-content:space-between;
+  gap:16px;
+}
+.viv-topbar-breadcrumbs{
+  display:flex; align-items:center; gap:8px;
+  font-size:0.92em; color:var(--text-secondary);
+  min-width:0; overflow:hidden;
+}
+.viv-topbar-breadcrumbs .viv-crumb{
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  color:var(--muted); text-decoration:none;
+}
+.viv-topbar-breadcrumbs .viv-crumb:hover{ color:var(--text) }
+.viv-topbar-breadcrumbs .viv-crumb.viv-crumb-current{
+  color:var(--text); font-weight:600;
+}
+.viv-topbar-breadcrumbs .viv-crumb-sep{
+  color:#9ca3af; font-size:0.95em;
+}
+.viv-topbar-breadcrumbs .viv-crumb-sep::before{ content:"\203a"; }
+
+.viv-topbar-actions{
+  display:flex; align-items:center; gap:8px;
+  flex:0 0 auto;
+}
+
+/* Topbar buttons ----------------------------------------------------------- */
+.viv-icon-btn{
+  width:32px; height:32px;
+  display:inline-flex; align-items:center; justify-content:center;
+  background:var(--panel); border:1px solid var(--border); border-radius:6px;
+  color:var(--text-secondary); cursor:pointer;
+  font-size:1em; line-height:1;
+  text-decoration:none;
+}
+.viv-icon-btn:hover{ background:var(--hover); color:var(--text) }
+
+.viv-btn{
+  display:inline-flex; align-items:center; gap:6px;
+  padding:5px 12px;
+  background:var(--panel); border:1px solid var(--border); border-radius:6px;
+  color:var(--text); cursor:pointer;
+  font-size:0.86em; font-weight:500;
+  text-decoration:none;
+}
+.viv-btn:hover{ background:var(--hover) }
+.viv-btn.viv-btn-primary{
+  background:#3b82f6; border-color:#3b82f6; color:#fff;
+}
+.viv-btn.viv-btn-primary:hover{ background:#2563eb; border-color:#2563eb }
+.viv-btn.viv-btn-success{
+  background:#d1fae5; border-color:#a7f3d0; color:#065f46;
+}
+.viv-btn.viv-btn-success:hover{ background:#a7f3d0 }
+.viv-btn:disabled,
+.viv-btn.viv-btn-disabled{
+  opacity:0.6; cursor:default;
+}
+
+.viv-kebab{
+  width:32px; height:32px;
+  display:inline-flex; align-items:center; justify-content:center;
+  background:transparent; border:1px solid transparent; border-radius:6px;
+  color:var(--muted); cursor:pointer;
+  font-size:1.1em; line-height:1;
+}
+.viv-kebab:hover{ background:var(--hover); color:var(--text) }
+
+.viv-avatar{
+  width:32px; height:32px; flex:0 0 32px;
+  border-radius:50%;
+  background:#c7d2fe; color:#1e3a8a;
+  display:flex; align-items:center; justify-content:center;
+  font-size:0.78em; font-weight:600;
+  cursor:pointer; user-select:none;
+}
+.viv-avatar:hover{ background:#a5b4fc }
+.viv-avatar-link{ text-decoration:none }
+/* Generic "Connect GitHub" prompt when `gh auth login` hasn't run. Muted
+ * palette so it reads as an affordance, not an identity. */
+.viv-avatar-no-github{
+  background:#e5e7eb; color:#6b7280; font-size:1.05em; font-weight:400;
+}
+.viv-avatar-no-github:hover{ background:#d1d5db; color:#1f2937 }
+.viv-rail-footer-no-github{
+  color:#6b7280;
+}
+.viv-rail-footer-no-github strong{ font-weight:500 }
+.viv-rail-footer-no-github code{
+  background:#f3f4f6; padding:0 4px; border-radius:3px;
+  font-size:0.92em; color:#374151;
+}
+
+/* Content area ------------------------------------------------------------- */
+.viv-content{
+  flex:1 1 auto;
+  overflow-y:auto; overflow-x:hidden;
+  padding:24px;
+  background:var(--bg);
+}
+.viv-content > .page{ max-width:1200px; margin:0 auto }
+
+/* Tooltip for decoration-only controls ------------------------------------- */
+.viv-tooltip{
+  position:relative;
+}
+.viv-tooltip[data-tooltip]:hover::after{
+  content:attr(data-tooltip);
+  position:absolute; top:calc(100% + 6px); right:0;
+  background:#1f2937; color:#fff;
+  padding:4px 8px; border-radius:4px;
+  font-size:0.78em; white-space:nowrap;
+  z-index:60;
+}
+/* Wide / multi-line variant for explainer chips (mem3dg-readdy friction #36
+ * — Run-cluster actions had title= tooltips that nobody discovered; a visible
+ * chip makes the explainer signposted). Inline-block label with a hovering
+ * pre-wrap card. */
+.viv-info-chip{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:18px; height:18px; border-radius:50%;
+  background:#e5e7eb; color:#4b5563;
+  font-size:11px; font-weight:600;
+  cursor:help; position:relative;
+}
+.viv-info-chip:hover{ background:#d1d5db; color:#111827 }
+.viv-info-chip[data-tooltip]:hover::after{
+  content:attr(data-tooltip);
+  position:absolute; top:calc(100% + 6px); left:0;
+  background:#1f2937; color:#fff;
+  padding:8px 10px; border-radius:4px;
+  font-size:0.78em; line-height:1.5;
+  white-space:pre-wrap; min-width:260px; max-width:340px;
+  z-index:60;
+  text-align:left; font-weight:400;
+}
+
+/* Study detail — cleaner tab strip + summary header (UX polish pass) -------- */
+.investigation-detail-tabs{
+  display:flex; gap:24px; align-items:center;
+  border-bottom:1px solid var(--border);
+  margin:20px 0 16px;
+}
+.investigation-detail-tab{
+  background:transparent; border:0;
+  display:inline-flex; align-items:center; gap:8px;
+  padding:8px 0; margin:0;
+  font:inherit; font-size:0.95em; color:var(--muted);
+  cursor:pointer;
+  border-bottom:2px solid transparent;
+  transition:color 0.12s, border-color 0.12s;
+}
+.investigation-detail-tab:hover{ color:var(--text) }
+.investigation-detail-tab.active{
+  color:var(--accent-blue); border-bottom-color:var(--accent-blue);
+  font-weight:600;
+}
+.investigation-detail-tab .tab-icon{
+  width:18px; height:18px; flex:0 0 18px;
+  display:block;
+}
+.investigation-detail-tab .tab-count-badge{
+  background:var(--bg-alt); color:var(--text-secondary);
+  padding:1px 6px; border-radius:10px;
+  font-size:0.78em; font-weight:600;
+  margin-left:4px;
+}
+
+/* Study Detail page shell — gives breathing room around the content
+   in both the standalone /studies/<name> view and inside the
+   Investigations iframe (where body margin:0 used to push text
+   flush against the iframe edges). */
+.study-page{
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 32px 48px;
+  box-sizing: border-box;
+}
+@media (max-width: 700px){
+  .study-page{ padding: 16px 16px 32px; }
+}
+
+/* Study-header card styling */
+.study-header{
+  margin-bottom:8px;
+}
+.study-title{
+  margin:0 0 4px; font-size:1.6em; color:var(--text);
+}
+.study-title .study-name{ color:var(--text) }
+.study-subtitle{
+  margin:0 0 12px; color:var(--text-secondary); font-size:0.95em; line-height:1.4;
+}
+.study-summary{
+  display:flex; gap:24px; margin:12px 0; padding:12px;
+  background:var(--bg-alt); border:1px solid var(--border); border-radius:6px;
+}
+.study-summary > div{ flex:1 }
+.study-summary dt{
+  font-size:0.78em; color:var(--muted);
+  text-transform:uppercase; letter-spacing:0.04em;
+  margin:0 0 4px;
+}
+.study-summary dd{
+  margin:0; font-weight:600; color:var(--text); font-size:0.95em;
+}
+.study-summary dd.status-pill{
+  display:inline-block;
+}
+
+/* Action row on investigation cards (Run / Re-run / Delete) */
+.investigation-card .ic-actions{
+  margin-top:10px; display:flex; gap:8px;
+  padding-top:10px; border-top:1px solid #f3f4f6;
+}
+.investigation-card .ic-actions .btn-mini{
+  flex:none;
+}
+
+/* Registry browser tabs */
+.registry-tabs{
+  display:flex; gap:24px; align-items:center;
+  border-bottom:1px solid var(--border);
+  margin:16px 0 12px;
+}
+.registry-tab{
+  background:transparent; border:0;
+  display:inline-flex; align-items:center; gap:8px;
+  padding:8px 0; margin:0;
+  font:inherit; font-size:0.95em; color:var(--muted);
+  cursor:pointer;
+  border-bottom:2px solid transparent;
+  transition:color 0.12s, border-color 0.12s;
+}
+.registry-tab:hover{ color:var(--text) }
+.registry-tab.active{
+  color:var(--accent-blue); border-bottom-color:var(--accent-blue);
+  font-weight:600;
+}
+.registry-tab .count-badge{
+  background:var(--bg-alt); color:var(--text-secondary);
+  padding:1px 6px; border-radius:10px;
+  font-size:0.78em; font-weight:600;
+  margin-left:4px;
+}
+.registry-tab-panel{ display:none }
+.registry-tab-panel.active{ display:block }
+.registry-search{
+  width:100%; padding:8px 12px;
+  border:1px solid var(--border); border-radius:6px;
+  font-size:0.9em; margin-bottom:12px;
+  background:var(--panel); color:var(--text);
+}
+.registry-entry{
+  padding:10px 12px; border-bottom:1px solid var(--border);
+  font-size:0.92em;
+}
+.registry-entry:last-child{ border-bottom:0 }
+.registry-entry strong{ font-size:1.02em; color:var(--text) }
+.registry-entry code{ font-size:0.88em }
+.registry-entry pre{ margin:4px 0; max-height:200px; overflow:auto }
+
+/* ===== Study Detail — 5-tab redesign (Plan 3) ===== */
+
+/* Tab bar — visually identical to .registry-tabs but scoped.
+ * Sticky at the top of the scroll container so the user can switch
+ * tabs (or re-anchor) while scrolling through long study sections
+ * like Findings or Tests. Background + z-index ensure tabs are
+ * readable over content underneath. The -webkit-sticky prefix is
+ * still needed for older Safari versions. */
+.study-tabs {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  margin: 16px 0 20px;
+  position: -webkit-sticky;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--panel);
+  padding-top: 4px;
+  box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.04);
+}
+.study-tab {
+  background: transparent;
+  border: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  margin: 0;
+  font: inherit;
+  font-size: 0.95em;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.12s, border-color 0.12s;
+}
+.study-tab:hover { color: var(--text); }
+.study-tab.active {
+  color: var(--accent-blue);
+  border-bottom-color: var(--accent-blue);
+  font-weight: 600;
+}
+.study-tab-panel { display: none; padding: 8px 0; }
+.study-tab-panel.active { display: block; }
+
+/* Study header — name + status pill */
+.study-header { margin: 0 0 8px; }
+.study-title { display: flex; align-items: center; gap: 12px; margin: 0; font-size: 1.6em; }
+.study-title .study-name { font-weight: 600; }
+
+/* Overview tab — notebook layout */
+.study-overview { max-width: 760px; }
+.overview-section { margin-bottom: 24px; }
+.overview-label { font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gray); margin: 0 0 6px; }
+.overview-prose {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  min-height: 40px;
+  white-space: pre-wrap;
+  cursor: text;
+}
+.overview-prose:empty::before {
+  content: attr(data-placeholder);
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.study-counts-strip {
+  display: flex;
+  gap: 24px;
+  padding: 12px 0;
+  border-top: 1px solid #eee;
+  border-bottom: 1px solid #eee;
+  margin: 18px 0;
+}
+.count-cell { display: flex; flex-direction: column; align-items: flex-start; min-width: 60px; }
+.count-cell strong { font-size: 1.2em; }
+.count-cell .count-label { color: #888; font-size: 0.78em; }
+
+/* Baseline tab */
+.baseline-list { display: flex; flex-direction: column; gap: 12px; }
+.baseline-entry {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+}
+.baseline-entry-header { display: flex; align-items: baseline; gap: 12px; }
+.baseline-entry-name { margin: 0; font-size: 1.05em; }
+.baseline-entry-fqn { color: var(--gray); font-size: 0.85em; }
+.baseline-params { width: 100%; margin-top: 8px; font-size: 0.85em; border-collapse: collapse; }
+.baseline-params th, .baseline-params td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #f3f4f6; }
+.baseline-entry-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+.baseline-add-form, .variant-add-form-wrapper, .intervention-add-form-wrapper {
+  margin-top: 16px;
+}
+.baseline-add-form summary, .variant-add-form-wrapper summary, .intervention-add-form-wrapper summary {
+  display: inline-block;
+  cursor: pointer;
+  color: #2563eb;
+  font-weight: 600;
+}
+.baseline-add-form form, .variant-add-form-wrapper form, .intervention-add-form-wrapper form {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 500px;
+}
+.baseline-add-form label, .variant-add-form-wrapper label, .intervention-add-form-wrapper label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.9em;
+}
+
+/* Variants tab */
+.variants-list { display: flex; flex-direction: column; gap: 12px; }
+.variant-row {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+}
+.variant-row-header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.variant-name { margin: 0; font-size: 1.05em; }
+.variant-base { color: var(--gray); font-size: 0.9em; }
+.variant-overrides-count { font-size: 0.85em; }
+.variant-overrides-detail { margin-top: 8px; }
+.variant-overrides-table { width: 100%; font-size: 0.85em; border-collapse: collapse; }
+.variant-overrides-table td { padding: 3px 8px; border-bottom: 1px solid #f3f4f6; }
+.variant-row-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+.param-form { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.param-row { display: flex; flex-direction: column; gap: 2px; }
+.param-label { display: flex; align-items: center; gap: 10px; }
+.param-input { padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px; min-width: 200px; }
+.param-desc { font-size: 0.8em; }
+
+/* Interventions tab */
+.interventions-list { display: flex; flex-direction: column; gap: 12px; }
+.intervention-row {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+}
+.intervention-row-header { display: flex; align-items: baseline; gap: 12px; }
+.intervention-name { margin: 0; font-size: 1.05em; }
+.intervention-description { margin: 8px 0; cursor: text; min-height: 1.5em; white-space: pre-wrap; }
+.intervention-description:empty::before {
+  content: "(click to add a description)";
+  color: #9ca3af;
+  font-style: italic;
+}
+.intervention-row-actions { display: flex; gap: 8px; margin-top: 4px; }
+
+/* Empty state */
+.empty-message { color: var(--gray); font-style: italic; padding: 12px 0; }
+
+/* Run-related shared utilities */
+.section-title { font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gray); margin: 16px 0 8px; }
+.muted { color: var(--gray); }
+.danger { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+
+
+/* ---------- Tests tab ---------- */
+.tests-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.6rem; }
+.tests-summary { flex: 1; }
+.tests-summary .ok { color: #228B22; }
+.tests-summary .fail { color: #B22222; }
+.tests-summary .skip { color: #888; }
+.tests-summary .muted { color: #888; font-size: 0.9em; }
+
+.tests-config { margin: 0.5rem 0; display: flex; gap: 1rem; }
+.tests-config .badge { background: #f0f0f0; padding: 0.2rem 0.5rem; border-radius: 4px; }
+
+.tests-list { list-style: none; padding: 0; }
+.test-row { padding: 0.4rem 0.6rem; margin: 0.2rem 0; border-radius: 4px; background: #fafafa; display: flex; gap: 0.6rem; align-items: center; }
+.test-row.test-passed { border-left: 3px solid #228B22; }
+.test-row.test-failed { border-left: 3px solid #B22222; }
+.test-row.test-skipped { border-left: 3px solid #888; opacity: 0.7; }
+.test-icon { font-size: 1.1em; }
+.test-nodeid { flex: 1; font-family: monospace; font-size: 0.9em; }
+.test-duration { color: #666; font-size: 0.85em; }
+.test-row details pre { background: #fff; padding: 0.6rem; border: 1px solid #ddd; border-radius: 4px; max-height: 200px; overflow: auto; }
+
+.overview-status-select {
+  font-size: 1rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  background: white;
+}
+
+.conclusions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+.conclusion-field h3 { margin-top: 0; }
+.conclusion-field textarea { width: 100%; box-sizing: border-box; font-family: inherit; padding: 0.5rem; }
+
+/* Top-bar "Open PR" button */
+.topbar-actions { display: inline-flex; gap: 0.5rem; margin-left: 1rem; vertical-align: middle; }
+#btn-open-pr { padding: 0.4rem 0.8rem; font-weight: 500; }
+
+/* Top-bar live git-status strip */
+.git-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.6rem;
+  background: var(--bg-alt, #f1f3f5);
+  border-radius: 6px;
+  font-size: 0.9em;
+  margin-left: 0.5rem;
+}
+.git-status .git-repo, .git-status .git-branch { color: #0366d6; text-decoration: none; font-family: monospace; }
+.git-status .git-repo:hover, .git-status .git-branch:hover { text-decoration: underline; }
+.git-badge { padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 0.85em; font-weight: 500; }
+.git-badge-ok { background: #d4edda; color: #155724; }
+.git-badge-ahead { background: #fff3cd; color: #856404; }
+.git-badge-behind { background: #ffeeba; color: #856404; }
+.git-badge-warn { background: #f8d7da; color: #721c24; }
+.git-status { flex-wrap: wrap; }
+.git-badge-info { background: #cce5ff; color: #004085; text-decoration: none; }
+.git-badge-info:hover { text-decoration: underline; }
+.git-badge-pr { text-decoration: none; }
+.git-badge-pr.pr-state-open { background: #d4edda; color: #155724; }
+.git-badge-pr.pr-state-draft { background: #e2e3e5; color: #41464b; }
+.git-badge-pr.pr-state-merged { background: #cce5ff; color: #004085; }
+.git-badge-pr.pr-state-closed { background: #f8d7da; color: #721c24; }
+.dirty-pill { cursor: pointer; }
+/* Action buttons inside the git-status strip (merged from former workstream-strip) */
+.git-status-actions { display: inline-flex; gap: 0.4rem; margin-left: 0.5rem; }
+.git-status-actions .ws-btn { padding: 0.2rem 0.6rem; font-size: 0.85em; border-radius: 4px; background: #e7f3ff; cursor: pointer; border: 1px solid #cfe2ff; }
+.git-status-actions .ws-btn.ws-primary { background: #cce5ff; border-color: #aacfff; }
+.git-status-actions .ws-btn.ws-end { background: #f8d7da; border-color: #f1aeb5; color: #721c24; }
+.git-status-actions .ws-btn:hover { filter: brightness(0.97); }
+.git-status-actions .ws-warn { color: #92400e; font-size: 0.85em; background: #fef3c7; padding: 0.2rem 0.5rem; border-radius: 4px; }
+.checkbox-row { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; }
+
+/* Dark mode overrides for element styles not covered by variables */
+[data-theme="dark"] th{background:rgba(255,255,255,0.06)}
+[data-theme="dark"] .registry-hint{background:#1e293b;border-left-color:#3b82f6}
+[data-theme="dark"] .source-artifact-tag{color:#94a3b8}
+[data-theme="dark"] .ce-create-sim-panel{background:#1e293b}
+[data-theme="dark"] select option{background:#1e293b;color:#e2e8f0}
+/* Catch-all for inline styles and unwrapped elements in dark mode */
+[data-theme="dark"] .viv-rail-investigations-group-items .viv-rail-link-sub{color:#94a3b8}
+[data-theme="dark"] .ce-param-row{background:var(--panel);border-color:var(--border)}
+[data-theme="dark"] .spec-yaml-pre{background:#1e293b;color:#e2e8f0}
+[data-theme="dark"] .ce-state-tree{background:#1e293b;color:#e2e8f0;border-color:var(--border)}
+[data-theme="dark"] .jsontree-key{color:#a78bfa}
+[data-theme="dark"] .stage-label{background:#7c7c7c}
+
+/* ===========================================================================
+ * Workspace switcher modal (lifted from index.html.j2 so the workspaceless
+ * landing page can share the same styling — todo #8 Phase A/B).
+ * =========================================================================== */
+.viv-ws-modal {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.32);
+  display: none;
+  align-items: center; justify-content: center;
+  z-index: 2000;
+  opacity: 0;
+  transition: opacity 0.14s ease-out;
+}
+.viv-ws-modal.open {
+  display: flex;
+  opacity: 1;
+}
+.viv-ws-modal-card {
+  width: min(720px, 90vw);
+  max-height: 80vh;
+  background: var(--panel, #fff);
+  border-radius: 8px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.18);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.viv-ws-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--border, #eee);
+}
+.viv-ws-modal-header h2 {
+  margin: 0; font-size: 15px; font-weight: 600; color: var(--text, #333);
+}
+.viv-ws-modal-close {
+  background: none; border: none; cursor: pointer;
+  font-size: 18px; color: var(--muted, #666); padding: 0 4px;
+}
+.viv-ws-modal-close:hover { color: var(--text, #000); }
+.viv-ws-modal-list {
+  list-style: none; margin: 0; padding: 0;
+  overflow-y: auto; flex: 1;
+}
+.viv-ws-modal-footer {
+  padding: 10px 18px; border-top: 1px solid var(--border, #eee);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.viv-ws-modal-add,
+.viv-ws-modal-new {
+  background: none; border: none; color: var(--accent-blue, #0366d6);
+  cursor: pointer; font-size: 13px; padding: 0; text-align: left;
+}
+.viv-ws-modal-add:hover,
+.viv-ws-modal-new:hover { text-decoration: underline; }
+.viv-ws-modal-new-primary { font-weight: 600; }
+
+/* New Workspace form (todo #8 Phase B) */
+.viv-ws-modal-create .viv-ws-modal-card {
+  width: min(520px, 90vw);
+  max-height: 88vh;
+}
+.viv-ws-create-form {
+  padding: 18px 20px 16px;
+  display: flex; flex-direction: column; gap: 6px;
+  overflow-y: auto;
+}
+.viv-ws-create-form label {
+  font-size: 12px; font-weight: 600; color: var(--text, #333);
+  margin-top: 8px;
+}
+.viv-ws-create-form label:first-child { margin-top: 0; }
+.viv-ws-create-form .viv-ws-req { color: #cf222e; font-weight: 700; }
+.viv-ws-create-form .viv-ws-optional { color: var(--muted, #888); font-weight: 400; }
+.viv-ws-create-form input[type="text"],
+.viv-ws-create-form select {
+  font: inherit;
+  padding: 7px 9px;
+  border: 1px solid var(--border, #d0d7de);
+  border-radius: 5px;
+  background: var(--panel, #fff);
+  color: var(--text, #1f2937);
+}
+.viv-ws-create-form input[type="text"]:focus,
+.viv-ws-create-form select:focus {
+  outline: none;
+  border-color: var(--accent-blue, #0366d6);
+  box-shadow: 0 0 0 3px rgba(3,102,214,0.18);
+}
+.viv-ws-field-hint {
+  font-size: 11px; color: var(--muted, #6b7280); line-height: 1.4;
+  margin-bottom: 2px;
+}
+.viv-ws-create-error {
+  min-height: 18px;
+  color: #cf222e;
+  font-size: 12px;
+  margin-top: 6px;
+  line-height: 1.4;
+}
+.viv-ws-create-error:empty { display: none; }
+.viv-ws-create-actions {
+  display: flex; gap: 10px; justify-content: flex-end;
+  margin-top: 10px;
+}
+.viv-ws-create-cancel,
+.viv-ws-create-submit {
+  font: inherit;
+  padding: 7px 14px; border-radius: 5px;
+  cursor: pointer;
+  border: 1px solid var(--border, #d0d7de);
+}
+.viv-ws-create-cancel { background: var(--panel, #fff); color: var(--text, #1f2937); }
+.viv-ws-create-cancel:hover { background: var(--hover, #f6f8fa); }
+.viv-ws-create-submit {
+  background: var(--accent-blue, #0366d6); color: #fff;
+  border-color: var(--accent-blue, #0366d6);
+}
+.viv-ws-create-submit:hover { filter: brightness(0.95); }
+.viv-ws-create-submit:disabled { opacity: 0.7; cursor: progress; }
+
+/* ── Theme toggle (dark/light mode switch) ─────────────────────────────── */
+.viv-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+.viv-theme-toggle:hover { background: var(--hover); }
+.viv-theme-toggle-track {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: #cbd5e1;
+  transition: background 0.25s ease;
+  flex: 0 0 auto;
+}
+[data-theme="dark"] .viv-theme-toggle-track {
+  background: #475569;
+}
+.viv-theme-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  transition: transform 0.25s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+}
+[data-theme="dark"] .viv-theme-toggle-thumb {
+  transform: translateX(16px);
+}
+.viv-theme-toggle-icon {
+  font-size: 13px;
+  line-height: 1;
+  color: var(--muted);
+  transition: color 0.2s;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+ * Workspace Inputs cards — theme-aware backgrounds.
+ *
+ * The card markup (in index.html.j2) historically used inline
+ * style="background:#fff;border:1px solid #e5e7eb" which the template
+ * baked in as a light-mode-only assumption. Moving the background +
+ * border to a CSS class lets these cards adapt when a dark-mode toggle
+ * is in play (see the data-theme="dark" system on
+ * feat/hpc-backend-integration that defines --panel/--border for dark
+ * mode). In light mode (and on main without a theme toggle) these vars
+ * resolve to the same #fff / #e5e7eb the inline styles used to set.
+ * =================================================================== */
+.expert-doc-card,
+.bib-entry {
+  background: var(--panel, #fff);
+  border: 1px solid var(--border, #e5e7eb);
+}
+
+/* ───────────────────────────────────────────────────────────────────
+ * v4 narrative-spine forms — editable cards for report, study_card,
+ * biological_summary, conclusion_verdicts on the Study Detail page.
+ *
+ * Each card lays out as a 2-col grid of label+input rows; "wide" rows
+ * (textareas) span full width with the label above. Inputs save on
+ * blur (text/textarea) or change (select) by POSTing to
+ * /api/study-narrative-set with a dotted path.
+ * =================================================================== */
+.narrative-card {
+  padding: 14px 16px;
+  background: var(--panel, #fff);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+.narrative-card-hint {
+  font-size: 0.78em;
+  color: var(--muted, #6b7280);
+  font-weight: normal;
+  margin-left: 8px;
+}
+.narrative-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, max-content) 1fr;
+  gap: 8px 14px;
+  align-items: start;
+}
+.narrative-row {
+  display: contents;
+}
+.narrative-row-wide {
+  display: block;
+  grid-column: 1 / -1;
+  margin-top: 4px;
+}
+.narrative-row-wide .narrative-label {
+  display: block;
+  margin-bottom: 4px;
+}
+.narrative-label {
+  font-size: 0.86em;
+  font-weight: 600;
+  color: var(--text-secondary, #4b5563);
+  padding-top: 6px;
+}
+.narrative-input {
+  font: inherit;
+  width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--border, #d0d7de);
+  border-radius: 4px;
+  background: var(--bg-alt, #f9fafb);
+  color: var(--text, #1f2937);
+}
+.narrative-input:focus {
+  outline: none;
+  border-color: var(--accent-blue, #2563eb);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+  background: var(--panel, #fff);
+}
+.narrative-textarea {
+  font-family: inherit;
+  resize: vertical;
+  min-height: 38px;
+  line-height: 1.45;
+}
+.narrative-card-input {
+  border-color: transparent;
+  background: transparent;
+  padding: 4px 6px;
+}
+.narrative-card-input:hover,
+.narrative-card-input:focus {
+  border-color: var(--border, #d0d7de);
+  background: var(--bg-alt, #f9fafb);
+}
+.narrative-input.narrative-saved {
+  border-color: var(--accent, #10b981);
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.18);
+  transition: border-color 0.4s ease, box-shadow 0.4s ease;
+}
+.narrative-input.narrative-error {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.18);
+}
+
+/* ───────────────────────────────────────────────────────────────────
+ * Composites tab — workspace-first ordering chrome.
+ *
+ * Each composite card carries a `workspace_local` flag from the
+ * /api/composites response. The new "Workspace first" sort (now the
+ * default) puts these at the top. We also surface the distinction
+ * visually so the user can scan it regardless of the active sort:
+ *
+ *   .composite-ws-tag         small "📦 workspace" pill next to the name
+ *   .module-card-workspace    subtle left-border accent on workspace cards
+ *   .composite-section-divider  thin "Other installed pbg-* modules"
+ *                               separator emitted between groups when
+ *                               the workspace-first sort is active
+ * =================================================================== */
+.composite-ws-tag {
+  display: inline-block;
+  background: #dcfce7;
+  color: #065f46;
+  font-size: 0.7em;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 9999px;
+  margin-left: 4px;
+  vertical-align: middle;
+  letter-spacing: 0.02em;
+}
+.module-card.module-card-workspace {
+  border-left: 3px solid #10b981;
+}
+.composite-section-divider {
+  grid-column: 1 / -1;            /* span all grid columns */
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 6px 0;
+  color: var(--muted, #94a3b8);
+  font-size: 0.78em;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.composite-section-divider::before,
+.composite-section-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border, #e2e8f0);
+}
+.composite-list .composite-section-divider {
+  margin: 10px 0 4px 0;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+ * Registry page — page-level sub-tabs (Modules / Discovered registry).
+ *
+ * The Registry page used to stack three panels (Available modules →
+ * Installed modules → Discovered registry), forcing users to scroll
+ * through a long catalog grid every time they wanted the build_core()
+ * introspection. Split into two sub-tabs so the user picks once.
+ * =================================================================== */
+.registry-subtabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  margin: -4px 0 16px 0;
+}
+.registry-subtab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 9px 16px 11px;
+  margin-bottom: -1px;
+  font: inherit;
+  font-size: 0.95em;
+  font-weight: 600;
+  color: var(--muted, #6b7280);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.registry-subtab:hover { color: var(--text, #1f2937); }
+.registry-subtab.active {
+  color: var(--accent-blue, #2563eb);
+  border-bottom-color: var(--accent-blue, #2563eb);
+}
+.registry-subtab-panel { display: none; }
+.registry-subtab-panel.active { display: block; }
+
+/* ───────────────────────────────────────────────────────────────────
+ * Catalog grid — workspace-package + installed-first chrome.
+ *
+ * After the Installed-modules table got folded into the catalog grid,
+ * each card visually distinguishes itself by tier:
+ *   .module-card-workspace   workspace's own first-party package (top
+ *                            anchor; uninstallable)
+ *   .module-card-installed   installed catalog modules
+ *   (no class)               available-to-install catalog modules
+ *
+ * The .module-section-divider separator marks the boundary between
+ * tiers (workspace → installed → available) so the user can see at a
+ * glance what's already in the workspace vs what's still browseable.
+ * =================================================================== */
+.module-card-workspace {
+  border-left: 3px solid #2563eb;
+  background: var(--bg-alt, #f8fafc);
+}
+.module-card-installed {
+  border-left: 3px solid #10b981;
+}
+.module-row-workspace {
+  background: var(--bg-alt, #f8fafc);
+  border-left: 3px solid #2563eb;
+  padding-left: 9px;
+}
+.module-installed-meta {
+  margin: 4px 0;
+  line-height: 1.5;
+  font-size: 0.85em;
+  color: var(--muted, #6b7280);
+}
+.module-installed-meta code {
+  font-size: 0.92em;
+}
+.module-section-divider {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 6px 0;
+  color: var(--muted, #94a3b8);
+  font-size: 0.78em;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.module-section-divider::before,
+.module-section-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border, #e2e8f0);
+}
+.module-list .module-section-divider {
+  margin: 10px 0 4px 0;
+}

@@ -1,0 +1,2398 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><title>ws_increase_demo</title>
+<link rel="stylesheet" href="assets/style.css?v=1779795224_1779795224">
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<style>
+/* Modal overlay */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+}
+.modal-box {
+  background: var(--panel, #fff);
+  border-radius: 8px;
+  padding: 24px 28px;
+  min-width: 360px;
+  max-width: 560px;
+  width: 100%;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  position: relative;
+}
+.modal-box h3 { margin-top: 0; color: var(--text, inherit); }
+.modal-box label { display: block; margin-bottom: 4px; font-weight: 600; font-size: 0.9em; color: var(--text, inherit); }
+.modal-box input, .modal-box select, .modal-box textarea {
+  width: 100%; box-sizing: border-box;
+  border: 1px solid var(--border, #ccc); border-radius: 4px;
+  padding: 6px 8px; font-size: 0.92em; margin-bottom: 12px;
+  background: var(--panel, #fff); color: var(--text, inherit);
+}
+.modal-box textarea { min-height: 90px; font-family: monospace; }
+.modal-box button[type=submit] {
+  background: #1976d2; color: #fff; border: none;
+  border-radius: 4px; padding: 8px 18px; cursor: pointer; font-size: 0.95em;
+}
+.modal-box button[type=submit]:disabled { opacity: 0.6; cursor: not-allowed; }
+.modal-close {
+  position: absolute; top: 10px; right: 14px;
+  background: none; border: none; font-size: 1.3em; cursor: pointer; color: var(--muted, #888);
+}
+.form-error { color: #c00; font-size: 0.9em; margin-top: 4px; min-height: 1.2em; }
+.action-btn {
+  margin-top: 10px; padding: 5px 12px;
+  border: 1px solid var(--accent-blue, #1976d2); background: var(--bg-alt, #e3f2fd);
+  border-radius: 4px; cursor: pointer; font-size: 0.88em;
+  color: var(--accent-blue, #1976d2);
+}
+.action-btn:hover { background: var(--hover, #bbdefb); }
+.action-btn--secondary {
+  margin-top: 10px; padding: 5px 12px;
+  border: 1px solid #b91c1c; background: #fef2f2;
+  border-radius: 4px; cursor: pointer; font-size: 0.88em; color: #b91c1c;
+}
+.action-btn--secondary:hover { background: #fee2e2; }
+.action-btn-small {
+  padding: 2px 8px; border: 1px solid #c62828; background: #ffebee;
+  border-radius: 4px; cursor: pointer; font-size: 0.82em; color: #c62828;
+}
+.action-btn-small:hover { background: #ffcdd2; }
+.pill-btn {
+  font-size: 0.78em; padding: 2px 8px; border-radius: 3px;
+  border: 1px solid var(--border, #666); background: var(--panel, #fff); cursor: pointer; margin-left: 6px;
+  vertical-align: middle;
+}
+.pill-btn:hover { background: var(--hover, #eee); }
+.btn-mini {
+  font-size: 0.78em; padding: 2px 8px; border-radius: 3px;
+  border: 1px solid var(--accent-blue, #1976d2); background: var(--bg-alt, #e3f2fd); cursor: pointer; margin-left: 8px;
+  vertical-align: middle;
+}
+.btn-mini:hover { background: var(--hover, #bbdefb); }
+.section-header {
+  margin: 28px 0 6px 0;
+  padding-bottom: 6px;
+  border-bottom: 2px solid #e0e0e0;
+  color: #333;
+}
+.section-lead {
+  color: #666; font-size: 0.92em; margin: 0 0 16px 0; font-style: italic;
+}
+.source-artifact-tag {
+  font-size: 0.78em; color: #555; font-style: italic; margin-left: 8px;
+}
+#run-tests-output {
+  white-space: pre-wrap; font-family: monospace; font-size: 0.82em;
+  background: #f8f8f8; border: 1px solid #ccc; border-radius: 4px;
+  padding: 10px; margin-top: 10px; max-height: 420px; overflow-y: auto;
+  display: none;
+}
+#run-tests-spinner { display: none; margin-left: 8px; color: #888; }
+.panel-lead { color: var(--muted, #6b7280); margin-bottom: 16px; font-size: 0.92em; }
+.status-pill.installed{ background:#d1fae5; color:#065f46 }
+.status-pill.not_installed{ background:#fef3c7; color:#92400e }
+.registry-hint{
+  background:#eff6ff; border-left:4px solid #3b82f6; padding:10px 14px;
+  border-radius:4px; margin:0 0 16px; font-size:0.92em;
+}
+/* Composite Explorer editing tab panels (Tasks 4-6 populate these) */
+.ce-panel {
+  border: 1px solid #eee; border-radius: 4px; padding: 12px; background: #fff;
+}
+/* Composite Explorer outer tab bar (todo #16) */
+.ce-tab-bar { display:flex; gap:4px; border-bottom:1px solid var(--border,#e2e8f0); margin:12px 0 18px; }
+.ce-tab-btn {
+  appearance:none; background:none; border:0;
+  border-bottom:2px solid transparent; padding:9px 18px 11px;
+  margin-bottom:-1px; font:inherit; font-size:0.95em; font-weight:600;
+  color:var(--muted,#6b7280); cursor:pointer;
+  transition:color 0.12s, border-color 0.12s;
+}
+.ce-tab-btn:hover { color:var(--text,#1f2937); }
+.ce-tab-btn.active { color:var(--accent-blue,#2563eb); border-bottom-color:var(--accent-blue,#2563eb); }
+.ce-tab-panel { display:none; }
+.ce-tab-panel.active { display:block; }
+.ce-dirty-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--warn,#d97706); margin-left:5px; vertical-align:middle; }
+/* HPC config form inside Configure tab */
+.ce-cfg-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px 16px; margin-top:12px; }
+.ce-cfg-grid label { display:flex; flex-direction:column; gap:4px; font-size:12px; font-weight:600; color:var(--muted,#555); }
+.ce-cfg-grid input, .ce-cfg-grid select {
+  padding:5px 8px; border:1px solid var(--border,#d0d0d4); border-radius:4px;
+  font:inherit; font-size:13px; background:var(--panel,#fff); color:var(--text,#1a1a1a);
+}
+.ce-cfg-grid input:focus, .ce-cfg-grid select:focus { outline:2px solid var(--accent-blue,#2563eb); outline-offset:-1px; border-color:transparent; }
+/* Run panels inside Run tab */
+.ce-run-panel { border:1px solid var(--border,#e0e0e4); border-radius:8px; padding:16px; margin-bottom:16px; background:var(--panel,#fff); }
+.ce-run-panel h4 { margin:0 0 10px; font-size:14px; }
+.ce-run-actions { display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap; }
+.ce-run-log { font-family:monospace; font-size:11px; white-space:pre-wrap; background:var(--page,#f7f7f8); border:1px solid var(--border,#e0e0e4); border-radius:4px; padding:8px; max-height:240px; overflow-y:auto; margin-top:8px; display:none; }
+/* Results tab */
+.ce-run-card { border:1px solid var(--border,#e0e0e4); border-radius:6px; padding:12px 14px; margin-bottom:10px; background:var(--panel,#fff); cursor:pointer; transition:border-color 0.12s; }
+.ce-run-card:hover { border-color:var(--accent-blue,#2563eb); }
+.ce-run-card.active-card { border-color:var(--accent-blue,#2563eb); background:var(--hover,#f0f7ff); }
+.ce-run-card-header { display:flex; align-items:center; gap:10px; }
+.ce-run-card-meta { font-size:11px; color:var(--muted,#888); margin-top:4px; }
+.ce-summary-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:12px 0; }
+.ce-summary-stat { background:var(--page,#f7f7f8); border:1px solid var(--border,#e0e0e4); border-radius:6px; padding:10px 12px; text-align:center; }
+.ce-summary-stat .val { font-size:18px; font-weight:700; color:var(--text,#1a1a1a); }
+.ce-summary-stat .key { font-size:11px; color:var(--muted,#888); margin-top:2px; }
+
+/* Workspace switcher (top of the left rail). */
+.viv-workspace-switcher { position: relative; padding: 8px 12px; }
+.viv-workspace-switcher-trigger {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 6px 8px; background: var(--panel, #fff);
+  border: 1px solid var(--border, #ddd); border-radius: 4px; cursor: pointer;
+  font-size: 13px; color: var(--text, inherit);
+}
+.viv-workspace-switcher-trigger:hover { background: var(--hover, #f5f5f5); }
+.viv-workspace-switcher-glyph { color: #2ea043; font-size: 14px; }
+.viv-glyph-running { color: #2ea043; }
+.viv-glyph-stopped { color: #999; }
+.viv-glyph-stale   { color: #d29922; }
+.viv-glyph-missing { color: #cf222e; }
+.viv-ws-error { color: #cf222e; font-size: 11px; padding: 2px 0; }
+
+/* Workspace switcher v2 — centered modal mounted to body. */
+.viv-ws-modal {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.32);
+  display: none;
+  align-items: center; justify-content: center;
+  z-index: 2000;
+  opacity: 0;
+  transition: opacity 0.14s ease-out;
+}
+.viv-ws-modal.open {
+  display: flex;
+  opacity: 1;
+}
+.viv-ws-modal-card {
+  width: min(720px, 90vw);
+  max-height: 80vh;
+  background: var(--panel, #fff);
+  border-radius: 8px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.18);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.viv-ws-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--border, #eee);
+}
+.viv-ws-modal-header h2 {
+  margin: 0; font-size: 15px; font-weight: 600; color: var(--text, #333);
+}
+.viv-ws-modal-close {
+  background: none; border: none; cursor: pointer;
+  font-size: 18px; color: var(--muted, #666); padding: 0 4px;
+}
+.viv-ws-modal-close:hover { color: var(--text, #000); }
+.viv-ws-modal-list {
+  list-style: none; margin: 0; padding: 0;
+  overflow-y: auto; flex: 1;
+}
+.viv-ws-modal-footer {
+  padding: 10px 18px; border-top: 1px solid var(--border, #eee);
+}
+.viv-ws-modal-add {
+  background: none; border: none; color: var(--accent-blue, #0366d6);
+  cursor: pointer; font-size: 13px; padding: 0;
+}
+.viv-ws-modal-add:hover { text-decoration: underline; }
+
+/* Rows */
+.viv-ws-row {
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border, #f0f0f0);
+  cursor: pointer;
+}
+.viv-ws-row:last-child { border-bottom: none; }
+.viv-ws-row:hover { background: var(--hover, #f6f8fa); }
+.viv-ws-row-current { cursor: default; background: var(--bg-alt, #f8f9fb); }
+.viv-ws-row-current:hover { background: var(--bg-alt, #f8f9fb); }
+.viv-ws-line1 {
+  display: flex; align-items: center; gap: 10px;
+}
+.viv-ws-row .viv-ws-glyph { width: 18px; text-align: center; font-size: 14px; }
+.viv-ws-name { flex: 1; font-size: 13px; color: var(--text, #1f2937); }
+.viv-ws-name small { color: var(--muted, #777); font-weight: normal; }
+.viv-ws-path {
+  font-size: 11px; color: var(--muted, #888);
+  margin-top: 3px; margin-left: 28px;
+  word-break: break-all;
+}
+.viv-ws-action {
+  font-size: 11px; padding: 4px 10px; cursor: pointer;
+  border: 1px solid var(--border, #ccc); background: var(--panel, #fff); border-radius: 3px;
+}
+.viv-ws-action:hover { background: var(--hover, #f0f0f0); }
+.viv-ws-action:disabled { opacity: 0.6; cursor: progress; }
+.viv-ws-action-danger { color: #cf222e; border-color: #f6c4c9; }
+.viv-ws-action-danger:hover { background: #fdecef; }
+.viv-ws-action-warn { color: #b3700d; border-color: #f0d8a7; }
+.viv-ws-action-warn:hover { background: #fff5e1; }
+.viv-ws-action-muted { color: #666; }
+.viv-ws-loading {
+  padding: 16px 18px; color: var(--muted, #999); font-size: 12px;
+}
+/* .viv-ws-error reused from v1; no rule change needed. */
+.mode-selector { margin: 0.5rem 0; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; }
+.mode-selector legend { font-weight: bold; padding: 0 0.3rem; }
+.mode-selector label { display: block; margin: 0.3rem 0; font-weight: normal; }
+.viv-workspace-switcher-actions {
+  border-top: 1px solid var(--border, #eee); margin-top: 0.4rem; padding-top: 0.4rem;
+}
+.viv-workspace-switcher-actions button {
+  display: block; width: 100%; text-align: left;
+  padding: 0.4rem 0.6rem; background: transparent; border: none; cursor: pointer;
+}
+.viv-workspace-switcher-actions button:hover { background: var(--hover, #f0f0f0); }
+
+/* Investigation switcher dropdown (anchored under the rail trigger). */
+.viv-workspace-switcher { position: relative; }
+.viv-iset-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% - 2px);
+  left: 12px;
+  right: 12px;
+  z-index: 1500;
+  background: var(--panel, #fff);
+  border: 1px solid var(--border, #d0d7de);
+  border-radius: 6px;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.14);
+  max-height: 60vh;
+  overflow-y: auto;
+  font-size: 13px;
+}
+.viv-iset-menu.open { display: block; }
+.viv-iset-menu-header {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--muted, #6b7280); padding: 8px 12px 4px;
+}
+.viv-iset-menu-list { list-style: none; margin: 0; padding: 0; }
+.viv-iset-menu-row {
+  padding: 8px 12px; cursor: pointer;
+  border-top: 1px solid var(--border, #f3f4f6);
+}
+.viv-iset-menu-row:first-child { border-top: none; }
+.viv-iset-menu-row:hover, .viv-iset-menu-row:focus { background: var(--hover, #f6f8fa); outline: none; }
+.viv-iset-menu-row-current { background: var(--bg-alt, #eef4ff); }
+.viv-iset-menu-row-current:hover { background: var(--bg-alt, #e3eefe); }
+.viv-iset-menu-row-line1 {
+  display: flex; align-items: center; gap: 8px;
+}
+.viv-iset-menu-row-title { flex: 1; font-size: 13px; color: var(--text, #111827); }
+.viv-iset-menu-row-pill {
+  font-size: 0.7em !important;
+  padding: 1px 7px !important;
+  white-space: nowrap;
+}
+.viv-iset-menu-row-slug {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; color: var(--muted, #6b7280); margin-top: 2px;
+}
+.viv-iset-menu-row-current-tag { color: var(--accent-blue, #1e40af); font-weight: 600; font-family: inherit; }
+.viv-iset-menu-loading, .viv-iset-menu-empty, .viv-iset-menu-error {
+  padding: 10px 12px; color: var(--muted, #6b7280); font-size: 12px;
+}
+.viv-iset-menu-error { color: #b91c1c; }
+.viv-iset-menu-divider { border-top: 1px solid var(--border, #e5e7eb); }
+.viv-iset-menu-new {
+  display: block; width: 100%; text-align: left;
+  background: none; border: none; cursor: pointer;
+  padding: 10px 12px; font-size: 13px; color: var(--accent-blue, #0366d6);
+}
+.viv-iset-menu-new:hover { background: var(--hover, #f6f8fa); }
+/* Pass C: cross-worktree section divider + peer-row arrow */
+.viv-iset-menu-section {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--muted, #6b7280); padding: 10px 12px 4px;
+  border-top: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-alt, #fafbfc);
+  list-style: none;
+}
+.viv-iset-menu-row-peer { padding-right: 28px; position: relative; }
+.viv-iset-menu-row-arrow {
+  color: var(--muted, #6b7280); font-size: 14px; padding-left: 6px;
+  flex: 0 0 auto;
+}
+.viv-iset-menu-row-peer:hover .viv-iset-menu-row-arrow { color: var(--accent-blue, #0366d6); }
+</style>
+</head><body>
+
+<div class="viv-layout">
+
+  <!-- LEFT RAIL -->
+  <aside id="viv-rail" class="viv-rail">
+
+    <!-- Brand + workspace switcher -->
+    <div class="viv-rail-header">
+      <img class="viv-rail-logo" src="assets/vivarium-logo.png" alt="Vivarium" loading="lazy">
+      <div class="viv-rail-brand">
+        <strong>Vivarium</strong>
+        <small>dashboard</small>
+      </div>
+    </div>
+
+    <div class="viv-workspace-switcher" id="viv-workspace-switcher">
+      <button class="viv-workspace-switcher-trigger" type="button"
+              aria-haspopup="true" aria-expanded="false"
+              id="viv-workspace-switcher-trigger">
+        <span class="viv-workspace-switcher-glyph">●</span>
+        <strong>ws_increase_demo</strong>
+        <span class="viv-arrow">▾</span>
+      </button>
+    </div>
+
+    <!-- Primary nav -->
+    <nav class="viv-rail-section" role="tablist">
+      <div class="viv-rail-section-label">Workspace</div>
+      <!-- Inputs: 3 data streams flowing into a process rectangle (input ports) -->
+      <a href="#workspace-inputs"  class="viv-rail-link menu-link" data-page="workspace-inputs">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <path d="M2 7h6M2 12h6M2 17h6"/>
+            <path d="M7 5l2 2-2 2M7 10l2 2-2 2M7 15l2 2-2 2"/>
+            <rect x="12" y="4" width="10" height="16" rx="1"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Inputs</span>
+      </a>
+      <!-- Registry: 3×2 grid of stores — the type catalog. Top row of
+           circles (continuous-type stores) over a bottom row of squares
+           (discrete/struct-type stores). The mixed-shape pair reads as
+           "different KINDS of stores" rather than a uniform grid, which
+           better matches the registry's heterogeneous-types semantics. -->
+      <a href="#registry"          class="viv-rail-link menu-link" data-page="registry">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <circle cx="6"  cy="7" r="2.2"/>
+            <circle cx="12" cy="7" r="2.2"/>
+            <circle cx="18" cy="7" r="2.2"/>
+            <rect x="3.8"  y="14.8" width="4.4" height="4.4" rx="0.3"/>
+            <rect x="9.8"  y="14.8" width="4.4" height="4.4" rx="0.3"/>
+            <rect x="15.8" y="14.8" width="4.4" height="4.4" rx="0.3"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Registry</span>
+      </a>
+      <!-- Composites: composite-as-process — outer boundary containing a process rectangle wired to a store -->
+      <a href="#simulation-setup"  class="viv-rail-link menu-link" data-page="simulation-setup">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <rect x="2.5" y="6" width="19" height="12" rx="1.25"/>
+            <rect x="5.5" y="9" width="5.5" height="6"/>
+            <circle cx="16.5" cy="12" r="2.4"/>
+            <path d="M11 12h3.1"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Composites</span>
+      </a>
+      <!-- Investigations: DAG of related studies. Uses the branching-fan
+           icon (previously on the now-removed flat Studies catalog). -->
+      <a href="#investigations" class="viv-rail-link menu-link" data-page="investigations">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <rect x="2.5" y="9" width="6" height="6"/>
+            <rect x="16" y="3" width="5.5" height="4"/>
+            <rect x="16" y="10" width="5.5" height="4"/>
+            <rect x="16" y="17" width="5.5" height="4"/>
+            <path d="M8.5 12L16 5"/>
+            <path d="M8.5 12h7.5"/>
+            <path d="M8.5 12L16 19"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Investigation</span>
+      </a>
+      <a href="#simulations"       class="viv-rail-link menu-link" data-page="simulations">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <ellipse cx="12" cy="6" rx="8" ry="3"/>
+            <path d="M4 6v12c0 1.657 3.582 3 8 3s8-1.343 8-3V6"/>
+            <path d="M4 12c0 1.657 3.582 3 8 3s8-1.343 8-3"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Simulations DB</span>
+      </a>
+      <!-- Visualizations: axes + line-chart polyline + data points.
+           Polyline style (vs the previous smooth sigmoid) reads more
+           clearly as "scientific plot" at rail-icon size — matches the
+           chart-icon convention common across viz / analytics UIs and
+           the mockup's iconography. -->
+      <a href="#visualizations"    class="viv-rail-link menu-link" data-page="visualizations">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <!-- L-shaped axes -->
+            <path d="M4 4 V20 H20"/>
+            <!-- chart polyline: low-left → peak → dip → higher peak → settle -->
+            <path d="M7 16 L 10 11 L 13 14 L 16 8 L 19 10"/>
+            <!-- data points at each vertex -->
+            <circle cx="7"  cy="16" r="1.05" fill="currentColor" stroke="none"/>
+            <circle cx="10" cy="11" r="1.05" fill="currentColor" stroke="none"/>
+            <circle cx="13" cy="14" r="1.05" fill="currentColor" stroke="none"/>
+            <circle cx="16" cy="8"  r="1.05" fill="currentColor" stroke="none"/>
+            <circle cx="19" cy="10" r="1.05" fill="currentColor" stroke="none"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Visualizations</span>
+      </a>
+      <!-- Branch: workspace branch + remote (formerly "GitHub"). The icon
+           is a branch-and-node glyph; renaming the label to "Branch"
+           better reflects that this tab is about the local branch state,
+           the workspace repo's remote, and PR/merge actions — not just
+           GitHub-the-product. Hash route #github kept for back-compat
+           with bookmarks. -->
+      <a href="#github"            class="viv-rail-link menu-link" data-page="github">
+        <span class="viv-rail-link-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
+            <circle cx="6" cy="6" r="2"/>
+            <circle cx="6" cy="18" r="2"/>
+            <circle cx="18" cy="12" r="2"/>
+            <path d="M6 8v8"/>
+            <path d="M6 8a6 6 0 0 0 6 6h4"/>
+          </svg>
+        </span>
+        <span class="viv-rail-link-label">Branch</span>
+      </a>
+    </nav>
+
+    <!-- Studies of the active investigation, dependency-ordered. -->
+    <div class="viv-rail-section">
+      <div class="viv-rail-section-label">Studies</div>
+      <div id="viv-rail-investigations">
+        <p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">Loading…</p>
+      </div>
+    </div>
+
+    <!-- Footer: user identity + collapse toggle.
+         Workspace owner is resolved from `gh api user` (which requires
+         the user to have authenticated `gh auth login`). When that
+         succeeds, `owner_login` is the GitHub username and we link to
+         their profile. When it doesn't, we fall back to a GENERIC
+         "Connect GitHub" prompt — never to git-config name/email —
+         so a workspace shown on screen / shared in a screenshot
+         doesn't leak the local user's personal git identity. -->
+    
+    
+    
+    
+    <a class="viv-rail-footer viv-rail-footer-link" href="https://github.com/AlexPatrie" target="_blank" rel="noopener" title="Open AlexPatrie on GitHub ↗">
+    
+      
+        <img class="viv-avatar viv-avatar-rail viv-avatar-img" src="https://avatars.githubusercontent.com/u/105522603?v=4" alt="AlexPatrie" loading="lazy" referrerpolicy="no-referrer">
+      
+      <div class="viv-rail-footer-text">
+        <strong>A.P.</strong>
+        <small>@AlexPatrie</small>
+      </div>
+    
+    </a>
+    
+    
+
+    <button class="viv-rail-toggle" id="viv-rail-toggle" type="button" aria-label="Collapse rail" onclick="_vivToggleRail()">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-toggle-svg">
+        <path d="M15 18l-6-6 6-6"/>
+      </svg>
+    </button>
+
+  </aside>
+
+  <!-- MAIN: topbar + content -->
+  <div class="viv-main">
+
+    <header class="viv-topbar">
+      <nav class="viv-topbar-breadcrumbs" id="viv-breadcrumbs">
+        <span>ws_increase_demo dashboard</span>
+      </nav>
+      <div class="viv-topbar-actions" id="viv-topbar-actions">
+        <!-- Git status strip + Open-PR button were here; moved into the
+             GitHub tab (Workspace → GitHub) for a cleaner topbar. The JS
+             (_refreshGitStatus) still targets #viv-git-status by id and
+             populates it wherever it lives. -->
+        <span class="viv-btn viv-tooltip" data-tooltip="Coming soon — share workspace link">Share</span>
+        <span class="viv-kebab viv-tooltip" data-tooltip="Workspace settings — coming soon">⋯</span>
+        <span class="viv-theme-toggle" id="viv-theme-toggle" role="button" tabindex="0" aria-label="Toggle dark mode" title="Toggle dark/light mode">
+          <span class="viv-theme-toggle-icon" id="viv-theme-toggle-icon">☀</span>
+          <span class="viv-theme-toggle-track">
+            <span class="viv-theme-toggle-thumb" id="viv-theme-toggle-thumb"></span>
+          </span>
+        </span>
+        
+        
+        <a class="viv-avatar viv-avatar-topbar viv-avatar-link"
+           href="https://github.com/AlexPatrie"
+           target="_blank" rel="noopener"
+           title="AlexPatrie · alexanderpatrie@gmail.com">AP</a>
+        
+      </div>
+    </header>
+
+    <main class="viv-content pages" id="viv-content">
+
+<!-- ===== PAGE: WORKSPACE INPUTS ===== -->
+<section id="page-workspace-inputs" class="page" data-page="workspace-inputs">
+  <h2 class="page-title">Inputs</h2>
+  <p class="page-lead">External resources you bring into the workspace. Datasets feed validation, references and expert docs anchor the science. Simulation modules (the Python packages providing Processes/Steps) live in the <a href="#registry">Registry</a> tab.</p>
+
+  <!-- Datasets panel -->
+  <div class="panel">
+    <h3>Datasets</h3>
+    <p class="panel-lead">Register datasets your model will compare against. Each entry maps to specific model claims it supports.</p>
+    
+    <p style="color:#888;font-style:italic">No datasets registered yet.</p>
+    
+    <button class="action-btn" onclick="openModal('modal-dataset')">+ Add dataset</button>
+  </div>
+
+  <!-- Expert knowledge panel — card layout (replaces cramped 5-column table) -->
+  <div class="panel">
+    <h3>Expert knowledge</h3>
+    <p class="panel-lead">Curated expert documents &mdash; PDFs, lab notes, expert review docs &mdash; that aren&rsquo;t formal publications but capture domain knowledge driving the model. Linked to the claims they support.</p>
+    
+    <p style="color:#888;font-style:italic">No expert documents registered yet.</p>
+    
+    <button class="action-btn" onclick="openModal('modal-expert-doc')">+ Add expert document</button>
+  </div>
+
+  <!-- References panel — papers.bib explorer + PDF status + add-reference action -->
+  <div class="panel">
+    <h3>References <span class="muted" style="font-size:0.75em;font-weight:normal">(0 entries, 0 PDFs in references/papers.bib)</span></h3>
+    <p class="panel-lead">Formal publications cited across the studies, plus the PDFs committed alongside them. Click any card to expand its details; click <em>Open ↗</em> to access the paper. Reading notes (if present) live at <code>references/notes/&lt;bib-key&gt;.md</code>. Adds entries to <code>references/papers.bib</code> and <code>references/claims.yaml</code>.</p>
+
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+      <input type="search" id="bib-filter" placeholder="Filter by key, title, author, year…"
+             style="flex:1;min-width:240px;max-width:480px;padding:6px 10px;border:1px solid #cbd5e1;border-radius:4px;font-size:0.9em"
+             oninput="_filterBibEntries(this.value)">
+      <button class="action-btn" onclick="openModal('modal-reference')">+ Add reference (PDF)</button>
+    </div>
+
+    
+    
+
+    
+
+    
+    <p style="color:#888;font-style:italic">No bibliography entries yet. Add some to <code>references/papers.bib</code>.</p>
+    
+  </div>
+
+</section>
+
+<!-- ===== PAGE: SIMULATION SETUP ===== -->
+<section id="page-simulation-setup" class="page" data-page="simulation-setup">
+  <h2 class="page-title">Composites</h2>
+  <p class="page-lead">Browse and explore the composites available in this workspace. Each composite packages a runnable simulation state with parameters you can configure. Click <strong>Explore</strong> to open its wiring diagram and start a Study.</p>
+
+  <!-- Available Composites (workspace-local discovery) -->
+  <div class="panel">
+    <h3>
+      Available Composites <span id="composite-count" class="count-badge"></span>
+      <a href="/composites/new" class="primary-btn" style="margin-left: 12px; font-size: 13px; text-decoration: none;" title="Author a new composite in the visual builder">+ Create</a>
+    </h3>
+    <p class="panel-lead">Discoverable composite documents from <code>pbg_&lt;slug&gt;/composites/*.composite.{yaml,json}</code>. Each one packages a runnable simulation state with parameters you can configure. Click <strong>Explore</strong> to open it in Composite Explorer, or <strong>+ Create</strong> above to build a new one visually.</p>
+    <div class="card-browse-toolbar" id="composite-toolbar">
+      <input type="search" class="card-browse-search" id="composite-search" placeholder="Filter composites…">
+      <div class="card-browse-chips" id="composite-tag-chips"></div>
+      <span class="card-browse-view-toggle">
+        <button class="view-btn active" data-view="grid" onclick="_setCompositeView('grid')" title="Grid view">&#9638;</button>
+        <button class="view-btn" data-view="list" onclick="_setCompositeView('list')" title="List view">&#8801;</button>
+      </span>
+      <select id="composites-sort" class="composites-sort-select" onchange="_setCompositesSort(this.value)" title="Sort composites">
+        <option value="workspace-first">Sort: Workspace first</option>
+        <option value="name">Sort: Name</option>
+        <option value="module">Sort: Module</option>
+        <option value="kind">Sort: Kind</option>
+      </select>
+    </div>
+    <div id="composite-cards" class="module-grid">
+      <p class="empty-state">Loading composites&hellip;</p>
+    </div>
+  </div>
+
+</section>
+
+<!-- ===== PAGE: VISUALIZATIONS ===== -->
+<section id="page-visualizations" class="page" data-page="visualizations">
+  <h2 class="page-title">Visualizations</h2>
+  <p class="page-lead">Charts rendered from observable trajectories. Either configure a registered class with specific settings, or describe what to plot in natural language and let <code>/pbg-viz</code> generate the function.</p>
+
+
+  <!-- Workspace visualizations (workspace.yaml-driven, primary panel) -->
+  <div class="panel">
+    <h3>Workspace visualizations</h3>
+    <p class="panel-lead">Configured visualizations registered in <code>workspace.yaml</code>. <strong>Class-backed</strong> entries are ready to use immediately in investigations. <strong>Description-only</strong> entries follow the Create/Add/Commit lifecycle to generate code via <code>/pbg-viz</code>.</p>
+    <div style="margin-bottom:8px">
+      <button class="action-btn" onclick="_openWorkspaceVizModal()">+ Add visualization</button>
+      <button class="action-btn" onclick="_vizCommitAll()">Commit all staged</button>
+    </div>
+    
+    <p style="color:#888;font-style:italic">No visualizations registered yet.</p>
+    
+  </div>
+
+  <!-- Available Visualization classes (registry-driven, secondary catalog) -->
+  <div class="panel">
+    <h3>Available Visualization classes <span id="viz-count" class="count-badge"></span></h3>
+    <p class="panel-lead">Visualization classes discovered from <code>core.link_registry</code> (subclasses of <code>pbg_superpowers.visualization.Visualization</code> from any installed pbg-* package). Click <strong>Preview</strong> to see a demo render; <strong>Use</strong> to register it as a Workspace visualization. <span class="muted">Workspace classes listed first; environment-only classes follow.</span> Need a new one? Run <code>/pbg-viz &lt;name&gt; &lt;description&gt;</code> in Claude Code.</p>
+    <input type="search" id="viz-catalog-search" placeholder="Search Visualization classes by name or doc…"
+           style="width:100%;padding:6px;margin-bottom:8px;font-size:0.9em"
+           oninput="_filterVizCatalog(this.value)">
+    <div id="viz-picker-container">
+      <p class="empty-state">Discovering Visualization classes&hellip; <span class="muted">First load walks every installed pbg-* package and can take a few seconds; subsequent loads are cached for 30 s.</span></p>
+    </div>
+  </div>
+
+</section>
+
+<!-- Preview modal (iframe-based) -->
+<div id="modal-viz-preview" class="modal-overlay">
+  <div class="modal-box" style="max-width:900px">
+    <button class="modal-close" onclick="closeModal('modal-viz-preview')">&times;</button>
+    <h3 id="viz-preview-title">Preview</h3>
+    <div id="viz-preview-source-row" style="margin-bottom:8px;font-size:0.9em;color:#555"></div>
+    <iframe id="viz-preview-iframe" style="width:100%;height:480px;border:1px solid #ddd;background:#fff"></iframe>
+    <div id="viz-preview-notes" style="margin-top:8px;font-size:0.85em;color:#666"></div>
+  </div>
+</div>
+
+<!-- ===== PAGE: REGISTRY ===== -->
+<section id="page-registry" class="page" data-page="registry">
+  <h2 class="page-title">Registry</h2>
+  <p class="page-lead">Simulation modules: browse the catalog, install pbg-* packages, see what processes and types they contribute. Installing a module adds it as a submodule under <code>external/</code>, pip-installs it into the workspace venv, and appends it to <code>pyproject.toml</code> dependencies.</p>
+
+  
+  <div class="registry-subtabs" role="tablist">
+    <button class="registry-subtab active" data-subtab="modules"
+            onclick="_setRegistrySubtab('modules')" role="tab">Modules</button>
+    <button class="registry-subtab" data-subtab="discovered"
+            onclick="_setRegistrySubtab('discovered')" role="tab">Discovered registry
+      <span class="count-badge muted" id="registry-total-count"></span></button>
+  </div>
+
+  <!-- Subtab: Modules (catalog grid; workspace + installed entries pinned at top) -->
+  <section class="panel registry-subtab-panel active" data-subtab="modules">
+    <p class="panel-lead">Modules active in this workspace appear at the top (the workspace's own first-party package is pinned first, then installed catalog modules). Click Install on any card below to add it. Each installed card carries an Uninstall affordance + its source / path.</p>
+    <div class="card-browse-toolbar" id="catalog-toolbar">
+      <input type="search" class="card-browse-search" id="catalog-search" placeholder="Filter modules…">
+      <div class="card-browse-chips" id="catalog-tag-chips"></div>
+      <div class="card-browse-options">
+        <label><input type="radio" name="catalog-installed-filter" value="all" checked> All</label>
+        <label><input type="radio" name="catalog-installed-filter" value="installed"> Installed</label>
+        <label><input type="radio" name="catalog-installed-filter" value="uninstalled"> Available</label>
+        <span class="card-browse-view-toggle">
+          <button class="view-btn active" data-view="grid" onclick="_setCatalogView('grid')" title="Grid view">&#9638;</button>
+          <button class="view-btn" data-view="list" onclick="_setCatalogView('list')" title="List view">&#8801;</button>
+        </span>
+      </div>
+    </div>
+    <div id="catalog-modules-grid" class="module-grid">
+      <p class="empty-state">Loading catalog&hellip;</p>
+    </div>
+    
+    <div id="installed-modules-sync-warning" style="display:none"></div>
+    
+    <div id="installed-modules-list" hidden></div>
+    <span id="installed-modules-count" hidden></span>
+  </section>
+
+  <!-- Subtab: Discovered registry (live build_core() introspection) -->
+  <section class="panel registry-subtab-panel" data-subtab="discovered">
+    <p class="panel-lead">Live snapshot of <code>build_core()</code> — every Process, Step, Emitter, Visualization, and Type registered via auto-discovery. Classes from this workspace's own package and declared <code>imports</code> are shown first. Classes discovered from the Python environment but <em>not</em> declared in <code>workspace.yaml</code> appear collapsed under <em>Also available in environment</em>.</p>
+
+    <button class="action-btn" onclick="_loadRegistry(true)">Refresh registry</button>
+    <div id="registry-status" class="muted" style="margin:8px 0"></div>
+
+    <div class="registry-tabs">
+      <button class="registry-tab active" data-kind="process"       onclick="_setRegistryTab('process')">Processes <span class="count-badge" id="registry-process-count"></span></button>
+      <button class="registry-tab"        data-kind="step"          onclick="_setRegistryTab('step')">Steps <span class="count-badge" id="registry-step-count"></span></button>
+      <button class="registry-tab"        data-kind="emitter"       onclick="_setRegistryTab('emitter')">Emitters <span class="count-badge" id="registry-emitter-count"></span></button>
+      <button class="registry-tab"        data-kind="visualization" onclick="_setRegistryTab('visualization')">Visualizations <span class="count-badge" id="registry-visualization-count"></span></button>
+      <button class="registry-tab"        data-kind="type"          onclick="_setRegistryTab('type')">Types <span class="count-badge" id="registry-type-count"></span></button>
+    </div>
+
+    <input type="search" class="registry-search" id="registry-search" placeholder="Filter&hellip;" oninput="_filterRegistry(this.value)">
+
+    <div class="registry-tab-panel active" data-kind="process"       id="registry-processes-container"><p class="empty-state">Loading&hellip;</p></div>
+    <div class="registry-tab-panel"        data-kind="step"          id="registry-steps-container"></div>
+    <div class="registry-tab-panel"        data-kind="emitter"       id="registry-emitters-container"></div>
+    <div class="registry-tab-panel"        data-kind="visualization" id="registry-visualizations-container"></div>
+    <div class="registry-tab-panel"        data-kind="type"          id="registry-types-container"></div>
+  </section>
+</section>
+
+<!-- ===== PAGE: STUDIES ===== -->
+<section id="page-investigations" class="page" data-page="investigations">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+    <h2 class="page-title" style="margin:0">Investigation</h2>
+    <div style="display:flex;gap:8px;align-items:center">
+      <!-- "Switch investigation" + "+ New Investigation" actions now live in
+           the left-rail investigation switcher dropdown (top of the rail). -->
+    </div>
+  </div>
+  <p class="page-lead" id="investigation-page-lead">The active investigation. Click a node in the DAG to open a study. Use the investigation switcher at the top of the left rail to switch active investigation or start a new one.</p>
+
+  <!-- List view: investigation cards. -->
+  <div id="investigations-list" class="investigations-list-grid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap:12px;">
+    <p class="empty-state">Loading…</p>
+  </div>
+
+  <!-- "+ New Investigation" modal. Hidden by default. -->
+  <div id="new-iset-modal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.4); z-index:1000; align-items:center; justify-content:center;">
+    <div style="background:var(--panel,#fff); border-radius:8px; padding:20px 22px; width:min(540px, 92vw); max-height:90vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,0.2);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <h3 style="margin:0">New Investigation</h3>
+        <button class="btn-mini" onclick="_closeNewIsetModal()">×</button>
+      </div>
+      <div id="new-iset-error" style="display:none; background:#fee2e2; color:#991b1b; padding:8px 12px; border-radius:6px; margin-bottom:10px; font-size:0.9em;"></div>
+      <label style="display:block; margin-bottom:10px;">
+        <div style="font-weight:600; font-size:0.9em; margin-bottom:4px;">Name <span style="color:#dc2626">*</span></div>
+        <input type="text" id="new-iset-name" oninput="_updateNewIsetSlugPreview()" placeholder="My new investigation"
+               style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:0.95em;">
+        <div class="muted" style="font-size:0.8em; margin-top:4px;">
+          Slug: <code id="new-iset-slug-preview" style="background:#f3f4f6; padding:1px 4px; border-radius:3px;">—</code>
+        </div>
+      </label>
+      <label style="display:block; margin-bottom:10px;">
+        <div style="font-weight:600; font-size:0.9em; margin-bottom:4px;">Overview <span class="muted" style="font-weight:normal;">(optional)</span></div>
+        <textarea id="new-iset-overview" rows="3"
+                  style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:0.95em; font-family:inherit; resize:vertical;"
+                  placeholder="One- or two-line description of the research arc."></textarea>
+      </label>
+      <label style="display:block; margin-bottom:14px;">
+        <div style="font-weight:600; font-size:0.9em; margin-bottom:4px;">Parent studies <span class="muted" style="font-weight:normal;">(optional, hold ⌘/Ctrl to multi-select)</span></div>
+        <select id="new-iset-parent-studies" multiple size="5"
+                style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:0.95em;"></select>
+      </label>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn-mini" onclick="_closeNewIsetModal()">Cancel</button>
+        <button class="action-btn" id="new-iset-submit-btn" onclick="_submitNewIset()">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- "Clone investigation" modal. Hidden by default. -->
+  <div id="clone-iset-modal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.4); z-index:1000; align-items:center; justify-content:center;">
+    <div style="background:#fff; border-radius:8px; padding:20px 22px; width:min(540px, 92vw); max-height:90vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,0.2);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <h3 style="margin:0">Clone investigation</h3>
+        <button class="btn-mini" onclick="_closeCloneIsetModal()">×</button>
+      </div>
+      <div id="clone-iset-error" style="display:none; background:#fee2e2; color:#991b1b; padding:8px 12px; border-radius:6px; margin-bottom:10px; font-size:0.9em;"></div>
+      <p class="muted" style="font-size:0.85em; margin:0 0 12px 0;">
+        Copies the investigation + its studies, strips simulation results, resets statuses to <code>planning</code>.
+        Useful for a fresh attempt at the same plan or a demo fixture.
+      </p>
+      <label style="display:block; margin-bottom:10px;">
+        <div style="font-weight:600; font-size:0.9em; margin-bottom:4px;">Source <span class="muted" style="font-weight:normal;">(this investigation)</span></div>
+        <input type="text" id="clone-iset-source" readonly
+               style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:0.95em; background:#f9fafb; color:#475569;">
+      </label>
+      <label style="display:block; margin-bottom:10px;">
+        <div style="font-weight:600; font-size:0.9em; margin-bottom:4px;">Target name <span style="color:#dc2626">*</span></div>
+        <input type="text" id="clone-iset-target" oninput="_updateCloneIsetSlugPreview()" placeholder="e.g. dnaa-replication-fresh"
+               style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:0.95em;">
+        <div class="muted" style="font-size:0.8em; margin-top:4px;">
+          Slug: <code id="clone-iset-slug-preview" style="background:#f3f4f6; padding:1px 4px; border-radius:3px;">—</code>
+        </div>
+      </label>
+      <label style="display:block; margin-bottom:14px;">
+        <div style="font-weight:600; font-size:0.9em; margin-bottom:4px;">Target study prefix <span class="muted" style="font-weight:normal;">(optional)</span></div>
+        <input type="text" id="clone-iset-target-prefix" placeholder="defaults to first dash-segment of target name"
+               style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:0.95em;">
+        <div class="muted" style="font-size:0.8em; margin-top:4px;">
+          Studies like <code>dnaa-02-atp-hydrolysis</code> become <code>&lt;prefix&gt;-02-atp-hydrolysis</code>.
+        </div>
+      </label>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn-mini" onclick="_closeCloneIsetModal()">Cancel</button>
+        <button class="action-btn" id="clone-iset-submit-btn" onclick="_submitCloneIset()">Clone</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail view: one investigation's DAG. Toggled on click. -->
+  <div id="investigation-detail-view" style="display:none; margin-top:8px">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+      <h3 id="investigation-detail-title" style="margin:0; flex:1"></h3>
+      <span id="investigation-detail-status" class="status-pill planned" style="font-size:0.85em"></span>
+      <span class="viv-info-chip" data-tooltip="Run unblocked &mdash; queue every variant whose model_settings don&#39;t have any unset &#39;required-before-run&#39; gates. Sequential, one variant at a time on a background thread.&#10;&#10;Refresh &mdash; re-fetch the investigation from disk. Use after editing YAML files directly.&#10;&#10;Generate report &mdash; self-contained HTML report you can email.&#10;&#10;Clone &mdash; copy this investigation into a fresh planning state with no run results.">?</span>
+      <button class="btn-mini" id="investigation-detail-refresh" onclick="_refreshInvestigationDetail()" title="Re-fetch the investigation + its studies from disk. Use after editing YAML files directly (which the dashboard can't see otherwise).">↻ Refresh</button>
+      <button class="btn-mini" id="investigation-run-unblocked" onclick="_runUnblockedSimulations()" title="Run every variant whose model_settings don't have any unset 'required-before-run' gates. Sequential — one variant at a time on a background thread. Progress shown in the panel below.">▶ Run unblocked</button>
+      <button class="btn-mini" onclick="_generateInvestigationReport()" title="Generate a shareable HTML report (self-contained, attach to email)">Generate report 📄</button>
+      <button class="btn-mini" onclick="_openCloneIsetModal()" title="Clone this investigation into a fresh planning state (no run results). Useful for a parallel attempt or a demo fixture.">Clone ⎘</button>
+    </div>
+    <!-- Run-progress panel: rendered while a run-unblocked job is active. -->
+    <div id="investigation-run-progress" class="inv-run-progress" style="display:none"></div>
+
+    <div id="investigation-intro" class="inv-intro" style="margin: 0 0 16px 0;">
+      <!-- Lead paragraph (the abstract). Auto-styled as serif body type for readability. -->
+      <div id="investigation-detail-description" class="inv-lead"></div>
+      <!-- At-a-glance grid: one tile per study with a one-line role. Populated by JS. -->
+      <div id="investigation-at-a-glance" class="inv-at-a-glance" style="display:none"></div>
+      <!-- How to read this: ordered list of usage tips for the evaluator. -->
+      <div id="investigation-how-to-read" class="inv-how-to-read" style="display:none">
+        <strong>How to read this</strong>
+        <ol></ol>
+      </div>
+      <!-- Glossary: collapsible. -->
+      <details id="investigation-glossary" class="inv-glossary" style="display:none">
+        <summary>Glossary</summary>
+        <dl></dl>
+      </details>
+      <!-- Biology story (free-form prose). Hidden if the yaml omits it. -->
+      <div id="investigation-biology-story" class="inv-bio-story" style="display:none">
+        <strong class="inv-bio-story-label">Biology story</strong>
+        <div id="investigation-biology-story-text" class="inv-bio-story-text"></div>
+      </div>
+    </div>
+    <div id="investigation-dag-shell"
+         style="position: relative; border: 1px solid #e2e8f0; border-radius: 6px; background: #fafafa;
+                overflow-x: auto; overflow-y: hidden;">
+      <!-- overflow-y must be hidden (not visible): per CSS spec, when one axis
+           is `visible` and the other isn't, `visible` gets promoted to `auto`,
+           which gives this shell its own vertical scrollbar in addition to
+           .viv-content's. JS sets shell.style.height = canvasH so the full
+           DAG fits and the parent .viv-content handles vertical scroll. -->
+      <svg id="investigation-dag-edges" style="position:absolute; top:0; left:0; pointer-events:none;"></svg>
+      <div id="investigation-dag-nodes" style="position:relative; top:0; left:0;"></div>
+    </div>
+
+    <!-- In-place study embed: when a DAG node is clicked, the full study
+         loads below in an iframe (same /studies/<name> route the Studies
+         page uses). Pop-out button breaks it into a separate window. -->
+    <div id="investigation-study-embed-panel" class="panel"
+         style="display:none; margin-top:16px; padding:0; overflow:hidden">
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid #e5e7eb; background:#f9fafb">
+        <strong id="investigation-study-embed-name" style="font-size:1.05em"></strong>
+        <div style="display:flex; gap:6px">
+          <button class="btn-mini" onclick="_popoutInvestigationStudy()" title="Open in a separate window. If it opens as a tab, your browser's 'open new pages as tabs' preference is overriding the popup hint (Safari → Tabs → 'Open pages in tabs instead of windows' → set to 'Manually').">Pop out ↗</button>
+          <button class="btn-mini" onclick="_closeInvestigationStudyEmbed()" title="Close">×</button>
+        </div>
+      </div>
+      <!-- Explicit height = its own scroll context, so `position:sticky` on
+           .study-tabs (inside the iframe) actually sticks to the iframe top
+           as the user scrolls through Overview → Build → … → Decide. -->
+      <iframe id="investigation-study-embed-frame" src="" title="Study detail"
+              style="width:100%; height:calc(100vh - 220px); min-height:600px;
+                     border:0; display:block"></iframe>
+    </div>
+  </div>
+</section>
+
+<!-- GitHub: in-UI sign-in + (future) org picker. The github-login.js widget
+     activates the #viv-gh-chip element on load. No-AI-agent setup path. -->
+<section id="page-github" class="page" data-page="github">
+  <h2 class="page-title">Branch</h2>
+
+  <!-- Settings-style single panel: three sections (Account, Workspace
+       repository, Actions), each a list of label/value rows. Replaces the
+       three-panel layout — easier to scan, easier to extend. -->
+  <div class="panel github-settings">
+    <style>
+      .github-settings .gh-section { padding:18px 0; border-top:1px solid #e5e7eb }
+      .github-settings .gh-section:first-of-type { padding-top:6px; border-top:none }
+      .github-settings .gh-section-title { margin:0 0 14px; font-size:0.95em; color:#1f2937; font-weight:600; letter-spacing:0.02em }
+      .github-settings .gh-row { display:grid; grid-template-columns:180px 1fr; gap:16px; padding:8px 0; align-items:center }
+      .github-settings .gh-row[hidden] { display:none }
+      .github-settings .gh-label { color:#6b7280; font-size:0.88em }
+      .github-settings .gh-value { color:#111827; font-size:0.92em; min-width:0 }
+      .github-settings .gh-value code { font-size:0.92em }
+      .github-settings .gh-value-hint { color:#6b7280; font-size:0.82em; margin-top:4px }
+      .github-settings select.gh-input { width:100%; max-width:380px; padding:6px 8px; font:inherit; border:1px solid #cbd5e1; border-radius:4px; background:#fff }
+      .github-settings .gh-action-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center }
+    </style>
+
+    <!-- ── Account ──────────────────────────────────────────────── -->
+    <div class="gh-section">
+      <h3 class="gh-section-title">Account</h3>
+
+      <div class="gh-row">
+        <div class="gh-label">Signed in as</div>
+        <div class="gh-value">
+          <div id="viv-gh-chip"
+               class="viv-rail-footer viv-rail-footer-link viv-rail-footer-no-github"
+               data-state="loading"
+               title="Sign in to GitHub from the dashboard"
+               style="cursor:pointer;display:inline-flex">
+            <div class="viv-avatar viv-avatar-rail" aria-hidden="true">+</div>
+            <div class="viv-rail-footer-text">
+              <strong>Connect GitHub</strong>
+              <small>checking…</small>
+            </div>
+          </div>
+          <div class="gh-value-hint">No terminal required. Uses your <code>gh</code> session if present, otherwise OAuth Device Flow (browser code-paste).</div>
+          <noscript>
+            <div class="gh-value-hint">Dashboard JS is disabled — run <code>gh auth login</code> from a terminal.</div>
+          </noscript>
+        </div>
+      </div>
+
+      <div class="gh-row">
+        <div class="gh-label">Default org</div>
+        <div class="gh-value">
+          <select id="viv-gh-default-org" class="gh-input">
+            <option value="">Sign in to load orgs…</option>
+          </select>
+          <div id="viv-gh-default-org-hint" class="gh-value-hint">Used to pre-fill <strong>org</strong> for new workspaces and <em>Create GitHub repo</em> actions.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Workspace repository — one row per fact, settings-style ── -->
+    <div class="gh-section">
+      <h3 class="gh-section-title">Workspace repository</h3>
+
+      <div class="gh-row" id="viv-gh-row-repo">
+        <div class="gh-label">Repository</div>
+        <div class="gh-value" id="viv-gh-repo"><span class="muted">loading…</span></div>
+      </div>
+
+      <div class="gh-row" id="viv-gh-row-branch">
+        <div class="gh-label">Branch</div>
+        <div class="gh-value" id="viv-gh-branch"><span class="muted">loading…</span></div>
+      </div>
+
+      <div class="gh-row" id="viv-gh-row-push-state">
+        <div class="gh-label">Push state</div>
+        <div class="gh-value" id="viv-gh-push-state"><span class="muted">loading…</span></div>
+      </div>
+
+      <div class="gh-row" id="viv-gh-row-ahead">
+        <div class="gh-label">Ahead of base</div>
+        <div class="gh-value" id="viv-gh-ahead"><span class="muted">—</span></div>
+      </div>
+
+      <div class="gh-row" id="viv-gh-row-dirty">
+        <div class="gh-label">Working tree</div>
+        <div class="gh-value" id="viv-gh-dirty"><span class="muted">—</span></div>
+      </div>
+
+      <div class="gh-row" id="viv-gh-row-pr">
+        <div class="gh-label">Pull request</div>
+        <div class="gh-value" id="viv-gh-pr"><span class="muted">—</span></div>
+      </div>
+
+      <!-- Legacy hidden host for any code path that still writes to #viv-git-status.
+           The new field-by-field hooks above are the primary surface. -->
+      <div id="viv-git-status" class="git-status" hidden></div>
+    </div>
+
+    <!-- ── Actions ────────────────────────────────────────────────── -->
+    <div class="gh-section">
+      <h3 class="gh-section-title">Actions</h3>
+
+      <div class="gh-row">
+        <div class="gh-label">Repo &amp; branch</div>
+        <div class="gh-value gh-action-row" id="viv-git-actions">
+          <button id="btn-open-pr" class="action-btn" onclick="_openPRDialog()" title="Open PR for current branch">Open PR ↗</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="page-studies" class="page" data-page="studies">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+    <h2 class="page-title" style="margin:0">Studies</h2>
+    <button class="action-btn" onclick="_createInvestigation()">+ New study</button>
+  </div>
+  <p class="page-lead">Declarative research recipes — pick a composite, declare simulations (single / sweep / seeds), name observables, choose visualizations. Run, save, compare.</p>
+
+  <!-- Browse toolbar matches v0.5.6 catalog/composite browse -->
+  <div class="card-browse-toolbar" id="investigations-toolbar">
+    <input type="search" class="card-browse-search" id="investigations-search" placeholder="Filter studies…">
+    <div class="card-browse-chips" id="investigations-tag-chips"></div>
+    <select id="investigations-sort" onchange="_setInvestigationsSort(this.value)" style="margin-left:12px">
+      <option value="dependencies" selected>Sort: Dependencies (topological)</option>
+      <option value="name">Sort: Name</option>
+      <option value="last_run">Sort: Last run</option>
+      <option value="status">Sort: Status</option>
+      <option value="phase">Sort: Phase (Design → Decide)</option>
+      <option value="topic">Sort: Topic</option>
+      <option value="n_runs">Sort: Run count</option>
+    </select>
+    <span class="card-browse-view-toggle">
+      <button class="view-btn active" data-view="grid" onclick="_setInvestigationsView('grid')">▦</button>
+      <button class="view-btn" data-view="list" onclick="_setInvestigationsView('list')">≡</button>
+    </span>
+  </div>
+
+  <div id="investigations-grid">
+    <p class="empty-state">Loading studies…</p>
+  </div>
+
+  <!-- Detail panel renders inline after a row is clicked -->
+  <div id="investigation-detail" style="display:none; margin-top:16px"></div>
+
+  <!--
+    Embedded study detail. Replaces the legacy full-window navigation to
+    /studies/<name> with an iframe that keeps the dashboard chrome visible.
+    The same /studies/<name> route serves both this iframe and the pop-out
+    window, so direct links keep working.
+  -->
+  <div id="study-detail-panel" class="panel" style="display:none; margin-top:16px; padding:0; overflow:hidden">
+    <div class="study-embed-header"
+         style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid #e5e7eb; background:#f9fafb">
+      <strong id="study-detail-name" style="font-size:1.05em"></strong>
+      <div style="display:flex; gap:6px">
+        <button class="btn-mini" onclick="_popoutStudy()" title="Open in a separate window. If it opens as a tab, your browser's 'open new pages as tabs' preference is overriding the popup hint (Safari → Tabs → 'Open pages in tabs instead of windows' → set to 'Manually').">Pop out &#8599;</button>
+        <button class="btn-mini" onclick="_closeStudyEmbedded()" title="Close">&times;</button>
+      </div>
+    </div>
+    <iframe id="study-detail-frame" src="" title="Study detail"
+            style="width:100%; height:calc(100vh - 220px); min-height:560px; border:0; display:block"></iframe>
+  </div>
+</section>
+
+<!-- ===== PAGE: SIMULATIONS ===== -->
+<section id="page-simulations" class="page" data-page="simulations">
+  <h2 class="page-title">Simulations DB</h2>
+  <p class="page-lead">
+    All persisted runs across this workspace, gathered from
+    <code>.pbg/composite-runs.db</code> and every
+    <code>studies/&lt;name&gt;/runs.db</code>. Delete a row to remove its
+    DB rows, run artifacts, and any Study references.
+  </p>
+
+  <div style="margin: 8px 0 12px; display: flex; gap: 8px; align-items: center;">
+    <input id="sim-filter" type="search" placeholder="Filter by composite, investigation, study, or label…"
+           style="flex: 1; max-width: 480px; padding: 6px 10px; font-size: 14px;
+                  border: 1px solid #d1d5db; border-radius: 4px;" />
+    <button id="sim-refresh" class="action-btn">Refresh</button>
+  </div>
+
+  <div id="sim-loading" style="color: #6b7280; padding: 12px;">Loading simulations…</div>
+  <div id="sim-empty"   style="color: #6b7280; padding: 12px; display: none;">
+    No simulations yet. Run a composite from the
+    <a href="#composite-explore">Composite Explorer</a> or from a
+    <a href="#studies">Study</a> to see entries here.
+  </div>
+
+  <table id="sim-table" style="width:100%; border-collapse: collapse; font-size: 13px; display: none;">
+    <thead>
+      <tr style="background:#f3f4f6;">
+        <th style="text-align:left; padding:6px 8px;">Composite</th>
+        <th style="text-align:left; padding:6px 8px;">Investigation</th>
+        <th style="text-align:left; padding:6px 8px;">Studies</th>
+        <th style="text-align:left; padding:6px 8px; width:90px;">Status</th>
+        <th style="text-align:left; padding:6px 8px; width:80px;">Steps</th>
+        <th style="text-align:left; padding:6px 8px;">Label</th>
+        <th style="text-align:left; padding:6px 8px; width:120px;">Started</th>
+        <th style="text-align:left; padding:6px 8px; width:80px;">Run</th>
+        <th style="text-align:left; padding:6px 8px; width:60px;"></th>
+      </tr>
+    </thead>
+    <tbody id="sim-tbody"></tbody>
+  </table>
+
+  <!-- Delete confirmation dialog -->
+  <div id="sim-delete-dialog" style="display:none; position:fixed; inset:0;
+                                      background:rgba(0,0,0,0.45); z-index:1000;
+                                      align-items:center; justify-content:center;">
+    <div style="background:#fff; max-width:560px; padding:20px; border-radius:6px;
+                 box-shadow:0 4px 16px rgba(0,0,0,0.2);">
+      <h3 style="margin:0 0 12px;">Delete simulation?</h3>
+      <div id="sim-delete-body" style="font-size:14px; color:#374151;"></div>
+      <div style="text-align:right; margin-top:16px;">
+        <button id="sim-delete-cancel" class="action-btn">Cancel</button>
+        <button id="sim-delete-confirm" class="action-btn"
+                style="background:#dc2626; color:#fff;">Delete</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Modal: create investigation -->
+<div id="modal-investigation-create" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-investigation-create')">&times;</button>
+    <h3>Create investigation</h3>
+    <form id="form-investigation-create" onsubmit="event.preventDefault(); _submitInvestigationCreate(this)">
+      <label>Name <input name="name" placeholder="dnaa-binding-baseline" required pattern="[a-zA-Z0-9_-]+"></label>
+      <label>Starting composite (optional — pick from workspace catalog)
+        <select name="source" id="create-inv-source">
+          <option value="">— blank composites list, add later —</option>
+        </select>
+      </label>
+      <div class="form-error"></div>
+      <button type="submit">Create</button>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: add visualization to an investigation -->
+<div id="modal-investigation-add-viz" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-investigation-add-viz')">&times;</button>
+    <h3>Add visualization</h3>
+    <form id="form-investigation-add-viz" onsubmit="event.preventDefault(); _submitAddViz(this)">
+      <input type="hidden" name="investigation" id="add-viz-investigation">
+      <label>Name <input name="name" placeholder="trajectory" required pattern="[a-zA-Z0-9_-]+"></label>
+      <label>Visualization class <select name="address" id="add-viz-class" required></select></label>
+      <label>Config (JSON; e.g. <code>{"observable":"level","sources":["baseline"]}</code>)
+        <textarea name="config" rows="4" placeholder='{"observable": "level", "sources": ["baseline"]}'></textarea>
+      </label>
+      <div class="form-error"></div>
+      <button type="submit">Add</button>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Investigation — Add composite from Registry -->
+<div id="modal-inv-add-composite" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-inv-add-composite')">&times;</button>
+    <h3>Add composite from Registry</h3>
+    <form id="form-inv-add-composite"
+          onsubmit="event.preventDefault(); _submitAddComposite(this)">
+      <label>Composite (workspace catalog)
+        <select name="source" id="inv-add-composite-source" required></select>
+      </label>
+      <label>Name in this study
+        <input name="name" pattern="^[a-zA-Z0-9_-]+$" required placeholder="baseline">
+      </label>
+      <div class="form-error"></div>
+      <button type="submit" class="action-btn">Add</button>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Investigation — Perturb composite -->
+<div id="modal-inv-perturb" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-inv-perturb')">&times;</button>
+    <h3>Perturb composite</h3>
+    <form id="form-inv-perturb"
+          onsubmit="event.preventDefault(); _submitPerturb(this)">
+      <input type="hidden" name="extends">
+      <label>New composite name
+        <input name="name" pattern="^[a-zA-Z0-9_-]+$" required placeholder="high-rate">
+      </label>
+      <label>Parameter overrides (JSON; dotted-path keys)
+        <textarea name="parameter_overrides" rows="3"
+                  placeholder='{"state.replication.config.rate": 2.0}'></textarea>
+      </label>
+      <label>Process overrides (JSON; null to remove, str for new address, dict for both)
+        <textarea name="process_overrides" rows="3"
+                  placeholder='{"replication": null}'></textarea>
+      </label>
+      <div class="form-error"></div>
+      <button type="submit" class="action-btn">Perturb</button>
+    </form>
+  </div>
+</div>
+
+<!-- ===== PAGE: COMPOSITE EXPLORER ===== -->
+<section id="page-composite-explore" class="page" data-page="composite-explore">
+  <h2 class="page-title">Composite Explorer</h2>
+  <p class="page-lead">Inspect a composite's wiring, run it, and view results. To configure parameters, design variants, and capture conclusions, start a <strong>Composite Study</strong>.</p>
+
+  <div id="ce-loading" class="empty-state">Loading composite&hellip;</div>
+
+  <div id="ce-main" style="display:none">
+
+    <!-- Begin Study CTA -->
+    <div id="ce-begin-study-bar" class="panel" style="display:flex;align-items:center;gap:12px;background:#f0f9ff;border:1px solid #bae6fd">
+      <div style="flex:1">
+        <strong>Ready to investigate?</strong>
+        <span class="muted">Start a Composite Study to design variants, run simulations, and capture conclusions.</span>
+      </div>
+      <button class="action-btn" id="ce-begin-study-btn" onclick="_beginStudyFromComposite()">Begin Study</button>
+    </div>
+
+    <!-- Metadata header -->
+    <div class="panel">
+      <h3 id="ce-name"></h3>
+      <p id="ce-description" class="muted"></p>
+      <p><strong>ID:</strong> <code id="ce-id"></code></p>
+      <p><strong>Module:</strong> <code id="ce-module"></code> <span id="ce-kind" class="kind-badge"></span></p>
+    </div>
+
+    <!-- Loom-explore graph (always visible — has its own View/Run/… nav inside) -->
+    <div class="panel">
+      <div class="loom-frame-toolbar" style="display:flex;justify-content:flex-end;margin-bottom:6px">
+        <button class="btn-mini" onclick="_popoutLoom('composite-explore-frame')" title="Open in a separate window.">Pop out &#8599;</button>
+      </div>
+      <iframe id="composite-explore-frame"
+              src="/loom-explore/index.html"
+              title="Composite Explorer"
+              style="width:100%;height:720px;border:1px solid #ddd;background:#fff"></iframe>
+    </div>
+
+    <!-- Post-run actions: shown after explore:run-complete postMessage -->
+    <div id="ce-post-run-bar" style="display:none;margin-top:8px;padding:12px 16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;align-items:center;gap:12px">
+      <span style="flex:1;color:#166534;font-size:0.9em">Run complete. Save this run as a Study to track variants and conclusions.</span>
+      <button id="save-as-study-btn" class="action-btn" onclick="_ceOpenSaveAsStudyModal()" style="background:#16a34a;border-color:#16a34a">Save as Study</button>
+    </div>
+
+    <!-- HPC tab panel: Configure | Run | Results (todo #16)
+         Separate from the loom-explore so we don't collide with its own nav. -->
+    <div class="panel" style="padding:0;margin-top:12px">
+      <div class="ce-tab-bar" role="tablist" style="margin:0;padding:10px 16px 0">
+        <button class="ce-tab-btn active" data-cetab="configure" onclick="_setCeTab('configure')" role="tab">Configure</button>
+        <button class="ce-tab-btn"        data-cetab="run"       onclick="_setCeTab('run')"       role="tab">Run</button>
+        <button class="ce-tab-btn"        data-cetab="results"   onclick="_setCeTab('results')"   role="tab" id="ce-tab-results-btn">Results</button>
+      </div>
+
+      <!-- ── Configure tab ───────────────────────────────────────────── -->
+      <div id="ce-tab-configure" class="ce-tab-panel active" style="padding:12px 16px 16px">
+        <h3 style="margin-top:0">HPC Run Configuration</h3>
+        <p class="muted" style="font-size:0.88em">
+          Parameters saved to this composite's <code>hpc_run_config</code> field.
+          Used as pre-filled defaults when running from the <strong>Run</strong> tab.
+        </p>
+        <form id="ce-hpc-config-form" onsubmit="event.preventDefault(); _ceSaveHpcConfig()">
+          <div class="ce-cfg-grid">
+            <label>Backend
+              <select id="ce-cfg-backend" oninput="_ceCfgDirty()">
+                <option value="v2ecoli">v2ecoli</option>
+              </select>
+            </label>
+            <label>N Cells
+              <input type="number" id="ce-cfg-n-cells" min="1" max="128" value="4" oninput="_ceCfgDirty()">
+            </label>
+            <label>Duration (min)
+              <input type="number" id="ce-cfg-duration-min" min="1" max="1440" value="22" oninput="_ceCfgDirty()">
+            </label>
+            <label>Seed
+              <input type="number" id="ce-cfg-seed" min="0" value="0" oninput="_ceCfgDirty()">
+            </label>
+            <label>CPUs
+              <input type="number" id="ce-cfg-cpus" min="1" max="64" value="8" oninput="_ceCfgDirty()">
+            </label>
+            <label>Memory (GB)
+              <input type="number" id="ce-cfg-mem-gb" min="8" max="512" value="32" oninput="_ceCfgDirty()">
+            </label>
+            <label>Time limit (min)
+              <input type="number" id="ce-cfg-time-limit" min="10" max="10080" value="60" oninput="_ceCfgDirty()">
+            </label>
+            <label>ParCa outdir
+              <input type="text" id="ce-cfg-outdir" value="out/sim_data" oninput="_ceCfgDirty()">
+            </label>
+            <label style="grid-column:span 2">Colony cache-dir
+              <input type="text" id="ce-cfg-cache-dir" value="out/sim_data/cache" oninput="_ceCfgDirty()">
+            </label>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:16px">
+            <button type="submit" class="action-btn" id="ce-cfg-save-btn">Save Config</button>
+            <span id="ce-cfg-dirty" style="display:none;font-size:12px;color:var(--warn,#b45309);font-weight:500">● Unsaved changes</span>
+            <span id="ce-cfg-status" style="font-size:12px;color:var(--muted,#666)"></span>
+          </div>
+        </form>
+      </div>
+
+      <!-- ── Run tab ─────────────────────────────────────────────────── -->
+      <div id="ce-tab-run" class="ce-tab-panel" style="padding:12px 16px 16px">
+
+        <!-- Run ParCa panel -->
+        <div class="ce-run-panel" id="ce-parca-panel">
+          <h4>⚗️ Run ParCa</h4>
+          <div style="font-size:12px;color:var(--muted,#666);margin-bottom:8px">
+            Fit the whole-cell model parameters. Output: <code id="ce-parca-outdir-preview">out/sim_data</code>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+            <label style="font-size:12px;font-weight:600;color:var(--muted,#555);display:flex;flex-direction:column;gap:3px">CPUs
+              <input type="number" id="ce-parca-cpus" class="viv-hpc-input" min="1" max="64" value="8">
+            </label>
+            <label style="font-size:12px;font-weight:600;color:var(--muted,#555);display:flex;flex-direction:column;gap:3px">Mem (GB)
+              <input type="number" id="ce-parca-mem" class="viv-hpc-input" min="8" max="256" value="32">
+            </label>
+            <label style="font-size:12px;font-weight:600;color:var(--muted,#555);display:flex;flex-direction:column;gap:3px">Time (min)
+              <input type="number" id="ce-parca-time" class="viv-hpc-input" min="10" max="1440" value="60">
+            </label>
+          </div>
+          <div class="viv-hpc-progress-wrap" id="ce-parca-progress-wrap" style="display:none;margin-top:10px">
+            <div class="viv-hpc-progress-track">
+              <div class="viv-hpc-progress-bar indeterminate" id="ce-parca-bar"></div>
+            </div>
+            <div class="viv-hpc-progress-label" id="ce-parca-prog-label"></div>
+          </div>
+          <div class="ce-run-actions">
+            <button class="action-btn" id="ce-parca-submit-btn" onclick="_ceRunParca()">▶ Run ParCa</button>
+            <span id="ce-parca-chip" style="display:none;font-size:12px;font-weight:600"></span>
+          </div>
+          <pre id="ce-parca-log" class="ce-run-log"></pre>
+        </div>
+
+        <!-- Run Colony panel -->
+        <div class="ce-run-panel" id="ce-colony-panel">
+          <h4>🧬 Run Colony</h4>
+          <div style="font-size:12px;color:var(--muted,#666);margin-bottom:8px">
+            Simulate the colony using the ParCa cache at <code id="ce-colony-cache-preview">out/sim_data/cache</code>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">
+            <label style="font-size:12px;font-weight:600;color:var(--muted,#555);display:flex;flex-direction:column;gap:3px">N Cells
+              <input type="number" id="ce-colony-ncells" class="viv-hpc-input" min="1" max="64" value="4">
+            </label>
+            <label style="font-size:12px;font-weight:600;color:var(--muted,#555);display:flex;flex-direction:column;gap:3px">Duration (min)
+              <input type="number" id="ce-colony-duration" class="viv-hpc-input" min="1" max="1440" value="22">
+            </label>
+            <label style="font-size:12px;font-weight:600;color:var(--muted,#555);display:flex;flex-direction:column;gap:3px">Seed
+              <input type="number" id="ce-colony-seed" class="viv-hpc-input" min="0" value="0">
+            </label>
+            <label style="font-size:12px;font-weight:600;color:var(--muted,#555);display:flex;flex-direction:column;gap:3px">Mem (GB)
+              <input type="number" id="ce-colony-mem" class="viv-hpc-input" min="8" max="512" value="32">
+            </label>
+          </div>
+          <div class="viv-hpc-progress-wrap" id="ce-colony-progress-wrap" style="display:none;margin-top:10px">
+            <div class="viv-hpc-progress-track">
+              <div class="viv-hpc-progress-bar indeterminate" id="ce-colony-bar"></div>
+            </div>
+            <div class="viv-hpc-progress-label" id="ce-colony-prog-label"></div>
+          </div>
+          <div class="ce-run-actions">
+            <button class="action-btn" id="ce-colony-submit-btn" onclick="_ceRunColony()">🧬 Run Colony</button>
+            <span id="ce-colony-chip" style="display:none;font-size:12px;font-weight:600"></span>
+          </div>
+          <pre id="ce-colony-log" class="ce-run-log"></pre>
+        </div>
+
+      </div>
+
+      <!-- ── Results tab ─────────────────────────────────────────────── -->
+      <div id="ce-tab-results" class="ce-tab-panel" style="padding:12px 16px 16px">
+        <div id="ce-results-empty" class="empty-state" style="display:none">No HPC runs for this composite yet. Use the <strong>Run</strong> tab to submit jobs.</div>
+        <div id="ce-results-list"></div>
+        <!-- Selected-run detail -->
+        <div id="ce-result-detail" style="display:none">
+          <div class="panel" style="margin-top:12px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+              <strong style="font-size:14px">Run <code id="ce-detail-run-id"></code></strong>
+              <span id="ce-detail-chip" class="viv-hpc-chip" style="font-size:11px"></span>
+            </div>
+            <!-- Summary stats (shown for COMPLETED runs) -->
+            <div id="ce-detail-summary" style="display:none">
+              <div class="ce-summary-grid" id="ce-summary-grid"></div>
+            </div>
+            <!-- Live log -->
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+              <span style="font-size:12px;font-weight:600;color:var(--muted,#555)">Log</span>
+              <button class="btn-mini" onclick="_ceRefreshDetailLog()">↻ Refresh</button>
+            </div>
+            <pre id="ce-detail-log" class="ce-run-log" style="display:block;max-height:320px"></pre>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /.panel (HPC tabs) -->
+
+  </div>
+</section>
+
+</main>
+
+  </div> <!-- /.viv-main -->
+</div> <!-- /.viv-layout -->
+
+<!-- ============================================================ -->
+<!-- MODALS -->
+<!-- ============================================================ -->
+
+<!-- Dataset modal -->
+<div id="modal-dataset" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-dataset')">&times;</button>
+    <h3>Add dataset</h3>
+    <form id="form-dataset" onsubmit="event.preventDefault(); _submitDataset(this)">
+      <label>Name *<input name="name" placeholder="e.g. bremer-1996" required></label>
+      <label style="margin-bottom:4px">Drop the data file here <small>(or skip if URL-based)</small></label>
+      <div id="ds-drop-zone" class="drop-zone">
+        <span class="drop-hint">Drag &amp; drop data file here, or click to select</span>
+        <div class="file-info"></div>
+        <div class="file-hash"></div>
+      </div>
+      <div id="ds-url-row" style="margin-top:8px">
+        <label>URL <small>(required if no file dropped)</small><input name="url" placeholder="https://example.com/data.csv"></label>
+        <label>SHA256 (required with URL)<input name="sha256" placeholder="abc123..."></label>
+      </div>
+      <label>Claims (comma-separated claim IDs)<input name="claims" placeholder="growth-rate-vs-medium, ribo-fraction"></label>
+      <div class="form-error"></div>
+      <button type="submit">Add dataset</button>
+    </form>
+  </div>
+</div>
+
+<!-- Reference modal -->
+<div id="modal-reference" class="modal-overlay">
+  <div class="modal-box" style="max-width:600px">
+    <button class="modal-close" onclick="closeModal('modal-reference')">&times;</button>
+    <h3>Add reference</h3>
+    <p class="subtitle" style="font-size:0.85em;color:#555;margin-bottom:12px">
+      Drop a PDF &mdash; metadata is auto-extracted from the PDF&rsquo;s embedded fields.
+    </p>
+
+    <label style="margin-bottom:4px;font-weight:600">Drop a PDF here *</label>
+    <div id="ref-pdf-drop-zone" class="drop-zone">
+      <span class="drop-hint">&#128196; Drop a PDF here, or click to browse</span>
+      <div class="file-info"></div>
+      <div class="file-hash"></div>
+    </div>
+
+    <details style="margin-top:14px">
+      <summary style="cursor:pointer;font-size:0.88em;color:#555;font-weight:600">Refinements (optional)</summary>
+      <div style="padding:12px 0;display:flex;flex-direction:column;gap:8px">
+        <label style="font-size:0.88em">bib_key (auto-generated if blank):
+          <input type="text" id="ref-bib_key" name="bib_key" placeholder="e.g. Smith2024" style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
+        </label>
+        <label style="font-size:0.88em">Title (auto-extracted if blank):
+          <input type="text" id="ref-title" name="title" placeholder="Full paper title" style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
+        </label>
+        <label style="font-size:0.88em">Authors (semicolon-separated; auto-extracted if blank):
+          <input type="text" id="ref-authors" name="authors" placeholder="Smith, J.; Doe, J." style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
+        </label>
+        <label style="font-size:0.88em">Year (auto-extracted if blank):
+          <input type="number" id="ref-year" name="year" placeholder="2024" min="1000" max="2100" style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
+        </label>
+        <label style="font-size:0.88em">Journal (optional):
+          <input type="text" id="ref-journal" name="journal" placeholder="e.g. EcoSal Plus" style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
+        </label>
+        <label style="font-size:0.88em">DOI (optional):
+          <input type="text" id="ref-doi" name="doi" placeholder="e.g. 10.1145/..." style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
+        </label>
+        <label style="font-size:0.88em">Maps to claims (comma-separated, optional):
+          <input type="text" id="ref-claim_mappings" name="claim_mappings" placeholder="phase-1.dnaA-accumulation" style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
+        </label>
+      </div>
+    </details>
+
+    <details style="margin-top:8px">
+      <summary style="cursor:pointer;font-size:0.88em;color:#555;font-weight:600">Or paste an existing BibTeX entry (no PDF)</summary>
+      <div style="padding:12px 0">
+        <label style="font-size:0.88em;display:block">BibTeX entry:
+          <textarea id="ref-bibtex_text" name="bibtex_text" rows="6" style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px;font-family:monospace"
+            placeholder="@article{Bremer1996,&#10;  author = {Bremer, H. and Dennis, P.},&#10;  title  = {...},&#10;  ...&#10;}"></textarea>
+        </label>
+        <label style="font-size:0.88em;display:block">Maps to claims (optional, format: <code>claim-id:bibkey, ...</code>):
+          <input type="text" id="ref-bibtex_claim_mappings" name="bibtex_claim_mappings" placeholder="growth-rate-vs-medium:Bremer1996" style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
+        </label>
+      </div>
+    </details>
+
+    <div class="form-error" id="ref-form-error" style="margin-top:8px"></div>
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button class="action-btn" style="background:#1976d2;color:#fff;border-color:#1976d2" onclick="submitReferenceForm()">Submit</button>
+      <button class="action-btn" onclick="closeModal('modal-reference')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Expert document modal -->
+<div id="modal-expert-doc" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-expert-doc')">&times;</button>
+    <h3>Add expert document</h3>
+    <p style="font-size:0.85em;color:#555">
+      Registers a local file (PDF, lab notes, etc.) in <code>workspace.yaml</code> and copies it to
+      <code>references/expert/</code> on a new <code>stage/5-expert-doc-*</code> branch.
+    </p>
+    <form id="form-expert-doc" onsubmit="event.preventDefault(); _submitExpertDoc(this)">
+      <label>Name * <small>(short label, used as filename stem)</small>
+        <input name="name" placeholder="e.g. ecoli-replication-review-2025" required>
+      </label>
+      <label style="margin-bottom:4px">Drop the expert document here * <small>(PDF / md / txt / &hellip;)</small></label>
+      <div id="expert-drop-zone" class="drop-zone">
+        <span class="drop-hint">Drag &amp; drop file here, or click to select</span>
+        <div class="file-info"></div>
+        <div class="file-hash"></div>
+      </div>
+      <label style="margin-top:8px">Description (optional)
+        <textarea name="description" placeholder="Expert review of E. coli chromosome replication mechanism"></textarea>
+      </label>
+      <label>Contributor (optional)
+        <input name="contributor" placeholder="Dr. Jane Smith">
+      </label>
+      <label>Claims supported (optional, comma-separated claim IDs)
+        <input name="claims_supported" placeholder="rep-initiation, ori-firing-rate">
+      </label>
+      <div class="form-error"></div>
+      <button type="submit">Register expert document</button>
+    </form>
+  </div>
+</div>
+
+<!-- Observable modal -->
+<div id="modal-observable" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-observable')">&times;</button>
+    <h3>Add observable</h3>
+    <p style="font-size:0.85em;color:#555">Register a state variable to track. The store path is a dotted path into the composite document.</p>
+    <form id="form-observable" onsubmit="event.preventDefault(); submitForm(this, '/api/observable', function(f){ return { name: f.obs_name.value.trim(), store_path: f.store_path.value.trim(), units: f.units.value.trim() || null, description: f.description.value.trim() || null }; })">
+      <label>Name * <small>(e.g. DnaA)</small><input name="obs_name" placeholder="DnaA" required></label>
+      <label>Store path * <small>(e.g. chromosome.DnaA_count)</small><input name="store_path" placeholder="chromosome.DnaA_count" required></label>
+      <label>Units (optional)<input name="units" placeholder="molecules"></label>
+      <label>Description (optional)<input name="description" placeholder="DnaA protein count in chromosome compartment"></label>
+      <div class="form-error"></div>
+      <button type="submit">Add observable</button>
+    </form>
+  </div>
+</div>
+
+<!-- Visualization modal -->
+<div id="modal-visualization" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-visualization')">&times;</button>
+    <h3>Add visualization</h3>
+    <p id="viz-already-registered" style="font-size:0.85em;color:#555;margin-bottom:8px"></p>
+    <form id="form-visualization" onsubmit="event.preventDefault(); submitForm(this, '/api/visualization', function(f){
+      var classVal = (f.viz_class.value || '').trim();
+      var cfgRaw = (f.viz_config.value || '').trim();
+      var cfg = null;
+      if (cfgRaw) {
+        try { cfg = JSON.parse(cfgRaw); }
+        catch (e) {
+          var err = f.querySelector('.form-error');
+          if (err) err.textContent = 'Invalid JSON in config: ' + String(e);
+          return null;
+        }
+      }
+      return {
+        name: f.viz_name.value.trim(),
+        description: (f.description.value.trim() || null),
+        'class': classVal || null,
+        config: cfg,
+      };
+    })">
+      <label>Name <input name="viz_name" pattern="^[a-zA-Z0-9_-]+$" required placeholder="e.g. free_DnaA-trajectory"></label>
+      <label>Class (optional &mdash; pick a registered Visualization to make this a configured instance)
+        <select name="viz_class" id="viz-class-picker"><option value="">— none (description-only) —</option></select>
+      </label>
+      <label>Config (JSON; required when a class is picked)
+        <textarea name="viz_config" rows="3" placeholder='{"observable": "free_DnaA", "sources": ["baseline"]}'></textarea>
+      </label>
+      <label>Description (natural language &mdash; required when no class is picked)
+        <textarea name="description" rows="3"
+                  placeholder="e.g. 'A time-series of free_DnaA concentration over the baseline simulation, with a horizontal line at the binding threshold of 50 molecules.'"></textarea>
+      </label>
+      <p style="font-size:0.85em;color:#555">
+        Class-backed: ready to use immediately in investigations.<br>
+        Description-only: click <strong>Create</strong> after to invoke the <code>/pbg-viz</code> skill which generates the function.
+      </p>
+      <div class="form-error"></div>
+      <button type="submit" class="action-btn">Add visualization</button>
+    </form>
+  </div>
+</div>
+
+<!-- Configure composite modal -->
+<div id="modal-configure-composite" class="modal-overlay">
+  <div class="modal-box" style="max-width:560px">
+    <button class="modal-close" onclick="closeModal('modal-configure-composite')">&times;</button>
+    <h3>Configure composite</h3>
+    <p id="cc-composite-name" class="muted" style="margin:0 0 12px"></p>
+    <form id="form-configure-composite" onsubmit="event.preventDefault(); _submitConfigureComposite(this);">
+      <label>Simulation name <input name="sim_name" pattern="^[a-zA-Z0-9_-]+$" required></label>
+      <label>t_start <input name="t_start" type="number" step="any" min="0" value="0" required></label>
+      <label>t_end <input name="t_end" type="number" step="any" required value="10"></label>
+      <div id="cc-parameter-fields"></div>
+      <input type="hidden" name="composite_id">
+      <div class="form-error"></div>
+      <button type="submit" class="action-btn">Create simulation</button>
+    </form>
+  </div>
+</div>
+
+<!-- Phase plan modal -->
+<div id="modal-phase-plan" class="modal-overlay">
+  <div class="modal-box" style="max-width:640px">
+    <button class="modal-close" onclick="closeModal('modal-phase-plan')">&times;</button>
+    <h3>Add phase plan</h3>
+    <p style="font-size:0.85em;color:#555">
+      Enter phases as JSON. Each phase needs <code>n</code> (integer) and <code>name</code> (string).
+      Optional: <code>objective</code>, <code>prereq_phases</code>, <code>acceptance_tests</code>.
+    </p>
+    <label>Phases JSON *
+      <textarea id="phase-plan-json" style="width:100%;min-height:180px;font-family:monospace;font-size:0.88em;border:1px solid #ccc;border-radius:4px;padding:8px;box-sizing:border-box"
+        placeholder='[{"n": 1, "name": "Baseline", "objective": "Establish replication initiation baseline"}, {"n": 2, "name": "DnaA accumulation", "objective": "Add DnaA binding dynamics"}]'></textarea>
+    </label>
+    <div class="form-error" id="phase-plan-error"></div>
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <button class="action-btn" style="background:#1976d2;color:#fff;border-color:#1976d2" onclick="submitPhasePlan()">Submit phase plan</button>
+      <button class="action-btn" onclick="closeModal('modal-phase-plan')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Link to upstream branch -->
+<div id="modal-link-branch" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-link-branch')">&times;</button>
+    <h3>Link to upstream branch</h3>
+    <p class="muted">Push the current investigation branch to its upstream counterpart on GitHub.</p>
+    <form id="form-link-branch" onsubmit="event.preventDefault(); _submitLinkBranch(this);">
+      <label>Upstream repo:
+        <input name="upstream_repo" value="vivarium-collective/v2ecoli"
+               pattern="[A-Za-z0-9._-]+/[A-Za-z0-9._-]+" required>
+      </label>
+      <label>Branch name (optional — defaults to current branch):
+        <input name="branch_name" placeholder="leave blank to keep current">
+      </label>
+      <fieldset class="mode-selector">
+        <legend>Mode:</legend>
+        <label><input type="radio" name="mode" value="branch" checked> Branch off upstream (push current branch to a branch on the upstream repo)</label>
+        <label><input type="radio" name="mode" value="fork"> Fork upstream (create your own fork; current branch pushes to your fork's origin)</label>
+      </fieldset>
+      <div class="form-actions">
+        <button type="submit" class="action-btn">Push branch</button>
+        <button type="button" class="action-btn--secondary" onclick="closeModal('modal-link-branch')">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Create PR -->
+<div id="modal-create-pr" class="modal-overlay">
+  <div class="modal-box" style="max-width:640px">
+    <button class="modal-close" onclick="closeModal('modal-create-pr')">&times;</button>
+    <h3>Create PR</h3>
+    <form id="form-create-pr" onsubmit="event.preventDefault(); _submitCreatePR(this);">
+      <label>Title
+        <div class="input-with-suggest">
+          <input name="title" required maxlength="100">
+          <button type="button" class="btn-suggest" onclick="_suggestInto(this, 'pr-title', 'title')">Suggest</button>
+        </div>
+      </label>
+      <label>Body
+        <div class="input-with-suggest input-with-suggest-textarea">
+          <textarea name="body" rows="6" placeholder="Summary + Test plan (markdown)"></textarea>
+          <button type="button" class="btn-suggest" onclick="_suggestInto(this, 'pr-body', 'body')">Suggest</button>
+        </div>
+      </label>
+      <div class="form-error"></div>
+      <button type="submit" class="action-btn">Create PR</button>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Open PR (top-bar action) -->
+<div id="modal-open-pr" class="modal-overlay">
+  <div class="modal-box" style="max-width:640px">
+    <button class="modal-close" onclick="closeModal('modal-open-pr')">&times;</button>
+    <h3>Open Pull Request</h3>
+    <p class="muted">Opens a <strong>draft proposal</strong> to merge
+<code id="pr-head-display">…</code> → <code id="pr-base-display">main</code>.
+Nothing on <code id="pr-base-display-2">main</code> changes until someone presses
+"Merge" on the GitHub PR page. You can leave a draft PR open indefinitely.</p>
+    <form id="form-open-pr" onsubmit="event.preventDefault(); _submitOpenPR(this);">
+      <label>Title:
+        <div class="input-with-suggest">
+          <input name="title" required>
+          <button type="button" class="btn-suggest" onclick="_draftPRFromInvestigation('title', this.closest('form'))">Suggest from investigation</button>
+        </div>
+      </label>
+      <label>Body:<br>
+        <div class="input-with-suggest input-with-suggest-textarea">
+          <textarea name="body" rows="14" placeholder="Summary, what changed, test plan..."></textarea>
+          <button type="button" class="btn-suggest" onclick="_draftPRFromInvestigation('body', this.closest('form'))">Suggest from investigation</button>
+        </div>
+      </label>
+      <p class="muted" id="pr-suggest-context" style="font-size:0.82em;margin:-4px 0 4px 0"></p>
+      <label class="checkbox-row">
+        <input type="checkbox" name="draft" id="pr-draft-checkbox" checked>
+        Draft PR (recommended — can be marked ready for review later)
+      </label>
+      <div class="form-actions">
+        <button type="submit" class="action-btn">Create PR</button>
+        <button type="button" class="action-btn--secondary" onclick="closeModal('modal-open-pr')">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Save as Study (from Composite Explorer test run) -->
+<div id="modal-save-as-study" class="modal-overlay">
+  <div class="modal-box" style="max-width:520px">
+    <button class="modal-close" onclick="closeModal('modal-save-as-study')">&times;</button>
+    <h3>Save as Study</h3>
+    <form id="form-save-as-study" onsubmit="event.preventDefault(); _ceSubmitSaveAsStudy()">
+      <label>Study name
+        <input id="sas-name" name="name" type="text" placeholder="chemotaxis-260513" required pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?" title="Lowercase letters, digits, and hyphens only (no leading/trailing hyphen)">
+      </label>
+      <label>Objective
+        <textarea id="sas-objective" name="objective" rows="3" placeholder="What question does this study address?"></textarea>
+      </label>
+      <label>Description
+        <input id="sas-description" name="description" type="text" placeholder="Optional short description">
+      </label>
+      <div class="form-error" id="sas-error" style="display:none"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button type="button" onclick="closeModal('modal-save-as-study')">Cancel</button>
+        <button type="submit" class="action-btn">Create Study</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="assets/render-helpers.js"></script>
+<script src="assets/client.js" onerror="/* live mode unavailable */"></script>
+<script src="assets/walkthrough.js?v=1779795224_1779795224" onerror="/* walkthrough unavailable */"></script>
+<script src="assets/github-login.js?v=1779795224_1779795224" onerror="/* github-login unavailable */"></script>
+<script src="assets/investigations.js" onerror="/* investigations unavailable */"></script>
+<!-- workspace-switcher.js is intentionally not loaded: the left-rail dropdown
+     it used to drive has been repurposed into the investigation switcher
+     (investigation-switcher.js). The /api/workspaces endpoints remain available
+     for CLI tooling. -->
+<script src="assets/investigation-switcher.js"></script>
+<script>
+// Initialize drop zones once walkthrough.js is loaded.
+document.addEventListener("DOMContentLoaded", function() {
+  if (typeof setupDropZone === "function") {
+    setupDropZone("ds-drop-zone", "dataset");
+    setupDropZone("ref-pdf-drop-zone", "reference_pdf_primary");
+    setupDropZone("expert-drop-zone", "expert_doc");
+  }
+});
+
+// Dataset form submission.
+function _submitDataset(form) {
+  submitForm(form, '/api/dataset', function(f) {
+    var data = { name: f.name.value.trim(), claims: f.claims.value.trim() };
+    var stored = (typeof _dropZoneStore !== "undefined") ? _dropZoneStore["dataset"] : null;
+    if (stored && stored.file_b64) {
+      data.file_b64 = stored.file_b64;
+      data.filename = stored.filename;
+    } else {
+      var url = f.url.value.trim();
+      if (url) {
+        data.url = url;
+        if (f.sha256.value.trim()) data.sha256 = f.sha256.value.trim();
+      } else {
+        var errEl = form.querySelector(".form-error");
+        if (errEl) errEl.textContent = "Error: drop a file or enter a URL.";
+        return null;
+      }
+    }
+    return data;
+  });
+}
+
+// Reference form submission.
+function submitReferenceForm() {
+  var errEl = document.getElementById("ref-form-error");
+  if (errEl) errEl.textContent = "";
+
+  var pdfStored = (typeof _dropZoneStore !== "undefined") ? _dropZoneStore["reference_pdf_primary"] : null;
+  var bibtexText = (document.getElementById("ref-bibtex_text") || {}).value || "";
+  bibtexText = bibtexText.trim();
+
+  if (pdfStored && pdfStored.file_b64) {
+    var data = { pdf_b64: pdfStored.file_b64, pdf_filename: pdfStored.filename };
+    var bibKey    = (document.getElementById("ref-bib_key") || {}).value || "";
+    var title     = (document.getElementById("ref-title") || {}).value || "";
+    var authors   = (document.getElementById("ref-authors") || {}).value || "";
+    var yearStr   = (document.getElementById("ref-year") || {}).value || "";
+    var journal   = (document.getElementById("ref-journal") || {}).value || "";
+    var doi       = (document.getElementById("ref-doi") || {}).value || "";
+    var claims    = (document.getElementById("ref-claim_mappings") || {}).value || "";
+    if (bibKey.trim())  data.bib_key  = bibKey.trim();
+    if (title.trim())   data.title    = title.trim();
+    if (authors.trim()) data.authors  = authors.trim();
+    if (yearStr.trim()) data.year     = parseInt(yearStr.trim(), 10);
+    if (journal.trim()) data.journal  = journal.trim();
+    if (doi.trim())     data.doi      = doi.trim();
+    if (claims.trim()) {
+      data.claim_mappings = claims.trim().split(",").map(function(s) { return s.trim(); }).filter(Boolean);
+    }
+    _postReferenceData("/api/reference-pdf", data);
+
+  } else if (bibtexText) {
+    var bibClaims = (document.getElementById("ref-bibtex_claim_mappings") || {}).value || "";
+    var data = { bibtex_text: bibtexText, claim_mappings: bibClaims.trim() };
+    _postReferenceData("/api/reference-bibtex", data);
+
+  } else {
+    if (errEl) errEl.textContent = "Error: drop a PDF or paste a BibTeX entry.";
+  }
+}
+
+function _postReferenceData(endpoint, data) {
+  var errEl = document.getElementById("ref-form-error");
+  fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  })
+    .then(function(res) {
+      return res.json().then(function(json) { return { ok: res.ok, status: res.status, json: json }; });
+    })
+    .then(function(r) {
+      if (!r.ok) {
+        var msg = (r.json && r.json.error) ? r.json.error : ("HTTP " + r.status);
+        if (errEl) errEl.textContent = "Error: " + msg;
+        return;
+      }
+      var branch = r.json.branch || "";
+      var commit = r.json.commit || "";
+      var bib_key = r.json.bib_key || "";
+      var pending = r.json.metadata_pending;
+      var msg = "Done!";
+      if (bib_key) msg += " bib_key: " + bib_key;
+      if (branch)  msg += "\nBranch: " + branch + (commit ? " (" + commit + ")" : "");
+      if (pending) msg += "\n\nNote: metadata incomplete — entry marked 'Needs metadata'.";
+      fetch("/api/render", { method: "POST" }).finally(function() {
+        alert(msg);
+        location.reload();
+      });
+    })
+    .catch(function(err) {
+      if (errEl) errEl.textContent = "Network error: " + String(err);
+    });
+}
+
+// Expert doc form submission.
+function _submitExpertDoc(form) {
+  submitForm(form, '/api/expert-doc', function(f) {
+    var stored = (typeof _dropZoneStore !== "undefined") ? _dropZoneStore["expert_doc"] : null;
+    if (!stored || !stored.file_b64) {
+      var errEl = form.querySelector(".form-error");
+      if (errEl) errEl.textContent = "Error: please drop or select a file first.";
+      return null;
+    }
+    var data = {
+      name: f.name.value.trim(),
+      file_b64: stored.file_b64,
+      filename: stored.filename,
+    };
+    if (f.description && f.description.value.trim()) data.description = f.description.value.trim();
+    if (f.contributor && f.contributor.value.trim()) data.contributor = f.contributor.value.trim();
+    if (f.claims_supported && f.claims_supported.value.trim()) data.claims_supported = f.claims_supported.value.trim();
+    return data;
+  });
+}
+
+// Visualization form submission — v0.4.2: name + description only.
+// (The submitForm call is now inline in the form's onsubmit attribute.)
+// Kept as no-op for backward compat with any external callers.
+function _submitVisualization(form) {
+  submitForm(form, '/api/visualization', function(f) {
+    return {
+      name: f.viz_name.value.trim(),
+      description: f.description ? (f.description.value.trim() || null) : null,
+    };
+  });
+}
+
+// Phase plan submission.
+function submitPhasePlan() {
+  var errEl = document.getElementById("phase-plan-error");
+  if (errEl) errEl.textContent = "";
+  var raw = document.getElementById("phase-plan-json").value.trim();
+  var phases;
+  try {
+    phases = JSON.parse(raw);
+  } catch (e) {
+    if (errEl) errEl.textContent = "Invalid JSON: " + e.message;
+    return;
+  }
+  if (!Array.isArray(phases) || !phases.length) {
+    if (errEl) errEl.textContent = "phases must be a non-empty JSON array";
+    return;
+  }
+  fetch("/api/phase-plan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phases: phases }),
+  })
+    .then(function(res) { return res.json().then(function(j) { return { ok: res.ok, json: j }; }); })
+    .then(function(r) {
+      if (!r.ok) {
+        if (errEl) errEl.textContent = "Error: " + (r.json.error || "unknown");
+        return;
+      }
+      fetch("/api/render", { method: "POST" }).finally(function() {
+        alert("Phase plan created!\nBranch: " + (r.json.branch || "") + "\nMerge it to make phases appear on main.");
+        location.reload();
+      });
+    })
+    .catch(function(err) {
+      if (errEl) errEl.textContent = "Network error: " + String(err);
+    });
+}
+
+// Phase start.
+function phaseStart(n) {
+  fetch("/api/phase-start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ n: n }),
+  })
+    .then(function(res) { return res.json().then(function(j) { return { ok: res.ok, json: j }; }); })
+    .then(function(r) {
+      if (!r.ok) { alert("Error: " + (r.json.error || "unknown")); return; }
+      fetch("/api/render", { method: "POST" }).finally(function() {
+        alert("Phase " + n + " started!\nBranch: " + (r.json.branch || ""));
+        location.reload();
+      });
+    })
+    .catch(function(err) { alert("Network error: " + err); });
+}
+
+// Phase gate.
+function phaseGate(n) {
+  fetch("/api/phase-gate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ n: n }),
+  })
+    .then(function(res) { return res.json().then(function(j) { return { ok: res.ok, json: j }; }); })
+    .then(function(r) {
+      if (!r.ok) { alert("Error: " + (r.json.error || "unknown")); return; }
+      fetch("/api/render", { method: "POST" }).finally(function() {
+        alert("Gate evaluated for phase " + n + ": " + (r.json.gate_status || "?") + "\nBranch: " + (r.json.branch || ""));
+        location.reload();
+      });
+    })
+    .catch(function(err) { alert("Network error: " + err); });
+}
+
+// Run tests.
+function runTests() {
+  var btn = document.getElementById("run-tests-btn");
+  var spinner = document.getElementById("run-tests-spinner");
+  var output = document.getElementById("run-tests-output");
+  if (btn) btn.disabled = true;
+  if (spinner) spinner.style.display = "inline";
+  if (output) { output.style.display = "none"; output.textContent = ""; }
+  fetch("/api/run-tests", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  })
+    .then(function(res) { return res.json(); })
+    .then(function(r) {
+      if (btn) btn.disabled = false;
+      if (spinner) spinner.style.display = "none";
+      if (output) {
+        output.style.display = "block";
+        var text = "";
+        if (r.error) {
+          text = "Error: " + r.error;
+        } else {
+          text = "Exit code: " + r.returncode + "\n\n" + (r.stdout || "") + (r.stderr ? "\nSTDERR:\n" + r.stderr : "");
+        }
+        output.textContent = text;
+      }
+    })
+    .catch(function(err) {
+      if (btn) btn.disabled = false;
+      if (spinner) spinner.style.display = "none";
+      if (output) { output.style.display = "block"; output.textContent = "Network error: " + err; }
+    });
+}
+// Theme toggle (dark/light mode)
+function _setTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  try { localStorage.setItem("viv-theme", theme); } catch(e) {}
+  var icon = document.getElementById("viv-theme-toggle-icon");
+  if (icon) icon.textContent = theme === "dark" ? "☾" : "☀";
+}
+function _toggleTheme() {
+  var theme = document.documentElement.getAttribute("data-theme");
+  _setTheme(theme === "dark" ? "light" : "dark");
+}
+(function(){
+  var saved = null;
+  try { saved = localStorage.getItem("viv-theme"); } catch(e) {}
+  var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  _setTheme(theme);
+  var btn = document.getElementById("viv-theme-toggle");
+  if (btn) btn.addEventListener("click", _toggleTheme);
+})();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Composite Explorer — HPC tabs  (todo #16)
+// ─────────────────────────────────────────────────────────────────────────────
+(function () {
+  // Current composite spec_id (set when user selects a composite).
+  var _ceSpecId = null;
+  // Active run state per panel: {runId, slurmJobId, pollTimer, backend}
+  var _ceParcaRun = null;
+  var _ceColonyRun = null;
+
+  // ── Tab switching ──────────────────────────────────────────────────────────
+  window._setCeTab = function (name) {
+    document.querySelectorAll(".ce-tab-btn").forEach(function (b) {
+      b.classList.toggle("active", b.dataset.cetab === name);
+    });
+    document.querySelectorAll(".ce-tab-panel").forEach(function (p) {
+      p.classList.toggle("active", p.id === "ce-tab-" + name);
+    });
+    try { sessionStorage.setItem("ce-tab", name); } catch (e) {}
+    if (name === "configure" && _ceSpecId) _ceFetchHpcConfig(_ceSpecId);
+    if (name === "results"   && _ceSpecId) _ceFetchRuns(_ceSpecId);
+  };
+
+  // Restore tab on composite selection.
+  function _ceRestoreTab () {
+    var saved = null;
+    try { saved = sessionStorage.getItem("ce-tab"); } catch (e) {}
+    _setCeTab(saved || "configure");
+  }
+
+  // Hook into the existing composite-selection flow: the main dashboard sets
+  // ce-name, ce-id etc.  We detect that via a MutationObserver on #ce-id.
+  var _ceIdEl = document.getElementById("ce-id");
+  if (_ceIdEl) {
+    new MutationObserver(function () {
+      var id = (_ceIdEl.textContent || "").trim();
+      if (id && id !== _ceSpecId) {
+        _ceSpecId = id;
+        _ceRestoreTab();
+        _ceCfgMarkClean();
+      }
+    }).observe(_ceIdEl, { childList: true, characterData: true, subtree: true });
+  }
+
+  // ── Configure tab ──────────────────────────────────────────────────────────
+  var _ceCfgLoaded = {};
+
+  window._ceCfgDirty = function () {
+    document.getElementById("ce-cfg-dirty").style.display = "";
+    // Also add dirty dot to the tab button label if not already there.
+    var btn = document.querySelector('[data-cetab="configure"]');
+    if (btn && !btn.querySelector(".ce-dirty-dot")) {
+      var dot = document.createElement("span");
+      dot.className = "ce-dirty-dot";
+      btn.appendChild(dot);
+    }
+  };
+
+  function _ceCfgMarkClean () {
+    document.getElementById("ce-cfg-dirty").style.display = "none";
+    var btn = document.querySelector('[data-cetab="configure"]');
+    if (btn) { var d = btn.querySelector(".ce-dirty-dot"); if (d) d.remove(); }
+  }
+
+  function _ceFetchHpcConfig (specId) {
+    fetch("/api/composite/" + encodeURIComponent(specId) + "/hpc-config")
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var cfg = data.hpc_run_config || {};
+        _ceCfgLoaded = cfg;
+        _cePopulateCfgForm(cfg);
+        _ceCfgMarkClean();
+        _ceRefreshRunPreviews();
+      })
+      .catch(function () {});
+  }
+
+  function _cePopulateCfgForm (cfg) {
+    function set (id, val) { var el = document.getElementById(id); if (el && val !== undefined) el.value = val; }
+    set("ce-cfg-backend",    cfg.backend      || "v2ecoli");
+    set("ce-cfg-n-cells",    cfg.n_cells      !== undefined ? cfg.n_cells      : 4);
+    set("ce-cfg-duration-min", cfg.duration_min !== undefined ? cfg.duration_min : 22);
+    set("ce-cfg-seed",       cfg.seed         !== undefined ? cfg.seed         : 0);
+    set("ce-cfg-cpus",       cfg.cpus         !== undefined ? cfg.cpus         : 8);
+    set("ce-cfg-mem-gb",     cfg.mem_gb       !== undefined ? cfg.mem_gb       : 32);
+    set("ce-cfg-time-limit", cfg.time_limit_min !== undefined ? cfg.time_limit_min : 60);
+    set("ce-cfg-outdir",     cfg.outdir       || "out/sim_data");
+    set("ce-cfg-cache-dir",  cfg.cache_dir    || "out/sim_data/cache");
+  }
+
+  function _ceReadCfgForm () {
+    function gn (id) { return parseInt(document.getElementById(id).value, 10) || 0; }
+    function gs (id) { return (document.getElementById(id).value || "").trim(); }
+    return {
+      backend:       gs("ce-cfg-backend"),
+      n_cells:       gn("ce-cfg-n-cells"),
+      duration_min:  gn("ce-cfg-duration-min"),
+      seed:          gn("ce-cfg-seed"),
+      cpus:          gn("ce-cfg-cpus"),
+      mem_gb:        gn("ce-cfg-mem-gb"),
+      time_limit_min: gn("ce-cfg-time-limit"),
+      outdir:        gs("ce-cfg-outdir"),
+      cache_dir:     gs("ce-cfg-cache-dir"),
+    };
+  }
+
+  window._ceSaveHpcConfig = function () {
+    if (!_ceSpecId) return;
+    var cfg = _ceReadCfgForm();
+    var btn = document.getElementById("ce-cfg-save-btn");
+    var status = document.getElementById("ce-cfg-status");
+    btn.disabled = true;
+    btn.textContent = "Saving…";
+    fetch("/api/composite/" + encodeURIComponent(_ceSpecId) + "/hpc-config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hpc_run_config: cfg }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        btn.disabled = false;
+        btn.textContent = "Save Config";
+        if (data.ok) {
+          _ceCfgLoaded = cfg;
+          _ceCfgMarkClean();
+          _ceRefreshRunPreviews();
+          status.textContent = "✓ Saved";
+          setTimeout(function () { status.textContent = ""; }, 3000);
+        } else {
+          status.textContent = "Error: " + (data.error || "unknown");
+        }
+      })
+      .catch(function (e) {
+        btn.disabled = false;
+        btn.textContent = "Save Config";
+        status.textContent = "Network error";
+      });
+  };
+
+  // ── Run tab ────────────────────────────────────────────────────────────────
+
+  // Sync Run tab inputs from the loaded config.
+  function _ceRefreshRunPreviews () {
+    var cfg = _ceReadCfgForm();
+    var od = document.getElementById("ce-parca-outdir-preview");
+    if (od) od.textContent = cfg.outdir || "out/sim_data";
+    var cd = document.getElementById("ce-colony-cache-preview");
+    if (cd) cd.textContent = cfg.cache_dir || "out/sim_data/cache";
+    // Pre-fill Run tab inputs from config.
+    function set (id, val) { var el = document.getElementById(id); if (el) el.value = val; }
+    set("ce-parca-cpus", cfg.cpus || 8);
+    set("ce-parca-mem",  cfg.mem_gb || 32);
+    set("ce-parca-time", cfg.time_limit_min || 60);
+    set("ce-colony-ncells",   cfg.n_cells || 4);
+    set("ce-colony-duration", cfg.duration_min || 22);
+    set("ce-colony-seed",     cfg.seed !== undefined ? cfg.seed : 0);
+    set("ce-colony-mem",      cfg.mem_gb || 32);
+  }
+
+  function _ceSubmitRun (command, resources, panelId, chipId, logId, progressWrapId, barId, labelId, onSubmit) {
+    if (!_ceSpecId) { alert("No composite selected"); return; }
+    var backend = (document.getElementById("ce-cfg-backend") || {}).value || "v2ecoli";
+    fetch("/api/hpc/" + encodeURIComponent(backend) + "/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(Object.assign({ command: command, composite_id: _ceSpecId }, resources)),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.error) {
+          var chip = document.getElementById(chipId);
+          chip.style.display = "";
+          chip.textContent = "Error: " + data.error;
+          chip.style.color = "#dc2626";
+          return;
+        }
+        var runId = data.run_id;
+        var slurmId = data.slurm_job_id;
+        var chip = document.getElementById(chipId);
+        chip.style.display = "";
+        chip.style.color = "";
+        chip.textContent = "SLURM " + slurmId + ": PENDING";
+        // Show progress bar.
+        document.getElementById(progressWrapId).style.display = "";
+        var bar = document.getElementById(barId);
+        bar.className = "viv-hpc-progress-bar indeterminate";
+        // Show log pane.
+        var logEl = document.getElementById(logId);
+        logEl.style.display = "block";
+        logEl.textContent = "(waiting for log…)";
+        if (onSubmit) onSubmit({ runId: runId, slurmId: slurmId, backend: backend });
+        _ceStartPoll(backend, runId, slurmId, chipId, logId, progressWrapId, barId, labelId);
+      })
+      .catch(function (e) {
+        var chip = document.getElementById(chipId);
+        chip.style.display = "";
+        chip.textContent = "Network error";
+        chip.style.color = "#dc2626";
+      });
+  }
+
+  function _ceStartPoll (backend, runId, slurmId, chipId, logId, progressWrapId, barId, labelId) {
+    var intervalMs = labelId === "ce-parca-prog-label" ? 20000 : 30000;
+    var logPath = "/api/hpc/" + encodeURIComponent(backend) + "/run/" + runId + "/log";
+    var statusPath = "/api/hpc/" + encodeURIComponent(backend) + "/run/" + slurmId;
+
+    function poll () {
+      // Fetch log.
+      fetch(logPath)
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          var txt = d.log || "(log not yet available)";
+          var logEl = document.getElementById(logId);
+          if (logEl) { logEl.textContent = txt; logEl.scrollTop = logEl.scrollHeight; }
+          // ParCa: parse checkpoint steps for determinate bar.
+          if (labelId === "ce-parca-prog-label") {
+            var steps = (txt.match(/checkpoint_step_(\d+)\.pkl/g) || []);
+            var maxStep = 0;
+            steps.forEach(function (s) { var n = parseInt(s.match(/(\d+)/)[1], 10); if (n > maxStep) maxStep = n; });
+            if (maxStep > 0) {
+              var pct = Math.min(100, Math.round(maxStep / 9 * 100));
+              var bar = document.getElementById(barId);
+              if (bar) { bar.className = "viv-hpc-progress-bar"; bar.style.width = pct + "%"; }
+              var lbl = document.getElementById(labelId);
+              if (lbl) lbl.textContent = "Step " + maxStep + " / 9 (" + pct + "%)";
+            }
+          }
+        })
+        .catch(function () {});
+      // Fetch status.
+      fetch(statusPath)
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          var state = (d.state || "UNKNOWN").toUpperCase();
+          var chip = document.getElementById(chipId);
+          if (chip) {
+            chip.textContent = "SLURM " + slurmId + ": " + state;
+            chip.style.color = state === "COMPLETED" ? "#16a34a"
+                              : state === "FAILED" || state === "CANCELLED" ? "#dc2626"
+                              : "";
+          }
+          if (state === "COMPLETED" || state === "FAILED" || state === "CANCELLED" || state === "TIMEOUT") {
+            clearInterval(timerId);
+            // Hide progress bar on terminal state.
+            var pw = document.getElementById(progressWrapId);
+            if (pw) pw.style.display = "none";
+            // On completion, refresh the Results tab list.
+            if (state === "COMPLETED") _ceFetchRuns(_ceSpecId);
+          }
+        })
+        .catch(function () {});
+    }
+
+    poll();
+    var timerId = setInterval(poll, intervalMs);
+  }
+
+  window._ceRunParca = function () {
+    var cfg = _ceReadCfgForm();
+    var outdir = cfg.outdir || "out/sim_data";
+    var cpus   = parseInt(document.getElementById("ce-parca-cpus").value, 10) || cfg.cpus || 8;
+    var mem    = parseInt(document.getElementById("ce-parca-mem").value,  10) || cfg.mem_gb || 32;
+    var time   = parseInt(document.getElementById("ce-parca-time").value, 10) || cfg.time_limit_min || 60;
+    var command = "v2ecoli-parca --mode fast --cpus " + cpus + " --outdir " + outdir;
+    _ceSubmitRun(command, { cpus: cpus, mem_gb: mem, time_min: time },
+      "ce-parca-panel", "ce-parca-chip", "ce-parca-log",
+      "ce-parca-progress-wrap", "ce-parca-bar", "ce-parca-prog-label",
+      function (info) { _ceParcaRun = info; });
+  };
+
+  window._ceRunColony = function () {
+    var cfg = _ceReadCfgForm();
+    var ncells   = parseInt(document.getElementById("ce-colony-ncells").value,   10) || cfg.n_cells || 4;
+    var duration = parseInt(document.getElementById("ce-colony-duration").value, 10) || cfg.duration_min || 22;
+    var seed     = parseInt(document.getElementById("ce-colony-seed").value,     10);
+    var mem      = parseInt(document.getElementById("ce-colony-mem").value,      10) || cfg.mem_gb || 32;
+    var cacheDir = cfg.cache_dir || "out/sim_data/cache";
+    var command  = "v2ecoli-colony --n-cells " + ncells +
+                   " --duration-min " + duration +
+                   " --seed " + seed +
+                   " --cache-dir " + cacheDir;
+    _ceSubmitRun(command, { cpus: 1, mem_gb: mem, time_min: Math.max(duration * 3, 60) },
+      "ce-colony-panel", "ce-colony-chip", "ce-colony-log",
+      "ce-colony-progress-wrap", "ce-colony-bar", "ce-colony-prog-label",
+      function (info) {
+        _ceColonyRun = info;
+        // Auto-switch to Results tab so the user can watch progress there.
+        _setCeTab("results");
+      });
+  };
+
+  // ── Results tab ────────────────────────────────────────────────────────────
+
+  var _ceSelectedRunId = null;
+
+  function _ceFetchRuns (specId) {
+    fetch("/api/composite/" + encodeURIComponent(specId) + "/runs")
+      .then(function (r) { return r.json(); })
+      .then(function (data) { _ceRenderRuns(data.runs || []); })
+      .catch(function () {});
+  }
+
+  function _ceRenderRuns (runs) {
+    var list = document.getElementById("ce-results-list");
+    var empty = document.getElementById("ce-results-empty");
+    if (!list) return;
+    if (!runs.length) {
+      list.innerHTML = "";
+      if (empty) empty.style.display = "";
+      return;
+    }
+    if (empty) empty.style.display = "none";
+    list.innerHTML = runs.map(function (r) {
+      var dt = r.submitted_at ? new Date(r.submitted_at).toLocaleString() : "";
+      var cmdShort = (r.command || "").replace(/^v2ecoli-/, "").slice(0, 60);
+      return '<div class="ce-run-card" id="ce-card-' + r.run_id + '" onclick="_ceSelectRun(' + JSON.stringify(r.run_id) + ')">'
+        + '<div class="ce-run-card-header">'
+        + '<code style="font-size:12px">' + r.run_id + '</code>'
+        + '<span class="viv-hpc-chip viv-hpc-chip-loading" style="font-size:11px">' + (r.slurm_job_id || '') + '</span>'
+        + '</div>'
+        + '<div class="ce-run-card-meta">' + dt + (cmdShort ? " · " + cmdShort : "") + '</div>'
+        + '</div>';
+    }).join("");
+    // Auto-select most recent if nothing selected.
+    if (!_ceSelectedRunId && runs.length) _ceSelectRun(runs[0].run_id);
+  }
+
+  window._ceSelectRun = function (runId) {
+    _ceSelectedRunId = runId;
+    // Highlight card.
+    document.querySelectorAll(".ce-run-card").forEach(function (c) {
+      c.classList.toggle("active-card", c.id === "ce-card-" + runId);
+    });
+    // Show detail pane.
+    var detail = document.getElementById("ce-result-detail");
+    if (detail) detail.style.display = "";
+    var rid = document.getElementById("ce-detail-run-id");
+    if (rid) rid.textContent = runId;
+    // Fetch log + summary.
+    _ceRefreshDetailLog();
+    _ceFetchRunSummary(runId);
+  };
+
+  window._ceRefreshDetailLog = function () {
+    if (!_ceSelectedRunId || !_ceSpecId) return;
+    var backend = (document.getElementById("ce-cfg-backend") || {}).value || "v2ecoli";
+    var logEl = document.getElementById("ce-detail-log");
+    if (logEl) logEl.textContent = "(loading…)";
+    fetch("/api/hpc/" + encodeURIComponent(backend) + "/run/" + _ceSelectedRunId + "/log")
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (logEl) { logEl.textContent = d.log || "(no log yet)"; logEl.scrollTop = logEl.scrollHeight; }
+      })
+      .catch(function () { if (logEl) logEl.textContent = "(error loading log)"; });
+  };
+
+  function _ceFetchRunSummary (runId) {
+    if (!_ceSpecId) return;
+    fetch("/api/composite/" + encodeURIComponent(_ceSpecId) + "/runs/" + runId + "/summary")
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var chip = document.getElementById("ce-detail-chip");
+        if (chip && data.meta) {
+          // We don't have cached state here; just show slurm id.
+          chip.textContent = "SLURM " + (data.meta.slurm_job_id || "");
+          chip.className = "viv-hpc-chip viv-hpc-chip-loading";
+        }
+        var sumDiv = document.getElementById("ce-detail-summary");
+        var grid   = document.getElementById("ce-summary-grid");
+        var s = data.summary;
+        if (s && grid && sumDiv) {
+          sumDiv.style.display = "";
+          var stats = [
+            { key: "Status",    val: s.status || "—" },
+            { key: "Cells (initial→final)", val: (s.n_cells_initial || "?") + " → " + (s.n_cells_final || "?") },
+            { key: "Duration",  val: s.duration_s ? (s.duration_s / 60).toFixed(1) + " min sim" : "—" },
+            { key: "Wall time", val: s.wall_seconds ? (s.wall_seconds / 60).toFixed(1) + " min" : "—" },
+            { key: "Peak RSS",  val: s.peak_rss_mb ? Math.round(s.peak_rss_mb / 1024) + " GB" : "—" },
+            { key: "Divisions", val: s.n_division_events !== undefined ? String(s.n_division_events) : "—" },
+          ];
+          grid.innerHTML = stats.map(function (st) {
+            return '<div class="ce-summary-stat"><div class="val">' + st.val + '</div><div class="key">' + st.key + '</div></div>';
+          }).join("");
+        }
+      })
+      .catch(function () {});
+  }
+
+}());
+</script>
+</body></html>
