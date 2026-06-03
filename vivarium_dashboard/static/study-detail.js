@@ -723,4 +723,232 @@
   if (runBtn) {
     runBtn.addEventListener('click', runStudyTests);
   }
+
+  // ===== HPC array job integration (todo #21 Phases C+D) =====
+
+  var _hpcArrayPollTimer = null;
+  var STUDY_NAME = window._studyName;
+  // Per-run_id state for auto-pullback on COMPLETED edge.
+  //   prevState: last polled SLURM state (string)
+  //   pullback:  'idle' | 'in_flight' | 'synced' | 'failed'
+  var _taskState = {};
+
+  function getComputeBackend() {
+    var sel = document.getElementById('compute-backend-select');
+    return sel ? sel.value : 'local';
+  }
+
+  function showBackendStatus(msg, ok) {
+    var el = document.getElementById('backend-status');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.color = ok ? '#16a34a' : '#dc2626';
+  }
+
+  // Probe backends on load
+  api('GET', '/api/compute-backends?status=1').then(function(r) {
+    if (r.status !== 200) return;
+    var backends = (r.body && r.body.backends) || [];
+    var sel = document.getElementById('compute-backend-select');
+    if (!sel) return;
+    backends.forEach(function(b) {
+      var opt = sel.querySelector('option[value="' + b.id + '"]');
+      if (opt) {
+        var status = b.status || {};
+        var hint = status.ok ? 'connected' : (status.message || 'unreachable');
+        opt.title = b.description + ' (' + hint + ')';
+        if (b.id !== 'local' && !status.ok) {
+          opt.style.color = '#dc2626';
+        }
+      }
+    });
+    var cur = getComputeBackend();
+    var meta = backends.find(function(b) { return b.id === cur; });
+    if (meta && meta.status) {
+      showBackendStatus(meta.status.ok ? 'connected' : (meta.status.message || 'error'), meta.status.ok);
+    }
+  });
+
+  // Backend selector change
+  document.addEventListener('change', function(ev) {
+    if (ev.target.id === 'compute-backend-select') {
+      var backend = ev.target.value;
+      if (backend === 'local') {
+        document.getElementById('hpc-runs-section').style.display = 'none';
+        if (_hpcArrayPollTimer) { clearInterval(_hpcArrayPollTimer); _hpcArrayPollTimer = null; }
+      } else {
+        document.getElementById('hpc-runs-section').style.display = '';
+        pollHpcArrayStatus();
+      }
+      api('GET', '/api/compute-backends/' + encodeURIComponent(backend) + '/status').then(function(r) {
+        if (r.status === 200 && r.body) {
+          showBackendStatus(r.body.ok ? 'connected' : (r.body.message || 'error'), r.body.ok);
+        }
+      });
+    }
+  });
+
+  // Show HPC section if not local on page load
+  if (getComputeBackend() !== 'local') {
+    document.getElementById('hpc-runs-section').style.display = '';
+    pollHpcArrayStatus();
+  }
+
+  function pollHpcArrayStatus() {
+    if (_hpcArrayPollTimer) clearInterval(_hpcArrayPollTimer);
+
+    function poll() {
+      api('GET', '/api/investigation-array-status?name=' + encodeURIComponent(STUDY_NAME))
+        .then(function(r) {
+          if (r.status === 404) {
+            document.getElementById('hpc-array-status').innerHTML = '<p class="muted">No HPC array runs yet.</p>';
+            document.getElementById('hpc-array-tasks-table').style.display = 'none';
+            return;
+          }
+          if (r.status !== 200) return;
+          renderHpcArrayStatus(r.body);
+        });
+    }
+
+    poll();
+    _hpcArrayPollTimer = setInterval(poll, 10000);
+  }
+
+  function renderHpcArrayStatus(data) {
+    var container = document.getElementById('hpc-array-status');
+    if (!container) return;
+
+    var nTotal = data.n_total || 0;
+    var nCompleted = data.n_completed || 0;
+    var nFailed = data.n_failed || 0;
+    var nRunning = data.n_running || 0;
+    var nPending = data.n_pending || 0;
+    var status = data.status || 'unknown';
+
+    var html = '<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">' +
+      '<span class="run-status run-status-' + status + '">array: ' + status + '</span>' +
+      '<span style="font-size:0.88em">' + nTotal + ' tasks · ' +
+      '<span style="color:#64748b">' + nPending + ' pending</span> · ' +
+      '<span style="color:#2563eb">' + nRunning + ' running</span> · ' +
+      '<span style="color:#16a34a">' + nCompleted + ' completed</span> · ' +
+      '<span style="color:#dc2626">' + nFailed + ' failed</span>' +
+      '</span></div>';
+
+    container.innerHTML = html;
+
+    // Per-task table
+    var table = document.getElementById('hpc-array-tasks-table');
+    var tbody = document.getElementById('hpc-array-tasks-body');
+    if (!table || !tbody) return;
+
+    var tasks = data.tasks || [];
+    var runIds = data.run_ids || [];
+
+    if (tasks.length === 0) {
+      table.style.display = 'none';
+      return;
+    }
+
+    table.style.display = '';
+    tbody.innerHTML = '';
+    tasks.forEach(function(task, idx) {
+      var runId = runIds[idx] || task.run_id || '—';
+      var s = _taskState[runId] || (_taskState[runId] = { prevState: null, pullback: 'idle' });
+
+      // Auto-pullback on PENDING/RUNNING → COMPLETED edge.
+      if (task.state === 'COMPLETED' && s.prevState !== 'COMPLETED' && s.pullback === 'idle') {
+        s.pullback = 'in_flight';
+        firePullback(runId);
+      }
+      s.prevState = task.state;
+
+      var tr = document.createElement('tr');
+      tr.style.fontSize = '0.85em';
+      tr.innerHTML =
+        '<td>' + (task.task_id !== undefined ? task.task_id : idx) + '</td>' +
+        '<td><code>' + runId + '</code></td>' +
+        '<td><span class="run-status run-status-' + (task.state || 'unknown').toLowerCase() + '">' + (task.state || '—') + '</span></td>' +
+        '<td>' + (task.exit_code || '—') + '</td>' +
+        '<td>' + (task.elapsed || '—') + '</td>' +
+        '<td>' + renderPullbackCell(task.state, runId, s.pullback) + '</td>';
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderPullbackCell(taskState, runId, pullbackState) {
+    if (taskState !== 'COMPLETED' && taskState !== 'FAILED') {
+      return '<span class="muted" style="font-size:0.82em">' +
+             (taskState === 'RUNNING' ? 'running…' : '—') + '</span>';
+    }
+    if (pullbackState === 'in_flight') {
+      return '<span style="color:#2563eb;font-size:0.82em">⟳ syncing…</span>';
+    }
+    if (pullbackState === 'synced') {
+      return '<span style="color:#16a34a;font-size:0.82em">✓ synced</span>';
+    }
+    if (pullbackState === 'failed') {
+      return '<button class="btn-pullback-task" data-run-id="' + runId + '" style="font-size:0.82em;padding:2px 8px;color:#dc2626">↻ retry</button>';
+    }
+    // idle — completed but not yet synced (e.g. page reloaded mid-array)
+    return '<button class="btn-pullback-task" data-run-id="' + runId + '" style="font-size:0.82em;padding:2px 8px">sync results</button>';
+  }
+
+  function firePullback(runId) {
+    api('POST', '/api/hpc/' + getComputeBackend() + '/run/' + encodeURIComponent(runId) + '/pullback', {})
+      .then(function(r) {
+        var s = _taskState[runId] || (_taskState[runId] = {});
+        var body = r.body || {};
+        if ((r.status === 200 || r.status === 202) && (body.state === 'ok' || body.state === 'partial')) {
+          s.pullback = 'synced';
+        } else if (r.status === 200 && body.state === 'in_progress') {
+          s.pullback = 'in_flight';  // already in progress server-side; next poll re-renders
+        } else {
+          s.pullback = 'failed';
+        }
+      })
+      .catch(function() {
+        var s = _taskState[runId] || (_taskState[runId] = {});
+        s.pullback = 'failed';
+      });
+  }
+
+  // Run HPC array job
+  document.getElementById('btn-run-hpc-array').addEventListener('click', function() {
+    var btn = this;
+    btn.disabled = true;
+    btn.textContent = 'Submitting…';
+    api('POST', '/api/investigation-run', {
+      name: STUDY_NAME,
+      compute_backend: getComputeBackend()
+    }).then(function(r) {
+      if (r.status === 202) {
+        btn.textContent = 'Submitted ✓';
+        pollHpcArrayStatus();
+      } else {
+        alert('HPC run failed: ' + (r.body && r.body.error || r.status));
+        btn.disabled = false;
+        btn.textContent = 'Run HPC array job';
+      }
+    }).catch(function(err) {
+      alert('HPC run error: ' + err);
+      btn.disabled = false;
+      btn.textContent = 'Run HPC array job';
+    });
+  });
+
+  // Manual per-task pullback trigger (used for retry after a failed auto-pullback
+  // or when the user loads the page mid-array and wants to sync an already-COMPLETED task).
+  // Routes through _taskState so the next poll re-renders the chip consistently.
+  document.addEventListener('click', function(ev) {
+    var btn = ev.target.closest('.btn-pullback-task');
+    if (!btn) return;
+    var runId = btn.dataset.runId;
+    if (!runId) return;
+    var s = _taskState[runId] || (_taskState[runId] = { prevState: null, pullback: 'idle' });
+    if (s.pullback === 'in_flight') return;
+    s.pullback = 'in_flight';
+    btn.disabled = true;
+    btn.textContent = '⟳ syncing…';
+    firePullback(runId);
+  });
 })();

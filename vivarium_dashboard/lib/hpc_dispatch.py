@@ -960,3 +960,204 @@ def submit_run_job(
     slurm_job_id = int(r.stdout.strip())
     log_path = f"{log_dir}/vivarium-{ws_name}-{run_id}.out"
     return {"slurm_job_id": slurm_job_id, "log_path": log_path, "run_id": run_id}
+
+
+def submit_investigation_array_job(
+    settings: HpcSettings,
+    ws_name: str,
+    *,
+    command_template: str,
+    param_values: list[dict],
+    resources: dict,
+) -> dict:
+    """Submit a SLURM job array for an investigation's parametric sweep.
+
+    Generates a single sbatch script with ``--array=0-{N-1}`` where each
+    task indexes into ``param_values`` to pick its parameters.  This is
+    much friendlier to the scheduler than submitting N individual jobs.
+
+    Args:
+        settings: HPC cluster connection settings.
+        ws_name: Workspace name (used for remote paths).
+        command_template: Command string with ``{param}`` placeholders.
+            Each placeholder is replaced by the corresponding key from
+            the per-task param dict.
+        param_values: List of per-task parameter dicts.  Length determines
+            the array size.
+        resources: Dict with optional ``cpus``, ``mem_gb``, ``time_min`` keys.
+
+    Returns::
+
+        {
+            "slurm_job_array_id": int,
+            "n_tasks": int,
+            "run_ids": list[str],
+        }
+    """
+    require_configured(settings)
+    n_tasks = len(param_values)
+    if n_tasks < 1:
+        raise ValueError("param_values must have at least one entry")
+    n_tasks_max = n_tasks - 1
+    run_ids = [uuid.uuid4().hex[:8] for _ in range(n_tasks)]
+    array_job_name = f"viv-array-{ws_name[:16]}-{run_ids[0][:4]}"
+    cpus = int(resources.get("cpus", 1))
+    mem_gb = int(resources.get("mem_gb", 4))
+    time_min = int(resources.get("time_min", 60))
+
+    remote_ws = f"{settings.hpc_repo_base_path}/{ws_name}"
+    log_base = settings.hpc_log_base_path or f"{settings.hpc_repo_base_path}/logs"
+    log_dir = f"{log_base}/{ws_name}"
+    log_file = f"{log_dir}/{array_job_name}_%a.out"
+
+    header = _build_sbatch_header(
+        settings,
+        job_name=array_job_name,
+        cpus=cpus,
+        mem_gb=mem_gb,
+        time_min=time_min,
+        log_file=log_file,
+    )
+    # Replace first header line (#!/bin/bash) to add --array
+    header[0] = "#!/bin/bash"
+    header.insert(1, f"#SBATCH --array=0-{n_tasks_max}")
+
+    # Serialise param_values as JSON in the script so each task reads its
+    # own params via SLURM_ARRAY_TASK_ID without external files.
+    import json as _json
+    params_json = _json.dumps(param_values)
+
+    exec_lines = _singularity_exec_lines(settings, remote_ws, ws_name, command_template)
+
+    body_lines = [
+        "set -euo pipefail",
+        "",
+        "PARAMS_JSON='" + params_json + "'",
+        "TASK_ID=${SLURM_ARRAY_TASK_ID:-0}",
+        "",
+        "# Pick this task's params from the JSON array.",
+        'TASK_PARAMS=$(echo "$PARAMS_JSON" | python3 -c "import json,sys; data=json.load(sys.stdin); p=data[$TASK_ID]; print(json.dumps(p))")',
+        "",
+        "# Build the per-task command by substituting {param} placeholders.",
+        'CMD=$(echo "$TASK_PARAMS" | python3 -c "',
+        "import json, sys",
+        "params = json.load(sys.stdin)",
+        "tmpl = '''" + command_template + "'''",
+        "print(tmpl.format(**params))",
+        '")',
+        "",
+        'echo "Task $TASK_ID / ${SLURM_ARRAY_TASK_COUNT}: params=$TASK_PARAMS"',
+        'echo "Command: $CMD"',
+        f'mkdir -p "{remote_ws}/results" "{remote_ws}/out"',
+        "eval \"$CMD\"",
+        "EC=$?",
+        'echo "Task $TASK_ID exit code: $EC"',
+        "exit $EC",
+    ]
+    body = "\n".join(body_lines)
+
+    script_text = "\n".join(header) + "\n" + body
+
+    # Write locally for audit trail
+    hpc_dir = Path.home() / ".pbg" / "hpc" / "array-jobs"
+    hpc_dir.mkdir(parents=True, exist_ok=True)
+    local_script = hpc_dir / f"{array_job_name}.sbatch"
+    local_script.write_text(script_text)
+
+    # SCP to cluster + sbatch
+    remote_script = f"{log_dir}/{array_job_name}.sbatch"
+    _scp_file(settings, local_script, remote_script, timeout=30)
+
+    r = _ssh(settings, f"sbatch --parsable {remote_script}", timeout=30)
+    if r.returncode != 0:
+        raise RuntimeError(
+            f"sbatch array job failed: {_mask(r.stderr[-500:], settings)}"
+        )
+    slurm_job_array_id = int(r.stdout.strip())
+
+    return {
+        "slurm_job_array_id": slurm_job_array_id,
+        "n_tasks": n_tasks,
+        "run_ids": run_ids,
+    }
+
+
+def get_array_job_status(
+    settings: HpcSettings,
+    slurm_job_array_id: int,
+) -> list[dict]:
+    """Poll per-task states for a SLURM job array.
+
+    Tries ``scontrol show job <id>`` for detailed per-task info (works
+    for running and recently-completed arrays).  Falls back to
+    ``sacct -j <id>`` for historical data.
+
+    Returns::
+
+        [
+            {
+                "task_id": int,
+                "state": str,
+                "exit_code": str | None,
+                "elapsed": str | None,
+            },
+            ...
+        ]
+    """
+    require_configured(settings)
+    results: list[dict] = []
+    seen_ids: set[int] = set()
+
+    # Strategy 1: scontrol show job (per-task states for running arrays).
+    r = _ssh(
+        settings,
+        f"scontrol show job {slurm_job_array_id} --oneliner 2>/dev/null || true",
+        timeout=30,
+    )
+    if r.returncode == 0 and r.stdout.strip():
+        # scontrol outputs one line per array task when using --oneliner
+        for line in r.stdout.splitlines():
+            m = re.search(r"JobId=(\d+)_\[(\d+)\]", line)
+            if not m:
+                continue
+            task_id = int(m.group(2))
+            state_m = re.search(r"JobState=(\S+)", line)
+            exit_m = re.search(r"ExitCode=(\S+)", line)
+            elapsed_m = re.search(r"Elapsed=(\S+)", line)
+            results.append({
+                "task_id": task_id,
+                "state": state_m.group(1) if state_m else "UNKNOWN",
+                "exit_code": exit_m.group(1) if exit_m else None,
+                "elapsed": elapsed_m.group(1) if elapsed_m else None,
+            })
+            seen_ids.add(task_id)
+
+    if results:
+        return results
+
+    # Strategy 2: sacct -j (covers completed array tasks where scontrol is silent).
+    r2 = _ssh(
+        settings,
+        f"sacct -j {slurm_job_array_id} --noheader --format=JobID%40,State,ExitCode,Elapsed --parsable2 2>/dev/null || true",
+        timeout=30,
+    )
+    if r2.returncode == 0 and r2.stdout.strip():
+        for line in r2.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            # sacct produces lines like "1234_[0]|COMPLETED|0:0|00:01:00"
+            m = re.search(r"(\d+)_\[(\d+)\]\|(\S+)\|(\S+)\|(\S+)", line)
+            if m:
+                task_id = int(m.group(2))
+                if task_id in seen_ids:
+                    continue
+                results.append({
+                    "task_id": task_id,
+                    "state": m.group(3),
+                    "exit_code": m.group(4),
+                    "elapsed": m.group(5),
+                })
+                seen_ids.add(task_id)
+
+    return results

@@ -28,6 +28,16 @@
   </h1>
 </header>
 
+{# Compute backend selector — added by todo #21 Phase C #}
+<div class="backend-selector" style="margin:8px 0;display:flex;align-items:center;gap:8px;font-size:0.88em">
+  <label for="compute-backend-select">Compute backend:</label>
+  <select id="compute-backend-select" style="padding:4px 8px;border:1px solid #cbd5e1;border-radius:4px">
+    <option value="local">Local machine</option>
+    <option value="hpc:ccam">HPC: CCAM</option>
+  </select>
+  <span id="backend-status" style="color:#64748b;font-size:0.82em"></span>
+</div>
+
 {# Pass A: multi-axis Status Detail panel — one chip per axis that is set on the study spec.
    Hidden entirely when none of the six axes are set, so legacy v3 studies stay unchanged. #}
 {% set _axes = [
@@ -1459,6 +1469,31 @@
       <button class="btn-compare-selected">Compare selected</button>
       <button class="btn-clear-runs danger">Clear all runs</button>
     </div>
+  </div>
+
+  {# HPC array runs section — todo #21 Phase C #}
+  <div class="hpc-runs-section" id="hpc-runs-section" style="margin-top:24px;display:none">
+    <h3 class="section-title">HPC Array Runs</h3>
+    <p class="muted" style="margin:0 0 10px 0;font-size:0.88em">
+      Runs dispatched to an HPC cluster via SLURM job arrays.
+      <button id="btn-run-hpc-array" class="btn btn-primary" style="margin-left:12px;padding:3px 12px;font-size:0.85em">Run HPC array job</button>
+    </p>
+    <div id="hpc-array-status">
+      <p class="muted">No HPC array runs yet.</p>
+    </div>
+    <table id="hpc-array-tasks-table" style="width:100%;margin-top:8px;display:none">
+      <thead>
+        <tr>
+          <th>Task</th>
+          <th>Run ID</th>
+          <th>State</th>
+          <th>Exit code</th>
+          <th>Elapsed</th>
+          <th>Pullback</th>
+        </tr>
+      </thead>
+      <tbody id="hpc-array-tasks-body"></tbody>
+    </table>
   </div>
 
 </section>

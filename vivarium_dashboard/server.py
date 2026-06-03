@@ -45,7 +45,20 @@ from threading import Lock
 
 import yaml
 
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_dashboard.lib.workspace_paths import WorkspacePaths as _WorkspacePaths
+
+
+def workspace_paths() -> _WorkspacePaths:
+    """Resolve the workspace directory layout for the bound workspace.
+
+    Returns a :class:`WorkspacePaths` instance cached per workspace path.
+    """
+    if WORKSPACE is None:
+        raise RuntimeError("workspace_paths() called with no workspace bound")
+    ws_str = str(WORKSPACE)
+    if ws_str not in _WP_CACHE:
+        _WP_CACHE[ws_str] = _WorkspacePaths.load(WORKSPACE)
+    return _WP_CACHE[ws_str]
 
 
 def _strip_process_instances(state):
@@ -1917,6 +1930,47 @@ def _study_name_from_body(body: dict) -> str:
         (body.get("name") or body.get("study") or body.get("investigation") or "")
         .strip()
     )
+
+
+def _apply_params(doc: dict, params: dict) -> dict:
+    """Best-effort overlay of ``params`` onto ``doc['state']``.
+
+    Each key in ``params`` is treated as a dot-separated path into the state
+    tree (e.g. ``chromosome.DnaA_count``).  Unknown paths are silently ignored.
+    """
+    if not params:
+        return doc
+    import copy
+    out = copy.deepcopy(doc)
+    state = out.get("state") or {}
+    for key, value in params.items():
+        segments = key.split(".")
+        node = state
+        for seg in segments[:-1]:
+            if isinstance(node, dict) and seg in node:
+                node = node[seg]
+            else:
+                node = None
+                break
+        if isinstance(node, dict) and segments[-1] in node:
+            leaf = node[segments[-1]]
+            if isinstance(leaf, dict):
+                leaf["_default"] = value
+            else:
+                node[segments[-1]] = value
+    return out
+
+
+def _patch_emitter_for_hpc(doc: dict, run_id: str) -> None:
+    """Rewrite the emitter's db_file to the HPC container path."""
+    state = doc.get("state") or {}
+    emitter = state.get("emitter") or {}
+    if emitter.get("_type") == "step":
+        cfg = dict(emitter.get("config") or {})
+        cfg["run_id"] = run_id
+        cfg["db_file"] = "/workspace/runs.db"
+        emitter["config"] = cfg
+        state["emitter"] = emitter
 
 
 # ---------------------------------------------------------------------------
@@ -4719,6 +4773,8 @@ class Handler(BaseHTTPRequestHandler):
         # address; tail is /schema.
         if self.path.startswith("/api/process/") and self.path.split("?", 1)[0].endswith("/schema"):
             return self._get_process_schema()
+        if self.path.startswith("/api/investigation-array-status"):
+            return self._get_investigation_array_status()
         if self.path.startswith("/api/investigation-viz-html"):
             return self._get_investigation_viz_html()
         if self.path.startswith("/api/investigation-composites"):
@@ -8305,17 +8361,30 @@ if __name__ == "__main__":
         return self._json(resp, code)
 
     def _post_investigation_run(self, body: dict):
-        """POST /api/investigation-run {name} — run all simulations + render visualizations."""
+        """POST /api/investigation-run {name} — run all simulations + render visualizations.
+
+        Supports optional ``compute_backend`` field in the body:
+        - ``"local"`` (default) — existing subprocess loop (unchanged)
+        - ``"hpc:ccam"`` (or any ``hpc:*``) — dispatch as SLURM job array
+        """
+        name = _study_name_from_body(body)
+        if not name:
+            return self._json({"error": "name is required"}, 400)
+
+        compute_backend = (body.get("compute_backend") or "local").strip()
+        if compute_backend.startswith("hpc:"):
+            try:
+                return self._post_investigation_run_hpc(body, name, compute_backend)
+            except Exception as exc:
+                return self._json({"error": str(exc)[:500]}, 500)
+
+        # --- local path (unchanged) ---
         _ws_add_to_sys_path()
         from vivarium_dashboard.lib.investigations import (
             run_investigation, InvestigationSpecError,
         )
         from vivarium_dashboard.lib.composite_lookup import substitute_parameters, find_composite_path
         from vivarium_dashboard.lib import composite_runs as cr
-
-        name = _study_name_from_body(body)
-        if not name:
-            return self._json({"error": "name is required"}, 400)
 
         # Resolve workspace package
         ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
@@ -8463,6 +8532,225 @@ if __name__ == "__main__":
             # files happen to be byte-identical) — still return success.
             return self._json(summary_holder[0], 200)
         return self._json(resp, code)
+
+    # ------------------------------------------------------------------
+    # Todo #21 Phase B — investigation run on HPC via SLURM job array
+    # ------------------------------------------------------------------
+
+    def _post_investigation_run_hpc(self, body: dict, name: str, backend: str):
+        """Submit an investigation's parametric sweep as a SLURM job array.
+
+        Replaces the local subprocess-loop with a single ``sbatch --array``
+        invocation.  Each array task runs inside the Singularity container
+        via ``run_investigation_task`` with a pre-resolved composite state.
+        """
+        import base64 as _b64
+        import datetime as _dt
+
+        from vivarium_dashboard.lib.investigations import (
+            load_spec, expand_simulations, inject_emitter_step,
+            InvestigationSpecError,
+        )
+        from vivarium_dashboard.lib.composite_lookup import (
+            substitute_parameters, find_composite_path,
+        )
+        from vivarium_dashboard.lib import composite_runs as cr
+        from vivarium_dashboard.lib.hpc_dispatch import submit_investigation_array_job
+        from vivarium_dashboard.lib.hpc_settings import get_hpc_settings, HpcNotConfiguredError
+
+        if WORKSPACE is None:
+            return self._json({"error": "no workspace bound"}, 409)
+
+        spec_path = _study_spec_path(name)
+        if not spec_path.is_file():
+            return self._json({"error": f"investigation '{name}' not found"}, 404)
+
+        spec = load_spec(spec_path)
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
+        pkg = ws_data.get("package_path") or (
+            "pbg_" + ws_data.get("name", "").replace("-", "_")
+        )
+
+        is_multi = ("variants" in spec or "composites" in spec) and "runs" in spec
+        inv_dir = _study_dir(name)
+        tasks: list[dict] = []
+
+        if is_multi:
+            observables = spec.get("observables") or []
+            for run_entry in spec.get("runs") or []:
+                composite_name = run_entry["composite"]
+                overrides = dict(run_entry.get("params") or {})
+                steps = int(run_entry.get("steps", 1))
+                doc_path = inv_dir / "composites" / f"{composite_name}.yaml"
+                if not doc_path.is_file():
+                    return self._json(
+                        {"error": f"composite doc not found: {composite_name}"}, 404
+                    )
+                raw_doc = yaml.safe_load(doc_path.read_text(encoding="utf-8")) or {}
+                doc = inject_emitter_step(raw_doc, observables)
+                doc = _apply_params(doc, overrides)
+                run_id = cr.generate_run_id(composite_name, overrides)
+                _patch_emitter_for_hpc(doc, run_id)
+                tasks.append({
+                    "run_id": run_id,
+                    "state_json": json.dumps(
+                        doc.get("state") or {}, default=_json_default
+                    ),
+                    "steps": steps,
+                })
+        else:
+            expanded = expand_simulations(spec)
+            for run in expanded:
+                run_id = cr.generate_run_id(spec["composite"], run["overrides"])
+                path = find_composite_path(WORKSPACE, pkg, spec["composite"])
+                if path is None:
+                    return self._json(
+                        {"error": f"composite not found: {spec['composite']}"}, 404
+                    )
+                text = path.read_text(encoding="utf-8")
+                comp_spec = (
+                    json.loads(text)
+                    if path.suffix.lower() == ".json"
+                    else yaml.safe_load(text)
+                )
+                state = substitute_parameters(
+                    comp_spec.get("state") or {},
+                    comp_spec.get("parameters") or {},
+                    run["overrides"],
+                )
+                state = cr.inject_sqlite_emitter(
+                    state, run_id=run_id, db_file="/workspace/runs.db"
+                )
+                tasks.append({
+                    "run_id": run_id,
+                    "state_json": json.dumps(state, default=_json_default),
+                    "steps": run["steps"],
+                })
+
+        if not tasks:
+            return self._json({"error": "no tasks resolved from investigation spec"}, 400)
+
+        param_values: list[dict] = []
+        for t in tasks:
+            encoded = _b64.b64encode(
+                json.dumps(
+                    {
+                        "run_id": t["run_id"],
+                        "state_json": t["state_json"],
+                        "steps": t["steps"],
+                        "pkg": pkg,
+                    }
+                ).encode()
+            ).decode()
+            param_values.append({"params_b64": encoded})
+
+        settings = get_hpc_settings(str(WORKSPACE))
+        ws_name = WORKSPACE.name
+        remote_ws = f"{settings.hpc_repo_base_path}/{ws_name}"
+        sif_path = settings.hpc_sif_path or f"{remote_ws}/{ws_name}.sif"
+        cmd_tmpl = (
+            f"apptainer exec --containall --bind {remote_ws}:/workspace "
+            f"{sif_path} bash -c 'cd /workspace && "
+            f"python3 -m vivarium_dashboard.lib.run_investigation_task {{params_b64}}'"
+        )
+
+        resources = {
+            "cpus": body.get("cpus", 1),
+            "mem_gb": body.get("mem_gb", 4),
+            "time_min": body.get("time_min", 60),
+        }
+        result = submit_investigation_array_job(
+            settings,
+            ws_name,
+            command_template=cmd_tmpl,
+            param_values=param_values,
+            resources=resources,
+        )
+
+        meta = {
+            "name": name,
+            "backend": backend,
+            "slurm_job_array_id": result["slurm_job_array_id"],
+            "n_tasks": result["n_tasks"],
+            "run_ids": result["run_ids"],
+            "tasks": [
+                {
+                    "idx": i,
+                    "run_id": rid,
+                }
+                for i, rid in enumerate(result["run_ids"])
+            ],
+            "submitted_at": _dt.datetime.utcnow().isoformat() + "Z",
+            "status": "submitted",
+        }
+        meta_path = inv_dir / "hpc-array-meta.json"
+        meta_path.write_text(json.dumps(meta, indent=2))
+        return self._json(result, 202)
+
+    def _get_investigation_array_status(self):
+        """GET /api/investigation-array-status — poll array job status.
+
+        Query params: ``name=<investigation-slug>``
+
+        Reads the ``hpc-array-meta.json`` sidecar written by
+        ``_post_investigation_run_hpc``, polls SLURM via
+        ``get_array_job_status``, and returns aggregated per-task states.
+        """
+        from urllib.parse import urlparse, parse_qs
+
+        from vivarium_dashboard.lib.hpc_dispatch import get_array_job_status
+        from vivarium_dashboard.lib.hpc_settings import get_hpc_settings, HpcNotConfiguredError
+
+        if WORKSPACE is None:
+            return self._json({"error": "no workspace bound"}, 409)
+
+        qs = parse_qs(urlparse(self.path).query)
+        name_list = qs.get("name")
+        if not name_list:
+            return self._json({"error": "query param 'name' required"}, 400)
+        name = name_list[0].strip()
+        inv_dir = _study_dir(name)
+        meta_path = inv_dir / "hpc-array-meta.json"
+        if not meta_path.is_file():
+            return self._json(
+                {"error": f"no HPC array job found for '{name}'"}, 404
+            )
+
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        slurm_job_array_id = meta.get("slurm_job_array_id")
+        if slurm_job_array_id is None:
+            return self._json(meta, 200)
+
+        try:
+            settings = get_hpc_settings(str(WORKSPACE))
+            task_states = get_array_job_status(settings, slurm_job_array_id)
+        except HpcNotConfiguredError:
+            task_states = []
+
+        n_total = meta.get("n_tasks", 0)
+        n_pending = sum(1 for t in task_states if t["state"] == "PENDING")
+        n_running = sum(1 for t in task_states if t["state"] == "RUNNING")
+        n_completed = sum(1 for t in task_states if t["state"] == "COMPLETED")
+        n_failed = sum(
+            1 for t in task_states if t["state"] in ("FAILED", "TIMEOUT", "NODE_FAIL")
+        )
+
+        return self._json(
+            {
+                "name": name,
+                "slurm_job_array_id": slurm_job_array_id,
+                "n_total": n_total,
+                "n_pending": n_pending,
+                "n_running": n_running,
+                "n_completed": n_completed,
+                "n_failed": n_failed,
+                "tasks": task_states,
+                "run_ids": meta.get("run_ids", []),
+                "status": meta.get("status"),
+                "submitted_at": meta.get("submitted_at"),
+            },
+            200,
+        )
 
     def _post_investigation_render_viz(self, body: dict):
         """POST /api/investigation-render-viz {name} — re-render visualizations

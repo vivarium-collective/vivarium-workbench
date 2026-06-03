@@ -23,11 +23,13 @@ from vivarium_dashboard.lib.hpc_dispatch import (
     cancel_job,
     check_connectivity,
     check_slurm,
+    get_array_job_status,
     get_job_status,
     open_socket,
     rsync_workspace,
     rsync_workspace_back,
     submit_build_job,
+    submit_investigation_array_job,
     submit_run_job,
 )
 from vivarium_dashboard.lib.hpc_settings import HpcNotConfiguredError, HpcSettings
@@ -867,3 +869,133 @@ class TestOpenSocket:
         args = mock_run.call_args[0][0]
         assert "-M" in args
         assert "-N" in args
+
+
+# ---------------------------------------------------------------------------
+# submit_investigation_array_job — SLURM job array for parametric sweeps
+# ---------------------------------------------------------------------------
+
+
+class TestSubmitInvestigationArrayJob:
+    def test_returns_array_id_and_run_ids(self) -> None:
+        s = _settings()
+        with patch("vivarium_dashboard.lib.hpc_dispatch._scp_file"), \
+             patch("vivarium_dashboard.lib.hpc_dispatch._ssh",
+                   return_value=_ok("555")):
+            result = submit_investigation_array_job(
+                s, "myws",
+                command_template="python run.py --n_cells {n_cells}",
+                param_values=[{"n_cells": 100}, {"n_cells": 200}],
+                resources={},
+            )
+        assert result["slurm_job_array_id"] == 555
+        assert result["n_tasks"] == 2
+        assert len(result["run_ids"]) == 2
+
+    def test_script_contains_array_directive(self) -> None:
+        s = _settings()
+        with patch("vivarium_dashboard.lib.hpc_dispatch._scp_file"), \
+             patch("vivarium_dashboard.lib.hpc_dispatch._ssh",
+                   return_value=_ok("42")):
+            submit_investigation_array_job(
+                s, "myws",
+                command_template="python run.py",
+                param_values=[{"x": 1}, {"x": 2}],
+                resources={"cpus": 2, "mem_gb": 8, "time_min": 30},
+            )
+        # Script was written to ~/.pbg/hpc/array-jobs/
+        import os
+        home = Path.home()
+        scripts_dir = home / ".pbg" / "hpc" / "array-jobs"
+        scripts = sorted(scripts_dir.glob("viv-array-*.sbatch"), key=lambda p: p.stat().st_mtime)
+        assert len(scripts) >= 1
+        text = scripts[-1].read_text()
+        assert "#SBATCH --array=0-1" in text
+        assert "--cpus-per-task=2" in text
+        assert "--mem=8G" in text
+        assert "--time=30" in text
+
+    def test_raises_on_empty_param_values(self) -> None:
+        s = _settings()
+        with pytest.raises(ValueError, match="at least one"):
+            submit_investigation_array_job(
+                s, "ws",
+                command_template="cmd",
+                param_values=[],
+                resources={},
+            )
+
+    def test_raises_on_sbatch_failure(self) -> None:
+        s = _settings()
+        with patch("vivarium_dashboard.lib.hpc_dispatch._scp_file"), \
+             patch("vivarium_dashboard.lib.hpc_dispatch._ssh",
+                   return_value=_fail("sbatch: error", returncode=1)):
+            with pytest.raises(RuntimeError, match="sbatch array job failed"):
+                submit_investigation_array_job(
+                    s, "ws",
+                    command_template="cmd",
+                    param_values=[{"x": 1}],
+                    resources={},
+                )
+
+    def test_script_contains_params_json(self) -> None:
+        s = _settings()
+        with patch("vivarium_dashboard.lib.hpc_dispatch._scp_file"), \
+             patch("vivarium_dashboard.lib.hpc_dispatch._ssh",
+                   return_value=_ok("99")):
+            submit_investigation_array_job(
+                s, "ws", command_template="python run.py",
+                param_values=[{"n_cells": 100, "seed": 42}, {"n_cells": 200, "seed": 7}],
+                resources={},
+            )
+        import os
+        home = Path.home()
+        scripts_dir = home / ".pbg" / "hpc" / "array-jobs"
+        scripts = sorted(scripts_dir.glob("viv-array-*.sbatch"), key=lambda p: p.stat().st_mtime)
+        text = scripts[-1].read_text()
+        assert '"n_cells": 100' in text or "'n_cells': 100" in text
+        assert '"seed": 42' in text or "'seed': 42" in text
+
+
+# ---------------------------------------------------------------------------
+# get_array_job_status — poll per-task states for a job array
+# ---------------------------------------------------------------------------
+
+
+class TestGetArrayJobStatus:
+    def test_parses_scontrol_lines(self) -> None:
+        s = _settings()
+        scontrol_output = (
+            "JobId=1234_[0] JobState=RUNNING ExitCode=0:0 Elapsed=00:01:00\n"
+            "JobId=1234_[1] JobState=PENDING ExitCode=0:0 Elapsed=\n"
+            "JobId=1234_[2] JobState=COMPLETED ExitCode=0:0 Elapsed=00:05:00\n"
+        )
+        with patch("vivarium_dashboard.lib.hpc_dispatch._ssh",
+                   return_value=_ok(scontrol_output)):
+            results = get_array_job_status(s, 1234)
+        assert len(results) == 3
+        assert results[0]["task_id"] == 0
+        assert results[0]["state"] == "RUNNING"
+        assert results[2]["state"] == "COMPLETED"
+
+    def test_returns_empty_when_no_job_found(self) -> None:
+        s = _settings()
+        with patch("vivarium_dashboard.lib.hpc_dispatch._ssh",
+                   return_value=_ok("")):
+            results = get_array_job_status(s, 9999)
+        assert results == []
+
+    def test_falls_back_to_sacct(self) -> None:
+        s = _settings()
+        sacct_output = (
+            "1234_[0]|COMPLETED|0:0|00:01:00\n"
+            "1234_[1]|FAILED|1:0|00:00:30\n"
+        )
+        # scontrol returns empty, sacct returns data
+        side_effects = [_ok(""), _ok(sacct_output)]
+        with patch("vivarium_dashboard.lib.hpc_dispatch._ssh",
+                   side_effect=side_effects):
+            results = get_array_job_status(s, 1234)
+        assert len(results) == 2
+        assert results[0]["state"] == "COMPLETED"
+        assert results[1]["state"] == "FAILED"
