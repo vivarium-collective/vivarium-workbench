@@ -154,6 +154,10 @@
   // multi-investigation groups (e.g., colonies + v2ecoli-pdmp) down to
   // just one — matching the dropdown's "current" selection.
   function publishCurrentSlug(current) {
+    // An explicit ?investigation=<name> deep-link (or a manual dropdown switch)
+    // is user intent and must NOT be clobbered by the registry's auto-pick (which
+    // selects the first "running" investigation — wrong when two share a worktree).
+    if (window._explicitInvestigation) return;
     const slug = current && current.slug ? current.slug : '';
     if (window._currentIsetSlug === slug) return;
     window._currentIsetSlug = slug;
@@ -404,6 +408,16 @@
   }
 
   function switchInvestigationLocal(name) {
+    // Re-scope the STUDIES rail to the chosen investigation. Without this the
+    // rail stays pinned to whatever the registry marked "current" (the
+    // alphabetically-first iset when several share one worktree), so switching
+    // siblings via the dropdown left the sidebar stuck. Update the published
+    // slug + re-render before opening the detail view.
+    window._currentIsetSlug = name;
+    if (typeof window._renderRailInvestigationGroups === 'function') {
+      try { window._renderRailInvestigationGroups(); } catch (_) { /* ignore */ }
+    }
+    updateTriggerLabel({ slug: name });
     if (typeof window._switchPage === 'function') {
       try { window._switchPage('investigations'); } catch (_) { /* ignore */ }
     }

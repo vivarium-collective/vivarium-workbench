@@ -478,6 +478,14 @@
     // load races with the page swap.
     var qInv = new URLSearchParams(window.location.search).get('investigation');
     if (qInv) {
+      // Explicit ?investigation=<name> is user intent — it must win over the
+      // registry's auto-pick (which selects the first "running" investigation,
+      // wrongly overriding the deep-link when two investigations share a worktree).
+      window._explicitInvestigation = qInv;
+      window._currentIsetSlug = qInv;
+      if (typeof window._renderRailInvestigationGroups === 'function') {
+        try { window._renderRailInvestigationGroups(); } catch (_) { /* ignore */ }
+      }
       if (!focusedPage) _switchPage('investigations');
       var tries = 0;
       var attemptOpen = function() {

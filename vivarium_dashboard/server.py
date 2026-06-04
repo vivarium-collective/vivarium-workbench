@@ -7995,7 +7995,10 @@ if __name__ == "__main__":
                 "composite":       composite_summary,
                 "composites":      composites,
                 "description":     spec.get("description", ""),
-                "topic":           spec.get("topic", ""),
+                # Fall back to the owning investigation (study.yaml back-reference)
+                # so the study list groups by investigation when no explicit topic.
+                "topic":           spec.get("topic") or spec.get("investigation", ""),
+                "investigation":   spec.get("investigation", ""),
                 "tags":            spec.get("tags") or [],
                 "status":          spec.get("status", "planned"),
                 "phase":           spec.get("phase"),
@@ -10977,7 +10980,10 @@ if __name__ == "__main__":
             n_runs = _count_runs_for_study(spec.get("name", d.name), spec)  # F2
             entry = {
                 "name":             spec.get("name", d.name),
-                "topic":            spec.get("topic", ""),
+                # Fall back to the owning investigation (study.yaml back-reference)
+                # so the study list groups by investigation when no explicit topic.
+                "topic":            spec.get("topic") or spec.get("investigation", ""),
+                "investigation":    spec.get("investigation", ""),
                 "status":           spec.get("status", "draft"),
                 "baseline_names":   [b.get("name", "")
                                      for b in (spec.get("baseline") or [])
@@ -12246,6 +12252,7 @@ if __name__ == "__main__":
         if rel.endswith(".json"): return "application/json"
         if rel.endswith(".png"): return "image/png"
         if rel.endswith(".svg"): return "image/svg+xml"
+        if rel.endswith(".gif"): return "image/gif"
         if rel.endswith(".html"): return "text/html"
         return "text/plain"
 
