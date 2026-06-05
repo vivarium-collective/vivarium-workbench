@@ -1466,6 +1466,51 @@ def _scan_worktree_investigations(worktree_path: str) -> list[dict]:
     return out
 
 
+def _match_investigation_to_branch(branch: str, inv_names: list[str]) -> str | None:
+    """Pick the investigation slug that best matches a git branch.
+
+    The current-picker used to require an EXACT branch==slug match (after
+    stripping the ``investigation/`` prefix); any other branch shape
+    (``feat/aim2-dnaa-oric``, ``wip/dnaa-boxes``) fell through to the
+    order-dependent "first running" heuristic, so a stale-running peer
+    investigation would hijack the dashboard. This generalises the match.
+
+    Priority — exact ``==`` > ``investigation/<slug>`` prefix > token-overlap
+    (tokenise on ``/`` ``_`` ``-``; score each slug by the FRACTION of its tokens
+    present in the branch tokens; highest score wins, ties broken by longer slug
+    then alphabetical). E.g. ``feat/aim2-dnaa-oric`` → ``dnaa-replication`` via
+    the shared ``dnaa`` token (1/2 = 0.5) over ``chromosome-cycle-calibration``
+    (0/3 = 0.0). Mirrors the matcher ``/pbg-dashboard open`` uses for JS injection
+    (``pbg_superpowers.dashboard``), so the server default and the open-helper agree.
+    Returns the slug, or ``None`` when nothing overlaps.
+    """
+    if not branch or not inv_names:
+        return None
+    if branch in inv_names:
+        return branch
+    if branch.startswith("investigation/"):
+        candidate = branch.split("/", 1)[1]
+        if candidate in inv_names:
+            return candidate
+    import re
+    def _tokens(s: str) -> list[str]:
+        return [t for t in re.split(r"[/_-]+", s) if t]
+    branch_tokens = set(_tokens(branch))
+    scored: list[tuple[float, int, str]] = []
+    for name in inv_names:
+        toks = _tokens(name)
+        if not toks:
+            continue
+        hits = sum(1 for t in toks if t in branch_tokens)
+        if hits == 0:
+            continue
+        scored.append((hits / len(toks), len(toks), name))
+    if scored:
+        scored.sort(key=lambda x: (-x[0], -x[1], x[2]))
+        return scored[0][2]
+    return None
+
+
 def _build_investigation_registry_for_test(
     ws_root: Path,
     this_url: str,
@@ -1544,17 +1589,19 @@ def _build_investigation_registry_for_test(
     chosen_idx: int | None = None
     if invs:
         cur_branch = current_branch_fn() or ""
-        # Strip the canonical "investigation/" prefix so an investigation
-        # slug ("dnaa-replication") matches its conventional branch
-        # ("investigation/dnaa-replication"). Without this strip, the
-        # heuristic falls through to "running" / alphabetical-first and
-        # mislabels the workspace switcher.
-        cur_branch_slug = cur_branch.removeprefix("investigation/") if cur_branch else ""
-        if cur_branch_slug:
-            for i, iv in enumerate(invs):
-                if iv.get("name") == cur_branch_slug:
-                    chosen_idx = i
-                    break
+        # Branch → investigation: exact, then "investigation/<slug>", then
+        # token-overlap (so a non-conventional branch like "feat/aim2-dnaa-oric"
+        # still resolves to "dnaa-replication" via the shared "dnaa" token,
+        # instead of falling through to the order-dependent "first running"
+        # heuristic where a stale-running peer investigation hijacks the picker).
+        if cur_branch:
+            matched = _match_investigation_to_branch(
+                cur_branch, [iv.get("name") for iv in invs if iv.get("name")])
+            if matched is not None:
+                for i, iv in enumerate(invs):
+                    if iv.get("name") == matched:
+                        chosen_idx = i
+                        break
         if chosen_idx is None:
             for i, iv in enumerate(invs):
                 if iv.get("effective_status") == "running":

@@ -243,6 +243,32 @@ def test_current_falls_back_to_first_when_branch_does_not_match(tmp_path):
     assert [s["slug"] for s in out["local_siblings"]] == ["beta"]
 
 
+def test_current_branch_token_overlap_beats_stale_running(tmp_path):
+    """A non-conventional branch resolves via TOKEN-OVERLAP to the investigation
+    that shares a token, beating a stale-running peer that sorts first.
+
+    Regression: branch ``feat/aim2-dnaa-oric`` used to fall through to the
+    "first running" heuristic and land on ``chromosome-cycle-calibration``
+    (alphabetically first, stale-running) instead of ``dnaa-replication``."""
+    ws = tmp_path / "ws"; ws.mkdir()
+    _write_iset(ws, "chromosome-cycle-calibration", status="running")
+    _write_iset(ws, "dnaa-replication", status="active")
+
+    out = _build_investigation_registry_for_test(
+        ws,
+        this_url="http://127.0.0.1:1",
+        list_servers_fn=lambda: [],
+        fetch_peer_fn=lambda u: None,
+        list_worktrees_fn=lambda: [],
+        scan_worktree_fn=lambda _p: [],
+        current_branch_fn=lambda: "feat/aim2-dnaa-oric",
+    )
+    # shared token "dnaa" (1/2) beats chromosome-cycle-calibration (0/3) AND
+    # the stale-running status. Without the token matcher this returned the
+    # running peer.
+    assert out["current"]["slug"] == "dnaa-replication"
+
+
 # ---------------------------------------------------------------------------
 # local_siblings: other investigations in this same workspace
 # ---------------------------------------------------------------------------
