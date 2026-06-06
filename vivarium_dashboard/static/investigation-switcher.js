@@ -127,7 +127,15 @@
     const list = menu.querySelector('.viv-iset-menu-list');
     list.innerHTML = '';
     const cur = (data && data.current) || {};
-    const repos = (data && data.workspaces) || [];
+    // Filter the catalog to a usable list: drop missing/placeholder entries,
+    // de-dupe by path, and order current -> running -> the rest.
+    const RANK = { current: 0, running: 1, stale: 2, stopped: 3 };
+    const seen = new Set();
+    const repos = ((data && data.workspaces) || [])
+      .filter((w) => w && w.status !== 'missing' && (w.name || '') !== 'placeholder')
+      .filter((w) => { const k = w.path || w.name; if (seen.has(k)) return false; seen.add(k); return true; })
+      .sort((a, b) => (RANK[a.status] ?? 4) - (RANK[b.status] ?? 4)
+                       || String(a.name).localeCompare(String(b.name)));
     if (!repos.length) {
       const li = document.createElement('li');
       li.className = 'viv-iset-menu-empty';
