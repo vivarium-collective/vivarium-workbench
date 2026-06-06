@@ -7732,9 +7732,11 @@ if __name__ == "__main__":
 
         studies_out = []
         for slug in (spec.get("studies") or []):
-            study_dir = workspace_paths().studies / slug
-            sp = study_dir / "study.yaml"
-            if not sp.is_file():
+            # Nested-aware (Phase 1 study_dir): investigations/<inv>/studies/<slug>/
+            # with flat back-compat; legacy v2 spec.yaml as last resort.
+            try:
+                sp = workspace_paths().study_dir(slug) / "study.yaml"
+            except FileNotFoundError:
                 sp = workspace_paths().investigations / slug / "spec.yaml"
             if not sp.is_file():
                 studies_out.append({"name": slug, "status": "missing", "error": "study.yaml not found"})
