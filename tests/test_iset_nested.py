@@ -46,3 +46,15 @@ def test_lifecycle_badge_main_vs_branch(tmp_path):
     out = {i["name"]: i for i in _build_iset_summary_for_test(ws)}
     assert out["inv-a"]["lifecycle"] == "merged"
     assert out["inv-b"]["lifecycle"] == "wip"
+
+
+def test_report_dir_and_helper(tmp_path):
+    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+    from vivarium_dashboard.server import _iset_report_file
+    ws = _nested_ws(tmp_path)
+    wp = WorkspacePaths.load(ws)
+    assert wp.report_dir("inv-a") == ws / "investigations" / "inv-a" / "reports"
+    assert _iset_report_file(ws, "inv-a") is None              # no report yet
+    rep = ws / "investigations" / "inv-a" / "reports"; rep.mkdir(parents=True)
+    (rep / "index.html").write_text("<h1>report</h1>", encoding="utf-8")
+    assert _iset_report_file(ws, "inv-a") == rep / "index.html"

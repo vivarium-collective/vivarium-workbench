@@ -1210,6 +1210,12 @@ def compute_study_effective_status(
     return s or "planned"
 
 
+def _iset_report_file(ws_root: Path, slug: str):
+    """Per-investigation report index.html (investigations/<slug>/reports/), or None."""
+    f = WorkspacePaths.load(ws_root).report_dir(slug) / "index.html"
+    return f if f.is_file() else None
+
+
 def _read_study_status(ws_root: Path, slug: str) -> tuple[str, bool]:
     """Read (status, has_runs) for a member study referenced by an iset.
 
@@ -4650,6 +4656,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_study_bigraph_paths()
         if self.path.startswith("/api/iset-list"):
             return self._get_iset_list()
+        if self.path.startswith("/api/iset/") and self.path.split("?", 1)[0].rstrip("/").endswith("/report"):
+            return self._get_iset_report()
         if self.path.startswith("/api/iset/"):
             return self._get_iset_detail()
         if self.path.startswith("/api/investigation-run-unblocked-status"):
@@ -7679,6 +7687,16 @@ if __name__ == "__main__":
             "static_count": len(static_charts),
             "live_count": len(live_charts),
         }, 200)
+
+    def _get_iset_report(self):
+        """GET /api/iset/<slug>/report — serve the per-investigation report."""
+        import urllib.parse as _up
+        _path = _up.urlparse(self.path).path
+        _slug = _path[len("/api/iset/"):].rsplit("/report", 1)[0].strip("/")
+        _f = _iset_report_file(WORKSPACE, _slug)
+        if _f is None:
+            return self._json({"error": f"no report for investigation {_slug!r}"}, 404)
+        return self._serve_file(_f, "text/html")
 
     def _get_iset_detail(self):
         """GET /api/iset/<name> — return one investigation + its resolved studies.

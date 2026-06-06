@@ -161,6 +161,10 @@ class WorkspacePaths:
                     seen.add(s.name)
                     yield s
 
+    def report_dir(self, inv_slug: str) -> Path:
+        """Per-investigation report/publication dir: investigations/<slug>/reports/."""
+        return self.dir("investigations") / inv_slug / "reports"
+
     def study_dir(self, slug: str) -> Path:
         """Resolve a study by slug, nested-first then flat. Raises if absent."""
         for s in self.iter_study_dirs():
