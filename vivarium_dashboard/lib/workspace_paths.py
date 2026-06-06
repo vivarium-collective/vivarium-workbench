@@ -138,3 +138,41 @@ class WorkspacePaths:
     def docs(self) -> Path: return self.dir("docs")
     @property
     def package(self) -> Path: return self.dir("package")
+
+    # Study resolution (investigation-centric structure) --------------------
+    def iter_study_dirs(self):
+        """Yield every study dir - nested investigations/<inv>/studies/<s>/ first,
+        then legacy flat studies/<s>/. A dir is a study iff it holds study.yaml.
+        Nested wins on slug collision."""
+        seen: set[str] = set()
+        inv_root = self.dir("investigations")
+        if inv_root.is_dir():
+            for inv in sorted(p for p in inv_root.iterdir() if p.is_dir()):
+                sroot = inv / "studies"
+                if sroot.is_dir():
+                    for s in sorted(p for p in sroot.iterdir() if p.is_dir()):
+                        if (s / "study.yaml").is_file() and s.name not in seen:
+                            seen.add(s.name)
+                            yield s
+        flat = self.dir("studies")
+        if flat.is_dir():
+            for s in sorted(p for p in flat.iterdir() if p.is_dir()):
+                if (s / "study.yaml").is_file() and s.name not in seen:
+                    seen.add(s.name)
+                    yield s
+
+    def study_dir(self, slug: str) -> Path:
+        """Resolve a study by slug, nested-first then flat. Raises if absent."""
+        for s in self.iter_study_dirs():
+            if s.name == slug:
+                return s
+        raise FileNotFoundError(f"study {slug!r} not found under {self.root}")
+
+    def study_owner(self, slug: str):
+        """Owning investigation slug for a study (nested layout), else the
+        study.yaml investigation: back-ref, else None."""
+        try:
+            d = self.study_dir(slug)
+        except FileNotFoundError:
+            return None
+
