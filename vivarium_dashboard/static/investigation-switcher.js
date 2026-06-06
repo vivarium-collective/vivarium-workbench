@@ -48,7 +48,7 @@
     menu.className = 'viv-iset-menu';
     menu.setAttribute('role', 'menu');
     menu.innerHTML = `
-      <div class="viv-iset-menu-header">Investigations</div>
+      <div class="viv-iset-menu-header">Repositories</div>
       <ul class="viv-iset-menu-list">
         <li class="viv-iset-menu-loading">Loading…</li>
       </ul>
@@ -108,26 +108,59 @@
   });
 
   async function refresh() {
+    // The top-left dropdown switches REPOS (workspaces). Investigation
+    // switching now lives in the Investigations list view. Studies-sidebar
+    // sync still rides the on-load /api/investigation-registry call below.
     const list = menu.querySelector('.viv-iset-menu-list');
     list.innerHTML = '<li class="viv-iset-menu-loading">Loading…</li>';
     try {
-      const resp = await fetch('/api/investigation-registry', {
-        headers: { Accept: 'application/json' },
-      });
+      const resp = await fetch('/api/workspaces', { headers: { Accept: 'application/json' } });
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      const data = await resp.json();
-      render({
-        current:        data.current        || null,
-        localSiblings:  data.local_siblings || [],
-        runningOthers:  data.running_others || [],
-        dormantOthers:  data.dormant_others || [],
-      });
-      updateTriggerLabel(data.current || null);
-      publishCurrentSlug(data.current || null);
+      renderRepos(await resp.json());
     } catch (err) {
-      list.innerHTML = '<li class="viv-iset-menu-error">Failed to load: '
+      list.innerHTML = '<li class="viv-iset-menu-error">Failed to load repos: '
         + escapeHtml(String(err)) + '</li>';
     }
+  }
+
+  function renderRepos(data) {
+    const list = menu.querySelector('.viv-iset-menu-list');
+    list.innerHTML = '';
+    const cur = (data && data.current) || {};
+    const repos = (data && data.workspaces) || [];
+    if (!repos.length) {
+      const li = document.createElement('li');
+      li.className = 'viv-iset-menu-empty';
+      li.textContent = 'No repos registered. Open one with /pbg-dashboard.';
+      list.appendChild(li);
+      return;
+    }
+    repos.forEach((w) => {
+      const isCurrent = w.status === 'current' || (cur.path && w.path === cur.path);
+      const status = isCurrent ? 'current' : (w.status || 'stopped');
+      const li = document.createElement('li');
+      li.className = 'viv-iset-menu-row' + (isCurrent ? ' viv-iset-menu-row-current' : '');
+      li.setAttribute('role', 'menuitem');
+      li.tabIndex = 0;
+      li.innerHTML =
+        '<div class="viv-iset-menu-row-line1">'
+        + '<strong class="viv-iset-menu-row-title">' + escapeHtml(w.name || '') + '</strong>'
+        + '<span class="status-pill ' + escapeHtml(status.replace(/[^a-z_]/g, '_'))
+        + ' viv-iset-menu-row-pill">' + escapeHtml(status) + '</span></div>'
+        + '<div class="viv-iset-menu-row-slug">' + escapeHtml(w.path || '') + '</div>';
+      if (!isCurrent) {
+        li.addEventListener('click', (e) => {
+          e.stopPropagation();
+          close();
+          if (w.url) {
+            window.location.assign(w.url);
+          } else {
+            window.alert('No running dashboard for "' + (w.name || '') + '".\nStart it from that repo:  /pbg-dashboard open');
+          }
+        });
+      }
+      list.appendChild(li);
+    });
   }
 
   // Sync the workspace-switcher trigger button's label with the current
@@ -142,9 +175,7 @@
     const raw = (strong.textContent || '').trim();
     const workspaceName = raw.split(':')[0];
     if (!workspaceName) return;
-    strong.textContent = current && current.slug
-      ? workspaceName + ':' + current.slug
-      : workspaceName;
+    strong.textContent = workspaceName;  // repo-only label (top-left switches repos)
   }
 
   // Surface the current iset slug as a window-level signal so the rail's

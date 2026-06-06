@@ -3982,6 +3982,14 @@
 
   function _openInvestigationDetail(name) {
     window._currentIset = name;
+    // Sync the left-rail STUDIES section to the selected investigation
+    // (the top-left now switches repos, so selection drives the sidebar).
+    if (window._currentIsetSlug !== name) {
+      window._currentIsetSlug = name;
+      if (typeof window._renderRailInvestigationGroups === 'function') {
+        try { window._renderRailInvestigationGroups(); } catch (_) { /* ignore */ }
+      }
+    }
     document.getElementById('investigations-list').style.display = 'none';
     document.getElementById('investigation-detail-view').style.display = '';
     document.getElementById('investigation-detail-title').textContent = name;
