@@ -226,14 +226,11 @@
   // label stays stuck on the baked-in static value and the rail keeps
   // showing every investigation's studies until the user opens the
   // dropdown.
-  fetch('/api/investigation-registry', { headers: { Accept: 'application/json' } })
-    .then((r) => (r.ok ? r.json() : null))
-    .then((data) => {
-      if (!data) return;
-      updateTriggerLabel(data.current || null);
-      publishCurrentSlug(data.current || null);
-    })
-    .catch(() => { /* leave the baked state in place */ });
+  // Top-left is a REPO switcher now: strip any baked ":investigation" suffix
+  // from the trigger label and do NOT pre-select an investigation. The current
+  // investigation (and the STUDIES sidebar scope) is driven by the user picking
+  // a card in the Investigations list view (list-first UX).
+  updateTriggerLabel(null);
 
   function render({ current, localSiblings, runningOthers, dormantOthers }) {
     const list = menu.querySelector('.viv-iset-menu-list');

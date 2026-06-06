@@ -3538,43 +3538,19 @@
         window._isetIndex = j.investigations || [];
         _renderInvestigationSets();
         _renderRailInvestigationGroups();
-        // New behavior: skip the list-of-cards UI. Auto-open the active
-        // investigation directly. Pick from (in order): the currently-open
-        // iset (refresh case), the iset matching the current branch when
-        // the branch follows `investigation/<name>`, or just the first iset.
         if (!window._isetIndex.length) return;
-        var active = window._currentIset;
-        if (!active) {
-          // Prefer the slug published by investigation-switcher.js from
-          // /api/investigation-registry — it already does the git-branch
-          // match + running-iset + alphabetical-fallback chain, and
-          // staying consistent with it keeps trigger label + STUDIES
-          // rail + Investigation-tab detail all pointing at the same
-          // iset.
-          var pubSlug = window._currentIsetSlug || '';
-          if (pubSlug) {
-            for (var pi = 0; pi < window._isetIndex.length; pi++) {
-              if (window._isetIndex[pi].name === pubSlug) { active = pubSlug; break; }
-            }
-          }
-        }
-        if (!active) {
-          // Legacy fallback: investigation/<name> branch prefix.
-          var branch = (window._gitStatus && window._gitStatus.active_branch) || '';
-          var m = /^investigation\/(.+)$/.exec(branch);
-          if (m) {
-            for (var i = 0; i < window._isetIndex.length; i++) {
-              if (window._isetIndex[i].name === m[1]) { active = m[1]; break; }
-            }
-          }
-        }
-        if (!active) active = window._isetIndex[0].name;
-        // Toggle the "switch investigation" button visibility based on count.
+        // LIST-FIRST UX: show the cards and let the user pick. Auto-open only
+        // when (a) a detail is already open (refresh/deep-link), or (b) there
+        // is exactly one investigation (a one-item list is pointless).
         var switchBtn = document.getElementById('investigation-switch-btn');
-        if (switchBtn) {
-          switchBtn.style.display = window._isetIndex.length > 1 ? '' : 'none';
+        if (switchBtn) switchBtn.style.display = window._isetIndex.length > 1 ? '' : 'none';
+        if (window._currentIset) {
+          _openInvestigationDetail(window._currentIset);
+        } else if (window._isetIndex.length === 1) {
+          _openInvestigationDetail(window._isetIndex[0].name);
+        } else {
+          _showInvestigationList();
         }
-        _openInvestigationDetail(active);
       })
       .catch(function(err) {
         if (list) list.innerHTML = '<p class="empty-state" style="color:#b91c1c">' +
