@@ -1081,10 +1081,26 @@
         <th style="text-align:left; padding:6px 8px; width:90px;">Emitter</th>
         <th style="text-align:left; padding:6px 8px; width:140px;">Time</th>
         <th style="text-align:left; padding:6px 8px; width:90px;">Status</th>
+        <th style="text-align:center; padding:6px 8px; width:120px;">Actions</th>
       </tr>
     </thead>
     <tbody id="sim-tbody"></tbody>
   </table>
+
+  <!-- Confirmation dialog for full simulation delete -->
+  <div id="sim-delete-dialog" style="display:none; position:fixed; inset:0;
+       background:rgba(0,0,0,0.4); align-items:center; justify-content:center; z-index:1000;">
+    <div style="background:#fff; border-radius:8px; padding:20px; max-width:520px;
+         width:90%; box-shadow:0 10px 40px rgba(0,0,0,0.2);">
+      <h3 style="margin:0 0 12px;">Delete simulation?</h3>
+      <div id="sim-delete-body" style="font-size:13px; color:#374151;"></div>
+      <div style="margin-top:16px; display:flex; gap:8px; justify-content:flex-end;">
+        <button id="sim-delete-cancel" class="action-btn">Cancel</button>
+        <button id="sim-delete-confirm" class="action-btn"
+                style="background:#dc2626; color:#fff;">Delete</button>
+      </div>
+    </div>
+  </div>
 </section>
 
 <!-- Modal: create investigation -->

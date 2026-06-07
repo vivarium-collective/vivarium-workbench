@@ -1,10 +1,10 @@
 """Drift guard: vendored vivarium_dashboard/lib/runs_index.py must stay
-identical to the canonical pbg_superpowers/runs_index.py for the functions
-the dashboard relies on.
+identical to the canonical pbg_superpowers/runs_index.py for the emitter-type
+classification helpers the dashboard's Simulations DB endpoint relies on.
 
-``emitter_type_of`` + ``_all_runs`` are compared byte-for-byte. ``list_all_runs``
-is EXCLUDED: the dashboard's ``lib/`` has no ``backfill_runs`` module, so the
-vendored copy wraps that import in try/except (see runs_index.py header).
+``emitter_type_of`` + ``_store_emitter_type`` are compared byte-for-byte.
+(The workspace-wide run listing lives in
+``vivarium_dashboard.lib.simulations_index.list_simulations``, not here.)
 
 Uses the file-read approach (pbg_superpowers is not installed in the dashboard
 venv), extracting each function's source by scanning for `def <name>` blocks.
@@ -15,8 +15,7 @@ from pathlib import Path
 CANONICAL = Path(__file__).parent.parent.parent / "pbg-superpowers" / "pbg_superpowers" / "runs_index.py"
 VENDORED = Path(__file__).parent.parent / "vivarium_dashboard" / "lib" / "runs_index.py"
 
-# list_all_runs intentionally excluded — see module docstring.
-FUNCS = ["emitter_type_of", "_store_emitter_type", "_all_runs"]
+FUNCS = ["emitter_type_of", "_store_emitter_type"]
 
 
 def _extract_functions(source: str) -> dict[str, str]:

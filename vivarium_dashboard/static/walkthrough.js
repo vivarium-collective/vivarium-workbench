@@ -10850,32 +10850,74 @@
     return new Date(sec * 1000).toLocaleString();
   }
 
-  // Module-scope cache. _simRows = all runs from the API; _simCurrent = the
-  // current investigation slug (default filter target, may be null).
+  // Module-scope cache. _simRows = all runs from the API (the {simulations}
+  // shape from simulations_index.list_simulations); _simCurrent = the current
+  // investigation slug (default filter target, may be null).
   window._simRows = [];
   window._simCurrent = null;
 
+  // Investigation/study come from the index's *_slug fields; the study slug
+  // falls back to the first cross-referenced study name.
+  function _simInvestigation(row) { return row.investigation_slug || ''; }
+  function _simStudy(row) {
+    return row.study_slug || (row.studies && row.studies.length ? row.studies[0] : '');
+  }
+
+  /** Open the Composite Explorer for a specific past simulation.
+   *
+   *  Mirrors _openCompositeExplorer but also seeds ?run_id=, so
+   *  _initCompositeExplorer picks it up and renders the run's results +
+   *  viz_html in the Run tab. Only meaningful for runs with a spec_id
+   *  (Composite Explorer scratch runs / runs_meta rows).
+   */
+  function _openSimulationInExplorer(run_id, spec_id) {
+    var url = new URL(window.location.href);
+    url.searchParams.set('id', spec_id);
+    url.searchParams.set('run_id', run_id);
+    url.hash = '#composite-explore';
+    window.history.pushState({}, '', url.toString());
+    _switchPage('composite-explore');
+  }
+  window._openSimulationInExplorer = _openSimulationInExplorer;
+
   function _renderSimRow(row) {
-    var inv = row.investigation || '';
+    var inv = _simInvestigation(row);
     var invCell = inv
       ? '<code style="font-size:12px; color:#374151;">' + _escSim(inv) + '</code>'
       : '<span style="color:#9ca3af;">—</span>';
-    var study = row.study || '';
+    var study = _simStudy(row);
     var studyCell = study
       ? '<code style="font-size:12px; color:#374151;">' + _escSim(study) + '</code>'
       : '<span style="color:#9ca3af;">—</span>';
     var runId = row.run_id || '';
-    var runTitle = row.emitter_path ? ' title="' + _escSim(row.emitter_path) + '"' : '';
+    var runLabel = row.sim_name || row.label || runId;
+    var runTitle = ' title="' + _escSim(runId + (row.db_path ? '\n' + row.db_path : '')) + '"';
     var timeSec = row.completed_at || row.started_at;
+    // Actions: open-in-explorer (only when there's a spec_id to seed the
+    // explorer with) + delete. The {simulations} shape carries spec_id +
+    // db_path so both are reconstructable.
+    var specId = row.spec_id || '';
+    var explorerBtn = specId
+      ? '<a href="?id=' + encodeURIComponent(specId) +
+          '&run_id=' + encodeURIComponent(runId) + '#composite-explore" ' +
+          'class="action-btn" title="Open in Composite Explorer" ' +
+          'style="text-decoration:none;" ' +
+          'onclick="event.preventDefault(); _openSimulationInExplorer(\'' +
+            _escSim(runId) + '\', \'' + _escSim(specId) + '\');">Open</a>'
+      : '';
+    var deleteBtn = '<button class="action-btn" title="Delete simulation" ' +
+      'onclick="_deleteSimulationRun(\'' + _escSim(runId) + '\')">🗑</button>';
     return (
       '<tr data-run-id="' + _escSim(runId) + '" style="border-bottom:1px solid #f3f4f6;">' +
       '<td style="padding:6px 8px;">' + invCell + '</td>' +
       '<td style="padding:6px 8px;">' + studyCell + '</td>' +
       '<td style="padding:6px 8px;"><code style="font-size:11px; color:#6b7280;"' +
-        runTitle + '>' + _escSim(runId) + '</code></td>' +
+        runTitle + '>' + _escSim(runLabel) + '</code></td>' +
       '<td style="padding:6px 8px;">' + _simEmitterPill(row.emitter_type) + '</td>' +
       '<td style="padding:6px 8px; color:#6b7280;">' + _escSim(_simFmtTime(timeSec)) + '</td>' +
       '<td style="padding:6px 8px;">' + _simStatusChip(row.status) + '</td>' +
+      '<td style="padding:6px 8px; text-align:center; white-space:nowrap;">' +
+        explorerBtn + (explorerBtn && deleteBtn ? ' ' : '') + deleteBtn + '</td>' +
       '</tr>'
     );
   }
@@ -10893,8 +10935,8 @@
     var emitterVal = emitterSel ? emitterSel.value : '';
 
     var visible = rows.filter(function (r) {
-      if (!showAll && window._simCurrent && r.investigation !== window._simCurrent) return false;
-      if (studyVal && r.study !== studyVal) return false;
+      if (!showAll && window._simCurrent && _simInvestigation(r) !== window._simCurrent) return false;
+      if (studyVal && _simStudy(r) !== studyVal) return false;
       if (emitterVal && (r.emitter_type || 'SQLite') !== emitterVal) return false;
       return true;
     });
@@ -10912,7 +10954,8 @@
     var rows = window._simRows || [];
     var studies = {}, emitters = {};
     rows.forEach(function (r) {
-      if (r.study) studies[r.study] = true;
+      var st = _simStudy(r);
+      if (st) studies[st] = true;
       emitters[r.emitter_type || 'SQLite'] = true;
     });
     function fill(sel, values) {
@@ -10947,7 +10990,7 @@
             'onclick="_initSimulations()">Retry</button></span>';
           return;
         }
-        window._simRows = data.runs || [];
+        window._simRows = data.simulations || [];
         window._simCurrent = data.current || null;
         if (loading) loading.style.display = 'none';
         _populateSimFilters();
@@ -10977,8 +11020,81 @@
       r.addEventListener('click', _initSimulations);
       r.dataset.wired = '1';
     }
+    var cancel = document.getElementById('sim-delete-cancel');
+    if (cancel && !cancel.dataset.wired) {
+      cancel.addEventListener('click', function () {
+        var dlg = document.getElementById('sim-delete-dialog');
+        if (dlg) dlg.style.display = 'none';
+      });
+      cancel.dataset.wired = '1';
+    }
   }
   window._wireSimulationsUiOnce = _wireSimulationsUiOnce;
+
+  // Confirm + perform a full delete of one simulation (DB rows + history +
+  // run dir + study.yaml refs) via DELETE /api/simulation-run. Reads the row
+  // from the {simulations} cache for spec_id/db_path/studies to populate the
+  // confirmation dialog.
+  function _deleteSimulationRun(run_id) {
+    _wireSimulationsUiOnce();
+    var rows = window._simRows || [];
+    var sim = null;
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].run_id === run_id) { sim = rows[i]; break; }
+    }
+    if (!sim) return;
+
+    var studies = sim.studies || [];
+    var studiesTxt = studies.length ? studies.map(_escSim).join(', ') : '<em>none</em>';
+    var stillRunning = (sim.status === 'running')
+      ? '<p style="color:#b45309; margin:8px 0 0;"><strong>⚠ This run is still running.</strong> ' +
+        'Deleting now will orphan the detached process (it will fail-write later, harmlessly).</p>'
+      : '';
+    var composite = sim.spec_id
+      ? '<p style="margin:0 0 8px;">Composite: <code>' + _escSim(sim.spec_id) + '</code></p>'
+      : '';
+    var body = document.getElementById('sim-delete-body');
+    if (body) body.innerHTML =
+      '<p style="margin:0 0 8px;"><code>' + _escSim(run_id) + '</code></p>' +
+      composite +
+      '<p style="margin:0 0 4px;">This will permanently remove:</p>' +
+      '<ul style="margin:0 0 4px 24px;">' +
+        '<li>1 row in <code>' + _escSim(sim.db_path || '?') + '</code></li>' +
+        '<li>All history rows (trajectory data) for this run</li>' +
+        '<li>The run directory <code>.pbg/runs/' + _escSim(run_id) + '/</code> (if any)</li>' +
+        '<li>References from study.yaml(s): ' + studiesTxt + '</li>' +
+      '</ul>' + stillRunning;
+    var dlg = document.getElementById('sim-delete-dialog');
+    if (dlg) dlg.style.display = 'flex';
+    var confirm = document.getElementById('sim-delete-confirm');
+    // Replace the confirm handler each time to bind the current run_id.
+    confirm.onclick = function () {
+      confirm.disabled = true;
+      fetch('/api/simulation-run', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_id: run_id }),
+      }).then(function (r) { return r.json().then(function (d) {
+        return { ok: r.ok, status: r.status, body: d };
+      }); }).then(function (res) {
+        confirm.disabled = false;
+        if (dlg) dlg.style.display = 'none';
+        if (!res.ok) {
+          alert('Delete failed: ' + (res.body.error || 'HTTP ' + res.status));
+          return;
+        }
+        if (res.body.errors && res.body.errors.length) {
+          alert('Deleted, but with warnings:\n' + res.body.errors.join('\n'));
+        }
+        _initSimulations();
+      }).catch(function (err) {
+        confirm.disabled = false;
+        if (dlg) dlg.style.display = 'none';
+        alert('Network error: ' + err);
+      });
+    };
+  }
+  window._deleteSimulationRun = _deleteSimulationRun;
 
   // ===========================================================================
   // Composite Explorer — load a prior run into the Run tab
