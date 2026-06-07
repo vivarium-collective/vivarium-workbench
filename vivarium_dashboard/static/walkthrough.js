@@ -7479,7 +7479,7 @@
       +   (function() {
             var ex = iset.executive || {};
             var dn = ex.decisions_needed || [];
-            if (!ex.what_is_this && !ex.verdict && !dn.length) return '';
+            if (!ex.what_is_this && !ex.verdict && !dn.length && !iset.question && !iset.hypothesis) return '';
             var vs = ex.verdict_status || 'in-progress';
             var h = '<section id="executive"><h2 style="margin-top:12px">Executive summary</h2>';
             if (ex.what_is_this)
@@ -7488,6 +7488,10 @@
               h += '<div class="callout" style="background:#f8fafc;border-left:5px solid #64748b;border-radius:8px;padding:12px 16px;margin:10px 0">'
                  + '<span class="badge badge-' + _h(vs) + '">' + _h(vs) + '</span> '
                  + '<strong>Current verdict.</strong> ' + _multiline(ex.verdict) + '</div>';
+            if (iset.question)
+              h += '<p><strong>Question.</strong> ' + _multiline(iset.question) + '</p>';
+            if (iset.hypothesis)
+              h += '<p><strong>Hypothesis.</strong> ' + _multiline(iset.hypothesis) + '</p>';
             if (dn.length) {
               h += '<details class="report-fold"><summary>Decisions needed from reviewers</summary><ol>'
                  + dn.map(function(d) {
@@ -7554,17 +7558,13 @@
           })()
 
       +   ((iset.biological_story || '').trim()
-          ? '<details class="investigation-biology-story report-fold">'
-            + '<summary style="font-size:0.85em;text-transform:uppercase;letter-spacing:0.05em;color:#075985;font-weight:600;cursor:pointer">Biology — the mechanism this investigation models</summary>'
-            + '<p class="biology-prose">' + _multiline(iset.biological_story) + '</p>'
+          ? '<details class="report-fold">'
+            + '<summary>Biology — the mechanism this investigation models</summary>'
+            + '<p style="margin:0">' + _multiline(iset.biological_story) + '</p>'
             + '</details>'
           : '')
 
-      +   '<details id="overview" class="report-fold"><summary>Overview</summary>'
-      +   (iset.question   ? '<p><strong>Question.</strong> '   + _multiline(iset.question)   + '</p>' : '')
-      +   (iset.hypothesis ? '<p><strong>Hypothesis.</strong> ' + _multiline(iset.hypothesis) + '</p>' : '')
-      +   (iset.description ? '<div class="description"><p>' + _multiline(iset.description) + '</p></div>' : '')
-      +   '</details>'
+      +   ''
 
       /* Removed: top-of-report "Acceptance criteria" section.
          Per-study behavior_tests + conclusion_verdicts (the v4 way
