@@ -5854,6 +5854,19 @@
         links.push('<a href="#study-' + slug + '-embeds">Visualizations <span class="sn-count">' + nEmbedsForStudy + '</span></a>');
       links.push('<a href="#' + sid.summary + '">Summary</a>');
       if (findings.length)    links.push('<a href="#' + sid.findings + '">Findings <span class="sn-count">' + findings.length + '</span></a>');
+      var _hasDiscovery = !!(
+        (discImpl.alternate_hypotheses || []).length
+        || (discImpl.mechanism_update_proposals || []).length
+        || followupProposals.length
+        || (discImpl.resolved_uncertainties || []).length
+        || (discImpl.remaining_uncertainties || []).length);
+      if (_hasDiscovery) {
+        var _nDisc = (discImpl.alternate_hypotheses || []).length
+                   + (discImpl.mechanism_update_proposals || []).length
+                   + followupProposals.length;
+        links.push('<a href="#' + sid.discovery + '">Discovery implications'
+                   + (_nDisc ? ' <span class="sn-count">' + _nDisc + '</span>' : '') + '</a>');
+      }
       // Conditions sub-nav link: rendered when v4 ``conditions:`` exists.
       var _cond = (s.conditions && typeof s.conditions === 'object') ? s.conditions : null;
       var _nVar = (_cond && _cond.variants || []).length;
@@ -5870,22 +5883,9 @@
       if (hasBuild)           links.push('<a href="#' + sid.build + '">Model changes</a>');
       if (reqs.length)        links.push('<a href="#' + sid.reqs + '">What to build / fix <span class="sn-count">' + reqs.length + '</span></a>');
       if (followUps.length)   links.push('<a href="#' + sid.followups + '">Next steps <span class="sn-count">' + followUps.length + '</span></a>');
-      var _hasDiscovery = !!(
-        (discImpl.alternate_hypotheses || []).length
-        || (discImpl.mechanism_update_proposals || []).length
-        || followupProposals.length
-        || (discImpl.resolved_uncertainties || []).length
-        || (discImpl.remaining_uncertainties || []).length);
       if (limitations.length) links.push('<a href="#' + sid.limits + '">Limitations <span class="sn-count">' + limitations.length + '</span></a>');
       if (bib.length)         links.push('<a href="#' + sid.refs + '">Cited refs <span class="sn-count">' + bib.length + '</span></a>');
       links.push('<a href="#' + sid.decision + '">Decision</a>');
-      if (_hasDiscovery) {
-        var _nDisc = (discImpl.alternate_hypotheses || []).length
-                   + (discImpl.mechanism_update_proposals || []).length
-                   + followupProposals.length;
-        links.push('<a href="#' + sid.discovery + '">Discovery implications'
-                   + (_nDisc ? ' <span class="sn-count">' + _nDisc + '</span>' : '') + '</a>');
-      }
 
       var dependsBrief = parents ? 'Depends on: ' + parents : '<em>Root study (no dependencies)</em>';
 
@@ -6898,6 +6898,7 @@
         +   summaryHtml         // 1. Plain-English summary
         +   expertReviewHtml    // 2b. Pre-run expert review
         +   takeawaysHtml       // 3 + 4. Detailed findings
+        +   discoveryHtml       // Discovery implications (directly under the findings)
         +   conditionsHtml      // Conditions (what we set up) — grouped with the runs
         +   simsHtml            // What did/will we run
         +   readoutsHtml        // What did/will we measure (above visualisations)
@@ -6909,7 +6910,6 @@
         +   limitsHtml          // 11. Limitations
         +   refsHtml            // 12. References
         +   decisionHtml        // Decision: can we move to the next study?
-        +   discoveryHtml       // 10b. Discovery implications (after the Decision)
         + '</section>'
         + '</details>';
     }
