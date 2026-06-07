@@ -552,39 +552,133 @@
     return '<p class="muted" style="font-style:italic;margin:4px 0">none</p>';
   }
 
-  // Render a datasets list (name + path) as a compact table, or a "none" line.
+  // A download link to a workspace-relative path. The server GET-serves any
+  // file under the workspace by its workspace-relative path (do_GET ->
+  // WORKSPACE / rel), so the href is simply '/' + path.
+  function _inputsDownloadLink(path, label) {
+    if (!path) return '';
+    var href = '/' + String(path).replace(/^\/+/, '');
+    return '<a href="' + _esc(href) + '" download class="action-btn" ' +
+      'style="font-size:0.8em;padding:1px 8px;text-decoration:none">⬇ ' +
+      _esc(label || 'Download') + '</a>';
+  }
+
+  // Render a datasets list (name + path + download) as a compact table, or a
+  // "none" line.
   function _inputsDatasetsHtml(datasets) {
     if (!datasets || !datasets.length) return _inputsNone();
     var rows = datasets.map(function (ds) {
       ds = ds || {};
       var name = _esc(ds.name || ds.path || '(unnamed)');
-      var path = ds.path || ds.url || '';
+      var path = ds.path || '';
+      var src = ds.path || ds.url || '';
+      var dl = path ? _inputsDownloadLink(path, 'Download') :
+        (ds.url ? '<a href="' + _esc(ds.url) + '" target="_blank" rel="noopener" ' +
+          'class="action-btn" style="font-size:0.8em;padding:1px 8px;text-decoration:none">↗ Source</a>' : '');
       return '<tr><td><code>' + name + '</code></td><td><small class="muted">' +
-        _esc(path) + '</small></td></tr>';
+        _esc(src) + '</small></td><td style="text-align:right">' + dl + '</td></tr>';
     }).join('');
-    return '<table><thead><tr><th>Name</th><th>Source</th></tr></thead><tbody>' +
+    return '<table><thead><tr><th>Name</th><th>Source</th><th></th></tr></thead><tbody>' +
       rows + '</tbody></table>';
   }
 
-  // Render references as a row of bib-key chips, or a "none" line.
+  // Render references as informative cards: title (linked to the paper online),
+  // a muted author/year/journal line, a collapsible BibTeX block with a copy
+  // button, and an optional PDF download. Used for BOTH investigation + global
+  // references. Unmatched bare keys render as a labeled stub.
   function _inputsRefsHtml(refs) {
     if (!refs || !refs.length) return _inputsNone();
-    return '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
-      refs.map(function (ref) {
-        return '<code style="background:#f1f5f9;padding:2px 8px;border-radius:9999px;' +
-          'font-size:0.82em">' + _esc(_inputsRefLabel(ref)) + '</code>';
-      }).join('') + '</div>';
+    return '<div style="display:flex;flex-direction:column;gap:10px">' +
+      refs.map(_inputsRefCardHtml).join('') + '</div>';
   }
 
-  // Render expert docs (name + optional path), or a "none" line.
+  function _inputsRefCardHtml(ref) {
+    ref = ref || {};
+    if (typeof ref === 'string') ref = { key: ref, title: ref, _unmatched: true };
+    var key = ref.key || ref.bib_key || '';
+
+    if (ref._unmatched) {
+      return '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">' +
+        '<code>' + _esc(key || _inputsRefLabel(ref)) + '</code> ' +
+        '<small class="muted">(no bib entry)</small></div>';
+    }
+
+    var title = ref.title || key || '(untitled)';
+    // Link target: explicit url, else doi.org/<doi>.
+    var link = '';
+    if (ref.url) link = ref.url;
+    else if (ref.doi) link = 'https://doi.org/' + ref.doi;
+
+    var titleHtml = link
+      ? '<a href="' + _esc(link) + '" target="_blank" rel="noopener" ' +
+        'style="font-weight:600">' + _esc(title) + '</a> ' +
+        '<small class="muted">↗</small>'
+      : '<strong>' + _esc(title) + '</strong>';
+
+    var metaParts = [];
+    if (ref.author) metaParts.push(_esc(ref.author));
+    if (ref.year) metaParts.push(_esc(ref.year));
+    if (ref.journal) metaParts.push(_esc(ref.journal));
+    var meta = metaParts.length
+      ? '<div class="muted" style="font-size:0.85em;margin-top:2px">' +
+        metaParts.join(' · ') + '</div>'
+      : '';
+
+    var actions = '';
+    if (ref.pdf_path) actions += ' ' + _inputsDownloadLink(ref.pdf_path, 'PDF');
+
+    var bibtex = ref.bibtex || '';
+    var bibBlock = '';
+    if (bibtex) {
+      var bibId = 'bibtex-' + (key || Math.random().toString(36).slice(2));
+      bibBlock = '<details style="margin-top:6px">' +
+        '<summary style="cursor:pointer;font-size:0.82em;color:#475569">BibTeX</summary>' +
+        '<pre id="' + _esc(bibId) + '" style="background:#f8fafc;border:1px solid #e2e8f0;' +
+        'border-radius:4px;padding:8px;font-size:0.78em;overflow:auto;margin:6px 0">' +
+        _esc(bibtex) + '</pre>' +
+        '<button class="action-btn" style="font-size:0.78em;padding:1px 8px" ' +
+        'onclick="_copyBibtex(\'' + _esc(bibId) + '\', this)">Copy BibTeX</button>' +
+        '</details>';
+    }
+
+    return '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">' +
+      '<div>' + titleHtml + actions + '</div>' + meta + bibBlock + '</div>';
+  }
+
+  // Copy the text content of a <pre> to the clipboard; flash the button label.
+  function _copyBibtex(preId, btn) {
+    var pre = document.getElementById(preId);
+    if (!pre) return;
+    var text = pre.textContent || '';
+    var done = function () {
+      if (!btn) return;
+      var orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(function () { btn.textContent = orig; }, 1200);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () {});
+    } else {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        document.execCommand('copy'); document.body.removeChild(ta); done();
+      } catch (e) { /* ignore */ }
+    }
+  }
+  window._copyBibtex = _copyBibtex;
+
+  // Render expert docs (name + optional path + download), or a "none" line.
   function _inputsExpertDocsHtml(docs) {
     if (!docs || !docs.length) return _inputsNone();
-    return '<ul style="margin:4px 0 0 18px;padding:0">' +
+    return '<ul style="margin:4px 0 0 0;padding:0;list-style:none;' +
+      'display:flex;flex-direction:column;gap:4px">' +
       docs.map(function (doc) {
         doc = doc || {};
         var name = _esc(doc.name || doc.path || '(unnamed)');
         var path = doc.path ? ' <small class="muted">' + _esc(doc.path) + '</small>' : '';
-        return '<li><strong>' + name + '</strong>' + path + '</li>';
+        var dl = doc.path ? ' ' + _inputsDownloadLink(doc.path, 'Download') : '';
+        return '<li><strong>' + name + '</strong>' + path + dl + '</li>';
       }).join('') + '</ul>';
   }
 
