@@ -48,6 +48,23 @@
     }
   });
 
+  // study-nav marker click -> open the (maybe-collapsed) study card + jump to
+  // the section it points at. Without this, an anchor into a collapsed
+  // <details> does nothing (the target is display:none).
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    var a = (t && t.closest) ? t.closest(".study-nav a[href^='#']") : null;
+    if (!a) return;
+    var target = document.getElementById(a.getAttribute("href").slice(1));
+    if (!target) return;
+    var fold = target.closest("details.study-fold");
+    if (fold && !fold.open) fold.open = true;
+    e.preventDefault();
+    setTimeout(function () {
+      target.scrollIntoView({behavior: "smooth", block: "start"});
+    }, 0);
+  });
+
   // Global listener for postMessage events from bigraph-loom iframes.
   window.addEventListener('message', function(ev) {
     if (ev.data && ev.data.type === 'explore:ready') {
@@ -5057,6 +5074,17 @@
       return m ? m[1] : t;
     }
 
+    // Word-boundary preview (collapse whitespace, cut at a space, ellipsis).
+    // Unlike _firstSentence it never breaks mid-abbreviation ("E. coli").
+    function _previewText(text, maxLen) {
+      var t = String(text || '').replace(/\s+/g, ' ').trim();
+      if (t.length <= maxLen) return t;
+      var cut = t.slice(0, maxLen);
+      var sp = cut.lastIndexOf(' ');
+      if (sp > maxLen * 0.6) cut = cut.slice(0, sp);
+      return cut + '\u2026';
+    }
+
     // Verdict vocabulary for the collapsed control panel. An authored
     // `report.verdict` (one of the keys below) wins; otherwise we derive it
     // from the gate decision class so older studies still get a sensible badge.
@@ -7160,6 +7188,12 @@
       + '.investigation-biology-story p.biology-prose{margin:0;font-size:1em;line-height:1.6;color:#0c4a6e;white-space:pre-line;max-width:none}'
       + 'details.report-fold{margin:10px 0;border-left:3px solid #cbd5e1;padding-left:10px}'
       + 'details.report-fold>summary{cursor:pointer;font-weight:600;color:#1e3a8a;margin-bottom:6px}'
+      + '.rf-prev{color:#64748b;font-weight:400;font-size:0.9em}'
+      + '.rf-chip{display:inline-block;background:#eef2ff;color:#3730a3;border-radius:10px;padding:1px 8px;font-size:0.72em;font-weight:600;margin:0 3px;vertical-align:middle}'
+      + '.rf-pill{display:inline-block;border-radius:10px;padding:1px 8px;font-size:0.72em;font-weight:700;margin:0 3px;vertical-align:middle;background:#e2e8f0;color:#334155;text-transform:uppercase;letter-spacing:0.03em}'
+      + '.rf-pill-pass,.rf-pill-passed,.rf-pill-complete{background:#dcfce7;color:#166534}'
+      + '.rf-pill-in-progress,.rf-pill-active,.rf-pill-running{background:#fef9c3;color:#854d0e}'
+      + '.rf-pill-fail,.rf-pill-failed,.rf-pill-invalid{background:#fee2e2;color:#991b1b}'
       + '.biology-glance{margin:0 0 18px 0;padding:14px 18px;background:#f0fdf4;border:1px solid #bbf7d0;border-left:5px solid #16a34a;border-radius:8px}'
       + '.biology-glance .biology-glance-label{font-size:0.85em;text-transform:uppercase;letter-spacing:0.05em;color:#166534;margin:0 0 8px 0;font-weight:600;border:none;padding:0}'
       + '.biology-summary-callout{margin-bottom:14px}'
@@ -7572,7 +7606,7 @@
             var dn = ex.decisions_needed || [];
             if (!ex.what_is_this && !ex.verdict && !iset.question && !iset.hypothesis) return '';
             var vs = ex.verdict_status || 'in-progress';
-            var h = '<details id="executive" class="report-fold" style="margin-top:12px"><summary>Executive summary' + ' <span class="muted small">\u2014 ' + _h(vs) + ((ex.verdict || ex.what_is_this) ? ': ' + _h(_firstSentence(String(ex.verdict || ex.what_is_this)).slice(0,130)) : '') + '</span></summary>';
+            var h = '<details id="executive" class="report-fold" style="margin-top:12px"><summary>📋 Executive summary' + ' <span class="rf-pill rf-pill-' + _h(String(vs).toLowerCase().replace(/[^a-z0-9]+/g,'-')) + '">' + _h(vs) + '</span>' + ((ex.verdict || ex.what_is_this) ? ' <span class="rf-prev">' + _h(_previewText(ex.verdict || ex.what_is_this, 150)) + '</span>' : '') + '</summary>';
             if (ex.what_is_this)
               h += '<p>' + _multiline(ex.what_is_this) + '</p>';
             if (ex.verdict)
@@ -7590,7 +7624,7 @@
       +   (function() {
             var dn = (iset.executive || {}).decisions_needed || [];
             if (!dn.length) return '';
-            return '<details class="report-fold"><summary>Decisions needed from reviewers' + ' <span class="muted small">\u2014 ' + dn.length + ' item' + (dn.length===1?'':'s') + (dn[0] && dn[0].question ? ': \u201c' + _h(_firstSentence(String(dn[0].question)).slice(0,110)) + '\u201d' : '') + '</span></summary><ol>'
+            return '<details class="report-fold"><summary>✋ Decisions needed from reviewers' + ' <span class="rf-chip">' + dn.length + ' item' + (dn.length===1?'':'s') + '</span>' + (dn[0] && dn[0].question ? ' <span class="rf-prev">next: ' + _h(_previewText(dn[0].question, 130)) + '</span>' : '') + '</summary><ol>'
               + dn.map(function(d) {
                   return '<li><strong>' + _h(d.question || '') + '</strong>'
                     + (d.context ? '<div class="muted small">' + _multiline(d.context) + '</div>' : '')
@@ -7607,7 +7641,7 @@
                 kf = sa.key_figures || [], cav = sa.caveats || [];
             if (!sa.main_claim && !ef.length && !ea.length) return '';
             function _li(x) { return '<li>' + _multiline(typeof x === 'string' ? x : (x.text || JSON.stringify(x))) + '</li>'; }
-            var h = '<details id="scientific-argument" class="report-fold"><summary>Scientific argument' + (sa.main_claim ? ' <span class="muted small">\u2014 ' + _h(_firstSentence(String(sa.main_claim)).slice(0,130)) + '</span>' : '') + '</summary>';
+            var h = '<details id="scientific-argument" class="report-fold"><summary>🔬 Scientific argument' + ((ef.length || ea.length) ? ' <span class="rf-chip">' + ef.length + ' for \u00b7 ' + ea.length + ' against</span>' : '') + (sa.main_claim ? ' <span class="rf-prev">' + _h(_previewText(sa.main_claim, 150)) + '</span>' : '') + '</summary>';
             if (sa.main_claim)
               h += '<p><strong>Main claim.</strong> ' + _multiline(sa.main_claim) + '</p>';
             if (ef.length || ea.length) {
@@ -7654,7 +7688,7 @@
 
       +   ((iset.biological_story || '').trim()
           ? '<details class="report-fold">'
-            + '<summary>Biology — the mechanism this investigation models' + ' <span class="muted small">\u2014 ' + _h(_firstSentence(String(iset.biological_story || '')).slice(0,130)) + '</span>' + '</summary>'
+            + '<summary>🧬 Biology — the mechanism this investigation models' + ' <span class="rf-prev">' + _h(_previewText(iset.biological_story || '', 175)) + '</span>' + '</summary>'
             + '<p style="margin:0">' + _multiline(iset.biological_story) + '</p>'
             + '</details>'
           : '')
@@ -7689,7 +7723,9 @@
       +       '}'
       +       'document.addEventListener("click",function(e){'
       +         'var t=e.target;var h=t&&t.closest?t.closest(".sn-collapse-hint,.sp-collapse-hint"):null;'
-      +         'if(h){var d=h.closest("details.study-fold");if(d){d.open=false;d.scrollIntoView({behavior:"smooth",block:"start"});}e.preventDefault();e.stopPropagation();}'
+      +         'if(h){var d=h.closest("details.study-fold");if(d){d.open=false;d.scrollIntoView({behavior:"smooth",block:"start"});}e.preventDefault();e.stopPropagation();return;}'
+      +         'var na=t&&t.closest?t.closest(".study-nav a"):null;'
+      +         'if(na&&na.getAttribute("href")&&na.getAttribute("href").charAt(0)==="#"){var tg=document.getElementById(na.getAttribute("href").slice(1));if(tg){var fd=tg.closest("details.study-fold");if(fd&&!fd.open)fd.open=true;e.preventDefault();setTimeout(function(){tg.scrollIntoView({behavior:"smooth",block:"start"});},0);}}'
       +       '});'
       +       'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",wire);}else{wire();}'
       +     '})();</script>'
