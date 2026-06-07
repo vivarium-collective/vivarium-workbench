@@ -4681,6 +4681,109 @@
     return _h(s).replace(/\n\s*\n/g, '<br><br>').replace(/\n/g, ' ');
   }
 
+  // Small unobtrusive badge reflecting a chart's run→viz freshness. The
+  // freshness field is computed server-side (lib/viz_freshness.chart_freshness)
+  // and carried on each static chart object in the study-charts payload.
+  //   fresh      → ✓ latest run   (green/muted)
+  //   stale      → ⚠ stale        (amber; names the recorded source run when known)
+  //   untracked  → ❓ untracked
+  //   unrendered → ◌ not rendered
+  function _freshnessBadge(c) {
+    var f = c && c.freshness;
+    if (!f) return '';
+    var label, color, bg;
+    if (f === 'fresh')        { label = '✓ latest run'; color = '#065f46'; bg = '#d1fae5'; }
+    else if (f === 'stale')   {
+      var src = (c.meta && (c.meta.source_run_id || c.meta.run_id)) || c.source_run_id;
+      label = '⚠ stale' + (src ? ' (' + _h(src) + ')' : '');
+      color = '#92400e'; bg = '#fef3c7';
+    }
+    else if (f === 'untracked')  { label = '❓ untracked';   color = '#475569'; bg = '#f1f5f9'; }
+    else if (f === 'unrendered') { label = '◌ not rendered'; color = '#475569'; bg = '#f1f5f9'; }
+    else return '';
+    return '<span class="chart-freshness-badge" style="display:inline-block;'
+      + 'margin-left:8px;padding:1px 7px;border-radius:10px;font-size:11px;'
+      + 'font-weight:500;vertical-align:middle;color:' + color + ';background:' + bg + ';">'
+      + label + '</span>';
+  }
+
+  // Build the inner HTML of a study's chart-card list (shared by the initial
+  // report/card render and the live Refresh re-render). Each card carries a
+  // title row with the freshness badge, the media (inline SVG or data-URI
+  // <img>), and any caption/provenance text.
+  function _renderChartCardsHtml(charts) {
+    return (charts || []).map(function(c) {
+      var titleHtml = '';
+      var badge = _freshnessBadge(c);
+      var titleText = c.title || c.key || '';
+      if (badge || titleText) {
+        titleHtml = '<div class="chart-title" style="font-size:13px;font-weight:600;'
+          + 'margin-bottom:4px;display:flex;align-items:center;flex-wrap:wrap;">'
+          + '<span>' + _h(titleText) + '</span>' + badge + '</div>';
+      }
+      var capHtml = '';
+      if (c.caption) capHtml += '<div class="chart-caption">' + _h(c.caption) + '</div>';
+      if (c.simulations) capHtml +=
+          '<div class="chart-simulations"><strong>Simulations behind this chart.</strong> '
+          + _h(c.simulations) + '</div>';
+      if (c.interpretation) capHtml +=
+          '<div class="chart-interpretation"><strong>What it means.</strong> '
+          + _h(c.interpretation) + '</div>';
+      var media = c.img
+        ? '<img class="chart-img" src="' + c.img + '" alt="' + _h(c.key || 'chart') + '" loading="lazy">'
+        : (c.svg || '');
+      return '<div class="chart-card">' + titleHtml + media + capHtml + '</div>';
+    }).join('');
+  }
+
+  // POST /api/study-refresh-viz/<study> then re-fetch + re-render that study's
+  // charts section in place. Resilient: shows a brief inline status/error and
+  // never throws (a failed POST leaves the existing charts untouched).
+  window._refreshStudyViz = function(btn) {
+    var study = btn && btn.getAttribute('data-study');
+    if (!study) return;
+    var statusEl = btn.parentElement
+      ? btn.parentElement.querySelector('.chart-refresh-status') : null;
+    var setStatus = function(txt) { if (statusEl) statusEl.textContent = txt || ''; };
+    btn.disabled = true;
+    setStatus('refreshing…');
+    fetch('/api/study-refresh-viz/' + encodeURIComponent(study), {method: 'POST'})
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(out) {
+        var results = (out && out.results) || [];
+        var errs = results.filter(function(x) { return x && x.status === 'error'; }).length;
+        var ok = results.filter(function(x) { return x && x.status === 'rendered'; }).length;
+        // Re-fetch the freshly-stamped charts and rebuild the section body.
+        return fetch('/api/study-charts/' + encodeURIComponent(study))
+          .then(function(r) { return r.ok ? r.json() : {charts: []}; })
+          .then(function(j) {
+            var container = document.getElementById('study-' + study + '-charts');
+            if (container) {
+              var cards = _renderChartCardsHtml(j.charts || []);
+              // Replace everything after the <h3> heading (preserve the
+              // heading + its Refresh button).
+              var h3 = container.querySelector('h3');
+              if (h3) {
+                while (h3.nextSibling) container.removeChild(h3.nextSibling);
+                h3.insertAdjacentHTML('afterend', cards);
+                // Re-point the status element (it lives inside the preserved h3).
+                statusEl = h3.querySelector('.chart-refresh-status');
+              } else {
+                container.innerHTML = cards;
+              }
+            }
+            setStatus(ok + ' rendered' + (errs ? ', ' + errs + ' failed' : ''));
+          });
+      })
+      .catch(function(e) {
+        setStatus('refresh failed: ' + (e && e.message ? e.message : 'error'));
+      })
+      .then(function() { btn.disabled = false; });
+  };
+
   // Construct the report's HTML body from the investigation + per-study specs.
   function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy, generation) {
     bibEntries = bibEntries || [];
@@ -5512,24 +5615,16 @@
 
       // ── CHARTS (visualisations from runs.db) ─────────────────────────
       var chartsHtml = charts.length
-        ? '<div id="' + sid.charts + '"><h3>Visualisations from the latest run</h3>'
-          + charts.map(function(c) {
-              var capHtml = '';
-              if (c.caption) capHtml += '<div class="chart-caption">' + _h(c.caption) + '</div>';
-              if (c.simulations) capHtml +=
-                  '<div class="chart-simulations"><strong>Simulations behind this chart.</strong> '
-                  + _h(c.simulations) + '</div>';
-              if (c.interpretation) capHtml +=
-                  '<div class="chart-interpretation"><strong>What it means.</strong> '
-                  + _h(c.interpretation) + '</div>';
-              // SVG records inline c.svg; PNG/GIF records embed a self-contained
-              // data-URI in c.img (rendered as <img> so it survives in a
-              // downloaded standalone report).
-              var media = c.img
-                ? '<img class="chart-img" src="' + c.img + '" alt="' + _h(c.key || 'chart') + '" loading="lazy">'
-                : (c.svg || '');
-              return '<div class="chart-card">' + media + capHtml + '</div>';
-            }).join('')
+        ? '<div id="' + sid.charts + '">'
+          + '<h3 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
+          + '<span>Visualisations from the latest run</span>'
+          + '<button type="button" class="chart-refresh-btn" data-study="' + _h(s.name) + '"'
+          + ' onclick="window._refreshStudyViz(this)"'
+          + ' style="font-size:12px;padding:2px 10px;border-radius:6px;border:1px solid #cbd5e1;'
+          + 'background:#f8fafc;color:#334155;cursor:pointer;">↻ Refresh visualizations</button>'
+          + '<span class="chart-refresh-status muted small" style="margin-left:4px;"></span>'
+          + '</h3>'
+          + _renderChartCardsHtml(charts)
           + '</div>'
         : '';
 
