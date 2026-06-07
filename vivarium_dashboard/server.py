@@ -819,6 +819,155 @@ def _latest_run_timestamp(runs_db: Path) -> float | None:
         return None
 
 
+def _latest_run_row(runs_db) -> dict | None:
+    """Newest runs_meta row as {run_id, completed_at, generation_id, emitter_path},
+    tolerating older DBs missing the optional columns. Mirrors
+    pbg_superpowers.run_registry.latest_run (not importable here)."""
+    from pathlib import Path
+    import sqlite3
+    runs_db = Path(runs_db)
+    if not runs_db.is_file():
+        return None
+    want = ("run_id", "completed_at", "generation_id", "emitter_path")
+    try:
+        conn = sqlite3.connect(f"file:{runs_db}?mode=ro", uri=True, timeout=1.0)
+        try:
+            have = {r[1] for r in conn.execute("PRAGMA table_info(runs_meta)")}
+            cols = [c for c in want if c in have]
+            if "run_id" not in cols:
+                return None
+            row = conn.execute(
+                f"SELECT {', '.join(cols)} FROM runs_meta "
+                "ORDER BY COALESCE(completed_at, started_at) DESC LIMIT 1"
+            ).fetchone()
+        finally:
+            conn.close()
+        return dict(zip(cols, row)) if row else None
+    except sqlite3.Error:
+        return None
+
+
+def _study_charts_payload(ws_root, name: str) -> dict:
+    """Build the /api/study-charts/<name> payload (pure, unit-testable).
+
+    Two chart sources, merged in display order (live first, static after):
+
+      live    — ``studies/<name>/runs.db`` (the per-step history
+                emitted by SQLiteEmitter). Picks the latest entry
+                from the ``simulations`` table (filtered to
+                ``baseline-steady-state`` when present) and renders
+                a small canonical set of line charts.
+      static  — any pre-rendered ``studies/<name>/charts/*.svg`` files
+                (with optional ``*.meta.json`` sidecars providing title +
+                caption). These are the domain-specific charts the study
+                authors checked in directly (e.g. chromosome maps).
+
+    Each STATIC chart additionally carries a ``freshness`` badge —
+    ``fresh`` / ``stale`` / ``unrendered`` for charts declared in the spec's
+    ``visualizations[]`` (computed against the study's latest run via the
+    vendored :func:`chart_freshness`), and ``untracked`` for on-disk chart
+    files with no matching ``visualizations[]`` entry.
+    """
+    import yaml as _yaml
+    from vivarium_dashboard.lib.study_charts import (
+        render_study_charts, render_v4_test_charts,
+        discover_static_study_charts,
+    )
+    from vivarium_dashboard.lib.simulations_index import (
+        discover_default_baseline_db,
+    )
+    from .lib.viz_freshness import chart_freshness, manifest_diff
+
+    study_dir = WorkspacePaths.load(ws_root).studies / name
+    runs_db = study_dir / "runs.db"
+    charts_dir = study_dir / "charts"
+    spec_path = study_dir / "study.yaml"
+
+    # Detect v4: study.yaml with schema_version: 4 → render charts per-test
+    # from tests[].measure.path, with default-baseline fallback when the
+    # per-study runs.db is empty.
+    spec = None
+    if spec_path.is_file():
+        try:
+            spec = _yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+        except Exception:
+            spec = None
+    is_v4 = isinstance(spec, dict) and spec.get("schema_version") == 4
+
+    if is_v4:
+        fallback_db = discover_default_baseline_db(ws_root)
+        live_charts = render_v4_test_charts(spec, runs_db, fallback_db=fallback_db)
+    else:
+        live_charts = render_study_charts(runs_db, run_name="baseline-steady-state")
+        if not live_charts:
+            live_charts = render_study_charts(runs_db, run_name=None)
+    for c in live_charts:
+        c.setdefault("source", "live")
+    static_charts = discover_static_study_charts(charts_dir)
+
+    # Per-chart freshness for static charts. Match each on-disk chart
+    # (``charts/<key>.<media>``) against the spec's visualizations[] entries
+    # by their ``chart:`` field; declared entries get fresh/stale/unrendered,
+    # everything else is untracked.
+    visualizations = (spec or {}).get("visualizations") or []
+    entry_by_chart = {
+        e.get("chart"): e for e in visualizations if isinstance(e, dict) and e.get("chart")
+    }
+    # manifest_diff ensures untracked on-disk charts are accounted for; the
+    # static-chart list already includes them, so we just use it to confirm.
+    manifest_diff(study_dir, visualizations)
+    latest = _latest_run_row(runs_db)
+    for c in static_charts:
+        rel = f"charts/{c.get('key')}.{c.get('media')}"
+        entry = entry_by_chart.get(rel)
+        if entry is None:
+            c["freshness"] = "untracked"
+        else:
+            c["freshness"] = chart_freshness(study_dir, entry, latest)
+
+    return {
+        "study": name,
+        "schema_version": (spec or {}).get("schema_version"),
+        "charts": live_charts + static_charts,
+        "db_exists": runs_db.exists(),
+        "static_count": len(static_charts),
+        "live_count": len(live_charts),
+    }
+
+
+def _study_refresh_viz(ws_root, name: str) -> dict:
+    """Re-render every ``visualizations[]`` entry of study ``name`` against its
+    latest run, stamping provenance (pure, unit-testable seam).
+
+    Thin orchestration around the vendored :func:`refresh_study_viz`: resolves
+    the study dir (layout-aware, like :func:`_study_charts_payload`), loads
+    ``study.yaml``, finds the latest run via :func:`_latest_run_row`, and
+    delegates. ``refresh_study_viz`` swallows per-chart render errors and
+    returns ``status="error"`` entries, so this never raises on a bad render.
+
+    Returns ``{"study": name, "results": [...]}`` or ``{"error": ...}`` when the
+    study does not exist (the HTTP wrapper maps that to 404).
+    """
+    import yaml as _yaml
+    from .lib.refresh_viz import refresh_study_viz
+
+    study_dir = WorkspacePaths.load(ws_root).studies / name
+    if not study_dir.is_dir():
+        return {"error": f"study {name!r} not found", "not_found": True}
+    spec_path = study_dir / "study.yaml"
+    spec = {}
+    if spec_path.is_file():
+        try:
+            loaded = _yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                spec = loaded
+        except Exception:
+            spec = {}
+    latest = _latest_run_row(study_dir / "runs.db")
+    results = refresh_study_viz(study_dir, spec, latest)
+    return {"study": name, "results": results}
+
+
 def _discover_viz_html_files(name: str) -> list[dict]:
     """Discover viz HTML files for a study from BOTH conventional locations.
 
@@ -4758,6 +4907,9 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError as e:
             return self._json({"error": f"invalid JSON: {e}"}, 400)
 
+        if self.path.startswith("/api/study-refresh-viz/"):
+            return self._post_study_refresh_viz(body)
+
         method_name = _POST_ROUTE_MAP.get(self.path)
         if method_name is None:
             return self._json({"error": "not found"}, 404)
@@ -4786,6 +4938,27 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     # POST handlers
     # ------------------------------------------------------------------
+
+    def _post_study_refresh_viz(self, body: dict):
+        """POST /api/study-refresh-viz/<name> — re-render the study's declared
+        visualizations against its latest run, stamping provenance.
+
+        Thin HTTP wrapper around :func:`_study_refresh_viz` (the pure seam).
+        Tolerant by design: per-chart render failures come back as
+        ``status="error"`` entries (never a 500). Only a missing study 404s.
+        """
+        import urllib.parse
+        path = urllib.parse.urlparse(self.path).path
+        name = path[len("/api/study-refresh-viz/"):].strip("/")
+        if not name:
+            return self._json({"error": "missing study name"}, 400)
+        try:
+            payload = _study_refresh_viz(WORKSPACE, name)
+        except Exception as e:  # noqa: BLE001
+            return self._json({"error": str(e), "study": name}, 500)
+        if payload.get("not_found"):
+            return self._json({"error": payload["error"], "study": name}, 404)
+        return self._json(payload, 200)
 
     def _post_feedback_import(self, body: dict):
         """POST /api/feedback-import — ingest feedback submitted directly from
@@ -7622,71 +7795,19 @@ if __name__ == "__main__":
     def _get_study_charts(self):
         """GET /api/study-charts/<name> — inline-SVG charts for the study.
 
-        Two sources, merged in display order (live first, static after):
-
-          live    — ``studies/<name>/runs.db`` (the per-step history
-                    emitted by SQLiteEmitter). Picks the latest entry
-                    from the ``simulations`` table (filtered to
-                    ``baseline-steady-state`` when present) and renders
-                    a small canonical set of line charts.
-          static  — any pre-rendered ``studies/<name>/charts/*.svg``
-                    files (with optional ``*.meta.json`` sidecars
-                    providing title + caption). These are the domain-
-                    specific charts the study authors checked in
-                    directly (e.g. chromosome maps, DnaA-box positions).
+        Thin HTTP wrapper around :func:`_study_charts_payload` (the pure,
+        unit-testable seam). See that function for the source semantics.
         """
         import urllib.parse
-        import yaml as _yaml
-        from vivarium_dashboard.lib.study_charts import (
-            render_study_charts, render_v4_test_charts,
-            discover_static_study_charts,
-        )
-        from vivarium_dashboard.lib.simulations_index import (
-            discover_default_baseline_db,
-        )
         path = urllib.parse.urlparse(self.path).path
         name = path[len("/api/study-charts/"):].strip("/")
         if not name:
             return self._json({"error": "missing study name"}, 400)
-        runs_db = workspace_paths().studies / name / "runs.db"
-        charts_dir = workspace_paths().studies / name / "charts"
-        spec_path = workspace_paths().studies / name / "study.yaml"
         try:
-            # Detect v4: study.yaml with schema_version: 4 → render charts
-            # per-test from tests[].measure.path, with default-baseline
-            # fallback when the per-study runs.db is empty.
-            spec = None
-            if spec_path.is_file():
-                try:
-                    spec = _yaml.safe_load(spec_path.read_text(encoding="utf-8"))
-                except Exception:
-                    spec = None
-            is_v4 = isinstance(spec, dict) and spec.get("schema_version") == 4
-
-            if is_v4:
-                fallback_db = discover_default_baseline_db(WORKSPACE)
-                live_charts = render_v4_test_charts(
-                    spec, runs_db, fallback_db=fallback_db,
-                )
-            else:
-                live_charts = render_study_charts(
-                    runs_db, run_name="baseline-steady-state",
-                )
-                if not live_charts:
-                    live_charts = render_study_charts(runs_db, run_name=None)
-            for c in live_charts:
-                c.setdefault("source", "live")
-            static_charts = discover_static_study_charts(charts_dir)
+            payload = _study_charts_payload(WORKSPACE, name)
         except Exception as e:
             return self._json({"error": str(e), "study": name}, 500)
-        return self._json({
-            "study": name,
-            "schema_version": (spec or {}).get("schema_version"),
-            "charts": live_charts + static_charts,
-            "db_exists": runs_db.exists(),
-            "static_count": len(static_charts),
-            "live_count": len(live_charts),
-        }, 200)
+        return self._json(payload, 200)
 
     def _get_iset_report(self):
         """GET /api/iset/<slug>/report — serve the per-investigation report."""
