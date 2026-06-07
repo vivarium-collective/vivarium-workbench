@@ -6155,8 +6155,8 @@
         +   takeawaysHtml       // 3 + 4. Detailed findings
         +   conditionsHtml      // Conditions (what we set up) — grouped with the runs
         +   simsHtml            // What did/will we run
+        +   readoutsHtml        // What did/will we measure (above visualisations)
         +   chartsHtml          //    + Visualisations
-        +   readoutsHtml        // 6. What we measured
         +   testsHtml           // 7. How we judge success
         +   buildHtml           // 8. Model changes
         +   reqsHtml            // 9. What to build/fix
