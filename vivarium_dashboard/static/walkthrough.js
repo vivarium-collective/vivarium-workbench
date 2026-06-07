@@ -8013,6 +8013,15 @@
       }
     }
 
+    // List-first (State A): no investigation selected yet + several available ->
+    // prompt the user to pick one rather than dumping every investigation's
+    // studies into the rail.
+    if (!currentSlug && groups.length > 1) {
+      host.innerHTML = '<div style="padding:6px 14px;color:#94a3b8;font-style:italic">'
+        + 'Select an investigation &rarr;</div>';
+      return;
+    }
+
     // Flat-list mode: when there's exactly one investigation (no
     // ungrouped studies), render its studies as a flat list directly
     // under the "Studies" rail-section label — no redundant group header.
