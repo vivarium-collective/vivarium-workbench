@@ -7875,7 +7875,7 @@
       +   (function() {
             var dn = (iset.executive || {}).decisions_needed || [];
             if (!dn.length) return '';
-            return '<details class="report-fold"><summary>✋ Decisions needed from reviewers' + ' <span class="rf-chip">' + dn.length + ' item' + (dn.length===1?'':'s') + '</span>' + (dn[0] && dn[0].question ? ' <span class="rf-prev">next: ' + _h(_previewText(dn[0].question, 130)) + '</span>' : '') + '</summary><ol>'
+            return '<details id="decisions-needed" class="report-fold"><summary>✋ Decisions needed from reviewers' + ' <span class="rf-chip">' + dn.length + ' item' + (dn.length===1?'':'s') + '</span>' + (dn[0] && dn[0].question ? ' <span class="rf-prev">next: ' + _h(_previewText(dn[0].question, 130)) + '</span>' : '') + '</summary><ol>'
               + dn.map(function(d) {
                   return '<li><strong>' + _h(d.question || '') + '</strong>'
                     + (d.context ? '<div class="muted small">' + _multiline(d.context) + '</div>' : '')
@@ -7938,7 +7938,7 @@
           })()
 
       +   ((iset.biological_story || '').trim()
-          ? '<details class="report-fold">'
+          ? '<details id="biology" class="report-fold">'
             + '<summary>🧬 Biology — the mechanism this investigation models' + ' <span class="rf-prev">' + _h(_previewText(iset.biological_story || '', 175)) + '</span>' + '</summary>'
             + '<p style="margin:0">' + _multiline(iset.biological_story) + '</p>'
             + '</details>'
@@ -8112,7 +8112,7 @@
       +   'var INV=' + JSON.stringify(invName) + ';'
       +   'var REPORT_ID=' + JSON.stringify(reportId || '') + ';'
       +   'var KEY="v2ecoli_feedback_"+INV+(REPORT_ID?("_"+REPORT_ID):"");'
-      +   'var ID_PATTERNS=[/^study-/,/^finding-/,/^acceptance$/,/^references$/,/^studies-heading$/];'
+      +   'var ID_PATTERNS=[/^study-/,/^finding-/,/^acceptance$/,/^references$/,/^studies-heading$/,/^executive$/,/^decisions-needed$/,/^scientific-argument$/,/^biology$/];'
       +   'var openEd=null;'
       +   'var memStore={};'
       +   'function safeGet(k){try{var v=(typeof localStorage!=="undefined")?localStorage.getItem(k):null;return (v==null?memStore[k]:v)||"";}catch(e){return memStore[k]||"";}}'
