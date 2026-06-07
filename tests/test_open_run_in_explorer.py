@@ -99,21 +99,11 @@ def test_walkthroughjs_exports_required_symbols(server):
         "_ceRenderRunResults",
         "_trajectoryToObservables",
         "_ceStopRunPoll",
-        "_openSimulationInExplorer",
     ):
         assert needle in js, f"missing {needle}"
     # _ceTestRun must read run_id from a 202 response, not the old fields.
     assert "window._ceLastRunId = run_id" in js, \
         "rewritten _ceTestRun should assign run_id from the 202 body"
-
-
-def test_simulations_row_template_links_to_explorer_with_run_id(server):
-    base = server["url"]
-    _, js = _get_text(f"{base}/walkthrough.js")
-    # The composite cell in _renderSimRow wraps <code> in an anchor whose
-    # onclick calls _openSimulationInExplorer.
-    assert "_openSimulationInExplorer(" in js
-    assert "sim-composite-link" in js
 
 
 def test_explorer_loads_with_run_id_then_endpoints_serve(server):

@@ -48,6 +48,14 @@
   border-radius: 4px; cursor: pointer; font-size: 0.88em;
 }
 .action-btn:hover { background: #bbdefb; }
+/* Emitter-type pills for the Simulations DB table */
+.emitter-pill {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 12px; font-weight: 500; white-space: nowrap;
+}
+.emitter-sqlite  { background: #e5e7eb; color: #374151; }   /* gray  */
+.emitter-parquet { background: #fef3c7; color: #92400e; }   /* amber */
+.emitter-xarray  { background: #ccfbf1; color: #0f766e; }   /* teal  */
 .action-btn--secondary {
   margin-top: 10px; padding: 5px 12px;
   border: 1px solid #b91c1c; background: #fef2f2;
@@ -1300,59 +1308,50 @@
 <section id="page-simulations" class="page" data-page="simulations">
   <h2 class="page-title">Simulations DB</h2>
   <p class="page-lead">
-    All persisted runs across this workspace, gathered from
-    <code>.pbg/composite-runs.db</code> and every
-    <code>studies/&lt;name&gt;/runs.db</code>. Delete a row to remove its
-    DB rows, run artifacts, and any Study references.
+    Every persisted run across this workspace, tagged by investigation and
+    study, gathered from each <code>studies/&lt;name&gt;/runs.db</code>.
+    Defaults to the current investigation — toggle to see all.
   </p>
 
-  <div style="margin: 8px 0 12px; display: flex; gap: 8px; align-items: center;">
-    <input id="sim-filter" type="search" placeholder="Filter by composite, investigation, study, or label…"
-           style="flex: 1; max-width: 480px; padding: 6px 10px; font-size: 14px;
-                  border: 1px solid #d1d5db; border-radius: 4px;" />
+  <div style="margin: 8px 0 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
+      <input id="sim-all-toggle" type="checkbox" /> All investigations
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
+      Study
+      <select id="sim-study-filter" style="padding:4px 8px; font-size:13px;
+              border:1px solid #d1d5db; border-radius:4px;">
+        <option value="">All</option>
+      </select>
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
+      Emitter
+      <select id="sim-emitter-filter" style="padding:4px 8px; font-size:13px;
+              border:1px solid #d1d5db; border-radius:4px;">
+        <option value="">All</option>
+      </select>
+    </label>
     <button id="sim-refresh" class="action-btn">Refresh</button>
   </div>
 
   <div id="sim-loading" style="color: #6b7280; padding: 12px;">Loading simulations…</div>
   <div id="sim-empty"   style="color: #6b7280; padding: 12px; display: none;">
-    No simulations yet. Run a composite from the
-    <a href="#composite-explore">Composite Explorer</a> or from a
-    <a href="#studies">Study</a> to see entries here.
+    No simulation runs found.
   </div>
 
   <table id="sim-table" style="width:100%; border-collapse: collapse; font-size: 13px; display: none;">
     <thead>
       <tr style="background:#f3f4f6;">
-        <th style="text-align:left; padding:6px 8px;">Composite</th>
         <th style="text-align:left; padding:6px 8px;">Investigation</th>
-        <th style="text-align:left; padding:6px 8px;">Studies</th>
+        <th style="text-align:left; padding:6px 8px;">Study</th>
+        <th style="text-align:left; padding:6px 8px;">Run</th>
+        <th style="text-align:left; padding:6px 8px; width:90px;">Emitter</th>
+        <th style="text-align:left; padding:6px 8px; width:140px;">Time</th>
         <th style="text-align:left; padding:6px 8px; width:90px;">Status</th>
-        <th style="text-align:left; padding:6px 8px; width:80px;">Emitter</th>
-        <th style="text-align:left; padding:6px 8px; width:80px;">Steps</th>
-        <th style="text-align:left; padding:6px 8px;">Label</th>
-        <th style="text-align:left; padding:6px 8px; width:120px;">Started</th>
-        <th style="text-align:left; padding:6px 8px; width:80px;">Run</th>
-        <th style="text-align:left; padding:6px 8px; width:60px;"></th>
       </tr>
     </thead>
     <tbody id="sim-tbody"></tbody>
   </table>
-
-  <!-- Delete confirmation dialog -->
-  <div id="sim-delete-dialog" style="display:none; position:fixed; inset:0;
-                                      background:rgba(0,0,0,0.45); z-index:1000;
-                                      align-items:center; justify-content:center;">
-    <div style="background:#fff; max-width:560px; padding:20px; border-radius:6px;
-                 box-shadow:0 4px 16px rgba(0,0,0,0.2);">
-      <h3 style="margin:0 0 12px;">Delete simulation?</h3>
-      <div id="sim-delete-body" style="font-size:14px; color:#374151;"></div>
-      <div style="text-align:right; margin-top:16px;">
-        <button id="sim-delete-cancel" class="action-btn">Cancel</button>
-        <button id="sim-delete-confirm" class="action-btn"
-                style="background:#dc2626; color:#fff;">Delete</button>
-      </div>
-    </div>
-  </div>
 </section>
 
 <!-- Modal: create investigation -->

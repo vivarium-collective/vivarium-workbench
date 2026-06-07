@@ -10833,125 +10833,98 @@
       _escSim(status || '?') + '</span>';
   }
 
-  function _simEmitterChip(emitter) {
-    // Which emitter persisted the run: xarray (zarr) / parquet / sqlite.
-    var colors = {
-      xarray:  ['#ede9fe', '#5b21b6'],
-      parquet: ['#fef3c7', '#92400e'],
-      sqlite:  ['#e0f2fe', '#075985'],
-    };
-    var e = (emitter || '').toLowerCase();
-    var c = colors[e] || ['#e5e7eb', '#374151'];
-    return '<span title="emitter / persistence format" style="background:' + c[0] +
-      '; color:' + c[1] + '; padding:2px 8px; border-radius:10px; font-size:12px;">' +
-      _escSim(emitter || '—') + '</span>';
+  // Emitter-type pill, keyed by the API's emitter_type ("SQLite"/"Parquet"/
+  // "XArray"). Colors live in CSS classes emitter-sqlite/parquet/xarray.
+  function _simEmitterPill(emitterType) {
+    var t = (emitterType || 'SQLite');
+    var cls = 'emitter-' + t.toLowerCase();
+    return '<span class="emitter-pill ' + cls + '" ' +
+      'title="emitter / persistence format">' + _escSim(t) + '</span>';
   }
 
-  function _simStudyChips(studies) {
-    if (!studies || !studies.length) return '<span style="color:#9ca3af;">—</span>';
-    return studies.map(function (name) {
-      return '<a href="/studies/' + encodeURIComponent(name) +
-        '" title="Open study: ' + _escSim(name) +
-        '" style="display:inline-block; background:#eef2ff; color:#3730a3; ' +
-        'padding:1px 7px; margin:0 2px 2px 0; border-radius:10px; font-size:12px; ' +
-        'text-decoration:none;">' + _escSim(name) + '</a>';
-    }).join('');
+  // Format an epoch-seconds timestamp as a readable local time.
+  function _simFmtTime(sec) {
+    if (!sec) return '—';
+    return new Date(sec * 1000).toLocaleString();
   }
 
-  function _simShortId(run_id) {
-    if (!run_id) return '';
-    // Show the last 6 chars (the hash suffix) of "<spec>__<ts>__<hash6>".
-    return run_id.slice(-6);
-  }
-
-  // Module-scope cache so the filter and delete flows can read current rows.
+  // Module-scope cache. _simRows = all runs from the API; _simCurrent = the
+  // current investigation slug (default filter target, may be null).
   window._simRows = [];
+  window._simCurrent = null;
 
-  /** Open the Composite Explorer for a specific past simulation.
-   *
-   *  Mirrors _openCompositeExplorer (line 2437) but also seeds ?run_id=, so
-   *  _initCompositeExplorer picks it up and renders the run's results +
-   *  viz_html in the Run tab.
-   */
-  function _openSimulationInExplorer(run_id, spec_id) {
-    var url = new URL(window.location.href);
-    url.searchParams.set('id', spec_id);
-    url.searchParams.set('run_id', run_id);
-    url.hash = '#composite-explore';
-    window.history.pushState({}, '', url.toString());
-    _switchPage('composite-explore');
-  }
-  window._openSimulationInExplorer = _openSimulationInExplorer;
-
-  function _renderSimRow(sim) {
-    var composite = _escSim(sim.spec_id || '');
-    // Last segment bold for scannability
-    var segs = composite.split('.');
-    if (segs.length > 1) {
-      segs[segs.length - 1] = '<strong>' + segs[segs.length - 1] + '</strong>';
-      composite = segs.join('.');
-    }
-    var stepsTxt = (sim.status === 'running')
-      ? (sim.progress_step || 0) + '/' + (sim.n_steps || '?')
-      : (sim.n_steps != null ? String(sim.n_steps)
-         : (sim.ensemble_size ? (sim.ensemble_size + '× ens') : '—'));
-    var label = sim.sim_name || sim.label || '';
-    var startedFull = sim.started_at
-      ? new Date(sim.started_at * 1000).toISOString()
-      : '';
-    var runTooltip = (sim.run_id || '') + '\n' + (sim.db_path || '');
-    var investigation = sim.investigation_slug || '';
-    var investigationCell = investigation
-      ? '<code style="font-size:12px; color:#374151;">' +
-          _escSim(investigation) + '</code>'
+  function _renderSimRow(row) {
+    var inv = row.investigation || '';
+    var invCell = inv
+      ? '<code style="font-size:12px; color:#374151;">' + _escSim(inv) + '</code>'
       : '<span style="color:#9ca3af;">—</span>';
+    var study = row.study || '';
+    var studyCell = study
+      ? '<code style="font-size:12px; color:#374151;">' + _escSim(study) + '</code>'
+      : '<span style="color:#9ca3af;">—</span>';
+    var runId = row.run_id || '';
+    var runTitle = row.emitter_path ? ' title="' + _escSim(row.emitter_path) + '"' : '';
+    var timeSec = row.completed_at || row.started_at;
     return (
-      '<tr data-run-id="' + _escSim(sim.run_id) + '" ' +
-        'style="border-bottom:1px solid #f3f4f6;">' +
-      '<td style="padding:6px 8px;">' +
-        '<a href="?id=' + encodeURIComponent(sim.spec_id) +
-        '&run_id=' + encodeURIComponent(sim.run_id) + '#composite-explore" ' +
-        'class="sim-composite-link" ' +
-        'style="text-decoration:none; color:inherit;" ' +
-        'onclick="event.preventDefault(); _openSimulationInExplorer(\'' +
-          _escSim(sim.run_id) + '\', \'' + _escSim(sim.spec_id) + '\');" ' +
-        'onmouseover="this.style.textDecoration=\'underline\';" ' +
-        'onmouseout="this.style.textDecoration=\'none\';">' +
-        '<code>' + composite + '</code></a>' +
-      '</td>' +
-      '<td style="padding:6px 8px;">' + investigationCell + '</td>' +
-      '<td style="padding:6px 8px;">' + _simStudyChips(sim.studies) + '</td>' +
-      '<td style="padding:6px 8px;">' + _simStatusChip(sim.status) + '</td>' +
-      '<td style="padding:6px 8px;">' + _simEmitterChip(sim.emitter) + '</td>' +
-      '<td style="padding:6px 8px;">' + _escSim(stepsTxt) + '</td>' +
-      '<td style="padding:6px 8px; color:#374151;">' + _escSim(label) + '</td>' +
-      '<td style="padding:6px 8px; color:#6b7280;" title="' + _escSim(startedFull) +
-        '">' + _escSim(_simRelativeTime(sim.started_at)) + '</td>' +
-      '<td style="padding:6px 8px;"><code title="' + _escSim(runTooltip) +
-        '" style="font-size:11px; color:#6b7280;">' + _escSim(_simShortId(sim.run_id)) +
-        '</code></td>' +
-      '<td style="padding:6px 8px; text-align:center;">' +
-        '<button class="action-btn" title="Delete simulation" ' +
-        'onclick="_deleteSimulationRun(\'' + _escSim(sim.run_id) + '\')">🗑</button>' +
-      '</td>' +
+      '<tr data-run-id="' + _escSim(runId) + '" style="border-bottom:1px solid #f3f4f6;">' +
+      '<td style="padding:6px 8px;">' + invCell + '</td>' +
+      '<td style="padding:6px 8px;">' + studyCell + '</td>' +
+      '<td style="padding:6px 8px;"><code style="font-size:11px; color:#6b7280;"' +
+        runTitle + '>' + _escSim(runId) + '</code></td>' +
+      '<td style="padding:6px 8px;">' + _simEmitterPill(row.emitter_type) + '</td>' +
+      '<td style="padding:6px 8px; color:#6b7280;">' + _escSim(_simFmtTime(timeSec)) + '</td>' +
+      '<td style="padding:6px 8px;">' + _simStatusChip(row.status) + '</td>' +
       '</tr>'
     );
   }
 
+  // Populate the Study + Emitter dropdowns from the data (preserving any
+  // current selection), then render rows through the active filters.
   function _applySimFilter() {
-    var q = (document.getElementById('sim-filter') || {}).value || '';
-    q = q.toLowerCase().trim();
     var rows = window._simRows || [];
-    var visible = q ? rows.filter(function (s) {
-      var hay = (s.spec_id + ' ' + (s.sim_name || '') + ' ' + (s.label || '') +
-                  ' ' + (s.studies || []).join(' ') +
-                  ' ' + (s.investigation_slug || '') +
-                  ' ' + (s.study_slug || '')).toLowerCase();
-      return hay.indexOf(q) >= 0;
-    }) : rows;
+    var allToggle = document.getElementById('sim-all-toggle');
+    var studySel  = document.getElementById('sim-study-filter');
+    var emitterSel = document.getElementById('sim-emitter-filter');
+
+    var showAll = allToggle ? allToggle.checked : false;
+    var studyVal = studySel ? studySel.value : '';
+    var emitterVal = emitterSel ? emitterSel.value : '';
+
+    var visible = rows.filter(function (r) {
+      if (!showAll && window._simCurrent && r.investigation !== window._simCurrent) return false;
+      if (studyVal && r.study !== studyVal) return false;
+      if (emitterVal && (r.emitter_type || 'SQLite') !== emitterVal) return false;
+      return true;
+    });
+
     var tbody = document.getElementById('sim-tbody');
-    if (!tbody) return;
-    tbody.innerHTML = visible.map(_renderSimRow).join('');
+    var table = document.getElementById('sim-table');
+    var empty = document.getElementById('sim-empty');
+    if (tbody) tbody.innerHTML = visible.map(_renderSimRow).join('');
+    if (table) table.style.display = visible.length ? '' : 'none';
+    if (empty) empty.style.display = visible.length ? 'none' : '';
+  }
+
+  // Rebuild the Study + Emitter <select> option lists from the current data.
+  function _populateSimFilters() {
+    var rows = window._simRows || [];
+    var studies = {}, emitters = {};
+    rows.forEach(function (r) {
+      if (r.study) studies[r.study] = true;
+      emitters[r.emitter_type || 'SQLite'] = true;
+    });
+    function fill(sel, values) {
+      if (!sel) return;
+      var prev = sel.value;
+      var opts = ['<option value="">All</option>'];
+      values.sort().forEach(function (v) {
+        opts.push('<option value="' + _escSim(v) + '">' + _escSim(v) + '</option>');
+      });
+      sel.innerHTML = opts.join('');
+      if (values.indexOf(prev) >= 0) sel.value = prev;
+    }
+    fill(document.getElementById('sim-study-filter'), Object.keys(studies));
+    fill(document.getElementById('sim-emitter-filter'), Object.keys(emitters));
   }
 
   function _initSimulations() {
@@ -10972,13 +10945,10 @@
             'onclick="_initSimulations()">Retry</button></span>';
           return;
         }
-        window._simRows = data.simulations || [];
+        window._simRows = data.runs || [];
+        window._simCurrent = data.current || null;
         if (loading) loading.style.display = 'none';
-        if (!window._simRows.length) {
-          if (empty) empty.style.display = '';
-          return;
-        }
-        if (table) table.style.display = '';
+        _populateSimFilters();
         _applySimFilter();
       })
       .catch(function (err) {
@@ -10989,87 +10959,24 @@
   }
   window._initSimulations = _initSimulations;
 
-  // Wire the filter input + refresh button + cancel button (once, on first init)
+  // Wire the toggle + dropdown filters + refresh button (once, on first init).
   function _wireSimulationsUiOnce() {
-    var f = document.getElementById('sim-filter');
-    if (f && !f.dataset.wired) {
-      f.addEventListener('input', _applySimFilter);
-      f.dataset.wired = '1';
-    }
+    [['sim-all-toggle', 'change'],
+     ['sim-study-filter', 'change'],
+     ['sim-emitter-filter', 'change']].forEach(function (pair) {
+      var el = document.getElementById(pair[0]);
+      if (el && !el.dataset.wired) {
+        el.addEventListener(pair[1], _applySimFilter);
+        el.dataset.wired = '1';
+      }
+    });
     var r = document.getElementById('sim-refresh');
     if (r && !r.dataset.wired) {
       r.addEventListener('click', _initSimulations);
       r.dataset.wired = '1';
     }
-    var cancel = document.getElementById('sim-delete-cancel');
-    if (cancel && !cancel.dataset.wired) {
-      cancel.addEventListener('click', function () {
-        var dlg = document.getElementById('sim-delete-dialog');
-        if (dlg) dlg.style.display = 'none';
-      });
-      cancel.dataset.wired = '1';
-    }
   }
   window._wireSimulationsUiOnce = _wireSimulationsUiOnce;
-
-  function _deleteSimulationRun(run_id) {
-    _wireSimulationsUiOnce();
-    var rows = window._simRows || [];
-    var sim = null;
-    for (var i = 0; i < rows.length; i++) {
-      if (rows[i].run_id === run_id) { sim = rows[i]; break; }
-    }
-    if (!sim) return;
-
-    var studiesTxt = (sim.studies && sim.studies.length)
-      ? sim.studies.map(_escSim).join(', ')
-      : '<em>none</em>';
-    var stillRunning = (sim.status === 'running')
-      ? '<p style="color:#b45309; margin:8px 0 0;"><strong>⚠ This run is still running.</strong> ' +
-        'Deleting now will orphan the detached process (it will fail-write later, harmlessly).</p>'
-      : '';
-    var body = document.getElementById('sim-delete-body');
-    if (body) body.innerHTML =
-      '<p style="margin:0 0 8px;"><code>' + _escSim(run_id) + '</code></p>' +
-      '<p style="margin:0 0 8px;">Composite: <code>' + _escSim(sim.spec_id) + '</code></p>' +
-      '<p style="margin:0 0 4px;">This will permanently remove:</p>' +
-      '<ul style="margin:0 0 4px 24px;">' +
-        '<li>1 row in <code>' + _escSim(sim.db_path) + '</code></li>' +
-        '<li>All history rows (trajectory data) for this run</li>' +
-        '<li>The run directory <code>.pbg/runs/' + _escSim(run_id) + '/</code> (if any)</li>' +
-        '<li>References from study.yaml(s): ' + studiesTxt + '</li>' +
-      '</ul>' + stillRunning;
-    var dlg = document.getElementById('sim-delete-dialog');
-    if (dlg) dlg.style.display = 'flex';
-    var confirm = document.getElementById('sim-delete-confirm');
-    // Replace the confirm handler each time to bind the current run_id.
-    confirm.onclick = function () {
-      confirm.disabled = true;
-      fetch('/api/simulation-run', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ run_id: run_id }),
-      }).then(function (r) { return r.json().then(function (d) {
-        return { ok: r.ok, status: r.status, body: d };
-      }); }).then(function (res) {
-        confirm.disabled = false;
-        if (dlg) dlg.style.display = 'none';
-        if (!res.ok) {
-          alert('Delete failed: ' + (res.body.error || 'HTTP ' + res.status));
-          return;
-        }
-        if (res.body.errors && res.body.errors.length) {
-          alert('Deleted, but with warnings:\n' + res.body.errors.join('\n'));
-        }
-        _initSimulations();
-      }).catch(function (err) {
-        confirm.disabled = false;
-        if (dlg) dlg.style.display = 'none';
-        alert('Network error: ' + err);
-      });
-    };
-  }
-  window._deleteSimulationRun = _deleteSimulationRun;
 
   // ===========================================================================
   // Composite Explorer — load a prior run into the Run tab
