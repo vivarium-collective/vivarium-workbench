@@ -365,7 +365,7 @@
     {% endif %}
 
     {% if study.purpose %}
-    <details class="overview-section study-fold">
+    <details class="overview-section">
       <summary class="overview-label">Purpose</summary>
       {% if study.purpose.question %}
       <div class="purpose-callout" style="background:#eff6ff;border-left:4px solid #3b82f6">
@@ -434,7 +434,7 @@
     {% endif %}
 
     {% if study.pipeline_gate %}
-    <details class="overview-section study-fold">
+    <details class="overview-section">
       <summary class="overview-label">Pipeline gate</summary>
       <p class="muted" style="margin: 0 0 8px 0;font-size:0.88em">
         Each study is a model-building gate: it answers <em>"Can we safely build the next layer?"</em>
@@ -458,7 +458,7 @@
     {% endif %}
 
     {% if study.key_assumptions %}
-    <details class="overview-section study-fold">
+    <details class="overview-section">
       <summary class="overview-label">Key assumptions</summary>
       <ul style="margin:0 0 0 18px;padding:0;font-size:0.93em">
         {% for a in study.key_assumptions %}<li style="margin:2px 0">{{ a }}</li>{% endfor %}
@@ -467,7 +467,7 @@
     {% endif %}
 
     {% if study.behavior_tests or study.expected_behavior %}
-    <details class="overview-section study-fold">
+    <details class="overview-section">
       <summary class="overview-label">Behavioral tests</summary>
       {% set _eb = study.behavior_tests or study.expected_behavior %}
       {% set _primary = _eb | selectattr('classification', 'equalto', 'primary') | list | length %}
@@ -486,7 +486,7 @@
     {% endif %}
 
     {% if study.expert_decisions_needed %}
-    <details class="overview-section pre-run-expert-review study-fold">
+    <details class="overview-section pre-run-expert-review">
       <summary class="overview-label">Pre-run expert review</summary>
       <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
         Open biological questions the planning is contingent on. A "wrong" answer here

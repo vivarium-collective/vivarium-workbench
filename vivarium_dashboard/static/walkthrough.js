@@ -34,7 +34,7 @@
   // <summary>, so the native toggle doesn't fire. Manual handler.
   document.addEventListener("click", function (e) {
     var t = e.target;
-    if (t && t.classList && t.classList.contains("sn-collapse-hint")) {
+    if (t && t.classList && (t.classList.contains("sn-collapse-hint") || t.classList.contains("sp-collapse-hint"))) {
       var details = t.closest("details.study-fold");
       if (details) {
         details.open = false;
@@ -3569,6 +3569,10 @@
     if (list) list.style.display = '';
     if (detail) detail.style.display = 'none';
     window._currentIset = null;
+    window._currentIsetSlug = '';
+    if (typeof window._renderRailInvestigationGroups === 'function') {
+      try { window._renderRailInvestigationGroups(); } catch (_) { /* ignore */ }
+    }
     _renderInvestigationSets();
   }
   window._showInvestigationList = _showInvestigationList;
@@ -5113,8 +5117,7 @@
         + (chips.length ? '<div class="sp-metrics">' + chips.join('') + '</div>' : '')
         + (insight ? '<div class="sp-insight"><span class="sp-lbl">Insight</span> ' + _h(insight) + '</div>' : '')
         + (caveat  ? '<div class="sp-caveat"><span class="sp-lbl">Caveat</span> ' + _h(caveat) + '</div>' : '')
-        + '<span class="sp-expand-hint">▸ click to expand full study</span>'
-        + '<span class="sp-collapse-hint">▴ click to collapse full study</span>';
+        + '<span class="sp-expand-hint">▸ click to expand full study</span>';
     }
 
     // Review-readiness gates — mechanical checks that catch the classes of
@@ -5235,7 +5238,7 @@
       var nEmbedsForStudy = (embedsByStudy[s.name] || []).length;
       if (nEmbedsForStudy)
         links.push('<a href="#study-' + slug + '-embeds">Visualizations <span class="sn-count">' + nEmbedsForStudy + '</span></a>');
-      if (findings.length)    links.push('<a href="#' + sid.takeaways + '">Key takeaways <span class="sn-count">' + findings.length + '</span></a>');
+      if (findings.length)    links.push('<a href="#' + sid.findings + '">Findings <span class="sn-count">' + findings.length + '</span></a>');
       if (sims.length)        links.push('<a href="#' + sid.sims + '">What we ran <span class="sn-count">' + sims.length + '</span></a>');
       if (charts.length)      links.push('<a href="#' + sid.charts + '">Charts <span class="sn-count">' + charts.length + '</span></a>');
       if (readouts.length)    links.push('<a href="#' + sid.readouts + '">What we measured <span class="sn-count">' + readouts.length + '</span></a>');
@@ -5346,7 +5349,7 @@
         var takeawayItems = findings.map(function(f) {
           var status = f.status || 'novel';
           var glyph = ({confirms:'✓', partial:'◐', contradicts:'✗', novel:'◆'})[status] || '◆';
-          var stmt = (f.statement || '').split('\n')[0].split('.')[0];
+          var stmt = (f.statement || (f.id||'').replace(/[-_]/g,' ')).split('\n')[0].split('.')[0];
           if (stmt.length > 180) stmt = stmt.slice(0, 177) + '…';
           return '<li class="takeaway-' + status + '"><span class="takeaway-glyph">' + glyph + '</span> '
                + '<a href="#finding-' + _h(f.id || '') + '">' + _h(stmt) + '</a></li>';
@@ -5362,6 +5365,9 @@
         function _renderFinding(f) {
           var status = f.status || 'novel';
           var glyph = ({confirms:'✓', partial:'◐', contradicts:'✗', novel:'◆'})[status] || '◆';
+          var statusText = (f.kind === 'biological')
+            ? (status + ' literature')
+            : ({confirms:'confirmed', partial:'partial result', contradicts:'correction', novel:'new result'}[status] || status);
           var ev = f.evidence || {};
           var exp = f.expected || {};
           var ref = f.expert_reference || {};
@@ -5419,9 +5425,9 @@
                +   '<div class="finding-header">'
                +     '<span class="finding-status-glyph">' + glyph + '</span>'
                +     '<span class="finding-id">' + _h(f.id || '') + '</span>'
-               +     '<span class="finding-status-text">' + _h(status) + ' literature</span>'
+               +     '<span class="finding-status-text">' + _h(statusText) + '</span>'
                +   '</div>'
-               +   '<div class="finding-statement">' + _multiline(f.statement || '(no statement)') + '</div>'
+               +   '<div class="finding-statement">' + _multiline(f.statement || (f.id ? f.id.replace(/[-_]/g,' ') : '(no statement)')) + '</div>'
                +   evMain
                +   expMain
                +   (f.explanation ? '<div class="finding-explanation"><em>Why:</em> ' + _multiline(f.explanation) + '</div>' : '')
@@ -5432,11 +5438,7 @@
                + '</div>';
         }
 
-        takeawaysHtml = '<div id="' + sid.takeaways + '" class="takeaways-section">'
-          + '<h3>Key takeaways</h3>'
-          + '<ul class="takeaway-list">' + takeawayItems + '</ul>'
-          + '</div>'
-          + '<div id="' + sid.findings + '" class="findings-section">'
+        takeawaysHtml = '<div id="' + sid.findings + '" class="findings-section">'
           + '<h3>Detailed findings</h3>'
           + Object.keys(groups).filter(function(k){return groups[k].length;}).map(function(k) {
               return '<h4 class="findings-group-header">' + kindHeader[k] + ' <span class="muted small">(' + groups[k].length + ')</span></h4>'
@@ -6149,19 +6151,19 @@
         +   mechanismNarrativeHtml  // 0a. Mechanism narrative (7 framework fields)
         +   embedsHtml          // 0b. Embedded preview HTMLs
         +   summaryHtml         // 1. Plain-English summary
-        +   decisionHtml        // 2. Decision box
         +   expertReviewHtml    // 2b. Pre-run expert review
-        +   takeawaysHtml       // 3 + 4. Key takeaways + findings
-        +   simsHtml            // 5. What we ran
+        +   takeawaysHtml       // 3 + 4. Detailed findings
+        +   conditionsHtml      // Conditions (what we set up) — grouped with the runs
+        +   simsHtml            // What did/will we run
+        +   readoutsHtml        // What did/will we measure (above visualisations)
         +   chartsHtml          //    + Visualisations
-        +   readoutsHtml        // 6. What we measured
         +   testsHtml           // 7. How we judge success
-        +   conditionsHtml      // 7b. Conditions
         +   buildHtml           // 8. Model changes
         +   reqsHtml            // 9. What to build/fix
         +   followUpsHtml       // 10. Next steps
         +   limitsHtml          // 11. Limitations
         +   refsHtml            // 12. References
+        +   decisionHtml        // Decision: can we move to the next study? (bottom)
         + '</section>'
         + '</details>';
     }
@@ -6519,7 +6521,6 @@
         +   (v4Insight ? '<div class="sp-insight"><span class="sp-lbl">Insight</span> ' + _h(v4Insight) + '</div>' : '')
         +   (v4Caveat  ? '<div class="sp-caveat"><span class="sp-lbl">Caveat</span> '   + _h(v4Caveat)  + '</div>' : '')
         +   '<span class="sp-expand-hint">▸ click to expand full study</span>'
-        +   '<span class="sp-collapse-hint">▴ click to collapse full study</span>'
         + '</summary>';
 
       // Dropped chrome on the v4 expanded section to remove three forms
@@ -7062,6 +7063,8 @@
       //    HTML renders with no external assets) ─────────────────────────
       + '.investigation-biology-story{padding:16px 20px;background:#f0f9ff;border:1px solid #bae6fd;border-left:5px solid #0284c7;border-radius:8px;margin:14px 0 18px 0;max-width:none}'
       + '.investigation-biology-story p.biology-prose{margin:0;font-size:1em;line-height:1.6;color:#0c4a6e;white-space:pre-line;max-width:none}'
+      + 'details.report-fold{margin:10px 0;border-left:3px solid #cbd5e1;padding-left:10px}'
+      + 'details.report-fold>summary{cursor:pointer;font-weight:600;color:#1e3a8a;margin-bottom:6px}'
       + '.biology-glance{margin:0 0 18px 0;padding:14px 18px;background:#f0fdf4;border:1px solid #bbf7d0;border-left:5px solid #16a34a;border-radius:8px}'
       + '.biology-glance .biology-glance-label{font-size:0.85em;text-transform:uppercase;letter-spacing:0.05em;color:#166534;margin:0 0 8px 0;font-weight:600;border:none;padding:0}'
       + '.biology-summary-callout{margin-bottom:14px}'
@@ -7372,12 +7375,8 @@
       //    page — see _wireIsetSwitcher below for the click + render logic.
       + '<nav class="topbar">'
       +   '<span class="tb-title">' + _h(iset.title || iset.name) + '</span>'
-      +   '<a href="#top">Top</a>'
       +   ((iset.executive && (iset.executive.what_is_this || iset.executive.verdict)) ? '<a href="#executive">Summary</a>' : '')
-      +   ((iset.scientific_argument && iset.scientific_argument.main_claim) ? '<a href="#scientific-argument">Argument</a>' : '')
-      +   '<a href="#overview">Overview</a>'
       /* "Acceptance" nav link removed alongside the section it pointed to */
-      +   '<a href="#how-to-read">How to read</a>'
       +   '<a href="#studies-heading">Studies</a>'
       +   '<a href="#references">References</a>'
       +   '<button type="button" class="tb-iset-switcher" id="tb-iset-switcher-trigger" aria-haspopup="true" aria-expanded="false">'
@@ -7476,24 +7475,32 @@
       +   (function() {
             var ex = iset.executive || {};
             var dn = ex.decisions_needed || [];
-            if (!ex.what_is_this && !ex.verdict && !dn.length) return '';
+            if (!ex.what_is_this && !ex.verdict && !iset.question && !iset.hypothesis) return '';
             var vs = ex.verdict_status || 'in-progress';
-            var h = '<section id="executive"><h2 style="margin-top:12px">Executive summary</h2>';
+            var h = '<details id="executive" class="report-fold" style="margin-top:12px"><summary>Executive summary' + ' <span class="muted small">\u2014 ' + _h(vs) + ((ex.verdict || ex.what_is_this) ? ': ' + _h(_firstSentence(String(ex.verdict || ex.what_is_this)).slice(0,130)) : '') + '</span></summary>';
             if (ex.what_is_this)
               h += '<p>' + _multiline(ex.what_is_this) + '</p>';
             if (ex.verdict)
               h += '<div class="callout" style="background:#f8fafc;border-left:5px solid #64748b;border-radius:8px;padding:12px 16px;margin:10px 0">'
                  + '<span class="badge badge-' + _h(vs) + '">' + _h(vs) + '</span> '
                  + '<strong>Current verdict.</strong> ' + _multiline(ex.verdict) + '</div>';
-            if (dn.length) {
-              h += '<h3>Decisions needed from reviewers</h3><ol>'
-                 + dn.map(function(d) {
-                     return '<li><strong>' + _h(d.question || '') + '</strong>'
-                       + (d.context ? '<div class="muted small">' + _multiline(d.context) + '</div>' : '')
-                       + '</li>';
-                   }).join('') + '</ol>';
-            }
-            return h + '</section>';
+            if (iset.question)
+              h += '<p><strong>Question.</strong> ' + _multiline(iset.question) + '</p>';
+            if (iset.hypothesis)
+              h += '<p><strong>Hypothesis.</strong> ' + _multiline(iset.hypothesis) + '</p>';
+            return h + '</details>';
+          })()
+
+      // ── Decisions needed (top-level fold, pulled out of Executive) ──
+      +   (function() {
+            var dn = (iset.executive || {}).decisions_needed || [];
+            if (!dn.length) return '';
+            return '<details class="report-fold"><summary>Decisions needed from reviewers' + ' <span class="muted small">\u2014 ' + dn.length + ' item' + (dn.length===1?'':'s') + (dn[0] && dn[0].question ? ': \u201c' + _h(_firstSentence(String(dn[0].question)).slice(0,110)) + '\u201d' : '') + '</span></summary><ol>'
+              + dn.map(function(d) {
+                  return '<li><strong>' + _h(d.question || '') + '</strong>'
+                    + (d.context ? '<div class="muted small">' + _multiline(d.context) + '</div>' : '')
+                    + '</li>';
+                }).join('') + '</ol></details>';
           })()
 
       // ── LAYER 2: SCIENTIFIC ARGUMENT ───────────────────────────────────
@@ -7505,7 +7512,7 @@
                 kf = sa.key_figures || [], cav = sa.caveats || [];
             if (!sa.main_claim && !ef.length && !ea.length) return '';
             function _li(x) { return '<li>' + _multiline(typeof x === 'string' ? x : (x.text || JSON.stringify(x))) + '</li>'; }
-            var h = '<section id="scientific-argument"><h2>Scientific argument</h2>';
+            var h = '<details id="scientific-argument" class="report-fold"><summary>Scientific argument' + (sa.main_claim ? ' <span class="muted small">\u2014 ' + _h(_firstSentence(String(sa.main_claim)).slice(0,130)) + '</span>' : '') + '</summary>';
             if (sa.main_claim)
               h += '<p><strong>Main claim.</strong> ' + _multiline(sa.main_claim) + '</p>';
             if (ef.length || ea.length) {
@@ -7520,7 +7527,7 @@
               }).join('') + '</ul>';
             if (cav.length)
               h += '<h3>Caveats</h3><ul>' + cav.map(_li).join('') + '</ul>';
-            return h + '</section>';
+            return h + '</details>';
           })()
 
       // Planning-phase banner: any study that has not yet produced runs
@@ -7551,16 +7558,13 @@
           })()
 
       +   ((iset.biological_story || '').trim()
-          ? '<div class="investigation-biology-story">'
-            + '<h2 style="margin:0 0 8px 0;font-size:0.85em;text-transform:uppercase;letter-spacing:0.05em;color:#075985;font-weight:600;border:none;padding:0">Biology — the mechanism this investigation models</h2>'
-            + '<p class="biology-prose">' + _multiline(iset.biological_story) + '</p>'
-            + '</div>'
+          ? '<details class="report-fold">'
+            + '<summary>Biology — the mechanism this investigation models' + ' <span class="muted small">\u2014 ' + _h(_firstSentence(String(iset.biological_story || '')).slice(0,130)) + '</span>' + '</summary>'
+            + '<p style="margin:0">' + _multiline(iset.biological_story) + '</p>'
+            + '</details>'
           : '')
 
-      +   '<h2 id="overview">Overview</h2>'
-      +   (iset.question   ? '<p><strong>Question.</strong> '   + _multiline(iset.question)   + '</p>' : '')
-      +   (iset.hypothesis ? '<p><strong>Hypothesis.</strong> ' + _multiline(iset.hypothesis) + '</p>' : '')
-      +   (iset.description ? '<div class="description"><p>' + _multiline(iset.description) + '</p></div>' : '')
+      +   ''
 
       /* Removed: top-of-report "Acceptance criteria" section.
          Per-study behavior_tests + conclusion_verdicts (the v4 way
@@ -7568,25 +7572,6 @@
          this investigation to be considered complete." The top-of-
          report ordered list of acceptance criteria duplicated that
          signal in a less-actionable form. */
-
-      +   '<h2 id="how-to-read">How to read this report</h2>'
-      +   '<p>Each section below is one study, '
-      +     (hasDag
-        ? 'ordered by dependency (roots first): a downstream study assumes the studies it depends on have passed, so reading top-down keeps the context intact.'
-        : 'listed in the order declared in the investigation.')
-      +   ' Each study presents these parts (sections with no content are omitted):</p>'
-      +   '<ul>'
-      +     '<li><strong>Question</strong> — what this study is asking, and why.</li>'
-      +     (hasAssumptions
-        ? '<li><strong>Assumptions</strong> — what the study takes as given, cited to the literature where applicable.</li>'
-        : '')
-      +     '<li><strong>Conditions</strong> — the experimental setup: <em>baseline</em> (the reference composite), <em>variants</em> (parameter perturbations), and <em>model settings</em> (any parameters gated on human input before a run).</li>'
-      +     '<li><strong>Tests</strong> — pass/fail criteria, each with a measure path and a comparison op. Charts inline below show the observable over the run; once tests are evaluated, each maps to a row in the gate decision.</li>'
-      +     '<li><strong>Status</strong> — shown as a phase badge plus per-axis status (design, implementation, simulation, evaluation, gate, expert review). The headline pill is the gate status when set; legacy single-keyword status is shown as a fallback.</li>'
-      +   '</ul>'
-      +   '<p>Supporting detail — <em>Model change</em>, <em>Implementation requirements</em>, <em>Follow-up studies</em>, <em>Limitations</em>, <em>References</em> — appears below each study when present, inside collapsible <em>Technical details</em> blocks. Open them when you need file paths, parameter names, or citations.</p>'
-      +   '<p class="muted small">Chart sourcing: charts are rendered from the study\'s latest <code>runs.db</code>. A study that has not run yet shows the workspace pre-execution baseline as a labelled "before" reference, and an auto-discovered chart that predates the latest run is flagged as possibly stale rather than hidden.</p>'
-      +   '<p class="muted small">Want to leave inline feedback? Click the <strong>💬</strong> icon next to any section. "Generate feedback report" (bottom-right) packages every annotation into a single yaml file that comes back via <code>pbg-feedback-import</code>.</p>'
 
       +   '<h2 id="studies-heading">Studies' + (hasDag ? ' (dependency order)' : '') + '</h2>'
       +   '<p class="muted small">Each study is collapsed to a one-glance control panel — scan top to bottom, then click any panel to expand its full detail.</p>'
@@ -7607,6 +7592,10 @@
       +         'if(ex)ex.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();setAll(true);});'
       +         'if(co)co.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();setAll(false);});'
       +       '}'
+      +       'document.addEventListener("click",function(e){'
+      +         'var t=e.target;var h=t&&t.closest?t.closest(".sn-collapse-hint,.sp-collapse-hint"):null;'
+      +         'if(h){var d=h.closest("details.study-fold");if(d){d.open=false;d.scrollIntoView({behavior:"smooth",block:"start"});}e.preventDefault();e.stopPropagation();}'
+      +       '});'
       +       'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",wire);}else{wire();}'
       +     '})();</script>'
       +   '</div>'
@@ -7741,7 +7730,7 @@
       +   'var INV=' + JSON.stringify(invName) + ';'
       +   'var REPORT_ID=' + JSON.stringify(reportId || '') + ';'
       +   'var KEY="v2ecoli_feedback_"+INV+(REPORT_ID?("_"+REPORT_ID):"");'
-      +   'var ID_PATTERNS=[/^study-/,/^finding-/,/^acceptance$/,/^references$/,/^how-to-read$/,/^studies-heading$/];'
+      +   'var ID_PATTERNS=[/^study-/,/^finding-/,/^acceptance$/,/^references$/,/^studies-heading$/];'
       +   'var openEd=null;'
       +   'var memStore={};'
       +   'function safeGet(k){try{var v=(typeof localStorage!=="undefined")?localStorage.getItem(k):null;return (v==null?memStore[k]:v)||"";}catch(e){return memStore[k]||"";}}'
@@ -8033,7 +8022,10 @@
     // under the "Studies" rail-section label — no redundant group header.
     if (groups.length === 1 && groups[0].name !== '__ungrouped__') {
       var g = groups[0];
-      host.innerHTML = g.studies.map(function(s) { return _railStudyItem(s); }).join('');
+      var _iset = (window._isetIndex || []).filter(function(i){ return i.name === g.name; })[0] || {};
+      host.innerHTML = '<div class="rail-iset-name" title="' + _esc(_iset.title || g.name) + '">'
+        + _esc(_iset.title || g.name) + '</div>'
+        + g.studies.map(function(s) { return _railStudyItem(s); }).join('');
       return;
     }
 

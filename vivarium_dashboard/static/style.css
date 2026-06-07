@@ -1989,3 +1989,6 @@ details.inv-how-to-read[open] > summary, details.inv-bio-story[open] > summary {
 details.overview-section > summary{ cursor:pointer; list-style-position:outside; }
 details.overview-section > summary.overview-label{ margin-bottom:0; }
 details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
+
+/* Investigation name above its studies in the left rail */
+.rail-iset-name{ padding:2px 14px 6px; font-size:0.82em; font-weight:600; color:#4338ca; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
