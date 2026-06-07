@@ -4454,121 +4454,20 @@
       byDepth[d].sort(function(a, b) { return a.name.localeCompare(b.name); });
     });
 
-    // Layout constants — horizontal orientation (depth flows left→right).
-    // Narrow cards in a left→right chain (discourse-graph nodes).
-    var CARD_W = 196, CARD_H = 176;
-    var X_GAP = 64,   Y_GAP = 24;
-    var PAD_X = 24,   PAD_Y = 16;
-
-    // Compute each card's (x, y): x = depth (left→right), y = within-depth slot.
+    // Horizontal layout (depth flows left->right). Card HEIGHT is NOT fixed:
+    // each card grows to fit its full text. We render once, measure each card,
+    // then stack + center the columns by the measured heights (two passes) so
+    // nothing is clipped.
+    var CARD_W = 210;
+    var X_GAP = 64, Y_GAP = 22;
+    var PAD_X = 24, PAD_Y = 16;
+    var svgNS = 'http://www.w3.org/2000/svg';
     var pos = {};
     var depths = Object.keys(byDepth).map(Number).sort(function(a, b) { return a - b; });
-    var maxSlot = 0;
-    depths.forEach(function(d) {
-      byDepth[d].forEach(function(s, i) {
-        pos[s.name] = {
-          x: PAD_X + d * (CARD_W + X_GAP),
-          y: PAD_Y + i * (CARD_H + Y_GAP),
-          depth: d, slot: i,
-        };
-        if (i > maxSlot) maxSlot = i;
-      });
-    });
 
-    // Center each depth column vertically: compute final canvasH first.
-    var canvasH = Math.max(
-      PAD_Y * 2 + (maxSlot + 1) * CARD_H + maxSlot * Y_GAP,
-      360
-    );
-    depths.forEach(function(d) {
-      var colSize = byDepth[d].length;
-      var colHeight = colSize * CARD_H + (colSize - 1) * Y_GAP;
-      var colOffset = Math.max(PAD_Y, (canvasH - colHeight) / 2);
-      byDepth[d].forEach(function(s, i) {
-        pos[s.name].y = colOffset + i * (CARD_H + Y_GAP);
-      });
-    });
-
-    var canvasW = PAD_X * 2 + (depths.length > 0 ? depths[depths.length - 1] : 0) * (CARD_W + X_GAP) + CARD_W;
-
-    nodesHost.style.width = canvasW + 'px';
-    nodesHost.style.height = canvasH + 'px';
-    edgesSvg.setAttribute('width', canvasW);
-    edgesSvg.setAttribute('height', canvasH);
-    edgesSvg.style.width = canvasW + 'px';
-    edgesSvg.style.height = canvasH + 'px';
-    // Size the shell to fit its content so the OUTER page scrolls instead
-    // of creating a nested scrollbar inside the panel.
-    var shellSize = document.getElementById('investigation-dag-shell');
-    if (shellSize) shellSize.style.height = canvasH + 'px';
-
-    // Marker for arrowheads (defined once).
-    var svgNS = 'http://www.w3.org/2000/svg';
-    edgesSvg.innerHTML =
-      '<defs><marker id="dag-arrowhead" viewBox="0 0 10 10" refX="9" refY="5" ' +
-      'markerWidth="7" markerHeight="7" orient="auto-start-reverse">' +
-      '<path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>';
-
-    // Render edges (behind cards) — left-of-child ← right-of-parent.
+    // -- Pass 1: build every card at its column x (top TBD), append, measure --
     studies.forEach(function(s) {
-      (s.parent_studies || []).forEach(function(p) {
-        var pn = p.study || p;
-        if (!pos[pn] || !pos[s.name]) return;
-        var x1 = pos[pn].x + CARD_W;
-        var y1 = pos[pn].y + CARD_H / 2;
-        var x2 = pos[s.name].x;
-        var y2 = pos[s.name].y + CARD_H / 2;
-        var dx = Math.max(28, (x2 - x1) / 2);
-        var path = document.createElementNS(svgNS, 'path');
-        path.setAttribute('d', 'M ' + x1 + ' ' + y1 +
-                              ' C ' + (x1 + dx) + ' ' + y1 +
-                              ', ' + (x2 - dx) + ' ' + y2 +
-                              ', ' + x2 + ' ' + y2);
-        path.setAttribute('fill', 'none');
-        path.setAttribute('stroke', '#94a3b8');
-        path.setAttribute('stroke-width', '1.5');
-        path.setAttribute('marker-end', 'url(#dag-arrowhead)');
-        edgesSvg.appendChild(path);
-
-        // Discourse relation on the edge: authored `relation:` or "leads to".
-        // Regulatory/refuting links render dashed.
-        var cond = (p.relation || 'leads to');
-        if (cond === 'regulatory' || cond === 'refutes') path.setAttribute('stroke-dasharray', '5 3');
-        var midX = (x1 + x2) / 2;
-        var midY = (y1 + y2) / 2 - 6;
-        var label = document.createElementNS(svgNS, 'text');
-        label.setAttribute('x', midX);
-        label.setAttribute('y', midY);
-        label.setAttribute('text-anchor', 'middle');
-        label.setAttribute('font-size', '10');
-        label.setAttribute('fill', '#94a3b8');
-        label.textContent = cond;
-        edgesSvg.appendChild(label);
-      });
-    });
-
-    // Render nodes (study cards).
-    studies.forEach(function(s) {
-      var p = pos[s.name];
-      // Prefer the server-derived `effective_status` (rolls up declared
-      // status + run-count signal); fall back to the raw author-declared
-      // `status` for back-compat with older servers.
       var liveStatus = s.effective_status || s.status || 'planned';
-      var statusColor = ({
-        planned:    '#94a3b8',
-        planning:   '#94a3b8',
-        running:    '#3b82f6',
-        in_progress:'#3b82f6',
-        ran:        '#10b981',
-        complete:   '#059669',
-        failed:     '#dc2626',
-        invalid:    '#dc2626',
-      })[liveStatus] || '#94a3b8';
-
-      // Discourse-graph node: a knowledge-producing operation framed as
-      //   Question (asks) → Evidence (finds) → Confidence.
-      // Confidence is an authored override (`confidence:`) or derived from the
-      // 6-axis status; the claim is an authored `claim:` or the top finding.
       var confidence = s.confidence || (function(st) {
         if (st === 'completed' || st === 'complete' || st === 'ran') return 'Accepted';
         if (st === 'in_progress' || st === 'running') return 'Investigating';
@@ -4584,26 +4483,26 @@
       var followUps = s.follow_up_studies || [];
 
       // Single display name everywhere: authored title:, else the shared
-      // _humanizeStudyName derivation (same as the control panel + study page).
+      // _humanizeStudyName derivation (same as control panel + study page).
       var prettyTitle = s.title || _humanizeStudyName(s.name).title;
+      // Show the FULL question + claim (no truncation) — the card grows to fit.
       var asks = (s.question || '').replace(/\s+/g, ' ').split(/[.?]/)[0].trim();
-      if (asks.length > 84) asks = asks.slice(0, 81).replace(/\s+\S*$/, '') + '…';
       var findings = s.findings || [];
       var claim = (s.claim ||
         (findings[0] && (findings[0].summary || findings[0].statement || findings[0].id)) || ''
       ).replace(/\s+/g, ' ').trim();
-      if (claim.length > 132) claim = claim.slice(0, 129).replace(/\s+\S*$/, '') + '…';
       var moreN = findings.length > 1 ? findings.length - 1 : 0;
 
       var node = document.createElement('div');
       node.className = 'iset-dag-node';
       node.onclick = function() { _openStudyInsideInvestigation(s.name); };
       node.title = s.name + ' — ' + confidence;
+      var x = PAD_X + depth[s.name] * (CARD_W + X_GAP);
       node.style.cssText =
-        'position:absolute;left:' + p.x + 'px;top:' + p.y + 'px;' +
-        'width:' + CARD_W + 'px;height:' + CARD_H + 'px;' +
+        'position:absolute;left:' + x + 'px;top:0px;' +
+        'width:' + CARD_W + 'px;' +
         'background:#fff;border:1px solid #e5e7eb;border-top:3px solid ' + ss.color + ';' +
-        'border-radius:8px;padding:9px 11px;cursor:pointer;box-sizing:border-box;overflow:hidden;' +
+        'border-radius:8px;padding:10px 12px;cursor:pointer;box-sizing:border-box;' +
         'box-shadow:0 1px 2px rgba(0,0,0,0.05);transition:box-shadow 0.1s,border-color 0.1s;';
 
       var followUpsChip = '';
@@ -4611,29 +4510,98 @@
         followUpsChip =
           '<button class="dag-followups-btn" ' +
           'onclick="event.stopPropagation(); _openDagFollowupsPopover(\'' + _esc(s.name) + '\', this)" ' +
-          'style="margin-top:6px;font-size:0.68em;padding:2px 7px;border:1px solid #10b981;background:#d1fae5;color:#065f46;border-radius:9999px;cursor:pointer">' +
+          'style="margin-top:8px;font-size:0.68em;padding:2px 7px;border:1px solid #10b981;background:#d1fae5;color:#065f46;border-radius:9999px;cursor:pointer">' +
           '▸ ' + followUps.length + ' follow-up' + (followUps.length === 1 ? '' : 's') +
           '</button>';
       }
       node.innerHTML =
         '<div style="display:flex;align-items:flex-start;gap:6px">' +
           '<span style="color:' + ss.color + ';font-size:1.05em;line-height:1.1;flex:none">' + ss.icon + '</span>' +
-          '<strong style="font-size:0.85em;line-height:1.2;color:#1e293b;flex:1;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden" title="' + _esc(prettyTitle) + '">' + _esc(prettyTitle) + '</strong>' +
+          '<strong style="font-size:0.85em;line-height:1.25;color:#1e293b;flex:1">' + _esc(prettyTitle) + '</strong>' +
           '<span style="font-size:0.62em;font-weight:700;color:' + ss.color + ';white-space:nowrap;margin-top:1px">' + _esc(confidence) + '</span>' +
         '</div>' +
         (asks
-          ? '<div style="font-size:0.72em;margin-top:6px;line-height:1.3;color:#64748b">' +
+          ? '<div style="font-size:0.72em;margin-top:7px;line-height:1.35;color:#64748b">' +
               '<span style="font-weight:600;color:#475569">Asks:</span> ' + _esc(asks) + '</div>'
           : '') +
-        '<div style="font-size:0.72em;margin-top:5px;line-height:1.3;color:#64748b">' +
+        '<div style="font-size:0.72em;margin-top:5px;line-height:1.35;color:#64748b">' +
           '<span style="font-weight:600;color:#475569">Finds:</span> ' +
           (claim ? _esc(claim) : '<em style="color:#94a3b8">pending evidence</em>') +
           (moreN ? ' <span style="color:#94a3b8">+' + moreN + ' more</span>' : '') +
         '</div>' +
         followUpsChip;
-      // Stash follow-ups on the node for the popover lookup.
       node._followUps = followUps;
       nodesHost.appendChild(node);
+      pos[s.name] = { x: x, node: node, depth: depth[s.name] };
+    });
+
+    // Measure now that content is in the DOM (container is already visible).
+    studies.forEach(function(s) { pos[s.name].h = pos[s.name].node.offsetHeight || 120; });
+
+    // -- Pass 2: stack each column vertically by measured height, then center --
+    var colTotals = {};
+    depths.forEach(function(d) {
+      var sum = 0;
+      byDepth[d].forEach(function(s) { sum += pos[s.name].h; });
+      colTotals[d] = sum + Math.max(0, byDepth[d].length - 1) * Y_GAP;
+    });
+    var maxCol = 0;
+    depths.forEach(function(d) { if (colTotals[d] > maxCol) maxCol = colTotals[d]; });
+    var canvasH = Math.max(PAD_Y * 2 + maxCol, 180);
+    depths.forEach(function(d) {
+      var yc = PAD_Y + Math.max(0, (canvasH - PAD_Y * 2 - colTotals[d]) / 2);
+      byDepth[d].forEach(function(s) {
+        pos[s.name].y = yc;
+        pos[s.name].node.style.top = yc + 'px';
+        yc += pos[s.name].h + Y_GAP;
+      });
+    });
+    var canvasW = PAD_X * 2 + (depths.length ? depths[depths.length - 1] : 0) * (CARD_W + X_GAP) + CARD_W;
+
+    nodesHost.style.width = canvasW + 'px';
+    nodesHost.style.height = canvasH + 'px';
+    edgesSvg.setAttribute('width', canvasW);
+    edgesSvg.setAttribute('height', canvasH);
+    edgesSvg.style.width = canvasW + 'px';
+    edgesSvg.style.height = canvasH + 'px';
+    var shellSize = document.getElementById('investigation-dag-shell');
+    if (shellSize) shellSize.style.height = canvasH + 'px';
+
+    // Edges (drawn after positions are known), using measured heights.
+    edgesSvg.innerHTML =
+      '<defs><marker id="dag-arrowhead" viewBox="0 0 10 10" refX="9" refY="5" ' +
+      'markerWidth="7" markerHeight="7" orient="auto-start-reverse">' +
+      '<path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>';
+    studies.forEach(function(s) {
+      (s.parent_studies || []).forEach(function(p) {
+        var pn = p.study || p;
+        if (!pos[pn] || !pos[s.name]) return;
+        var x1 = pos[pn].x + CARD_W;
+        var y1 = pos[pn].y + pos[pn].h / 2;
+        var x2 = pos[s.name].x;
+        var y2 = pos[s.name].y + pos[s.name].h / 2;
+        var dx = Math.max(28, (x2 - x1) / 2);
+        var path = document.createElementNS(svgNS, 'path');
+        path.setAttribute('d', 'M ' + x1 + ' ' + y1 +
+                              ' C ' + (x1 + dx) + ' ' + y1 +
+                              ', ' + (x2 - dx) + ' ' + y2 +
+                              ', ' + x2 + ' ' + y2);
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', '#94a3b8');
+        path.setAttribute('stroke-width', '1.5');
+        path.setAttribute('marker-end', 'url(#dag-arrowhead)');
+        edgesSvg.appendChild(path);
+        var cond = (p.relation || 'leads to');
+        if (cond === 'regulatory' || cond === 'refutes') path.setAttribute('stroke-dasharray', '5 3');
+        var label = document.createElementNS(svgNS, 'text');
+        label.setAttribute('x', (x1 + x2) / 2);
+        label.setAttribute('y', (y1 + y2) / 2 - 6);
+        label.setAttribute('text-anchor', 'middle');
+        label.setAttribute('font-size', '10');
+        label.setAttribute('fill', '#94a3b8');
+        label.textContent = cond;
+        edgesSvg.appendChild(label);
+      });
     });
 
     // Auto-scroll the shell so the top of the DAG is in view.
@@ -4660,7 +4628,7 @@
         _lg('#16a34a', '✓', 'Accepted') + _lg('#ca8a04', '◐', 'Investigating') +
         _lg('#2563eb', '○', 'Planned') + _lg('#dc2626', '✗', 'Refuted') +
         '<span style="margin:0 14px 0 6px"><span style="color:#94a3b8">→</span> leads to</span>' +
-        '<span><span style="color:#94a3b8;letter-spacing:-1px">⤍</span> regulatory</span>';
+        '<span><span style="color:#94a3b8;letter-spacing:-1px">⤄</span> regulatory</span>';
     }
   }
   window._renderInvestigationDag = _renderInvestigationDag;
