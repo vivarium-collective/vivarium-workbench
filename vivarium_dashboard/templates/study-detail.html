@@ -365,8 +365,8 @@
     {% endif %}
 
     {% if study.purpose %}
-    <div class="overview-section">
-      <h2 class="overview-label">Purpose</h2>
+    <details class="overview-section study-fold">
+      <summary class="overview-label">Purpose</summary>
       {% if study.purpose.question %}
       <div class="purpose-callout" style="background:#eff6ff;border-left:4px solid #3b82f6">
         <strong>Question.</strong> {{ study.purpose.question }}
@@ -382,7 +382,7 @@
         <strong>Expected outcome.</strong> {{ study.purpose.expected_outcome }}
       </div>
       {% endif %}
-    </div>
+    </details>
     {% else %}
     {# Fallback: old narrative fields #}
     {% if study.question %}
@@ -486,8 +486,8 @@
     {% endif %}
 
     {% if study.expert_decisions_needed %}
-    <div class="overview-section pre-run-expert-review">
-      <h2 class="overview-label">Pre-run expert review</h2>
+    <details class="overview-section pre-run-expert-review study-fold">
+      <summary class="overview-label">Pre-run expert review</summary>
       <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
         Open biological questions the planning is contingent on. A "wrong" answer here
         means a primary test threshold needs to change <em>before</em> the simulation
@@ -529,7 +529,7 @@
         </div>
         {% endfor %}
       </div>
-    </div>
+    </details>
     {% endif %}
 
     {% if study.limitations %}
