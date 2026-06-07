@@ -52,6 +52,11 @@ def chart_freshness(study_dir: Path, entry: dict, latest: dict | None) -> str:
     meta = read_meta(chart)
     if meta is None:
         return STALE
+    pinned = entry.get("source_run")
+    if pinned:
+        # Multi-run study: chart anchored to a specific run. Fresh iff it was
+        # last rendered from THAT run, regardless of which run is newest.
+        return FRESH if meta.get("source_run_id") == pinned else STALE
     if not latest:
         return STALE
     if meta.get("source_run_id") != latest.get("run_id"):
