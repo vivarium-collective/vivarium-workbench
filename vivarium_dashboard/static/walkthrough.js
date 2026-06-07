@@ -5238,7 +5238,7 @@
       var nEmbedsForStudy = (embedsByStudy[s.name] || []).length;
       if (nEmbedsForStudy)
         links.push('<a href="#study-' + slug + '-embeds">Visualizations <span class="sn-count">' + nEmbedsForStudy + '</span></a>');
-      if (findings.length)    links.push('<a href="#' + sid.takeaways + '">Key takeaways <span class="sn-count">' + findings.length + '</span></a>');
+      if (findings.length)    links.push('<a href="#' + sid.findings + '">Findings <span class="sn-count">' + findings.length + '</span></a>');
       if (sims.length)        links.push('<a href="#' + sid.sims + '">What we ran <span class="sn-count">' + sims.length + '</span></a>');
       if (charts.length)      links.push('<a href="#' + sid.charts + '">Charts <span class="sn-count">' + charts.length + '</span></a>');
       if (readouts.length)    links.push('<a href="#' + sid.readouts + '">What we measured <span class="sn-count">' + readouts.length + '</span></a>');
@@ -5438,11 +5438,7 @@
                + '</div>';
         }
 
-        takeawaysHtml = '<div id="' + sid.takeaways + '" class="takeaways-section">'
-          + '<h3>Key takeaways</h3>'
-          + '<ul class="takeaway-list">' + takeawayItems + '</ul>'
-          + '</div>'
-          + '<div id="' + sid.findings + '" class="findings-section">'
+        takeawaysHtml = '<div id="' + sid.findings + '" class="findings-section">'
           + '<h3>Detailed findings</h3>'
           + Object.keys(groups).filter(function(k){return groups[k].length;}).map(function(k) {
               return '<h4 class="findings-group-header">' + kindHeader[k] + ' <span class="muted small">(' + groups[k].length + ')</span></h4>'
