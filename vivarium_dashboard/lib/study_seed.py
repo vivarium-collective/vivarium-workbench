@@ -42,13 +42,43 @@ def _unique_dir(studies_root: Path, base: str) -> Path:
     raise RuntimeError(f"Could not find a unique slug for {base!r}")
 
 
+def _select_proposal(proposals: list, proposal_id, proposal_idx):
+    """Pick a followup_study_proposals entry by id (preferred) or index.
+
+    Returns ``(proposal_dict, idx)``. Raises IndexError/KeyError when the
+    selector doesn't resolve.
+    """
+    if proposal_id is not None and str(proposal_id) != "":
+        for i, p in enumerate(proposals):
+            if str(p.get("id")) == str(proposal_id):
+                return p, i
+        raise KeyError(f"no followup_study_proposal with id {proposal_id!r}")
+    if proposal_idx is None or proposal_idx < 0:
+        raise ValueError("proposal_id or a non-negative proposal_idx is required")
+    if proposal_idx >= len(proposals):
+        raise IndexError(f"proposal_idx {proposal_idx} out of range "
+                         f"(parent has {len(proposals)} followup proposals)")
+    return proposals[proposal_idx], proposal_idx
+
+
 def seed_followup_study(workspace: Path, parent_name: str,
-                        followup_idx: int) -> str:
-    """Create the child study.yaml and return its directory name."""
+                        followup_idx: int = -1, *,
+                        proposal_id=None, proposal_idx: int | None = None) -> str:
+    """Create the child study.yaml and return its directory name.
+
+    Two source forms are supported:
+
+    - **Legacy** ``follow_up_studies[followup_idx]`` — pass ``followup_idx``.
+    - **Richer** ``discovery_implications.followup_study_proposals`` — pass
+      ``proposal_id`` (preferred) or ``proposal_idx``. The child inherits the
+      proposal's title / study_type / target_mechanism_elements /
+      required_inputs and a ``parent_studies`` edge back to this study with
+      ``relation: leads-to``.
+
+    When a proposal selector is given it wins over ``followup_idx``.
+    """
     if not parent_name:
         raise ValueError("parent study name is required")
-    if followup_idx < 0:
-        raise ValueError("followup_idx must be non-negative")
 
     studies_root = WorkspacePaths.load(workspace).studies
     parent_dir = studies_root / parent_name
@@ -57,6 +87,18 @@ def seed_followup_study(workspace: Path, parent_name: str,
         raise FileNotFoundError(f"parent study not found: {parent_yaml}")
 
     parent_spec = yaml.safe_load(parent_yaml.read_text(encoding="utf-8")) or {}
+
+    # Decide which source we're seeding from. A proposal selector (id or idx)
+    # routes to the richer discovery_implications path.
+    using_proposal = (proposal_id is not None and str(proposal_id) != "") \
+        or (proposal_idx is not None)
+    if using_proposal:
+        return _seed_from_proposal(
+            workspace, parent_name, parent_spec, studies_root,
+            proposal_id=proposal_id, proposal_idx=proposal_idx)
+
+    if followup_idx < 0:
+        raise ValueError("followup_idx must be non-negative")
     follow_ups = parent_spec.get("follow_up_studies") or []
     if followup_idx >= len(follow_ups):
         raise IndexError(f"followup_idx {followup_idx} out of range "
@@ -204,6 +246,145 @@ def seed_followup_study(workspace: Path, parent_name: str,
     # in the dashboard's Investigations DAG view).
     _add_to_parent_investigations(workspace, parent_name, new_name)
 
+    return new_name
+
+
+def _seed_from_proposal(workspace: Path, parent_name: str, parent_spec: dict,
+                        studies_root: Path, *,
+                        proposal_id=None, proposal_idx: int | None = None) -> str:
+    """Seed a child study from a ``discovery_implications.followup_study_proposals``
+    entry. The child inherits the proposal's title / study_type /
+    target_mechanism_elements / required_inputs and a ``parent_studies`` edge
+    back to the parent with ``relation: leads-to``.
+    """
+    disc = parent_spec.get("discovery_implications") or {}
+    proposals = (disc.get("followup_study_proposals")
+                 if isinstance(disc, dict) else None) or []
+    if not proposals:
+        raise IndexError(
+            f"parent study {parent_name!r} has no "
+            "discovery_implications.followup_study_proposals")
+    proposal, idx = _select_proposal(proposals, proposal_id, proposal_idx)
+
+    title = (proposal.get("title") or "untitled follow-up proposal").strip()
+    study_type = proposal.get("study_type") or ""
+    targets = proposal.get("target_mechanism_elements") or []
+    required_inputs = proposal.get("required_inputs") or []
+
+    base_slug = _slugify(title)
+    parent_prefix_match = re.match(r"^([a-z]+-\d+)", parent_name)
+    if parent_prefix_match:
+        base_slug = f"{parent_prefix_match.group(1)}f-{base_slug}"
+    new_dir = _unique_dir(studies_root, base_slug)
+    new_name = new_dir.name
+    new_dir.mkdir(parents=True, exist_ok=False)
+
+    today = datetime.date.today().isoformat()
+    question = (proposal.get("proposed_experiment") or title).strip()
+    mechanism = (
+        f"Discovery-implications follow-up '{title}' (study_type: "
+        f"{study_type or 'unspecified'}). "
+        + (f"Targets mechanism elements: {', '.join(targets)}. " if targets else "")
+        + "Add concrete model_change details before moving past Design.").strip()
+    expected = (proposal.get("expected_information_gain")
+                and f"Expected information gain: {proposal['expected_information_gain']}."
+                or "TBD — populate before exiting Design phase.")
+
+    child_spec: dict = {
+        "schema_version": 4,
+        "name": new_name,
+        "created": today,
+        "status": "planned",
+        "phase": "Design",
+        "study_type": study_type or None,
+        "seeded_from": {
+            "parent": parent_name,
+            "source": "discovery_implications.followup_study_proposals",
+            "proposal_id": proposal.get("id"),
+            "proposal_idx": idx,
+            "proposal_title": title,
+            "source_trigger": proposal.get("source_trigger"),
+        },
+        "baseline": [{
+            "name": "baseline-placeholder",
+            "composite": "v2ecoli.composites.baseline.baseline",
+            "params": {"seed": 0, "cache_dir": "out/cache"},
+        }],
+        "purpose": {
+            "question": question,
+            "mechanism": mechanism,
+            "expected_outcome": expected,
+        },
+        "pipeline_gate": {
+            "prerequisites": [{"study": parent_name, "relation": "leads-to"}],
+            "enables": [],
+            "proceed_condition": "TBD — define before Simulate.",
+        },
+        "simulation_set": [],
+        "model_change": {
+            "base_model": "v2ecoli.composites.baseline.baseline",
+            "new_processes": [],
+            "new_state_variables": [],
+            "new_parameters": [],
+            "modified_processes": [],
+            "notes": "Populate during Build phase.",
+        },
+        "key_assumptions": (
+            [f"Targets mechanism element: {t}" for t in targets]
+            or ["TBD — list during Design phase."]
+        ),
+        "readouts": [],
+        "behavior_tests": [],
+        "implementation_requirements": [
+            {"requirement": f"Required input: {ri}"} for ri in required_inputs
+        ],
+        "limitations": ["TBD — fill before Decide phase."],
+        "bibliography": {
+            "expert": parent_spec.get("bibliography", {}).get("expert", []),
+            "bib_keys": [],
+        },
+        "conclusion": None,
+        # Edge back to the parent with the leads-to relation (also mirrored in
+        # pipeline_gate.prerequisites above — parent_studies is the field the
+        # dashboard DAG reads today).
+        "parent_studies": [{"study": parent_name, "relation": "leads-to"}],
+        "target_mechanism_elements": list(targets),
+        "required_inputs": list(required_inputs),
+        "tests": {"auto_discover": True, "data_source": "latest_run",
+                  "pytest_args": [], "last_results": None},
+    }
+    child_spec["report"] = {
+        "title": title,
+        "verdict": "not-yet-run",
+        "confidence": "low",
+        "evidence_quality": "aspirational",
+        "objective": question,
+        "conclusion": "",
+        "main_insight": "",
+        "caveat": "",
+        "key_metrics": [],
+    }
+    child_spec["study_card"] = {
+        "goal": title,
+        "mechanism": mechanism,
+        "why_before_next": "TBD — explain why this study unblocks downstream work.",
+        "expected_result": "",
+        "main_expert_question": "",
+    }
+
+    new_yaml = new_dir / "study.yaml"
+    header = (
+        f"# Auto-seeded {today} from {parent_name}'s "
+        f"discovery_implications.followup_study_proposals "
+        f"(id={proposal.get('id')!r}, idx={idx}; '{title}').\n"
+        f"# study_type: {study_type or '?'}. "
+        f"source_trigger: {proposal.get('source_trigger') or '?'}.\n"
+        "# schema v4 — fill the placeholder fields as the study matures.\n\n"
+    )
+    new_yaml.write_text(header + yaml.safe_dump(
+        child_spec, sort_keys=False, default_flow_style=False, allow_unicode=True))
+
+    _add_to_parent_investigations(workspace, parent_name, new_name)
     return new_name
 
 

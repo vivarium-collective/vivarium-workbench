@@ -10322,18 +10322,36 @@ if __name__ == "__main__":
         }, 200)
 
     def _post_study_seed_followup(self, body: dict):
-        """POST /api/study-seed-followup {parent, followup_idx} → seed child study.
+        """POST /api/study-seed-followup → seed a child study.
 
-        Reads parent study.yaml, picks ``follow_up_studies[followup_idx]``,
-        and writes a new ``studies/<new-name>/study.yaml`` whose Purpose +
-        Pipeline gate inherit context from the follow-up entry. The new
-        study comes up as ``phase: Design`` / ``status: planned`` and is
-        immediately visible in the dashboard's Investigations tab.
+        Two source forms:
+
+        - Legacy ``{parent, followup_idx}`` — seeds from
+          ``follow_up_studies[followup_idx]``.
+        - Richer ``{parent, proposal_id}`` or ``{parent, proposal_idx}`` —
+          seeds from ``discovery_implications.followup_study_proposals``,
+          inheriting the proposal's title / study_type /
+          target_mechanism_elements / required_inputs and a
+          ``parent_studies`` edge back with ``relation: leads-to``.
+
+        A proposal selector wins over ``followup_idx``. The new study comes
+        up as ``phase: Design`` / ``status: planned`` and is immediately
+        visible in the dashboard's Investigations tab.
         """
         from vivarium_dashboard.lib.study_seed import seed_followup_study
+        proposal_id = body.get("proposal_id")
+        proposal_idx = body.get("proposal_idx")
+        if proposal_idx is not None:
+            try:
+                proposal_idx = int(proposal_idx)
+            except (TypeError, ValueError):
+                return self._json({"error": "proposal_idx must be an integer"}, 400)
         try:
             new_name = seed_followup_study(
-                WORKSPACE, body.get("parent"), int(body.get("followup_idx", -1))
+                WORKSPACE, body.get("parent"),
+                int(body.get("followup_idx", -1)),
+                proposal_id=proposal_id,
+                proposal_idx=proposal_idx,
             )
         except FileNotFoundError as e:
             return self._json({"error": str(e)}, 404)
