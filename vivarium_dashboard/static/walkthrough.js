@@ -682,6 +682,109 @@
       }).join('') + '</ul>';
   }
 
+  // A small "+ Add" button that launches the investigation-scoped upload flow
+  // for the given category ('dataset' | 'reference' | 'expert').
+  function _inputsAddBtn(category) {
+    return '<button class="action-btn" style="font-size:0.78em;padding:1px 8px;' +
+      'font-weight:normal" onclick="_inputsAdd(\'' + category + '\')">+ Add</button>';
+  }
+
+  // Read a File object to pure base64 (sans data: prefix) and invoke cb.
+  function _inputsReadFileB64(file, cb) {
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      var dataUrl = ev.target.result;
+      var comma = dataUrl.indexOf(',');
+      cb(comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // POST an investigation-scoped input upload, then refresh the page.
+  function _inputsPost(endpoint, body) {
+    body = body || {};
+    var slug = window._currentIsetSlug || '';
+    if (slug) body.investigation = slug;
+    fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        if (!res.ok || (res.d && res.d.error)) {
+          alert('Upload failed: ' + ((res.d && res.d.error) || 'unknown error'));
+          return;
+        }
+        if (typeof _loadInputs === 'function') _loadInputs();
+      })
+      .catch(function (err) { alert('Upload failed: ' + String(err)); });
+  }
+
+  // Hidden file picker -> base64 -> cb({file_b64, filename}).
+  function _inputsPickFile(cb) {
+    var inp = document.createElement('input');
+    inp.type = 'file';
+    inp.style.display = 'none';
+    inp.onchange = function () {
+      if (inp.files && inp.files[0]) {
+        var f = inp.files[0];
+        _inputsReadFileB64(f, function (b64) { cb({ file_b64: b64, filename: f.name }); });
+      }
+      setTimeout(function () { if (inp.parentNode) inp.parentNode.removeChild(inp); }, 0);
+    };
+    document.body.appendChild(inp);
+    inp.click();
+  }
+
+  // Entry point for the "+ Add" buttons on the investigation inputs panel.
+  function _inputsAdd(category) {
+    var slug = window._currentIsetSlug || '';
+    if (!slug) { alert('No investigation loaded.'); return; }
+
+    if (category === 'dataset') {
+      var dsName = window.prompt('Dataset name?');
+      if (!dsName) return;
+      _inputsPickFile(function (picked) {
+        _inputsPost('/api/dataset', {
+          name: dsName, filename: picked.filename, file_b64: picked.file_b64
+        });
+      });
+      return;
+    }
+
+    if (category === 'expert') {
+      var edName = window.prompt('Expert-doc name?');
+      if (!edName) return;
+      _inputsPickFile(function (picked) {
+        _inputsPost('/api/expert-doc', {
+          name: edName, filename: picked.filename, file_b64: picked.file_b64
+        });
+      });
+      return;
+    }
+
+    if (category === 'reference') {
+      // PDF drop-and-go, or BibTeX paste.
+      var mode = window.prompt(
+        'Add reference — type "pdf" to upload a PDF, or "bibtex" to paste BibTeX:',
+        'bibtex');
+      if (mode == null) return;
+      mode = mode.trim().toLowerCase();
+      if (mode === 'pdf') {
+        _inputsPickFile(function (picked) {
+          _inputsPost('/api/reference-pdf', { pdf_b64: picked.file_b64 });
+        });
+      } else if (mode === 'bibtex') {
+        var bib = window.prompt('Paste a BibTeX entry:');
+        if (!bib || !bib.trim()) return;
+        _inputsPost('/api/reference-bibtex', { bibtex_text: bib.trim() });
+      }
+      return;
+    }
+  }
+  window._inputsAdd = _inputsAdd;
+
   function _renderInputs(el, data) {
     var inv = data.investigation || {};
     var glob = data.global || {};
@@ -701,11 +804,14 @@
         html += '<p class="muted" style="font-style:italic;font-size:0.85em">' +
           'migrating: showing repo-level inputs</p>';
       }
-      html += '<h4 style="margin:12px 0 4px">Datasets</h4>' +
+      html += '<h4 style="margin:12px 0 4px">Datasets ' +
+        _inputsAddBtn('dataset') + '</h4>' +
         _inputsDatasetsHtml(inv.datasets);
-      html += '<h4 style="margin:12px 0 4px">References</h4>' +
+      html += '<h4 style="margin:12px 0 4px">References ' +
+        _inputsAddBtn('reference') + '</h4>' +
         _inputsRefsHtml(inv.references);
-      html += '<h4 style="margin:12px 0 4px">Expert docs</h4>' +
+      html += '<h4 style="margin:12px 0 4px">Expert docs ' +
+        _inputsAddBtn('expert') + '</h4>' +
         _inputsExpertDocsHtml(inv.expert_docs);
     }
     html += '</div>';
