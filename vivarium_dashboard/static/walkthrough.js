@@ -7493,7 +7493,7 @@
             if (iset.hypothesis)
               h += '<p><strong>Hypothesis.</strong> ' + _multiline(iset.hypothesis) + '</p>';
             if (dn.length) {
-              h += '<details class="report-fold"><summary>Decisions needed from reviewers</summary><ol>'
+              h += '<details class="report-fold"><summary>Decisions needed from reviewers' + ' <span class="muted small">\u2014 ' + dn.length + ' item' + (dn.length===1?'':'s') + (dn[0] && dn[0].question ? ': \u201c' + _h(_firstSentence(String(dn[0].question)).slice(0,110)) + '\u201d' : '') + '</span></summary><ol>'
                  + dn.map(function(d) {
                      return '<li><strong>' + _h(d.question || '') + '</strong>'
                        + (d.context ? '<div class="muted small">' + _multiline(d.context) + '</div>' : '')
@@ -7512,7 +7512,7 @@
                 kf = sa.key_figures || [], cav = sa.caveats || [];
             if (!sa.main_claim && !ef.length && !ea.length) return '';
             function _li(x) { return '<li>' + _multiline(typeof x === 'string' ? x : (x.text || JSON.stringify(x))) + '</li>'; }
-            var h = '<details id="scientific-argument" class="report-fold"><summary>Scientific argument</summary>';
+            var h = '<details id="scientific-argument" class="report-fold"><summary>Scientific argument' + (sa.main_claim ? ' <span class="muted small">\u2014 ' + _h(_firstSentence(String(sa.main_claim)).slice(0,130)) + '</span>' : '') + '</summary>';
             if (sa.main_claim)
               h += '<p><strong>Main claim.</strong> ' + _multiline(sa.main_claim) + '</p>';
             if (ef.length || ea.length) {
@@ -7559,7 +7559,7 @@
 
       +   ((iset.biological_story || '').trim()
           ? '<details class="report-fold">'
-            + '<summary>Biology — the mechanism this investigation models</summary>'
+            + '<summary>Biology — the mechanism this investigation models' + ' <span class="muted small">\u2014 ' + _h(_firstSentence(String(iset.biological_story || '')).slice(0,130)) + '</span>' + '</summary>'
             + '<p style="margin:0">' + _multiline(iset.biological_story) + '</p>'
             + '</details>'
           : '')
