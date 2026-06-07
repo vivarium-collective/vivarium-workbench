@@ -1506,6 +1506,18 @@ def _inputs_payload(ws_root: Path) -> dict:
     return {"investigation": investigation, "global": global_block, "current": current}
 
 
+def _simulations_payload(ws_root: Path) -> dict:
+    """Pure seam backing ``GET /api/simulations``.
+
+    Returns every run across the workspace tagged investigation/study/emitter
+    (newest first) plus the current investigation slug (the investigation whose
+    slug matches the current git branch), so the SimulationsDB can default to
+    the loaded investigation.
+    """
+    from vivarium_dashboard.lib.runs_index import list_all_runs
+    return {"runs": list_all_runs(ws_root), "current": _current_branch_slug(ws_root)}
+
+
 def _set_investigation_status(ws_root: Path, inv: str, status: str) -> dict:
     """Write the ``status`` field into investigations/<inv>/investigation.yaml.
 
@@ -4909,6 +4921,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_study_bigraph_paths()
         if path_only == "/api/inputs":
             return self._get_inputs()
+        if path_only == "/api/simulations":
+            return self._get_simulations()
         if self.path.startswith("/api/iset-list"):
             return self._get_iset_list()
         if self.path.startswith("/api/iset/") and self.path.split("?", 1)[0].rstrip("/").endswith("/report"):
@@ -7919,6 +7933,11 @@ if __name__ == "__main__":
         """GET /api/inputs — loaded investigation's inputs (top) + repo-wide
         global inputs + current investigation slug."""
         return self._json(_inputs_payload(WORKSPACE), 200)
+
+    def _get_simulations(self):
+        """GET /api/simulations — global list of all runs tagged by
+        investigation/study/emitter + the current investigation slug."""
+        return self._json(_simulations_payload(WORKSPACE), 200)
 
     def _get_iset_report(self):
         """GET /api/iset/<slug>/report — serve the per-investigation report."""
