@@ -487,6 +487,50 @@ def test_iset_detail_multiaxis_status_partial(_ws):
 
 
 # ---------------------------------------------------------------------------
+# Part 4b: discovery_implications passthrough — alternate hypotheses,
+# mechanism-update proposals, and the richer followup_study_proposals must
+# surface on the iset detail so the study view + report can render them.
+# ---------------------------------------------------------------------------
+
+
+def test_iset_detail_surfaces_discovery_implications(_ws):
+    _write_iset(_ws, "inv", status="planning", studies=["s1"])
+    di = {
+        "resolved_uncertainties": ["init timing now bounded"],
+        "remaining_uncertainties": ["dnaA cooperativity"],
+        "alternate_hypotheses": [
+            {"id": "alt-1", "statement": "Titration sets timing",
+             "why_plausible": "matches replication data"},
+        ],
+        "mechanism_update_proposals": [
+            {"mechanism_node_or_edge": "dnaA->oriC",
+             "update_type": "strengthen", "rationale": "consistent",
+             "requires_expert_approval": True},
+        ],
+        "followup_study_proposals": [
+            {"id": "fup-1", "title": "Sweep dnaA copy number",
+             "study_type": "parameter_sweep", "source_trigger": "low_confidence",
+             "expected_information_gain": "high",
+             "proposed_experiment": "vary copy number 0.5x-2x"},
+        ],
+    }
+    _write_study_full(_ws, "s1", status="ran", discovery_implications=di)
+    resp, code = _build_iset_detail_for_test(_ws, "inv")
+    assert code == 200, resp
+    s = resp["studies"][0]
+    assert s["discovery_implications"] == di
+    assert s["discovery_implications"]["followup_study_proposals"][0]["id"] == "fup-1"
+
+
+def test_iset_detail_discovery_implications_absent_is_empty_dict(_ws):
+    _write_iset(_ws, "inv", status="planning", studies=["s1"])
+    _write_study(_ws, "s1", "planned")
+    resp, code = _build_iset_detail_for_test(_ws, "inv")
+    assert code == 200, resp
+    assert resp["studies"][0]["discovery_implications"] == {}
+
+
+# ---------------------------------------------------------------------------
 # Part 5: schema-drift defense — non-list acceptance_criteria / expert_docs
 # must degrade gracefully, not break report generation.
 #
