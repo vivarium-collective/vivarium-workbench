@@ -4010,7 +4010,12 @@
         if (storyBox && storyText) {
           var story = (d.biological_story || '').trim();
           if (story) {
-            storyText.textContent = story;
+            // Render as reflowing paragraphs (split on blank lines, collapse
+            // intra-paragraph hard newlines to spaces) so the text uses the full
+            // width instead of breaking at the YAML's source newlines.
+            storyText.innerHTML = story.split(/\n\s*\n/).map(function(para) {
+              return '<p>' + _esc(para.replace(/\s*\n\s*/g, ' ').trim()) + '</p>';
+            }).join('');
             storyBox.style.display = '';
           } else {
             storyText.textContent = '';
