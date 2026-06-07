@@ -460,6 +460,9 @@
     if (pageId === 'investigations') {
       _loadInvestigationSets();
     }
+    if (pageId === 'workspace-inputs') {
+      _loadInputs();
+    }
   }
 
   function _initMenuNav() {
@@ -511,6 +514,119 @@
 
   window._switchPage = _switchPage;
   window._initMenuNav = _initMenuNav;
+
+  // -------------------------------------------------------------------------
+  // Inputs tab — investigation-first render from /api/inputs
+  // -------------------------------------------------------------------------
+  // Mirrors the SimulationsDB current-investigation-first layout: the loaded
+  // investigation's owned inputs render at the TOP, then repo-wide / shared
+  // data sources below. Replaces the server-rendered dataset/reference lists
+  // as the single source of truth (the management panels below the container
+  // keep the add/edit actions + bib explorer).
+  function _loadInputs() {
+    var el = document.getElementById('inputs-api-render');
+    if (!el) return;
+    el.innerHTML = '<p class="muted" style="font-style:italic">Loading inputs…</p>';
+    var _slug = window._currentIsetSlug || '';
+    var _url = '/api/inputs' + (_slug ? ('?investigation=' + encodeURIComponent(_slug)) : '');
+    fetch(_url)
+      .then(function (r) { return r.json(); })
+      .then(function (data) { _renderInputs(el, data || {}); })
+      .catch(function (err) {
+        el.innerHTML = '<p style="color:#c00">Could not load inputs: ' +
+          _esc(String(err)) +
+          ' <button class="action-btn" onclick="_loadInputs()">Retry</button></p>';
+      });
+  }
+  window._loadInputs = _loadInputs;
+
+  // A reference entry is either a bare bib key (investigation.references) or a
+  // parsed bib-entry dict (global.references). Normalize to a display label.
+  function _inputsRefLabel(ref) {
+    if (ref == null) return '';
+    if (typeof ref === 'string') return ref;
+    return ref.key || ref.bib_key || ref.name || ref.title || JSON.stringify(ref);
+  }
+
+  function _inputsNone() {
+    return '<p class="muted" style="font-style:italic;margin:4px 0">none</p>';
+  }
+
+  // Render a datasets list (name + path) as a compact table, or a "none" line.
+  function _inputsDatasetsHtml(datasets) {
+    if (!datasets || !datasets.length) return _inputsNone();
+    var rows = datasets.map(function (ds) {
+      ds = ds || {};
+      var name = _esc(ds.name || ds.path || '(unnamed)');
+      var path = ds.path || ds.url || '';
+      return '<tr><td><code>' + name + '</code></td><td><small class="muted">' +
+        _esc(path) + '</small></td></tr>';
+    }).join('');
+    return '<table><thead><tr><th>Name</th><th>Source</th></tr></thead><tbody>' +
+      rows + '</tbody></table>';
+  }
+
+  // Render references as a row of bib-key chips, or a "none" line.
+  function _inputsRefsHtml(refs) {
+    if (!refs || !refs.length) return _inputsNone();
+    return '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
+      refs.map(function (ref) {
+        return '<code style="background:#f1f5f9;padding:2px 8px;border-radius:9999px;' +
+          'font-size:0.82em">' + _esc(_inputsRefLabel(ref)) + '</code>';
+      }).join('') + '</div>';
+  }
+
+  // Render expert docs (name + optional path), or a "none" line.
+  function _inputsExpertDocsHtml(docs) {
+    if (!docs || !docs.length) return _inputsNone();
+    return '<ul style="margin:4px 0 0 18px;padding:0">' +
+      docs.map(function (doc) {
+        doc = doc || {};
+        var name = _esc(doc.name || doc.path || '(unnamed)');
+        var path = doc.path ? ' <small class="muted">' + _esc(doc.path) + '</small>' : '';
+        return '<li><strong>' + name + '</strong>' + path + '</li>';
+      }).join('') + '</ul>';
+  }
+
+  function _renderInputs(el, data) {
+    var inv = data.investigation || {};
+    var glob = data.global || {};
+    var current = data.current || null;
+
+    var html = '';
+
+    // --- This investigation's inputs (top) ---
+    var invHeading = 'This investigation’s inputs';
+    if (current) invHeading += ' — ' + _esc(current);
+    html += '<div class="panel">';
+    html += '<h3>' + invHeading + '</h3>';
+    if (!current) {
+      html += '<p class="muted" style="font-style:italic">No investigation loaded.</p>';
+    } else {
+      if (inv._repo_fallback) {
+        html += '<p class="muted" style="font-style:italic;font-size:0.85em">' +
+          'migrating: showing repo-level inputs</p>';
+      }
+      html += '<h4 style="margin:12px 0 4px">Datasets</h4>' +
+        _inputsDatasetsHtml(inv.datasets);
+      html += '<h4 style="margin:12px 0 4px">References</h4>' +
+        _inputsRefsHtml(inv.references);
+      html += '<h4 style="margin:12px 0 4px">Expert docs</h4>' +
+        _inputsExpertDocsHtml(inv.expert_docs);
+    }
+    html += '</div>';
+
+    // --- Repo-wide data sources (below) ---
+    html += '<div class="panel">';
+    html += '<h3>Repo-wide data sources</h3>';
+    html += '<h4 style="margin:12px 0 4px">Datasets</h4>' +
+      _inputsDatasetsHtml(glob.datasets);
+    html += '<h4 style="margin:12px 0 4px">References</h4>' +
+      _inputsRefsHtml(glob.references);
+    html += '</div>';
+
+    el.innerHTML = html;
+  }
 
   // -------------------------------------------------------------------------
   // Registry tab (v0.3.6)
@@ -10719,45 +10835,40 @@
       _escSim(status || '?') + '</span>';
   }
 
-  function _simEmitterChip(emitter) {
-    // Which emitter persisted the run: xarray (zarr) / parquet / sqlite.
-    var colors = {
-      xarray:  ['#ede9fe', '#5b21b6'],
-      parquet: ['#fef3c7', '#92400e'],
-      sqlite:  ['#e0f2fe', '#075985'],
-    };
-    var e = (emitter || '').toLowerCase();
-    var c = colors[e] || ['#e5e7eb', '#374151'];
-    return '<span title="emitter / persistence format" style="background:' + c[0] +
-      '; color:' + c[1] + '; padding:2px 8px; border-radius:10px; font-size:12px;">' +
-      _escSim(emitter || '—') + '</span>';
+  // Emitter-type pill, keyed by the API's emitter_type ("SQLite"/"Parquet"/
+  // "XArray"). Colors live in CSS classes emitter-sqlite/parquet/xarray.
+  function _simEmitterPill(emitterType) {
+    var t = (emitterType || 'SQLite');
+    var cls = 'emitter-' + t.toLowerCase();
+    return '<span class="emitter-pill ' + cls + '" ' +
+      'title="emitter / persistence format">' + _escSim(t) + '</span>';
   }
 
-  function _simStudyChips(studies) {
-    if (!studies || !studies.length) return '<span style="color:#9ca3af;">—</span>';
-    return studies.map(function (name) {
-      return '<a href="/studies/' + encodeURIComponent(name) +
-        '" title="Open study: ' + _escSim(name) +
-        '" style="display:inline-block; background:#eef2ff; color:#3730a3; ' +
-        'padding:1px 7px; margin:0 2px 2px 0; border-radius:10px; font-size:12px; ' +
-        'text-decoration:none;">' + _escSim(name) + '</a>';
-    }).join('');
+  // Format an epoch-seconds timestamp as a readable local time.
+  function _simFmtTime(sec) {
+    if (!sec) return '—';
+    return new Date(sec * 1000).toLocaleString();
   }
 
-  function _simShortId(run_id) {
-    if (!run_id) return '';
-    // Show the last 6 chars (the hash suffix) of "<spec>__<ts>__<hash6>".
-    return run_id.slice(-6);
-  }
-
-  // Module-scope cache so the filter and delete flows can read current rows.
+  // Module-scope cache. _simRows = all runs from the API (the {simulations}
+  // shape from simulations_index.list_simulations); _simCurrent = the current
+  // investigation slug (default filter target, may be null).
   window._simRows = [];
+  window._simCurrent = null;
+
+  // Investigation/study come from the index's *_slug fields; the study slug
+  // falls back to the first cross-referenced study name.
+  function _simInvestigation(row) { return row.investigation_slug || ''; }
+  function _simStudy(row) {
+    return row.study_slug || (row.studies && row.studies.length ? row.studies[0] : '');
+  }
 
   /** Open the Composite Explorer for a specific past simulation.
    *
-   *  Mirrors _openCompositeExplorer (line 2437) but also seeds ?run_id=, so
+   *  Mirrors _openCompositeExplorer but also seeds ?run_id=, so
    *  _initCompositeExplorer picks it up and renders the run's results +
-   *  viz_html in the Run tab.
+   *  viz_html in the Run tab. Only meaningful for runs with a spec_id
+   *  (Composite Explorer scratch runs / runs_meta rows).
    */
   function _openSimulationInExplorer(run_id, spec_id) {
     var url = new URL(window.location.href);
@@ -10769,75 +10880,96 @@
   }
   window._openSimulationInExplorer = _openSimulationInExplorer;
 
-  function _renderSimRow(sim) {
-    var composite = _escSim(sim.spec_id || '');
-    // Last segment bold for scannability
-    var segs = composite.split('.');
-    if (segs.length > 1) {
-      segs[segs.length - 1] = '<strong>' + segs[segs.length - 1] + '</strong>';
-      composite = segs.join('.');
-    }
-    var stepsTxt = (sim.status === 'running')
-      ? (sim.progress_step || 0) + '/' + (sim.n_steps || '?')
-      : (sim.n_steps != null ? String(sim.n_steps)
-         : (sim.ensemble_size ? (sim.ensemble_size + '× ens') : '—'));
-    var label = sim.sim_name || sim.label || '';
-    var startedFull = sim.started_at
-      ? new Date(sim.started_at * 1000).toISOString()
-      : '';
-    var runTooltip = (sim.run_id || '') + '\n' + (sim.db_path || '');
-    var investigation = sim.investigation_slug || '';
-    var investigationCell = investigation
-      ? '<code style="font-size:12px; color:#374151;">' +
-          _escSim(investigation) + '</code>'
+  function _renderSimRow(row) {
+    var inv = _simInvestigation(row);
+    var invCell = inv
+      ? '<code style="font-size:12px; color:#374151;">' + _escSim(inv) + '</code>'
       : '<span style="color:#9ca3af;">—</span>';
+    var study = _simStudy(row);
+    var studyCell = study
+      ? '<code style="font-size:12px; color:#374151;">' + _escSim(study) + '</code>'
+      : '<span style="color:#9ca3af;">—</span>';
+    var runId = row.run_id || '';
+    var runLabel = row.sim_name || row.label || runId;
+    var runTitle = ' title="' + _escSim(runId + (row.db_path ? '\n' + row.db_path : '')) + '"';
+    var timeSec = row.completed_at || row.started_at;
+    // Actions: open-in-explorer (only when there's a spec_id to seed the
+    // explorer with) + delete. The {simulations} shape carries spec_id +
+    // db_path so both are reconstructable.
+    var specId = row.spec_id || '';
+    var explorerBtn = specId
+      ? '<a href="?id=' + encodeURIComponent(specId) +
+          '&run_id=' + encodeURIComponent(runId) + '#composite-explore" ' +
+          'class="action-btn" title="Open in Composite Explorer" ' +
+          'style="text-decoration:none;" ' +
+          'onclick="event.preventDefault(); _openSimulationInExplorer(\'' +
+            _escSim(runId) + '\', \'' + _escSim(specId) + '\');">Open</a>'
+      : '';
+    var deleteBtn = '<button class="action-btn" title="Delete simulation" ' +
+      'onclick="_deleteSimulationRun(\'' + _escSim(runId) + '\')">🗑</button>';
     return (
-      '<tr data-run-id="' + _escSim(sim.run_id) + '" ' +
-        'style="border-bottom:1px solid #f3f4f6;">' +
-      '<td style="padding:6px 8px;">' +
-        '<a href="?id=' + encodeURIComponent(sim.spec_id) +
-        '&run_id=' + encodeURIComponent(sim.run_id) + '#composite-explore" ' +
-        'class="sim-composite-link" ' +
-        'style="text-decoration:none; color:inherit;" ' +
-        'onclick="event.preventDefault(); _openSimulationInExplorer(\'' +
-          _escSim(sim.run_id) + '\', \'' + _escSim(sim.spec_id) + '\');" ' +
-        'onmouseover="this.style.textDecoration=\'underline\';" ' +
-        'onmouseout="this.style.textDecoration=\'none\';">' +
-        '<code>' + composite + '</code></a>' +
-      '</td>' +
-      '<td style="padding:6px 8px;">' + investigationCell + '</td>' +
-      '<td style="padding:6px 8px;">' + _simStudyChips(sim.studies) + '</td>' +
-      '<td style="padding:6px 8px;">' + _simStatusChip(sim.status) + '</td>' +
-      '<td style="padding:6px 8px;">' + _simEmitterChip(sim.emitter) + '</td>' +
-      '<td style="padding:6px 8px;">' + _escSim(stepsTxt) + '</td>' +
-      '<td style="padding:6px 8px; color:#374151;">' + _escSim(label) + '</td>' +
-      '<td style="padding:6px 8px; color:#6b7280;" title="' + _escSim(startedFull) +
-        '">' + _escSim(_simRelativeTime(sim.started_at)) + '</td>' +
-      '<td style="padding:6px 8px;"><code title="' + _escSim(runTooltip) +
-        '" style="font-size:11px; color:#6b7280;">' + _escSim(_simShortId(sim.run_id)) +
-        '</code></td>' +
-      '<td style="padding:6px 8px; text-align:center;">' +
-        '<button class="action-btn" title="Delete simulation" ' +
-        'onclick="_deleteSimulationRun(\'' + _escSim(sim.run_id) + '\')">🗑</button>' +
-      '</td>' +
+      '<tr data-run-id="' + _escSim(runId) + '" style="border-bottom:1px solid #f3f4f6;">' +
+      '<td style="padding:6px 8px;">' + invCell + '</td>' +
+      '<td style="padding:6px 8px;">' + studyCell + '</td>' +
+      '<td style="padding:6px 8px;"><code style="font-size:11px; color:#6b7280;"' +
+        runTitle + '>' + _escSim(runLabel) + '</code></td>' +
+      '<td style="padding:6px 8px;">' + _simEmitterPill(row.emitter_type) + '</td>' +
+      '<td style="padding:6px 8px; color:#6b7280;">' + _escSim(_simFmtTime(timeSec)) + '</td>' +
+      '<td style="padding:6px 8px;">' + _simStatusChip(row.status) + '</td>' +
+      '<td style="padding:6px 8px; text-align:center; white-space:nowrap;">' +
+        explorerBtn + (explorerBtn && deleteBtn ? ' ' : '') + deleteBtn + '</td>' +
       '</tr>'
     );
   }
 
+  // Populate the Study + Emitter dropdowns from the data (preserving any
+  // current selection), then render rows through the active filters.
   function _applySimFilter() {
-    var q = (document.getElementById('sim-filter') || {}).value || '';
-    q = q.toLowerCase().trim();
     var rows = window._simRows || [];
-    var visible = q ? rows.filter(function (s) {
-      var hay = (s.spec_id + ' ' + (s.sim_name || '') + ' ' + (s.label || '') +
-                  ' ' + (s.studies || []).join(' ') +
-                  ' ' + (s.investigation_slug || '') +
-                  ' ' + (s.study_slug || '')).toLowerCase();
-      return hay.indexOf(q) >= 0;
-    }) : rows;
+    var allToggle = document.getElementById('sim-all-toggle');
+    var studySel  = document.getElementById('sim-study-filter');
+    var emitterSel = document.getElementById('sim-emitter-filter');
+
+    var showAll = allToggle ? allToggle.checked : false;
+    var studyVal = studySel ? studySel.value : '';
+    var emitterVal = emitterSel ? emitterSel.value : '';
+
+    var visible = rows.filter(function (r) {
+      if (!showAll && window._simCurrent && _simInvestigation(r) !== window._simCurrent) return false;
+      if (studyVal && _simStudy(r) !== studyVal) return false;
+      if (emitterVal && (r.emitter_type || 'SQLite') !== emitterVal) return false;
+      return true;
+    });
+
     var tbody = document.getElementById('sim-tbody');
-    if (!tbody) return;
-    tbody.innerHTML = visible.map(_renderSimRow).join('');
+    var table = document.getElementById('sim-table');
+    var empty = document.getElementById('sim-empty');
+    if (tbody) tbody.innerHTML = visible.map(_renderSimRow).join('');
+    if (table) table.style.display = visible.length ? '' : 'none';
+    if (empty) empty.style.display = visible.length ? 'none' : '';
+  }
+
+  // Rebuild the Study + Emitter <select> option lists from the current data.
+  function _populateSimFilters() {
+    var rows = window._simRows || [];
+    var studies = {}, emitters = {};
+    rows.forEach(function (r) {
+      var st = _simStudy(r);
+      if (st) studies[st] = true;
+      emitters[r.emitter_type || 'SQLite'] = true;
+    });
+    function fill(sel, values) {
+      if (!sel) return;
+      var prev = sel.value;
+      var opts = ['<option value="">All</option>'];
+      values.sort().forEach(function (v) {
+        opts.push('<option value="' + _escSim(v) + '">' + _escSim(v) + '</option>');
+      });
+      sel.innerHTML = opts.join('');
+      if (values.indexOf(prev) >= 0) sel.value = prev;
+    }
+    fill(document.getElementById('sim-study-filter'), Object.keys(studies));
+    fill(document.getElementById('sim-emitter-filter'), Object.keys(emitters));
   }
 
   function _initSimulations() {
@@ -10859,12 +10991,9 @@
           return;
         }
         window._simRows = data.simulations || [];
+        window._simCurrent = data.current || null;
         if (loading) loading.style.display = 'none';
-        if (!window._simRows.length) {
-          if (empty) empty.style.display = '';
-          return;
-        }
-        if (table) table.style.display = '';
+        _populateSimFilters();
         _applySimFilter();
       })
       .catch(function (err) {
@@ -10875,13 +11004,17 @@
   }
   window._initSimulations = _initSimulations;
 
-  // Wire the filter input + refresh button + cancel button (once, on first init)
+  // Wire the toggle + dropdown filters + refresh button (once, on first init).
   function _wireSimulationsUiOnce() {
-    var f = document.getElementById('sim-filter');
-    if (f && !f.dataset.wired) {
-      f.addEventListener('input', _applySimFilter);
-      f.dataset.wired = '1';
-    }
+    [['sim-all-toggle', 'change'],
+     ['sim-study-filter', 'change'],
+     ['sim-emitter-filter', 'change']].forEach(function (pair) {
+      var el = document.getElementById(pair[0]);
+      if (el && !el.dataset.wired) {
+        el.addEventListener(pair[1], _applySimFilter);
+        el.dataset.wired = '1';
+      }
+    });
     var r = document.getElementById('sim-refresh');
     if (r && !r.dataset.wired) {
       r.addEventListener('click', _initSimulations);
@@ -10898,6 +11031,10 @@
   }
   window._wireSimulationsUiOnce = _wireSimulationsUiOnce;
 
+  // Confirm + perform a full delete of one simulation (DB rows + history +
+  // run dir + study.yaml refs) via DELETE /api/simulation-run. Reads the row
+  // from the {simulations} cache for spec_id/db_path/studies to populate the
+  // confirmation dialog.
   function _deleteSimulationRun(run_id) {
     _wireSimulationsUiOnce();
     var rows = window._simRows || [];
@@ -10907,20 +11044,22 @@
     }
     if (!sim) return;
 
-    var studiesTxt = (sim.studies && sim.studies.length)
-      ? sim.studies.map(_escSim).join(', ')
-      : '<em>none</em>';
+    var studies = sim.studies || [];
+    var studiesTxt = studies.length ? studies.map(_escSim).join(', ') : '<em>none</em>';
     var stillRunning = (sim.status === 'running')
       ? '<p style="color:#b45309; margin:8px 0 0;"><strong>⚠ This run is still running.</strong> ' +
         'Deleting now will orphan the detached process (it will fail-write later, harmlessly).</p>'
       : '';
+    var composite = sim.spec_id
+      ? '<p style="margin:0 0 8px;">Composite: <code>' + _escSim(sim.spec_id) + '</code></p>'
+      : '';
     var body = document.getElementById('sim-delete-body');
     if (body) body.innerHTML =
       '<p style="margin:0 0 8px;"><code>' + _escSim(run_id) + '</code></p>' +
-      '<p style="margin:0 0 8px;">Composite: <code>' + _escSim(sim.spec_id) + '</code></p>' +
+      composite +
       '<p style="margin:0 0 4px;">This will permanently remove:</p>' +
       '<ul style="margin:0 0 4px 24px;">' +
-        '<li>1 row in <code>' + _escSim(sim.db_path) + '</code></li>' +
+        '<li>1 row in <code>' + _escSim(sim.db_path || '?') + '</code></li>' +
         '<li>All history rows (trajectory data) for this run</li>' +
         '<li>The run directory <code>.pbg/runs/' + _escSim(run_id) + '/</code> (if any)</li>' +
         '<li>References from study.yaml(s): ' + studiesTxt + '</li>' +

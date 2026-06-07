@@ -172,6 +172,14 @@ class WorkspacePaths:
                 return s
         raise FileNotFoundError(f"study {slug!r} not found under {self.root}")
 
+    def inputs_dir(self, inv_slug: str) -> Path:
+        """investigations/<inv_slug>/inputs (per-investigation owned inputs)."""
+        return self.dir("investigations") / inv_slug / "inputs"
+
+    def report_dir(self, inv_slug: str) -> Path:
+        """Per-investigation report/publication dir: investigations/<slug>/reports/."""
+        return self.dir("investigations") / inv_slug / "reports"
+
     def study_owner(self, slug: str):
         """Owning investigation slug for a study (nested layout), else the
         study.yaml investigation: back-ref, else None."""
@@ -179,4 +187,15 @@ class WorkspacePaths:
             d = self.study_dir(slug)
         except FileNotFoundError:
             return None
+        try:
+            parts = d.relative_to(self.dir("investigations")).parts
+            if len(parts) >= 3 and parts[1] == "studies":
+                return parts[0]
+        except ValueError:
+            pass
+        sy = d / "study.yaml"
+        if sy.is_file():
+            data = yaml.safe_load(sy.read_text(encoding="utf-8")) or {}
+            return data.get("investigation")
+        return None
 

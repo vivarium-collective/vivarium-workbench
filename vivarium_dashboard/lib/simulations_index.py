@@ -362,6 +362,14 @@ def _read_parquet_hive(
             f"simulations_index: parquet config read failed at {exp_dir}: {e}"
         )
 
+    # Fall back to the study's owning investigation when the parquet metadata
+    # didn't carry investigation_slug (older runner output, pre-convention).
+    if not investigation_slug and study_slug:
+        try:
+            investigation_slug = WorkspacePaths.load(workspace).study_owner(study_slug)
+        except Exception:  # noqa: BLE001
+            pass
+
     # Row count = total emit count across all generations.
     try:
         n_rows = int(

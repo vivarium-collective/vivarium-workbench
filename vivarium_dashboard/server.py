@@ -1468,6 +1468,44 @@ def _current_branch_slug(ws_root: Path) -> str | None:
     return best if best_n > 0 else None
 
 
+def _inputs_payload(ws_root: Path, slug: str | None = None) -> dict:
+    """Pure seam backing ``GET /api/inputs``.
+
+    Returns the loaded investigation's owned inputs (the investigation whose
+    slug matches the current git branch), the repo-wide global inputs
+    (workspace.yaml ``datasets`` + parsed BibTeX references), and that current
+    slug. Mirrors the SimulationsDB current-investigation-first layout.
+    """
+    from vivarium_dashboard.lib.investigation_inputs import investigation_inputs
+    from vivarium_dashboard.lib.report import _parse_bib_entries, _enrich_with_file_info
+
+    current = slug or _current_branch_slug(ws_root)
+    if current:
+        investigation = investigation_inputs(ws_root, current, repo_fallback=False)
+    else:
+        investigation = {"datasets": [], "references": [],
+                         "expert_docs": [], "_repo_fallback": False}
+
+    # Repo-level (global) inputs: reuse the same data sources the global Inputs
+    # page builds from — workspace.yaml `datasets` (file-enriched) and the
+    # parsed BibTeX references.
+    try:
+        ws = yaml.safe_load((Path(ws_root) / "workspace.yaml").read_text(encoding="utf-8")) or {}
+    except Exception:
+        ws = {}
+    try:
+        global_datasets = _enrich_with_file_info(ws.get("datasets") or [], ws_root)
+    except Exception:
+        global_datasets = list(ws.get("datasets") or [])
+    try:
+        global_references = _parse_bib_entries(ws_root)
+    except Exception:
+        global_references = []
+    global_block = {"datasets": global_datasets, "references": global_references}
+
+    return {"investigation": investigation, "global": global_block, "current": current}
+
+
 def _set_investigation_status(ws_root: Path, inv: str, status: str) -> dict:
     """Write the ``status`` field into investigations/<inv>/investigation.yaml.
 
@@ -4869,6 +4907,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_investigation_state_tree()
         if self.path.startswith("/api/study-bigraph-paths"):
             return self._get_study_bigraph_paths()
+        if path_only == "/api/inputs":
+            return self._get_inputs()
         if self.path.startswith("/api/iset-list"):
             return self._get_iset_list()
         if self.path.startswith("/api/iset/") and self.path.split("?", 1)[0].rstrip("/").endswith("/report"):
@@ -7253,9 +7293,18 @@ if __name__ == "__main__":
     def _get_simulations(self):
         """GET /api/simulations — all persisted runs across the workspace.
 
-        Returns ``{simulations: [...]}`` aggregated from ``.pbg/composite-runs.db``
-        and every ``studies/<name>/runs.db``, with Studies-association annotated
-        from each ``study.yaml``'s ``runs[]``. Newest first.
+        Returns ``{simulations: [...], current: <slug|None>}`` aggregated from
+        ``.pbg/composite-runs.db`` and every ``studies/<name>/runs.db``, with
+        Studies-association annotated from each ``study.yaml``'s ``runs[]``.
+        Newest first. ``current`` is the investigation slug matching the
+        workspace's current git branch, so the SimulationsDB UI can default to
+        the loaded investigation.
+
+        Each sim carries an ``emitter_type`` in {"SQLite","Parquet","XArray"}
+        (capitalized; the canonical labels from
+        :mod:`vivarium_dashboard.lib.runs_index`), derived from the index's
+        lowercase ``emitter`` tag (sqlite/parquet/xarray) so the UI can render
+        an emitter pill uniformly across SQLite/Parquet/XArray runs.
         """
         _ws_add_to_sys_path()
         try:
@@ -7263,7 +7312,17 @@ if __name__ == "__main__":
             sims = list_simulations(WORKSPACE)
         except Exception as e:  # noqa: BLE001 — never blank-page the user
             return self._json({"error": f"simulations index failed: {e}"}, 500)
-        return self._json({"simulations": sims}, 200)
+        # Map the index's lowercase emitter tag onto the canonical capitalized
+        # emitter_type label the UI/pills key on (and runs_index.emitter_type_of
+        # produces). db_path-based detection is the fallback for any row whose
+        # source tag didn't resolve.
+        from vivarium_dashboard.lib.runs_index import emitter_type_of
+        _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray"}
+        for s in sims:
+            tag = (s.get("emitter") or "").lower()
+            s["emitter_type"] = _emitter_label.get(tag) or emitter_type_of(s.get("db_path"))
+        return self._json(
+            {"simulations": sims, "current": _current_branch_slug(WORKSPACE)}, 200)
 
     def _get_composite_runs(self):
         """GET /api/composite-runs?spec_id=X — list runs for one composite spec."""
@@ -7874,6 +7933,15 @@ if __name__ == "__main__":
         except Exception as e:
             return self._json({"error": str(e), "study": name}, 500)
         return self._json(payload, 200)
+
+    def _get_inputs(self):
+        """GET /api/inputs — loaded investigation's inputs (top) + repo-wide
+        global inputs + current investigation slug. Honors ?investigation=<slug>
+        so the tab follows the SPA-loaded investigation, not just the git branch."""
+        import urllib.parse as _up
+        _q = _up.parse_qs(_up.urlparse(self.path).query)
+        _slug = (_q.get("investigation") or [None])[0]
+        return self._json(_inputs_payload(WORKSPACE, _slug), 200)
 
     def _get_iset_report(self):
         """GET /api/iset/<slug>/report — serve the per-investigation report."""
