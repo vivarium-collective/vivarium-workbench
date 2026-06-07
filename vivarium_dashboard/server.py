@@ -1498,10 +1498,57 @@ def _inputs_payload(ws_root: Path, slug: str | None = None) -> dict:
     except Exception:
         global_datasets = list(ws.get("datasets") or [])
     try:
-        global_references = _parse_bib_entries(ws_root)
+        bib_entries = _parse_bib_entries(ws_root)
     except Exception:
-        global_references = []
+        bib_entries = []
+    global_references = bib_entries
     global_block = {"datasets": global_datasets, "references": global_references}
+
+    # Enrich the investigation block:
+    #  - references: the investigation's references are bare bib keys; join them
+    #    against the parsed BibTeX entries so the UI gets rich dicts (title,
+    #    author, year, journal, doi, url, bibtex). Unmatched keys are flagged.
+    #  - datasets / expert_docs: ensure each carries a workspace-relative
+    #    `path` (download href) and a `name`.
+    by_key = {e.get("key"): e for e in bib_entries if isinstance(e, dict) and e.get("key")}
+    # references_pdfs maps a bib key -> stored PDF path (drop-and-go uploads).
+    pdf_by_key = {}
+    for rp in (ws.get("references_pdfs") or []):
+        if isinstance(rp, dict) and rp.get("bib_key") and rp.get("path"):
+            pdf_by_key[rp["bib_key"]] = rp["path"]
+
+    def _enrich_ref(ref):
+        key = ref if isinstance(ref, str) else (
+            (ref or {}).get("key") or (ref or {}).get("bib_key") if isinstance(ref, dict) else None)
+        if isinstance(ref, dict) and not key:
+            # Already a rich dict without a recognizable key field; pass through.
+            out = dict(ref)
+        elif key and key in by_key:
+            out = dict(by_key[key])
+        elif key:
+            out = {"key": key, "title": key, "_unmatched": True}
+        else:
+            out = {"key": str(ref), "title": str(ref), "_unmatched": True}
+        k = out.get("key")
+        if k and k in pdf_by_key and not out.get("pdf_path"):
+            out["pdf_path"] = pdf_by_key[k]
+        return out
+
+    investigation["references"] = [_enrich_ref(r) for r in (investigation.get("references") or [])]
+
+    def _norm_input(item):
+        if isinstance(item, str):
+            return {"name": item.rsplit("/", 1)[-1], "path": item}
+        if isinstance(item, dict):
+            out = dict(item)
+            p = out.get("path") or out.get("url") or ""
+            if not out.get("name"):
+                out["name"] = (p.rsplit("/", 1)[-1] if p else "") or "(unnamed)"
+            return out
+        return {"name": str(item)}
+
+    investigation["datasets"] = [_norm_input(d) for d in (investigation.get("datasets") or [])]
+    investigation["expert_docs"] = [_norm_input(d) for d in (investigation.get("expert_docs") or [])]
 
     return {"investigation": investigation, "global": global_block, "current": current}
 
