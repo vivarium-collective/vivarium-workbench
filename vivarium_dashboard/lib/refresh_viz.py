@@ -26,12 +26,15 @@ def refresh_study_viz(study_dir, spec: dict, latest: dict | None) -> list[dict]:
             continue
         chart = study_dir / chart_rel
         filled = cmd.replace("{chart}", chart_rel)
+        # A pinned entry (source_run:) anchors the chart to a specific run, so
+        # we stamp THAT run id (not the study's latest). Falls back to latest.
+        run_id = entry.get("source_run") or (latest or {}).get("run_id")
         env = dict(os.environ)
         if latest and latest.get("emitter_path"):
             ep = latest["emitter_path"]
             env["PBG_RUN_DIR"] = ep if os.path.isabs(ep) else str(study_dir / ep)
-        if latest and latest.get("run_id"):
-            env["PBG_RUN_ID"] = latest["run_id"]
+        if run_id:
+            env["PBG_RUN_ID"] = run_id
         try:
             proc = subprocess.run(filled, shell=True, cwd=study_dir, env=env,
                                   capture_output=True, text=True, timeout=900)
@@ -44,7 +47,7 @@ def refresh_study_viz(study_dir, spec: dict, latest: dict | None) -> list[dict]:
                             "error": (proc.stderr or proc.stdout or "")[-2000:]})
             continue
         stamp_meta(chart,
-                   source_run_id=(latest or {}).get("run_id"),
+                   source_run_id=run_id,
                    generation_id=(latest or {}).get("generation_id"),
                    rendered_at=time.time(), command=filled)
         results.append({"name": name, "chart": chart_rel, "status": "rendered"})
