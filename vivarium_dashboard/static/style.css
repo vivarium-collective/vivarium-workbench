@@ -1984,3 +1984,8 @@ details.inv-how-to-read > summary, details.inv-bio-story > summary {
 details.inv-bio-story > summary { color: #075985; }
 details.inv-how-to-read > summary { color: #78350f; }
 details.inv-how-to-read[open] > summary, details.inv-bio-story[open] > summary { margin-bottom: 8px; }
+
+/* Foldable overview sections (study detail): hide secondary detail */
+details.overview-section > summary{ cursor:pointer; list-style-position:outside; }
+details.overview-section > summary.overview-label{ margin-bottom:0; }
+details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
