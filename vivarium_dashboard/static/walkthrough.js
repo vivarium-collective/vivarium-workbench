@@ -8199,7 +8199,7 @@
       //    page — see _wireIsetSwitcher below for the click + render logic.
       + '<nav class="topbar">'
       +   '<span class="tb-title">' + _h(iset.title || iset.name) + '</span>'
-      +   ((iset.executive && (iset.executive.what_is_this || iset.executive.verdict)) ? '<a href="#executive">Summary</a>' : '')
+      +   '<a href="#" onclick="window.scrollTo({top:0,behavior:\'smooth\'});return false;">Top</a>'
       /* "Acceptance" nav link removed alongside the section it pointed to */
       +   '<a href="#studies-heading">Studies</a>'
       +   '<a href="#references">References</a>'
