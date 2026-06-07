@@ -7378,7 +7378,6 @@
       //    page — see _wireIsetSwitcher below for the click + render logic.
       + '<nav class="topbar">'
       +   '<span class="tb-title">' + _h(iset.title || iset.name) + '</span>'
-      +   '<a href="#top">Top</a>'
       +   ((iset.executive && (iset.executive.what_is_this || iset.executive.verdict)) ? '<a href="#executive">Summary</a>' : '')
       /* "Acceptance" nav link removed alongside the section it pointed to */
       +   '<a href="#studies-heading">Studies</a>'
@@ -7481,7 +7480,7 @@
             var dn = ex.decisions_needed || [];
             if (!ex.what_is_this && !ex.verdict && !dn.length && !iset.question && !iset.hypothesis) return '';
             var vs = ex.verdict_status || 'in-progress';
-            var h = '<section id="executive"><h2 style="margin-top:12px">Executive summary</h2>';
+            var h = '<details id="executive" class="report-fold" style="margin-top:12px"><summary>Executive summary' + ' <span class="muted small">\u2014 ' + _h(vs) + ((ex.verdict || ex.what_is_this) ? ': ' + _h(_firstSentence(String(ex.verdict || ex.what_is_this)).slice(0,130)) : '') + '</span></summary>';
             if (ex.what_is_this)
               h += '<p>' + _multiline(ex.what_is_this) + '</p>';
             if (ex.verdict)
@@ -7500,7 +7499,7 @@
                        + '</li>';
                    }).join('') + '</ol></details>';
             }
-            return h + '</section>';
+            return h + '</details>';
           })()
 
       // ── LAYER 2: SCIENTIFIC ARGUMENT ───────────────────────────────────
