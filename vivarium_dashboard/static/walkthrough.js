@@ -7381,7 +7381,6 @@
       +   ((iset.scientific_argument && iset.scientific_argument.main_claim) ? '<a href="#scientific-argument">Argument</a>' : '')
       +   '<a href="#overview">Overview</a>'
       /* "Acceptance" nav link removed alongside the section it pointed to */
-      +   '<a href="#how-to-read">How to read</a>'
       +   '<a href="#studies-heading">Studies</a>'
       +   '<a href="#references">References</a>'
       +   '<button type="button" class="tb-iset-switcher" id="tb-iset-switcher-trigger" aria-haspopup="true" aria-expanded="false">'
@@ -7573,25 +7572,6 @@
          report ordered list of acceptance criteria duplicated that
          signal in a less-actionable form. */
 
-      +   '<h2 id="how-to-read">How to read this report</h2>'
-      +   '<p>Each section below is one study, '
-      +     (hasDag
-        ? 'ordered by dependency (roots first): a downstream study assumes the studies it depends on have passed, so reading top-down keeps the context intact.'
-        : 'listed in the order declared in the investigation.')
-      +   ' Each study presents these parts (sections with no content are omitted):</p>'
-      +   '<ul>'
-      +     '<li><strong>Question</strong> — what this study is asking, and why.</li>'
-      +     (hasAssumptions
-        ? '<li><strong>Assumptions</strong> — what the study takes as given, cited to the literature where applicable.</li>'
-        : '')
-      +     '<li><strong>Conditions</strong> — the experimental setup: <em>baseline</em> (the reference composite), <em>variants</em> (parameter perturbations), and <em>model settings</em> (any parameters gated on human input before a run).</li>'
-      +     '<li><strong>Tests</strong> — pass/fail criteria, each with a measure path and a comparison op. Charts inline below show the observable over the run; once tests are evaluated, each maps to a row in the gate decision.</li>'
-      +     '<li><strong>Status</strong> — shown as a phase badge plus per-axis status (design, implementation, simulation, evaluation, gate, expert review). The headline pill is the gate status when set; legacy single-keyword status is shown as a fallback.</li>'
-      +   '</ul>'
-      +   '<p>Supporting detail — <em>Model change</em>, <em>Implementation requirements</em>, <em>Follow-up studies</em>, <em>Limitations</em>, <em>References</em> — appears below each study when present, inside collapsible <em>Technical details</em> blocks. Open them when you need file paths, parameter names, or citations.</p>'
-      +   '<p class="muted small">Chart sourcing: charts are rendered from the study\'s latest <code>runs.db</code>. A study that has not run yet shows the workspace pre-execution baseline as a labelled "before" reference, and an auto-discovered chart that predates the latest run is flagged as possibly stale rather than hidden.</p>'
-      +   '<p class="muted small">Want to leave inline feedback? Click the <strong>💬</strong> icon next to any section. "Generate feedback report" (bottom-right) packages every annotation into a single yaml file that comes back via <code>pbg-feedback-import</code>.</p>'
-
       +   '<h2 id="studies-heading">Studies' + (hasDag ? ' (dependency order)' : '') + '</h2>'
       +   '<p class="muted small">Each study is collapsed to a one-glance control panel — scan top to bottom, then click any panel to expand its full detail.</p>'
       +   '<div class="studies-toolbar">'
@@ -7749,7 +7729,7 @@
       +   'var INV=' + JSON.stringify(invName) + ';'
       +   'var REPORT_ID=' + JSON.stringify(reportId || '') + ';'
       +   'var KEY="v2ecoli_feedback_"+INV+(REPORT_ID?("_"+REPORT_ID):"");'
-      +   'var ID_PATTERNS=[/^study-/,/^finding-/,/^acceptance$/,/^references$/,/^how-to-read$/,/^studies-heading$/];'
+      +   'var ID_PATTERNS=[/^study-/,/^finding-/,/^acceptance$/,/^references$/,/^studies-heading$/];'
       +   'var openEd=null;'
       +   'var memStore={};'
       +   'function safeGet(k){try{var v=(typeof localStorage!=="undefined")?localStorage.getItem(k):null;return (v==null?memStore[k]:v)||"";}catch(e){return memStore[k]||"";}}'
