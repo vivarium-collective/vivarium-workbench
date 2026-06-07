@@ -935,6 +935,39 @@ def _study_charts_payload(ws_root, name: str) -> dict:
     }
 
 
+def _study_refresh_viz(ws_root, name: str) -> dict:
+    """Re-render every ``visualizations[]`` entry of study ``name`` against its
+    latest run, stamping provenance (pure, unit-testable seam).
+
+    Thin orchestration around the vendored :func:`refresh_study_viz`: resolves
+    the study dir (layout-aware, like :func:`_study_charts_payload`), loads
+    ``study.yaml``, finds the latest run via :func:`_latest_run_row`, and
+    delegates. ``refresh_study_viz`` swallows per-chart render errors and
+    returns ``status="error"`` entries, so this never raises on a bad render.
+
+    Returns ``{"study": name, "results": [...]}`` or ``{"error": ...}`` when the
+    study does not exist (the HTTP wrapper maps that to 404).
+    """
+    import yaml as _yaml
+    from .lib.refresh_viz import refresh_study_viz
+
+    study_dir = WorkspacePaths.load(ws_root).studies / name
+    if not study_dir.is_dir():
+        return {"error": f"study {name!r} not found", "not_found": True}
+    spec_path = study_dir / "study.yaml"
+    spec = {}
+    if spec_path.is_file():
+        try:
+            loaded = _yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                spec = loaded
+        except Exception:
+            spec = {}
+    latest = _latest_run_row(study_dir / "runs.db")
+    results = refresh_study_viz(study_dir, spec, latest)
+    return {"study": name, "results": results}
+
+
 def _discover_viz_html_files(name: str) -> list[dict]:
     """Discover viz HTML files for a study from BOTH conventional locations.
 
@@ -4874,6 +4907,9 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError as e:
             return self._json({"error": f"invalid JSON: {e}"}, 400)
 
+        if self.path.startswith("/api/study-refresh-viz/"):
+            return self._post_study_refresh_viz(body)
+
         method_name = _POST_ROUTE_MAP.get(self.path)
         if method_name is None:
             return self._json({"error": "not found"}, 404)
@@ -4902,6 +4938,27 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     # POST handlers
     # ------------------------------------------------------------------
+
+    def _post_study_refresh_viz(self, body: dict):
+        """POST /api/study-refresh-viz/<name> — re-render the study's declared
+        visualizations against its latest run, stamping provenance.
+
+        Thin HTTP wrapper around :func:`_study_refresh_viz` (the pure seam).
+        Tolerant by design: per-chart render failures come back as
+        ``status="error"`` entries (never a 500). Only a missing study 404s.
+        """
+        import urllib.parse
+        path = urllib.parse.urlparse(self.path).path
+        name = path[len("/api/study-refresh-viz/"):].strip("/")
+        if not name:
+            return self._json({"error": "missing study name"}, 400)
+        try:
+            payload = _study_refresh_viz(WORKSPACE, name)
+        except Exception as e:  # noqa: BLE001
+            return self._json({"error": str(e), "study": name}, 500)
+        if payload.get("not_found"):
+            return self._json({"error": payload["error"], "study": name}, 404)
+        return self._json(payload, 200)
 
     def _post_feedback_import(self, body: dict):
         """POST /api/feedback-import — ingest feedback submitted directly from
