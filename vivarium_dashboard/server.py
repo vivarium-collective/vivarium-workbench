@@ -8036,6 +8036,10 @@ if __name__ == "__main__":
                 "follow_up_studies": follow_ups,
                 "n_findings":      len(findings),
                 "findings":        findings,
+                # Discourse-graph re-skin: optional authored headline + confidence
+                # override (fall back to derived from findings/status client-side).
+                "claim":           study_spec.get("claim"),
+                "confidence":      study_spec.get("confidence"),
                 # Pass A multi-axis status: pass through whichever of the six
                 # axes are set on the study spec. All optional, all independent.
                 "design_status":         study_spec.get("design_status"),

@@ -4412,8 +4412,8 @@
     });
 
     // Layout constants — horizontal orientation (depth flows left→right).
-    // Narrow cards in a left→right chain (matches the reference concept map).
-    var CARD_W = 186, CARD_H = 188;
+    // Narrow cards in a left→right chain (discourse-graph nodes).
+    var CARD_W = 202, CARD_H = 200;
     var X_GAP = 64,   Y_GAP = 24;
     var PAD_X = 24,   PAD_Y = 16;
 
@@ -4487,7 +4487,10 @@
         path.setAttribute('marker-end', 'url(#dag-arrowhead)');
         edgesSvg.appendChild(path);
 
-        var cond = (p.condition || 'tests-passed');
+        // Discourse relation on the edge: authored `relation:` or "leads to".
+        // Regulatory/refuting links render dashed.
+        var cond = (p.relation || 'leads to');
+        if (cond === 'regulatory' || cond === 'refutes') path.setAttribute('stroke-dasharray', '5 3');
         var midX = (x1 + x2) / 2;
         var midY = (y1 + y2) / 2 - 6;
         var label = document.createElementNS(svgNS, 'text');
@@ -4519,38 +4522,40 @@
         invalid:    '#dc2626',
       })[liveStatus] || '#94a3b8';
 
-      // Reference-style status: icon + color (Accepted / Investigating / Planned).
-      var ss = (function(st) {
-        if (st === 'completed' || st === 'complete' || st === 'ran')
-          return {color: '#16a34a', icon: '✓', label: 'Accepted'};
-        if (st === 'in_progress' || st === 'running')
-          return {color: '#ca8a04', icon: '◐', label: 'Investigating'};
-        if (st === 'failed' || st === 'invalid')
-          return {color: '#9ca3af', icon: '⊘', label: 'Not relevant'};
-        return {color: '#2563eb', icon: '○', label: 'Planned / Unknown'};
+      // Discourse-graph node: a knowledge-producing operation framed as
+      //   Question (asks) → Evidence (finds) → Confidence.
+      // Confidence is an authored override (`confidence:`) or derived from the
+      // 6-axis status; the claim is an authored `claim:` or the top finding.
+      var confidence = s.confidence || (function(st) {
+        if (st === 'completed' || st === 'complete' || st === 'ran') return 'Accepted';
+        if (st === 'in_progress' || st === 'running') return 'Investigating';
+        if (st === 'failed' || st === 'invalid') return 'Refuted';
+        return 'Planned';
       })(liveStatus);
+      var ss = ({
+        Accepted:      {color: '#16a34a', icon: '✓'},
+        Investigating: {color: '#ca8a04', icon: '◐'},
+        Planned:       {color: '#2563eb', icon: '○'},
+        Refuted:       {color: '#dc2626', icon: '✗'},
+      })[confidence] || {color: '#9ca3af', icon: '○'};
       var followUps = s.follow_up_studies || [];
 
-      // Card content from study data, mapped to the reference's fields:
-      //   title  = slug prettified (drop the dnaa-N- ordering prefix)
-      //   Role   = study question (first sentence, truncated)
-      //   Sim Component = baseline composite
-      //   Evidence = findings count (or runs, or "(planned)")
       var prettyTitle = String(s.name).replace(/^[a-z]+-\d+-/, '').replace(/-/g, ' ')
         .replace(/\b\w/g, function(c) { return c.toUpperCase(); }) || s.name;
-      var role = (s.question || '').replace(/\s+/g, ' ').split(/[.?]/)[0].trim();
-      if (role.length > 90) role = role.slice(0, 87).replace(/\s+\S*$/, '') + '…';
+      var asks = (s.question || '').replace(/\s+/g, ' ').split(/[.?]/)[0].trim();
+      if (asks.length > 84) asks = asks.slice(0, 81).replace(/\s+\S*$/, '') + '…';
+      var findings = s.findings || [];
+      var claim = (s.claim ||
+        (findings[0] && (findings[0].summary || findings[0].statement || findings[0].id)) || ''
+      ).replace(/\s+/g, ' ').trim();
+      if (claim.length > 132) claim = claim.slice(0, 129).replace(/\s+\S*$/, '') + '…';
+      var moreN = findings.length > 1 ? findings.length - 1 : 0;
       var simComp = String(s.baseline_source || '—').replace(/^v2ecoli:/, '');
-      var nFind = (s.n_findings !== undefined) ? s.n_findings : (s.findings || []).length;
-      var nRuns = (s.n_runs !== undefined) ? s.n_runs : 0;
-      var evidence = nFind ? (nFind + ' finding' + (nFind === 1 ? '' : 's'))
-                   : nRuns ? (nRuns + ' run' + (nRuns === 1 ? '' : 's'))
-                   : '(planned)';
 
       var node = document.createElement('div');
       node.className = 'iset-dag-node';
       node.onclick = function() { _openStudyInsideInvestigation(s.name); };
-      node.title = s.name + ' — ' + ss.label;
+      node.title = s.name + ' — ' + confidence;
       node.style.cssText =
         'position:absolute;left:' + p.x + 'px;top:' + p.y + 'px;' +
         'width:' + CARD_W + 'px;height:' + CARD_H + 'px;' +
@@ -4558,11 +4563,6 @@
         'border-radius:8px;padding:9px 11px;cursor:pointer;box-sizing:border-box;overflow:hidden;' +
         'box-shadow:0 1px 2px rgba(0,0,0,0.05);transition:box-shadow 0.1s,border-color 0.1s;';
 
-      function fld(label, val) {
-        return '<div style="font-size:0.72em;margin-top:5px;line-height:1.3">' +
-          '<span style="font-weight:600;color:#475569">' + label + ':</span> ' +
-          '<span style="color:#64748b">' + _esc(val) + '</span></div>';
-      }
       var followUpsChip = '';
       if (s.phase === 'Decide' && followUps.length) {
         followUpsChip =
@@ -4575,11 +4575,21 @@
       node.innerHTML =
         '<div style="display:flex;align-items:flex-start;gap:6px">' +
           '<span style="color:' + ss.color + ';font-size:1.05em;line-height:1.1;flex:none">' + ss.icon + '</span>' +
-          '<strong style="font-size:0.86em;line-height:1.25;color:#1e293b">' + _esc(prettyTitle) + '</strong>' +
+          '<strong style="font-size:0.85em;line-height:1.2;color:#1e293b;flex:1">' + _esc(prettyTitle) + '</strong>' +
+          '<span style="font-size:0.62em;font-weight:700;color:' + ss.color + ';white-space:nowrap;margin-top:1px">' + _esc(confidence) + '</span>' +
         '</div>' +
-        (role ? fld('Role', role) : '') +
-        fld('Sim Component', simComp) +
-        fld('Evidence', evidence) +
+        (asks
+          ? '<div style="font-size:0.72em;margin-top:6px;line-height:1.3;color:#64748b">' +
+              '<span style="font-weight:600;color:#475569">Asks:</span> ' + _esc(asks) + '</div>'
+          : '') +
+        '<div style="font-size:0.72em;margin-top:5px;line-height:1.3;color:#64748b">' +
+          '<span style="font-weight:600;color:#475569">Finds:</span> ' +
+          (claim ? _esc(claim) : '<em style="color:#94a3b8">pending evidence</em>') +
+          (moreN ? ' <span style="color:#94a3b8">+' + moreN + ' more</span>' : '') +
+        '</div>' +
+        '<div style="position:absolute;bottom:7px;left:11px;right:11px;font-size:0.66em;color:#94a3b8;' +
+          'font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + _esc(simComp) + '">' +
+          _esc(simComp) + '</div>' +
         followUpsChip;
       // Stash follow-ups on the node for the popover lookup.
       node._followUps = followUps;
@@ -4606,9 +4616,11 @@
       legendHost.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;' +
         'font-size:0.74em;color:#64748b;padding:8px 4px 0;border-top:1px solid #f1f5f9;margin-top:8px';
       legendHost.innerHTML =
+        '<span style="font-weight:600;color:#475569;margin-right:10px">Confidence:</span>' +
         _lg('#16a34a', '✓', 'Accepted') + _lg('#ca8a04', '◐', 'Investigating') +
-        _lg('#2563eb', '○', 'Planned / Unknown') + _lg('#9ca3af', '⊘', 'Not relevant') +
-        '<span style="margin-right:14px"><span style="color:#94a3b8">→</span> Leads to</span>';
+        _lg('#2563eb', '○', 'Planned') + _lg('#dc2626', '✗', 'Refuted') +
+        '<span style="margin:0 14px 0 6px"><span style="color:#94a3b8">→</span> leads to</span>' +
+        '<span><span style="color:#94a3b8;letter-spacing:-1px">⤍</span> regulatory</span>';
     }
   }
   window._renderInvestigationDag = _renderInvestigationDag;
