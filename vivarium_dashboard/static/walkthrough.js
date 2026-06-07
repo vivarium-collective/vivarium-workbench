@@ -4412,8 +4412,9 @@
     });
 
     // Layout constants — horizontal orientation (depth flows left→right).
-    var CARD_W = 300, CARD_H = 120;
-    var X_GAP = 72,   Y_GAP = 30;
+    // Narrow cards in a left→right chain (matches the reference concept map).
+    var CARD_W = 186, CARD_H = 188;
+    var X_GAP = 64,   Y_GAP = 24;
     var PAD_X = 24,   PAD_Y = 16;
 
     // Compute each card's (x, y): x = depth (left→right), y = within-depth slot.
@@ -4518,70 +4519,68 @@
         invalid:    '#dc2626',
       })[liveStatus] || '#94a3b8';
 
+      // Reference-style status: icon + color (Accepted / Investigating / Planned).
+      var ss = (function(st) {
+        if (st === 'completed' || st === 'complete' || st === 'ran')
+          return {color: '#16a34a', icon: '✓', label: 'Accepted'};
+        if (st === 'in_progress' || st === 'running')
+          return {color: '#ca8a04', icon: '◐', label: 'Investigating'};
+        if (st === 'failed' || st === 'invalid')
+          return {color: '#9ca3af', icon: '⊘', label: 'Not relevant'};
+        return {color: '#2563eb', icon: '○', label: 'Planned / Unknown'};
+      })(liveStatus);
+      var followUps = s.follow_up_studies || [];
+
+      // Card content from study data, mapped to the reference's fields:
+      //   title  = slug prettified (drop the dnaa-N- ordering prefix)
+      //   Role   = study question (first sentence, truncated)
+      //   Sim Component = baseline composite
+      //   Evidence = findings count (or runs, or "(planned)")
+      var prettyTitle = String(s.name).replace(/^[a-z]+-\d+-/, '').replace(/-/g, ' ')
+        .replace(/\b\w/g, function(c) { return c.toUpperCase(); }) || s.name;
+      var role = (s.question || '').replace(/\s+/g, ' ').split(/[.?]/)[0].trim();
+      if (role.length > 90) role = role.slice(0, 87).replace(/\s+\S*$/, '') + '…';
+      var simComp = String(s.baseline_source || '—').replace(/^v2ecoli:/, '');
+      var nFind = (s.n_findings !== undefined) ? s.n_findings : (s.findings || []).length;
+      var nRuns = (s.n_runs !== undefined) ? s.n_runs : 0;
+      var evidence = nFind ? (nFind + ' finding' + (nFind === 1 ? '' : 's'))
+                   : nRuns ? (nRuns + ' run' + (nRuns === 1 ? '' : 's'))
+                   : '(planned)';
+
       var node = document.createElement('div');
       node.className = 'iset-dag-node';
       node.onclick = function() { _openStudyInsideInvestigation(s.name); };
+      node.title = s.name + ' — ' + ss.label;
       node.style.cssText =
         'position:absolute;left:' + p.x + 'px;top:' + p.y + 'px;' +
         'width:' + CARD_W + 'px;height:' + CARD_H + 'px;' +
-        'background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;' +
-        'cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.04);transition:box-shadow 0.1s,border-color 0.1s;' +
-        'border-left: 4px solid ' + statusColor + ';' +
-        'box-sizing:border-box;overflow:hidden;';
-      // Phase chip color mapping (mirrors study-detail.html .phase-* CSS).
-      var phaseColors = {
-        Design:   {bg: '#e0e7ff', fg: '#3730a3'},
-        Build:    {bg: '#fef3c7', fg: '#92400e'},
-        Simulate: {bg: '#dbeafe', fg: '#1e40af'},
-        Evaluate: {bg: '#fce7f3', fg: '#9d174d'},
-        Decide:   {bg: '#d1fae5', fg: '#065f46'},
-      };
-      var pc = phaseColors[s.phase] || null;
-      var phaseChip = (s.phase && pc)
-        ? '<span class="phase-pill" style="background:' + pc.bg + ';color:' + pc.fg +
-          ';font-size:0.7em;padding:1px 8px;border-radius:9999px;margin-right:4px">' + _esc(s.phase) + '</span>'
-        : '';
-      // Composite counts line — readouts (new) | variants (legacy) + behavior tests + requirements (new).
-      var nReadouts = (s.n_readouts !== undefined) ? s.n_readouts : 0;
-      var nReqs = (s.n_requirements !== undefined) ? s.n_requirements : 0;
-      var followUps = s.follow_up_studies || [];
-      // When phase=Decide AND there are follow-ups, surface a clickable chip
-      // that opens a popover listing them with one-click "Seed →" actions.
+        'background:#fff;border:1px solid #e5e7eb;border-top:3px solid ' + ss.color + ';' +
+        'border-radius:8px;padding:9px 11px;cursor:pointer;box-sizing:border-box;overflow:hidden;' +
+        'box-shadow:0 1px 2px rgba(0,0,0,0.05);transition:box-shadow 0.1s,border-color 0.1s;';
+
+      function fld(label, val) {
+        return '<div style="font-size:0.72em;margin-top:5px;line-height:1.3">' +
+          '<span style="font-weight:600;color:#475569">' + label + ':</span> ' +
+          '<span style="color:#64748b">' + _esc(val) + '</span></div>';
+      }
       var followUpsChip = '';
       if (s.phase === 'Decide' && followUps.length) {
         followUpsChip =
           '<button class="dag-followups-btn" ' +
           'onclick="event.stopPropagation(); _openDagFollowupsPopover(\'' + _esc(s.name) + '\', this)" ' +
-          'style="margin-top:4px;font-size:0.72em;padding:2px 8px;border:1px solid #10b981;background:#d1fae5;color:#065f46;border-radius:9999px;cursor:pointer">' +
-          '▸ ' + followUps.length + ' follow-up' + (followUps.length === 1 ? '' : 's') + ' · click to seed' +
+          'style="margin-top:6px;font-size:0.68em;padding:2px 7px;border:1px solid #10b981;background:#d1fae5;color:#065f46;border-radius:9999px;cursor:pointer">' +
+          '▸ ' + followUps.length + ' follow-up' + (followUps.length === 1 ? '' : 's') +
           '</button>';
       }
       node.innerHTML =
-        '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:4px">' +
-          '<strong style="font-size:0.95em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _esc(s.name) + '</strong>' +
-          '<span style="white-space:nowrap">' + phaseChip +
-            '<span class="status-pill" title="' +
-              (s.effective_status && s.status && s.effective_status !== s.status
-                ? 'effective: ' + _esc(s.effective_status) + ' (declared: ' + _esc(s.status) + ')'
-                : 'status: ' + _esc(liveStatus)) +
-              '" style="background:#f1f5f9;color:#475569;font-size:0.7em;padding:1px 6px;' +
-              (s.effective_status && s.status && s.effective_status !== s.status
-                ? 'border:1px dashed #f59e0b;'
-                : '') + '">' + _esc(liveStatus) + '</span>' +
-          '</span>' +
+        '<div style="display:flex;align-items:flex-start;gap:6px">' +
+          '<span style="color:' + ss.color + ';font-size:1.05em;line-height:1.1;flex:none">' + ss.icon + '</span>' +
+          '<strong style="font-size:0.86em;line-height:1.25;color:#1e293b">' + _esc(prettyTitle) + '</strong>' +
         '</div>' +
-        '<div style="font-size:0.78em;color:#64748b;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
-          _esc(s.baseline_source || '—') + '</div>' +
-        '<div style="font-size:0.78em;color:#64748b;margin-top:6px">' +
-          (s.n_variants || 0) + ' sim · ' +
-          (s.n_behaviors || 0) + ' tests' +
-          (nReadouts ? ' · ' + nReadouts + ' readouts' : '') +
-          (nReqs ? ' · ' + nReqs + ' reqs' : '') +
-        '</div>' +
-        followUpsChip +
-        (followUpsChip
-          ? ''
-          : '<div style="font-size:0.72em;color:#94a3b8;margin-top:4px">Click to open study</div>');
+        (role ? fld('Role', role) : '') +
+        fld('Sim Component', simComp) +
+        fld('Evidence', evidence) +
+        followUpsChip;
       // Stash follow-ups on the node for the popover lookup.
       node._followUps = followUps;
       nodesHost.appendChild(node);
@@ -4590,6 +4589,27 @@
     // Auto-scroll the shell so the top of the DAG is in view.
     var shell = document.getElementById('investigation-dag-shell');
     if (shell) shell.scrollTop = 0;
+
+    // Legend (status colors + edge types) — created once below the shell.
+    var legendHost = document.getElementById('investigation-dag-legend');
+    if (!legendHost && shell && shell.parentNode) {
+      legendHost = document.createElement('div');
+      legendHost.id = 'investigation-dag-legend';
+      shell.parentNode.insertBefore(legendHost, shell.nextSibling);
+    }
+    if (legendHost) {
+      var _lg = function(color, icon, label) {
+        return '<span style="display:inline-flex;align-items:center;gap:4px;margin-right:14px">' +
+          '<span style="color:' + color + ';font-size:1em">' + icon + '</span>' +
+          '<span>' + label + '</span></span>';
+      };
+      legendHost.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;' +
+        'font-size:0.74em;color:#64748b;padding:8px 4px 0;border-top:1px solid #f1f5f9;margin-top:8px';
+      legendHost.innerHTML =
+        _lg('#16a34a', '✓', 'Accepted') + _lg('#ca8a04', '◐', 'Investigating') +
+        _lg('#2563eb', '○', 'Planned / Unknown') + _lg('#9ca3af', '⊘', 'Not relevant') +
+        '<span style="margin-right:14px"><span style="color:#94a3b8">→</span> Leads to</span>';
+    }
   }
   window._renderInvestigationDag = _renderInvestigationDag;
 
