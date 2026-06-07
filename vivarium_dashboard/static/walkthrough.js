@@ -603,7 +603,9 @@
         '<small class="muted">(no bib entry)</small></div>';
     }
 
-    var title = ref.title || key || '(untitled)';
+    // Many minimal bib entries have only url + note (no title); fall back to
+    // the note (a human description), then the key.
+    var title = ref.title || ref.note || key || '(untitled)';
     // Link target: explicit url, else doi.org/<doi>.
     var link = '';
     if (ref.url) link = ref.url;
@@ -641,8 +643,13 @@
         '</details>';
     }
 
+    // Show the note as a sub-line only when it isn't already the headline.
+    var noteHtml = (ref.note && ref.note !== title)
+      ? '<div class="muted" style="font-size:0.85em;margin-top:2px;font-style:italic">' + _esc(ref.note) + '</div>'
+      : '';
+
     return '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">' +
-      '<div>' + titleHtml + actions + '</div>' + meta + bibBlock + '</div>';
+      '<div>' + titleHtml + actions + '</div>' + meta + noteHtml + bibBlock + '</div>';
   }
 
   // Copy the text content of a <pre> to the clipboard; flash the button label.
