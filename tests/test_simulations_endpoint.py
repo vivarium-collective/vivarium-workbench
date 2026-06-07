@@ -88,3 +88,19 @@ def test_simulations_payload(tmp_path):
     assert beta["investigation"] == "dnaa-replication"
     assert beta["study"] == "beta"
     assert beta["emitter_type"] == "SQLite"
+
+
+def test_simulations_payload_backfills_on_disk_parquet(tmp_path):
+    """A study with an on-disk out/<run_id>/ Parquet store but NO runs_meta row
+    is discovered by the vendored backfill_study_runs during list_all_runs and
+    tagged Parquet (via dir-aware emitter detection)."""
+    ws = _git_ws(tmp_path)
+    sdir = ws / "investigations" / "dnaa-replication" / "studies" / "alpha"
+    on_disk = sdir / "out" / "run-ondisk"
+    on_disk.mkdir(parents=True)
+    (on_disk / "data.parquet").write_bytes(b"PAR1")
+    payload = _simulations_payload(ws)
+    runs = {r["run_id"]: r for r in payload["runs"]}
+    assert "run-ondisk" in runs, "vendored backfill did not register the on-disk run"
+    assert runs["run-ondisk"]["study"] == "alpha"
+    assert runs["run-ondisk"]["emitter_type"] == "Parquet"

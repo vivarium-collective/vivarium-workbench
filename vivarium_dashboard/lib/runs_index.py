@@ -4,11 +4,12 @@ VENDORED COPY. Canonical source: pbg_superpowers/runs_index.py in the
 pbg-superpowers repo. The dashboard venv has no pbg_superpowers, so this is
 a near-byte-faithful copy. ``emitter_type_of`` + ``_all_runs`` are kept
 byte-identical to canonical (the drift guard in
-tests/test_runs_index_mirror.py compares them). ``list_all_runs`` differs in
-ONE way: the dashboard's ``lib/`` has no ``backfill_runs`` module, so the
-``from .backfill_runs import backfill_study_runs`` import is wrapped in
-try/except and backfill is skipped when unavailable. ``list_all_runs`` is
-therefore EXCLUDED from the byte-compare.
+tests/test_runs_index_mirror.py compares emitter_type_of, _store_emitter_type,
+and _all_runs). ``list_all_runs`` is EXCLUDED from that byte-compare: it is
+functionally equivalent to canonical but wraps the per-study
+``backfill_study_runs`` call in try/except so a backfill failure never breaks
+the listing. The vendored ``lib/backfill_runs`` (and ``lib/run_registry``'s
+RUNS_META_DDL) now satisfy the import.
 """
 from __future__ import annotations
 
@@ -73,20 +74,16 @@ def _all_runs(runs_db: Path) -> list[dict]:
 def list_all_runs(ws_root: Path) -> list[dict]:
     """All runs across every study, tagged investigation/study/emitter, newest first."""
     from .workspace_paths import WorkspacePaths
-    try:
-        from .backfill_runs import backfill_study_runs
-    except ImportError:
-        backfill_study_runs = None
+    from .backfill_runs import backfill_study_runs
     wp = WorkspacePaths.load(Path(ws_root))
     out: list[dict] = []
     for sd in wp.iter_study_dirs():
         slug = sd.name
         owner = wp.study_owner(slug)
-        if backfill_study_runs is not None:
-            try:
-                backfill_study_runs(sd, spec_id=slug)
-            except Exception:
-                pass
+        try:
+            backfill_study_runs(sd, spec_id=slug)
+        except Exception:
+            pass
         for r in _all_runs(sd / "runs.db"):
             ep = r.get("emitter_path")
             etype = emitter_type_of(ep)
