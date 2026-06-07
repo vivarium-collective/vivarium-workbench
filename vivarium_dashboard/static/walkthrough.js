@@ -5876,6 +5876,9 @@
         || followupProposals.length
         || (discImpl.resolved_uncertainties || []).length
         || (discImpl.remaining_uncertainties || []).length);
+      if (limitations.length) links.push('<a href="#' + sid.limits + '">Limitations <span class="sn-count">' + limitations.length + '</span></a>');
+      if (bib.length)         links.push('<a href="#' + sid.refs + '">Cited refs <span class="sn-count">' + bib.length + '</span></a>');
+      links.push('<a href="#' + sid.decision + '">Decision</a>');
       if (_hasDiscovery) {
         var _nDisc = (discImpl.alternate_hypotheses || []).length
                    + (discImpl.mechanism_update_proposals || []).length
@@ -5883,9 +5886,6 @@
         links.push('<a href="#' + sid.discovery + '">Discovery implications'
                    + (_nDisc ? ' <span class="sn-count">' + _nDisc + '</span>' : '') + '</a>');
       }
-      if (limitations.length) links.push('<a href="#' + sid.limits + '">Limitations <span class="sn-count">' + limitations.length + '</span></a>');
-      if (bib.length)         links.push('<a href="#' + sid.refs + '">Cited refs <span class="sn-count">' + bib.length + '</span></a>');
-      links.push('<a href="#' + sid.decision + '">Decision</a>');
 
       var dependsBrief = parents ? 'Depends on: ' + parents : '<em>Root study (no dependencies)</em>';
 
@@ -6906,10 +6906,10 @@
         +   buildHtml           // 8. Model changes
         +   reqsHtml            // 9. What to build/fix
         +   followUpsHtml       // 10. Next steps
-        +   discoveryHtml       // 10b. Discovery implications (after evidence, before Decide)
         +   limitsHtml          // 11. Limitations
         +   refsHtml            // 12. References
-        +   decisionHtml        // Decision: can we move to the next study? (bottom)
+        +   decisionHtml        // Decision: can we move to the next study?
+        +   discoveryHtml       // 10b. Discovery implications (after the Decision)
         + '</section>'
         + '</details>';
     }
