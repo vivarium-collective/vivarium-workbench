@@ -7380,7 +7380,6 @@
       +   '<span class="tb-title">' + _h(iset.title || iset.name) + '</span>'
       +   '<a href="#top">Top</a>'
       +   ((iset.executive && (iset.executive.what_is_this || iset.executive.verdict)) ? '<a href="#executive">Summary</a>' : '')
-      +   '<a href="#overview">Overview</a>'
       /* "Acceptance" nav link removed alongside the section it pointed to */
       +   '<a href="#studies-heading">Studies</a>'
       +   '<a href="#references">References</a>'
@@ -7561,10 +7560,11 @@
             + '</details>'
           : '')
 
-      +   '<h2 id="overview">Overview</h2>'
+      +   '<details id="overview" class="report-fold"><summary>Overview</summary>'
       +   (iset.question   ? '<p><strong>Question.</strong> '   + _multiline(iset.question)   + '</p>' : '')
       +   (iset.hypothesis ? '<p><strong>Hypothesis.</strong> ' + _multiline(iset.hypothesis) + '</p>' : '')
       +   (iset.description ? '<div class="description"><p>' + _multiline(iset.description) + '</p></div>' : '')
+      +   '</details>'
 
       /* Removed: top-of-report "Acceptance criteria" section.
          Per-study behavior_tests + conclusion_verdicts (the v4 way
