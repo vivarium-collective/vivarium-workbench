@@ -168,6 +168,30 @@
 .finding-expert-note{font-size:0.88em;color:#475569;margin-top:4px;font-style:italic}
 .finding-next{padding:6px 10px;background:#f0fdf4;border-left:3px solid #10b981;border-radius:3px;font-size:0.9em;margin-top:8px;line-height:1.5}
 .finding-next strong{color:#065f46}
+/* discovery implications */
+.di-group{margin:14px 0}
+.di-group h3{margin:0 0 6px 0;font-size:0.95em}
+.di-uncertainties{display:flex;flex-wrap:wrap;gap:16px;margin:8px 0}
+.di-unc{flex:1;min-width:220px}
+.di-unc h4{margin:0 0 4px 0;font-size:0.88em}
+.di-unc-resolved h4{color:#065f46}
+.di-unc-remaining h4{color:#92400e}
+.di-unc ul{margin:0 0 0 18px;padding:0;font-size:0.9em;line-height:1.45}
+.di-card{padding:10px 14px;margin:8px 0;border:1px solid #e2e8f0;border-left:4px solid #94a3b8;border-radius:4px;background:#f8fafc;font-size:0.92em}
+.di-card-stmt{font-size:0.98em;line-height:1.5}
+.di-card-why{margin:4px 0 0 0;color:#475569;line-height:1.45}
+.di-card-line{margin:4px 0 0 0;font-size:0.88em;color:#475569;line-height:1.4}
+.di-lbl{color:#475569;font-weight:600;font-size:0.85em}
+.di-mech-card{border-left-color:#a855f7;background:#faf5ff}
+.di-mech-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.di-update-chip{font-size:0.7em;text-transform:uppercase;letter-spacing:0.04em;padding:1px 8px;border-radius:9999px;background:#e0e7ff;color:#3730a3}
+.di-conf-change{font-size:0.78em;color:#475569;font-family:ui-monospace,monospace}
+.di-approval-badge{font-size:0.68em;text-transform:uppercase;letter-spacing:0.04em;padding:1px 8px;border-radius:9999px;background:#fef3c7;color:#92400e}
+.di-fup-card{border-left-color:#10b981;background:#f0fdf4}
+.di-gain-high{background:#d1fae5;color:#065f46}
+.di-gain-medium{background:#fef3c7;color:#92400e}
+.di-gain-low{background:#e5e7eb;color:#374151}
+.di-chip{font-size:0.7em;padding:1px 8px;border-radius:9999px;background:#e2e8f0;color:#475569}
 </style>
 
 <section class="study-tab-panel active" data-kind="overview" id="panel-overview">
@@ -1851,6 +1875,105 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
   </div>
   <p class="muted">Saved as one markdown blob in study.yaml.conclusion with H2 headers.</p>
   {% endif %}
+
+  {# ── Discovery implications (after decisions) ───────────────────────────
+     Where this study's results leave the mechanism model and what to
+     investigate next. Mirrors the report's discovery_implications block
+     (static/walkthrough.js v3StudySection), placed AFTER the Decide content. #}
+  {% if study.discovery_implications %}
+  {% set _di = study.discovery_implications %}
+  <div class="overview-section" id="discovery-implications-section" style="margin-top:18px">
+    <h2 class="overview-label">Discovery implications</h2>
+    <p class="muted" style="margin:0 0 10px 0;font-size:0.88em">Where this study's results leave the mechanism model — and what to investigate next.</p>
+
+    {% if _di.resolved_uncertainties or _di.remaining_uncertainties %}
+    <div class="di-uncertainties">
+      {% if _di.resolved_uncertainties %}
+      <div class="di-unc di-unc-resolved">
+        <h4>✓ Resolved uncertainties</h4>
+        <ul>{% for u in _di.resolved_uncertainties %}<li>{{ u }}</li>{% endfor %}</ul>
+      </div>
+      {% endif %}
+      {% if _di.remaining_uncertainties %}
+      <div class="di-unc di-unc-remaining">
+        <h4>● Remaining uncertainties</h4>
+        <ul>{% for u in _di.remaining_uncertainties %}<li>{{ u }}</li>{% endfor %}</ul>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if _di.alternate_hypotheses %}
+    <div class="di-group">
+      <h3>Alternate hypotheses <span class="muted" style="font-weight:normal;font-size:0.85em">({{ _di.alternate_hypotheses | length }})</span></h3>
+      {% for h in _di.alternate_hypotheses %}
+      <div class="di-card">
+        <div class="di-card-stmt"><strong>{{ h.statement or '(untitled hypothesis)' }}</strong></div>
+        {% if h.why_plausible %}<div class="di-card-why">{{ h.why_plausible }}</div>{% endif %}
+        {% if h.mechanism_elements_affected %}
+        <div class="di-card-line"><span class="di-lbl">Mechanism elements:</span>
+          {% for e in h.mechanism_elements_affected %}<code>{{ e }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+        </div>
+        {% endif %}
+        {% if h.discriminating_observables %}
+        <div class="di-card-line"><span class="di-lbl">Discriminating observables:</span>
+          {% for d in h.discriminating_observables %}<code>{{ d }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if _di.mechanism_update_proposals %}
+    <div class="di-group">
+      <h3>Mechanism update proposals <span class="muted" style="font-weight:normal;font-size:0.85em">({{ _di.mechanism_update_proposals | length }})</span></h3>
+      {% for m in _di.mechanism_update_proposals %}
+      <div class="di-card di-mech-card">
+        <div class="di-mech-head">
+          <code>{{ m.mechanism_node_or_edge or '(unspecified)' }}</code>
+          <span class="di-update-chip">{{ m.update_type or 'revise' }}</span>
+          {% if m.confidence_change %}<span class="di-conf-change">Δconfidence: {{ m.confidence_change }}</span>{% endif %}
+          {% if m.requires_expert_approval %}<span class="di-approval-badge">needs expert approval</span>{% endif %}
+        </div>
+        {% if m.rationale %}<div class="di-card-why">{{ m.rationale }}</div>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if _di.followup_study_proposals %}
+    <div class="di-group">
+      <h3>Follow-up study proposals <span class="muted" style="font-weight:normal;font-size:0.85em">({{ _di.followup_study_proposals | length }})</span></h3>
+      <p class="muted" style="margin:0 0 8px 0;font-size:0.85em">Click <strong>➕ Add to investigation</strong> to spawn a new study node in the investigation graph.</p>
+      <div class="followup-list">
+        {% for p in _di.followup_study_proposals %}
+        {% set _gain = (p.expected_information_gain or '')|lower %}
+        <div class="di-card di-fup-card">
+          <div class="followup-header">
+            <strong class="followup-title">{{ p.title or '(untitled proposal)' }}</strong>
+            {% if p.study_type %}<span class="di-chip">{{ p.study_type }}</span>{% endif %}
+            {% if p.source_trigger %}<span class="di-chip">{{ p.source_trigger }}</span>{% endif %}
+            {% if _gain %}<span class="di-chip di-gain-{{ _gain }}">gain: {{ _gain }}</span>{% endif %}
+            {% if p.priority %}<span class="di-chip">priority: {{ p.priority }}</span>{% endif %}
+          </div>
+          {% if p.proposed_experiment %}<div class="di-card-why">{{ p.proposed_experiment }}</div>{% endif %}
+          {% if p.target_mechanism_elements %}
+          <div class="di-card-line"><span class="di-lbl">Targets:</span>
+            {% for t in p.target_mechanism_elements %}<code>{{ t }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+          </div>
+          {% endif %}
+          <div class="followup-actions" style="margin-top:8px">
+            <button class="btn-seed-followup"
+                    onclick="_seedFollowupProposal('{{ name }}', {{ (p.id or '')|tojson }})">➕ Add to investigation</button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
 </section>
 
 </main>
@@ -1903,7 +2026,76 @@ function _saveExpertInput(studyName, eiName, btn) {
     btn.disabled = false;
   });
 }
+
+// ── Seed a child study from this study's discovery_implications /
+//    follow_up_studies and make it appear in the investigation graph ──────
+// Both POST /api/study-seed-followup. On success they flash an inline
+// confirmation on the clicked button, then refresh the surface the user is
+// in: when embedded inside the investigation iframe, ask the parent to
+// re-render the investigation detail (and reload as a fallback); standalone,
+// reload the page so the seeded child is reflected.
+//
+// NOTE: these are defined AFTER /study-detail.js loads (see the script order
+// below) so they take precedence over the legacy _seedFollowupStudy there,
+// which navigates away instead of refreshing the embedded investigation.
+function _flashSeedBtn(btn, text, ok) {
+  if (!btn) return;
+  btn.textContent = text;
+  btn.style.borderColor = ok ? '#10b981' : '#dc2626';
+  btn.style.color = ok ? '#065f46' : '#991b1b';
+}
+function _afterSeedRefresh() {
+  // Embedded inside the investigation iframe → refresh the parent's graph.
+  if (window.parent && window.parent !== window) {
+    try {
+      if (window.parent._refreshInvestigationDetail) {
+        window.parent._refreshInvestigationDetail();
+        return;
+      }
+    } catch (e) { /* cross-origin or missing — fall through to reload */ }
+    try { window.parent.location.reload(); return; } catch (e) { /* fall through */ }
+  }
+  location.reload();
+}
+function _seedFollowup(payload, btn) {
+  var orig = btn ? btn.textContent : null;
+  if (btn) { btn.disabled = true; _flashSeedBtn(btn, '… seeding', true); }
+  fetch('/api/study-seed-followup', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  }).then(function(r) {
+    return r.json().then(function(d) { return {ok: r.ok, status: r.status, body: d}; })
+      .catch(function() { return {ok: r.ok, status: r.status, body: {}}; });
+  }).then(function(res) {
+    if (!res.ok || (res.body && res.body.error)) {
+      _flashSeedBtn(btn, '✗ ' + ((res.body && res.body.error) || ('HTTP ' + res.status)), false);
+      if (btn) btn.disabled = false;
+      return;
+    }
+    _flashSeedBtn(btn, '✓ added', true);
+    setTimeout(_afterSeedRefresh, 600);
+  }).catch(function(err) {
+    _flashSeedBtn(btn, '✗ ' + String(err), false);
+    if (btn) btn.disabled = false;
+  });
+}
+function _seedFollowupStudy(parent, idx) {
+  _seedFollowup({parent: parent, followup_idx: idx}, window.event && window.event.target);
+}
+function _seedFollowupProposal(parent, proposalId) {
+  _seedFollowup({parent: parent, proposal_id: proposalId}, window.event && window.event.target);
+}
+window._seedFollowupStudy = _seedFollowupStudy;
+window._seedFollowupProposal = _seedFollowupProposal;
 </script>
 <script src="/study-detail.js"></script>
+<script>
+// Re-assert the refresh-aware seed handlers AFTER study-detail.js (which
+// defines its own navigate-away _seedFollowupStudy). The embedded
+// investigation view prefers staying in place over a full navigation.
+window._seedFollowupStudy = _seedFollowupStudy;
+window._seedFollowupProposal = _seedFollowupProposal;
+</script>
 </body>
 </html>

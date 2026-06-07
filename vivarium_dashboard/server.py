@@ -1425,6 +1425,27 @@ def _read_study_multiaxis_status(ws_root: Path, slug: str) -> dict:
     return {axis: None for axis in _MULTIAXIS_STATUS_FIELDS}
 
 
+def _read_study_discovery_implications(ws_root: Path, slug: str) -> dict:
+    """Return the study's ``discovery_implications:`` block (or ``{}``).
+
+    Mirrors :func:`_read_study_status` resolution + fallback behavior. The
+    block holds alternate hypotheses, mechanism-update proposals, and the
+    richer ``followup_study_proposals`` (successor to ``follow_up_studies``).
+    """
+    try:
+        sp = WorkspacePaths.load(ws_root).study_dir(slug) / "study.yaml"
+    except FileNotFoundError:
+        sp = ws_root / "investigations" / slug / "spec.yaml"
+    if sp.is_file():
+        try:
+            spec = yaml.safe_load(sp.read_text(encoding="utf-8")) or {}
+        except Exception:
+            return {}
+        di = spec.get("discovery_implications")
+        return di if isinstance(di, dict) else {}
+    return {}
+
+
 def _iset_lifecycle(ws_root: Path, slug: str) -> str:
     """Git lifecycle of an investigation: 'merged' if its dir exists in the
     merge-base with main (i.e. already on main), else 'wip'. Any git error or
@@ -2125,6 +2146,11 @@ def _build_iset_detail_for_test(ws_root: Path, name: str) -> tuple[dict, int]:
         # Absent axes round-trip as None so callers can detect "not set".
         entry = {"name": slug, "status": status}
         entry.update(_read_study_multiaxis_status(ws_root, slug))
+        # Discovery Implications passthrough — mirrors the full handler so the
+        # study view + report can render alternate hypotheses / mechanism
+        # updates / followup_study_proposals.
+        entry["discovery_implications"] = _read_study_discovery_implications(
+            ws_root, slug)
         studies_out.append(entry)
 
     author_status = spec.get("status", "planning")
@@ -8184,6 +8210,12 @@ if __name__ == "__main__":
             purpose = study_spec.get("purpose") or {}
             question = (purpose.get("question") if isinstance(purpose, dict) else None) or study_spec.get("question", "")
             follow_ups = study_spec.get("follow_up_studies") or []
+            # discovery_implications.followup_study_proposals is the richer
+            # successor to follow_up_studies. Prefer it for the surfaced
+            # follow-up count, falling back to legacy follow_up_studies.
+            disc_impl = study_spec.get("discovery_implications") or {}
+            disc_followups = (disc_impl.get("followup_study_proposals")
+                              if isinstance(disc_impl, dict) else None) or []
             findings = study_spec.get("findings") or []
             n_runs_for_study = _count_runs_for_study(
                 study_spec["name"], study_spec)  # F2
@@ -8207,8 +8239,13 @@ if __name__ == "__main__":
                 "n_behaviors":     len(beh_tests),
                 "n_readouts":      len(readouts),
                 "n_requirements":  len(study_spec.get("implementation_requirements") or study_spec.get("gaps") or []),
-                "n_followups":     len(follow_ups),
+                "n_followups":     len(disc_followups) or len(follow_ups),
                 "follow_up_studies": follow_ups,
+                # Discovery Implications (alternate hypotheses, mechanism-update
+                # proposals, richer follow-up study proposals). Pass through
+                # verbatim; the study view + report render it, and the seed
+                # flow reads followup_study_proposals from it.
+                "discovery_implications": disc_impl,
                 "n_findings":      len(findings),
                 "findings":        findings,
                 # Discourse-graph re-skin: optional authored headline + confidence
@@ -8254,6 +8291,9 @@ if __name__ == "__main__":
             # investigations, where the report falls back to derived data.
             "executive":           spec.get("executive") or {},
             "scientific_argument": spec.get("scientific_argument") or {},
+            # Investigation-declared references (inputs.references bib keys) so the
+            # report's References section includes them, not only study citations.
+            "references":          (spec.get("inputs") or {}).get("references") or [],
             "studies":          studies_out,
         }, 200)
 
@@ -10285,18 +10325,36 @@ if __name__ == "__main__":
         }, 200)
 
     def _post_study_seed_followup(self, body: dict):
-        """POST /api/study-seed-followup {parent, followup_idx} → seed child study.
+        """POST /api/study-seed-followup → seed a child study.
 
-        Reads parent study.yaml, picks ``follow_up_studies[followup_idx]``,
-        and writes a new ``studies/<new-name>/study.yaml`` whose Purpose +
-        Pipeline gate inherit context from the follow-up entry. The new
-        study comes up as ``phase: Design`` / ``status: planned`` and is
-        immediately visible in the dashboard's Investigations tab.
+        Two source forms:
+
+        - Legacy ``{parent, followup_idx}`` — seeds from
+          ``follow_up_studies[followup_idx]``.
+        - Richer ``{parent, proposal_id}`` or ``{parent, proposal_idx}`` —
+          seeds from ``discovery_implications.followup_study_proposals``,
+          inheriting the proposal's title / study_type /
+          target_mechanism_elements / required_inputs and a
+          ``parent_studies`` edge back with ``relation: leads-to``.
+
+        A proposal selector wins over ``followup_idx``. The new study comes
+        up as ``phase: Design`` / ``status: planned`` and is immediately
+        visible in the dashboard's Investigations tab.
         """
         from vivarium_dashboard.lib.study_seed import seed_followup_study
+        proposal_id = body.get("proposal_id")
+        proposal_idx = body.get("proposal_idx")
+        if proposal_idx is not None:
+            try:
+                proposal_idx = int(proposal_idx)
+            except (TypeError, ValueError):
+                return self._json({"error": "proposal_idx must be an integer"}, 400)
         try:
             new_name = seed_followup_study(
-                WORKSPACE, body.get("parent"), int(body.get("followup_idx", -1))
+                WORKSPACE, body.get("parent"),
+                int(body.get("followup_idx", -1)),
+                proposal_id=proposal_id,
+                proposal_idx=proposal_idx,
             )
         except FileNotFoundError as e:
             return self._json({"error": str(e)}, 404)

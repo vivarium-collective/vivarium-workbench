@@ -33,6 +33,61 @@ well-scoped.
 The renderer surfaces them as a single **"Mechanism narrative"** table at
 the top of each study card.
 
+## Per-study: `discovery_implications` (`studies/<slug>/study.yaml`)
+
+An optional block that turns a study's results into alternate hypotheses,
+mechanism-update proposals, and selectable follow-up study proposals. It
+renders as a **"Discovery Implications"** section in the study card and the
+downloadable report, placed after the evidence/follow-ups and before the
+Decide box. All fields are optional; the section is hidden when empty.
+
+```yaml
+discovery_implications:
+  mechanism_uncertainty_addressed: []   # list[str]
+  resolved_uncertainties: []            # list[str]
+  remaining_uncertainties: []           # list[str]
+  alternate_hypotheses:
+    - id:
+      statement:
+      mechanism_elements_affected: []
+      why_plausible:
+      evidence_for: []
+      evidence_against: []
+      discriminating_observables: []
+  mechanism_update_proposals:
+    - mechanism_node_or_edge:
+      update_type:        # strengthen|weaken|revise|reject|split|merge
+      confidence_change:
+      rationale:
+      requires_expert_approval: true
+  followup_study_proposals:
+    - id:
+      title:
+      study_type:         # parameter_sweep|mechanism_discrimination|model_extension|validation|rerun|calibration
+      source_trigger:     # low_confidence|contradiction|ambiguity|missing_parameter|missing_interaction|expert_concern
+      target_mechanism_elements: []
+      proposed_experiment:
+      expected_information_gain:  # low|medium|high
+      required_build_changes: []
+      required_inputs: []
+      blocks_or_unblocks: []
+      priority:
+      expert_gate_required: true
+```
+
+`followup_study_proposals` is the richer successor to the legacy
+`follow_up_studies`. Everywhere a follow-up is read (the study card, the
+report, and the DAG node popover) the proposals list is preferred, with a
+fallback to `follow_up_studies` for back-compat — don't delete the legacy
+field.
+
+Each follow-up proposal carries an **"➕ Add to investigation"** button that
+seeds a new child study node (`POST /api/study-seed-followup` with
+`proposal_id` or `proposal_idx`). The child inherits the proposal's title /
+`study_type` / `target_mechanism_elements` / `required_inputs` and gets a
+`parent_studies` edge back to the originating study with
+`relation: leads-to`.
+
 ## Investigation-level: `parts` grouping (`investigations/<slug>/investigation.yaml`)
 
 Group studies into conceptual phases so the report reads as a coherent

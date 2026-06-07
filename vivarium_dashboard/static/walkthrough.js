@@ -4851,7 +4851,12 @@
     for (var i = 0; i < isetStudies.length; i++) {
       if (isetStudies[i].name === studyName) { match = isetStudies[i]; break; }
     }
-    var followUps = (match && match.follow_up_studies) || [];
+    // Prefer the richer discovery_implications.followup_study_proposals;
+    // fall back to legacy follow_up_studies for back-compat.
+    var di = (match && match.discovery_implications) || {};
+    var proposals = di.followup_study_proposals || [];
+    var usingProposals = proposals.length > 0;
+    var followUps = usingProposals ? proposals : ((match && match.follow_up_studies) || []);
     if (!followUps.length) {
       alert('No follow-ups recorded for ' + studyName + '.');
       return;
@@ -4877,7 +4882,10 @@
       '<p style="font-size:0.85em;color:#64748b;margin:0 0 10px 0">Click <em>Seed →</em> to spawn a new child study from any entry. The new study inherits this one as a pipeline_gate prerequisite.</p>';
 
     var rows = followUps.map(function(f, idx) {
-      var kind = f.kind || 'other';
+      // Normalize across the two shapes: legacy follow_up_studies use
+      // kind/why/effort; followup_study_proposals use study_type/
+      // proposed_experiment/expected_information_gain.
+      var kind = f.kind || f.study_type || 'other';
       var kindColors = {
         infrastructure_fix: {bg: '#fef2f2', fg: '#991b1b', border: '#dc2626'},
         calibration_task:   {bg: '#fefce8', fg: '#92400e', border: '#f59e0b'},
@@ -4888,19 +4896,24 @@
       };
       var kc = kindColors[kind] || kindColors.other;
       var canSeed = kind !== 'existing';
+      var seedCall = usingProposals
+        ? '_seedFollowupProposal(\'' + _esc(studyName) + '\', ' + JSON.stringify(f.id != null ? String(f.id) : '') + ', ' + idx + ', this)'
+        : '_seedFollowupAndOpen(\'' + _esc(studyName) + '\', ' + idx + ')';
       var seedBtn = canSeed
-        ? '<button onclick="event.stopPropagation(); _seedFollowupAndOpen(\'' + _esc(studyName) + '\', ' + idx + ')" ' +
+        ? '<button onclick="event.stopPropagation(); ' + seedCall + '" ' +
           'style="font-size:0.8em;padding:3px 10px;border:1px solid ' + kc.border + ';background:#fff;color:' + kc.fg +
           ';border-radius:4px;cursor:pointer;white-space:nowrap">Seed →</button>'
         : '<span style="font-size:0.78em;color:#64748b;font-style:italic">(existing study)</span>';
       var statusBadge = f.status
         ? '<span style="font-size:0.7em;padding:1px 6px;border-radius:9999px;background:#fef3c7;color:#92400e;margin-left:6px">' + _esc(f.status) + '</span>'
         : '';
-      var effortBadge = f.effort
-        ? '<span style="font-size:0.7em;padding:1px 6px;border-radius:9999px;background:#e0e7ff;color:#3730a3;margin-left:6px;font-family:monospace">' + _esc(f.effort) + '</span>'
+      var effortText = f.effort || f.expected_information_gain;
+      var effortBadge = effortText
+        ? '<span style="font-size:0.7em;padding:1px 6px;border-radius:9999px;background:#e0e7ff;color:#3730a3;margin-left:6px;font-family:monospace">' + _esc(effortText) + '</span>'
         : '';
-      var why = f.why
-        ? '<div style="font-size:0.83em;color:#475569;margin-top:4px;line-height:1.4">' + _esc(f.why.slice(0, 280)) + (f.why.length > 280 ? '…' : '') + '</div>'
+      var whyText = f.why || f.proposed_experiment || '';
+      var why = whyText
+        ? '<div style="font-size:0.83em;color:#475569;margin-top:4px;line-height:1.4">' + _esc(whyText.slice(0, 280)) + (whyText.length > 280 ? '…' : '') + '</div>'
         : '';
       return '<div style="padding:10px 12px;border:1px solid ' + kc.border + ';border-left:4px solid ' + kc.border +
              ';border-radius:4px;background:' + kc.bg + ';margin-bottom:8px">' +
@@ -4953,6 +4966,48 @@
       });
   }
   window._seedFollowupAndOpen = _seedFollowupAndOpen;
+
+  // Seed a child study from a discovery_implications.followup_study_proposals
+  // entry (the richer successor to follow_up_studies). Identifies the proposal
+  // by id (preferred) or index. On success, refreshes the current
+  // investigation so the new node appears in the graph (no full navigation —
+  // the expert stays in the investigation they're working in).
+  function _seedFollowupProposal(parentName, proposalId, proposalIdx, btn) {
+    if (!confirm('Spawn a new study node from this follow-up proposal?\n\n'
+        + 'A new study.yaml will be created under studies/<new-name>/ with a '
+        + 'leads-to edge back to ' + parentName + '.')) return;
+    var origText = btn ? btn.textContent : null;
+    if (btn) { btn.disabled = true; btn.textContent = '… seeding'; }
+    var payload = {parent: parentName};
+    if (proposalId) payload.proposal_id = proposalId;
+    payload.proposal_idx = proposalIdx;
+    fetch('/api/study-seed-followup', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    }).then(function(r) { return r.json().then(function(d) { return {status: r.status, body: d}; }); })
+      .then(function(res) {
+        if (res.status !== 200 || res.body.error) {
+          alert('Seed failed: ' + (res.body.error || res.status));
+          if (btn) { btn.disabled = false; btn.textContent = origText; }
+          return;
+        }
+        var pop = document.getElementById('dag-followups-popover');
+        if (pop) pop.remove();
+        if (btn) { btn.textContent = '✓ added'; }
+        // Refresh the investigation view so the new node + edge render.
+        if (window._currentIset && typeof _openInvestigationDetail === 'function') {
+          _openInvestigationDetail(window._currentIset);
+        } else {
+          alert('Created: ' + res.body.new_study_name);
+        }
+      })
+      .catch(function(err) {
+        alert('Seed failed: ' + err);
+        if (btn) { btn.disabled = false; btn.textContent = origText; }
+      });
+  }
+  window._seedFollowupProposal = _seedFollowupProposal;
 
   // Click a DAG node → load the full study in an in-page iframe BELOW the
   // DAG (no jump to the legacy Studies tab). The iframe is the same
@@ -5738,6 +5793,7 @@
         build:      'study-' + slug + '-build',
         reqs:       'study-' + slug + '-reqs',
         followups:  'study-' + slug + '-followups',
+        discovery:  'study-' + slug + '-discovery',
         limits:     'study-' + slug + '-limitations',
         refs:       'study-' + slug + '-refs',
       };
@@ -5753,6 +5809,12 @@
       var decide = s.conclusion_logic || {};
       var limitations = s.limitations || [];
       var followUps = s.follow_up_studies || [];
+      // Discovery Implications — alternate hypotheses, mechanism-update
+      // proposals, and the richer followup_study_proposals (successor to
+      // follow_up_studies). All fields optional; section hidden when empty.
+      var discImpl = (s.discovery_implications && typeof s.discovery_implications === 'object')
+                      ? s.discovery_implications : {};
+      var followupProposals = discImpl.followup_study_proposals || [];
       var findings = s.findings || [];
       var bib = (s.bibliography && s.bibliography.bib_keys) || [];
       var charts = (chartsByStudy && chartsByStudy[s.name]) || [];
@@ -5808,9 +5870,22 @@
       if (hasBuild)           links.push('<a href="#' + sid.build + '">Model changes</a>');
       if (reqs.length)        links.push('<a href="#' + sid.reqs + '">What to build / fix <span class="sn-count">' + reqs.length + '</span></a>');
       if (followUps.length)   links.push('<a href="#' + sid.followups + '">Next steps <span class="sn-count">' + followUps.length + '</span></a>');
+      var _hasDiscovery = !!(
+        (discImpl.alternate_hypotheses || []).length
+        || (discImpl.mechanism_update_proposals || []).length
+        || followupProposals.length
+        || (discImpl.resolved_uncertainties || []).length
+        || (discImpl.remaining_uncertainties || []).length);
       if (limitations.length) links.push('<a href="#' + sid.limits + '">Limitations <span class="sn-count">' + limitations.length + '</span></a>');
       if (bib.length)         links.push('<a href="#' + sid.refs + '">Cited refs <span class="sn-count">' + bib.length + '</span></a>');
       links.push('<a href="#' + sid.decision + '">Decision</a>');
+      if (_hasDiscovery) {
+        var _nDisc = (discImpl.alternate_hypotheses || []).length
+                   + (discImpl.mechanism_update_proposals || []).length
+                   + followupProposals.length;
+        links.push('<a href="#' + sid.discovery + '">Discovery implications'
+                   + (_nDisc ? ' <span class="sn-count">' + _nDisc + '</span>' : '') + '</a>');
+      }
 
       var dependsBrief = parents ? 'Depends on: ' + parents : '<em>Root study (no dependencies)</em>';
 
@@ -6281,6 +6356,129 @@
           + '</div>'
         : '';
 
+      // ── DISCOVERY IMPLICATIONS ───────────────────────────────────────
+      // Turns the study's results into resolved/remaining uncertainties,
+      // alternate hypotheses, mechanism-update proposals, and selectable
+      // follow-up study proposals. Sits after the evidence/follow-ups and
+      // before the Decide box. Each follow-up proposal carries an
+      // "➕ Add to investigation" button that seeds a child study node.
+      var discoveryHtml = '';
+      if (_hasDiscovery) {
+        var diBits = [];
+
+        // Resolved / remaining uncertainties — two short lists.
+        var resolved = discImpl.resolved_uncertainties || [];
+        var remaining = discImpl.remaining_uncertainties || [];
+        if (resolved.length || remaining.length) {
+          var uncBits = [];
+          if (resolved.length) {
+            uncBits.push('<div class="di-unc di-unc-resolved"><h4>✓ Resolved uncertainties</h4><ul>'
+              + resolved.map(function(u){ return '<li>' + _multiline(typeof u === 'string' ? u : JSON.stringify(u)) + '</li>'; }).join('')
+              + '</ul></div>');
+          }
+          if (remaining.length) {
+            uncBits.push('<div class="di-unc di-unc-remaining"><h4>● Remaining uncertainties</h4><ul>'
+              + remaining.map(function(u){ return '<li>' + _multiline(typeof u === 'string' ? u : JSON.stringify(u)) + '</li>'; }).join('')
+              + '</ul></div>');
+          }
+          diBits.push('<div class="di-uncertainties">' + uncBits.join('') + '</div>');
+        }
+
+        // Alternate hypotheses.
+        var altH = discImpl.alternate_hypotheses || [];
+        if (altH.length) {
+          diBits.push('<div class="di-group"><h4>Alternate hypotheses <span class="muted small">(' + altH.length + ')</span></h4>'
+            + altH.map(function(h) {
+                var evFor = (h.evidence_for || []).length;
+                var evAgainst = (h.evidence_against || []).length;
+                var disc = h.discriminating_observables || [];
+                var rows = [];
+                if (h.why_plausible) rows.push('<div class="di-alt-why">' + _multiline(h.why_plausible) + '</div>');
+                rows.push('<div class="di-alt-ev"><span class="di-ev di-ev-for">▲ ' + evFor + ' for</span>'
+                  + '<span class="di-ev di-ev-against">▼ ' + evAgainst + ' against</span></div>');
+                if (disc.length) {
+                  rows.push('<div class="di-alt-disc"><span class="di-lbl">Discriminating observables:</span> '
+                    + disc.map(function(d){ return '<code>' + _h(d) + '</code>'; }).join(', ') + '</div>');
+                }
+                var elems = h.mechanism_elements_affected || [];
+                if (elems.length) {
+                  rows.push('<div class="di-alt-elems"><span class="di-lbl">Mechanism elements:</span> '
+                    + elems.map(function(e){ return '<code>' + _h(e) + '</code>'; }).join(', ') + '</div>');
+                }
+                return '<div class="di-alt-card">'
+                  + '<div class="di-alt-stmt"><strong>' + _h(h.statement || '(untitled hypothesis)') + '</strong></div>'
+                  + rows.join('')
+                  + '</div>';
+              }).join('')
+            + '</div>');
+        }
+
+        // Mechanism update proposals.
+        var mech = discImpl.mechanism_update_proposals || [];
+        if (mech.length) {
+          diBits.push('<div class="di-group"><h4>Mechanism update proposals <span class="muted small">(' + mech.length + ')</span></h4>'
+            + mech.map(function(m) {
+                var ut = (m.update_type || 'revise');
+                var badge = m.requires_expert_approval
+                  ? '<span class="di-approval-badge">needs expert approval</span>' : '';
+                var cc = m.confidence_change
+                  ? '<span class="di-conf-change">Δconfidence: ' + _h(String(m.confidence_change)) + '</span>' : '';
+                return '<div class="di-mech-card">'
+                  + '<div class="di-mech-head">'
+                  +   '<code class="di-mech-target">' + _h(m.mechanism_node_or_edge || '(unspecified)') + '</code>'
+                  +   '<span class="di-update-chip di-update-' + _h(ut) + '">' + _h(ut) + '</span>'
+                  +   cc + badge
+                  + '</div>'
+                  + (m.rationale ? '<div class="di-mech-rationale">' + _multiline(m.rationale) + '</div>' : '')
+                  + '</div>';
+              }).join('')
+            + '</div>');
+        }
+
+        // Follow-up study proposals — each a selectable card with an
+        // "➕ Add to investigation" button (seeds a new child study node).
+        if (followupProposals.length) {
+          diBits.push('<div class="di-group"><h4>Follow-up study proposals <span class="muted small">(' + followupProposals.length + ')</span></h4>'
+            + '<p class="muted small">Select a proposal to spawn a new study node in the investigation graph.</p>'
+            + followupProposals.map(function(p, pi) {
+                var gain = (p.expected_information_gain || '').toLowerCase();
+                var gainChip = gain ? '<span class="di-gain-chip di-gain-' + _h(gain) + '">gain: ' + _h(gain) + '</span>' : '';
+                var typeChip = p.study_type ? '<span class="di-type-chip">' + _h(p.study_type) + '</span>' : '';
+                var trigChip = p.source_trigger ? '<span class="di-trigger-chip">' + _h(p.source_trigger) + '</span>' : '';
+                var targets = p.target_mechanism_elements || [];
+                var prio = p.priority ? '<span class="di-prio-chip">priority: ' + _h(String(p.priority)) + '</span>' : '';
+                // Identify the proposal by id (preferred) or index for the seed call.
+                var pid = p.id != null ? String(p.id) : '';
+                return '<div class="di-fup-card">'
+                  + '<div class="di-fup-head">'
+                  +   '<strong class="di-fup-title">' + _h(p.title || '(untitled proposal)') + '</strong>'
+                  +   typeChip + trigChip + gainChip + prio
+                  + '</div>'
+                  + (p.proposed_experiment ? '<div class="di-fup-exp">' + _multiline(p.proposed_experiment) + '</div>' : '')
+                  + (targets.length ? '<div class="di-fup-targets"><span class="di-lbl">Targets:</span> '
+                      + targets.map(function(t){ return '<code>' + _h(t) + '</code>'; }).join(', ') + '</div>' : '')
+                  + '<button type="button" class="di-add-btn" '
+                  +   'onclick="event.stopPropagation(); _seedFollowupProposal(\'' + _esc(s.name) + '\', ' + JSON.stringify(pid) + ', ' + pi + ', this)">'
+                  +   '➕ Add to investigation</button>'
+                  + '</div>';
+              }).join('')
+            + '</div>');
+        }
+
+        // Addressed mechanism uncertainty (provenance line, optional).
+        var addressed = discImpl.mechanism_uncertainty_addressed || [];
+        if (addressed.length) {
+          diBits.push('<div class="di-addressed muted small"><span class="di-lbl">Mechanism uncertainty addressed:</span> '
+            + addressed.map(function(a){ return _h(typeof a === 'string' ? a : JSON.stringify(a)); }).join('; ') + '</div>');
+        }
+
+        discoveryHtml = '<div id="' + sid.discovery + '" class="discovery-implications">'
+          + '<h3>Discovery implications</h3>'
+          + '<p class="muted small">Where this study\'s results leave the mechanism model — and what to investigate next.</p>'
+          + diBits.join('')
+          + '</div>';
+      }
+
       // ── LIMITATIONS ──────────────────────────────────────────────────
       var limitsHtml = limitations.length
         ? '<div id="' + sid.limits + '"><h3>Limitations</h3><ul>'
@@ -6672,6 +6870,7 @@
           +   '<details class="study-technical-fold"><summary>Technical context (model changes · implementation tasks · follow-ups · limitations · refs)</summary>'
           +     reqsHtml          // Implementation requirements
           +     followUpsHtml     // Follow-ups
+          +     discoveryHtml     // Discovery implications
           +     limitsHtml        // Limitations
           +     refsHtml          // References
           +   '</details>'
@@ -6709,7 +6908,8 @@
         +   followUpsHtml       // 10. Next steps
         +   limitsHtml          // 11. Limitations
         +   refsHtml            // 12. References
-        +   decisionHtml        // Decision: can we move to the next study? (bottom)
+        +   decisionHtml        // Decision: can we move to the next study?
+        +   discoveryHtml       // 10b. Discovery implications (after the Decision)
         + '</section>'
         + '</details>';
     }
@@ -7182,14 +7382,27 @@
        `_coerce_list_field`. `_asList` is kept as a reusable helper. */
     var acceptance = '';
 
-    // ── Collect the union of bib keys cited across all studies + iset ──
+    // ── Collect the union of references across the investigation + studies ──
+    // Sources: study expected_behavior[].cites + bibliography.bib_keys (bib keys),
+    // the investigation's declared inputs.references (iset.references, bib keys),
+    // and each study's `references:` (bib-key strings → looked up in papers.bib;
+    // rich {name,url,role} entries → rendered as standalone sources).
     var citedKeys = new Set();
+    var extraSources = [];
+    function _collectRef(r) {
+      if (typeof r === 'string') { if (r) citedKeys.add(r); return; }
+      if (!r || typeof r !== 'object') return;
+      if (r.key || r.bib_key) { citedKeys.add(r.key || r.bib_key); return; }
+      if (r.name || r.url || r.path) extraSources.push(r);
+    }
+    (iset.references || []).forEach(_collectRef);
     specs.forEach(function(s) {
       (s.expected_behavior || []).forEach(function(b) {
         (b.cites || []).forEach(function(k) { citedKeys.add(k); });
       });
       var bib = (s.bibliography && s.bibliography.bib_keys) || [];
       bib.forEach(function(k) { citedKeys.add(k); });
+      (s.references || []).forEach(_collectRef);
     });
     var orderedCited = Array.from(citedKeys).sort();
     var referencesHtml = orderedCited.map(function(key) {
@@ -7215,6 +7428,20 @@
            + doiLink + urlLink
            + (e.note ? '<div class="muted small">Note: ' + _h(e.note) + '</div>' : '')
            + '</li>';
+    }).join('');
+    // Rich study/investigation sources (name + online link + role) that aren't
+    // papers.bib keys — de-duped by name+url, appended to the References list.
+    var _seenSrc = {};
+    referencesHtml += extraSources.filter(function (r) {
+      var k = (r.name || '') + '|' + (r.url || r.path || '');
+      if (_seenSrc[k]) return false; _seenSrc[k] = 1; return true;
+    }).map(function (r) {
+      var label = _h(r.name || r.url || r.path || 'source');
+      var head = r.url
+        ? '<a href="' + _h(r.url) + '" target="_blank" rel="noopener">' + label + '</a> <small class="muted">↗</small>'
+        : '<strong>' + label + '</strong>';
+      return '<li class="ref-entry">' + head
+           + (r.role ? '<div class="muted small">' + _h(r.role) + '</div>' : '') + '</li>';
     }).join('');
 
     // ── Build the TOC (sidebar nav) entries from the ordered studies ────
@@ -7346,6 +7573,51 @@
       + '.fu-why,.fu-unblocks,.fu-acc,.fu-hyp{margin:4px 0 0 0;font-size:0.92em;line-height:1.45}'
       + '.fu-hyp{padding:6px 10px;background:#fff;border-radius:3px;border:1px dashed #cbd5e1}'
       + '.fu-acc ul{margin:2px 0 0 18px;padding:0}'
+      // discovery implications — alternate hypotheses, mechanism updates,
+      // selectable follow-up proposals.
+      + '.discovery-implications{margin:0 0 24px 0;padding:14px 16px;background:#fdfcff;border:1px solid #ddd6fe;border-radius:8px}'
+      + '.discovery-implications>h3{margin-top:0}'
+      + '.di-group{margin:14px 0 0 0}'
+      + '.di-group>h4{margin:0 0 6px 0;font-size:0.95em}'
+      + '.di-uncertainties{display:flex;gap:14px;flex-wrap:wrap;margin-top:6px}'
+      + '.di-unc{flex:1;min-width:220px;padding:8px 12px;border-radius:6px;font-size:0.9em}'
+      + '.di-unc>h4{margin:0 0 4px 0;font-size:0.85em}'
+      + '.di-unc ul{margin:0 0 0 18px;padding:0}'
+      + '.di-unc-resolved{background:#ecfdf5;border:1px solid #a7f3d0}'
+      + '.di-unc-remaining{background:#fffbeb;border:1px solid #fde68a}'
+      + '.di-alt-card,.di-mech-card,.di-fup-card{padding:10px 14px;margin:8px 0;border:1px solid #e2e8f0;border-left:4px solid #a78bfa;border-radius:4px;background:#fff;font-size:0.93em}'
+      + '.di-alt-stmt{margin-bottom:4px}'
+      + '.di-alt-why{color:#475569;margin:4px 0;line-height:1.45}'
+      + '.di-alt-ev{display:flex;gap:8px;margin:4px 0}'
+      + '.di-ev{font-size:0.78em;padding:1px 8px;border-radius:9999px}'
+      + '.di-ev-for{background:#dcfce7;color:#166534}'
+      + '.di-ev-against{background:#fee2e2;color:#991b1b}'
+      + '.di-alt-disc,.di-alt-elems,.di-fup-targets{font-size:0.85em;color:#475569;margin-top:4px}'
+      + '.di-lbl{color:#64748b;font-weight:600}'
+      + '.di-mech-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}'
+      + '.di-mech-target{background:#f1f5f9;padding:1px 6px;border-radius:3px}'
+      + '.di-mech-rationale{color:#475569;line-height:1.45}'
+      + '.di-update-chip{font-size:0.7em;text-transform:uppercase;letter-spacing:0.05em;padding:1px 8px;border-radius:9999px;background:#e2e8f0;color:#475569}'
+      + '.di-update-strengthen{background:#dcfce7;color:#166534}'
+      + '.di-update-weaken{background:#fef3c7;color:#92400e}'
+      + '.di-update-reject{background:#fee2e2;color:#991b1b}'
+      + '.di-update-revise,.di-update-split,.di-update-merge{background:#e0e7ff;color:#3730a3}'
+      + '.di-conf-change{font-size:0.72em;padding:1px 8px;border-radius:9999px;background:#eef2ff;color:#4338ca;font-family:ui-monospace,monospace}'
+      + '.di-approval-badge{font-size:0.7em;padding:1px 8px;border-radius:9999px;background:#fef3c7;color:#92400e}'
+      + '.di-fup-card{border-left-color:#10b981}'
+      + '.di-fup-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}'
+      + '.di-fup-title{flex:1;min-width:160px}'
+      + '.di-fup-exp{color:#475569;margin:4px 0;line-height:1.45}'
+      + '.di-type-chip,.di-trigger-chip,.di-prio-chip{font-size:0.7em;padding:1px 8px;border-radius:9999px;background:#e2e8f0;color:#475569}'
+      + '.di-trigger-chip{background:#f3e8ff;color:#6b21a8}'
+      + '.di-gain-chip{font-size:0.7em;padding:1px 8px;border-radius:9999px;background:#e2e8f0;color:#475569}'
+      + '.di-gain-high{background:#dcfce7;color:#166534}'
+      + '.di-gain-medium{background:#fef9c3;color:#854d0e}'
+      + '.di-gain-low{background:#f1f5f9;color:#64748b}'
+      + '.di-add-btn{margin-top:8px;font-size:0.82em;padding:4px 12px;border:1px solid #10b981;background:#f0fdf4;color:#065f46;border-radius:4px;cursor:pointer}'
+      + '.di-add-btn:hover{background:#dcfce7}'
+      + '.di-add-btn:disabled{opacity:0.6;cursor:default}'
+      + '.di-addressed{margin-top:12px}'
       // charts — SVGs scale to fit their card container; preserves aspect
       // ratio so a 1400×484 chart shrinks to (e.g.) 800×276 instead of
       // overflowing horizontally + clipping content.
@@ -7931,82 +8203,7 @@
       /* "Acceptance" nav link removed alongside the section it pointed to */
       +   '<a href="#studies-heading">Studies</a>'
       +   '<a href="#references">References</a>'
-      +   '<button type="button" class="tb-iset-switcher" id="tb-iset-switcher-trigger" aria-haspopup="true" aria-expanded="false">'
-      +     '<span class="tb-iset-switcher-icon">⇄</span>'
-      +     '<span>Switch investigation</span>'
-      +     '<span class="tb-iset-switcher-arrow">▾</span>'
-      +   '</button>'
-      +   '<div class="tb-iset-menu" id="tb-iset-menu" role="menu" hidden></div>'
       + '</nav>'
-      + '<script>(function(){'
-      // Topbar investigation switcher. Polishes the existing
-      // /api/investigation-registry data — the live dashboard already
-      // surfaces this via its left-rail switcher; this brings the same
-      // navigation to the report pages, where the rail isn't present.
-      // Self-contained: no dep on index.html.j2 chrome.
-      +     'var trigger=document.getElementById("tb-iset-switcher-trigger");'
-      +     'var menu=document.getElementById("tb-iset-menu");'
-      +     'if(!trigger||!menu){return;}'
-      +     'var loaded=false;'
-      +     'function esc(s){return String(s||"").replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c];});}'
-      +     'function row(p,kind){'
-      +       'var pill="";'
-      +       'if(kind==="current"){pill="<span class=\\"tb-iset-menu-pill tb-iset-menu-pill-here\\">here</span>";}'
-      +       'else if(kind==="running"){pill="<span class=\\"tb-iset-menu-pill tb-iset-menu-pill-running\\">running</span>";}'
-      +       'else if(kind==="dormant"){pill="<span class=\\"tb-iset-menu-pill tb-iset-menu-pill-dormant\\">dormant</span>";}'
-      +       'var cls="tb-iset-menu-row"+(kind==="current"?" tb-iset-menu-row-current":"");'
-      +       'var dataUrl=p.url?(" data-url=\\""+esc(p.url)+"\\""):"";'
-      +       'var dataSlug=p.slug?(" data-slug=\\""+esc(p.slug)+"\\""):"";'
-      +       'return "<button type=\\"button\\" class=\\""+cls+"\\""+dataUrl+dataSlug+">'
-      +         '<span class=\\"tb-iset-menu-slug\\">"+esc(p.title||p.slug||"(unnamed)")+"</span>"+pill+"</button>";'
-      +     '}'
-      +     'function position(){'
-      +       'var r=trigger.getBoundingClientRect();'
-      +       'menu.style.top=(r.bottom+6)+"px";'
-      // Right-align the menu to the trigger so it doesn't overflow the right edge.
-      +       'menu.style.right=Math.max(8,window.innerWidth-r.right)+"px";'
-      +       'menu.style.left="auto";'
-      +     '}'
-      +     'function render(data){'
-      +       'var html="";'
-      +       'if(data.current){html+="<div class=\\"tb-iset-menu-section\\">CURRENT</div>"+row(data.current,"current");}'
-      +       'var running=(data.running_others||[]).filter(function(p){return p&&p.url;});'
-      +       'if(running.length){html+="<div class=\\"tb-iset-menu-section\\">OTHER LIVE DASHBOARDS</div>";running.forEach(function(p){html+=row(p,"running");});}'
-      +       'var siblings=(data.local_siblings||[]);'
-      +       'if(siblings.length){html+="<div class=\\"tb-iset-menu-section\\">ALSO IN THIS WORKTREE</div>";siblings.forEach(function(p){html+=row(p,"sibling");});}'
-      +       'var dormant=(data.dormant_others||[]);'
-      +       'if(dormant.length){html+="<div class=\\"tb-iset-menu-section\\">DORMANT (NO LIVE DASHBOARD)</div>";dormant.forEach(function(p){html+=row(p,"dormant");});}'
-      +       'if(!html){html="<div class=\\"tb-iset-menu-empty\\">No other investigations found.</div>";}'
-      +       'menu.innerHTML=html;'
-      +     '}'
-      +     'function refresh(){'
-      +       'menu.innerHTML="<div class=\\"tb-iset-menu-empty\\">Loading…</div>";'
-      +       'fetch("/api/investigation-registry",{headers:{Accept:"application/json"}})'
-      +         '.then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})'
-      +         '.then(render)'
-      +         '.catch(function(e){menu.innerHTML="<div class=\\"tb-iset-menu-error\\">Failed to load: "+esc(String(e))+"</div>";});'
-      +     '}'
-      +     'function openMenu(){menu.hidden=false;position();trigger.setAttribute("aria-expanded","true");if(!loaded){loaded=true;refresh();}}'
-      +     'function closeMenu(){menu.hidden=true;trigger.setAttribute("aria-expanded","false");}'
-      +     'trigger.addEventListener("click",function(e){'
-      +       'e.stopPropagation();'
-      +       'if(menu.hidden){openMenu();}else{closeMenu();}'
-      +     '});'
-      +     'menu.addEventListener("click",function(e){'
-      +       'var btn=e.target.closest(".tb-iset-menu-row");'
-      +       'if(!btn||btn.classList.contains("tb-iset-menu-row-current"))return;'
-      +       'var url=btn.getAttribute("data-url");'
-      +       'var slug=btn.getAttribute("data-slug");'
-      +       'if(url){window.location.href=url;}'
-      +       'else if(slug){alert("This investigation is dormant. Start its dashboard with:\\n  /pbg-investigation open "+slug);closeMenu();}'
-      +     '});'
-      +     'document.addEventListener("click",function(e){'
-      +       'if(menu.hidden)return;'
-      +       'if(!menu.contains(e.target)&&!trigger.contains(e.target))closeMenu();'
-      +     '});'
-      +     'document.addEventListener("keydown",function(e){if(e.key==="Escape")closeMenu();});'
-      +     'window.addEventListener("resize",function(){if(!menu.hidden)position();});'
-      +   '})();</script>'
 
       // ── Main content ──
       + '<main class="content" id="top">'
