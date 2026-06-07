@@ -1489,9 +1489,19 @@ def _set_investigation_status(ws_root: Path, inv: str, status: str) -> dict:
             break
     if target is None or not target.is_file():
         return {"error": "investigation not found", "_code": 404}
-    spec = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
-    spec["status"] = status
-    target.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
+    # Prefer ruamel (round-trip preserves comments) when available; fall back
+    # to safe_dump (test .venv has no ruamel; the runtime venv does).
+    try:
+        from ruamel.yaml import YAML as _RYAML
+        _ry = _RYAML(); _ry.preserve_quotes = True; _ry.width = 4096
+        spec = _ry.load(target.read_text(encoding="utf-8")) or {}
+        spec["status"] = status
+        with target.open("w", encoding="utf-8") as _fh:
+            _ry.dump(spec, _fh)
+    except Exception:
+        spec = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+        spec["status"] = status
+        target.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True, "status": status}
 
 
