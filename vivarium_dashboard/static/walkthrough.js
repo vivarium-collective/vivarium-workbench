@@ -6151,19 +6151,19 @@
         +   mechanismNarrativeHtml  // 0a. Mechanism narrative (7 framework fields)
         +   embedsHtml          // 0b. Embedded preview HTMLs
         +   summaryHtml         // 1. Plain-English summary
-        +   decisionHtml        // 2. Decision box
         +   expertReviewHtml    // 2b. Pre-run expert review
-        +   takeawaysHtml       // 3 + 4. Key takeaways + findings
-        +   simsHtml            // 5. What we ran
+        +   takeawaysHtml       // 3 + 4. Detailed findings
+        +   conditionsHtml      // Conditions (what we set up) — grouped with the runs
+        +   simsHtml            // What did/will we run
         +   chartsHtml          //    + Visualisations
         +   readoutsHtml        // 6. What we measured
         +   testsHtml           // 7. How we judge success
-        +   conditionsHtml      // 7b. Conditions
         +   buildHtml           // 8. Model changes
         +   reqsHtml            // 9. What to build/fix
         +   followUpsHtml       // 10. Next steps
         +   limitsHtml          // 11. Limitations
         +   refsHtml            // 12. References
+        +   decisionHtml        // Decision: can we move to the next study? (bottom)
         + '</section>'
         + '</details>';
     }
