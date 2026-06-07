@@ -460,6 +460,9 @@
     if (pageId === 'investigations') {
       _loadInvestigationSets();
     }
+    if (pageId === 'workspace-inputs') {
+      _loadInputs();
+    }
   }
 
   function _initMenuNav() {
@@ -511,6 +514,117 @@
 
   window._switchPage = _switchPage;
   window._initMenuNav = _initMenuNav;
+
+  // -------------------------------------------------------------------------
+  // Inputs tab — investigation-first render from /api/inputs
+  // -------------------------------------------------------------------------
+  // Mirrors the SimulationsDB current-investigation-first layout: the loaded
+  // investigation's owned inputs render at the TOP, then repo-wide / shared
+  // data sources below. Replaces the server-rendered dataset/reference lists
+  // as the single source of truth (the management panels below the container
+  // keep the add/edit actions + bib explorer).
+  function _loadInputs() {
+    var el = document.getElementById('inputs-api-render');
+    if (!el) return;
+    el.innerHTML = '<p class="muted" style="font-style:italic">Loading inputs…</p>';
+    fetch('/api/inputs')
+      .then(function (r) { return r.json(); })
+      .then(function (data) { _renderInputs(el, data || {}); })
+      .catch(function (err) {
+        el.innerHTML = '<p style="color:#c00">Could not load inputs: ' +
+          _esc(String(err)) +
+          ' <button class="action-btn" onclick="_loadInputs()">Retry</button></p>';
+      });
+  }
+  window._loadInputs = _loadInputs;
+
+  // A reference entry is either a bare bib key (investigation.references) or a
+  // parsed bib-entry dict (global.references). Normalize to a display label.
+  function _inputsRefLabel(ref) {
+    if (ref == null) return '';
+    if (typeof ref === 'string') return ref;
+    return ref.key || ref.bib_key || ref.name || ref.title || JSON.stringify(ref);
+  }
+
+  function _inputsNone() {
+    return '<p class="muted" style="font-style:italic;margin:4px 0">none</p>';
+  }
+
+  // Render a datasets list (name + path) as a compact table, or a "none" line.
+  function _inputsDatasetsHtml(datasets) {
+    if (!datasets || !datasets.length) return _inputsNone();
+    var rows = datasets.map(function (ds) {
+      ds = ds || {};
+      var name = _esc(ds.name || ds.path || '(unnamed)');
+      var path = ds.path || ds.url || '';
+      return '<tr><td><code>' + name + '</code></td><td><small class="muted">' +
+        _esc(path) + '</small></td></tr>';
+    }).join('');
+    return '<table><thead><tr><th>Name</th><th>Source</th></tr></thead><tbody>' +
+      rows + '</tbody></table>';
+  }
+
+  // Render references as a row of bib-key chips, or a "none" line.
+  function _inputsRefsHtml(refs) {
+    if (!refs || !refs.length) return _inputsNone();
+    return '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
+      refs.map(function (ref) {
+        return '<code style="background:#f1f5f9;padding:2px 8px;border-radius:9999px;' +
+          'font-size:0.82em">' + _esc(_inputsRefLabel(ref)) + '</code>';
+      }).join('') + '</div>';
+  }
+
+  // Render expert docs (name + optional path), or a "none" line.
+  function _inputsExpertDocsHtml(docs) {
+    if (!docs || !docs.length) return _inputsNone();
+    return '<ul style="margin:4px 0 0 18px;padding:0">' +
+      docs.map(function (doc) {
+        doc = doc || {};
+        var name = _esc(doc.name || doc.path || '(unnamed)');
+        var path = doc.path ? ' <small class="muted">' + _esc(doc.path) + '</small>' : '';
+        return '<li><strong>' + name + '</strong>' + path + '</li>';
+      }).join('') + '</ul>';
+  }
+
+  function _renderInputs(el, data) {
+    var inv = data.investigation || {};
+    var glob = data.global || {};
+    var current = data.current || null;
+
+    var html = '';
+
+    // --- This investigation's inputs (top) ---
+    var invHeading = 'This investigation’s inputs';
+    if (current) invHeading += ' — ' + _esc(current);
+    html += '<div class="panel">';
+    html += '<h3>' + invHeading + '</h3>';
+    if (!current) {
+      html += '<p class="muted" style="font-style:italic">No investigation loaded.</p>';
+    } else {
+      if (inv._repo_fallback) {
+        html += '<p class="muted" style="font-style:italic;font-size:0.85em">' +
+          'migrating: showing repo-level inputs</p>';
+      }
+      html += '<h4 style="margin:12px 0 4px">Datasets</h4>' +
+        _inputsDatasetsHtml(inv.datasets);
+      html += '<h4 style="margin:12px 0 4px">References</h4>' +
+        _inputsRefsHtml(inv.references);
+      html += '<h4 style="margin:12px 0 4px">Expert docs</h4>' +
+        _inputsExpertDocsHtml(inv.expert_docs);
+    }
+    html += '</div>';
+
+    // --- Repo-wide data sources (below) ---
+    html += '<div class="panel">';
+    html += '<h3>Repo-wide data sources</h3>';
+    html += '<h4 style="margin:12px 0 4px">Datasets</h4>' +
+      _inputsDatasetsHtml(glob.datasets);
+    html += '<h4 style="margin:12px 0 4px">References</h4>' +
+      _inputsRefsHtml(glob.references);
+    html += '</div>';
+
+    el.innerHTML = html;
+  }
 
   // -------------------------------------------------------------------------
   // Registry tab (v0.3.6)

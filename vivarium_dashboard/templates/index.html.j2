@@ -520,7 +520,14 @@
 <!-- ===== PAGE: WORKSPACE INPUTS ===== -->
 <section id="page-workspace-inputs" class="page" data-page="workspace-inputs">
   <h2 class="page-title">Inputs</h2>
-  <p class="page-lead">External resources you bring into the workspace. Datasets feed validation, references and expert docs anchor the science. Simulation modules (the Python packages providing Processes/Steps) live in the <a href="#registry">Registry</a> tab.</p>
+  <p class="page-lead">The loaded investigation's inputs come first &mdash; the datasets, references, and expert docs it owns. Below them are the repo-wide / shared data sources every investigation can draw on (imported source packages plus shared datasets and references). Simulation modules (the Python packages providing Processes/Steps) live in the <a href="#registry">Registry</a> tab.</p>
+
+  <!-- Investigation-first inputs, rendered client-side from /api/inputs.
+       Single source of truth for the datasets/references/expert-docs lists;
+       the management panels below provide the add/edit actions + bib explorer. -->
+  <div id="inputs-api-render" class="panel">
+    <p class="muted" style="font-style:italic">Loading inputs…</p>
+  </div>
 
   <!-- Datasets panel -->
   <div class="panel">
