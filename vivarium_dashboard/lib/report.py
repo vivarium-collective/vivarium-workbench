@@ -189,6 +189,7 @@ def _parse_bib_entries(ws_root: Path) -> list[dict]:
         if not m:
             break
         etype = m.group(1).lower()
+        entry_start = i + m.start()  # position of the leading '@'
         start = i + m.end()
         depth = 1
         j = start
@@ -199,6 +200,7 @@ def _parse_bib_entries(ws_root: Path) -> list[dict]:
                 depth -= 1
             j += 1
         body = text[start : j - 1] if depth == 0 else text[start:n]
+        entry_src = text[entry_start:j].strip()  # full '@type{...}' source text
         i = j
 
         # Split into key, then key=value pairs.
@@ -247,6 +249,7 @@ def _parse_bib_entries(ws_root: Path) -> list[dict]:
             "doi": fields.get("doi", ""),
             "url": fields.get("url", ""),
             "note": fields.get("note", ""),
+            "bibtex": entry_src,
             "has_notes_md": notes_md.is_file(),
             "notes_md_path": str(notes_md.relative_to(ws_root)) if notes_md.is_file() else "",
         }

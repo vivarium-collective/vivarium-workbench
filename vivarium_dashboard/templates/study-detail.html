@@ -9,7 +9,7 @@
 <main class="study-page">
 <header class="study-header">
   <h1 class="study-title">
-    <span class="study-name" id="study-name">{{ name }}</span>
+    {% if name_chip %}<span class="study-num-chip" style="font-size:0.5em; font-weight:700; color:#64748b; background:#f1f5f9; padding:3px 9px; border-radius:9999px; vertical-align:middle; margin-right:8px">{{ name_chip }}</span>{% endif %}<span class="study-name" id="study-name" data-slug="{{ name }}" title="{{ name }}">{{ display_name }}</span>
     {% if study.phase %}
     <span class="phase-pill phase-{{ study.phase|lower }}" title="Lifecycle: Design → Build → Simulate → Evaluate → Decide">{{ study.phase }}</span>
     {% endif %}

@@ -552,41 +552,245 @@
     return '<p class="muted" style="font-style:italic;margin:4px 0">none</p>';
   }
 
-  // Render a datasets list (name + path) as a compact table, or a "none" line.
+  // A download link to a workspace-relative path. The server GET-serves any
+  // file under the workspace by its workspace-relative path (do_GET ->
+  // WORKSPACE / rel), so the href is simply '/' + path.
+  function _inputsDownloadLink(path, label) {
+    if (!path) return '';
+    var href = '/' + String(path).replace(/^\/+/, '');
+    return '<a href="' + _esc(href) + '" download class="action-btn" ' +
+      'style="font-size:0.8em;padding:1px 8px;text-decoration:none">⬇ ' +
+      _esc(label || 'Download') + '</a>';
+  }
+
+  // Render a datasets list (name + path + download) as a compact table, or a
+  // "none" line.
   function _inputsDatasetsHtml(datasets) {
     if (!datasets || !datasets.length) return _inputsNone();
     var rows = datasets.map(function (ds) {
       ds = ds || {};
       var name = _esc(ds.name || ds.path || '(unnamed)');
-      var path = ds.path || ds.url || '';
+      var path = ds.path || '';
+      var src = ds.path || ds.url || '';
+      var dl = path ? _inputsDownloadLink(path, 'Download') :
+        (ds.url ? '<a href="' + _esc(ds.url) + '" target="_blank" rel="noopener" ' +
+          'class="action-btn" style="font-size:0.8em;padding:1px 8px;text-decoration:none">↗ Source</a>' : '');
       return '<tr><td><code>' + name + '</code></td><td><small class="muted">' +
-        _esc(path) + '</small></td></tr>';
+        _esc(src) + '</small></td><td style="text-align:right">' + dl + '</td></tr>';
     }).join('');
-    return '<table><thead><tr><th>Name</th><th>Source</th></tr></thead><tbody>' +
+    return '<table><thead><tr><th>Name</th><th>Source</th><th></th></tr></thead><tbody>' +
       rows + '</tbody></table>';
   }
 
-  // Render references as a row of bib-key chips, or a "none" line.
+  // Render references as informative cards: title (linked to the paper online),
+  // a muted author/year/journal line, a collapsible BibTeX block with a copy
+  // button, and an optional PDF download. Used for BOTH investigation + global
+  // references. Unmatched bare keys render as a labeled stub.
   function _inputsRefsHtml(refs) {
     if (!refs || !refs.length) return _inputsNone();
-    return '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
-      refs.map(function (ref) {
-        return '<code style="background:#f1f5f9;padding:2px 8px;border-radius:9999px;' +
-          'font-size:0.82em">' + _esc(_inputsRefLabel(ref)) + '</code>';
-      }).join('') + '</div>';
+    return '<div style="display:flex;flex-direction:column;gap:10px">' +
+      refs.map(_inputsRefCardHtml).join('') + '</div>';
   }
 
-  // Render expert docs (name + optional path), or a "none" line.
+  function _inputsRefCardHtml(ref) {
+    ref = ref || {};
+    if (typeof ref === 'string') ref = { key: ref, title: ref, _unmatched: true };
+    var key = ref.key || ref.bib_key || '';
+
+    if (ref._unmatched) {
+      return '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">' +
+        '<code>' + _esc(key || _inputsRefLabel(ref)) + '</code> ' +
+        '<small class="muted">(no bib entry)</small></div>';
+    }
+
+    // Many minimal bib entries have only url + note (no title); fall back to
+    // the note (a human description), then the key.
+    var title = ref.title || ref.note || key || '(untitled)';
+    // Link target: explicit url, else doi.org/<doi>.
+    var link = '';
+    if (ref.url) link = ref.url;
+    else if (ref.doi) link = 'https://doi.org/' + ref.doi;
+
+    var titleHtml = link
+      ? '<a href="' + _esc(link) + '" target="_blank" rel="noopener" ' +
+        'style="font-weight:600">' + _esc(title) + '</a> ' +
+        '<small class="muted">↗</small>'
+      : '<strong>' + _esc(title) + '</strong>';
+
+    var metaParts = [];
+    if (ref.author) metaParts.push(_esc(ref.author));
+    if (ref.year) metaParts.push(_esc(ref.year));
+    if (ref.journal) metaParts.push(_esc(ref.journal));
+    var meta = metaParts.length
+      ? '<div class="muted" style="font-size:0.85em;margin-top:2px">' +
+        metaParts.join(' · ') + '</div>'
+      : '';
+
+    var actions = '';
+    if (ref.pdf_path) actions += ' ' + _inputsDownloadLink(ref.pdf_path, 'PDF');
+
+    var bibtex = ref.bibtex || '';
+    var bibBlock = '';
+    if (bibtex) {
+      var bibId = 'bibtex-' + (key || Math.random().toString(36).slice(2));
+      bibBlock = '<details style="margin-top:6px">' +
+        '<summary style="cursor:pointer;font-size:0.82em;color:#475569">BibTeX</summary>' +
+        '<pre id="' + _esc(bibId) + '" style="background:#f8fafc;border:1px solid #e2e8f0;' +
+        'border-radius:4px;padding:8px;font-size:0.78em;overflow:auto;margin:6px 0">' +
+        _esc(bibtex) + '</pre>' +
+        '<button class="action-btn" style="font-size:0.78em;padding:1px 8px" ' +
+        'onclick="_copyBibtex(\'' + _esc(bibId) + '\', this)">Copy BibTeX</button>' +
+        '</details>';
+    }
+
+    // Show the note as a sub-line only when it isn't already the headline.
+    var noteHtml = (ref.note && ref.note !== title)
+      ? '<div class="muted" style="font-size:0.85em;margin-top:2px;font-style:italic">' + _esc(ref.note) + '</div>'
+      : '';
+
+    return '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">' +
+      '<div>' + titleHtml + actions + '</div>' + meta + noteHtml + bibBlock + '</div>';
+  }
+
+  // Copy the text content of a <pre> to the clipboard; flash the button label.
+  function _copyBibtex(preId, btn) {
+    var pre = document.getElementById(preId);
+    if (!pre) return;
+    var text = pre.textContent || '';
+    var done = function () {
+      if (!btn) return;
+      var orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(function () { btn.textContent = orig; }, 1200);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () {});
+    } else {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        document.execCommand('copy'); document.body.removeChild(ta); done();
+      } catch (e) { /* ignore */ }
+    }
+  }
+  window._copyBibtex = _copyBibtex;
+
+  // Render expert docs (name + optional path + download), or a "none" line.
   function _inputsExpertDocsHtml(docs) {
     if (!docs || !docs.length) return _inputsNone();
-    return '<ul style="margin:4px 0 0 18px;padding:0">' +
+    return '<ul style="margin:4px 0 0 0;padding:0;list-style:none;' +
+      'display:flex;flex-direction:column;gap:4px">' +
       docs.map(function (doc) {
         doc = doc || {};
         var name = _esc(doc.name || doc.path || '(unnamed)');
         var path = doc.path ? ' <small class="muted">' + _esc(doc.path) + '</small>' : '';
-        return '<li><strong>' + name + '</strong>' + path + '</li>';
+        var dl = doc.path ? ' ' + _inputsDownloadLink(doc.path, 'Download') : '';
+        return '<li><strong>' + name + '</strong>' + path + dl + '</li>';
       }).join('') + '</ul>';
   }
+
+  // A small "+ Add" button that launches the investigation-scoped upload flow
+  // for the given category ('dataset' | 'reference' | 'expert').
+  function _inputsAddBtn(category) {
+    return '<button class="action-btn" style="font-size:0.78em;padding:1px 8px;' +
+      'font-weight:normal" onclick="_inputsAdd(\'' + category + '\')">+ Add</button>';
+  }
+
+  // Read a File object to pure base64 (sans data: prefix) and invoke cb.
+  function _inputsReadFileB64(file, cb) {
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      var dataUrl = ev.target.result;
+      var comma = dataUrl.indexOf(',');
+      cb(comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // POST an investigation-scoped input upload, then refresh the page.
+  function _inputsPost(endpoint, body) {
+    body = body || {};
+    var slug = window._currentIsetSlug || '';
+    if (slug) body.investigation = slug;
+    fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        if (!res.ok || (res.d && res.d.error)) {
+          alert('Upload failed: ' + ((res.d && res.d.error) || 'unknown error'));
+          return;
+        }
+        if (typeof _loadInputs === 'function') _loadInputs();
+      })
+      .catch(function (err) { alert('Upload failed: ' + String(err)); });
+  }
+
+  // Hidden file picker -> base64 -> cb({file_b64, filename}).
+  function _inputsPickFile(cb) {
+    var inp = document.createElement('input');
+    inp.type = 'file';
+    inp.style.display = 'none';
+    inp.onchange = function () {
+      if (inp.files && inp.files[0]) {
+        var f = inp.files[0];
+        _inputsReadFileB64(f, function (b64) { cb({ file_b64: b64, filename: f.name }); });
+      }
+      setTimeout(function () { if (inp.parentNode) inp.parentNode.removeChild(inp); }, 0);
+    };
+    document.body.appendChild(inp);
+    inp.click();
+  }
+
+  // Entry point for the "+ Add" buttons on the investigation inputs panel.
+  function _inputsAdd(category) {
+    var slug = window._currentIsetSlug || '';
+    if (!slug) { alert('No investigation loaded.'); return; }
+
+    if (category === 'dataset') {
+      var dsName = window.prompt('Dataset name?');
+      if (!dsName) return;
+      _inputsPickFile(function (picked) {
+        _inputsPost('/api/dataset', {
+          name: dsName, filename: picked.filename, file_b64: picked.file_b64
+        });
+      });
+      return;
+    }
+
+    if (category === 'expert') {
+      var edName = window.prompt('Expert-doc name?');
+      if (!edName) return;
+      _inputsPickFile(function (picked) {
+        _inputsPost('/api/expert-doc', {
+          name: edName, filename: picked.filename, file_b64: picked.file_b64
+        });
+      });
+      return;
+    }
+
+    if (category === 'reference') {
+      // PDF drop-and-go, or BibTeX paste.
+      var mode = window.prompt(
+        'Add reference — type "pdf" to upload a PDF, or "bibtex" to paste BibTeX:',
+        'bibtex');
+      if (mode == null) return;
+      mode = mode.trim().toLowerCase();
+      if (mode === 'pdf') {
+        _inputsPickFile(function (picked) {
+          _inputsPost('/api/reference-pdf', { pdf_b64: picked.file_b64 });
+        });
+      } else if (mode === 'bibtex') {
+        var bib = window.prompt('Paste a BibTeX entry:');
+        if (!bib || !bib.trim()) return;
+        _inputsPost('/api/reference-bibtex', { bibtex_text: bib.trim() });
+      }
+      return;
+    }
+  }
+  window._inputsAdd = _inputsAdd;
 
   function _renderInputs(el, data) {
     var inv = data.investigation || {};
@@ -607,11 +811,14 @@
         html += '<p class="muted" style="font-style:italic;font-size:0.85em">' +
           'migrating: showing repo-level inputs</p>';
       }
-      html += '<h4 style="margin:12px 0 4px">Datasets</h4>' +
+      html += '<h4 style="margin:12px 0 4px">Datasets ' +
+        _inputsAddBtn('dataset') + '</h4>' +
         _inputsDatasetsHtml(inv.datasets);
-      html += '<h4 style="margin:12px 0 4px">References</h4>' +
+      html += '<h4 style="margin:12px 0 4px">References ' +
+        _inputsAddBtn('reference') + '</h4>' +
         _inputsRefsHtml(inv.references);
-      html += '<h4 style="margin:12px 0 4px">Expert docs</h4>' +
+      html += '<h4 style="margin:12px 0 4px">Expert docs ' +
+        _inputsAddBtn('expert') + '</h4>' +
         _inputsExpertDocsHtml(inv.expert_docs);
     }
     html += '</div>';
@@ -4149,6 +4356,50 @@
     host.style.display = '';
   }
 
+  // Investigation opening — state-first, and synchronized with the downloaded
+  // report's "Executive summary": both read the SAME canonical investigation.yaml
+  // fields (executive.{what_is_this,verdict,verdict_status} + question + hypothesis).
+  // The free-form `lead` ("replaces prior work…") is demoted to a Background fold.
+  function _renderInvOpening(d) {
+    d = d || {};
+    var ex = d.executive || {};
+    var whatIs  = (ex.what_is_this || '').trim();
+    var verdict = (ex.verdict || '').trim();
+    var vs      = (ex.verdict_status || 'in-progress').trim();
+    var oneline = function(t) { return (t || '').replace(/\s+/g, ' ').trim(); };
+    var q   = oneline(d.question);
+    var hyp = oneline(d.hypothesis);
+    var leadProse = (d.lead || d.description || '').trim();
+
+    // Legacy investigations with no executive content fall back to the lead.
+    if (!whatIs && !verdict && !q && !hyp) {
+      return leadProse ? _renderInvLeadMarkdown(leadProse) : '';
+    }
+
+    var key = String(vs).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    var vColor = ({ 'passed':'#166534','complete':'#166534','in-progress':'#854d0e',
+                    'blocked':'#991b1b','failed':'#991b1b','planning':'#1e40af' })[key] || '#475569';
+    var vBg = ({ 'passed':'#dcfce7','complete':'#dcfce7','in-progress':'#fef9c3',
+                 'blocked':'#fee2e2','failed':'#fee2e2','planning':'#dbeafe' })[key] || '#e2e8f0';
+
+    var out = '';
+    if (whatIs)
+      out += '<div style="margin:2px 0 10px;color:#334155;line-height:1.5">' + _renderInvLeadMarkdown(whatIs) + '</div>';
+    if (verdict)
+      out += '<div style="background:#f8fafc;border-left:5px solid ' + vColor + ';border-radius:8px;padding:10px 14px;margin:10px 0">' +
+        '<span style="display:inline-block;font-size:0.7em;font-weight:700;letter-spacing:0.03em;background:' + vBg +
+          ';color:' + vColor + ';padding:2px 9px;border-radius:9999px;margin-right:8px">' + _esc(vs.toUpperCase()) + '</span>' +
+        '<strong style="color:#1e293b">Current verdict.</strong> <span style="color:#334155">' + _esc(verdict) + '</span></div>';
+    if (q)
+      out += '<p style="margin:8px 0;color:#334155;line-height:1.5"><strong style="color:#1e293b">Question.</strong> ' + _esc(q) + '</p>';
+    if (hyp)
+      out += '<p style="margin:8px 0;color:#475569;line-height:1.5"><strong style="color:#1e293b">Hypothesis.</strong> ' + _esc(hyp) + '</p>';
+    if (leadProse)
+      out += '<details style="margin-top:10px"><summary style="cursor:pointer;font-size:0.88em;color:#64748b">Background &amp; context</summary>' +
+        '<div style="margin-top:6px;color:#475569;line-height:1.5">' + _renderInvLeadMarkdown(leadProse) + '</div></details>';
+    return out;
+  }
+
   function _openInvestigationDetail(name) {
     window._currentIset = name;
     // Sync the left-rail STUDIES section to the selected investigation
@@ -4181,13 +4432,13 @@
         // Lead paragraph: render lead (preferred) or fall back to description.
         // Light markdown: paragraph splits, * bullets, `code`, **bold**.
         var leadEl = document.getElementById('investigation-detail-description');
-        var leadText = (d.lead || d.description || '').trim();
-        leadEl.innerHTML = leadText ? _renderInvLeadMarkdown(leadText) : '';
+        leadEl.innerHTML = _renderInvOpening(d);
 
-        // At-a-glance grid: one tile per study with a one-line role.
-        // Sources: investigation.yaml#at_a_glance (preferred) → derive from
-        // each study's purpose.question first sentence as fallback.
-        _renderInvAtAGlance(d);
+        // At-a-glance study-card row removed (user request 2026-06-07): the
+        // dependency DAG below shows the same studies, so the top row was
+        // redundant. Clear + hide the host so no empty band remains.
+        var _aagHost = document.getElementById('investigation-at-a-glance');
+        if (_aagHost) { _aagHost.innerHTML = ''; _aagHost.style.display = 'none'; }
 
         // How to read: yaml-driven list of evaluator tips. Hidden if absent.
         _renderInvHowToRead(d.how_to_read);
@@ -4410,41 +4661,109 @@
       byDepth[d].sort(function(a, b) { return a.name.localeCompare(b.name); });
     });
 
-    // Layout constants — vertical orientation.
-    var CARD_W = 320, CARD_H = 120;
-    var X_GAP = 40,   Y_GAP = 60;
-    var PAD_X = 24,   PAD_Y = 16;
-
-    // Compute each card's (x, y): y = depth, x = within-depth slot.
+    // Horizontal layout (depth flows left->right). Card HEIGHT is NOT fixed:
+    // each card grows to fit its full text. We render once, measure each card,
+    // then stack + center the columns by the measured heights (two passes) so
+    // nothing is clipped.
+    var CARD_W = 210;
+    var X_GAP = 64, Y_GAP = 22;
+    var PAD_X = 24, PAD_Y = 16;
+    var svgNS = 'http://www.w3.org/2000/svg';
     var pos = {};
     var depths = Object.keys(byDepth).map(Number).sort(function(a, b) { return a - b; });
-    var maxSlot = 0;
-    depths.forEach(function(d) {
-      byDepth[d].forEach(function(s, i) {
-        pos[s.name] = {
-          x: PAD_X + i * (CARD_W + X_GAP),
-          y: PAD_Y + d * (CARD_H + Y_GAP),
-          depth: d, slot: i,
-        };
-        if (i > maxSlot) maxSlot = i;
-      });
+
+    // -- Pass 1: build every card at its column x (top TBD), append, measure --
+    studies.forEach(function(s) {
+      var liveStatus = s.effective_status || s.status || 'planned';
+      var confidence = s.confidence || (function(st) {
+        if (st === 'completed' || st === 'complete' || st === 'ran') return 'Accepted';
+        if (st === 'in_progress' || st === 'running') return 'Investigating';
+        if (st === 'failed' || st === 'invalid') return 'Refuted';
+        return 'Planned';
+      })(liveStatus);
+      var ss = ({
+        Accepted:      {color: '#16a34a', icon: '✓'},
+        Investigating: {color: '#ca8a04', icon: '◐'},
+        Planned:       {color: '#2563eb', icon: '○'},
+        Refuted:       {color: '#dc2626', icon: '✗'},
+      })[confidence] || {color: '#9ca3af', icon: '○'};
+      var followUps = s.follow_up_studies || [];
+
+      // Single display name everywhere: authored title:, else the shared
+      // _humanizeStudyName derivation (same as control panel + study page).
+      var prettyTitle = s.title || _humanizeStudyName(s.name).title;
+      // Show the FULL question + claim (no truncation) — the card grows to fit.
+      var asks = (s.question || '').replace(/\s+/g, ' ').split(/[.?]/)[0].trim();
+      var findings = s.findings || [];
+      var claim = (s.claim ||
+        (findings[0] && (findings[0].summary || findings[0].statement || findings[0].id)) || ''
+      ).replace(/\s+/g, ' ').trim();
+      var moreN = findings.length > 1 ? findings.length - 1 : 0;
+
+      var node = document.createElement('div');
+      node.className = 'iset-dag-node';
+      node.onclick = function() { _openStudyInsideInvestigation(s.name); };
+      node.title = s.name + ' — ' + confidence;
+      var x = PAD_X + depth[s.name] * (CARD_W + X_GAP);
+      node.style.cssText =
+        'position:absolute;left:' + x + 'px;top:0px;' +
+        'width:' + CARD_W + 'px;' +
+        'background:#fff;border:1px solid #e5e7eb;border-top:3px solid ' + ss.color + ';' +
+        'border-radius:8px;padding:10px 12px;cursor:pointer;box-sizing:border-box;' +
+        'box-shadow:0 1px 2px rgba(0,0,0,0.05);transition:box-shadow 0.1s,border-color 0.1s;';
+
+      var followUpsChip = '';
+      if (s.phase === 'Decide' && followUps.length) {
+        followUpsChip =
+          '<button class="dag-followups-btn" ' +
+          'onclick="event.stopPropagation(); _openDagFollowupsPopover(\'' + _esc(s.name) + '\', this)" ' +
+          'style="margin-top:8px;font-size:0.68em;padding:2px 7px;border:1px solid #10b981;background:#d1fae5;color:#065f46;border-radius:9999px;cursor:pointer">' +
+          '▸ ' + followUps.length + ' follow-up' + (followUps.length === 1 ? '' : 's') +
+          '</button>';
+      }
+      node.innerHTML =
+        '<div style="display:flex;align-items:flex-start;gap:6px">' +
+          '<span style="color:' + ss.color + ';font-size:1.05em;line-height:1.1;flex:none">' + ss.icon + '</span>' +
+          '<strong style="font-size:0.85em;line-height:1.25;color:#1e293b;flex:1">' + _esc(prettyTitle) + '</strong>' +
+          '<span style="font-size:0.62em;font-weight:700;color:' + ss.color + ';white-space:nowrap;margin-top:1px">' + _esc(confidence) + '</span>' +
+        '</div>' +
+        (asks
+          ? '<div style="font-size:0.72em;margin-top:7px;line-height:1.35;color:#64748b">' +
+              '<span style="font-weight:600;color:#475569">Asks:</span> ' + _esc(asks) + '</div>'
+          : '') +
+        '<div style="font-size:0.72em;margin-top:5px;line-height:1.35;color:#64748b">' +
+          '<span style="font-weight:600;color:#475569">Finds:</span> ' +
+          (claim ? _esc(claim) : '<em style="color:#94a3b8">pending evidence</em>') +
+          (moreN ? ' <span style="color:#94a3b8">+' + moreN + ' more</span>' : '') +
+        '</div>' +
+        followUpsChip;
+      node._followUps = followUps;
+      nodesHost.appendChild(node);
+      pos[s.name] = { x: x, node: node, depth: depth[s.name] };
     });
 
-    // Center each depth row inside the canvas: compute final canvasW first.
-    var canvasW = Math.max(
-      PAD_X * 2 + (maxSlot + 1) * CARD_W + maxSlot * X_GAP,
-      720
-    );
+    // Measure now that content is in the DOM (container is already visible).
+    studies.forEach(function(s) { pos[s.name].h = pos[s.name].node.offsetHeight || 120; });
+
+    // -- Pass 2: stack each column vertically by measured height, then center --
+    var colTotals = {};
     depths.forEach(function(d) {
-      var rowSize = byDepth[d].length;
-      var rowWidth = rowSize * CARD_W + (rowSize - 1) * X_GAP;
-      var rowOffset = Math.max(PAD_X, (canvasW - rowWidth) / 2);
-      byDepth[d].forEach(function(s, i) {
-        pos[s.name].x = rowOffset + i * (CARD_W + X_GAP);
+      var sum = 0;
+      byDepth[d].forEach(function(s) { sum += pos[s.name].h; });
+      colTotals[d] = sum + Math.max(0, byDepth[d].length - 1) * Y_GAP;
+    });
+    var maxCol = 0;
+    depths.forEach(function(d) { if (colTotals[d] > maxCol) maxCol = colTotals[d]; });
+    var canvasH = Math.max(PAD_Y * 2 + maxCol, 180);
+    depths.forEach(function(d) {
+      var yc = PAD_Y + Math.max(0, (canvasH - PAD_Y * 2 - colTotals[d]) / 2);
+      byDepth[d].forEach(function(s) {
+        pos[s.name].y = yc;
+        pos[s.name].node.style.top = yc + 'px';
+        yc += pos[s.name].h + Y_GAP;
       });
     });
-
-    var canvasH = PAD_Y * 2 + (depths.length > 0 ? depths[depths.length - 1] : 0) * (CARD_H + Y_GAP) + CARD_H;
+    var canvasW = PAD_X * 2 + (depths.length ? depths[depths.length - 1] : 0) * (CARD_W + X_GAP) + CARD_W;
 
     nodesHost.style.width = canvasW + 'px';
     nodesHost.style.height = canvasH + 'px';
@@ -4452,45 +4771,39 @@
     edgesSvg.setAttribute('height', canvasH);
     edgesSvg.style.width = canvasW + 'px';
     edgesSvg.style.height = canvasH + 'px';
-    // Size the shell to fit its content so the OUTER page scrolls instead
-    // of creating a nested scrollbar inside the panel.
     var shellSize = document.getElementById('investigation-dag-shell');
     if (shellSize) shellSize.style.height = canvasH + 'px';
 
-    // Marker for arrowheads (defined once).
-    var svgNS = 'http://www.w3.org/2000/svg';
+    // Edges (drawn after positions are known), using measured heights.
     edgesSvg.innerHTML =
       '<defs><marker id="dag-arrowhead" viewBox="0 0 10 10" refX="9" refY="5" ' +
       'markerWidth="7" markerHeight="7" orient="auto-start-reverse">' +
       '<path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>';
-
-    // Render edges (behind cards) — top-of-child ← bottom-of-parent.
     studies.forEach(function(s) {
       (s.parent_studies || []).forEach(function(p) {
         var pn = p.study || p;
         if (!pos[pn] || !pos[s.name]) return;
-        var x1 = pos[pn].x + CARD_W / 2;
-        var y1 = pos[pn].y + CARD_H;
-        var x2 = pos[s.name].x + CARD_W / 2;
-        var y2 = pos[s.name].y;
-        var dy = Math.max(28, (y2 - y1) / 2);
+        var x1 = pos[pn].x + CARD_W;
+        var y1 = pos[pn].y + pos[pn].h / 2;
+        var x2 = pos[s.name].x;
+        var y2 = pos[s.name].y + pos[s.name].h / 2;
+        var dx = Math.max(28, (x2 - x1) / 2);
         var path = document.createElementNS(svgNS, 'path');
         path.setAttribute('d', 'M ' + x1 + ' ' + y1 +
-                              ' C ' + x1 + ' ' + (y1 + dy) +
-                              ', ' + x2 + ' ' + (y2 - dy) +
+                              ' C ' + (x1 + dx) + ' ' + y1 +
+                              ', ' + (x2 - dx) + ' ' + y2 +
                               ', ' + x2 + ' ' + y2);
         path.setAttribute('fill', 'none');
         path.setAttribute('stroke', '#94a3b8');
         path.setAttribute('stroke-width', '1.5');
         path.setAttribute('marker-end', 'url(#dag-arrowhead)');
         edgesSvg.appendChild(path);
-
-        var cond = (p.condition || 'tests-passed');
-        var midX = (x1 + x2) / 2 + 8;
-        var midY = (y1 + y2) / 2;
+        var cond = (p.relation || 'leads to');
+        if (cond === 'regulatory' || cond === 'refutes') path.setAttribute('stroke-dasharray', '5 3');
         var label = document.createElementNS(svgNS, 'text');
-        label.setAttribute('x', midX);
-        label.setAttribute('y', midY);
+        label.setAttribute('x', (x1 + x2) / 2);
+        label.setAttribute('y', (y1 + y2) / 2 - 6);
+        label.setAttribute('text-anchor', 'middle');
         label.setAttribute('font-size', '10');
         label.setAttribute('fill', '#94a3b8');
         label.textContent = cond;
@@ -4498,96 +4811,32 @@
       });
     });
 
-    // Render nodes (study cards).
-    studies.forEach(function(s) {
-      var p = pos[s.name];
-      // Prefer the server-derived `effective_status` (rolls up declared
-      // status + run-count signal); fall back to the raw author-declared
-      // `status` for back-compat with older servers.
-      var liveStatus = s.effective_status || s.status || 'planned';
-      var statusColor = ({
-        planned:    '#94a3b8',
-        planning:   '#94a3b8',
-        running:    '#3b82f6',
-        in_progress:'#3b82f6',
-        ran:        '#10b981',
-        complete:   '#059669',
-        failed:     '#dc2626',
-        invalid:    '#dc2626',
-      })[liveStatus] || '#94a3b8';
-
-      var node = document.createElement('div');
-      node.className = 'iset-dag-node';
-      node.onclick = function() { _openStudyInsideInvestigation(s.name); };
-      node.style.cssText =
-        'position:absolute;left:' + p.x + 'px;top:' + p.y + 'px;' +
-        'width:' + CARD_W + 'px;height:' + CARD_H + 'px;' +
-        'background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;' +
-        'cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.04);transition:box-shadow 0.1s,border-color 0.1s;' +
-        'border-left: 4px solid ' + statusColor + ';' +
-        'box-sizing:border-box;overflow:hidden;';
-      // Phase chip color mapping (mirrors study-detail.html .phase-* CSS).
-      var phaseColors = {
-        Design:   {bg: '#e0e7ff', fg: '#3730a3'},
-        Build:    {bg: '#fef3c7', fg: '#92400e'},
-        Simulate: {bg: '#dbeafe', fg: '#1e40af'},
-        Evaluate: {bg: '#fce7f3', fg: '#9d174d'},
-        Decide:   {bg: '#d1fae5', fg: '#065f46'},
-      };
-      var pc = phaseColors[s.phase] || null;
-      var phaseChip = (s.phase && pc)
-        ? '<span class="phase-pill" style="background:' + pc.bg + ';color:' + pc.fg +
-          ';font-size:0.7em;padding:1px 8px;border-radius:9999px;margin-right:4px">' + _esc(s.phase) + '</span>'
-        : '';
-      // Composite counts line — readouts (new) | variants (legacy) + behavior tests + requirements (new).
-      var nReadouts = (s.n_readouts !== undefined) ? s.n_readouts : 0;
-      var nReqs = (s.n_requirements !== undefined) ? s.n_requirements : 0;
-      var followUps = s.follow_up_studies || [];
-      // When phase=Decide AND there are follow-ups, surface a clickable chip
-      // that opens a popover listing them with one-click "Seed →" actions.
-      var followUpsChip = '';
-      if (s.phase === 'Decide' && followUps.length) {
-        followUpsChip =
-          '<button class="dag-followups-btn" ' +
-          'onclick="event.stopPropagation(); _openDagFollowupsPopover(\'' + _esc(s.name) + '\', this)" ' +
-          'style="margin-top:4px;font-size:0.72em;padding:2px 8px;border:1px solid #10b981;background:#d1fae5;color:#065f46;border-radius:9999px;cursor:pointer">' +
-          '▸ ' + followUps.length + ' follow-up' + (followUps.length === 1 ? '' : 's') + ' · click to seed' +
-          '</button>';
-      }
-      node.innerHTML =
-        '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:4px">' +
-          '<strong style="font-size:0.95em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _esc(s.name) + '</strong>' +
-          '<span style="white-space:nowrap">' + phaseChip +
-            '<span class="status-pill" title="' +
-              (s.effective_status && s.status && s.effective_status !== s.status
-                ? 'effective: ' + _esc(s.effective_status) + ' (declared: ' + _esc(s.status) + ')'
-                : 'status: ' + _esc(liveStatus)) +
-              '" style="background:#f1f5f9;color:#475569;font-size:0.7em;padding:1px 6px;' +
-              (s.effective_status && s.status && s.effective_status !== s.status
-                ? 'border:1px dashed #f59e0b;'
-                : '') + '">' + _esc(liveStatus) + '</span>' +
-          '</span>' +
-        '</div>' +
-        '<div style="font-size:0.78em;color:#64748b;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
-          _esc(s.baseline_source || '—') + '</div>' +
-        '<div style="font-size:0.78em;color:#64748b;margin-top:6px">' +
-          (s.n_variants || 0) + ' sim · ' +
-          (s.n_behaviors || 0) + ' tests' +
-          (nReadouts ? ' · ' + nReadouts + ' readouts' : '') +
-          (nReqs ? ' · ' + nReqs + ' reqs' : '') +
-        '</div>' +
-        followUpsChip +
-        (followUpsChip
-          ? ''
-          : '<div style="font-size:0.72em;color:#94a3b8;margin-top:4px">Click to open study</div>');
-      // Stash follow-ups on the node for the popover lookup.
-      node._followUps = followUps;
-      nodesHost.appendChild(node);
-    });
-
     // Auto-scroll the shell so the top of the DAG is in view.
     var shell = document.getElementById('investigation-dag-shell');
     if (shell) shell.scrollTop = 0;
+
+    // Legend (status colors + edge types) — created once below the shell.
+    var legendHost = document.getElementById('investigation-dag-legend');
+    if (!legendHost && shell && shell.parentNode) {
+      legendHost = document.createElement('div');
+      legendHost.id = 'investigation-dag-legend';
+      shell.parentNode.insertBefore(legendHost, shell.nextSibling);
+    }
+    if (legendHost) {
+      var _lg = function(color, icon, label) {
+        return '<span style="display:inline-flex;align-items:center;gap:4px;margin-right:14px">' +
+          '<span style="color:' + color + ';font-size:1em">' + icon + '</span>' +
+          '<span>' + label + '</span></span>';
+      };
+      legendHost.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;' +
+        'font-size:0.74em;color:#64748b;padding:8px 4px 0;border-top:1px solid #f1f5f9;margin-top:8px';
+      legendHost.innerHTML =
+        '<span style="font-weight:600;color:#475569;margin-right:10px">Confidence:</span>' +
+        _lg('#16a34a', '✓', 'Accepted') + _lg('#ca8a04', '◐', 'Investigating') +
+        _lg('#2563eb', '○', 'Planned') + _lg('#dc2626', '✗', 'Refuted') +
+        '<span style="margin:0 14px 0 6px"><span style="color:#94a3b8">→</span> leads to</span>' +
+        '<span><span style="color:#94a3b8;letter-spacing:-1px">⤄</span> regulatory</span>';
+    }
   }
   window._renderInvestigationDag = _renderInvestigationDag;
 
@@ -5356,7 +5605,7 @@
     function _studyControlPanel(s, i, decision) {
       var rep = s.report || {};
       var v = _verdictBadge(s, decision);
-      var title = rep.title || _humanizeStudyName(s.name).title;
+      var title = s.title || rep.title || _humanizeStudyName(s.name).title;
       var objective  = rep.objective    || _firstSentence(rep.purpose)
                         || _firstSentence((s.purpose || {}).question);
       var conclusion = rep.conclusion   || _firstSentence(rep.result);
@@ -5533,18 +5782,16 @@
                          || (decide.biological_validation && decide.biological_validation.length)
                          || s.conclusion || latestRun);
 
-      // Sub-nav links — new section order, human-readable labels.
+      // Sub-nav links — order MUST mirror the report's section render order
+      // (the post-execution assembly below): embeds → summary → findings →
+      // conditions → ran → measured → charts → tests → model changes →
+      // build/fix → next steps → limitations → refs → decision (last).
       var links = [];
-      links.push('<a href="#' + sid.summary + '">Summary</a>');
-      links.push('<a href="#' + sid.decision + '">Decision</a>');
       var nEmbedsForStudy = (embedsByStudy[s.name] || []).length;
       if (nEmbedsForStudy)
         links.push('<a href="#study-' + slug + '-embeds">Visualizations <span class="sn-count">' + nEmbedsForStudy + '</span></a>');
+      links.push('<a href="#' + sid.summary + '">Summary</a>');
       if (findings.length)    links.push('<a href="#' + sid.findings + '">Findings <span class="sn-count">' + findings.length + '</span></a>');
-      if (sims.length)        links.push('<a href="#' + sid.sims + '">What we ran <span class="sn-count">' + sims.length + '</span></a>');
-      if (charts.length)      links.push('<a href="#' + sid.charts + '">Charts <span class="sn-count">' + charts.length + '</span></a>');
-      if (readouts.length)    links.push('<a href="#' + sid.readouts + '">What we measured <span class="sn-count">' + readouts.length + '</span></a>');
-      if (tests.length)       links.push('<a href="#' + sid.tests + '">How we judge it <span class="sn-count">' + tests.length + '</span></a>');
       // Conditions sub-nav link: rendered when v4 ``conditions:`` exists.
       var _cond = (s.conditions && typeof s.conditions === 'object') ? s.conditions : null;
       var _nVar = (_cond && _cond.variants || []).length;
@@ -5554,11 +5801,16 @@
         links.push('<a href="#' + sid.conditions + '">Conditions ' +
                    (_condCount ? '<span class="sn-count">' + _condCount + '</span>' : '') + '</a>');
       }
+      if (sims.length)        links.push('<a href="#' + sid.sims + '">What we ran <span class="sn-count">' + sims.length + '</span></a>');
+      if (readouts.length)    links.push('<a href="#' + sid.readouts + '">What we measured <span class="sn-count">' + readouts.length + '</span></a>');
+      if (charts.length)      links.push('<a href="#' + sid.charts + '">Charts <span class="sn-count">' + charts.length + '</span></a>');
+      if (tests.length)       links.push('<a href="#' + sid.tests + '">How we judge it <span class="sn-count">' + tests.length + '</span></a>');
       if (hasBuild)           links.push('<a href="#' + sid.build + '">Model changes</a>');
       if (reqs.length)        links.push('<a href="#' + sid.reqs + '">What to build / fix <span class="sn-count">' + reqs.length + '</span></a>');
       if (followUps.length)   links.push('<a href="#' + sid.followups + '">Next steps <span class="sn-count">' + followUps.length + '</span></a>');
       if (limitations.length) links.push('<a href="#' + sid.limits + '">Limitations <span class="sn-count">' + limitations.length + '</span></a>');
       if (bib.length)         links.push('<a href="#' + sid.refs + '">Cited refs <span class="sn-count">' + bib.length + '</span></a>');
+      links.push('<a href="#' + sid.decision + '">Decision</a>');
 
       var dependsBrief = parents ? 'Depends on: ' + parents : '<em>Root study (no dependencies)</em>';
 
@@ -7795,7 +8047,7 @@
       +   (function() {
             var dn = (iset.executive || {}).decisions_needed || [];
             if (!dn.length) return '';
-            return '<details class="report-fold"><summary>✋ Decisions needed from reviewers' + ' <span class="rf-chip">' + dn.length + ' item' + (dn.length===1?'':'s') + '</span>' + (dn[0] && dn[0].question ? ' <span class="rf-prev">next: ' + _h(_previewText(dn[0].question, 130)) + '</span>' : '') + '</summary><ol>'
+            return '<details id="decisions-needed" class="report-fold"><summary>✋ Decisions needed from reviewers' + ' <span class="rf-chip">' + dn.length + ' item' + (dn.length===1?'':'s') + '</span>' + (dn[0] && dn[0].question ? ' <span class="rf-prev">next: ' + _h(_previewText(dn[0].question, 130)) + '</span>' : '') + '</summary><ol>'
               + dn.map(function(d) {
                   return '<li><strong>' + _h(d.question || '') + '</strong>'
                     + (d.context ? '<div class="muted small">' + _multiline(d.context) + '</div>' : '')
@@ -7858,7 +8110,7 @@
           })()
 
       +   ((iset.biological_story || '').trim()
-          ? '<details class="report-fold">'
+          ? '<details id="biology" class="report-fold">'
             + '<summary>🧬 Biology — the mechanism this investigation models' + ' <span class="rf-prev">' + _h(_previewText(iset.biological_story || '', 175)) + '</span>' + '</summary>'
             + '<p style="margin:0">' + _multiline(iset.biological_story) + '</p>'
             + '</details>'
@@ -8032,7 +8284,7 @@
       +   'var INV=' + JSON.stringify(invName) + ';'
       +   'var REPORT_ID=' + JSON.stringify(reportId || '') + ';'
       +   'var KEY="v2ecoli_feedback_"+INV+(REPORT_ID?("_"+REPORT_ID):"");'
-      +   'var ID_PATTERNS=[/^study-/,/^finding-/,/^acceptance$/,/^references$/,/^studies-heading$/];'
+      +   'var ID_PATTERNS=[/^study-/,/^finding-/,/^acceptance$/,/^references$/,/^studies-heading$/,/^executive$/,/^decisions-needed$/,/^scientific-argument$/,/^biology$/];'
       +   'var openEd=null;'
       +   'var memStore={};'
       +   'function safeGet(k){try{var v=(typeof localStorage!=="undefined")?localStorage.getItem(k):null;return (v==null?memStore[k]:v)||"";}catch(e){return memStore[k]||"";}}'

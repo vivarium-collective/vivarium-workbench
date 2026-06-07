@@ -804,8 +804,9 @@
 
   <!-- Detail view: one investigation's DAG. Toggled on click. -->
   <div id="investigation-detail-view" style="display:none; margin-top:8px">
+    <button class="iset-back-link" onclick="_showInvestigationList()" title="Back to all investigations"
+            style="background:none; border:none; padding:0; margin:0 0 4px; color:#64748b; font-size:0.82em; cursor:pointer; display:inline-flex; align-items:center; gap:4px">&larr; All investigations</button>
     <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
-      <button class="btn-mini" onclick="_showInvestigationList()" title="Back to all investigations" style="flex-shrink:0">&larr; Investigations</button>
       <h3 id="investigation-detail-title" style="margin:0; flex:1"></h3>
       <span id="investigation-detail-status" class="status-pill planned" style="font-size:0.85em"></span>
       <span class="viv-info-chip" data-tooltip="Run unblocked &mdash; queue every variant whose model_settings don&#39;t have any unset &#39;required-before-run&#39; gates. Sequential, one variant at a time on a background thread.&#10;&#10;Refresh &mdash; re-fetch the investigation from disk. Use after editing YAML files directly.&#10;&#10;Generate report &mdash; self-contained HTML report you can email.&#10;&#10;Clone &mdash; copy this investigation into a fresh planning state with no run results.">?</span>
@@ -837,6 +838,12 @@
         <summary class="inv-bio-story-label">Biology — the mechanism this investigation models</summary>
         <div id="investigation-biology-story-text" class="inv-bio-story-text"></div>
       </details>
+    </div>
+    <!-- Discourse-graph framing: studies as knowledge-producing operations. -->
+    <div id="investigation-dag-lead" style="margin: 4px 0 8px; font-size: 0.88em; color: #475569; line-height: 1.4;">
+      <strong>Investigation graph</strong> — each study is a knowledge-producing operation that
+      builds understanding of the mechanism. Each node shows the <em>question</em> it asks and
+      the <em>evidence</em> it produced; edges show what a result leads to.
     </div>
     <div id="investigation-dag-shell"
          style="position: relative; border: 1px solid #e2e8f0; border-radius: 6px; background: #fafafa;

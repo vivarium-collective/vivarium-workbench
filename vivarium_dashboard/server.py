@@ -1498,10 +1498,57 @@ def _inputs_payload(ws_root: Path, slug: str | None = None) -> dict:
     except Exception:
         global_datasets = list(ws.get("datasets") or [])
     try:
-        global_references = _parse_bib_entries(ws_root)
+        bib_entries = _parse_bib_entries(ws_root)
     except Exception:
-        global_references = []
+        bib_entries = []
+    global_references = bib_entries
     global_block = {"datasets": global_datasets, "references": global_references}
+
+    # Enrich the investigation block:
+    #  - references: the investigation's references are bare bib keys; join them
+    #    against the parsed BibTeX entries so the UI gets rich dicts (title,
+    #    author, year, journal, doi, url, bibtex). Unmatched keys are flagged.
+    #  - datasets / expert_docs: ensure each carries a workspace-relative
+    #    `path` (download href) and a `name`.
+    by_key = {e.get("key"): e for e in bib_entries if isinstance(e, dict) and e.get("key")}
+    # references_pdfs maps a bib key -> stored PDF path (drop-and-go uploads).
+    pdf_by_key = {}
+    for rp in (ws.get("references_pdfs") or []):
+        if isinstance(rp, dict) and rp.get("bib_key") and rp.get("path"):
+            pdf_by_key[rp["bib_key"]] = rp["path"]
+
+    def _enrich_ref(ref):
+        key = ref if isinstance(ref, str) else (
+            (ref or {}).get("key") or (ref or {}).get("bib_key") if isinstance(ref, dict) else None)
+        if isinstance(ref, dict) and not key:
+            # Already a rich dict without a recognizable key field; pass through.
+            out = dict(ref)
+        elif key and key in by_key:
+            out = dict(by_key[key])
+        elif key:
+            out = {"key": key, "title": key, "_unmatched": True}
+        else:
+            out = {"key": str(ref), "title": str(ref), "_unmatched": True}
+        k = out.get("key")
+        if k and k in pdf_by_key and not out.get("pdf_path"):
+            out["pdf_path"] = pdf_by_key[k]
+        return out
+
+    investigation["references"] = [_enrich_ref(r) for r in (investigation.get("references") or [])]
+
+    def _norm_input(item):
+        if isinstance(item, str):
+            return {"name": item.rsplit("/", 1)[-1], "path": item}
+        if isinstance(item, dict):
+            out = dict(item)
+            p = out.get("path") or out.get("url") or ""
+            if not out.get("name"):
+                out["name"] = (p.rsplit("/", 1)[-1] if p else "") or "(unnamed)"
+            return out
+        return {"name": str(item)}
+
+    investigation["datasets"] = [_norm_input(d) for d in (investigation.get("datasets") or [])]
+    investigation["expert_docs"] = [_norm_input(d) for d in (investigation.get("expert_docs") or [])]
 
     return {"investigation": investigation, "global": global_block, "current": current}
 
@@ -1541,6 +1588,62 @@ def _set_investigation_status(ws_root: Path, inv: str, status: str) -> dict:
         spec["status"] = status
         target.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True, "status": status}
+
+
+def _investigation_yaml_path(ws_root: Path, inv: str) -> Path | None:
+    """Resolve investigations/<inv>/investigation.yaml, or None if missing."""
+    for d in _iter_iset_dirs(ws_root):
+        if d.name == inv:
+            p = d / "investigation.yaml"
+            return p if p.is_file() else None
+    return None
+
+
+def _append_investigation_input(ws_root: Path, inv: str, category: str, entry) -> bool:
+    """Append ``entry`` to investigation.yaml's ``inputs.<category>`` list.
+
+    ``category`` is one of ``datasets``, ``references``, ``expert_docs``.
+    ``entry`` is a dict (datasets / expert_docs) or a bare bib-key string
+    (references). Prefers ruamel for round-trip preservation, falling back to
+    safe_dump. Returns True on success.
+    """
+    target = _investigation_yaml_path(ws_root, inv)
+    if target is None:
+        return False
+
+    def _mutate(spec: dict) -> dict:
+        block = spec.get("inputs")
+        if not isinstance(block, dict):
+            block = {}
+            spec["inputs"] = block
+        lst = block.get(category)
+        if not isinstance(lst, list):
+            lst = []
+            block[category] = lst
+        # De-dupe by name/path (dicts) or value (strings).
+        if isinstance(entry, dict):
+            ident = entry.get("path") or entry.get("name")
+            for ex in lst:
+                if isinstance(ex, dict) and (ex.get("path") == ident or ex.get("name") == entry.get("name")):
+                    return spec
+        else:
+            if entry in lst:
+                return spec
+        lst.append(entry)
+        return spec
+
+    try:
+        from ruamel.yaml import YAML as _RYAML
+        _ry = _RYAML(); _ry.preserve_quotes = True; _ry.width = 4096
+        spec = _ry.load(target.read_text(encoding="utf-8")) or {}
+        spec = _mutate(spec)
+        with target.open("w", encoding="utf-8") as _fh:
+            _ry.dump(spec, _fh)
+    except Exception:
+        spec = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+        spec = _mutate(spec)
+        target.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
+    return True
 
 
 def _build_iset_summary_for_test(ws_root: Path) -> list[dict]:
@@ -3779,7 +3882,26 @@ def _render_study_detail_html(name: str, spec: dict) -> str:
     env.filters["fmt_ts"] = _jinja_fmt_ts
     env.filters["fmt_duration"] = _jinja_fmt_duration
     tpl = env.get_template("study-detail.html")
-    return tpl.render(study=spec, name=name)
+    # Single display name everywhere (mirrors JS _humanizeStudyName): authored
+    # title:, else the slug with the ordering prefix peeled off into a chip.
+    _hn = _humanize_study_name(name)
+    return tpl.render(study=spec, name=name,
+                      display_name=spec.get("title") or _hn["title"],
+                      name_chip=_hn["chip"])
+
+
+def _humanize_study_name(slug: str) -> dict:
+    """Mirror of JS _humanizeStudyName: peel a leading '<prefix>-NN[a-z]?-' into
+    a chip and humanize the remainder. Keeps dashboard + report names identical."""
+    import re
+    m = re.match(r"^([a-z]+-\d+[a-z]*)-(.+)$", slug or "")
+    if not m:
+        return {"chip": "", "title": (slug or "").replace("-", " ")}
+    rest = m.group(2).replace("-", " ")
+    rest = rest[:1].upper() + rest[1:]
+    if len(rest) > 60:
+        rest = rest[:57] + "…"
+    return {"chip": m.group(1), "title": rest}
 
 
 def _jinja_fmt_ts(ts) -> str:
@@ -5234,11 +5356,17 @@ class Handler(BaseHTTPRequestHandler):
         filename = (body.get("filename") or "").strip()
         path = (body.get("path") or "").strip()
         url = (body.get("url") or "").strip()
+        investigation = (body.get("investigation") or "").strip()
+        if investigation and not _SLUG_RE.match(investigation):
+            return self._json({"error": f"invalid investigation slug: '{investigation}'"}, 400)
 
         if file_b64:
             if not filename:
                 return self._json({"error": "filename is required when file_b64 is provided"}, 400)
-            dest_rel = f"datasets/{_safe_slug(name)}/{filename}"
+            if investigation:
+                dest_rel = f"investigations/{investigation}/inputs/datasets/{_safe_slug(name)}/{filename}"
+            else:
+                dest_rel = f"datasets/{_safe_slug(name)}/{filename}"
             entry["path"] = dest_rel
         elif path:
             entry["path"] = path
@@ -5271,6 +5399,11 @@ class Handler(BaseHTTPRequestHandler):
                     entry["sha256"] = h.hexdigest()
 
             _ws_add_to_sys_path()
+            if investigation:
+                # Investigation-scoped: append to investigations/<slug>/investigation.yaml.
+                if not _append_investigation_input(WORKSPACE, investigation, "datasets", entry):
+                    raise ValueError(f"investigation '{investigation}' not found")
+                return
             from vivarium_dashboard.lib.workspace_yaml import load_workspace, save_workspace
             ws_file = WORKSPACE / "workspace.yaml"
             ws = load_workspace(ws_file)
@@ -5284,6 +5417,8 @@ class Handler(BaseHTTPRequestHandler):
             datasets.append(entry)
             save_workspace(ws_file, ws)
 
+        if investigation:
+            commit_msg = f"feat(4): register dataset '{name}' for investigation '{investigation}'"
         return self._json(*_active_branch_action(commit_msg, action))
 
     def _post_reference_pdf(self, body: dict):
@@ -5297,6 +5432,10 @@ class Handler(BaseHTTPRequestHandler):
         _ws_add_to_sys_path()
         from vivarium_dashboard.lib.pdf_metadata import extract_pdf_metadata, auto_bib_key, build_bibtex
         extracted = extract_pdf_metadata(raw_pdf)
+
+        investigation = (body.get("investigation") or "").strip()
+        if investigation and not _SLUG_RE.match(investigation):
+            return self._json({"error": f"invalid investigation slug: '{investigation}'"}, 400)
 
         title = (body.get("title") or "").strip() or extracted.get("title", "")
         authors_input = (body.get("authors") or "").strip()
@@ -5340,7 +5479,10 @@ class Handler(BaseHTTPRequestHandler):
         def action():
             bib_file = workspace_paths().references / "papers.bib"
             claims_file = workspace_paths().references / "claims.yaml"
-            pdf_dest_rel = f"references/papers/{bib_key}.pdf"
+            if investigation:
+                pdf_dest_rel = f"investigations/{investigation}/inputs/references/{bib_key}.pdf"
+            else:
+                pdf_dest_rel = f"references/papers/{bib_key}.pdf"
             pdf_dest = WORKSPACE / pdf_dest_rel
 
             if bib_file.exists():
@@ -5371,6 +5513,10 @@ class Handler(BaseHTTPRequestHandler):
                     entry["_metadata_pending"] = True
                 refs_pdfs.append(entry)
             save_workspace(ws_file, ws)
+
+            if investigation:
+                if not _append_investigation_input(WORKSPACE, investigation, "references", bib_key):
+                    raise ValueError(f"investigation '{investigation}' not found")
 
             if claim_ids:
                 import yaml as _yaml
@@ -5407,6 +5553,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "could not parse BibTeX key from bibtex_text"}, 400)
         bibkey = m.group(1).strip()
 
+        investigation = (body.get("investigation") or "").strip()
+        if investigation and not _SLUG_RE.match(investigation):
+            return self._json({"error": f"invalid investigation slug: '{investigation}'"}, 400)
+
         if isinstance(claim_mappings_raw, str):
             claim_mappings: dict = {}
             for pair in claim_mappings_raw.split(","):
@@ -5423,14 +5573,25 @@ class Handler(BaseHTTPRequestHandler):
             bib_file = workspace_paths().references / "papers.bib"
             claims_file = workspace_paths().references / "claims.yaml"
 
+            already_in_bib = False
             if bib_file.exists():
                 existing_text = bib_file.read_text(encoding="utf-8")
                 if f"{{{bibkey}," in existing_text or f"{{{bibkey} " in existing_text:
-                    raise ValueError(f"BibTeX key '{bibkey}' already exists in papers.bib")
+                    already_in_bib = True
+                    # Investigation-scoped references may reuse an existing key
+                    # (just add the bare key to the investigation block); the
+                    # global flow still treats a duplicate as an error.
+                    if not investigation:
+                        raise ValueError(f"BibTeX key '{bibkey}' already exists in papers.bib")
 
-            bib_file.parent.mkdir(parents=True, exist_ok=True)
-            with bib_file.open("a") as f:
-                f.write("\n" + bibtex_text + "\n")
+            if not already_in_bib:
+                bib_file.parent.mkdir(parents=True, exist_ok=True)
+                with bib_file.open("a") as f:
+                    f.write("\n" + bibtex_text + "\n")
+
+            if investigation:
+                if not _append_investigation_input(WORKSPACE, investigation, "references", bibkey):
+                    raise ValueError(f"investigation '{investigation}' not found")
 
             if claim_mappings:
                 import yaml as _yaml
@@ -5478,6 +5639,10 @@ class Handler(BaseHTTPRequestHandler):
         contributor = (body.get("contributor") or "").strip() or None
         claims_raw = body.get("claims_supported", [])
 
+        investigation = (body.get("investigation") or "").strip()
+        if investigation and not _SLUG_RE.match(investigation):
+            return self._json({"error": f"invalid investigation slug: '{investigation}'"}, 400)
+
         if not name:
             return self._json({"error": "name is required"}, 400)
         if not file_b64 and not source_path_raw:
@@ -5490,11 +5655,14 @@ class Handler(BaseHTTPRequestHandler):
         else:
             claims_supported = []
 
+        expert_dir = (f"investigations/{investigation}/inputs/expert"
+                      if investigation else "references/expert")
+
         if file_b64:
             if not filename:
                 return self._json({"error": "filename is required when file_b64 is provided"}, 400)
             ext = Path(filename).suffix if Path(filename).suffix else ".pdf"
-            dest_rel = f"references/expert/{_safe_slug(name)}{ext}"
+            dest_rel = f"{expert_dir}/{_safe_slug(name)}{ext}"
             source_path = None
         else:
             source_path = Path(source_path_raw)
@@ -5505,9 +5673,10 @@ class Handler(BaseHTTPRequestHandler):
             if not source_path.is_file():
                 return self._json({"error": f"source_path is not a regular file: {source_path}"}, 400)
             ext = source_path.suffix if source_path.suffix else ".pdf"
-            dest_rel = f"references/expert/{_safe_slug(name)}{ext}"
+            dest_rel = f"{expert_dir}/{_safe_slug(name)}{ext}"
 
-        commit_msg = f"feat(5): add expert document '{name}'"
+        commit_msg = (f"feat(5): add expert document '{name}' for investigation '{investigation}'"
+                      if investigation else f"feat(5): add expert document '{name}'")
 
         def action():
             dest = WORKSPACE / dest_rel
@@ -5525,6 +5694,18 @@ class Handler(BaseHTTPRequestHandler):
                 sha = h.hexdigest()
 
             _ws_add_to_sys_path()
+            entry: dict = {"name": name, "path": dest_rel, "sha256": sha}
+            if description:
+                entry["description"] = description
+            if contributor:
+                entry["contributor"] = contributor
+            if claims_supported:
+                entry["claims_supported"] = claims_supported
+
+            if investigation:
+                if not _append_investigation_input(WORKSPACE, investigation, "expert_docs", entry):
+                    raise ValueError(f"investigation '{investigation}' not found")
+                return
             from vivarium_dashboard.lib.workspace_yaml import load_workspace, save_workspace
             ws_file = WORKSPACE / "workspace.yaml"
             ws = load_workspace(ws_file)
@@ -5535,13 +5716,6 @@ class Handler(BaseHTTPRequestHandler):
             for existing in expert_docs:
                 if isinstance(existing, dict) and existing.get("name") == name:
                     raise ValueError(f"expert doc '{name}' already registered")
-            entry: dict = {"name": name, "path": dest_rel, "sha256": sha}
-            if description:
-                entry["description"] = description
-            if contributor:
-                entry["contributor"] = contributor
-            if claims_supported:
-                entry["claims_supported"] = claims_supported
             expert_docs.append(entry)
             save_workspace(ws_file, ws)
 
@@ -8023,6 +8197,7 @@ if __name__ == "__main__":
                     has_active_run=_has_active_run_for_study(
                         study_spec["name"], study_spec)),
                 "phase":           study_spec.get("phase"),
+                "title":           study_spec.get("title"),
                 "question":        question,
                 "n_variants":      len(sim_set) if sim_set else len(study_spec.get("variants") or []),
                 "n_interventions": len(study_spec.get("interventions") or []),
@@ -8036,6 +8211,10 @@ if __name__ == "__main__":
                 "follow_up_studies": follow_ups,
                 "n_findings":      len(findings),
                 "findings":        findings,
+                # Discourse-graph re-skin: optional authored headline + confidence
+                # override (fall back to derived from findings/status client-side).
+                "claim":           study_spec.get("claim"),
+                "confidence":      study_spec.get("confidence"),
                 # Pass A multi-axis status: pass through whichever of the six
                 # axes are set on the study spec. All optional, all independent.
                 "design_status":         study_spec.get("design_status"),
