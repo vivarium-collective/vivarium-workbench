@@ -1074,20 +1074,20 @@
       <!-- At-a-glance grid: one tile per study with a one-line role. Populated by JS. -->
       <div id="investigation-at-a-glance" class="inv-at-a-glance" style="display:none"></div>
       <!-- How to read this: ordered list of usage tips for the evaluator. -->
-      <div id="investigation-how-to-read" class="inv-how-to-read" style="display:none">
-        <strong>How to read this</strong>
+      <details id="investigation-how-to-read" class="inv-how-to-read" style="display:none">
+        <summary>How to read this</summary>
         <ol></ol>
-      </div>
+      </details>
       <!-- Glossary: collapsible. -->
       <details id="investigation-glossary" class="inv-glossary" style="display:none">
         <summary>Glossary</summary>
         <dl></dl>
       </details>
       <!-- Biology story (free-form prose). Hidden if the yaml omits it. -->
-      <div id="investigation-biology-story" class="inv-bio-story" style="display:none">
-        <strong class="inv-bio-story-label">Biology story</strong>
+      <details id="investigation-biology-story" class="inv-bio-story" style="display:none">
+        <summary class="inv-bio-story-label">Biology — the mechanism this investigation models</summary>
         <div id="investigation-biology-story-text" class="inv-bio-story-text"></div>
-      </div>
+      </details>
     </div>
     <div id="investigation-dag-shell"
          style="position: relative; border: 1px solid #e2e8f0; border-radius: 6px; background: #fafafa;

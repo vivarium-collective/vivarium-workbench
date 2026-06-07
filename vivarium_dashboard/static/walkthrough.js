@@ -3544,9 +3544,10 @@
         // is exactly one investigation (a one-item list is pointless).
         var switchBtn = document.getElementById('investigation-switch-btn');
         if (switchBtn) switchBtn.style.display = window._isetIndex.length > 1 ? '' : 'none';
-        if (window._currentIset) {
-          _openInvestigationDetail(window._currentIset);
-        } else if (window._isetIndex.length === 1) {
+        // List-first: clicking the Investigations menu always returns to the
+        // card list. Auto-open only when there is exactly one investigation;
+        // cards (and deep-links) open a detail explicitly via _openInvestigationDetail.
+        if (window._isetIndex.length === 1) {
           _openInvestigationDetail(window._isetIndex[0].name);
         } else {
           _showInvestigationList();
@@ -4009,7 +4010,12 @@
         if (storyBox && storyText) {
           var story = (d.biological_story || '').trim();
           if (story) {
-            storyText.textContent = story;
+            // Render as reflowing paragraphs (split on blank lines, collapse
+            // intra-paragraph hard newlines to spaces) so the text uses the full
+            // width instead of breaking at the YAML's source newlines.
+            storyText.innerHTML = story.split(/\n\s*\n/).map(function(para) {
+              return '<p>' + _esc(para.replace(/\s*\n\s*/g, ' ').trim()) + '</p>';
+            }).join('');
             storyBox.style.display = '';
           } else {
             storyText.textContent = '';

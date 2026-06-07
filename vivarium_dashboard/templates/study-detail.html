@@ -55,8 +55,8 @@
 .gate-status-stale            { background:#ede9fe; color:#5b21b6 }
 .status-pill.gate-status{font-weight:500}
 </style>
-<section class="status-detail-panel" aria-label="Multi-axis status detail">
-  <h2>Status detail (Pass A multi-axis)</h2>
+<details class="status-detail-panel" aria-label="Multi-axis status detail">
+  <summary class="study-fold-summary">Status detail (Pass A multi-axis)</summary>
   {% for _key, _label in _axes %}
   {% if study[_key] %}
   <div class="status-detail-row">
@@ -65,7 +65,7 @@
   </div>
   {% endif %}
   {% endfor %}
-</section>
+</details>
 {% endif %}
 
 {# v3 detection: any of these fields being present (even as an empty list/dict)
@@ -365,8 +365,8 @@
     {% endif %}
 
     {% if study.purpose %}
-    <div class="overview-section">
-      <h2 class="overview-label">Purpose</h2>
+    <details class="overview-section study-fold">
+      <summary class="overview-label">Purpose</summary>
       {% if study.purpose.question %}
       <div class="purpose-callout" style="background:#eff6ff;border-left:4px solid #3b82f6">
         <strong>Question.</strong> {{ study.purpose.question }}
@@ -382,7 +382,7 @@
         <strong>Expected outcome.</strong> {{ study.purpose.expected_outcome }}
       </div>
       {% endif %}
-    </div>
+    </details>
     {% else %}
     {# Fallback: old narrative fields #}
     {% if study.question %}
@@ -434,8 +434,8 @@
     {% endif %}
 
     {% if study.pipeline_gate %}
-    <div class="overview-section">
-      <h2 class="overview-label">Pipeline gate</h2>
+    <details class="overview-section study-fold">
+      <summary class="overview-label">Pipeline gate</summary>
       <p class="muted" style="margin: 0 0 8px 0;font-size:0.88em">
         Each study is a model-building gate: it answers <em>"Can we safely build the next layer?"</em>
       </p>
@@ -454,21 +454,21 @@
       {% if study.pipeline_gate.proceed_condition %}
       <div><strong>Proceed when:</strong> <span class="muted">{{ study.pipeline_gate.proceed_condition }}</span></div>
       {% endif %}
-    </div>
+    </details>
     {% endif %}
 
     {% if study.key_assumptions %}
-    <div class="overview-section">
-      <h2 class="overview-label">Key assumptions</h2>
+    <details class="overview-section study-fold">
+      <summary class="overview-label">Key assumptions</summary>
       <ul style="margin:0 0 0 18px;padding:0;font-size:0.93em">
         {% for a in study.key_assumptions %}<li style="margin:2px 0">{{ a }}</li>{% endfor %}
       </ul>
-    </div>
+    </details>
     {% endif %}
 
     {% if study.behavior_tests or study.expected_behavior %}
-    <div class="overview-section">
-      <h2 class="overview-label">Behavioral tests</h2>
+    <details class="overview-section study-fold">
+      <summary class="overview-label">Behavioral tests</summary>
       {% set _eb = study.behavior_tests or study.expected_behavior %}
       {% set _primary = _eb | selectattr('classification', 'equalto', 'primary') | list | length %}
       {% set _supporting = _eb | selectattr('classification', 'equalto', 'supporting') | list | length %}
@@ -482,12 +482,12 @@
           <span class="classification-pill classification-regression">{{ _regression }} regression</span>{% endif %}
         <a onclick="_setStudyTab('tests')" style="cursor:pointer;color:#3b82f6;text-decoration:underline;margin-left:6px">View on Tests tab →</a>
       </p>
-    </div>
+    </details>
     {% endif %}
 
     {% if study.expert_decisions_needed %}
-    <div class="overview-section pre-run-expert-review">
-      <h2 class="overview-label">Pre-run expert review</h2>
+    <details class="overview-section pre-run-expert-review study-fold">
+      <summary class="overview-label">Pre-run expert review</summary>
       <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
         Open biological questions the planning is contingent on. A "wrong" answer here
         means a primary test threshold needs to change <em>before</em> the simulation
@@ -529,7 +529,7 @@
         </div>
         {% endfor %}
       </div>
-    </div>
+    </details>
     {% endif %}
 
     {% if study.limitations %}

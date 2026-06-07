@@ -1101,7 +1101,7 @@ def _iter_iset_dirs(ws_root: Path | None = None):
     ``ws_root`` defaults to the module-level WORKSPACE constant; tests can
     pass an explicit path to walk an isolated tmp workspace.
     """
-    root = (ws_root or WORKSPACE) / "investigations"
+    root = WorkspacePaths.load(ws_root or WORKSPACE).dir("investigations")
     if not root.is_dir():
         return
     for d in sorted(root.iterdir()):
@@ -1280,7 +1280,7 @@ def _iset_lifecycle(ws_root: Path, slug: str) -> str:
     merge-base with main (i.e. already on main), else 'wip'. Any git error or
     non-repo -> 'wip'."""
     import subprocess
-    rel = f"investigations/{slug}/investigation.yaml"
+    rel = WorkspacePaths.load(ws_root).rel("investigations") + f"/{slug}/investigation.yaml"
     try:
         base = subprocess.run(["git", "merge-base", "HEAD", "main"], cwd=str(ws_root),
                               capture_output=True, text=True)

@@ -1551,9 +1551,11 @@ body.focus-mode .page.active{ display:block !important; min-height:0 !important 
 .inv-bio-story-text {
   color: #0c4a6e;
   line-height: 1.6;
-  white-space: pre-wrap;
+  white-space: normal;        /* reflow to full width (was pre-wrap -> wrapped at source newlines) */
   font-size: 0.95em;
 }
+.inv-bio-story-text p { margin: 0 0 10px 0; }
+.inv-bio-story-text p:last-child { margin-bottom: 0; }
 
 /* ─── Conditions block on study-detail Build tab ──────────────────── */
 .cond-block { margin: 12px 0; padding: 10px 12px; background: #fff;
@@ -1974,3 +1976,16 @@ body.focus-mode .page.active{ display:block !important; min-height:0 !important 
   color: #991b1b;
   border: 1px solid rgba(220, 38, 38, 0.3);
 }
+
+/* Collapsible lead blocks (condense the lead-up to the studies) */
+details.inv-how-to-read > summary, details.inv-bio-story > summary {
+  cursor: pointer; font-weight: 600; list-style-position: outside;
+}
+details.inv-bio-story > summary { color: #075985; }
+details.inv-how-to-read > summary { color: #78350f; }
+details.inv-how-to-read[open] > summary, details.inv-bio-story[open] > summary { margin-bottom: 8px; }
+
+/* Foldable overview sections (study detail): hide secondary detail */
+details.overview-section > summary{ cursor:pointer; list-style-position:outside; }
+details.overview-section > summary.overview-label{ margin-bottom:0; }
+details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
