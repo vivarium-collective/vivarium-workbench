@@ -16,7 +16,7 @@ CANONICAL = Path(__file__).parent.parent.parent / "pbg-superpowers" / "pbg_super
 VENDORED = Path(__file__).parent.parent / "vivarium_dashboard" / "lib" / "runs_index.py"
 
 # list_all_runs intentionally excluded — see module docstring.
-FUNCS = ["emitter_type_of", "_all_runs"]
+FUNCS = ["emitter_type_of", "_store_emitter_type", "_all_runs"]
 
 
 def _extract_functions(source: str) -> dict[str, str]:
