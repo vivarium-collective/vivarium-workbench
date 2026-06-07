@@ -3569,6 +3569,10 @@
     if (list) list.style.display = '';
     if (detail) detail.style.display = 'none';
     window._currentIset = null;
+    window._currentIsetSlug = '';
+    if (typeof window._renderRailInvestigationGroups === 'function') {
+      try { window._renderRailInvestigationGroups(); } catch (_) { /* ignore */ }
+    }
     _renderInvestigationSets();
   }
   window._showInvestigationList = _showInvestigationList;
@@ -8033,7 +8037,10 @@
     // under the "Studies" rail-section label — no redundant group header.
     if (groups.length === 1 && groups[0].name !== '__ungrouped__') {
       var g = groups[0];
-      host.innerHTML = g.studies.map(function(s) { return _railStudyItem(s); }).join('');
+      var _iset = (window._isetIndex || []).filter(function(i){ return i.name === g.name; })[0] || {};
+      host.innerHTML = '<div class="rail-iset-name" title="' + _esc(_iset.title || g.name) + '">'
+        + _esc(_iset.title || g.name) + '</div>'
+        + g.studies.map(function(s) { return _railStudyItem(s); }).join('');
       return;
     }
 
