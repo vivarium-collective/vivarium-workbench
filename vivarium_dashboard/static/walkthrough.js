@@ -7066,6 +7066,8 @@
       //    HTML renders with no external assets) ─────────────────────────
       + '.investigation-biology-story{padding:16px 20px;background:#f0f9ff;border:1px solid #bae6fd;border-left:5px solid #0284c7;border-radius:8px;margin:14px 0 18px 0;max-width:none}'
       + '.investigation-biology-story p.biology-prose{margin:0;font-size:1em;line-height:1.6;color:#0c4a6e;white-space:pre-line;max-width:none}'
+      + 'details.report-fold{margin:10px 0;border-left:3px solid #cbd5e1;padding-left:10px}'
+      + 'details.report-fold>summary{cursor:pointer;font-weight:600;color:#1e3a8a;margin-bottom:6px}'
       + '.biology-glance{margin:0 0 18px 0;padding:14px 18px;background:#f0fdf4;border:1px solid #bbf7d0;border-left:5px solid #16a34a;border-radius:8px}'
       + '.biology-glance .biology-glance-label{font-size:0.85em;text-transform:uppercase;letter-spacing:0.05em;color:#166534;margin:0 0 8px 0;font-weight:600;border:none;padding:0}'
       + '.biology-summary-callout{margin-bottom:14px}'
@@ -7378,7 +7380,6 @@
       +   '<span class="tb-title">' + _h(iset.title || iset.name) + '</span>'
       +   '<a href="#top">Top</a>'
       +   ((iset.executive && (iset.executive.what_is_this || iset.executive.verdict)) ? '<a href="#executive">Summary</a>' : '')
-      +   ((iset.scientific_argument && iset.scientific_argument.main_claim) ? '<a href="#scientific-argument">Argument</a>' : '')
       +   '<a href="#overview">Overview</a>'
       /* "Acceptance" nav link removed alongside the section it pointed to */
       +   '<a href="#studies-heading">Studies</a>'
@@ -7489,12 +7490,12 @@
                  + '<span class="badge badge-' + _h(vs) + '">' + _h(vs) + '</span> '
                  + '<strong>Current verdict.</strong> ' + _multiline(ex.verdict) + '</div>';
             if (dn.length) {
-              h += '<h3>Decisions needed from reviewers</h3><ol>'
+              h += '<details class="report-fold"><summary>Decisions needed from reviewers</summary><ol>'
                  + dn.map(function(d) {
                      return '<li><strong>' + _h(d.question || '') + '</strong>'
                        + (d.context ? '<div class="muted small">' + _multiline(d.context) + '</div>' : '')
                        + '</li>';
-                   }).join('') + '</ol>';
+                   }).join('') + '</ol></details>';
             }
             return h + '</section>';
           })()
@@ -7508,7 +7509,7 @@
                 kf = sa.key_figures || [], cav = sa.caveats || [];
             if (!sa.main_claim && !ef.length && !ea.length) return '';
             function _li(x) { return '<li>' + _multiline(typeof x === 'string' ? x : (x.text || JSON.stringify(x))) + '</li>'; }
-            var h = '<section id="scientific-argument"><h2>Scientific argument</h2>';
+            var h = '<details id="scientific-argument" class="report-fold"><summary>Scientific argument</summary>';
             if (sa.main_claim)
               h += '<p><strong>Main claim.</strong> ' + _multiline(sa.main_claim) + '</p>';
             if (ef.length || ea.length) {
@@ -7523,7 +7524,7 @@
               }).join('') + '</ul>';
             if (cav.length)
               h += '<h3>Caveats</h3><ul>' + cav.map(_li).join('') + '</ul>';
-            return h + '</section>';
+            return h + '</details>';
           })()
 
       // Planning-phase banner: any study that has not yet produced runs
@@ -7554,10 +7555,10 @@
           })()
 
       +   ((iset.biological_story || '').trim()
-          ? '<div class="investigation-biology-story">'
-            + '<h2 style="margin:0 0 8px 0;font-size:0.85em;text-transform:uppercase;letter-spacing:0.05em;color:#075985;font-weight:600;border:none;padding:0">Biology — the mechanism this investigation models</h2>'
+          ? '<details class="investigation-biology-story report-fold">'
+            + '<summary style="font-size:0.85em;text-transform:uppercase;letter-spacing:0.05em;color:#075985;font-weight:600;cursor:pointer">Biology — the mechanism this investigation models</summary>'
             + '<p class="biology-prose">' + _multiline(iset.biological_story) + '</p>'
-            + '</div>'
+            + '</details>'
           : '')
 
       +   '<h2 id="overview">Overview</h2>'
