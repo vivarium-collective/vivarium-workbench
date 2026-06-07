@@ -3564,7 +3564,10 @@
         // List-first: clicking the Investigations menu always returns to the
         // card list. Auto-open only when there is exactly one investigation;
         // cards (and deep-links) open a detail explicitly via _openInvestigationDetail.
-        if (window._isetIndex.length === 1) {
+        var cur = (window._isetIndex || []).filter(function(i){return i.current;})[0];
+        if (cur) {
+          _openInvestigationDetail(cur.name);
+        } else if (window._isetIndex.length === 1) {
           _openInvestigationDetail(window._isetIndex[0].name);
         } else {
           _showInvestigationList();
@@ -3614,10 +3617,14 @@
       var intentLine = (authStatus && authStatus !== effStatus)
         ? '<div class="muted" style="font-size:0.72em; margin-top:-2px; margin-bottom:6px;">intent: ' + _esc(authStatus) + '</div>'
         : '';
+      var currentPill = iset.current
+        ? '<span class="status-pill" style="font-size:0.72em;background:#dcfce7;color:#166534;border:1px solid #86efac">● current branch</span>'
+        : '';
       return '<div class="investigation-set-card" onclick="_openInvestigationDetail(\'' + _esc(iset.name) + '\')" ' +
              'style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;cursor:pointer;transition:box-shadow 0.1s,border-color 0.1s;">' +
         '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px;">' +
           '<strong style="font-size:1.05em;flex:1">' + _esc(iset.title || iset.name) + '</strong>' +
+          currentPill +
           '<span class="status-pill ' + pillClass + '" style="font-size:0.78em">' + _esc(effStatus) + '</span>' +
         '</div>' +
         intentLine +

@@ -1441,6 +1441,59 @@ def _iset_lifecycle(ws_root: Path, slug: str) -> str:
         return "wip"
 
 
+def _current_branch_slug(ws_root: Path) -> str | None:
+    """The investigation slug matching the workspace's current git branch, or None."""
+    import re, subprocess
+    try:
+        br = subprocess.run(["git", "-C", str(ws_root), "branch", "--show-current"],
+                            capture_output=True, text=True, timeout=2).stdout.strip()
+    except Exception:
+        return None
+    if not br:
+        return None
+    slugs = [d.name for d in _iter_iset_dirs(ws_root)]
+    if br in slugs:
+        return br
+    for s in slugs:
+        if br == f"investigation/{s}" or br.endswith("/" + s):
+            return s
+    brtok = set(t for t in re.split(r"[/_\-.]+", br.lower()) if t)
+    best, best_n = None, 0
+    for s in slugs:
+        stok = set(t for t in re.split(r"[/_\-.]+", s.lower()) if t)
+        n = len(brtok & stok)
+        if n > best_n:
+            best, best_n = s, n
+    return best if best_n > 0 else None
+
+
+def _set_investigation_status(ws_root: Path, inv: str, status: str) -> dict:
+    """Write the ``status`` field into investigations/<inv>/investigation.yaml.
+
+    Pure helper backing ``POST /api/investigation-set-status``. Returns a
+    ``{ok, status}`` dict on success, or ``{error, _code}`` on failure (the
+    HTTP handler maps ``_code`` to the response status).
+    """
+    inv = (inv or "").strip()
+    status = (status or "").strip()
+    valid = {"active", "in-progress", "planning", "completed", "archived", "closed"}
+    if not inv:
+        return {"error": "investigation required", "_code": 400}
+    if status not in valid:
+        return {"error": f"status must be one of {sorted(valid)}", "_code": 400}
+    target = None
+    for d in _iter_iset_dirs(ws_root):
+        if d.name == inv:
+            target = d / "investigation.yaml"
+            break
+    if target is None or not target.is_file():
+        return {"error": "investigation not found", "_code": 404}
+    spec = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+    spec["status"] = status
+    target.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
+    return {"ok": True, "status": status}
+
+
 def _build_iset_summary_for_test(ws_root: Path) -> list[dict]:
     """Pure function backing ``GET /api/iset-list`` — emits the same list
     of summary dicts that the handler returns, but without HTTP plumbing.
@@ -1449,6 +1502,7 @@ def _build_iset_summary_for_test(ws_root: Path) -> list[dict]:
     studies' current statuses.
     """
     out: list[dict] = []
+    current_slug = _current_branch_slug(ws_root)
     for d in _iter_iset_dirs(ws_root):
         try:
             spec = yaml.safe_load((d / "investigation.yaml").read_text(encoding="utf-8")) or {}
@@ -1472,6 +1526,7 @@ def _build_iset_summary_for_test(ws_root: Path) -> list[dict]:
             "n_studies":        len(study_slugs),
             "studies":          study_slugs,
             "lifecycle":        _iset_lifecycle(ws_root, spec.get("name", d.name)),
+            "current":          (d.name == current_slug),
         })
     return out
 
