@@ -55,8 +55,8 @@
 .gate-status-stale            { background:#ede9fe; color:#5b21b6 }
 .status-pill.gate-status{font-weight:500}
 </style>
-<section class="status-detail-panel" aria-label="Multi-axis status detail">
-  <h2>Status detail (Pass A multi-axis)</h2>
+<details class="status-detail-panel" aria-label="Multi-axis status detail">
+  <summary class="study-fold-summary">Status detail (Pass A multi-axis)</summary>
   {% for _key, _label in _axes %}
   {% if study[_key] %}
   <div class="status-detail-row">
@@ -65,7 +65,7 @@
   </div>
   {% endif %}
   {% endfor %}
-</section>
+</details>
 {% endif %}
 
 {# v3 detection: any of these fields being present (even as an empty list/dict)
