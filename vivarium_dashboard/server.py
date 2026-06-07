@@ -290,6 +290,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/study-comparison-add":        "_post_study_comparison_add",
     "/api/study-tests-run":             "_post_study_tests_run",
     "/api/study-seed-followup":         "_post_study_seed_followup",
+    "/api/investigation-set-status":    "_post_investigation_set_status",
     # Workspace-switcher POST endpoints.
     "/api/workspaces/add":           "_post_workspaces_add",
     "/api/workspaces/forget":        "_post_workspaces_forget",
@@ -9906,6 +9907,17 @@ if __name__ == "__main__":
             return self._json(*_commit_or_run(commit_msg, do_action))
         except Exception as e:
             return self._json({"error": f"workstream error: {e}"}, 500)
+
+    def _post_investigation_set_status(self, body: dict):
+        """POST /api/investigation-set-status {investigation, status} — write the
+        `status` field into investigations/<slug>/investigation.yaml."""
+        result = _set_investigation_status(
+            WORKSPACE,
+            body.get("investigation") or "",
+            body.get("status") or "",
+        )
+        code = result.pop("_code", 200)
+        return self._json(result, code)
 
     # ------------------------------------------------------------------
     # Study-specific POST handlers (thin wrappers around pure helpers)

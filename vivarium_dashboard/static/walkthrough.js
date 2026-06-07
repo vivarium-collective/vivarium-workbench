@@ -3604,7 +3604,17 @@
       list.innerHTML = '<p class="empty-state">No investigations declared. Author one at <code>investigations/&lt;name&gt;/investigation.yaml</code>.</p>';
       return;
     }
-    list.innerHTML = window._isetIndex.map(function(iset) {
+    // Closed/archived investigations sink to the bottom (stable sort).
+    var ordered = (window._isetIndex || []).map(function(it, idx) { return [it, idx]; });
+    ordered.sort(function(a, b) {
+      var ac = (a[0].status === 'archived' || a[0].status === 'closed') ? 1 : 0;
+      var bc = (b[0].status === 'archived' || b[0].status === 'closed') ? 1 : 0;
+      if (ac !== bc) return ac - bc;
+      return a[1] - b[1];
+    });
+    list.innerHTML = ordered.map(function(pair) {
+      var iset = pair[0];
+      var closed = (iset.status === 'archived' || iset.status === 'closed');
       var desc = (iset.description || '').split('\n')[0].slice(0, 240);
       // Prefer the server-computed effective_status (derived from member
       // studies' live statuses). Fall back to the author-declared yaml
@@ -3620,23 +3630,61 @@
       var currentPill = iset.current
         ? '<span class="status-pill" style="font-size:0.72em;background:#dcfce7;color:#166534;border:1px solid #86efac">● current branch</span>'
         : '';
+      // Closed/archived: show a gray "Closed" pill INSTEAD of effective-status.
+      var statusPill = closed
+        ? '<span class="status-pill" style="font-size:0.78em;background:#e5e7eb;color:#4b5563;border:1px solid #d1d5db">Closed</span>'
+        : '<span class="status-pill ' + pillClass + '" style="font-size:0.78em">' + _esc(effStatus) + '</span>';
+      var cardStyle = 'background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;cursor:pointer;transition:box-shadow 0.1s,border-color 0.1s;' +
+        (closed ? 'opacity:0.6;' : '');
+      var actionLabel = closed ? 'Reopen' : 'Close';
+      var actionStatus = closed ? 'in-progress' : 'archived';
+      var actionBtn = '<button type="button" onclick="event.stopPropagation();_setInvestigationStatus(this,\'' +
+        _esc(iset.name) + '\',\'' + actionStatus + '\')" ' +
+        'style="font-size:0.78em;padding:3px 10px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;color:#334155;cursor:pointer">' +
+        actionLabel + '</button>';
       return '<div class="investigation-set-card" onclick="_openInvestigationDetail(\'' + _esc(iset.name) + '\')" ' +
-             'style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;cursor:pointer;transition:box-shadow 0.1s,border-color 0.1s;">' +
+             'style="' + cardStyle + '">' +
         '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px;">' +
           '<strong style="font-size:1.05em;flex:1">' + _esc(iset.title || iset.name) + '</strong>' +
           currentPill +
-          '<span class="status-pill ' + pillClass + '" style="font-size:0.78em">' + _esc(effStatus) + '</span>' +
+          statusPill +
         '</div>' +
         intentLine +
         '<div class="muted" style="font-size:0.78em;font-family:monospace;margin-bottom:6px">' + _esc(iset.name) + '</div>' +
         (desc ? '<p style="margin:0 0 8px 0;font-size:0.9em;color:#475569">' + _esc(desc) + (iset.description.length > 240 ? '…' : '') + '</p>' : '') +
-        '<div style="font-size:0.85em;color:#64748b">' +
-          '<strong>' + iset.n_studies + '</strong> stud' + (iset.n_studies === 1 ? 'y' : 'ies') +
-          ' &nbsp;·&nbsp; click to open DAG' +
+        '<div style="display:flex;align-items:center;gap:10px;font-size:0.85em;color:#64748b">' +
+          '<span style="flex:1"><strong>' + iset.n_studies + '</strong> stud' + (iset.n_studies === 1 ? 'y' : 'ies') +
+          ' &nbsp;·&nbsp; click to open DAG</span>' +
+          actionBtn +
         '</div>' +
       '</div>';
     }).join('');
   }
+
+  // Close/Reopen an investigation: POST the new status, then reload the list.
+  // Resilient — never throws; surfaces a brief inline error on the button.
+  function _setInvestigationStatus(btn, name, status) {
+    var orig = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    fetch('/api/investigation-set-status', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({investigation: name, status: status}),
+    })
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function() {
+        if (typeof _loadInvestigationSets === 'function') _loadInvestigationSets();
+      })
+      .catch(function(err) {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = orig;
+          btn.style.color = '#b91c1c';
+          btn.title = 'Failed: ' + String(err);
+        }
+      });
+  }
+  window._setInvestigationStatus = _setInvestigationStatus;
 
   // ─── "+ New Investigation" modal ──────────────────────────────────────
   // Slug the user-typed name client-side for a live preview. Matches the
