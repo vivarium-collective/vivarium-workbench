@@ -3779,7 +3779,26 @@ def _render_study_detail_html(name: str, spec: dict) -> str:
     env.filters["fmt_ts"] = _jinja_fmt_ts
     env.filters["fmt_duration"] = _jinja_fmt_duration
     tpl = env.get_template("study-detail.html")
-    return tpl.render(study=spec, name=name)
+    # Single display name everywhere (mirrors JS _humanizeStudyName): authored
+    # title:, else the slug with the ordering prefix peeled off into a chip.
+    _hn = _humanize_study_name(name)
+    return tpl.render(study=spec, name=name,
+                      display_name=spec.get("title") or _hn["title"],
+                      name_chip=_hn["chip"])
+
+
+def _humanize_study_name(slug: str) -> dict:
+    """Mirror of JS _humanizeStudyName: peel a leading '<prefix>-NN[a-z]?-' into
+    a chip and humanize the remainder. Keeps dashboard + report names identical."""
+    import re
+    m = re.match(r"^([a-z]+-\d+[a-z]*)-(.+)$", slug or "")
+    if not m:
+        return {"chip": "", "title": (slug or "").replace("-", " ")}
+    rest = m.group(2).replace("-", " ")
+    rest = rest[:1].upper() + rest[1:]
+    if len(rest) > 60:
+        rest = rest[:57] + "…"
+    return {"chip": m.group(1), "title": rest}
 
 
 def _jinja_fmt_ts(ts) -> str:
@@ -8023,6 +8042,7 @@ if __name__ == "__main__":
                     has_active_run=_has_active_run_for_study(
                         study_spec["name"], study_spec)),
                 "phase":           study_spec.get("phase"),
+                "title":           study_spec.get("title"),
                 "question":        question,
                 "n_variants":      len(sim_set) if sim_set else len(study_spec.get("variants") or []),
                 "n_interventions": len(study_spec.get("interventions") or []),

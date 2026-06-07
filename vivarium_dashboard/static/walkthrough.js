@@ -4456,7 +4456,7 @@
 
     // Layout constants — horizontal orientation (depth flows left→right).
     // Narrow cards in a left→right chain (discourse-graph nodes).
-    var CARD_W = 202, CARD_H = 200;
+    var CARD_W = 196, CARD_H = 176;
     var X_GAP = 64,   Y_GAP = 24;
     var PAD_X = 24,   PAD_Y = 16;
 
@@ -4583,8 +4583,9 @@
       })[confidence] || {color: '#9ca3af', icon: '○'};
       var followUps = s.follow_up_studies || [];
 
-      var prettyTitle = String(s.name).replace(/^[a-z]+-\d+-/, '').replace(/-/g, ' ')
-        .replace(/\b\w/g, function(c) { return c.toUpperCase(); }) || s.name;
+      // Single display name everywhere: authored title:, else the shared
+      // _humanizeStudyName derivation (same as the control panel + study page).
+      var prettyTitle = s.title || _humanizeStudyName(s.name).title;
       var asks = (s.question || '').replace(/\s+/g, ' ').split(/[.?]/)[0].trim();
       if (asks.length > 84) asks = asks.slice(0, 81).replace(/\s+\S*$/, '') + '…';
       var findings = s.findings || [];
@@ -4593,7 +4594,6 @@
       ).replace(/\s+/g, ' ').trim();
       if (claim.length > 132) claim = claim.slice(0, 129).replace(/\s+\S*$/, '') + '…';
       var moreN = findings.length > 1 ? findings.length - 1 : 0;
-      var simComp = String(s.baseline_source || '—').replace(/^v2ecoli:/, '');
 
       var node = document.createElement('div');
       node.className = 'iset-dag-node';
@@ -4618,7 +4618,7 @@
       node.innerHTML =
         '<div style="display:flex;align-items:flex-start;gap:6px">' +
           '<span style="color:' + ss.color + ';font-size:1.05em;line-height:1.1;flex:none">' + ss.icon + '</span>' +
-          '<strong style="font-size:0.85em;line-height:1.2;color:#1e293b;flex:1">' + _esc(prettyTitle) + '</strong>' +
+          '<strong style="font-size:0.85em;line-height:1.2;color:#1e293b;flex:1;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden" title="' + _esc(prettyTitle) + '">' + _esc(prettyTitle) + '</strong>' +
           '<span style="font-size:0.62em;font-weight:700;color:' + ss.color + ';white-space:nowrap;margin-top:1px">' + _esc(confidence) + '</span>' +
         '</div>' +
         (asks
@@ -4630,9 +4630,6 @@
           (claim ? _esc(claim) : '<em style="color:#94a3b8">pending evidence</em>') +
           (moreN ? ' <span style="color:#94a3b8">+' + moreN + ' more</span>' : '') +
         '</div>' +
-        '<div style="position:absolute;bottom:7px;left:11px;right:11px;font-size:0.66em;color:#94a3b8;' +
-          'font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + _esc(simComp) + '">' +
-          _esc(simComp) + '</div>' +
         followUpsChip;
       // Stash follow-ups on the node for the popover lookup.
       node._followUps = followUps;
@@ -5433,7 +5430,7 @@
     function _studyControlPanel(s, i, decision) {
       var rep = s.report || {};
       var v = _verdictBadge(s, decision);
-      var title = rep.title || _humanizeStudyName(s.name).title;
+      var title = s.title || rep.title || _humanizeStudyName(s.name).title;
       var objective  = rep.objective    || _firstSentence(rep.purpose)
                         || _firstSentence((s.purpose || {}).question);
       var conclusion = rep.conclusion   || _firstSentence(rep.result);
