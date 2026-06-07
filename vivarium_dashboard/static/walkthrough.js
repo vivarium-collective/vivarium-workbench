@@ -4184,10 +4184,11 @@
         var leadText = (d.lead || d.description || '').trim();
         leadEl.innerHTML = leadText ? _renderInvLeadMarkdown(leadText) : '';
 
-        // At-a-glance grid: one tile per study with a one-line role.
-        // Sources: investigation.yaml#at_a_glance (preferred) → derive from
-        // each study's purpose.question first sentence as fallback.
-        _renderInvAtAGlance(d);
+        // At-a-glance study-card row removed (user request 2026-06-07): the
+        // dependency DAG below shows the same studies, so the top row was
+        // redundant. Clear + hide the host so no empty band remains.
+        var _aagHost = document.getElementById('investigation-at-a-glance');
+        if (_aagHost) { _aagHost.innerHTML = ''; _aagHost.style.display = 'none'; }
 
         // How to read: yaml-driven list of evaluator tips. Hidden if absent.
         _renderInvHowToRead(d.how_to_read);
@@ -4410,41 +4411,41 @@
       byDepth[d].sort(function(a, b) { return a.name.localeCompare(b.name); });
     });
 
-    // Layout constants — vertical orientation.
-    var CARD_W = 320, CARD_H = 120;
-    var X_GAP = 40,   Y_GAP = 60;
+    // Layout constants — horizontal orientation (depth flows left→right).
+    var CARD_W = 300, CARD_H = 120;
+    var X_GAP = 72,   Y_GAP = 30;
     var PAD_X = 24,   PAD_Y = 16;
 
-    // Compute each card's (x, y): y = depth, x = within-depth slot.
+    // Compute each card's (x, y): x = depth (left→right), y = within-depth slot.
     var pos = {};
     var depths = Object.keys(byDepth).map(Number).sort(function(a, b) { return a - b; });
     var maxSlot = 0;
     depths.forEach(function(d) {
       byDepth[d].forEach(function(s, i) {
         pos[s.name] = {
-          x: PAD_X + i * (CARD_W + X_GAP),
-          y: PAD_Y + d * (CARD_H + Y_GAP),
+          x: PAD_X + d * (CARD_W + X_GAP),
+          y: PAD_Y + i * (CARD_H + Y_GAP),
           depth: d, slot: i,
         };
         if (i > maxSlot) maxSlot = i;
       });
     });
 
-    // Center each depth row inside the canvas: compute final canvasW first.
-    var canvasW = Math.max(
-      PAD_X * 2 + (maxSlot + 1) * CARD_W + maxSlot * X_GAP,
-      720
+    // Center each depth column vertically: compute final canvasH first.
+    var canvasH = Math.max(
+      PAD_Y * 2 + (maxSlot + 1) * CARD_H + maxSlot * Y_GAP,
+      360
     );
     depths.forEach(function(d) {
-      var rowSize = byDepth[d].length;
-      var rowWidth = rowSize * CARD_W + (rowSize - 1) * X_GAP;
-      var rowOffset = Math.max(PAD_X, (canvasW - rowWidth) / 2);
+      var colSize = byDepth[d].length;
+      var colHeight = colSize * CARD_H + (colSize - 1) * Y_GAP;
+      var colOffset = Math.max(PAD_Y, (canvasH - colHeight) / 2);
       byDepth[d].forEach(function(s, i) {
-        pos[s.name].x = rowOffset + i * (CARD_W + X_GAP);
+        pos[s.name].y = colOffset + i * (CARD_H + Y_GAP);
       });
     });
 
-    var canvasH = PAD_Y * 2 + (depths.length > 0 ? depths[depths.length - 1] : 0) * (CARD_H + Y_GAP) + CARD_H;
+    var canvasW = PAD_X * 2 + (depths.length > 0 ? depths[depths.length - 1] : 0) * (CARD_W + X_GAP) + CARD_W;
 
     nodesHost.style.width = canvasW + 'px';
     nodesHost.style.height = canvasH + 'px';
@@ -4464,20 +4465,20 @@
       'markerWidth="7" markerHeight="7" orient="auto-start-reverse">' +
       '<path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>';
 
-    // Render edges (behind cards) — top-of-child ← bottom-of-parent.
+    // Render edges (behind cards) — left-of-child ← right-of-parent.
     studies.forEach(function(s) {
       (s.parent_studies || []).forEach(function(p) {
         var pn = p.study || p;
         if (!pos[pn] || !pos[s.name]) return;
-        var x1 = pos[pn].x + CARD_W / 2;
-        var y1 = pos[pn].y + CARD_H;
-        var x2 = pos[s.name].x + CARD_W / 2;
-        var y2 = pos[s.name].y;
-        var dy = Math.max(28, (y2 - y1) / 2);
+        var x1 = pos[pn].x + CARD_W;
+        var y1 = pos[pn].y + CARD_H / 2;
+        var x2 = pos[s.name].x;
+        var y2 = pos[s.name].y + CARD_H / 2;
+        var dx = Math.max(28, (x2 - x1) / 2);
         var path = document.createElementNS(svgNS, 'path');
         path.setAttribute('d', 'M ' + x1 + ' ' + y1 +
-                              ' C ' + x1 + ' ' + (y1 + dy) +
-                              ', ' + x2 + ' ' + (y2 - dy) +
+                              ' C ' + (x1 + dx) + ' ' + y1 +
+                              ', ' + (x2 - dx) + ' ' + y2 +
                               ', ' + x2 + ' ' + y2);
         path.setAttribute('fill', 'none');
         path.setAttribute('stroke', '#94a3b8');
@@ -4486,11 +4487,12 @@
         edgesSvg.appendChild(path);
 
         var cond = (p.condition || 'tests-passed');
-        var midX = (x1 + x2) / 2 + 8;
-        var midY = (y1 + y2) / 2;
+        var midX = (x1 + x2) / 2;
+        var midY = (y1 + y2) / 2 - 6;
         var label = document.createElementNS(svgNS, 'text');
         label.setAttribute('x', midX);
         label.setAttribute('y', midY);
+        label.setAttribute('text-anchor', 'middle');
         label.setAttribute('font-size', '10');
         label.setAttribute('fill', '#94a3b8');
         label.textContent = cond;
