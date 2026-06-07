@@ -4149,6 +4149,50 @@
     host.style.display = '';
   }
 
+  // Investigation opening — state-first, and synchronized with the downloaded
+  // report's "Executive summary": both read the SAME canonical investigation.yaml
+  // fields (executive.{what_is_this,verdict,verdict_status} + question + hypothesis).
+  // The free-form `lead` ("replaces prior work…") is demoted to a Background fold.
+  function _renderInvOpening(d) {
+    d = d || {};
+    var ex = d.executive || {};
+    var whatIs  = (ex.what_is_this || '').trim();
+    var verdict = (ex.verdict || '').trim();
+    var vs      = (ex.verdict_status || 'in-progress').trim();
+    var oneline = function(t) { return (t || '').replace(/\s+/g, ' ').trim(); };
+    var q   = oneline(d.question);
+    var hyp = oneline(d.hypothesis);
+    var leadProse = (d.lead || d.description || '').trim();
+
+    // Legacy investigations with no executive content fall back to the lead.
+    if (!whatIs && !verdict && !q && !hyp) {
+      return leadProse ? _renderInvLeadMarkdown(leadProse) : '';
+    }
+
+    var key = String(vs).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    var vColor = ({ 'passed':'#166534','complete':'#166534','in-progress':'#854d0e',
+                    'blocked':'#991b1b','failed':'#991b1b','planning':'#1e40af' })[key] || '#475569';
+    var vBg = ({ 'passed':'#dcfce7','complete':'#dcfce7','in-progress':'#fef9c3',
+                 'blocked':'#fee2e2','failed':'#fee2e2','planning':'#dbeafe' })[key] || '#e2e8f0';
+
+    var out = '';
+    if (whatIs)
+      out += '<div style="margin:2px 0 10px;color:#334155;line-height:1.5">' + _renderInvLeadMarkdown(whatIs) + '</div>';
+    if (verdict)
+      out += '<div style="background:#f8fafc;border-left:5px solid ' + vColor + ';border-radius:8px;padding:10px 14px;margin:10px 0">' +
+        '<span style="display:inline-block;font-size:0.7em;font-weight:700;letter-spacing:0.03em;background:' + vBg +
+          ';color:' + vColor + ';padding:2px 9px;border-radius:9999px;margin-right:8px">' + _esc(vs.toUpperCase()) + '</span>' +
+        '<strong style="color:#1e293b">Current verdict.</strong> <span style="color:#334155">' + _esc(verdict) + '</span></div>';
+    if (q)
+      out += '<p style="margin:8px 0;color:#334155;line-height:1.5"><strong style="color:#1e293b">Question.</strong> ' + _esc(q) + '</p>';
+    if (hyp)
+      out += '<p style="margin:8px 0;color:#475569;line-height:1.5"><strong style="color:#1e293b">Hypothesis.</strong> ' + _esc(hyp) + '</p>';
+    if (leadProse)
+      out += '<details style="margin-top:10px"><summary style="cursor:pointer;font-size:0.88em;color:#64748b">Background &amp; context</summary>' +
+        '<div style="margin-top:6px;color:#475569;line-height:1.5">' + _renderInvLeadMarkdown(leadProse) + '</div></details>';
+    return out;
+  }
+
   function _openInvestigationDetail(name) {
     window._currentIset = name;
     // Sync the left-rail STUDIES section to the selected investigation
@@ -4181,8 +4225,7 @@
         // Lead paragraph: render lead (preferred) or fall back to description.
         // Light markdown: paragraph splits, * bullets, `code`, **bold**.
         var leadEl = document.getElementById('investigation-detail-description');
-        var leadText = (d.lead || d.description || '').trim();
-        leadEl.innerHTML = leadText ? _renderInvLeadMarkdown(leadText) : '';
+        leadEl.innerHTML = _renderInvOpening(d);
 
         // At-a-glance study-card row removed (user request 2026-06-07): the
         // dependency DAG below shows the same studies, so the top row was
