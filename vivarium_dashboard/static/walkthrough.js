@@ -7478,7 +7478,7 @@
       +   (function() {
             var ex = iset.executive || {};
             var dn = ex.decisions_needed || [];
-            if (!ex.what_is_this && !ex.verdict && !dn.length && !iset.question && !iset.hypothesis) return '';
+            if (!ex.what_is_this && !ex.verdict && !iset.question && !iset.hypothesis) return '';
             var vs = ex.verdict_status || 'in-progress';
             var h = '<details id="executive" class="report-fold" style="margin-top:12px"><summary>Executive summary' + ' <span class="muted small">\u2014 ' + _h(vs) + ((ex.verdict || ex.what_is_this) ? ': ' + _h(_firstSentence(String(ex.verdict || ex.what_is_this)).slice(0,130)) : '') + '</span></summary>';
             if (ex.what_is_this)
@@ -7491,15 +7491,19 @@
               h += '<p><strong>Question.</strong> ' + _multiline(iset.question) + '</p>';
             if (iset.hypothesis)
               h += '<p><strong>Hypothesis.</strong> ' + _multiline(iset.hypothesis) + '</p>';
-            if (dn.length) {
-              h += '<details class="report-fold"><summary>Decisions needed from reviewers' + ' <span class="muted small">\u2014 ' + dn.length + ' item' + (dn.length===1?'':'s') + (dn[0] && dn[0].question ? ': \u201c' + _h(_firstSentence(String(dn[0].question)).slice(0,110)) + '\u201d' : '') + '</span></summary><ol>'
-                 + dn.map(function(d) {
-                     return '<li><strong>' + _h(d.question || '') + '</strong>'
-                       + (d.context ? '<div class="muted small">' + _multiline(d.context) + '</div>' : '')
-                       + '</li>';
-                   }).join('') + '</ol></details>';
-            }
             return h + '</details>';
+          })()
+
+      // ── Decisions needed (top-level fold, pulled out of Executive) ──
+      +   (function() {
+            var dn = (iset.executive || {}).decisions_needed || [];
+            if (!dn.length) return '';
+            return '<details class="report-fold"><summary>Decisions needed from reviewers' + ' <span class="muted small">\u2014 ' + dn.length + ' item' + (dn.length===1?'':'s') + (dn[0] && dn[0].question ? ': \u201c' + _h(_firstSentence(String(dn[0].question)).slice(0,110)) + '\u201d' : '') + '</span></summary><ol>'
+              + dn.map(function(d) {
+                  return '<li><strong>' + _h(d.question || '') + '</strong>'
+                    + (d.context ? '<div class="muted small">' + _multiline(d.context) + '</div>' : '')
+                    + '</li>';
+                }).join('') + '</ol></details>';
           })()
 
       // ── LAYER 2: SCIENTIFIC ARGUMENT ───────────────────────────────────
