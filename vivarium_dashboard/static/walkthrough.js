@@ -5117,8 +5117,7 @@
         + (chips.length ? '<div class="sp-metrics">' + chips.join('') + '</div>' : '')
         + (insight ? '<div class="sp-insight"><span class="sp-lbl">Insight</span> ' + _h(insight) + '</div>' : '')
         + (caveat  ? '<div class="sp-caveat"><span class="sp-lbl">Caveat</span> ' + _h(caveat) + '</div>' : '')
-        + '<span class="sp-expand-hint">▸ click to expand full study</span>'
-        + '<span class="sp-collapse-hint">▴ click to collapse full study</span>';
+        + '<span class="sp-expand-hint">▸ click to expand full study</span>';
     }
 
     // Review-readiness gates — mechanical checks that catch the classes of
@@ -5350,7 +5349,7 @@
         var takeawayItems = findings.map(function(f) {
           var status = f.status || 'novel';
           var glyph = ({confirms:'✓', partial:'◐', contradicts:'✗', novel:'◆'})[status] || '◆';
-          var stmt = (f.statement || '').split('\n')[0].split('.')[0];
+          var stmt = (f.statement || (f.id||'').replace(/[-_]/g,' ')).split('\n')[0].split('.')[0];
           if (stmt.length > 180) stmt = stmt.slice(0, 177) + '…';
           return '<li class="takeaway-' + status + '"><span class="takeaway-glyph">' + glyph + '</span> '
                + '<a href="#finding-' + _h(f.id || '') + '">' + _h(stmt) + '</a></li>';
@@ -5366,6 +5365,9 @@
         function _renderFinding(f) {
           var status = f.status || 'novel';
           var glyph = ({confirms:'✓', partial:'◐', contradicts:'✗', novel:'◆'})[status] || '◆';
+          var statusText = (f.kind === 'biological')
+            ? (status + ' literature')
+            : ({confirms:'confirmed', partial:'partial result', contradicts:'correction', novel:'new result'}[status] || status);
           var ev = f.evidence || {};
           var exp = f.expected || {};
           var ref = f.expert_reference || {};
@@ -5423,9 +5425,9 @@
                +   '<div class="finding-header">'
                +     '<span class="finding-status-glyph">' + glyph + '</span>'
                +     '<span class="finding-id">' + _h(f.id || '') + '</span>'
-               +     '<span class="finding-status-text">' + _h(status) + ' literature</span>'
+               +     '<span class="finding-status-text">' + _h(statusText) + '</span>'
                +   '</div>'
-               +   '<div class="finding-statement">' + _multiline(f.statement || '(no statement)') + '</div>'
+               +   '<div class="finding-statement">' + _multiline(f.statement || (f.id ? f.id.replace(/[-_]/g,' ') : '(no statement)')) + '</div>'
                +   evMain
                +   expMain
                +   (f.explanation ? '<div class="finding-explanation"><em>Why:</em> ' + _multiline(f.explanation) + '</div>' : '')
@@ -6523,7 +6525,6 @@
         +   (v4Insight ? '<div class="sp-insight"><span class="sp-lbl">Insight</span> ' + _h(v4Insight) + '</div>' : '')
         +   (v4Caveat  ? '<div class="sp-caveat"><span class="sp-lbl">Caveat</span> '   + _h(v4Caveat)  + '</div>' : '')
         +   '<span class="sp-expand-hint">▸ click to expand full study</span>'
-        +   '<span class="sp-collapse-hint">▴ click to collapse full study</span>'
         + '</summary>';
 
       // Dropped chrome on the v4 expanded section to remove three forms
