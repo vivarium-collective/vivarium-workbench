@@ -24,3 +24,4 @@ htmlcov/
 *.swp
 .DS_Store
 todo.md
+.superpowers/

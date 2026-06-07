@@ -1210,6 +1210,12 @@ def compute_study_effective_status(
     return s or "planned"
 
 
+def _iset_report_file(ws_root: Path, slug: str):
+    """Per-investigation report index.html (investigations/<slug>/reports/), or None."""
+    f = WorkspacePaths.load(ws_root).report_dir(slug) / "index.html"
+    return f if f.is_file() else None
+
+
 def _read_study_status(ws_root: Path, slug: str) -> tuple[str, bool]:
     """Read (status, has_runs) for a member study referenced by an iset.
 
@@ -1217,21 +1223,20 @@ def _read_study_status(ws_root: Path, slug: str) -> tuple[str, bool]:
     treat missing-children as benign for status derivation rather than
     poisoning the entire investigation.
     """
-    candidates = [
-        ws_root / "studies" / slug / "study.yaml",
-        ws_root / "investigations" / slug / "spec.yaml",
-    ]
-    for sp in candidates:
-        if not sp.is_file():
-            continue
+    # Resolve the study dir nested-aware (investigations/<inv>/studies/<slug>/),
+    # falling back to the legacy v2 spec.yaml. study_dir() handles flat back-compat.
+    try:
+        sp = WorkspacePaths.load(ws_root).study_dir(slug) / "study.yaml"
+    except FileNotFoundError:
+        sp = ws_root / "investigations" / slug / "spec.yaml"
+    if sp.is_file():
         try:
             spec = yaml.safe_load(sp.read_text(encoding="utf-8")) or {}
         except Exception:
             return "planning", False
         status = spec.get("status") or "planning"
         # F2: count via _count_runs_for_study so we see runs that landed in
-        # runs.db without a matching study.yaml entry (the new canonical
-        # path). spec.runs still merged in via max() for legacy specs.
+        # runs.db without a matching study.yaml entry. spec.runs merged via max().
         return status, _count_runs_for_study(slug, spec) > 0
     return "planning", False
 
@@ -1270,6 +1275,23 @@ def _read_study_multiaxis_status(ws_root: Path, slug: str) -> dict:
     return {axis: None for axis in _MULTIAXIS_STATUS_FIELDS}
 
 
+def _iset_lifecycle(ws_root: Path, slug: str) -> str:
+    """Git lifecycle of an investigation: 'merged' if its dir exists in the
+    merge-base with main (i.e. already on main), else 'wip'. Any git error or
+    non-repo -> 'wip'."""
+    import subprocess
+    rel = f"investigations/{slug}/investigation.yaml"
+    try:
+        base = subprocess.run(["git", "merge-base", "HEAD", "main"], cwd=str(ws_root),
+                              capture_output=True, text=True)
+        ref = base.stdout.strip() if base.returncode == 0 else "main"
+        r = subprocess.run(["git", "cat-file", "-e", f"{ref}:{rel}"], cwd=str(ws_root),
+                          capture_output=True, text=True)
+        return "merged" if r.returncode == 0 else "wip"
+    except Exception:
+        return "wip"
+
+
 def _build_iset_summary_for_test(ws_root: Path) -> list[dict]:
     """Pure function backing ``GET /api/iset-list`` — emits the same list
     of summary dicts that the handler returns, but without HTTP plumbing.
@@ -1300,6 +1322,7 @@ def _build_iset_summary_for_test(ws_root: Path) -> list[dict]:
             "hypothesis":       spec.get("hypothesis", ""),
             "n_studies":        len(study_slugs),
             "studies":          study_slugs,
+            "lifecycle":        _iset_lifecycle(ws_root, spec.get("name", d.name)),
         })
     return out
 
@@ -4633,6 +4656,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_study_bigraph_paths()
         if self.path.startswith("/api/iset-list"):
             return self._get_iset_list()
+        if self.path.startswith("/api/iset/") and self.path.split("?", 1)[0].rstrip("/").endswith("/report"):
+            return self._get_iset_report()
         if self.path.startswith("/api/iset/"):
             return self._get_iset_detail()
         if self.path.startswith("/api/investigation-run-unblocked-status"):
@@ -7663,6 +7688,16 @@ if __name__ == "__main__":
             "live_count": len(live_charts),
         }, 200)
 
+    def _get_iset_report(self):
+        """GET /api/iset/<slug>/report — serve the per-investigation report."""
+        import urllib.parse as _up
+        _path = _up.urlparse(self.path).path
+        _slug = _path[len("/api/iset/"):].rsplit("/report", 1)[0].strip("/")
+        _f = _iset_report_file(WORKSPACE, _slug)
+        if _f is None:
+            return self._json({"error": f"no report for investigation {_slug!r}"}, 404)
+        return self._serve_file(_f, "text/html")
+
     def _get_iset_detail(self):
         """GET /api/iset/<name> — return one investigation + its resolved studies.
 
@@ -7697,9 +7732,11 @@ if __name__ == "__main__":
 
         studies_out = []
         for slug in (spec.get("studies") or []):
-            study_dir = workspace_paths().studies / slug
-            sp = study_dir / "study.yaml"
-            if not sp.is_file():
+            # Nested-aware (Phase 1 study_dir): investigations/<inv>/studies/<slug>/
+            # with flat back-compat; legacy v2 spec.yaml as last resort.
+            try:
+                sp = workspace_paths().study_dir(slug) / "study.yaml"
+            except FileNotFoundError:
                 sp = workspace_paths().investigations / slug / "spec.yaml"
             if not sp.is_file():
                 studies_out.append({"name": slug, "status": "missing", "error": "study.yaml not found"})
