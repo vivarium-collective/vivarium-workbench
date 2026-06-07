@@ -1468,7 +1468,7 @@ def _current_branch_slug(ws_root: Path) -> str | None:
     return best if best_n > 0 else None
 
 
-def _inputs_payload(ws_root: Path) -> dict:
+def _inputs_payload(ws_root: Path, slug: str | None = None) -> dict:
     """Pure seam backing ``GET /api/inputs``.
 
     Returns the loaded investigation's owned inputs (the investigation whose
@@ -1479,7 +1479,7 @@ def _inputs_payload(ws_root: Path) -> dict:
     from vivarium_dashboard.lib.investigation_inputs import investigation_inputs
     from vivarium_dashboard.lib.report import _parse_bib_entries, _enrich_with_file_info
 
-    current = _current_branch_slug(ws_root)
+    current = slug or _current_branch_slug(ws_root)
     if current:
         investigation = investigation_inputs(ws_root, current, repo_fallback=False)
     else:
@@ -7931,8 +7931,12 @@ if __name__ == "__main__":
 
     def _get_inputs(self):
         """GET /api/inputs — loaded investigation's inputs (top) + repo-wide
-        global inputs + current investigation slug."""
-        return self._json(_inputs_payload(WORKSPACE), 200)
+        global inputs + current investigation slug. Honors ?investigation=<slug>
+        so the tab follows the SPA-loaded investigation, not just the git branch."""
+        import urllib.parse as _up
+        _q = _up.parse_qs(_up.urlparse(self.path).query)
+        _slug = (_q.get("investigation") or [None])[0]
+        return self._json(_inputs_payload(WORKSPACE, _slug), 200)
 
     def _get_simulations(self):
         """GET /api/simulations — global list of all runs tagged by

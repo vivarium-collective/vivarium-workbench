@@ -527,7 +527,9 @@
     var el = document.getElementById('inputs-api-render');
     if (!el) return;
     el.innerHTML = '<p class="muted" style="font-style:italic">Loading inputs…</p>';
-    fetch('/api/inputs')
+    var _slug = window._currentIsetSlug || '';
+    var _url = '/api/inputs' + (_slug ? ('?investigation=' + encodeURIComponent(_slug)) : '');
+    fetch(_url)
       .then(function (r) { return r.json(); })
       .then(function (data) { _renderInputs(el, data || {}); })
       .catch(function (err) {
