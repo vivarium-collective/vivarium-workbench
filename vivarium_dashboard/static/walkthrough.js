@@ -34,7 +34,7 @@
   // <summary>, so the native toggle doesn't fire. Manual handler.
   document.addEventListener("click", function (e) {
     var t = e.target;
-    if (t && t.classList && t.classList.contains("sn-collapse-hint")) {
+    if (t && t.classList && (t.classList.contains("sn-collapse-hint") || t.classList.contains("sp-collapse-hint"))) {
       var details = t.closest("details.study-fold");
       if (details) {
         details.open = false;
