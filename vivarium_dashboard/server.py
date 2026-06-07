@@ -8291,6 +8291,9 @@ if __name__ == "__main__":
             # investigations, where the report falls back to derived data.
             "executive":           spec.get("executive") or {},
             "scientific_argument": spec.get("scientific_argument") or {},
+            # Investigation-declared references (inputs.references bib keys) so the
+            # report's References section includes them, not only study citations.
+            "references":          (spec.get("inputs") or {}).get("references") or [],
             "studies":          studies_out,
         }, 200)
 

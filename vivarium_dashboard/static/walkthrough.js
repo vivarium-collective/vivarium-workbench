@@ -7382,14 +7382,27 @@
        `_coerce_list_field`. `_asList` is kept as a reusable helper. */
     var acceptance = '';
 
-    // ── Collect the union of bib keys cited across all studies + iset ──
+    // ── Collect the union of references across the investigation + studies ──
+    // Sources: study expected_behavior[].cites + bibliography.bib_keys (bib keys),
+    // the investigation's declared inputs.references (iset.references, bib keys),
+    // and each study's `references:` (bib-key strings → looked up in papers.bib;
+    // rich {name,url,role} entries → rendered as standalone sources).
     var citedKeys = new Set();
+    var extraSources = [];
+    function _collectRef(r) {
+      if (typeof r === 'string') { if (r) citedKeys.add(r); return; }
+      if (!r || typeof r !== 'object') return;
+      if (r.key || r.bib_key) { citedKeys.add(r.key || r.bib_key); return; }
+      if (r.name || r.url || r.path) extraSources.push(r);
+    }
+    (iset.references || []).forEach(_collectRef);
     specs.forEach(function(s) {
       (s.expected_behavior || []).forEach(function(b) {
         (b.cites || []).forEach(function(k) { citedKeys.add(k); });
       });
       var bib = (s.bibliography && s.bibliography.bib_keys) || [];
       bib.forEach(function(k) { citedKeys.add(k); });
+      (s.references || []).forEach(_collectRef);
     });
     var orderedCited = Array.from(citedKeys).sort();
     var referencesHtml = orderedCited.map(function(key) {
@@ -7415,6 +7428,20 @@
            + doiLink + urlLink
            + (e.note ? '<div class="muted small">Note: ' + _h(e.note) + '</div>' : '')
            + '</li>';
+    }).join('');
+    // Rich study/investigation sources (name + online link + role) that aren't
+    // papers.bib keys — de-duped by name+url, appended to the References list.
+    var _seenSrc = {};
+    referencesHtml += extraSources.filter(function (r) {
+      var k = (r.name || '') + '|' + (r.url || r.path || '');
+      if (_seenSrc[k]) return false; _seenSrc[k] = 1; return true;
+    }).map(function (r) {
+      var label = _h(r.name || r.url || r.path || 'source');
+      var head = r.url
+        ? '<a href="' + _h(r.url) + '" target="_blank" rel="noopener">' + label + '</a> <small class="muted">↗</small>'
+        : '<strong>' + label + '</strong>';
+      return '<li class="ref-entry">' + head
+           + (r.role ? '<div class="muted small">' + _h(r.role) + '</div>' : '') + '</li>';
     }).join('');
 
     // ── Build the TOC (sidebar nav) entries from the ordered studies ────
@@ -8176,82 +8203,7 @@
       /* "Acceptance" nav link removed alongside the section it pointed to */
       +   '<a href="#studies-heading">Studies</a>'
       +   '<a href="#references">References</a>'
-      +   '<button type="button" class="tb-iset-switcher" id="tb-iset-switcher-trigger" aria-haspopup="true" aria-expanded="false">'
-      +     '<span class="tb-iset-switcher-icon">⇄</span>'
-      +     '<span>Switch investigation</span>'
-      +     '<span class="tb-iset-switcher-arrow">▾</span>'
-      +   '</button>'
-      +   '<div class="tb-iset-menu" id="tb-iset-menu" role="menu" hidden></div>'
       + '</nav>'
-      + '<script>(function(){'
-      // Topbar investigation switcher. Polishes the existing
-      // /api/investigation-registry data — the live dashboard already
-      // surfaces this via its left-rail switcher; this brings the same
-      // navigation to the report pages, where the rail isn't present.
-      // Self-contained: no dep on index.html.j2 chrome.
-      +     'var trigger=document.getElementById("tb-iset-switcher-trigger");'
-      +     'var menu=document.getElementById("tb-iset-menu");'
-      +     'if(!trigger||!menu){return;}'
-      +     'var loaded=false;'
-      +     'function esc(s){return String(s||"").replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c];});}'
-      +     'function row(p,kind){'
-      +       'var pill="";'
-      +       'if(kind==="current"){pill="<span class=\\"tb-iset-menu-pill tb-iset-menu-pill-here\\">here</span>";}'
-      +       'else if(kind==="running"){pill="<span class=\\"tb-iset-menu-pill tb-iset-menu-pill-running\\">running</span>";}'
-      +       'else if(kind==="dormant"){pill="<span class=\\"tb-iset-menu-pill tb-iset-menu-pill-dormant\\">dormant</span>";}'
-      +       'var cls="tb-iset-menu-row"+(kind==="current"?" tb-iset-menu-row-current":"");'
-      +       'var dataUrl=p.url?(" data-url=\\""+esc(p.url)+"\\""):"";'
-      +       'var dataSlug=p.slug?(" data-slug=\\""+esc(p.slug)+"\\""):"";'
-      +       'return "<button type=\\"button\\" class=\\""+cls+"\\""+dataUrl+dataSlug+">'
-      +         '<span class=\\"tb-iset-menu-slug\\">"+esc(p.title||p.slug||"(unnamed)")+"</span>"+pill+"</button>";'
-      +     '}'
-      +     'function position(){'
-      +       'var r=trigger.getBoundingClientRect();'
-      +       'menu.style.top=(r.bottom+6)+"px";'
-      // Right-align the menu to the trigger so it doesn't overflow the right edge.
-      +       'menu.style.right=Math.max(8,window.innerWidth-r.right)+"px";'
-      +       'menu.style.left="auto";'
-      +     '}'
-      +     'function render(data){'
-      +       'var html="";'
-      +       'if(data.current){html+="<div class=\\"tb-iset-menu-section\\">CURRENT</div>"+row(data.current,"current");}'
-      +       'var running=(data.running_others||[]).filter(function(p){return p&&p.url;});'
-      +       'if(running.length){html+="<div class=\\"tb-iset-menu-section\\">OTHER LIVE DASHBOARDS</div>";running.forEach(function(p){html+=row(p,"running");});}'
-      +       'var siblings=(data.local_siblings||[]);'
-      +       'if(siblings.length){html+="<div class=\\"tb-iset-menu-section\\">ALSO IN THIS WORKTREE</div>";siblings.forEach(function(p){html+=row(p,"sibling");});}'
-      +       'var dormant=(data.dormant_others||[]);'
-      +       'if(dormant.length){html+="<div class=\\"tb-iset-menu-section\\">DORMANT (NO LIVE DASHBOARD)</div>";dormant.forEach(function(p){html+=row(p,"dormant");});}'
-      +       'if(!html){html="<div class=\\"tb-iset-menu-empty\\">No other investigations found.</div>";}'
-      +       'menu.innerHTML=html;'
-      +     '}'
-      +     'function refresh(){'
-      +       'menu.innerHTML="<div class=\\"tb-iset-menu-empty\\">Loading…</div>";'
-      +       'fetch("/api/investigation-registry",{headers:{Accept:"application/json"}})'
-      +         '.then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})'
-      +         '.then(render)'
-      +         '.catch(function(e){menu.innerHTML="<div class=\\"tb-iset-menu-error\\">Failed to load: "+esc(String(e))+"</div>";});'
-      +     '}'
-      +     'function openMenu(){menu.hidden=false;position();trigger.setAttribute("aria-expanded","true");if(!loaded){loaded=true;refresh();}}'
-      +     'function closeMenu(){menu.hidden=true;trigger.setAttribute("aria-expanded","false");}'
-      +     'trigger.addEventListener("click",function(e){'
-      +       'e.stopPropagation();'
-      +       'if(menu.hidden){openMenu();}else{closeMenu();}'
-      +     '});'
-      +     'menu.addEventListener("click",function(e){'
-      +       'var btn=e.target.closest(".tb-iset-menu-row");'
-      +       'if(!btn||btn.classList.contains("tb-iset-menu-row-current"))return;'
-      +       'var url=btn.getAttribute("data-url");'
-      +       'var slug=btn.getAttribute("data-slug");'
-      +       'if(url){window.location.href=url;}'
-      +       'else if(slug){alert("This investigation is dormant. Start its dashboard with:\\n  /pbg-investigation open "+slug);closeMenu();}'
-      +     '});'
-      +     'document.addEventListener("click",function(e){'
-      +       'if(menu.hidden)return;'
-      +       'if(!menu.contains(e.target)&&!trigger.contains(e.target))closeMenu();'
-      +     '});'
-      +     'document.addEventListener("keydown",function(e){if(e.key==="Escape")closeMenu();});'
-      +     'window.addEventListener("resize",function(){if(!menu.hidden)position();});'
-      +   '})();</script>'
 
       // ── Main content ──
       + '<main class="content" id="top">'
