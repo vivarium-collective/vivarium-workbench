@@ -108,20 +108,25 @@ def render_static_report(ws_root: Path | str, slug: str, out: Path | str = "_sit
     figdir = out / "figures"
     figdir.mkdir(exist_ok=True)
 
-    # copy opted-in decision figures
-    fig_src: dict[str, str] = {}
-    for s in study_slugs:
-        viz = (studies[s].get("decision_figure_viz") or "").strip()
-        if not viz:
-            continue
-        try:
-            src = wp.study_dir(s) / "viz" / f"{viz}.html"
-        except Exception:
-            continue
-        if src.is_file():
-            dst = f"{s}__{viz}.html"
-            shutil.copyfile(src, figdir / dst)
-            fig_src[s] = dst
+    # copy opted-in decision figures + 3D system-behavior views
+    def _copy_viz(field: str) -> dict[str, str]:
+        out_: dict[str, str] = {}
+        for s in study_slugs:
+            viz = (studies[s].get(field) or "").strip()
+            if not viz:
+                continue
+            try:
+                src = wp.study_dir(s) / "viz" / f"{viz}.html"
+            except Exception:
+                continue
+            if src.is_file():
+                dst = f"{s}__{viz}.html"
+                shutil.copyfile(src, figdir / dst)
+                out_[s] = dst
+        return out_
+
+    fig_src = _copy_viz("decision_figure_viz")
+    sys_src = _copy_viz("system_figure_viz")  # e.g. particles-3d — animated actin+membrane
 
     exe = inv.get("executive", {}) or {}
     sa = inv.get("scientific_argument", {}) or {}
@@ -145,6 +150,11 @@ def render_static_report(ws_root: Path | str, slug: str, out: Path | str = "_sit
         figblock = (f"<iframe src='figures/{fig}' loading='lazy'></iframe>" if fig else
                     "<div class='nofig'>No decision figure yet (set <code>decision_figure_viz</code> "
                     "in the study, or it needs additional emitted data).</div>")
+        sysfig = sys_src.get(s)
+        sysblock = (f"<details class='sys' open><summary>🧬 System behavior in 3D "
+                    f"— drag to rotate · ▶ / ⏸ to play · slider to scrub</summary>"
+                    f"<iframe class='sys3d' src='figures/{sysfig}' loading='lazy'></iframe>"
+                    f"</details>" if sysfig else "")
         ev = st.get("evidence_status", "")
         cards += f"""
         <section class="card">
@@ -156,6 +166,7 @@ def render_static_report(ws_root: Path | str, slug: str, out: Path | str = "_sit
             <div><b>Acceptance threshold:</b> {_e(st.get('acceptance_threshold', ''))}</div>
             {f'<div><b>Evidence:</b> <code>{_e(ev)}</code></div>' if ev else ''}
           </div>
+          {sysblock}
           {figblock}
           {_fb(s.replace('-', '_'), title)}
         </section>"""
@@ -188,6 +199,9 @@ def render_static_report(ws_root: Path | str, slug: str, out: Path | str = "_sit
   .claim {{ color:#374151; margin:8px 0; }}
   .meta {{ font-size:13px; color:var(--muted); margin:8px 0 12px; }} .meta b {{ color:var(--ink); }}
   iframe {{ width:100%; height:440px; border:1px solid var(--rule); border-radius:8px; background:#fff; }}
+  iframe.sys3d {{ height:520px; background:#f8fafc; }}
+  details.sys {{ margin:6px 0 12px; }}
+  details.sys summary {{ cursor:pointer; font-size:13px; font-weight:600; color:#0369a1; margin-bottom:6px; }}
   .nofig {{ background:#f9fafb; border:1px dashed var(--rule); border-radius:8px; padding:18px; color:var(--muted); font-size:13px; }}
   dt {{ font-weight:600; margin-top:6px; }} dd {{ margin:0 0 4px 16px; color:#374151; }}
   .foot {{ margin-top:48px; padding-top:14px; border-top:1px solid var(--rule); color:var(--muted); font-size:12px; }}
