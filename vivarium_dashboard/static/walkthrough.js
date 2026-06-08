@@ -6787,7 +6787,7 @@
           '<div class="expert-feedback-panel" id="study-' + slug + '-imported-feedback" '
           + 'style="margin:12px 0;padding:12px 16px;background:#eff6ff;border:1px solid #3b82f6;'
           + 'border-left-width:5px;border-radius:6px;color:#1e3a5f">'
-          + '<strong>💬 Expert feedback (' + fb.length + ')</strong>'
+          + '<strong>💬 Reviewer feedback (' + fb.length + ')</strong>'
           + '<ul style="list-style:none;margin:8px 0 0;padding:0">'
           + fb.map(function(a) {
               var who = _h(a.author || 'reviewer');
@@ -8694,39 +8694,18 @@
       +   'function countAll(){var d=load();var n=0;Object.keys(d).forEach(function(k){n+=(d[k]||[]).length;});return n;}'
       +   'function updateBadges(){var d=load();document.querySelectorAll(".fb-add").forEach(function(b){var sid=b.parentElement&&b.parentElement.id;if(!sid)return;b.classList.toggle("has-fb",((d[sid]||[]).length>0));});}'
       +   'function updateBarCount(){var c=countAll();var nt="("+c+")";document.querySelectorAll(".fb-count").forEach(function(s){if(s.textContent!==nt)s.textContent=nt;});document.querySelectorAll(".fb-bar-btn").forEach(function(btn){btn.disabled=c===0;});}'
-      // B.2: when the report is viewed live (served by the dashboard over
-      // http/https) offer a one-click "Send to dashboard" that POSTs the
-      // annotations straight to /api/feedback-import — no download → email →
-      // CLI. Offline (file://) keeps the YAML download as the only path.
-      +   'var CAN_POST=(location.protocol==="http:"||location.protocol==="https:");'
       +   'function ensureBar(){'
       +     'if(document.querySelector(".fb-bar"))return;'
       +     'var bar=document.createElement("div");bar.className="fb-bar";'
       +     'var html="";'
-      +     'if(CAN_POST){html+="<button type=\\"button\\" class=\\"fb-bar-btn fb-send-btn\\" title=\\"Send your annotations straight to the dashboard\\">Send to dashboard <span class=\\"fb-count\\">(0)</span></button>";html+="<button type=\\"button\\" class=\\"fb-bar-btn fb-dl-btn\\" style=\\"margin-left:6px;background:#f1f5f9;color:#334155;border-color:#cbd5e1\\" title=\\"Or download a yaml to send back manually\\">Download .yaml</button>";}'
-      +     'else{html+="<button type=\\"button\\" class=\\"fb-bar-btn fb-dl-btn\\" title=\\"Download all your annotations as a yaml file; send it back to the investigation\\">Generate feedback report <span class=\\"fb-count\\">(0)</span></button>";}'
+      +     'html+="<button type=\\"button\\" class=\\"fb-bar-btn fb-dl-btn\\" title=\\"Download all your annotations as a yaml file\\">Download feedback (.yaml) <span class=\\"fb-count\\">(0)</span></button>";'
       // One-click submit to GitHub — works on any host (no dashboard server
       // needed), so an emailed/Pages-hosted report can file feedback directly.
       +     'html+="<button type=\\"button\\" class=\\"fb-bar-btn fb-gh-issue\\" style=\\"margin-left:6px;background:#1f883d\\" title=\\"Open a prefilled GitHub issue with your feedback\\">→ GitHub issue</button>";'
       +     'bar.innerHTML=html;'
       +     'document.body.appendChild(bar);'
-      +     'var sb=bar.querySelector(".fb-send-btn");if(sb)sb.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();submitFeedback();});'
       +     'var db=bar.querySelector(".fb-dl-btn");if(db)db.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();downloadFeedback();});'
       +     'var gi=bar.querySelector(".fb-gh-issue");if(gi)gi.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();openGhIssue();});'
-      +   '}'
-      +   'function submitFeedback(){'
-      +     'var d=load();if(!countAll()){alert("No feedback yet — click 💬 next to any section first.");return;}'
-      +     'var ts=new Date().toISOString();'
-      +     'var meta={investigation:INV,report_id:REPORT_ID,generated_at:ts,page_title:document.title,source_url:location.href};'
-      +     'var sb=document.querySelector(".fb-send-btn");if(sb){sb.disabled=true;sb.textContent="Sending…";}'
-      +     'fetch("/api/feedback-import",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({meta:meta,annotations:d})})'
-      +       '.then(function(r){return r.json().catch(function(){return {};}).then(function(j){return {ok:r.ok,j:j};});})'
-      +       '.then(function(res){'
-      +         'if(res.ok&&res.j&&res.j.ok){alert("Sent "+(res.j.n_entries||countAll())+" annotation(s) to the dashboard.\\nSaved at "+res.j.path);}'
-      +         'else{alert("Could not send to the dashboard ("+((res.j&&res.j.error)||"error")+"). Falling back to a .yaml download.");downloadFeedback();}'
-      +       '})'
-      +       '.catch(function(err){alert("Could not reach the dashboard ("+err+"). Falling back to a .yaml download.");downloadFeedback();})'
-      +       '.then(function(){var b=document.querySelector(".fb-send-btn");if(b){b.disabled=false;b.innerHTML="Send to dashboard <span class=\\"fb-count\\">("+countAll()+")</span>";}});'
       +   '}'
       +   'function serialiseYaml(meta,data){'
       +     'var L=["# Inline feedback report","# Generated from the v2ecoli inline-feedback widget.","# Import with: pbg-feedback-import <this-file>"];'
@@ -8762,7 +8741,7 @@
       +   'function fbYaml(){var meta={investigation:INV,report_id:REPORT_ID,generated_at:new Date().toISOString(),page_title:document.title,source_url:location.href};return serialiseYaml(meta,load());}'
       +   'function openGhIssue(){if(!countAll()){alert("No feedback yet — click the 💬 icons first.");return;}var repo=ghRepo();if(!repo)return;'
       +     'var body="Inline feedback from the investigation report.\\n\\n```yaml\\n"+fbYaml()+"```\\n";'
-      +     'var url="https://github.com/"+repo+"/issues/new?labels=feedback&title="+encodeURIComponent("Expert feedback: "+INV)+"&body="+encodeURIComponent(body);'
+      +     'var url="https://github.com/"+repo+"/issues/new?labels=feedback&title="+encodeURIComponent("Reviewer feedback: "+INV)+"&body="+encodeURIComponent(body);'
       +     'var w=window.open(url,"_blank","noopener");if(!w)location.href=url;'
       +   '}'
       +   'function init(){attachAll();ensureBar();var mo=new MutationObserver(function(){attachAll();});mo.observe(document.body,{childList:true,subtree:true});}'
