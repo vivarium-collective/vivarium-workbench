@@ -575,40 +575,6 @@
   <p class="page-lead">Charts rendered from observable trajectories. Either configure a registered class with specific settings, or describe what to plot in natural language and let <code>/pbg-viz</code> generate the function.</p>
 
 
-  <!-- Workspace visualizations (workspace.yaml-driven, primary panel) -->
-  <div class="panel">
-    <h3>Workspace visualizations</h3>
-    <p class="panel-lead">Configured visualizations registered in <code>workspace.yaml</code>. <strong>Class-backed</strong> entries are ready to use immediately in investigations. <strong>Description-only</strong> entries follow the Create/Add/Commit lifecycle to generate code via <code>/pbg-viz</code>.</p>
-    <div style="margin-bottom:8px">
-      <button class="action-btn" onclick="_openWorkspaceVizModal()">+ Add visualization</button>
-      <button class="action-btn" onclick="_vizCommitAll()">Commit all staged</button>
-    </div>
-    {% if visualizations %}
-    <table><thead><tr><th>Name</th><th>Class / Description</th><th>Config</th><th>Status</th><th>Actions</th></tr></thead><tbody>
-    {% for viz in visualizations %}
-    <tr id="viz-row-{{ viz.name }}">
-      <td><code>{{ viz.name }}</code>{% if viz.type %}<br><small style="color:#888">{{ viz.type }}{% if viz.observables %}: {{ viz.observables | join(', ') }}{% endif %}</small>{% endif %}</td>
-      <td class="viz-description">
-        {% if viz.class %}<strong>{{ viz.class }}</strong>{% if viz.description %}<br>{% endif %}{% endif %}
-        {% if viz.description %}{{ viz.description }}{% elif not viz.class and not viz.type %}<em style="color:#888">No description</em>{% endif %}
-      </td>
-      <td><small style="color:#666;font-family:monospace">{% if viz.config %}{{ viz.config | tojson }}{% else %}—{% endif %}</small></td>
-      <td><span class="status-pill" id="viz-status-{{ viz.name }}">…</span></td>
-      <td class="viz-actions">
-        <button class="btn-mini" onclick="_vizPreview('{{ viz.name }}')">Preview</button>
-        {% if viz.description and not viz.class %}<button class="btn-mini" onclick="_vizCreate('{{ viz.name }}')">Create</button>{% endif %}
-        <button class="btn-mini" onclick="_vizAddToProject('{{ viz.name }}')">Add to project</button>
-        <button class="btn-mini" onclick="_vizCommit(['{{ viz.name }}'])">Commit</button>
-        <button class="btn-mini" onclick="_vizRemove('{{ viz.name }}')" style="color:#c00">Remove</button>
-      </td>
-    </tr>
-    {% endfor %}
-    </tbody></table>
-    {% else %}
-    <p style="color:#888;font-style:italic">No visualizations registered yet.</p>
-    {% endif %}
-  </div>
-
   <!-- Available Visualization classes (registry-driven, secondary catalog) -->
   <div class="panel">
     <h3>Available Visualization classes <span id="viz-count" class="count-badge"></span></h3>
