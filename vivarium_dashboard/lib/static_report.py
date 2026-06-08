@@ -240,10 +240,10 @@ def render_static_report(ws_root: Path | str, slug: str, out: Path | str = "_sit
 {_fb('global_interpretation', 'interpretation (across the investigation)')}
 
 <div class="fbbar">
-  <button class="btn gen" id="btn-gen">① Generate feedback YAML</button>
-  <button class="btn copy" id="btn-copy" disabled>Copy</button>
-  <button class="btn issue" id="btn-issue" disabled>② Open as GitHub issue</button>
-  <button class="btn pr" id="btn-pr" disabled>② Propose as PR file</button>
+  <button class="btn gen" id="btn-gen">Preview YAML</button>
+  <button class="btn copy" id="btn-copy">Copy YAML</button>
+  <button class="btn issue" id="btn-issue">Open as GitHub issue</button>
+  <button class="btn pr" id="btn-pr">Propose as PR file</button>
   <span class="hint" id="fb-status"></span>
 </div>
 <textarea id="yamlout" readonly spellcheck="false"></textarea>
@@ -267,24 +267,37 @@ def render_static_report(ws_root: Path | str, slug: str, out: Path | str = "_sit
       y+='  '+k+':\\n'; byKey[k].forEach(function(txt){{ y+='    - text: |\\n'+block(txt,8)+'\\n'; }}); }}); }}
     return {{yaml:y, name:name, hasAny: keys.length>0 || !!overall}};
   }}
-  var cur=null;
   function fname(name) {{ var d=new Date().toISOString().slice(0,10);
     var safe=(name||'anon').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'anon';
     return 'feedback/'+SLUG+'--'+safe+'--'+d+'.yaml'; }}
+  function status(m) {{ document.getElementById('fb-status').textContent=m; }}
+  function ensure() {{  // (re)generate from current inputs and show the preview
+    var r=buildYaml(); var o=document.getElementById('yamlout'); o.value=r.yaml; o.style.display='block'; return r;
+  }}
+  function need() {{    // ensure there's content; returns the result or null (+message)
+    var r=ensure();
+    if (!r.hasAny) {{ status('Add a comment in a ✎ box (or an overall assessment) first.'); return null; }}
+    return r;
+  }}
+  function openUrl(url) {{ var w=window.open(url,'_blank','noopener'); if (!w) {{ location.href=url; }} }}
   document.getElementById('btn-gen').onclick=function(){{
-    cur=buildYaml(); var o=document.getElementById('yamlout'); o.value=cur.yaml; o.style.display='block';
-    ['btn-copy','btn-issue','btn-pr'].forEach(function(id){{document.getElementById(id).disabled=!cur.hasAny;}});
-    document.getElementById('fb-status').textContent=cur.hasAny?'Review the YAML below, then submit.':'Add at least one comment or an overall assessment.';
+    var r=ensure();
+    status(r.hasAny?'Review the YAML below, then Copy / open an issue / propose a PR.':'Add a comment in a ✎ box (or an overall assessment).');
   }};
-  document.getElementById('btn-copy').onclick=function(){{ navigator.clipboard.writeText(cur.yaml).then(function(){{document.getElementById('fb-status').textContent='Copied.';}}); }};
-  document.getElementById('btn-issue').onclick=function(){{
-    var url='https://github.com/'+OWNER_REPO+'/issues/new?title='+encodeURIComponent('Expert feedback: '+SLUG+' ('+cur.name+')')+
-      '&labels=feedback&body='+encodeURIComponent('Generated from the investigation report.\\n\\n```yaml\\n'+cur.yaml+'\\n```\\n');
-    window.open(url,'_blank');
+  document.getElementById('btn-copy').onclick=function(){{ var r=need(); if(!r) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {{
+      navigator.clipboard.writeText(r.yaml).then(function(){{status('Copied to clipboard.');}},
+        function(){{ document.getElementById('yamlout').select(); status('Copy failed — text selected below; press Ctrl/Cmd-C.'); }});
+    }} else {{ document.getElementById('yamlout').select(); status('Select-all done — press Ctrl/Cmd-C to copy.'); }}
   }};
-  document.getElementById('btn-pr').onclick=function(){{
-    var url='https://github.com/'+OWNER_REPO+'/new/'+BASE+'?filename='+encodeURIComponent(fname(cur.name))+'&value='+encodeURIComponent(cur.yaml);
-    window.open(url,'_blank');
+  document.getElementById('btn-issue').onclick=function(){{ var r=need(); if(!r) return;
+    var url='https://github.com/'+OWNER_REPO+'/issues/new?title='+encodeURIComponent('Expert feedback: '+SLUG+' ('+r.name+')')+
+      '&labels=feedback&body='+encodeURIComponent('Generated from the investigation report.\\n\\n```yaml\\n'+r.yaml+'\\n```\\n');
+    status('Opening a prefilled GitHub issue…'); openUrl(url);
+  }};
+  document.getElementById('btn-pr').onclick=function(){{ var r=need(); if(!r) return;
+    var url='https://github.com/'+OWNER_REPO+'/new/'+BASE+'?filename='+encodeURIComponent(fname(r.name))+'&value='+encodeURIComponent(r.yaml);
+    status('Opening GitHub to commit '+fname(r.name)+' on a new branch…'); openUrl(url);
   }};
 }})();
 </script>
