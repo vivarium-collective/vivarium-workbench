@@ -5922,6 +5922,7 @@
       // ── PLAIN-ENGLISH SUMMARY ─────────────────────────────────────────
       var summaryHtml = reportHtml
         + '<div id="' + sid.summary + '" class="study-summary">'
+        + '<h3>Overview</h3>'
         + '<p class="study-summary-text">' + _h(summaryText) + '</p>'
         + '<details class="tech-details"><summary>Purpose &amp; background (study design)</summary>'
         +   (purpose.question         ? '<div class="callout cl-blue"><strong>Question.</strong> ' + _multiline(purpose.question) + '</div>' : '')
@@ -6894,8 +6895,8 @@
         +   feedbackHtml        // 💬 imported expert feedback (B.1)
         +   biologyGlanceHtml   // 0. Biology-at-a-glance
         +   mechanismNarrativeHtml  // 0a. Mechanism narrative (7 framework fields)
-        +   embedsHtml          // 0b. Embedded preview HTMLs
-        +   summaryHtml         // 1. Plain-English summary
+        +   summaryHtml         // 1. Plain-English summary (explanation leads, before charts)
+        +   embedsHtml          // 1a. Embedded visualizations (after the explanation)
         +   expertReviewHtml    // 2b. Pre-run expert review
         +   takeawaysHtml       // 3 + 4. Detailed findings
         +   discoveryHtml       // Discovery implications (directly under the findings)
@@ -8326,7 +8327,7 @@
               ? '<p class="muted small" style="margin:0 0 10px 0">' + _multiline(pi._note) + '</p>'
               : '<p class="muted small" style="margin:0 0 10px 0">These references / mechanisms were proposed by the agent and were '
                 + '<strong>not</strong> provided by the expert. Nothing here is integrated until you <strong>Accept</strong> it.</p>';
-            return '<details id="proposed-inputs" class="report-fold" open><summary>🧩 Suggested additions — pending your approval'
+            return '<details id="proposed-inputs" class="report-fold"><summary>🧩 Suggested additions — pending your approval'
               + ' <span class="rf-chip">' + items.length + ' item' + (items.length===1?'':'s')
               + (pending ? ' · ' + pending + ' pending' : '') + '</span></summary>'
               + note + cards + '</details>';
@@ -8500,38 +8501,46 @@
       + '<script>'
       + '(function(){'
       +   'var INV=' + JSON.stringify(iset.name || '') + ';'
+      // Accept / Decline / "+ Add to investigation" all record the reviewer's
+      // decision as a NORMAL ANNOTATION — the same channel the manual 💬
+      // highlight-comments use (window._fbAddAnnotation, defined by the inline-
+      // feedback widget below). No server POST: the agent applies the decision
+      // when it reads the exported feedback YAML, like all other feedback. This
+      // works identically whether the report is served (http/https) or opened
+      // offline (file://).
+      +   'function _annotate(sid,text){'
+      +     'if(window._fbAddAnnotation){window._fbAddAnnotation(sid,text);return true;}'
+      +     'return false;'
+      +   '}'
       +   'window._decideProposedInput=function(itemId,decision,btn){'
       +     'if(!itemId){alert("Missing item id");return;}'
       +     'var card=btn&&btn.closest?btn.closest(".proposed-input-card"):null;'
       +     'var actions=card?card.querySelector(".proposed-input-actions"):null;'
+      +     'var accepted=decision==="accept";'
+      +     'var titleEl=card?card.querySelector("div[style*=\\"font-weight:600\\"]"):null;'
+      +     'var title=titleEl?titleEl.textContent.trim():"";'
+      +     'var text=(accepted?"Accept":"Decline")+" \\u2014 "+(title||"proposed input")+" [id: "+itemId+"]";'
+      +     'if(!_annotate("proposed-inputs",text)){alert("Could not record the decision (feedback widget unavailable).");return;}'
       +     'if(actions){actions.querySelectorAll("button").forEach(function(b){b.disabled=true;});}'
-      +     'if(btn){btn.textContent="…";}'
-      +     'fetch("/api/proposed-input-decision",{method:"POST",headers:{"Content-Type":"application/json"},'
-      +       'body:JSON.stringify({investigation:INV,item_id:itemId,decision:decision})})'
-      +     '.then(function(r){return r.json().then(function(d){return {status:r.status,body:d};});})'
-      +     '.then(function(res){'
-      +       'if(res.status!==200||res.body.error){'
-      +         'alert("Decision failed: "+(res.body.error||res.status));'
-      +         'if(actions){actions.querySelectorAll("button").forEach(function(b){b.disabled=false;});}'
-      +         'return;'
-      +       '}'
-      +       'var newStatus=res.body.status||(decision==="accept"?"accepted":"declined");'
-      +       'if(card){'
-      +         'var color=newStatus==="accepted"?"#16a34a":"#dc2626";'
-      +         'card.style.borderLeftColor=color;'
-      +         'var msg=newStatus==="accepted"?"\\u2713 Accepted by the expert"+(res.body.kind==="reference"?" \\u2014 added to the investigation\\u2019s provided references.":" \\u2014 a human integrates the mechanism."):"\\u2717 Declined by the expert \\u2014 not integrated.";'
-      +         'var resolved=document.createElement("div");'
-      +         'resolved.className="proposed-input-resolved muted small";'
-      +         'resolved.style.cssText="margin-top:10px;font-style:italic";'
-      +         'resolved.textContent=msg;'
-      +         'if(actions){actions.replaceWith(resolved);}else{card.appendChild(resolved);}'
-      +         'var pill=card.querySelector("span");'
-      +       '}'
-      +     '})'
-      +     '.catch(function(err){'
-      +       'alert("Decision failed: "+err);'
-      +       'if(actions){actions.querySelectorAll("button").forEach(function(b){b.disabled=false;});}'
-      +     '});'
+      +     'if(card){card.style.borderLeftColor=accepted?"#16a34a":"#dc2626";}'
+      +     'var resolved=document.createElement("div");'
+      +     'resolved.className="proposed-input-resolved muted small";'
+      +     'resolved.style.cssText="margin-top:10px;font-style:italic";'
+      +     'resolved.textContent=(accepted?"\\u2713":"\\u2717")+" recorded \\u2014 exports with your feedback";'
+      +     'if(actions){actions.replaceWith(resolved);}else if(card){card.appendChild(resolved);}'
+      +   '};'
+      // ── "+ Add to investigation" seed handler (report-scoped) ──────────
+      // Records a "Add study" annotation keyed to the proposed-inputs section.
+      // The SPA defines its own richer _seedFollowupProposal (live graph
+      // refresh); this report-scoped version just annotates so the offline /
+      // served reviewer click is captured in the feedback export.
+      +   'window._seedFollowupProposal=function(parentName,proposalId,proposalIdx,btn){'
+      +     'var card=btn&&btn.closest?btn.closest(".di-fup-card"):null;'
+      +     'var title=card?(function(){var t=card.querySelector(".di-fup-title");return t?t.textContent.trim():"";})():"";'
+      +     'var targets=card?Array.prototype.map.call(card.querySelectorAll(".di-fup-targets code"),function(c){return c.textContent;}):[];'
+      +     'var text="Add study \\u2014 "+(title||"new study")+(targets.length?" (targets: "+targets.join(", ")+")":"")+(parentName?" [parent: "+parentName+"]":"");'
+      +     'if(!_annotate("proposed-inputs",text)){alert("Could not record the request (feedback widget unavailable).");return;}'
+      +     'if(btn){btn.disabled=true;btn.textContent="\\u2713 recorded \\u2014 exports with your feedback";btn.style.borderColor="#16a34a";btn.style.color="#166534";}'
       +   '};'
       + '})();'
       + '</script>'
@@ -8707,16 +8716,26 @@
       +     'var db=bar.querySelector(".fb-dl-btn");if(db)db.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();downloadFeedback();});'
       +     'var gi=bar.querySelector(".fb-gh-issue");if(gi)gi.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();openGhIssue();});'
       +   '}'
+      // Proposed-input Accept/Decline and "+ Add to investigation" record
+      // their decision through this — a NORMAL annotation, the same channel
+      // the manual 💬 comments use. Author defaults to the reviewer's saved
+      // name (fb_author) so decisions are attributed like every other comment.
+      +   'window._fbAddAnnotation=function(sid,text,author){'
+      +     'if(!sid||!text)return;'
+      +     'author=author||safeGet("fb_author")||"reviewer";'
+      +     'var d=load();d[sid]=d[sid]||[];'
+      +     'd[sid].push({ts:new Date().toISOString(),author:author,text:text});'
+      +     'save(d);var host=document.getElementById(sid);if(host&&host.dataset&&host.dataset.fbAttached)renderExisting(host,sid);updateBadges();updateBarCount();'
+      +   '};'
       +   'function serialiseYaml(meta,data){'
       +     'var L=["# Inline feedback report","# Generated from the v2ecoli inline-feedback widget.","# Import with: pbg-feedback-import <this-file>"];'
       +     'L.push("meta:");'
       +     'Object.keys(meta).forEach(function(k){L.push("  "+k+": "+JSON.stringify(meta[k]));});'
       +     'var keys=Object.keys(data).sort();'
-      +     'if(!keys.length){L.push("annotations: {}");return L.join("\\n")+"\\n";}'
-      +     'L.push("annotations:");'
-      +     'keys.forEach(function(sid){'
+      +     'if(!keys.length){L.push("annotations: {}");}'
+      +     'else{L.push("annotations:");keys.forEach(function(sid){'
       +       '(data[sid]||[]).forEach(function(e,i){if(i===0)L.push("  "+JSON.stringify(sid)+":");L.push("    - ts: "+JSON.stringify(e.ts));if(e.author)L.push("      author: "+JSON.stringify(e.author));L.push("      text: "+JSON.stringify(e.text));});'
-      +     '});'
+      +     '});}'
       +     'return L.join("\\n")+"\\n";'
       +   '}'
       +   'function downloadFeedback(){'
