@@ -8201,6 +8201,8 @@
       +   '<span class="tb-title">' + _h(iset.title || iset.name) + '</span>'
       +   '<a href="#" onclick="window.scrollTo({top:0,behavior:\'smooth\'});return false;">Top</a>'
       /* "Acceptance" nav link removed alongside the section it pointed to */
+      +   ((iset.proposed_inputs && (iset.proposed_inputs.items || []).length)
+          ? '<a href="#proposed-inputs">Suggested additions</a>' : '')
       +   '<a href="#studies-heading">Studies</a>'
       +   '<a href="#references">References</a>'
       + '</nav>'
@@ -8250,6 +8252,84 @@
                     + (d.context ? '<div class="muted small">' + _multiline(d.context) + '</div>' : '')
                     + '</li>';
                 }).join('') + '</ol></details>';
+          })()
+
+      // ── PROPOSED INPUTS (pending expert approval) ──────────────────────
+      // Agent-suggested references / mechanisms the expert did NOT provide.
+      // They are NOT silently integrated: each is surfaced here for the
+      // expert to Accept (→ promoted to a real provided input) or Decline.
+      // Reads iset.proposed_inputs.items; renders nothing if absent/empty.
+      // Mirrors the follow-up-proposal Accept/Decline button pattern via
+      // _decideProposedInput → POST /api/proposed-input-decision.
+      +   (function() {
+            var pi = iset.proposed_inputs || {};
+            var items = pi.items || [];
+            if (!items.length) return '';
+            var pending = items.filter(function(it){ return (it.status||'pending')==='pending'; }).length;
+            function _kindBadge(kind) {
+              var k = (kind||'reference');
+              var bg = k === 'mechanism' ? '#faf5ff' : '#eff6ff';
+              var fg = k === 'mechanism' ? '#6b21a8' : '#1e40af';
+              return '<span style="font-size:0.7em;text-transform:uppercase;letter-spacing:0.05em;'
+                + 'padding:1px 8px;border-radius:9999px;background:' + bg + ';color:' + fg + '">' + _h(k) + '</span>';
+            }
+            function _statusPill(status) {
+              var s = (status||'pending');
+              var c = s === 'accepted' ? {bg:'#dcfce7',fg:'#166534'}
+                    : s === 'declined' ? {bg:'#fee2e2',fg:'#991b1b'}
+                    : {bg:'#fef3c7',fg:'#92400e'};
+              return '<span style="font-size:0.7em;padding:1px 8px;border-radius:9999px;background:'
+                + c.bg + ';color:' + c.fg + ';margin-left:6px">' + _h(s) + '</span>';
+            }
+            var cards = items.map(function(it) {
+              var status = it.status || 'pending';
+              var headline = (it.kind === 'mechanism') ? (it.summary || '(mechanism)') : (it.citation || '(reference)');
+              var rows = [];
+              if (it.related_study) rows.push('<div class="muted small"><strong>Related study:</strong> <code>' + _h(it.related_study) + '</code></div>');
+              if (it.rationale) rows.push('<div class="small" style="margin-top:4px"><strong>Rationale.</strong> ' + _multiline(it.rationale) + '</div>');
+              if (it.provenance) rows.push('<div class="muted small" style="margin-top:4px"><strong>Provenance.</strong> ' + _multiline(it.provenance) + '</div>');
+              if (it.proposed_by || it.proposed_at) {
+                rows.push('<div class="muted small" style="margin-top:4px">proposed by ' + _h(it.proposed_by || 'agent')
+                  + (it.proposed_at ? ' · ' + _h(String(it.proposed_at)) : '') + '</div>');
+              }
+              var actions;
+              if (status === 'pending') {
+                var idJson = JSON.stringify(String(it.id || ''));
+                actions = '<div class="proposed-input-actions" style="margin-top:10px;display:flex;gap:8px">'
+                  + '<button type="button" onclick="event.stopPropagation(); _decideProposedInput(' + idJson + ', \'accept\', this)" '
+                  +   'style="font-size:0.82em;padding:4px 14px;border:1px solid #16a34a;background:#16a34a;color:#fff;border-radius:5px;cursor:pointer">Accept</button>'
+                  + '<button type="button" onclick="event.stopPropagation(); _decideProposedInput(' + idJson + ', \'decline\', this)" '
+                  +   'style="font-size:0.82em;padding:4px 14px;border:1px solid #dc2626;background:#fff;color:#b91c1c;border-radius:5px;cursor:pointer">Decline</button>'
+                  + '</div>';
+              } else {
+                actions = '<div class="proposed-input-resolved muted small" style="margin-top:10px;font-style:italic">'
+                  + (status === 'accepted'
+                      ? '✓ Accepted by the expert' + (it.kind === 'reference' ? ' — added to the investigation\'s provided references.' : ' — a human integrates the mechanism.')
+                      : '✗ Declined by the expert — not integrated.')
+                  + '</div>';
+              }
+              var borderColor = status === 'accepted' ? '#16a34a' : status === 'declined' ? '#dc2626' : '#f59e0b';
+              return '<div class="proposed-input-card" data-item-id="' + _h(String(it.id||'')) + '" '
+                + 'style="padding:12px 14px;border:1px solid #e2e8f0;border-left:4px solid ' + borderColor
+                + ';border-radius:6px;background:#fff;margin-bottom:10px">'
+                + '<div style="display:flex;align-items:flex-start;gap:8px">'
+                +   '<div style="flex:1;min-width:0">'
+                +     _kindBadge(it.kind) + _statusPill(status)
+                +     '<div style="font-weight:600;margin-top:6px">' + _h(headline) + '</div>'
+                +     rows.join('')
+                +   '</div>'
+                + '</div>'
+                + actions
+                + '</div>';
+            }).join('');
+            var note = pi._note
+              ? '<p class="muted small" style="margin:0 0 10px 0">' + _multiline(pi._note) + '</p>'
+              : '<p class="muted small" style="margin:0 0 10px 0">These references / mechanisms were proposed by the agent and were '
+                + '<strong>not</strong> provided by the expert. Nothing here is integrated until you <strong>Accept</strong> it.</p>';
+            return '<details id="proposed-inputs" class="report-fold" open><summary>🧩 Suggested additions — pending your approval'
+              + ' <span class="rf-chip">' + items.length + ' item' + (items.length===1?'':'s')
+              + (pending ? ' · ' + pending + ' pending' : '') + '</span></summary>'
+              + note + cards + '</details>';
           })()
 
       // ── LAYER 2: SCIENTIFIC ARGUMENT ───────────────────────────────────
@@ -8407,6 +8487,52 @@
       +       '});'
       +     '});'
       +   '});'
+      + '})();'
+      + '</script>'
+
+      // ── Proposed-input Accept/Decline wiring (in-report) ──────────────
+      // Self-contained handler baked into the downloaded report so the
+      // Accept/Decline buttons work both in the live dashboard report and
+      // when the report is served by the dashboard. POSTs the decision to
+      // /api/proposed-input-decision and, on success, rewrites the card's
+      // status in place (no full reload needed). The investigation name is
+      // baked in so the standalone report knows which investigation to PATCH.
+      + '<script>'
+      + '(function(){'
+      +   'var INV=' + JSON.stringify(iset.name || '') + ';'
+      +   'window._decideProposedInput=function(itemId,decision,btn){'
+      +     'if(!itemId){alert("Missing item id");return;}'
+      +     'var card=btn&&btn.closest?btn.closest(".proposed-input-card"):null;'
+      +     'var actions=card?card.querySelector(".proposed-input-actions"):null;'
+      +     'if(actions){actions.querySelectorAll("button").forEach(function(b){b.disabled=true;});}'
+      +     'if(btn){btn.textContent="…";}'
+      +     'fetch("/api/proposed-input-decision",{method:"POST",headers:{"Content-Type":"application/json"},'
+      +       'body:JSON.stringify({investigation:INV,item_id:itemId,decision:decision})})'
+      +     '.then(function(r){return r.json().then(function(d){return {status:r.status,body:d};});})'
+      +     '.then(function(res){'
+      +       'if(res.status!==200||res.body.error){'
+      +         'alert("Decision failed: "+(res.body.error||res.status));'
+      +         'if(actions){actions.querySelectorAll("button").forEach(function(b){b.disabled=false;});}'
+      +         'return;'
+      +       '}'
+      +       'var newStatus=res.body.status||(decision==="accept"?"accepted":"declined");'
+      +       'if(card){'
+      +         'var color=newStatus==="accepted"?"#16a34a":"#dc2626";'
+      +         'card.style.borderLeftColor=color;'
+      +         'var msg=newStatus==="accepted"?"\\u2713 Accepted by the expert"+(res.body.kind==="reference"?" \\u2014 added to the investigation\\u2019s provided references.":" \\u2014 a human integrates the mechanism."):"\\u2717 Declined by the expert \\u2014 not integrated.";'
+      +         'var resolved=document.createElement("div");'
+      +         'resolved.className="proposed-input-resolved muted small";'
+      +         'resolved.style.cssText="margin-top:10px;font-style:italic";'
+      +         'resolved.textContent=msg;'
+      +         'if(actions){actions.replaceWith(resolved);}else{card.appendChild(resolved);}'
+      +         'var pill=card.querySelector("span");'
+      +       '}'
+      +     '})'
+      +     '.catch(function(err){'
+      +       'alert("Decision failed: "+err);'
+      +       'if(actions){actions.querySelectorAll("button").forEach(function(b){b.disabled=false;});}'
+      +     '});'
+      +   '};'
       + '})();'
       + '</script>'
 

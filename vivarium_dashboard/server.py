@@ -291,6 +291,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/study-tests-run":             "_post_study_tests_run",
     "/api/study-seed-followup":         "_post_study_seed_followup",
     "/api/investigation-set-status":    "_post_investigation_set_status",
+    "/api/proposed-input-decision":     "_post_proposed_input_decision",
     # Workspace-switcher POST endpoints.
     "/api/workspaces/add":           "_post_workspaces_add",
     "/api/workspaces/forget":        "_post_workspaces_forget",
@@ -1667,6 +1668,92 @@ def _append_investigation_input(ws_root: Path, inv: str, category: str, entry) -
     return True
 
 
+def _decide_proposed_input_for_test(
+    ws_root: Path, inv: str, item_id: str, decision: str
+) -> tuple[dict, int]:
+    """Pure function backing ``POST /api/proposed-input-decision``.
+
+    Resolves the ``proposed_inputs.items[]`` entry with ``id == item_id`` in
+    investigations/<inv>/investigation.yaml and applies the expert decision:
+
+      * ``accept``  → set ``status: accepted``. For ``kind: reference`` also
+        append the citation to ``inputs.references`` so it becomes a real
+        provided reference. For ``kind: mechanism`` only mark accepted (a
+        human integrates the mechanism).
+      * ``decline`` → set ``status: declined``.
+
+    Persists with ruamel (round-trip preserves comments/formatting), falling
+    back to safe_dump where ruamel is unavailable (e.g. the test venv).
+    Returns (response_dict, status_code).
+    """
+    if not inv:
+        return {"error": "investigation name required"}, 400
+    if not item_id:
+        return {"error": "item_id required"}, 400
+    if decision not in ("accept", "decline"):
+        return {"error": "decision must be 'accept' or 'decline'"}, 400
+
+    target = _investigation_yaml_path(ws_root, inv)
+    if target is None:
+        return {"error": f"no investigation.yaml for {inv!r}"}, 404
+
+    new_status = "accepted" if decision == "accept" else "declined"
+    result: dict = {}
+
+    def _mutate(spec: dict):
+        block = spec.get("proposed_inputs")
+        if not isinstance(block, dict):
+            return None, ("proposed_inputs block missing", 404)
+        items = block.get("items")
+        if not isinstance(items, list):
+            return None, ("proposed_inputs.items missing", 404)
+        match = None
+        for it in items:
+            if isinstance(it, dict) and str(it.get("id")) == str(item_id):
+                match = it
+                break
+        if match is None:
+            return None, (f"no proposed input with id {item_id!r}", 404)
+        match["status"] = new_status
+        kind = match.get("kind") or "reference"
+        result["kind"] = kind
+        result["status"] = new_status
+        # On accept, promote a reference into the real provided-references list.
+        if decision == "accept" and kind == "reference":
+            inputs = spec.get("inputs")
+            if not isinstance(inputs, dict):
+                inputs = {}
+                spec["inputs"] = inputs
+            refs = inputs.get("references")
+            if not isinstance(refs, list):
+                refs = []
+                inputs["references"] = refs
+            # Prefer a bib-key style id; fall back to the citation text.
+            ref_value = match.get("id") or match.get("citation")
+            if ref_value and ref_value not in refs:
+                refs.append(ref_value)
+                result["added_reference"] = ref_value
+        return spec, None
+
+    try:
+        from ruamel.yaml import YAML as _RYAML
+        _ry = _RYAML(); _ry.preserve_quotes = True; _ry.width = 4096
+        spec = _ry.load(target.read_text(encoding="utf-8")) or {}
+        mutated, err = _mutate(spec)
+        if err is not None:
+            return {"error": err[0]}, err[1]
+        with target.open("w", encoding="utf-8") as _fh:
+            _ry.dump(mutated, _fh)
+    except ImportError:
+        spec = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+        mutated, err = _mutate(spec)
+        if err is not None:
+            return {"error": err[0]}, err[1]
+        target.write_text(yaml.safe_dump(mutated, sort_keys=False), encoding="utf-8")
+
+    return {"ok": True, "item_id": item_id, **result}, 200
+
+
 def _build_iset_summary_for_test(ws_root: Path) -> list[dict]:
     """Pure function backing ``GET /api/iset-list`` — emits the same list
     of summary dicts that the handler returns, but without HTTP plumbing.
@@ -2166,6 +2253,8 @@ def _build_iset_detail_for_test(ws_root: Path, name: str) -> tuple[dict, int]:
         "effective_status": effective_status,
         "expert_docs":      _coerce_list_field(spec, "expert_docs", source=str(spec_path)),
         "acceptance_criteria": _coerce_list_field(spec, "acceptance_criteria", source=str(spec_path)),
+        "references":          (spec.get("inputs") or {}).get("references") or [],
+        "proposed_inputs":     spec.get("proposed_inputs") or {},
         "studies":          studies_out,
     }, 200
 
@@ -8294,6 +8383,10 @@ if __name__ == "__main__":
             # Investigation-declared references (inputs.references bib keys) so the
             # report's References section includes them, not only study citations.
             "references":          (spec.get("inputs") or {}).get("references") or [],
+            # Agent-proposed references/mechanisms pending expert accept/decline.
+            # Surfaced in the report's "Suggested additions" section; never
+            # silently integrated (see pbg-investigation / pbg-study skills).
+            "proposed_inputs":     spec.get("proposed_inputs") or {},
             "studies":          studies_out,
         }, 200)
 
@@ -10215,6 +10308,22 @@ if __name__ == "__main__":
         )
         code = result.pop("_code", 200)
         return self._json(result, code)
+
+    def _post_proposed_input_decision(self, body: dict):
+        """POST /api/proposed-input-decision {investigation, item_id, decision}.
+
+        Accept or decline an agent-proposed reference/mechanism. On accept,
+        kind=reference items are promoted into ``inputs.references``. Persists
+        the new ``status`` back to investigation.yaml. See
+        ``_decide_proposed_input_for_test``.
+        """
+        response, code = _decide_proposed_input_for_test(
+            WORKSPACE,
+            body.get("investigation") or "",
+            str(body.get("item_id") or ""),
+            (body.get("decision") or "").strip().lower(),
+        )
+        return self._json(response, code)
 
     # ------------------------------------------------------------------
     # Study-specific POST handlers (thin wrappers around pure helpers)
