@@ -8530,16 +8530,22 @@
       +     'if(actions){actions.replaceWith(resolved);}else if(card){card.appendChild(resolved);}'
       +   '};'
       // ── "+ Add to investigation" seed handler (report-scoped) ──────────
-      // Records a "Add study" annotation keyed to the proposed-inputs section.
+      // Records a "Add study" annotation keyed to the per-study Discovery
+      // Implications section (id="study-<slug>-discovery", matched by the
+      // /^study-/ feedback pattern so it round-trips in the export and
+      // re-renders under that section). Falls back to "proposed-inputs" if
+      // the ancestor section id can't be resolved.
       // The SPA defines its own richer _seedFollowupProposal (live graph
       // refresh); this report-scoped version just annotates so the offline /
       // served reviewer click is captured in the feedback export.
       +   'window._seedFollowupProposal=function(parentName,proposalId,proposalIdx,btn){'
       +     'var card=btn&&btn.closest?btn.closest(".di-fup-card"):null;'
+      +     'var sect=btn&&btn.closest?btn.closest(".discovery-implications"):null;'
+      +     'var sid=(sect&&sect.id)?sect.id:"proposed-inputs";'
       +     'var title=card?(function(){var t=card.querySelector(".di-fup-title");return t?t.textContent.trim():"";})():"";'
       +     'var targets=card?Array.prototype.map.call(card.querySelectorAll(".di-fup-targets code"),function(c){return c.textContent;}):[];'
       +     'var text="Add study \\u2014 "+(title||"new study")+(targets.length?" (targets: "+targets.join(", ")+")":"")+(parentName?" [parent: "+parentName+"]":"");'
-      +     'if(!_annotate("proposed-inputs",text)){alert("Could not record the request (feedback widget unavailable).");return;}'
+      +     'if(!_annotate(sid,text)){alert("Could not record the request (feedback widget unavailable).");return;}'
       +     'if(btn){btn.disabled=true;btn.textContent="\\u2713 recorded \\u2014 exports with your feedback";btn.style.borderColor="#16a34a";btn.style.color="#166534";}'
       +   '};'
       + '})();'
