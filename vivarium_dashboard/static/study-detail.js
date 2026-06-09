@@ -560,6 +560,27 @@
     window.open('/composite-explorer?run_id=' + encodeURIComponent(runId), '_blank');
   });
 
+  // ptools-launch → _get_ptools_launch
+  bindAll('.btn-launch-ptools', function(btn) {
+    var runId = btn.dataset.runId;
+    var study = studyName();
+    var url = '/api/ptools-launch/' + encodeURIComponent(study) + '?run=' + encodeURIComponent(runId);
+    fetch(url).then(function(r) {
+      return r.json().then(function(d) { return {status: r.status, body: d}; });
+    }).then(function(res) {
+      var b = res.body;
+      if (res.status === 200 && b.url) {
+        window.open(b.url, '_blank');
+      } else if (b && b.error === 'ptools_server_url not configured') {
+        alert('PTools not configured.\nSet ui.ptools_server_url in workspace.yaml.');
+      } else if (b && b.available && b.available.length === 0) {
+        alert('No ptools TSV results found for this run.\nRun the ptools analyses first.');
+      } else {
+        alert('PTools launch failed: ' + (b && b.error || res.status));
+      }
+    });
+  });
+
   // study-run-delete → _post_investigation_run_delete
   bindAll('.btn-delete-run', function(btn) {
     var runId = btn.dataset.runId;
