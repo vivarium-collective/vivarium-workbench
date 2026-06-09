@@ -24,6 +24,7 @@ v0.4.2: Visualization lifecycle — Create/Add/Commit.
 from __future__ import annotations
 import argparse
 import base64
+import copy
 import hashlib
 import html as _html
 import json
@@ -688,6 +689,62 @@ _DATA_SOURCE_MIME: dict[str, tuple[str, bool]] = {
 }
 
 
+def _registry_modules_override(ws_data: dict | None) -> list | None:
+    """Resolve ``dashboard.registry.modules`` to a list of entries, or ``None``.
+
+    The ``modules`` block is the per-workspace catalog OVERRIDE: when present
+    and non-empty it REPLACES pbg's default catalog (unlike ``include``, which
+    only filters the default). Each entry is either:
+
+      - a bare string  → the name of an entry in pbg's default catalog whose
+        full metadata should be inherited (or a minimal stub if pbg doesn't
+        ship it); or
+      - a dict         → a custom catalog module that pbg doesn't ship
+        (e.g. ``viva-munk``), used verbatim with missing display fields filled.
+
+    Returns ``None`` when unset/not-a-list/empty → caller falls back to the
+    default catalog + ``include`` filter (unchanged behavior).
+    """
+    dash = _dashboard_config(ws_data)
+    reg = dash.get("registry")
+    if not isinstance(reg, dict):
+        return None
+    modules = reg.get("modules")
+    if not isinstance(modules, list) or not modules:
+        return None
+    return modules
+
+
+def _modules_override_pkgs(ws_data: dict | None) -> set[str] | None:
+    """Normalized top-level package names named by ``dashboard.registry.modules``.
+
+    Used so the process-registry (``/api/registry``) filter shows the SAME set
+    as the override catalog even when no explicit ``include`` is present. For a
+    string entry the package is the name itself; for a dict entry the ``package``
+    field (falling back to the snake_case ``name``). Returns ``None`` when no
+    override is configured.
+    """
+    modules = _registry_modules_override(ws_data)
+    if modules is None:
+        return None
+
+    def _norm(s) -> str:
+        return str(s or "").strip().replace("-", "_").split(".")[0]
+
+    pkgs: set[str] = set()
+    for entry in modules:
+        if isinstance(entry, str):
+            n = _norm(entry)
+            if n:
+                pkgs.add(n)
+        elif isinstance(entry, dict):
+            pkg = entry.get("package") or entry.get("name")
+            n = _norm(pkg)
+            if n:
+                pkgs.add(n)
+    return pkgs or None
+
+
 def _registry_include_pkgs(ws_data: dict | None) -> set[str] | None:
     """Resolve ``dashboard.registry.include`` to a set of normalized top-level
     package names (dashes → underscores), or ``None`` when unset.
@@ -695,6 +752,11 @@ def _registry_include_pkgs(ws_data: dict | None) -> set[str] | None:
     ``None`` means "no filter" (show everything — current behavior); an empty
     list also means no filter (treated as unset, to avoid an accidental
     blank registry).
+
+    When ``dashboard.registry.modules`` (the catalog override) is present but
+    no explicit ``include`` is given, the allow-list is DERIVED from the module
+    names — so the process-registry class grid stays in sync with the override
+    catalog (same set: workspace-self + each declared module).
     """
     dash = _dashboard_config(ws_data)
     reg = dash.get("registry")
@@ -702,7 +764,18 @@ def _registry_include_pkgs(ws_data: dict | None) -> set[str] | None:
         return None
     include = reg.get("include")
     if not isinstance(include, list) or not include:
-        return None
+        # No explicit include: derive from the modules override (if any) so the
+        # process registry matches the override catalog. The workspace's own
+        # package is always allowed alongside the declared modules.
+        derived = _modules_override_pkgs(ws_data)
+        if derived is None:
+            return None
+        slug = str((ws_data or {}).get("name", "") or "").strip().replace("-", "_")
+        pkg_path = str((ws_data or {}).get("package_path", "") or "").strip().replace("-", "_")
+        for s in (slug, pkg_path):
+            if s:
+                derived.add(s)
+        return derived or None
     pkgs = {
         str(p).strip().replace("-", "_").split(".")[0]
         for p in include
@@ -783,6 +856,86 @@ def _filter_catalog_modules(modules: list, ws_data: dict | None) -> list:
         return bool(variants & include)
 
     return [m for m in modules if _allowed(m)]
+
+
+def _build_override_catalog(override: list, default_modules: list) -> list:
+    """Build a catalog from ``dashboard.registry.modules`` (the override).
+
+    The override REPLACES pbg's default catalog. ``default_modules`` is pbg's
+    default catalog (``load_registry`` + workspace overlay) used only to resolve
+    bare-string entries by inheriting their full metadata.
+
+    Resolution per entry:
+
+      - **string** → look the name up in ``default_modules``; if found, deep-copy
+        its full metadata dict; if NOT found, emit a minimal stub
+        (``name`` + a short ``description`` note) so the row still renders.
+      - **dict** → a custom module pbg doesn't ship; used verbatim with missing
+        display fields filled with sensible defaults so the row renders and the
+        Install/Uninstall button works (needs at least ``name``; ``package``
+        defaults to the snake_case name; ``source``/``description``/``tags`` get
+        placeholder fallbacks).
+
+    Install-state is NOT set here — the caller's existing install-detection loop
+    (imports / pyproject / venv probe) annotates each entry, so a custom entry
+    whose ``package`` is importable in the venv (e.g. ``viva_munk``) is marked
+    installed exactly like a default-catalog entry.
+
+    Order is preserved from the override list. Unrecognized entry types are
+    skipped.
+    """
+    by_name = {
+        str(m.get("name")): m
+        for m in (default_modules or [])
+        if isinstance(m, dict) and m.get("name")
+    }
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    for entry in override:
+        if isinstance(entry, str):
+            name = entry.strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            found = by_name.get(name)
+            if found is not None:
+                out.append(copy.deepcopy(found))
+            else:
+                # pbg doesn't ship this name — minimal stub so it still renders.
+                out.append({
+                    "name": name,
+                    "package": name.replace("-", "_"),
+                    "description": (
+                        f"{name} — declared in this workspace's "
+                        "dashboard.registry.modules but not found in the default "
+                        "pbg catalog (no inherited metadata)."
+                    ),
+                    "tags": [],
+                    "override_stub": True,
+                })
+        elif isinstance(entry, dict):
+            name = str(entry.get("name") or "").strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            m = copy.deepcopy(entry)
+            m.setdefault("package", name.replace("-", "_"))
+            m.setdefault(
+                "description",
+                f"{name} — custom workspace catalog entry.",
+            )
+            m.setdefault("source", "")
+            m.setdefault("tags", [])
+            # Surface a single-tag category as a tag too (display convenience).
+            cat = m.get("category")
+            if cat and isinstance(m.get("tags"), list) and cat not in m["tags"]:
+                m["tags"] = list(m["tags"]) + [cat]
+            m["override_custom"] = True
+            out.append(m)
+        # else: unknown entry type → skip silently.
+
+    return out
 
 
 def _save_upload(file_b64: str, target_path: Path) -> str:
@@ -12351,7 +12504,20 @@ if __name__ == "__main__":
         except Exception as e:
             return self._json({"modules": [], "error": f"workspace.yaml: {e}"}, 500)
 
-        modules = self._module_registry()  # canonical (pbg-superpowers) + overlay
+        default_modules = self._module_registry()  # canonical (pbg-superpowers) + overlay
+
+        # Per-workspace catalog OVERRIDE (dashboard.registry.modules): when set,
+        # it REPLACES the default catalog (vs `include`, which only filters it).
+        # String entries inherit full metadata from the default catalog; dict
+        # entries are custom modules pbg doesn't ship (e.g. viva-munk). The
+        # install-detection loop below then annotates each entry's installed
+        # state exactly as for default-catalog modules (so a custom entry whose
+        # `package` is importable in the venv shows as installed).
+        override = _registry_modules_override(ws_data)
+        if override is not None:
+            modules = _build_override_catalog(override, default_modules)
+        else:
+            modules = default_modules
 
         # Three install-source layers, in priority order:
         #   1. workspace.yaml.imports — explicit declaration by the workspace
@@ -12438,13 +12604,19 @@ if __name__ == "__main__":
         if ws_self is not None:
             modules = [ws_self] + modules
 
-        # Optional display-only allow-list: workspace.yaml::dashboard.registry.include.
-        # When set, the Registry-tab catalog (marketplace) shows ONLY modules
-        # whose package is in the list — same allow-list / normalization as the
-        # /api/registry filter. No-op when unset → full catalog (current behavior).
-        # The workspace's own first-party module is included only when its slug
-        # (e.g. v2ecoli) is in the list.
-        modules = _filter_catalog_modules(modules, ws_data)
+        # When the catalog was built from the `modules` OVERRIDE, it is already
+        # exactly the declared set (+ workspace-self) — do NOT re-filter (a
+        # custom/stub entry could be dropped by the derived allow-list, and the
+        # override is the authoritative list anyway).
+        #
+        # Otherwise apply the optional display-only allow-list
+        # (workspace.yaml::dashboard.registry.include): the Registry-tab catalog
+        # shows ONLY modules whose package is in the list — same allow-list /
+        # normalization as the /api/registry filter. No-op when unset → full
+        # catalog (current behavior). The workspace's own first-party module is
+        # included only when its slug (e.g. v2ecoli) is in the list.
+        if override is None:
+            modules = _filter_catalog_modules(modules, ws_data)
 
         return self._json({"modules": modules}, 200)
 
