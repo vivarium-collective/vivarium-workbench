@@ -5326,7 +5326,43 @@ class Handler(BaseHTTPRequestHandler):
         fallback = workspace_paths().reports / rel
         return self._serve_file(fallback, self._guess_mime(rel))
 
+    def _csrf_ok(self) -> bool:
+        """Same-origin guard for state-mutating (POST/DELETE) requests.
+
+        Conservative allowlist designed NOT to break the same-origin SPA or
+        local CLI tools while blocking cross-site forged requests to the
+        loopback server (which can run git/gh/pip/shell):
+
+          * ``Origin`` ABSENT  -> ALLOW. Covers curl, the user's local CLI
+            tools, and same-origin navigations that omit the header.
+          * ``Origin`` PRESENT -> its ``host:port`` must equal the request's
+            ``Host`` header (same-origin). Match -> ALLOW; mismatch -> 403.
+
+        The SPA is served same-origin by this same server, so its fetches send
+        an ``Origin`` equal to ``Host`` (or none) and are always allowed.
+
+        Set ``VIVARIUM_DASHBOARD_DISABLE_CSRF=1`` to bypass enforcement
+        (escape hatch; enforcement is ON by default).
+
+        Returns True if the request may proceed. On rejection, emits a 403
+        JSON error and returns False.
+        """
+        if os.environ.get("VIVARIUM_DASHBOARD_DISABLE_CSRF") == "1":
+            return True
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        from urllib.parse import urlsplit
+        origin_netloc = urlsplit(origin).netloc
+        host = self.headers.get("Host", "")
+        if origin_netloc and origin_netloc == host:
+            return True
+        self._json({"error": "cross-origin request forbidden"}, 403)
+        return False
+
     def do_POST(self):
+        if not self._csrf_ok():
+            return
         length = int(self.headers.get("Content-Length", 0))
         try:
             body = json.loads(self.rfile.read(length).decode()) if length else {}
@@ -5342,6 +5378,8 @@ class Handler(BaseHTTPRequestHandler):
         getattr(self, method_name)(body)
 
     def do_DELETE(self):
+        if not self._csrf_ok():
+            return
         length = int(self.headers.get("Content-Length", 0))
         try:
             body = json.loads(self.rfile.read(length).decode()) if length else {}
