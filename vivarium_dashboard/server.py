@@ -634,6 +634,75 @@ def _study_spec_path(name: str):
     return _study_spec_file(_study_dir(name))
 
 
+# ---------------------------------------------------------------------------
+# Pathway Tools Omics Viewer launch helper
+# ---------------------------------------------------------------------------
+
+# DEFAULT TEMPLATE — TBD: finalize against the live Pathway Tools server.
+# Open the Cellular Overview in your PTools instance, then use
+#   Operations → Generate Bookmark for Current Cellular Overview
+# to capture the exact Omics-Viewer URL format, and set
+# ``ui.ptools_omics_url_template`` in workspace.yaml accordingly.
+# Placeholders: {server}, {orgid}, {tsv_url}.
+_PTOOLS_DEFAULT_OMICS_URL_TEMPLATE = (
+    "{server}/overviewsWeb/celOv.shtml?orgid={orgid}&data-file={tsv_url}"
+)
+
+
+def _build_ptools_launch_url(
+    study_dir,
+    ws_root,
+    ptools_server_url: str,
+    ptools_omics_url_template: str,
+    public_base: str,
+    run_id: str | None = None,
+    analysis: str | None = None,
+) -> dict:
+    """Pure helper: discover ptools TSVs and build a Pathway Tools Omics Viewer URL.
+
+    Returns a dict with keys:
+      - ``url`` + ``tsv_url`` + ``available`` on success
+      - ``error`` + optional ``available`` on failure
+
+    The Pathway Tools server must be able to reach ``tsv_url`` over HTTP —
+    it must be an absolute URL on the dashboard's externally-reachable host,
+    not a localhost/relative path.
+    """
+    study_dir = Path(study_dir)
+    ws_root = Path(ws_root)
+
+    # Discover all ptools TSVs under the study directory.
+    all_tsvs = sorted(study_dir.glob("**/ptools/*.tsv"))
+
+    # Filter by analysis prefix when requested.
+    if analysis:
+        prefix = f"{analysis}__"
+        all_tsvs = [p for p in all_tsvs if p.name.startswith(prefix)]
+
+    # Build workspace-relative paths for the static handler + available list.
+    def _relpath(p):
+        try:
+            return p.relative_to(ws_root).as_posix()
+        except ValueError:
+            return p.as_posix()
+
+    available = [_relpath(p) for p in all_tsvs]
+
+    if not available:
+        return {"error": "no ptools TSVs found for this run", "available": []}
+
+    # Use the first available TSV (most useful when analysis is filtered).
+    rel = available[0]
+    tsv_url = f"{public_base.rstrip('/')}/{rel}"
+
+    launch_url = ptools_omics_url_template.format(
+        server=ptools_server_url.rstrip("/"),
+        tsv_url=tsv_url,
+        orgid="ECOLI",
+    )
+    return {"url": launch_url, "tsv_url": tsv_url, "available": available}
+
+
 def _study_detail_spec(name: str):
     """Load a study's spec for the GET /studies/<name> detail page.
 
@@ -5196,6 +5265,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_visualization_classes()
         if self.path.startswith("/api/ui-config"):
             return self._get_ui_config()
+        if self.path.startswith("/api/ptools-launch/"):
+            study = self.path[len("/api/ptools-launch/"):].split("?", 1)[0]
+            if not _SLUG_RE.match(study):
+                return self._json({"error": "invalid study name"}, 400)
+            return self._get_ptools_launch(study)
         if self.path.startswith("/api/git-status"):
             return self._get_git_status()
         # Serve the bigraph-loom viewer at /bigraph-loom. The bundle comes from
@@ -9103,8 +9177,18 @@ if __name__ == "__main__":
         except Exception:
             ws = {}
         ui = ws.get("ui") or {}
+        # NOTE (ptools_omics_url_template): This is the DEFAULT placeholder.
+        # Finalize against the live Pathway Tools server — open its Cellular Overview,
+        # use "Operations → Generate Bookmark for Current Cellular Overview" to capture
+        # the exact Omics-Viewer URL format, then set ui.ptools_omics_url_template in
+        # workspace.yaml. Placeholders: {server}, {orgid}, {tsv_url}.
         return self._json({
             "composite_view": ui.get("composite_view", "bigraph-loom"),
+            "ptools_server_url": ui.get("ptools_server_url", ""),
+            "ptools_omics_url_template": ui.get(
+                "ptools_omics_url_template",
+                _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
+            ),
         }, 200)
 
     def _get_visualization_classes(self):
@@ -10843,6 +10927,65 @@ if __name__ == "__main__":
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def _get_ptools_launch(self, study: str):
+        """GET /api/ptools-launch/<study>?run=<run_id>&analysis=<name>
+
+        Discovers per-run ptools TSV files and returns a Pathway Tools Omics
+        Viewer launch URL.  Requires ``ui.ptools_server_url`` in workspace.yaml.
+
+        The Pathway Tools server fetches the data file over HTTP, so the TSV URL
+        must be reachable from the PTools server, not just the browser.  The
+        dashboard resolves its public base from (in priority order):
+          1. ``ui.dashboard_public_base_url`` in workspace.yaml
+          2. The HTTP ``Host`` header sent by the browser
+        """
+        from urllib.parse import urlparse, parse_qs
+        qs = urlparse(self.path).query
+        params = parse_qs(qs)
+        run_id = (params.get("run", [""])[0] or "").strip() or None
+        analysis = (params.get("analysis", [""])[0] or "").strip() or None
+
+        try:
+            ws = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")) or {}
+        except Exception:
+            ws = {}
+        ui = ws.get("ui") or {}
+
+        ptools_server_url = ui.get("ptools_server_url", "").strip()
+        if not ptools_server_url:
+            return self._json({"error": "ptools_server_url not configured"}, 400)
+
+        # NOTE: finalize ptools_omics_url_template against the live PTools server
+        # (see docs/ptools-launcher.md and comment in _get_ui_config).
+        ptools_omics_url_template = ui.get(
+            "ptools_omics_url_template",
+            _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
+        )
+
+        # Resolve the dashboard's public base URL so the PTools server can fetch
+        # the TSV over HTTP.  Priority: explicit config > Host header.
+        public_base = (ui.get("dashboard_public_base_url") or "").strip()
+        if not public_base:
+            host = self.headers.get("Host", "localhost")
+            public_base = f"http://{host}"
+
+        study_dir = _study_dir(study)
+        if not study_dir.is_dir():
+            return self._json({"error": f"study not found: {study}"}, 404)
+
+        result = _build_ptools_launch_url(
+            study_dir=study_dir,
+            ws_root=WORKSPACE,
+            ptools_server_url=ptools_server_url,
+            ptools_omics_url_template=ptools_omics_url_template,
+            public_base=public_base,
+            run_id=run_id,
+            analysis=analysis,
+        )
+        if "error" in result:
+            return self._json(result, 404)
+        return self._json(result, 200)
 
     def _send_html(self, body: str, code: int = 200):
         """Send an HTML response with the given body and status code."""
@@ -12896,6 +13039,7 @@ if __name__ == "__main__":
         if rel.endswith(".png"): return "image/png"
         if rel.endswith(".svg"): return "image/svg+xml"
         if rel.endswith(".html"): return "text/html"
+        if rel.endswith(".tsv"): return "text/tab-separated-values"
         return "text/plain"
 
 
