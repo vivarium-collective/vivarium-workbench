@@ -580,6 +580,114 @@ def _dashboard_config(ws_data: dict | None) -> dict:
     return dash if isinstance(dash, dict) else {}
 
 
+# ---------------------------------------------------------------------------
+# Repo-wide data sources (workspace.yaml dashboard.data_sources provider hook)
+# ---------------------------------------------------------------------------
+# A workspace may declare a data-source bundle provider:
+#
+#   dashboard:
+#     data_sources:
+#       provider: "pkg.module:func"   # importable module:callable
+#       label: "ecoli-sources"
+#
+# The provider takes no args and returns a list of dicts, one per file:
+#   {key, path (abs str), category, kind: "override"|"inherited", size_bytes}
+#
+# Optional — workspaces without it keep current behavior ({sources: []}).
+# Enumeration is cached (same 30s TTL as the registry) because it can stat
+# 100s of files. The server already runs inside the workspace venv (it spawns
+# build_core() via sys.executable), so the provider imports in-process.
+_DATA_SOURCES_CACHE: dict = {"data": None, "ts": 0.0}
+_DATA_SOURCES_TTL = 30.0  # seconds
+
+
+def _data_sources_config(ws_data: dict | None) -> dict:
+    """Return the ``dashboard.data_sources`` block (or {})."""
+    dash = _dashboard_config(ws_data)
+    ds = dash.get("data_sources")
+    return ds if isinstance(ds, dict) else {}
+
+
+def _import_provider(spec: str):
+    """Import a ``module:func`` spec and return the callable.
+
+    Raises ImportError/AttributeError/ValueError on a malformed or unresolvable
+    spec; the caller is expected to catch and surface as an error payload.
+    """
+    import importlib
+    if ":" not in spec:
+        raise ValueError(f"provider must be 'module:func', got {spec!r}")
+    mod_name, _, func_name = spec.partition(":")
+    mod = importlib.import_module(mod_name)
+    fn = getattr(mod, func_name)
+    if not callable(fn):
+        raise TypeError(f"provider {spec!r} is not callable")
+    return fn
+
+
+def _enumerate_data_sources(bypass_cache: bool = False) -> dict:
+    """Resolve + invoke the workspace data-source provider, with 30s caching.
+
+    Always returns ``{"label": <str|None>, "sources": [...]}`` (never raises).
+    On a missing provider returns ``{"sources": []}``. On a provider error
+    returns ``{"label", "sources": [], "error": <str>}`` so the UI can degrade.
+    """
+    global _DATA_SOURCES_CACHE
+    now = time.time()
+    if not bypass_cache and _DATA_SOURCES_CACHE["data"] is not None:
+        if now - _DATA_SOURCES_CACHE["ts"] < _DATA_SOURCES_TTL:
+            return _DATA_SOURCES_CACHE["data"]
+
+    data: dict
+    try:
+        ws_yaml = WORKSPACE / "workspace.yaml"
+        ws_data = yaml.safe_load(ws_yaml.read_text(encoding="utf-8")) or {}
+        cfg = _data_sources_config(ws_data)
+        provider = str(cfg.get("provider") or "").strip()
+        label = cfg.get("label")
+        if not provider:
+            data = {"sources": []}
+        else:
+            fn = _import_provider(provider)
+            raw = fn() or []
+            sources = []
+            for entry in raw:
+                if not isinstance(entry, dict) or "key" not in entry:
+                    continue
+                sources.append({
+                    "key": str(entry.get("key")),
+                    "path": str(entry.get("path") or ""),
+                    "category": str(entry.get("category") or "uncategorized"),
+                    "kind": str(entry.get("kind") or "inherited"),
+                    "size_bytes": int(entry.get("size_bytes") or 0),
+                })
+            data = {"label": label, "sources": sources}
+    except Exception as e:  # noqa: BLE001 — never break the dashboard
+        data = {"label": None, "sources": [], "error": f"{type(e).__name__}: {e}"}
+
+    _DATA_SOURCES_CACHE["data"] = data
+    _DATA_SOURCES_CACHE["ts"] = now
+    return data
+
+
+# Map of file extension → (content-type, inline?) for serving a data-source
+# file. Anything not listed is offered as a binary download.
+_DATA_SOURCE_MIME: dict[str, tuple[str, bool]] = {
+    ".tsv": ("text/tab-separated-values; charset=utf-8", True),
+    ".csv": ("text/csv; charset=utf-8", True),
+    ".json": ("application/json; charset=utf-8", True),
+    ".txt": ("text/plain; charset=utf-8", True),
+    ".text": ("text/plain; charset=utf-8", True),
+    ".md": ("text/markdown; charset=utf-8", True),
+    ".fasta": ("text/plain; charset=utf-8", True),
+    ".fa": ("text/plain; charset=utf-8", True),
+    ".fna": ("text/plain; charset=utf-8", True),
+    ".faa": ("text/plain; charset=utf-8", True),
+    ".yaml": ("text/yaml; charset=utf-8", True),
+    ".yml": ("text/yaml; charset=utf-8", True),
+}
+
+
 def _registry_include_pkgs(ws_data: dict | None) -> set[str] | None:
     """Resolve ``dashboard.registry.include`` to a set of normalized top-level
     package names (dashes → underscores), or ``None`` when unset.
@@ -5297,6 +5405,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_study_bigraph_paths()
         if path_only == "/api/inputs":
             return self._get_inputs()
+        if path_only == "/api/data-sources":
+            return self._get_data_sources()
+        if path_only == "/api/data-source-file":
+            return self._get_data_source_file()
         if self.path.startswith("/api/iset-list"):
             return self._get_iset_list()
         if self.path.startswith("/api/iset/") and self.path.split("?", 1)[0].rstrip("/").endswith("/report"):
@@ -8387,6 +8499,68 @@ if __name__ == "__main__":
         _q = _up.parse_qs(_up.urlparse(self.path).query)
         _slug = (_q.get("investigation") or [None])[0]
         return self._json(_inputs_payload(WORKSPACE, _slug), 200)
+
+    def _get_data_sources(self):
+        """GET /api/data-sources — repo-wide data-source bundle.
+
+        Reads ``workspace.yaml dashboard.data_sources``, imports the declared
+        ``provider`` (module:func) in-process, and returns
+        ``{label, sources: [{key, path, category, kind, size_bytes}, ...]}``.
+        Returns ``{sources: []}`` when no provider is configured. Cached ~30s.
+        """
+        return self._json(_enumerate_data_sources(), 200)
+
+    def _get_data_source_file(self):
+        """GET /api/data-source-file?key=... — serve one bundle file.
+
+        Re-runs the provider enumeration and serves the bytes of the entry
+        whose ``key`` matches. The path comes ONLY from the enumeration (never
+        a client-supplied path), so there is no traversal surface. Text kinds
+        (tsv/csv/json/txt/fasta/yaml/md) are served inline; anything else is
+        offered as a download. 404 if the key is not in the enumeration.
+        """
+        import urllib.parse as _up
+        q = _up.parse_qs(_up.urlparse(self.path).query)
+        key = (q.get("key") or [None])[0]
+        if not key:
+            return self._json({"error": "missing ?key="}, 400)
+
+        payload = _enumerate_data_sources()
+        entry = next(
+            (s for s in payload.get("sources", []) if s.get("key") == key),
+            None,
+        )
+        if entry is None:
+            return self._json(
+                {"error": f"key not in data-source bundle: {key!r}"}, 404
+            )
+
+        path = Path(entry.get("path") or "")
+        if not path.is_file():
+            return self._json(
+                {"error": f"file for key {key!r} not found: {path}"}, 404
+            )
+
+        ext = path.suffix.lower()
+        mime, inline = _DATA_SOURCE_MIME.get(
+            ext, ("application/octet-stream", False)
+        )
+        try:
+            data = path.read_bytes()
+        except OSError as e:
+            return self._json({"error": f"read failed: {e}"}, 500)
+
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        if not inline:
+            self.send_header(
+                "Content-Disposition",
+                f'attachment; filename="{path.name}"',
+            )
+        self.end_headers()
+        self.wfile.write(data)
 
     def _get_iset_report(self):
         """GET /api/iset/<slug>/report — serve the per-investigation report."""

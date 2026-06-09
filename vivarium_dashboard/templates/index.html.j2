@@ -600,6 +600,18 @@
   </div>
 </div>
 
+<!-- Data-source file preview modal (repo-wide data sources, Inputs tab) -->
+<div id="modal-ds-preview" class="modal-overlay">
+  <div class="modal-box" style="max-width:900px">
+    <button class="modal-close" onclick="closeModal('modal-ds-preview')">&times;</button>
+    <h3 style="margin-bottom:8px">Data source: <code id="ds-preview-title" style="font-size:0.85em"></code></h3>
+    <div style="margin-bottom:8px">
+      <a id="ds-preview-download" class="action-btn" download>Download</a>
+    </div>
+    <pre id="ds-preview-body" style="max-height:560px;overflow:auto;background:#0f172a;color:#e2e8f0;padding:12px;border-radius:6px;font-size:0.8em;line-height:1.4;white-space:pre;margin:0"></pre>
+  </div>
+</div>
+
 <!-- ===== PAGE: REGISTRY ===== -->
 <section id="page-registry" class="page" data-page="registry">
   <h2 class="page-title">Registry</h2>
