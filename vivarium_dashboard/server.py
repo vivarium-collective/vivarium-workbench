@@ -746,6 +746,45 @@ def _apply_registry_include_filter(data: dict, ws_data: dict | None) -> None:
     data["registry_include"] = sorted(include)
 
 
+def _filter_catalog_modules(modules: list, ws_data: dict | None) -> list:
+    """Apply ``dashboard.registry.include`` to the package catalog (/api/catalog).
+
+    Same allow-list, same normalization as the registry filter
+    (``_apply_registry_include_filter``): dashes ↔ underscores, top-level
+    package segment only. A catalog module's package identity is matched
+    against any of its name variants — ``name`` (e.g. ``pbg-bioreactordesign``,
+    ``spatio-flux``), ``pypi_name``, and ``package`` (the snake_case import
+    name) — so e.g. ``viva-munk`` ↔ ``viva_munk`` and the workspace's own
+    first-party module (``kind: "workspace"``, ``name`` = slug = ``v2ecoli``)
+    all resolve correctly.
+
+    No-op when no include list is configured (returns ``modules`` unchanged →
+    current behavior: show the full catalog).
+    """
+    if not isinstance(modules, list):
+        return modules
+    include = _registry_include_pkgs(ws_data)
+    if include is None:
+        return modules
+
+    def _norm(s) -> str:
+        return str(s or "").strip().replace("-", "_").split(".")[0]
+
+    def _allowed(m: dict) -> bool:
+        if not isinstance(m, dict):
+            return False
+        variants = {_norm(m.get("name"))}
+        if m.get("pypi_name"):
+            variants.add(_norm(m.get("pypi_name")))
+        # `package` may be absent; fall back to name→snake_case like elsewhere.
+        pkg = m.get("package") or str(m.get("name") or "").replace("-", "_")
+        variants.add(_norm(pkg))
+        variants.discard("")
+        return bool(variants & include)
+
+    return [m for m in modules if _allowed(m)]
+
+
 def _save_upload(file_b64: str, target_path: Path) -> str:
     """Decode base64-encoded file content, write to target_path, return sha256."""
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -12398,6 +12437,14 @@ if __name__ == "__main__":
         ws_self = self._workspace_self_module(ws_data)
         if ws_self is not None:
             modules = [ws_self] + modules
+
+        # Optional display-only allow-list: workspace.yaml::dashboard.registry.include.
+        # When set, the Registry-tab catalog (marketplace) shows ONLY modules
+        # whose package is in the list — same allow-list / normalization as the
+        # /api/registry filter. No-op when unset → full catalog (current behavior).
+        # The workspace's own first-party module is included only when its slug
+        # (e.g. v2ecoli) is in the list.
+        modules = _filter_catalog_modules(modules, ws_data)
 
         return self._json({"modules": modules}, 200)
 
