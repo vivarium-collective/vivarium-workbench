@@ -6448,8 +6448,10 @@
                 var trigChip = p.source_trigger ? '<span class="di-trigger-chip">' + _h(p.source_trigger) + '</span>' : '';
                 var targets = p.target_mechanism_elements || [];
                 var prio = p.priority ? '<span class="di-prio-chip">priority: ' + _h(String(p.priority)) + '</span>' : '';
-                // Identify the proposal by id (preferred) or index for the seed call.
-                var pid = p.id != null ? String(p.id) : '';
+                // No custom "➕ Add to investigation" button: the enclosing
+                // Discovery implications section (id="study-<slug>-discovery")
+                // is a standard inline-feedback host, so reviewers annotate it
+                // with the 💬 affordance — reliable in the downloaded report.
                 return '<div class="di-fup-card">'
                   + '<div class="di-fup-head">'
                   +   '<strong class="di-fup-title">' + _h(p.title || '(untitled proposal)') + '</strong>'
@@ -6458,9 +6460,6 @@
                   + (p.proposed_experiment ? '<div class="di-fup-exp">' + _multiline(p.proposed_experiment) + '</div>' : '')
                   + (targets.length ? '<div class="di-fup-targets"><span class="di-lbl">Targets:</span> '
                       + targets.map(function(t){ return '<code>' + _h(t) + '</code>'; }).join(', ') + '</div>' : '')
-                  + '<button type="button" class="di-add-btn" '
-                  +   'onclick="event.stopPropagation(); _seedFollowupProposal(\'' + _esc(s.name) + '\', ' + JSON.stringify(pid) + ', ' + pi + ', this)">'
-                  +   '➕ Add to investigation</button>'
                   + '</div>';
               }).join('')
             + '</div>');
@@ -8202,8 +8201,8 @@
       +   '<span class="tb-title">' + _h(iset.title || iset.name) + '</span>'
       +   '<a href="#" onclick="window.scrollTo({top:0,behavior:\'smooth\'});return false;">Top</a>'
       /* "Acceptance" nav link removed alongside the section it pointed to */
-      +   ((iset.proposed_inputs && (iset.proposed_inputs.items || []).length)
-          ? '<a href="#proposed-inputs">Suggested additions</a>' : '')
+      /* "Suggested additions" nav link removed per request; the section itself
+         (id="proposed-inputs") stays in the body. */
       +   '<a href="#studies-heading">Studies</a>'
       +   '<a href="#references">References</a>'
       + '</nav>'
@@ -8295,13 +8294,11 @@
               }
               var actions;
               if (status === 'pending') {
-                var idJson = JSON.stringify(String(it.id || ''));
-                actions = '<div class="proposed-input-actions" style="margin-top:10px;display:flex;gap:8px">'
-                  + '<button type="button" onclick="event.stopPropagation(); _decideProposedInput(' + idJson + ', \'accept\', this)" '
-                  +   'style="font-size:0.82em;padding:4px 14px;border:1px solid #16a34a;background:#16a34a;color:#fff;border-radius:5px;cursor:pointer">Accept</button>'
-                  + '<button type="button" onclick="event.stopPropagation(); _decideProposedInput(' + idJson + ', \'decline\', this)" '
-                  +   'style="font-size:0.82em;padding:4px 14px;border:1px solid #dc2626;background:#fff;color:#b91c1c;border-radius:5px;cursor:pointer">Decline</button>'
-                  + '</div>';
+                // No custom Accept/Decline buttons: reviewers annotate this
+                // section with the standard inline-feedback 💬 affordance
+                // (the section id="proposed-inputs" is an annotatable host),
+                // which round-trips reliably in the downloaded file:// report.
+                actions = '';
               } else {
                 actions = '<div class="proposed-input-resolved muted small" style="margin-top:10px;font-style:italic">'
                   + (status === 'accepted'
@@ -8616,7 +8613,7 @@
       +   'var INV=' + JSON.stringify(invName) + ';'
       +   'var REPORT_ID=' + JSON.stringify(reportId || '') + ';'
       +   'var KEY="v2ecoli_feedback_"+INV+(REPORT_ID?("_"+REPORT_ID):"");'
-      +   'var ID_PATTERNS=[/^study-/,/^finding-/,/^acceptance$/,/^references$/,/^studies-heading$/,/^executive$/,/^decisions-needed$/,/^scientific-argument$/,/^biology$/];'
+      +   'var ID_PATTERNS=[/^study-/,/^finding-/,/^acceptance$/,/^references$/,/^studies-heading$/,/^executive$/,/^decisions-needed$/,/^scientific-argument$/,/^biology$/,/^proposed-inputs$/];'
       +   'var openEd=null;'
       +   'var memStore={};'
       +   'function safeGet(k){try{var v=(typeof localStorage!=="undefined")?localStorage.getItem(k):null;return (v==null?memStore[k]:v)||"";}catch(e){return memStore[k]||"";}}'
