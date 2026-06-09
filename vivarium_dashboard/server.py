@@ -858,6 +858,67 @@ def _filter_catalog_modules(modules: list, ws_data: dict | None) -> list:
     return [m for m in modules if _allowed(m)]
 
 
+def _composite_top_pkg(rec: dict) -> str:
+    """Derive a composite record's top-level package (normalized).
+
+    A composite record carries ``module`` (its dotted Python path, e.g.
+    ``v2ecoli.composites.foo`` or ``spatio_flux.composites.metabolism``) and
+    sometimes ``source`` (a workspace-relative or absolute path, e.g.
+    ``v2ecoli/composites/foo.composite.yaml``). The package is the first dotted
+    segment of ``module``; when ``module`` is empty, fall back to the first
+    path segment of ``source``. Dashes are normalized to underscores so
+    ``pbg-bioreactordesign`` ↔ ``pbg_bioreactordesign`` matches the allow-list.
+
+    Returns ``""`` when neither field yields a usable package root.
+    """
+    mod = str(rec.get("module") or "").strip()
+    if mod:
+        return mod.split(".")[0].replace("-", "_")
+    src = str(rec.get("source") or "").strip()
+    if src:
+        segs = [s for s in src.replace("\\", "/").split("/") if s.strip()]
+        # Installed-package sources are absolute paths whose package dir is the
+        # segment immediately before ``composites/`` (e.g.
+        # ``/…/site-packages/spatio_flux/composites/x.yaml`` → ``spatio_flux``).
+        # Workspace-relative sources start at the package dir itself
+        # (``v2ecoli/composites/foo.yaml`` → ``v2ecoli``). Prefer the
+        # before-``composites`` segment; otherwise fall back to the first.
+        for i, seg in enumerate(segs):
+            if seg == "composites" and i > 0:
+                return segs[i - 1].split(".")[0].replace("-", "_")
+        return segs[0].split(".")[0].replace("-", "_") if segs else ""
+    return ""
+
+
+def _filter_composites(records: list, ws_data: dict | None) -> list:
+    """Apply the per-workspace registry allow-list to a list of composite dicts.
+
+    Keeps a record when EITHER it is flagged ``workspace_local: True`` (the
+    workspace's own composites are always shown) OR its top-level package (see
+    :func:`_composite_top_pkg`) is in the normalized
+    ``dashboard.registry.{include,modules}`` allow-list. Reuses
+    :func:`_registry_include_pkgs` so dash/underscore normalization matches the
+    process-registry and catalog filters.
+
+    No-op when no allow-list is configured (``None``) → returns ``records``
+    unchanged, preserving the historical "show every installed package" view.
+    """
+    if not isinstance(records, list):
+        return records
+    include = _registry_include_pkgs(ws_data)
+    if include is None:
+        return records
+
+    def _keep(rec: dict) -> bool:
+        if not isinstance(rec, dict):
+            return False
+        if rec.get("workspace_local") is True:
+            return True
+        return _composite_top_pkg(rec) in include
+
+    return [r for r in records if _keep(r)]
+
+
 def _build_override_catalog(override: list, default_modules: list) -> list:
     """Build a catalog from ``dashboard.registry.modules`` (the override).
 
@@ -11848,6 +11909,12 @@ if __name__ == "__main__":
                     mod == pkg or mod.startswith(ws_prefix_dot)
                 )
                 out.append(rec)
+            # Per-workspace registry allow-list: when configured, hide
+            # composites from packages NOT in dashboard.registry.{modules,
+            # include} (e.g. spatio_flux / pbg_copasi transitive deps), but
+            # always keep the workspace's own (workspace_local) composites.
+            # No-op when no allow-list is set → full multi-package list.
+            out = _filter_composites(out, ws_data)
             return self._json({"composites": out, "workspace_package": pkg}, 200)
         except Exception as e:
             return self._json({"composites": [], "error": str(e)}, 200)
@@ -12184,6 +12251,21 @@ if __name__ == "__main__":
             all_comps = discover_all_composites(WORKSPACE, pkg)
         except Exception:
             all_comps = {}
+        # Per-workspace registry allow-list (same as /api/composites): hide
+        # composites from non-allow-listed packages from the manifest summary.
+        # The workspace's own package is always in the include set, so its
+        # composites survive the package-root check. No-op when unset.
+        ws_for_filter = None
+        try:
+            ws_for_filter = yaml.safe_load(
+                (WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")
+            ) or {}
+        except Exception:
+            ws_for_filter = None
+        if ws_for_filter is not None:
+            kept = _filter_composites(list(all_comps.values()), ws_for_filter)
+            kept_ids = {c.get("id") for c in kept if isinstance(c, dict)}
+            all_comps = {cid: c for cid, c in all_comps.items() if cid in kept_ids}
         out = []
         for cid, c in sorted(all_comps.items()):
             viz_count = _count_viz_steps_in_state(c.get("state") or {})
