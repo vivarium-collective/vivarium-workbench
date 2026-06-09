@@ -784,6 +784,67 @@ def _registry_include_pkgs(ws_data: dict | None) -> set[str] | None:
     return pkgs or None
 
 
+def _build_reexport_map(include: set[str]) -> dict[str, str]:
+    """Map re-exported classes → the allow-listed package that re-exports them.
+
+    For each allow-listed package, import it and scan its top-level namespace
+    (``dir(mod)``) for classes whose ``__module__`` top-level segment is a
+    DIFFERENT package. Those are re-exports: a class defined elsewhere (e.g.
+    ``spatio_flux.visualizations.field_heatmap.FieldHeatmap``) that the
+    allow-listed package surfaces as part of its own API (e.g. exposed as
+    ``viva_munk.FieldHeatmap``).
+
+    The returned map is keyed by the class's full definition address
+    (``def_module + '.' + qualname``, e.g.
+    ``spatio_flux.visualizations.field_heatmap.FieldHeatmap``) AND, as a
+    looser fallback, by ``(def_top_pkg, class_name)`` joined as
+    ``"<def_top_pkg>::<name>"``. The value is the re-exporting package's
+    normalized name (e.g. ``viva_munk``).
+
+    Imports are guarded with try/except — a single bad import never blanks the
+    registry; the worst case is a class is not surfaced. The allow-listed set is
+    small (a handful of packages) so importing them here is cheap.
+    """
+    import importlib
+    import inspect
+
+    # Framework infrastructure packages are intentionally hidden from the
+    # filtered registry; do NOT resurrect them as re-exports just because an
+    # allow-listed package re-imports e.g. process_bigraph.Composite into its
+    # namespace. Mirrors _FRAMEWORK_PKGS in the registry subprocess.
+    _FRAMEWORK_PKGS = {
+        "process_bigraph", "bigraph_schema", "bigraph_viz",
+        "pbg_superpowers", "vivarium_dashboard",
+    }
+
+    reexports: dict[str, str] = {}
+    for pkg in sorted(include):
+        try:
+            mod = importlib.import_module(pkg)
+        except Exception:
+            continue
+        for attr in dir(mod):
+            try:
+                obj = getattr(mod, attr)
+            except Exception:
+                continue
+            if not inspect.isclass(obj):
+                continue
+            def_mod = getattr(obj, "__module__", "") or ""
+            def_top = def_mod.split(".")[0].replace("-", "_")
+            if not def_top or def_top == pkg:
+                continue  # defined in the re-exporting package itself → not a re-export
+            if def_top in include:
+                continue  # already surfaced by its own allow-listed package
+            if def_top in _FRAMEWORK_PKGS:
+                continue  # framework infra stays hidden; not a workspace re-export
+            qualname = getattr(obj, "__qualname__", attr) or attr
+            full_addr = f"{def_mod}.{qualname}"
+            reexports[full_addr] = pkg
+            reexports[f"{def_top}::{qualname}"] = pkg
+    return reexports
+
+
 def _apply_registry_include_filter(data: dict, ws_data: dict | None) -> None:
     """Filter ``data['processes']`` to only classes from allow-listed packages.
 
@@ -792,6 +853,16 @@ def _apply_registry_include_filter(data: dict, ws_data: dict | None) -> None:
     ``name`` if it is dotted) against the normalized
     ``dashboard.registry.include`` set. Dashes/underscores are normalized on
     both sides (``pbg-bioreactordesign`` ↔ ``pbg_bioreactordesign``).
+
+    Re-exports are honored: a class DEFINED in a non-allow-listed package but
+    RE-EXPORTED in an allow-listed package's top-level namespace (e.g.
+    ``viva_munk.FieldHeatmap``, defined in ``spatio_flux``) survives the filter
+    and is re-attributed to the re-exporting package — its ``source`` becomes
+    ``in_workspace`` and its top-level package tag flips to the re-exporter, so
+    the UI groups it under (e.g.) viva_munk rather than spatio_flux. The true
+    definition module is preserved in ``aliases`` so the attribution is not
+    misleading. Classes from a non-allow-listed package that are NOT re-exported
+    stay filtered out.
 
     No-op when no include list is configured (current behavior: show all).
     Allow-listed packages surface regardless of in_workspace/framework/
@@ -813,8 +884,54 @@ def _apply_registry_include_filter(data: dict, ws_data: dict | None) -> None:
             mod = str(entry.get("name") or "")
         return mod.split(".")[0].replace("-", "_")
 
+    # Build the re-export map (guarded so a bad import never blanks the grid).
+    try:
+        reexports = _build_reexport_map(include)
+    except Exception:
+        reexports = {}
+
+    def _reexporter(entry: dict) -> str | None:
+        """Return the allow-listed pkg that re-exports this entry, else None."""
+        if not reexports:
+            return None
+        addr = str(entry.get("address") or "").strip()
+        if addr and addr in reexports:
+            return reexports[addr]
+        # Looser match: definition top-level package + class name. The class
+        # name is the last segment of the address (or the entry name).
+        def_top = _top_pkg(entry)
+        cls_name = addr.split(".")[-1] if addr else str(entry.get("name") or "")
+        key = f"{def_top}::{cls_name}"
+        return reexports.get(key)
+
     procs = data.get("processes") or []
-    data["processes"] = [p for p in procs if isinstance(p, dict) and _top_pkg(p) in include]
+    kept: list[dict] = []
+    for p in procs:
+        if not isinstance(p, dict):
+            continue
+        own_pkg = _top_pkg(p)
+        if own_pkg in include:
+            kept.append(p)
+            continue
+        reexporter = _reexporter(p)
+        if reexporter is not None:
+            # Re-attribute to the re-exporting package: keep the true definition
+            # module in aliases (so it is not misleading), flip the address's
+            # top-level segment and source classification to the re-exporter.
+            true_addr = str(p.get("address") or "")
+            aliases = list(p.get("aliases") or [])
+            if true_addr and true_addr not in aliases:
+                aliases.append(true_addr)
+            p["aliases"] = aliases
+            p["reexported_from"] = own_pkg
+            p["source"] = "in_workspace"
+            # Re-tag the address's top-level package so _top_pkg / the UI group
+            # it under the re-exporter. The class is re-exported as
+            # ``<reexporter>.<ClassName>``.
+            cls_name = true_addr.split(".")[-1] if true_addr else str(p.get("name") or "")
+            p["address"] = f"{reexporter}.{cls_name}"
+            kept.append(p)
+    data["processes"] = kept
     # Record what was applied for debugging / frontend awareness.
     data["registry_include"] = sorted(include)
 
