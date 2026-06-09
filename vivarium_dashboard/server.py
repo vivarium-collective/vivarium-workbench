@@ -518,6 +518,11 @@ except Exception as e:
         # treat the emitter-name match permissively (case-insensitive substring
         # against the class name, e.g. 'parquet' → ParquetEmitter).
         _mark_default_emitter(data, ws_data)
+        # Optional display-only allow-list: workspace.yaml::dashboard.registry.include.
+        # When set, the Registry tab shows ONLY classes whose originating package
+        # is in the list (discovery is unchanged). No-op when unset → current
+        # behavior (show everything).
+        _apply_registry_include_filter(data, ws_data)
     except Exception as e:
         data = {"error": str(e), "processes": [], "types": []}
 
@@ -554,6 +559,83 @@ def _mark_default_emitter(data: dict, ws_data: dict | None) -> None:
         p["is_workspace_default"] = bool(needle) and (needle in name.lower())
     # Expose the resolved value at the top level for convenience / debugging.
     data["default_emitter"] = default_emitter or None
+
+
+def _dashboard_config(ws_data: dict | None) -> dict:
+    """Return the ``dashboard:`` block from workspace.yaml as a dict (or {}).
+
+    The block is the single source for per-workspace dashboard customization::
+
+        dashboard:
+          name: "sms-ecoli dashboard"        # header/brand + <title>
+          logo: assets/sms-ecoli-logo.png    # workspace-relative logo file
+          registry:
+            include: [pkg-a, pkg-b]           # display allow-list (by package)
+
+    All keys optional; missing block → {} → current default behavior.
+    """
+    if not isinstance(ws_data, dict):
+        return {}
+    dash = ws_data.get("dashboard")
+    return dash if isinstance(dash, dict) else {}
+
+
+def _registry_include_pkgs(ws_data: dict | None) -> set[str] | None:
+    """Resolve ``dashboard.registry.include`` to a set of normalized top-level
+    package names (dashes → underscores), or ``None`` when unset.
+
+    ``None`` means "no filter" (show everything — current behavior); an empty
+    list also means no filter (treated as unset, to avoid an accidental
+    blank registry).
+    """
+    dash = _dashboard_config(ws_data)
+    reg = dash.get("registry")
+    if not isinstance(reg, dict):
+        return None
+    include = reg.get("include")
+    if not isinstance(include, list) or not include:
+        return None
+    pkgs = {
+        str(p).strip().replace("-", "_").split(".")[0]
+        for p in include
+        if str(p).strip()
+    }
+    return pkgs or None
+
+
+def _apply_registry_include_filter(data: dict, ws_data: dict | None) -> None:
+    """Filter ``data['processes']`` to only classes from allow-listed packages.
+
+    Display-only: matches each entry's originating top-level package (derived
+    from its ``address`` = ``module.qualname``, falling back to the entry
+    ``name`` if it is dotted) against the normalized
+    ``dashboard.registry.include`` set. Dashes/underscores are normalized on
+    both sides (``pbg-bioreactordesign`` ↔ ``pbg_bioreactordesign``).
+
+    No-op when no include list is configured (current behavior: show all).
+    Allow-listed packages surface regardless of in_workspace/framework/
+    environment_only classification.
+    """
+    if not isinstance(data, dict):
+        return
+    include = _registry_include_pkgs(ws_data)
+    if include is None:
+        return
+
+    def _top_pkg(entry: dict) -> str:
+        addr = str(entry.get("address") or "")
+        mod = addr
+        # address is "module.path.ClassName"; the module is everything we have,
+        # but the qualname tail is the class. The top-level package is just the
+        # first dotted segment, so we can take it directly from the address.
+        if not mod:
+            mod = str(entry.get("name") or "")
+        return mod.split(".")[0].replace("-", "_")
+
+    procs = data.get("processes") or []
+    data["processes"] = [p for p in procs if isinstance(p, dict) and _top_pkg(p) in include]
+    # Record what was applied for debugging / frontend awareness.
+    data["registry_include"] = sorted(include)
 
 
 def _save_upload(file_b64: str, target_path: Path) -> str:
