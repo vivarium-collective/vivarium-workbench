@@ -359,7 +359,7 @@ def _read_parquet_hive(
                 investigation_slug = first.get("investigation_slug") or None
     except Exception as e:  # noqa: BLE001
         warnings.warn(
-            f"simulations_index: parquet config read failed at {exp_dir}: {e}"
+            f"simulations_index: parquet config read failed at {hive_dir}: {e}"
         )
 
     # Fall back to the study's owning investigation when the parquet metadata

@@ -305,6 +305,15 @@ for _old, _new in _POST_STUDY_ALIASES.items():
         _POST_ROUTE_MAP[_new] = _POST_ROUTE_MAP[_old]
 del _old, _new  # clean up loop variables from module scope
 
+_DELETE_ROUTE_MAP: dict[str, str] = {
+    "/api/simulation":               "_delete_simulation",
+    "/api/simulation-run":           "_delete_simulation_run",
+    "/api/visualization":            "_delete_visualization",
+    "/api/investigation-composite":  "_delete_investigation_composite",
+    "/api/investigation-comparison": "_delete_investigation_comparison",
+    "/api/investigation-group":      "_delete_investigation_group",
+}
+
 
 def _get_registry_data(bypass_cache: bool = False) -> dict:
     """Return registry data from build_core() subprocess, with 30s caching.
@@ -5291,8 +5300,8 @@ class Handler(BaseHTTPRequestHandler):
         # other route that the client appends params to still resolves.
         static_path = self.path.split("?", 1)[0]
         rel = static_path.lstrip("/")
-        # Refuse path traversal and absolute paths.
-        if ".." in rel.split("/") or rel.startswith("/"):
+        # Refuse path traversal (rel is already lstrip-ed of leading "/").
+        if ".." in rel.split("/"):
             self.send_response(403); self.end_headers(); return
         # Package-bundled static first (style.css, walkthrough.js, vivarium-logo.png,
         # render-helpers.js, client.js); then workspace tree (for files the
@@ -5339,18 +5348,10 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError as e:
             return self._json({"error": f"invalid JSON: {e}"}, 400)
 
-        route_map = {
-            "/api/simulation":    self._delete_simulation,
-            "/api/simulation-run": self._delete_simulation_run,
-            "/api/visualization": self._delete_visualization,
-            "/api/investigation-composite": self._delete_investigation_composite,
-            "/api/investigation-comparison": self._delete_investigation_comparison,
-            "/api/investigation-group":      self._delete_investigation_group,
-        }
-        handler_fn = route_map.get(self.path)
-        if handler_fn is None:
+        method_name = _DELETE_ROUTE_MAP.get(self.path)
+        if method_name is None:
             return self._json({"error": "not found"}, 404)
-        handler_fn(body)
+        getattr(self, method_name)(body)
 
     # ------------------------------------------------------------------
     # POST handlers
