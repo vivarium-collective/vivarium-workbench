@@ -2424,7 +2424,7 @@
     var existing = document.getElementById('ws-dirty-panel');
     if (existing) existing.remove();
     if (!d || !d.files || d.files.length === 0) return;
-    var anchor = document.getElementById('viv-topbar-actions');
+    var anchor = document.getElementById('viv-content');
     if (!anchor) return;
     var div = document.createElement('div');
     div.id = 'ws-dirty-panel';
@@ -2440,7 +2440,7 @@
         '<button class="ws-btn" onclick="_refreshGitStatus(); _toggleDirtyPanel()">Refresh</button> ' +
         '<button class="ws-btn" onclick="_toggleDirtyPanel()">Close</button>' +
       '</div>';
-    anchor.insertAdjacentElement('afterend', div);
+    anchor.insertAdjacentElement('beforebegin', div);
   }
 
   function _commitDirtyAll() {
