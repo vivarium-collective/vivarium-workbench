@@ -1450,6 +1450,17 @@ def _study_detail_spec(name: str):
         except Exception:  # noqa: BLE001
             pass
 
+        # Stage-3c: tracked feedback index with per-item status
+        # (open / addressed / dismissed).  Pure Python in pbg-superpowers —
+        # no AI dependency.  Best-effort; empty result on any error.
+        try:
+            from pbg_superpowers.feedback_tracking import study_feedback_tracked
+            ft = study_feedback_tracked(WORKSPACE, name)
+            # Always attach so the SPA can render the panel (empty → no items).
+            spec["feedback_tracked"] = ft
+        except Exception:  # noqa: BLE001
+            pass
+
         # Derive-on-read status (round-2 friction #2): compute the observable
         # status axes from runs.db so the report shows what actually ran, and
         # flag any stored axis (or legacy planning headline) that contradicts
