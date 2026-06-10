@@ -8652,22 +8652,9 @@ if __name__ == "__main__":
             if condition == "complete":
                 return status == "complete"
             if condition == "tests-passed":
-                tests = parent.get("tests")
-                # New v4 shape: tests is a list of {name, status, ...}.
-                if isinstance(tests, list):
-                    statuses = [
-                        (t.get("status") or "").lower()
-                        for t in tests if isinstance(t, dict)
-                    ]
-                    if not statuses:
-                        return False
-                    return all("pass" in s for s in statuses)
-                # Legacy v3/v4-extras shape: tests is a mapping with last_results.
-                last = (tests or {}).get("last_results") or {}
-                summary = last.get("summary") or {}
-                passed = summary.get("passed", 0) or 0
-                failed = summary.get("failed", 0) or 0
-                return failed == 0 and passed > 0
+                from pbg_superpowers import study_status
+                counts = study_status.count_test_outcomes(parent, parent.get("runs"))
+                return counts["fail"] == 0 and counts["pass"] > 0
             return False
 
         out = []
