@@ -6711,7 +6711,8 @@ class Handler(BaseHTTPRequestHandler):
         simulation_name = (body.get("simulation") or "").strip() or None
 
         if viz_class:
-            known = {c["name"] for c in self._list_visualization_classes()}
+            known = {c["name"] for c in self._list_visualization_classes()
+                     if c.get("kind") != "analysis"}
             if viz_class not in known:
                 return self._json(
                     {"error": f"class '{viz_class}' is not a registered Visualization. "
@@ -9955,7 +9956,29 @@ if __name__ == "__main__":
                 doc = (cls.__doc__ or "").strip().split("\n", 1)[0] if cls.__doc__ else ""
             except Exception:
                 doc = ""
-            out.append({"address": f"local:{name}", "name": name, "doc": doc})
+            out.append({"address": f"local:{name}", "name": name, "doc": doc, "kind": "visualization"})
+
+        # Append Analysis classes from v2ecoli (process-bigraph Steps).
+        # Guarded import — dashboard is workspace-agnostic; if v2ecoli is not
+        # installed the analysis section is simply absent.
+        try:
+            import v2ecoli.workflow.analyses  # noqa: F401  (import-time registration)
+            from v2ecoli.workflow.analysis import ANALYSIS_REGISTRY, Analysis
+            for _name, _cls in sorted(ANALYSIS_REGISTRY.items()):
+                if isinstance(_cls, type) and issubclass(_cls, Analysis):
+                    try:
+                        _doc = (_cls.__doc__ or "").strip().split("\n")[0]
+                    except Exception:
+                        _doc = ""
+                    out.append({
+                        "address": f"local:{_cls.__module__}.{_cls.__qualname__}",
+                        "name": _name,
+                        "doc": _doc,
+                        "kind": "analysis",
+                    })
+        except Exception:
+            pass  # no analysis registry importable in this workspace — fine
+
         return out
 
     def _get_ui_config(self):
