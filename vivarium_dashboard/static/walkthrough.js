@@ -2,6 +2,20 @@
 (function () {
   "use strict";
 
+  // Module-level so EVERY render function can call it. It was previously only
+  // defined nested inside the investigation-report builder, but called from
+  // sibling scopes (tick / study-card / v4 renderers) — which threw
+  // "ReferenceError: Can't find variable: _humanizeStudyName" and failed the
+  // investigation report load (fixed 2026-06-10). Hoisted here = visible IIFE-wide.
+  function _humanizeStudyName(slug) {
+    var m = /^([a-z]+-\d+[a-z]*)-(.+)$/.exec(slug);
+    if (!m) return {chip: '', title: String(slug).replace(/-/g, ' ')};
+    var rest = m[2].replace(/-/g, ' ');
+    rest = rest.charAt(0).toUpperCase() + rest.slice(1);
+    if (rest.length > 60) rest = rest.slice(0, 57) + '…';
+    return {chip: m[1], title: rest};
+  }
+
   // -------------------------------------------------------------------------
   // Generic modal helpers
   // -------------------------------------------------------------------------
