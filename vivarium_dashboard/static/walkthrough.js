@@ -5312,11 +5312,22 @@
           .then(function(r) { return r.ok ? r.json() : {generation: null}; })
           .then(function(j) { return (j && j.generation) || null; })
           .catch(function() { return null; });
+        // Workspace GitHub repo (owner/name) — injected into the exported
+        // report's inline-feedback widget so its "Open GitHub issue" button
+        // pre-fills against the right repo with no reviewer prompt. Best-
+        // effort: null when the workspace has no GitHub origin (widget then
+        // falls back to host-detection / a one-time prompt).
+        var ghRepoFetch = fetch('/api/github-repo')
+          .then(function(r) { return r.ok ? r.json() : {repo: null}; })
+          .then(function(j) { return (j && j.repo) || null; })
+          .catch(function() { return null; });
         return Promise.all([Promise.all(studyFetches), bibFetch,
-                            Promise.all(chartFetches), genFetch]).then(function(arr) {
+                            Promise.all(chartFetches), genFetch,
+                            ghRepoFetch]).then(function(arr) {
           var chartsByStudy = {};
           arr[2].forEach(function(c) { chartsByStudy[c.name] = c.charts; });
           var generation = arr[3];
+          var ghRepo = arr[4];
           // Second pass: now that we have the specs, fetch each study's
           // embed_visualizations URLs so the downloaded report can inline
           // them as <iframe srcdoc="...">. This makes the file truly
@@ -5351,14 +5362,15 @@
             });
             return {iset: iset, specs: specs, bibEntries: arr[1],
                     chartsByStudy: chartsByStudy, embedsByStudy: embedsByStudy,
-                    generation: generation};
+                    generation: generation, ghRepo: ghRepo};
           });
         });
       })
       .then(function(bundle) {
         var html = _buildInvestigationReportHtml(bundle.iset, bundle.specs,
                                                   bundle.bibEntries, bundle.chartsByStudy,
-                                                  bundle.embedsByStudy, bundle.generation);
+                                                  bundle.embedsByStudy, bundle.generation,
+                                                  bundle.ghRepo);
         var dateStr = new Date().toISOString().slice(0, 10);
         var filename = 'investigation-' + name + '-' + dateStr + '.html';
         _triggerDownload(filename, html, 'text/html');
@@ -5506,11 +5518,12 @@
   };
 
   // Construct the report's HTML body from the investigation + per-study specs.
-  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy, generation) {
+  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy, generation, ghRepo) {
     bibEntries = bibEntries || [];
     chartsByStudy = chartsByStudy || {};
     embedsByStudy = embedsByStudy || {};
     generation = generation || null;
+    ghRepo = ghRepo || null;
     var bibByKey = {};
     bibEntries.forEach(function(e) { bibByKey[e.key] = e; });
     var now = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
@@ -8782,7 +8795,8 @@
       + _feedbackWidgetCss()
       + _feedbackWidgetJs(iset.name || 'investigation',
                           'rpt-' + new Date().toISOString()
-                                     .slice(0, 19).replace(/[-:T]/g, ''))
+                                     .slice(0, 19).replace(/[-:T]/g, ''),
+                          ghRepo)
 
       + '</body></html>';
   }
@@ -8812,12 +8826,14 @@
       + '.fb-text{margin-top:2px;white-space:pre-wrap}'
       + '.fb-del{position:absolute;top:4px;right:6px;background:none;border:none;color:#a8a29e;cursor:pointer;font-size:14px;padding:0;line-height:1}'
       + '.fb-del:hover{color:#dc2626}'
+      + '.fb-gh-entry{margin-top:6px;background:#1f883d;color:#fff;border:1px solid #1a7f37;border-radius:4px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer;line-height:1.2}'
+      + '.fb-gh-entry:hover{background:#1a7f37}'
       + '.fb-bar{position:fixed;bottom:16px;right:16px;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,.15);border-radius:6px;background:#fff}'
       + '.fb-bar-btn{background:#f59e0b;color:#1f2937;border:1px solid #d97706;padding:10px 14px;font-weight:600;border-radius:6px;cursor:pointer;font-size:14px}'
       + '.fb-bar-btn:hover{background:#fde68a}'
       + '.fb-bar-btn[disabled]{opacity:.5;cursor:not-allowed}'
       + '.fb-count{font-weight:400;opacity:.75;margin-left:4px}'
-      + '@media print{.fb-add,.fb-editor,.fb-bar{display:none}}'
+      + '@media print{.fb-add,.fb-editor,.fb-bar,.fb-gh-entry{display:none}}'
       + '</style>';
   }
 
@@ -8836,11 +8852,16 @@
   //      blocks) that clip or hide the editor entirely.
   //   2. A single global editor means clicking a different 💬 swaps the
   //      anchor cleanly instead of opening N stacked editors.
-  function _feedbackWidgetJs(invName, reportId) {
+  function _feedbackWidgetJs(invName, reportId, ghRepo) {
     return '<script>'
       + '(function(){'
       +   'var INV=' + JSON.stringify(invName) + ';'
       +   'var REPORT_ID=' + JSON.stringify(reportId || '') + ';'
+      // Repo (owner/name) resolved server-side at generation time from the
+      // workspace git remote (fallback workspace.yaml dashboard.github_repo).
+      // null when the workspace has no GitHub origin — the widget then
+      // host-detects or prompts once.
+      +   'var GH_REPO=' + JSON.stringify(ghRepo || '') + ';'
       +   'var KEY="v2ecoli_feedback_"+INV+(REPORT_ID?("_"+REPORT_ID):"");'
       +   'var ID_PATTERNS=[/^study-/,/^finding-/,/^acceptance$/,/^references$/,/^studies-heading$/,/^executive$/,/^decisions-needed$/,/^scientific-argument$/,/^biology$/,/^proposed-inputs$/];'
       +   'var openEd=null;'
@@ -8872,10 +8893,16 @@
       +              '<button type=\\"button\\" class=\\"fb-del\\" data-i=\\""+i+"\\" title=\\"Delete\\">×</button>'
       +              '<div class=\\"fb-meta\\">"+esc(e.author||"evaluator")+" · "+esc(e.ts)+"</div>'
       +              '<div class=\\"fb-text\\">"+esc(e.text)+"</div>'
+      // Per-annotation one-click GitHub issue (label=feedback, titled+bodied
+      // with this section + this annotation). Hidden when no repo is known.
+      +              '<button type=\\"button\\" class=\\"fb-gh-entry\\" data-i=\\""+i+"\\" title=\\"File this comment as a GitHub issue\\">\\u2197 Open GitHub issue</button>'
       +              '</div>";'
       +     '}).join("");'
       +     'box.querySelectorAll(".fb-del").forEach(function(b){'
       +       'b.addEventListener("click",function(ev){ev.preventDefault();ev.stopPropagation();var i=parseInt(b.dataset.i,10);var d=load();(d[sid]||[]).splice(i,1);if(!(d[sid]||[]).length)delete d[sid];save(d);renderExisting(host,sid);updateBadges();updateBarCount();});'
+      +     '});'
+      +     'box.querySelectorAll(".fb-gh-entry").forEach(function(b){'
+      +       'b.addEventListener("click",function(ev){ev.preventDefault();ev.stopPropagation();var i=parseInt(b.dataset.i,10);var e=(load()[sid]||[])[i];if(e)openGhIssueForSection(sid,e.text,e.author);});'
       +     '});'
       +   '}'
       +   'function closeEditor(){if(openEd){openEd.remove();openEd=null;}}'
@@ -8976,12 +9003,36 @@
       // GitHub submit helpers. Resolve owner/repo from a github.io host
       // (vivarium-collective.github.io/<repo>/…), else ask once and remember.
       +   'function ghRepo(){'
+      // 1) repo injected at generation time from the workspace git remote.
+      +     'if(GH_REPO)return GH_REPO;'
+      // 2) github.io host detection (vivarium-collective.github.io/<repo>/…).
       +     'try{var h=location.hostname,p=location.pathname.split("/").filter(Boolean);'
       +       'if(/\\.github\\.io$/.test(h)&&p.length)return h.split(".")[0]+"/"+p[0];}catch(e){}'
+      // 3) remembered prompt answer, then a one-time prompt.
       +     'var v=safeGet("fb_gh_repo");if(v)return v;'
       +     'var ans=prompt("GitHub repo for this feedback (owner/repo):","");'
       +     'if(ans){ans=ans.replace(/^https?:\\/\\/github.com\\//,"").replace(/\\.git$/,"").replace(/\\/+$/,"");safeSet("fb_gh_repo",ans);}'
       +     'return ans||"";'
+      +   '}'
+      // Per-section GitHub issue: file ONE annotation as a focused issue,
+      // titled with the section id and bodied with the annotation text, a
+      // short quote of the section, and a deep-link anchor back to it.
+      +   'function sectionQuote(sid){try{var el=document.getElementById(sid);if(!el)return "";'
+      +     'var clone=el.cloneNode(true);clone.querySelectorAll(".fb-add,.fb-editor,.fb-entries,.fb-bar,script,style").forEach(function(n){n.remove();});'
+      +     'var t=(clone.textContent||"").replace(/\\s+/g," ").trim();return t.slice(0,280)+(t.length>280?"\\u2026":"");}catch(e){return "";}}'
+      +   'function openGhIssueForSection(sid,text,author){'
+      +     'var repo=ghRepo();if(!repo)return;'
+      +     'var anchor=location.origin+location.pathname+"#"+encodeURIComponent(sid);'
+      +     'var quote=sectionQuote(sid);'
+      +     'var body="Reviewer feedback on the **"+INV+"** investigation report.\\n\\n"'
+      +       '+"**Section:** `"+sid+"`\\n"'
+      +       '+(author?("**Reviewer:** "+author+"\\n"):"")'
+      +       '+"\\n**Feedback:**\\n> "+String(text||"").replace(/\\n/g,"\\n> ")+"\\n"'
+      +       '+(quote?("\\n**Section context:**\\n> "+quote+"\\n"):"")'
+      +       '+"\\n[Open this section in the report]("+anchor+")\\n";'
+      +     'var title="Reviewer feedback ["+INV+"]: "+sid;'
+      +     'var url="https://github.com/"+repo+"/issues/new?labels=feedback&title="+encodeURIComponent(title)+"&body="+encodeURIComponent(body);'
+      +     'var w=window.open(url,"_blank","noopener");if(!w)location.href=url;'
       +   '}'
       +   'function fbYaml(){var meta={investigation:INV,report_id:REPORT_ID,generated_at:new Date().toISOString(),page_title:document.title,source_url:location.href};return serialiseYaml(meta,load());}'
       +   'function openGhIssue(){if(!countAll()){alert("No feedback yet — click the 💬 icons first.");return;}var repo=ghRepo();if(!repo)return;'
@@ -12440,11 +12491,15 @@
             .then(function (j) { return {name: s.name, charts: j.charts || []}; })
             .catch(function () { return {name: s.name, charts: []}; });
         });
-        return Promise.all([Promise.all(studyFetches), bibFetch, Promise.all(chartFetches)])
+        var ghRepoFetch = fetch('/api/github-repo')
+          .then(function (r) { return r.ok ? r.json() : {repo: null}; })
+          .then(function (j) { return (j && j.repo) || null; })
+          .catch(function () { return null; });
+        return Promise.all([Promise.all(studyFetches), bibFetch, Promise.all(chartFetches), ghRepoFetch])
           .then(function (arr) {
             var chartsByStudy = {};
             arr[2].forEach(function (c) { chartsByStudy[c.name] = c.charts; });
-            return _buildInvestigationReportHtml(iset, arr[0], arr[1], chartsByStudy);
+            return _buildInvestigationReportHtml(iset, arr[0], arr[1], chartsByStudy, undefined, null, arr[3]);
           });
       });
   }

@@ -6072,6 +6072,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_references_bib()
         if self.path.startswith("/api/generation"):
             return self._get_generation()
+        if self.path.startswith("/api/github-repo"):
+            return self._get_github_repo()
         if self.path.startswith("/api/investigation-composite-doc"):
             return self._get_investigation_composite_doc()
         if self.path.startswith("/api/investigation/"):
@@ -9002,6 +9004,43 @@ if __name__ == "__main__":
             "label": g.label,
             "n_runs": len(g.runs),
         }}, 200)
+
+    def _get_github_repo(self):
+        """GET /api/github-repo — the workspace's GitHub repo as ``owner/name``.
+
+        Resolution order (first hit wins):
+          1. ``git remote get-url origin`` parsed for github.com (the live
+             checkout's actual remote — authoritative for v2ecoli =
+             ``vivarium-collective/v2ecoli``).
+          2. workspace.yaml ``dashboard.github_repo`` / ``dashboard.repository``.
+
+        Returns ``{repo: "owner/name"}`` or ``{repo: null}`` when neither
+        resolves. Backs the report's inline-feedback "Open GitHub issue"
+        button so the exported HTML can pre-fill issues against the right
+        repo without prompting the reviewer. Best-effort: never 500s.
+        """
+        repo = None
+        try:
+            from vivarium_dashboard.lib.report import _detect_github_repo
+            repo = _detect_github_repo(WORKSPACE)
+        except Exception:  # noqa: BLE001
+            repo = None
+        if not repo:
+            try:
+                ws_data = yaml.safe_load(
+                    (WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")
+                ) or {}
+                dash = _dashboard_config(ws_data)
+                cand = dash.get("github_repo") or dash.get("repository")
+                if isinstance(cand, str) and cand.strip():
+                    # Normalize a full URL down to owner/name.
+                    import re as _re
+                    cand = cand.strip()
+                    m = _re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", cand)
+                    repo = m.group(1) if m else cand.replace(".git", "").strip("/")
+            except Exception:  # noqa: BLE001
+                repo = None
+        return self._json({"repo": repo or None}, 200)
 
     def _get_references_bib(self):
         """GET /api/references-bib — parsed contents of references/papers.bib.
