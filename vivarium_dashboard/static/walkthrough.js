@@ -428,6 +428,10 @@
         _loadRegistry(false);
       }
     }
+    // Analyses page: always refresh from /api/visualization-classes on navigate.
+    if (pageId === 'visualizations') {
+      _loadAnalysesPage();
+    }
     if (pageId === 'simulation-setup') {
       _loadComposites();
     }
@@ -1040,6 +1044,82 @@
   }
   window._filterVizCatalog = _filterVizCatalog;
 
+  // -------------------------------------------------------------------------
+  // Analyses page: fetch /api/visualization-classes and render two groups —
+  // "Analyses" (kind === "analysis") and "Visualizations" (kind === "visualization").
+  // -------------------------------------------------------------------------
+
+  function _renderAnalysesGroups(classes, container) {
+    if (!classes || classes.length === 0) {
+      container.innerHTML = '<p class="empty-state">No classes found. Install a pbg-* package or a v2ecoli workspace to populate this page.</p>';
+      return;
+    }
+    var analyses = classes.filter(function(c) { return c.kind === 'analysis'; });
+    var vizzes   = classes.filter(function(c) { return c.kind !== 'analysis'; });
+
+    function _renderClassCard(c) {
+      var previewBtn = (c.kind !== 'analysis')
+        ? '<button class="btn-mini" onclick="_vizClassPreview(\'' + _esc(c.address) + '\',\'' + _esc(c.name) + '\')">Preview</button>'
+        : '';
+      return '<div class="picker-row" data-kind="' + _esc(c.kind || 'visualization') + '">' +
+        '<div class="picker-row-main">' +
+          '<strong>' + _esc(c.name) + '</strong>' +
+          ' <code class="muted" style="font-size:0.82em">' + _esc(c.address) + '</code>' +
+          (c.doc ? '<br><span class="muted" style="font-size:0.85em">' + _esc(c.doc) + '</span>' : '') +
+        '</div>' +
+        '<div class="picker-row-actions">' +
+          previewBtn +
+          (c.kind !== 'analysis'
+            ? '<button class="btn-mini" onclick="_useRegistryClass(\'visualization\', \'' + _esc(c.name) + '\')">Use</button>'
+            : '') +
+        '</div>' +
+      '</div>';
+    }
+
+    var html = '';
+
+    // ── Analyses group ───────────────────────────────────────────────────────
+    html += '<div class="analyses-group" style="margin-bottom:20px">' +
+      '<h4 style="margin:0 0 8px;font-size:0.95em;text-transform:uppercase;letter-spacing:0.06em;color:#374151">Analyses' +
+      ' <span class="count-badge" style="font-size:0.8em">' + analyses.length + '</span></h4>';
+    if (analyses.length === 0) {
+      html += '<p class="empty-state muted" style="margin:0">No Analysis classes found. v2ecoli must be installed in this workspace\'s environment.</p>';
+    } else {
+      html += analyses.map(_renderClassCard).join('');
+    }
+    html += '</div>';
+
+    // ── Visualizations group ─────────────────────────────────────────────────
+    html += '<div class="analyses-group">' +
+      '<h4 style="margin:0 0 8px;font-size:0.95em;text-transform:uppercase;letter-spacing:0.06em;color:#374151">Visualizations' +
+      ' <span class="count-badge" style="font-size:0.8em">' + vizzes.length + '</span></h4>';
+    if (vizzes.length === 0) {
+      html += '<p class="empty-state muted" style="margin:0">No Visualization classes found. Install a pbg-* package that provides one (Registry tab &rarr; Available modules).</p>';
+    } else {
+      html += vizzes.map(_renderClassCard).join('');
+    }
+    html += '</div>';
+
+    container.innerHTML = html;
+  }
+
+  function _loadAnalysesPage() {
+    var container = document.getElementById('viz-picker-container');
+    var countEl   = document.getElementById('viz-count');
+    if (!container) return;
+    fetch('/api/visualization-classes')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var classes = (data && data.classes) || [];
+        _renderAnalysesGroups(classes, container);
+        if (countEl) countEl.textContent = '(' + classes.length + ')';
+      })
+      .catch(function(err) {
+        container.innerHTML = '<p class="empty-state" style="color:#991b1b">Error loading classes: ' + _esc(String(err)) + '</p>';
+      });
+  }
+  window._loadAnalysesPage = _loadAnalysesPage;
+
   // Source-rank for picker sort: in_workspace classes are the ones the user
   // can act on directly (they live in this workspace's package or an
   // explicit `imports:` entry); framework comes next; environment-only is
@@ -1337,11 +1417,9 @@
           }
         }
 
-        // Populate visualization picker (Visualizations tab).
-        var vizContainer = document.getElementById('viz-picker-container');
-        if (vizContainer) _renderKindPicker(byKind.visualization, vizContainer, 'visualization');
-        var vizCount = document.getElementById('viz-count');
-        if (vizCount) vizCount.textContent = '(' + byKind.visualization.length + ')';
+        // Note: the Analyses page (viz-picker-container) is now populated by
+        // _loadAnalysesPage() (called from _switchPage), which fetches
+        // /api/visualization-classes and renders two groups (Analyses + Visualizations).
       })
       .catch(function(err) {
         if (status) status.innerHTML = '<span style="color:#991b1b">Network error: ' + err + '</span>';
@@ -11253,7 +11331,8 @@
       fetch('/api/visualization-instances').then(function(r) { return r.json(); }),
       fetch('/workspace.yaml').then(function(r) { return r.ok ? r.text() : ''; }),
     ]).then(function(parts) {
-      var classes = (parts[0] && parts[0].classes) || [];
+      // Filter out Analysis classes — the workspace viz picker only shows Visualization classes.
+      var classes = ((parts[0] && parts[0].classes) || []).filter(function(c) { return c.kind !== 'analysis'; });
       var instances = (parts[1] && parts[1].instances) || [];
       if (classSel) {
         classes.forEach(function(c) {
@@ -11310,7 +11389,8 @@
       fetch('/api/visualization-classes').then(function(r) { return r.json(); }),
     ]).then(function(parts) {
       var instances = (parts[0] && parts[0].instances) || [];
-      var classes = (parts[1] && parts[1].classes) || [];
+      // Filter out Analysis classes — the add-viz picker only offers Visualization classes.
+      var classes = ((parts[1] && parts[1].classes) || []).filter(function(c) { return c.kind !== 'analysis'; });
       if (instances.length) {
         var gi = document.createElement('optgroup');
         gi.label = 'Registered instances (config pre-filled)';

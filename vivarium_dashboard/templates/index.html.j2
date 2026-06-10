@@ -424,7 +424,7 @@ window.addEventListener('pageshow', function (e) {
             <circle cx="19" cy="10" r="1.05" fill="currentColor" stroke="none"/>
           </svg>
         </span>
-        <span class="viv-rail-link-label">Visualizations</span>
+        <span class="viv-rail-link-label">Analyses</span>
       </a>
       <!-- Branch: workspace branch + remote (formerly "GitHub"). The icon
            is a branch-and-node glyph; renaming the label to "Branch"
@@ -557,21 +557,21 @@ window.addEventListener('pageshow', function (e) {
 
 </section>
 
-<!-- ===== PAGE: VISUALIZATIONS ===== -->
+<!-- ===== PAGE: ANALYSES ===== -->
 <section id="page-visualizations" class="page" data-page="visualizations">
-  <h2 class="page-title">Visualizations</h2>
-  <p class="page-lead">Charts rendered from observable trajectories. Either configure a registered class with specific settings, or describe what to plot in natural language and let <code>/pbg-viz</code> generate the function.</p>
+  <h2 class="page-title">Analyses</h2>
+  <p class="page-lead">Analysis scripts and visualization classes available in this workspace. <strong>Analyses</strong> are v2ecoli <code>Analysis</code> steps (registered in <code>ANALYSIS_REGISTRY</code>) that post-process simulation output. <strong>Visualizations</strong> are chart classes (subclasses of <code>pbg_superpowers.visualization.Visualization</code>) that render observable trajectories — configure one with specific settings or generate a new one with <code>/pbg-viz</code>.</p>
 
 
-  <!-- Available Visualization classes (registry-driven, secondary catalog) -->
+  <!-- Available Analysis + Visualization classes (catalog) -->
   <div class="panel">
-    <h3>Available Visualization classes <span id="viz-count" class="count-badge"></span></h3>
-    <p class="panel-lead">Visualization classes discovered from <code>core.link_registry</code> (subclasses of <code>pbg_superpowers.visualization.Visualization</code> from any installed pbg-* package). Click <strong>Preview</strong> to see a demo render; <strong>Use</strong> to register it as a Workspace visualization. <span class="muted">Workspace classes listed first; environment-only classes follow.</span> Need a new one? Run <code>/pbg-viz &lt;name&gt; &lt;description&gt;</code> in Claude Code.</p>
-    <input type="search" id="viz-catalog-search" placeholder="Search Visualization classes by name or doc…"
+    <h3>Available classes <span id="viz-count" class="count-badge"></span></h3>
+    <p class="panel-lead">Classes discovered from the installed environment. Analyses are <code>v2ecoli</code> <code>ANALYSIS_REGISTRY</code> entries; Visualizations are <code>pbg_superpowers.visualization.Visualization</code> subclasses. Click <strong>Preview</strong> (Visualizations only) to see a demo render; <strong>Use</strong> to register a Visualization in this workspace. Need a new visualization? Run <code>/pbg-viz &lt;name&gt; &lt;description&gt;</code> in Claude Code.</p>
+    <input type="search" id="viz-catalog-search" placeholder="Search classes by name or doc…"
            style="width:100%;padding:6px;margin-bottom:8px;font-size:0.9em"
            oninput="_filterVizCatalog(this.value)">
     <div id="viz-picker-container">
-      <p class="empty-state">Discovering Visualization classes&hellip; <span class="muted">First load walks every installed pbg-* package and can take a few seconds; subsequent loads are cached for 30 s.</span></p>
+      <p class="empty-state">Discovering classes&hellip; <span class="muted">First load walks the installed environment and can take a few seconds; subsequent loads are cached for 30 s.</span></p>
     </div>
   </div>
 
