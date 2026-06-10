@@ -24,6 +24,7 @@ v0.4.2: Visualization lifecycle — Create/Add/Commit.
 from __future__ import annotations
 import argparse
 import base64
+import copy
 import hashlib
 import html as _html
 import json
@@ -589,6 +590,170 @@ def _dashboard_config(ws_data: dict | None) -> dict:
     return dash if isinstance(dash, dict) else {}
 
 
+# ---------------------------------------------------------------------------
+# Repo-wide data sources (workspace.yaml dashboard.data_sources provider hook)
+# ---------------------------------------------------------------------------
+# A workspace may declare a data-source bundle provider:
+#
+#   dashboard:
+#     data_sources:
+#       provider: "pkg.module:func"   # importable module:callable
+#       label: "ecoli-sources"
+#
+# The provider takes no args and returns a list of dicts, one per file:
+#   {key, path (abs str), category, kind: "override"|"inherited", size_bytes}
+#
+# Optional — workspaces without it keep current behavior ({sources: []}).
+# Enumeration is cached (same 30s TTL as the registry) because it can stat
+# 100s of files. The server already runs inside the workspace venv (it spawns
+# build_core() via sys.executable), so the provider imports in-process.
+_DATA_SOURCES_CACHE: dict = {"data": None, "ts": 0.0}
+_DATA_SOURCES_TTL = 30.0  # seconds
+
+
+def _data_sources_config(ws_data: dict | None) -> dict:
+    """Return the ``dashboard.data_sources`` block (or {})."""
+    dash = _dashboard_config(ws_data)
+    ds = dash.get("data_sources")
+    return ds if isinstance(ds, dict) else {}
+
+
+def _import_provider(spec: str):
+    """Import a ``module:func`` spec and return the callable.
+
+    Raises ImportError/AttributeError/ValueError on a malformed or unresolvable
+    spec; the caller is expected to catch and surface as an error payload.
+    """
+    import importlib
+    if ":" not in spec:
+        raise ValueError(f"provider must be 'module:func', got {spec!r}")
+    mod_name, _, func_name = spec.partition(":")
+    mod = importlib.import_module(mod_name)
+    fn = getattr(mod, func_name)
+    if not callable(fn):
+        raise TypeError(f"provider {spec!r} is not callable")
+    return fn
+
+
+def _enumerate_data_sources(bypass_cache: bool = False) -> dict:
+    """Resolve + invoke the workspace data-source provider, with 30s caching.
+
+    Always returns ``{"label": <str|None>, "sources": [...]}`` (never raises).
+    On a missing provider returns ``{"sources": []}``. On a provider error
+    returns ``{"label", "sources": [], "error": <str>}`` so the UI can degrade.
+    """
+    global _DATA_SOURCES_CACHE
+    now = time.time()
+    if not bypass_cache and _DATA_SOURCES_CACHE["data"] is not None:
+        if now - _DATA_SOURCES_CACHE["ts"] < _DATA_SOURCES_TTL:
+            return _DATA_SOURCES_CACHE["data"]
+
+    data: dict
+    try:
+        ws_yaml = WORKSPACE / "workspace.yaml"
+        ws_data = yaml.safe_load(ws_yaml.read_text(encoding="utf-8")) or {}
+        cfg = _data_sources_config(ws_data)
+        provider = str(cfg.get("provider") or "").strip()
+        label = cfg.get("label")
+        if not provider:
+            data = {"sources": []}
+        else:
+            fn = _import_provider(provider)
+            raw = fn() or []
+            sources = []
+            for entry in raw:
+                if not isinstance(entry, dict) or "key" not in entry:
+                    continue
+                sources.append({
+                    "key": str(entry.get("key")),
+                    "path": str(entry.get("path") or ""),
+                    "category": str(entry.get("category") or "uncategorized"),
+                    "kind": str(entry.get("kind") or "inherited"),
+                    "size_bytes": int(entry.get("size_bytes") or 0),
+                })
+            data = {"label": label, "sources": sources}
+    except Exception as e:  # noqa: BLE001 — never break the dashboard
+        data = {"label": None, "sources": [], "error": f"{type(e).__name__}: {e}"}
+
+    _DATA_SOURCES_CACHE["data"] = data
+    _DATA_SOURCES_CACHE["ts"] = now
+    return data
+
+
+# Map of file extension → (content-type, inline?) for serving a data-source
+# file. Anything not listed is offered as a binary download.
+_DATA_SOURCE_MIME: dict[str, tuple[str, bool]] = {
+    ".tsv": ("text/tab-separated-values; charset=utf-8", True),
+    ".csv": ("text/csv; charset=utf-8", True),
+    ".json": ("application/json; charset=utf-8", True),
+    ".txt": ("text/plain; charset=utf-8", True),
+    ".text": ("text/plain; charset=utf-8", True),
+    ".md": ("text/markdown; charset=utf-8", True),
+    ".fasta": ("text/plain; charset=utf-8", True),
+    ".fa": ("text/plain; charset=utf-8", True),
+    ".fna": ("text/plain; charset=utf-8", True),
+    ".faa": ("text/plain; charset=utf-8", True),
+    ".yaml": ("text/yaml; charset=utf-8", True),
+    ".yml": ("text/yaml; charset=utf-8", True),
+}
+
+
+def _registry_modules_override(ws_data: dict | None) -> list | None:
+    """Resolve ``dashboard.registry.modules`` to a list of entries, or ``None``.
+
+    The ``modules`` block is the per-workspace catalog OVERRIDE: when present
+    and non-empty it REPLACES pbg's default catalog (unlike ``include``, which
+    only filters the default). Each entry is either:
+
+      - a bare string  → the name of an entry in pbg's default catalog whose
+        full metadata should be inherited (or a minimal stub if pbg doesn't
+        ship it); or
+      - a dict         → a custom catalog module that pbg doesn't ship
+        (e.g. ``viva-munk``), used verbatim with missing display fields filled.
+
+    Returns ``None`` when unset/not-a-list/empty → caller falls back to the
+    default catalog + ``include`` filter (unchanged behavior).
+    """
+    dash = _dashboard_config(ws_data)
+    reg = dash.get("registry")
+    if not isinstance(reg, dict):
+        return None
+    modules = reg.get("modules")
+    if not isinstance(modules, list) or not modules:
+        return None
+    return modules
+
+
+def _modules_override_pkgs(ws_data: dict | None) -> set[str] | None:
+    """Normalized top-level package names named by ``dashboard.registry.modules``.
+
+    Used so the process-registry (``/api/registry``) filter shows the SAME set
+    as the override catalog even when no explicit ``include`` is present. For a
+    string entry the package is the name itself; for a dict entry the ``package``
+    field (falling back to the snake_case ``name``). Returns ``None`` when no
+    override is configured.
+    """
+    modules = _registry_modules_override(ws_data)
+    if modules is None:
+        return None
+
+    def _norm(s) -> str:
+        return str(s or "").strip().replace("-", "_").split(".")[0]
+
+    pkgs: set[str] = set()
+    for entry in modules:
+        if isinstance(entry, str):
+            n = _norm(entry)
+            if n:
+                pkgs.add(n)
+        elif isinstance(entry, dict):
+            pkg = entry.get("package") or entry.get("name")
+            n = _norm(pkg)
+            if n:
+                pkgs.add(n)
+    return pkgs or None
+
+
 def _registry_include_pkgs(ws_data: dict | None) -> set[str] | None:
     """Resolve ``dashboard.registry.include`` to a set of normalized top-level
     package names (dashes → underscores), or ``None`` when unset.
@@ -596,6 +761,11 @@ def _registry_include_pkgs(ws_data: dict | None) -> set[str] | None:
     ``None`` means "no filter" (show everything — current behavior); an empty
     list also means no filter (treated as unset, to avoid an accidental
     blank registry).
+
+    When ``dashboard.registry.modules`` (the catalog override) is present but
+    no explicit ``include`` is given, the allow-list is DERIVED from the module
+    names — so the process-registry class grid stays in sync with the override
+    catalog (same set: workspace-self + each declared module).
     """
     dash = _dashboard_config(ws_data)
     reg = dash.get("registry")
@@ -603,13 +773,85 @@ def _registry_include_pkgs(ws_data: dict | None) -> set[str] | None:
         return None
     include = reg.get("include")
     if not isinstance(include, list) or not include:
-        return None
+        # No explicit include: derive from the modules override (if any) so the
+        # process registry matches the override catalog. The workspace's own
+        # package is always allowed alongside the declared modules.
+        derived = _modules_override_pkgs(ws_data)
+        if derived is None:
+            return None
+        slug = str((ws_data or {}).get("name", "") or "").strip().replace("-", "_")
+        pkg_path = str((ws_data or {}).get("package_path", "") or "").strip().replace("-", "_")
+        for s in (slug, pkg_path):
+            if s:
+                derived.add(s)
+        return derived or None
     pkgs = {
         str(p).strip().replace("-", "_").split(".")[0]
         for p in include
         if str(p).strip()
     }
     return pkgs or None
+
+
+def _build_reexport_map(include: set[str]) -> dict[str, str]:
+    """Map re-exported classes → the allow-listed package that re-exports them.
+
+    For each allow-listed package, import it and scan its top-level namespace
+    (``dir(mod)``) for classes whose ``__module__`` top-level segment is a
+    DIFFERENT package. Those are re-exports: a class defined elsewhere (e.g.
+    ``spatio_flux.visualizations.field_heatmap.FieldHeatmap``) that the
+    allow-listed package surfaces as part of its own API (e.g. exposed as
+    ``viva_munk.FieldHeatmap``).
+
+    The returned map is keyed by the class's full definition address
+    (``def_module + '.' + qualname``, e.g.
+    ``spatio_flux.visualizations.field_heatmap.FieldHeatmap``) AND, as a
+    looser fallback, by ``(def_top_pkg, class_name)`` joined as
+    ``"<def_top_pkg>::<name>"``. The value is the re-exporting package's
+    normalized name (e.g. ``viva_munk``).
+
+    Imports are guarded with try/except — a single bad import never blanks the
+    registry; the worst case is a class is not surfaced. The allow-listed set is
+    small (a handful of packages) so importing them here is cheap.
+    """
+    import importlib
+    import inspect
+
+    # Framework infrastructure packages are intentionally hidden from the
+    # filtered registry; do NOT resurrect them as re-exports just because an
+    # allow-listed package re-imports e.g. process_bigraph.Composite into its
+    # namespace. Mirrors _FRAMEWORK_PKGS in the registry subprocess.
+    _FRAMEWORK_PKGS = {
+        "process_bigraph", "bigraph_schema", "bigraph_viz",
+        "pbg_superpowers", "vivarium_dashboard",
+    }
+
+    reexports: dict[str, str] = {}
+    for pkg in sorted(include):
+        try:
+            mod = importlib.import_module(pkg)
+        except Exception:
+            continue
+        for attr in dir(mod):
+            try:
+                obj = getattr(mod, attr)
+            except Exception:
+                continue
+            if not inspect.isclass(obj):
+                continue
+            def_mod = getattr(obj, "__module__", "") or ""
+            def_top = def_mod.split(".")[0].replace("-", "_")
+            if not def_top or def_top == pkg:
+                continue  # defined in the re-exporting package itself → not a re-export
+            if def_top in include:
+                continue  # already surfaced by its own allow-listed package
+            if def_top in _FRAMEWORK_PKGS:
+                continue  # framework infra stays hidden; not a workspace re-export
+            qualname = getattr(obj, "__qualname__", attr) or attr
+            full_addr = f"{def_mod}.{qualname}"
+            reexports[full_addr] = pkg
+            reexports[f"{def_top}::{qualname}"] = pkg
+    return reexports
 
 
 def _apply_registry_include_filter(data: dict, ws_data: dict | None) -> None:
@@ -620,6 +862,16 @@ def _apply_registry_include_filter(data: dict, ws_data: dict | None) -> None:
     ``name`` if it is dotted) against the normalized
     ``dashboard.registry.include`` set. Dashes/underscores are normalized on
     both sides (``pbg-bioreactordesign`` ↔ ``pbg_bioreactordesign``).
+
+    Re-exports are honored: a class DEFINED in a non-allow-listed package but
+    RE-EXPORTED in an allow-listed package's top-level namespace (e.g.
+    ``viva_munk.FieldHeatmap``, defined in ``spatio_flux``) survives the filter
+    and is re-attributed to the re-exporting package — its ``source`` becomes
+    ``in_workspace`` and its top-level package tag flips to the re-exporter, so
+    the UI groups it under (e.g.) viva_munk rather than spatio_flux. The true
+    definition module is preserved in ``aliases`` so the attribution is not
+    misleading. Classes from a non-allow-listed package that are NOT re-exported
+    stay filtered out.
 
     No-op when no include list is configured (current behavior: show all).
     Allow-listed packages surface regardless of in_workspace/framework/
@@ -641,10 +893,342 @@ def _apply_registry_include_filter(data: dict, ws_data: dict | None) -> None:
             mod = str(entry.get("name") or "")
         return mod.split(".")[0].replace("-", "_")
 
+    # Build the re-export map (guarded so a bad import never blanks the grid).
+    try:
+        reexports = _build_reexport_map(include)
+    except Exception:
+        reexports = {}
+
+    def _reexporter(entry: dict) -> str | None:
+        """Return the allow-listed pkg that re-exports this entry, else None."""
+        if not reexports:
+            return None
+        addr = str(entry.get("address") or "").strip()
+        if addr and addr in reexports:
+            return reexports[addr]
+        # Looser match: definition top-level package + class name. The class
+        # name is the last segment of the address (or the entry name).
+        def_top = _top_pkg(entry)
+        cls_name = addr.split(".")[-1] if addr else str(entry.get("name") or "")
+        key = f"{def_top}::{cls_name}"
+        return reexports.get(key)
+
     procs = data.get("processes") or []
-    data["processes"] = [p for p in procs if isinstance(p, dict) and _top_pkg(p) in include]
+    kept: list[dict] = []
+    for p in procs:
+        if not isinstance(p, dict):
+            continue
+        own_pkg = _top_pkg(p)
+        if own_pkg in include:
+            kept.append(p)
+            continue
+        reexporter = _reexporter(p)
+        if reexporter is not None:
+            # Re-attribute to the re-exporting package: keep the true definition
+            # module in aliases (so it is not misleading), flip the address's
+            # top-level segment and source classification to the re-exporter.
+            true_addr = str(p.get("address") or "")
+            aliases = list(p.get("aliases") or [])
+            if true_addr and true_addr not in aliases:
+                aliases.append(true_addr)
+            p["aliases"] = aliases
+            p["reexported_from"] = own_pkg
+            p["source"] = "in_workspace"
+            # Re-tag the address's top-level package so _top_pkg / the UI group
+            # it under the re-exporter. The class is re-exported as
+            # ``<reexporter>.<ClassName>``.
+            cls_name = true_addr.split(".")[-1] if true_addr else str(p.get("name") or "")
+            p["address"] = f"{reexporter}.{cls_name}"
+            kept.append(p)
+    data["processes"] = kept
     # Record what was applied for debugging / frontend awareness.
     data["registry_include"] = sorted(include)
+
+
+def _filter_catalog_modules(modules: list, ws_data: dict | None) -> list:
+    """Apply ``dashboard.registry.include`` to the package catalog (/api/catalog).
+
+    Same allow-list, same normalization as the registry filter
+    (``_apply_registry_include_filter``): dashes ↔ underscores, top-level
+    package segment only. A catalog module's package identity is matched
+    against any of its name variants — ``name`` (e.g. ``pbg-bioreactordesign``,
+    ``spatio-flux``), ``pypi_name``, and ``package`` (the snake_case import
+    name) — so e.g. ``viva-munk`` ↔ ``viva_munk`` and the workspace's own
+    first-party module (``kind: "workspace"``, ``name`` = slug = ``v2ecoli``)
+    all resolve correctly.
+
+    No-op when no include list is configured (returns ``modules`` unchanged →
+    current behavior: show the full catalog).
+    """
+    if not isinstance(modules, list):
+        return modules
+    include = _registry_include_pkgs(ws_data)
+    if include is None:
+        return modules
+
+    def _norm(s) -> str:
+        return str(s or "").strip().replace("-", "_").split(".")[0]
+
+    def _allowed(m: dict) -> bool:
+        if not isinstance(m, dict):
+            return False
+        variants = {_norm(m.get("name"))}
+        if m.get("pypi_name"):
+            variants.add(_norm(m.get("pypi_name")))
+        # `package` may be absent; fall back to name→snake_case like elsewhere.
+        pkg = m.get("package") or str(m.get("name") or "").replace("-", "_")
+        variants.add(_norm(pkg))
+        variants.discard("")
+        return bool(variants & include)
+
+    return [m for m in modules if _allowed(m)]
+
+
+def _composite_top_pkg(rec: dict) -> str:
+    """Derive a composite record's top-level package (normalized).
+
+    A composite record carries ``module`` (its dotted Python path, e.g.
+    ``v2ecoli.composites.foo`` or ``spatio_flux.composites.metabolism``) and
+    sometimes ``source`` (a workspace-relative or absolute path, e.g.
+    ``v2ecoli/composites/foo.composite.yaml``). The package is the first dotted
+    segment of ``module``; when ``module`` is empty, fall back to the first
+    path segment of ``source``. Dashes are normalized to underscores so
+    ``pbg-bioreactordesign`` ↔ ``pbg_bioreactordesign`` matches the allow-list.
+
+    Returns ``""`` when neither field yields a usable package root.
+    """
+    mod = str(rec.get("module") or "").strip()
+    if mod:
+        return mod.split(".")[0].replace("-", "_")
+    src = str(rec.get("source") or "").strip()
+    if src:
+        segs = [s for s in src.replace("\\", "/").split("/") if s.strip()]
+        # Installed-package sources are absolute paths whose package dir is the
+        # segment immediately before ``composites/`` (e.g.
+        # ``/…/site-packages/spatio_flux/composites/x.yaml`` → ``spatio_flux``).
+        # Workspace-relative sources start at the package dir itself
+        # (``v2ecoli/composites/foo.yaml`` → ``v2ecoli``). Prefer the
+        # before-``composites`` segment; otherwise fall back to the first.
+        for i, seg in enumerate(segs):
+            if seg == "composites" and i > 0:
+                return segs[i - 1].split(".")[0].replace("-", "_")
+        return segs[0].split(".")[0].replace("-", "_") if segs else ""
+    return ""
+
+
+def _filter_composites(records: list, ws_data: dict | None) -> list:
+    """Apply the per-workspace registry allow-list to a list of composite dicts.
+
+    Keeps a record when EITHER it is flagged ``workspace_local: True`` (the
+    workspace's own composites are always shown) OR its top-level package (see
+    :func:`_composite_top_pkg`) is in the normalized
+    ``dashboard.registry.{include,modules}`` allow-list. Reuses
+    :func:`_registry_include_pkgs` so dash/underscore normalization matches the
+    process-registry and catalog filters.
+
+    No-op when no allow-list is configured (``None``) → returns ``records``
+    unchanged, preserving the historical "show every installed package" view.
+    """
+    if not isinstance(records, list):
+        return records
+    include = _registry_include_pkgs(ws_data)
+    if include is None:
+        return records
+
+    def _keep(rec: dict) -> bool:
+        if not isinstance(rec, dict):
+            return False
+        if rec.get("workspace_local") is True:
+            return True
+        return _composite_top_pkg(rec) in include
+
+    return [r for r in records if _keep(r)]
+
+
+def _build_override_catalog(override: list, default_modules: list) -> list:
+    """Build a catalog from ``dashboard.registry.modules`` (the override).
+
+    The override REPLACES pbg's default catalog. ``default_modules`` is pbg's
+    default catalog (``load_registry`` + workspace overlay) used only to resolve
+    bare-string entries by inheriting their full metadata.
+
+    Resolution per entry:
+
+      - **string** → look the name up in ``default_modules``; if found, deep-copy
+        its full metadata dict; if NOT found, emit a minimal stub
+        (``name`` + a short ``description`` note) so the row still renders.
+      - **dict** → a custom module pbg doesn't ship; used verbatim with missing
+        display fields filled with sensible defaults so the row renders and the
+        Install/Uninstall button works (needs at least ``name``; ``package``
+        defaults to the snake_case name; ``source``/``description``/``tags`` get
+        placeholder fallbacks).
+
+    Install-state is NOT set here — the caller's existing install-detection loop
+    (imports / pyproject / venv probe) annotates each entry, so a custom entry
+    whose ``package`` is importable in the venv (e.g. ``viva_munk``) is marked
+    installed exactly like a default-catalog entry.
+
+    Order is preserved from the override list. Unrecognized entry types are
+    skipped.
+    """
+    by_name = {
+        str(m.get("name")): m
+        for m in (default_modules or [])
+        if isinstance(m, dict) and m.get("name")
+    }
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    for entry in override:
+        if isinstance(entry, str):
+            name = entry.strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            found = by_name.get(name)
+            if found is not None:
+                out.append(copy.deepcopy(found))
+            else:
+                # pbg doesn't ship this name — minimal stub so it still renders.
+                out.append({
+                    "name": name,
+                    "package": name.replace("-", "_"),
+                    "description": (
+                        f"{name} — declared in this workspace's "
+                        "dashboard.registry.modules but not found in the default "
+                        "pbg catalog (no inherited metadata)."
+                    ),
+                    "tags": [],
+                    "override_stub": True,
+                })
+        elif isinstance(entry, dict):
+            name = str(entry.get("name") or "").strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            m = copy.deepcopy(entry)
+            m.setdefault("package", name.replace("-", "_"))
+            m.setdefault(
+                "description",
+                f"{name} — custom workspace catalog entry.",
+            )
+            m.setdefault("source", "")
+            m.setdefault("tags", [])
+            # Surface a single-tag category as a tag too (display convenience).
+            cat = m.get("category")
+            if cat and isinstance(m.get("tags"), list) and cat not in m["tags"]:
+                m["tags"] = list(m["tags"]) + [cat]
+            m["override_custom"] = True
+            out.append(m)
+        # else: unknown entry type → skip silently.
+
+    return out
+
+
+def _build_reexport_origin_modules(
+    ws_data: dict | None, existing_modules: list
+) -> list[dict]:
+    """Synthesize catalog entries for re-export-ORIGIN packages.
+
+    A re-export origin is a package that is (a) NOT in the registry allow-list
+    itself, but (b) has ≥1 class re-exported by an allow-listed package (per
+    :func:`_build_reexport_map`). The canonical example: ``spatio_flux`` is not
+    allow-listed, but ``viva_munk`` re-exports 7 of its classes into its own
+    top-level namespace — so spatio-flux is a genuine dependency of an
+    allow-listed package and should be SHOWN in the catalog (tagged
+    ``📦 via viva-munk``) rather than fully hidden.
+
+    For each such origin package we emit one catalog entry stamped with
+    ``install_source: "venv"`` + ``installed_via: [<allow-listed re-exporters>]``
+    so the install-source badge renders ``📦 via <parents>`` and the UI shows
+    "(remove parent to uninstall)" instead of an Install button. This
+    install_source attribution is DELIBERATELY forced to the re-exporter(s)
+    even when the package is also a direct pyproject dependency of the
+    workspace (e.g. v2ecoli pins spatio-flux): the meaningful reason it appears
+    in this filtered catalog is the re-export, per v2ecoli's own pyproject
+    comment.
+
+    Guarded: returns ``[]`` unless a registry allow-list is configured AND the
+    re-export map yields at least one origin package. Origin packages already
+    present in ``existing_modules`` (by name/package variant) are skipped so we
+    never duplicate or shadow a primary catalog entry.
+    """
+    include = _registry_include_pkgs(ws_data)
+    if include is None:
+        return []
+    try:
+        reexports = _build_reexport_map(include)
+    except Exception:
+        return []
+    if not reexports:
+        return []
+
+    def _norm(s) -> str:
+        return str(s or "").strip().replace("-", "_").split(".")[0]
+
+    # Collect, per origin package, the set of allow-listed re-exporters.
+    # Map keys are either ``def_module.qualname`` (full address) or
+    # ``"<def_top_pkg>::<name>"``; the value is the re-exporting package. Only
+    # the ``::`` keys cleanly expose the origin top-level package, so derive
+    # origins from those.
+    # Stdlib / builtin module names are NOT installable workspace packages —
+    # an allow-listed package re-importing e.g. ``typing.TypeVar`` or
+    # ``dataclasses.dataclass`` into its namespace must not surface a bogus
+    # "typing" catalog row. Mirror the framework-pkg guard in _build_reexport_map
+    # for the standard library.
+    import sys as _sys
+    _stdlib = set(getattr(_sys, "stdlib_module_names", ()))
+    _builtins = set(_sys.builtin_module_names)
+
+    origins: dict[str, set[str]] = {}
+    for key, reexporter in reexports.items():
+        if "::" not in key:
+            continue
+        def_top = _norm(key.split("::", 1)[0])
+        if not def_top or def_top in include:
+            continue
+        if def_top in _stdlib or def_top in _builtins:
+            continue
+        origins.setdefault(def_top, set()).add(reexporter)
+    if not origins:
+        return []
+
+    # Don't duplicate a package that the override catalog already lists.
+    existing: set[str] = set()
+    for m in existing_modules or []:
+        if not isinstance(m, dict):
+            continue
+        existing.add(_norm(m.get("name")))
+        if m.get("pypi_name"):
+            existing.add(_norm(m.get("pypi_name")))
+        existing.add(_norm(m.get("package") or m.get("name")))
+    existing.discard("")
+
+    out: list[dict] = []
+    for origin_pkg in sorted(origins):
+        if origin_pkg in existing:
+            continue
+        # Re-exporters as their catalog display names (dash form for the badge).
+        parents = sorted(p.replace("_", "-") for p in origins[origin_pkg])
+        display_name = origin_pkg.replace("_", "-")
+        out.append({
+            "name": display_name,
+            "package": origin_pkg,
+            "description": (
+                f"Re-exported by {', '.join(parents)} "
+                "(particles + visualizations)."
+            ),
+            "tags": ["dependency", "re-export"],
+            "category": "dependency",
+            "installed": True,
+            # Force the venv/via-parent attribution even if this package is also
+            # a direct pyproject dep — the reason it's surfaced here is the
+            # re-export, not the direct pin.
+            "install_source": "venv",
+            "installed_via": parents,
+            "reexport_origin": True,
+        })
+    return out
 
 
 def _save_upload(file_b64: str, target_path: Path) -> str:
@@ -5306,6 +5890,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_study_bigraph_paths()
         if path_only == "/api/inputs":
             return self._get_inputs()
+        if path_only == "/api/data-sources":
+            return self._get_data_sources()
+        if path_only == "/api/data-source-file":
+            return self._get_data_source_file()
         if self.path.startswith("/api/iset-list"):
             return self._get_iset_list()
         if self.path.startswith("/api/iset/") and self.path.split("?", 1)[0].rstrip("/").endswith("/report"):
@@ -8427,6 +9015,68 @@ if __name__ == "__main__":
         _slug = (_q.get("investigation") or [None])[0]
         return self._json(_inputs_payload(WORKSPACE, _slug), 200)
 
+    def _get_data_sources(self):
+        """GET /api/data-sources — repo-wide data-source bundle.
+
+        Reads ``workspace.yaml dashboard.data_sources``, imports the declared
+        ``provider`` (module:func) in-process, and returns
+        ``{label, sources: [{key, path, category, kind, size_bytes}, ...]}``.
+        Returns ``{sources: []}`` when no provider is configured. Cached ~30s.
+        """
+        return self._json(_enumerate_data_sources(), 200)
+
+    def _get_data_source_file(self):
+        """GET /api/data-source-file?key=... — serve one bundle file.
+
+        Re-runs the provider enumeration and serves the bytes of the entry
+        whose ``key`` matches. The path comes ONLY from the enumeration (never
+        a client-supplied path), so there is no traversal surface. Text kinds
+        (tsv/csv/json/txt/fasta/yaml/md) are served inline; anything else is
+        offered as a download. 404 if the key is not in the enumeration.
+        """
+        import urllib.parse as _up
+        q = _up.parse_qs(_up.urlparse(self.path).query)
+        key = (q.get("key") or [None])[0]
+        if not key:
+            return self._json({"error": "missing ?key="}, 400)
+
+        payload = _enumerate_data_sources()
+        entry = next(
+            (s for s in payload.get("sources", []) if s.get("key") == key),
+            None,
+        )
+        if entry is None:
+            return self._json(
+                {"error": f"key not in data-source bundle: {key!r}"}, 404
+            )
+
+        path = Path(entry.get("path") or "")
+        if not path.is_file():
+            return self._json(
+                {"error": f"file for key {key!r} not found: {path}"}, 404
+            )
+
+        ext = path.suffix.lower()
+        mime, inline = _DATA_SOURCE_MIME.get(
+            ext, ("application/octet-stream", False)
+        )
+        try:
+            data = path.read_bytes()
+        except OSError as e:
+            return self._json({"error": f"read failed: {e}"}, 500)
+
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        if not inline:
+            self.send_header(
+                "Content-Disposition",
+                f'attachment; filename="{path.name}"',
+            )
+        self.end_headers()
+        self.wfile.write(data)
+
     def _get_iset_report(self):
         """GET /api/iset/<slug>/report — serve the per-investigation report."""
         import urllib.parse as _up
@@ -11521,6 +12171,12 @@ if __name__ == "__main__":
                     mod == pkg or mod.startswith(ws_prefix_dot)
                 )
                 out.append(rec)
+            # Per-workspace registry allow-list: when configured, hide
+            # composites from packages NOT in dashboard.registry.{modules,
+            # include} (e.g. spatio_flux / pbg_copasi transitive deps), but
+            # always keep the workspace's own (workspace_local) composites.
+            # No-op when no allow-list is set → full multi-package list.
+            out = _filter_composites(out, ws_data)
             return self._json({"composites": out, "workspace_package": pkg}, 200)
         except Exception as e:
             return self._json({"composites": [], "error": str(e)}, 200)
@@ -11857,6 +12513,21 @@ if __name__ == "__main__":
             all_comps = discover_all_composites(WORKSPACE, pkg)
         except Exception:
             all_comps = {}
+        # Per-workspace registry allow-list (same as /api/composites): hide
+        # composites from non-allow-listed packages from the manifest summary.
+        # The workspace's own package is always in the include set, so its
+        # composites survive the package-root check. No-op when unset.
+        ws_for_filter = None
+        try:
+            ws_for_filter = yaml.safe_load(
+                (WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")
+            ) or {}
+        except Exception:
+            ws_for_filter = None
+        if ws_for_filter is not None:
+            kept = _filter_composites(list(all_comps.values()), ws_for_filter)
+            kept_ids = {c.get("id") for c in kept if isinstance(c, dict)}
+            all_comps = {cid: c for cid, c in all_comps.items() if cid in kept_ids}
         out = []
         for cid, c in sorted(all_comps.items()):
             viz_count = _count_viz_steps_in_state(c.get("state") or {})
@@ -12177,7 +12848,20 @@ if __name__ == "__main__":
         except Exception as e:
             return self._json({"modules": [], "error": f"workspace.yaml: {e}"}, 500)
 
-        modules = self._module_registry()  # canonical (pbg-superpowers) + overlay
+        default_modules = self._module_registry()  # canonical (pbg-superpowers) + overlay
+
+        # Per-workspace catalog OVERRIDE (dashboard.registry.modules): when set,
+        # it REPLACES the default catalog (vs `include`, which only filters it).
+        # String entries inherit full metadata from the default catalog; dict
+        # entries are custom modules pbg doesn't ship (e.g. viva-munk). The
+        # install-detection loop below then annotates each entry's installed
+        # state exactly as for default-catalog modules (so a custom entry whose
+        # `package` is importable in the venv shows as installed).
+        override = _registry_modules_override(ws_data)
+        if override is not None:
+            modules = _build_override_catalog(override, default_modules)
+        else:
+            modules = default_modules
 
         # Three install-source layers, in priority order:
         #   1. workspace.yaml.imports — explicit declaration by the workspace
@@ -12260,9 +12944,40 @@ if __name__ == "__main__":
                         m["out_of_sync"] = True
                         m["out_of_sync_reason"] = sync_reason
 
+        # Re-export-ORIGIN packages: when a registry allow-list is active, also
+        # SHOW (vs fully hide) packages whose classes an allow-listed package
+        # re-exports — e.g. spatio-flux, 7 of whose classes viva-munk surfaces.
+        # These are appended AFTER the install-detection loop so their forced
+        # `install_source: venv` + `installed_via: [<re-exporters>]` attribution
+        # (which the UI renders as `📦 via <parents>`) is not overwritten by the
+        # pyproject/imports detection above. No-op without an allow-list.
+        reexport_origins = _build_reexport_origin_modules(ws_data, modules)
+        if reexport_origins:
+            modules = modules + reexport_origins
+
         ws_self = self._workspace_self_module(ws_data)
         if ws_self is not None:
             modules = [ws_self] + modules
+
+        # When the catalog was built from the `modules` OVERRIDE, it is already
+        # exactly the declared set (+ workspace-self) — do NOT re-filter (a
+        # custom/stub entry could be dropped by the derived allow-list, and the
+        # override is the authoritative list anyway).
+        #
+        # Otherwise apply the optional display-only allow-list
+        # (workspace.yaml::dashboard.registry.include): the Registry-tab catalog
+        # shows ONLY modules whose package is in the list — same allow-list /
+        # normalization as the /api/registry filter. No-op when unset → full
+        # catalog (current behavior). The workspace's own first-party module is
+        # included only when its slug (e.g. v2ecoli) is in the list.
+        if override is None:
+            # Preserve synthesized re-export-origin entries (they are not in the
+            # allow-list by definition, but are surfaced deliberately).
+            kept_origins = [
+                m for m in modules
+                if isinstance(m, dict) and m.get("reexport_origin")
+            ]
+            modules = _filter_catalog_modules(modules, ws_data) + kept_origins
 
         return self._json({"modules": modules}, 200)
 

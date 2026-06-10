@@ -1,7 +1,22 @@
 <!DOCTYPE html>
 <html lang="en"><head>
-<meta charset="UTF-8"><title>{{ dashboard_name or workspace_name }}{% if active_investigation_name %}:{{ active_investigation_name }}{% endif %}</title>
+<meta charset="UTF-8"><title>{% if dashboard_name %}{{ dashboard_name }} dashboard{% else %}{{ workspace_name }}{% endif %}{% if active_investigation_name %}:{{ active_investigation_name }}{% endif %}</title>
 <link rel="stylesheet" href="assets/style.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
+<script>
+// Per-workspace branding (rail logo, title, brand text) is resolved
+// server-side at GET / and is NOT re-applied by any client script. The
+// cross-workspace switcher navigates between dashboard ports with a full
+// location.assign(), so a round-trip switch (workspace A -> B -> A) relies on
+// the browser actually re-running GET / for A to restore A's custom branding.
+// Modern browsers instead restore A from the back/forward cache (bfcache) — a
+// frozen DOM snapshot served WITHOUT a new server render — so A's branding can
+// come back stale (the Vivarium default that was showing when A was frozen).
+// `Cache-Control: no-store` on sub-resources does not disable page bfcache.
+// Force a real reload on bfcache restore so branding is always re-rendered.
+window.addEventListener('pageshow', function (e) {
+  if (e.persisted) { window.location.reload(); }
+});
+</script>
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 <style>
 /* Modal overlay */
@@ -302,10 +317,10 @@
 
     <!-- Brand + workspace switcher -->
     <div class="viv-rail-header">
-      <img class="viv-rail-logo" src="{{ dashboard_logo or 'assets/vivarium-logo.png' }}" alt="{{ dashboard_name or 'Vivarium' }}" loading="lazy">
+      <img class="viv-rail-logo" src="{{ dashboard_logo or 'assets/vivarium-logo.png' }}{% if asset_version %}?v={{ asset_version }}{% endif %}" alt="{{ dashboard_name or 'Vivarium' }}" loading="lazy">
       <div class="viv-rail-brand">
-        {% if dashboard_name %}<strong>{{ dashboard_name }}</strong>{% else %}<strong>Vivarium</strong>
-        <small>dashboard</small>{% endif %}
+        <strong>{{ dashboard_name or 'Vivarium' }}</strong>
+        <small>dashboard</small>
       </div>
     </div>
 
@@ -597,6 +612,18 @@
     <div id="viz-preview-source-row" style="margin-bottom:8px;font-size:0.9em;color:#555"></div>
     <iframe id="viz-preview-iframe" style="width:100%;height:480px;border:1px solid #ddd;background:#fff"></iframe>
     <div id="viz-preview-notes" style="margin-top:8px;font-size:0.85em;color:#666"></div>
+  </div>
+</div>
+
+<!-- Data-source file preview modal (repo-wide data sources, Inputs tab) -->
+<div id="modal-ds-preview" class="modal-overlay">
+  <div class="modal-box" style="max-width:900px">
+    <button class="modal-close" onclick="closeModal('modal-ds-preview')">&times;</button>
+    <h3 style="margin-bottom:8px">Data source: <code id="ds-preview-title" style="font-size:0.85em"></code></h3>
+    <div style="margin-bottom:8px">
+      <a id="ds-preview-download" class="action-btn" download>Download</a>
+    </div>
+    <pre id="ds-preview-body" style="max-height:560px;overflow:auto;background:#0f172a;color:#e2e8f0;padding:12px;border-radius:6px;font-size:0.8em;line-height:1.4;white-space:pre;margin:0"></pre>
   </div>
 </div>
 

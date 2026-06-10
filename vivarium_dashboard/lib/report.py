@@ -491,7 +491,16 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
             return str(int(p.stat().st_mtime))
         except OSError:
             return "0"
-    asset_version = _mtime("walkthrough.js") + "_" + _mtime("style.css")
+    # Fold the resolved per-workspace logo's mtime into the version stamp so
+    # the rail <img> URL changes whenever a workspace swaps its branding logo.
+    # Without this, the shared destination name (assets/workspace-logo.<ext>)
+    # would resolve to the same URL across workspaces, and a cached image from
+    # a previous workspace could survive a switch back.
+    _logo_rel = (dashboard_logo or "").removeprefix("assets/")
+    asset_version = (
+        _mtime("walkthrough.js") + "_" + _mtime("style.css")
+        + ("_" + _mtime(_logo_rel) if _logo_rel else "")
+    )
 
     # Workspace owner — resolved from GitHub CLI (`gh api user`) so the
     # rail footer + profile links route to the right person. Falls back

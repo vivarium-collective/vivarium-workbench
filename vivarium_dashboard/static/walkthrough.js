@@ -830,10 +830,146 @@
       _inputsDatasetsHtml(glob.datasets);
     html += '<h4 style="margin:12px 0 4px">References</h4>' +
       _inputsRefsHtml(glob.references);
+    // Data-source bundle (workspace.yaml dashboard.data_sources provider).
+    // Populated asynchronously; the host is hidden until sources arrive so
+    // workspaces without a provider see no extra UI.
+    html += '<div id="data-sources-host" style="display:none;margin-top:16px"></div>';
     html += '</div>';
 
     el.innerHTML = html;
+
+    _loadDataSources();
   }
+
+  // -------------------------------------------------------------------------
+  // Repo-wide data sources — provider-backed bundle (workspace.yaml hook).
+  // Grouped-by-category, searchable list with click-to-open file preview.
+  // -------------------------------------------------------------------------
+  var _dataSourcesCache = null;  // [{key, path, category, kind, size_bytes}]
+
+  function _fmtBytes(n) {
+    n = Number(n) || 0;
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / 1024 / 1024).toFixed(2) + ' MB';
+  }
+
+  function _loadDataSources() {
+    var host = document.getElementById('data-sources-host');
+    if (!host) return;
+    fetch('/api/data-sources')
+      .then(function(r) { return r.json(); })
+      .then(function(j) {
+        var sources = (j && j.sources) || [];
+        if (!sources.length) {
+          host.style.display = 'none';
+          return;
+        }
+        _dataSourcesCache = sources;
+        host.style.display = 'block';
+        _renderDataSources(host, j.label || 'data sources', sources, j.error);
+      })
+      .catch(function() { host.style.display = 'none'; });
+  }
+
+  function _renderDataSources(host, label, sources, error) {
+    var n = sources.length;
+    var nOv = sources.filter(function(s) { return s.kind === 'override'; }).length;
+    var h = '';
+    h += '<h4 style="margin:12px 0 4px">' + _esc(label) +
+      ' <span class="muted" style="font-weight:normal">(' + n + ' files' +
+      (nOv ? ', ' + nOv + ' override' + (nOv === 1 ? '' : 's') : '') + ')</span></h4>';
+    if (error) {
+      h += '<p class="muted" style="font-style:italic;font-size:0.85em">' +
+        'provider error: ' + _esc(error) + '</p>';
+    }
+    h += '<input type="text" id="ds-filter" placeholder="Filter by key…" ' +
+      'oninput="_filterDataSources(this.value)" ' +
+      'style="width:100%;box-sizing:border-box;padding:6px 8px;margin:4px 0 8px;' +
+      'border:1px solid #d1d5db;border-radius:6px;font-size:0.85em">';
+    h += '<div id="ds-list"></div>';
+    host.innerHTML = h;
+    _filterDataSources('');
+  }
+
+  function _filterDataSources(q) {
+    var listEl = document.getElementById('ds-list');
+    if (!listEl || !_dataSourcesCache) return;
+    q = (q || '').toLowerCase().trim();
+    var matched = _dataSourcesCache.filter(function(s) {
+      return !q || s.key.toLowerCase().indexOf(q) !== -1;
+    });
+
+    // Group by category.
+    var groups = {};
+    matched.forEach(function(s) {
+      (groups[s.category] = groups[s.category] || []).push(s);
+    });
+    var cats = Object.keys(groups).sort();
+    if (!cats.length) {
+      listEl.innerHTML = '<p class="muted" style="font-size:0.85em">No matching files.</p>';
+      return;
+    }
+
+    var html = '';
+    cats.forEach(function(cat) {
+      var items = groups[cat];
+      html += '<details ' + (q ? 'open' : '') + ' style="margin-bottom:6px">';
+      html += '<summary style="cursor:pointer;font-weight:600;font-size:0.85em;' +
+        'padding:4px 0;color:#374151">' + _esc(cat) +
+        ' <span class="muted" style="font-weight:normal">(' + items.length + ')</span></summary>';
+      html += '<div style="margin:2px 0 6px 8px">';
+      items.forEach(function(s) {
+        var badgeColor = s.kind === 'override' ? '#9333ea' : '#6b7280';
+        var badgeBg = s.kind === 'override' ? '#f3e8ff' : '#f3f4f6';
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:3px 0;' +
+          'border-bottom:1px solid #f3f4f6;font-size:0.82em">';
+        html += '<code style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" ' +
+          'title="' + _esc(s.key) + '">' + _esc(s.key) + '</code>';
+        html += '<span style="flex:none;font-size:0.72em;font-weight:700;padding:1px 6px;' +
+          'border-radius:9999px;color:' + badgeColor + ';background:' + badgeBg + '">' +
+          _esc(s.kind) + '</span>';
+        html += '<span class="muted" style="flex:none;width:64px;text-align:right">' +
+          _fmtBytes(s.size_bytes) + '</span>';
+        html += '<button class="action-btn" style="flex:none;padding:1px 8px;font-size:0.85em" ' +
+          'onclick="_openDataSourceFile(\'' + _esc(s.key).replace(/'/g, "\\'") + '\')">Open</button>';
+        html += '</div>';
+      });
+      html += '</div></details>';
+    });
+    listEl.innerHTML = html;
+  }
+  window._filterDataSources = _filterDataSources;
+
+  function _openDataSourceFile(key) {
+    var url = '/api/data-source-file?key=' + encodeURIComponent(key);
+    var titleEl = document.getElementById('ds-preview-title');
+    var bodyEl = document.getElementById('ds-preview-body');
+    var dlEl = document.getElementById('ds-preview-download');
+    if (titleEl) titleEl.textContent = key;
+    if (dlEl) dlEl.setAttribute('href', url);
+    if (bodyEl) bodyEl.textContent = 'Loading…';
+    openModal('modal-ds-preview');
+    fetch(url)
+      .then(function(r) {
+        var ct = r.headers.get('Content-Type') || '';
+        if (ct.indexOf('text/') === 0 || ct.indexOf('json') !== -1 ||
+            ct.indexOf('yaml') !== -1 || ct.indexOf('csv') !== -1 ||
+            ct.indexOf('tab-separated') !== -1) {
+          return r.text().then(function(t) {
+            if (bodyEl) bodyEl.textContent = t;
+          });
+        }
+        if (bodyEl) {
+          bodyEl.textContent =
+            '(binary file — use Download to save it)';
+        }
+      })
+      .catch(function(e) {
+        if (bodyEl) bodyEl.textContent = 'Error loading file: ' + e;
+      });
+  }
+  window._openDataSourceFile = _openDataSourceFile;
 
   // -------------------------------------------------------------------------
   // Registry tab (v0.3.6)
