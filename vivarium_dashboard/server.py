@@ -291,6 +291,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/study-comparison-add":        "_post_study_comparison_add",
     "/api/study-tests-run":             "_post_study_tests_run",
     "/api/study-seed-followup":         "_post_study_seed_followup",
+    "/api/study-sync-runs":             "_post_study_sync_runs",
     "/api/investigation-set-status":    "_post_investigation_set_status",
     "/api/proposed-input-decision":     "_post_proposed_input_decision",
     # Workspace-switcher POST endpoints.
@@ -3808,6 +3809,11 @@ def _post_study_run_baseline_for_test(ws_root, body):
             response.setdefault("post_run_script_files", []).extend(script_files)
         if script_errors:
             response.setdefault("post_run_script_errors", []).extend(script_errors)
+        try:
+            from pbg_superpowers import study_outcomes
+            study_outcomes.record_runs(study_dir)
+        except Exception as exc:  # never fail a successful run on a record error
+            print(f"[study_outcomes] record_runs failed: {exc}", file=sys.stderr)
     return response, code
 
 
@@ -4299,7 +4305,31 @@ def _post_study_run_variant_for_test(ws_root, body):
             response.setdefault("post_run_script_files", []).extend(script_files)
         if script_errors:
             response.setdefault("post_run_script_errors", []).extend(script_errors)
+        try:
+            from pbg_superpowers import study_outcomes
+            study_outcomes.record_runs(study_dir)
+        except Exception as exc:  # never fail a successful run on a record error
+            print(f"[study_outcomes] record_runs failed: {exc}", file=sys.stderr)
     return response, code
+
+
+def _post_study_sync_runs_for_test(ws_root, body: dict):
+    """Reconcile a study's runs.db into study.yaml runs[]. Returns (response_dict, status_code).
+
+    Body:
+      study: <slug>
+    """
+    from pbg_superpowers import study_outcomes
+    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+    slug = (body or {}).get("study")
+    if not slug:
+        return {"error": "study slug required"}, 400
+    try:
+        study_dir = WorkspacePaths.load(Path(ws_root)).study_dir(slug)
+    except FileNotFoundError:
+        return {"error": f"study not found: {slug}"}, 404
+    summary = study_outcomes.record_runs(study_dir)
+    return {"ok": True, "summary": summary}, 200
 
 
 def _post_study_variant_add_for_test(ws_root, body):
@@ -9384,22 +9414,9 @@ if __name__ == "__main__":
             if condition == "complete":
                 return status == "complete"
             if condition == "tests-passed":
-                tests = parent.get("tests")
-                # New v4 shape: tests is a list of {name, status, ...}.
-                if isinstance(tests, list):
-                    statuses = [
-                        (t.get("status") or "").lower()
-                        for t in tests if isinstance(t, dict)
-                    ]
-                    if not statuses:
-                        return False
-                    return all("pass" in s for s in statuses)
-                # Legacy v3/v4-extras shape: tests is a mapping with last_results.
-                last = (tests or {}).get("last_results") or {}
-                summary = last.get("summary") or {}
-                passed = summary.get("passed", 0) or 0
-                failed = summary.get("failed", 0) or 0
-                return failed == 0 and passed > 0
+                from pbg_superpowers import study_status
+                counts = study_status.count_test_outcomes(parent, parent.get("runs"))
+                return counts["fail"] == 0 and counts["pass"] > 0
             return False
 
         out = []
@@ -11328,6 +11345,11 @@ if __name__ == "__main__":
             return self._json({"error": f"seed failed: {e}"}, 500)
         return self._json({"new_study_name": new_name}, 200)
 
+
+    def _post_study_sync_runs(self, body: dict):
+        """POST /api/study-sync-runs {study}"""
+        response, code = _post_study_sync_runs_for_test(WORKSPACE, body)
+        return self._json(response, code)
 
     def _post_study_rename(self, body: dict):
         """POST /api/study-rename {study, new_name}"""
