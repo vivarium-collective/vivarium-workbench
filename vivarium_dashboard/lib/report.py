@@ -61,6 +61,57 @@ def _copy_assets(target_dir: Path) -> None:
             shutil.copy2(path, target_dir / path.name)
 
 
+def _resolve_branding(
+    ws: dict, ws_root: Path, assets_dir: Path
+) -> tuple[str | None, str | None]:
+    """Resolve per-workspace dashboard branding from ``workspace.yaml``.
+
+    Reads the optional ``dashboard:`` block::
+
+        dashboard:
+          name: "sms-ecoli dashboard"
+          logo: assets/sms-ecoli-logo.png   # workspace-relative
+
+    Returns ``(dashboard_name, dashboard_logo_src)`` for the template context:
+      * ``dashboard_name`` — brand/title text, or ``None`` (template falls back
+        to the default "Vivarium / dashboard").
+      * ``dashboard_logo_src`` — the ``assets/``-relative ``src`` to use in the
+        rail ``<img>``, or ``None`` (template falls back to the bundled
+        ``assets/vivarium-logo.png``). When ``dashboard.logo`` points at an
+        existing file, it is copied into ``reports/assets/`` (preserving its
+        suffix as ``workspace-logo.<ext>``) so the served page can load it.
+
+    Never raises — any failure degrades to the default branding.
+    """
+    dash = ws.get("dashboard") if isinstance(ws, dict) else None
+    if not isinstance(dash, dict):
+        return None, None
+
+    name = dash.get("name")
+    dashboard_name = str(name).strip() or None if name else None
+
+    dashboard_logo_src: str | None = None
+    logo_rel = dash.get("logo")
+    if logo_rel:
+        try:
+            src = (ws_root / str(logo_rel)).resolve()
+            if src.is_file():
+                suffix = src.suffix or ".png"
+                dest_name = f"workspace-logo{suffix}"
+                assets_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, assets_dir / dest_name)
+                dashboard_logo_src = f"assets/{dest_name}"
+            else:
+                warnings.warn(
+                    f"dashboard.logo not found: {src} — using default logo",
+                    stacklevel=2,
+                )
+        except OSError as e:
+            warnings.warn(f"dashboard.logo copy failed: {e}", stacklevel=2)
+
+    return dashboard_name, dashboard_logo_src
+
+
 def _load_registry(ws_root: Path, package_path: str | None) -> tuple[dict, str | None]:
     """Try to import the workspace package and call build_core()/registry_snapshot().
 
@@ -380,6 +431,10 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     out.parent.mkdir(parents=True, exist_ok=True)
     _copy_assets(wp.reports / "assets")
 
+    # Per-workspace dashboard branding (workspace.yaml::dashboard.{name, logo}).
+    # All optional; missing → default "Vivarium dashboard" + bundled logo.
+    dashboard_name, dashboard_logo = _resolve_branding(ws, ws_root, wp.reports / "assets")
+
     references_count = _count_bib_entries(ws_root)
     bib_entries = _parse_bib_entries(ws_root)
     # Merge cached enrichment data (DOI / publisher URL / OA PDF URL) into
@@ -447,6 +502,8 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
 
     out.write_text(tpl.render(
         workspace_name=ws["name"],
+        dashboard_name=dashboard_name,
+        dashboard_logo=dashboard_logo,
         active_investigation_name=active_investigation_name,
         workspace_description=ws.get("description", ""),
         generated_at=today,

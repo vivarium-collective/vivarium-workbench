@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en"><head>
-<meta charset="UTF-8"><title>{{ workspace_name }}{% if active_investigation_name %}:{{ active_investigation_name }}{% endif %}</title>
+<meta charset="UTF-8"><title>{{ dashboard_name or workspace_name }}{% if active_investigation_name %}:{{ active_investigation_name }}{% endif %}</title>
 <link rel="stylesheet" href="assets/style.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 <style>
@@ -302,10 +302,10 @@
 
     <!-- Brand + workspace switcher -->
     <div class="viv-rail-header">
-      <img class="viv-rail-logo" src="assets/vivarium-logo.png" alt="Vivarium" loading="lazy">
+      <img class="viv-rail-logo" src="{{ dashboard_logo or 'assets/vivarium-logo.png' }}" alt="{{ dashboard_name or 'Vivarium' }}" loading="lazy">
       <div class="viv-rail-brand">
-        <strong>Vivarium</strong>
-        <small>dashboard</small>
+        {% if dashboard_name %}<strong>{{ dashboard_name }}</strong>{% else %}<strong>Vivarium</strong>
+        <small>dashboard</small>{% endif %}
       </div>
     </div>
 
