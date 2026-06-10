@@ -3142,6 +3142,11 @@ def _post_study_run_baseline_for_test(ws_root, body):
             response.setdefault("post_run_script_files", []).extend(script_files)
         if script_errors:
             response.setdefault("post_run_script_errors", []).extend(script_errors)
+        try:
+            from pbg_superpowers import study_outcomes
+            study_outcomes.record_runs(study_dir)
+        except Exception as exc:  # never fail a successful run on a record error
+            print(f"[study_outcomes] record_runs failed: {exc}", file=sys.stderr)
     return response, code
 
 
@@ -3633,6 +3638,11 @@ def _post_study_run_variant_for_test(ws_root, body):
             response.setdefault("post_run_script_files", []).extend(script_files)
         if script_errors:
             response.setdefault("post_run_script_errors", []).extend(script_errors)
+        try:
+            from pbg_superpowers import study_outcomes
+            study_outcomes.record_runs(study_dir)
+        except Exception as exc:  # never fail a successful run on a record error
+            print(f"[study_outcomes] record_runs failed: {exc}", file=sys.stderr)
     return response, code
 
 
