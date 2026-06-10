@@ -509,34 +509,7 @@ window.addEventListener('pageshow', function (e) {
   <!-- MAIN: topbar + content -->
   <div class="viv-main">
 
-    <header class="viv-topbar">
-      <nav class="viv-topbar-breadcrumbs" id="viv-breadcrumbs">
-        <span>{{ workspace_name }}{% if active_investigation_name %}:{{ active_investigation_name }}{% endif %} dashboard</span>
-      </nav>
-      <div class="viv-topbar-actions" id="viv-topbar-actions">
-        <!-- Git status strip + Open-PR button were here; moved into the
-             GitHub tab (Workspace → GitHub) for a cleaner topbar. The JS
-             (_refreshGitStatus) still targets #viv-git-status by id and
-             populates it wherever it lives. -->
-        <span class="viv-btn viv-tooltip" data-tooltip="Coming soon — share workspace link">Share</span>
-        <span class="viv-kebab viv-tooltip" data-tooltip="Workspace settings — coming soon">⋯</span>
-        {# Mirrors the rail-footer logic — show GitHub initials/email only
-           when `gh auth login` succeeded; otherwise a generic prompt that
-           opens the gh-cli setup docs, so screenshots of this workspace
-           don't leak the local git config identity. #}
-        {% if owner_login %}
-        <a class="viv-avatar viv-avatar-topbar viv-avatar-link"
-           href="{{ owner_html_url or '#' }}"
-           target="_blank" rel="noopener"
-           title="{{ owner_login }}{% if owner_email %} · {{ owner_email }}{% endif %}">{{ owner_initials or '—' }}</a>
-        {% else %}
-        <a class="viv-avatar viv-avatar-topbar viv-avatar-link viv-avatar-no-github"
-           href="https://cli.github.com/manual/gh_auth_login"
-           target="_blank" rel="noopener"
-           title="Connect this workspace to GitHub — run `gh auth login`">+</a>
-        {% endif %}
-      </div>
-    </header>
+    <!-- Top banner removed — was a non-functional breadcrumb + "Coming soon" Share/settings placeholders + a decorative avatar. -->
 
     <main class="viv-content pages" id="viv-content">
 
