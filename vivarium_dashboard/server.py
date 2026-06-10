@@ -4458,7 +4458,7 @@ def _post_study_sync_runs_for_test(ws_root, body: dict):
         study_dir = WorkspacePaths.load(Path(ws_root)).study_dir(slug)
     except FileNotFoundError:
         return {"error": f"study not found: {slug}"}, 404
-    summary = study_outcomes.record_runs(study_dir)
+    summary = study_outcomes.sync(study_dir)  # record runs + compute outcomes
     return {"ok": True, "summary": summary}, 200
 
 
