@@ -3809,6 +3809,15 @@ def _post_study_run_baseline_for_test(ws_root, body):
             response.setdefault("post_run_script_files", []).extend(script_files)
         if script_errors:
             response.setdefault("post_run_script_errors", []).extend(script_errors)
+        # Post-run analysis hook: run spec.analyses[] steps over the parquet emitter
+        # output.  Synchronous (runs before this HTTP response returns) so the
+        # analysis outputs are on disk by the time the client refreshes.
+        analysis_files, analysis_errors = _run_study_analyses(
+            study_dir, spec, run_id, ws_root)
+        if analysis_files:
+            response.setdefault("analysis_files", []).extend(analysis_files)
+        if analysis_errors:
+            response.setdefault("analysis_errors", []).extend(analysis_errors)
         try:
             from pbg_superpowers import study_outcomes
             study_outcomes.record_runs(study_dir)
@@ -3876,6 +3885,120 @@ def _run_post_run_scripts(spec: dict, ws_root: Path) -> tuple[list[str], list[di
             if html.stat().st_mtime >= t_start:
                 written.append(str(html.relative_to(ws_root)))
     return written, errors
+
+
+def _build_analysis_options(entries: list[dict]) -> tuple[dict, list[dict]]:
+    """Translate ``spec.analyses`` entries into v2ecoli ``analysis_options``.
+
+    Looks up each entry's ``name`` in ``v2ecoli.workflow.analysis.ANALYSIS_REGISTRY``
+    to discover its ``scale``, then groups it into
+    ``{scale: {name: params}}``.
+
+    Returns ``(analysis_options, errors)`` where ``errors`` lists dicts for
+    unknown analysis names.  Importable as a pure helper so it is unit-testable
+    without a workspace.
+    """
+    try:
+        from v2ecoli.workflow.analysis import ANALYSIS_REGISTRY  # type: ignore[import]
+    except ImportError:
+        return {}, [{"error": "v2ecoli not installed; cannot resolve analysis scales"}]
+
+    analysis_options: dict[str, dict] = {}
+    errors: list[dict] = []
+    for entry in entries:
+        name = entry.get("name")
+        if not name:
+            continue
+        step_cls = ANALYSIS_REGISTRY.get(name)
+        if step_cls is None:
+            errors.append({"analysis": name, "error": f"unknown analysis {name!r} (not in ANALYSIS_REGISTRY)"})
+            continue
+        scale = getattr(step_cls, "scale", None)
+        if not scale:
+            errors.append({"analysis": name, "error": f"analysis {name!r} has no scale attribute"})
+            continue
+        analysis_options.setdefault(scale, {})[name] = entry.get("params") or {}
+    return analysis_options, errors
+
+
+def _run_study_analyses(study_dir: Path, spec: dict, run_id: str,
+                        ws_root: Path) -> tuple[list[str], list[dict]]:
+    """Run the study's configured ``analyses:`` steps over the run's parquet output.
+
+    Mirrors ``_run_post_run_scripts`` in structure.  Collects the written
+    ``ptools/*.tsv``, ``viz/*.html``, and ``analysis.json`` into
+    ``written_files``, and per-analysis errors into ``errors``.
+    Returns ``(written_files, errors)`` — never raises.
+
+    Requires:
+      - v2ecoli installed in the same venv (guarded import).
+      - A parquet emitter run under ``study_dir/parquet-runs/``.
+      - A sim_data pickle somewhere in the workspace (searched under ws_root).
+        Analyses that don't need sim_data will still run even if none is found.
+    """
+    try:
+        entries = list(spec.get("analyses") or [])
+        if not entries:
+            return [], []
+
+        # 1. Build analysis_options from spec.analyses entries.
+        analysis_options, build_errors = _build_analysis_options(entries)
+        if not analysis_options:
+            return [], build_errors
+
+        # 2. Locate the most-recent parquet sweep dir.
+        from vivarium_dashboard.lib.study_charts import _latest_parquet_for_study
+        hive_root = _latest_parquet_for_study(study_dir)
+        if hive_root is None:
+            return [], [{"error": "no parquet run found under study dir; analyses need parquet emitter output"}]
+        # run_analyses globs history parquet under sweep_dir; the hive root is
+        # <exp>/history so its parent <exp> is the sweep_dir.
+        sweep_dir = hive_root.parent
+
+        # 3. Resolve workspace sim_data (optional — analyses that don't need it still run).
+        sim_data_path: str | None = None
+        for pat in ("out/**/simData*.cPickle", "out/**/sim_data*.cPickle",
+                    "simData*.cPickle", "sim_data*.cPickle",
+                    "**/simData*.cPickle", "**/sim_data*.cPickle"):
+            import glob as _glob
+            hits = _glob.glob(str(ws_root / pat), recursive=True)
+            if hits:
+                sim_data_path = hits[0]
+                break
+
+        # 4. Run analyses.
+        from v2ecoli.workflow.analysis_runner import run_analyses  # type: ignore[import]
+        import v2ecoli.workflow.analyses  # noqa: F401 — register analysis ports  # type: ignore[import]
+
+        t_start = __import__("time").time()
+        results = run_analyses(str(sweep_dir), analysis_options, sim_data_path=sim_data_path)
+
+        # 5. Collect written files (mtime newer than call start).
+        written: list[str] = []
+        for sub in ("ptools", "viz"):
+            sub_dir = sweep_dir / sub
+            if not sub_dir.is_dir():
+                continue
+            for f in sub_dir.iterdir():
+                if f.is_file() and f.stat().st_mtime >= t_start:
+                    written.append(str(f))
+        analysis_json = sweep_dir / "analysis.json"
+        if analysis_json.is_file() and analysis_json.stat().st_mtime >= t_start:
+            written.append(str(analysis_json))
+
+        # 6. Collect per-group errors from the results dict.
+        errors: list[dict] = list(build_errors)
+        for scale_results in results.values():
+            for name, groups in (scale_results or {}).items():
+                for gstr, val in (groups or {}).items():
+                    if isinstance(val, dict) and "error" in val:
+                        errors.append({"analysis": name, "group": gstr, "error": val["error"]})
+        return written, errors
+
+    except Exception as exc:  # noqa: BLE001 — never crash the run handler
+        import traceback
+        return [], [{"error": f"_run_study_analyses failed: {type(exc).__name__}: {exc}",
+                     "traceback": traceback.format_exc()}]
 
 
 def _zarr_store_for_sim(study_db: Path, sim_name: str | None) -> Path | None:
@@ -4305,6 +4428,13 @@ def _post_study_run_variant_for_test(ws_root, body):
             response.setdefault("post_run_script_files", []).extend(script_files)
         if script_errors:
             response.setdefault("post_run_script_errors", []).extend(script_errors)
+        # Post-run analysis hook: mirrors baseline path — run spec.analyses[] steps.
+        analysis_files, analysis_errors = _run_study_analyses(
+            study_dir, spec, run_id, ws_root)
+        if analysis_files:
+            response.setdefault("analysis_files", []).extend(analysis_files)
+        if analysis_errors:
+            response.setdefault("analysis_errors", []).extend(analysis_errors)
         try:
             from pbg_superpowers import study_outcomes
             study_outcomes.record_runs(study_dir)

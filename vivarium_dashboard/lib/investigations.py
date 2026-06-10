@@ -174,6 +174,15 @@ def _validate_study_v3_or_v4(spec: dict) -> None:
     if not isinstance(visualizations, list):
         raise InvestigationSpecError("v3 study: 'visualizations' must be a list")
 
+    analyses = spec.get("analyses", [])
+    if not isinstance(analyses, list):
+        raise InvestigationSpecError("v3 study: 'analyses' must be a list")
+    for i, a in enumerate(analyses):
+        if not isinstance(a, dict) or not isinstance(a.get("name", ""), str) or not a.get("name"):
+            raise InvestigationSpecError(
+                f"v3 study: analyses[{i}] must be a mapping with a string 'name'"
+            )
+
     interventions = spec.get("interventions", [])
     if not isinstance(interventions, list):
         raise InvestigationSpecError("v3 study: 'interventions' must be a list")
