@@ -1478,6 +1478,16 @@ def _study_detail_spec(name: str):
             spec["clarity_summary"] = _ss.study_clarity_summary(spec, runs)
         except Exception:  # noqa: BLE001
             pass
+
+        # Coded gate verdict (spine stage #2): roll per-test outcomes → study
+        # verdict and surface it alongside the authored gate_status so the SPA
+        # can render both and flag divergence. Does NOT modify study.yaml
+        # (write_gate_evaluator does that); this is render-only.
+        try:
+            from pbg_superpowers.study_verdict import roll_up_verdict
+            spec["computed_gate_verdict"] = roll_up_verdict(spec)
+        except Exception:  # noqa: BLE001
+            pass
     return spec
 
 
@@ -9416,6 +9426,27 @@ if __name__ == "__main__":
             member_statuses, has_runs=member_has_runs,
         )
 
+        # Coded acceptance roll-up (spine stage #2): roll member-study verdicts
+        # → investigation acceptance for render-only display alongside authored
+        # verdict_status. Does NOT write investigation.yaml. Defensive import.
+        computed_acceptance: dict | None = None
+        try:
+            from pbg_superpowers.investigation_status import roll_up_acceptance
+            from pbg_superpowers import study_io as _sio
+            # Build studies_by_name from the workspace for acceptance computation
+            wp = workspace_paths()
+            studies_by_name: dict = {}
+            for _sd in wp.iter_study_dirs():
+                _syp = _sd / "study.yaml"
+                if _syp.exists():
+                    try:
+                        studies_by_name[_sd.name] = _sio.load_yaml_mapping(_syp)
+                    except Exception:  # noqa: BLE001
+                        pass
+            computed_acceptance = roll_up_acceptance(spec, studies_by_name)
+        except Exception:  # noqa: BLE001
+            pass
+
         return self._json({
             "name":             spec.get("name", name),
             "title":            spec.get("title", spec.get("name", name)),
@@ -9431,6 +9462,9 @@ if __name__ == "__main__":
             "effective_status": effective_status,
             "expert_docs":      _coerce_list_field(spec, "expert_docs", source=str(spec_path)),
             "acceptance_criteria": _coerce_list_field(spec, "acceptance_criteria", source=str(spec_path)),
+            # Coded acceptance roll-up (spine stage #2): parallel computed slot
+            # alongside authored acceptance_criteria + executive.verdict_status.
+            "computed_acceptance": computed_acceptance,
             # Authored synthesis layers for the layered report (executive
             # summary + scientific argument). Optional — absent on older
             # investigations, where the report falls back to derived data.
