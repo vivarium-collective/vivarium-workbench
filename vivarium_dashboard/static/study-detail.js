@@ -673,6 +673,62 @@
     } else {
       summary.textContent = '— no test results yet — click "Run tests" to execute them or check the runs[] section in study.yaml';
     }
+
+    // --- Code-computed outcomes summary ---
+    // Tally spec.runs[].computed_outcomes (written by the post-run evaluator).
+    // Skip the _status sentinel key and any non-object entries.
+    var cPassed = 0, cFailed = 0, cAgent = 0;
+    var cAgree = 0, cDivergent = 0, cNoAuthored = 0;
+    var anyComputed = false;
+    (spec && spec.runs || []).forEach(function(r) {
+      var co = r.computed_outcomes;
+      if (!co || typeof co !== 'object' || Array.isArray(co)) return;
+      Object.keys(co).forEach(function(tname) {
+        if (tname === '_status') return;
+        var entry = co[tname];
+        if (!entry || typeof entry !== 'object') return;
+        anyComputed = true;
+        var evaluatedBy = entry.evaluated_by || '';
+        if (evaluatedBy === 'code') {
+          if (entry.result === 'PASS') cPassed++;
+          else if (entry.result === 'FAIL') cFailed++;
+          else cAgent++;
+        } else {
+          cAgent++;
+        }
+        var reconcile = entry.reconcile || '';
+        if (reconcile === 'agree') cAgree++;
+        else if (reconcile === 'divergent') cDivergent++;
+        else if (reconcile === 'no_authored') cNoAuthored++;
+      });
+    });
+
+    if (anyComputed) {
+      var compEl = document.getElementById('tests-computed-summary');
+      if (!compEl) {
+        compEl = document.createElement('div');
+        compEl.id = 'tests-computed-summary';
+        compEl.className = 'tests-summary muted';
+        summary.insertAdjacentElement('afterend', compEl);
+      }
+      var cHtml =
+        '<span class="muted">Code-computed: </span>' +
+        '<span class="ok">' + cPassed + ' passed</span>' +
+        ' / <span class="fail">' + cFailed + ' failed</span>' +
+        ' / <span class="muted">' + cAgent + ' agent</span>';
+      if (cDivergent > 0) {
+        cHtml += '  <span class="fail" style="font-weight:600">' +
+          '⚠ ' + escapeHtmlForTests(String(cDivergent)) +
+          ' divergent from authored</span>';
+      }
+      var muted = [];
+      if (cAgree > 0) muted.push(escapeHtmlForTests(String(cAgree)) + ' agree');
+      if (cNoAuthored > 0) muted.push(escapeHtmlForTests(String(cNoAuthored)) + ' no_authored');
+      if (muted.length) {
+        cHtml += ' <span class="muted">(' + muted.join(', ') + ')</span>';
+      }
+      compEl.innerHTML = cHtml;
+    }
   }
 
   function escapeHtmlForTests(s) {

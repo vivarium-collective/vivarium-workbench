@@ -450,3 +450,128 @@ def test_fmt_ts_handles_none_and_unix():
     assert _jinja_fmt_ts(None) == ""
     assert _jinja_fmt_ts(0) == ""  # epoch zero treated as falsy/no-data
     assert _jinja_fmt_ts(1700000000.0) == "2023-11-14 22:13"
+
+
+# ---------------------------------------------------------------------------
+# computed_outcomes data-path: verify runs[].computed_outcomes survives
+# load_spec + _enrich_runs_with_meta and reaches window._study in the SPA.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _ws_with_computed_outcomes(tmp_path, monkeypatch):
+    """Workspace whose study has one run with both authored outcomes and
+    computed_outcomes (agree + divergent + no_authored entries + _status key)."""
+    import vivarium_dashboard.server as srv
+
+    ws = tmp_path / "ws"
+    sd = ws / "studies" / "computed-test"
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "schema_version": 4,
+        "name": "computed-test",
+        "objective": "Validate computed-outcome pass-through.",
+        "simulation_status": "ran",
+        "baseline": [
+            {"name": "core", "composite": "pkg.composites.core", "params": {}},
+        ],
+        "variants": [],
+        "runs": [
+            {
+                "run_id": "run-co1",
+                "variant": None,
+                "composite": "core",
+                "label": "baseline",
+                "n_steps": 10,
+                "status": "completed",
+                "outcomes": {
+                    "GROWTH_RATE_MATCHES": {"result": "PASS"},
+                    "COPY_NUMBER_STABLE": {"result": "PASS"},
+                    "EXPRESSION_LEVEL": {"result": "FAIL"},
+                },
+                "computed_outcomes": {
+                    "GROWTH_RATE_MATCHES": {
+                        "result": "PASS",
+                        "measured_value": 0.42,
+                        "evaluated_by": "code",
+                        "reconcile": "agree",
+                    },
+                    "COPY_NUMBER_STABLE": {
+                        "result": "FAIL",
+                        "measured_value": 15.0,
+                        "evaluated_by": "code",
+                        "reconcile": "divergent",
+                    },
+                    "EXPRESSION_LEVEL": {
+                        "result": "PASS",
+                        "measured_value": 2.3,
+                        "evaluated_by": "agent",
+                        "reconcile": "no_authored",
+                    },
+                    "_status": "store_unresolved",
+                },
+            }
+        ],
+    }))
+    monkeypatch.setattr(srv, "WORKSPACE", ws)
+    return ws
+
+
+def test_computed_outcomes_survive_study_detail_spec(_ws_with_computed_outcomes):
+    """_study_detail_spec must return runs[].computed_outcomes intact so the
+    SPA (window._study) can render the code-computed vs authored comparison."""
+    from vivarium_dashboard.server import _study_detail_spec
+
+    spec = _study_detail_spec("computed-test")
+    assert spec is not None
+
+    runs = spec.get("runs") or []
+    assert len(runs) >= 1, "expected at least one run in spec"
+
+    run = runs[0]
+    assert "computed_outcomes" in run, (
+        "computed_outcomes key was stripped — it must pass through load_spec + "
+        "_study_detail_spec unchanged so the client SPA can render it"
+    )
+
+    co = run["computed_outcomes"]
+    assert isinstance(co, dict), "computed_outcomes must be a dict"
+
+    # All authored entries survive
+    assert "GROWTH_RATE_MATCHES" in co
+    assert "COPY_NUMBER_STABLE" in co
+    assert "EXPRESSION_LEVEL" in co
+
+    # Entry shapes are intact
+    assert co["GROWTH_RATE_MATCHES"]["result"] == "PASS"
+    assert co["GROWTH_RATE_MATCHES"]["reconcile"] == "agree"
+    assert co["COPY_NUMBER_STABLE"]["result"] == "FAIL"
+    assert co["COPY_NUMBER_STABLE"]["reconcile"] == "divergent"
+    assert co["EXPRESSION_LEVEL"]["evaluated_by"] == "agent"
+    assert co["EXPRESSION_LEVEL"]["reconcile"] == "no_authored"
+
+    # The _status sentinel key also survives (JS skips it by name)
+    assert "_status" in co
+    assert co["_status"] == "store_unresolved"
+
+
+def test_computed_outcomes_survive_enrich_runs(_ws_with_computed_outcomes):
+    """_enrich_runs_with_meta must not strip computed_outcomes even when there
+    is no matching runs.db row (tolerant path)."""
+    from vivarium_dashboard.server import (
+        _study_detail_spec,
+        _render_study_detail_html,
+    )
+    import json as _json
+
+    spec = _study_detail_spec("computed-test")
+    # _render_study_detail_html calls _enrich_runs_with_meta internally;
+    # window._study is serialised via tojson — we verify the key appears in
+    # the rendered HTML (as JSON) so the SPA receives it.
+    html = _render_study_detail_html("computed-test", spec)
+    assert "computed_outcomes" in html, (
+        "computed_outcomes must appear in the rendered window._study JSON so "
+        "study-detail.js can tally code-computed verdicts"
+    )
+    assert "COPY_NUMBER_STABLE" in html
+    assert "divergent" in html
