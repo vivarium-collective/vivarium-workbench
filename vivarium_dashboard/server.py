@@ -3820,9 +3820,9 @@ def _post_study_run_baseline_for_test(ws_root, body):
             response.setdefault("analysis_errors", []).extend(analysis_errors)
         try:
             from pbg_superpowers import study_outcomes
-            study_outcomes.record_runs(study_dir)
+            study_outcomes.sync(study_dir)  # record runs + compute outcomes
         except Exception as exc:  # never fail a successful run on a record error
-            print(f"[study_outcomes] record_runs failed: {exc}", file=sys.stderr)
+            print(f"[study_outcomes] sync failed: {exc}", file=sys.stderr)
     return response, code
 
 
@@ -4437,9 +4437,9 @@ def _post_study_run_variant_for_test(ws_root, body):
             response.setdefault("analysis_errors", []).extend(analysis_errors)
         try:
             from pbg_superpowers import study_outcomes
-            study_outcomes.record_runs(study_dir)
+            study_outcomes.sync(study_dir)  # record runs + compute outcomes
         except Exception as exc:  # never fail a successful run on a record error
-            print(f"[study_outcomes] record_runs failed: {exc}", file=sys.stderr)
+            print(f"[study_outcomes] sync failed: {exc}", file=sys.stderr)
     return response, code
 
 
@@ -4458,7 +4458,7 @@ def _post_study_sync_runs_for_test(ws_root, body: dict):
         study_dir = WorkspacePaths.load(Path(ws_root)).study_dir(slug)
     except FileNotFoundError:
         return {"error": f"study not found: {slug}"}, 404
-    summary = study_outcomes.record_runs(study_dir)
+    summary = study_outcomes.sync(study_dir)  # record runs + compute outcomes
     return {"ok": True, "summary": summary}, 200
 
 
