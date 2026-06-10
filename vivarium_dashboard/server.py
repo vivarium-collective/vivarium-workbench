@@ -1116,6 +1116,112 @@ def _build_override_catalog(override: list, default_modules: list) -> list:
     return out
 
 
+def _build_reexport_origin_modules(
+    ws_data: dict | None, existing_modules: list
+) -> list[dict]:
+    """Synthesize catalog entries for re-export-ORIGIN packages.
+
+    A re-export origin is a package that is (a) NOT in the registry allow-list
+    itself, but (b) has ≥1 class re-exported by an allow-listed package (per
+    :func:`_build_reexport_map`). The canonical example: ``spatio_flux`` is not
+    allow-listed, but ``viva_munk`` re-exports 7 of its classes into its own
+    top-level namespace — so spatio-flux is a genuine dependency of an
+    allow-listed package and should be SHOWN in the catalog (tagged
+    ``📦 via viva-munk``) rather than fully hidden.
+
+    For each such origin package we emit one catalog entry stamped with
+    ``install_source: "venv"`` + ``installed_via: [<allow-listed re-exporters>]``
+    so the install-source badge renders ``📦 via <parents>`` and the UI shows
+    "(remove parent to uninstall)" instead of an Install button. This
+    install_source attribution is DELIBERATELY forced to the re-exporter(s)
+    even when the package is also a direct pyproject dependency of the
+    workspace (e.g. v2ecoli pins spatio-flux): the meaningful reason it appears
+    in this filtered catalog is the re-export, per v2ecoli's own pyproject
+    comment.
+
+    Guarded: returns ``[]`` unless a registry allow-list is configured AND the
+    re-export map yields at least one origin package. Origin packages already
+    present in ``existing_modules`` (by name/package variant) are skipped so we
+    never duplicate or shadow a primary catalog entry.
+    """
+    include = _registry_include_pkgs(ws_data)
+    if include is None:
+        return []
+    try:
+        reexports = _build_reexport_map(include)
+    except Exception:
+        return []
+    if not reexports:
+        return []
+
+    def _norm(s) -> str:
+        return str(s or "").strip().replace("-", "_").split(".")[0]
+
+    # Collect, per origin package, the set of allow-listed re-exporters.
+    # Map keys are either ``def_module.qualname`` (full address) or
+    # ``"<def_top_pkg>::<name>"``; the value is the re-exporting package. Only
+    # the ``::`` keys cleanly expose the origin top-level package, so derive
+    # origins from those.
+    # Stdlib / builtin module names are NOT installable workspace packages —
+    # an allow-listed package re-importing e.g. ``typing.TypeVar`` or
+    # ``dataclasses.dataclass`` into its namespace must not surface a bogus
+    # "typing" catalog row. Mirror the framework-pkg guard in _build_reexport_map
+    # for the standard library.
+    import sys as _sys
+    _stdlib = set(getattr(_sys, "stdlib_module_names", ()))
+    _builtins = set(_sys.builtin_module_names)
+
+    origins: dict[str, set[str]] = {}
+    for key, reexporter in reexports.items():
+        if "::" not in key:
+            continue
+        def_top = _norm(key.split("::", 1)[0])
+        if not def_top or def_top in include:
+            continue
+        if def_top in _stdlib or def_top in _builtins:
+            continue
+        origins.setdefault(def_top, set()).add(reexporter)
+    if not origins:
+        return []
+
+    # Don't duplicate a package that the override catalog already lists.
+    existing: set[str] = set()
+    for m in existing_modules or []:
+        if not isinstance(m, dict):
+            continue
+        existing.add(_norm(m.get("name")))
+        if m.get("pypi_name"):
+            existing.add(_norm(m.get("pypi_name")))
+        existing.add(_norm(m.get("package") or m.get("name")))
+    existing.discard("")
+
+    out: list[dict] = []
+    for origin_pkg in sorted(origins):
+        if origin_pkg in existing:
+            continue
+        # Re-exporters as their catalog display names (dash form for the badge).
+        parents = sorted(p.replace("_", "-") for p in origins[origin_pkg])
+        display_name = origin_pkg.replace("_", "-")
+        out.append({
+            "name": display_name,
+            "package": origin_pkg,
+            "description": (
+                f"Re-exported by {', '.join(parents)} "
+                "(particles + visualizations)."
+            ),
+            "tags": ["dependency", "re-export"],
+            "category": "dependency",
+            "installed": True,
+            # Force the venv/via-parent attribution even if this package is also
+            # a direct pyproject dep — the reason it's surfaced here is the
+            # re-export, not the direct pin.
+            "install_source": "venv",
+            "installed_via": parents,
+            "reexport_origin": True,
+        })
+    return out
+
+
 def _save_upload(file_b64: str, target_path: Path) -> str:
     """Decode base64-encoded file content, write to target_path, return sha256."""
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -12799,6 +12905,17 @@ if __name__ == "__main__":
                         m["out_of_sync"] = True
                         m["out_of_sync_reason"] = sync_reason
 
+        # Re-export-ORIGIN packages: when a registry allow-list is active, also
+        # SHOW (vs fully hide) packages whose classes an allow-listed package
+        # re-exports — e.g. spatio-flux, 7 of whose classes viva-munk surfaces.
+        # These are appended AFTER the install-detection loop so their forced
+        # `install_source: venv` + `installed_via: [<re-exporters>]` attribution
+        # (which the UI renders as `📦 via <parents>`) is not overwritten by the
+        # pyproject/imports detection above. No-op without an allow-list.
+        reexport_origins = _build_reexport_origin_modules(ws_data, modules)
+        if reexport_origins:
+            modules = modules + reexport_origins
+
         ws_self = self._workspace_self_module(ws_data)
         if ws_self is not None:
             modules = [ws_self] + modules
@@ -12815,7 +12932,13 @@ if __name__ == "__main__":
         # catalog (current behavior). The workspace's own first-party module is
         # included only when its slug (e.g. v2ecoli) is in the list.
         if override is None:
-            modules = _filter_catalog_modules(modules, ws_data)
+            # Preserve synthesized re-export-origin entries (they are not in the
+            # allow-list by definition, but are surfaced deliberately).
+            kept_origins = [
+                m for m in modules
+                if isinstance(m, dict) and m.get("reexport_origin")
+            ]
+            modules = _filter_catalog_modules(modules, ws_data) + kept_origins
 
         return self._json({"modules": modules}, 200)
 
