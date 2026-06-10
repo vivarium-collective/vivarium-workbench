@@ -450,6 +450,36 @@ def inject_emitter_for_paths(state: dict, explicit_paths: list[str]) -> dict:
     return new_state
 
 
+def _readout_observables(rr) -> list[str]:
+    """Underlying observable path(s) a resolved readout needs emitted.
+
+    Adds the *parent* array/scalar for each readout kind, not the selected
+    element — the whole vector is emitted (self-describing via #1's id-coord)
+    and ``RunReader.select`` picks the element at read time:
+
+      - ``scalar``      → the dotted observable path.
+      - ``element``     → the parent array observable (``bulk`` for bulk_id,
+                          ``listeners.monomer_counts`` for literal_index /
+                          monomer_id / …); the index_by value is resolved later.
+      - ``expression``  → each operand's observable: ``bulk`` for bulk_id
+                          operands, the dotted path for scalar operands.
+
+    ``rr`` is a ``ResolvedReadout``; only its public dataclass fields are read.
+    """
+    out: list[str] = []
+    if rr.kind in ("scalar", "element"):
+        if rr.observable:
+            out.append(rr.observable)
+    elif rr.kind == "expression":
+        for op in (rr.operand_ids or []):
+            ib = op.get("index_by") or {}
+            if ib.get("type") == "bulk_id":
+                out.append("bulk")
+            else:  # scalar operand → the dotted path is the value/token
+                out.append(ib.get("value") or op.get("token"))
+    return out
+
+
 def collect_emit_paths_from_spec(spec: dict) -> list[str]:
     """Collect observable paths declared by a v4 study yaml, for emitter setup.
 
@@ -457,6 +487,10 @@ def collect_emit_paths_from_spec(spec: dict) -> list[str]:
     captures the study's biology, not just ``_tick``. Sources:
       - ``readouts[].store_path``                       — v2ecoli explicit
                                                           per-readout paths
+      - ``readouts[]`` resolved via ``readout_resolver`` — canonical/legacy
+                                                          ``identifier:`` /
+                                                          ``index_by:`` readouts
+                                                          (the real dnaa studies)
       - ``tests[].measure.path``                        — per-test observables
       - ``behavior_tests[].measure.path``               — legacy v3 fallback
       - ``visualizations[].inputs_map.*`` / ``.config.inputs_map.*``
@@ -483,6 +517,26 @@ def collect_emit_paths_from_spec(spec: dict) -> list[str]:
         p = _norm(r.get("store_path"))
         if p:
             paths.add(p)
+    # Canonical/legacy readouts (identifier: / index_by:) carry no usable
+    # store_path, so the loop above misses every real dnaa study. Resolve them
+    # to their underlying observables and add the array/scalar that must be
+    # emitted so RunReader.select can pick the element at read time. Imported
+    # defensively: an older pbg_superpowers without the resolver simply yields
+    # no readout-driven additions (the dashboard still works).
+    try:
+        from pbg_superpowers.readout_resolver import (
+            resolve_study_readouts, ResolvedReadout,
+        )
+    except ImportError:
+        resolve_study_readouts = None
+    if resolve_study_readouts is not None:
+        for rr in resolve_study_readouts(spec).values():
+            if not isinstance(rr, ResolvedReadout):
+                continue  # UnresolvedReadout → never fabricate a path
+            for obs in _readout_observables(rr):
+                p = _norm(obs)
+                if p:
+                    paths.add(p)
     for t in (spec.get("tests") or []) + (spec.get("behavior_tests") or []):
         if not isinstance(t, dict):
             continue

@@ -3,7 +3,7 @@ from vivarium_dashboard.lib.composite_runs import (
     connect, save_metadata, complete_metadata, query_runs, query_run,
     query_run_meta, update_progress, set_pid, mark_orphaned, prune_runs,
     inject_sqlite_emitter, auto_label, inject_emitter_for_paths,
-    all_store_paths,
+    all_store_paths, collect_emit_paths_from_spec,
 )
 
 
@@ -457,3 +457,81 @@ def test_prune_runs_keeps_only_newest_n_per_spec(tmp_path):
     assert remaining == ["r3", "r4"]
     # Other spec untouched.
     assert len(query_runs(conn, spec_id="other")) == 1
+
+
+# ---------------------------------------------------------------------------
+# collect_emit_paths_from_spec — readout-driven emit paths (#5)
+# ---------------------------------------------------------------------------
+
+def test_collect_emit_paths_honors_resolved_readouts():
+    """Canonical/legacy readouts (identifier/index_by) must drive emit paths.
+
+    Before #5 only ``store_path`` was read, so the real dnaa studies (which use
+    ``identifier:`` with bracket-index, bulk fraction expressions, and bare
+    dotted paths) contributed ZERO emit paths. Now ``resolve_study_readouts``
+    feeds the underlying observables into the emit set:
+      - ``listeners.monomer_counts[3861]``   (element/literal_index) → parent
+        array ``listeners/monomer_counts`` (whole vector emitted; the element
+        is selected at read time).
+      - bulk fraction expression                (expression)         → ``bulk``
+        (the bulk array carries every operand id).
+      - ``listeners.mass.cell_mass``            (scalar)             → the path.
+    Each also appears in its ``agents/0/...`` per-agent variant.
+    """
+    spec = {"readouts": [
+        {"name": "monomer", "identifier": "listeners.monomer_counts[3861]"},
+        {"name": "frac",
+         "identifier": "bulk CPLX0-3933[c] / (CPLX0-3933[c] + MONOMER0-160[c])"},
+        {"name": "mass", "identifier": "listeners.mass.cell_mass"},
+    ]}
+    paths = collect_emit_paths_from_spec(spec)
+    for base in ("listeners/monomer_counts", "bulk", "listeners/mass/cell_mass"):
+        assert base in paths, f"missing {base}: {paths}"
+        assert f"agents/0/{base}" in paths, f"missing agents/0/{base}: {paths}"
+
+
+def test_collect_emit_paths_expression_scalar_operands():
+    """Non-bulk expression operands contribute their dotted observable paths."""
+    spec = {"readouts": [
+        {"name": "ratio",
+         "identifier": "listeners.mass.cell_mass / listeners.mass.dry_mass"},
+    ]}
+    paths = collect_emit_paths_from_spec(spec)
+    assert "listeners/mass/cell_mass" in paths
+    assert "listeners/mass/dry_mass" in paths
+
+
+def test_collect_emit_paths_skips_unresolved_readouts():
+    """Prose/derived readouts that cannot be resolved are NOT fabricated.
+
+    ``identifier: derived`` resolves to an UnresolvedReadout and carries no
+    ``store_path``, so it contributes nothing — the resolver never invents a
+    path it could not parse.
+    """
+    spec = {"readouts": [
+        {"name": "vague", "identifier": "derived"},
+        {"name": "multi",
+         "identifier": "bulk MONOMER0-160[c] · MONOMER0-161[c]"},
+    ]}
+    paths = collect_emit_paths_from_spec(spec)
+    assert paths == [], f"expected no fabricated paths, got {paths}"
+
+
+def test_collect_emit_paths_store_path_regression():
+    """Existing store_path / tests / viz collection is unchanged by #5."""
+    spec = {
+        "readouts": [{"name": "rp", "store_path": "listeners.rna_counts"}],
+        "tests": [{"measure": {"path": "listeners.mass.cell_mass"}}],
+        "behavior_tests": [{"measure": {"path": "global_time"}}],
+        "visualizations": [{"inputs_map": {"x": "listeners.foo"}}],
+        "comparative_visualizations": [{"observable_path": "listeners.bar"}],
+    }
+    paths = collect_emit_paths_from_spec(spec)
+    for base in ("listeners/rna_counts", "listeners/mass/cell_mass",
+                 "global_time", "listeners/foo", "listeners/bar"):
+        assert base in paths, f"missing {base}: {paths}"
+        assert f"agents/0/{base}" in paths
+
+
+def test_collect_emit_paths_empty_spec():
+    assert collect_emit_paths_from_spec({}) == []
