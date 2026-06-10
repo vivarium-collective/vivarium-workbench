@@ -290,6 +290,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/study-comparison-add":        "_post_study_comparison_add",
     "/api/study-tests-run":             "_post_study_tests_run",
     "/api/study-seed-followup":         "_post_study_seed_followup",
+    "/api/study-sync-runs":             "_post_study_sync_runs",
     "/api/investigation-set-status":    "_post_investigation_set_status",
     "/api/proposed-input-decision":     "_post_proposed_input_decision",
     # Workspace-switcher POST endpoints.
@@ -3644,6 +3645,25 @@ def _post_study_run_variant_for_test(ws_root, body):
         except Exception as exc:  # never fail a successful run on a record error
             print(f"[study_outcomes] record_runs failed: {exc}", file=sys.stderr)
     return response, code
+
+
+def _post_study_sync_runs_for_test(ws_root, body: dict):
+    """Reconcile a study's runs.db into study.yaml runs[]. Returns (response_dict, status_code).
+
+    Body:
+      study: <slug>
+    """
+    from pbg_superpowers import study_outcomes
+    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+    slug = (body or {}).get("study")
+    if not slug:
+        return {"error": "study slug required"}, 400
+    try:
+        study_dir = WorkspacePaths.load(Path(ws_root)).study_dir(slug)
+    except FileNotFoundError:
+        return {"error": f"study not found: {slug}"}, 404
+    summary = study_outcomes.record_runs(study_dir)
+    return {"ok": True, "summary": summary}, 200
 
 
 def _post_study_variant_add_for_test(ws_root, body):
@@ -10593,6 +10613,11 @@ if __name__ == "__main__":
             return self._json({"error": f"seed failed: {e}"}, 500)
         return self._json({"new_study_name": new_name}, 200)
 
+
+    def _post_study_sync_runs(self, body: dict):
+        """POST /api/study-sync-runs {study}"""
+        response, code = _post_study_sync_runs_for_test(WORKSPACE, body)
+        return self._json(response, code)
 
     def _post_study_rename(self, body: dict):
         """POST /api/study-rename {study, new_name}"""
