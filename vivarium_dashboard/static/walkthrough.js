@@ -800,7 +800,7 @@
     var html = '';
 
     // --- This investigation's inputs (top) ---
-    var invHeading = 'This investigation’s inputs';
+    var invHeading = 'This investigation’s sources';
     if (current) invHeading += ' — ' + _esc(current);
     html += '<div class="panel">';
     html += '<h3>' + invHeading + '</h3>';
@@ -826,14 +826,15 @@
     // --- Repo-wide data sources (below) ---
     html += '<div class="panel">';
     html += '<h3>Repo-wide data sources</h3>';
+    // Data-source bundle (workspace.yaml dashboard.data_sources provider).
+    // Populated asynchronously; the host is hidden until sources arrive so
+    // workspaces without a provider see no extra UI. Rendered FIRST (above the
+    // shared datasets/references) as the primary repo-wide source.
+    html += '<div id="data-sources-host" style="display:none;margin-bottom:16px"></div>';
     html += '<h4 style="margin:12px 0 4px">Datasets</h4>' +
       _inputsDatasetsHtml(glob.datasets);
     html += '<h4 style="margin:12px 0 4px">References</h4>' +
       _inputsRefsHtml(glob.references);
-    // Data-source bundle (workspace.yaml dashboard.data_sources provider).
-    // Populated asynchronously; the host is hidden until sources arrive so
-    // workspaces without a provider see no extra UI.
-    html += '<div id="data-sources-host" style="display:none;margin-top:16px"></div>';
     html += '</div>';
 
     el.innerHTML = html;
