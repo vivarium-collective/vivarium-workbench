@@ -800,4 +800,102 @@
   if (runBtn) {
     runBtn.addEventListener('click', runStudyTests);
   }
+
+  // ── Stage-3c: Tracked Feedback panel ─────────────────────────────────────
+  // Renders open/addressed/dismissed items from window._study.feedback_tracked
+  // into #feedback-tracked-panel (Overview tab).  Idempotent — skips if already
+  // populated.  Escapes all user-supplied text.  Renders nothing when empty.
+  // Pure render, no AI.
+  function _esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+    });
+  }
+
+  function _renderFeedbackTrackedPanel() {
+    var container = document.getElementById('feedback-tracked-panel');
+    if (!container) return;               // anchor missing — template version mismatch
+    if (container.dataset.rendered) return; // idempotent
+    container.dataset.rendered = '1';
+
+    var spec = window._study || {};
+    var ft = spec.feedback_tracked;
+    if (!ft || !ft.items || ft.items.length === 0) return;  // nothing to show
+
+    var summary = ft.summary || {};
+    var openCt  = summary.open      || 0;
+    var addrCt  = summary.addressed || 0;
+    var disCt   = summary.dismissed || 0;
+    var total   = summary.total     || ft.items.length;
+
+    // Status badge colours
+    var badgeCss = {
+      open:      'background:#fef3c7;color:#92400e;',
+      addressed: 'background:#d1fae5;color:#065f46;',
+      dismissed: 'background:#f1f5f9;color:#64748b;text-decoration:line-through;',
+    };
+
+    var itemsHtml = '';
+    (ft.items || []).forEach(function(item) {
+      var status   = item.status || 'open';
+      var badgeStyle = badgeCss[status] || badgeCss.open;
+      var badgeHtml  =
+        '<span style="' + badgeStyle +
+        'padding:1px 8px;border-radius:9999px;font-size:0.78em;' +
+        'font-family:ui-monospace,monospace;margin-right:6px">' +
+        _esc(status) + '</span>';
+
+      var metaHtml =
+        '<span class="muted" style="font-size:0.82em">' +
+        _esc(item.author || '') + ' · ' + _esc((item.ts || '').replace('T', ' ').replace('Z', ' UTC')) +
+        ' · <code style="font-size:0.9em">' + _esc(item.section || '') + '</code>' +
+        '</span>';
+
+      var textHtml = '<p style="margin:4px 0;font-size:0.92em">' + _esc(item.text || '') + '</p>';
+
+      var responseHtml = '';
+      if (status === 'addressed' && item.response) {
+        responseHtml =
+          '<div style="margin:6px 0 0 0;padding:8px 12px;background:#f0fdf4;' +
+          'border-left:3px solid #10b981;border-radius:4px;font-size:0.88em">' +
+          '<strong style="font-size:0.85em;color:#065f46">Response' +
+          (item.responded_by ? ' (' + _esc(item.responded_by) + ')' : '') +
+          (item.responded_at ? ' — ' + _esc(item.responded_at) : '') +
+          ':</strong>' +
+          '<pre style="white-space:pre-wrap;margin:4px 0 0 0;font-family:inherit;' +
+          'font-size:0.92em;color:#374151">' + _esc(item.response) + '</pre>' +
+          '</div>';
+      }
+
+      itemsHtml +=
+        '<div style="padding:10px 14px;border-bottom:1px solid #f1f5f9">' +
+        '<div style="display:flex;align-items:flex-start;gap:6px;flex-wrap:wrap;margin-bottom:4px">' +
+        badgeHtml + metaHtml +
+        '</div>' +
+        textHtml +
+        responseHtml +
+        '</div>';
+    });
+
+    var summaryHtml =
+      '<span style="font-size:0.9em">' +
+      '<span style="color:#92400e">' + openCt + ' open</span>' +
+      ' / <span style="color:#065f46">' + addrCt + ' addressed</span>' +
+      ' / <span style="color:#64748b">' + disCt + ' dismissed</span>' +
+      ' <span class="muted">(' + total + ' total)</span>' +
+      '</span>';
+
+    container.innerHTML =
+      '<div class="overview-section" style="margin-top:18px">' +
+      '<h2 class="overview-label">Expert Feedback</h2>' +
+      '<div style="margin-bottom:10px">' + summaryHtml + '</div>' +
+      '<div style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden">' +
+      itemsHtml +
+      '</div>' +
+      '</div>';
+  }
+
+  // Run after the page spec is available.
+  _renderFeedbackTrackedPanel();
+
 })();
