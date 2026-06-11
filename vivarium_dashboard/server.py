@@ -1577,40 +1577,71 @@ def _collect_study_feedback(study_slug: str) -> list[dict]:
 
 
 def _compute_param_enforcement(spec: dict) -> dict | None:
-    """Compare a study's declared enforced_params against its latest run.
+    """Check param drift per-run: each run against the params IT was supposed
+    to apply.
 
     Returns ``{declared, checked_against_run, violations: [{param, expected,
-    actual, kind, message}]}`` or ``None`` when the study declares no
-    enforced params. The "applied" params are the newest run's recorded
-    overrides (``runs_meta.params_json``), surfaced via ``spec["runs"]``.
+    actual, kind, message, run}]}`` or ``None`` when the study declares no
+    enforced params. Each run's expectation is resolved with
+    :func:`resolve_run_expected` — a baseline run gets the baseline declared
+    values, a variant run gets the baseline overlaid with that variant's
+    ``parameter_overrides`` (linked via ``run.variant`` / ``run.simulation``).
+    This removes the false positive where a variant run that legitimately
+    overrides a baseline param was flagged against the single flat baseline
+    dict; real drift (a run that didn't apply its OWN declaration) is still
+    caught. The "applied" params are each run's recorded overrides
+    (``runs_meta.params_json``), surfaced via ``spec["runs"]``.
     """
     from pbg_superpowers.param_enforcement import (
-        load_enforced_params, check_enforced_params,
+        load_enforced_params, check_enforced_params, resolve_run_expected,
     )
     declared = load_enforced_params(spec)
     if not declared:
         return None
-    # Newest run with a params dict (runs are merged newest-first upstream,
-    # but be order-independent and prefer completed runs).
     runs = spec.get("runs") or []
     def _ts(r):
         v = (r or {}).get("started_at")
         return float(v) if isinstance(v, (int, float)) else 0.0
-    candidate = None
-    for r in sorted(runs, key=_ts, reverse=True):
-        if isinstance(r, dict) and isinstance(r.get("params"), dict):
-            candidate = r
-            break
-    applied = (candidate or {}).get("params") or {}
-    violations = check_enforced_params(declared, applied)
+    # Newest-first; only runs that recorded an applied-params dict are checked.
+    with_params = [
+        r for r in sorted(runs, key=_ts, reverse=True)
+        if isinstance(r, dict) and isinstance(r.get("params"), dict)
+    ]
+
+    def _emit(violations, run_id):
+        return [
+            {"param": v.param, "expected": v.expected, "actual": v.actual,
+             "kind": v.kind, "message": v.describe(), "run": run_id}
+            for v in violations
+        ]
+
+    if not with_params:
+        # No run recorded applied params → surface the declared set as missing
+        # against the newest run (or None), as before.
+        newest = next((r for r in sorted(runs, key=_ts, reverse=True)
+                       if isinstance(r, dict)), None)
+        run_id = (newest or {}).get("run_id")
+        violations = check_enforced_params(declared, {})
+        return {
+            "declared": declared,
+            "checked_against_run": run_id,
+            "violations": _emit(violations, run_id),
+        }
+
+    all_violations: list = []
+    for r in with_params:
+        expected = resolve_run_expected(spec, r, declared)
+        applied = r.get("params") or {}
+        all_violations.extend(
+            _emit(check_enforced_params(expected, applied), r.get("run_id"))
+        )
+
     return {
         "declared": declared,
-        "checked_against_run": (candidate or {}).get("run_id"),
-        "violations": [
-            {"param": v.param, "expected": v.expected, "actual": v.actual,
-             "kind": v.kind, "message": v.describe()}
-            for v in violations
-        ],
+        # The newest run anchors the report banner; per-violation `run` ties
+        # each violation back to the run that drifted.
+        "checked_against_run": with_params[0].get("run_id"),
+        "violations": all_violations,
     }
 
 
@@ -4419,7 +4450,34 @@ def _post_study_run_baseline_for_test(ws_root, body):
             study_outcomes.sync(study_dir)  # record runs + compute outcomes
         except Exception as exc:  # never fail a successful run on a record error
             print(f"[study_outcomes] sync failed: {exc}", file=sys.stderr)
+        _sync_parent_investigation(ws_root, study_dir)  # SP1: roll up to investigation
     return response, code
+
+
+def _sync_parent_investigation(ws_root, study_dir) -> None:
+    """Best-effort SP1 hook: after a study syncs, re-write its parent
+    investigation's computed acceptance so the investigation verdict on disk
+    tracks the member study's new outcome.
+
+    No-op when the study has no owning investigation, or when the installed
+    pbg_superpowers predates ``sync_investigation``. Never raises — a record
+    error must not fail a successful run (mirrors the study-sync hook above).
+    """
+    try:
+        from pbg_superpowers import study_outcomes
+        from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+        sync_investigation = getattr(study_outcomes, "sync_investigation", None)
+        if sync_investigation is None:
+            return
+        wp = WorkspacePaths.load(Path(ws_root))
+        owner = wp.study_owner(Path(study_dir).name)
+        if not owner:
+            return
+        inv_dir = wp.investigations / owner
+        if (inv_dir / "investigation.yaml").is_file():
+            sync_investigation(inv_dir, Path(ws_root))
+    except Exception as exc:  # never fail a successful run on a record error
+        print(f"[study_outcomes] sync_investigation failed: {exc}", file=sys.stderr)
 
 
 def _run_post_run_scripts(spec: dict, ws_root: Path) -> tuple[list[str], list[dict]]:
@@ -5036,6 +5094,7 @@ def _post_study_run_variant_for_test(ws_root, body):
             study_outcomes.sync(study_dir)  # record runs + compute outcomes
         except Exception as exc:  # never fail a successful run on a record error
             print(f"[study_outcomes] sync failed: {exc}", file=sys.stderr)
+        _sync_parent_investigation(ws_root, study_dir)  # SP1: roll up to investigation
     return response, code
 
 
@@ -5055,6 +5114,7 @@ def _post_study_sync_runs_for_test(ws_root, body: dict):
     except FileNotFoundError:
         return {"error": f"study not found: {slug}"}, 404
     summary = study_outcomes.sync(study_dir)  # record runs + compute outcomes
+    _sync_parent_investigation(ws_root, study_dir)  # SP1: roll up to investigation
     return {"ok": True, "summary": summary}, 200
 
 
