@@ -192,6 +192,11 @@ def _do_build(ws_root: Path, out_dir: Path, srv) -> dict:
         _study_detail_spec,
         _workspace_home_data,
         _render_study_detail_html,
+        _build_iset_summary_for_test,
+        _inputs_payload,
+        _catalog_data,
+        _composites_data,
+        _get_registry_data,
     )
     from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 
@@ -217,9 +222,43 @@ def _do_build(ws_root: Path, out_dir: Path, srv) -> dict:
     api_dir = out_dir / "api"
     (api_dir / "iset").mkdir(parents=True, exist_ok=True)
     (api_dir / "study").mkdir(parents=True, exist_ok=True)
+    (api_dir / "inputs").mkdir(parents=True, exist_ok=True)
 
     # api/workspace.json
     _write_json(api_dir / "workspace.json", _workspace_home_data(ws_root))
+
+    # api/iset-list.json — investigations list (GET /api/iset-list)
+    _write_json(api_dir / "iset-list.json",
+                {"investigations": _build_iset_summary_for_test(ws_root)})
+
+    # api/inputs/<inv>.json — per-investigation inputs (GET /api/inputs?investigation=<slug>)
+    for inv_name in investigations:
+        try:
+            payload = _inputs_payload(ws_root, inv_name)
+        except Exception:
+            payload = {}
+        _write_json(api_dir / "inputs" / f"{inv_name}.json", payload)
+
+    # api/catalog.json — curated module catalog (GET /api/catalog)
+    try:
+        catalog = _catalog_data(ws_root)
+    except Exception:
+        catalog = {"modules": []}
+    _write_json(api_dir / "catalog.json", catalog)
+
+    # api/composites.json — composite specs (GET /api/composites)
+    try:
+        composites = _composites_data(ws_root)
+    except Exception:
+        composites = {"composites": []}
+    _write_json(api_dir / "composites.json", composites)
+
+    # api/registry.json — discovered process/type registry (GET /api/registry)
+    try:
+        registry = _get_registry_data(bypass_cache=True)
+    except Exception:
+        registry = {"processes": [], "types": []}
+    _write_json(api_dir / "registry.json", registry)
 
     # api/iset/<id>.json
     for inv_name in investigations:

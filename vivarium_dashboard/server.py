@@ -2611,6 +2611,175 @@ def _build_iset_summary_for_test(ws_root: Path) -> list[dict]:
     return out
 
 
+def _catalog_data(ws_root: "Path") -> dict:
+    """Pure data builder for GET /api/catalog — returns ``{"modules": [...]}`` dict.
+
+    Called by ``Handler._get_catalog`` (which wraps it in the HTTP response)
+    and by ``publish.build_bundle`` to export ``api/catalog.json``.
+
+    Requires the ``WORKSPACE`` global to already be set to *ws_root*
+    (``build_bundle`` ensures this before calling).
+    """
+    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths as _WP
+
+    try:
+        ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8"))
+    except Exception as e:
+        return {"modules": [], "error": f"workspace.yaml: {e}"}
+
+    # Module registry (canonical pbg-superpowers list + per-workspace overlay)
+    try:
+        from pbg_superpowers.catalog import load_registry as _lr
+        default_modules: list = _lr(ws_root)
+    except Exception:
+        _wp = _WP.load(ws_root)
+        legacy = _wp.scripts / "_catalog" / "modules.json"
+        if legacy.is_file():
+            try:
+                default_modules = json.loads(legacy.read_text(encoding="utf-8"))
+            except Exception:
+                default_modules = []
+        else:
+            default_modules = []
+
+    override = _registry_modules_override(ws_data)
+    if override is not None:
+        modules = _build_override_catalog(override, default_modules)
+    else:
+        modules = default_modules
+
+    imports = (ws_data or {}).get("imports", {}) or {}
+    pyproject_deps = _read_workspace_pyproject_deps(ws_root)
+    venv_dists = _detect_workspace_venv_distributions(ws_root)
+
+    def _name_variants(m: dict) -> list:
+        out: list = [m["name"].lower()]
+        pn = m.get("pypi_name")
+        if pn:
+            out.append(pn.lower())
+        pkg = m.get("package") or m["name"].replace("-", "_")
+        out.append(pkg.lower())
+        return out
+
+    for m in modules:
+        variants = _name_variants(m)
+        declared = m["name"] in imports
+        in_pyproject = any(v in pyproject_deps for v in variants)
+        in_venv = any(v in venv_dists for v in variants)
+        if declared:
+            m["installed"] = True
+            m["install_source"] = "imports"
+            imp = imports.get(m["name"], {}) or {}
+            for k in ("source", "ref", "path", "install_path", "package"):
+                v = imp.get(k)
+                if v is not None:
+                    m[k] = v
+        elif in_pyproject:
+            m["installed"] = True
+            m["install_source"] = "pyproject"
+        elif in_venv:
+            m["installed"] = True
+            m["install_source"] = "venv"
+            parents: list = []
+            for v in variants:
+                info = venv_dists.get(v)
+                if info:
+                    parents.extend(info.get("requires_by") or [])
+                    break
+            m["installed_via"] = sorted(set(parents))
+        else:
+            m["installed"] = False
+        if m["installed"]:
+            if m.get("install_source") in ("imports", "pyproject"):
+                pkg_name = m.get("package") or m["name"].replace("-", "_")
+                sync_reason = _check_installed_module_sync(pkg_name, m.get("install_path"))
+                if sync_reason:
+                    m["out_of_sync"] = True
+                    m["out_of_sync_reason"] = sync_reason
+
+    reexport_origins = _build_reexport_origin_modules(ws_data, modules)
+    if reexport_origins:
+        modules = modules + reexport_origins
+
+    # Workspace self-module (mirrors Handler._workspace_self_module)
+    slug = (ws_data or {}).get("name", "") or ""
+    ws_pkg = (ws_data or {}).get("package_path")
+    if not ws_pkg:
+        ws_pkg = "pbg_" + slug.replace("-", "_") if slug else None
+    if ws_pkg:
+        pkg_dir = ws_root / ws_pkg
+        if pkg_dir.is_dir():
+            sync_reason = _check_installed_module_sync(ws_pkg, ws_pkg)
+            try:
+                ref = subprocess.run(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    cwd=ws_root, capture_output=True, text=True, timeout=2,
+                ).stdout.strip() or "—"
+            except (subprocess.TimeoutExpired, OSError):
+                ref = "—"
+            ws_self: dict = {
+                "kind":         "workspace",
+                "name":         slug or ws_pkg,
+                "package":      ws_pkg,
+                "install_path": ws_pkg,
+                "description":  "Workspace's own first-party package — provides the "
+                                "Processes, Steps, Composites, and Types that "
+                                "build_core() registers for this workspace.",
+                "source":       "workspace",
+                "ref":          ref,
+                "tags":         ["workspace"],
+                "installed":    True,
+            }
+            if sync_reason:
+                ws_self["out_of_sync"] = True
+                ws_self["out_of_sync_reason"] = sync_reason
+            modules = [ws_self] + modules
+
+    if override is None:
+        kept_origins = [m for m in modules if isinstance(m, dict) and m.get("reexport_origin")]
+        modules = _filter_catalog_modules(modules, ws_data) + kept_origins
+
+    return {"modules": modules}
+
+
+def _composites_data(ws_root: "Path") -> dict:
+    """Pure data builder for GET /api/composites — returns ``{"composites": [...]}`` dict.
+
+    Called by ``Handler._get_composites`` and ``publish.build_bundle``.
+    Requires ``WORKSPACE`` to be set to *ws_root*.
+    """
+    import importlib as _importlib
+    _ws_add_to_sys_path()
+    try:
+        from vivarium_dashboard.lib.composite_lookup import discover_all_composites
+    except ImportError as e:
+        return {"composites": [], "error": str(e)}
+
+    try:
+        ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8"))
+        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+        try:
+            _importlib.import_module(pkg)
+        except Exception:
+            pass
+        specs = discover_all_composites(ws_root, pkg)
+        ws_prefix_dot = pkg + "."
+        out: list = []
+        for s in specs.values():
+            rec = {k: v for k, v in s.items() if not k.startswith("_")}
+            rec.setdefault("kind", "spec")
+            rec.setdefault("module", "")
+            if "default_n_steps" not in rec:
+                rec["default_n_steps"] = None
+            mod = rec.get("module") or ""
+            rec["workspace_local"] = bool(mod == pkg or mod.startswith(ws_prefix_dot))
+            out.append(rec)
+        out = _filter_composites(out, ws_data)
+        return {"composites": out, "workspace_package": pkg}
+    except Exception as e:
+        return {"composites": [], "error": str(e)}
+
+
 # --- Pass C: cross-worktree investigation registry --------------------------
 #
 # Each running vivarium-dashboard registers itself in ~/.pbg/servers/*.json
@@ -12455,65 +12624,10 @@ if __name__ == "__main__":
     def _get_composites(self):
         """GET /api/composites — return composite specs from the workspace AND every installed pbg-* package.
 
-        Each record includes ``kind`` (``"spec"`` | ``"generator"``) and
-        ``module`` so dashboards can tell static specs from
-        ``@composite_generator`` functions. Generator entries also include
-        ``default_n_steps`` (int | None) for UI pre-fill.
+        Delegates data assembly to the module-level ``_composites_data(ws_root)``
+        pure builder; wraps the result in the HTTP JSON response.
         """
-        import importlib as _importlib
-        _ws_add_to_sys_path()
-        try:
-            from vivarium_dashboard.lib.composite_lookup import discover_all_composites
-        except ImportError as e:
-            return self._json({"composites": [], "error": str(e)}, 200)
-
-        try:
-            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
-            pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-            # Eagerly import the workspace package so any @composite_generator
-            # decorators inside it fire and register into pbg-superpowers'
-            # _REGISTRY before discover_all_composites calls discover_generators().
-            # The workspace is already on sys.path via _ws_add_to_sys_path().
-            try:
-                _importlib.import_module(pkg)
-            except Exception:
-                pass
-            specs = discover_all_composites(WORKSPACE, pkg)
-            # Workspace-local prefix for the workspace_local flag below.
-            # The composite's `module` is its dotted Python path, e.g.
-            # "pbg_v2ecoli.composites.baseline_recipes.dnaa_02". A
-            # composite is workspace-local when its module starts with the
-            # workspace's own package prefix (followed by . or end-of-string,
-            # so "pbg_v2ecoli_other" doesn't false-positive against
-            # "pbg_v2ecoli"). The dashboard's Composites tab uses this to
-            # sort workspace-authored composites to the top — surfacing the
-            # ones the current investigation actually needs, ahead of the
-            # full list of every installed pbg-* package's composites.
-            ws_prefix_dot = pkg + "."
-            out = []
-            for s in specs.values():
-                rec = {k: v for k, v in s.items() if not k.startswith("_")}
-                rec.setdefault("kind", "spec")
-                rec.setdefault("module", "")
-                # Ensure default_n_steps is always present in every entry so
-                # the UI can rely on the key existing (None for spec entries
-                # that don't declare one).
-                if "default_n_steps" not in rec:
-                    rec["default_n_steps"] = None
-                mod = rec.get("module") or ""
-                rec["workspace_local"] = bool(
-                    mod == pkg or mod.startswith(ws_prefix_dot)
-                )
-                out.append(rec)
-            # Per-workspace registry allow-list: when configured, hide
-            # composites from packages NOT in dashboard.registry.{modules,
-            # include} (e.g. spatio_flux / pbg_copasi transitive deps), but
-            # always keep the workspace's own (workspace_local) composites.
-            # No-op when no allow-list is set → full multi-package list.
-            out = _filter_composites(out, ws_data)
-            return self._json({"composites": out, "workspace_package": pkg}, 200)
-        except Exception as e:
-            return self._json({"composites": [], "error": str(e)}, 200)
+        return self._json(_composites_data(WORKSPACE), 200)
 
     def _get_composite_state(self):
         """GET /api/composite-state?ref=<id-or-path>
@@ -13169,151 +13283,12 @@ if __name__ == "__main__":
     def _get_catalog(self):
         """GET /api/catalog — return the curated module catalog with installed annotations.
 
-        Each installed module is additionally checked for venv-vs-workspace.yaml
-        drift: if the declared Python package is not importable in the workspace
-        venv, the module is flagged ``out_of_sync: true`` with a short reason.
-
-        The workspace's own first-party package (workspace.yaml.package_path) is
-        prepended to the list with ``kind: "workspace"`` so the Installed
-        Modules panel can show it. The UI filters it out of Available Modules.
+        Delegates data assembly to the module-level ``_catalog_data(ws_root)``
+        pure builder; wraps the result in the HTTP JSON response.
         """
-        try:
-            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
-        except Exception as e:
-            return self._json({"modules": [], "error": f"workspace.yaml: {e}"}, 500)
-
-        default_modules = self._module_registry()  # canonical (pbg-superpowers) + overlay
-
-        # Per-workspace catalog OVERRIDE (dashboard.registry.modules): when set,
-        # it REPLACES the default catalog (vs `include`, which only filters it).
-        # String entries inherit full metadata from the default catalog; dict
-        # entries are custom modules pbg doesn't ship (e.g. viva-munk). The
-        # install-detection loop below then annotates each entry's installed
-        # state exactly as for default-catalog modules (so a custom entry whose
-        # `package` is importable in the venv shows as installed).
-        override = _registry_modules_override(ws_data)
-        if override is not None:
-            modules = _build_override_catalog(override, default_modules)
-        else:
-            modules = default_modules
-
-        # Three install-source layers, in priority order:
-        #   1. workspace.yaml.imports — explicit declaration by the workspace
-        #      (the dashboard's canonical install record)
-        #   2. pyproject.toml [project.dependencies] — the project declares it
-        #      as a direct dep (e.g. v2ecoli's pyproject lists pbg-copasi
-        #      directly; the workspace.yaml.imports stays empty because the
-        #      user never went through the dashboard install flow)
-        #   3. Bulk venv probe — the package is in the venv but neither
-        #      declared layer mentions it (transitive: brought in by another
-        #      installed package)
-        # The dashboard surfaces all three as `installed: true` but stamps
-        # `install_source` + (for #3) `installed_via: [parent_pkgs]` so the UI
-        # can render the distinction (declared cards look pinned-by-user;
-        # pyproject cards show a "via pyproject" pill; venv-transitive cards
-        # show "transitive via X, Y" with no Uninstall affordance — the user
-        # has to remove the parent to remove the dep).
-        imports = (ws_data or {}).get("imports", {}) or {}
-        pyproject_deps = _read_workspace_pyproject_deps(WORKSPACE)
-        venv_dists = _detect_workspace_venv_distributions(WORKSPACE)
-
-        def _name_variants(m: dict) -> list[str]:
-            """Module's name, pypi_name, and snake_case package name —
-            all lowercased — for fuzzy matching against pyproject.toml /
-            venv-distribution name conventions (which vary: PyPI names
-            use dashes; Python imports use underscores; uppercase varies)."""
-            out = [m["name"].lower()]
-            pn = m.get("pypi_name")
-            if pn:
-                out.append(pn.lower())
-            pkg = m.get("package") or m["name"].replace("-", "_")
-            out.append(pkg.lower())
-            return out
-
-        for m in modules:
-            variants = _name_variants(m)
-            declared = m["name"] in imports
-            in_pyproject = any(v in pyproject_deps for v in variants)
-            in_venv = any(v in venv_dists for v in variants)
-
-            if declared:
-                m["installed"] = True
-                m["install_source"] = "imports"
-                # Merge live workspace.yaml entry fields (source/ref/path/install_path/package)
-                # into the catalog item so the UI has authoritative install metadata.
-                imp = imports.get(m["name"], {}) or {}
-                for k in ("source", "ref", "path", "install_path", "package"):
-                    v = imp.get(k)
-                    if v is not None:
-                        m[k] = v
-            elif in_pyproject:
-                m["installed"] = True
-                m["install_source"] = "pyproject"
-            elif in_venv:
-                m["installed"] = True
-                m["install_source"] = "venv"
-                # Trace which installed parent(s) require this — best-effort,
-                # empty when no installed package declares it (then it's a
-                # direct-but-undeclared install, e.g. someone pip-installed
-                # by hand).
-                parents: list[str] = []
-                for v in variants:
-                    info = venv_dists.get(v)
-                    if info:
-                        parents.extend(info.get("requires_by") or [])
-                        break
-                m["installed_via"] = sorted(set(parents))
-            else:
-                m["installed"] = False
-
-            if m["installed"]:
-                # Sync check (only meaningful for declared/pyproject paths;
-                # venv-transitive is already venv-confirmed).
-                if m.get("install_source") in ("imports", "pyproject"):
-                    pkg_name = m.get("package") or m["name"].replace("-", "_")
-                    sync_reason = _check_installed_module_sync(
-                        pkg_name, m.get("install_path")
-                    )
-                    if sync_reason:
-                        m["out_of_sync"] = True
-                        m["out_of_sync_reason"] = sync_reason
-
-        # Re-export-ORIGIN packages: when a registry allow-list is active, also
-        # SHOW (vs fully hide) packages whose classes an allow-listed package
-        # re-exports — e.g. spatio-flux, 7 of whose classes viva-munk surfaces.
-        # These are appended AFTER the install-detection loop so their forced
-        # `install_source: venv` + `installed_via: [<re-exporters>]` attribution
-        # (which the UI renders as `📦 via <parents>`) is not overwritten by the
-        # pyproject/imports detection above. No-op without an allow-list.
-        reexport_origins = _build_reexport_origin_modules(ws_data, modules)
-        if reexport_origins:
-            modules = modules + reexport_origins
-
-        ws_self = self._workspace_self_module(ws_data)
-        if ws_self is not None:
-            modules = [ws_self] + modules
-
-        # When the catalog was built from the `modules` OVERRIDE, it is already
-        # exactly the declared set (+ workspace-self) — do NOT re-filter (a
-        # custom/stub entry could be dropped by the derived allow-list, and the
-        # override is the authoritative list anyway).
-        #
-        # Otherwise apply the optional display-only allow-list
-        # (workspace.yaml::dashboard.registry.include): the Registry-tab catalog
-        # shows ONLY modules whose package is in the list — same allow-list /
-        # normalization as the /api/registry filter. No-op when unset → full
-        # catalog (current behavior). The workspace's own first-party module is
-        # included only when its slug (e.g. v2ecoli) is in the list.
-        if override is None:
-            # Preserve synthesized re-export-origin entries (they are not in the
-            # allow-list by definition, but are surfaced deliberately).
-            kept_origins = [
-                m for m in modules
-                if isinstance(m, dict) and m.get("reexport_origin")
-            ]
-            modules = _filter_catalog_modules(modules, ws_data) + kept_origins
-
-        return self._json({"modules": modules}, 200)
+        data = _catalog_data(WORKSPACE)
+        status = 500 if "error" in data and not data.get("modules") else 200
+        return self._json(data, status)
 
     def _workspace_self_module(self, ws_data: dict) -> dict | None:
         """Synthesize a catalog-style entry for the workspace's own package.

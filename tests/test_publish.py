@@ -159,6 +159,38 @@ def test_bundle_shell_asset_urls_resolve(tmp_workspace, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Task 1 (read-only viewer): export the five read resources
+# ---------------------------------------------------------------------------
+
+def test_bundle_exports_full_read_surface(tmp_workspace, tmp_path):
+    """build_bundle writes api/{iset-list,catalog,composites,registry}.json
+    and api/inputs/<inv>.json per investigation; iset-list parity."""
+    from vivarium_dashboard import publish
+
+    out = tmp_path / "bundle"
+    publish.build_bundle(server.WORKSPACE, out)
+
+    assert (out / "api" / "iset-list.json").is_file(), "iset-list.json missing"
+    assert (out / "api" / "catalog.json").is_file(), "catalog.json missing"
+    assert (out / "api" / "composites.json").is_file(), "composites.json missing"
+    assert (out / "api" / "registry.json").is_file(), "registry.json missing"
+
+    # inputs per investigation
+    isets = json.loads((out / "api" / "iset-list.json").read_text())["investigations"]
+    if isets:
+        inv = isets[0]["name"]
+        assert (out / "api" / "inputs" / f"{inv}.json").is_file(), \
+            f"inputs/{inv}.json missing"
+
+    # parity for iset-list
+    assert json.loads((out / "api" / "iset-list.json").read_text()) == \
+        json.loads(json.dumps(
+            {"investigations": server._build_iset_summary_for_test(server.WORKSPACE)},
+            default=server._json_default,
+        )), "iset-list.json parity failed"
+
+
+# ---------------------------------------------------------------------------
 # Task 5: golden on a real workspace (v2e-invest), skipif absent
 # ---------------------------------------------------------------------------
 
