@@ -1258,6 +1258,51 @@ def workspace_paths() -> WorkspacePaths:
         _WP_CACHE[key] = wp
     return wp
 
+
+def _workspace_home_data(ws_root: "Path | None" = None) -> dict:
+    """Return workspace narrative metadata for GET /api/workspace and publish.
+
+    Reads workspace.yaml + enumerates investigation dirs.  Pure (no socket I/O).
+    Returned dict shape: {name, description, imports, investigations:[...]}.
+    """
+    ws_root = Path(ws_root) if ws_root is not None else Path(WORKSPACE)
+    wp = WorkspacePaths.load(ws_root)
+    ws: dict = {}
+    wf = ws_root / "workspace.yaml"
+    if wf.exists():
+        try:
+            ws = yaml.safe_load(wf.read_text(encoding="utf-8")) or {}
+        except Exception:
+            ws = {}
+
+    investigations: list[dict] = []
+    inv_root = wp.investigations
+    if inv_root.is_dir():
+        for inv_dir in sorted(
+            d for d in inv_root.iterdir()
+            if d.is_dir() and (d / "investigation.yaml").is_file()
+        ):
+            try:
+                inv_spec = yaml.safe_load(
+                    (inv_dir / "investigation.yaml").read_text(encoding="utf-8")
+                ) or {}
+                investigations.append({
+                    "name":        inv_spec.get("name", inv_dir.name),
+                    "title":       inv_spec.get("title") or inv_spec.get("name") or inv_dir.name,
+                    "status":      inv_spec.get("status", "planning"),
+                    "description": inv_spec.get("description", ""),
+                })
+            except Exception:
+                investigations.append({"name": inv_dir.name, "status": "error"})
+
+    return {
+        "name":           ws.get("name", ws_root.name),
+        "description":    ws.get("description", ""),
+        "imports":        ws.get("imports") or {},
+        "investigations": investigations,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Study slug validation
 # ---------------------------------------------------------------------------
@@ -1277,13 +1322,22 @@ def _study_dir(name: str):
     """Resolve a study directory, preferring the v3 ``studies/`` location
     over the legacy ``investigations/`` location.
 
-    Studies created by /api/study-create-from-run live in ``studies/<name>/``.
-    Pre-Phase-1 investigations live in ``investigations/<name>/``. The aliased
-    /api/study-* handlers must find both.
+    Uses ``WorkspacePaths.study_dir`` as the primary lookup (handles nested
+    ``investigations/<inv>/studies/<slug>/`` layouts used by workspaces with a
+    custom ``layout:`` map in ``workspace.yaml``, e.g. v2e-invest).  Falls back
+    to the flat ``investigations/<name>/`` path for callers that reference a
+    pre-Phase-1 spec.yaml that is not discovered by ``iter_study_dirs``.
     """
-    studies_path = workspace_paths().studies / name
-    if studies_path.is_dir():
-        return studies_path
+    try:
+        return workspace_paths().study_dir(name)
+    except FileNotFoundError:
+        pass
+    # Guard: flat studies/<name>/ exists but has only spec.yaml (no study.yaml),
+    # so iter_study_dirs() skipped it.  Return it rather than falling back to
+    # the legacy investigations/<name> location.
+    flat_candidate = workspace_paths().studies / name
+    if flat_candidate.is_dir():
+        return flat_candidate
     return workspace_paths().investigations / name
 
 
@@ -2555,6 +2609,527 @@ def _build_iset_summary_for_test(ws_root: Path) -> list[dict]:
             "current":          (d.name == current_slug),
         })
     return out
+
+
+def _catalog_data(ws_root: "Path") -> dict:
+    """Pure data builder for GET /api/catalog — returns ``{"modules": [...]}`` dict.
+
+    Called by ``Handler._get_catalog`` (which wraps it in the HTTP response)
+    and by ``publish.build_bundle`` to export ``api/catalog.json``.
+
+    Requires the ``WORKSPACE`` global to already be set to *ws_root*
+    (``build_bundle`` ensures this before calling).
+    """
+    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths as _WP
+
+    try:
+        ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8"))
+    except Exception as e:
+        return {"modules": [], "error": f"workspace.yaml: {e}"}
+
+    # Module registry (canonical pbg-superpowers list + per-workspace overlay)
+    try:
+        from pbg_superpowers.catalog import load_registry as _lr
+        default_modules: list = _lr(ws_root)
+    except Exception:
+        _wp = _WP.load(ws_root)
+        legacy = _wp.scripts / "_catalog" / "modules.json"
+        if legacy.is_file():
+            try:
+                default_modules = json.loads(legacy.read_text(encoding="utf-8"))
+            except Exception:
+                default_modules = []
+        else:
+            default_modules = []
+
+    override = _registry_modules_override(ws_data)
+    if override is not None:
+        modules = _build_override_catalog(override, default_modules)
+    else:
+        modules = default_modules
+
+    imports = (ws_data or {}).get("imports", {}) or {}
+    pyproject_deps = _read_workspace_pyproject_deps(ws_root)
+    venv_dists = _detect_workspace_venv_distributions(ws_root)
+
+    def _name_variants(m: dict) -> list:
+        out: list = [m["name"].lower()]
+        pn = m.get("pypi_name")
+        if pn:
+            out.append(pn.lower())
+        pkg = m.get("package") or m["name"].replace("-", "_")
+        out.append(pkg.lower())
+        return out
+
+    for m in modules:
+        variants = _name_variants(m)
+        declared = m["name"] in imports
+        in_pyproject = any(v in pyproject_deps for v in variants)
+        in_venv = any(v in venv_dists for v in variants)
+        if declared:
+            m["installed"] = True
+            m["install_source"] = "imports"
+            imp = imports.get(m["name"], {}) or {}
+            for k in ("source", "ref", "path", "install_path", "package"):
+                v = imp.get(k)
+                if v is not None:
+                    m[k] = v
+        elif in_pyproject:
+            m["installed"] = True
+            m["install_source"] = "pyproject"
+        elif in_venv:
+            m["installed"] = True
+            m["install_source"] = "venv"
+            parents: list = []
+            for v in variants:
+                info = venv_dists.get(v)
+                if info:
+                    parents.extend(info.get("requires_by") or [])
+                    break
+            m["installed_via"] = sorted(set(parents))
+        else:
+            m["installed"] = False
+        if m["installed"]:
+            if m.get("install_source") in ("imports", "pyproject"):
+                pkg_name = m.get("package") or m["name"].replace("-", "_")
+                sync_reason = _check_installed_module_sync(pkg_name, m.get("install_path"))
+                if sync_reason:
+                    m["out_of_sync"] = True
+                    m["out_of_sync_reason"] = sync_reason
+
+    reexport_origins = _build_reexport_origin_modules(ws_data, modules)
+    if reexport_origins:
+        modules = modules + reexport_origins
+
+    # Workspace self-module (mirrors Handler._workspace_self_module)
+    slug = (ws_data or {}).get("name", "") or ""
+    ws_pkg = (ws_data or {}).get("package_path")
+    if not ws_pkg:
+        ws_pkg = "pbg_" + slug.replace("-", "_") if slug else None
+    if ws_pkg:
+        pkg_dir = ws_root / ws_pkg
+        if pkg_dir.is_dir():
+            sync_reason = _check_installed_module_sync(ws_pkg, ws_pkg)
+            try:
+                ref = subprocess.run(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    cwd=ws_root, capture_output=True, text=True, timeout=2,
+                ).stdout.strip() or "—"
+            except (subprocess.TimeoutExpired, OSError):
+                ref = "—"
+            ws_self: dict = {
+                "kind":         "workspace",
+                "name":         slug or ws_pkg,
+                "package":      ws_pkg,
+                "install_path": ws_pkg,
+                "description":  "Workspace's own first-party package — provides the "
+                                "Processes, Steps, Composites, and Types that "
+                                "build_core() registers for this workspace.",
+                "source":       "workspace",
+                "ref":          ref,
+                "tags":         ["workspace"],
+                "installed":    True,
+            }
+            if sync_reason:
+                ws_self["out_of_sync"] = True
+                ws_self["out_of_sync_reason"] = sync_reason
+            modules = [ws_self] + modules
+
+    if override is None:
+        kept_origins = [m for m in modules if isinstance(m, dict) and m.get("reexport_origin")]
+        modules = _filter_catalog_modules(modules, ws_data) + kept_origins
+
+    return {"modules": modules}
+
+
+def _composites_data(ws_root: "Path") -> dict:
+    """Pure data builder for GET /api/composites — returns ``{"composites": [...]}`` dict.
+
+    Called by ``Handler._get_composites`` and ``publish.build_bundle``.
+    Requires ``WORKSPACE`` to be set to *ws_root*.
+    """
+    import importlib as _importlib
+    _ws_add_to_sys_path()
+    try:
+        from vivarium_dashboard.lib.composite_lookup import discover_all_composites
+    except ImportError as e:
+        return {"composites": [], "error": str(e)}
+
+    try:
+        ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8"))
+        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+        try:
+            _importlib.import_module(pkg)
+        except Exception:
+            pass
+        specs = discover_all_composites(ws_root, pkg)
+        ws_prefix_dot = pkg + "."
+        out: list = []
+        for s in specs.values():
+            rec = {k: v for k, v in s.items() if not k.startswith("_")}
+            rec.setdefault("kind", "spec")
+            rec.setdefault("module", "")
+            if "default_n_steps" not in rec:
+                rec["default_n_steps"] = None
+            mod = rec.get("module") or ""
+            rec["workspace_local"] = bool(mod == pkg or mod.startswith(ws_prefix_dot))
+            out.append(rec)
+        out = _filter_composites(out, ws_data)
+        return {"composites": out, "workspace_package": pkg}
+    except Exception as e:
+        return {"composites": [], "error": str(e)}
+
+
+def _composite_resolve_data(spec_id: str) -> "dict | None":
+    """Pure data builder for a single composite — returns the resolve payload dict.
+
+    Mirrors the data returned by ``GET /api/composite-resolve`` (minus the
+    expensive SVG render, which is set to ``None``).  Used by ``publish.build_bundle``
+    to pre-build ``api/composite-state/<id>.json`` files consumed by the
+    bigraph-loom ``?static=1&stateUrl=`` read-only mode.
+
+    Returns ``None`` on any failure (not found, import errors, missing packages).
+    Requires ``WORKSPACE`` to already be set.
+    """
+    _ws_add_to_sys_path()
+    try:
+        from vivarium_dashboard.lib.composite_lookup import (
+            substitute_parameters,
+            find_composite_path,
+        )
+        ws_data = yaml.safe_load(
+            (WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")
+        )
+        pkg = ws_data.get("package_path") or (
+            "pbg_" + ws_data.get("name", "").replace("-", "_")
+        )
+
+        # Generator-kind branch (pbg-superpowers @composite_generator)
+        try:
+            from pbg_superpowers.composite_generator import (
+                _REGISTRY, build_generator, discover_generators,
+            )
+            if not _REGISTRY:
+                discover_generators()
+            entry = _REGISTRY.get(spec_id)
+        except ImportError:
+            entry = None
+
+        if entry is not None:
+            try:
+                doc = build_generator(entry, overrides={})
+            except Exception:
+                return None
+            if isinstance(doc, dict) and "state" in doc and isinstance(doc["state"], dict):
+                state = doc["state"]
+            else:
+                state = doc
+            try:
+                from vivarium_dashboard.lib.process_docs import attach_process_docs
+                attach_process_docs(state)
+            except Exception:
+                pass
+            return {
+                "id": spec_id,
+                "name": entry.name,
+                "description": entry.description,
+                "parameters": entry.parameters,
+                "state": state,
+                "svg": None,
+                "kind": "generator",
+                "module": entry.module,
+                "default_n_steps": getattr(entry, "default_n_steps", None),
+            }
+
+        # Spec-file branch
+        path = find_composite_path(WORKSPACE, pkg, spec_id)
+        if path is None:
+            return None
+
+        text = path.read_text(encoding="utf-8")
+        spec = (
+            json.loads(text) if path.suffix.lower() == ".json"
+            else yaml.safe_load(text)
+        )
+        state = substitute_parameters(
+            spec.get("state") or {},
+            spec.get("parameters") or {},
+            {},
+        )
+        try:
+            from vivarium_dashboard.lib.composite_lookup import _derive_module_from_spec_id
+            module = _derive_module_from_spec_id(spec_id)
+        except Exception:
+            module = ""
+        try:
+            from vivarium_dashboard.lib.process_docs import attach_process_docs
+            attach_process_docs(state)
+        except Exception:
+            pass
+        return {
+            "id": spec_id,
+            "name": spec.get("name", spec_id.rsplit(".composites.", 1)[-1]),
+            "description": spec.get("description", ""),
+            "parameters": spec.get("parameters") or {},
+            "state": state,
+            "svg": None,
+            "kind": "spec",
+            "module": module,
+            "default_n_steps": None,
+        }
+    except Exception:
+        return None
+
+
+def _simulations_data(ws_root: Path) -> dict:
+    """Pure data builder for GET /api/simulations.
+
+    Returns ``{"simulations": [...], "current": <slug|None>}`` with emitter_type
+    labels applied.  Tolerates missing DB / import errors → returns empty list.
+    Called by ``publish.build_bundle`` to export ``api/simulations.json``.
+    """
+    _ws_add_to_sys_path()
+    try:
+        from vivarium_dashboard.lib.simulations_index import list_simulations
+        sims = list_simulations(ws_root)
+    except Exception:
+        return {"simulations": [], "current": None}
+    try:
+        from vivarium_dashboard.lib.runs_index import emitter_type_of
+        _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray"}
+        for s in sims:
+            tag = (s.get("emitter") or "").lower()
+            s["emitter_type"] = _emitter_label.get(tag) or emitter_type_of(s.get("db_path"))
+    except Exception:
+        pass
+    return {"simulations": sims, "current": _current_branch_slug(ws_root)}
+
+
+def _visualization_classes_data(ws_root: Path) -> dict:
+    """Pure data builder for GET /api/visualization-classes.
+
+    Returns ``{"classes": [...]}`` with the same shape as
+    ``Handler._list_visualization_classes()``.  Tolerates missing packages /
+    build_core failures → returns empty list.
+    Called by ``publish.build_bundle`` to export ``api/visualization-classes.json``.
+    """
+    _ws_add_to_sys_path()
+    try:
+        ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
+        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+        sys.path.insert(0, str(ws_root))
+        core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
+        core = core_module.build_core()
+        registry: dict = dict(core.link_registry)
+    except Exception:
+        registry = {}
+
+    # Inject standard pbg-superpowers visualization classes
+    try:
+        from pbg_superpowers.visualizations import (
+            TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap,
+        )
+        for cls in [TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap]:
+            registry[cls.__name__] = cls
+    except ImportError:
+        pass
+
+    # Inject workspace-local viz classes
+    try:
+        from pbg_superpowers.visualization import Visualization as _VizBase
+        import pkgutil as _pkgutil, importlib as _importlib
+        viz_pkg = _importlib.import_module(f"{ws_data.get('package_path') or ('pbg_' + ws_data.get('name','').replace('-','_'))}.visualizations")
+        for _, modname, _ in _pkgutil.iter_modules(viz_pkg.__path__):
+            try:
+                mod = _importlib.import_module(f"{pkg}.visualizations.{modname}")
+                for attr_val in vars(mod).values():
+                    if not isinstance(attr_val, type):
+                        continue
+                    if attr_val is _VizBase:
+                        continue
+                    if issubclass(attr_val, _VizBase):
+                        registry[attr_val.__name__] = attr_val
+            except Exception:
+                continue
+    except Exception:
+        pass
+        _VizBase = None
+
+    # Filter to Visualization subclasses
+    try:
+        from pbg_superpowers.visualization import Visualization as _VB
+    except ImportError:
+        _VB = None
+
+    def _is_viz(cls):
+        if _VB is not None and cls is _VB:
+            return False
+        marker = getattr(cls, "is_visualization", None)
+        if callable(marker):
+            try:
+                if marker() is True:
+                    return True
+            except Exception:
+                pass
+        if _VB is not None:
+            try:
+                if isinstance(cls, type) and issubclass(cls, _VB):
+                    return True
+            except TypeError:
+                pass
+        return False
+
+    per_cls: dict = {}
+    for name, cls in registry.items():
+        if not _is_viz(cls) or name == "Visualization":
+            continue
+        existing = per_cls.get(id(cls))
+        if existing is None or len(name) < len(existing[0]):
+            per_cls[id(cls)] = (name, cls)
+
+    out = []
+    for name, cls in sorted(per_cls.values(), key=lambda kv: kv[0]):
+        try:
+            doc = (cls.__doc__ or "").strip().split("\n", 1)[0] if cls.__doc__ else ""
+        except Exception:
+            doc = ""
+        out.append({"address": f"local:{name}", "name": name, "doc": doc, "kind": "visualization"})
+
+    # Append Analysis classes from v2ecoli
+    try:
+        import v2ecoli.workflow.analyses  # noqa: F401
+        from v2ecoli.workflow.analysis import ANALYSIS_REGISTRY, Analysis
+        for _name, _cls in sorted(ANALYSIS_REGISTRY.items()):
+            if isinstance(_cls, type) and issubclass(_cls, Analysis):
+                try:
+                    _doc = (_cls.__doc__ or "").strip().split("\n")[0]
+                except Exception:
+                    _doc = ""
+                out.append({
+                    "address": f"local:{_cls.__module__}.{_cls.__qualname__}",
+                    "name": _name,
+                    "doc": _doc,
+                    "kind": "analysis",
+                })
+    except Exception:
+        pass
+
+    return {"classes": out}
+
+
+def _investigations_data(ws_root: Path) -> dict:
+    """Pure data builder for GET /api/investigations — returns ``{"investigations": [...]}`` dict.
+
+    Includes the study-dependency DAG: each row carries ``parent_studies``
+    (normalized to [{study, condition}]) and a computed ``blocked`` flag
+    plus ``blocked_by`` list pointing at parents that don't yet satisfy
+    their condition.
+
+    Called by ``Handler._get_investigations`` (which wraps it in the HTTP
+    response) and by ``publish.build_bundle`` to export
+    ``api/investigations.json``.  Requires ``WORKSPACE`` to be set to
+    *ws_root*.
+    """
+    _ws_add_to_sys_path()
+    from vivarium_dashboard.lib.investigations import (
+        load_spec,
+        InvestigationSpecError,
+        normalize_dag_edges,
+    )
+
+    # First pass: load every spec so we can resolve cross-study conditions.
+    loaded: list[tuple[Path, dict]] = []   # (dir, spec)
+    for d in _iter_study_dirs():
+        spec_path = d / "study.yaml" if (d / "study.yaml").is_file() else d / "spec.yaml"
+        if not spec_path.is_file():
+            continue
+        try:
+            loaded.append((d, load_spec(spec_path)))
+        except InvestigationSpecError as e:
+            loaded.append((d, {"__invalid__": True, "name": d.name, "error": str(e)}))
+
+    by_name: dict[str, dict] = {s["name"]: s for _, s in loaded if not s.get("__invalid__")}
+
+    def _normalize_parents(spec: dict) -> list[dict]:
+        return normalize_dag_edges(spec)
+
+    def _condition_satisfied(parent: dict | None, condition: str) -> bool:
+        if parent is None:
+            return False
+        status = parent.get("status", "planned")
+        if condition == "ran":
+            return status in ("ran", "complete")
+        if condition == "complete":
+            return status == "complete"
+        if condition == "tests-passed":
+            from pbg_superpowers import study_status
+            counts = study_status.count_test_outcomes(parent, parent.get("runs"))
+            return counts["fail"] == 0 and counts["pass"] > 0
+        return False
+
+    out = []
+    for d, spec in loaded:
+        if spec.get("__invalid__"):
+            out.append({"name": spec["name"], "status": "invalid", "error": spec["error"]})
+            continue
+        composites = spec.get("composites") or []
+        if composites:
+            composite_summary = ", ".join(c.get("name", "") for c in composites)
+            n_runs = _count_runs_for_study(spec["name"], spec)
+        else:
+            composite_summary = spec.get("composite", "")
+            n_runs = _count_runs_for_study(spec["name"], spec)
+            if n_runs == 0:
+                n_runs = len(spec.get("simulations") or [])
+
+        parents = _normalize_parents(spec)
+        blocked_by = []
+        for p in parents:
+            parent_spec = by_name.get(p["study"])
+            if not _condition_satisfied(parent_spec, p["condition"]):
+                blocked_by.append({
+                    "study":     p["study"],
+                    "condition": p["condition"],
+                    "missing":   "parent-not-found" if parent_spec is None else
+                                 f"parent.status={parent_spec.get('status', 'planned')}",
+                })
+
+        sim_set_top = spec.get("simulation_set") or []
+        beh_tests_top = spec.get("behavior_tests") or spec.get("expected_behavior") or []
+        readouts_top = spec.get("readouts") or spec.get("observables") or []
+        reqs_top = spec.get("implementation_requirements") or spec.get("gaps") or []
+        n_variants_top = (len(sim_set_top) if sim_set_top
+                          else len(spec.get("variants") or []))
+        row = {
+            "name":            spec["name"],
+            "composite":       composite_summary,
+            "composites":      composites,
+            "description":     spec.get("description", ""),
+            "topic":           spec.get("topic", ""),
+            "tags":            spec.get("tags") or [],
+            "status":          spec.get("status", "planned"),
+            "phase":           spec.get("phase"),
+            "last_run":        spec.get("last_run"),
+            "n_simulations":   n_runs,
+            "baseline_names":  [b.get("name", "") for b in (spec.get("baseline") or [])
+                                if isinstance(b, dict)],
+            "n_baseline":      len(spec.get("baseline") or []),
+            "n_variants":      n_variants_top,
+            "n_groups":        len(spec.get("groups") or []),
+            "n_interventions": len(spec.get("interventions") or []),
+            "n_behaviors":     len(beh_tests_top),
+            "n_readouts":      len(readouts_top),
+            "n_requirements":  len(reqs_top),
+            "n_comparisons":   len(spec.get("comparisons") or []),
+            "n_runs":          n_runs,
+            "baseline_source": _format_baseline_source(spec),
+            "conclusions_excerpt": _conclusions_excerpt(spec),
+            "parent_studies":  parents,
+            "blocked":         len(blocked_by) > 0,
+            "blocked_by":      blocked_by,
+        }
+        out.append(row)
+    return {"investigations": out}
 
 
 # --- Pass C: cross-worktree investigation registry --------------------------
@@ -5999,6 +6574,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json_bytes(*Handler._build_api_study_response(_slug))
         if _path_only_pre == "/api/config":
             return self._send_json_bytes(*Handler._build_api_config_response())
+        if _path_only_pre == "/api/workspace":
+            return self._send_json_bytes(*Handler._build_api_workspace_response())
 
         # Resolve /api/study-* aliases to their /api/investigation-* originals so
         # the rest of the dispatch chain only needs to know one set of paths.
@@ -9323,174 +9900,18 @@ if __name__ == "__main__":
     def _get_iset_detail(self):
         """GET /api/iset/<name> — return one investigation + its resolved studies.
 
-        Each constituent study is returned with its `parent_studies:`
-        normalized (legacy strings become dicts) so the frontend DAG layout
-        has consistent shape.
+        Delegates to the pure builder ``_iset_detail_data`` so the export CLI
+        (publish.py) and the live handler share identical logic.
         """
         import urllib.parse
         path = urllib.parse.urlparse(self.path).path
         name = path.split("/api/iset/", 1)[-1].strip("/")
         if not name:
             return self._json({"error": "investigation name required"}, 400)
-
-        spec_path = workspace_paths().investigations / name / "investigation.yaml"
-        if not spec_path.is_file():
-            return self._json({"error": f"no investigation.yaml at {spec_path}"}, 404)
-        try:
-            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-        except Exception as e:
-            return self._json({"error": f"parse failed: {e}"}, 500)
-
-        # Resolve constituent studies.
-        _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
-
-        from vivarium_dashboard.lib.investigations import normalize_dag_edges
-        # Delegate to the canonical helper — reads pipeline_gate.prerequisites
-        # first, falls back to parent_studies for back-compat (with a
-        # DeprecationWarning when only the legacy field is set).
-        def _normalize_parents(study_spec: dict) -> list[dict]:
-            return normalize_dag_edges(study_spec)
-
-        studies_out = []
-        for slug in (spec.get("studies") or []):
-            # Nested-aware (Phase 1 study_dir): investigations/<inv>/studies/<slug>/
-            # with flat back-compat; legacy v2 spec.yaml as last resort.
-            try:
-                sp = workspace_paths().study_dir(slug) / "study.yaml"
-            except FileNotFoundError:
-                sp = workspace_paths().investigations / slug / "spec.yaml"
-            if not sp.is_file():
-                studies_out.append({"name": slug, "status": "missing", "error": "study.yaml not found"})
-                continue
-            try:
-                study_spec = load_spec(sp)
-            except InvestigationSpecError as e:
-                studies_out.append({"name": slug, "status": "invalid", "error": str(e)})
-                continue
-            # New-template aware: derive counts from new fields when present,
-            # fall back to legacy fields. Purpose.question wins over top-level
-            # question if both exist.
-            sim_set = study_spec.get("simulation_set") or []
-            beh_tests = study_spec.get("behavior_tests") or study_spec.get("expected_behavior") or []
-            readouts = study_spec.get("readouts") or study_spec.get("observables") or []
-            purpose = study_spec.get("purpose") or {}
-            question = (purpose.get("question") if isinstance(purpose, dict) else None) or study_spec.get("question", "")
-            follow_ups = study_spec.get("follow_up_studies") or []
-            # discovery_implications.followup_study_proposals is the richer
-            # successor to follow_up_studies. Prefer it for the surfaced
-            # follow-up count, falling back to legacy follow_up_studies.
-            disc_impl = study_spec.get("discovery_implications") or {}
-            disc_followups = (disc_impl.get("followup_study_proposals")
-                              if isinstance(disc_impl, dict) else None) or []
-            findings = study_spec.get("findings") or []
-            n_runs_for_study = _count_runs_for_study(
-                study_spec["name"], study_spec)  # F2
-            raw_status = study_spec.get("status", "planned")
-            studies_out.append({
-                "name":            study_spec["name"],
-                "status":          raw_status,
-                "effective_status": compute_study_effective_status(
-                    raw_status,
-                    has_runs=n_runs_for_study > 0,
-                    has_active_run=_has_active_run_for_study(
-                        study_spec["name"], study_spec)),
-                "phase":           study_spec.get("phase"),
-                "title":           study_spec.get("title"),
-                "question":        question,
-                "n_variants":      len(sim_set) if sim_set else len(study_spec.get("variants") or []),
-                "n_interventions": len(study_spec.get("interventions") or []),
-                "n_runs":          n_runs_for_study,
-                "baseline_source": _format_baseline_source(study_spec),
-                "parent_studies":  _normalize_parents(study_spec),
-                "n_behaviors":     len(beh_tests),
-                "n_readouts":      len(readouts),
-                "n_requirements":  len(study_spec.get("implementation_requirements") or study_spec.get("gaps") or []),
-                "n_followups":     len(disc_followups) or len(follow_ups),
-                "follow_up_studies": follow_ups,
-                # Discovery Implications (alternate hypotheses, mechanism-update
-                # proposals, richer follow-up study proposals). Pass through
-                # verbatim; the study view + report render it, and the seed
-                # flow reads followup_study_proposals from it.
-                "discovery_implications": disc_impl,
-                "n_findings":      len(findings),
-                "findings":        findings,
-                # Discourse-graph re-skin: optional authored headline + confidence
-                # override (fall back to derived from findings/status client-side).
-                "claim":           study_spec.get("claim"),
-                "confidence":      study_spec.get("confidence"),
-                # Pass A multi-axis status: pass through whichever of the six
-                # axes are set on the study spec. All optional, all independent.
-                "design_status":         study_spec.get("design_status"),
-                "implementation_status": study_spec.get("implementation_status"),
-                "simulation_status":     study_spec.get("simulation_status"),
-                "evaluation_status":     study_spec.get("evaluation_status"),
-                "gate_status":           study_spec.get("gate_status"),
-                "expert_review_status":  study_spec.get("expert_review_status"),
-            })
-
-        # Compute effective_status from the member studies' current statuses.
-        # The author-declared YAML 'status' represents intent; the dashboard
-        # surfaces effective_status as the live signal.
-        member_statuses = [s.get("status", "planning") for s in studies_out]
-        member_has_runs = [(s.get("n_runs") or 0) > 0 for s in studies_out]
-        effective_status = compute_investigation_status(
-            member_statuses, has_runs=member_has_runs,
-        )
-
-        # Coded acceptance roll-up (spine stage #2): roll member-study verdicts
-        # → investigation acceptance for render-only display alongside authored
-        # verdict_status. Does NOT write investigation.yaml. Defensive import.
-        computed_acceptance: dict | None = None
-        try:
-            from pbg_superpowers.investigation_status import roll_up_acceptance
-            from pbg_superpowers import study_io as _sio
-            # Build studies_by_name from the workspace for acceptance computation
-            wp = workspace_paths()
-            studies_by_name: dict = {}
-            for _sd in wp.iter_study_dirs():
-                _syp = _sd / "study.yaml"
-                if _syp.exists():
-                    try:
-                        studies_by_name[_sd.name] = _sio.load_yaml_mapping(_syp)
-                    except Exception:  # noqa: BLE001
-                        pass
-            computed_acceptance = roll_up_acceptance(spec, studies_by_name)
-        except Exception:  # noqa: BLE001
-            pass
-
-        return self._json({
-            "name":             spec.get("name", name),
-            "title":            spec.get("title", spec.get("name", name)),
-            "description":      spec.get("description", ""),
-            "lead":             spec.get("lead", ""),
-            "at_a_glance":      spec.get("at_a_glance") or [],
-            "how_to_read":      spec.get("how_to_read") or [],
-            "glossary":         spec.get("glossary") or [],
-            "biological_story": spec.get("biological_story", ""),
-            "question":         spec.get("question", ""),
-            "hypothesis":       spec.get("hypothesis", ""),
-            "status":           spec.get("status", "planning"),
-            "effective_status": effective_status,
-            "expert_docs":      _coerce_list_field(spec, "expert_docs", source=str(spec_path)),
-            "acceptance_criteria": _coerce_list_field(spec, "acceptance_criteria", source=str(spec_path)),
-            # Coded acceptance roll-up (spine stage #2): parallel computed slot
-            # alongside authored acceptance_criteria + executive.verdict_status.
-            "computed_acceptance": computed_acceptance,
-            # Authored synthesis layers for the layered report (executive
-            # summary + scientific argument). Optional — absent on older
-            # investigations, where the report falls back to derived data.
-            "executive":           spec.get("executive") or {},
-            "scientific_argument": spec.get("scientific_argument") or {},
-            # Investigation-declared references (inputs.references bib keys) so the
-            # report's References section includes them, not only study citations.
-            "references":          (spec.get("inputs") or {}).get("references") or [],
-            # Agent-proposed references/mechanisms pending expert accept/decline.
-            # Surfaced in the report's "Suggested additions" section; never
-            # silently integrated (see pbg-investigation / pbg-study skills).
-            "proposed_inputs":     spec.get("proposed_inputs") or {},
-            "studies":          studies_out,
-        }, 200)
+        result = Handler._iset_detail_data(name)
+        if result is None:
+            return self._json({"error": f"no investigation.yaml for {name!r}"}, 404)
+        return self._json(result, 200)
 
     def _get_study_bigraph_paths(self):
         """GET /api/study-bigraph-paths?study=<slug>[&baseline=<name>][&max_depth=<n>]
@@ -9601,119 +10022,10 @@ if __name__ == "__main__":
     def _get_investigations(self):
         """GET /api/investigations — return summaries of all investigations.
 
-        Includes the study-dependency DAG: each row carries `parent_studies`
-        (normalized to [{study, condition}]) and a computed `blocked` flag
-        plus `blocked_by` list pointing at parents that don't yet satisfy
-        their condition.
+        Delegates to the pure builder :func:`_investigations_data` so the same
+        data is available for ``publish.build_bundle`` without HTTP plumbing.
         """
-        _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
-
-        # First pass: load every spec so we can resolve cross-study conditions.
-        loaded: list[tuple[Path, dict]] = []   # (dir, spec)
-        for d in _iter_study_dirs():
-            spec_path = d / "study.yaml" if (d / "study.yaml").is_file() else d / "spec.yaml"
-            if not spec_path.is_file():
-                continue
-            try:
-                loaded.append((d, load_spec(spec_path)))
-            except InvestigationSpecError as e:
-                loaded.append((d, {"__invalid__": True, "name": d.name, "error": str(e)}))
-
-        by_name: dict[str, dict] = {s["name"]: s for _, s in loaded if not s.get("__invalid__")}
-
-        from vivarium_dashboard.lib.investigations import normalize_dag_edges
-        # Single read path — reads pipeline_gate.prerequisites (canonical)
-        # with parent_studies fallback. Emits DeprecationWarning for the
-        # legacy-only case so workspaces know to migrate.
-        def _normalize_parents(spec: dict) -> list[dict]:
-            return normalize_dag_edges(spec)
-
-        def _condition_satisfied(parent: dict | None, condition: str) -> bool:
-            """Does this parent currently satisfy `condition`?"""
-            if parent is None:
-                # Parent doesn't exist in workspace — treat as unsatisfiable,
-                # so the child shows up as blocked with a useful diagnostic.
-                return False
-            status = parent.get("status", "planned")
-            if condition == "ran":
-                return status in ("ran", "complete")
-            if condition == "complete":
-                return status == "complete"
-            if condition == "tests-passed":
-                from pbg_superpowers import study_status
-                counts = study_status.count_test_outcomes(parent, parent.get("runs"))
-                return counts["fail"] == 0 and counts["pass"] > 0
-            return False
-
-        out = []
-        for d, spec in loaded:
-            if spec.get("__invalid__"):
-                out.append({"name": spec["name"], "status": "invalid", "error": spec["error"]})
-                continue
-            # Multi-composite (new) vs single-`composite:` (legacy) shape.
-            composites = spec.get("composites") or []
-            if composites:
-                composite_summary = ", ".join(c.get("name", "") for c in composites)
-                n_runs = _count_runs_for_study(spec["name"], spec)  # F2: runs.db canonical
-            else:
-                composite_summary = spec.get("composite", "")
-                # Legacy v2 specs sometimes used `simulations:` instead of `runs:`.
-                # _count_runs_for_study only checks `runs:` against runs.db, so
-                # preserve the `simulations:` fallback for that shape.
-                n_runs = _count_runs_for_study(spec["name"], spec)
-                if n_runs == 0:
-                    n_runs = len(spec.get("simulations") or [])
-
-            parents = _normalize_parents(spec)
-            blocked_by = []
-            for p in parents:
-                parent_spec = by_name.get(p["study"])
-                if not _condition_satisfied(parent_spec, p["condition"]):
-                    blocked_by.append({
-                        "study":     p["study"],
-                        "condition": p["condition"],
-                        "missing":   "parent-not-found" if parent_spec is None else
-                                     f"parent.status={parent_spec.get('status', 'planned')}",
-                    })
-
-            sim_set_top = spec.get("simulation_set") or []
-            beh_tests_top = spec.get("behavior_tests") or spec.get("expected_behavior") or []
-            readouts_top = spec.get("readouts") or spec.get("observables") or []
-            reqs_top = spec.get("implementation_requirements") or spec.get("gaps") or []
-            n_variants_top = (len(sim_set_top) if sim_set_top
-                              else len(spec.get("variants") or []))
-            row = {
-                "name":            spec["name"],
-                "composite":       composite_summary,
-                "composites":      composites,
-                "description":     spec.get("description", ""),
-                "topic":           spec.get("topic", ""),
-                "tags":            spec.get("tags") or [],
-                "status":          spec.get("status", "planned"),
-                "phase":           spec.get("phase"),
-                "last_run":        spec.get("last_run"),
-                "n_simulations":   n_runs,
-                "baseline_names":  [b.get("name", "") for b in (spec.get("baseline") or [])
-                                    if isinstance(b, dict)],
-                "n_baseline":      len(spec.get("baseline") or []),
-                "n_variants":      n_variants_top,
-                "n_groups":        len(spec.get("groups") or []),
-                "n_interventions": len(spec.get("interventions") or []),
-                "n_behaviors":     len(beh_tests_top),
-                "n_readouts":      len(readouts_top),
-                "n_requirements":  len(reqs_top),
-                "n_comparisons":   len(spec.get("comparisons") or []),
-                "n_runs":          n_runs,
-                "baseline_source": _format_baseline_source(spec),
-                "conclusions_excerpt": _conclusions_excerpt(spec),
-                # DAG / dependency fields.
-                "parent_studies":  parents,
-                "blocked":         len(blocked_by) > 0,
-                "blocked_by":      blocked_by,
-            }
-            out.append(row)
-        return self._json({"investigations": out}, 200)
+        return self._json(_investigations_data(WORKSPACE), 200)
 
     def _post_investigation_create(self, body: dict):
         """POST /api/investigation-create {name, source?} — scaffold a new investigation.
@@ -12065,6 +12377,142 @@ if __name__ == "__main__":
         """
         return _json_body({"mode": "local-server"}), 200
 
+    @staticmethod
+    def _iset_detail_data(name: str) -> "dict | None":
+        """Pure builder for investigation (iset) detail — no socket I/O.
+
+        Returns the dict that GET /api/iset/<name> sends, or ``None`` when
+        the investigation.yaml does not exist.  Extracted from
+        ``_get_iset_detail`` so publish.py can call it without a live server.
+        """
+        spec_path = workspace_paths().investigations / name / "investigation.yaml"
+        if not spec_path.is_file():
+            return None
+        try:
+            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            return None
+
+        _ws_add_to_sys_path()
+        from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
+        from vivarium_dashboard.lib.investigations import normalize_dag_edges
+
+        def _normalize_parents(study_spec: dict) -> list:
+            return normalize_dag_edges(study_spec)
+
+        studies_out: list[dict] = []
+        for slug in (spec.get("studies") or []):
+            try:
+                sp = workspace_paths().study_dir(slug) / "study.yaml"
+            except FileNotFoundError:
+                sp = workspace_paths().investigations / slug / "spec.yaml"
+            if not sp.is_file():
+                studies_out.append({"name": slug, "status": "missing", "error": "study.yaml not found"})
+                continue
+            try:
+                study_spec = load_spec(sp)
+            except InvestigationSpecError as e:
+                studies_out.append({"name": slug, "status": "invalid", "error": str(e)})
+                continue
+            sim_set = study_spec.get("simulation_set") or []
+            beh_tests = study_spec.get("behavior_tests") or study_spec.get("expected_behavior") or []
+            readouts = study_spec.get("readouts") or study_spec.get("observables") or []
+            purpose = study_spec.get("purpose") or {}
+            question = (purpose.get("question") if isinstance(purpose, dict) else None) or study_spec.get("question", "")
+            follow_ups = study_spec.get("follow_up_studies") or []
+            disc_impl = study_spec.get("discovery_implications") or {}
+            disc_followups = (disc_impl.get("followup_study_proposals")
+                              if isinstance(disc_impl, dict) else None) or []
+            findings = study_spec.get("findings") or []
+            n_runs_for_study = _count_runs_for_study(study_spec["name"], study_spec)
+            raw_status = study_spec.get("status", "planned")
+            studies_out.append({
+                "name":                  study_spec["name"],
+                "status":                raw_status,
+                "effective_status":      compute_study_effective_status(
+                    raw_status,
+                    has_runs=n_runs_for_study > 0,
+                    has_active_run=_has_active_run_for_study(study_spec["name"], study_spec)),
+                "phase":                 study_spec.get("phase"),
+                "title":                 study_spec.get("title"),
+                "question":              question,
+                "n_variants":            len(sim_set) if sim_set else len(study_spec.get("variants") or []),
+                "n_interventions":       len(study_spec.get("interventions") or []),
+                "n_runs":                n_runs_for_study,
+                "baseline_source":       _format_baseline_source(study_spec),
+                "parent_studies":        _normalize_parents(study_spec),
+                "n_behaviors":           len(beh_tests),
+                "n_readouts":            len(readouts),
+                "n_requirements":        len(study_spec.get("implementation_requirements") or study_spec.get("gaps") or []),
+                "n_followups":           len(disc_followups) or len(follow_ups),
+                "follow_up_studies":     follow_ups,
+                "discovery_implications": disc_impl,
+                "n_findings":            len(findings),
+                "findings":              findings,
+                "claim":                 study_spec.get("claim"),
+                "confidence":            study_spec.get("confidence"),
+                "design_status":         study_spec.get("design_status"),
+                "implementation_status": study_spec.get("implementation_status"),
+                "simulation_status":     study_spec.get("simulation_status"),
+                "evaluation_status":     study_spec.get("evaluation_status"),
+                "gate_status":           study_spec.get("gate_status"),
+                "expert_review_status":  study_spec.get("expert_review_status"),
+            })
+
+        member_statuses = [s.get("status", "planning") for s in studies_out]
+        member_has_runs = [(s.get("n_runs") or 0) > 0 for s in studies_out]
+        effective_status = compute_investigation_status(
+            member_statuses, has_runs=member_has_runs,
+        )
+
+        computed_acceptance: "dict | None" = None
+        try:
+            from pbg_superpowers.investigation_status import roll_up_acceptance
+            from pbg_superpowers import study_io as _sio
+            wp = workspace_paths()
+            studies_by_name: dict = {}
+            for _sd in wp.iter_study_dirs():
+                _syp = _sd / "study.yaml"
+                if _syp.exists():
+                    try:
+                        studies_by_name[_sd.name] = _sio.load_yaml_mapping(_syp)
+                    except Exception:
+                        pass
+            computed_acceptance = roll_up_acceptance(spec, studies_by_name)
+        except Exception:
+            pass
+
+        return {
+            "name":                spec.get("name", name),
+            "title":               spec.get("title", spec.get("name", name)),
+            "description":         spec.get("description", ""),
+            "lead":                spec.get("lead", ""),
+            "at_a_glance":         spec.get("at_a_glance") or [],
+            "how_to_read":         spec.get("how_to_read") or [],
+            "glossary":            spec.get("glossary") or [],
+            "biological_story":    spec.get("biological_story", ""),
+            "question":            spec.get("question", ""),
+            "hypothesis":          spec.get("hypothesis", ""),
+            "status":              spec.get("status", "planning"),
+            "effective_status":    effective_status,
+            "expert_docs":         _coerce_list_field(spec, "expert_docs", source=str(spec_path)),
+            "acceptance_criteria": _coerce_list_field(spec, "acceptance_criteria", source=str(spec_path)),
+            "computed_acceptance": computed_acceptance,
+            "executive":           spec.get("executive") or {},
+            "scientific_argument": spec.get("scientific_argument") or {},
+            "references":          (spec.get("inputs") or {}).get("references") or [],
+            "proposed_inputs":     spec.get("proposed_inputs") or {},
+            "studies":             studies_out,
+        }
+
+    @staticmethod
+    def _build_api_workspace_response():
+        """Pure builder for GET /api/workspace — returns workspace home data.
+
+        Returns (json_bytes, http_status).  Mirrors _build_api_config_response.
+        """
+        return _json_body(_workspace_home_data(WORKSPACE)), 200
+
     def _get_study_detail_page(self):
         """GET /studies/<name> — render the Study Detail page."""
         # Strip query-string before slicing the slug — otherwise a URL like
@@ -12419,65 +12867,10 @@ if __name__ == "__main__":
     def _get_composites(self):
         """GET /api/composites — return composite specs from the workspace AND every installed pbg-* package.
 
-        Each record includes ``kind`` (``"spec"`` | ``"generator"``) and
-        ``module`` so dashboards can tell static specs from
-        ``@composite_generator`` functions. Generator entries also include
-        ``default_n_steps`` (int | None) for UI pre-fill.
+        Delegates data assembly to the module-level ``_composites_data(ws_root)``
+        pure builder; wraps the result in the HTTP JSON response.
         """
-        import importlib as _importlib
-        _ws_add_to_sys_path()
-        try:
-            from vivarium_dashboard.lib.composite_lookup import discover_all_composites
-        except ImportError as e:
-            return self._json({"composites": [], "error": str(e)}, 200)
-
-        try:
-            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
-            pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-            # Eagerly import the workspace package so any @composite_generator
-            # decorators inside it fire and register into pbg-superpowers'
-            # _REGISTRY before discover_all_composites calls discover_generators().
-            # The workspace is already on sys.path via _ws_add_to_sys_path().
-            try:
-                _importlib.import_module(pkg)
-            except Exception:
-                pass
-            specs = discover_all_composites(WORKSPACE, pkg)
-            # Workspace-local prefix for the workspace_local flag below.
-            # The composite's `module` is its dotted Python path, e.g.
-            # "pbg_v2ecoli.composites.baseline_recipes.dnaa_02". A
-            # composite is workspace-local when its module starts with the
-            # workspace's own package prefix (followed by . or end-of-string,
-            # so "pbg_v2ecoli_other" doesn't false-positive against
-            # "pbg_v2ecoli"). The dashboard's Composites tab uses this to
-            # sort workspace-authored composites to the top — surfacing the
-            # ones the current investigation actually needs, ahead of the
-            # full list of every installed pbg-* package's composites.
-            ws_prefix_dot = pkg + "."
-            out = []
-            for s in specs.values():
-                rec = {k: v for k, v in s.items() if not k.startswith("_")}
-                rec.setdefault("kind", "spec")
-                rec.setdefault("module", "")
-                # Ensure default_n_steps is always present in every entry so
-                # the UI can rely on the key existing (None for spec entries
-                # that don't declare one).
-                if "default_n_steps" not in rec:
-                    rec["default_n_steps"] = None
-                mod = rec.get("module") or ""
-                rec["workspace_local"] = bool(
-                    mod == pkg or mod.startswith(ws_prefix_dot)
-                )
-                out.append(rec)
-            # Per-workspace registry allow-list: when configured, hide
-            # composites from packages NOT in dashboard.registry.{modules,
-            # include} (e.g. spatio_flux / pbg_copasi transitive deps), but
-            # always keep the workspace's own (workspace_local) composites.
-            # No-op when no allow-list is set → full multi-package list.
-            out = _filter_composites(out, ws_data)
-            return self._json({"composites": out, "workspace_package": pkg}, 200)
-        except Exception as e:
-            return self._json({"composites": [], "error": str(e)}, 200)
+        return self._json(_composites_data(WORKSPACE), 200)
 
     def _get_composite_state(self):
         """GET /api/composite-state?ref=<id-or-path>
@@ -13133,151 +13526,12 @@ if __name__ == "__main__":
     def _get_catalog(self):
         """GET /api/catalog — return the curated module catalog with installed annotations.
 
-        Each installed module is additionally checked for venv-vs-workspace.yaml
-        drift: if the declared Python package is not importable in the workspace
-        venv, the module is flagged ``out_of_sync: true`` with a short reason.
-
-        The workspace's own first-party package (workspace.yaml.package_path) is
-        prepended to the list with ``kind: "workspace"`` so the Installed
-        Modules panel can show it. The UI filters it out of Available Modules.
+        Delegates data assembly to the module-level ``_catalog_data(ws_root)``
+        pure builder; wraps the result in the HTTP JSON response.
         """
-        try:
-            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
-        except Exception as e:
-            return self._json({"modules": [], "error": f"workspace.yaml: {e}"}, 500)
-
-        default_modules = self._module_registry()  # canonical (pbg-superpowers) + overlay
-
-        # Per-workspace catalog OVERRIDE (dashboard.registry.modules): when set,
-        # it REPLACES the default catalog (vs `include`, which only filters it).
-        # String entries inherit full metadata from the default catalog; dict
-        # entries are custom modules pbg doesn't ship (e.g. viva-munk). The
-        # install-detection loop below then annotates each entry's installed
-        # state exactly as for default-catalog modules (so a custom entry whose
-        # `package` is importable in the venv shows as installed).
-        override = _registry_modules_override(ws_data)
-        if override is not None:
-            modules = _build_override_catalog(override, default_modules)
-        else:
-            modules = default_modules
-
-        # Three install-source layers, in priority order:
-        #   1. workspace.yaml.imports — explicit declaration by the workspace
-        #      (the dashboard's canonical install record)
-        #   2. pyproject.toml [project.dependencies] — the project declares it
-        #      as a direct dep (e.g. v2ecoli's pyproject lists pbg-copasi
-        #      directly; the workspace.yaml.imports stays empty because the
-        #      user never went through the dashboard install flow)
-        #   3. Bulk venv probe — the package is in the venv but neither
-        #      declared layer mentions it (transitive: brought in by another
-        #      installed package)
-        # The dashboard surfaces all three as `installed: true` but stamps
-        # `install_source` + (for #3) `installed_via: [parent_pkgs]` so the UI
-        # can render the distinction (declared cards look pinned-by-user;
-        # pyproject cards show a "via pyproject" pill; venv-transitive cards
-        # show "transitive via X, Y" with no Uninstall affordance — the user
-        # has to remove the parent to remove the dep).
-        imports = (ws_data or {}).get("imports", {}) or {}
-        pyproject_deps = _read_workspace_pyproject_deps(WORKSPACE)
-        venv_dists = _detect_workspace_venv_distributions(WORKSPACE)
-
-        def _name_variants(m: dict) -> list[str]:
-            """Module's name, pypi_name, and snake_case package name —
-            all lowercased — for fuzzy matching against pyproject.toml /
-            venv-distribution name conventions (which vary: PyPI names
-            use dashes; Python imports use underscores; uppercase varies)."""
-            out = [m["name"].lower()]
-            pn = m.get("pypi_name")
-            if pn:
-                out.append(pn.lower())
-            pkg = m.get("package") or m["name"].replace("-", "_")
-            out.append(pkg.lower())
-            return out
-
-        for m in modules:
-            variants = _name_variants(m)
-            declared = m["name"] in imports
-            in_pyproject = any(v in pyproject_deps for v in variants)
-            in_venv = any(v in venv_dists for v in variants)
-
-            if declared:
-                m["installed"] = True
-                m["install_source"] = "imports"
-                # Merge live workspace.yaml entry fields (source/ref/path/install_path/package)
-                # into the catalog item so the UI has authoritative install metadata.
-                imp = imports.get(m["name"], {}) or {}
-                for k in ("source", "ref", "path", "install_path", "package"):
-                    v = imp.get(k)
-                    if v is not None:
-                        m[k] = v
-            elif in_pyproject:
-                m["installed"] = True
-                m["install_source"] = "pyproject"
-            elif in_venv:
-                m["installed"] = True
-                m["install_source"] = "venv"
-                # Trace which installed parent(s) require this — best-effort,
-                # empty when no installed package declares it (then it's a
-                # direct-but-undeclared install, e.g. someone pip-installed
-                # by hand).
-                parents: list[str] = []
-                for v in variants:
-                    info = venv_dists.get(v)
-                    if info:
-                        parents.extend(info.get("requires_by") or [])
-                        break
-                m["installed_via"] = sorted(set(parents))
-            else:
-                m["installed"] = False
-
-            if m["installed"]:
-                # Sync check (only meaningful for declared/pyproject paths;
-                # venv-transitive is already venv-confirmed).
-                if m.get("install_source") in ("imports", "pyproject"):
-                    pkg_name = m.get("package") or m["name"].replace("-", "_")
-                    sync_reason = _check_installed_module_sync(
-                        pkg_name, m.get("install_path")
-                    )
-                    if sync_reason:
-                        m["out_of_sync"] = True
-                        m["out_of_sync_reason"] = sync_reason
-
-        # Re-export-ORIGIN packages: when a registry allow-list is active, also
-        # SHOW (vs fully hide) packages whose classes an allow-listed package
-        # re-exports — e.g. spatio-flux, 7 of whose classes viva-munk surfaces.
-        # These are appended AFTER the install-detection loop so their forced
-        # `install_source: venv` + `installed_via: [<re-exporters>]` attribution
-        # (which the UI renders as `📦 via <parents>`) is not overwritten by the
-        # pyproject/imports detection above. No-op without an allow-list.
-        reexport_origins = _build_reexport_origin_modules(ws_data, modules)
-        if reexport_origins:
-            modules = modules + reexport_origins
-
-        ws_self = self._workspace_self_module(ws_data)
-        if ws_self is not None:
-            modules = [ws_self] + modules
-
-        # When the catalog was built from the `modules` OVERRIDE, it is already
-        # exactly the declared set (+ workspace-self) — do NOT re-filter (a
-        # custom/stub entry could be dropped by the derived allow-list, and the
-        # override is the authoritative list anyway).
-        #
-        # Otherwise apply the optional display-only allow-list
-        # (workspace.yaml::dashboard.registry.include): the Registry-tab catalog
-        # shows ONLY modules whose package is in the list — same allow-list /
-        # normalization as the /api/registry filter. No-op when unset → full
-        # catalog (current behavior). The workspace's own first-party module is
-        # included only when its slug (e.g. v2ecoli) is in the list.
-        if override is None:
-            # Preserve synthesized re-export-origin entries (they are not in the
-            # allow-list by definition, but are surfaced deliberately).
-            kept_origins = [
-                m for m in modules
-                if isinstance(m, dict) and m.get("reexport_origin")
-            ]
-            modules = _filter_catalog_modules(modules, ws_data) + kept_origins
-
-        return self._json({"modules": modules}, 200)
+        data = _catalog_data(WORKSPACE)
+        status = 500 if "error" in data and not data.get("modules") else 200
+        return self._json(data, status)
 
     def _workspace_self_module(self, ws_data: dict) -> dict | None:
         """Synthesize a catalog-style entry for the workspace's own package.

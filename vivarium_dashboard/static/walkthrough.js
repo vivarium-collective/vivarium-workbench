@@ -426,6 +426,14 @@
 
   function _switchPage(pageId) {
     pageId = pageId || 'workspace-inputs';
+    // Snapshot mode: redirect authoring-only tabs to the investigations view.
+    // composite-explore needs live composite resolution (build_core) which is
+    // unavailable in a static bundle → redirect to simulation-setup (composites list).
+    if (document.body.classList.contains('snapshot')) {
+      if (pageId === 'github' || pageId === 'studies') {
+        pageId = 'investigations';
+      }
+    }
     document.querySelectorAll('.page').forEach(function(s) { s.classList.remove('active'); });
     document.querySelectorAll('.menu-link').forEach(function(a) { a.classList.remove('active'); });
     var page = document.getElementById('page-' + pageId);
@@ -489,7 +497,10 @@
     var focus = params.get('focus');
     var focusedPage = null;
     if (focus) {
-      var validPages = ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'investigations', 'studies', 'simulations', 'composite-explore', 'github'];
+      var _snapshot = document.body.classList.contains('snapshot');
+      var validPages = _snapshot
+        ? ['workspace-inputs', 'simulation-setup', 'registry', 'investigations', 'simulations', 'visualizations', 'composite-explore']
+        : ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'investigations', 'studies', 'simulations', 'composite-explore', 'github'];
       if (validPages.indexOf(focus) >= 0) {
         document.body.classList.add('focus-mode', 'focus-' + focus);
         _switchPage(focus);
@@ -504,7 +515,10 @@
     if (!focusedPage) {
       function fromHash() {
         var h = (window.location.hash || '').replace(/^#/, '');
-        var validPages = ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'investigations', 'studies', 'simulations', 'composite-explore', 'github'];
+        var _snap = document.body.classList.contains('snapshot');
+        var validPages = _snap
+          ? ['workspace-inputs', 'registry', 'simulation-setup', 'investigations', 'simulations', 'visualizations', 'composite-explore']
+          : ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'investigations', 'studies', 'simulations', 'composite-explore', 'github'];
         _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
       }
       window.addEventListener('hashchange', fromHash);
@@ -546,9 +560,13 @@
     if (!el) return;
     el.innerHTML = '<p class="muted" style="font-style:italic">Loading inputs…</p>';
     var _slug = window._currentIsetSlug || '';
-    var _url = '/api/inputs' + (_slug ? ('?investigation=' + encodeURIComponent(_slug)) : '');
-    fetch(_url)
-      .then(function (r) { return r.json(); })
+    var _p = window.DataSource
+      ? window.DataSource.loadInputs(_slug)
+      : (function() {
+          var _url = '/api/inputs' + (_slug ? ('?investigation=' + encodeURIComponent(_slug)) : '');
+          return fetch(_url).then(function(r) { return r.json(); });
+        })();
+    _p
       .then(function (data) { _renderInputs(el, data || {}); })
       .catch(function (err) {
         el.innerHTML = '<p style="color:#c00">Could not load inputs: ' +
@@ -710,7 +728,7 @@
   // A small "+ Add" button that launches the investigation-scoped upload flow
   // for the given category ('dataset' | 'reference' | 'expert').
   function _inputsAddBtn(category) {
-    return '<button class="action-btn" style="font-size:0.78em;padding:1px 8px;' +
+    return '<button class="action-btn js-authoring" style="font-size:0.78em;padding:1px 8px;' +
       'font-weight:normal" onclick="_inputsAdd(\'' + category + '\')">+ Add</button>';
   }
 
@@ -876,8 +894,10 @@
   function _loadDataSources() {
     var host = document.getElementById('data-sources-host');
     if (!host) return;
-    fetch('/api/data-sources')
-      .then(function(r) { return r.json(); })
+    var _p = window.DataSource
+      ? window.DataSource.loadDataSources()
+      : fetch('/api/data-sources').then(function(r) { return r.json(); });
+    _p
       .then(function(j) {
         var sources = (j && j.sources) || [];
         if (!sources.length) {
@@ -1073,7 +1093,7 @@
 
     function _renderClassCard(c) {
       var previewBtn = (c.kind !== 'analysis')
-        ? '<button class="btn-mini" onclick="_vizClassPreview(\'' + _esc(c.address) + '\',\'' + _esc(c.name) + '\')">Preview</button>'
+        ? '<button class="btn-mini js-authoring" onclick="_vizClassPreview(\'' + _esc(c.address) + '\',\'' + _esc(c.name) + '\')">Preview</button>'
         : '';
       return '<div class="picker-row" data-kind="' + _esc(c.kind || 'visualization') + '">' +
         '<div class="picker-row-main">' +
@@ -1084,7 +1104,7 @@
         '<div class="picker-row-actions">' +
           previewBtn +
           (c.kind !== 'analysis'
-            ? '<button class="btn-mini" onclick="_useRegistryClass(\'visualization\', \'' + _esc(c.name) + '\')">Use</button>'
+            ? '<button class="btn-mini js-authoring" onclick="_useRegistryClass(\'visualization\', \'' + _esc(c.name) + '\')">Use</button>'
             : '') +
         '</div>' +
       '</div>';
@@ -1121,8 +1141,7 @@
     var container = document.getElementById('viz-picker-container');
     var countEl   = document.getElementById('viz-count');
     if (!container) return;
-    fetch('/api/visualization-classes')
-      .then(function(r) { return r.json(); })
+    window.DataSource.loadVisualizationClasses()
       .then(function(data) {
         var classes = (data && data.classes) || [];
         _renderAnalysesGroups(classes, container);
@@ -1162,7 +1181,7 @@
         schemaSnippet = '<details><summary class="muted" style="cursor:pointer;font-size:0.85em">config_schema</summary><code class="registry-schema">' + _esc(it.schema_preview) + '</code></details>';
       }
       var previewBtn = (kind === 'visualization')
-        ? '<button class="btn-mini" onclick="_vizClassPreview(\'' + _esc(it.address) + '\',\'' + _esc(it.name) + '\')">Preview</button>'
+        ? '<button class="btn-mini js-authoring" onclick="_vizClassPreview(\'' + _esc(it.address) + '\',\'' + _esc(it.name) + '\')">Preview</button>'
         : '';
       // Section divider when source group changes. Lightweight — keeps the
       // sort intent visible without committing to a full grouped-list layout.
@@ -1185,7 +1204,7 @@
         '</div>' +
         '<div class="picker-row-actions">' +
           previewBtn +
-          '<button class="btn-mini" onclick="_useRegistryClass(\'' + kind + '\', \'' + _esc(it.name) + '\')">Use</button>' +
+          '<button class="btn-mini js-authoring" onclick="_useRegistryClass(\'' + kind + '\', \'' + _esc(it.name) + '\')">Use</button>' +
         '</div>' +
       '</div>';
     }).join('');
@@ -1356,8 +1375,10 @@
   function _loadRegistry(refresh) {
     var status = document.getElementById('registry-status');
     if (status) status.textContent = 'Loading…';
-    fetch('/api/registry' + (refresh ? '?refresh=1' : ''))
-      .then(function(r) { return r.json(); })
+    var _p = window.DataSource
+      ? window.DataSource.loadRegistry(refresh)
+      : fetch('/api/registry' + (refresh ? '?refresh=1' : '')).then(function(r) { return r.json(); });
+    _p
       .then(function(data) {
         if (status) {
           if (data.error) {
@@ -1588,6 +1609,7 @@
       return '';
     }
 
+    var _isSnapshot = document.body.classList.contains('snapshot');
     if (window._compositesView === 'list') {
       container.className = 'composite-list';
       var prevC = null;
@@ -1597,12 +1619,15 @@
         }).join('');
         var divider = _maybeDivider(prevC, c);
         prevC = c;
+        var exploreBtn = (_isSnapshot && !c.has_wiring)
+          ? ''
+          : '<button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Explore</button>';
         return divider + '<div class="composite-list-row">' +
           '<span class="name">' + _esc(c.name) + ' ' + _wsTag(c) + '</span>' +
           '<span class="desc">' + tagPills + ' ' + _esc(c.description || '(no description)') +
             _moduleLine(c) +
           '</span>' +
-          '<span><button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Explore</button></span>' +
+          '<span>' + exploreBtn + '</span>' +
           '</div>';
       });
       container.innerHTML = rows.join('');
@@ -1632,6 +1657,9 @@
         }
         var divider = _maybeDivider(prevG, c);
         prevG = c;
+        var exploreBtn = (_isSnapshot && !c.has_wiring)
+          ? ''
+          : '<button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Explore</button>';
         return divider + '<div class="module-card' + (c.workspace_local ? ' module-card-workspace' : '') + '">' +
           '<div class="module-card-header"><strong>' + _esc(c.name) + '</strong> ' + _wsTag(c) + '</div>' +
           '<p class="module-desc">' + _esc(c.description || '(no description)') + '</p>' +
@@ -1640,7 +1668,7 @@
           tagSummary +
           paramSummary +
           '<div class="module-action">' +
-            '<button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Explore</button>' +
+            exploreBtn +
           '</div>' +
         '</div>';
       });
@@ -1650,8 +1678,10 @@
   window._renderComposites = _renderComposites;
 
   function _loadComposites() {
-    fetch('/api/composites')
-      .then(function(r) { return r.json(); })
+    var _p = window.DataSource
+      ? window.DataSource.loadComposites()
+      : fetch('/api/composites').then(function(r) { return r.json(); });
+    _p
       .then(function(data) {
         var container = document.getElementById('composite-cards');
         var countBadge = document.getElementById('composite-count');
@@ -1897,7 +1927,7 @@
             // Workspace.yaml doesn't declare it and no installed dep requires
             // it. User can uninstall directly from the dashboard.
             srcBadge = '<span class="install-src-pill install-src-unmanaged" title="Installed in the venv but not declared in workspace.yaml.imports and not required by any installed package. Safe to uninstall.">📦 unmanaged</span>';
-            action = '<button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
+            action = '<button class="action-btn action-btn--secondary js-authoring" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
           } else {
             var viaText = 'via ' + via.slice(0, 3).map(_esc).join(', ') + (via.length > 3 ? ' +' + (via.length - 3) : '');
             srcBadge = '<span class="install-src-pill install-src-venv" title="Brought in by another installed package; cannot be uninstalled directly.">📦 ' + viaText + '</span>';
@@ -1905,14 +1935,14 @@
           }
         } else if (src === 'pyproject') {
           srcBadge = '<span class="install-src-pill install-src-pyproject" title="Declared in pyproject.toml [project.dependencies]; workspace.yaml.imports does not have an explicit entry.">📋 via pyproject</span>';
-          action = '<button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
+          action = '<button class="action-btn action-btn--secondary js-authoring" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
         } else {
           srcBadge = '<span class="status-pill installed">installed</span>';
-          action = '<button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
+          action = '<button class="action-btn action-btn--secondary js-authoring" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
         }
         return srcBadge + ' ' + action;
       }
-      return '<button class="action-btn" onclick="_installFromCatalog(\'' + _esc(m.name) + '\')">Install</button>';
+      return '<button class="action-btn js-authoring" onclick="_installFromCatalog(\'' + _esc(m.name) + '\')">Install</button>';
     }
 
     // Section divider injected at boundaries: workspace → installed →
@@ -2129,8 +2159,10 @@
   window._checkSystemDepsForInstalled = _checkSystemDepsForInstalled;
 
   function _loadCatalog() {
-    fetch('/api/catalog')
-      .then(function(r) { return r.json(); })
+    var _p = window.DataSource
+      ? window.DataSource.loadCatalog()
+      : fetch('/api/catalog').then(function(r) { return r.json(); });
+    _p
       .then(function(data) {
         var grid = document.getElementById('catalog-modules-grid');
         if (!grid) return;
@@ -2864,6 +2896,27 @@
   window._dropZoneStore = _dropZoneStore;
 
   document.addEventListener("DOMContentLoaded", function () {
+    // Snapshot read-only mode: set body.snapshot so CSS hides authoring controls.
+    var _dashCfg = window.__DASH_CONFIG__ || {};
+    if (_dashCfg.mode === "snapshot") {
+      document.body.classList.add("snapshot");
+      // Wire the snapshot banner interactive link (hide if no interactiveUrl configured).
+      var bannerLink = document.getElementById('snapshot-interactive-link');
+      if (bannerLink) {
+        var iurl = _dashCfg.interactiveUrl || '';
+        if (iurl) {
+          bannerLink.href = iurl;
+        } else {
+          bannerLink.style.display = 'none';
+        }
+      }
+      // Show repo-name label from config (Task 5).
+      var repoLabel = document.getElementById('snapshot-repo-label');
+      if (repoLabel && _dashCfg.repo) {
+        repoLabel.textContent = _dashCfg.repo.replace(/^.*\/([^/]+?)(?:\.git)?$/, '$1');
+      }
+    }
+
     // Initialize menu navigation.
     _initMenuNav();
 
@@ -2914,7 +2967,10 @@
     // workspaces with no investigation.yaml files.
     var hasIsetUI = (typeof _renderRailInvestigationGroups === 'function')
                  && document.getElementById('investigations-list');
-    var p1 = fetch('/api/investigations').then(function(r) { return r.json(); }).catch(function() { return {investigations: []}; });
+    var p1 = (window.DataSource
+      ? window.DataSource.loadInvestigationsFlat()
+      : fetch('/api/investigations').then(function(r) { return r.json(); })
+    ).catch(function() { return {investigations: []}; });
     var p2 = hasIsetUI
       ? fetch('/api/iset-list').then(function(r) { return r.json(); }).catch(function() { return {investigations: []}; })
       : Promise.resolve({investigations: []});
@@ -3680,11 +3736,19 @@
   window._ceSnapshotToInitial = _ceSnapshotToInitial;
 
   function _ceFetch() {
-    var url = '/api/composite-resolve?id=' + encodeURIComponent(window._ceCurrent.id) +
-      '&overrides=' + encodeURIComponent(JSON.stringify(window._ceCurrent.overrides));
-    fetch(url)
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
+    var id = window._ceCurrent.id;
+    var isSnapshot = document.body.classList.contains('snapshot');
+    var p;
+    if (isSnapshot) {
+      // Snapshot mode: load pre-built state from static bundle via DataSource.
+      p = window.DataSource.loadCompositeResolve(id);
+    } else {
+      // Live mode: fetch resolve endpoint with overrides.
+      var url = '/api/composite-resolve?id=' + encodeURIComponent(id) +
+        '&overrides=' + encodeURIComponent(JSON.stringify(window._ceCurrent.overrides));
+      p = fetch(url).then(function(r) { return r.json(); });
+    }
+    p.then(function(data) {
         if (data.error) {
           document.getElementById('ce-loading').innerHTML =
             '<span style="color:#c00">Error: ' + _esc(data.error) + '</span>';
@@ -3737,8 +3801,11 @@
         if (stateJsonEl) stateJsonEl.textContent = JSON.stringify(data.state, null, 2);
       })
       .catch(function(err) {
+        var msg = document.body.classList.contains('snapshot')
+          ? 'Wiring snapshot not available for this composite in the read-only view.'
+          : 'Network error: ' + _esc(String(err));
         document.getElementById('ce-loading').innerHTML =
-          '<span style="color:#c00">Network error: ' + _esc(String(err)) + '</span>';
+          '<span style="color:#c00">' + msg + '</span>';
       });
   }
 
@@ -3778,6 +3845,15 @@
     var iframe = document.getElementById('composite-explore-frame');
     if (!iframe) return;
 
+    // Snapshot mode: set iframe src to ?static=1&stateUrl= (read-only loom view).
+    // bigraph-loom fetches the stateUrl and renders it in View-only mode.
+    if (document.body.classList.contains('snapshot')) {
+      var stateUrl = '/api/composite-state/' + encodeURIComponent(ref) + '.json';
+      iframe.src = '/bigraph-loom/index.html?static=1&stateUrl=' + encodeURIComponent(stateUrl);
+      iframe.style.display = '';
+      return;
+    }
+
     function _postState(state, name) {
       var payload = {
         type: 'composite:load',
@@ -3813,9 +3889,8 @@
       // Caller already has the resolved state (e.g. from _ceFetch via composite-resolve)
       _postState(stateObj, nameHint || ref);
     } else {
-      // Fetch state independently via /api/composite-state
-      fetch('/api/composite-state?ref=' + encodeURIComponent(ref))
-        .then(function(r) { return r.json(); })
+      // Fetch state independently via DataSource (snapshot → /api/composite-state/<id>.json; live → /api/composite-resolve)
+      window.DataSource.loadCompositeResolve(ref)
         .then(function(data) {
           if (data.error) {
             console.error('composite-state error:', data.error);
@@ -4069,11 +4144,13 @@
   window._investigationsView = 'grid';
 
   function _loadInvestigations() {
-    fetch('/api/investigations')
-      .then(function(r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      })
+    var _p = window.DataSource
+      ? window.DataSource.loadInvestigationsFlat()
+      : fetch('/api/investigations').then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        });
+    _p
       .then(function(data) {
         window._investigations = data.investigations || [];
         _buildInvestigationTagChips();
@@ -4101,8 +4178,11 @@
   function _loadInvestigationSets() {
     var list = document.getElementById('investigations-list');
     if (list) list.innerHTML = '<p class="empty-state">Loading…</p>';
-    fetch('/api/iset-list', {headers: {Accept: 'application/json'}})
-      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    var _p = window.DataSource
+      ? window.DataSource.loadIsetList()
+      : fetch('/api/iset-list', {headers: {Accept: 'application/json'}})
+          .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+    _p
       .then(function(j) {
         window._isetIndex = j.investigations || [];
         _renderInvestigationSets();
@@ -4190,7 +4270,7 @@
         (closed ? 'opacity:0.6;' : '');
       var actionLabel = closed ? 'Reopen' : 'Close';
       var actionStatus = closed ? 'in-progress' : 'archived';
-      var actionBtn = '<button type="button" onclick="event.stopPropagation();_setInvestigationStatus(this,\'' +
+      var actionBtn = '<button type="button" class="js-authoring" onclick="event.stopPropagation();_setInvestigationStatus(this,\'' +
         _esc(iset.name) + '\',\'' + actionStatus + '\')" ' +
         'style="font-size:0.78em;padding:3px 10px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;color:#334155;cursor:pointer">' +
         actionLabel + '</button>';
@@ -4644,8 +4724,15 @@
     document.getElementById('investigation-detail-title').textContent = name;
     document.getElementById('investigation-detail-description').textContent = 'Loading…';
 
-    fetch('/api/iset/' + encodeURIComponent(name), {headers: {Accept: 'application/json'}})
-      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    // Route through DataSource so snapshot mode reads api/iset/<name>.json from
+    // the static bundle instead of hitting the live /api/iset/<name> endpoint
+    // (which would 404 in a hosted read-only bundle). Direct-fetch fallback keeps
+    // local-server mode identical — the ternary branch only triggers under snapshot.
+    var _isetDetailFetch = (window.DataSource && window.DataSource.loadInvestigation)
+      ? window.DataSource.loadInvestigation(name)
+      : fetch('/api/iset/' + encodeURIComponent(name), {headers: {Accept: 'application/json'}})
+          .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+    _isetDetailFetch
       .then(function(d) {
         window._currentIsetData = d;
         document.getElementById('investigation-detail-title').textContent = d.title || d.name;
@@ -9765,7 +9852,7 @@
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="composites">' +
         '<div style="margin-bottom:8px">' +
-          '<button class="action-btn" onclick="_openAddCompositeModal()">+ Add composite</button>' +
+          '<button class="action-btn js-authoring" onclick="_openAddCompositeModal()">+ Add composite</button>' +
         '</div>' +
         '<div id="inv-composites-list" style="display:grid;grid-template-columns:220px 1fr;gap:16px">' +
           '<div id="inv-composites-sidebar"></div>' +
@@ -9786,7 +9873,7 @@
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="groups">' +
         '<section class="ws-groups" style="padding:10px">' +
-          '<button class="btn-mini" style="margin-bottom:8px" onclick="_openAddGroupModal()">+ Add group</button>' +
+          '<button class="btn-mini js-authoring" style="margin-bottom:8px" onclick="_openAddGroupModal()">+ Add group</button>' +
           '<div id="ws-groups-list"></div>' +
         '</section>' +
       '</div>' +
@@ -9805,17 +9892,17 @@
           ' Emit entire state (root)' +
         '</label>' +
         '<div id="inv-observables-tree" style="font-family:monospace;font-size:0.9em"></div>' +
-        '<button class="action-btn" onclick="_saveObservables()">Save observables</button>' +
+        '<button class="action-btn js-authoring" onclick="_saveObservables()">Save observables</button>' +
         '<div id="inv-observables-status" style="margin-top:8px;font-size:0.9em;color:#555"></div>' +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="viz">' +
         '<section class="ws-comparisons" style="margin-bottom:16px;padding:10px;border:1px solid #eee">' +
           '<h3 style="margin-top:0">Comparisons</h3>' +
           '<div id="ws-comparisons-list"></div>' +
-          '<button class="btn-mini" onclick="_openAddComparisonModal()">+ Add comparison</button>' +
+          '<button class="btn-mini js-authoring" onclick="_openAddComparisonModal()">+ Add comparison</button>' +
         '</section>' +
         (vizFiles.length ?
-          '<button class="btn-mini" style="margin-bottom:8px" onclick="_openAddVizModal(\'' + _esc(name) + '\')">+ Add visualization</button>' +
+          '<button class="btn-mini js-authoring" style="margin-bottom:8px" onclick="_openAddVizModal(\'' + _esc(name) + '\')">+ Add visualization</button>' +
           vizFiles.map(function(v) {
             return '<h4 style="margin-bottom:4px">' + _esc(v.name) + '</h4>' +
                    '<iframe class="viz-frame" src="/' + _esc(v.path) + '?ts=' + Date.now() + '"></iframe>';
@@ -9823,7 +9910,7 @@
           '<p class="empty-state">No visualizations declared in <code>spec.yaml</code> yet. ' +
             'Click <em>Add visualization</em> to scaffold one, or edit ' +
             '<code>investigations/' + _esc(name) + '/spec.yaml</code> directly and click <em>Run</em>.</p>' +
-          '<button class="action-btn" onclick="_openAddVizModal(\'' + _esc(name) + '\')">+ Add visualization</button>') +
+          '<button class="action-btn js-authoring" onclick="_openAddVizModal(\'' + _esc(name) + '\')">+ Add visualization</button>') +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="conclusions">' +
         '<div class="ws-conclusions" style="padding:10px">' +
@@ -9843,7 +9930,7 @@
             '<strong>Next steps</strong>' +
             '<textarea id="cn-next-steps" rows="6" style="width:100%;font-family:monospace"></textarea>' +
           '</label>' +
-          '<button class="btn-primary" onclick="_saveConclusions()">Save</button>' +
+          '<button class="btn-primary js-authoring" onclick="_saveConclusions()">Save</button>' +
           '<h4 style="margin-top:16px">Raw markdown (combined)</h4>' +
           '<pre id="conclusions-preview" style="background:#f5f5f5;padding:10px;white-space:pre-wrap;font-family:monospace"></pre>' +
         '</div>' +
@@ -11780,12 +11867,12 @@
     var explorerBtn = specId
       ? '<a href="?id=' + encodeURIComponent(specId) +
           '&run_id=' + encodeURIComponent(runId) + '#composite-explore" ' +
-          'class="action-btn" title="Open in Composite Explorer" ' +
+          'class="action-btn js-authoring" title="Open in Composite Explorer" ' +
           'style="text-decoration:none;" ' +
           'onclick="event.preventDefault(); _openSimulationInExplorer(\'' +
             _escSim(runId) + '\', \'' + _escSim(specId) + '\');">Open</a>'
       : '';
-    var deleteBtn = '<button class="action-btn" title="Delete simulation" ' +
+    var deleteBtn = '<button class="action-btn js-authoring" title="Delete simulation" ' +
       'onclick="_deleteSimulationRun(\'' + _escSim(runId) + '\')">🗑</button>';
     return (
       '<tr data-run-id="' + _escSim(runId) + '" style="border-bottom:1px solid #f3f4f6;">' +
@@ -11860,8 +11947,7 @@
     if (empty)   empty.style.display = 'none';
     if (table)   table.style.display = 'none';
 
-    fetch('/api/simulations')
-      .then(function (r) { return r.json(); })
+    window.DataSource.loadSimulations()
       .then(function (data) {
         if (data.error) {
           if (loading) loading.innerHTML =

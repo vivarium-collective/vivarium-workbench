@@ -26,6 +26,7 @@ dev = ["pytest>=7.4", "pytest-timeout", "pytest-json-report>=1.5"]
 
 [project.scripts]
 vivarium-dashboard = "vivarium_dashboard.cli:main"
+vivarium-dashboard-publish = "vivarium_dashboard.publish:main"
 
 # bigraph-loom is a PEP 508 direct git URL (not on PyPI), so the wheel build
 # backend must opt into direct references — without this, hatchling refuses the

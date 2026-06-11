@@ -1,0 +1,169 @@
+/*
+ * snapshot-readonly.css — Read-only viewer: hide authoring controls + workspace tabs.
+ *
+ * Applied when body carries the `snapshot` class (set at DOMContentLoaded when
+ * window.__DASH_CONFIG__.mode === "snapshot").  Hides:
+ *  - Rail links for Simulations DB (data-page="simulations") and Branch (data-page="github")
+ *  - Authoring buttons in the investigation detail header (Run unblocked, Clone)
+ *  - The New Investigation + Clone Investigation modals
+ *  - Composite Explorer Begin-Study bar + Save-as-Study post-run bar
+ *  - All elements marked with the js-authoring class (JS-rendered buttons:
+ *    catalog Install/Uninstall, sources +Add, investigation Close/Reopen,
+ *    investigation-detail +Add composite/group/comparison/visualization,
+ *    Save observables, Save conclusions)
+ *  - Sources add-* modals (modal-dataset/reference/expert-doc/observable/visualization)
+ *  - Investigation-detail authoring modals (modal-inv-add-composite,
+ *    modal-comparison-edit, modal-group-edit, modal-investigation-add-viz)
+ *  - GitHub PR / branch-link / open-pr modals
+ *  - Save-as-Study modal
+ *  - The Studies page (flat list, replaced by Investigations in snapshot)
+ *  - The "Open PR" button in the Branch tab action row
+ *  - The "+ New study" button on the Studies page
+ *  - The "+ New Investigation" left-rail entry (.viv-iset-menu-new)
+ *
+ * Registry + Composites tabs stay VISIBLE but read-only (Install/Uninstall/
+ * Begin-Study/Run/Save-as-Study controls are suppressed by the rules above).
+ *
+ * NOTE: the bigraph-loom iframe (/bigraph-loom/index.html) has an internal Run
+ * button that lives inside a separate document — body.snapshot cannot reach it.
+ * It fails gracefully against the static bundle so no fix is needed here.
+ */
+
+/* ── Snapshot banner (hidden in local mode, shown in snapshot) ───────── */
+#snapshot-banner {
+  display: none;
+}
+body.snapshot #snapshot-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #fffbeb;
+  border-bottom: 1px solid #fcd34d;
+  font-size: 0.88em;
+  color: #92400e;
+  flex-shrink: 0;
+}
+body.snapshot #snapshot-banner a {
+  color: #b45309;
+  font-weight: 600;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+
+/* ── Hidden rail tabs ─────────────────────────────────────────────────── */
+/* Simulations DB and Visualizations/Analyses tabs are now read-only enabled
+   (Task 1-3 of the full-surface plan). Only the Branch/GitHub tab stays hidden
+   since git operations have no read-only equivalent in snapshot mode. */
+body.snapshot a.menu-link[data-page="github"] {
+  display: none !important;
+}
+
+/* ── GitHub identity / "Connect GitHub" rail footer (git auth — not in a read-only viewer) ── */
+body.snapshot .viv-rail-footer {
+  display: none !important;
+}
+
+/* ── Investigation detail header: authoring buttons ─────────────────── */
+body.snapshot #investigation-run-unblocked,
+body.snapshot button[onclick*="_openCloneIsetModal"] {
+  display: none !important;
+}
+
+/* ── Investigation modals ────────────────────────────────────────────── */
+body.snapshot #new-iset-modal,
+body.snapshot #clone-iset-modal {
+  display: none !important;
+}
+
+/* ── Composite Explorer: write-oriented bars ─────────────────────────── */
+body.snapshot #ce-begin-study-bar,
+body.snapshot #ce-post-run-bar {
+  display: none !important;
+}
+
+/* ── Generic JS-authoring tag (applied by JS at render time) ─────────── */
+body.snapshot .js-authoring {
+  display: none !important;
+}
+
+/* ── Sources add-* modals ────────────────────────────────────────────── */
+body.snapshot #modal-dataset,
+body.snapshot #modal-reference,
+body.snapshot #modal-expert-doc,
+body.snapshot #modal-observable,
+body.snapshot #modal-visualization {
+  display: none !important;
+}
+
+/* ── GitHub / branch authoring modals + PR button ───────────────────── */
+body.snapshot #modal-link-branch,
+body.snapshot #modal-create-pr,
+body.snapshot #modal-open-pr,
+body.snapshot #btn-open-pr {
+  display: none !important;
+}
+
+/* ── Save-as-Study modal (from Composite Explorer run) ───────────────── */
+body.snapshot #modal-save-as-study {
+  display: none !important;
+}
+
+/* ── Studies page write controls ─────────────────────────────────────── */
+body.snapshot #page-studies button[onclick*="_createInvestigation"] {
+  display: none !important;
+}
+
+/* ── Registry: Refresh-registry button (live server only) ────────────── */
+body.snapshot button[onclick*="_loadRegistry(true)"] {
+  display: none !important;
+}
+
+/* ── Investigation-detail authoring modals ───────────────────────────── */
+body.snapshot #modal-inv-add-composite,
+body.snapshot #modal-comparison-edit,
+body.snapshot #modal-group-edit,
+body.snapshot #modal-investigation-add-viz {
+  display: none !important;
+}
+
+/* ── Investigation switcher: + New Investigation entry ───────────────── */
+body.snapshot .viv-iset-menu-new {
+  display: none !important;
+}
+
+/* ── Repo switcher: hidden in snapshot; static label shown instead ───── */
+body.snapshot #viv-workspace-switcher {
+  display: none !important;
+}
+body.snapshot #snapshot-repo-label {
+  display: flex !important;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 0.92em;
+  color: #374151;
+}
+
+/* Composite Explorer: Explore button is now available in snapshot mode via
+   bigraph-loom ?static=1&stateUrl= (read-only view). The old hide rule was
+   removed in the full-surface implementation (Task 1). */
+
+/* ── Visualizations/Analyses: hide Preview modal (authoring only) ────────── */
+body.snapshot #modal-viz-preview {
+  display: none !important;
+}
+
+/* ── Studies rail section: legacy flat-list Studies page unreachable in
+   snapshot (redirected to Investigations). Hide the rail section so users
+   go to the Investigations tab instead.  ─────────────────────────────────── */
+body.snapshot #viv-rail-studies-section {
+  display: none !important;
+}
+
+/* ── Investigation-detail Composites sub-tab: fetches /api/investigation-composites
+   which is not exported in snapshot. Hide the tab + its panel.  ─────────── */
+body.snapshot .investigation-detail-tab[data-tab="composites"],
+body.snapshot .investigation-detail-panel[data-tab="composites"] {
+  display: none !important;
+}

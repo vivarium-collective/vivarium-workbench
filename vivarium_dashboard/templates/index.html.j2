@@ -2,6 +2,7 @@
 <html lang="en"><head>
 <meta charset="UTF-8"><title>{% if dashboard_name %}{{ dashboard_name }} dashboard{% else %}{{ workspace_name }}{% endif %}{% if active_investigation_name %}:{{ active_investigation_name }}{% endif %}</title>
 <link rel="stylesheet" href="assets/style.css{% if asset_version %}?v={{ asset_version }}{% endif %}">
+<link rel="stylesheet" href="assets/snapshot-readonly.css">
 <script>
 // Per-workspace branding (rail logo, title, brand text) is resolved
 // server-side at GET / and is NOT re-applied by any client script. The
@@ -333,6 +334,11 @@ window.addEventListener('pageshow', function (e) {
         <span class="viv-arrow">▾</span>
       </button>
     </div>
+    <!-- Snapshot mode: static repo label replaces the switcher dropdown. -->
+    <div class="viv-repo-label" id="snapshot-repo-label" style="display:none">
+      <span class="viv-workspace-switcher-glyph">●</span>
+      <strong>{{ workspace_name }}</strong>
+    </div>
 
     <!-- Primary nav -->
     <nav class="viv-rail-section" role="tablist">
@@ -447,7 +453,7 @@ window.addEventListener('pageshow', function (e) {
     </nav>
 
     <!-- Studies of the active investigation, dependency-ordered. -->
-    <div class="viv-rail-section">
+    <div class="viv-rail-section" id="viv-rail-studies-section">
       <div class="viv-rail-section-label">Studies</div>
       <div id="viv-rail-investigations">
         <p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">Loading…</p>
@@ -508,6 +514,12 @@ window.addEventListener('pageshow', function (e) {
 
   <!-- MAIN: topbar + content -->
   <div class="viv-main">
+
+    <!-- Read-only snapshot banner — hidden in local mode; shown when body.snapshot is set. -->
+    <div id="snapshot-banner">
+      <span>Read-only view &mdash; a full interactive version is available.</span>
+      <a id="snapshot-interactive-link" target="_blank" rel="noopener">Open interactive version</a>
+    </div>
 
     <!-- Top banner removed — was a non-functional breadcrumb + "Coming soon" Share/settings placeholders + a decorative avatar. -->
 
@@ -1556,7 +1568,6 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/client.js" onerror="/* live mode unavailable */"></script>
 <script src="assets/walkthrough.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* walkthrough unavailable */"></script>
 <script src="assets/github-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* github-login unavailable */"></script>
-<script src="assets/investigations.js" onerror="/* investigations unavailable */"></script>
 <!-- workspace-switcher.js is intentionally not loaded: the left-rail dropdown
      it used to drive has been repurposed into the investigation switcher
      (investigation-switcher.js). The /api/workspaces endpoints remain available

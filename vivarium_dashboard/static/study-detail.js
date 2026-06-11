@@ -53,6 +53,13 @@
     var panel = document.getElementById(panelId);
     if (!panel) return;
     _chartsLoadedFor[panelId] = true;
+    // In snapshot mode the /api/study-charts/ endpoint is not exported.
+    // Show a neutral placeholder instead of attempting the fetch.
+    var _cfg = window.__DASH_CONFIG__ || {};
+    if (_cfg.mode === 'snapshot') {
+      panel.innerHTML = '<p class="muted" style="margin:0">Results are served by sms-api — coming in a later update.</p>';
+      return;
+    }
     panel.innerHTML = '<p class="muted" style="margin:0">Loading charts…</p>';
     fetch('/api/study-charts/' + encodeURIComponent(studyName()))
       .then(function(r) { return r.json(); })
