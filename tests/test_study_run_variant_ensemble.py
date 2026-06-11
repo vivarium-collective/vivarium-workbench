@@ -120,3 +120,56 @@ def test_sweep_without_v2ecoli_errors_clearly(tmp_other_study):
         tmp_other_study, {"study": "s1", "variant": "sw"})
     assert code >= 400
     assert "ensemble" in resp.get("error", "").lower()  # clear guard, no half-run
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — single-entry record-back via the existing reconcile_runs/record_runs
+#
+# MANUAL INTEGRATION VERIFY (pending — needs the real v2ecoli venv; not
+# automated here): on v2e-invest, add a `kind: seeds` variant to a baseline
+# study and `run-variant` it. Confirm exactly one `v2ecoli-workflow` invocation
+# produces a packed store at
+#   studies/<study>/out/<run_id>/parquet/<exp>/history/variant=…/lineage_seed=…/…
+# and that `study.yaml runs[]` gains exactly ONE ensemble entry whose name is
+# <run_id> and whose emitter.store points at out/<run_id>/. (Do NOT run this
+# against the real /Users/eranagmon/code/v2e-invest in CI.)
+# ---------------------------------------------------------------------------
+
+
+def test_ensemble_records_one_run(tmp_v2ecoli_study, monkeypatch):
+    """A stubbed invoker that writes a minimal parquet hive under out/<run_id>/
+    must yield exactly ONE study.yaml runs[] entry (name == run_id, store
+    pointing at out/<run_id>/) — confirming the existing post-run sync folds the
+    one packed-store dir into a single ensemble run with ZERO dashboard changes
+    (reconcile_runs -> backfill_study_runs -> record_runs).
+
+    NOTE: study_outcomes._emitter_kind classifies the run DIR rel-path
+    ("out/<run_id>"), which has no "parquet" segment, so emitter.kind is
+    "unknown" — that classifier is owned by study_outcomes (out of scope here
+    and must stay untouched). The load-bearing invariant is ONE entry pointing
+    at the packed store.
+    """
+    captured = {}
+
+    def _stub_invoke(cfg_path, out_dir, ws_root, timeout_s):
+        out_dir = Path(out_dir)
+        run_id = out_dir.name
+        captured["run_id"] = run_id
+        # Emulate the v2ecoli packed layout: out/<run_id>/parquet/<exp>/history/...
+        hive = out_dir / "parquet" / run_id / "history" / "variant=0" / "lineage_seed=0"
+        hive.mkdir(parents=True, exist_ok=True)
+        (hive / "data.parquet").write_bytes(b"PAR1")
+        return ({"simulation_id": run_id, "ensemble": True}, 200)
+
+    monkeypatch.setattr(server, "_invoke_v2ecoli_workflow", _stub_invoke)
+    resp, code = server._post_study_run_variant_for_test(
+        tmp_v2ecoli_study, {"study": "s1", "variant": "ens"})
+    assert code == 200, resp
+
+    spec = yaml.safe_load(
+        (tmp_v2ecoli_study / "studies" / "s1" / "study.yaml").read_text())
+    runs = spec.get("runs") or []
+    assert len(runs) == 1, runs
+    run_id = captured["run_id"]
+    assert runs[0]["name"] == run_id
+    assert runs[0]["emitter"]["store"] == f"out/{run_id}"
