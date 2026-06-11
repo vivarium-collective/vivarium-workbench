@@ -265,3 +265,32 @@ def test_study_dir_flat_spec_yaml_resolves_to_studies_not_investigations(tmp_pat
         f"_study_dir returned {result!r}, expected {study_dir!r} "
         f"(flat studies/<name>/ with spec.yaml only must not fall back to investigations/<name>)"
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 2 (read-only viewer): DataSource loaders for the 5 home-SPA resources
+# ---------------------------------------------------------------------------
+
+def test_data_source_has_home_spa_loaders():
+    """data-source.js must define the five new loaders + their snapshot URLs."""
+    text = (server.STATIC_DIR / "data-source.js").read_text()
+    for token in [
+        "loadIsetList", "loadInputs", "loadCatalog", "loadComposites", "loadRegistry",
+        '"snapshot"',
+        "/api/iset-list.json", "/api/inputs/", "/api/catalog.json",
+        "/api/composites.json", "/api/registry.json",
+    ]:
+        assert token in text, f"data-source.js missing token: {token!r}"
+
+
+def test_walkthrough_routes_reads_through_data_source():
+    """walkthrough.js must route each of the 5 home-SPA fetches through DataSource."""
+    text = (server.STATIC_DIR / "walkthrough.js").read_text()
+    for symbol in [
+        "DataSource.loadIsetList",
+        "DataSource.loadInputs",
+        "DataSource.loadCatalog",
+        "DataSource.loadComposites",
+        "DataSource.loadRegistry",
+    ]:
+        assert symbol in text, f"walkthrough.js missing DataSource routing: {symbol!r}"

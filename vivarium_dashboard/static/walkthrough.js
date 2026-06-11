@@ -546,9 +546,13 @@
     if (!el) return;
     el.innerHTML = '<p class="muted" style="font-style:italic">Loading inputs…</p>';
     var _slug = window._currentIsetSlug || '';
-    var _url = '/api/inputs' + (_slug ? ('?investigation=' + encodeURIComponent(_slug)) : '');
-    fetch(_url)
-      .then(function (r) { return r.json(); })
+    var _p = window.DataSource
+      ? window.DataSource.loadInputs(_slug)
+      : (function() {
+          var _url = '/api/inputs' + (_slug ? ('?investigation=' + encodeURIComponent(_slug)) : '');
+          return fetch(_url).then(function(r) { return r.json(); });
+        })();
+    _p
       .then(function (data) { _renderInputs(el, data || {}); })
       .catch(function (err) {
         el.innerHTML = '<p style="color:#c00">Could not load inputs: ' +
@@ -1356,8 +1360,10 @@
   function _loadRegistry(refresh) {
     var status = document.getElementById('registry-status');
     if (status) status.textContent = 'Loading…';
-    fetch('/api/registry' + (refresh ? '?refresh=1' : ''))
-      .then(function(r) { return r.json(); })
+    var _p = window.DataSource
+      ? window.DataSource.loadRegistry(refresh)
+      : fetch('/api/registry' + (refresh ? '?refresh=1' : '')).then(function(r) { return r.json(); });
+    _p
       .then(function(data) {
         if (status) {
           if (data.error) {
@@ -1650,8 +1656,10 @@
   window._renderComposites = _renderComposites;
 
   function _loadComposites() {
-    fetch('/api/composites')
-      .then(function(r) { return r.json(); })
+    var _p = window.DataSource
+      ? window.DataSource.loadComposites()
+      : fetch('/api/composites').then(function(r) { return r.json(); });
+    _p
       .then(function(data) {
         var container = document.getElementById('composite-cards');
         var countBadge = document.getElementById('composite-count');
@@ -2129,8 +2137,10 @@
   window._checkSystemDepsForInstalled = _checkSystemDepsForInstalled;
 
   function _loadCatalog() {
-    fetch('/api/catalog')
-      .then(function(r) { return r.json(); })
+    var _p = window.DataSource
+      ? window.DataSource.loadCatalog()
+      : fetch('/api/catalog').then(function(r) { return r.json(); });
+    _p
       .then(function(data) {
         var grid = document.getElementById('catalog-modules-grid');
         if (!grid) return;
@@ -4101,8 +4111,11 @@
   function _loadInvestigationSets() {
     var list = document.getElementById('investigations-list');
     if (list) list.innerHTML = '<p class="empty-state">Loading…</p>';
-    fetch('/api/iset-list', {headers: {Accept: 'application/json'}})
-      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    var _p = window.DataSource
+      ? window.DataSource.loadIsetList()
+      : fetch('/api/iset-list', {headers: {Accept: 'application/json'}})
+          .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+    _p
       .then(function(j) {
         window._isetIndex = j.investigations || [];
         _renderInvestigationSets();

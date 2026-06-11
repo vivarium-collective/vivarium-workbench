@@ -53,6 +53,29 @@
     return cfg().mode === "snapshot" ? "/api/workspace.json" : "/api/workspace";
   }
 
+  function _isetListUrl() {
+    return cfg().mode === "snapshot" ? "/api/iset-list.json" : "/api/iset-list";
+  }
+
+  function _inputsUrl(slug) {
+    return cfg().mode === "snapshot"
+      ? "/api/inputs/" + encodeURIComponent(slug) + ".json"
+      : "/api/inputs?investigation=" + encodeURIComponent(slug);
+  }
+
+  function _catalogUrl() {
+    return cfg().mode === "snapshot" ? "/api/catalog.json" : "/api/catalog";
+  }
+
+  function _compositesUrl() {
+    return cfg().mode === "snapshot" ? "/api/composites.json" : "/api/composites";
+  }
+
+  function _registryUrl(refresh) {
+    if (cfg().mode === "snapshot") return "/api/registry.json";
+    return "/api/registry" + (refresh ? "?refresh=1" : "");
+  }
+
   var DataSource = {
     /** Return the current source config (default: local-server). */
     config: cfg,
@@ -84,6 +107,53 @@
      */
     async loadWorkspace() {
       return _get(_workspaceUrl());
+    },
+
+    /**
+     * Load the investigations summary list.
+     * Local mode:    fetches GET /api/iset-list
+     * Snapshot mode: fetches /api/iset-list.json from the static bundle
+     */
+    async loadIsetList() {
+      return _get(_isetListUrl());
+    },
+
+    /**
+     * Load the sources/inputs for a given investigation slug.
+     * Local mode:    fetches GET /api/inputs?investigation=<slug>
+     * Snapshot mode: fetches /api/inputs/<slug>.json from the static bundle
+     * @param {string} slug - the investigation slug.
+     */
+    async loadInputs(slug) {
+      return _get(_inputsUrl(slug || ""));
+    },
+
+    /**
+     * Load the curated module catalog.
+     * Local mode:    fetches GET /api/catalog
+     * Snapshot mode: fetches /api/catalog.json from the static bundle
+     */
+    async loadCatalog() {
+      return _get(_catalogUrl());
+    },
+
+    /**
+     * Load the composite specs.
+     * Local mode:    fetches GET /api/composites
+     * Snapshot mode: fetches /api/composites.json from the static bundle
+     */
+    async loadComposites() {
+      return _get(_compositesUrl());
+    },
+
+    /**
+     * Load the discovered process/type registry.
+     * Local mode:    fetches GET /api/registry (+ optional ?refresh=1)
+     * Snapshot mode: fetches /api/registry.json from the static bundle
+     * @param {boolean} [refresh] - when true, bypass server cache (local mode only).
+     */
+    async loadRegistry(refresh) {
+      return _get(_registryUrl(refresh));
     },
   };
 
