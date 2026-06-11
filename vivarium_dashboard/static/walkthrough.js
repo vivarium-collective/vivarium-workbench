@@ -9795,7 +9795,7 @@
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="composites">' +
         '<div style="margin-bottom:8px">' +
-          '<button class="action-btn" onclick="_openAddCompositeModal()">+ Add composite</button>' +
+          '<button class="action-btn js-authoring" onclick="_openAddCompositeModal()">+ Add composite</button>' +
         '</div>' +
         '<div id="inv-composites-list" style="display:grid;grid-template-columns:220px 1fr;gap:16px">' +
           '<div id="inv-composites-sidebar"></div>' +
@@ -9816,7 +9816,7 @@
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="groups">' +
         '<section class="ws-groups" style="padding:10px">' +
-          '<button class="btn-mini" style="margin-bottom:8px" onclick="_openAddGroupModal()">+ Add group</button>' +
+          '<button class="btn-mini js-authoring" style="margin-bottom:8px" onclick="_openAddGroupModal()">+ Add group</button>' +
           '<div id="ws-groups-list"></div>' +
         '</section>' +
       '</div>' +
@@ -9835,17 +9835,17 @@
           ' Emit entire state (root)' +
         '</label>' +
         '<div id="inv-observables-tree" style="font-family:monospace;font-size:0.9em"></div>' +
-        '<button class="action-btn" onclick="_saveObservables()">Save observables</button>' +
+        '<button class="action-btn js-authoring" onclick="_saveObservables()">Save observables</button>' +
         '<div id="inv-observables-status" style="margin-top:8px;font-size:0.9em;color:#555"></div>' +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="viz">' +
         '<section class="ws-comparisons" style="margin-bottom:16px;padding:10px;border:1px solid #eee">' +
           '<h3 style="margin-top:0">Comparisons</h3>' +
           '<div id="ws-comparisons-list"></div>' +
-          '<button class="btn-mini" onclick="_openAddComparisonModal()">+ Add comparison</button>' +
+          '<button class="btn-mini js-authoring" onclick="_openAddComparisonModal()">+ Add comparison</button>' +
         '</section>' +
         (vizFiles.length ?
-          '<button class="btn-mini" style="margin-bottom:8px" onclick="_openAddVizModal(\'' + _esc(name) + '\')">+ Add visualization</button>' +
+          '<button class="btn-mini js-authoring" style="margin-bottom:8px" onclick="_openAddVizModal(\'' + _esc(name) + '\')">+ Add visualization</button>' +
           vizFiles.map(function(v) {
             return '<h4 style="margin-bottom:4px">' + _esc(v.name) + '</h4>' +
                    '<iframe class="viz-frame" src="/' + _esc(v.path) + '?ts=' + Date.now() + '"></iframe>';
@@ -9853,7 +9853,7 @@
           '<p class="empty-state">No visualizations declared in <code>spec.yaml</code> yet. ' +
             'Click <em>Add visualization</em> to scaffold one, or edit ' +
             '<code>investigations/' + _esc(name) + '/spec.yaml</code> directly and click <em>Run</em>.</p>' +
-          '<button class="action-btn" onclick="_openAddVizModal(\'' + _esc(name) + '\')">+ Add visualization</button>') +
+          '<button class="action-btn js-authoring" onclick="_openAddVizModal(\'' + _esc(name) + '\')">+ Add visualization</button>') +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="conclusions">' +
         '<div class="ws-conclusions" style="padding:10px">' +
@@ -9873,7 +9873,7 @@
             '<strong>Next steps</strong>' +
             '<textarea id="cn-next-steps" rows="6" style="width:100%;font-family:monospace"></textarea>' +
           '</label>' +
-          '<button class="btn-primary" onclick="_saveConclusions()">Save</button>' +
+          '<button class="btn-primary js-authoring" onclick="_saveConclusions()">Save</button>' +
           '<h4 style="margin-top:16px">Raw markdown (combined)</h4>' +
           '<pre id="conclusions-preview" style="background:#f5f5f5;padding:10px;white-space:pre-wrap;font-family:monospace"></pre>' +
         '</div>' +

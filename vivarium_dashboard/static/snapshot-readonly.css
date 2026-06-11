@@ -8,16 +8,25 @@
  *  - The New Investigation + Clone Investigation modals
  *  - Composite Explorer Begin-Study bar + Save-as-Study post-run bar
  *  - All elements marked with the js-authoring class (JS-rendered buttons:
- *    catalog Install/Uninstall, sources +Add, investigation Close/Reopen)
+ *    catalog Install/Uninstall, sources +Add, investigation Close/Reopen,
+ *    investigation-detail +Add composite/group/comparison/visualization,
+ *    Save observables, Save conclusions)
  *  - Sources add-* modals (modal-dataset/reference/expert-doc/observable/visualization)
+ *  - Investigation-detail authoring modals (modal-inv-add-composite,
+ *    modal-comparison-edit, modal-group-edit, modal-investigation-add-viz)
  *  - GitHub PR / branch-link / open-pr modals
  *  - Save-as-Study modal
  *  - The Studies page (flat list, replaced by Investigations in snapshot)
  *  - The "Open PR" button in the Branch tab action row
  *  - The "+ New study" button on the Studies page
+ *  - The "+ New Investigation" left-rail entry (.viv-iset-menu-new)
  *
  * Registry + Composites tabs stay VISIBLE but read-only (Install/Uninstall/
  * Begin-Study/Run/Save-as-Study controls are suppressed by the rules above).
+ *
+ * NOTE: the bigraph-loom iframe (/bigraph-loom/index.html) has an internal Run
+ * button that lives inside a separate document — body.snapshot cannot reach it.
+ * It fails gracefully against the static bundle so no fix is needed here.
  */
 
 /* ── Hidden rail tabs ─────────────────────────────────────────────────── */
@@ -78,5 +87,18 @@ body.snapshot #page-studies button[onclick*="_createInvestigation"] {
 
 /* ── Registry: Refresh-registry button (live server only) ────────────── */
 body.snapshot button[onclick*="_loadRegistry(true)"] {
+  display: none !important;
+}
+
+/* ── Investigation-detail authoring modals ───────────────────────────── */
+body.snapshot #modal-inv-add-composite,
+body.snapshot #modal-comparison-edit,
+body.snapshot #modal-group-edit,
+body.snapshot #modal-investigation-add-viz {
+  display: none !important;
+}
+
+/* ── Investigation switcher: + New Investigation entry ───────────────── */
+body.snapshot .viv-iset-menu-new {
   display: none !important;
 }
