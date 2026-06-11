@@ -510,6 +510,12 @@ window.addEventListener('pageshow', function (e) {
   <!-- MAIN: topbar + content -->
   <div class="viv-main">
 
+    <!-- Read-only snapshot banner — hidden in local mode; shown when body.snapshot is set. -->
+    <div id="snapshot-banner">
+      <span>Read-only view &mdash; a full interactive version is available.</span>
+      <a id="snapshot-interactive-link" target="_blank" rel="noopener">Open interactive version</a>
+    </div>
+
     <!-- Top banner removed — was a non-functional breadcrumb + "Coming soon" Share/settings placeholders + a decorative avatar. -->
 
     <main class="viv-content pages" id="viv-content">

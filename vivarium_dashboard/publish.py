@@ -96,11 +96,20 @@ def _normalize_asset_urls(html: str) -> str:
     )
 
 
-def _set_snapshot_config(html: str) -> str:
-    """Swap the ``__DASH_CONFIG__`` mode from *local-server* to *snapshot*."""
+def _set_snapshot_config(html: str, interactive_url: str = "") -> str:
+    """Swap the ``__DASH_CONFIG__`` mode from *local-server* to *snapshot*.
+
+    Optionally injects ``interactiveUrl`` so the snapshot banner can link to
+    the interactive version.  Pass via ``--interactive-url`` CLI arg.
+    """
+    config_js = 'window.__DASH_CONFIG__ = { mode: "snapshot"'
+    if interactive_url:
+        import json as _json
+        config_js += ', interactiveUrl: ' + _json.dumps(interactive_url)
+    config_js += ' };'
     return html.replace(
         'window.__DASH_CONFIG__ = { mode: "local-server" };',
-        'window.__DASH_CONFIG__ = { mode: "snapshot" };',
+        config_js,
     )
 
 
@@ -155,7 +164,7 @@ def _render_home_html(ws_root: Path) -> str:
 # Core builder
 # ---------------------------------------------------------------------------
 
-def build_bundle(ws_root, out_dir) -> dict:
+def build_bundle(ws_root, out_dir, *, interactive_url: str = "") -> dict:
     """Export the workspace at *ws_root* into a static bundle at *out_dir*.
 
     Returns a summary dict::
@@ -165,6 +174,10 @@ def build_bundle(ws_root, out_dir) -> dict:
     JSON parity guarantee: each ``api/study/<slug>.json`` file is byte-for-byte
     identical to ``GET /api/study/<slug>`` (modulo key ordering), because both
     use ``server._study_detail_spec`` + ``server._json_default``.
+
+    Args:
+        interactive_url: Optional URL injected into the snapshot banner's
+            "Open interactive version" link.  Pass via ``--interactive-url`` CLI.
     """
     import vivarium_dashboard.server as srv
 
@@ -179,13 +192,13 @@ def build_bundle(ws_root, out_dir) -> dict:
     srv.WORKSPACE = ws_root
     srv._WP_CACHE.clear()
     try:
-        return _do_build(ws_root, out_dir, srv)
+        return _do_build(ws_root, out_dir, srv, interactive_url=interactive_url)
     finally:
         srv.WORKSPACE = orig_ws
         srv._WP_CACHE.clear()
 
 
-def _do_build(ws_root: Path, out_dir: Path, srv) -> dict:
+def _do_build(ws_root: Path, out_dir: Path, srv, *, interactive_url: str = "") -> dict:
     """Internal build routine — called with WORKSPACE already set to ws_root."""
     from vivarium_dashboard.server import (
         STATIC_DIR,
@@ -352,7 +365,7 @@ def _do_build(ws_root: Path, out_dir: Path, srv) -> dict:
     # ------------------------------------------------------------------
     home_html = _render_home_html(ws_root)
     home_html = _normalize_asset_urls(home_html)
-    home_html = _set_snapshot_config(home_html)
+    home_html = _set_snapshot_config(home_html, interactive_url=interactive_url)
     (out_dir / "index.html").write_text(home_html, encoding="utf-8")
 
     # ------------------------------------------------------------------
@@ -364,7 +377,7 @@ def _do_build(ws_root: Path, out_dir: Path, srv) -> dict:
             continue
         study_html = _render_study_detail_html(slug, spec)
         study_html = _normalize_asset_urls(study_html)
-        study_html = _set_snapshot_config(study_html)
+        study_html = _set_snapshot_config(study_html, interactive_url=interactive_url)
         shell_dir = out_dir / "studies" / slug
         shell_dir.mkdir(parents=True, exist_ok=True)
         (shell_dir / "index.html").write_text(study_html, encoding="utf-8")
@@ -414,8 +427,15 @@ def main(argv=None):
         "--out", required=True,
         help="Output directory for the bundle (created if absent).",
     )
+    parser.add_argument(
+        "--interactive-url", default="",
+        dest="interactive_url",
+        help="URL of the interactive vivarium-dashboard version (injected into the snapshot banner).",
+    )
     args = parser.parse_args(argv)
-    summary = build_bundle(Path(args.workspace), Path(args.out))
+    summary = build_bundle(
+        Path(args.workspace), Path(args.out), interactive_url=args.interactive_url
+    )
     print(json.dumps(summary, indent=2))
 
 

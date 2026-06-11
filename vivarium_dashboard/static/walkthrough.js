@@ -2890,8 +2890,24 @@
 
   document.addEventListener("DOMContentLoaded", function () {
     // Snapshot read-only mode: set body.snapshot so CSS hides authoring controls.
-    if ((window.__DASH_CONFIG__ || {}).mode === "snapshot") {
+    var _dashCfg = window.__DASH_CONFIG__ || {};
+    if (_dashCfg.mode === "snapshot") {
       document.body.classList.add("snapshot");
+      // Wire the snapshot banner interactive link (hide if no interactiveUrl configured).
+      var bannerLink = document.getElementById('snapshot-interactive-link');
+      if (bannerLink) {
+        var iurl = _dashCfg.interactiveUrl || '';
+        if (iurl) {
+          bannerLink.href = iurl;
+        } else {
+          bannerLink.style.display = 'none';
+        }
+      }
+      // Show repo-name label from config (Task 5).
+      var repoLabel = document.getElementById('snapshot-repo-label');
+      if (repoLabel && _dashCfg.repo) {
+        repoLabel.textContent = _dashCfg.repo.replace(/^.*\/([^/]+?)(?:\.git)?$/, '$1');
+      }
     }
 
     // Initialize menu navigation.

@@ -410,3 +410,51 @@ def test_bundle_exports_visualization_classes(tmp_workspace, tmp_path):
         "api/visualization-classes.json missing"
     data = json.loads((out / "api" / "visualization-classes.json").read_text())
     assert "classes" in data, "api/visualization-classes.json missing 'classes' key"
+
+
+# ---------------------------------------------------------------------------
+# Task 4 (full-surface): read-only banner + interactive-version link
+# ---------------------------------------------------------------------------
+
+def test_snapshot_banner_in_template():
+    """index.html.j2 must contain the #snapshot-banner div with the interactive link."""
+    text = (server.TEMPLATES_DIR / "index.html.j2").read_text()
+    assert "snapshot-banner" in text, "index.html.j2 missing #snapshot-banner"
+    assert "snapshot-interactive-link" in text, \
+        "index.html.j2 missing #snapshot-interactive-link"
+
+
+def test_snapshot_banner_css_rules():
+    """snapshot-readonly.css must define baseline hide + body.snapshot show for #snapshot-banner."""
+    text = (server.STATIC_DIR / "snapshot-readonly.css").read_text()
+    assert "#snapshot-banner" in text, "snapshot-readonly.css missing #snapshot-banner rules"
+    assert "body.snapshot #snapshot-banner" in text, \
+        "snapshot-readonly.css missing body.snapshot #snapshot-banner show rule"
+
+
+def test_walkthrough_wires_banner_link():
+    """walkthrough.js DOMContentLoaded must set #snapshot-interactive-link href from __DASH_CONFIG__."""
+    text = (server.STATIC_DIR / "walkthrough.js").read_text()
+    assert "snapshot-interactive-link" in text, \
+        "walkthrough.js missing snapshot-interactive-link wiring"
+    assert "interactiveUrl" in text, \
+        "walkthrough.js missing interactiveUrl config key"
+
+
+def test_set_snapshot_config_injects_interactive_url():
+    """_set_snapshot_config injects interactiveUrl when provided."""
+    from vivarium_dashboard.publish import _set_snapshot_config
+    html = 'window.__DASH_CONFIG__ = { mode: "local-server" };'
+    result = _set_snapshot_config(html, interactive_url="https://example.com/dash")
+    assert 'mode: "snapshot"' in result
+    assert "interactiveUrl" in result
+    assert "https://example.com/dash" in result
+
+
+def test_set_snapshot_config_no_url_omits_interactive_url():
+    """_set_snapshot_config without interactiveUrl produces minimal config."""
+    from vivarium_dashboard.publish import _set_snapshot_config
+    html = 'window.__DASH_CONFIG__ = { mode: "local-server" };'
+    result = _set_snapshot_config(html)
+    assert 'mode: "snapshot"' in result
+    assert "interactiveUrl" not in result
