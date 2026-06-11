@@ -6430,9 +6430,26 @@
       var testsHtml = '';
       if (tests.length) {
         // Aggregate latest outcomes by test name so we can show PASS/FAIL pills.
+        // Merge BOTH the authored outcomes AND the run/outcome-spine
+        // evaluator-computed outcomes, so each test surfaces how it actually ran
+        // (measured_value, evaluated_by code/agent) and whether the code verdict
+        // agrees with the authored one (reconcile).
         var outcomeByTest = {};
         if (latestRun && latestRun.outcomes) {
-          Object.keys(latestRun.outcomes).forEach(function(k) { outcomeByTest[k] = latestRun.outcomes[k]; });
+          Object.keys(latestRun.outcomes).forEach(function(k) { outcomeByTest[k] = Object.assign({}, latestRun.outcomes[k]); });
+        }
+        if (latestRun && latestRun.computed_outcomes) {
+          Object.keys(latestRun.computed_outcomes).forEach(function(k) {
+            var c = latestRun.computed_outcomes[k] || {};
+            var base = outcomeByTest[k] || {};
+            if (base.result == null && c.result != null) base.result = c.result;   // code verdict when no authored one
+            if (c.measured_value != null && base.measured_value == null) base.measured_value = c.measured_value;
+            if (c.evaluated_by) base.evaluated_by = c.evaluated_by;   // code | agent | needs_rerun
+            if (c.operator) base.operator = c.operator;
+            if (c.reconcile) base.reconcile = c.reconcile;            // agree | divergent | no_authored
+            if (base.detail == null && (c.detail || c.reason)) base.detail = c.detail || c.reason;
+            outcomeByTest[k] = base;
+          });
         }
         // At-a-glance summary so a reviewer doesn't have to count pills.
         var _tc = { PASS: 0, FAIL: 0, PARTIAL: 0, SKIP: 0, PENDING: 0 };
@@ -6451,7 +6468,7 @@
         if (_tc.PENDING) _tcParts.push(_tc.PENDING + ' ⏳ pending');
         var _tcSummary = _tcParts.length ? (' — ' + _tcParts.join(' · ')) : '';
         testsHtml = '<div id="' + sid.tests + '"><h3>How do we judge success? <span class="muted small">(' + tests.length + ' tests' + _tcSummary + ')</span></h3>'
-          + '<p class="muted small" style="margin:0 0 8px 0">Each test makes a specific scientific claim. The latest result (pass/fail) appears as a pill when we have evidence; the technical assertion is hidden by default.</p>'
+          + '<p class="muted small" style="margin:0 0 8px 0">Each test makes a specific scientific claim with a machine-checkable criterion (<code>measure</code> + <code>pass_if</code>). Tests are now <strong>evaluated by code against the run</strong> (the run/outcome spine: RunReader → evaluator): the pill shows the result, and the evidence line shows the <em>measured value</em>, whether it was computed by <em>code</em> or routed to an <em>agent</em>, and whether the code verdict <em>agrees</em> with the authored one (reconcile). <span class="muted">⏳ pending = the study hasn\'t run yet.</span> Technical assertion + the exact evaluator are under "Technical details".</p>'
           + tests.map(function(t) {
               var name = t.name || '(unnamed)';
               var cls = t.classification || 'unclassified';
