@@ -51,7 +51,7 @@ def _write_study(ws, name, variants):
 @pytest.fixture
 def tmp_v2ecoli_study(tmp_path, monkeypatch):
     ws = tmp_path / "v2e"
-    _write_workspace(ws, "v2ecoli")
+    _write_workspace(ws, "v2ecoli", with_console_script=True)
     _write_study(ws, "s1", [
         {"name": "ens", "kind": "seeds", "base_composite": "core",
          "n_seeds": 4, "generations": 2},
@@ -120,6 +120,89 @@ def test_sweep_without_v2ecoli_errors_clearly(tmp_other_study):
         tmp_other_study, {"study": "s1", "variant": "sw"})
     assert code >= 400
     assert "ensemble" in resp.get("error", "").lower()  # clear guard, no half-run
+
+
+# ---------------------------------------------------------------------------
+# Review FIX 1 — a non-delegatable sweep/seeds variant must 422, NEVER silently
+# single-run a baseline. Branch on "is this an ENSEMBLE?" first.
+# ---------------------------------------------------------------------------
+
+
+def _guard_single_run(monkeypatch):
+    """Make both run paths explode so a 422 must be returned BEFORE either."""
+    monkeypatch.setattr(server, "_resolve_study_baseline_state",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("single-run path reached")))
+    monkeypatch.setattr(server, "_run_composite_subprocess",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("_run_composite_subprocess called")))
+    monkeypatch.setattr(server, "_invoke_v2ecoli_workflow",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("delegation fired")))
+
+
+def test_bare_key_sweep_422_not_single_run(tmp_path, monkeypatch):
+    ws = tmp_path / "v2e"
+    _write_workspace(ws, "v2ecoli", with_console_script=True)
+    _write_study(ws, "s1", [
+        {"name": "bad", "kind": "sweep", "base_composite": "core",
+         "sweep_over": {"b": [1, 2]}},  # bare key, no "<proc>."
+    ])
+    monkeypatch.setattr(server, "WORKSPACE", ws)
+    _guard_single_run(monkeypatch)
+    resp, code = server._post_study_run_variant_for_test(
+        ws, {"study": "s1", "variant": "bad"})
+    assert code == 422, (resp, code)
+    assert "<process>.<key>" in resp.get("error", "")
+    assert "b" in resp.get("error", "")
+
+
+def test_seeds_without_n_seeds_422(tmp_path, monkeypatch):
+    ws = tmp_path / "v2e"
+    _write_workspace(ws, "v2ecoli", with_console_script=True)
+    _write_study(ws, "s1", [
+        {"name": "bad", "kind": "seeds", "base_composite": "core"},  # no n_seeds
+    ])
+    monkeypatch.setattr(server, "WORKSPACE", ws)
+    _guard_single_run(monkeypatch)
+    resp, code = server._post_study_run_variant_for_test(
+        ws, {"study": "s1", "variant": "bad"})
+    assert code == 422, (resp, code)
+    assert "n_seeds" in resp.get("error", "")
+
+
+# ---------------------------------------------------------------------------
+# Review FIX 2 — a workspace whose venv lacks v2ecoli-workflow must NOT be
+# considered delegation-available (so a delegatable sweep there returns the
+# clear v2ecoli-required 422, never an uncaught FileNotFoundError).
+# ---------------------------------------------------------------------------
+
+
+def test_delegatable_sweep_missing_binary_422_not_raise(tmp_path, monkeypatch):
+    ws = tmp_path / "v2e-nobin"
+    _write_workspace(ws, "v2ecoli", with_console_script=False)  # no binary
+    _write_study(ws, "s1", [
+        {"name": "sw", "kind": "sweep", "base_composite": "core",
+         "sweep_over": {"ecoli-metabolism.kcat": [1, 2, 3]}},
+    ])
+    monkeypatch.setattr(server, "WORKSPACE", ws)
+    resp, code = server._post_study_run_variant_for_test(
+        ws, {"study": "s1", "variant": "sw"})
+    assert code == 422, (resp, code)
+    assert "ensemble" in resp.get("error", "").lower()
+
+
+def test_invoke_workflow_missing_binary_returns_error(tmp_path):
+    """_invoke_v2ecoli_workflow must catch a missing exe (FileNotFoundError)
+    and return a clear status, not raise."""
+    ws = tmp_path / "ws"
+    out_dir = ws / "out" / "run-x"
+    out_dir.mkdir(parents=True)
+    cfg = out_dir / "config.json"
+    cfg.write_text("{}")
+    resp, code = server._invoke_v2ecoli_workflow(str(cfg), out_dir, ws, 5)
+    assert code >= 400
+    assert "v2ecoli-workflow" in resp.get("error", "")
 
 
 # ---------------------------------------------------------------------------

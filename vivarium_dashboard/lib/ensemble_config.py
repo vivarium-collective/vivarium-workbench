@@ -128,22 +128,15 @@ def is_delegatable_sweep(variant: dict[str, Any]) -> bool:
 def delegation_available(ws_root) -> bool:
     """True iff ``ws_root`` can delegate an ensemble to v2ecoli-workflow.
 
-    A cheap filesystem / yaml check — deliberately does NOT import v2ecoli into
-    the dashboard process. Available when EITHER:
-      * ``<ws>/.venv/bin/v2ecoli-workflow`` exists (the console script is
-        installed in the workspace venv), OR
-      * ``workspace.yaml`` declares ``package_path: v2ecoli``.
+    A cheap filesystem check — deliberately does NOT import v2ecoli into the
+    dashboard process. Available iff ``<ws>/.venv/bin/v2ecoli-workflow`` exists
+    (the console script is installed in the workspace venv).
+
+    Review FIX 2: the binary is ALWAYS required. A ``package_path: v2ecoli``
+    declaration alone is NOT sufficient — without the console script,
+    :func:`_invoke_v2ecoli_workflow`'s ``subprocess.run`` would raise an uncaught
+    ``FileNotFoundError``. Requiring the binary here makes a delegatable sweep on
+    such a workspace return the clear v2ecoli-required 422 instead.
     """
     ws = Path(ws_root)
-    if (ws / ".venv" / "bin" / "v2ecoli-workflow").exists():
-        return True
-    ws_yaml = ws / "workspace.yaml"
-    if ws_yaml.is_file():
-        try:
-            import yaml
-            data = yaml.safe_load(ws_yaml.read_text(encoding="utf-8")) or {}
-        except Exception:  # noqa: BLE001 — a malformed yaml is simply "not available"
-            return False
-        if isinstance(data, dict) and data.get("package_path") == "v2ecoli":
-            return True
-    return False
+    return (ws / ".venv" / "bin" / "v2ecoli-workflow").exists()

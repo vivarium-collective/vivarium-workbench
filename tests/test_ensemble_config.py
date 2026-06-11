@@ -86,10 +86,12 @@ def test_delegation_available_requires_v2ecoli_workflow(
     assert delegation_available(tmp_workspace_other) is False
 
 
-def test_delegation_available_via_package_path(tmp_path):
-    """No console script, but workspace.yaml package_path == v2ecoli → available."""
+def test_delegation_unavailable_without_binary_even_if_package_path(tmp_path):
+    """Review FIX 2: package_path == v2ecoli alone is NOT enough — the console
+    script must exist, else _invoke_v2ecoli_workflow would raise FileNotFoundError.
+    """
     ws = tmp_path / "pkg-only"
     ws.mkdir()
     (ws / "workspace.yaml").write_text(
         "schema_version: 2\nname: v2ecoli\npackage_path: v2ecoli\n")
-    assert delegation_available(ws) is True
+    assert delegation_available(ws) is False

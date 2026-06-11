@@ -5042,7 +5042,23 @@ def _post_study_run_variant_for_test(ws_root, body):
     ws_default_n_steps = _runtime.get("default_n_steps")
     steps = int(body.get("steps") or params_n_steps or ws_default_n_steps or 5)
 
-    if is_delegatable_sweep(variant):
+    kind = variant.get("kind")
+    if kind in ("sweep", "seeds"):
+        # Review FIX 1: branch on the variant being an ENSEMBLE first. A
+        # `kind: sweep`/`kind: seeds` variant is NEVER silently single-run as a
+        # baseline — if it is not delegatable (bare-key sweep, missing/zero
+        # n_seeds) it must error CLEARLY rather than ignore the declared sweep.
+        if not is_delegatable_sweep(variant):
+            if kind == "seeds":
+                return ({"error": "kind: seeds requires n_seeds >= 1"}, 422)
+            # kind == "sweep" — empty or bare-key (non-"<proc>.<key>") targets.
+            sweep_over = variant.get("sweep_over") or {}
+            if not sweep_over:
+                return ({"error": "kind: sweep requires a non-empty sweep_over "
+                         "of '<process>.<key>' targets"}, 422)
+            bad = [k for k in sweep_over if "." not in str(k)]
+            return ({"error": "sweep targets must be '<process>.<key>' "
+                     f"(got bare keys: {bad})"}, 422)
         # SP2a delegation: hand the whole ensemble to v2ecoli-workflow once. It
         # packs all sweep/seed points into ONE parquet hive store under
         # out/<run_id>/, which the post-run sync records as a single run. We do
@@ -5786,6 +5802,11 @@ def _invoke_v2ecoli_workflow(cfg_path, out_dir, ws_root, timeout_s):
                                 text=True, timeout=timeout_s)
     except subprocess.TimeoutExpired:
         return ({"simulation_id": run_id, "error": "ensemble run timed out"}, 504)
+    except FileNotFoundError:
+        # Defensive: delegation_available() should have gated this, but a venv
+        # missing the console script must never raise uncaught (review FIX 2).
+        return ({"simulation_id": run_id,
+                 "error": "v2ecoli-workflow not found in the workspace venv"}, 502)
     if result.returncode != 0:
         return ({"simulation_id": run_id, "error": "ensemble run failed",
                  "stdout": result.stdout, "stderr": result.stderr}, 502)
