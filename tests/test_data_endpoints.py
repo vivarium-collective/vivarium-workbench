@@ -2,6 +2,8 @@
 
 Sub-project #1: client-fetch seam.
 See docs/superpowers/plans/2026-06-10-client-fetch-seam-subproject-1.md.
+Sub-project #2: narrative export / publish.
+See docs/superpowers/plans/2026-06-10-narrative-export-subproject-2.md.
 """
 import json
 import yaml
@@ -176,3 +178,64 @@ def test_api_study_builder_returns_400_for_invalid_slug(tmp_workspace):
     body, code = server.Handler._build_api_study_response("../traversal")
     assert code == 400
     assert "error" in json.loads(body)
+
+
+# ---------------------------------------------------------------------------
+# Sub-project #2 — Task 1: pure builders + GET /api/workspace
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def tmp_workspace_with_inv(tmp_path, monkeypatch):
+    """Workspace with an investigation + study, for Task 1 tests."""
+    ws = tmp_path / "ws"
+    inv = ws / "investigations" / "test-inv"
+    inv.mkdir(parents=True)
+    (inv / "investigation.yaml").write_text(yaml.safe_dump({
+        "name": "test-inv",
+        "title": "Test Investigation",
+        "studies": ["demo"],
+        "status": "planning",
+    }))
+    demo = ws / "studies" / "demo"
+    demo.mkdir(parents=True)
+    (demo / "study.yaml").write_text(yaml.safe_dump({
+        "name": "demo",
+        "schema_version": 3,
+        "baseline": [{"name": "default", "composite": "demo.Default"}],
+        "variants": [],
+        "objective": "A demo study.",
+        "status": "draft",
+    }))
+    monkeypatch.setattr(server, "WORKSPACE", ws)
+    return ws
+
+
+def test_iset_detail_data_and_workspace_home_data(tmp_workspace_with_inv):
+    """_iset_detail_data returns a dict with 'studies'; _workspace_home_data returns
+    a dict; _build_api_workspace_response is JSON-parity with _workspace_home_data."""
+    iset = server.Handler._iset_detail_data("test-inv")
+    assert isinstance(iset, dict) and "studies" in iset
+
+    home = server._workspace_home_data(server.WORKSPACE)
+    assert isinstance(home, dict)
+
+    body, code = server.Handler._build_api_workspace_response()
+    assert code == 200
+    assert json.loads(body) == json.loads(json.dumps(home, default=server._json_default))
+
+
+def test_iset_detail_data_returns_none_for_missing(tmp_workspace_with_inv):
+    """_iset_detail_data returns None when the investigation.yaml doesn't exist."""
+    result = server.Handler._iset_detail_data("does-not-exist")
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Sub-project #2 — Task 2: data-source.js snapshot mode
+# ---------------------------------------------------------------------------
+
+def test_data_source_has_snapshot_mode():
+    """data-source.js must define the snapshot URL helpers and mode check."""
+    text = (server.STATIC_DIR / "data-source.js").read_text()
+    for token in ['mode === "snapshot"', ".json", "_studyUrl", "_isetUrl", "_workspaceUrl"]:
+        assert token in text, f"data-source.js missing token: {token!r}"

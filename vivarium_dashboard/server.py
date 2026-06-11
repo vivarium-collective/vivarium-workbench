@@ -1258,6 +1258,51 @@ def workspace_paths() -> WorkspacePaths:
         _WP_CACHE[key] = wp
     return wp
 
+
+def _workspace_home_data(ws_root: "Path | None" = None) -> dict:
+    """Return workspace narrative metadata for GET /api/workspace and publish.
+
+    Reads workspace.yaml + enumerates investigation dirs.  Pure (no socket I/O).
+    Returned dict shape: {name, description, imports, investigations:[...]}.
+    """
+    ws_root = Path(ws_root) if ws_root is not None else Path(WORKSPACE)
+    wp = WorkspacePaths.load(ws_root)
+    ws: dict = {}
+    wf = ws_root / "workspace.yaml"
+    if wf.exists():
+        try:
+            ws = yaml.safe_load(wf.read_text(encoding="utf-8")) or {}
+        except Exception:
+            ws = {}
+
+    investigations: list[dict] = []
+    inv_root = wp.investigations
+    if inv_root.is_dir():
+        for inv_dir in sorted(
+            d for d in inv_root.iterdir()
+            if d.is_dir() and (d / "investigation.yaml").is_file()
+        ):
+            try:
+                inv_spec = yaml.safe_load(
+                    (inv_dir / "investigation.yaml").read_text(encoding="utf-8")
+                ) or {}
+                investigations.append({
+                    "name":        inv_spec.get("name", inv_dir.name),
+                    "title":       inv_spec.get("title") or inv_spec.get("name") or inv_dir.name,
+                    "status":      inv_spec.get("status", "planning"),
+                    "description": inv_spec.get("description", ""),
+                })
+            except Exception:
+                investigations.append({"name": inv_dir.name, "status": "error"})
+
+    return {
+        "name":           ws.get("name", ws_root.name),
+        "description":    ws.get("description", ""),
+        "imports":        ws.get("imports") or {},
+        "investigations": investigations,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Study slug validation
 # ---------------------------------------------------------------------------
@@ -5999,6 +6044,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json_bytes(*Handler._build_api_study_response(_slug))
         if _path_only_pre == "/api/config":
             return self._send_json_bytes(*Handler._build_api_config_response())
+        if _path_only_pre == "/api/workspace":
+            return self._send_json_bytes(*Handler._build_api_workspace_response())
 
         # Resolve /api/study-* aliases to their /api/investigation-* originals so
         # the rest of the dispatch chain only needs to know one set of paths.
@@ -9323,174 +9370,18 @@ if __name__ == "__main__":
     def _get_iset_detail(self):
         """GET /api/iset/<name> — return one investigation + its resolved studies.
 
-        Each constituent study is returned with its `parent_studies:`
-        normalized (legacy strings become dicts) so the frontend DAG layout
-        has consistent shape.
+        Delegates to the pure builder ``_iset_detail_data`` so the export CLI
+        (publish.py) and the live handler share identical logic.
         """
         import urllib.parse
         path = urllib.parse.urlparse(self.path).path
         name = path.split("/api/iset/", 1)[-1].strip("/")
         if not name:
             return self._json({"error": "investigation name required"}, 400)
-
-        spec_path = workspace_paths().investigations / name / "investigation.yaml"
-        if not spec_path.is_file():
-            return self._json({"error": f"no investigation.yaml at {spec_path}"}, 404)
-        try:
-            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-        except Exception as e:
-            return self._json({"error": f"parse failed: {e}"}, 500)
-
-        # Resolve constituent studies.
-        _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
-
-        from vivarium_dashboard.lib.investigations import normalize_dag_edges
-        # Delegate to the canonical helper — reads pipeline_gate.prerequisites
-        # first, falls back to parent_studies for back-compat (with a
-        # DeprecationWarning when only the legacy field is set).
-        def _normalize_parents(study_spec: dict) -> list[dict]:
-            return normalize_dag_edges(study_spec)
-
-        studies_out = []
-        for slug in (spec.get("studies") or []):
-            # Nested-aware (Phase 1 study_dir): investigations/<inv>/studies/<slug>/
-            # with flat back-compat; legacy v2 spec.yaml as last resort.
-            try:
-                sp = workspace_paths().study_dir(slug) / "study.yaml"
-            except FileNotFoundError:
-                sp = workspace_paths().investigations / slug / "spec.yaml"
-            if not sp.is_file():
-                studies_out.append({"name": slug, "status": "missing", "error": "study.yaml not found"})
-                continue
-            try:
-                study_spec = load_spec(sp)
-            except InvestigationSpecError as e:
-                studies_out.append({"name": slug, "status": "invalid", "error": str(e)})
-                continue
-            # New-template aware: derive counts from new fields when present,
-            # fall back to legacy fields. Purpose.question wins over top-level
-            # question if both exist.
-            sim_set = study_spec.get("simulation_set") or []
-            beh_tests = study_spec.get("behavior_tests") or study_spec.get("expected_behavior") or []
-            readouts = study_spec.get("readouts") or study_spec.get("observables") or []
-            purpose = study_spec.get("purpose") or {}
-            question = (purpose.get("question") if isinstance(purpose, dict) else None) or study_spec.get("question", "")
-            follow_ups = study_spec.get("follow_up_studies") or []
-            # discovery_implications.followup_study_proposals is the richer
-            # successor to follow_up_studies. Prefer it for the surfaced
-            # follow-up count, falling back to legacy follow_up_studies.
-            disc_impl = study_spec.get("discovery_implications") or {}
-            disc_followups = (disc_impl.get("followup_study_proposals")
-                              if isinstance(disc_impl, dict) else None) or []
-            findings = study_spec.get("findings") or []
-            n_runs_for_study = _count_runs_for_study(
-                study_spec["name"], study_spec)  # F2
-            raw_status = study_spec.get("status", "planned")
-            studies_out.append({
-                "name":            study_spec["name"],
-                "status":          raw_status,
-                "effective_status": compute_study_effective_status(
-                    raw_status,
-                    has_runs=n_runs_for_study > 0,
-                    has_active_run=_has_active_run_for_study(
-                        study_spec["name"], study_spec)),
-                "phase":           study_spec.get("phase"),
-                "title":           study_spec.get("title"),
-                "question":        question,
-                "n_variants":      len(sim_set) if sim_set else len(study_spec.get("variants") or []),
-                "n_interventions": len(study_spec.get("interventions") or []),
-                "n_runs":          n_runs_for_study,
-                "baseline_source": _format_baseline_source(study_spec),
-                "parent_studies":  _normalize_parents(study_spec),
-                "n_behaviors":     len(beh_tests),
-                "n_readouts":      len(readouts),
-                "n_requirements":  len(study_spec.get("implementation_requirements") or study_spec.get("gaps") or []),
-                "n_followups":     len(disc_followups) or len(follow_ups),
-                "follow_up_studies": follow_ups,
-                # Discovery Implications (alternate hypotheses, mechanism-update
-                # proposals, richer follow-up study proposals). Pass through
-                # verbatim; the study view + report render it, and the seed
-                # flow reads followup_study_proposals from it.
-                "discovery_implications": disc_impl,
-                "n_findings":      len(findings),
-                "findings":        findings,
-                # Discourse-graph re-skin: optional authored headline + confidence
-                # override (fall back to derived from findings/status client-side).
-                "claim":           study_spec.get("claim"),
-                "confidence":      study_spec.get("confidence"),
-                # Pass A multi-axis status: pass through whichever of the six
-                # axes are set on the study spec. All optional, all independent.
-                "design_status":         study_spec.get("design_status"),
-                "implementation_status": study_spec.get("implementation_status"),
-                "simulation_status":     study_spec.get("simulation_status"),
-                "evaluation_status":     study_spec.get("evaluation_status"),
-                "gate_status":           study_spec.get("gate_status"),
-                "expert_review_status":  study_spec.get("expert_review_status"),
-            })
-
-        # Compute effective_status from the member studies' current statuses.
-        # The author-declared YAML 'status' represents intent; the dashboard
-        # surfaces effective_status as the live signal.
-        member_statuses = [s.get("status", "planning") for s in studies_out]
-        member_has_runs = [(s.get("n_runs") or 0) > 0 for s in studies_out]
-        effective_status = compute_investigation_status(
-            member_statuses, has_runs=member_has_runs,
-        )
-
-        # Coded acceptance roll-up (spine stage #2): roll member-study verdicts
-        # → investigation acceptance for render-only display alongside authored
-        # verdict_status. Does NOT write investigation.yaml. Defensive import.
-        computed_acceptance: dict | None = None
-        try:
-            from pbg_superpowers.investigation_status import roll_up_acceptance
-            from pbg_superpowers import study_io as _sio
-            # Build studies_by_name from the workspace for acceptance computation
-            wp = workspace_paths()
-            studies_by_name: dict = {}
-            for _sd in wp.iter_study_dirs():
-                _syp = _sd / "study.yaml"
-                if _syp.exists():
-                    try:
-                        studies_by_name[_sd.name] = _sio.load_yaml_mapping(_syp)
-                    except Exception:  # noqa: BLE001
-                        pass
-            computed_acceptance = roll_up_acceptance(spec, studies_by_name)
-        except Exception:  # noqa: BLE001
-            pass
-
-        return self._json({
-            "name":             spec.get("name", name),
-            "title":            spec.get("title", spec.get("name", name)),
-            "description":      spec.get("description", ""),
-            "lead":             spec.get("lead", ""),
-            "at_a_glance":      spec.get("at_a_glance") or [],
-            "how_to_read":      spec.get("how_to_read") or [],
-            "glossary":         spec.get("glossary") or [],
-            "biological_story": spec.get("biological_story", ""),
-            "question":         spec.get("question", ""),
-            "hypothesis":       spec.get("hypothesis", ""),
-            "status":           spec.get("status", "planning"),
-            "effective_status": effective_status,
-            "expert_docs":      _coerce_list_field(spec, "expert_docs", source=str(spec_path)),
-            "acceptance_criteria": _coerce_list_field(spec, "acceptance_criteria", source=str(spec_path)),
-            # Coded acceptance roll-up (spine stage #2): parallel computed slot
-            # alongside authored acceptance_criteria + executive.verdict_status.
-            "computed_acceptance": computed_acceptance,
-            # Authored synthesis layers for the layered report (executive
-            # summary + scientific argument). Optional — absent on older
-            # investigations, where the report falls back to derived data.
-            "executive":           spec.get("executive") or {},
-            "scientific_argument": spec.get("scientific_argument") or {},
-            # Investigation-declared references (inputs.references bib keys) so the
-            # report's References section includes them, not only study citations.
-            "references":          (spec.get("inputs") or {}).get("references") or [],
-            # Agent-proposed references/mechanisms pending expert accept/decline.
-            # Surfaced in the report's "Suggested additions" section; never
-            # silently integrated (see pbg-investigation / pbg-study skills).
-            "proposed_inputs":     spec.get("proposed_inputs") or {},
-            "studies":          studies_out,
-        }, 200)
+        result = Handler._iset_detail_data(name)
+        if result is None:
+            return self._json({"error": f"no investigation.yaml for {name!r}"}, 404)
+        return self._json(result, 200)
 
     def _get_study_bigraph_paths(self):
         """GET /api/study-bigraph-paths?study=<slug>[&baseline=<name>][&max_depth=<n>]
@@ -12064,6 +11955,142 @@ if __name__ == "__main__":
         Returns (json_bytes, http_status).  Default: local-server mode.
         """
         return _json_body({"mode": "local-server"}), 200
+
+    @staticmethod
+    def _iset_detail_data(name: str) -> "dict | None":
+        """Pure builder for investigation (iset) detail — no socket I/O.
+
+        Returns the dict that GET /api/iset/<name> sends, or ``None`` when
+        the investigation.yaml does not exist.  Extracted from
+        ``_get_iset_detail`` so publish.py can call it without a live server.
+        """
+        spec_path = workspace_paths().investigations / name / "investigation.yaml"
+        if not spec_path.is_file():
+            return None
+        try:
+            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            return None
+
+        _ws_add_to_sys_path()
+        from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
+        from vivarium_dashboard.lib.investigations import normalize_dag_edges
+
+        def _normalize_parents(study_spec: dict) -> list:
+            return normalize_dag_edges(study_spec)
+
+        studies_out: list[dict] = []
+        for slug in (spec.get("studies") or []):
+            try:
+                sp = workspace_paths().study_dir(slug) / "study.yaml"
+            except FileNotFoundError:
+                sp = workspace_paths().investigations / slug / "spec.yaml"
+            if not sp.is_file():
+                studies_out.append({"name": slug, "status": "missing", "error": "study.yaml not found"})
+                continue
+            try:
+                study_spec = load_spec(sp)
+            except InvestigationSpecError as e:
+                studies_out.append({"name": slug, "status": "invalid", "error": str(e)})
+                continue
+            sim_set = study_spec.get("simulation_set") or []
+            beh_tests = study_spec.get("behavior_tests") or study_spec.get("expected_behavior") or []
+            readouts = study_spec.get("readouts") or study_spec.get("observables") or []
+            purpose = study_spec.get("purpose") or {}
+            question = (purpose.get("question") if isinstance(purpose, dict) else None) or study_spec.get("question", "")
+            follow_ups = study_spec.get("follow_up_studies") or []
+            disc_impl = study_spec.get("discovery_implications") or {}
+            disc_followups = (disc_impl.get("followup_study_proposals")
+                              if isinstance(disc_impl, dict) else None) or []
+            findings = study_spec.get("findings") or []
+            n_runs_for_study = _count_runs_for_study(study_spec["name"], study_spec)
+            raw_status = study_spec.get("status", "planned")
+            studies_out.append({
+                "name":                  study_spec["name"],
+                "status":                raw_status,
+                "effective_status":      compute_study_effective_status(
+                    raw_status,
+                    has_runs=n_runs_for_study > 0,
+                    has_active_run=_has_active_run_for_study(study_spec["name"], study_spec)),
+                "phase":                 study_spec.get("phase"),
+                "title":                 study_spec.get("title"),
+                "question":              question,
+                "n_variants":            len(sim_set) if sim_set else len(study_spec.get("variants") or []),
+                "n_interventions":       len(study_spec.get("interventions") or []),
+                "n_runs":                n_runs_for_study,
+                "baseline_source":       _format_baseline_source(study_spec),
+                "parent_studies":        _normalize_parents(study_spec),
+                "n_behaviors":           len(beh_tests),
+                "n_readouts":            len(readouts),
+                "n_requirements":        len(study_spec.get("implementation_requirements") or study_spec.get("gaps") or []),
+                "n_followups":           len(disc_followups) or len(follow_ups),
+                "follow_up_studies":     follow_ups,
+                "discovery_implications": disc_impl,
+                "n_findings":            len(findings),
+                "findings":              findings,
+                "claim":                 study_spec.get("claim"),
+                "confidence":            study_spec.get("confidence"),
+                "design_status":         study_spec.get("design_status"),
+                "implementation_status": study_spec.get("implementation_status"),
+                "simulation_status":     study_spec.get("simulation_status"),
+                "evaluation_status":     study_spec.get("evaluation_status"),
+                "gate_status":           study_spec.get("gate_status"),
+                "expert_review_status":  study_spec.get("expert_review_status"),
+            })
+
+        member_statuses = [s.get("status", "planning") for s in studies_out]
+        member_has_runs = [(s.get("n_runs") or 0) > 0 for s in studies_out]
+        effective_status = compute_investigation_status(
+            member_statuses, has_runs=member_has_runs,
+        )
+
+        computed_acceptance: "dict | None" = None
+        try:
+            from pbg_superpowers.investigation_status import roll_up_acceptance
+            from pbg_superpowers import study_io as _sio
+            wp = workspace_paths()
+            studies_by_name: dict = {}
+            for _sd in wp.iter_study_dirs():
+                _syp = _sd / "study.yaml"
+                if _syp.exists():
+                    try:
+                        studies_by_name[_sd.name] = _sio.load_yaml_mapping(_syp)
+                    except Exception:
+                        pass
+            computed_acceptance = roll_up_acceptance(spec, studies_by_name)
+        except Exception:
+            pass
+
+        return {
+            "name":                spec.get("name", name),
+            "title":               spec.get("title", spec.get("name", name)),
+            "description":         spec.get("description", ""),
+            "lead":                spec.get("lead", ""),
+            "at_a_glance":         spec.get("at_a_glance") or [],
+            "how_to_read":         spec.get("how_to_read") or [],
+            "glossary":            spec.get("glossary") or [],
+            "biological_story":    spec.get("biological_story", ""),
+            "question":            spec.get("question", ""),
+            "hypothesis":          spec.get("hypothesis", ""),
+            "status":              spec.get("status", "planning"),
+            "effective_status":    effective_status,
+            "expert_docs":         _coerce_list_field(spec, "expert_docs", source=str(spec_path)),
+            "acceptance_criteria": _coerce_list_field(spec, "acceptance_criteria", source=str(spec_path)),
+            "computed_acceptance": computed_acceptance,
+            "executive":           spec.get("executive") or {},
+            "scientific_argument": spec.get("scientific_argument") or {},
+            "references":          (spec.get("inputs") or {}).get("references") or [],
+            "proposed_inputs":     spec.get("proposed_inputs") or {},
+            "studies":             studies_out,
+        }
+
+    @staticmethod
+    def _build_api_workspace_response():
+        """Pure builder for GET /api/workspace — returns workspace home data.
+
+        Returns (json_bytes, http_status).  Mirrors _build_api_config_response.
+        """
+        return _json_body(_workspace_home_data(WORKSPACE)), 200
 
     def _get_study_detail_page(self):
         """GET /studies/<name> — render the Study Detail page."""
