@@ -334,6 +334,11 @@ window.addEventListener('pageshow', function (e) {
         <span class="viv-arrow">▾</span>
       </button>
     </div>
+    <!-- Snapshot mode: static repo label replaces the switcher dropdown. -->
+    <div class="viv-repo-label" id="snapshot-repo-label" style="display:none">
+      <span class="viv-workspace-switcher-glyph">●</span>
+      <strong>{{ workspace_name }}</strong>
+    </div>
 
     <!-- Primary nav -->
     <nav class="viv-rail-section" role="tablist">

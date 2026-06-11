@@ -458,3 +458,32 @@ def test_set_snapshot_config_no_url_omits_interactive_url():
     result = _set_snapshot_config(html)
     assert 'mode: "snapshot"' in result
     assert "interactiveUrl" not in result
+
+
+# ---------------------------------------------------------------------------
+# Task 5 (full-surface): repo switcher → static repo label
+# ---------------------------------------------------------------------------
+
+def test_snapshot_repo_label_in_template():
+    """index.html.j2 must contain #snapshot-repo-label (static repo label for snapshot mode)."""
+    text = (server.TEMPLATES_DIR / "index.html.j2").read_text()
+    assert "snapshot-repo-label" in text, \
+        "index.html.j2 missing #snapshot-repo-label"
+    assert "viv-repo-label" in text, \
+        "index.html.j2 missing .viv-repo-label class"
+
+
+def test_snapshot_css_hides_switcher_and_shows_label():
+    """snapshot-readonly.css must hide #viv-workspace-switcher and show #snapshot-repo-label."""
+    text = (server.STATIC_DIR / "snapshot-readonly.css").read_text()
+    assert "#viv-workspace-switcher" in text, \
+        "snapshot-readonly.css missing rule to hide #viv-workspace-switcher"
+    assert "#snapshot-repo-label" in text, \
+        "snapshot-readonly.css missing rule to show #snapshot-repo-label"
+
+
+def test_walkthrough_sets_repo_label():
+    """walkthrough.js DOMContentLoaded must populate snapshot-repo-label from __DASH_CONFIG__.repo."""
+    text = (server.STATIC_DIR / "walkthrough.js").read_text()
+    assert "snapshot-repo-label" in text, \
+        "walkthrough.js missing snapshot-repo-label population"
