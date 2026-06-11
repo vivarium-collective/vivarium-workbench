@@ -36,6 +36,11 @@ body.snapshot a.menu-link[data-page="visualizations"] {
   display: none !important;
 }
 
+/* ── GitHub identity / "Connect GitHub" rail footer (git auth — not in a read-only viewer) ── */
+body.snapshot .viv-rail-footer {
+  display: none !important;
+}
+
 /* ── Investigation detail header: authoring buttons ─────────────────── */
 body.snapshot #investigation-run-unblocked,
 body.snapshot button[onclick*="_openCloneIsetModal"] {
