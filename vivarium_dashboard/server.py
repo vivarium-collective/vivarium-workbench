@@ -4419,7 +4419,34 @@ def _post_study_run_baseline_for_test(ws_root, body):
             study_outcomes.sync(study_dir)  # record runs + compute outcomes
         except Exception as exc:  # never fail a successful run on a record error
             print(f"[study_outcomes] sync failed: {exc}", file=sys.stderr)
+        _sync_parent_investigation(ws_root, study_dir)  # SP1: roll up to investigation
     return response, code
+
+
+def _sync_parent_investigation(ws_root, study_dir) -> None:
+    """Best-effort SP1 hook: after a study syncs, re-write its parent
+    investigation's computed acceptance so the investigation verdict on disk
+    tracks the member study's new outcome.
+
+    No-op when the study has no owning investigation, or when the installed
+    pbg_superpowers predates ``sync_investigation``. Never raises — a record
+    error must not fail a successful run (mirrors the study-sync hook above).
+    """
+    try:
+        from pbg_superpowers import study_outcomes
+        from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+        sync_investigation = getattr(study_outcomes, "sync_investigation", None)
+        if sync_investigation is None:
+            return
+        wp = WorkspacePaths.load(Path(ws_root))
+        owner = wp.study_owner(Path(study_dir).name)
+        if not owner:
+            return
+        inv_dir = wp.investigations / owner
+        if (inv_dir / "investigation.yaml").is_file():
+            sync_investigation(inv_dir, Path(ws_root))
+    except Exception as exc:  # never fail a successful run on a record error
+        print(f"[study_outcomes] sync_investigation failed: {exc}", file=sys.stderr)
 
 
 def _run_post_run_scripts(spec: dict, ws_root: Path) -> tuple[list[str], list[dict]]:
@@ -5036,6 +5063,7 @@ def _post_study_run_variant_for_test(ws_root, body):
             study_outcomes.sync(study_dir)  # record runs + compute outcomes
         except Exception as exc:  # never fail a successful run on a record error
             print(f"[study_outcomes] sync failed: {exc}", file=sys.stderr)
+        _sync_parent_investigation(ws_root, study_dir)  # SP1: roll up to investigation
     return response, code
 
 
@@ -5055,6 +5083,7 @@ def _post_study_sync_runs_for_test(ws_root, body: dict):
     except FileNotFoundError:
         return {"error": f"study not found: {slug}"}, 404
     summary = study_outcomes.sync(study_dir)  # record runs + compute outcomes
+    _sync_parent_investigation(ws_root, study_dir)  # SP1: roll up to investigation
     return {"ok": True, "summary": summary}, 200
 
 
