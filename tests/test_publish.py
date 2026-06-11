@@ -310,6 +310,100 @@ def test_walkthrough_has_snapshot_body_class_and_switchpage_gating():
 
 
 # ---------------------------------------------------------------------------
+# --base-path: subpath hosting for GitHub Pages project sites
+# ---------------------------------------------------------------------------
+
+def test_build_bundle_with_base_path(tmp_workspace, tmp_path):
+    """build_bundle(base_path='/v2ecoli/dashboard') prefixes /assets/ and
+    /bigraph-loom/ URLs in all shells and injects basePath into __DASH_CONFIG__."""
+    from vivarium_dashboard import publish
+
+    out = tmp_path / "bundle"
+    base = "/v2ecoli/dashboard"
+    publish.build_bundle(server.WORKSPACE, out, base_path=base)
+
+    for shell in [out / "index.html"] + list(out.glob("studies/*/index.html")):
+        html = shell.read_text()
+
+        # All JS/CSS asset refs must be prefixed
+        assert f'{base}/assets/' in html, \
+            f"{shell.name}: missing prefixed /assets/ URL"
+        # Bare /assets/ must NOT appear (every one should be prefixed)
+        for m in re.finditer(r'(?:src|href)="(/assets/[^"]+)"', html):
+            raise AssertionError(
+                f"{shell.name}: unprefixed /assets/ URL: {m.group(1)!r}"
+            )
+
+        # __DASH_CONFIG__ must carry basePath
+        assert f'basePath: "{base}"' in html, \
+            f"{shell.name}: __DASH_CONFIG__ missing basePath"
+        assert 'mode: "snapshot"' in html, \
+            f"{shell.name}: __DASH_CONFIG__ missing mode: snapshot"
+
+    # Home shell specifically: loom iframe src must be prefixed
+    home_html = (out / "index.html").read_text()
+    assert f'{base}/bigraph-loom/' in home_html, \
+        "index.html: bigraph-loom iframe src not prefixed with base path"
+
+
+def test_build_bundle_base_path_normalization(tmp_workspace, tmp_path):
+    """base_path is normalized: trailing slash stripped, leading slash added."""
+    from vivarium_dashboard import publish
+
+    out = tmp_path / "bundle"
+    # Trailing slash should be stripped; no leading slash should be added
+    publish.build_bundle(server.WORKSPACE, out, base_path="v2ecoli/dashboard/")
+
+    home_html = (out / "index.html").read_text()
+    # Canonical form: leading slash, no trailing slash
+    assert 'basePath: "/v2ecoli/dashboard"' in home_html, \
+        "base_path normalization failed"
+    assert "/v2ecoli/dashboard/assets/" in home_html, \
+        "assets not prefixed after normalization"
+
+
+def test_build_bundle_default_base_path_unchanged(tmp_workspace, tmp_path):
+    """Default base_path='' leaves root-absolute URLs untouched."""
+    from vivarium_dashboard import publish
+
+    out = tmp_path / "bundle"
+    publish.build_bundle(server.WORKSPACE, out)
+
+    home_html = (out / "index.html").read_text()
+
+    # basePath must NOT be injected into __DASH_CONFIG__
+    assert 'basePath' not in home_html, \
+        "basePath injected into __DASH_CONFIG__ by default (should only appear when set)"
+
+    # Asset URLs must be root-absolute (not double-prefixed or missing)
+    assert 'src="/assets/' in home_html or 'href="/assets/' in home_html, \
+        "index.html: root-absolute /assets/ URLs missing with empty base_path"
+
+
+def test_data_source_js_has_base_helper():
+    """data-source.js must expose a _base() helper that reads cfg().basePath."""
+    text = (server.STATIC_DIR / "data-source.js").read_text()
+    # _base helper exists
+    assert '_base()' in text, "data-source.js missing _base() helper invocation"
+    assert 'basePath' in text, "data-source.js missing basePath reference"
+    # Snapshot URLs must be prefixed with _base()
+    assert '_base() + "/api/' in text or '_base() +' in text, \
+        "data-source.js snapshot URLs not prefixed with _base()"
+
+
+def test_walkthrough_js_loom_stateurl_prefixed_with_base_path():
+    """walkthrough.js must prefix the loom iframe src and stateUrl with
+    __DASH_CONFIG__.basePath in snapshot mode."""
+    text = (server.STATIC_DIR / "walkthrough.js").read_text()
+    # basePath is read from __DASH_CONFIG__
+    assert '__DASH_CONFIG__' in text and 'basePath' in text, \
+        "walkthrough.js missing __DASH_CONFIG__.basePath reference"
+    # stateUrl must be prefixed
+    assert '_snapshotBase' in text or 'basePath' in text, \
+        "walkthrough.js missing base-path prefix for loom stateUrl"
+
+
+# ---------------------------------------------------------------------------
 # Task 5: golden on a real workspace (v2e-invest), skipif absent
 # ---------------------------------------------------------------------------
 

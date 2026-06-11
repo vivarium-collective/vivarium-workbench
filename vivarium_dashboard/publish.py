@@ -63,6 +63,48 @@ def _git_info(ws_root: Path) -> tuple:
     return commit, remote, branch
 
 
+def _normalize_base_path(base_path: str) -> str:
+    """Normalize a *base_path* value: strip trailing slashes, ensure a leading
+    slash when the value is non-empty.  Empty string (root hosting) is returned
+    as-is.
+
+    >>> _normalize_base_path("/v2ecoli/dashboard/")
+    '/v2ecoli/dashboard'
+    >>> _normalize_base_path("v2ecoli/dashboard")
+    '/v2ecoli/dashboard'
+    >>> _normalize_base_path("")
+    ''
+    """
+    if not base_path:
+        return ""
+    bp = base_path.rstrip("/")
+    if not bp.startswith("/"):
+        bp = "/" + bp
+    return bp
+
+
+def _apply_base_path(html: str, base_path: str) -> str:
+    """Prefix root-absolute ``/assets/`` and ``/bigraph-loom/`` URLs in *html*
+    with *base_path*.
+
+    Called AFTER ``_normalize_asset_urls()`` so all JS/CSS refs are already in
+    ``/assets/<name>`` form.  Does **not** touch external URLs (``https://``)
+    or ``/api/`` paths (those are prefixed at runtime by ``data-source.js``
+    via the ``basePath`` config key).
+    """
+    if not base_path:
+        return html
+
+    def _prefix(m: re.Match) -> str:
+        attr = m.group(1)
+        url = m.group(2)
+        if url.startswith(("/assets/", "/bigraph-loom/")):
+            return f'{attr}="{base_path}{url}"'
+        return m.group(0)
+
+    return re.sub(r'\b(src|href)="(/[^"]+)"', _prefix, html)
+
+
 def _normalize_asset_urls(html: str) -> str:
     """Rewrite ``src``/``href`` JS/CSS asset URLs to root-absolute
     ``/assets/<basename>`` so both template conventions are normalised in the
@@ -96,16 +138,26 @@ def _normalize_asset_urls(html: str) -> str:
     )
 
 
-def _set_snapshot_config(html: str, interactive_url: str = "") -> str:
+def _set_snapshot_config(
+    html: str,
+    interactive_url: str = "",
+    base_path: str = "",
+) -> str:
     """Swap the ``__DASH_CONFIG__`` mode from *local-server* to *snapshot*.
 
-    Optionally injects ``interactiveUrl`` so the snapshot banner can link to
-    the interactive version.  Pass via ``--interactive-url`` CLI arg.
+    Optionally injects:
+    - ``interactiveUrl`` — so the snapshot banner can link to the interactive
+      version (``--interactive-url`` CLI arg).
+    - ``basePath`` — URL prefix for subpath hosting so ``data-source.js`` can
+      resolve ``/api/*.json`` paths correctly when the bundle is served under a
+      non-root path (``--base-path`` CLI arg).  Only injected when non-empty.
     """
+    import json as _json
     config_js = 'window.__DASH_CONFIG__ = { mode: "snapshot"'
     if interactive_url:
-        import json as _json
         config_js += ', interactiveUrl: ' + _json.dumps(interactive_url)
+    if base_path:
+        config_js += ', basePath: ' + _json.dumps(base_path)
     config_js += ' };'
     return html.replace(
         'window.__DASH_CONFIG__ = { mode: "local-server" };',
@@ -164,7 +216,13 @@ def _render_home_html(ws_root: Path) -> str:
 # Core builder
 # ---------------------------------------------------------------------------
 
-def build_bundle(ws_root, out_dir, *, interactive_url: str = "") -> dict:
+def build_bundle(
+    ws_root,
+    out_dir,
+    *,
+    interactive_url: str = "",
+    base_path: str = "",
+) -> dict:
     """Export the workspace at *ws_root* into a static bundle at *out_dir*.
 
     Returns a summary dict::
@@ -178,12 +236,21 @@ def build_bundle(ws_root, out_dir, *, interactive_url: str = "") -> dict:
     Args:
         interactive_url: Optional URL injected into the snapshot banner's
             "Open interactive version" link.  Pass via ``--interactive-url`` CLI.
+        base_path: URL prefix for subpath hosting (e.g. ``/v2ecoli/dashboard``).
+            When set, every root-absolute ``/assets/`` and ``/bigraph-loom/``
+            URL in the rendered shells is prefixed with this value, and
+            ``basePath`` is injected into ``__DASH_CONFIG__`` so that
+            ``data-source.js`` resolves ``/api/*.json`` URLs correctly.
+            Pass via ``--base-path`` CLI.  Default ``""`` keeps root-absolute
+            (domain-root) behavior unchanged.
     """
     import vivarium_dashboard.server as srv
 
     ws_root = Path(ws_root)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    base_path = _normalize_base_path(base_path)
 
     # Temporarily point the server module at ws_root so all lookups
     # (_study_detail_spec, _iset_detail_data, workspace_paths …) use the right
@@ -192,13 +259,24 @@ def build_bundle(ws_root, out_dir, *, interactive_url: str = "") -> dict:
     srv.WORKSPACE = ws_root
     srv._WP_CACHE.clear()
     try:
-        return _do_build(ws_root, out_dir, srv, interactive_url=interactive_url)
+        return _do_build(
+            ws_root, out_dir, srv,
+            interactive_url=interactive_url,
+            base_path=base_path,
+        )
     finally:
         srv.WORKSPACE = orig_ws
         srv._WP_CACHE.clear()
 
 
-def _do_build(ws_root: Path, out_dir: Path, srv, *, interactive_url: str = "") -> dict:
+def _do_build(
+    ws_root: Path,
+    out_dir: Path,
+    srv,
+    *,
+    interactive_url: str = "",
+    base_path: str = "",
+) -> dict:
     """Internal build routine — called with WORKSPACE already set to ws_root."""
     from vivarium_dashboard.server import (
         STATIC_DIR,
@@ -374,7 +452,10 @@ def _do_build(ws_root: Path, out_dir: Path, srv, *, interactive_url: str = "") -
     # ------------------------------------------------------------------
     home_html = _render_home_html(ws_root)
     home_html = _normalize_asset_urls(home_html)
-    home_html = _set_snapshot_config(home_html, interactive_url=interactive_url)
+    home_html = _apply_base_path(home_html, base_path)
+    home_html = _set_snapshot_config(
+        home_html, interactive_url=interactive_url, base_path=base_path,
+    )
     (out_dir / "index.html").write_text(home_html, encoding="utf-8")
 
     # ------------------------------------------------------------------
@@ -386,7 +467,10 @@ def _do_build(ws_root: Path, out_dir: Path, srv, *, interactive_url: str = "") -
             continue
         study_html = _render_study_detail_html(slug, spec)
         study_html = _normalize_asset_urls(study_html)
-        study_html = _set_snapshot_config(study_html, interactive_url=interactive_url)
+        study_html = _apply_base_path(study_html, base_path)
+        study_html = _set_snapshot_config(
+            study_html, interactive_url=interactive_url, base_path=base_path,
+        )
         shell_dir = out_dir / "studies" / slug
         shell_dir.mkdir(parents=True, exist_ok=True)
         (shell_dir / "index.html").write_text(study_html, encoding="utf-8")
@@ -441,9 +525,22 @@ def main(argv=None):
         dest="interactive_url",
         help="URL of the interactive vivarium-dashboard version (injected into the snapshot banner).",
     )
+    parser.add_argument(
+        "--base-path", default="",
+        dest="base_path",
+        help=(
+            "URL prefix for subpath hosting (e.g. /v2ecoli/dashboard). "
+            "When set, every /assets/ and /bigraph-loom/ URL in the rendered "
+            "shells is prefixed with this value, and basePath is injected into "
+            "__DASH_CONFIG__ so data-source.js resolves /api/*.json URLs "
+            "correctly.  Default '' keeps root-absolute (domain-root) behavior."
+        ),
+    )
     args = parser.parse_args(argv)
     summary = build_bundle(
-        Path(args.workspace), Path(args.out), interactive_url=args.interactive_url
+        Path(args.workspace), Path(args.out),
+        interactive_url=args.interactive_url,
+        base_path=args.base_path,
     )
     print(json.dumps(summary, indent=2))
 
