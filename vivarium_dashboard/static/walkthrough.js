@@ -426,6 +426,12 @@
 
   function _switchPage(pageId) {
     pageId = pageId || 'workspace-inputs';
+    // Snapshot mode: redirect authoring-only tabs to the investigations view.
+    if (document.body.classList.contains('snapshot')) {
+      if (pageId === 'simulations' || pageId === 'github' || pageId === 'studies') {
+        pageId = 'investigations';
+      }
+    }
     document.querySelectorAll('.page').forEach(function(s) { s.classList.remove('active'); });
     document.querySelectorAll('.menu-link').forEach(function(a) { a.classList.remove('active'); });
     var page = document.getElementById('page-' + pageId);
@@ -489,7 +495,10 @@
     var focus = params.get('focus');
     var focusedPage = null;
     if (focus) {
-      var validPages = ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'investigations', 'studies', 'simulations', 'composite-explore', 'github'];
+      var _snapshot = document.body.classList.contains('snapshot');
+      var validPages = _snapshot
+        ? ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'investigations', 'composite-explore']
+        : ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'investigations', 'studies', 'simulations', 'composite-explore', 'github'];
       if (validPages.indexOf(focus) >= 0) {
         document.body.classList.add('focus-mode', 'focus-' + focus);
         _switchPage(focus);
@@ -504,7 +513,10 @@
     if (!focusedPage) {
       function fromHash() {
         var h = (window.location.hash || '').replace(/^#/, '');
-        var validPages = ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'investigations', 'studies', 'simulations', 'composite-explore', 'github'];
+        var _snap = document.body.classList.contains('snapshot');
+        var validPages = _snap
+          ? ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'investigations', 'composite-explore']
+          : ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'investigations', 'studies', 'simulations', 'composite-explore', 'github'];
         _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
       }
       window.addEventListener('hashchange', fromHash);
@@ -714,7 +726,7 @@
   // A small "+ Add" button that launches the investigation-scoped upload flow
   // for the given category ('dataset' | 'reference' | 'expert').
   function _inputsAddBtn(category) {
-    return '<button class="action-btn" style="font-size:0.78em;padding:1px 8px;' +
+    return '<button class="action-btn js-authoring" style="font-size:0.78em;padding:1px 8px;' +
       'font-weight:normal" onclick="_inputsAdd(\'' + category + '\')">+ Add</button>';
   }
 
@@ -1905,7 +1917,7 @@
             // Workspace.yaml doesn't declare it and no installed dep requires
             // it. User can uninstall directly from the dashboard.
             srcBadge = '<span class="install-src-pill install-src-unmanaged" title="Installed in the venv but not declared in workspace.yaml.imports and not required by any installed package. Safe to uninstall.">📦 unmanaged</span>';
-            action = '<button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
+            action = '<button class="action-btn action-btn--secondary js-authoring" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
           } else {
             var viaText = 'via ' + via.slice(0, 3).map(_esc).join(', ') + (via.length > 3 ? ' +' + (via.length - 3) : '');
             srcBadge = '<span class="install-src-pill install-src-venv" title="Brought in by another installed package; cannot be uninstalled directly.">📦 ' + viaText + '</span>';
@@ -1913,14 +1925,14 @@
           }
         } else if (src === 'pyproject') {
           srcBadge = '<span class="install-src-pill install-src-pyproject" title="Declared in pyproject.toml [project.dependencies]; workspace.yaml.imports does not have an explicit entry.">📋 via pyproject</span>';
-          action = '<button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
+          action = '<button class="action-btn action-btn--secondary js-authoring" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
         } else {
           srcBadge = '<span class="status-pill installed">installed</span>';
-          action = '<button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
+          action = '<button class="action-btn action-btn--secondary js-authoring" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
         }
         return srcBadge + ' ' + action;
       }
-      return '<button class="action-btn" onclick="_installFromCatalog(\'' + _esc(m.name) + '\')">Install</button>';
+      return '<button class="action-btn js-authoring" onclick="_installFromCatalog(\'' + _esc(m.name) + '\')">Install</button>';
     }
 
     // Section divider injected at boundaries: workspace → installed →
@@ -2874,6 +2886,11 @@
   window._dropZoneStore = _dropZoneStore;
 
   document.addEventListener("DOMContentLoaded", function () {
+    // Snapshot read-only mode: set body.snapshot so CSS hides authoring controls.
+    if ((window.__DASH_CONFIG__ || {}).mode === "snapshot") {
+      document.body.classList.add("snapshot");
+    }
+
     // Initialize menu navigation.
     _initMenuNav();
 
@@ -4203,7 +4220,7 @@
         (closed ? 'opacity:0.6;' : '');
       var actionLabel = closed ? 'Reopen' : 'Close';
       var actionStatus = closed ? 'in-progress' : 'archived';
-      var actionBtn = '<button type="button" onclick="event.stopPropagation();_setInvestigationStatus(this,\'' +
+      var actionBtn = '<button type="button" class="js-authoring" onclick="event.stopPropagation();_setInvestigationStatus(this,\'' +
         _esc(iset.name) + '\',\'' + actionStatus + '\')" ' +
         'style="font-size:0.78em;padding:3px 10px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;color:#334155;cursor:pointer">' +
         actionLabel + '</button>';

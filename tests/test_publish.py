@@ -191,6 +191,65 @@ def test_bundle_exports_full_read_surface(tmp_workspace, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Task 3 (read-only viewer): snapshot read-only mode
+# ---------------------------------------------------------------------------
+
+def test_snapshot_readonly_css_exists_and_has_key_rules():
+    """snapshot-readonly.css must exist as a static asset and contain the
+    key hiding rules for the simulations/github rail links and js-authoring."""
+    css_path = server.STATIC_DIR / "snapshot-readonly.css"
+    assert css_path.is_file(), "snapshot-readonly.css not found in static assets"
+    text = css_path.read_text()
+    for selector in [
+        'body.snapshot',
+        'data-page="simulations"',
+        'data-page="github"',
+        '.js-authoring',
+        '#ce-begin-study-bar',
+        '#investigation-run-unblocked',
+    ]:
+        assert selector in text, f"snapshot-readonly.css missing selector: {selector!r}"
+
+
+def test_snapshot_css_bundled_in_home_shell(tmp_workspace, tmp_path):
+    """build_bundle copies snapshot-readonly.css to assets/ and the
+    home shell's href resolves to an existing file in the bundle."""
+    from vivarium_dashboard import publish
+    import re
+
+    out = tmp_path / "bundle"
+    publish.build_bundle(server.WORKSPACE, out)
+
+    assert (out / "assets" / "snapshot-readonly.css").is_file(), \
+        "snapshot-readonly.css not in bundle assets/"
+
+    html = (out / "index.html").read_text()
+    assert "snapshot-readonly.css" in html, \
+        "index.html does not reference snapshot-readonly.css"
+
+    # Every CSS href must resolve in the bundle
+    for m in re.finditer(r'href="(/[^"]+\.css)"', html):
+        url = m.group(1)
+        rel = url.lstrip("/")
+        assert (out / rel).is_file(), \
+            f"index.html: {url!r} does not resolve in bundle"
+
+
+def test_walkthrough_has_snapshot_body_class_and_switchpage_gating():
+    """walkthrough.js must set body.snapshot at DOMContentLoaded and gate
+    the simulations/github/studies tabs in _switchPage."""
+    text = (server.STATIC_DIR / "walkthrough.js").read_text()
+    assert 'document.body.classList.add("snapshot")' in text, \
+        "walkthrough.js missing body.snapshot class init"
+    assert '_switchPage' in text
+    # _switchPage guard: redirects simulations/github/studies → investigations
+    assert '"simulations"' in text or "'simulations'" in text
+    assert '"github"' in text or "'github'" in text
+    # The snapshot gating must redirect, not break
+    assert 'investigations' in text
+
+
+# ---------------------------------------------------------------------------
 # Task 5: golden on a real workspace (v2e-invest), skipif absent
 # ---------------------------------------------------------------------------
 
