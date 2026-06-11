@@ -188,20 +188,27 @@ def test_feedback_tracked_absent_when_no_feedback(_ws_no_feedback):
 # ---------------------------------------------------------------------------
 
 
-def test_feedback_tracked_in_window_study_json(_ws_with_feedback):
-    """The rendered study-detail HTML must include feedback_tracked in the
-    window._study JSON object so JS can render the feedback panel."""
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+def test_feedback_tracked_in_study_spec(_ws_with_feedback):
+    """The spec returned by _study_detail_spec must include feedback_tracked so
+    study-detail.js receives it via GET /api/study/<slug> and renders the panel.
+
+    After the fetch-seam conversion (Task 4), the SPA fetches the spec — the
+    window._study JSON embed is no longer in the rendered HTML.  We verify the
+    DATA is in the spec (what the API returns) rather than in the HTML.
+    """
+    from vivarium_dashboard.server import _study_detail_spec
 
     spec = _study_detail_spec("fb-test")
-    html = _render_study_detail_html("fb-test", spec)
-
-    assert "feedback_tracked" in html, (
-        "feedback_tracked must appear in the rendered window._study JSON "
-        "so study-detail.js can render the Feedback panel"
+    assert "feedback_tracked" in spec, (
+        "feedback_tracked must be present in the spec returned by _study_detail_spec "
+        "so study-detail.js can render the Feedback panel via the fetched spec"
     )
-    assert "addressed" in html
-    assert "study-fb-test-charts" in html
+    ft = spec["feedback_tracked"]
+    # Verify the structure the JS renderer expects
+    items = ft.get("items") or []
+    by_section = {i["section"]: i for i in items if isinstance(i, dict)}
+    assert any(i.get("status") == "addressed" for i in items), "addressed item must be present"
+    assert "study-fb-test-charts" in by_section, "addressed item section must be present"
 
 
 def test_feedback_panel_anchor_in_html(_ws_with_feedback):
