@@ -1982,9 +1982,11 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
 </section>
 
 </main>
+<script>window.__DASH_CONFIG__ = { mode: "local-server" };</script>
+<script src="/static/data-source.js"></script>
 <script>
-window._study = {{ study|tojson }};
 window._studyName = "{{ name }}";
+window._study = null;  // populated by _bootstrapStudy() in study-detail.js
 
 // Save handler for the Conditions → Model settings editable rows.
 // POSTs to /api/study-expert-input-set (route kept for back-compat)

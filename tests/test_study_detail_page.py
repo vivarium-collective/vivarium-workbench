@@ -99,6 +99,25 @@ def test_study_detail_page_has_eight_tabs(_ws):
            ('"study-tab active"' in html and 'data-kind="overview"' in html)
 
 
+def test_study_page_is_a_fetch_shell_not_an_embed(_ws):
+    """After the fetch-seam conversion (Task 4), the study-detail page must:
+    - carry __DASH_CONFIG__ and data-source.js (DataSource layer),
+    - expose window._studyName so the bootstrap can fetch the right slug,
+    - NOT embed the full spec as window._study = {...} (data is fetched).
+    """
+    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    spec = _study_detail_spec("study-monod_kinetics-096184")
+    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    assert "window.__DASH_CONFIG__" in html
+    assert "data-source.js" in html
+    assert (
+        'window._studyName = "study-monod_kinetics-096184"' in html
+        or "window._studyName='study-monod_kinetics-096184'" in html
+    )
+    # The heavy spec must NOT be embedded — the JS fetches it via DataSource.
+    assert "window._study = {" not in html and "window._study={" not in html
+
+
 def test_study_detail_page_loads_set_tab_helper(_ws):
     """The page ships the _setStudyTab helper inline or via study-detail.js."""
     from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
@@ -557,21 +576,30 @@ def test_computed_outcomes_survive_study_detail_spec(_ws_with_computed_outcomes)
 
 def test_computed_outcomes_survive_enrich_runs(_ws_with_computed_outcomes):
     """_enrich_runs_with_meta must not strip computed_outcomes even when there
-    is no matching runs.db row (tolerant path)."""
+    is no matching runs.db row (tolerant path).
+
+    After the fetch-seam conversion (Task 4), the SPA receives study data via
+    GET /api/study/<slug> (i.e. _study_detail_spec) rather than a Jinja embed.
+    We verify that the spec returned by _study_detail_spec retains computed_outcomes
+    after _render_study_detail_html exercises _enrich_runs_with_meta internally.
+    """
     from vivarium_dashboard.server import (
         _study_detail_spec,
         _render_study_detail_html,
     )
-    import json as _json
 
     spec = _study_detail_spec("computed-test")
-    # _render_study_detail_html calls _enrich_runs_with_meta internally;
-    # window._study is serialised via tojson — we verify the key appears in
-    # the rendered HTML (as JSON) so the SPA receives it.
-    html = _render_study_detail_html("computed-test", spec)
-    assert "computed_outcomes" in html, (
-        "computed_outcomes must appear in the rendered window._study JSON so "
-        "study-detail.js can tally code-computed verdicts"
+    # Exercise _enrich_runs_with_meta by rendering the page (it's called internally).
+    _render_study_detail_html("computed-test", spec)
+    # The spec the JS fetches (via GET /api/study/<slug>) must carry computed_outcomes.
+    runs = spec.get("runs") or []
+    run_with_co = next(
+        (r for r in runs if isinstance(r, dict) and r.get("computed_outcomes")), None
     )
-    assert "COPY_NUMBER_STABLE" in html
-    assert "divergent" in html
+    assert run_with_co is not None, (
+        "computed_outcomes must survive _enrich_runs_with_meta in the spec "
+        "returned by _study_detail_spec so study-detail.js can tally verdicts"
+    )
+    co = run_with_co["computed_outcomes"]
+    assert "COPY_NUMBER_STABLE" in co
+    assert "divergent" in (co.get("COPY_NUMBER_STABLE") or {}).get("reconcile", "")
