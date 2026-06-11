@@ -185,28 +185,6 @@ def build_bundle(ws_root, out_dir) -> dict:
         srv._WP_CACHE.clear()
 
 
-def _stub_missing_assets(out_dir: Path) -> None:
-    """After all shells are rendered, scan every HTML file in the bundle for
-    ``/assets/*.{js,css}`` URLs and create an empty stub for any that are absent.
-
-    This ensures that assets referenced in templates but not present in
-    STATIC_DIR (e.g. ``investigations.js`` which is dynamically generated in
-    some workspaces) don't produce 404s when the bundle is served statically.
-    """
-    assets_dir = out_dir / "assets"
-    for shell in out_dir.glob("**/*.html"):
-        html = shell.read_text(encoding="utf-8")
-        for m in re.finditer(r'(?:src|href)="(/assets/[^"]+\.(?:js|css))"', html):
-            url = m.group(1)
-            basename = url.split("/")[-1].split("?")[0]
-            stub = assets_dir / basename
-            if not stub.exists():
-                stub.write_text(
-                    f"/* {basename} — placeholder for static bundle (file not present in source) */\n",
-                    encoding="utf-8",
-                )
-
-
 def _do_build(ws_root: Path, out_dir: Path, srv) -> dict:
     """Internal build routine — called with WORKSPACE already set to ws_root."""
     from vivarium_dashboard.server import (
@@ -285,11 +263,6 @@ def _do_build(ws_root: Path, out_dir: Path, srv) -> dict:
         shell_dir = out_dir / "studies" / slug
         shell_dir.mkdir(parents=True, exist_ok=True)
         (shell_dir / "index.html").write_text(study_html, encoding="utf-8")
-
-    # ------------------------------------------------------------------
-    # 5b. Stub any referenced assets missing from the bundle
-    # ------------------------------------------------------------------
-    _stub_missing_assets(out_dir)
 
     # ------------------------------------------------------------------
     # 6. Write config.json

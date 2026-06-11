@@ -239,3 +239,29 @@ def test_data_source_has_snapshot_mode():
     text = (server.STATIC_DIR / "data-source.js").read_text()
     for token in ['mode === "snapshot"', ".json", "_studyUrl", "_isetUrl", "_workspaceUrl"]:
         assert token in text, f"data-source.js missing token: {token!r}"
+
+
+# ---------------------------------------------------------------------------
+# FIX 2: _study_dir flat spec.yaml edge case
+# ---------------------------------------------------------------------------
+
+def test_study_dir_flat_spec_yaml_resolves_to_studies_not_investigations(tmp_path, monkeypatch):
+    """_study_dir must return studies/<name>/ when that dir exists but only has
+    spec.yaml (no study.yaml) — not fall back to investigations/<name>."""
+    ws = tmp_path / "ws"
+    # Create studies/legacy-study/ with only spec.yaml (no study.yaml)
+    study_dir = ws / "studies" / "legacy-study"
+    study_dir.mkdir(parents=True)
+    (study_dir / "spec.yaml").write_text("name: legacy-study\n")
+    # Ensure investigations/legacy-study/ does NOT exist (fallback target)
+    (ws / "investigations").mkdir(parents=True, exist_ok=True)
+    (ws / "workspace.yaml").write_text("name: test-ws\n")
+
+    monkeypatch.setattr(server, "WORKSPACE", ws)
+    server._WP_CACHE.clear()
+
+    result = server._study_dir("legacy-study")
+    assert result == study_dir, (
+        f"_study_dir returned {result!r}, expected {study_dir!r} "
+        f"(flat studies/<name>/ with spec.yaml only must not fall back to investigations/<name>)"
+    )

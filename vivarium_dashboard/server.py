@@ -1332,6 +1332,12 @@ def _study_dir(name: str):
         return workspace_paths().study_dir(name)
     except FileNotFoundError:
         pass
+    # Guard: flat studies/<name>/ exists but has only spec.yaml (no study.yaml),
+    # so iter_study_dirs() skipped it.  Return it rather than falling back to
+    # the legacy investigations/<name> location.
+    flat_candidate = workspace_paths().studies / name
+    if flat_candidate.is_dir():
+        return flat_candidate
     return workspace_paths().investigations / name
 
 
