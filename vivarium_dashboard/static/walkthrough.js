@@ -428,7 +428,7 @@
     pageId = pageId || 'workspace-inputs';
     // Snapshot mode: redirect authoring-only tabs to the investigations view.
     if (document.body.classList.contains('snapshot')) {
-      if (pageId === 'simulations' || pageId === 'github' || pageId === 'studies') {
+      if (pageId === 'simulations' || pageId === 'github' || pageId === 'studies' || pageId === 'visualizations') {
         pageId = 'investigations';
       }
     }
@@ -497,7 +497,7 @@
     if (focus) {
       var _snapshot = document.body.classList.contains('snapshot');
       var validPages = _snapshot
-        ? ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'investigations', 'composite-explore']
+        ? ['workspace-inputs', 'simulation-setup', 'registry', 'investigations', 'composite-explore']
         : ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'investigations', 'studies', 'simulations', 'composite-explore', 'github'];
       if (validPages.indexOf(focus) >= 0) {
         document.body.classList.add('focus-mode', 'focus-' + focus);
@@ -515,7 +515,7 @@
         var h = (window.location.hash || '').replace(/^#/, '');
         var _snap = document.body.classList.contains('snapshot');
         var validPages = _snap
-          ? ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'investigations', 'composite-explore']
+          ? ['workspace-inputs', 'registry', 'simulation-setup', 'investigations', 'composite-explore']
           : ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'investigations', 'studies', 'simulations', 'composite-explore', 'github'];
         _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
       }
@@ -4674,8 +4674,15 @@
     document.getElementById('investigation-detail-title').textContent = name;
     document.getElementById('investigation-detail-description').textContent = 'Loading…';
 
-    fetch('/api/iset/' + encodeURIComponent(name), {headers: {Accept: 'application/json'}})
-      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    // Route through DataSource so snapshot mode reads api/iset/<name>.json from
+    // the static bundle instead of hitting the live /api/iset/<name> endpoint
+    // (which would 404 in a hosted read-only bundle). Direct-fetch fallback keeps
+    // local-server mode identical — the ternary branch only triggers under snapshot.
+    var _isetDetailFetch = (window.DataSource && window.DataSource.loadInvestigation)
+      ? window.DataSource.loadInvestigation(name)
+      : fetch('/api/iset/' + encodeURIComponent(name), {headers: {Accept: 'application/json'}})
+          .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+    _isetDetailFetch
       .then(function(d) {
         window._currentIsetData = d;
         document.getElementById('investigation-detail-title').textContent = d.title || d.name;

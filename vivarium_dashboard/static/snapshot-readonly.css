@@ -31,7 +31,8 @@
 
 /* ── Hidden rail tabs ─────────────────────────────────────────────────── */
 body.snapshot a.menu-link[data-page="simulations"],
-body.snapshot a.menu-link[data-page="github"] {
+body.snapshot a.menu-link[data-page="github"],
+body.snapshot a.menu-link[data-page="visualizations"] {
   display: none !important;
 }
 
