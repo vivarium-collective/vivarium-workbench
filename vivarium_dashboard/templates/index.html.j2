@@ -315,11 +315,11 @@ window.addEventListener('pageshow', function (e) {
   <!-- LEFT RAIL -->
   <aside id="viv-rail" class="viv-rail">
 
-    <!-- Brand + workspace switcher -->
+    <!-- Brand: fixed Vivarium logo + name (no per-workspace icon/name override). -->
     <div class="viv-rail-header">
-      <img class="viv-rail-logo" src="{{ dashboard_logo or 'assets/vivarium-logo.png' }}{% if asset_version %}?v={{ asset_version }}{% endif %}" alt="{{ dashboard_name or 'Vivarium' }}" loading="lazy">
+      <img class="viv-rail-logo" src="assets/vivarium-logo.png{% if asset_version %}?v={{ asset_version }}{% endif %}" alt="Vivarium" loading="lazy">
       <div class="viv-rail-brand">
-        <strong>{{ dashboard_name or 'Vivarium' }}</strong>
+        <strong>Vivarium</strong>
         <small>dashboard</small>
       </div>
     </div>
