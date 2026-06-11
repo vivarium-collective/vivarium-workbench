@@ -113,3 +113,8 @@ body.snapshot .viv-iset-menu-new {
 /* Composite Explorer: Explore button is now available in snapshot mode via
    bigraph-loom ?static=1&stateUrl= (read-only view). The old hide rule was
    removed in the full-surface implementation (Task 1). */
+
+/* ── Visualizations/Analyses: hide Preview modal (authoring only) ────────── */
+body.snapshot #modal-viz-preview {
+  display: none !important;
+}
