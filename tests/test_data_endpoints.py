@@ -342,14 +342,22 @@ def test_snapshot_composite_explore_available_readonly():
          "Task 1 removed that rule — Explore now works read-only via loom ?static=1")
 
 
-def test_switchpage_gates_composite_explore_in_snapshot():
-    """walkthrough.js _switchPage must redirect composite-explore → simulation-setup
-    in snapshot mode so the Explore button (even if somehow clicked) cannot open
-    the live-only explorer."""
+def test_switchpage_composite_explore_available_in_snapshot():
+    """walkthrough.js _switchPage no longer redirects composite-explore in snapshot
+    mode — Explore now works read-only via bigraph-loom ?static=1&stateUrl=.
+    The snapshot whitelist in _initMenuNav must include 'composite-explore' so
+    hash-based navigation reaches it directly."""
     text = (server.STATIC_DIR / "walkthrough.js").read_text()
+    # composite-explore is in the page set
     assert "composite-explore" in text
-    # The gate must redirect to simulation-setup, not crash
-    assert "simulation-setup" in text
+    # The snapshot whitelists must include composite-explore (both focus + hash paths)
+    assert "'composite-explore'" in text or '"composite-explore"' in text
+    # _switchPage must NOT redirect composite-explore in the snapshot guard block.
+    # The old redirect routed composite-explore → simulation-setup; it was removed
+    # because Explore now works read-only via loom ?static=1&stateUrl=.
+    # The snapshot guard only redirects github and studies:
+    assert "'composite-explore'" not in text.split("'github' || pageId === 'studies'")[0].split("classList.contains('snapshot')")[1][:200], \
+        "_switchPage snapshot guard still redirects composite-explore (should only redirect github/studies)"
 
 
 # ---------------------------------------------------------------------------
@@ -487,3 +495,100 @@ def test_walkthrough_sets_repo_label():
     text = (server.STATIC_DIR / "walkthrough.js").read_text()
     assert "snapshot-repo-label" in text, \
         "walkthrough.js missing snapshot-repo-label population"
+
+
+# ---------------------------------------------------------------------------
+# QA fixes — BUG 1: simulations + visualizations in snapshot _initMenuNav whitelists
+# ---------------------------------------------------------------------------
+
+def test_initmenunav_snapshot_whitelists_include_simulations_and_visualizations():
+    """Both snapshot whitelists in _initMenuNav (focus + hash) must include
+    'simulations' and 'visualizations' so those tabs navigate correctly."""
+    text = (server.STATIC_DIR / "walkthrough.js").read_text()
+    # Find the two snapshot whitelist arrays.  Each is a JS array literal
+    # that appears inside _initMenuNav after a _snapshot / _snap check.
+    import re
+    # Extract all array literals that are assigned as snapshot valid-page lists
+    # Both lists must contain simulations and visualizations.
+    arrays = re.findall(
+        r"\? \[([^\]]+)\]"  # snapshot-branch array literal
+        r"[\s\S]*?investigations",  # followed by investigations (sanity check)
+        text
+    )
+    # Simpler: just confirm the key strings appear together in the snapshot branches.
+    # The non-snapshot branches also include them, so count occurrences.
+    assert text.count("'simulations'") >= 4, \
+        ("walkthrough.js snapshot whitelists must include 'simulations' in both "
+         "focus and hash branches (expected ≥4 occurrences total including live lists)")
+    assert text.count("'visualizations'") >= 4, \
+        ("walkthrough.js snapshot whitelists must include 'visualizations' in both "
+         "focus and hash branches (expected ≥4 occurrences total including live lists)")
+
+
+# ---------------------------------------------------------------------------
+# QA fixes — BUG 2: Studies rail section hidden in snapshot
+# ---------------------------------------------------------------------------
+
+def test_snapshot_css_hides_studies_rail_section():
+    """snapshot-readonly.css must hide #viv-rail-studies-section in snapshot."""
+    text = (server.STATIC_DIR / "snapshot-readonly.css").read_text()
+    assert "viv-rail-studies-section" in text, \
+        "snapshot-readonly.css missing rule to hide #viv-rail-studies-section"
+
+
+def test_template_has_studies_rail_section_id():
+    """index.html.j2 must carry id='viv-rail-studies-section' on the Studies rail div."""
+    text = (server.TEMPLATES_DIR / "index.html.j2").read_text()
+    assert "viv-rail-studies-section" in text, \
+        "index.html.j2 missing id='viv-rail-studies-section' on the Studies rail section"
+
+
+# ---------------------------------------------------------------------------
+# QA fixes — BUG 3: has_wiring in composites.json + graceful 404 message
+# ---------------------------------------------------------------------------
+
+def test_bundle_composites_have_has_wiring(tmp_workspace, tmp_path):
+    """build_bundle must annotate each composite entry with has_wiring: bool."""
+    from vivarium_dashboard import publish
+
+    out = tmp_path / "bundle"
+    publish.build_bundle(server.WORKSPACE, out)
+
+    comps_path = out / "api" / "composites.json"
+    assert comps_path.is_file(), "api/composites.json missing"
+    comps_data = json.loads(comps_path.read_text())
+    for comp in comps_data.get("composites", []):
+        assert "has_wiring" in comp, \
+            f"composite {comp.get('id')!r} missing has_wiring field"
+        assert isinstance(comp["has_wiring"], bool), \
+            f"composite {comp.get('id')!r} has_wiring is not bool"
+
+
+def test_cefetch_snapshot_graceful_message_in_walkthrough():
+    """walkthrough.js _ceFetch catch handler must show a snapshot-specific
+    message instead of the raw 'Network error: ...' when in snapshot mode."""
+    text = (server.STATIC_DIR / "walkthrough.js").read_text()
+    assert "Wiring snapshot not available" in text, \
+        "walkthrough.js missing snapshot graceful message in _ceFetch catch"
+
+
+def test_snapshot_css_hides_inv_composites_subtab():
+    """snapshot-readonly.css must hide the investigation Composites sub-tab
+    (data-tab='composites') so it doesn't fire /api/investigation-composites."""
+    text = (server.STATIC_DIR / "snapshot-readonly.css").read_text()
+    assert 'data-tab="composites"' in text, \
+        "snapshot-readonly.css missing rule to hide investigation Composites sub-tab"
+
+
+# ---------------------------------------------------------------------------
+# QA fixes — BUG 4: charts placeholder in snapshot
+# ---------------------------------------------------------------------------
+
+def test_study_detail_charts_gated_in_snapshot():
+    """study-detail.js _loadCharts must short-circuit in snapshot mode and
+    show a placeholder instead of fetching /api/study-charts/."""
+    text = (server.STATIC_DIR / "study-detail.js").read_text()
+    assert "mode === 'snapshot'" in text or 'mode === "snapshot"' in text, \
+        "study-detail.js _loadCharts missing snapshot mode gate"
+    assert "Results are served by sms-api" in text, \
+        "study-detail.js _loadCharts missing snapshot placeholder text"

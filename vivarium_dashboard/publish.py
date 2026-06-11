@@ -272,15 +272,16 @@ def _do_build(ws_root: Path, out_dir: Path, srv, *, interactive_url: str = "") -
     _write_json(api_dir / "catalog.json", catalog)
 
     # api/composites.json — composite specs (GET /api/composites)
+    # Written AFTER the composite-state loop so each entry can carry has_wiring.
     try:
         composites = _composites_data(ws_root)
     except Exception:
         composites = {"composites": []}
-    _write_json(api_dir / "composites.json", composites)
 
     # api/composite-state/<id>.json — pre-resolved composite state for loom ?static=1
     composite_state_dir = api_dir / "composite-state"
     composite_state_dir.mkdir(parents=True, exist_ok=True)
+    exported_wiring: set[str] = set()
     for comp in (composites.get("composites") or []):
         cid = comp.get("id")
         if not cid:
@@ -291,6 +292,14 @@ def _do_build(ws_root: Path, out_dir: Path, srv, *, interactive_url: str = "") -
             data = None
         if data is not None:
             _write_json(composite_state_dir / f"{cid}.json", data)
+            exported_wiring.add(cid)
+
+    # Annotate each composite with has_wiring so the viewer can hide the
+    # Explore button for composites whose state could not be exported.
+    for comp in (composites.get("composites") or []):
+        cid = comp.get("id")
+        comp["has_wiring"] = bool(cid and cid in exported_wiring)
+    _write_json(api_dir / "composites.json", composites)
 
     # api/simulations.json — pre-run simulations (GET /api/simulations)
     try:
@@ -357,7 +366,7 @@ def _do_build(ws_root: Path, out_dir: Path, srv, *, interactive_url: str = "") -
         if loom_dst.exists():
             shutil.rmtree(loom_dst)
         shutil.copytree(str(loom_src), str(loom_dst))
-    except (ImportError, Exception):
+    except Exception:
         pass
 
     # ------------------------------------------------------------------

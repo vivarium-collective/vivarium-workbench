@@ -499,7 +499,7 @@
     if (focus) {
       var _snapshot = document.body.classList.contains('snapshot');
       var validPages = _snapshot
-        ? ['workspace-inputs', 'simulation-setup', 'registry', 'investigations', 'composite-explore']
+        ? ['workspace-inputs', 'simulation-setup', 'registry', 'investigations', 'simulations', 'visualizations', 'composite-explore']
         : ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'investigations', 'studies', 'simulations', 'composite-explore', 'github'];
       if (validPages.indexOf(focus) >= 0) {
         document.body.classList.add('focus-mode', 'focus-' + focus);
@@ -517,7 +517,7 @@
         var h = (window.location.hash || '').replace(/^#/, '');
         var _snap = document.body.classList.contains('snapshot');
         var validPages = _snap
-          ? ['workspace-inputs', 'registry', 'simulation-setup', 'investigations', 'composite-explore']
+          ? ['workspace-inputs', 'registry', 'simulation-setup', 'investigations', 'simulations', 'visualizations', 'composite-explore']
           : ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'investigations', 'studies', 'simulations', 'composite-explore', 'github'];
         _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
       }
@@ -1609,6 +1609,7 @@
       return '';
     }
 
+    var _isSnapshot = document.body.classList.contains('snapshot');
     if (window._compositesView === 'list') {
       container.className = 'composite-list';
       var prevC = null;
@@ -1618,12 +1619,15 @@
         }).join('');
         var divider = _maybeDivider(prevC, c);
         prevC = c;
+        var exploreBtn = (_isSnapshot && !c.has_wiring)
+          ? ''
+          : '<button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Explore</button>';
         return divider + '<div class="composite-list-row">' +
           '<span class="name">' + _esc(c.name) + ' ' + _wsTag(c) + '</span>' +
           '<span class="desc">' + tagPills + ' ' + _esc(c.description || '(no description)') +
             _moduleLine(c) +
           '</span>' +
-          '<span><button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Explore</button></span>' +
+          '<span>' + exploreBtn + '</span>' +
           '</div>';
       });
       container.innerHTML = rows.join('');
@@ -1653,6 +1657,9 @@
         }
         var divider = _maybeDivider(prevG, c);
         prevG = c;
+        var exploreBtn = (_isSnapshot && !c.has_wiring)
+          ? ''
+          : '<button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Explore</button>';
         return divider + '<div class="module-card' + (c.workspace_local ? ' module-card-workspace' : '') + '">' +
           '<div class="module-card-header"><strong>' + _esc(c.name) + '</strong> ' + _wsTag(c) + '</div>' +
           '<p class="module-desc">' + _esc(c.description || '(no description)') + '</p>' +
@@ -1661,7 +1668,7 @@
           tagSummary +
           paramSummary +
           '<div class="module-action">' +
-            '<button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Explore</button>' +
+            exploreBtn +
           '</div>' +
         '</div>';
       });
@@ -3794,8 +3801,11 @@
         if (stateJsonEl) stateJsonEl.textContent = JSON.stringify(data.state, null, 2);
       })
       .catch(function(err) {
+        var msg = document.body.classList.contains('snapshot')
+          ? 'Wiring snapshot not available for this composite in the read-only view.'
+          : 'Network error: ' + _esc(String(err));
         document.getElementById('ce-loading').innerHTML =
-          '<span style="color:#c00">Network error: ' + _esc(String(err)) + '</span>';
+          '<span style="color:#c00">' + msg + '</span>';
       });
   }
 
@@ -3879,7 +3889,7 @@
       // Caller already has the resolved state (e.g. from _ceFetch via composite-resolve)
       _postState(stateObj, nameHint || ref);
     } else {
-      // Fetch state independently via DataSource (snapshot → static JSON; live → /api/composite-state)
+      // Fetch state independently via DataSource (snapshot → /api/composite-state/<id>.json; live → /api/composite-resolve)
       window.DataSource.loadCompositeResolve(ref)
         .then(function(data) {
           if (data.error) {

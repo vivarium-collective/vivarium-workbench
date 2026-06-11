@@ -153,3 +153,17 @@ body.snapshot #snapshot-repo-label {
 body.snapshot #modal-viz-preview {
   display: none !important;
 }
+
+/* ── Studies rail section: legacy flat-list Studies page unreachable in
+   snapshot (redirected to Investigations). Hide the rail section so users
+   go to the Investigations tab instead.  ─────────────────────────────────── */
+body.snapshot #viv-rail-studies-section {
+  display: none !important;
+}
+
+/* ── Investigation-detail Composites sub-tab: fetches /api/investigation-composites
+   which is not exported in snapshot. Hide the tab + its panel.  ─────────── */
+body.snapshot .investigation-detail-tab[data-tab="composites"],
+body.snapshot .investigation-detail-panel[data-tab="composites"] {
+  display: none !important;
+}
