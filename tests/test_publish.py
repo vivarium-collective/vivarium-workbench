@@ -314,3 +314,34 @@ def test_golden_v2e_invest(tmp_path):
     assert cfg["mode"] == "snapshot"
     commit = cfg.get("commit")
     assert commit and len(commit) >= 7, f"config.commit is not a sha: {commit!r}"
+
+    # Task 4 (read-only viewer): new API resources present + snapshot-readonly.css
+    assert (out / "api" / "iset-list.json").is_file(), "iset-list.json missing"
+    assert (out / "api" / "catalog.json").is_file(), "catalog.json missing"
+    assert (out / "api" / "composites.json").is_file(), "composites.json missing"
+    assert (out / "api" / "registry.json").is_file(), "registry.json missing"
+    assert (out / "assets" / "snapshot-readonly.css").is_file(), \
+        "snapshot-readonly.css not in bundle"
+
+    # inputs/<inv>.json present for each investigation
+    isets = json.loads((out / "api" / "iset-list.json").read_text())["investigations"]
+    assert len(isets) >= 1, "iset-list.json is empty for v2e-invest"
+    for inv in isets:
+        inv_name = inv["name"]
+        assert (out / "api" / "inputs" / f"{inv_name}.json").is_file(), \
+            f"api/inputs/{inv_name}.json missing"
+
+    # iset-list parity
+    orig_ws = server.WORKSPACE
+    server.WORKSPACE = _V2E_INVEST
+    server._WP_CACHE.clear()
+    try:
+        expected_isets = json.loads(json.dumps(
+            {"investigations": server._build_iset_summary_for_test(_V2E_INVEST)},
+            default=server._json_default,
+        ))
+    finally:
+        server.WORKSPACE = orig_ws
+        server._WP_CACHE.clear()
+    assert json.loads((out / "api" / "iset-list.json").read_text()) == expected_isets, \
+        "iset-list.json parity failed for v2e-invest"
