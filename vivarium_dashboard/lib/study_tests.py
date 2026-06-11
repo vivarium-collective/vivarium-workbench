@@ -59,7 +59,10 @@ def run_study_tests(workspace: Path, slug: str) -> StudyTestsResult:
         raise FileNotFoundError(f"study not found: {spec_path}")
 
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-    pytest_args = (spec.get("tests") or {}).get("pytest_args", []) or []
+    # `tests:` is the behaviour-test LIST in spine studies (not a {pytest_args:...}
+    # config dict) — guard so we never call .get() on a list.
+    _tests_cfg = spec.get("tests")
+    pytest_args = (_tests_cfg.get("pytest_args", []) if isinstance(_tests_cfg, dict) else []) or []
 
     if not tests_dir.is_dir() or not any(tests_dir.glob("test_*.py")):
         result = StudyTestsResult(
@@ -127,11 +130,16 @@ def run_study_tests(workspace: Path, slug: str) -> StudyTestsResult:
 
 def _write_last_results(spec_path: Path, result: StudyTestsResult) -> None:
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-    spec.setdefault("tests", {})
-    spec["tests"]["last_results"] = {
+    meta = {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         **result.summary,
     }
+    # In spine studies `tests:` is the behaviour-test LIST — don't clobber it; write
+    # the pytest run-meta to a separate top-level key instead.
+    if isinstance(spec.get("tests"), dict):
+        spec["tests"]["last_results"] = meta
+    else:
+        spec["last_test_run"] = meta
     tmp = spec_path.with_suffix(spec_path.suffix + ".tmp")
     tmp.write_text(yaml.safe_dump(spec, sort_keys=False))
     os.replace(tmp, spec_path)

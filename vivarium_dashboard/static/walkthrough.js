@@ -5452,8 +5452,13 @@
   // report/card render and the live Refresh re-render). Each card carries a
   // title row with the freshness badge, the media (inline SVG or data-URI
   // <img>), and any caption/provenance text.
-  function _renderChartCardsHtml(charts) {
-    return (charts || []).map(function(c) {
+  function _renderChartCardsHtml(charts, slug) {
+    return (charts || []).map(function(c, i) {
+      // Per-figure annotation host: a "study-...-chart-..." id matches the
+      // feedback ID_PATTERNS (/^study-/), so each figure gets its OWN 💬
+      // comment affordance (keyed by this id), not just the section-level one.
+      var cardId = 'study-' + (slug || 'x') + '-chart-'
+        + String(c.key || ('fig' + i)).replace(/[^a-zA-Z0-9_-]/g, '-');
       var titleHtml = '';
       var badge = _freshnessBadge(c);
       var titleText = c.title || c.key || '';
@@ -5473,7 +5478,7 @@
       var media = c.img
         ? '<img class="chart-img" src="' + c.img + '" alt="' + _h(c.key || 'chart') + '" loading="lazy">'
         : (c.svg || '');
-      return '<div class="chart-card">' + titleHtml + media + capHtml + '</div>';
+      return '<div class="chart-card" id="' + cardId + '">' + titleHtml + media + capHtml + '</div>';
     }).join('');
   }
 
@@ -5503,7 +5508,7 @@
           .then(function(j) {
             var container = document.getElementById('study-' + study + '-charts');
             if (container) {
-              var cards = _renderChartCardsHtml(j.charts || []);
+              var cards = _renderChartCardsHtml(j.charts || [], study);
               // Replace everything after the <h3> heading (preserve the
               // heading + its Refresh button).
               var h3 = container.querySelector('h3');
@@ -6401,7 +6406,7 @@
           + 'background:#f8fafc;color:#334155;cursor:pointer;">↻ Refresh visualizations</button>'
           + '<span class="chart-refresh-status muted small" style="margin-left:4px;"></span>'
           + '</h3>'
-          + _renderChartCardsHtml(charts)
+          + _renderChartCardsHtml(charts, slug)
           + '</div>'
         : '';
 
