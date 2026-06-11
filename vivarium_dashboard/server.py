@@ -14304,6 +14304,11 @@ def serve(workspace: Path, port: int, host: str = "127.0.0.1") -> int:
     """
     global WORKSPACE
     WORKSPACE = Path(workspace).resolve()
+    # Run with CWD = workspace root. In-process composite/generator builds use
+    # workspace-relative paths (e.g. out/cache/initial_state.json) and would
+    # otherwise resolve against wherever the server was launched from, failing
+    # with "No such file or directory". Subprocess calls already pass cwd=WORKSPACE.
+    os.chdir(WORKSPACE)
     _ws_add_to_sys_path()
     # Register the active workspace root for ``vivarium_dashboard.lib`` helpers
     # that used to walk up from __file__.

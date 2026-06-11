@@ -5245,7 +5245,13 @@
     var panel = document.getElementById('investigation-study-embed-panel');
     var frame = document.getElementById('investigation-study-embed-frame');
     var nameEl = document.getElementById('investigation-study-embed-name');
-    if (!panel || !frame) return;
+    if (!panel || !frame) {
+      // This view (e.g. the report / deep-link investigation view) has no
+      // in-place study-embed panel — navigate to the study page directly so the
+      // sidebar study link still works instead of dying silently.
+      window.location = '/studies/' + encodeURIComponent(name);
+      return;
+    }
     window._currentInvestigationStudy = name;
     frame.src = '/studies/' + encodeURIComponent(name);
     if (nameEl) nameEl.textContent = name;
