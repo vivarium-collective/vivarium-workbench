@@ -4964,8 +4964,15 @@ def _post_study_run_variant_for_test(ws_root, body):
       variant: <variant name>
     Resolves the variant's `base_composite` against the study's `baseline[]`,
     layers `parameter_overrides` on top of that entry's `params`, and runs.
+
+    SP2a: a variant declaring `kind: sweep` / `kind: seeds` is an ENSEMBLE — it
+    is DELEGATED to v2ecoli-workflow (which packs every grid point into ONE
+    parquet hive store), not executed as N independent dashboard subprocesses.
     """
     from vivarium_dashboard.lib import composite_runs as cr
+    from vivarium_dashboard.lib.ensemble_config import (
+        build_workflow_config, delegation_available, is_delegatable_sweep,
+    )
 
     name = _study_name_from_body(body)
     variant_name = (body.get("variant") or "").strip()
@@ -5035,36 +5042,61 @@ def _post_study_run_variant_for_test(ws_root, body):
     ws_default_n_steps = _runtime.get("default_n_steps")
     steps = int(body.get("steps") or params_n_steps or ws_default_n_steps or 5)
 
-    state, err = _resolve_study_baseline_state(pkg, spec_id, generator_overrides)
-    if err is not None:
-        return err, 400
+    if is_delegatable_sweep(variant):
+        # SP2a delegation: hand the whole ensemble to v2ecoli-workflow once. It
+        # packs all sweep/seed points into ONE parquet hive store under
+        # out/<run_id>/, which the post-run sync records as a single run. We do
+        # NOT resolve/build the composite here (no _resolve_study_baseline_state)
+        # — the workflow engine builds every branch itself.
+        if not delegation_available(ws_root):
+            return ({"error": "ensemble sweep/seeds runs require a v2ecoli "
+                     "workspace (v2ecoli-workflow) with `<proc>.<key>` sweep "
+                     "targets; this workspace cannot delegate"}, 422)
+        full_params = dict(generator_overrides)
+        if params_n_steps is not None:
+            full_params["n_steps"] = params_n_steps
+        run_id = cr.generate_run_id(spec_id, full_params)
+        runtime_cfg = (spec.get("runtime") or {}) if isinstance(spec.get("runtime"), dict) else {}
+        timeout_s = int(runtime_cfg.get("subprocess_timeout_s") or 1800)
+        out_dir = study_dir / "out" / run_id
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # experiment_id == run_id so the packed store + the recorded run align.
+        cfg = build_workflow_config(variant, run_id, str(out_dir))
+        cfg_path = out_dir / "config.json"
+        cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        response, code = _invoke_v2ecoli_workflow(
+            str(cfg_path), out_dir, ws_root, timeout_s)
+    else:
+        state, err = _resolve_study_baseline_state(pkg, spec_id, generator_overrides)
+        if err is not None:
+            return err, 400
 
-    full_params = dict(generator_overrides)
-    if params_n_steps is not None:
-        full_params["n_steps"] = params_n_steps
+        full_params = dict(generator_overrides)
+        if params_n_steps is not None:
+            full_params["n_steps"] = params_n_steps
 
-    db_file = str(study_dir / "runs.db")
-    run_id = cr.generate_run_id(spec_id, full_params)
-    # v2ecoli friction #6: per-study subprocess timeout.
-    runtime_cfg = (spec.get("runtime") or {}) if isinstance(spec.get("runtime"), dict) else {}
-    timeout_s = int(runtime_cfg.get("subprocess_timeout_s") or 1800)
-    # v2ecoli friction #14: thread observables to the subprocess (same as
-    # baseline path) so variant runs also capture biology in history.state.
-    emit_paths = cr.collect_emit_paths_from_spec(spec)
-    # Per-study overrides — see baseline path for rationale. Emitter precedence:
-    # study runtime.emitter > investigation runtime.default_emitter > workspace.
-    study_emitter = runtime_cfg.get("emitter") or _investigation_emitter_for_study(spec.get("name"))
-    study_max_generations = runtime_cfg.get("max_generations")
-    study_single_daughters = runtime_cfg.get("single_daughters")
-    response, code = _run_composite_subprocess(
-        pkg=pkg, state=state, steps=steps, db_file=db_file,
-        run_id=run_id, spec_id=spec_id, label=variant_name,
-        sim_name=variant_name, overrides=generator_overrides,
-        timeout=timeout_s, emit_paths=emit_paths,
-        study_emitter=study_emitter,
-        study_max_generations=study_max_generations,
-        study_single_daughters=study_single_daughters,
-    )
+        db_file = str(study_dir / "runs.db")
+        run_id = cr.generate_run_id(spec_id, full_params)
+        # v2ecoli friction #6: per-study subprocess timeout.
+        runtime_cfg = (spec.get("runtime") or {}) if isinstance(spec.get("runtime"), dict) else {}
+        timeout_s = int(runtime_cfg.get("subprocess_timeout_s") or 1800)
+        # v2ecoli friction #14: thread observables to the subprocess (same as
+        # baseline path) so variant runs also capture biology in history.state.
+        emit_paths = cr.collect_emit_paths_from_spec(spec)
+        # Per-study overrides — see baseline path for rationale. Emitter precedence:
+        # study runtime.emitter > investigation runtime.default_emitter > workspace.
+        study_emitter = runtime_cfg.get("emitter") or _investigation_emitter_for_study(spec.get("name"))
+        study_max_generations = runtime_cfg.get("max_generations")
+        study_single_daughters = runtime_cfg.get("single_daughters")
+        response, code = _run_composite_subprocess(
+            pkg=pkg, state=state, steps=steps, db_file=db_file,
+            run_id=run_id, spec_id=spec_id, label=variant_name,
+            sim_name=variant_name, overrides=generator_overrides,
+            timeout=timeout_s, emit_paths=emit_paths,
+            study_emitter=study_emitter,
+            study_max_generations=study_max_generations,
+            study_single_daughters=study_single_daughters,
+        )
     # F2: no _append_study_run — the runs_meta row is the canonical record;
     # see the matching note in run-baseline above.
     if code == 200:
@@ -5730,6 +5762,35 @@ def _diagnose_push_error(err: str) -> dict | None:
             "suggestion": "Pull/rebase first: `git pull --rebase origin <branch>`, then push.",
         }
     return None
+
+
+def _invoke_v2ecoli_workflow(cfg_path, out_dir, ws_root, timeout_s):
+    """Run ``v2ecoli-workflow`` once for a delegated ensemble (SP2a).
+
+    Mirrors :func:`_run_composite_subprocess`'s timeout/return contract: runs
+    ``<ws>/.venv/bin/v2ecoli-workflow --config <cfg> --out <out_dir>`` in a
+    subprocess and returns ``(response_dict, status_code)``. The workflow packs
+    every sweep/seed point into ONE parquet hive store under
+    ``<out_dir>/parquet/…``; the caller's existing post-run ``study_outcomes.sync``
+    records that one dir as a single ensemble run (no dashboard change needed).
+
+    Does NOT touch ``_run_composite_subprocess`` — this is the ensemble sibling.
+    """
+    ws = Path(ws_root)
+    out_dir = Path(out_dir)
+    run_id = out_dir.name
+    exe = ws / ".venv" / "bin" / "v2ecoli-workflow"
+    cmd = [str(exe), "--config", str(cfg_path), "--out", str(out_dir)]
+    try:
+        result = subprocess.run(cmd, cwd=str(ws), capture_output=True,
+                                text=True, timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        return ({"simulation_id": run_id, "error": "ensemble run timed out"}, 504)
+    if result.returncode != 0:
+        return ({"simulation_id": run_id, "error": "ensemble run failed",
+                 "stdout": result.stdout, "stderr": result.stderr}, 502)
+    return ({"simulation_id": run_id, "ensemble": True,
+             "out_dir": str(out_dir), "steps": 0}, 200)
 
 
 def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
