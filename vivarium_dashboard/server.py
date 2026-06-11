@@ -5988,6 +5988,21 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        # DataSource seam endpoints — handled BEFORE the alias rewriting loop
+        # so they are not shadowed by the /api/study/ → /api/investigation/
+        # alias (sub-project #1, client-fetch seam).
+        _path_only_pre = self.path.split("?", 1)[0]
+        if _path_only_pre.startswith("/api/study/"):
+            _slug = _path_only_pre.split("/api/study/", 1)[-1].strip("/")
+            if not _SLUG_RE.match(_slug):
+                return self._json({"error": "invalid slug"}, 400)
+            _spec = _study_detail_spec(_slug)
+            if _spec is None:
+                return self._json({"error": f"study not found: {_slug}"}, 404)
+            return self._json(_spec, 200)
+        if _path_only_pre == "/api/config":
+            return self._json({"mode": "local-server"}, 200)
+
         # Resolve /api/study-* aliases to their /api/investigation-* originals so
         # the rest of the dispatch chain only needs to know one set of paths.
         for old_prefix, new_prefix in _GET_STUDY_ALIASES:
@@ -12025,6 +12040,27 @@ if __name__ == "__main__":
         self.send_header("Content-Length", str(len(encoded)))
         self.end_headers()
         self.wfile.write(encoded)
+
+    @staticmethod
+    def _build_api_study_response(slug: str):
+        """Pure builder for GET /api/study/<slug>.
+
+        Returns (json_bytes, http_status).  Pure (no socket I/O) so tests can
+        call it without a live server.  The do_GET branch calls this and emits
+        the bytes via self._json().
+        """
+        spec = _study_detail_spec(slug)
+        if spec is None:
+            return _json_body({"error": f"study not found: {slug}"}), 404
+        return _json_body(spec), 200
+
+    @staticmethod
+    def _build_api_config_response():
+        """Pure builder for GET /api/config — returns the source-config object.
+
+        Returns (json_bytes, http_status).  Default: local-server mode.
+        """
+        return _json_body({"mode": "local-server"}), 200
 
     def _get_study_detail_page(self):
         """GET /studies/<name> — render the Study Detail page."""
