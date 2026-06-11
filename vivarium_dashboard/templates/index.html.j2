@@ -1545,6 +1545,13 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
   </div>
 </div>
 
+<!-- DataSource layer (client-fetch seam, sub-project #1).
+     __DASH_CONFIG__ sets the data-source mode; data-source.js exposes the
+     DataSource global that renderers call to fetch narrative data.
+     local-server mode (default) fetches from the same-origin /api/* endpoints.
+     Hosted mode (sub-projects #2/#3) will set a different config here. -->
+<script>window.__DASH_CONFIG__ = { mode: "local-server" };</script>
+<script src="assets/data-source.js"></script>
 <script src="assets/render-helpers.js"></script>
 <script src="assets/client.js" onerror="/* live mode unavailable */"></script>
 <script src="assets/walkthrough.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* walkthrough unavailable */"></script>

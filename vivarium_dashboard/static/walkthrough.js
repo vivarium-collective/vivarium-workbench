@@ -5288,13 +5288,21 @@
     var btn = event && event.target;
     var orig = btn ? btn.textContent : null;
     if (btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
-    fetch('/api/iset/' + encodeURIComponent(name), {headers: {Accept: 'application/json'}})
-      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    // Use window.DataSource.loadInvestigation if available (client-fetch seam,
+    // sub-project #1).  Falls back to a direct fetch so local mode is unchanged.
+    var _isetFetch = (window.DataSource && window.DataSource.loadInvestigation)
+      ? window.DataSource.loadInvestigation(name)
+      : fetch('/api/iset/' + encodeURIComponent(name), {headers: {Accept: 'application/json'}})
+          .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+    _isetFetch
       .then(function(iset) {
         var studyFetches = (iset.studies || []).map(function(s) {
-          return fetch('/api/study/' + encodeURIComponent(s.name))
-            .then(function(r) { return r.ok ? r.json() : {spec: {name: s.name, error: 'load-failed'}}; })
-            .then(function(j) { return j.spec || j; });
+          return ((window.DataSource && window.DataSource.loadStudy)
+            ? window.DataSource.loadStudy(s.name)
+            : fetch('/api/study/' + encodeURIComponent(s.name))
+                .then(function(r) { return r.ok ? r.json() : {spec: {name: s.name, error: 'load-failed'}}; })
+                .then(function(j) { return j.spec || j; })
+          );
         });
         var bibFetch = fetch('/api/references-bib')
           .then(function(r) { return r.ok ? r.json() : {entries: []}; })
@@ -12474,11 +12482,18 @@
   function _generateReportHtmlForCurrentIset() {
     var name = window._currentIset;
     if (!name) return Promise.resolve(null);
-    return fetch('/api/iset/' + encodeURIComponent(name)).then(function (r) { return r.json(); })
-      .then(function (iset) {
+    // Route through DataSource so hosted/snapshot mode (sub-projects #2/#3)
+    // honours the configured source here too.  Direct-fetch fallback keeps
+    // behaviour unchanged when DataSource is not available.
+    var _isetFetch = (window.DataSource && window.DataSource.loadInvestigation)
+      ? window.DataSource.loadInvestigation(name)
+      : fetch('/api/iset/' + encodeURIComponent(name)).then(function (r) { return r.json(); });
+    return _isetFetch.then(function (iset) {
         var studyFetches = (iset.studies || []).map(function (s) {
-          return fetch('/api/study/' + encodeURIComponent(s.name))
-            .then(function (r) { return r.ok ? r.json() : {spec: {name: s.name}}; })
+          return ((window.DataSource && window.DataSource.loadStudy)
+            ? window.DataSource.loadStudy(s.name).catch(function () { return {spec: {name: s.name}}; })
+            : fetch('/api/study/' + encodeURIComponent(s.name))
+                .then(function (r) { return r.ok ? r.json() : {spec: {name: s.name}}; }))
             .then(function (j) { return j.spec || j; });
         });
         var bibFetch = fetch('/api/references-bib')

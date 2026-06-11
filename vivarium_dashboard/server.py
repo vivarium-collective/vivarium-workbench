@@ -5988,6 +5988,18 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        # DataSource seam endpoints — handled BEFORE the alias rewriting loop
+        # so they are not shadowed by the /api/study/ → /api/investigation/
+        # alias (sub-project #1, client-fetch seam).
+        _path_only_pre = self.path.split("?", 1)[0]
+        if _path_only_pre.startswith("/api/study/"):
+            _slug = _path_only_pre.split("/api/study/", 1)[-1].strip("/")
+            # Delegate entirely to the pure builder (slug validation + lookup
+            # both live there so the live path and the tested builder are identical).
+            return self._send_json_bytes(*Handler._build_api_study_response(_slug))
+        if _path_only_pre == "/api/config":
+            return self._send_json_bytes(*Handler._build_api_config_response())
+
         # Resolve /api/study-* aliases to their /api/investigation-* originals so
         # the rest of the dispatch chain only needs to know one set of paths.
         for old_prefix, new_prefix in _GET_STUDY_ALIASES:
@@ -12026,6 +12038,33 @@ if __name__ == "__main__":
         self.end_headers()
         self.wfile.write(encoded)
 
+    @staticmethod
+    def _build_api_study_response(slug: str):
+        """Pure builder for GET /api/study/<slug>.
+
+        Returns (json_bytes, http_status).  Pure (no socket I/O) so tests can
+        call it without a live server.  The do_GET branch calls this and emits
+        the bytes via self._send_json_bytes().
+
+        Validates the slug with _SLUG_RE first so the live path and builder
+        are identical — callers that skip do_GET (e.g. tests) still get the
+        400 on traversal/invalid slugs.
+        """
+        if not _SLUG_RE.match(slug):
+            return _json_body({"error": "invalid slug"}), 400
+        spec = _study_detail_spec(slug)
+        if spec is None:
+            return _json_body({"error": f"study not found: {slug}"}), 404
+        return _json_body(spec), 200
+
+    @staticmethod
+    def _build_api_config_response():
+        """Pure builder for GET /api/config — returns the source-config object.
+
+        Returns (json_bytes, http_status).  Default: local-server mode.
+        """
+        return _json_body({"mode": "local-server"}), 200
+
     def _get_study_detail_page(self):
         """GET /studies/<name> — render the Study Detail page."""
         # Strip query-string before slicing the slug — otherwise a URL like
@@ -14116,6 +14155,19 @@ if __name__ == "__main__":
                 time.sleep(1.0)
         except (BrokenPipeError, ConnectionResetError):
             return
+
+    def _send_json_bytes(self, body: bytes, code: int):
+        """Send pre-encoded JSON bytes with the standard JSON response headers.
+
+        Used by do_GET branches that call a ``_build_*_response`` builder (which
+        already encodes to bytes) so the encoding step is not duplicated.
+        """
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
 
     def _json(self, data: dict, code: int):
         body = _json_body(data)

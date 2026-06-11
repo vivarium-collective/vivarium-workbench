@@ -895,7 +895,39 @@
       '</div>';
   }
 
-  // Run after the page spec is available.
-  _renderFeedbackTrackedPanel();
+  // ── DataSource bootstrap (client-fetch seam, sub-project #1) ─────────────
+  // Populate window._study via a fetch when the Jinja embed is absent.
+  // The renderers (loadTestsTab, _loadConclusionsTab, _renderFeedbackTrackedPanel,
+  // etc.) are unchanged — they still read window._study.  Only acquisition changes.
+
+  function _showStudyLoadError(e) {
+    var el = document.getElementById('study-root') || document.body;
+    el.innerHTML =
+      '<div style="padding:2rem;color:#dc2626">' +
+      'Could not load study data: ' + String(e && e.message || e) +
+      '</div>';
+  }
+
+  async function _bootstrapStudy() {
+    if (!window._study && window.DataSource && window._studyName) {
+      try {
+        window._study = await window.DataSource.loadStudy(window._studyName);
+      } catch (e) {
+        _showStudyLoadError(e);
+        return false;
+      }
+    }
+    return !!window._study;
+  }
+
+  function _runStudyInit() {
+    // All renderers that need window._study to be populated.
+    _renderFeedbackTrackedPanel();
+  }
+
+  // Entry point: fetch the spec if needed, then run init.
+  (async function () {
+    if (await _bootstrapStudy()) { _runStudyInit(); }
+  })();
 
 })();

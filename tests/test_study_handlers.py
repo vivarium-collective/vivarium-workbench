@@ -69,15 +69,23 @@ def test_export_returns_zip_bytes(_study_workspace):
 
 
 def test_study_detail_page_renders(_study_workspace):
-    """GET /studies/s1 — _render_study_detail_html returns HTML with key section headings."""
+    """GET /studies/s1 — _render_study_detail_html returns HTML with key section headings.
+
+    Note: after the fetch-seam conversion (Task 4) the spec is no longer
+    embedded as window._study JSON. Assertions that relied on JSON-embed
+    content are now verified via _study_detail_spec instead (see test_data_endpoints).
+    """
     from vivarium_dashboard.server import _render_study_detail_html
     import yaml
     spec = yaml.safe_load((_study_workspace / "studies" / "s1" / "study.yaml").read_text())
     html = _render_study_detail_html("s1", spec)
     assert "s1" in html
-    # Should include section headings for the six cards
+    # Should include section headings for the six cards — these come from the
+    # Jinja-rendered HTML (not the JSON embed) so they survive the fetch-seam change.
     assert "Baseline" in html or "baseline" in html.lower()
-    assert "Objective" in html or "objective" in html.lower()
+    # "Objective" is only rendered when study.objective is non-empty ({% if study.objective %});
+    # the fixture has objective="" so it's gated out. Check for the overview tab instead.
+    assert 'data-kind="overview"' in html
     assert "Conclusion" in html or "conclusion" in html.lower()
     assert "Variants" in html or "variants" in html.lower()
 
