@@ -405,3 +405,30 @@ def test_golden_v2e_invest(tmp_path):
         server._WP_CACHE.clear()
     assert json.loads((out / "api" / "iset-list.json").read_text()) == expected_isets, \
         "iset-list.json parity failed for v2e-invest"
+
+    # ── Full-surface golden (Tasks 1-5) ─────────────────────────────────────────
+    # Simulations DB + Visualizations/Analyses exports
+    assert (out / "api" / "simulations.json").is_file(), "api/simulations.json missing"
+    sims_data = json.loads((out / "api" / "simulations.json").read_text())
+    assert "simulations" in sims_data, "api/simulations.json missing 'simulations' key"
+
+    assert (out / "api" / "visualization-classes.json").is_file(), \
+        "api/visualization-classes.json missing"
+    viz_data = json.loads((out / "api" / "visualization-classes.json").read_text())
+    assert "classes" in viz_data, "api/visualization-classes.json missing 'classes' key"
+
+    # Composite-state dir exists (may be empty if no composites resolvable)
+    assert (out / "api" / "composite-state").is_dir(), \
+        "api/composite-state/ dir missing"
+
+    # Snapshot banner in home shell
+    home_html = (out / "index.html").read_text()
+    assert "snapshot-banner" in home_html, "index.html missing #snapshot-banner"
+    assert "snapshot-repo-label" in home_html, "index.html missing #snapshot-repo-label"
+
+    # Repo switcher hidden by CSS in snapshot mode
+    css_text = (out / "assets" / "snapshot-readonly.css").read_text()
+    assert "#viv-workspace-switcher" in css_text, \
+        "snapshot-readonly.css missing switcher hide rule"
+    assert "#snapshot-repo-label" in css_text, \
+        "snapshot-readonly.css missing repo-label show rule"
