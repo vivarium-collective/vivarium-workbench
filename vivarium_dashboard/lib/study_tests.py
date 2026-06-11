@@ -215,12 +215,14 @@ def _run_spine_tests(
             f"code={meta.get('tests_code', 0)} agent={meta.get('tests_agent', 0)} "
             f"(latest run: {run.get('name', '?')})"
         )
-    result = StudyTestsResult(
+    # NB: do NOT call _write_last_results here — it round-trips study.yaml via
+    # yaml.safe_dump, which STRIPS the research-log comments. compute_outcomes
+    # already persisted computed_outcomes via a comment-preserving ruamel pass,
+    # so the spine path must not rewrite the file.
+    return StudyTestsResult(
         summary={"passed": passed, "failed": failed, "skipped": skipped, "duration_s": duration},
         tests=tests, note=note,
     )
-    _write_last_results(spec_path, result)
-    return result
 
 
 def _write_last_results(spec_path: Path, result: StudyTestsResult) -> None:
