@@ -751,13 +751,14 @@
       li.className = 'test-row test-' + t.outcome;
       var icon = icons[t.outcome] || '•';
       var tb = t.traceback
-        ? '<details><summary>traceback</summary><pre>' + escapeHtmlForTests(t.traceback) + '</pre></details>'
+        ? '<details><summary>detail</summary><pre>' + escapeHtmlForTests(t.traceback) + '</pre></details>'
         : '';
+      var dur = t.duration
+        ? '<span class="test-duration">' + (t.duration).toFixed(3) + 's</span>' : '';
       li.innerHTML =
         '<span class="test-icon">' + icon + '</span>' +
         '<code class="test-nodeid">' + escapeHtmlForTests(t.nodeid) + '</code>' +
-        '<span class="test-duration">' + ((t.duration || 0).toFixed(3)) + 's</span>' +
-        tb;
+        dur + tb;
       list.appendChild(li);
     });
     var s = body.summary || {};
@@ -767,7 +768,8 @@
         '<span class="ok">' + (s.passed || 0) + ' passed</span>' +
         ' / <span class="fail">' + (s.failed || 0) + ' failed</span>' +
         ' / <span class="skip">' + (s.skipped || 0) + ' skipped</span>' +
-        ' <span class="muted">(' + ((s.duration_s || 0).toFixed(2)) + 's)</span>';
+        ' <span class="muted">(' + ((s.duration_s || 0).toFixed(2)) + 's)</span>' +
+        (body.note ? ' <span class="muted" style="font-style:italic">— ' + escapeHtmlForTests(body.note) + '</span>' : '');
     }
   }
 
