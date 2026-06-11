@@ -146,3 +146,37 @@ def test_load_spec_v3_redesign_path_keeps_tests_as_list(tmp_path):
     # tests[] must remain a list — the v4-redesign validator demands it.
     assert isinstance(spec["tests"], list)
     assert spec["tests"][0]["name"] == "t1"
+
+
+def test_v4_behavior_tests_projection_carries_classification(tmp_path):
+    """The legacy ``behavior_tests`` projection (what the report's
+    walkthrough.js renders) must carry each test's ``classification`` through,
+    or every v4 test renders as "unclassified" in the investigation report.
+    Regression for the showcase studies rendering UNCLASSIFIED chips."""
+    spec_path = tmp_path / "spec.yaml"
+    spec_path.write_text(yaml.safe_dump({
+        "schema_version": 4,
+        "name": "classified-study",
+        "question": "Does X work?",
+        "status": "complete",
+        "conditions": {
+            "baseline": {"composite": "pkg.composites.x"},
+            "variants": [],
+            "model_settings": [],
+        },
+        "tests": [
+            {"name": "t-primary", "classification": "primary",
+             "question": "Is it primary?",
+             "measure": {"kind": "condition_count"},
+             "pass_if": {"op": "==", "value": 51}},
+            {"name": "t-decision", "classification": "decision",
+             "question": "Reviewer to decide?",
+             "measure": {"kind": "reviewer_decision"},
+             "pass_if": {"op": "reviewer_selected_variant"}},
+        ],
+    }))
+    spec = load_spec(spec_path)
+    bt = spec["behavior_tests"]
+    by_name = {t["name"]: t for t in bt}
+    assert by_name["t-primary"]["classification"] == "primary"
+    assert by_name["t-decision"]["classification"] == "decision"

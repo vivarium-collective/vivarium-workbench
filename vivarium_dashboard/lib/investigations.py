@@ -425,6 +425,10 @@ def _project_v4_redesign_to_legacy_view(spec: dict) -> dict:
             "measure": t.get("measure"),
             "expect": t.get("pass_if"),
             "status": t.get("status"),
+            # Carry the authored classification through the legacy projection so
+            # the report (walkthrough.js test-card chip) shows primary/supporting/
+            # etc. instead of defaulting every v4 test to "unclassified".
+            "classification": t.get("classification"),
         } for t in new_tests if isinstance(t, dict)]
 
     # interventions placeholder — the legacy validator + renderer expect
