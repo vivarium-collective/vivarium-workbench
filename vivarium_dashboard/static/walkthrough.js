@@ -427,9 +427,14 @@
   function _switchPage(pageId) {
     pageId = pageId || 'workspace-inputs';
     // Snapshot mode: redirect authoring-only tabs to the investigations view.
+    // composite-explore needs live composite resolution (build_core) which is
+    // unavailable in a static bundle → redirect to simulation-setup (composites list).
     if (document.body.classList.contains('snapshot')) {
       if (pageId === 'simulations' || pageId === 'github' || pageId === 'studies' || pageId === 'visualizations') {
         pageId = 'investigations';
+      }
+      if (pageId === 'composite-explore') {
+        pageId = 'simulation-setup';
       }
     }
     document.querySelectorAll('.page').forEach(function(s) { s.classList.remove('active'); });
@@ -892,8 +897,10 @@
   function _loadDataSources() {
     var host = document.getElementById('data-sources-host');
     if (!host) return;
-    fetch('/api/data-sources')
-      .then(function(r) { return r.json(); })
+    var _p = window.DataSource
+      ? window.DataSource.loadDataSources()
+      : fetch('/api/data-sources').then(function(r) { return r.json(); });
+    _p
       .then(function(j) {
         var sources = (j && j.sources) || [];
         if (!sources.length) {
@@ -2941,7 +2948,10 @@
     // workspaces with no investigation.yaml files.
     var hasIsetUI = (typeof _renderRailInvestigationGroups === 'function')
                  && document.getElementById('investigations-list');
-    var p1 = fetch('/api/investigations').then(function(r) { return r.json(); }).catch(function() { return {investigations: []}; });
+    var p1 = (window.DataSource
+      ? window.DataSource.loadInvestigationsFlat()
+      : fetch('/api/investigations').then(function(r) { return r.json(); })
+    ).catch(function() { return {investigations: []}; });
     var p2 = hasIsetUI
       ? fetch('/api/iset-list').then(function(r) { return r.json(); }).catch(function() { return {investigations: []}; })
       : Promise.resolve({investigations: []});
@@ -4096,11 +4106,13 @@
   window._investigationsView = 'grid';
 
   function _loadInvestigations() {
-    fetch('/api/investigations')
-      .then(function(r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      })
+    var _p = window.DataSource
+      ? window.DataSource.loadInvestigationsFlat()
+      : fetch('/api/investigations').then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        });
+    _p
       .then(function(data) {
         window._investigations = data.investigations || [];
         _buildInvestigationTagChips();

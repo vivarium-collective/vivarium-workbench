@@ -2780,6 +2780,121 @@ def _composites_data(ws_root: "Path") -> dict:
         return {"composites": [], "error": str(e)}
 
 
+def _investigations_data(ws_root: Path) -> dict:
+    """Pure data builder for GET /api/investigations — returns ``{"investigations": [...]}`` dict.
+
+    Includes the study-dependency DAG: each row carries ``parent_studies``
+    (normalized to [{study, condition}]) and a computed ``blocked`` flag
+    plus ``blocked_by`` list pointing at parents that don't yet satisfy
+    their condition.
+
+    Called by ``Handler._get_investigations`` (which wraps it in the HTTP
+    response) and by ``publish.build_bundle`` to export
+    ``api/investigations.json``.  Requires ``WORKSPACE`` to be set to
+    *ws_root*.
+    """
+    _ws_add_to_sys_path()
+    from vivarium_dashboard.lib.investigations import (
+        load_spec,
+        InvestigationSpecError,
+        normalize_dag_edges,
+    )
+
+    # First pass: load every spec so we can resolve cross-study conditions.
+    loaded: list[tuple[Path, dict]] = []   # (dir, spec)
+    for d in _iter_study_dirs():
+        spec_path = d / "study.yaml" if (d / "study.yaml").is_file() else d / "spec.yaml"
+        if not spec_path.is_file():
+            continue
+        try:
+            loaded.append((d, load_spec(spec_path)))
+        except InvestigationSpecError as e:
+            loaded.append((d, {"__invalid__": True, "name": d.name, "error": str(e)}))
+
+    by_name: dict[str, dict] = {s["name"]: s for _, s in loaded if not s.get("__invalid__")}
+
+    def _normalize_parents(spec: dict) -> list[dict]:
+        return normalize_dag_edges(spec)
+
+    def _condition_satisfied(parent: dict | None, condition: str) -> bool:
+        if parent is None:
+            return False
+        status = parent.get("status", "planned")
+        if condition == "ran":
+            return status in ("ran", "complete")
+        if condition == "complete":
+            return status == "complete"
+        if condition == "tests-passed":
+            from pbg_superpowers import study_status
+            counts = study_status.count_test_outcomes(parent, parent.get("runs"))
+            return counts["fail"] == 0 and counts["pass"] > 0
+        return False
+
+    out = []
+    for d, spec in loaded:
+        if spec.get("__invalid__"):
+            out.append({"name": spec["name"], "status": "invalid", "error": spec["error"]})
+            continue
+        composites = spec.get("composites") or []
+        if composites:
+            composite_summary = ", ".join(c.get("name", "") for c in composites)
+            n_runs = _count_runs_for_study(spec["name"], spec)
+        else:
+            composite_summary = spec.get("composite", "")
+            n_runs = _count_runs_for_study(spec["name"], spec)
+            if n_runs == 0:
+                n_runs = len(spec.get("simulations") or [])
+
+        parents = _normalize_parents(spec)
+        blocked_by = []
+        for p in parents:
+            parent_spec = by_name.get(p["study"])
+            if not _condition_satisfied(parent_spec, p["condition"]):
+                blocked_by.append({
+                    "study":     p["study"],
+                    "condition": p["condition"],
+                    "missing":   "parent-not-found" if parent_spec is None else
+                                 f"parent.status={parent_spec.get('status', 'planned')}",
+                })
+
+        sim_set_top = spec.get("simulation_set") or []
+        beh_tests_top = spec.get("behavior_tests") or spec.get("expected_behavior") or []
+        readouts_top = spec.get("readouts") or spec.get("observables") or []
+        reqs_top = spec.get("implementation_requirements") or spec.get("gaps") or []
+        n_variants_top = (len(sim_set_top) if sim_set_top
+                          else len(spec.get("variants") or []))
+        row = {
+            "name":            spec["name"],
+            "composite":       composite_summary,
+            "composites":      composites,
+            "description":     spec.get("description", ""),
+            "topic":           spec.get("topic", ""),
+            "tags":            spec.get("tags") or [],
+            "status":          spec.get("status", "planned"),
+            "phase":           spec.get("phase"),
+            "last_run":        spec.get("last_run"),
+            "n_simulations":   n_runs,
+            "baseline_names":  [b.get("name", "") for b in (spec.get("baseline") or [])
+                                if isinstance(b, dict)],
+            "n_baseline":      len(spec.get("baseline") or []),
+            "n_variants":      n_variants_top,
+            "n_groups":        len(spec.get("groups") or []),
+            "n_interventions": len(spec.get("interventions") or []),
+            "n_behaviors":     len(beh_tests_top),
+            "n_readouts":      len(readouts_top),
+            "n_requirements":  len(reqs_top),
+            "n_comparisons":   len(spec.get("comparisons") or []),
+            "n_runs":          n_runs,
+            "baseline_source": _format_baseline_source(spec),
+            "conclusions_excerpt": _conclusions_excerpt(spec),
+            "parent_studies":  parents,
+            "blocked":         len(blocked_by) > 0,
+            "blocked_by":      blocked_by,
+        }
+        out.append(row)
+    return {"investigations": out}
+
+
 # --- Pass C: cross-worktree investigation registry --------------------------
 #
 # Each running vivarium-dashboard registers itself in ~/.pbg/servers/*.json
@@ -9670,119 +9785,10 @@ if __name__ == "__main__":
     def _get_investigations(self):
         """GET /api/investigations — return summaries of all investigations.
 
-        Includes the study-dependency DAG: each row carries `parent_studies`
-        (normalized to [{study, condition}]) and a computed `blocked` flag
-        plus `blocked_by` list pointing at parents that don't yet satisfy
-        their condition.
+        Delegates to the pure builder :func:`_investigations_data` so the same
+        data is available for ``publish.build_bundle`` without HTTP plumbing.
         """
-        _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
-
-        # First pass: load every spec so we can resolve cross-study conditions.
-        loaded: list[tuple[Path, dict]] = []   # (dir, spec)
-        for d in _iter_study_dirs():
-            spec_path = d / "study.yaml" if (d / "study.yaml").is_file() else d / "spec.yaml"
-            if not spec_path.is_file():
-                continue
-            try:
-                loaded.append((d, load_spec(spec_path)))
-            except InvestigationSpecError as e:
-                loaded.append((d, {"__invalid__": True, "name": d.name, "error": str(e)}))
-
-        by_name: dict[str, dict] = {s["name"]: s for _, s in loaded if not s.get("__invalid__")}
-
-        from vivarium_dashboard.lib.investigations import normalize_dag_edges
-        # Single read path — reads pipeline_gate.prerequisites (canonical)
-        # with parent_studies fallback. Emits DeprecationWarning for the
-        # legacy-only case so workspaces know to migrate.
-        def _normalize_parents(spec: dict) -> list[dict]:
-            return normalize_dag_edges(spec)
-
-        def _condition_satisfied(parent: dict | None, condition: str) -> bool:
-            """Does this parent currently satisfy `condition`?"""
-            if parent is None:
-                # Parent doesn't exist in workspace — treat as unsatisfiable,
-                # so the child shows up as blocked with a useful diagnostic.
-                return False
-            status = parent.get("status", "planned")
-            if condition == "ran":
-                return status in ("ran", "complete")
-            if condition == "complete":
-                return status == "complete"
-            if condition == "tests-passed":
-                from pbg_superpowers import study_status
-                counts = study_status.count_test_outcomes(parent, parent.get("runs"))
-                return counts["fail"] == 0 and counts["pass"] > 0
-            return False
-
-        out = []
-        for d, spec in loaded:
-            if spec.get("__invalid__"):
-                out.append({"name": spec["name"], "status": "invalid", "error": spec["error"]})
-                continue
-            # Multi-composite (new) vs single-`composite:` (legacy) shape.
-            composites = spec.get("composites") or []
-            if composites:
-                composite_summary = ", ".join(c.get("name", "") for c in composites)
-                n_runs = _count_runs_for_study(spec["name"], spec)  # F2: runs.db canonical
-            else:
-                composite_summary = spec.get("composite", "")
-                # Legacy v2 specs sometimes used `simulations:` instead of `runs:`.
-                # _count_runs_for_study only checks `runs:` against runs.db, so
-                # preserve the `simulations:` fallback for that shape.
-                n_runs = _count_runs_for_study(spec["name"], spec)
-                if n_runs == 0:
-                    n_runs = len(spec.get("simulations") or [])
-
-            parents = _normalize_parents(spec)
-            blocked_by = []
-            for p in parents:
-                parent_spec = by_name.get(p["study"])
-                if not _condition_satisfied(parent_spec, p["condition"]):
-                    blocked_by.append({
-                        "study":     p["study"],
-                        "condition": p["condition"],
-                        "missing":   "parent-not-found" if parent_spec is None else
-                                     f"parent.status={parent_spec.get('status', 'planned')}",
-                    })
-
-            sim_set_top = spec.get("simulation_set") or []
-            beh_tests_top = spec.get("behavior_tests") or spec.get("expected_behavior") or []
-            readouts_top = spec.get("readouts") or spec.get("observables") or []
-            reqs_top = spec.get("implementation_requirements") or spec.get("gaps") or []
-            n_variants_top = (len(sim_set_top) if sim_set_top
-                              else len(spec.get("variants") or []))
-            row = {
-                "name":            spec["name"],
-                "composite":       composite_summary,
-                "composites":      composites,
-                "description":     spec.get("description", ""),
-                "topic":           spec.get("topic", ""),
-                "tags":            spec.get("tags") or [],
-                "status":          spec.get("status", "planned"),
-                "phase":           spec.get("phase"),
-                "last_run":        spec.get("last_run"),
-                "n_simulations":   n_runs,
-                "baseline_names":  [b.get("name", "") for b in (spec.get("baseline") or [])
-                                    if isinstance(b, dict)],
-                "n_baseline":      len(spec.get("baseline") or []),
-                "n_variants":      n_variants_top,
-                "n_groups":        len(spec.get("groups") or []),
-                "n_interventions": len(spec.get("interventions") or []),
-                "n_behaviors":     len(beh_tests_top),
-                "n_readouts":      len(readouts_top),
-                "n_requirements":  len(reqs_top),
-                "n_comparisons":   len(spec.get("comparisons") or []),
-                "n_runs":          n_runs,
-                "baseline_source": _format_baseline_source(spec),
-                "conclusions_excerpt": _conclusions_excerpt(spec),
-                # DAG / dependency fields.
-                "parent_studies":  parents,
-                "blocked":         len(blocked_by) > 0,
-                "blocked_by":      blocked_by,
-            }
-            out.append(row)
-        return self._json({"investigations": out}, 200)
+        return self._json(_investigations_data(WORKSPACE), 200)
 
     def _post_investigation_create(self, body: dict):
         """POST /api/investigation-create {name, source?} — scaffold a new investigation.

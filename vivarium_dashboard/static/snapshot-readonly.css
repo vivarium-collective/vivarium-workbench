@@ -103,3 +103,8 @@ body.snapshot #modal-investigation-add-viz {
 body.snapshot .viv-iset-menu-new {
   display: none !important;
 }
+
+/* ── Composite Explorer: Explore button (requires live composite resolution) ── */
+body.snapshot button[onclick*="_openCompositeExplorer"] {
+  display: none !important;
+}

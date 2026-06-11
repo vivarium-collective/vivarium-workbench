@@ -294,3 +294,57 @@ def test_walkthrough_routes_reads_through_data_source():
         "DataSource.loadRegistry",
     ]:
         assert symbol in text, f"walkthrough.js missing DataSource routing: {symbol!r}"
+
+
+# ---------------------------------------------------------------------------
+# Kept-tab reads: new loaders + empty-slug _inputsUrl fix
+# ---------------------------------------------------------------------------
+
+def test_data_source_has_new_kept_tab_loaders():
+    """data-source.js must define loadDataSources + loadInvestigationsFlat loaders
+    with correct snapshot URLs, and _inputsUrl must route empty slug to _global.json."""
+    text = (server.STATIC_DIR / "data-source.js").read_text()
+
+    # New loaders present
+    for token in ["loadDataSources", "loadInvestigationsFlat"]:
+        assert token in text, f"data-source.js missing loader: {token!r}"
+
+    # Snapshot URLs for the new loaders
+    assert "/api/data-sources.json" in text, \
+        "data-source.js missing snapshot URL /api/data-sources.json"
+    assert "/api/investigations.json" in text, \
+        "data-source.js missing snapshot URL /api/investigations.json"
+
+    # Empty-slug _inputsUrl fix: snapshot → _global.json
+    assert "_global.json" in text, \
+        "data-source.js missing _global.json for empty-slug _inputsUrl"
+
+
+def test_walkthrough_routes_new_kept_tab_fetches_through_data_source():
+    """walkthrough.js must route _loadDataSources and _loadInvestigations
+    (+ rail refresh) through DataSource loaders."""
+    text = (server.STATIC_DIR / "walkthrough.js").read_text()
+    for symbol in [
+        "DataSource.loadDataSources",
+        "DataSource.loadInvestigationsFlat",
+    ]:
+        assert symbol in text, \
+            f"walkthrough.js missing DataSource routing for kept-tab read: {symbol!r}"
+
+
+def test_snapshot_readonly_css_hides_explore_button():
+    """snapshot-readonly.css must contain a rule hiding the Explore button on
+    composite cards, since composite resolution (build_core) requires a live server."""
+    text = (server.STATIC_DIR / "snapshot-readonly.css").read_text()
+    assert "_openCompositeExplorer" in text, \
+        "snapshot-readonly.css missing rule to hide the Explore/composite explorer button"
+
+
+def test_switchpage_gates_composite_explore_in_snapshot():
+    """walkthrough.js _switchPage must redirect composite-explore → simulation-setup
+    in snapshot mode so the Explore button (even if somehow clicked) cannot open
+    the live-only explorer."""
+    text = (server.STATIC_DIR / "walkthrough.js").read_text()
+    assert "composite-explore" in text
+    # The gate must redirect to simulation-setup, not crash
+    assert "simulation-setup" in text

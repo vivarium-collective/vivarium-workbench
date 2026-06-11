@@ -190,6 +190,37 @@ def test_bundle_exports_full_read_surface(tmp_workspace, tmp_path):
         )), "iset-list.json parity failed"
 
 
+def test_bundle_exports_kept_tab_reads(tmp_workspace, tmp_path):
+    """build_bundle writes the three new files needed by kept tabs in the viewer:
+    api/inputs/_global.json, api/data-sources.json, api/investigations.json."""
+    from vivarium_dashboard import publish
+
+    out = tmp_path / "bundle"
+    publish.build_bundle(server.WORKSPACE, out)
+
+    # Global inputs — no investigation slug (empty-slug Sources page)
+    global_json = out / "api" / "inputs" / "_global.json"
+    assert global_json.is_file(), "api/inputs/_global.json missing"
+    global_data = json.loads(global_json.read_text())
+    assert "global" in global_data, "api/inputs/_global.json missing 'global' key"
+
+    # Repo-wide data sources (workspace.yaml provider hook)
+    ds_json = out / "api" / "data-sources.json"
+    assert ds_json.is_file(), "api/data-sources.json missing"
+    ds_data = json.loads(ds_json.read_text())
+    assert "sources" in ds_data, "api/data-sources.json missing 'sources' key"
+
+    # Flat investigations list with DAG (studies left-rail)
+    inv_json = out / "api" / "investigations.json"
+    assert inv_json.is_file(), "api/investigations.json missing"
+    inv_data = json.loads(inv_json.read_text())
+    assert "investigations" in inv_data, "api/investigations.json missing 'investigations' key"
+    # The workspace has studies alpha + beta; both must appear
+    names = {r["name"] for r in inv_data["investigations"]}
+    assert "alpha" in names, "api/investigations.json missing study 'alpha'"
+    assert "beta" in names, "api/investigations.json missing study 'beta'"
+
+
 # ---------------------------------------------------------------------------
 # Task 3 (read-only viewer): snapshot read-only mode
 # ---------------------------------------------------------------------------

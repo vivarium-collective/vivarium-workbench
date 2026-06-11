@@ -197,6 +197,8 @@ def _do_build(ws_root: Path, out_dir: Path, srv) -> dict:
         _catalog_data,
         _composites_data,
         _get_registry_data,
+        _enumerate_data_sources,
+        _investigations_data,
     )
     from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 
@@ -231,6 +233,13 @@ def _do_build(ws_root: Path, out_dir: Path, srv) -> dict:
     _write_json(api_dir / "iset-list.json",
                 {"investigations": _build_iset_summary_for_test(ws_root)})
 
+    # api/inputs/_global.json — global/shared inputs (GET /api/inputs with no slug)
+    try:
+        global_inputs = _inputs_payload(ws_root, "")
+    except Exception:
+        global_inputs = {}
+    _write_json(api_dir / "inputs" / "_global.json", global_inputs)
+
     # api/inputs/<inv>.json — per-investigation inputs (GET /api/inputs?investigation=<slug>)
     for inv_name in investigations:
         try:
@@ -259,6 +268,20 @@ def _do_build(ws_root: Path, out_dir: Path, srv) -> dict:
     except Exception:
         registry = {"processes": [], "types": []}
     _write_json(api_dir / "registry.json", registry)
+
+    # api/data-sources.json — repo-wide data-source bundle (GET /api/data-sources)
+    try:
+        data_sources = _enumerate_data_sources(bypass_cache=True)
+    except Exception:
+        data_sources = {"sources": []}
+    _write_json(api_dir / "data-sources.json", data_sources)
+
+    # api/investigations.json — flat studies list with DAG (GET /api/investigations)
+    try:
+        investigations_flat = _investigations_data(ws_root)
+    except Exception:
+        investigations_flat = {"investigations": []}
+    _write_json(api_dir / "investigations.json", investigations_flat)
 
     # api/iset/<id>.json
     for inv_name in investigations:

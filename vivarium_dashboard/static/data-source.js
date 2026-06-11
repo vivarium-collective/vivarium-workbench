@@ -58,9 +58,23 @@
   }
 
   function _inputsUrl(slug) {
+    if (!slug) {
+      // No investigation context → global/shared inputs.
+      return cfg().mode === "snapshot"
+        ? "/api/inputs/_global.json"
+        : "/api/inputs";
+    }
     return cfg().mode === "snapshot"
       ? "/api/inputs/" + encodeURIComponent(slug) + ".json"
       : "/api/inputs?investigation=" + encodeURIComponent(slug);
+  }
+
+  function _dataSourcesUrl() {
+    return cfg().mode === "snapshot" ? "/api/data-sources.json" : "/api/data-sources";
+  }
+
+  function _investigationsUrl() {
+    return cfg().mode === "snapshot" ? "/api/investigations.json" : "/api/investigations";
   }
 
   function _catalogUrl() {
@@ -154,6 +168,25 @@
      */
     async loadRegistry(refresh) {
       return _get(_registryUrl(refresh));
+    },
+
+    /**
+     * Load the repo-wide data-source bundle (workspace.yaml provider hook).
+     * Local mode:    fetches GET /api/data-sources
+     * Snapshot mode: fetches /api/data-sources.json from the static bundle
+     */
+    async loadDataSources() {
+      return _get(_dataSourcesUrl());
+    },
+
+    /**
+     * Load the flat per-study investigations list with DAG edges.
+     * Used by the studies left-rail and the Studies tab grid.
+     * Local mode:    fetches GET /api/investigations
+     * Snapshot mode: fetches /api/investigations.json from the static bundle
+     */
+    async loadInvestigationsFlat() {
+      return _get(_investigationsUrl());
     },
   };
 
