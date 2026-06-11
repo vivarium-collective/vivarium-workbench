@@ -350,3 +350,63 @@ def test_switchpage_gates_composite_explore_in_snapshot():
     assert "composite-explore" in text
     # The gate must redirect to simulation-setup, not crash
     assert "simulation-setup" in text
+
+
+# ---------------------------------------------------------------------------
+# Task 2 (full-surface): Simulations DB read-only
+# ---------------------------------------------------------------------------
+
+def test_data_source_has_simulations_loader():
+    """data-source.js must define loadSimulations + snapshot URL /api/simulations.json."""
+    text = (server.STATIC_DIR / "data-source.js").read_text()
+    assert "loadSimulations" in text, "data-source.js missing loadSimulations"
+    assert "/api/simulations.json" in text, "data-source.js missing /api/simulations.json"
+    assert "/api/simulations" in text, "data-source.js missing /api/simulations live URL"
+
+
+def test_walkthrough_routes_simulations_through_data_source():
+    """walkthrough.js must route _initSimulations through DataSource.loadSimulations."""
+    text = (server.STATIC_DIR / "walkthrough.js").read_text()
+    assert "DataSource.loadSimulations" in text, \
+        "walkthrough.js missing DataSource.loadSimulations routing"
+
+
+def test_bundle_exports_simulations(tmp_workspace, tmp_path):
+    """build_bundle writes api/simulations.json."""
+    from vivarium_dashboard import publish
+    out = tmp_path / "bundle"
+    publish.build_bundle(server.WORKSPACE, out)
+    assert (out / "api" / "simulations.json").is_file(), "api/simulations.json missing"
+    data = json.loads((out / "api" / "simulations.json").read_text())
+    assert "simulations" in data, "api/simulations.json missing 'simulations' key"
+
+
+# ---------------------------------------------------------------------------
+# Task 3 (full-surface): Visualizations/Analyses read-only
+# ---------------------------------------------------------------------------
+
+def test_data_source_has_visualization_classes_loader():
+    """data-source.js must define loadVisualizationClasses + snapshot URL."""
+    text = (server.STATIC_DIR / "data-source.js").read_text()
+    assert "loadVisualizationClasses" in text, \
+        "data-source.js missing loadVisualizationClasses"
+    assert "/api/visualization-classes.json" in text, \
+        "data-source.js missing /api/visualization-classes.json"
+
+
+def test_walkthrough_routes_visualizations_through_data_source():
+    """walkthrough.js must route _loadAnalysesPage through DataSource.loadVisualizationClasses."""
+    text = (server.STATIC_DIR / "walkthrough.js").read_text()
+    assert "DataSource.loadVisualizationClasses" in text, \
+        "walkthrough.js missing DataSource.loadVisualizationClasses routing"
+
+
+def test_bundle_exports_visualization_classes(tmp_workspace, tmp_path):
+    """build_bundle writes api/visualization-classes.json."""
+    from vivarium_dashboard import publish
+    out = tmp_path / "bundle"
+    publish.build_bundle(server.WORKSPACE, out)
+    assert (out / "api" / "visualization-classes.json").is_file(), \
+        "api/visualization-classes.json missing"
+    data = json.loads((out / "api" / "visualization-classes.json").read_text())
+    assert "classes" in data, "api/visualization-classes.json missing 'classes' key"

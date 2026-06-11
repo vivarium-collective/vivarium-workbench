@@ -1093,7 +1093,7 @@
 
     function _renderClassCard(c) {
       var previewBtn = (c.kind !== 'analysis')
-        ? '<button class="btn-mini" onclick="_vizClassPreview(\'' + _esc(c.address) + '\',\'' + _esc(c.name) + '\')">Preview</button>'
+        ? '<button class="btn-mini js-authoring" onclick="_vizClassPreview(\'' + _esc(c.address) + '\',\'' + _esc(c.name) + '\')">Preview</button>'
         : '';
       return '<div class="picker-row" data-kind="' + _esc(c.kind || 'visualization') + '">' +
         '<div class="picker-row-main">' +
@@ -1104,7 +1104,7 @@
         '<div class="picker-row-actions">' +
           previewBtn +
           (c.kind !== 'analysis'
-            ? '<button class="btn-mini" onclick="_useRegistryClass(\'visualization\', \'' + _esc(c.name) + '\')">Use</button>'
+            ? '<button class="btn-mini js-authoring" onclick="_useRegistryClass(\'visualization\', \'' + _esc(c.name) + '\')">Use</button>'
             : '') +
         '</div>' +
       '</div>';
@@ -1141,8 +1141,7 @@
     var container = document.getElementById('viz-picker-container');
     var countEl   = document.getElementById('viz-count');
     if (!container) return;
-    fetch('/api/visualization-classes')
-      .then(function(r) { return r.json(); })
+    window.DataSource.loadVisualizationClasses()
       .then(function(data) {
         var classes = (data && data.classes) || [];
         _renderAnalysesGroups(classes, container);
@@ -1182,7 +1181,7 @@
         schemaSnippet = '<details><summary class="muted" style="cursor:pointer;font-size:0.85em">config_schema</summary><code class="registry-schema">' + _esc(it.schema_preview) + '</code></details>';
       }
       var previewBtn = (kind === 'visualization')
-        ? '<button class="btn-mini" onclick="_vizClassPreview(\'' + _esc(it.address) + '\',\'' + _esc(it.name) + '\')">Preview</button>'
+        ? '<button class="btn-mini js-authoring" onclick="_vizClassPreview(\'' + _esc(it.address) + '\',\'' + _esc(it.name) + '\')">Preview</button>'
         : '';
       // Section divider when source group changes. Lightweight — keeps the
       // sort intent visible without committing to a full grouped-list layout.
@@ -1205,7 +1204,7 @@
         '</div>' +
         '<div class="picker-row-actions">' +
           previewBtn +
-          '<button class="btn-mini" onclick="_useRegistryClass(\'' + kind + '\', \'' + _esc(it.name) + '\')">Use</button>' +
+          '<button class="btn-mini js-authoring" onclick="_useRegistryClass(\'' + kind + '\', \'' + _esc(it.name) + '\')">Use</button>' +
         '</div>' +
       '</div>';
     }).join('');
@@ -11842,12 +11841,12 @@
     var explorerBtn = specId
       ? '<a href="?id=' + encodeURIComponent(specId) +
           '&run_id=' + encodeURIComponent(runId) + '#composite-explore" ' +
-          'class="action-btn" title="Open in Composite Explorer" ' +
+          'class="action-btn js-authoring" title="Open in Composite Explorer" ' +
           'style="text-decoration:none;" ' +
           'onclick="event.preventDefault(); _openSimulationInExplorer(\'' +
             _escSim(runId) + '\', \'' + _escSim(specId) + '\');">Open</a>'
       : '';
-    var deleteBtn = '<button class="action-btn" title="Delete simulation" ' +
+    var deleteBtn = '<button class="action-btn js-authoring" title="Delete simulation" ' +
       'onclick="_deleteSimulationRun(\'' + _escSim(runId) + '\')">🗑</button>';
     return (
       '<tr data-run-id="' + _escSim(runId) + '" style="border-bottom:1px solid #f3f4f6;">' +
@@ -11922,8 +11921,7 @@
     if (empty)   empty.style.display = 'none';
     if (table)   table.style.display = 'none';
 
-    fetch('/api/simulations')
-      .then(function (r) { return r.json(); })
+    window.DataSource.loadSimulations()
       .then(function (data) {
         if (data.error) {
           if (loading) loading.innerHTML =
