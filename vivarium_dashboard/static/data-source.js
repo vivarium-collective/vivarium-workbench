@@ -26,6 +26,13 @@
     return global.__DASH_CONFIG__ || { mode: "local-server" };
   }
 
+  // Return the configured base path (e.g. "/v2ecoli/dashboard") or "".
+  // Used in snapshot mode to prefix /api/*.json URLs so the bundle works
+  // when hosted at a URL subpath rather than the domain root.
+  function _base() {
+    return cfg().basePath || "";
+  }
+
   async function _get(url) {
     var r = await fetch(url, { headers: { "Accept": "application/json" } });
     if (!r.ok) throw new Error("fetch " + url + " -> " + r.status);
@@ -39,70 +46,84 @@
 
   function _studyUrl(slug) {
     return cfg().mode === "snapshot"
-      ? "/api/study/" + encodeURIComponent(slug) + ".json"
+      ? _base() + "/api/study/" + encodeURIComponent(slug) + ".json"
       : "/api/study/" + encodeURIComponent(slug);
   }
 
   function _isetUrl(id) {
     return cfg().mode === "snapshot"
-      ? "/api/iset/" + encodeURIComponent(id) + ".json"
+      ? _base() + "/api/iset/" + encodeURIComponent(id) + ".json"
       : "/api/iset/" + encodeURIComponent(id);
   }
 
   function _workspaceUrl() {
-    return cfg().mode === "snapshot" ? "/api/workspace.json" : "/api/workspace";
+    return cfg().mode === "snapshot"
+      ? _base() + "/api/workspace.json"
+      : "/api/workspace";
   }
 
   function _isetListUrl() {
-    return cfg().mode === "snapshot" ? "/api/iset-list.json" : "/api/iset-list";
+    return cfg().mode === "snapshot"
+      ? _base() + "/api/iset-list.json"
+      : "/api/iset-list";
   }
 
   function _inputsUrl(slug) {
     if (!slug) {
       // No investigation context → global/shared inputs.
       return cfg().mode === "snapshot"
-        ? "/api/inputs/_global.json"
+        ? _base() + "/api/inputs/_global.json"
         : "/api/inputs";
     }
     return cfg().mode === "snapshot"
-      ? "/api/inputs/" + encodeURIComponent(slug) + ".json"
+      ? _base() + "/api/inputs/" + encodeURIComponent(slug) + ".json"
       : "/api/inputs?investigation=" + encodeURIComponent(slug);
   }
 
   function _dataSourcesUrl() {
-    return cfg().mode === "snapshot" ? "/api/data-sources.json" : "/api/data-sources";
+    return cfg().mode === "snapshot"
+      ? _base() + "/api/data-sources.json"
+      : "/api/data-sources";
   }
 
   function _investigationsUrl() {
-    return cfg().mode === "snapshot" ? "/api/investigations.json" : "/api/investigations";
+    return cfg().mode === "snapshot"
+      ? _base() + "/api/investigations.json"
+      : "/api/investigations";
   }
 
   function _catalogUrl() {
-    return cfg().mode === "snapshot" ? "/api/catalog.json" : "/api/catalog";
+    return cfg().mode === "snapshot"
+      ? _base() + "/api/catalog.json"
+      : "/api/catalog";
   }
 
   function _compositesUrl() {
-    return cfg().mode === "snapshot" ? "/api/composites.json" : "/api/composites";
+    return cfg().mode === "snapshot"
+      ? _base() + "/api/composites.json"
+      : "/api/composites";
   }
 
   function _registryUrl(refresh) {
-    if (cfg().mode === "snapshot") return "/api/registry.json";
+    if (cfg().mode === "snapshot") return _base() + "/api/registry.json";
     return "/api/registry" + (refresh ? "?refresh=1" : "");
   }
 
   function _compositeResolveUrl(id) {
     return cfg().mode === "snapshot"
-      ? "/api/composite-state/" + encodeURIComponent(id) + ".json"
+      ? _base() + "/api/composite-state/" + encodeURIComponent(id) + ".json"
       : "/api/composite-resolve?id=" + encodeURIComponent(id);
   }
 
   function _simulationsUrl() {
-    return cfg().mode === "snapshot" ? "/api/simulations.json" : "/api/simulations";
+    return cfg().mode === "snapshot"
+      ? _base() + "/api/simulations.json"
+      : "/api/simulations";
   }
 
   function _visualizationClassesUrl() {
     return cfg().mode === "snapshot"
-      ? "/api/visualization-classes.json"
+      ? _base() + "/api/visualization-classes.json"
       : "/api/visualization-classes";
   }
 

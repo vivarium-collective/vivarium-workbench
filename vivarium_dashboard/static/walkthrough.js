@@ -3844,9 +3844,13 @@
 
     // Snapshot mode: set iframe src to ?static=1&stateUrl= (read-only loom view).
     // bigraph-loom fetches the stateUrl and renders it in View-only mode.
+    // basePath is non-empty when the bundle is hosted at a URL subpath (e.g.
+    // GitHub Pages project sites).  Prefix both the loom entry point and the
+    // stateUrl so all paths resolve under the configured subpath.
     if (document.body.classList.contains('snapshot')) {
-      var stateUrl = '/api/composite-state/' + encodeURIComponent(ref) + '.json';
-      iframe.src = '/bigraph-loom/index.html?static=1&stateUrl=' + encodeURIComponent(stateUrl);
+      var _snapshotBase = (window.__DASH_CONFIG__ && window.__DASH_CONFIG__.basePath) || "";
+      var stateUrl = _snapshotBase + '/api/composite-state/' + encodeURIComponent(ref) + '.json';
+      iframe.src = _snapshotBase + '/bigraph-loom/index.html?static=1&stateUrl=' + encodeURIComponent(stateUrl);
       iframe.style.display = '';
       return;
     }
