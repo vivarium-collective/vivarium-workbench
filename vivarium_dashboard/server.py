@@ -1322,13 +1322,16 @@ def _study_dir(name: str):
     """Resolve a study directory, preferring the v3 ``studies/`` location
     over the legacy ``investigations/`` location.
 
-    Studies created by /api/study-create-from-run live in ``studies/<name>/``.
-    Pre-Phase-1 investigations live in ``investigations/<name>/``. The aliased
-    /api/study-* handlers must find both.
+    Uses ``WorkspacePaths.study_dir`` as the primary lookup (handles nested
+    ``investigations/<inv>/studies/<slug>/`` layouts used by workspaces with a
+    custom ``layout:`` map in ``workspace.yaml``, e.g. v2e-invest).  Falls back
+    to the flat ``investigations/<name>/`` path for callers that reference a
+    pre-Phase-1 spec.yaml that is not discovered by ``iter_study_dirs``.
     """
-    studies_path = workspace_paths().studies / name
-    if studies_path.is_dir():
-        return studies_path
+    try:
+        return workspace_paths().study_dir(name)
+    except FileNotFoundError:
+        pass
     return workspace_paths().investigations / name
 
 
