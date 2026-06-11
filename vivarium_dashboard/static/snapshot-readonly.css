@@ -30,9 +30,10 @@
  */
 
 /* ── Hidden rail tabs ─────────────────────────────────────────────────── */
-body.snapshot a.menu-link[data-page="simulations"],
-body.snapshot a.menu-link[data-page="github"],
-body.snapshot a.menu-link[data-page="visualizations"] {
+/* Simulations DB and Visualizations/Analyses tabs are now read-only enabled
+   (Task 1-3 of the full-surface plan). Only the Branch/GitHub tab stays hidden
+   since git operations have no read-only equivalent in snapshot mode. */
+body.snapshot a.menu-link[data-page="github"] {
   display: none !important;
 }
 
@@ -109,7 +110,6 @@ body.snapshot .viv-iset-menu-new {
   display: none !important;
 }
 
-/* ── Composite Explorer: Explore button (requires live composite resolution) ── */
-body.snapshot button[onclick*="_openCompositeExplorer"] {
-  display: none !important;
-}
+/* Composite Explorer: Explore button is now available in snapshot mode via
+   bigraph-loom ?static=1&stateUrl= (read-only view). The old hide rule was
+   removed in the full-surface implementation (Task 1). */

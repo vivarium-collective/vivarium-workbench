@@ -90,6 +90,22 @@
     return "/api/registry" + (refresh ? "?refresh=1" : "");
   }
 
+  function _compositeResolveUrl(id) {
+    return cfg().mode === "snapshot"
+      ? "/api/composite-state/" + encodeURIComponent(id) + ".json"
+      : "/api/composite-resolve?id=" + encodeURIComponent(id);
+  }
+
+  function _simulationsUrl() {
+    return cfg().mode === "snapshot" ? "/api/simulations.json" : "/api/simulations";
+  }
+
+  function _visualizationClassesUrl() {
+    return cfg().mode === "snapshot"
+      ? "/api/visualization-classes.json"
+      : "/api/visualization-classes";
+  }
+
   var DataSource = {
     /** Return the current source config (default: local-server). */
     config: cfg,
@@ -187,6 +203,35 @@
      */
     async loadInvestigationsFlat() {
       return _get(_investigationsUrl());
+    },
+
+    /**
+     * Load the pre-resolved composite state for the given id.
+     * Local mode:    fetches GET /api/composite-resolve?id=<id>  (no overrides)
+     * Snapshot mode: fetches /api/composite-state/<id>.json from the static bundle
+     * For overrides in live mode, use the raw fetch with overrides param directly.
+     * @param {string} id - the composite spec id.
+     */
+    async loadCompositeResolve(id) {
+      return _get(_compositeResolveUrl(id));
+    },
+
+    /**
+     * Load the simulations index (all pre-run sims across the workspace).
+     * Local mode:    fetches GET /api/simulations
+     * Snapshot mode: fetches /api/simulations.json from the static bundle
+     */
+    async loadSimulations() {
+      return _get(_simulationsUrl());
+    },
+
+    /**
+     * Load the registered visualization/analysis classes.
+     * Local mode:    fetches GET /api/visualization-classes
+     * Snapshot mode: fetches /api/visualization-classes.json from the static bundle
+     */
+    async loadVisualizationClasses() {
+      return _get(_visualizationClassesUrl());
     },
   };
 

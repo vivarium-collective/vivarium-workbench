@@ -430,11 +430,8 @@
     // composite-explore needs live composite resolution (build_core) which is
     // unavailable in a static bundle → redirect to simulation-setup (composites list).
     if (document.body.classList.contains('snapshot')) {
-      if (pageId === 'simulations' || pageId === 'github' || pageId === 'studies' || pageId === 'visualizations') {
+      if (pageId === 'github' || pageId === 'studies') {
         pageId = 'investigations';
-      }
-      if (pageId === 'composite-explore') {
-        pageId = 'simulation-setup';
       }
     }
     document.querySelectorAll('.page').forEach(function(s) { s.classList.remove('active'); });
@@ -3717,11 +3714,19 @@
   window._ceSnapshotToInitial = _ceSnapshotToInitial;
 
   function _ceFetch() {
-    var url = '/api/composite-resolve?id=' + encodeURIComponent(window._ceCurrent.id) +
-      '&overrides=' + encodeURIComponent(JSON.stringify(window._ceCurrent.overrides));
-    fetch(url)
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
+    var id = window._ceCurrent.id;
+    var isSnapshot = document.body.classList.contains('snapshot');
+    var p;
+    if (isSnapshot) {
+      // Snapshot mode: load pre-built state from static bundle via DataSource.
+      p = window.DataSource.loadCompositeResolve(id);
+    } else {
+      // Live mode: fetch resolve endpoint with overrides.
+      var url = '/api/composite-resolve?id=' + encodeURIComponent(id) +
+        '&overrides=' + encodeURIComponent(JSON.stringify(window._ceCurrent.overrides));
+      p = fetch(url).then(function(r) { return r.json(); });
+    }
+    p.then(function(data) {
         if (data.error) {
           document.getElementById('ce-loading').innerHTML =
             '<span style="color:#c00">Error: ' + _esc(data.error) + '</span>';
@@ -3815,6 +3820,15 @@
     var iframe = document.getElementById('composite-explore-frame');
     if (!iframe) return;
 
+    // Snapshot mode: set iframe src to ?static=1&stateUrl= (read-only loom view).
+    // bigraph-loom fetches the stateUrl and renders it in View-only mode.
+    if (document.body.classList.contains('snapshot')) {
+      var stateUrl = '/api/composite-state/' + encodeURIComponent(ref) + '.json';
+      iframe.src = '/bigraph-loom/index.html?static=1&stateUrl=' + encodeURIComponent(stateUrl);
+      iframe.style.display = '';
+      return;
+    }
+
     function _postState(state, name) {
       var payload = {
         type: 'composite:load',
@@ -3850,9 +3864,8 @@
       // Caller already has the resolved state (e.g. from _ceFetch via composite-resolve)
       _postState(stateObj, nameHint || ref);
     } else {
-      // Fetch state independently via /api/composite-state
-      fetch('/api/composite-state?ref=' + encodeURIComponent(ref))
-        .then(function(r) { return r.json(); })
+      // Fetch state independently via DataSource (snapshot → static JSON; live → /api/composite-state)
+      window.DataSource.loadCompositeResolve(ref)
         .then(function(data) {
           if (data.error) {
             console.error('composite-state error:', data.error);

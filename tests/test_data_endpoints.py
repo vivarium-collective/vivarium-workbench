@@ -332,12 +332,14 @@ def test_walkthrough_routes_new_kept_tab_fetches_through_data_source():
             f"walkthrough.js missing DataSource routing for kept-tab read: {symbol!r}"
 
 
-def test_snapshot_readonly_css_hides_explore_button():
-    """snapshot-readonly.css must contain a rule hiding the Explore button on
-    composite cards, since composite resolution (build_core) requires a live server."""
+def test_snapshot_composite_explore_available_readonly():
+    """snapshot-readonly.css must NOT hide the Explore button — it is now routed
+    through bigraph-loom ?static=1 (read-only viewer).  The old hide rule was
+    removed in the Task-1 full-surface implementation."""
     text = (server.STATIC_DIR / "snapshot-readonly.css").read_text()
-    assert "_openCompositeExplorer" in text, \
-        "snapshot-readonly.css missing rule to hide the Explore/composite explorer button"
+    assert 'button[onclick*="_openCompositeExplorer"]' not in text, \
+        ("snapshot-readonly.css still hides the Explore button; "
+         "Task 1 removed that rule — Explore now works read-only via loom ?static=1")
 
 
 def test_switchpage_gates_composite_explore_in_snapshot():

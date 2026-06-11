@@ -196,9 +196,12 @@ def _do_build(ws_root: Path, out_dir: Path, srv) -> dict:
         _inputs_payload,
         _catalog_data,
         _composites_data,
+        _composite_resolve_data,
         _get_registry_data,
         _enumerate_data_sources,
         _investigations_data,
+        _simulations_data,
+        _visualization_classes_data,
     )
     from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 
@@ -262,6 +265,34 @@ def _do_build(ws_root: Path, out_dir: Path, srv) -> dict:
         composites = {"composites": []}
     _write_json(api_dir / "composites.json", composites)
 
+    # api/composite-state/<id>.json — pre-resolved composite state for loom ?static=1
+    composite_state_dir = api_dir / "composite-state"
+    composite_state_dir.mkdir(parents=True, exist_ok=True)
+    for comp in (composites.get("composites") or []):
+        cid = comp.get("id")
+        if not cid:
+            continue
+        try:
+            data = _composite_resolve_data(cid)
+        except Exception:
+            data = None
+        if data is not None:
+            _write_json(composite_state_dir / f"{cid}.json", data)
+
+    # api/simulations.json — pre-run simulations (GET /api/simulations)
+    try:
+        sims = _simulations_data(ws_root)
+    except Exception:
+        sims = {"simulations": [], "current": None}
+    _write_json(api_dir / "simulations.json", sims)
+
+    # api/visualization-classes.json — registered viz/analysis classes
+    try:
+        viz_classes = _visualization_classes_data(ws_root)
+    except Exception:
+        viz_classes = {"classes": []}
+    _write_json(api_dir / "visualization-classes.json", viz_classes)
+
     # api/registry.json — discovered process/type registry (GET /api/registry)
     try:
         registry = _get_registry_data(bypass_cache=True)
@@ -303,6 +334,18 @@ def _do_build(ws_root: Path, out_dir: Path, srv) -> dict:
     for src in STATIC_DIR.iterdir():
         if src.is_file():
             shutil.copy2(src, assets_dir / src.name)
+
+    # Copy bigraph-loom dist → bundle/bigraph-loom/ (read-only loom ?static=1 mode).
+    # Skipped gracefully when bigraph_loom is not installed in this environment.
+    try:
+        import bigraph_loom as _bl
+        loom_src = Path(_bl.asset_dir())
+        loom_dst = out_dir / "bigraph-loom"
+        if loom_dst.exists():
+            shutil.rmtree(loom_dst)
+        shutil.copytree(str(loom_src), str(loom_dst))
+    except (ImportError, Exception):
+        pass
 
     # ------------------------------------------------------------------
     # 4. Render home SPA shell → bundle/index.html
