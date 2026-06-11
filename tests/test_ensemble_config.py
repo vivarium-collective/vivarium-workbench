@@ -9,8 +9,11 @@ whether a variant is delegatable and whether the workspace can delegate.
 Grounded against ``v2ecoli/v2ecoli/configs/default.json`` +
 ``v2ecoli/workflow/variants.py`` — the ``target`` MUST be ``<proc>.<key>``.
 """
+import pytest
+
 from vivarium_dashboard.lib.ensemble_config import (
     build_workflow_config,
+    delegation_available,
     is_delegatable_sweep,
 )
 
@@ -48,3 +51,45 @@ def test_sweep_over_bare_key_is_not_delegatable():
     assert is_delegatable_sweep({"kind": "sweep", "sweep_over": {"proc.b": [1, 2]}}) is True
     assert is_delegatable_sweep({"kind": "seeds", "n_seeds": 3}) is True
     assert is_delegatable_sweep({"name": "plain"}) is False    # not a sweep at all
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — delegation availability (cheap fs/yaml check; no v2ecoli import)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def tmp_workspace_v2ecoli(tmp_path):
+    """A workspace whose .venv exposes the v2ecoli-workflow console script."""
+    ws = tmp_path / "v2e-ws"
+    bind = ws / ".venv" / "bin"
+    bind.mkdir(parents=True)
+    (bind / "v2ecoli-workflow").write_text("#!/bin/sh\n")
+    (ws / "workspace.yaml").write_text(
+        "schema_version: 2\nname: v2ecoli\npackage_path: v2ecoli\n")
+    return ws
+
+
+@pytest.fixture
+def tmp_workspace_other(tmp_path):
+    """A non-v2ecoli workspace: no console script, unrelated package_path."""
+    ws = tmp_path / "other-ws"
+    (ws / ".venv" / "bin").mkdir(parents=True)
+    (ws / "workspace.yaml").write_text(
+        "schema_version: 2\nname: viva-munk\npackage_path: multi_cell\n")
+    return ws
+
+
+def test_delegation_available_requires_v2ecoli_workflow(
+        tmp_workspace_v2ecoli, tmp_workspace_other):
+    assert delegation_available(tmp_workspace_v2ecoli) is True   # console script present
+    assert delegation_available(tmp_workspace_other) is False
+
+
+def test_delegation_available_via_package_path(tmp_path):
+    """No console script, but workspace.yaml package_path == v2ecoli → available."""
+    ws = tmp_path / "pkg-only"
+    ws.mkdir()
+    (ws / "workspace.yaml").write_text(
+        "schema_version: 2\nname: v2ecoli\npackage_path: v2ecoli\n")
+    assert delegation_available(ws) is True

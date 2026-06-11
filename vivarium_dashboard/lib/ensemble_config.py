@@ -23,6 +23,7 @@ shares one ``out_dir`` hive store.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 # Inline default mirroring v2ecoli/v2ecoli/configs/default.json. We keep this
@@ -121,4 +122,28 @@ def is_delegatable_sweep(variant: dict[str, Any]) -> bool:
         if not sweep_over:
             return False
         return all("." in str(key) for key in sweep_over)
+    return False
+
+
+def delegation_available(ws_root) -> bool:
+    """True iff ``ws_root`` can delegate an ensemble to v2ecoli-workflow.
+
+    A cheap filesystem / yaml check — deliberately does NOT import v2ecoli into
+    the dashboard process. Available when EITHER:
+      * ``<ws>/.venv/bin/v2ecoli-workflow`` exists (the console script is
+        installed in the workspace venv), OR
+      * ``workspace.yaml`` declares ``package_path: v2ecoli``.
+    """
+    ws = Path(ws_root)
+    if (ws / ".venv" / "bin" / "v2ecoli-workflow").exists():
+        return True
+    ws_yaml = ws / "workspace.yaml"
+    if ws_yaml.is_file():
+        try:
+            import yaml
+            data = yaml.safe_load(ws_yaml.read_text(encoding="utf-8")) or {}
+        except Exception:  # noqa: BLE001 — a malformed yaml is simply "not available"
+            return False
+        if isinstance(data, dict) and data.get("package_path") == "v2ecoli":
+            return True
     return False
