@@ -5332,7 +5332,13 @@
     var panel = document.getElementById('investigation-study-embed-panel');
     var frame = document.getElementById('investigation-study-embed-frame');
     var nameEl = document.getElementById('investigation-study-embed-name');
-    if (!panel || !frame) return;
+    if (!panel || !frame) {
+      // This view (e.g. the report / deep-link investigation view) has no
+      // in-place study-embed panel — navigate to the study page directly so the
+      // sidebar study link still works instead of dying silently.
+      window.location = '/studies/' + encodeURIComponent(name);
+      return;
+    }
     window._currentInvestigationStudy = name;
     frame.src = '/studies/' + encodeURIComponent(name);
     if (nameEl) nameEl.textContent = name;
@@ -5539,8 +5545,13 @@
   // report/card render and the live Refresh re-render). Each card carries a
   // title row with the freshness badge, the media (inline SVG or data-URI
   // <img>), and any caption/provenance text.
-  function _renderChartCardsHtml(charts) {
-    return (charts || []).map(function(c) {
+  function _renderChartCardsHtml(charts, slug) {
+    return (charts || []).map(function(c, i) {
+      // Per-figure annotation host: a "study-...-chart-..." id matches the
+      // feedback ID_PATTERNS (/^study-/), so each figure gets its OWN 💬
+      // comment affordance (keyed by this id), not just the section-level one.
+      var cardId = 'study-' + (slug || 'x') + '-chart-'
+        + String(c.key || ('fig' + i)).replace(/[^a-zA-Z0-9_-]/g, '-');
       var titleHtml = '';
       var badge = _freshnessBadge(c);
       var titleText = c.title || c.key || '';
@@ -5560,7 +5571,7 @@
       var media = c.img
         ? '<img class="chart-img" src="' + c.img + '" alt="' + _h(c.key || 'chart') + '" loading="lazy">'
         : (c.svg || '');
-      return '<div class="chart-card">' + titleHtml + media + capHtml + '</div>';
+      return '<div class="chart-card" id="' + cardId + '">' + titleHtml + media + capHtml + '</div>';
     }).join('');
   }
 
@@ -5590,7 +5601,7 @@
           .then(function(j) {
             var container = document.getElementById('study-' + study + '-charts');
             if (container) {
-              var cards = _renderChartCardsHtml(j.charts || []);
+              var cards = _renderChartCardsHtml(j.charts || [], study);
               // Replace everything after the <h3> heading (preserve the
               // heading + its Refresh button).
               var h3 = container.querySelector('h3');
@@ -6488,7 +6499,7 @@
           + 'background:#f8fafc;color:#334155;cursor:pointer;">↻ Refresh visualizations</button>'
           + '<span class="chart-refresh-status muted small" style="margin-left:4px;"></span>'
           + '</h3>'
-          + _renderChartCardsHtml(charts)
+          + _renderChartCardsHtml(charts, slug)
           + '</div>'
         : '';
 
@@ -6517,9 +6528,26 @@
       var testsHtml = '';
       if (tests.length) {
         // Aggregate latest outcomes by test name so we can show PASS/FAIL pills.
+        // Merge BOTH the authored outcomes AND the run/outcome-spine
+        // evaluator-computed outcomes, so each test surfaces how it actually ran
+        // (measured_value, evaluated_by code/agent) and whether the code verdict
+        // agrees with the authored one (reconcile).
         var outcomeByTest = {};
         if (latestRun && latestRun.outcomes) {
-          Object.keys(latestRun.outcomes).forEach(function(k) { outcomeByTest[k] = latestRun.outcomes[k]; });
+          Object.keys(latestRun.outcomes).forEach(function(k) { outcomeByTest[k] = Object.assign({}, latestRun.outcomes[k]); });
+        }
+        if (latestRun && latestRun.computed_outcomes) {
+          Object.keys(latestRun.computed_outcomes).forEach(function(k) {
+            var c = latestRun.computed_outcomes[k] || {};
+            var base = outcomeByTest[k] || {};
+            if (base.result == null && c.result != null) base.result = c.result;   // code verdict when no authored one
+            if (c.measured_value != null && base.measured_value == null) base.measured_value = c.measured_value;
+            if (c.evaluated_by) base.evaluated_by = c.evaluated_by;   // code | agent | needs_rerun
+            if (c.operator) base.operator = c.operator;
+            if (c.reconcile) base.reconcile = c.reconcile;            // agree | divergent | no_authored
+            if (base.detail == null && (c.detail || c.reason)) base.detail = c.detail || c.reason;
+            outcomeByTest[k] = base;
+          });
         }
         // At-a-glance summary so a reviewer doesn't have to count pills.
         var _tc = { PASS: 0, FAIL: 0, PARTIAL: 0, SKIP: 0, PENDING: 0 };
@@ -6538,7 +6566,7 @@
         if (_tc.PENDING) _tcParts.push(_tc.PENDING + ' ⏳ pending');
         var _tcSummary = _tcParts.length ? (' — ' + _tcParts.join(' · ')) : '';
         testsHtml = '<div id="' + sid.tests + '"><h3>How do we judge success? <span class="muted small">(' + tests.length + ' tests' + _tcSummary + ')</span></h3>'
-          + '<p class="muted small" style="margin:0 0 8px 0">Each test makes a specific scientific claim. The latest result (pass/fail) appears as a pill when we have evidence; the technical assertion is hidden by default.</p>'
+          + '<p class="muted small" style="margin:0 0 8px 0">Each test makes a specific scientific claim with a machine-checkable criterion (<code>measure</code> + <code>pass_if</code>). Tests are now <strong>evaluated by code against the run</strong> (the run/outcome spine: RunReader → evaluator): the pill shows the result, and the evidence line shows the <em>measured value</em>, whether it was computed by <em>code</em> or routed to an <em>agent</em>, and whether the code verdict <em>agrees</em> with the authored one (reconcile). <span class="muted">⏳ pending = the study hasn\'t run yet.</span> Technical assertion + the exact evaluator are under "Technical details".</p>'
           + tests.map(function(t) {
               var name = t.name || '(unnamed)';
               var cls = t.classification || 'unclassified';
@@ -8556,6 +8584,41 @@
       // Coordinated-generation provenance banner (expert-feedback A.3).
       +   generationBannerHtml
 
+      // ── Execution-status banner (LEADS the report, before the folds) ────
+      // Accurate to the actual run state: a pre-execution review notice when
+      // nothing has run yet, otherwise a concise post-execution lead that names
+      // the still-planned studies. Placed at the very top so it never wedges
+      // between the collapsible sections.
+      +   (function() {
+            var alls = specs || [];
+            var planning = alls.filter(function(s) { return !(s.runs || []).length && !(s.findings || []).length; });
+            var total = alls.length, n = planning.length;
+            if (!n) return '';
+            var names = planning.map(function(s) { return s.name || s.slug || ''; }).filter(Boolean).join(', ');
+            var pre = (n === total);   // genuinely pre-execution — nothing has run
+            var body = pre
+              ? '<strong>Planning phase — pre-execution review.</strong> None of the ' + total
+                + ' studies have run yet; the charts are the <strong>workspace pre-execution baseline</strong>.'
+                + ' For each study the key review surfaces are:'
+              : '<strong>' + (total - n) + ' of ' + total + ' studies have completed runs</strong> — their'
+                + ' verdicts + evaluator-computed test outcomes are below. ' + n + ' still in planning'
+                + (names ? ' (<code>' + _h(names) + '</code>)' : '')
+                + ': their charts are pre-execution baselines and their tests are pending those runs.'
+                + ' For the planned studies the key review surfaces are:';
+            return '<div class="planning-phase-banner" id="planning-phase-banner">'
+              + '<div class="planning-phase-banner-icon">📝</div>'
+              + '<div class="planning-phase-banner-content">'
+              +   '<div class="planning-phase-banner-body">' + body + '</div>'
+              +   '<ul class="planning-phase-banner-list">'
+              +     '<li><strong>Conditions</strong> — variants and their parameter overrides, plus the model settings awaiting your call.</li>'
+              +     '<li><strong>Expected behavior</strong> — what each test claims will pass / fail and the criterion it uses (flag any under- or over-specified).</li>'
+              +     '<li><strong>Baseline visualizations</strong> — what the system looks like before the study\'s mechanism lands.</li>'
+              +   '</ul>'
+              +   '<div class="planning-phase-banner-foot">Click the <strong>💬</strong> icon next to any section to leave inline feedback. "Generate feedback report" (bottom-right) packages everything into a single yaml file.</div>'
+              + '</div>'
+              + '</div>';
+          })()
+
       // ── LAYER 1: EXECUTIVE ─────────────────────────────────────────────
       // Authored narrative + conclusions for a human reviewer, at the very
       // top. Reads iset.executive; renders nothing if the field is absent
@@ -8694,32 +8757,6 @@
             return h + '</details>';
           })()
 
-      // Planning-phase banner: any study that has not yet produced runs
-      // is treated as planning, and the whole report leads with a notice
-      // that the doc is a pre-execution spec for expert review.
-      +   (function() {
-            var planningCount = (specs || []).filter(function(s) {
-              return !(s.runs || []).length && !(s.findings || []).length;
-            }).length;
-            if (!planningCount) return '';
-            return '<div class="planning-phase-banner" id="planning-phase-banner">'
-              + '<div class="planning-phase-banner-icon">📝</div>'
-              + '<div class="planning-phase-banner-content">'
-              +   '<div class="planning-phase-banner-body">'
-              +     '<strong>Planning phase — pre-execution review.</strong> '
-              +     planningCount + ' of ' + (specs || []).length + ' studies have not yet run. '
-              +     'The charts below come from the <strong>workspace pre-execution baseline</strong>. '
-              +     'For each study, the most important sections for expert review are:'
-              +   '</div>'
-              +   '<ul class="planning-phase-banner-list">'
-              +     '<li><strong>Conditions</strong> — variants and their parameter overrides, plus the model settings awaiting your call. Edit values in the live dashboard\'s Build tab, or comment here.</li>'
-              +     '<li><strong>Expected behavior</strong> — what each test claims will pass / fail and the criterion it uses. Flag any test that\'s under- or over-specified.</li>'
-              +     '<li><strong>Baseline visualizations</strong> — what the system looks like before the study\'s mechanism lands. Comment on whether the trace matches your intuition.</li>'
-              +   '</ul>'
-              +   '<div class="planning-phase-banner-foot">Click the <strong>💬</strong> icon next to any section to leave inline feedback. "Generate feedback report" (bottom-right) packages everything into a single yaml file to send back.</div>'
-              + '</div>'
-              + '</div>';
-          })()
 
       +   ((iset.biological_story || '').trim()
           ? '<details id="biology" class="report-fold">'
