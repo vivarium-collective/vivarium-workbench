@@ -107,3 +107,72 @@ def test_data_source_interface_is_stable():
     for route in ["/api/study/", "/api/iset/", "/api/workspace", "__DASH_CONFIG__"]:
         assert route in text, f"data-source.js missing route: {route!r}"
     assert server.Handler._build_api_study_response("does-not-exist")[1] == 404
+
+
+# ---------------------------------------------------------------------------
+# FIX 1 regression: the data-source.js <script src> URL in study-detail.html
+# must resolve to an existing file through the server's static handler.
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+
+def _static_handler_resolve(url: str):
+    """Replicate the server's static-file resolution logic (server.py ~6169-6195).
+
+    Returns the resolved Path if the URL maps to an existing bundled file,
+    otherwise None.  Mirrors:
+      rel = url.lstrip("/")
+      bundled = STATIC_DIR / rel           → serve if exists
+      if rel.startswith("assets/"):
+          bundled_alt = STATIC_DIR / rel[7:]  → serve if exists
+    """
+    path_only = url.split("?", 1)[0]
+    rel = path_only.lstrip("/")
+    bundled = server.STATIC_DIR / rel
+    if bundled.is_file():
+        return bundled
+    if rel.startswith("assets/"):
+        bundled_alt = server.STATIC_DIR / rel[len("assets/"):]
+        if bundled_alt.is_file():
+            return bundled_alt
+    return None
+
+
+def test_study_detail_data_source_script_url_resolves(tmp_workspace):
+    """The <script src> for data-source.js in study-detail.html must map to an
+    existing bundled file through the server's static handler — not produce a 404.
+
+    Previously the template used ``/static/data-source.js`` which doubled the
+    ``static/`` directory prefix (STATIC_DIR / "static/data-source.js" → absent).
+    The correct URL is ``/data-source.js`` (root-relative, matches study-detail.js
+    convention at the bottom of the same template).
+    """
+    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    spec = _study_detail_spec("demo")
+    html = _render_study_detail_html("demo", spec)
+
+    # Extract all <script src="..."> URLs that mention data-source.js.
+    srcs = _re.findall(r'<script\s+src="([^"]*data-source\.js[^"]*)"', html)
+    assert srcs, "study-detail.html must contain a <script src=...data-source.js...> tag"
+
+    for src in srcs:
+        resolved = _static_handler_resolve(src)
+        assert resolved is not None, (
+            f"<script src={src!r}> does not resolve to an existing bundled file "
+            f"through the static handler.  "
+            f"Expected a root-relative URL like /data-source.js "
+            f"(not /static/data-source.js which doubles the directory prefix)."
+        )
+
+
+# ---------------------------------------------------------------------------
+# FIX 2: _build_api_study_response validates slug → returns 400 for bad slug
+# ---------------------------------------------------------------------------
+
+def test_api_study_builder_returns_400_for_invalid_slug(tmp_workspace):
+    """After moving the slug-regex guard into the builder, an invalid slug must
+    return HTTP 400 from the pure builder (not only from do_GET)."""
+    body, code = server.Handler._build_api_study_response("../traversal")
+    assert code == 400
+    assert "error" in json.loads(body)

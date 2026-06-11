@@ -5994,14 +5994,11 @@ class Handler(BaseHTTPRequestHandler):
         _path_only_pre = self.path.split("?", 1)[0]
         if _path_only_pre.startswith("/api/study/"):
             _slug = _path_only_pre.split("/api/study/", 1)[-1].strip("/")
-            if not _SLUG_RE.match(_slug):
-                return self._json({"error": "invalid slug"}, 400)
-            _spec = _study_detail_spec(_slug)
-            if _spec is None:
-                return self._json({"error": f"study not found: {_slug}"}, 404)
-            return self._json(_spec, 200)
+            # Delegate entirely to the pure builder (slug validation + lookup
+            # both live there so the live path and the tested builder are identical).
+            return self._send_json_bytes(*Handler._build_api_study_response(_slug))
         if _path_only_pre == "/api/config":
-            return self._json({"mode": "local-server"}, 200)
+            return self._send_json_bytes(*Handler._build_api_config_response())
 
         # Resolve /api/study-* aliases to their /api/investigation-* originals so
         # the rest of the dispatch chain only needs to know one set of paths.
@@ -12047,8 +12044,14 @@ if __name__ == "__main__":
 
         Returns (json_bytes, http_status).  Pure (no socket I/O) so tests can
         call it without a live server.  The do_GET branch calls this and emits
-        the bytes via self._json().
+        the bytes via self._send_json_bytes().
+
+        Validates the slug with _SLUG_RE first so the live path and builder
+        are identical — callers that skip do_GET (e.g. tests) still get the
+        400 on traversal/invalid slugs.
         """
+        if not _SLUG_RE.match(slug):
+            return _json_body({"error": "invalid slug"}), 400
         spec = _study_detail_spec(slug)
         if spec is None:
             return _json_body({"error": f"study not found: {slug}"}), 404
@@ -14152,6 +14155,19 @@ if __name__ == "__main__":
                 time.sleep(1.0)
         except (BrokenPipeError, ConnectionResetError):
             return
+
+    def _send_json_bytes(self, body: bytes, code: int):
+        """Send pre-encoded JSON bytes with the standard JSON response headers.
+
+        Used by do_GET branches that call a ``_build_*_response`` builder (which
+        already encodes to bytes) so the encoding step is not duplicated.
+        """
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
 
     def _json(self, data: dict, code: int):
         body = _json_body(data)

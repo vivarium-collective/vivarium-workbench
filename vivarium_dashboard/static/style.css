@@ -1992,3 +1992,217 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 
 /* Investigation name above its studies in the left rail */
 .rail-iset-name{ padding:2px 14px 6px; font-size:0.82em; font-weight:600; color:#4338ca; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Biology-at-a-glance — planning-phase, biologist-first.
+ *
+ * Renders at the top of the study Overview tab whenever a study.yaml
+ * declares any of: biological_summary, study_card, literature_anchors.
+ *
+ * Goal: a biologist scrolls past everything else and gets a complete
+ * understanding of the study before scrolling into listener paths or
+ * test-spec details.
+ * ─────────────────────────────────────────────────────────────────── */
+.biology-glance {
+  margin: 0 0 18px 0;
+  padding: 14px 18px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-left: 5px solid #16a34a;
+  border-radius: 8px;
+}
+.biology-glance-label {
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #166534;
+  margin: 0 0 8px 0;
+  font-weight: 600;
+}
+.biology-summary-callout {
+  margin-bottom: 14px;
+}
+.biology-summary-callout .biology-prose {
+  margin: 0;
+  font-size: 1.02em;
+  line-height: 1.55;
+  color: #14532d;
+  white-space: pre-line;
+}
+.study-card {
+  margin-bottom: 14px;
+  background: #fff;
+  border-radius: 6px;
+  padding: 10px 14px;
+  border: 1px solid #d1fae5;
+}
+.study-card-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.93em;
+}
+.study-card-table th {
+  text-align: left;
+  font-weight: 600;
+  color: #166534;
+  background: #f0fdf4;
+  padding: 6px 10px;
+  white-space: nowrap;
+  vertical-align: top;
+  width: 180px;
+  border-bottom: 1px solid #bbf7d0;
+}
+.study-card-table td {
+  padding: 6px 10px;
+  vertical-align: top;
+  color: #14532d;
+  border-bottom: 1px solid #f0fdf4;
+  line-height: 1.5;
+}
+.study-card-table tr:last-child th,
+.study-card-table tr:last-child td {
+  border-bottom: none;
+}
+.literature-anchors {
+  background: #fff;
+  border-radius: 6px;
+  padding: 10px 14px;
+  border: 1px solid #d1fae5;
+}
+.literature-anchor-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.literature-anchor-card {
+  padding: 8px 12px;
+  background: #f8fefa;
+  border-left: 3px solid #16a34a;
+  border-radius: 4px;
+  font-size: 0.92em;
+}
+.literature-anchor-card .anchor-expectation {
+  font-weight: 500;
+  color: #064e3b;
+  margin-bottom: 4px;
+  line-height: 1.45;
+}
+.literature-anchor-card .anchor-observable,
+.literature-anchor-card .anchor-source,
+.literature-anchor-card .anchor-status {
+  font-size: 0.88em;
+  color: #475569;
+  margin: 2px 0;
+  line-height: 1.45;
+}
+.literature-anchor-card .anchor-observable code {
+  font-size: 0.92em;
+  background: #fff;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid #d1fae5;
+}
+.literature-anchor-card .anchor-status {
+  font-style: italic;
+}
+
+/* ─── Investigation-level biology story banner ─────────────────────── */
+.investigation-biology-story {
+  padding: 16px 20px;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-left: 5px solid #0284c7;
+  border-radius: 8px;
+  margin-bottom: 18px;
+}
+.investigation-biology-story h2 {
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #075985;
+  margin: 0 0 8px 0;
+  font-weight: 600;
+}
+.investigation-biology-story .biology-prose {
+  margin: 0;
+  font-size: 1em;
+  line-height: 1.6;
+  color: #0c4a6e;
+  white-space: pre-line;
+}
+
+/* ─── Pre-run expert review (study Overview) ───────────────────────── */
+.pre-run-expert-review {
+  margin-top: 18px;
+  padding: 14px 16px;
+  background: #faf5ff;
+  border: 1px solid #e9d5ff;
+  border-left: 5px solid #a855f7;
+  border-radius: 8px;
+}
+.pre-run-expert-review .overview-label {
+  color: #6b21a8;
+}
+.expert-question-list { display: flex; flex-direction: column; gap: 10px }
+.expert-question-card {
+  padding: 10px 14px;
+  background: #fff;
+  border: 1px solid #e9d5ff;
+  border-left: 4px solid #a855f7;
+  border-radius: 6px;
+}
+.expert-question-card.status-resolved { border-left-color: #10b981 }
+.expert-question-header {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 0.85em; color: #6b21a8; margin-bottom: 6px;
+}
+.expert-question-id {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85em;
+  background: #ede9fe; padding: 1px 6px; border-radius: 3px;
+}
+.expert-question-status {
+  font-size: 0.78em;
+  padding: 1px 6px; border-radius: 9999px;
+  background: #fef3c7; color: #92400e;
+}
+.expert-question-card.status-resolved .expert-question-status {
+  background: #d1fae5; color: #065f46;
+}
+.expert-question-asked-to {
+  font-size: 0.78em; color: #6b7280; margin-left: auto;
+}
+.expert-question-text {
+  font-size: 0.95em; line-height: 1.55; color: #1e1b4b;
+  margin-bottom: 6px;
+}
+.expert-question-alternatives,
+.expert-question-impact {
+  font-size: 0.9em; color: #475569; line-height: 1.5;
+  margin: 4px 0;
+}
+.expert-question-alternatives ul {
+  margin: 4px 0 0 18px; padding: 0;
+}
+.expert-question-alternatives li { margin: 2px 0 }
+.expert-question-impact em,
+.expert-question-alternatives em {
+  color: #6b21a8; font-style: normal; font-weight: 600;
+}
+.expert-question-blocks,
+.expert-question-response {
+  font-size: 0.88em; margin: 6px 0 0 0; color: #475569;
+}
+.expert-question-blocks summary,
+.expert-question-response summary {
+  cursor: pointer; padding: 3px 0; color: #6b7280;
+}
+.expert-question-blocks ul {
+  margin: 4px 0 0 18px; padding: 0;
+}
+.expert-question-blocks li { margin: 2px 0; font-size: 0.92em }
+.expert-question-response p {
+  margin: 4px 0; padding: 6px 10px; background: #faf5ff; border-radius: 4px;
+}
