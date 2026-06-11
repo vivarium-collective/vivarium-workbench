@@ -1798,6 +1798,7 @@
   function _buildCatalogChips() {
     var chipsEl = document.getElementById('catalog-tag-chips');
     if (!chipsEl) return;
+    chipsEl.innerHTML = ''; return; // tag filter chips hidden
     var allTags = [];
     window._catalogModules.forEach(function(m) {
       (m.tags || []).forEach(function(t) {
@@ -1965,9 +1966,7 @@
       var rows = modules.map(function(m) {
         var divider = _maybeSectionDivider(prevL, m);
         prevL = m;
-        var tagPills = (m.tags || []).map(function(t) {
-          return '<span class="tag-pill">' + _esc(t) + '</span>';
-        }).join('');
+        var tagPills = ''; // tag pills hidden
         return divider + '<div class="module-list-row' + (m.kind === 'workspace' ? ' module-row-workspace' : '') + '">' +
           '<span class="name">' + _esc(m.name) + '</span>' +
           '<span class="desc">' + tagPills + ' ' + _esc(m.description || '') + _installedMeta(m) + '</span>' +
@@ -1981,9 +1980,7 @@
       var cards = modules.map(function(m) {
         var divider = _maybeSectionDivider(prevG, m);
         prevG = m;
-        var tags = (m.tags || []).map(function(t) {
-          return '<span class="tag-pill">' + _esc(t) + '</span>';
-        }).join(' ');
+        var tags = ''; // tag pills hidden
         var homepage = m.homepage
           ? '<a href="' + _esc(m.homepage) + '" target="_blank" class="module-link">GitHub &#8599;</a>'
           : '';
