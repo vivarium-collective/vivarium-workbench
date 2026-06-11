@@ -76,6 +76,29 @@ def test_data_source_js_is_served_and_defines_loaders():
 
 
 # ---------------------------------------------------------------------------
+# Task 5: iset / investigation page uses DataSource shell
+# ---------------------------------------------------------------------------
+
+def test_iset_page_shell_has_config_and_data_source():
+    """The main SPA template (index.html.j2) must include __DASH_CONFIG__ and
+    data-source.js so the DataSource layer is available on all pages the SPA
+    renders.  The investigation/iset detail page lives inside the SPA; this
+    ensures the seam is in place for hosted-mode swap-in (sub-projects #2/#3).
+    """
+    text = (server.TEMPLATES_DIR / "index.html.j2").read_text()
+    assert "window.__DASH_CONFIG__" in text
+    assert "data-source.js" in text
+
+
+def test_iset_page_walkthrough_references_data_source():
+    """walkthrough.js must reference window.DataSource for the iset-report fetch
+    so the seam is wired end-to-end in local mode and SnapshotSource can plug in.
+    """
+    text = (server.STATIC_DIR / "walkthrough.js").read_text()
+    assert "window.DataSource" in text
+
+
+# ---------------------------------------------------------------------------
 # Task 6: Lock the DataSource interface
 # ---------------------------------------------------------------------------
 
