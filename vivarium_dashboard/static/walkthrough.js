@@ -6555,6 +6555,7 @@
                +   sweepChart
                +   refBlock
                +   (f.next_action ? '<div class="finding-next"><strong>→ Next:</strong> ' + _multiline(f.next_action) + '</div>' : '')
+               +   (f.seeded_study ? '<div class="finding-seeded"><strong>→ seeded study:</strong> <a href="/studies/' + encodeURIComponent(f.seeded_study) + '">' + _h(f.seeded_study) + '</a></div>' : '')
                +   techDisclosure
                + '</div>';
         }
