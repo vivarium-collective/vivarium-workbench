@@ -1537,7 +1537,12 @@ def _reconcile_simset_with_runs(sim_set, runs, ws_root=None):
             if not isinstance(entry, dict):
                 continue
             if use_baseline:
-                if not entry.get("is_baseline"):
+                # A run-absorbing "baseline" entry: explicitly flagged (synthesized
+                # specs), the only entry (authored single-baseline studies), or
+                # simply unperturbed (the reference run in a sweep).
+                is_base = (entry.get("is_baseline") or len(sim_set) == 1
+                           or not entry.get("perturbation"))
+                if not is_base:
                     continue
                 mruns = [r for i, r in enumerate(runs) if i not in claimed]
             else:
