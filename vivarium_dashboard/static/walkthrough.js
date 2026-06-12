@@ -5792,8 +5792,88 @@
             : '')
         + '. <span class="muted small">code-computed from member-study verdicts</span></p>';
     }
+    // ── SP4a: AC → study gating-matrix panel ───────────────────────────────
+    // Rows = acceptance criteria; columns = the gating study (linked to its
+    // section) + the computed result. Acceptance criteria with NO `study:` link
+    // are FLAGGED red ("no study linked — gap") — this is what surfaces e.g.
+    // chromosome-cycle-calibration's 5 unlinked criteria. Built synchronously
+    // from iset.acceptance_criteria (so the gap is visible even in a static
+    // snapshot), then ENRICHED from /api/linkage-index?investigation=<name>
+    // when the live endpoint is reachable. Tolerates the endpoint failing.
+    function _acResultBadge(result) {
+      var r = (result || '').toString().toLowerCase();
+      if (r === 'passing' || r === 'pass' || r === 'passed') return { glyph: '✅', bd: '#16a34a', bg: '#f0fdf4' };
+      if (r === 'failing' || r === 'fail' || r === 'failed') return { glyph: '⛔', bd: '#dc2626', bg: '#fef2f2' };
+      if (r === 'passing-with-caveats') return { glyph: '⚠', bd: '#f59e0b', bg: '#fffbeb' };
+      return { glyph: '◐', bd: '#94a3b8', bg: '#f8fafc' };  // in-progress / pending
+    }
+    function _acGatingMatrixHtml() {
+      var crits = (iset.acceptance_criteria || []).filter(function(c) {
+        return c && typeof c === 'object';
+      });
+      if (!crits.length) return '';
+      var computed = ((iset.computed_acceptance || {}).criteria) || [];
+      var nGap = 0;
+      var rows = crits.map(function(c, i) {
+        var study = (c.study || '').toString().trim();
+        var gap = !study;
+        if (gap) nGap += 1;
+        var result = (computed[i] && computed[i].result) || c.status || '';
+        var b = _acResultBadge(result);
+        var behavior = c.behavior || c.name || '(criterion ' + (i + 1) + ')';
+        var studyCell = gap
+          ? '<td style="color:#b91c1c;font-weight:600">⚠ no study linked — gap</td>'
+          : '<td><a href="#study-' + _h(study) + '">' + _h(study) + '</a></td>';
+        var resultCell = '<td id="acg-result-' + i + '" '
+          + 'style="white-space:nowrap"><span class="acg-pill" '
+          + 'style="display:inline-block;padding:1px 8px;border-radius:10px;border:1px solid '
+          + b.bd + ';background:' + b.bg + '">' + b.glyph + ' ' + _h(result || 'pending') + '</span></td>';
+        return '<tr id="acg-row-' + i + '" data-gap="' + (gap ? '1' : '0') + '" '
+          + 'style="' + (gap ? 'background:#fef2f2' : '') + '">'
+          + '<td style="padding-right:10px">' + _h(behavior) + '</td>'
+          + studyCell + resultCell + '</tr>';
+      }).join('');
+      var gapNote = nGap
+        ? '<p class="muted small" style="margin:6px 0 0 0;color:#b91c1c">'
+          + nGap + ' of ' + crits.length + ' acceptance criteria have no study linked (gaps) — '
+          + 'nothing gates them.</p>'
+        : '<p class="muted small" style="margin:6px 0 0 0">All ' + crits.length
+          + ' acceptance criteria are linked to a gating study.</p>';
+      return '<div class="ac-gating-matrix" id="ac-gating-matrix" '
+        + 'data-investigation="' + _h(iset.name || '') + '" '
+        + 'style="margin:12px 0;padding:12px 16px;background:#f0f9ff;'
+        + 'border:1px solid #bae6fd;border-left:4px solid #3b82f6;border-radius:6px">'
+        + '<strong>AC → study gating matrix</strong> '
+        + '<span class="muted small">which study gates each acceptance criterion · '
+        + '⚠ = no study linked (gap)</span>'
+        + '<table class="acg-table" style="width:100%;border-collapse:collapse;margin-top:8px;font-size:0.92em">'
+        + '<thead><tr style="text-align:left;border-bottom:1px solid #cbd5e1">'
+        + '<th style="padding:2px 10px 4px 0">Acceptance criterion</th>'
+        + '<th style="padding:2px 0 4px 0">Gating study</th>'
+        + '<th style="padding:2px 0 4px 0">Result</th></tr></thead>'
+        + '<tbody>' + rows + '</tbody></table>' + gapNote
+        + '</div>'
+        // Enrich from the live linkage-index endpoint when reachable. The panel
+        // already renders the gaps synchronously, so a failed/absent endpoint
+        // (e.g. a static snapshot) is harmless — we just keep the skeleton.
+        + '<script>(function(){try{'
+        + 'var panel=document.getElementById("ac-gating-matrix");'
+        + 'if(!panel)return;var inv=panel.getAttribute("data-investigation");if(!inv)return;'
+        + 'fetch("/api/linkage-index?investigation="+encodeURIComponent(inv))'
+        + '.then(function(r){return r.ok?r.json():null;})'
+        + '.then(function(d){if(!d||!d.ac_matrix||!d.ac_matrix.criteria)return;'
+        + 'd.ac_matrix.criteria.forEach(function(c,i){'
+        + 'var cell=document.getElementById("acg-result-"+i);if(!cell)return;'
+        + 'var res=(c.result||"pending");'
+        + 'var span=cell.querySelector(".acg-pill");if(span)span.textContent="• "+res;'
+        + '});})'
+        + '.catch(function(){});'
+        + '}catch(e){}})();</script>';
+    }
+
     var verdictDagHtml = _verdictDagHtml();
     var acceptanceNarrativeHtml = _acceptanceNarrativeHtml();
+    var acGatingMatrixHtml = _acGatingMatrixHtml();
 
     // Data-driven flags so the "How to read" guide describes only what this
     // investigation actually contains — no workspace-specific boilerplate.
@@ -8820,6 +8900,7 @@
       // — the dependency structure + where it passes/blocks, at a glance, before
       // the per-study folds.
       +   acceptanceNarrativeHtml
+      +   acGatingMatrixHtml
       +   verdictDagHtml
 
       // ── Execution-status banner (LEADS the report, before the folds) ────
