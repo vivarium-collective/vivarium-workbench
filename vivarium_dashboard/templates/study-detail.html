@@ -374,13 +374,31 @@
         </div>
         <div class="finding-statement">{{ f.statement }}</div>
         {% if f.evidence %}
+        {# Spine B1: the cited test/run are CLICKABLE (anchor to its #test-/#run-
+           card), the headline computed number divergence_factor is surfaced,
+           provenance.run_ids are linked, and the cited test's pass_if band is
+           inlined so "passing" is legible without hunting. #}
+        {% set _ftok = (f.evidence.from_test or '').split(' ')[0] %}
+        {% set _rtok = (f.evidence.from_run or '').split(' ')[0] %}
         <div class="finding-evidence">
           {% if f.evidence.observed is defined %}<strong>observed:</strong> {{ f.evidence.observed }}{% if f.evidence.units %} {{ f.evidence.units }}{% endif %} · {% endif %}
-          {% if f.evidence.from_test %}via test <code>{{ f.evidence.from_test }}</code> · {% endif %}
-          {% if f.evidence.from_run %}in run <code>{{ f.evidence.from_run }}</code>{% endif %}
+          {% if f.evidence.from_test %}via test <a href="#bt-{{ _ftok }}"><code>{{ f.evidence.from_test }}</code></a> · {% endif %}
+          {% if f.evidence.from_run %}in run <a href="#run-{{ _rtok }}"><code>{{ f.evidence.from_run }}</code></a>{% endif %}
           {% if f.evidence.window %} ({{ f.evidence.window }}){% endif %}
           {% if f.evidence.smoking_gun %}<details style="display:inline-block;margin-left:4px"><summary>smoking gun</summary><pre style="white-space:pre-wrap;margin:4px 0 0 0;padding:6px 8px;background:#fff;border-radius:3px;font-size:0.85em;font-family:inherit">{{ f.evidence.smoking_gun }}</pre></details>{% endif %}
         </div>
+        {% set _runids = (f.provenance or {}).run_ids %}
+        {% if f.evidence.divergence_factor is defined or _runids %}
+        <div class="finding-traceability" style="font-size:0.84em;color:#475569;padding:4px 10px;margin:4px 0">
+          {% if f.evidence.divergence_factor is defined %}<span class="finding-divergence" style="font-weight:600">×{{ f.evidence.divergence_factor }} vs expected</span>{% endif %}
+          {% if f.evidence.divergence_factor is defined and _runids %} · {% endif %}
+          {% if _runids %}runs: {% for rid in _runids %}<a href="#run-{{ rid }}"><code>{{ rid }}</code></a>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+        </div>
+        {% endif %}
+        {% set _citedtest = (study.behavior_tests or study.expected_behavior or [])|selectattr('name','equalto', _ftok)|first %}
+        {% if _citedtest and (_citedtest.pass_if or _citedtest.expect) %}
+        <div class="pass_if-band muted small" style="font-size:0.82em;padding:2px 10px">judged against <code>pass_if: {{ (_citedtest.pass_if or _citedtest.expect) | tojson }}</code></div>
+        {% endif %}
         {% endif %}
         {% if f.expected %}
         <div class="finding-expected">

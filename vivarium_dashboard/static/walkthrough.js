@@ -6360,9 +6360,19 @@
           var ev = f.evidence || {};
           var exp = f.expected || {};
           var ref = f.expert_reference || {};
+          var prov = f.provenance || {};
+          // Anchor a (possibly descriptive) test/run reference: the leading
+          // identifier token becomes the #<prefix>-<id> target, the full text
+          // stays as the link label so the reader can trace the value to its
+          // source (the test card / the run row) instead of reading dead code.
+          function _traceLink(prefix, val) {
+            var s = String(val);
+            var tok = (s.match(/^[A-Za-z0-9_.\-]+/) || [s])[0];
+            return '<a href="#' + prefix + '-' + _h(tok) + '"><code>' + _h(s) + '</code></a>';
+          }
           var techParts = [];
-          if (ev.from_test) techParts.push('test: <code>' + _h(ev.from_test) + '</code>');
-          if (ev.from_run)  techParts.push('run: <code>' + _h(ev.from_run) + '</code>');
+          if (ev.from_test) techParts.push('test: ' + _traceLink('test', ev.from_test));
+          if (ev.from_run)  techParts.push('run: ' + _traceLink('run', ev.from_run));
           if (ev.window)    techParts.push('window: ' + _h(ev.window));
           if (ev.smoking_gun) techParts.push('<details style="margin-top:4px"><summary>Smoking gun</summary><pre style="white-space:pre-wrap;font-size:0.85em;background:#fff;padding:6px;border-radius:3px">' + _h(ev.smoking_gun) + '</pre></details>');
           if (ev.discovered_during) techParts.push('discovered during: <code>' + _h(ev.discovered_during) + '</code>');
@@ -6390,6 +6400,42 @@
                     + (exp.cites && exp.cites.length ? '<div class="muted small" style="margin-top:4px">Cites: ' + exp.cites.map(function(c){return '<code>' + _h(c) + '</code>';}).join(', ') + '</div>' : '')
                     + '</div>';
           }
+
+          // Traceability block (spine B1): surface the finding's computed
+          // distance + provenance, connected to source. The headline computed
+          // number `divergence_factor` (how far observed is from expected) was
+          // previously dropped; render it prominently. Link the cited test +
+          // run, list provenance.run_ids (linked), and inline the cited test's
+          // pass_if band so the reader sees what "passing" meant without hunting.
+          var traceBits = [];
+          if (ev.divergence_factor != null) {
+            traceBits.push('<span class="finding-divergence" style="font-weight:600">×'
+              + _h(String(ev.divergence_factor)) + ' vs expected</span>');
+          }
+          if (ev.from_test) traceBits.push('test: ' + _traceLink('test', ev.from_test));
+          if (ev.from_run)  traceBits.push('run: ' + _traceLink('run', ev.from_run));
+          var runIds = prov.run_ids || [];
+          if (Array.isArray(runIds) && runIds.length) {
+            traceBits.push('runs: ' + runIds.map(function(rid) {
+              return '<a href="#run-' + _h(String(rid)) + '"><code>' + _h(String(rid)) + '</code></a>';
+            }).join(', '));
+          }
+          // Inline the cited test's pass_if band (look it up by from_test).
+          var citedBand = '';
+          if (ev.from_test) {
+            var citedTok = (String(ev.from_test).match(/^[A-Za-z0-9_.\-]+/) || [''])[0];
+            var citedTest = (tests || []).filter(function(t){ return t && t.name === citedTok; })[0];
+            if (citedTest && (citedTest.pass_if || citedTest.expect)) {
+              citedBand = '<div class="pass_if-band muted small" style="margin-top:4px">judged against '
+                + '<code>pass_if: ' + _h(JSON.stringify(citedTest.pass_if || citedTest.expect)) + '</code></div>';
+            }
+          }
+          var traceBlock = (traceBits.length || citedBand)
+            ? '<div class="finding-traceability" style="margin-top:6px;padding:6px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;font-size:0.88em">'
+              + (traceBits.length ? '<span class="muted small">traceability:</span> ' + traceBits.join(' · ') : '')
+              + citedBand
+              + '</div>'
+            : '';
 
           var refBlock = '';
           if (ref.doc || ref.quote || ref.note) {
@@ -6419,6 +6465,7 @@
                +   '<div class="finding-statement">' + _multiline(f.statement || (f.id ? f.id.replace(/[-_]/g,' ') : '(no statement)')) + '</div>'
                +   evMain
                +   expMain
+               +   traceBlock
                +   (f.explanation ? '<div class="finding-explanation"><em>Why:</em> ' + _multiline(f.explanation) + '</div>' : '')
                +   sweepChart
                +   refBlock
@@ -6655,7 +6702,7 @@
               if (t.calibration_anchor) techBits.push('Calibration anchor: ⚠️ <code>' + _h(JSON.stringify(t.calibration_anchor)) + '</code>');
               var techDisc = techBits.length ? '<details class="tech-details"><summary>Technical details</summary>' + techBits.join('<br>') + '</details>' : '';
 
-              return '<div class="test-card test-classification-' + _h(cls) + '">'
+              return '<div class="test-card test-classification-' + _h(cls) + '" id="test-' + _h(name) + '">'
                    +   '<div class="test-header">'
                    +     '<span style="background:' + resBg + ';color:' + resFg + ';padding:2px 10px;border-radius:9999px;font-size:0.78em;font-weight:600">' + resGlyph + ' ' + _h(result) + '</span>'
                    +     '<span class="test-classification">' + _h(cls) + '</span>'
