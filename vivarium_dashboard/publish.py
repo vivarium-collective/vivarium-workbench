@@ -347,6 +347,13 @@ def _do_build(
         catalog = _catalog_data(ws_root)
     except Exception:
         catalog = {"modules": []}
+    # A static snapshot has no live venv, so the build-time install-sync probe
+    # (which can even time out importing a heavy package) is meaningless and
+    # misleading here — strip the out-of-sync flags from the published catalog.
+    for _m in catalog.get("modules") or []:
+        if isinstance(_m, dict):
+            _m.pop("out_of_sync", None)
+            _m.pop("out_of_sync_reason", None)
     _write_json(api_dir / "catalog.json", catalog)
 
     # api/composites.json — composite specs (GET /api/composites)

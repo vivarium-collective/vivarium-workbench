@@ -353,3 +353,35 @@ def test_registry_imports_missing_or_none(tmp_path, monkeypatch):
     finally:
         httpd.shutdown()
         thread.join(timeout=2)
+
+
+# ---------------------------------------------------------------------------
+# Catalog filter: registry.include must not hide INSTALLED modules
+# ---------------------------------------------------------------------------
+
+def test_filter_catalog_keeps_installed_modules_outside_include():
+    """`dashboard.registry.include` limits which *available* modules surface, but
+    INSTALLED modules (the workspace's active deps) must always be kept — else a
+    narrow include like [v2ecoli] hides pbg-emitters/viva-munk/etc."""
+    from vivarium_dashboard import server
+
+    modules = [
+        {"name": "v2ecoli", "installed": True},
+        {"name": "pbg-emitters", "package": "pbg_emitters", "installed": True},
+        {"name": "viva-munk", "package": "viva_munk", "installed": True},
+        {"name": "pbg-cellpack", "package": "pbg_cellpack", "installed": False},
+    ]
+    ws_data = {"dashboard": {"registry": {"include": ["v2ecoli"]}}}
+    kept = {m["name"] for m in server._filter_catalog_modules(modules, ws_data)}
+
+    assert kept == {"v2ecoli", "pbg-emitters", "viva-munk"}, (
+        "installed modules must survive the include filter; available "
+        "(not-installed) modules outside the include must be dropped"
+    )
+
+
+def test_filter_catalog_noop_without_include():
+    """No include configured -> full catalog unchanged."""
+    from vivarium_dashboard import server
+    modules = [{"name": "a", "installed": False}, {"name": "b", "installed": True}]
+    assert server._filter_catalog_modules(modules, {}) == modules
