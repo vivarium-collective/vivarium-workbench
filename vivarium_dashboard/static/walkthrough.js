@@ -7152,6 +7152,13 @@
           + '</ul></div>';
       }
 
+      // Spine A3: readiness panel placeholder. Populated after render by
+      // _populateReadinessPanels(), which fetches /api/report-lint ONCE per
+      // report and keys the deterministic linter findings by study. Mirrors
+      // the param-enforcement banner: surfaced per study, connected to its
+      // source (the linter), labeled code-computed. Empty until populated.
+      var readinessHtml = '<div class="study-readiness-panel" id="study-' + slug + '-readiness" data-study="' + _h(slug) + '"></div>';
+
       // Imported expert feedback (expert-feedback B.1). Shows the reviewer's
       // own annotations back, in-context per study, so the loop closes: the
       // next report makes clear what was said and lets the team show it's
@@ -7234,6 +7241,7 @@
           +   '<div class="study-planning-pill">PLANNING — not yet run</div>'
           +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
           +   enforcementHtml     // ⚠ declared params not applied (D.2)
+          +   readinessHtml       // ✓/⚠ lint readiness panel (A3)
           +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
           +   feedbackHtml        // 💬 imported expert feedback (B.1)
           +   summaryHtml         // Question / purpose
@@ -7266,6 +7274,7 @@
         +   subNav
         +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
         +   enforcementHtml     // ⚠ declared params not applied (D.2)
+        +   readinessHtml       // ✓/⚠ lint readiness panel (A3)
         +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
         +   feedbackHtml        // 💬 imported expert feedback (B.1)
         +   biologyGlanceHtml   // 0. Biology-at-a-glance
@@ -12937,5 +12946,61 @@
   });
 
   document.addEventListener('DOMContentLoaded', _refreshGitStatus);
+
+  // -------------------------------------------------------------------------
+  // Spine A3: per-study readiness panel (lint findings)
+  // -------------------------------------------------------------------------
+  // Fetches the deterministic report linter ONCE (/api/report-lint), keys the
+  // findings by study, and fills each `.study-readiness-panel` placeholder a
+  // study section rendered. Mirrors the param-enforcement banner: surfaced per
+  // study, connected to its source (the linter), and labeled code-computed
+  // (vs human-authored). AI-free — pure deterministic linter output. Surfaces
+  // the SP2b-ii readout-migration + SP2c band-citation-gap findings.
+  var _readinessFetched = false;
+  function _readinessPanelHtml(findings) {
+    var sev = { error: 0, warning: 0, info: 0 };
+    findings.forEach(function (f) {
+      var s = f.severity || 'info';
+      if (sev[s] != null) sev[s]++; else sev.info++;
+    });
+    var gaps = sev.error + sev.warning;
+    var head, bg, bd, col;
+    if (!findings.length) { head = '✓ Ready'; bg = '#f0fdf4'; bd = '#16a34a'; col = '#166534'; }
+    else if (gaps) { head = '⚠ ' + gaps + ' gap' + (gaps === 1 ? '' : 's'); bg = '#fffbeb'; bd = '#f59e0b'; col = '#92400e'; }
+    else { head = 'ℹ ' + sev.info + ' note' + (sev.info === 1 ? '' : 's'); bg = '#eff6ff'; bd = '#3b82f6'; col = '#1e40af'; }
+    var rows = findings.map(function (f) {
+      var s = f.severity || 'info';
+      var dot = s === 'error' ? '#dc2626' : (s === 'warning' ? '#f59e0b' : '#3b82f6');
+      return '<li style="margin-top:4px"><span style="color:' + dot + ';font-weight:700">●</span> '
+        + '<code>' + _h(f.check || '') + '</code> — ' + _h(f.message || '') + '</li>';
+    }).join('');
+    return '<div class="readiness-banner" style="margin:12px 0;padding:12px 16px;background:' + bg
+      + ';border:1px solid ' + bd + ';border-left-width:5px;border-radius:6px;color:' + col + '">'
+      + '<strong>Readiness: ' + head + '</strong> '
+      + '<span class="small" style="color:#64748b">code-computed by the report linter (deterministic)</span>'
+      + (findings.length ? '<ul class="small" style="margin:8px 0 0 18px">' + rows + '</ul>' : '')
+      + '</div>';
+  }
+  function _populateReadinessPanels() {
+    var panels = document.querySelectorAll('.study-readiness-panel');
+    if (!panels.length || _readinessFetched) return;
+    _readinessFetched = true;
+    fetch('/api/report-lint')
+      .then(function (r) { return r.ok ? r.json() : { findings: [] }; })
+      .then(function (j) {
+        var byStudy = {};
+        (j.findings || []).forEach(function (f) {
+          var k = f.study || '<workspace>';
+          (byStudy[k] = byStudy[k] || []).push(f);
+        });
+        document.querySelectorAll('.study-readiness-panel').forEach(function (el) {
+          var slug = el.getAttribute('data-study') || '';
+          el.innerHTML = _readinessPanelHtml(byStudy[slug] || []);
+        });
+      })
+      .catch(function () { _readinessFetched = false; });
+  }
+  window._populateReadinessPanels = _populateReadinessPanels;
+  document.addEventListener('DOMContentLoaded', _populateReadinessPanels);
 
 })();

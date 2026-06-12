@@ -932,6 +932,50 @@
   function _runStudyInit() {
     // All renderers that need window._study to be populated.
     _renderFeedbackTrackedPanel();
+    _renderReadinessPanel();
+  }
+
+  // Spine A3: per-study readiness panel. Fetches the deterministic report
+  // linter (GET /api/report-lint), filters to THIS study, and renders a
+  // ✓ ready / ⚠ N gaps badge with the lint findings (severity-coloured).
+  // Mirrors the param-enforcement banner: surfaced, connected to its source
+  // (the linter), labeled code-computed. AI-free — pure deterministic output.
+  function _renderReadinessPanel() {
+    var container = document.getElementById('readiness-panel');
+    if (!container || container.dataset.rendered) return;
+    container.dataset.rendered = '1';
+    var slug = container.getAttribute('data-slug') || studyName() || '';
+    fetch('/api/report-lint')
+      .then(function (r) { return r.ok ? r.json() : { findings: [] }; })
+      .then(function (j) {
+        var findings = (j.findings || []).filter(function (f) {
+          return (f.study || '') === slug;
+        });
+        var sev = { error: 0, warning: 0, info: 0 };
+        findings.forEach(function (f) {
+          var s = f.severity || 'info';
+          if (sev[s] != null) sev[s]++; else sev.info++;
+        });
+        var gaps = sev.error + sev.warning;
+        var head, bg, bd, col;
+        if (!findings.length) { head = '✓ Ready'; bg = '#f0fdf4'; bd = '#16a34a'; col = '#166534'; }
+        else if (gaps) { head = '⚠ ' + gaps + ' gap' + (gaps === 1 ? '' : 's'); bg = '#fffbeb'; bd = '#f59e0b'; col = '#92400e'; }
+        else { head = 'ℹ ' + sev.info + ' note' + (sev.info === 1 ? '' : 's'); bg = '#eff6ff'; bd = '#3b82f6'; col = '#1e40af'; }
+        var rows = findings.map(function (f) {
+          var s = f.severity || 'info';
+          var dot = s === 'error' ? '#dc2626' : (s === 'warning' ? '#f59e0b' : '#3b82f6');
+          return '<li style="margin-top:4px"><span style="color:' + dot + ';font-weight:700">●</span> '
+            + '<code>' + _esc(f.check || '') + '</code> — ' + _esc(f.message || '') + '</li>';
+        }).join('');
+        container.innerHTML =
+          '<div class="readiness-banner" style="margin:8px 0 14px 0;padding:10px 14px;background:' + bg
+          + ';border:1px solid ' + bd + ';border-left-width:5px;border-radius:6px;color:' + col + '">'
+          + '<strong>Readiness: ' + head + '</strong> '
+          + '<span class="muted" style="font-size:0.85em">code-computed by the report linter (deterministic)</span>'
+          + (findings.length ? '<ul style="margin:8px 0 0 18px;font-size:0.9em">' + rows + '</ul>' : '')
+          + '</div>';
+      })
+      .catch(function () { container.dataset.rendered = ''; });
   }
 
   // Entry point: fetch the spec if needed, then run init.

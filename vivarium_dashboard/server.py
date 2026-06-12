@@ -7132,6 +7132,47 @@ def _study_observable_check(ws_root: Path, slug: str):
     return _json_body({"composite": ref, "readouts": results}), 200
 
 
+def _report_lint(ws_root: Path):
+    """GET /api/report-lint worker — ``(json_bytes, status)``.
+
+    Spine A3: runs the EXISTING deterministic linter
+    (``pbg_superpowers.report_linter.lint_workspace_report``) over the
+    workspace and returns its findings keyed by study so the dashboard can
+    render a per-study readiness panel. This wires three computed artifacts at
+    once: the SP2b-ii readout-migration findings (info/warning) and the SP2c
+    band-citation-gap warnings already emitted by the linter.
+
+    The dashboard adds NO AI — it only runs the deterministic linter and
+    renders the result. Tolerant: if the linter is unavailable (older
+    pbg_superpowers) or the workspace can't be scanned, returns 200 with an
+    empty findings list rather than a 500.
+
+    Shape: ``{"findings": [{study, check, severity, message, field_path}]}``,
+    in the linter's own stable order (error→warning→info).
+    """
+    ws_root = Path(ws_root)
+    try:
+        from pbg_superpowers.report_linter import lint_workspace_report
+    except Exception:  # noqa: BLE001 — older pbg_superpowers lacks the linter
+        return _json_body({"findings": []}), 200
+    try:
+        raw = lint_workspace_report(ws_root)
+    except Exception as e:  # noqa: BLE001 — never 500 the readiness panel
+        return _json_body({"findings": [], "error": str(e)}), 200
+
+    findings = []
+    for f in raw:
+        d = f.to_dict() if hasattr(f, "to_dict") else dict(f)
+        findings.append({
+            "study":      d.get("study_slug") or d.get("study") or "<workspace>",
+            "check":      d.get("check", ""),
+            "severity":   d.get("level") or d.get("severity") or "info",
+            "message":    d.get("message", ""),
+            "field_path": d.get("field_path", ""),
+        })
+    return _json_body({"findings": findings}), 200
+
+
 # ---------------------------------------------------------------------------
 # HTTP handler
 # ---------------------------------------------------------------------------
@@ -7166,6 +7207,9 @@ class Handler(BaseHTTPRequestHandler):
             _q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
             _slug = (_q.get("study") or _q.get("investigation") or _q.get("name") or "").strip()
             return self._send_json_bytes(*_study_observable_check(WORKSPACE, _slug))
+        # Spine A3: per-study readiness panel — runs the deterministic linter.
+        if _path_only_pre == "/api/report-lint":
+            return self._send_json_bytes(*_report_lint(WORKSPACE))
 
         # Resolve /api/study-* aliases to their /api/investigation-* originals so
         # the rest of the dispatch chain only needs to know one set of paths.
@@ -12978,6 +13022,12 @@ if __name__ == "__main__":
         """Test seam for GET /api/study-observable-check — calls the module
         worker with an explicit ws_root. Returns (json_bytes, http_status)."""
         return _study_observable_check(ws_root, slug)
+
+    @staticmethod
+    def _report_lint_test(ws_root):
+        """Test seam for GET /api/report-lint — runs the deterministic linter
+        over an explicit ws_root. Returns (json_bytes, http_status)."""
+        return _report_lint(ws_root)
 
     @staticmethod
     def _iset_detail_data(name: str) -> "dict | None":

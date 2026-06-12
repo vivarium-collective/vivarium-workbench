@@ -38,6 +38,12 @@
   </h1>
 </header>
 
+{# Spine A3: readiness panel. Populated by study-detail.js from GET
+   /api/report-lint (the deterministic report linter), filtered to this study.
+   Mirrors the param-enforcement banner: surfaced, connected to its source (the
+   linter), labeled code-computed. Empty until populated (AI-free). #}
+<div id="readiness-panel" data-slug="{{ name }}"></div>
+
 {# Pass A: multi-axis Status Detail panel — one chip per axis that is set on the study spec.
    Hidden entirely when none of the six axes are set, so legacy v3 studies stay unchanged. #}
 {% set _axes = [
