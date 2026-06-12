@@ -1728,7 +1728,55 @@ def _study_detail_spec(name: str):
                 spec["computed_gate_verdict"] = roll_up_verdict(spec)
         except Exception:  # noqa: BLE001
             pass
+
+        # Spine C1a: surface the owning investigation's PERSISTED acceptance
+        # criterion(s) covering THIS study so the "Spine at a glance" panel can
+        # show the acceptance roll-up + link to the investigation. Pure disk
+        # read of executive.computed_acceptance — NO recompute (the live
+        # roll-up still happens in the investigation builder). Best-effort.
+        try:
+            sa = _study_acceptance_criterion(name)
+            if sa:
+                spec["spine_acceptance"] = sa
+        except Exception:  # noqa: BLE001
+            pass
     return spec
+
+
+def _study_acceptance_criterion(name: str):
+    """The owning investigation's PERSISTED acceptance criterion(s) for a study.
+
+    Reads ``investigations/<owner>/investigation.yaml``'s
+    ``executive.computed_acceptance`` (written by the spine's investigation
+    acceptance evaluator) and filters its ``criteria`` to those covering this
+    study. Returns ``{investigation, verdict_status, criteria}`` or ``None``
+    when the study has no owning investigation / no persisted acceptance.
+    Pure disk read — never recomputes.
+    """
+    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+    wp = WorkspacePaths.load(WORKSPACE)
+    owner = wp.study_owner(name)
+    if not owner:
+        return None
+    inv_file = wp.investigations / owner / "investigation.yaml"
+    if not inv_file.is_file():
+        return None
+    import yaml as _yaml
+    data = _yaml.safe_load(inv_file.read_text(encoding="utf-8")) or {}
+    ca = ((data.get("executive") or {}).get("computed_acceptance")
+          or data.get("computed_acceptance") or {})
+    if not isinstance(ca, dict):
+        return None
+    criteria = [c for c in (ca.get("criteria") or [])
+                if isinstance(c, dict) and c.get("study") == name]
+    if not criteria and not ca.get("verdict_status"):
+        return None
+    return {
+        "investigation": owner,
+        "verdict_status": ca.get("verdict_status"),
+        "diverges_from_authored": ca.get("diverges_from_authored"),
+        "criteria": criteria,
+    }
 
 
 def _collect_study_feedback(study_slug: str) -> list[dict]:

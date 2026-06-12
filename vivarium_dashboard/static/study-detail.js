@@ -1090,6 +1090,134 @@
     // All renderers that need window._study to be populated.
     _renderFeedbackTrackedPanel();
     _renderReadinessPanel();
+    _renderSpineSummary();
+  }
+
+  // Memoized GET /api/report-lint — shared by the readiness panel AND the
+  // spine-summary panel so the deterministic linter is fetched once.
+  var _reportLintPromise = null;
+  function _reportLint() {
+    if (!_reportLintPromise) {
+      _reportLintPromise = fetch('/api/report-lint')
+        .then(function (r) { return r.ok ? r.json() : { findings: [] }; })
+        .catch(function () { return { findings: [] }; });
+    }
+    return _reportLintPromise;
+  }
+
+  // Spine C1a: "Spine at a glance" — a compact RE-PRESENTATION of the spine's
+  // already-computed A+B content (verdict / why / acceptance / readiness /
+  // next), each row linking to its detail tab/section. Reuses window._study
+  // (computed_gate_verdict, findings, spine_acceptance, follow-ups) + the
+  // /api/report-lint fetch — NO recompute, AI-free. Each row tolerates absence.
+  function _renderSpineSummary() {
+    var container = document.getElementById('spine-summary');
+    if (!container || container.dataset.rendered) return;
+    container.dataset.rendered = '1';
+    var s = window._study || {};
+    var e = _spineEsc;
+    // Fixed display order: verdict → why → acceptance → readiness → next.
+    var ORDER = ['Verdict', 'Why', 'Acceptance', 'Readiness', 'Next'];
+    var slots = {};
+
+    function _row(key, body, jump) {
+      slots[key] = '<div class="spine-row spine-row-' + key.toLowerCase() + '">'
+        + '<span class="spine-key">' + key + '</span>'
+        + '<span class="spine-val">' + body + '</span>'
+        + (jump ? '<span class="spine-jump">' + jump + '</span>' : '')
+        + '</div>';
+    }
+    function _flush() { _flushSpineSummary(container, ORDER, slots); }
+
+    // ── Verdict — the code-computed gate verdict + the A2 divergence chip ──
+    var cgv = s.computed_gate_verdict || {};
+    if (cgv.result) {
+      var chip = cgv.diverges_from_authored
+        ? '<span class="spine-chip-warn" title="code-computed verdict disagrees with the authored gate_status">'
+          + '⚠ code: ' + e(cgv.result) + ' · authored: ' + e(s.gate_status || '—') + '</span>'
+        : '';
+      _row('Verdict',
+        '<strong>' + e(cgv.result) + '</strong> '
+        + '<span class="spine-label">code-computed</span> ' + chip,
+        '<a href="#" onclick="_setStudyTab(\'overview\');return false">details →</a>');
+    }
+
+    // ── Why — the primary finding statement + its divergence_factor ────────
+    var findings = s.findings || [];
+    var fwhy = findings.filter(function (f) {
+      return f && (f.classification || '') === 'primary';
+    })[0] || findings[0];
+    if (fwhy && fwhy.statement) {
+      var ev = fwhy.evidence || {};
+      var dv = (ev.divergence_factor != null)
+        ? ' <span class="spine-div">×' + e(ev.divergence_factor) + ' vs expected</span>' : '';
+      _row('Why', e(fwhy.statement) + dv,
+        '<a href="#" onclick="_setStudyTab(\'overview\');return false">finding →</a>');
+    }
+
+    // ── Acceptance — the investigation criterion this study covers (A1) ────
+    var sa = s.spine_acceptance || {};
+    var crit = (sa.criteria || [])[0];
+    if (crit) {
+      var inv = sa.investigation || '';
+      var aLink = inv
+        ? '<a href="/iset/' + encodeURIComponent(inv) + '#' + e(inv) + '-acceptance-rollup">'
+          + e(inv) + ' →</a>'
+        : '';
+      _row('Acceptance',
+        e(crit.behavior || crit.study || '') + ': <strong>' + e(crit.result || '—') + '</strong> '
+        + '<span class="spine-label">code-computed</span>',
+        aLink);
+    }
+
+    // ── Readiness — the A3 ✓/⚠ summary (from the report linter) ────────────
+    var slug = container.getAttribute('data-slug') || studyName() || '';
+    _reportLint().then(function (j) {
+      var fs = (j.findings || []).filter(function (f) { return (f.study || '') === slug; });
+      var gaps = fs.filter(function (f) {
+        var sv = f.severity || 'info'; return sv === 'error' || sv === 'warning';
+      }).length;
+      var head = !fs.length ? '✓ Ready'
+        : (gaps ? '⚠ ' + gaps + ' gap' + (gaps === 1 ? '' : 's')
+                : 'ℹ ' + fs.length + ' note' + (fs.length === 1 ? '' : 's'));
+      _row('Readiness',
+        e(head) + ' <span class="spine-label">code-computed by the report linter</span>',
+        '<a href="#readiness-panel">readiness →</a>');
+      _flush();
+    });
+
+    // ── Next — the top next_action / follow-up ─────────────────────────────
+    var next = null;
+    for (var i = 0; i < findings.length; i++) {
+      if (findings[i] && findings[i].next_action) { next = findings[i].next_action; break; }
+    }
+    if (!next) {
+      var fu = (s.follow_up_studies || [])[0];
+      if (fu && fu.title) next = fu.title;
+    }
+    if (!next) {
+      var di = (s.discovery_implications || {}).followup_study_proposals || [];
+      if (di[0] && di[0].title) next = di[0].title;
+    }
+    if (next) {
+      _row('Next', e(next),
+        '<a href="#" onclick="_setStudyTab(\'conclusions\');return false">decide →</a>');
+    }
+
+    // First synchronous flush (readiness fills its slot async above).
+    _flush();
+  }
+
+  function _flushSpineSummary(container, order, slots) {
+    var html = order.map(function (k) { return slots[k] || ''; }).join('');
+    if (!html) { container.innerHTML = ''; return; }
+    container.innerHTML = '<div class="spine-summary-head">Spine at a glance</div>' + html;
+  }
+
+  function _spineEsc(v) {
+    return String(v == null ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
   // Spine A3: per-study readiness panel. Fetches the deterministic report
@@ -1102,8 +1230,7 @@
     if (!container || container.dataset.rendered) return;
     container.dataset.rendered = '1';
     var slug = container.getAttribute('data-slug') || studyName() || '';
-    fetch('/api/report-lint')
-      .then(function (r) { return r.ok ? r.json() : { findings: [] }; })
+    _reportLint()
       .then(function (j) {
         var findings = (j.findings || []).filter(function (f) {
           return (f.study || '') === slug;
