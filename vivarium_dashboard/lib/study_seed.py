@@ -61,13 +61,54 @@ def _select_proposal(proposals: list, proposal_id, proposal_idx):
     return proposals[proposal_idx], proposal_idx
 
 
+def _seed_from_finding(workspace: Path, parent_name: str, finding_id: str, *,
+                       proposal_id=None, new_slug=None) -> str:
+    """Seed a child study from a parent FINDING by DELEGATING to the shared
+    pbg-superpowers seed mechanism (``resolve_seed_source`` +
+    ``write_child_study``), then add the dashboard's investigation back-link.
+
+    This is the centralize-over-duplication path: the finding→child seed math
+    + the parent stamp live once, in pbg-superpowers; the dashboard does not
+    reimplement them — it only contributes the investigation DAG back-link.
+
+    A finding with a ``next_action`` seeds STANDALONE (no pre-existing
+    ``followup_proposals[]`` row needed); ``resolve_seed_source`` synthesizes
+    an inline proposal stub.
+    """
+    from pbg_superpowers.seed_from_followup import (
+        resolve_seed_source,
+        write_child_study,
+    )
+
+    studies_root = WorkspacePaths.load(workspace).studies
+    parent_yaml = studies_root / parent_name / "study.yaml"
+    if not parent_yaml.is_file():
+        raise FileNotFoundError(f"parent study not found: {parent_yaml}")
+    parent_spec = yaml.safe_load(parent_yaml.read_text(encoding="utf-8")) or {}
+
+    src = resolve_seed_source(
+        parent_spec, finding_id=finding_id, proposal_id=proposal_id)
+    res = write_child_study(workspace, parent_name, src, new_slug=new_slug)
+    new_name = res["new_slug"]
+
+    # The pbg writer is workspace-layout aware but knows nothing about the
+    # dashboard's investigation DAG — add the back-link here so the seeded
+    # study shows up in the Investigations view.
+    _add_to_parent_investigations(workspace, parent_name, new_name)
+    return new_name
+
+
 def seed_followup_study(workspace: Path, parent_name: str,
                         followup_idx: int = -1, *,
-                        proposal_id=None, proposal_idx: int | None = None) -> str:
+                        proposal_id=None, proposal_idx: int | None = None,
+                        finding_id=None) -> str:
     """Create the child study.yaml and return its directory name.
 
-    Two source forms are supported:
+    Source forms (the four unified followup field families):
 
+    - **Finding** ``finding.next_action`` — pass ``finding_id``. DELEGATES to
+      the pbg seed mechanism (standalone; synthesizes an inline proposal stub
+      when there's no ``followup_proposals[]`` row). Wins over all others.
     - **Legacy** ``follow_up_studies[followup_idx]`` — pass ``followup_idx``.
     - **Richer** ``discovery_implications.followup_study_proposals`` — pass
       ``proposal_id`` (preferred) or ``proposal_idx``. The child inherits the
@@ -79,6 +120,11 @@ def seed_followup_study(workspace: Path, parent_name: str,
     """
     if not parent_name:
         raise ValueError("parent study name is required")
+
+    # Finding family — delegate to the shared pbg mechanism.
+    if finding_id is not None and str(finding_id) != "":
+        return _seed_from_finding(
+            workspace, parent_name, finding_id, proposal_id=proposal_id)
 
     studies_root = WorkspacePaths.load(workspace).studies
     parent_dir = studies_root / parent_name

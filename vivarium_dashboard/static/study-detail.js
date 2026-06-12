@@ -163,6 +163,25 @@
   }
   window._seedFollowupStudy = _seedFollowupStudy;
 
+  // ── Seed a new study from a finding's next_action ────────────────────────
+  // Delegates to the shared pbg seed mechanism via {parent, finding_id};
+  // the finding seeds STANDALONE (no pre-existing followup proposal needed).
+  function _seedFromFinding(parentStudyName, findingId) {
+    if (!confirm('Seed a new study from this finding?\n\nA new study.yaml will be created under studies/<new-name>/ pre-populated from the finding\'s next_action, and the finding will be stamped with the seeded study.')) {
+      return;
+    }
+    api('POST', '/api/study-seed-followup', {parent: parentStudyName, finding_id: findingId})
+      .then(function(res) {
+        if (res.status !== 200 || res.body.error) {
+          alert('Seed failed: ' + (res.body.error || res.status));
+          return;
+        }
+        alert('Created: ' + res.body.new_study_name + '\nOpening it now.');
+        window.location.href = '/studies/' + encodeURIComponent(res.body.new_study_name);
+      });
+  }
+  window._seedFromFinding = _seedFromFinding;
+
   // --- Inline-edit (overview fields: objective, conclusion, question, hypothesis, status) ---
   function _saveOverviewField(field, value) {
     if (field === 'objective') {
@@ -1190,8 +1209,13 @@
 
     // ── Next — the top next_action / follow-up ─────────────────────────────
     var next = null;
+    var nextFindingId = null;
     for (var i = 0; i < findings.length; i++) {
-      if (findings[i] && findings[i].next_action) { next = findings[i].next_action; break; }
+      if (findings[i] && findings[i].next_action) {
+        next = findings[i].next_action;
+        nextFindingId = findings[i].id || null;
+        break;
+      }
     }
     if (!next) {
       var fu = (s.follow_up_studies || [])[0];
@@ -1202,8 +1226,17 @@
       if (di[0] && di[0].title) next = di[0].title;
     }
     if (next) {
-      _row('Next', e(next),
-        '<a href="#" onclick="_setStudyTab(\'conclusions\');return false">decide →</a>');
+      // When the "Next" is a finding's next_action, offer to seed a child
+      // study from it directly (delegates to the shared pbg seed mechanism).
+      var nextAction;
+      if (nextFindingId) {
+        nextAction = '<a href="#" onclick="_seedFromFinding(' +
+          JSON.stringify(studyName()) + ',' + JSON.stringify(nextFindingId) +
+          ');return false">seed study from this finding →</a>';
+      } else {
+        nextAction = '<a href="#" onclick="_setStudyTab(\'conclusions\');return false">decide →</a>';
+      }
+      _row('Next', e(next), nextAction);
     }
 
     // First synchronous flush (readiness fills its slot async above).

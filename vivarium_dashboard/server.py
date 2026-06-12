@@ -4143,6 +4143,55 @@ def _post_study_narrative_set_for_test(ws_root: Path, body: dict):
     return {"ok": True}, 200
 
 
+def _post_study_seed_followup_for_test(ws_root: Path, body: dict):
+    """Seed a child study from a parent. Returns (response_dict, status_code).
+
+    Routes the four unified followup field families through one entry:
+
+    - ``finding_id`` → delegates to the shared pbg-superpowers seed mechanism
+      (``resolve_seed_source`` + ``write_child_study``) via
+      ``seed_followup_study``; seeds STANDALONE from a ``finding.next_action``.
+    - ``followup_idx`` / ``proposal_id`` / ``proposal_idx`` → the existing
+      legacy / discovery_implications paths.
+
+    The pbg import is lazy + tolerant: if pbg-superpowers isn't installed the
+    finding path returns a 500 with a clear message rather than crashing the
+    server.
+    """
+    from vivarium_dashboard.lib.study_seed import seed_followup_study
+
+    parent = body.get("parent")
+    finding_id = body.get("finding_id")
+    proposal_id = body.get("proposal_id")
+    proposal_idx = body.get("proposal_idx")
+    if proposal_idx is not None:
+        try:
+            proposal_idx = int(proposal_idx)
+        except (TypeError, ValueError):
+            return {"error": "proposal_idx must be an integer"}, 400
+    try:
+        if finding_id is not None and str(finding_id) != "":
+            # Finding family — delegate to the shared pbg seed mechanism.
+            new_name = seed_followup_study(
+                ws_root, parent, finding_id=finding_id, proposal_id=proposal_id)
+        else:
+            new_name = seed_followup_study(
+                ws_root, parent,
+                int(body.get("followup_idx", -1)),
+                proposal_id=proposal_id,
+                proposal_idx=proposal_idx,
+            )
+    except ImportError as e:
+        return {"error": f"finding-seed requires pbg-superpowers: {e}"}, 500
+    except FileNotFoundError as e:
+        return {"error": str(e)}, 404
+    except (ValueError, KeyError, IndexError) as e:
+        return {"error": str(e)}, 400
+    except Exception as e:
+        return {"error": f"seed failed: {e}"}, 500
+    return {"new_study_name": new_name, "new_slug": new_name}, 200
+
+
 def _post_study_rename_for_test(ws_root: Path, body: dict):
     """Rename a study directory and update name in study.yaml. Returns (response_dict, status_code)."""
     name = (body.get("study") or "").strip()
@@ -12555,8 +12604,12 @@ if __name__ == "__main__":
     def _post_study_seed_followup(self, body: dict):
         """POST /api/study-seed-followup → seed a child study.
 
-        Two source forms:
+        Source forms (the four unified followup field families):
 
+        - **Finding** ``{parent, finding_id}`` — seeds from a
+          ``finding.next_action`` by delegating to the shared
+          pbg-superpowers seed mechanism (standalone; no pre-existing
+          ``followup_proposals[]`` row needed). Wins over the others.
         - Legacy ``{parent, followup_idx}`` — seeds from
           ``follow_up_studies[followup_idx]``.
         - Richer ``{parent, proposal_id}`` or ``{parent, proposal_idx}`` —
@@ -12569,28 +12622,8 @@ if __name__ == "__main__":
         up as ``phase: Design`` / ``status: planned`` and is immediately
         visible in the dashboard's Investigations tab.
         """
-        from vivarium_dashboard.lib.study_seed import seed_followup_study
-        proposal_id = body.get("proposal_id")
-        proposal_idx = body.get("proposal_idx")
-        if proposal_idx is not None:
-            try:
-                proposal_idx = int(proposal_idx)
-            except (TypeError, ValueError):
-                return self._json({"error": "proposal_idx must be an integer"}, 400)
-        try:
-            new_name = seed_followup_study(
-                WORKSPACE, body.get("parent"),
-                int(body.get("followup_idx", -1)),
-                proposal_id=proposal_id,
-                proposal_idx=proposal_idx,
-            )
-        except FileNotFoundError as e:
-            return self._json({"error": str(e)}, 404)
-        except (ValueError, KeyError, IndexError) as e:
-            return self._json({"error": str(e)}, 400)
-        except Exception as e:
-            return self._json({"error": f"seed failed: {e}"}, 500)
-        return self._json({"new_study_name": new_name}, 200)
+        response, code = _post_study_seed_followup_for_test(WORKSPACE, body)
+        return self._json(response, code)
 
 
     def _post_study_sync_runs(self, body: dict):
