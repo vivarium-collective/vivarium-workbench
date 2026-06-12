@@ -622,42 +622,18 @@
     </div>
     {% endif %}
 
+    {# Spine C1b: de-dup — follow-ups appeared in 3 places. The canonical
+       surface is the Decide/Conclusions tab (a Decide-phase output); the
+       Overview occurrence is a short link to it, not a triplicated card list. #}
     {% if study.follow_up_studies %}
     <div class="overview-section">
-      <h2 class="overview-label">Follow-up studies + decisions</h2>
-      <p class="muted" style="margin:0 0 8px 0;font-size:0.85em">Concrete next steps derived from this study's runs. Click <em>Seed new study</em> to scaffold a child study.yaml from any entry.</p>
-      <div class="followup-list">
-        {% for f in study.follow_up_studies %}
-        <div class="followup-card followup-kind-{{ f.kind or 'other' }}">
-          <div class="followup-header">
-            <span class="followup-kind">{{ f.kind or 'other' }}</span>
-            {% if f.effort %}<span class="followup-effort" title="Effort">{{ f.effort }}</span>{% endif %}
-            {% if f.status %}<span class="followup-status status-{{ f.status }}">{{ f.status }}</span>{% endif %}
-            <strong class="followup-title">{{ f.title }}</strong>
-          </div>
-          {% if f.why %}<div class="followup-why"><em>Why:</em> {{ f.why }}</div>{% endif %}
-          {% if f.unblocks %}
-          <div class="followup-unblocks"><em>Unblocks:</em>
-            <ul style="margin:2px 0 0 18px;padding:0">{% for u in f.unblocks %}<li>{{ u }}</li>{% endfor %}</ul>
-          </div>
-          {% endif %}
-          {% if f.acceptance %}
-          <div class="followup-acceptance"><em>Acceptance:</em>
-            <ul style="margin:2px 0 0 18px;padding:0">{% for a in f.acceptance %}<li>{{ a }}</li>{% endfor %}</ul>
-          </div>
-          {% endif %}
-          {% if f.hypothesized_mechanism %}
-          <div class="followup-hypothesis"><em>Hypothesized mechanism:</em> {{ f.hypothesized_mechanism }}</div>
-          {% endif %}
-          {% if f.kind not in ('existing',) %}
-          <div class="followup-actions" style="margin-top:8px">
-            <button class="btn-seed-followup" data-followup-idx="{{ loop.index0 }}"
-                    onclick="_seedFollowupStudy('{{ name }}', {{ loop.index0 }})">Seed new study →</button>
-          </div>
-          {% endif %}
-        </div>
-        {% endfor %}
-      </div>
+      <h2 class="overview-label">Follow-up studies</h2>
+      <p class="muted" style="margin:0;font-size:0.9em">
+        <strong>{{ study.follow_up_studies | length }}</strong>
+        follow-up{{ '' if study.follow_up_studies|length == 1 else 's' }} derived from this study's runs —
+        the canonical surface is the {{ "Decide" if _is_v3 else "Conclusions" }} tab.
+        <a onclick="_setStudyTab('conclusions')" style="cursor:pointer;color:#3b82f6;text-decoration:underline;margin-left:4px">View follow-ups on the {{ "Decide" if _is_v3 else "Conclusions" }} tab →</a>
+      </p>
     </div>
     {% endif %}
 
@@ -1844,32 +1820,19 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
         {{ _latest.rows or '?' }} history rows ·
         started {{ _latest.started_at or '?' }}
       </div>
+      {# Spine C1b: outcomes are CANONICAL on the Tests tab (thread B — per-test
+         measured value · evaluator · band). Defer to it instead of re-dumping a
+         second, cruder raw k:v table here. #}
       {% if _latest.outcomes %}
-      <table style="width:100%;border-collapse:collapse;font-size:0.9em">
-        <thead><tr style="background:#f8fafc">
-          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e2e8f0">Test</th>
-          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e2e8f0">Result</th>
-          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e2e8f0">Detail</th>
-        </tr></thead>
-        <tbody>
-          {% for tname, out in _latest.outcomes.items() %}
-          {% set _r = out.result %}
-          {% set _pb = '#d1fae5' if _r == 'PASS' else ('#fee2e2' if _r == 'FAIL' else '#fef3c7') %}
-          {% set _pf = '#065f46' if _r == 'PASS' else ('#991b1b' if _r == 'FAIL' else '#92400e') %}
-          <tr>
-            <td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;font-family:ui-monospace,monospace;font-size:0.85em">{{ tname }}</td>
-            <td style="padding:6px 10px;border-bottom:1px solid #f1f5f9">
-              <span style="background:{{ _pb }};color:{{ _pf }};padding:1px 8px;border-radius:9999px;font-size:0.8em;font-family:ui-monospace,monospace">{{ _r }}</span>
-            </td>
-            <td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;font-size:0.85em;color:#475569">
-              {% for k, v in out.items() if k != 'result' %}
-                <code style="margin-right:8px">{{ k }}: {{ v }}</code>
-              {% endfor %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      {% set _npass = _latest.outcomes.values() | selectattr('result', 'equalto', 'PASS') | list | length %}
+      {% set _nfail = _latest.outcomes.values() | selectattr('result', 'equalto', 'FAIL') | list | length %}
+      <p class="muted" style="margin:0;font-size:0.9em">
+        <strong>{{ _latest.outcomes | length }}</strong> test outcome{{ '' if _latest.outcomes|length == 1 else 's' }}
+        — <span style="color:#065f46;font-weight:600">{{ _npass }} PASS</span> ·
+        <span style="color:#991b1b;font-weight:600">{{ _nfail }} FAIL</span>.
+        Per-test outcomes (measured value · evaluator · band) are canonical on the
+        <a onclick="_setStudyTab('tests')" style="cursor:pointer;color:#3b82f6;text-decoration:underline">Tests tab →</a>.
+      </p>
       {% endif %}
     </div>
     {% endif %}
@@ -1921,8 +1884,9 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
 
     {# ── Follow-up studies with one-click seed ──────────────────────── #}
     {% if study.follow_up_studies %}
-    <div class="decide-section" style="margin-top:18px">
-      <h3 class="overview-label">Follow-up studies — pick one to seed</h3>
+    <div class="decide-section" id="followups-authored" style="margin-top:18px">
+      <h3 class="overview-label">Follow-up studies — pick one to seed
+        <span class="muted" style="font-weight:normal;font-size:0.82em">(authored)</span></h3>
       <p class="muted" style="margin:0 0 8px 0;font-size:0.85em">
         Click <strong>Seed new study →</strong> on any non-existing follow-up to scaffold a child study.yaml.
         The new study inherits this one as a <code>pipeline_gate</code> prerequisite and starts at phase: Design.
@@ -2050,12 +2014,19 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
     </div>
     {% endif %}
 
+    {# Spine C1b: discovered proposals are a DISTINCT family from authored
+       follow_up_studies — render them together on this canonical Decide
+       surface, clearly distinguished, de-duplicated by id (skip any proposal
+       already present as an authored follow-up). #}
+    {% set _fup_ids = (study.follow_up_studies or []) | map(attribute='id') | select | list %}
     {% if _di.followup_study_proposals %}
     <div class="di-group">
-      <h3>Follow-up study proposals <span class="muted" style="font-weight:normal;font-size:0.85em">({{ _di.followup_study_proposals | length }})</span></h3>
+      <h3>Follow-up study proposals
+        <span class="muted" style="font-weight:normal;font-size:0.82em">(discovered)</span>
+        <span class="muted" style="font-weight:normal;font-size:0.85em">({{ _di.followup_study_proposals | length }})</span></h3>
       <p class="muted" style="margin:0 0 8px 0;font-size:0.85em">Click <strong>➕ Add to investigation</strong> to spawn a new study node in the investigation graph.</p>
       <div class="followup-list">
-        {% for p in _di.followup_study_proposals %}
+        {% for p in _di.followup_study_proposals if (p.id or '') not in _fup_ids %}
         {% set _gain = (p.expected_information_gain or '')|lower %}
         <div class="di-card di-fup-card">
           <div class="followup-header">
