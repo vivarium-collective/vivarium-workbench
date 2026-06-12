@@ -113,8 +113,8 @@ def seed_followup_study(workspace: Path, parent_name: str,
     - **Richer** ``discovery_implications.followup_study_proposals`` — pass
       ``proposal_id`` (preferred) or ``proposal_idx``. The child inherits the
       proposal's title / study_type / target_mechanism_elements /
-      required_inputs and a ``parent_studies`` edge back to this study with
-      ``relation: leads-to``.
+      required_inputs and a ``pipeline_gate.prerequisites`` edge back to this
+      study with ``relation: leads-to``.
 
     When a proposal selector is given it wins over ``followup_idx``.
     """
@@ -237,7 +237,9 @@ def seed_followup_study(workspace: Path, parent_name: str,
             "bib_keys": [],
         },
         "conclusion": None,
-        "parent_studies": [parent_name],
+        # The parent edge lives in pipeline_gate.prerequisites above; the legacy
+        # parent_studies field is no longer written (normalize_dag_edges reads
+        # prerequisites first — see lib/investigations.py).
         "tests": {"auto_discover": True, "data_source": "latest_run",
                   "pytest_args": [], "last_results": None},
     }
@@ -300,8 +302,9 @@ def _seed_from_proposal(workspace: Path, parent_name: str, parent_spec: dict,
                         proposal_id=None, proposal_idx: int | None = None) -> str:
     """Seed a child study from a ``discovery_implications.followup_study_proposals``
     entry. The child inherits the proposal's title / study_type /
-    target_mechanism_elements / required_inputs and a ``parent_studies`` edge
-    back to the parent with ``relation: leads-to``.
+    target_mechanism_elements / required_inputs and a
+    ``pipeline_gate.prerequisites`` edge back to the parent with
+    ``relation: leads-to``.
     """
     disc = parent_spec.get("discovery_implications") or {}
     proposals = (disc.get("followup_study_proposals")
@@ -390,10 +393,9 @@ def _seed_from_proposal(workspace: Path, parent_name: str, parent_spec: dict,
             "bib_keys": [],
         },
         "conclusion": None,
-        # Edge back to the parent with the leads-to relation (also mirrored in
-        # pipeline_gate.prerequisites above — parent_studies is the field the
-        # dashboard DAG reads today).
-        "parent_studies": [{"study": parent_name, "relation": "leads-to"}],
+        # The parent edge lives in pipeline_gate.prerequisites above (with the
+        # leads-to relation); the legacy parent_studies field is no longer
+        # written (normalize_dag_edges reads prerequisites first).
         "target_mechanism_elements": list(targets),
         "required_inputs": list(required_inputs),
         "tests": {"auto_discover": True, "data_source": "latest_run",

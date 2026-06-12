@@ -69,7 +69,10 @@ def test_seed_legacy_follow_up_studies(_ws):
     new_name = seed_followup_study(_ws, "p1", 0)
     child = yaml.safe_load(
         (_ws / "studies" / new_name / "study.yaml").read_text())
-    assert child["parent_studies"] == ["p1"]
+    # The parent edge is written to the canonical pipeline_gate.prerequisites;
+    # the legacy parent_studies field is no longer written.
+    assert child["pipeline_gate"]["prerequisites"] == ["p1"]
+    assert "parent_studies" not in child
     assert child["seeded_from"]["parent"] == "p1"
 
 
@@ -81,10 +84,11 @@ def test_seed_from_proposal_by_id_sets_leads_to_edge(_ws):
     child = yaml.safe_load(
         (_ws / "studies" / new_name / "study.yaml").read_text())
 
-    # Parent edge with the leads-to relation (both fields).
-    assert child["parent_studies"] == [{"study": "p1", "relation": "leads-to"}]
+    # Parent edge with the leads-to relation, in the canonical location; the
+    # legacy parent_studies field is no longer written.
     assert child["pipeline_gate"]["prerequisites"] == [
         {"study": "p1", "relation": "leads-to"}]
+    assert "parent_studies" not in child
 
     # Proposal content carried onto the child.
     assert child["study_type"] == "parameter_sweep"
@@ -106,7 +110,9 @@ def test_seed_from_proposal_by_index(_ws):
         (_ws / "studies" / new_name / "study.yaml").read_text())
     assert child["study_type"] == "model_extension"
     assert child["seeded_from"]["proposal_id"] == "fup-extend"
-    assert child["parent_studies"] == [{"study": "p1", "relation": "leads-to"}]
+    assert child["pipeline_gate"]["prerequisites"] == [
+        {"study": "p1", "relation": "leads-to"}]
+    assert "parent_studies" not in child
 
 
 def test_seed_proposal_unknown_id_raises(_ws):
