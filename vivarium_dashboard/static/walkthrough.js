@@ -5719,6 +5719,82 @@
           || a.name.localeCompare(b.name);
     });
 
+    // ── Spine C2: investigation verdict DAG + acceptance narrative ──────────
+    // A compact, dependency-true map of the member studies, each badged with
+    // its code-computed gate verdict, plus a one-paragraph acceptance roll-up.
+    // Reuses the `ordered` / `depthMap` topology above (no second sort) and the
+    // spine-computed verdicts/acceptance (no recompute). Mirrors the
+    // param-enforcement banner: surfaced, connected (nodes/criteria link to the
+    // per-study sections), labeled code-computed.
+    function _spineVerdictBadge(result) {
+      var r = (result || '').toString().toLowerCase();
+      if (r === 'passed' || r === 'pass') return { glyph: '✅', cls: 'pass', bd: '#16a34a' };
+      if (r === 'failed' || r === 'fail') return { glyph: '⛔', cls: 'fail', bd: '#dc2626' };
+      if (!r) return { glyph: '◽', cls: 'none', bd: '#cbd5e1' };
+      // needs_calibration / blocked / stale → needs work
+      return { glyph: '⚠', cls: 'warn', bd: '#f59e0b' };
+    }
+    function _verdictDagHtml() {
+      if (!ordered.length) return '';
+      var hasEdges = specs.some(function(s) { return (s.parent_studies || []).length; });
+      var byDepth = {};
+      ordered.forEach(function(s) {
+        var d = depthMap[s.name] || 0;
+        (byDepth[d] = byDepth[d] || []).push(s);
+      });
+      var depths = Object.keys(byDepth).map(Number).sort(function(a, b) { return a - b; });
+      var ranks = depths.map(function(d) {
+        var nodes = byDepth[d].map(function(s) {
+          var b = _spineVerdictBadge((s.computed_gate_verdict || {}).result);
+          var parents = (s.parent_studies || []).map(function(p) {
+            return (typeof p === 'string') ? p : p.study;
+          }).filter(Boolean);
+          var dep = parents.length
+            ? ' <span class="sdag-dep muted small">← ' + parents.map(function(p) {
+                return '<a href="#study-' + _h(p) + '">' + _h(p) + '</a>';
+              }).join(', ') + '</span>'
+            : '';
+          return '<li class="sdag-node sdag-' + b.cls + '" '
+            + 'style="margin:3px 0;padding:2px 8px;border-left:3px solid ' + b.bd + '">'
+            + '<span class="sdag-badge" title="code-computed gate verdict">' + b.glyph + '</span> '
+            + '<a href="#study-' + _h(s.name) + '"><strong>' + _h(s.name) + '</strong></a>'
+            + dep + '</li>';
+        }).join('');
+        return '<div class="sdag-rank" style="margin:4px 0">'
+          + (hasEdges ? '<span class="sdag-rank-lbl muted small" style="display:inline-block;min-width:64px">depth ' + d + '</span>' : '')
+          + '<ul class="sdag-list" style="list-style:none;margin:0;padding:0;display:inline-block;vertical-align:top">' + nodes + '</ul></div>';
+      }).join('');
+      return '<div class="study-verdict-dag" id="study-verdict-dag" '
+        + 'style="margin:14px 0;padding:12px 16px;background:#f8fafc;border:1px solid #cbd5e1;border-left-width:5px;border-radius:6px">'
+        + '<strong>Study verdict map</strong> '
+        + '<span class="muted small">code-computed gate verdicts (✅ passed · ⚠ needs work · ⛔ blocked)'
+        + (hasEdges ? '; edges = pipeline prerequisites (← depends on)' : '') + '</span>'
+        + ranks + '</div>';
+    }
+    function _acceptanceNarrativeHtml() {
+      var ca = iset.computed_acceptance;
+      if (!ca || !ca.criteria || !ca.criteria.length) return '';
+      var total = ca.criteria.length;
+      function _is(r, set) { return set.indexOf((r || '').toString().toLowerCase()) >= 0; }
+      var nPass = ca.criteria.filter(function(c) { return _is(c.result, ['passing', 'pass']); }).length;
+      var blocked = ca.criteria.filter(function(c) {
+        return _is(c.result, ['failing', 'fail', 'blocked']);
+      }).map(function(c) { return c.study; }).filter(Boolean);
+      var vs = ca.verdict_status || (nPass === total ? 'passing' : 'in-progress');
+      return '<p class="acceptance-narrative" id="acceptance-narrative" '
+        + 'style="margin:10px 0;padding:10px 16px;background:#f0f9ff;border-left:4px solid #3b82f6;border-radius:4px">'
+        + '<strong>Investigation acceptance: ' + _h(vs) + '.</strong> '
+        + nPass + ' of ' + total + ' acceptance criteria passing'
+        + (blocked.length
+            ? '; blocked by ' + blocked.map(function(n) {
+                return '<a href="#study-' + _h(n) + '">' + _h(n) + '</a>';
+              }).join(', ')
+            : '')
+        + '. <span class="muted small">code-computed from member-study verdicts</span></p>';
+    }
+    var verdictDagHtml = _verdictDagHtml();
+    var acceptanceNarrativeHtml = _acceptanceNarrativeHtml();
+
     // Data-driven flags so the "How to read" guide describes only what this
     // investigation actually contains — no workspace-specific boilerplate.
     var hasDag = specs.some(function(s) {
@@ -8696,6 +8772,12 @@
 
       // Coordinated-generation provenance banner (expert-feedback A.3).
       +   generationBannerHtml
+
+      // Spine C2: the investigation's verdict DAG + acceptance roll-up narrative
+      // — the dependency structure + where it passes/blocks, at a glance, before
+      // the per-study folds.
+      +   acceptanceNarrativeHtml
+      +   verdictDagHtml
 
       // ── Execution-status banner (LEADS the report, before the folds) ────
       // Accurate to the actual run state: a pre-execution review notice when
