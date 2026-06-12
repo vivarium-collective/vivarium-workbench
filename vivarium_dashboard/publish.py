@@ -359,11 +359,26 @@ def _do_build(
     # api/composite-state/<id>.json — pre-resolved composite state for loom ?static=1
     composite_state_dir = api_dir / "composite-state"
     composite_state_dir.mkdir(parents=True, exist_ok=True)
+    # Optional committed overrides: a workspace can PRE-RESOLVE a heavy composite
+    # once (e.g. the full baseline, whose generator needs the on-disk ParCa cache
+    # and so can't resolve at publish time) and commit the state JSON under
+    # reports/composite-state/<id>.json. When present it's used verbatim and the
+    # composite is marked navigable (has_wiring=True), even if live resolution
+    # would fail. The filename must match the composite id.
+    committed_state_dir = ws_root / "reports" / "composite-state"
     exported_wiring: set[str] = set()
     for comp in (composites.get("composites") or []):
         cid = comp.get("id")
         if not cid:
             continue
+        committed = committed_state_dir / f"{cid}.json"
+        if committed.is_file():
+            try:
+                (composite_state_dir / f"{cid}.json").write_bytes(committed.read_bytes())
+                exported_wiring.add(cid)
+                continue  # committed override wins; skip live resolution
+            except Exception:
+                pass
         try:
             data = _composite_resolve_data(cid)
             if data is not None:

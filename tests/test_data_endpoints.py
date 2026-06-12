@@ -425,11 +425,15 @@ def test_bundle_exports_visualization_classes(tmp_workspace, tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_snapshot_banner_in_template():
-    """index.html.j2 must contain the #snapshot-banner div with the interactive link."""
+    """index.html.j2 must contain the #snapshot-banner div whose link is a STATIC
+    pointer to the vivarium-dashboard GitHub repo (run-it-locally instructions),
+    not a per-publish hosted-interactive URL."""
     text = (server.TEMPLATES_DIR / "index.html.j2").read_text()
     assert "snapshot-banner" in text, "index.html.j2 missing #snapshot-banner"
     assert "snapshot-interactive-link" in text, \
         "index.html.j2 missing #snapshot-interactive-link"
+    assert "github.com/vivarium-collective/vivarium-dashboard" in text, \
+        "snapshot banner link should point at the vivarium-dashboard GitHub repo"
 
 
 def test_snapshot_banner_css_rules():
@@ -440,13 +444,15 @@ def test_snapshot_banner_css_rules():
         "snapshot-readonly.css missing body.snapshot #snapshot-banner show rule"
 
 
-def test_walkthrough_wires_banner_link():
-    """walkthrough.js DOMContentLoaded must set #snapshot-interactive-link href from __DASH_CONFIG__."""
+def test_walkthrough_does_not_override_static_banner_link():
+    """The banner link is now a STATIC GitHub href in the template; walkthrough.js
+    must NOT re-point or hide #snapshot-interactive-link from a per-publish
+    interactiveUrl (that wiring was removed)."""
     text = (server.STATIC_DIR / "walkthrough.js").read_text()
-    assert "snapshot-interactive-link" in text, \
-        "walkthrough.js missing snapshot-interactive-link wiring"
-    assert "interactiveUrl" in text, \
-        "walkthrough.js missing interactiveUrl config key"
+    assert "snapshot-interactive-link" not in text, \
+        "walkthrough.js should no longer wire the (now static) banner link"
+    assert "interactiveUrl" not in text, \
+        "walkthrough.js should no longer read interactiveUrl"
 
 
 def test_set_snapshot_config_injects_interactive_url():
