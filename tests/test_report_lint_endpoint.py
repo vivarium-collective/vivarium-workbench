@@ -46,11 +46,18 @@ def test_report_lint_endpoint_returns_findings(tmp_workspace_with_legacy_readout
     body, code = server.Handler._report_lint_test(server.WORKSPACE)
     assert code == 200
     findings = json.loads(body)["findings"]
-    # surfaces SP2b-ii readout-migration + SP2c band-citation-gap findings
+    # The fixture study declares no readouts, so the linter MUST surface
+    # findings — no `or findings == []` escape hatch (an empty result here would
+    # mean the endpoint silently dropped the linter output). Assert the
+    # SP2b-ii readout-migration finding (or an SP2c band-citation-gap) is
+    # present, keyed to the study, so the assertion is actually meaningful.
+    assert findings, "fixture study with no readouts should yield findings"
     assert any(
-        "readout" in f.get("check", "") or "needs_human" in f.get("message", "").lower()
+        "readout" in f.get("check", "")
+        or "band" in f.get("check", "")
+        or "needs_human" in f.get("message", "").lower()
         for f in findings
-    ) or findings == []
+    ), f"expected a readout-migration / band-citation finding; got: {findings}"
 
 
 def test_report_lint_findings_have_expected_shape(tmp_workspace_with_legacy_readouts):
@@ -77,6 +84,32 @@ def test_walkthrough_js_renders_readiness_panel():
     assert "/api/report-lint" in js
     assert "readiness" in js.lower()
     assert "study-readiness-panel" in js
+
+
+def test_walkthrough_js_populates_readiness_from_report_render_not_only_domcontentloaded():
+    """FIX 1: the investigation report emits its `.study-readiness-panel`
+    placeholders asynchronously, so `_populateReadinessPanels` cannot rely on
+    the DOMContentLoaded binding alone — it must also be invoked from the
+    report-render completion. The self-contained report (no walkthrough.js)
+    bakes an exact copy via `.toString()` and invokes it after the study
+    sections render. Verify both: the report-build path bakes + invokes it, and
+    the DOMContentLoaded binding is still present (study-detail / live-DOM)."""
+    js = (_PKG / "static" / "walkthrough.js").read_text(encoding="utf-8")
+    # Report-render path bakes the function via .toString() and invokes it.
+    assert "_populateReadinessPanels.toString()" in js, (
+        "report-render path should bake _populateReadinessPanels via .toString()"
+    )
+    build_start = js.index("function _buildInvestigationReportHtml")
+    build_region = js[build_start:js.index("function _generateReportHtmlForCurrentIset")] \
+        if "function _generateReportHtmlForCurrentIset" in js else js[build_start:]
+    assert "_populateReadinessPanels" in build_region, (
+        "_populateReadinessPanels must be wired from the report-render path"
+    )
+    # The original DOMContentLoaded binding is kept for live-DOM contexts.
+    assert "addEventListener('DOMContentLoaded', _populateReadinessPanels)" in js
+    # Idempotent: no hard one-shot lock; cache lives on the function object so a
+    # second call re-keys panels without a duplicate fetch.
+    assert "_populateReadinessPanels._cache" in js
 
 
 def test_study_detail_js_renders_readiness_panel():

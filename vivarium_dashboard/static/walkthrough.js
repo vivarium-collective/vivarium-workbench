@@ -8670,6 +8670,10 @@
             if (ca && ca.criteria && ca.criteria.length) {
               var authoredVs = (ex.verdict_status || '').toString().toLowerCase().trim();
               var computedVs = (ca.verdict_status || '').toString().toLowerCase().trim();
+              // NOTE: the per-criterion `result`s below are LIVE-ROLLED at render
+              // time (from each member study's current verdict), whereas
+              // `ca.diverges_from_authored` is the spine-PERSISTED divergence flag
+              // — the two can momentarily differ; this is acceptable per the plan.
               // Prefer the spine-persisted divergence flag; fall back to the
               // computed-vs-authored verdict_status comparison the plan allows.
               var caDiverges = (ca.diverges_from_authored === true)
@@ -8921,6 +8925,24 @@
       +     '});'
       +   '});'
       + '})();'
+      + '</script>'
+
+      // ── Spine A3: readiness-panel populate (report-render completion) ──
+      // The `.study-readiness-panel` placeholders above are emitted per study
+      // but filled by JS. This report is self-contained (no walkthrough.js),
+      // so bake an EXACT copy of _populateReadinessPanels (+ _readinessPanelHtml
+      // + _h) via `.toString()` and invoke it once the study sections have
+      // rendered. Reuses the same deterministic linter fetch — no duplicated
+      // logic, no AI. Idempotent. fetch('/api/report-lint') resolves when the
+      // report is SERVED by the dashboard; offline (file://) it no-ops cleanly.
+      + '<script>'
+      +   '(function(){'
+      +     'var _h=' + _h.toString() + ';'
+      +     'var _readinessPanelHtml=' + _readinessPanelHtml.toString() + ';'
+      +     'var _populateReadinessPanels=' + _populateReadinessPanels.toString() + ';'
+      +     'window._populateReadinessPanels=_populateReadinessPanels;'
+      +     'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",_populateReadinessPanels);}else{_populateReadinessPanels();}'
+      +   '})();'
       + '</script>'
 
       // ── Proposed-input Accept/Decline wiring (in-report) ──────────────
@@ -12956,7 +12978,6 @@
   // study, connected to its source (the linter), and labeled code-computed
   // (vs human-authored). AI-free — pure deterministic linter output. Surfaces
   // the SP2b-ii readout-migration + SP2c band-citation-gap findings.
-  var _readinessFetched = false;
   function _readinessPanelHtml(findings) {
     var sev = { error: 0, warning: 0, info: 0 };
     findings.forEach(function (f) {
@@ -12981,10 +13002,28 @@
       + (findings.length ? '<ul class="small" style="margin:8px 0 0 18px">' + rows + '</ul>' : '')
       + '</div>';
   }
+  // Idempotent + safe to call repeatedly. The linter findings are fetched ONCE
+  // and cached on the function; every call (re-)keys whatever
+  // `.study-readiness-panel` placeholders are currently in the DOM by
+  // overwriting their innerHTML — so a second call after more panels render
+  // fills the new ones without issuing a duplicate fetch or double-rendering.
+  // No outer closure state is used (cache lives on the function object) so the
+  // investigation report can bake an exact copy via `.toString()` — see
+  // _buildInvestigationReportHtml; the served/downloaded report has no
+  // walkthrough.js, so it carries its own copy and invokes it after its study
+  // sections render (the placeholders are emitted async, after DOMContentLoaded).
   function _populateReadinessPanels() {
     var panels = document.querySelectorAll('.study-readiness-panel');
-    if (!panels.length || _readinessFetched) return;
-    _readinessFetched = true;
+    if (!panels.length) return;
+    function _apply(byStudy) {
+      document.querySelectorAll('.study-readiness-panel').forEach(function (el) {
+        var slug = el.getAttribute('data-study') || '';
+        el.innerHTML = _readinessPanelHtml(byStudy[slug] || []);
+      });
+    }
+    if (_populateReadinessPanels._cache) { _apply(_populateReadinessPanels._cache); return; }
+    if (_populateReadinessPanels._pending) return;
+    _populateReadinessPanels._pending = true;
     fetch('/api/report-lint')
       .then(function (r) { return r.ok ? r.json() : { findings: [] }; })
       .then(function (j) {
@@ -12993,14 +13032,16 @@
           var k = f.study || '<workspace>';
           (byStudy[k] = byStudy[k] || []).push(f);
         });
-        document.querySelectorAll('.study-readiness-panel').forEach(function (el) {
-          var slug = el.getAttribute('data-study') || '';
-          el.innerHTML = _readinessPanelHtml(byStudy[slug] || []);
-        });
+        _populateReadinessPanels._pending = false;
+        _populateReadinessPanels._cache = byStudy;
+        _apply(byStudy);
       })
-      .catch(function () { _readinessFetched = false; });
+      .catch(function () { _populateReadinessPanels._pending = false; });
   }
   window._populateReadinessPanels = _populateReadinessPanels;
+  // study-detail / live-DOM contexts: panels that exist at parse time get
+  // populated on load. The investigation report renders its panels async, so it
+  // additionally bakes + invokes this from its own render-completion (below).
   document.addEventListener('DOMContentLoaded', _populateReadinessPanels);
 
 })();
