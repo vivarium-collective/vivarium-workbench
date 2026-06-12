@@ -94,3 +94,76 @@ def test_study_observable_check_uncomputable_composite_clear_status(demo_ws):
     # composite can't build → a clear non-crash status, never a 500
     assert code in (200, 422), body
     assert code != 500
+
+
+# ---------------------------------------------------------------------------
+# Task 4: v2e-invest golden (skipif absent / not buildable in this interpreter)
+# ---------------------------------------------------------------------------
+
+_V2E_INVEST = Path("/Users/eranagmon/code/v2e-invest")
+_V2E_BASELINE = "v2ecoli.composites.baseline.baseline"
+_V2E_STUDY = "dnaa-00-stage1-baseline"
+_VALID_STATUSES = {"ok", "unresolved", "not_in_structure", "aspirational"}
+
+
+def _v2e_observables_or_skip():
+    """Build the real v2ecoli baseline composite's observable set, or skip.
+
+    Skips when v2e-invest is absent OR when the whole-cell composite cannot be
+    built in the *current* interpreter (the bare vivarium-dashboard venv lacks
+    v2ecoli's runtime deps — dill/unum/etc.). In a v2ecoli-equipped venv this
+    becomes a real golden; everywhere else the suite stays green. READ-ONLY:
+    never writes under v2e-invest.
+    """
+    if not (_V2E_INVEST / "workspace.yaml").is_file():
+        pytest.skip("v2e-invest not present")
+    try:
+        from pbg_superpowers.readout_validation import available_observables  # noqa: F401
+    except Exception:
+        pytest.skip("pbg_superpowers.readout_validation unavailable")
+    body, code = server.Handler._observables_for_ref_test(_V2E_INVEST, _V2E_BASELINE)
+    payload = json.loads(body)
+    if code != 200 or not payload.get("leaves"):
+        pytest.skip(f"v2ecoli baseline not buildable in this interpreter: {code} {payload.get('error')}")
+    return payload
+
+
+def test_v2e_invest_golden_observables_nonempty():
+    payload = _v2e_observables_or_skip()
+    leaves = payload["leaves"]
+    assert isinstance(leaves, list) and len(leaves) > 100, len(leaves)
+    # the real whole-cell composite nests the cell under agents/0/.
+    assert any(l.endswith("listeners.mass.cell_mass") for l in leaves), leaves[:10]
+
+
+def test_v2e_invest_golden_study_readout_statuses():
+    _v2e_observables_or_skip()  # gate: ensures buildable before checking the study
+    body, code = server.Handler._study_observable_check_test(_V2E_INVEST, _V2E_STUDY)
+    assert code == 200, body
+    payload = json.loads(body)
+    assert payload["composite"] == _V2E_BASELINE
+    res = payload["readouts"]
+    assert res, "study should declare readouts"
+    # every readout gets a status from the valid set — no crash, no fabrication
+    assert all(r["status"] in _VALID_STATUSES for r in res), res
+    statuses = {r["status"] for r in res}
+    # the prose/`derived` readouts can't be parsed → unresolved
+    assert "unresolved" in statuses, statuses
+
+
+def test_v2e_invest_golden_real_leaf_ok_phantom_flagged():
+    """Against the REAL composite structure: a real leaf passes (`ok`), an
+    invented one is flagged (`not_in_structure`) — the never-fabricate value.
+    """
+    payload = _v2e_observables_or_skip()
+    from pbg_superpowers.readout_validation import validate_readouts
+    real = next(l for l in payload["leaves"] if l.endswith("listeners.mass.cell_mass"))
+    spec = {"readouts": [
+        {"name": "real", "store_path": real},
+        {"name": "phantom", "store_path": real.rsplit(".", 1)[0] + ".totally_fabricated"},
+    ]}
+    available = {"leaves": payload["leaves"], "catalogs": payload["catalogs"]}
+    res = validate_readouts(spec, available=available)
+    by = {r["name"]: r["status"] for r in res}
+    assert by["real"] == "ok", res
+    assert by["phantom"] == "not_in_structure", res
