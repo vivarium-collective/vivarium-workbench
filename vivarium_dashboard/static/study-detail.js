@@ -1160,9 +1160,11 @@
     var crit = (sa.criteria || [])[0];
     if (crit) {
       var inv = sa.investigation || '';
+      // Deep-link to the investigation detail (SPA reads ?investigation=<name>)
+      // + the acceptance roll-up anchor the report renders (<inv>-acceptance-rollup).
       var aLink = inv
-        ? '<a href="/iset/' + encodeURIComponent(inv) + '#' + e(inv) + '-acceptance-rollup">'
-          + e(inv) + ' →</a>'
+        ? '<a href="/?investigation=' + encodeURIComponent(inv) + '#'
+          + e(inv) + '-acceptance-rollup">' + e(inv) + ' →</a>'
         : '';
       _row('Acceptance',
         e(crit.behavior || crit.study || '') + ': <strong>' + e(crit.result || '—') + '</strong> '
