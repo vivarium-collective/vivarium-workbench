@@ -8650,6 +8650,47 @@
               h += '<p><strong>Question.</strong> ' + _multiline(iset.question) + '</p>';
             if (iset.hypothesis)
               h += '<p><strong>Hypothesis.</strong> ' + _multiline(iset.hypothesis) + '</p>';
+            // ── Spine A1: computed acceptance roll-up ──────────────────────
+            // Restores the acceptance visibility removed earlier, now COMPUTED
+            // by the spine (investigation_status.roll_up_acceptance) and
+            // connected to the member studies' verdicts. Mirrors the
+            // param-enforcement banner: surfaced, connected (each criterion
+            // links to its study section), and labeled code-computed vs
+            // authored, with a divergence badge when the two disagree.
+            var ca = iset.computed_acceptance;
+            if (ca && ca.criteria && ca.criteria.length) {
+              var authoredVs = (ex.verdict_status || '').toString().toLowerCase().trim();
+              var computedVs = (ca.verdict_status || '').toString().toLowerCase().trim();
+              // Prefer the spine-persisted divergence flag; fall back to the
+              // computed-vs-authored verdict_status comparison the plan allows.
+              var caDiverges = (ca.diverges_from_authored === true)
+                || (!!authoredVs && !!computedVs && authoredVs !== computedVs);
+              var critRows = ca.criteria.map(function(c) {
+                var r = (c.result || '').toString().toLowerCase();
+                var rcls = (r === 'passing' || r === 'pass') ? '#16a34a'
+                         : (r === 'failing' || r === 'fail') ? '#dc2626'
+                         : '#92400e';
+                return '<tr>'
+                  + '<td style="padding:3px 8px"><a href="#study-' + _h(c.study) + '">' + _h(c.study) + '</a></td>'
+                  + '<td style="padding:3px 8px">' + _h(c.behavior || '') + '</td>'
+                  + '<td style="padding:3px 8px;font-weight:600;color:' + rcls + '">' + _h(c.result || '—') + '</td>'
+                  + '</tr>';
+              }).join('');
+              var caBadge = caDiverges
+                ? '<span class="acceptance-divergence" title="The code-computed acceptance disagrees with the authored verdict_status — computed by the spine (investigation_status), not human-authored." style="display:inline-block;margin-left:8px;padding:2px 9px;border-radius:9999px;font-size:0.8em;font-weight:600;background:#fffbeb;border:1px solid #f59e0b;color:#92400e">⚠ code: ' + _h(ca.verdict_status || computedVs || '?') + ' · authored: ' + _h(ex.verdict_status || '—') + '</span>'
+                : '';
+              h += '<div class="acceptance-rollup" id="' + _h(iset.name || 'inv') + '-acceptance-rollup" '
+                + 'style="margin:12px 0;padding:12px 16px;background:#f8fafc;border:1px solid #cbd5e1;border-left-width:5px;border-radius:6px">'
+                + '<strong>Acceptance roll-up</strong> '
+                + '<span class="muted small" style="color:#64748b">code-computed from member-study verdicts</span>'
+                + caBadge
+                + '<table class="small" style="margin-top:8px;border-collapse:collapse">'
+                + '<thead><tr>'
+                + '<th style="padding:3px 8px;text-align:left">Study</th>'
+                + '<th style="padding:3px 8px;text-align:left">Behavior</th>'
+                + '<th style="padding:3px 8px;text-align:left">Result</th>'
+                + '</tr></thead><tbody>' + critRows + '</tbody></table></div>';
+            }
             return h + '</details>';
           })()
 

@@ -13090,6 +13090,17 @@ if __name__ == "__main__":
                     except Exception:
                         pass
             computed_acceptance = roll_up_acceptance(spec, studies_by_name)
+            # Spine A1: surface the PERSISTED divergence flag (written by the
+            # investigation acceptance evaluator) so the executive fold can
+            # render a code-vs-authored badge. The recompute above gives the
+            # per-criterion table + computed verdict_status; we do NOT recompute
+            # diverges_from_authored here — we read the spine-written flag.
+            persisted_acc = (spec.get("executive") or {}).get("computed_acceptance")
+            if isinstance(persisted_acc, dict) and isinstance(computed_acceptance, dict):
+                if "diverges_from_authored" in persisted_acc:
+                    computed_acceptance["diverges_from_authored"] = (
+                        persisted_acc.get("diverges_from_authored")
+                    )
         except Exception:
             pass
 
