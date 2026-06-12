@@ -6361,18 +6361,27 @@
           var exp = f.expected || {};
           var ref = f.expert_reference || {};
           var prov = f.provenance || {};
-          // Anchor a (possibly descriptive) test/run reference: the leading
+          // Anchor a (possibly descriptive) test reference: the leading
           // identifier token becomes the #<prefix>-<id> target, the full text
           // stays as the link label so the reader can trace the value to its
-          // source (the test card / the run row) instead of reading dead code.
+          // source (the test card) instead of reading dead code.  Only used
+          // for the TEST case: the report renders test cards (id="test-..."),
+          // so #test- anchors resolve.  The report has NO per-run rows, so run
+          // references are rendered as plain <code> (see _traceRun) — anchoring
+          // them would produce dead run-row links.  (The STUDY page does emit
+          // per-run rows and keeps its run anchors; that lives in study-detail.)
           function _traceLink(prefix, val) {
             var s = String(val);
             var tok = (s.match(/^[A-Za-z0-9_.\-]+/) || [s])[0];
             return '<a href="#' + prefix + '-' + _h(tok) + '"><code>' + _h(s) + '</code></a>';
           }
+          // Run references in the report: plain <code>, no anchor (no target).
+          function _traceRun(val) {
+            return '<code>' + _h(String(val)) + '</code>';
+          }
           var techParts = [];
           if (ev.from_test) techParts.push('test: ' + _traceLink('test', ev.from_test));
-          if (ev.from_run)  techParts.push('run: ' + _traceLink('run', ev.from_run));
+          if (ev.from_run)  techParts.push('run: ' + _traceRun(ev.from_run));
           if (ev.window)    techParts.push('window: ' + _h(ev.window));
           if (ev.smoking_gun) techParts.push('<details style="margin-top:4px"><summary>Smoking gun</summary><pre style="white-space:pre-wrap;font-size:0.85em;background:#fff;padding:6px;border-radius:3px">' + _h(ev.smoking_gun) + '</pre></details>');
           if (ev.discovered_during) techParts.push('discovered during: <code>' + _h(ev.discovered_during) + '</code>');
@@ -6413,11 +6422,11 @@
               + _h(String(ev.divergence_factor)) + ' vs expected</span>');
           }
           if (ev.from_test) traceBits.push('test: ' + _traceLink('test', ev.from_test));
-          if (ev.from_run)  traceBits.push('run: ' + _traceLink('run', ev.from_run));
+          if (ev.from_run)  traceBits.push('run: ' + _traceRun(ev.from_run));
           var runIds = prov.run_ids || [];
           if (Array.isArray(runIds) && runIds.length) {
             traceBits.push('runs: ' + runIds.map(function(rid) {
-              return '<a href="#run-' + _h(String(rid)) + '"><code>' + _h(String(rid)) + '</code></a>';
+              return '<code>' + _h(String(rid)) + '</code>';
             }).join(', '));
           }
           // Inline the cited test's pass_if band (look it up by from_test).
@@ -6667,7 +6676,7 @@
                   ? ' <span class="reconcile-divergent" style="display:inline-block;padding:3px 7px;border-radius:4px;background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;font-weight:600;font-size:0.85em">⚠ reconcile: divergent</span>'
                   : '';
                 var runLink = runIdent
-                  ? ' <span class="muted small">from run <a href="#run-' + _h(runIdent) + '">' + _h(runIdent) + '</a></span>'
+                  ? ' <span class="muted small">from run <code>' + _h(runIdent) + '</code></span>'
                   : '';
                 var bandLine = t.pass_if
                   ? '<div class="pass_if-band muted small" style="margin-top:3px">judged against <code>pass_if: ' + _h(JSON.stringify(t.pass_if)) + '</code></div>'
