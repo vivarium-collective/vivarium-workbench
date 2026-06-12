@@ -6901,6 +6901,75 @@ def _observables_for_ref(ws_root: Path, ref: str):
     return _json_body(payload), 200
 
 
+def _study_observable_check(ws_root: Path, slug: str):
+    """GET /api/study-observable-check?study=<slug> worker — ``(json_bytes, status)``.
+
+    Validates every readout in a study against its baseline composite's real
+    structure (the never-fabricate guard): ``{"composite": ref, "readouts":
+    [{name, status, detail}]}`` with ``status`` ∈
+    ``ok|unresolved|not_in_structure|aspirational``. ``not_in_structure`` is the
+    never-fabricate flag — a selector pointing at an observable the composite
+    does not expose. If the composite can't build, returns a clear non-500
+    (422 + all readouts marked aspirational with a note), never a crash.
+    """
+    ws_root = Path(ws_root)
+    if not _SLUG_RE.match(slug or ""):
+        return _json_body({"error": "invalid slug"}), 400
+
+    study_dir = ws_root / "studies" / slug
+    if not study_dir.is_dir():
+        study_dir = ws_root / "investigations" / slug
+    sf = _study_spec_file(study_dir)
+    if not sf.is_file():
+        return _json_body({"error": f"study not found: {slug}"}), 404
+
+    try:
+        spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
+    except Exception as e:  # noqa: BLE001
+        return _json_body({"error": f"study spec parse failed: {e}"}), 400
+
+    # Project legacy v2 shape (baseline: <str>) into the v3 baseline list.
+    from vivarium_dashboard.lib.spec_migration import migrate_v2_to_v3
+    spec = migrate_v2_to_v3(spec)
+
+    baseline = spec.get("baseline") or []
+    if not (isinstance(baseline, list) and baseline and isinstance(baseline[0], dict)):
+        return _json_body({"error": "study has no baseline composite", "readouts": []}), 422
+    ref = baseline[0].get("composite")
+    if not ref:
+        return _json_body({"error": "baseline entry has no composite ref", "readouts": []}), 422
+
+    try:
+        from pbg_superpowers.readout_validation import available_observables, validate_readouts
+    except Exception as e:  # noqa: BLE001
+        return _json_body({"error": f"readout_validation unavailable: {e}"}), 501
+
+    readouts = spec.get("readouts") or []
+    try:
+        core, state, schema = _build_composite_state_for_observables(ws_root, ref)
+    except Exception as e:  # noqa: BLE001 (LookupError / RuntimeError both land here)
+        # Composite can't build → clear non-500: surface every readout as
+        # aspirational (unverifiable) with a note, rather than crashing.
+        out = [
+            {"name": r.get("name", f"readout_{i}"), "status": "aspirational",
+             "detail": f"composite {ref!r} could not be built — readout unverified"}
+            for i, r in enumerate(readouts)
+        ]
+        return _json_body({
+            "composite": ref,
+            "readouts": out,
+            "note": f"composite {ref!r} could not be built: {e}",
+        }), 422
+
+    try:
+        available = available_observables(core, state, schema)
+        results = validate_readouts(spec, available=available)
+    except Exception as e:  # noqa: BLE001
+        return _json_body({"error": f"readout validation failed: {e}", "composite": ref}), 500
+
+    return _json_body({"composite": ref, "readouts": results}), 200
+
+
 # ---------------------------------------------------------------------------
 # HTTP handler
 # ---------------------------------------------------------------------------
@@ -6930,6 +6999,11 @@ class Handler(BaseHTTPRequestHandler):
             import urllib.parse as _up
             _ref = dict(_up.parse_qsl(_up.urlparse(self.path).query)).get("ref", "")
             return self._send_json_bytes(*_observables_for_ref(WORKSPACE, _ref))
+        if _path_only_pre == "/api/study-observable-check":
+            import urllib.parse as _up
+            _q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
+            _slug = (_q.get("study") or _q.get("investigation") or _q.get("name") or "").strip()
+            return self._send_json_bytes(*_study_observable_check(WORKSPACE, _slug))
 
         # Resolve /api/study-* aliases to their /api/investigation-* originals so
         # the rest of the dispatch chain only needs to know one set of paths.
@@ -12737,6 +12811,12 @@ if __name__ == "__main__":
         explicit ws_root so unit tests don't need the WORKSPACE global patched.
         Returns (json_bytes, http_status)."""
         return _observables_for_ref(ws_root, ref)
+
+    @staticmethod
+    def _study_observable_check_test(ws_root, slug):
+        """Test seam for GET /api/study-observable-check — calls the module
+        worker with an explicit ws_root. Returns (json_bytes, http_status)."""
+        return _study_observable_check(ws_root, slug)
 
     @staticmethod
     def _iset_detail_data(name: str) -> "dict | None":

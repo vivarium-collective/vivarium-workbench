@@ -34,6 +34,13 @@ def demo_ws(tmp_path):
     return ws
 
 
+def _write_study(ws: Path, slug: str, spec: dict) -> None:
+    import yaml
+    sdir = ws / "studies" / slug
+    sdir.mkdir(parents=True, exist_ok=True)
+    (sdir / "study.yaml").write_text(yaml.safe_dump(spec), encoding="utf-8")
+
+
 # ---------------------------------------------------------------------------
 # Task 1: GET /api/observables
 # ---------------------------------------------------------------------------
@@ -51,3 +58,39 @@ def test_observables_endpoint_unknown_ref_clear_error(demo_ws):
     body, code = server.Handler._observables_for_ref_test(demo_ws, "nope.not.a.composite")
     assert code >= 400
     assert "error" in json.loads(body)
+
+
+# ---------------------------------------------------------------------------
+# Task 2: GET /api/study-observable-check
+# ---------------------------------------------------------------------------
+
+def test_study_observable_check_flags_phantom(demo_ws):
+    _write_study(demo_ws, "the-study", {
+        "name": "the-study",
+        "baseline": [{"name": "base", "composite": _REF}],
+        "readouts": [
+            {"name": "real-one", "store_path": "stores.level"},
+            {"name": "phantom-one", "store_path": "stores.nonexistent"},
+        ],
+    })
+    body, code = server.Handler._study_observable_check_test(demo_ws, "the-study")
+    assert code == 200, body
+    payload = json.loads(body)
+    res = payload["readouts"]
+    assert payload["composite"] == _REF
+    # the never-fabricate flag: a phantom selector is flagged, not passed
+    assert any(r["name"] == "phantom-one" and r["status"] == "not_in_structure"
+               for r in res), res
+    assert any(r["status"] == "ok" for r in res), res     # the real one passes
+
+
+def test_study_observable_check_uncomputable_composite_clear_status(demo_ws):
+    _write_study(demo_ws, "broken-study", {
+        "name": "broken-study",
+        "baseline": [{"name": "base", "composite": "pbg_ws_increase_demo.composites.does-not-exist"}],
+        "readouts": [{"name": "real-one", "store_path": "stores.level"}],
+    })
+    body, code = server.Handler._study_observable_check_test(demo_ws, "broken-study")
+    # composite can't build → a clear non-crash status, never a 500
+    assert code in (200, 422), body
+    assert code != 500
