@@ -7341,26 +7341,61 @@ def _linkage_cached_index(ws_root: Path):
     return index
 
 
-def _linkage_index(ws_root: Path, *, investigation=None, source=None, observable=None):
+def _linkage_index(ws_root: Path, *, investigation=None, source=None, observable=None,
+                   observable_registry=None, composite=None):
     """GET /api/linkage-index worker — ``(json_bytes, status)``.
 
     SP4a: runs the deterministic linkage index/queries
     (``pbg_superpowers.linkage_index``) over the workspace. Param-dispatch:
 
-    - ``source``         → ``{studies: [...]}`` (studies citing the bib_key)
-    - ``observable``     → ``{findings: [...]}`` (findings measuring the token)
-    - ``investigation``  → ``{ac_matrix, dag, nodes, edges}`` for that inv
-    - (none)             → the full ``{nodes, edges}`` graph
+    - ``source``               → ``{studies: [...]}`` (studies citing the bib_key)
+    - ``observable``           → ``{findings: [...]}`` (findings measuring the token)
+    - ``observable_registry``  → ``{studies, composites}`` emitting the token (SP4b)
+    - ``composite``            → ``{emits, used_by_studies}`` for that composite (SP4b)
+    - ``investigation``        → ``{ac_matrix, dag, nodes, edges}`` for that inv
+    - (none)                   → the full ``{nodes, edges}`` graph
 
     The dashboard adds NO AI — it only runs the deterministic derive and returns
     JSON. Tolerant: an older/absent pbg_superpowers, or an unscannable
     workspace, returns 200 with an empty payload rather than a 500.
+
+    SP4b note: ``observable_registry``/``composite`` are the ONLY paths that
+    trigger a (cached) composite build, via the injected
+    ``_observables_for_ref`` callable. The other paths stay build-free.
     """
     ws_root = Path(ws_root)
     try:
         from pbg_superpowers import linkage_index as _li
     except Exception:  # noqa: BLE001 — older pbg_superpowers lacks the module
         return _json_body({"nodes": [], "edges": []}), 200
+
+    # SP4b: adapter over the (cached, real) composite build. ``_observables_for_ref``
+    # returns ``(json_bytes, status)`` for the HTTP path; the enrich callable wants
+    # the ``{"leaves", "catalogs"}`` dict — normalize both that and a direct dict
+    # (test-injected) shape. Looked up as a module global so tests can monkeypatch it.
+    def _obs_for_ref(ref):
+        res = _observables_for_ref(ws_root, ref)
+        if isinstance(res, dict):
+            return res
+        if isinstance(res, tuple) and res:
+            try:
+                return json.loads(res[0])
+            except Exception:  # noqa: BLE001
+                return {}
+        return {}
+
+    if observable_registry:
+        try:
+            return _json_body(_li.studies_for_observable(
+                ws_root, observable_registry, observables_for_ref=_obs_for_ref)), 200
+        except Exception:  # noqa: BLE001 — build/derive can fail; stay typed + 200
+            return _json_body({"studies": [], "composites": []}), 200
+    if composite:
+        try:
+            return _json_body(_li.composite_emits(
+                ws_root, composite, observables_for_ref=_obs_for_ref)), 200
+        except Exception:  # noqa: BLE001 — build/derive can fail; stay typed + 200
+            return _json_body({"emits": [], "used_by_studies": []}), 200
 
     try:
         if source:
@@ -7426,6 +7461,8 @@ class Handler(BaseHTTPRequestHandler):
                 investigation=(_q.get("investigation") or _q.get("inv") or "").strip() or None,
                 source=(_q.get("source") or "").strip() or None,
                 observable=(_q.get("observable") or "").strip() or None,
+                observable_registry=(_q.get("observable_registry") or "").strip() or None,
+                composite=(_q.get("composite") or "").strip() or None,
             ))
 
         # Resolve /api/study-* aliases to their /api/investigation-* originals so
@@ -13247,11 +13284,14 @@ if __name__ == "__main__":
         return _report_lint(ws_root)
 
     @staticmethod
-    def _linkage_index_test(ws_root, *, investigation=None, source=None, observable=None):
+    def _linkage_index_test(ws_root, *, investigation=None, source=None, observable=None,
+                            observable_registry=None, composite=None):
         """Test seam for GET /api/linkage-index — runs the deterministic linkage
         queries over an explicit ws_root. Returns (json_bytes, http_status)."""
         return _linkage_index(ws_root, investigation=investigation,
-                              source=source, observable=observable)
+                              source=source, observable=observable,
+                              observable_registry=observable_registry,
+                              composite=composite)
 
     @staticmethod
     def _iset_detail_data(name: str) -> "dict | None":
