@@ -215,6 +215,38 @@ def test_bundle_survives_nonfinite_composite_state(tmp_workspace, tmp_path, monk
     assert not (out / "api" / "composite-state" / "bad.json").exists()
 
 
+def test_bundle_uses_committed_composite_state_override(tmp_workspace, tmp_path, monkeypatch):
+    """A composite whose generator can't resolve at publish time (e.g. the full
+    baseline, which needs the on-disk ParCa cache) still becomes navigable when a
+    pre-resolved state JSON is committed under reports/composite-state/<id>.json:
+    the committed file is used verbatim and has_wiring=True."""
+    from vivarium_dashboard import publish
+
+    monkeypatch.setattr(server, "_composites_data", lambda ws: {"composites": [
+        {"id": "heavy.composite", "name": "Heavy"},
+    ]})
+
+    def _resolve(cid):
+        raise RuntimeError("needs on-disk cache")  # live resolution fails
+
+    monkeypatch.setattr(server, "_composite_resolve_data", _resolve)
+
+    committed_dir = server.WORKSPACE / "reports" / "composite-state"
+    committed_dir.mkdir(parents=True, exist_ok=True)
+    committed = {"state": {"step": {"_type": "step", "inputs": {}, "outputs": {}}}}
+    (committed_dir / "heavy.composite.json").write_text(json.dumps(committed))
+
+    out = tmp_path / "bundle"
+    publish.build_bundle(server.WORKSPACE, out)
+
+    exported = out / "api" / "composite-state" / "heavy.composite.json"
+    assert exported.is_file(), "committed override not exported"
+    assert json.loads(exported.read_text()) == committed, "committed override not used verbatim"
+    by_id = {c["id"]: c for c in
+             json.loads((out / "api" / "composites.json").read_text())["composites"]}
+    assert by_id["heavy.composite"]["has_wiring"] is True, "override should mark composite navigable"
+
+
 # ---------------------------------------------------------------------------
 # Task 1 (read-only viewer): export the five read resources
 # ---------------------------------------------------------------------------

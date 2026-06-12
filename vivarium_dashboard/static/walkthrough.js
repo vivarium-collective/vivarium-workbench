@@ -201,6 +201,16 @@
   // serves both contexts, so external/bookmarked links to it still resolve.
   // -------------------------------------------------------------------------
 
+  // Build a /studies/<name> URL honoring the snapshot base-path. In a hosted
+  // read-only snapshot the bundle lives at a subpath (e.g. /v2ecoli/dashboard),
+  // so a root-absolute '/studies/<name>' 404s on GitHub Pages. basePath is ""
+  // in local mode, leaving the URL unchanged.
+  function _studyHref(name) {
+    var base = (window.__DASH_CONFIG__ && window.__DASH_CONFIG__.basePath) || "";
+    return base + '/studies/' + encodeURIComponent(name);
+  }
+  window._studyHref = _studyHref;
+
   function _openStudyEmbedded(name) {
     if (!name) return;
     var frame = document.getElementById('study-detail-frame');
@@ -208,13 +218,13 @@
     var nameEl = document.getElementById('study-detail-name');
     if (!frame || !panel) {
       // Fallback for any host that doesn't have the embed shell yet.
-      window.location = '/studies/' + encodeURIComponent(name);
+      window.location = _studyHref(name);
       return;
     }
     // If a previous study is currently popped out, drop the placeholder
     // before reusing the iframe.
     _restoreEmbeddedLoom('study-detail-frame');
-    frame.src = '/studies/' + encodeURIComponent(name);
+    frame.src = _studyHref(name);
     panel.style.display = '';
     if (nameEl) nameEl.textContent = name;
     window._studyDetailCurrent = name;
@@ -225,7 +235,7 @@
   function _popoutStudy() {
     var name = window._studyDetailCurrent;
     if (!name) return;
-    var url = '/studies/' + encodeURIComponent(name);
+    var url = _studyHref(name);
     var w = _openDetachedWindow(url, 1200, 800);
     if (!w) {
       alert('Popup blocked. Allow popups from this site to pop out the study view.');
@@ -970,8 +980,17 @@
           _esc(s.kind) + '</span>';
         html += '<span class="muted" style="flex:none;width:64px;text-align:right">' +
           _fmtBytes(s.size_bytes) + '</span>';
-        html += '<button class="action-btn" style="flex:none;padding:1px 8px;font-size:0.85em" ' +
-          'onclick="_openDataSourceFile(\'' + _esc(s.key).replace(/'/g, "\\'") + '\')">Open</button>';
+        // Prefer an external hyperlink when the provider supplied one (e.g. a
+        // GitHub raw URL) — this is the only access path that works in the
+        // published static snapshot. Fall back to the server-only "Open"
+        // button for local mode when no url is present.
+        if (s.url) {
+          html += '<a class="action-btn" style="flex:none;padding:1px 8px;font-size:0.85em;text-decoration:none" ' +
+            'href="' + _esc(s.url) + '" target="_blank" rel="noopener">open ↗</a>';
+        } else {
+          html += '<button class="action-btn" style="flex:none;padding:1px 8px;font-size:0.85em" ' +
+            'onclick="_openDataSourceFile(\'' + _esc(s.key).replace(/'/g, "\\'") + '\')">Open</button>';
+        }
         html += '</div>';
       });
       html += '</div></details>';
@@ -2897,16 +2916,9 @@
     var _dashCfg = window.__DASH_CONFIG__ || {};
     if (_dashCfg.mode === "snapshot") {
       document.body.classList.add("snapshot");
-      // Wire the snapshot banner interactive link (hide if no interactiveUrl configured).
-      var bannerLink = document.getElementById('snapshot-interactive-link');
-      if (bannerLink) {
-        var iurl = _dashCfg.interactiveUrl || '';
-        if (iurl) {
-          bannerLink.href = iurl;
-        } else {
-          bannerLink.style.display = 'none';
-        }
-      }
+      // The snapshot banner link is a static href to the vivarium-dashboard
+      // GitHub repo (set in the template); there is no hosted interactive
+      // version, so nothing to wire here.
       // Show repo-name label from config (Task 5).
       var repoLabel = document.getElementById('snapshot-repo-label');
       if (repoLabel && _dashCfg.repo) {
@@ -4601,7 +4613,7 @@
       // panel a DAG-node click uses). Plain-text href is kept so
       // middle-click / cmd-click still opens the standalone study
       // detail page in a new tab.
-      var href = t.slug ? '/studies/' + encodeURIComponent(t.slug) : '#';
+      var href = t.slug ? _studyHref(t.slug) : '#';
       var slugAttr = _escInv(t.slug || '');
       return '<a class="inv-aag-tile" href="' + href + '" '
         +    'data-study-slug="' + slugAttr + '" '
@@ -5409,11 +5421,11 @@
       // This view (e.g. the report / deep-link investigation view) has no
       // in-place study-embed panel — navigate to the study page directly so the
       // sidebar study link still works instead of dying silently.
-      window.location = '/studies/' + encodeURIComponent(name);
+      window.location = _studyHref(name);
       return;
     }
     window._currentInvestigationStudy = name;
-    frame.src = '/studies/' + encodeURIComponent(name);
+    frame.src = _studyHref(name);
     if (nameEl) nameEl.textContent = name;
     panel.style.display = '';
     panel.scrollIntoView({behavior: 'smooth', block: 'start'});
@@ -5432,7 +5444,7 @@
   function _popoutInvestigationStudy() {
     var name = window._currentInvestigationStudy;
     if (!name) return;
-    var w = _openDetachedWindow('/studies/' + encodeURIComponent(name), 1200, 800);
+    var w = _openDetachedWindow(_studyHref(name), 1200, 800);
     if (!w) {
       console.warn('_popoutInvestigationStudy: popup blocked');
       alert('Popup blocked. Allow popups from this site to pop out the study view.');

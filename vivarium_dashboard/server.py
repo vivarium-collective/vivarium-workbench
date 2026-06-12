@@ -679,6 +679,12 @@ def _enumerate_data_sources(bypass_cache: bool = False) -> dict:
                     "category": str(entry.get("category") or "uncategorized"),
                     "kind": str(entry.get("kind") or "inherited"),
                     "size_bytes": int(entry.get("size_bytes") or 0),
+                    # Optional external link (e.g. a GitHub raw URL for an
+                    # inherited source). When present the SPA renders a
+                    # hyperlink — the ONLY working access path in the published
+                    # static snapshot (the /api/data-source-file "Open" button
+                    # is server-only).
+                    "url": str(entry.get("url") or ""),
                 })
             data = {"label": label, "sources": sources}
     except Exception as e:  # noqa: BLE001 — never break the dashboard
