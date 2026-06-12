@@ -1006,6 +1006,7 @@
     <p style="margin:6px 0;font-size:0.9em">
       <strong>Duration:</strong> {{ sim.duration_min or '?' }} min · <strong>Seeds:</strong>
       {% if sim.seeds %}<code>{{ sim.seeds | join(', ') }}</code>{% else %}<em>not set</em>{% endif %}
+      {% if sim.n_runs_recorded %} · <strong>Runs recorded:</strong> {{ sim.n_runs_recorded }}{% if sim.run_names %} (<code>{{ sim.run_names | join('</code>, <code>') }}</code>){% endif %}{% endif %}
     </p>
     {% if sim.readouts %}
     <p style="margin:4px 0;font-size:0.88em"><strong>Readouts:</strong>
