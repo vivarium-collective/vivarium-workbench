@@ -117,6 +117,72 @@ def test_seed_proposal_unknown_id_raises(_ws):
         seed_followup_study(_ws, "p1", proposal_id="does-not-exist")
 
 
+def _write_parent_with_finding(ws: Path, name: str) -> Path:
+    return _write_parent(ws, name, findings=[{
+        "id": "F-01",
+        "kind": "biological",
+        "status": "contradicts",
+        "statement": "v2ecoli underestimates the DnaA-ATP fraction ~5x.",
+        "next_action": (
+            "Calibrate the DARS reactivation rate to match the literature "
+            "ATP fraction in range 0.20-0.30."
+        ),
+        "evidence": {"from_test": "dnaA-atp-fraction"},
+        "explanation": "ATP-loading is gated by DARS-mediated reactivation.",
+    }])
+
+
+def test_seed_from_finding_delegates_to_pbg(_ws):
+    """A finding with a next_action seeds STANDALONE (no pre-existing
+    proposal) by delegating to the pbg seed mechanism; the parent finding
+    is stamped seeded_study."""
+    _write_parent_with_finding(_ws, "p1")
+    new_name = seed_followup_study(_ws, "p1", finding_id="F-01")
+    child = yaml.safe_load(
+        (_ws / "studies" / new_name / "study.yaml").read_text())
+    assert child["seeded_from"]["finding"] == "F-01"
+    assert child["seeded_from"]["study"] == "p1"
+    assert child["purpose"]["question"]
+    # Parent finding stamped.
+    parent = yaml.safe_load((_ws / "studies" / "p1" / "study.yaml").read_text())
+    f = next(f for f in parent["findings"] if f["id"] == "F-01")
+    assert f["seeded_study"] == new_name
+
+
+def test_seed_from_finding_adds_investigation_backlink(_ws):
+    """The finding-seeded child is appended to investigations listing the
+    parent (the dashboard's back-link, preserved through delegation)."""
+    _write_parent_with_finding(_ws, "p1")
+    inv = _ws / "investigations" / "inv" / "investigation.yaml"
+    inv.parent.mkdir(parents=True, exist_ok=True)
+    inv.write_text("name: inv\nstudies:\n  - p1\n")
+    new_name = seed_followup_study(_ws, "p1", finding_id="F-01")
+    studies = yaml.safe_load(inv.read_text())["studies"]
+    assert new_name in studies
+
+
+def test_post_study_seed_followup_accepts_finding_id(_ws):
+    from vivarium_dashboard.server import _post_study_seed_followup_for_test
+    _write_parent_with_finding(_ws, "p1")
+    body, code = _post_study_seed_followup_for_test(
+        _ws, {"parent": "p1", "finding_id": "F-01"})
+    assert code == 200, body
+    assert (_ws / "studies" / body["new_slug"] / "study.yaml").is_file()
+    assert body["new_study_name"] == body["new_slug"]
+
+
+def test_post_study_seed_followup_legacy_still_works(_ws):
+    """The legacy followup_idx path still routes (no finding_id)."""
+    from vivarium_dashboard.server import _post_study_seed_followup_for_test
+    _write_parent(_ws, "p1", follow_up_studies=[
+        {"title": "old follow-up", "kind": "new", "why": "because"},
+    ])
+    body, code = _post_study_seed_followup_for_test(
+        _ws, {"parent": "p1", "followup_idx": 0})
+    assert code == 200, body
+    assert body["new_study_name"]
+
+
 def test_seed_proposal_adds_child_to_parent_investigation(_ws):
     """The seeded child must be appended to investigations listing the parent
     so it shows up in the DAG view."""
