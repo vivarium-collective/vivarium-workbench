@@ -70,3 +70,76 @@ def test_linkage_index_tolerant_on_missing_ws(tmp_path, monkeypatch):
     body, code = server.Handler._linkage_index_test(missing, investigation="nope")
     assert code == 200  # never 500
     json.loads(body)  # valid JSON
+
+
+# --- SP4b: observable_registry + composite queries (INJECTED build) --------
+
+@pytest.fixture
+def tmp_ws_observable_registry(tmp_path, monkeypatch):
+    """A workspace whose single study uses composite ``cm-comp`` and measures
+    ``listeners.mass.cell_mass`` — so an injected build that emits a matching
+    leaf links the composite to the study in the observable registry."""
+    import vivarium_dashboard.server as srv
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True)
+    (ws / "workspace.yaml").write_text("name: ws\n")
+    sd = ws / "studies" / "s1"
+    sd.mkdir(parents=True)
+    sd.joinpath("study.yaml").write_text(yaml.safe_dump({
+        "name": "s1",
+        "baseline": {"name": "bl", "composite": "cm-comp"},
+        "tests": [{"name": "b1",
+                   "measure": {"field": "listeners.mass.cell_mass"}}],
+    }))
+    monkeypatch.setattr(srv, "WORKSPACE", ws)
+    return ws
+
+
+def test_linkage_index_observable_registry_query(tmp_ws_observable_registry, monkeypatch):
+    import vivarium_dashboard.server as server
+    # Stub the (expensive) composite build so the test never builds for real.
+    monkeypatch.setattr(server, "_observables_for_ref",
+                        lambda ws, ref: {"leaves": ["agents.0.listeners.mass.cell_mass"],
+                                         "catalogs": {}})
+    body, code = server.Handler._linkage_index_test(
+        server.WORKSPACE, observable_registry="listeners.mass.cell_mass")
+    d = json.loads(body)
+    assert code == 200
+    assert set(d) == {"studies", "composites"}
+    assert "s1" in (d.get("studies") or [])
+    assert "cm-comp" in (d.get("composites") or [])
+
+
+def test_linkage_index_composite_query(tmp_ws_observable_registry, monkeypatch):
+    import vivarium_dashboard.server as server
+    monkeypatch.setattr(server, "_observables_for_ref",
+                        lambda ws, ref: {"leaves": ["agents.0.listeners.mass.cell_mass"],
+                                         "catalogs": {}})
+    body, code = server.Handler._linkage_index_test(
+        server.WORKSPACE, composite="cm-comp")
+    d = json.loads(body)
+    assert code == 200
+    assert set(d) == {"emits", "used_by_studies"}
+    assert "listeners.mass.cell_mass" in (d.get("emits") or [])
+    assert "s1" in (d.get("used_by_studies") or [])
+
+
+def test_linkage_index_observable_registry_tolerant_on_build_failure(
+        tmp_ws_observable_registry, monkeypatch):
+    import vivarium_dashboard.server as server
+
+    def _boom(ws, ref):
+        raise RuntimeError("composite build blew up")
+
+    monkeypatch.setattr(server, "_observables_for_ref", _boom)
+    body, code = server.Handler._linkage_index_test(
+        server.WORKSPACE, observable_registry="listeners.mass.cell_mass")
+    d = json.loads(body)
+    assert code == 200  # never 500
+    assert set(d) == {"studies", "composites"}
+
+    body2, code2 = server.Handler._linkage_index_test(
+        server.WORKSPACE, composite="cm-comp")
+    d2 = json.loads(body2)
+    assert code2 == 200
+    assert set(d2) == {"emits", "used_by_studies"}
