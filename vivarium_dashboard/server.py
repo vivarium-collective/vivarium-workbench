@@ -6853,6 +6853,53 @@ def _build_composite_state_for_observables(ws_root: Path, ref: str):
     return core, state, spec.get("schema") or spec.get("composition")
 
 
+import re as _re
+_LINEAGE_AGENT_RE = _re.compile(r"^agents\.\d+\.(.+)$")
+
+
+def _augment_lineage_aliases(available: dict) -> dict:
+    """Augment an ``available_observables`` dict with lineage-prefix-stripped aliases.
+
+    The whole-cell composite runs as a LINEAGE: the cell is nested under
+    ``agents.<n>.*`` (nearly every leaf is ``agents.0.<rest>``).  Studies,
+    however, author *bare* single-cell readout paths (``listeners.mass.cell_mass``,
+    ``unique.active_replisome``).  Without normalization the never-fabricate
+    guard flags those real readouts as ``not_in_structure`` purely on a prefix
+    mismatch (confirmed across all v2e-invest studies: 4/4 such flags, 0 genuine
+    phantoms).
+
+    For the ``available`` set used in VALIDATION only, this strips a leading
+    ``agents.<n>.`` from every leaf (and catalog key) and adds the captured
+    ``<rest>`` as an alias.  The raw emitted paths are preserved.  Crucially it
+    strips ONLY a leading ``agents.<n>.`` — never an arbitrary suffix — so a
+    genuinely-absent observable (``listeners.totally_fabricated``) still fails
+    to match and is correctly flagged ``not_in_structure``.
+
+    This lineage/``agents.<n>.`` convention lives in the dashboard worker; the
+    general ``readout_validation`` validator stays free of agent-structure
+    knowledge.
+    """
+    leaves = list(available.get("leaves", []) or [])
+    catalogs = dict(available.get("catalogs", {}) or {})
+
+    seen = set(leaves)
+    extra_leaves = []
+    for leaf in leaves:
+        m = _LINEAGE_AGENT_RE.match(leaf)
+        if m:
+            rest = m.group(1)
+            if rest not in seen:
+                extra_leaves.append(rest)
+                seen.add(rest)
+
+    for key, val in list(catalogs.items()):
+        m = _LINEAGE_AGENT_RE.match(key)
+        if m:
+            catalogs.setdefault(m.group(1), val)
+
+    return {"leaves": leaves + extra_leaves, "catalogs": catalogs}
+
+
 def _observables_for_ref(ws_root: Path, ref: str):
     """GET /api/observables?ref=<id> worker — returns ``(json_bytes, status)``.
 
@@ -6962,7 +7009,11 @@ def _study_observable_check(ws_root: Path, slug: str):
         }), 422
 
     try:
-        available = available_observables(core, state, schema)
+        # Normalize the lineage prefix: the whole-cell composite nests the cell
+        # under ``agents.<n>.`` but studies author bare single-cell paths, so
+        # augment the VALIDATION set with prefix-stripped aliases (never-fabricate
+        # preserved — only a leading ``agents.<n>.`` is stripped).
+        available = _augment_lineage_aliases(available_observables(core, state, schema))
         results = validate_readouts(spec, available=available)
     except Exception as e:  # noqa: BLE001
         return _json_body({"error": f"readout validation failed: {e}", "composite": ref}), 500

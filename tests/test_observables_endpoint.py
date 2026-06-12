@@ -97,6 +97,42 @@ def test_study_observable_check_uncomputable_composite_clear_status(demo_ws):
 
 
 # ---------------------------------------------------------------------------
+# Task 3: lineage-prefix normalization (the SP2b-i false-positive fix)
+# ---------------------------------------------------------------------------
+
+def test_lineage_prefix_normalization_bare_readouts_match():
+    """The whole-cell composite runs as a LINEAGE: cell leaves are nested under
+    ``agents.<n>.``.  Studies author *bare* single-cell paths.  The dashboard's
+    ``_augment_lineage_aliases`` strips a leading ``agents.<n>.`` so a bare
+    readout matches the real prefixed leaf — WITHOUT inventing arbitrary leaves
+    (a genuinely-absent path still flags ``not_in_structure``).
+    """
+    from pbg_superpowers.readout_validation import validate_readouts
+
+    available = {
+        "leaves": ["agents.0.listeners.x", "agents.0.unique.y"],
+        "catalogs": {},
+    }
+    aug = server._augment_lineage_aliases(available)
+    # raw prefixed forms are preserved …
+    assert "agents.0.listeners.x" in aug["leaves"]
+    # … and the stripped aliases are added
+    assert "listeners.x" in aug["leaves"]
+    assert "unique.y" in aug["leaves"]
+
+    spec = {"readouts": [
+        {"name": "x", "store_path": "listeners.x"},
+        {"name": "y", "store_path": "unique.y"},
+        {"name": "bogus", "store_path": "listeners.bogus"},
+    ]}
+    by = {r["name"]: r["status"] for r in validate_readouts(spec, available=aug)}
+    assert by["x"] == "ok", by
+    assert by["y"] == "ok", by
+    # never-fabricate preserved: a genuinely-absent leaf still flags
+    assert by["bogus"] == "not_in_structure", by
+
+
+# ---------------------------------------------------------------------------
 # Task 4: v2e-invest golden (skipif absent / not buildable in this interpreter)
 # ---------------------------------------------------------------------------
 
@@ -152,17 +188,24 @@ def test_v2e_invest_golden_study_readout_statuses():
 
 
 def test_v2e_invest_golden_real_leaf_ok_phantom_flagged():
-    """Against the REAL composite structure: a real leaf passes (`ok`), an
-    invented one is flagged (`not_in_structure`) — the never-fabricate value.
+    """Against the REAL composite structure, exercising the lineage-prefix fix:
+    a BARE single-cell readout (`listeners.mass.cell_mass`, NOT pre-prefixed
+    with ``agents.0.``) passes (`ok`) once the dashboard normalizes the
+    available set, while an invented leaf (`listeners.totally_fabricated`) is
+    still flagged (`not_in_structure`) — the never-fabricate value preserved.
     """
     payload = _v2e_observables_or_skip()
     from pbg_superpowers.readout_validation import validate_readouts
-    real = next(l for l in payload["leaves"] if l.endswith("listeners.mass.cell_mass"))
+    # the real emitted form is prefixed (lineage); the study authors it bare
+    assert any(l.endswith("listeners.mass.cell_mass") for l in payload["leaves"])
+    assert "listeners.mass.cell_mass" not in payload["leaves"]  # bare form NOT raw-emitted
+    available = server._augment_lineage_aliases(
+        {"leaves": payload["leaves"], "catalogs": payload["catalogs"]}
+    )
     spec = {"readouts": [
-        {"name": "real", "store_path": real},
-        {"name": "phantom", "store_path": real.rsplit(".", 1)[0] + ".totally_fabricated"},
+        {"name": "real", "store_path": "listeners.mass.cell_mass"},
+        {"name": "phantom", "store_path": "listeners.totally_fabricated"},
     ]}
-    available = {"leaves": payload["leaves"], "catalogs": payload["catalogs"]}
     res = validate_readouts(spec, available=available)
     by = {r["name"]: r["status"] for r in res}
     assert by["real"] == "ok", res
