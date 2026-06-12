@@ -4783,12 +4783,84 @@
           }
         }
         _renderInvestigationDag(d.studies || []);
+        // SP5: needs-attention panel (deterministic scan, code-computed, AI-free).
+        _renderInvNeedsAttention(name);
       })
       .catch(function(err) {
         document.getElementById('investigation-detail-description').textContent = 'Failed to load: ' + err;
       });
   }
   window._openInvestigationDetail = _openInvestigationDetail;
+
+  // SP5: "Needs attention" panel on the investigation-detail page. Fetches the
+  // deterministic scan (GET /api/needs-attention) — uncovered ACs, verdict
+  // divergences, open feedback, param drift, stale findings, phantom
+  // observables — and renders it as a collapsible <details> dropdown that
+  // mirrors the study-detail readiness panel. Items arrive PRE-SORTED
+  // high→medium→low. The dashboard computes nothing here; it renders the
+  // scan's output (AI-free). Tolerant: an absent/failed endpoint just leaves
+  // the panel empty.
+  function _naSeverityStyle(sev) {
+    var s = (sev || '').toString().toLowerCase();
+    if (s === 'high')   return { dot: '#dc2626', bg: '#fef2f2', bd: '#dc2626', col: '#991b1b' };
+    if (s === 'medium') return { dot: '#f59e0b', bg: '#fffbeb', bd: '#f59e0b', col: '#92400e' };
+    return { dot: '#3b82f6', bg: '#eff6ff', bd: '#3b82f6', col: '#1e40af' };  // low / default
+  }
+  function _renderInvNeedsAttention(name) {
+    var container = document.getElementById('investigation-needs-attention');
+    if (!container) return;
+    container.innerHTML = '';
+    var _fetch = fetch('/api/needs-attention?investigation=' + encodeURIComponent(name),
+                       {headers: {Accept: 'application/json'}})
+      .then(function(r) { return r.ok ? r.json() : null; });
+    _fetch.then(function(d) {
+      if (!d || !d.summary) return;
+      var lbl = '<span class="muted" style="font-size:0.85em">code-computed by the needs-attention scan (deterministic)</span>';
+      var total = (d.summary.total) || 0;
+      if (!total) {
+        // Quiet "nothing needs attention" state — not an empty dropdown.
+        container.innerHTML =
+          '<div class="needs-attention-banner" style="margin:10px 0 14px 0;padding:10px 14px;'
+          + 'background:#f0fdf4;border:1px solid #16a34a;border-left-width:5px;border-radius:6px;color:#166534">'
+          + '<strong>✓ Nothing needs attention</strong> ' + lbl + '</div>';
+        return;
+      }
+      var bySev = d.summary.by_severity || {};
+      var high = bySev.high || 0;
+      var head = '⚠ Needs attention — ' + high + ' high, ' + total + ' total';
+      var items = (d.items || []).map(function(it) {
+        var st = _naSeverityStyle(it.severity);
+        var ref = (it.study || it.ref || '').toString();
+        var kind = _esc((it.kind || '').toString());
+        var refHtml = ref ? '<code>' + _esc(ref) + '</code>' : '<span class="muted">—</span>';
+        var hint = it.action_hint ? ' &nbsp;·&nbsp; ' + _esc(it.action_hint.toString()) : '';
+        var titleLine = it.title
+          ? '<div style="font-size:0.9em;margin-top:2px">' + _esc(it.title.toString()) + '</div>'
+          : '';
+        return '<li style="margin-top:7px;padding-left:10px;border-left:3px solid ' + st.bd + '">'
+          + '<span style="color:' + st.dot + ';font-weight:700">●</span> '
+          + '<code style="font-size:0.85em">' + kind + '</code> &nbsp;·&nbsp; ' + refHtml + hint
+          + titleLine + '</li>';
+      }).join('');
+      var byKind = d.summary.by_kind || {};
+      var breakdown = Object.keys(byKind).sort(function(a, b) {
+        return (byKind[b] || 0) - (byKind[a] || 0);
+      }).map(function(k) { return (byKind[k] || 0) + '× ' + _esc(k); }).join(' &nbsp;·&nbsp; ');
+      var sev = _naSeverityStyle(high ? 'high' : 'medium');
+      container.innerHTML =
+        '<details class="needs-attention-banner" style="margin:10px 0 14px 0;background:' + sev.bg
+        + ';border:1px solid ' + sev.bd + ';border-left-width:5px;border-radius:6px;color:' + sev.col + '">'
+        + '<summary style="padding:10px 14px;cursor:pointer;list-style:none;outline:none">'
+        + '<strong>' + head + '</strong> ' + lbl
+        + (breakdown ? '<div class="muted" style="font-size:0.82em;margin-top:5px">' + breakdown
+            + ' &nbsp;·&nbsp; <span style="opacity:.7;font-style:italic">click to expand</span></div>' : '')
+        + '</summary>'
+        + '<ul style="margin:4px 0 12px 0;padding:0 14px 0 18px;list-style:none;font-size:0.92em">'
+        + items + '</ul>'
+        + '</details>';
+    }).catch(function() { /* tolerant — leave the panel empty */ });
+  }
+  window._renderInvNeedsAttention = _renderInvNeedsAttention;
 
   // "Run unblocked" — kick off every variant in the current investigation
   // whose required-before-run gates are satisfied. POSTs to start a
@@ -5871,9 +5943,50 @@
         + '}catch(e){}})();</script>';
     }
 
+    // ── SP5: "Decisions needed" report section ─────────────────────────────
+    // A compact list of the same needs-attention items shown in the live panel.
+    // Built as a placeholder that an inline script fills from the deterministic
+    // /api/needs-attention scan (mirrors the AC-gating-matrix enrich pattern):
+    // the section hydrates in the live report and stays quiet/hidden in a static
+    // snapshot where the endpoint is unreachable. The report computes nothing.
+    function _needsAttentionReportHtml() {
+      var inv = (iset.name || '').toString();
+      if (!inv) return '';
+      return '<section class="needs-attention-report" id="needs-attention-report" '
+        + 'data-investigation="' + _h(inv) + '" style="display:none;margin:12px 0;'
+        + 'padding:12px 16px;background:#fffbeb;border:1px solid #fcd34d;'
+        + 'border-left:4px solid #f59e0b;border-radius:6px">'
+        + '<strong>Decisions needed</strong> '
+        + '<span class="muted small">items the deterministic scan flags for triage · code-computed</span>'
+        + '<div id="needs-attention-report-body" style="margin-top:8px;font-size:0.92em"></div>'
+        + '</section>'
+        + '<script>(function(){try{'
+        + 'var sec=document.getElementById("needs-attention-report");'
+        + 'if(!sec)return;var inv=sec.getAttribute("data-investigation");if(!inv)return;'
+        + 'fetch("/api/needs-attention?investigation="+encodeURIComponent(inv))'
+        + '.then(function(r){return r.ok?r.json():null;})'
+        + '.then(function(d){if(!d||!d.summary||!(d.summary.total>0))return;'
+        + 'var sevcol={high:"#dc2626",medium:"#f59e0b",low:"#3b82f6"};'
+        + 'var body=document.getElementById("needs-attention-report-body");if(!body)return;'
+        + 'var esc=function(s){var e=document.createElement("span");e.textContent=(s==null?"":String(s));return e.innerHTML;};'
+        + 'var rows=(d.items||[]).map(function(it){'
+        + 'var c=sevcol[(it.severity||"low")]||"#3b82f6";'
+        + 'var ref=esc(it.study||it.ref||"");'
+        + 'var hint=it.action_hint?(" &middot; "+esc(it.action_hint)):"";'
+        + 'return "<li style=\\"margin-top:5px;padding-left:9px;border-left:3px solid "+c+"\\">"'
+        + '+"<code style=\\"font-size:0.85em\\">"+esc(it.kind||"")+"</code> &middot; <code>"+ref+"</code>"+hint+"</li>";'
+        + '}).join("");'
+        + 'body.innerHTML="<div class=\\"muted small\\">"+((d.summary.by_severity||{}).high||0)+" high &middot; "'
+        + '+d.summary.total+" total</div><ul style=\\"margin:6px 0 0 0;padding:0 0 0 4px;list-style:none\\">"+rows+"</ul>";'
+        + 'sec.style.display="";'
+        + '}).catch(function(){});'
+        + '}catch(e){}})();</script>';
+    }
+
     var verdictDagHtml = _verdictDagHtml();
     var acceptanceNarrativeHtml = _acceptanceNarrativeHtml();
     var acGatingMatrixHtml = _acGatingMatrixHtml();
+    var needsAttentionReportHtml = _needsAttentionReportHtml();
 
     // Data-driven flags so the "How to read" guide describes only what this
     // investigation actually contains — no workspace-specific boilerplate.
@@ -8901,6 +9014,7 @@
       // the per-study folds.
       +   acceptanceNarrativeHtml
       +   acGatingMatrixHtml
+      +   needsAttentionReportHtml
       +   verdictDagHtml
 
       // ── Execution-status banner (LEADS the report, before the folds) ────
