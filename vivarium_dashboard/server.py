@@ -1449,32 +1449,13 @@ def _run_store_summary(store_abs):
         return _RUN_STORE_SUMMARY_CACHE[key]
     out: dict = {}
     try:
+        # Canonical framework summary (pbg_emitters.RunReader.summary): the single
+        # definition of a run's quantitative shape. Recorded runs persist these
+        # fields; this read-time fallback covers legacy runs recorded before that.
         from pbg_emitters.run_reader import RunReader
-        rr = RunReader.open(str(store_abs))
-        gens = rr.generations() or []
-        obs = rr.observables() or []
-        if gens:
-            out["generations"] = len(gens)
-        if obs:
-            out["n_observables"] = len(obs)
-        # sim time from abs_time — pick a SCALAR observable (list/array-typed
-        # observables can't cast to Float64 and raise). Try known scalars first,
-        # then fall back to scanning; each series() call is guarded so one bad
-        # observable never costs us generations/n_observables (set above).
-        scalars = ("listeners.mass.cell_mass", "listeners.mass.dry_mass",
-                   "listeners.mass.cellMass", "global_time", "time")
-        for cand in (*scalars, *obs):
-            if cand not in obs:
-                continue
-            try:
-                df = rr.series(cand)
-            except Exception:  # noqa: BLE001
-                continue
-            if df is not None and len(df) and "abs_time" in df.columns:
-                out["sim_minutes"] = int(round(float(df["abs_time"].max()) / 60.0))
-                break
+        out = RunReader.open(str(store_abs)).summary() or {}
     except Exception:  # noqa: BLE001 — never break the study page
-        pass
+        out = {}
     _RUN_STORE_SUMMARY_CACHE[key] = out
     return out
 
@@ -1526,13 +1507,17 @@ def _reconcile_simset_with_runs(sim_set, runs, ws_root=None):
                 if r in mruns:
                     claimed.add(i)
             seeds = sorted({x for r in mruns for x in _seeds(r)})
+            # Prefer the framework-baked run-record summary (generations /
+            # sim_minutes / n_readouts persisted at record time by
+            # pbg_superpowers.study_outcomes). Falls back to opening the store
+            # only for legacy runs recorded before the summary was baked in.
             gens = [r.get("generations") for r in mruns if r.get("generations")]
-            durs = [r.get("duration_min") for r in mruns if r.get("duration_min")]
+            mins = [r.get("sim_minutes") or r.get("duration_min") for r in mruns
+                    if r.get("sim_minutes") or r.get("duration_min")]
+            reads = [r.get("n_readouts") for r in mruns if r.get("n_readouts")]
             ran = any(str(r.get("status", "")).lower() in ("completed", "ran", "done", "passed") for r in mruns)
-            # Open the run stores for the REAL simulation time / generations /
-            # readouts collected (cached); the run records usually omit these.
             store_gens, store_min, store_obs = [], [], []
-            if ws_root:
+            if ws_root and not (gens and mins and reads):
                 from pathlib import Path as _P
                 for r in mruns:
                     store = (r.get("emitter") or {}).get("store") or r.get("store")
@@ -1549,10 +1534,10 @@ def _reconcile_simset_with_runs(sim_set, runs, ws_root=None):
                 entry["seeds"] = seeds
             if (gens or store_gens) and not entry.get("generations"):
                 entry["generations"] = max(gens + store_gens)
-            if (durs or store_min) and not entry.get("duration_min"):
-                entry["duration_min"] = max(durs + store_min)
-            if store_obs and not entry.get("n_readouts_collected"):
-                entry["n_readouts_collected"] = max(store_obs)
+            if (mins or store_min) and not entry.get("duration_min"):
+                entry["duration_min"] = max(mins + store_min)
+            if (reads or store_obs) and not entry.get("n_readouts_collected"):
+                entry["n_readouts_collected"] = max(reads + store_obs)
             if ran and (not entry.get("status") or entry.get("status") == "ready"):
                 entry["status"] = "completed"
             entry["n_runs_recorded"] = len(mruns)
