@@ -996,7 +996,13 @@ def _filter_catalog_modules(modules: list, ws_data: dict | None) -> list:
         variants.discard("")
         return bool(variants & include)
 
-    return [m for m in modules if _allowed(m)]
+    # Always keep modules that are actually INSTALLED in this workspace — the
+    # catalog's job is to show what's active here, and "modules active in this
+    # workspace appear at the top" is its stated contract. The include allow-list
+    # only governs which *non-installed* (available-to-install) modules also
+    # surface. (Without this, `registry.include: [v2ecoli]` hid the workspace's
+    # own installed deps — pbg-emitters, viva-munk, … — leaving only v2ecoli.)
+    return [m for m in modules if _allowed(m) or m.get("installed")]
 
 
 def _composite_top_pkg(rec: dict) -> str:
