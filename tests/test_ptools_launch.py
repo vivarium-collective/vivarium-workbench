@@ -53,7 +53,11 @@ def test_build_ptools_launch_url_basic(study_with_ptools):
     assert "error" not in result
     assert result["url"].startswith("http://ptools.example.com/overviewsWeb/celOv.shtml")
     assert "orgid=ECOLI" in result["url"]
-    assert "data-file=" in result["url"]
+    # Omics Viewer auto-load params (verified format)
+    assert "omics=t" in result["url"]
+    assert f"url={result['tsv_url']}" in result["url"]
+    assert "class=" in result["url"]
+    assert "column1=" in result["url"]
     # tsv_url must be an absolute URL the PTools server can fetch
     assert result["tsv_url"].startswith("http://dashboard.example.com:8771/")
     assert result["tsv_url"].endswith(".tsv")
@@ -143,8 +147,40 @@ def test_build_ptools_launch_url_custom_template(study_with_ptools):
 
 
 def test_default_omics_template_has_all_placeholders():
-    """The default template contains all three required placeholders."""
+    """The default template contains every placeholder the builder supplies."""
     t = _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE
     assert "{server}" in t
     assert "{orgid}" in t
     assert "{tsv_url}" in t
+    assert "{cls}" in t
+    assert "{columns}" in t
+    # It targets the Omics Viewer auto-load endpoint.
+    assert "omics=t" in t
+
+
+def test_ptools_object_class_inference():
+    """Object class is inferred from the analysis / TSV name."""
+    from vivarium_dashboard.server import _ptools_object_class
+
+    assert _ptools_object_class("ptools_rxns__p1.tsv") == "reaction"
+    assert _ptools_object_class("ptools_proteins__p1.tsv") == "protein"
+    assert _ptools_object_class("ptools_rna__p1.tsv") == "gene"
+    assert _ptools_object_class("anything_else") == "gene"
+
+
+def test_launch_url_infers_class_and_columns(tmp_path):
+    """The builder sets class=<type> and column1=1-N from the chosen TSV."""
+    ws = tmp_path / "ws"
+    pt = ws / "studies" / "s" / "ptools"
+    pt.mkdir(parents=True)
+    # ptools_rxns TSV with a $-header carrying 3 timepoint columns.
+    (pt / "ptools_rxns__p1.tsv").write_text("$\tt0\tt1\tt2\nRXN-1\t1\t2\t3\n")
+    result = _build_ptools_launch_url(
+        study_dir=ws / "studies" / "s",
+        ws_root=ws,
+        ptools_server_url="http://ptools.example.com",
+        ptools_omics_url_template=_PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
+        public_base="http://dash.example.com",
+    )
+    assert "class=reaction" in result["url"]
+    assert "column1=1-3" in result["url"]
