@@ -2332,9 +2332,10 @@ def _iter_study_dirs():
     A name present in both locations yields only the studies/ entry (the v3
     location wins, matching _study_dir's precedence).
     """
+    wp = WorkspacePaths.load(WORKSPACE)
     seen = set()
     for root_name in ("studies", "investigations"):
-        root = WORKSPACE / root_name
+        root = wp.dir(root_name)  # layout-aware; falls back to flat name
         if not root.is_dir():
             continue
         for d in sorted(root.iterdir()):
