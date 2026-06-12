@@ -7414,6 +7414,38 @@ def _linkage_index(ws_root: Path, *, investigation=None, source=None, observable
         return _json_body({"nodes": [], "edges": [], "error": str(e)}), 200
 
 
+def _needs_attention(ws_root: Path, *, investigation=None):
+    """GET /api/needs-attention worker — ``(json_bytes, status)``.
+
+    SP5: runs the deterministic ``pbg_superpowers.needs_attention.
+    scan_investigation`` over the workspace and returns its
+    ``{"investigation", "items": [...], "summary": {...}}`` payload so the
+    dashboard can render a "Needs attention" panel on the investigation-detail
+    page. ``items`` arrive pre-sorted high→medium→low.
+
+    Build-free by default: we do NOT pass ``observables_for_ref`` (the opt-in
+    that would trigger a composite build). The dashboard adds NO AI — it only
+    runs the deterministic scan and renders. Tolerant: an older/absent
+    pbg_superpowers, or an unscannable workspace, returns 200 with the
+    empty-typed payload rather than a 500.
+    """
+    ws_root = Path(ws_root)
+    _empty = {
+        "investigation": investigation,
+        "items": [],
+        "summary": {"by_severity": {"high": 0, "medium": 0, "low": 0},
+                    "by_kind": {}, "total": 0},
+    }
+    try:
+        from pbg_superpowers import needs_attention as _na
+    except Exception:  # noqa: BLE001 — older pbg_superpowers lacks the module
+        return _json_body(_empty), 200
+    try:
+        return _json_body(_na.scan_investigation(ws_root, investigation)), 200
+    except Exception:  # noqa: BLE001 — scan/derive can fail; stay typed + 200
+        return _json_body(_empty), 200
+
+
 # ---------------------------------------------------------------------------
 # HTTP handler
 # ---------------------------------------------------------------------------
@@ -7463,6 +7495,17 @@ class Handler(BaseHTTPRequestHandler):
                 observable=(_q.get("observable") or "").strip() or None,
                 observable_registry=(_q.get("observable_registry") or "").strip() or None,
                 composite=(_q.get("composite") or "").strip() or None,
+            ))
+        # SP5: needs-attention scan — deterministic, build-free derive of the
+        # items an investigation should triage (uncovered ACs, verdict
+        # divergences, open feedback, param drift, stale findings, phantom
+        # observables). Read-only; never 500.
+        if _path_only_pre == "/api/needs-attention":
+            import urllib.parse as _up
+            _q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
+            return self._send_json_bytes(*_needs_attention(
+                WORKSPACE,
+                investigation=(_q.get("investigation") or _q.get("inv") or "").strip() or None,
             ))
 
         # Resolve /api/study-* aliases to their /api/investigation-* originals so
@@ -13292,6 +13335,13 @@ if __name__ == "__main__":
                               source=source, observable=observable,
                               observable_registry=observable_registry,
                               composite=composite)
+
+    @staticmethod
+    def _needs_attention_test(ws_root, *, investigation=None):
+        """Test seam for GET /api/needs-attention — runs the deterministic
+        needs-attention scan over an explicit ws_root. Returns
+        (json_bytes, http_status)."""
+        return _needs_attention(ws_root, investigation=investigation)
 
     @staticmethod
     def _iset_detail_data(name: str) -> "dict | None":
