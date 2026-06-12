@@ -6590,12 +6590,49 @@
               var claim = (t.description || t.en || '').split('\n')[0].split('. ')[0];
               if (claim.length > 220) claim = claim.slice(0, 217) + '…';
               if (claim && claim.charAt(claim.length - 1) !== '.' && claim.charAt(claim.length - 1) !== '?') claim += '.';
-              // Evidence: extra fields from the outcome (skip 'result' itself).
+              // Evidence (spine B3): render the code-computed outcome as a
+              // styled row — measured_value + operator + evaluated_by in a
+              // CODE-COMPUTED chip, kept visually SEPARATE from the
+              // human-authored outcome (its own chip), with a prominent
+              // reconcile:divergent badge and a link to the run that produced
+              // the value + the pass_if band it was judged against. No more
+              // raw merged k:v dump (which blended authored + computed).
+              var authoredOut = (latestRun && latestRun.outcomes) ? latestRun.outcomes[name] : null;
+              var computedOut = (latestRun && latestRun.computed_outcomes) ? latestRun.computed_outcomes[name] : null;
+              var runIdent = latestRun ? (latestRun.run_id || latestRun.name || '') : '';
               var evidence = '';
-              if (out) {
-                var bits = Object.keys(out).filter(function(k){return k !== 'result';})
-                  .map(function(k){return _h(k) + ': ' + _h(String(out[k]));});
-                if (bits.length) evidence = bits.join(' · ');
+              if (computedOut || authoredOut) {
+                var co = computedOut || {};
+                var mv = co.measured_value;
+                var mvStr = (mv == null) ? '—' : (typeof mv === 'object' ? JSON.stringify(mv) : String(mv));
+                if (mvStr.length > 220) mvStr = mvStr.slice(0, 217) + '…';
+                var codeBits = [];
+                if (co.result != null) codeBits.push('<strong>' + _h(String(co.result)) + '</strong>');
+                if (co.operator) codeBits.push('op <code>' + _h(String(co.operator)) + '</code>');
+                if (co.evaluated_by) codeBits.push('by <code>' + _h(String(co.evaluated_by)) + '</code>');
+                var codeChip = computedOut
+                  ? '<span class="outcome-chip outcome-chip-computed" style="display:inline-block;padding:3px 7px;border-radius:4px;background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;font-size:0.85em"><span class="muted">code computed</span> ' + codeBits.join(' · ') + '</span>'
+                  : '';
+                var authoredChip = (authoredOut && authoredOut.result != null)
+                  ? ' <span class="outcome-chip outcome-chip-authored" style="display:inline-block;padding:3px 7px;border-radius:4px;background:#f8fafc;border:1px solid #e2e8f0;color:#475569;font-size:0.85em"><span class="muted">authored</span> <strong>' + _h(String(authoredOut.result)) + '</strong></span>'
+                  : '';
+                var divBadge = (co.reconcile === 'divergent')
+                  ? ' <span class="reconcile-divergent" style="display:inline-block;padding:3px 7px;border-radius:4px;background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;font-weight:600;font-size:0.85em">⚠ reconcile: divergent</span>'
+                  : '';
+                var runLink = runIdent
+                  ? ' <span class="muted small">from run <a href="#run-' + _h(runIdent) + '">' + _h(runIdent) + '</a></span>'
+                  : '';
+                var bandLine = t.pass_if
+                  ? '<div class="pass_if-band muted small" style="margin-top:3px">judged against <code>pass_if: ' + _h(JSON.stringify(t.pass_if)) + '</code></div>'
+                  : '';
+                var detailLine = (co.detail || co.reason)
+                  ? '<div class="muted small" style="margin-top:3px">' + _h(String(co.detail || co.reason)) + '</div>'
+                  : '';
+                evidence = '<div class="computed-outcome-row">'
+                  + (computedOut ? '<div><strong>measured_value:</strong> <code>' + _h(mvStr) + '</code></div>' : '')
+                  + '<div style="margin-top:3px">' + codeChip + authoredChip + divBadge + runLink + '</div>'
+                  + bandLine + detailLine
+                  + '</div>';
               }
               var techBits = [];
               if (t.measure) techBits.push('Measure: <code>' + _h(JSON.stringify(t.measure)) + '</code>');

@@ -1451,6 +1451,7 @@
           <th>Started (UTC)</th>
           <th>Duration</th>
           <th>Status</th>
+          <th>Test results</th>
           <th>Model changes</th>
           <th>Actions</th>
         </tr>
@@ -1459,7 +1460,8 @@
         {% for r in (study.runs or []) %}
         {% set _params = r.meta_params or r.params or {} %}
         {% set _has_changes = _params and _params|length > 0 %}
-        <tr data-run-id="{{ r.run_id }}"
+        <tr id="run-{{ r.run_id or r.name }}"
+            data-run-id="{{ r.run_id }}"
             data-spec-id="{{ r.meta_spec_id or r.spec_id or '' }}"
             data-started-at="{{ r.meta_started_at or r.started_at or '' }}">
           <td><input type="checkbox" class="run-compare-checkbox" value="{{ r.run_id }}"></td>
@@ -1484,6 +1486,37 @@
               <div class="muted" style="font-size:0.74em"><code>{{ r.meta_log_path }}</code></div>
             {% endif %}
           </td>
+          {# Test results — code-computed outcomes for THIS run (spine B3).
+             ✓ pass / ✗ fail / ◐ agent-routed, from r.computed_outcomes so a
+             reader sees which run produced which results without leaving the
+             table. Falls back to authored r.outcomes when no computed ones. #}
+          <td class="run-test-results" style="font-size:0.82em;white-space:nowrap">
+            {% set _co = r.computed_outcomes or {} %}
+            {% set ns = namespace(p=0, f=0, a=0, total=0) %}
+            {% for _tn, _o in _co.items() if _tn != '_status' and _o is mapping %}
+              {% set ns.total = ns.total + 1 %}
+              {% if _o.result == 'PASS' %}{% set ns.p = ns.p + 1 %}
+              {% elif _o.result == 'FAIL' %}{% set ns.f = ns.f + 1 %}
+              {% else %}{% set ns.a = ns.a + 1 %}{% endif %}
+            {% endfor %}
+            {% if ns.total > 0 %}
+              {% if ns.p %}<span class="ok" title="passed">✓ {{ ns.p }}</span>{% endif %}
+              {% if ns.f %}<span class="fail" title="failed">✗ {{ ns.f }}</span>{% endif %}
+              {% if ns.a %}<span class="muted" title="routed to agent">◐ {{ ns.a }}</span>{% endif %}
+            {% elif r.outcomes %}
+              {% set ans = namespace(p=0, f=0) %}
+              {% for _tn, _o in r.outcomes.items() if _o is mapping %}
+                {% if _o.result == 'PASS' %}{% set ans.p = ans.p + 1 %}
+                {% elif _o.result == 'FAIL' %}{% set ans.f = ans.f + 1 %}{% endif %}
+              {% endfor %}
+              {% if ans.p %}<span class="ok" title="authored pass">✓ {{ ans.p }}</span>{% endif %}
+              {% if ans.f %}<span class="fail" title="authored fail">✗ {{ ans.f }}</span>{% endif %}
+              {% if not ans.p and not ans.f %}<span class="muted">—</span>{% endif %}
+              <span class="muted" style="font-size:0.85em"> (authored)</span>
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
           <td>
             {% if _has_changes %}
             <details>
@@ -1501,7 +1534,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="9" class="empty-message">No runs yet.</td></tr>
+        <tr><td colspan="10" class="empty-message">No runs yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>
