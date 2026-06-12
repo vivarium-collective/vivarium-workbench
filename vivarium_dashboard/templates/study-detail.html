@@ -1116,7 +1116,8 @@
       <thead>
         <tr>
           <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Name</th>
-          <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Status</th>
+          <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Status <span class="muted" style="font-weight:400">(authored)</span></th>
+          <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Validated against composite</th>
           <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Store path</th>
           <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Indexed by</th>
           <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Description</th>
@@ -1124,7 +1125,7 @@
       </thead>
       <tbody>
         {% for o in _obs %}
-        <tr style="border-bottom: 1px solid #f1f5f9;">
+        <tr style="border-bottom: 1px solid #f1f5f9;" data-readout="{{ o.name }}">
           <td style="padding:6px; vertical-align: top;"><code>{{ o.name }}</code></td>
           <td style="padding:6px; vertical-align: top;">
             <span style="font-size: 0.75em; color: #475569;">
@@ -1133,6 +1134,14 @@
               {% elif o.status == 'aspirational' %}⏳ aspirational
               {% else %}{{ o.status or '—' }}{% endif %}
             </span>
+          </td>
+          {# Spine B2: COMPUTED validation status, fetched from
+             /api/study-observable-check and injected by JS — kept BESIDE the
+             authored status so a phantom readout (not_in_structure) is visible
+             at the source. Empty until the fetch resolves; tolerates failure. #}
+          <td style="padding:6px; vertical-align: top;">
+            <span class="readout-validation" data-readout="{{ o.name }}"
+                  style="font-size:0.75em"></span>
           </td>
           <td style="padding:6px; vertical-align: top;"><code style="font-size: 0.85em;">{{ o.store_path or '' }}</code></td>
           <td style="padding:6px; vertical-align: top;">

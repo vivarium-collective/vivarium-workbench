@@ -27,8 +27,65 @@
     if (kind === 'visualizations') {
       _loadCharts('viz-charts-panel');
     }
+    if (kind === 'observables') {
+      _loadReadoutValidation();
+    }
   }
   window._setStudyTab = _setStudyTab;
+
+  // ── Spine B2: readout validation badges ──────────────────────────────────
+  // Fetch /api/study-observable-check (SP2b-i, the never-fabricate guard) and
+  // badge each readout row with the COMPUTED validation status
+  // (ok / unresolved / not_in_structure / aspirational) BESIDE the authored
+  // status, labeled "validated against the composite", so a phantom readout
+  // (not_in_structure) is visible at the source. Tolerates the endpoint failing
+  // or being absent (no badge, no error) — the composite must build (~3s).
+  // not_in_structure links to the re-author guidance (/api/observables).
+  var _readoutValidationLoaded = false;
+  function _loadReadoutValidation() {
+    if (_readoutValidationLoaded) return;
+    _readoutValidationLoaded = true;
+    var slug = studyName();
+    if (!slug) return;
+    fetch('/api/study-observable-check?study=' + encodeURIComponent(slug),
+          {headers: {Accept: 'application/json'}})
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(j) {
+        if (!j || !Array.isArray(j.readouts)) return;  // tolerate failure
+        var byName = {};
+        j.readouts.forEach(function(o) { if (o && o.name) byName[o.name] = o; });
+        document.querySelectorAll('.readout-validation').forEach(function(el) {
+          var o = byName[el.getAttribute('data-readout')];
+          if (!o) return;
+          el.innerHTML = _readoutValidationBadge(o.status, o.detail);
+        });
+      })
+      .catch(function() { /* tolerate — no badge */ });
+  }
+
+  function _readoutValidationBadge(status, detail) {
+    var e = escapeHtmlForTests;
+    var styles = {
+      ok:              {bg: '#d1fae5', fg: '#065f46', bd: '#6ee7b7', glyph: '✓', label: 'ok'},
+      unresolved:      {bg: '#fef3c7', fg: '#92400e', bd: '#fcd34d', glyph: '⚠', label: 'unresolved'},
+      not_in_structure:{bg: '#fee2e2', fg: '#991b1b', bd: '#fca5a5', glyph: '✗', label: 'not_in_structure'},
+      aspirational:    {bg: '#f1f5f9', fg: '#475569', bd: '#cbd5e1', glyph: '⏳', label: 'aspirational'},
+    };
+    var s = styles[status] || {bg: '#f1f5f9', fg: '#475569', bd: '#cbd5e1', glyph: '•', label: status || '—'};
+    var badge =
+      '<span class="readout-validation-badge" title="' + e(detail || '') + '" ' +
+      'style="display:inline-block;padding:2px 8px;border-radius:9999px;background:' + s.bg +
+      ';color:' + s.fg + ';border:1px solid ' + s.bd + '">' + s.glyph + ' ' + e(s.label) + '</span>';
+    if (status === 'not_in_structure') {
+      // Re-author guidance: the in-page bigraph picker resolves real paths;
+      // /api/observables backs it. Point the reader at the picker to fix the
+      // phantom readout at the source.
+      badge += ' <a href="#bigraph-picker-details" ' +
+        'onclick="var d=document.getElementById(\'bigraph-picker-details\');if(d)d.open=true;" ' +
+        'class="muted" style="font-size:0.9em" title="re-author against /api/observables">re-author →</a>';
+    }
+    return badge;
+  }
 
   // ── Charts panel: inline SVGs from /api/study-charts ─────────────────────
   // Lives in the Visualizations tab only. Memoized per panel id.
