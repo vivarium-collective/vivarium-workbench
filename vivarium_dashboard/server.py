@@ -1433,6 +1433,67 @@ def _build_ptools_launch_url(
     return {"url": launch_url, "tsv_url": tsv_url, "available": available}
 
 
+def _reconcile_simset_with_runs(sim_set, runs):
+    """Enrich each simulation_set entry with what ACTUALLY ran, so the
+    Simulations tab reflects current status instead of the authored/synthesized
+    plan's placeholders ("? min", "not set", "ready") when real runs exist.
+
+    Authored values win; run-derived values fill the gaps. Matching: a run that
+    explicitly names the entry wins; otherwise the baseline entry absorbs the
+    runs not claimed by a named variant (the common single-baseline case).
+    """
+    if not sim_set:
+        return sim_set
+    runs = [r for r in (runs or []) if isinstance(r, dict)]
+    if not runs:
+        return sim_set
+
+    def _seeds(r):
+        s = r.get("seeds")
+        if isinstance(s, list):
+            return [x for x in s if x is not None]
+        return [r["seed"]] if r.get("seed") is not None else []
+
+    def _named_match(entry, r):
+        nm = entry.get("name")
+        if not nm:
+            return False
+        return any(str(r.get(k)) == str(nm) for k in ("simulation", "sim", "entry", "variant", "name") if r.get(k))
+
+    claimed = set()
+    # Pass 1: explicit name matches. Pass 2: baseline entries absorb the rest.
+    for use_baseline in (False, True):
+        for entry in sim_set:
+            if not isinstance(entry, dict):
+                continue
+            if use_baseline:
+                if not entry.get("is_baseline"):
+                    continue
+                mruns = [r for i, r in enumerate(runs) if i not in claimed]
+            else:
+                mruns = [r for i, r in enumerate(runs) if i not in claimed and _named_match(entry, r)]
+            if not mruns:
+                continue
+            for i, r in enumerate(runs):
+                if r in mruns:
+                    claimed.add(i)
+            seeds = sorted({x for r in mruns for x in _seeds(r)})
+            gens = [r.get("generations") for r in mruns if r.get("generations")]
+            durs = [r.get("duration_min") for r in mruns if r.get("duration_min")]
+            ran = any(str(r.get("status", "")).lower() in ("completed", "ran", "done", "passed") for r in mruns)
+            if seeds and not entry.get("seeds"):
+                entry["seeds"] = seeds
+            if gens and not entry.get("generations"):
+                entry["generations"] = max(gens)
+            if durs and not entry.get("duration_min"):
+                entry["duration_min"] = max(durs)
+            if ran and (not entry.get("status") or entry.get("status") == "ready"):
+                entry["status"] = "completed"
+            entry["n_runs_recorded"] = len(mruns)
+            entry["run_names"] = [r.get("name") for r in mruns if r.get("name")]
+    return sim_set
+
+
 def _study_detail_spec(name: str):
     """Load a study's spec for the GET /studies/<name> detail page.
 
@@ -1463,6 +1524,15 @@ def _study_detail_spec(name: str):
                 if r.get("run_id") not in existing_ids:
                     merged.append(r)
             spec["runs"] = merged
+
+        # Reconcile the simulation_set with the actual runs so the Simulations
+        # tab reflects current status (seeds / duration / run-count / ran) rather
+        # than the authored-or-synthesized plan's "? min / not set / ready".
+        try:
+            spec["simulation_set"] = _reconcile_simset_with_runs(
+                spec.get("simulation_set"), spec.get("runs"))
+        except Exception:  # noqa: BLE001
+            pass
 
         # Auto-discover any pre-rendered Plotly HTML files at
         # studies/<name>/viz/*.html (produced by render_visualizations
