@@ -185,6 +185,36 @@ def test_bundle_exports_composite_state_and_loom(tmp_workspace, tmp_path):
         pass  # package not installed in this venv; loom dist skip is expected
 
 
+def test_bundle_survives_nonfinite_composite_state(tmp_workspace, tmp_path, monkeypatch):
+    """A composite whose resolved state carries a non-finite float (inf/nan)
+    must NOT crash the whole bundle build — strict JSON rejects inf/nan, so the
+    composite degrades to has_wiring=False (Explore hidden), exactly like an
+    unresolvable composite, while finite composites still export their state."""
+    from vivarium_dashboard import publish
+
+    monkeypatch.setattr(server, "_composites_data", lambda ws: {"composites": [
+        {"id": "good", "name": "Good"},
+        {"id": "bad", "name": "Bad"},
+    ]})
+
+    def _resolve(cid):
+        if cid == "bad":
+            return {"state": {"rate": float("inf")}}  # non-finite -> strict JSON rejects
+        return {"state": {"rate": 1.0}}
+
+    monkeypatch.setattr(server, "_composite_resolve_data", _resolve)
+
+    out = tmp_path / "bundle"
+    publish.build_bundle(server.WORKSPACE, out)  # must not raise
+
+    by_id = {c["id"]: c for c in
+             json.loads((out / "api" / "composites.json").read_text())["composites"]}
+    assert by_id["good"]["has_wiring"] is True
+    assert by_id["bad"]["has_wiring"] is False
+    assert (out / "api" / "composite-state" / "good.json").is_file()
+    assert not (out / "api" / "composite-state" / "bad.json").exists()
+
+
 # ---------------------------------------------------------------------------
 # Task 1 (read-only viewer): export the five read resources
 # ---------------------------------------------------------------------------

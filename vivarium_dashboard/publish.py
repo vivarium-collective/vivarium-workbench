@@ -366,11 +366,15 @@ def _do_build(
             continue
         try:
             data = _composite_resolve_data(cid)
+            if data is not None:
+                # The write itself can also fail (e.g. a resolved state that
+                # carries non-finite floats like inf/nan, which strict JSON
+                # rejects).  Treat that the same as an unresolvable composite:
+                # degrade gracefully and let has_wiring=False hide Explore.
+                _write_json(composite_state_dir / f"{cid}.json", data)
+                exported_wiring.add(cid)
         except Exception:
-            data = None
-        if data is not None:
-            _write_json(composite_state_dir / f"{cid}.json", data)
-            exported_wiring.add(cid)
+            pass
 
     # Annotate each composite with has_wiring so the viewer can hide the
     # Explore button for composites whose state could not be exported.
