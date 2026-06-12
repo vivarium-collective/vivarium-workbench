@@ -12980,27 +12980,48 @@
   // the SP2b-ii readout-migration + SP2c band-citation-gap findings.
   function _readinessPanelHtml(findings) {
     var sev = { error: 0, warning: 0, info: 0 };
+    var byCheck = {};
     findings.forEach(function (f) {
       var s = f.severity || 'info';
       if (sev[s] != null) sev[s]++; else sev.info++;
+      var c = f.check || 'other';
+      (byCheck[c] = byCheck[c] || []).push(f);
     });
     var gaps = sev.error + sev.warning;
     var head, bg, bd, col;
     if (!findings.length) { head = '✓ Ready'; bg = '#f0fdf4'; bd = '#16a34a'; col = '#166534'; }
     else if (gaps) { head = '⚠ ' + gaps + ' gap' + (gaps === 1 ? '' : 's'); bg = '#fffbeb'; bd = '#f59e0b'; col = '#92400e'; }
     else { head = 'ℹ ' + sev.info + ' note' + (sev.info === 1 ? '' : 's'); bg = '#eff6ff'; bd = '#3b82f6'; col = '#1e40af'; }
-    var rows = findings.map(function (f) {
-      var s = f.severity || 'info';
-      var dot = s === 'error' ? '#dc2626' : (s === 'warning' ? '#f59e0b' : '#3b82f6');
-      return '<li style="margin-top:4px"><span style="color:' + dot + ';font-weight:700">●</span> '
-        + '<code>' + _h(f.check || '') + '</code> — ' + _h(f.message || '') + '</li>';
+    var lbl = '<span class="small" style="color:#64748b">code-computed by the report linter (deterministic)</span>';
+    // Ready → no dropdown needed.
+    if (!findings.length) {
+      return '<div class="readiness-banner" style="margin:12px 0;padding:12px 16px;background:' + bg
+        + ';border:1px solid ' + bd + ';border-left-width:5px;border-radius:6px;color:' + col + '">'
+        + '<strong>Readiness: ' + head + '</strong> ' + lbl + '</div>';
+    }
+    // Key info on top: per-check breakdown, most-frequent first (so noise like
+    // viz_stale_vs_latest_run is summarised, not enumerated, until expanded).
+    var checks = Object.keys(byCheck).sort(function (a, b) { return byCheck[b].length - byCheck[a].length; });
+    var breakdown = checks.map(function (c) { return byCheck[c].length + '× ' + _h(c); }).join(' &nbsp;·&nbsp; ');
+    var groups = checks.map(function (c) {
+      var items = byCheck[c].map(function (f) {
+        var s = f.severity || 'info';
+        var dot = s === 'error' ? '#dc2626' : (s === 'warning' ? '#f59e0b' : '#3b82f6');
+        return '<li style="margin-top:3px"><span style="color:' + dot + ';font-weight:700">●</span> ' + _h(f.message || '') + '</li>';
+      }).join('');
+      return '<div style="margin-top:9px"><code>' + _h(c) + '</code> '
+        + '<span class="small" style="color:#94a3b8">(' + byCheck[c].length + ')</span>'
+        + '<ul class="small" style="margin:3px 0 0 18px;padding:0">' + items + '</ul></div>';
     }).join('');
-    return '<div class="readiness-banner" style="margin:12px 0;padding:12px 16px;background:' + bg
+    return '<details class="readiness-banner" style="margin:12px 0;background:' + bg
       + ';border:1px solid ' + bd + ';border-left-width:5px;border-radius:6px;color:' + col + '">'
-      + '<strong>Readiness: ' + head + '</strong> '
-      + '<span class="small" style="color:#64748b">code-computed by the report linter (deterministic)</span>'
-      + (findings.length ? '<ul class="small" style="margin:8px 0 0 18px">' + rows + '</ul>' : '')
-      + '</div>';
+      + '<summary style="padding:12px 16px;cursor:pointer;list-style:none;outline:none">'
+      + '<strong>Readiness: ' + head + '</strong> ' + lbl
+      + '<div class="small" style="color:#64748b;margin-top:5px">' + breakdown
+      + ' &nbsp;·&nbsp; <span style="opacity:.7;font-style:italic">click to expand</span></div>'
+      + '</summary>'
+      + '<div style="padding:2px 16px 12px 16px">' + groups + '</div>'
+      + '</details>';
   }
   // Idempotent + safe to call repeatedly. The linter findings are fetched ONCE
   // and cached on the function; every call (re-)keys whatever
