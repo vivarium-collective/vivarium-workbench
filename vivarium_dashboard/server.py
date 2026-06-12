@@ -1433,14 +1433,62 @@ def _build_ptools_launch_url(
     return {"url": launch_url, "tsv_url": tsv_url, "available": available}
 
 
-def _reconcile_simset_with_runs(sim_set, runs):
+_RUN_STORE_SUMMARY_CACHE: dict = {}
+
+
+def _run_store_summary(store_abs):
+    """Open a run store via RunReader and return what it actually contains:
+    ``{generations, sim_minutes, n_observables}``. Cached by store path (run
+    stores are immutable once written). Best-effort — returns {} on any failure.
+
+    sim_minutes = max cumulative simulated time (RunReader's ``abs_time``, in
+    seconds) / 60 — the real simulation time, not wall-clock.
+    """
+    key = str(store_abs)
+    if key in _RUN_STORE_SUMMARY_CACHE:
+        return _RUN_STORE_SUMMARY_CACHE[key]
+    out: dict = {}
+    try:
+        from pbg_emitters.run_reader import RunReader
+        rr = RunReader.open(str(store_abs))
+        gens = rr.generations() or []
+        obs = rr.observables() or []
+        if gens:
+            out["generations"] = len(gens)
+        if obs:
+            out["n_observables"] = len(obs)
+        # sim time from abs_time — pick a SCALAR observable (list/array-typed
+        # observables can't cast to Float64 and raise). Try known scalars first,
+        # then fall back to scanning; each series() call is guarded so one bad
+        # observable never costs us generations/n_observables (set above).
+        scalars = ("listeners.mass.cell_mass", "listeners.mass.dry_mass",
+                   "listeners.mass.cellMass", "global_time", "time")
+        for cand in (*scalars, *obs):
+            if cand not in obs:
+                continue
+            try:
+                df = rr.series(cand)
+            except Exception:  # noqa: BLE001
+                continue
+            if df is not None and len(df) and "abs_time" in df.columns:
+                out["sim_minutes"] = int(round(float(df["abs_time"].max()) / 60.0))
+                break
+    except Exception:  # noqa: BLE001 — never break the study page
+        pass
+    _RUN_STORE_SUMMARY_CACHE[key] = out
+    return out
+
+
+def _reconcile_simset_with_runs(sim_set, runs, ws_root=None):
     """Enrich each simulation_set entry with what ACTUALLY ran, so the
     Simulations tab reflects current status instead of the authored/synthesized
     plan's placeholders ("? min", "not set", "ready") when real runs exist.
 
-    Authored values win; run-derived values fill the gaps. Matching: a run that
-    explicitly names the entry wins; otherwise the baseline entry absorbs the
-    runs not claimed by a named variant (the common single-baseline case).
+    Fills seeds / status / run-count from the run records, and — by opening the
+    run store — the real simulation time (minutes + generations) and number of
+    readouts collected. Authored values win; run-derived values fill the gaps.
+    Matching: a run that explicitly names the entry wins; otherwise the baseline
+    entry absorbs the runs not claimed by a named variant (single-baseline case).
     """
     if not sim_set:
         return sim_set
@@ -1481,12 +1529,30 @@ def _reconcile_simset_with_runs(sim_set, runs):
             gens = [r.get("generations") for r in mruns if r.get("generations")]
             durs = [r.get("duration_min") for r in mruns if r.get("duration_min")]
             ran = any(str(r.get("status", "")).lower() in ("completed", "ran", "done", "passed") for r in mruns)
+            # Open the run stores for the REAL simulation time / generations /
+            # readouts collected (cached); the run records usually omit these.
+            store_gens, store_min, store_obs = [], [], []
+            if ws_root:
+                from pathlib import Path as _P
+                for r in mruns:
+                    store = (r.get("emitter") or {}).get("store") or r.get("store")
+                    if not store:
+                        continue
+                    summ = _run_store_summary(_P(ws_root) / store)
+                    if summ.get("generations"):
+                        store_gens.append(summ["generations"])
+                    if summ.get("sim_minutes"):
+                        store_min.append(summ["sim_minutes"])
+                    if summ.get("n_observables"):
+                        store_obs.append(summ["n_observables"])
             if seeds and not entry.get("seeds"):
                 entry["seeds"] = seeds
-            if gens and not entry.get("generations"):
-                entry["generations"] = max(gens)
-            if durs and not entry.get("duration_min"):
-                entry["duration_min"] = max(durs)
+            if (gens or store_gens) and not entry.get("generations"):
+                entry["generations"] = max(gens + store_gens)
+            if (durs or store_min) and not entry.get("duration_min"):
+                entry["duration_min"] = max(durs + store_min)
+            if store_obs and not entry.get("n_readouts_collected"):
+                entry["n_readouts_collected"] = max(store_obs)
             if ran and (not entry.get("status") or entry.get("status") == "ready"):
                 entry["status"] = "completed"
             entry["n_runs_recorded"] = len(mruns)
@@ -1530,7 +1596,18 @@ def _study_detail_spec(name: str):
         # than the authored-or-synthesized plan's "? min / not set / ready".
         try:
             spec["simulation_set"] = _reconcile_simset_with_runs(
-                spec.get("simulation_set"), spec.get("runs"))
+                spec.get("simulation_set"), spec.get("runs"), ws_root=WORKSPACE)
+            # Fill the rest of each entry's promise: condition + tests applied.
+            _cond = (spec.get("condition") or spec.get("media")
+                     or (spec.get("model_change") or {}).get("condition"))
+            _ntests = len(spec.get("tests") or spec.get("behavior_tests") or [])
+            for _e in (spec.get("simulation_set") or []):
+                if not isinstance(_e, dict):
+                    continue
+                if _cond and not _e.get("condition"):
+                    _e["condition"] = _cond
+                if _ntests and not _e.get("n_tests_applied"):
+                    _e["n_tests_applied"] = _ntests
         except Exception:  # noqa: BLE001
             pass
 
