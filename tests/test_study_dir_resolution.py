@@ -59,3 +59,49 @@ def test_iter_study_dirs_includes_both(_ws):
     from vivarium_dashboard.server import _iter_study_dirs
     names = sorted(d.name for d in _iter_study_dirs())
     assert names == ["new-study", "old-inv"]
+
+
+def test_iter_study_dirs_honors_nested_layout(tmp_path, monkeypatch):
+    """A `layout:` block (nested workspace/ layout) must be honored: the study
+    list reads the layout-resolved studies dir, not the hardcoded root.
+
+    Regression for the empty-sidebar bug on nested-layout workspaces, where
+    _iter_study_dirs walked WORKSPACE/studies (absent) instead of
+    workspace/studies (declared via layout:)."""
+    import vivarium_dashboard.server as srv
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "workspace.yaml").write_text(yaml.safe_dump({
+        "name": "demo",
+        "layout": {"studies": "workspace/studies"},
+    }))
+    sd = ws / "workspace" / "studies" / "nested-study"
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "schema_version": 3, "name": "nested-study", "created": "2026-06-12",
+        "status": "ran", "objective": "obj",
+        "baseline": {"composite": "pkg.foo", "params": {}},
+        "variants": [], "runs": [], "visualizations": [],
+        "conclusion": None, "parent_studies": [],
+    }))
+    monkeypatch.setattr(srv, "WORKSPACE", ws)
+    names = sorted(d.name for d in srv._iter_study_dirs())
+    assert names == ["nested-study"]
+
+
+def test_iter_study_dirs_flat_layout_still_works(tmp_path, monkeypatch):
+    """No `layout:` block -> classic flat studies/<slug>/ is still discovered."""
+    import vivarium_dashboard.server as srv
+    ws = tmp_path / "ws"
+    sd = ws / "studies" / "flat-study"
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "schema_version": 3, "name": "flat-study", "created": "2026-06-12",
+        "status": "ran", "objective": "obj",
+        "baseline": {"composite": "pkg.foo", "params": {}},
+        "variants": [], "runs": [], "visualizations": [],
+        "conclusion": None, "parent_studies": [],
+    }))
+    monkeypatch.setattr(srv, "WORKSPACE", ws)
+    names = sorted(d.name for d in srv._iter_study_dirs())
+    assert names == ["flat-study"]
