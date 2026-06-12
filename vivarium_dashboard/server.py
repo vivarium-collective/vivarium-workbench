@@ -1706,13 +1706,21 @@ def _study_detail_spec(name: str):
         except Exception:  # noqa: BLE001
             pass
 
-        # Coded gate verdict (spine stage #2): roll per-test outcomes → study
-        # verdict and surface it alongside the authored gate_status so the SPA
-        # can render both and flag divergence. Does NOT modify study.yaml
-        # (write_gate_evaluator does that); this is render-only.
+        # Coded gate verdict (spine stage #2): surface the study verdict
+        # alongside the authored gate_status so the SPA can render both and flag
+        # divergence. PREFER the PERSISTED pipeline_gate.gate_evaluator written
+        # by study_verdict.write_gate_evaluator — it carries result,
+        # evaluated_by AND diverges_from_authored (the code-vs-authored signal).
+        # Only fall back to roll_up_verdict (a render-only recompute that DROPS
+        # diverges_from_authored) when no persisted slot exists. Does NOT modify
+        # study.yaml; this is render-only.
         try:
-            from pbg_superpowers.study_verdict import roll_up_verdict
-            spec["computed_gate_verdict"] = roll_up_verdict(spec)
+            persisted_ge = (spec.get("pipeline_gate") or {}).get("gate_evaluator")
+            if isinstance(persisted_ge, dict) and persisted_ge.get("result"):
+                spec["computed_gate_verdict"] = dict(persisted_ge)
+            else:
+                from pbg_superpowers.study_verdict import roll_up_verdict
+                spec["computed_gate_verdict"] = roll_up_verdict(spec)
         except Exception:  # noqa: BLE001
             pass
     return spec
@@ -13051,6 +13059,15 @@ if __name__ == "__main__":
                 "evaluation_status":     study_spec.get("evaluation_status"),
                 "gate_status":           study_spec.get("gate_status"),
                 "expert_review_status":  study_spec.get("expert_review_status"),
+                # Spine A2: surface the PERSISTED coded gate_evaluator (carries
+                # result + diverges_from_authored) so the report's per-study
+                # verdict pill can render a code-vs-authored divergence chip.
+                # Read-only passthrough; no recompute here.
+                "computed_gate_verdict": (
+                    (study_spec.get("pipeline_gate") or {}).get("gate_evaluator")
+                    if isinstance((study_spec.get("pipeline_gate") or {}).get("gate_evaluator"), dict)
+                    else None
+                ),
             })
 
         member_statuses = [s.get("status", "planning") for s in studies_out]

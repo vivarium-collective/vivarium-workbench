@@ -5992,10 +5992,20 @@
       var amb = (cs.ambiguities && cs.ambiguities.length)
         ? '<span style="' + pill + 'background:#fef3c7;color:#92400e" title="' + _h(cs.ambiguities.join(' | ')) + '">⚠ ' + cs.ambiguities.length + ' clarity note' + (cs.ambiguities.length > 1 ? 's' : '') + '</span>'
         : '';
+      // Spine A2: code-vs-authored gate divergence chip. The spine's
+      // study_verdict writes pipeline_gate.gate_evaluator (computed_gate_verdict)
+      // carrying diverges_from_authored. Mirrors the param-enforcement banner:
+      // surfaced beside the verdict, connected to its source (the coded
+      // evaluator), and labeled code-computed vs authored. Only shown on divergence.
+      var cgv = s && s.computed_gate_verdict;
+      var divChip = (cgv && cgv.diverges_from_authored)
+        ? '<span class="sp-gate-divergence" style="' + pill + 'background:#fffbeb;color:#92400e;border:1px solid #f59e0b" title="Code-computed verdict (spine study_verdict, not human-authored) disagrees with the authored gate_status.">⚠ code: ' + _h(cgv.result || '?') + ' · authored: ' + _h((s && s.gate_status) || '—') + '</span>'
+        : '';
       return '<div class="sp-clarity" style="margin:6px 0 2px 0">'
         + '<span style="' + pill + ranBg + '">' + (ranOn ? '▶' : (cs.ran.status === 'running' ? '…' : '○')) + ' ' + _h(cs.ran.label) + '</span>'
         + '<span style="' + pill + tBg + '">' + _h(cs.tests.label) + '</span>'
         + '<span class="sp-verdict ' + cs.verdict.cls + '" style="' + pill + '">' + cs.verdict.glyph + ' ' + _h(cs.verdict.label) + '</span>'
+        + divChip
         + amb
         + '</div>';
     }

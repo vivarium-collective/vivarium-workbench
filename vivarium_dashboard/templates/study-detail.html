@@ -25,6 +25,16 @@
     {% else %}
     <span class="status-pill status-planned">planned</span>
     {% endif %}
+    {# Spine A2: code-vs-authored gate divergence chip. The spine's
+       study_verdict.write_gate_evaluator persists pipeline_gate.gate_evaluator
+       (result + diverges_from_authored); _study_detail_spec surfaces it as
+       computed_gate_verdict. Mirrors the param-enforcement banner: prominent,
+       connected to its source (the coded evaluator), and labeled
+       code-computed-vs-authored. Only shown when the two disagree. #}
+    {% set _cgv = study.computed_gate_verdict %}
+    {% if _cgv and _cgv.diverges_from_authored %}
+    <span class="gate-divergence-chip" title="Code-computed verdict (spine study_verdict, not human-authored) disagrees with the authored gate_status." style="display:inline-block;font-size:0.5em;font-weight:700;padding:3px 9px;border-radius:9999px;vertical-align:middle;margin-left:8px;background:#fffbeb;border:1px solid #f59e0b;color:#92400e">⚠ code: {{ _cgv.result }} · authored: {{ study.gate_status }}</span>
+    {% endif %}
   </h1>
 </header>
 
