@@ -5992,10 +5992,20 @@
       var amb = (cs.ambiguities && cs.ambiguities.length)
         ? '<span style="' + pill + 'background:#fef3c7;color:#92400e" title="' + _h(cs.ambiguities.join(' | ')) + '">⚠ ' + cs.ambiguities.length + ' clarity note' + (cs.ambiguities.length > 1 ? 's' : '') + '</span>'
         : '';
+      // Spine A2: code-vs-authored gate divergence chip. The spine's
+      // study_verdict writes pipeline_gate.gate_evaluator (computed_gate_verdict)
+      // carrying diverges_from_authored. Mirrors the param-enforcement banner:
+      // surfaced beside the verdict, connected to its source (the coded
+      // evaluator), and labeled code-computed vs authored. Only shown on divergence.
+      var cgv = s && s.computed_gate_verdict;
+      var divChip = (cgv && cgv.diverges_from_authored)
+        ? '<span class="sp-gate-divergence" style="' + pill + 'background:#fffbeb;color:#92400e;border:1px solid #f59e0b" title="Code-computed verdict (spine study_verdict, not human-authored) disagrees with the authored gate_status.">⚠ code: ' + _h(cgv.result || '?') + ' · authored: ' + _h((s && s.gate_status) || '—') + '</span>'
+        : '';
       return '<div class="sp-clarity" style="margin:6px 0 2px 0">'
         + '<span style="' + pill + ranBg + '">' + (ranOn ? '▶' : (cs.ran.status === 'running' ? '…' : '○')) + ' ' + _h(cs.ran.label) + '</span>'
         + '<span style="' + pill + tBg + '">' + _h(cs.tests.label) + '</span>'
         + '<span class="sp-verdict ' + cs.verdict.cls + '" style="' + pill + '">' + cs.verdict.glyph + ' ' + _h(cs.verdict.label) + '</span>'
+        + divChip
         + amb
         + '</div>';
     }
@@ -7142,6 +7152,13 @@
           + '</ul></div>';
       }
 
+      // Spine A3: readiness panel placeholder. Populated after render by
+      // _populateReadinessPanels(), which fetches /api/report-lint ONCE per
+      // report and keys the deterministic linter findings by study. Mirrors
+      // the param-enforcement banner: surfaced per study, connected to its
+      // source (the linter), labeled code-computed. Empty until populated.
+      var readinessHtml = '<div class="study-readiness-panel" id="study-' + slug + '-readiness" data-study="' + _h(slug) + '"></div>';
+
       // Imported expert feedback (expert-feedback B.1). Shows the reviewer's
       // own annotations back, in-context per study, so the loop closes: the
       // next report makes clear what was said and lets the team show it's
@@ -7224,6 +7241,7 @@
           +   '<div class="study-planning-pill">PLANNING — not yet run</div>'
           +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
           +   enforcementHtml     // ⚠ declared params not applied (D.2)
+          +   readinessHtml       // ✓/⚠ lint readiness panel (A3)
           +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
           +   feedbackHtml        // 💬 imported expert feedback (B.1)
           +   summaryHtml         // Question / purpose
@@ -7256,6 +7274,7 @@
         +   subNav
         +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
         +   enforcementHtml     // ⚠ declared params not applied (D.2)
+        +   readinessHtml       // ✓/⚠ lint readiness panel (A3)
         +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
         +   feedbackHtml        // 💬 imported expert feedback (B.1)
         +   biologyGlanceHtml   // 0. Biology-at-a-glance
@@ -8640,6 +8659,51 @@
               h += '<p><strong>Question.</strong> ' + _multiline(iset.question) + '</p>';
             if (iset.hypothesis)
               h += '<p><strong>Hypothesis.</strong> ' + _multiline(iset.hypothesis) + '</p>';
+            // ── Spine A1: computed acceptance roll-up ──────────────────────
+            // Restores the acceptance visibility removed earlier, now COMPUTED
+            // by the spine (investigation_status.roll_up_acceptance) and
+            // connected to the member studies' verdicts. Mirrors the
+            // param-enforcement banner: surfaced, connected (each criterion
+            // links to its study section), and labeled code-computed vs
+            // authored, with a divergence badge when the two disagree.
+            var ca = iset.computed_acceptance;
+            if (ca && ca.criteria && ca.criteria.length) {
+              var authoredVs = (ex.verdict_status || '').toString().toLowerCase().trim();
+              var computedVs = (ca.verdict_status || '').toString().toLowerCase().trim();
+              // NOTE: the per-criterion `result`s below are LIVE-ROLLED at render
+              // time (from each member study's current verdict), whereas
+              // `ca.diverges_from_authored` is the spine-PERSISTED divergence flag
+              // — the two can momentarily differ; this is acceptable per the plan.
+              // Prefer the spine-persisted divergence flag; fall back to the
+              // computed-vs-authored verdict_status comparison the plan allows.
+              var caDiverges = (ca.diverges_from_authored === true)
+                || (!!authoredVs && !!computedVs && authoredVs !== computedVs);
+              var critRows = ca.criteria.map(function(c) {
+                var r = (c.result || '').toString().toLowerCase();
+                var rcls = (r === 'passing' || r === 'pass') ? '#16a34a'
+                         : (r === 'failing' || r === 'fail') ? '#dc2626'
+                         : '#92400e';
+                return '<tr>'
+                  + '<td style="padding:3px 8px"><a href="#study-' + _h(c.study) + '">' + _h(c.study) + '</a></td>'
+                  + '<td style="padding:3px 8px">' + _h(c.behavior || '') + '</td>'
+                  + '<td style="padding:3px 8px;font-weight:600;color:' + rcls + '">' + _h(c.result || '—') + '</td>'
+                  + '</tr>';
+              }).join('');
+              var caBadge = caDiverges
+                ? '<span class="acceptance-divergence" title="The code-computed acceptance disagrees with the authored verdict_status — computed by the spine (investigation_status), not human-authored." style="display:inline-block;margin-left:8px;padding:2px 9px;border-radius:9999px;font-size:0.8em;font-weight:600;background:#fffbeb;border:1px solid #f59e0b;color:#92400e">⚠ code: ' + _h(ca.verdict_status || computedVs || '?') + ' · authored: ' + _h(ex.verdict_status || '—') + '</span>'
+                : '';
+              h += '<div class="acceptance-rollup" id="' + _h(iset.name || 'inv') + '-acceptance-rollup" '
+                + 'style="margin:12px 0;padding:12px 16px;background:#f8fafc;border:1px solid #cbd5e1;border-left-width:5px;border-radius:6px">'
+                + '<strong>Acceptance roll-up</strong> '
+                + '<span class="muted small" style="color:#64748b">code-computed from member-study verdicts</span>'
+                + caBadge
+                + '<table class="small" style="margin-top:8px;border-collapse:collapse">'
+                + '<thead><tr>'
+                + '<th style="padding:3px 8px;text-align:left">Study</th>'
+                + '<th style="padding:3px 8px;text-align:left">Behavior</th>'
+                + '<th style="padding:3px 8px;text-align:left">Result</th>'
+                + '</tr></thead><tbody>' + critRows + '</tbody></table></div>';
+            }
             return h + '</details>';
           })()
 
@@ -8861,6 +8925,24 @@
       +     '});'
       +   '});'
       + '})();'
+      + '</script>'
+
+      // ── Spine A3: readiness-panel populate (report-render completion) ──
+      // The `.study-readiness-panel` placeholders above are emitted per study
+      // but filled by JS. This report is self-contained (no walkthrough.js),
+      // so bake an EXACT copy of _populateReadinessPanels (+ _readinessPanelHtml
+      // + _h) via `.toString()` and invoke it once the study sections have
+      // rendered. Reuses the same deterministic linter fetch — no duplicated
+      // logic, no AI. Idempotent. fetch('/api/report-lint') resolves when the
+      // report is SERVED by the dashboard; offline (file://) it no-ops cleanly.
+      + '<script>'
+      +   '(function(){'
+      +     'var _h=' + _h.toString() + ';'
+      +     'var _readinessPanelHtml=' + _readinessPanelHtml.toString() + ';'
+      +     'var _populateReadinessPanels=' + _populateReadinessPanels.toString() + ';'
+      +     'window._populateReadinessPanels=_populateReadinessPanels;'
+      +     'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",_populateReadinessPanels);}else{_populateReadinessPanels();}'
+      +   '})();'
       + '</script>'
 
       // ── Proposed-input Accept/Decline wiring (in-report) ──────────────
@@ -12886,5 +12968,101 @@
   });
 
   document.addEventListener('DOMContentLoaded', _refreshGitStatus);
+
+  // -------------------------------------------------------------------------
+  // Spine A3: per-study readiness panel (lint findings)
+  // -------------------------------------------------------------------------
+  // Fetches the deterministic report linter ONCE (/api/report-lint), keys the
+  // findings by study, and fills each `.study-readiness-panel` placeholder a
+  // study section rendered. Mirrors the param-enforcement banner: surfaced per
+  // study, connected to its source (the linter), and labeled code-computed
+  // (vs human-authored). AI-free — pure deterministic linter output. Surfaces
+  // the SP2b-ii readout-migration + SP2c band-citation-gap findings.
+  function _readinessPanelHtml(findings) {
+    var sev = { error: 0, warning: 0, info: 0 };
+    var byCheck = {};
+    findings.forEach(function (f) {
+      var s = f.severity || 'info';
+      if (sev[s] != null) sev[s]++; else sev.info++;
+      var c = f.check || 'other';
+      (byCheck[c] = byCheck[c] || []).push(f);
+    });
+    var gaps = sev.error + sev.warning;
+    var head, bg, bd, col;
+    if (!findings.length) { head = '✓ Ready'; bg = '#f0fdf4'; bd = '#16a34a'; col = '#166534'; }
+    else if (gaps) { head = '⚠ ' + gaps + ' gap' + (gaps === 1 ? '' : 's'); bg = '#fffbeb'; bd = '#f59e0b'; col = '#92400e'; }
+    else { head = 'ℹ ' + sev.info + ' note' + (sev.info === 1 ? '' : 's'); bg = '#eff6ff'; bd = '#3b82f6'; col = '#1e40af'; }
+    var lbl = '<span class="small" style="color:#64748b">code-computed by the report linter (deterministic)</span>';
+    // Ready → no dropdown needed.
+    if (!findings.length) {
+      return '<div class="readiness-banner" style="margin:12px 0;padding:12px 16px;background:' + bg
+        + ';border:1px solid ' + bd + ';border-left-width:5px;border-radius:6px;color:' + col + '">'
+        + '<strong>Readiness: ' + head + '</strong> ' + lbl + '</div>';
+    }
+    // Key info on top: per-check breakdown, most-frequent first (so noise like
+    // viz_stale_vs_latest_run is summarised, not enumerated, until expanded).
+    var checks = Object.keys(byCheck).sort(function (a, b) { return byCheck[b].length - byCheck[a].length; });
+    var breakdown = checks.map(function (c) { return byCheck[c].length + '× ' + _h(c); }).join(' &nbsp;·&nbsp; ');
+    var groups = checks.map(function (c) {
+      var items = byCheck[c].map(function (f) {
+        var s = f.severity || 'info';
+        var dot = s === 'error' ? '#dc2626' : (s === 'warning' ? '#f59e0b' : '#3b82f6');
+        return '<li style="margin-top:3px"><span style="color:' + dot + ';font-weight:700">●</span> ' + _h(f.message || '') + '</li>';
+      }).join('');
+      return '<div style="margin-top:9px"><code>' + _h(c) + '</code> '
+        + '<span class="small" style="color:#94a3b8">(' + byCheck[c].length + ')</span>'
+        + '<ul class="small" style="margin:3px 0 0 18px;padding:0">' + items + '</ul></div>';
+    }).join('');
+    return '<details class="readiness-banner" style="margin:12px 0;background:' + bg
+      + ';border:1px solid ' + bd + ';border-left-width:5px;border-radius:6px;color:' + col + '">'
+      + '<summary style="padding:12px 16px;cursor:pointer;list-style:none;outline:none">'
+      + '<strong>Readiness: ' + head + '</strong> ' + lbl
+      + '<div class="small" style="color:#64748b;margin-top:5px">' + breakdown
+      + ' &nbsp;·&nbsp; <span style="opacity:.7;font-style:italic">click to expand</span></div>'
+      + '</summary>'
+      + '<div style="padding:2px 16px 12px 16px">' + groups + '</div>'
+      + '</details>';
+  }
+  // Idempotent + safe to call repeatedly. The linter findings are fetched ONCE
+  // and cached on the function; every call (re-)keys whatever
+  // `.study-readiness-panel` placeholders are currently in the DOM by
+  // overwriting their innerHTML — so a second call after more panels render
+  // fills the new ones without issuing a duplicate fetch or double-rendering.
+  // No outer closure state is used (cache lives on the function object) so the
+  // investigation report can bake an exact copy via `.toString()` — see
+  // _buildInvestigationReportHtml; the served/downloaded report has no
+  // walkthrough.js, so it carries its own copy and invokes it after its study
+  // sections render (the placeholders are emitted async, after DOMContentLoaded).
+  function _populateReadinessPanels() {
+    var panels = document.querySelectorAll('.study-readiness-panel');
+    if (!panels.length) return;
+    function _apply(byStudy) {
+      document.querySelectorAll('.study-readiness-panel').forEach(function (el) {
+        var slug = el.getAttribute('data-study') || '';
+        el.innerHTML = _readinessPanelHtml(byStudy[slug] || []);
+      });
+    }
+    if (_populateReadinessPanels._cache) { _apply(_populateReadinessPanels._cache); return; }
+    if (_populateReadinessPanels._pending) return;
+    _populateReadinessPanels._pending = true;
+    fetch('/api/report-lint')
+      .then(function (r) { return r.ok ? r.json() : { findings: [] }; })
+      .then(function (j) {
+        var byStudy = {};
+        (j.findings || []).forEach(function (f) {
+          var k = f.study || '<workspace>';
+          (byStudy[k] = byStudy[k] || []).push(f);
+        });
+        _populateReadinessPanels._pending = false;
+        _populateReadinessPanels._cache = byStudy;
+        _apply(byStudy);
+      })
+      .catch(function () { _populateReadinessPanels._pending = false; });
+  }
+  window._populateReadinessPanels = _populateReadinessPanels;
+  // study-detail / live-DOM contexts: panels that exist at parse time get
+  // populated on load. The investigation report renders its panels async, so it
+  // additionally bakes + invokes this from its own render-completion (below).
+  document.addEventListener('DOMContentLoaded', _populateReadinessPanels);
 
 })();

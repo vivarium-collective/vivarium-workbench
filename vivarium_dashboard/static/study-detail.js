@@ -932,6 +932,70 @@
   function _runStudyInit() {
     // All renderers that need window._study to be populated.
     _renderFeedbackTrackedPanel();
+    _renderReadinessPanel();
+  }
+
+  // Spine A3: per-study readiness panel. Fetches the deterministic report
+  // linter (GET /api/report-lint), filters to THIS study, and renders a
+  // ✓ ready / ⚠ N gaps badge with the lint findings (severity-coloured).
+  // Mirrors the param-enforcement banner: surfaced, connected to its source
+  // (the linter), labeled code-computed. AI-free — pure deterministic output.
+  function _renderReadinessPanel() {
+    var container = document.getElementById('readiness-panel');
+    if (!container || container.dataset.rendered) return;
+    container.dataset.rendered = '1';
+    var slug = container.getAttribute('data-slug') || studyName() || '';
+    fetch('/api/report-lint')
+      .then(function (r) { return r.ok ? r.json() : { findings: [] }; })
+      .then(function (j) {
+        var findings = (j.findings || []).filter(function (f) {
+          return (f.study || '') === slug;
+        });
+        var sev = { error: 0, warning: 0, info: 0 };
+        findings.forEach(function (f) {
+          var s = f.severity || 'info';
+          if (sev[s] != null) sev[s]++; else sev.info++;
+        });
+        var gaps = sev.error + sev.warning;
+        var head, bg, bd, col;
+        if (!findings.length) { head = '✓ Ready'; bg = '#f0fdf4'; bd = '#16a34a'; col = '#166534'; }
+        else if (gaps) { head = '⚠ ' + gaps + ' gap' + (gaps === 1 ? '' : 's'); bg = '#fffbeb'; bd = '#f59e0b'; col = '#92400e'; }
+        else { head = 'ℹ ' + sev.info + ' note' + (sev.info === 1 ? '' : 's'); bg = '#eff6ff'; bd = '#3b82f6'; col = '#1e40af'; }
+        var lbl = '<span class="muted" style="font-size:0.85em">code-computed by the report linter (deterministic)</span>';
+        if (!findings.length) {
+          container.innerHTML =
+            '<div class="readiness-banner" style="margin:8px 0 14px 0;padding:10px 14px;background:' + bg
+            + ';border:1px solid ' + bd + ';border-left-width:5px;border-radius:6px;color:' + col + '">'
+            + '<strong>Readiness: ' + head + '</strong> ' + lbl + '</div>';
+          return;
+        }
+        // Key info on top: per-check breakdown (most frequent first), full list behind a dropdown.
+        var byCheck = {};
+        findings.forEach(function (f) { var c = f.check || 'other'; (byCheck[c] = byCheck[c] || []).push(f); });
+        var checks = Object.keys(byCheck).sort(function (a, b) { return byCheck[b].length - byCheck[a].length; });
+        var breakdown = checks.map(function (c) { return byCheck[c].length + '× ' + _esc(c); }).join(' &nbsp;·&nbsp; ');
+        var groups = checks.map(function (c) {
+          var items = byCheck[c].map(function (f) {
+            var s = f.severity || 'info';
+            var dot = s === 'error' ? '#dc2626' : (s === 'warning' ? '#f59e0b' : '#3b82f6');
+            return '<li style="margin-top:3px"><span style="color:' + dot + ';font-weight:700">●</span> ' + _esc(f.message || '') + '</li>';
+          }).join('');
+          return '<div style="margin-top:9px"><code>' + _esc(c) + '</code> '
+            + '<span class="muted" style="font-size:0.82em">(' + byCheck[c].length + ')</span>'
+            + '<ul style="margin:3px 0 0 18px;font-size:0.9em;padding:0">' + items + '</ul></div>';
+        }).join('');
+        container.innerHTML =
+          '<details class="readiness-banner" style="margin:8px 0 14px 0;background:' + bg
+          + ';border:1px solid ' + bd + ';border-left-width:5px;border-radius:6px;color:' + col + '">'
+          + '<summary style="padding:10px 14px;cursor:pointer;list-style:none;outline:none">'
+          + '<strong>Readiness: ' + head + '</strong> ' + lbl
+          + '<div class="muted" style="font-size:0.82em;margin-top:5px">' + breakdown
+          + ' &nbsp;·&nbsp; <span style="opacity:.7;font-style:italic">click to expand</span></div>'
+          + '</summary>'
+          + '<div style="padding:2px 14px 12px 14px">' + groups + '</div>'
+          + '</details>';
+      })
+      .catch(function () { container.dataset.rendered = ''; });
   }
 
   // Entry point: fetch the spec if needed, then run init.

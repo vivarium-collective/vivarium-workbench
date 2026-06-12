@@ -1711,13 +1711,21 @@ def _study_detail_spec(name: str):
         except Exception:  # noqa: BLE001
             pass
 
-        # Coded gate verdict (spine stage #2): roll per-test outcomes → study
-        # verdict and surface it alongside the authored gate_status so the SPA
-        # can render both and flag divergence. Does NOT modify study.yaml
-        # (write_gate_evaluator does that); this is render-only.
+        # Coded gate verdict (spine stage #2): surface the study verdict
+        # alongside the authored gate_status so the SPA can render both and flag
+        # divergence. PREFER the PERSISTED pipeline_gate.gate_evaluator written
+        # by study_verdict.write_gate_evaluator — it carries result,
+        # evaluated_by AND diverges_from_authored (the code-vs-authored signal).
+        # Only fall back to roll_up_verdict (a render-only recompute that DROPS
+        # diverges_from_authored) when no persisted slot exists. Does NOT modify
+        # study.yaml; this is render-only.
         try:
-            from pbg_superpowers.study_verdict import roll_up_verdict
-            spec["computed_gate_verdict"] = roll_up_verdict(spec)
+            persisted_ge = (spec.get("pipeline_gate") or {}).get("gate_evaluator")
+            if isinstance(persisted_ge, dict) and persisted_ge.get("result"):
+                spec["computed_gate_verdict"] = dict(persisted_ge)
+            else:
+                from pbg_superpowers.study_verdict import roll_up_verdict
+                spec["computed_gate_verdict"] = roll_up_verdict(spec)
         except Exception:  # noqa: BLE001
             pass
     return spec
@@ -7129,6 +7137,47 @@ def _study_observable_check(ws_root: Path, slug: str):
     return _json_body({"composite": ref, "readouts": results}), 200
 
 
+def _report_lint(ws_root: Path):
+    """GET /api/report-lint worker — ``(json_bytes, status)``.
+
+    Spine A3: runs the EXISTING deterministic linter
+    (``pbg_superpowers.report_linter.lint_workspace_report``) over the
+    workspace and returns its findings keyed by study so the dashboard can
+    render a per-study readiness panel. This wires three computed artifacts at
+    once: the SP2b-ii readout-migration findings (info/warning) and the SP2c
+    band-citation-gap warnings already emitted by the linter.
+
+    The dashboard adds NO AI — it only runs the deterministic linter and
+    renders the result. Tolerant: if the linter is unavailable (older
+    pbg_superpowers) or the workspace can't be scanned, returns 200 with an
+    empty findings list rather than a 500.
+
+    Shape: ``{"findings": [{study, check, severity, message, field_path}]}``,
+    in the linter's own stable order (error→warning→info).
+    """
+    ws_root = Path(ws_root)
+    try:
+        from pbg_superpowers.report_linter import lint_workspace_report
+    except Exception:  # noqa: BLE001 — older pbg_superpowers lacks the linter
+        return _json_body({"findings": []}), 200
+    try:
+        raw = lint_workspace_report(ws_root)
+    except Exception as e:  # noqa: BLE001 — never 500 the readiness panel
+        return _json_body({"findings": [], "error": str(e)}), 200
+
+    findings = []
+    for f in raw:
+        d = f.to_dict() if hasattr(f, "to_dict") else dict(f)
+        findings.append({
+            "study":      d.get("study_slug") or d.get("study") or "<workspace>",
+            "check":      d.get("check", ""),
+            "severity":   d.get("level") or d.get("severity") or "info",
+            "message":    d.get("message", ""),
+            "field_path": d.get("field_path", ""),
+        })
+    return _json_body({"findings": findings}), 200
+
+
 # ---------------------------------------------------------------------------
 # HTTP handler
 # ---------------------------------------------------------------------------
@@ -7163,6 +7212,9 @@ class Handler(BaseHTTPRequestHandler):
             _q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
             _slug = (_q.get("study") or _q.get("investigation") or _q.get("name") or "").strip()
             return self._send_json_bytes(*_study_observable_check(WORKSPACE, _slug))
+        # Spine A3: per-study readiness panel — runs the deterministic linter.
+        if _path_only_pre == "/api/report-lint":
+            return self._send_json_bytes(*_report_lint(WORKSPACE))
 
         # Resolve /api/study-* aliases to their /api/investigation-* originals so
         # the rest of the dispatch chain only needs to know one set of paths.
@@ -12977,6 +13029,12 @@ if __name__ == "__main__":
         return _study_observable_check(ws_root, slug)
 
     @staticmethod
+    def _report_lint_test(ws_root):
+        """Test seam for GET /api/report-lint — runs the deterministic linter
+        over an explicit ws_root. Returns (json_bytes, http_status)."""
+        return _report_lint(ws_root)
+
+    @staticmethod
     def _iset_detail_data(name: str) -> "dict | None":
         """Pure builder for investigation (iset) detail — no socket I/O.
 
@@ -13056,6 +13114,15 @@ if __name__ == "__main__":
                 "evaluation_status":     study_spec.get("evaluation_status"),
                 "gate_status":           study_spec.get("gate_status"),
                 "expert_review_status":  study_spec.get("expert_review_status"),
+                # Spine A2: surface the PERSISTED coded gate_evaluator (carries
+                # result + diverges_from_authored) so the report's per-study
+                # verdict pill can render a code-vs-authored divergence chip.
+                # Read-only passthrough; no recompute here.
+                "computed_gate_verdict": (
+                    (study_spec.get("pipeline_gate") or {}).get("gate_evaluator")
+                    if isinstance((study_spec.get("pipeline_gate") or {}).get("gate_evaluator"), dict)
+                    else None
+                ),
             })
 
         member_statuses = [s.get("status", "planning") for s in studies_out]
@@ -13078,6 +13145,17 @@ if __name__ == "__main__":
                     except Exception:
                         pass
             computed_acceptance = roll_up_acceptance(spec, studies_by_name)
+            # Spine A1: surface the PERSISTED divergence flag (written by the
+            # investigation acceptance evaluator) so the executive fold can
+            # render a code-vs-authored badge. The recompute above gives the
+            # per-criterion table + computed verdict_status; we do NOT recompute
+            # diverges_from_authored here — we read the spine-written flag.
+            persisted_acc = (spec.get("executive") or {}).get("computed_acceptance")
+            if isinstance(persisted_acc, dict) and isinstance(computed_acceptance, dict):
+                if "diverges_from_authored" in persisted_acc:
+                    computed_acceptance["diverges_from_authored"] = (
+                        persisted_acc.get("diverges_from_authored")
+                    )
         except Exception:
             pass
 
