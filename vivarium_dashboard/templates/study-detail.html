@@ -374,13 +374,31 @@
         </div>
         <div class="finding-statement">{{ f.statement }}</div>
         {% if f.evidence %}
+        {# Spine B1: the cited test/run are CLICKABLE (anchor to its #test-/#run-
+           card), the headline computed number divergence_factor is surfaced,
+           provenance.run_ids are linked, and the cited test's pass_if band is
+           inlined so "passing" is legible without hunting. #}
+        {% set _ftok = (f.evidence.from_test or '').split(' ')[0] %}
+        {% set _rtok = (f.evidence.from_run or '').split(' ')[0] %}
         <div class="finding-evidence">
           {% if f.evidence.observed is defined %}<strong>observed:</strong> {{ f.evidence.observed }}{% if f.evidence.units %} {{ f.evidence.units }}{% endif %} · {% endif %}
-          {% if f.evidence.from_test %}via test <code>{{ f.evidence.from_test }}</code> · {% endif %}
-          {% if f.evidence.from_run %}in run <code>{{ f.evidence.from_run }}</code>{% endif %}
+          {% if f.evidence.from_test %}via test <a href="#bt-{{ _ftok }}"><code>{{ f.evidence.from_test }}</code></a> · {% endif %}
+          {% if f.evidence.from_run %}in run <a href="#run-{{ _rtok }}"><code>{{ f.evidence.from_run }}</code></a>{% endif %}
           {% if f.evidence.window %} ({{ f.evidence.window }}){% endif %}
           {% if f.evidence.smoking_gun %}<details style="display:inline-block;margin-left:4px"><summary>smoking gun</summary><pre style="white-space:pre-wrap;margin:4px 0 0 0;padding:6px 8px;background:#fff;border-radius:3px;font-size:0.85em;font-family:inherit">{{ f.evidence.smoking_gun }}</pre></details>{% endif %}
         </div>
+        {% set _runids = (f.provenance or {}).run_ids %}
+        {% if f.evidence.divergence_factor is defined or _runids %}
+        <div class="finding-traceability" style="font-size:0.84em;color:#475569;padding:4px 10px;margin:4px 0">
+          {% if f.evidence.divergence_factor is defined %}<span class="finding-divergence" style="font-weight:600">×{{ f.evidence.divergence_factor }} vs expected</span>{% endif %}
+          {% if f.evidence.divergence_factor is defined and _runids %} · {% endif %}
+          {% if _runids %}runs: {% for rid in _runids %}<a href="#run-{{ rid }}"><code>{{ rid }}</code></a>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+        </div>
+        {% endif %}
+        {% set _citedtest = (study.behavior_tests or study.expected_behavior or [])|selectattr('name','equalto', _ftok)|first %}
+        {% if _citedtest and (_citedtest.pass_if or _citedtest.expect) %}
+        <div class="pass_if-band muted small" style="font-size:0.82em;padding:2px 10px">judged against <code>pass_if: {{ (_citedtest.pass_if or _citedtest.expect) | tojson }}</code></div>
+        {% endif %}
         {% endif %}
         {% if f.expected %}
         <div class="finding-expected">
@@ -1098,7 +1116,8 @@
       <thead>
         <tr>
           <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Name</th>
-          <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Status</th>
+          <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Status <span class="muted" style="font-weight:400">(authored)</span></th>
+          <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Validated against composite</th>
           <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Store path</th>
           <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Indexed by</th>
           <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Description</th>
@@ -1106,7 +1125,7 @@
       </thead>
       <tbody>
         {% for o in _obs %}
-        <tr style="border-bottom: 1px solid #f1f5f9;">
+        <tr style="border-bottom: 1px solid #f1f5f9;" data-readout="{{ o.name }}">
           <td style="padding:6px; vertical-align: top;"><code>{{ o.name }}</code></td>
           <td style="padding:6px; vertical-align: top;">
             <span style="font-size: 0.75em; color: #475569;">
@@ -1115,6 +1134,14 @@
               {% elif o.status == 'aspirational' %}⏳ aspirational
               {% else %}{{ o.status or '—' }}{% endif %}
             </span>
+          </td>
+          {# Spine B2: COMPUTED validation status, fetched from
+             /api/study-observable-check and injected by JS — kept BESIDE the
+             authored status so a phantom readout (not_in_structure) is visible
+             at the source. Empty until the fetch resolves; tolerates failure. #}
+          <td style="padding:6px; vertical-align: top;">
+            <span class="readout-validation" data-readout="{{ o.name }}"
+                  style="font-size:0.75em"></span>
           </td>
           <td style="padding:6px; vertical-align: top;"><code style="font-size: 0.85em;">{{ o.store_path or '' }}</code></td>
           <td style="padding:6px; vertical-align: top;">
@@ -1451,6 +1478,7 @@
           <th>Started (UTC)</th>
           <th>Duration</th>
           <th>Status</th>
+          <th>Test results</th>
           <th>Model changes</th>
           <th>Actions</th>
         </tr>
@@ -1459,7 +1487,8 @@
         {% for r in (study.runs or []) %}
         {% set _params = r.meta_params or r.params or {} %}
         {% set _has_changes = _params and _params|length > 0 %}
-        <tr data-run-id="{{ r.run_id }}"
+        <tr id="run-{{ r.run_id or r.name }}"
+            data-run-id="{{ r.run_id }}"
             data-spec-id="{{ r.meta_spec_id or r.spec_id or '' }}"
             data-started-at="{{ r.meta_started_at or r.started_at or '' }}">
           <td><input type="checkbox" class="run-compare-checkbox" value="{{ r.run_id }}"></td>
@@ -1484,6 +1513,37 @@
               <div class="muted" style="font-size:0.74em"><code>{{ r.meta_log_path }}</code></div>
             {% endif %}
           </td>
+          {# Test results — code-computed outcomes for THIS run (spine B3).
+             ✓ pass / ✗ fail / ◐ agent-routed, from r.computed_outcomes so a
+             reader sees which run produced which results without leaving the
+             table. Falls back to authored r.outcomes when no computed ones. #}
+          <td class="run-test-results" style="font-size:0.82em;white-space:nowrap">
+            {% set _co = r.computed_outcomes or {} %}
+            {% set ns = namespace(p=0, f=0, a=0, total=0) %}
+            {% for _tn, _o in _co.items() if _tn != '_status' and _o is mapping %}
+              {% set ns.total = ns.total + 1 %}
+              {% if _o.result == 'PASS' %}{% set ns.p = ns.p + 1 %}
+              {% elif _o.result == 'FAIL' %}{% set ns.f = ns.f + 1 %}
+              {% else %}{% set ns.a = ns.a + 1 %}{% endif %}
+            {% endfor %}
+            {% if ns.total > 0 %}
+              {% if ns.p %}<span class="ok" title="passed">✓ {{ ns.p }}</span>{% endif %}
+              {% if ns.f %}<span class="fail" title="failed">✗ {{ ns.f }}</span>{% endif %}
+              {% if ns.a %}<span class="muted" title="routed to agent">◐ {{ ns.a }}</span>{% endif %}
+            {% elif r.outcomes %}
+              {% set ans = namespace(p=0, f=0) %}
+              {% for _tn, _o in r.outcomes.items() if _o is mapping %}
+                {% if _o.result == 'PASS' %}{% set ans.p = ans.p + 1 %}
+                {% elif _o.result == 'FAIL' %}{% set ans.f = ans.f + 1 %}{% endif %}
+              {% endfor %}
+              {% if ans.p %}<span class="ok" title="authored pass">✓ {{ ans.p }}</span>{% endif %}
+              {% if ans.f %}<span class="fail" title="authored fail">✗ {{ ans.f }}</span>{% endif %}
+              {% if not ans.p and not ans.f %}<span class="muted">—</span>{% endif %}
+              <span class="muted" style="font-size:0.85em"> (authored)</span>
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
           <td>
             {% if _has_changes %}
             <details>
@@ -1501,7 +1561,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="9" class="empty-message">No runs yet.</td></tr>
+        <tr><td colspan="10" class="empty-message">No runs yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>

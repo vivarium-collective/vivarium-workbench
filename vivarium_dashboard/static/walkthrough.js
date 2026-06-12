@@ -6360,9 +6360,28 @@
           var ev = f.evidence || {};
           var exp = f.expected || {};
           var ref = f.expert_reference || {};
+          var prov = f.provenance || {};
+          // Anchor a (possibly descriptive) test reference: the leading
+          // identifier token becomes the #<prefix>-<id> target, the full text
+          // stays as the link label so the reader can trace the value to its
+          // source (the test card) instead of reading dead code.  Only used
+          // for the TEST case: the report renders test cards (id="test-..."),
+          // so #test- anchors resolve.  The report has NO per-run rows, so run
+          // references are rendered as plain <code> (see _traceRun) — anchoring
+          // them would produce dead run-row links.  (The STUDY page does emit
+          // per-run rows and keeps its run anchors; that lives in study-detail.)
+          function _traceLink(prefix, val) {
+            var s = String(val);
+            var tok = (s.match(/^[A-Za-z0-9_.\-]+/) || [s])[0];
+            return '<a href="#' + prefix + '-' + _h(tok) + '"><code>' + _h(s) + '</code></a>';
+          }
+          // Run references in the report: plain <code>, no anchor (no target).
+          function _traceRun(val) {
+            return '<code>' + _h(String(val)) + '</code>';
+          }
           var techParts = [];
-          if (ev.from_test) techParts.push('test: <code>' + _h(ev.from_test) + '</code>');
-          if (ev.from_run)  techParts.push('run: <code>' + _h(ev.from_run) + '</code>');
+          if (ev.from_test) techParts.push('test: ' + _traceLink('test', ev.from_test));
+          if (ev.from_run)  techParts.push('run: ' + _traceRun(ev.from_run));
           if (ev.window)    techParts.push('window: ' + _h(ev.window));
           if (ev.smoking_gun) techParts.push('<details style="margin-top:4px"><summary>Smoking gun</summary><pre style="white-space:pre-wrap;font-size:0.85em;background:#fff;padding:6px;border-radius:3px">' + _h(ev.smoking_gun) + '</pre></details>');
           if (ev.discovered_during) techParts.push('discovered during: <code>' + _h(ev.discovered_during) + '</code>');
@@ -6390,6 +6409,42 @@
                     + (exp.cites && exp.cites.length ? '<div class="muted small" style="margin-top:4px">Cites: ' + exp.cites.map(function(c){return '<code>' + _h(c) + '</code>';}).join(', ') + '</div>' : '')
                     + '</div>';
           }
+
+          // Traceability block (spine B1): surface the finding's computed
+          // distance + provenance, connected to source. The headline computed
+          // number `divergence_factor` (how far observed is from expected) was
+          // previously dropped; render it prominently. Link the cited test +
+          // run, list provenance.run_ids (linked), and inline the cited test's
+          // pass_if band so the reader sees what "passing" meant without hunting.
+          var traceBits = [];
+          if (ev.divergence_factor != null) {
+            traceBits.push('<span class="finding-divergence" style="font-weight:600">×'
+              + _h(String(ev.divergence_factor)) + ' vs expected</span>');
+          }
+          if (ev.from_test) traceBits.push('test: ' + _traceLink('test', ev.from_test));
+          if (ev.from_run)  traceBits.push('run: ' + _traceRun(ev.from_run));
+          var runIds = prov.run_ids || [];
+          if (Array.isArray(runIds) && runIds.length) {
+            traceBits.push('runs: ' + runIds.map(function(rid) {
+              return '<code>' + _h(String(rid)) + '</code>';
+            }).join(', '));
+          }
+          // Inline the cited test's pass_if band (look it up by from_test).
+          var citedBand = '';
+          if (ev.from_test) {
+            var citedTok = (String(ev.from_test).match(/^[A-Za-z0-9_.\-]+/) || [''])[0];
+            var citedTest = (tests || []).filter(function(t){ return t && t.name === citedTok; })[0];
+            if (citedTest && (citedTest.pass_if || citedTest.expect)) {
+              citedBand = '<div class="pass_if-band muted small" style="margin-top:4px">judged against '
+                + '<code>pass_if: ' + _h(JSON.stringify(citedTest.pass_if || citedTest.expect)) + '</code></div>';
+            }
+          }
+          var traceBlock = (traceBits.length || citedBand)
+            ? '<div class="finding-traceability" style="margin-top:6px;padding:6px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;font-size:0.88em">'
+              + (traceBits.length ? '<span class="muted small">traceability:</span> ' + traceBits.join(' · ') : '')
+              + citedBand
+              + '</div>'
+            : '';
 
           var refBlock = '';
           if (ref.doc || ref.quote || ref.note) {
@@ -6419,6 +6474,7 @@
                +   '<div class="finding-statement">' + _multiline(f.statement || (f.id ? f.id.replace(/[-_]/g,' ') : '(no statement)')) + '</div>'
                +   evMain
                +   expMain
+               +   traceBlock
                +   (f.explanation ? '<div class="finding-explanation"><em>Why:</em> ' + _multiline(f.explanation) + '</div>' : '')
                +   sweepChart
                +   refBlock
@@ -6590,12 +6646,49 @@
               var claim = (t.description || t.en || '').split('\n')[0].split('. ')[0];
               if (claim.length > 220) claim = claim.slice(0, 217) + '…';
               if (claim && claim.charAt(claim.length - 1) !== '.' && claim.charAt(claim.length - 1) !== '?') claim += '.';
-              // Evidence: extra fields from the outcome (skip 'result' itself).
+              // Evidence (spine B3): render the code-computed outcome as a
+              // styled row — measured_value + operator + evaluated_by in a
+              // CODE-COMPUTED chip, kept visually SEPARATE from the
+              // human-authored outcome (its own chip), with a prominent
+              // reconcile:divergent badge and a link to the run that produced
+              // the value + the pass_if band it was judged against. No more
+              // raw merged k:v dump (which blended authored + computed).
+              var authoredOut = (latestRun && latestRun.outcomes) ? latestRun.outcomes[name] : null;
+              var computedOut = (latestRun && latestRun.computed_outcomes) ? latestRun.computed_outcomes[name] : null;
+              var runIdent = latestRun ? (latestRun.run_id || latestRun.name || '') : '';
               var evidence = '';
-              if (out) {
-                var bits = Object.keys(out).filter(function(k){return k !== 'result';})
-                  .map(function(k){return _h(k) + ': ' + _h(String(out[k]));});
-                if (bits.length) evidence = bits.join(' · ');
+              if (computedOut || authoredOut) {
+                var co = computedOut || {};
+                var mv = co.measured_value;
+                var mvStr = (mv == null) ? '—' : (typeof mv === 'object' ? JSON.stringify(mv) : String(mv));
+                if (mvStr.length > 220) mvStr = mvStr.slice(0, 217) + '…';
+                var codeBits = [];
+                if (co.result != null) codeBits.push('<strong>' + _h(String(co.result)) + '</strong>');
+                if (co.operator) codeBits.push('op <code>' + _h(String(co.operator)) + '</code>');
+                if (co.evaluated_by) codeBits.push('by <code>' + _h(String(co.evaluated_by)) + '</code>');
+                var codeChip = computedOut
+                  ? '<span class="outcome-chip outcome-chip-computed" style="display:inline-block;padding:3px 7px;border-radius:4px;background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;font-size:0.85em"><span class="muted">code computed</span> ' + codeBits.join(' · ') + '</span>'
+                  : '';
+                var authoredChip = (authoredOut && authoredOut.result != null)
+                  ? ' <span class="outcome-chip outcome-chip-authored" style="display:inline-block;padding:3px 7px;border-radius:4px;background:#f8fafc;border:1px solid #e2e8f0;color:#475569;font-size:0.85em"><span class="muted">authored</span> <strong>' + _h(String(authoredOut.result)) + '</strong></span>'
+                  : '';
+                var divBadge = (co.reconcile === 'divergent')
+                  ? ' <span class="reconcile-divergent" style="display:inline-block;padding:3px 7px;border-radius:4px;background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;font-weight:600;font-size:0.85em">⚠ reconcile: divergent</span>'
+                  : '';
+                var runLink = runIdent
+                  ? ' <span class="muted small">from run <code>' + _h(runIdent) + '</code></span>'
+                  : '';
+                var bandLine = t.pass_if
+                  ? '<div class="pass_if-band muted small" style="margin-top:3px">judged against <code>pass_if: ' + _h(JSON.stringify(t.pass_if)) + '</code></div>'
+                  : '';
+                var detailLine = (co.detail || co.reason)
+                  ? '<div class="muted small" style="margin-top:3px">' + _h(String(co.detail || co.reason)) + '</div>'
+                  : '';
+                evidence = '<div class="computed-outcome-row">'
+                  + (computedOut ? '<div><strong>measured_value:</strong> <code>' + _h(mvStr) + '</code></div>' : '')
+                  + '<div style="margin-top:3px">' + codeChip + authoredChip + divBadge + runLink + '</div>'
+                  + bandLine + detailLine
+                  + '</div>';
               }
               var techBits = [];
               if (t.measure) techBits.push('Measure: <code>' + _h(JSON.stringify(t.measure)) + '</code>');
@@ -6618,7 +6711,7 @@
               if (t.calibration_anchor) techBits.push('Calibration anchor: ⚠️ <code>' + _h(JSON.stringify(t.calibration_anchor)) + '</code>');
               var techDisc = techBits.length ? '<details class="tech-details"><summary>Technical details</summary>' + techBits.join('<br>') + '</details>' : '';
 
-              return '<div class="test-card test-classification-' + _h(cls) + '">'
+              return '<div class="test-card test-classification-' + _h(cls) + '" id="test-' + _h(name) + '">'
                    +   '<div class="test-header">'
                    +     '<span style="background:' + resBg + ';color:' + resFg + ';padding:2px 10px;border-radius:9999px;font-size:0.78em;font-weight:600">' + resGlyph + ' ' + _h(result) + '</span>'
                    +     '<span class="test-classification">' + _h(cls) + '</span>'

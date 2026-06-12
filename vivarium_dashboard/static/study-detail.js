@@ -27,8 +27,65 @@
     if (kind === 'visualizations') {
       _loadCharts('viz-charts-panel');
     }
+    if (kind === 'observables') {
+      _loadReadoutValidation();
+    }
   }
   window._setStudyTab = _setStudyTab;
+
+  // ── Spine B2: readout validation badges ──────────────────────────────────
+  // Fetch /api/study-observable-check (SP2b-i, the never-fabricate guard) and
+  // badge each readout row with the COMPUTED validation status
+  // (ok / unresolved / not_in_structure / aspirational) BESIDE the authored
+  // status, labeled "validated against the composite", so a phantom readout
+  // (not_in_structure) is visible at the source. Tolerates the endpoint failing
+  // or being absent (no badge, no error) — the composite must build (~3s).
+  // not_in_structure links to the re-author guidance (/api/observables).
+  var _readoutValidationLoaded = false;
+  function _loadReadoutValidation() {
+    if (_readoutValidationLoaded) return;
+    _readoutValidationLoaded = true;
+    var slug = studyName();
+    if (!slug) return;
+    fetch('/api/study-observable-check?study=' + encodeURIComponent(slug),
+          {headers: {Accept: 'application/json'}})
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(j) {
+        if (!j || !Array.isArray(j.readouts)) return;  // tolerate failure
+        var byName = {};
+        j.readouts.forEach(function(o) { if (o && o.name) byName[o.name] = o; });
+        document.querySelectorAll('.readout-validation').forEach(function(el) {
+          var o = byName[el.getAttribute('data-readout')];
+          if (!o) return;
+          el.innerHTML = _readoutValidationBadge(o.status, o.detail);
+        });
+      })
+      .catch(function() { /* tolerate — no badge */ });
+  }
+
+  function _readoutValidationBadge(status, detail) {
+    var e = escapeHtmlForTests;
+    var styles = {
+      ok:              {bg: '#d1fae5', fg: '#065f46', bd: '#6ee7b7', glyph: '✓', label: 'ok'},
+      unresolved:      {bg: '#fef3c7', fg: '#92400e', bd: '#fcd34d', glyph: '⚠', label: 'unresolved'},
+      not_in_structure:{bg: '#fee2e2', fg: '#991b1b', bd: '#fca5a5', glyph: '✗', label: 'not_in_structure'},
+      aspirational:    {bg: '#f1f5f9', fg: '#475569', bd: '#cbd5e1', glyph: '⏳', label: 'aspirational'},
+    };
+    var s = styles[status] || {bg: '#f1f5f9', fg: '#475569', bd: '#cbd5e1', glyph: '•', label: status || '—'};
+    var badge =
+      '<span class="readout-validation-badge" title="' + e(detail || '') + '" ' +
+      'style="display:inline-block;padding:2px 8px;border-radius:9999px;background:' + s.bg +
+      ';color:' + s.fg + ';border:1px solid ' + s.bd + '">' + s.glyph + ' ' + e(s.label) + '</span>';
+    if (status === 'not_in_structure') {
+      // Re-author guidance: the in-page bigraph picker resolves real paths;
+      // /api/observables backs it. Point the reader at the picker to fix the
+      // phantom readout at the source.
+      badge += ' <a href="#bigraph-picker-details" ' +
+        'onclick="var d=document.getElementById(\'bigraph-picker-details\');if(d)d.open=true;" ' +
+        'class="muted" style="font-size:0.9em" title="re-author against /api/observables">re-author →</a>';
+    }
+    return badge;
+  }
 
   // ── Charts panel: inline SVGs from /api/study-charts ─────────────────────
   // Lives in the Visualizations tab only. Memoized per panel id.
@@ -681,20 +738,31 @@
       summary.textContent = '— no test results yet — click "Run tests" to execute them or check the runs[] section in study.yaml';
     }
 
-    // --- Code-computed outcomes summary ---
-    // Tally spec.runs[].computed_outcomes (written by the post-run evaluator).
-    // Skip the _status sentinel key and any non-object entries.
+    // --- Per-test code-computed outcomes (spine B3) ---------------------
+    // Render each test's LATEST code-computed outcome (measured_value /
+    // result / operator / evaluated_by) connected to the run that produced
+    // it and the pass_if band it was judged against — with the code-computed
+    // value visually SEPARATE from any human-authored outcome and a
+    // reconcile:divergent badge when they disagree. Follows the
+    // param-enforcement-banner pattern (surfaced · connected · code-vs-authored).
+    // Replaces the prior aggregate-only tally (now a one-line summary header).
+    //
+    // perTest[name] = {computed, authored, runIdent} — last run wins.
+    var perTest = {};
     var cPassed = 0, cFailed = 0, cAgent = 0;
     var cAgree = 0, cDivergent = 0, cNoAuthored = 0;
     var anyComputed = false;
     (spec && spec.runs || []).forEach(function(r) {
       var co = r.computed_outcomes;
       if (!co || typeof co !== 'object' || Array.isArray(co)) return;
+      var runIdent = r.run_id || r.name || '';
       Object.keys(co).forEach(function(tname) {
         if (tname === '_status') return;
         var entry = co[tname];
         if (!entry || typeof entry !== 'object') return;
         anyComputed = true;
+        var authored = (r.outcomes && typeof r.outcomes === 'object') ? r.outcomes[tname] : null;
+        perTest[tname] = {computed: entry, authored: authored || null, runIdent: runIdent};
         var evaluatedBy = entry.evaluated_by || '';
         if (evaluatedBy === 'code') {
           if (entry.result === 'PASS') cPassed++;
@@ -711,6 +779,7 @@
     });
 
     if (anyComputed) {
+      // One-line summary header (kept; per-test detail now lives on each row).
       var compEl = document.getElementById('tests-computed-summary');
       if (!compEl) {
         compEl = document.createElement('div');
@@ -735,7 +804,95 @@
         cHtml += ' <span class="muted">(' + muted.join(', ') + ')</span>';
       }
       compEl.innerHTML = cHtml;
+
+      // Per-test rows: inject a computed-outcome block into each test card.
+      var testByName = {};
+      (spec.behavior_tests || spec.expected_behavior || []).forEach(function(t) {
+        if (t && t.name) testByName[t.name] = t;
+      });
+      Object.keys(perTest).forEach(function(tname) {
+        var li = document.getElementById('bt-' + tname);
+        if (!li) return;
+        if (li.querySelector('.computed-outcome-row')) return;  // idempotent
+        var passIf = (testByName[tname] || {}).pass_if || (testByName[tname] || {}).expect || null;
+        li.insertAdjacentHTML('beforeend',
+          _renderComputedOutcomeRow(tname, perTest[tname], passIf));
+      });
     }
+  }
+
+  // Render one test's code-computed outcome as a styled row: the measured
+  // value + result + operator + evaluated_by in a CODE-COMPUTED chip, the
+  // human-authored outcome in a SEPARATE AUTHORED chip, a prominent
+  // reconcile:divergent badge when they disagree, a link to the run that
+  // produced the value, and the pass_if band it was judged against.
+  function _renderComputedOutcomeRow(tname, info, passIf) {
+    var c = info.computed || {};
+    var a = info.authored || null;
+    var runIdent = info.runIdent || '';
+    var e = escapeHtmlForTests;
+    var divergent = (c.reconcile === 'divergent');
+
+    var mv = c.measured_value;
+    var mvStr;
+    if (mv == null) mvStr = '—';
+    else if (typeof mv === 'object') mvStr = JSON.stringify(mv);
+    else mvStr = String(mv);
+    if (mvStr.length > 220) mvStr = mvStr.slice(0, 217) + '…';
+
+    // CODE-COMPUTED chip.
+    var codeBits = [];
+    if (c.result != null) codeBits.push('<strong>' + e(String(c.result)) + '</strong>');
+    if (c.operator) codeBits.push('op <code>' + e(String(c.operator)) + '</code>');
+    codeBits.push('by <code>' + e(String(c.evaluated_by || '?')) + '</code>');
+    var codeChip =
+      '<span class="outcome-chip outcome-chip-computed" ' +
+      'style="display:inline-block;padding:4px 8px;border-radius:4px;background:#eef2ff;' +
+      'border:1px solid #c7d2fe;color:#3730a3;font-size:0.82em">' +
+      '<span class="muted" style="font-size:0.85em">code computed</span> ' +
+      codeBits.join(' · ') + '</span>';
+
+    // SEPARATE AUTHORED chip (only when an authored outcome exists).
+    var authoredChip = '';
+    if (a && (a.result != null)) {
+      authoredChip =
+        ' <span class="outcome-chip outcome-chip-authored" ' +
+        'style="display:inline-block;padding:4px 8px;border-radius:4px;background:#f8fafc;' +
+        'border:1px solid #e2e8f0;color:#475569;font-size:0.82em">' +
+        '<span class="muted" style="font-size:0.85em">authored</span> ' +
+        '<strong>' + e(String(a.result)) + '</strong></span>';
+    }
+
+    var divBadge = divergent
+      ? ' <span class="reconcile-divergent" ' +
+        'style="display:inline-block;padding:4px 8px;border-radius:4px;background:#fee2e2;' +
+        'border:1px solid #fca5a5;color:#991b1b;font-weight:600;font-size:0.82em">' +
+        '⚠ reconcile: divergent</span>'
+      : '';
+
+    var runLink = runIdent
+      ? '<div class="muted small" style="margin-top:4px">from run ' +
+        '<a href="#run-' + e(runIdent) + '" onclick="_setStudyTab(\'runs\')" ' +
+        'style="color:#3b82f6">' + e(runIdent) + '</a></div>'
+      : '';
+
+    var bandLine = passIf
+      ? '<div class="pass_if-band muted small" style="margin-top:2px">judged against ' +
+        '<code>pass_if: ' + e(JSON.stringify(passIf)) + '</code></div>'
+      : '';
+
+    var detail = (c.detail || c.reason)
+      ? '<div class="muted small" style="margin-top:2px">' + e(String(c.detail || c.reason)) + '</div>'
+      : '';
+
+    return '<div class="computed-outcome-row" ' +
+      'style="margin-top:6px;padding:8px 10px;background:#fff;border:1px solid ' +
+      (divergent ? '#fca5a5' : '#e2e8f0') + ';border-radius:4px;font-size:0.85em">' +
+      '<div><strong>measured_value:</strong> <code>' + e(mvStr) + '</code></div>' +
+      '<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
+      codeChip + authoredChip + divBadge + '</div>' +
+      runLink + bandLine + detail +
+      '</div>';
   }
 
   function escapeHtmlForTests(s) {
