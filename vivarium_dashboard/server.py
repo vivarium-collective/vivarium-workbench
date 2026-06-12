@@ -1368,15 +1368,36 @@ def _study_spec_path(name: str):
 # Pathway Tools Omics Viewer launch helper
 # ---------------------------------------------------------------------------
 
-# DEFAULT TEMPLATE — TBD: finalize against the live Pathway Tools server.
-# Open the Cellular Overview in your PTools instance, then use
-#   Operations → Generate Bookmark for Current Cellular Overview
-# to capture the exact Omics-Viewer URL format, and set
-# ``ui.ptools_omics_url_template`` in workspace.yaml accordingly.
-# Placeholders: {server}, {orgid}, {tsv_url}.
+# DEFAULT TEMPLATE — the Pathway Tools Cellular Overview Omics Viewer auto-loads
+# a tab-delimited data file via URL params (verified against sms-ptools 0.8.2;
+# the param format is documented in the server's celOverviewHelp.shtml):
+#   omics=t        enable the Omics Viewer overlay
+#   url=<datafile> the data file to paint (reachable BY the PTools server)
+#   class=<cls>    object type of the rows: gene | reaction | protein | compound
+#   column1=<N|a-b> data column(s); a range (e.g. 1-6) animates across timepoints
+# Placeholders: {server}, {orgid}, {tsv_url}, {cls}, {columns}.  Override with
+# ``ui.ptools_omics_url_template`` in workspace.yaml if your PTools build differs.
 _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE = (
-    "{server}/overviewsWeb/celOv.shtml?orgid={orgid}&data-file={tsv_url}"
+    "{server}/overviewsWeb/celOv.shtml"
+    "?omics=t&url={tsv_url}&orgid={orgid}&class={cls}&column1={columns}"
 )
+
+
+def _ptools_object_class(name: str) -> str:
+    """Infer the Pathway Tools object class from an analysis/TSV name.
+
+    The Omics Viewer needs to know whether the row IDs are genes, reactions,
+    proteins, or compounds.  v2ecoli's ptools analyses are named accordingly
+    (ptools_rna → genes, ptools_rxns → reactions, ptools_proteins → proteins).
+    """
+    n = name.lower()
+    if "rxn" in n or "reaction" in n:
+        return "reaction"
+    if "protein" in n:
+        return "protein"
+    if "metabolite" in n or "compound" in n:
+        return "compound"
+    return "gene"  # rna / default
 
 
 def _build_ptools_launch_url(
@@ -1422,13 +1443,33 @@ def _build_ptools_launch_url(
         return {"error": "no ptools TSVs found for this run", "available": []}
 
     # Use the first available TSV (most useful when analysis is filtered).
+    chosen = all_tsvs[0]
     rel = available[0]
     tsv_url = f"{public_base.rstrip('/')}/{rel}"
+
+    # Object class for the overlay (gene/reaction/protein/compound).
+    cls = _ptools_object_class(analysis or chosen.name)
+
+    # Animate across every data column: count the timepoint columns from the
+    # first non-comment line (the ptools TSVs carry a ``$``-prefixed header row
+    # whose remaining fields are the timepoints).  ``column1=1-N`` animates.
+    columns = "1"
+    try:
+        for line in chosen.read_text(encoding="utf-8").splitlines():
+            if not line or line.startswith(("#", ";")):
+                continue
+            ncol = len(line.split("\t")) - 1  # minus the name/ID column
+            columns = f"1-{ncol}" if ncol > 1 else "1"
+            break
+    except Exception:
+        pass
 
     launch_url = ptools_omics_url_template.format(
         server=ptools_server_url.rstrip("/"),
         tsv_url=tsv_url,
         orgid="ECOLI",
+        cls=cls,
+        columns=columns,
     )
     return {"url": launch_url, "tsv_url": tsv_url, "available": available}
 
@@ -11067,11 +11108,10 @@ if __name__ == "__main__":
         except Exception:
             ws = {}
         ui = ws.get("ui") or {}
-        # NOTE (ptools_omics_url_template): This is the DEFAULT placeholder.
-        # Finalize against the live Pathway Tools server — open its Cellular Overview,
-        # use "Operations → Generate Bookmark for Current Cellular Overview" to capture
-        # the exact Omics-Viewer URL format, then set ui.ptools_omics_url_template in
-        # workspace.yaml. Placeholders: {server}, {orgid}, {tsv_url}.
+        # NOTE (ptools_omics_url_template): the default targets the Omics Viewer
+        # auto-load endpoint (omics=t&url=…&class=…&column1=…), verified against
+        # sms-ptools 0.8.2. Override via ui.ptools_omics_url_template if your
+        # PTools build differs. Placeholders: {server},{orgid},{tsv_url},{cls},{columns}.
         return self._json({
             "composite_view": ui.get("composite_view", "bigraph-loom"),
             "ptools_server_url": ui.get("ptools_server_url", ""),
@@ -12851,8 +12891,8 @@ if __name__ == "__main__":
         if not ptools_server_url:
             return self._json({"error": "ptools_server_url not configured"}, 400)
 
-        # NOTE: finalize ptools_omics_url_template against the live PTools server
-        # (see docs/ptools-launcher.md and comment in _get_ui_config).
+        # Default template auto-loads the Omics Viewer; override via
+        # ui.ptools_omics_url_template if your PTools build differs.
         ptools_omics_url_template = ui.get(
             "ptools_omics_url_template",
             _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
