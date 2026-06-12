@@ -937,6 +937,14 @@ def _apply_registry_include_filter(data: dict, ws_data: dict | None) -> None:
         if own_pkg in include:
             kept.append(p)
             continue
+        # Always surface emitters regardless of the include allow-list. They are
+        # the workspace's I/O backends (the configured runtime.default_emitter is
+        # one of them) and live in framework/env packages (process_bigraph,
+        # pbg_emitters) outside the include list — so a repo-scoped include like
+        # [v2ecoli] would otherwise leave the Registry's Emitters section empty.
+        if p.get("kind") == "emitter":
+            kept.append(p)
+            continue
         reexporter = _reexporter(p)
         if reexporter is not None:
             # Re-attribute to the re-exporting package: keep the true definition
