@@ -385,3 +385,24 @@ def test_filter_catalog_noop_without_include():
     from vivarium_dashboard import server
     modules = [{"name": "a", "installed": False}, {"name": "b", "installed": True}]
     assert server._filter_catalog_modules(modules, {}) == modules
+
+
+def test_registry_filter_always_keeps_emitters():
+    """`dashboard.registry.include` scopes processes to the repo, but emitters
+    (the workspace's I/O backends, in framework/env packages outside the
+    include) must always survive — else the Registry's Emitters section is
+    empty under a repo-scoped include like [v2ecoli]."""
+    from vivarium_dashboard import server
+
+    data = {"processes": [
+        {"name": "EcoliWCM", "address": "v2ecoli.bridge.EcoliWCM", "kind": "process"},
+        {"name": "Foreign", "address": "viva_munk.x.Foreign", "kind": "process"},
+        {"name": "XArrayEmitter", "address": "pbg_emitters.x.XArrayEmitter", "kind": "emitter"},
+        {"name": "ConsoleEmitter", "address": "process_bigraph.emitter.ConsoleEmitter", "kind": "emitter"},
+    ]}
+    server._apply_registry_include_filter(data, {"dashboard": {"registry": {"include": ["v2ecoli"]}}})
+    kept = {p["name"] for p in data["processes"]}
+    assert "EcoliWCM" in kept            # own package
+    assert "XArrayEmitter" in kept       # emitter (env pkg) survives
+    assert "ConsoleEmitter" in kept      # emitter (framework pkg) survives
+    assert "Foreign" not in kept         # foreign non-emitter still filtered
