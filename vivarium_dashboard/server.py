@@ -46,6 +46,7 @@ from threading import Lock
 import yaml
 
 from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_dashboard.lib.atomic_io import atomic_write_text
 
 
 def _strip_process_instances(state):
@@ -3920,14 +3921,7 @@ def _post_iset_create_for_test(ws_root: Path, body: dict) -> tuple[dict, int]:
     )
 
     inv_dir.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(".yaml.tmp")
-    try:
-        tmp.write_text(body_yaml)
-        os.replace(tmp, target)
-    except Exception:
-        if tmp.exists():
-            tmp.unlink()
-        raise
+    atomic_write_text(target, body_yaml)
 
     detail, code = _build_iset_detail_for_test(ws_root, name)
     return detail, code
@@ -4154,9 +4148,7 @@ def _post_study_narrative_set_for_test(ws_root: Path, body: dict):
     else:
         cur[leaf] = value
 
-    tmp = sf.with_suffix(".yaml.tmp")
-    tmp.write_text(yaml.safe_dump(spec, sort_keys=False, allow_unicode=True))
-    os.replace(tmp, sf)
+    atomic_write_text(sf, yaml.safe_dump(spec, sort_keys=False, allow_unicode=True))
     return {"ok": True}, 200
 
 

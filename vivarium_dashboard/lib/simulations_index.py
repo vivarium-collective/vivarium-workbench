@@ -712,13 +712,8 @@ def _rewrite_study_yaml_without(yaml_path: Path, run_id: str) -> bool:
     if not changed:
         return False
     data["runs"] = new_runs
-    tmp = yaml_path.with_suffix(yaml_path.suffix + ".tmp")
-    try:
-        tmp.write_text(yaml.safe_dump(data, sort_keys=False))
-    except OSError:
-        tmp.unlink(missing_ok=True)
-        raise
-    tmp.replace(yaml_path)
+    from .atomic_io import atomic_write_text
+    atomic_write_text(yaml_path, yaml.safe_dump(data, sort_keys=False))
     return True
 
 

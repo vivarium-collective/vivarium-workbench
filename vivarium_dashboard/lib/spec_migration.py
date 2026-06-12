@@ -64,9 +64,9 @@ def migrate_study_to_v2_vocabulary(spec_path: pathlib.Path) -> bool:
 
 
 def _atomic_write(path: pathlib.Path, text: str) -> None:
-    tmp = path.with_suffix(path.suffix + '.tmp')
-    tmp.write_text(text)
-    os.replace(tmp, path)
+    # Single-sourced — see lib/atomic_io.py.
+    from .atomic_io import atomic_write_text
+    atomic_write_text(path, text)
 
 
 def migrate_v2_to_v3(spec: dict) -> dict:
