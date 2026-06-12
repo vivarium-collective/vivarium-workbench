@@ -6767,6 +6767,141 @@ def _read_workspace_pyproject_deps(ws_root: Path) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
+# SP2b-i — never-fabricate observable guard
+#
+# Wire the (otherwise orphaned) ``pbg_superpowers.readout_validation`` into a
+# live path so the agent can answer "what can this composite actually emit?"
+# and is stopped from authoring phantom observables. Pure/deterministic given
+# a built composite: the dashboard renders the statuses, the /pbg-study skill
+# guides re-authoring (dashboard stays AI-free).
+# ---------------------------------------------------------------------------
+
+def _build_composite_state_for_observables(ws_root: Path, ref: str):
+    """Build a composite by ``ref`` and return ``(core, state, schema)``.
+
+    Reuses the SAME build path the Composite Explorer uses
+    (``_get_composite_state`` / ``_get_composite_resolve``): a
+    ``@composite_generator`` entry via ``build_generator``, else a spec file
+    parsed + ``substitute_parameters``-resolved. A best-effort workspace
+    ``build_core()`` is threaded through so registered ``LabeledArray`` types
+    resolve their ``_labels`` catalogs (tolerated if it fails — ``core`` may be
+    ``None``, in which case only inline ``_labels`` are recoverable).
+
+    Raises ``LookupError`` for an unknown ref and ``RuntimeError`` for a build
+    failure; the caller maps those to clear 4xx statuses.
+    """
+    ws_root = Path(ws_root)
+    ws_str = str(ws_root)
+    if ws_str not in sys.path:
+        sys.path.insert(0, ws_str)
+
+    ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
+    pkg = ws_data.get("package_path") or ("pbg_" + str(ws_data.get("name", "")).replace("-", "_"))
+
+    # Best-effort core for labeled-array catalog resolution. Absence is fine —
+    # leaves come from the state tree alone; only static catalogs degrade.
+    core = None
+    try:
+        core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
+        core = core_module.build_core()
+    except Exception:
+        core = None
+
+    # Generator branch (mirrors _get_composite_state): resolve via the live
+    # pbg-superpowers registry.
+    entry = None
+    apply_core_extensions = None
+    try:
+        from pbg_superpowers.composite_generator import (
+            _REGISTRY, build_generator, discover_generators, apply_core_extensions,
+        )
+        if not _REGISTRY:
+            try:
+                discover_generators()
+            except Exception:
+                pass
+        entry = _REGISTRY.get(ref)
+    except ImportError:
+        entry = None
+
+    if entry is not None:
+        if core is not None and apply_core_extensions is not None:
+            try:
+                core = apply_core_extensions(entry, core)
+            except Exception:
+                pass
+        try:
+            doc = build_generator(entry, core=core)
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(f"generator build failed: {e}") from e
+        if isinstance(doc, dict) and isinstance(doc.get("state"), dict):
+            return core, doc["state"], doc.get("schema")
+        return core, doc, None
+
+    # Spec-parse branch (mirrors _get_composite_resolve): read the file +
+    # substitute parameter defaults to get the live state tree.
+    from vivarium_dashboard.lib.composite_lookup import find_composite_path, substitute_parameters
+    path = find_composite_path(ws_root, pkg, ref)
+    if path is None or not path.is_file():
+        raise LookupError(f"composite not found: {ref}")
+    try:
+        text = path.read_text(encoding="utf-8")
+        spec = json.loads(text) if path.suffix.lower() == ".json" else (yaml.safe_load(text) or {})
+        state = substitute_parameters(spec.get("state") or {}, spec.get("parameters") or {}, {})
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"spec parse failed: {e}") from e
+    return core, state, spec.get("schema") or spec.get("composition")
+
+
+def _observables_for_ref(ws_root: Path, ref: str):
+    """GET /api/observables?ref=<id> worker — returns ``(json_bytes, status)``.
+
+    Builds the composite (shared TTL cache, since a whole-cell build is ~3s)
+    and reports its emittable observables via ``available_observables``:
+    ``{"ref", "leaves": [dotted paths], "catalogs": {observable: [labels]}}``.
+    Unknown ref → 404; build failure → 400; validator absent → 501.
+    """
+    ref = (ref or "").strip()
+    if not ref:
+        return _json_body({"error": "ref required"}), 400
+
+    import time as _time
+    cache = _COMPOSITE_STATE_CACHE
+    ckey = ("observables", str(ws_root), ref)
+    hit = cache.get(ckey)
+    if hit is not None and (_time.time() - hit[0]) < _COMPOSITE_STATE_TTL_S:
+        return _json_body({**hit[1], "cached": True}), 200
+
+    # Lazy import — tolerant if pbg_superpowers predates readout_validation.
+    try:
+        from pbg_superpowers.readout_validation import available_observables
+    except Exception as e:  # noqa: BLE001
+        return _json_body({"error": f"readout_validation unavailable: {e}"}), 501
+
+    try:
+        core, state, schema = _build_composite_state_for_observables(ws_root, ref)
+    except LookupError as e:
+        return _json_body({"error": str(e)}), 404
+    except Exception as e:  # noqa: BLE001
+        return _json_body({"error": f"composite build failed: {e}"}), 400
+
+    try:
+        available = available_observables(core, state, schema)
+    except Exception as e:  # noqa: BLE001
+        return _json_body({"error": f"observable introspection failed: {e}"}), 500
+
+    payload = {
+        "ref": ref,
+        "leaves": available.get("leaves", []),
+        "catalogs": available.get("catalogs", {}),
+    }
+    cache[ckey] = (_time.time(), payload)
+    if len(cache) > 32:  # cap memory; drop the oldest entry
+        cache.pop(next(iter(cache)))
+    return _json_body(payload), 200
+
+
+# ---------------------------------------------------------------------------
 # HTTP handler
 # ---------------------------------------------------------------------------
 
@@ -6788,6 +6923,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json_bytes(*Handler._build_api_config_response())
         if _path_only_pre == "/api/workspace":
             return self._send_json_bytes(*Handler._build_api_workspace_response())
+        # SP2b-i never-fabricate observable guard. Handled here (before the
+        # /api/study-* alias rewriting) so /api/study-observable-check is not
+        # shadowed. Both delegate to the pure module workers + WORKSPACE global.
+        if _path_only_pre == "/api/observables":
+            import urllib.parse as _up
+            _ref = dict(_up.parse_qsl(_up.urlparse(self.path).query)).get("ref", "")
+            return self._send_json_bytes(*_observables_for_ref(WORKSPACE, _ref))
 
         # Resolve /api/study-* aliases to their /api/investigation-* originals so
         # the rest of the dispatch chain only needs to know one set of paths.
@@ -12588,6 +12730,13 @@ if __name__ == "__main__":
         Returns (json_bytes, http_status).  Default: local-server mode.
         """
         return _json_body({"mode": "local-server"}), 200
+
+    @staticmethod
+    def _observables_for_ref_test(ws_root, ref):
+        """Test seam for GET /api/observables — calls the module worker with an
+        explicit ws_root so unit tests don't need the WORKSPACE global patched.
+        Returns (json_bytes, http_status)."""
+        return _observables_for_ref(ws_root, ref)
 
     @staticmethod
     def _iset_detail_data(name: str) -> "dict | None":
