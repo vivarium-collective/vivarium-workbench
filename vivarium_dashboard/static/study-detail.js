@@ -1070,6 +1070,12 @@
       ' <span class="muted">(' + total + ' total)</span>' +
       '</span>';
 
+    // ── SP3b: proposed feedback → action surface (read-only render + Apply) ──
+    // The dashboard NEVER computes the action — it renders the pbg-supplied
+    // feedback_actions (kind + proposed_text + open/applied status) and applies
+    // an open action by POSTing item_id to /api/feedback-apply-action.
+    var actionsSectionHtml = _renderFeedbackActionsSection();
+
     container.innerHTML =
       '<div class="overview-section" style="margin-top:18px">' +
       '<h2 class="overview-label">Expert Feedback</h2>' +
@@ -1077,7 +1083,106 @@
       '<div style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden">' +
       itemsHtml +
       '</div>' +
+      actionsSectionHtml +
       '</div>';
+
+    _wireFeedbackApplyButtons(container);
+  }
+
+  // Build the "Proposed Actions" sub-panel from window._study.feedback_actions.
+  // Each item that carries an action shows its kind + proposed_text + an
+  // open/applied badge; open actions get an Apply button. Returns '' when there
+  // are no actions to show. Pure render — escapes all text.
+  function _actionBadgeCss(status) {
+    return ({
+      open:      'background:#fef3c7;color:#92400e;',
+      applied:   'background:#d1fae5;color:#065f46;',
+      dismissed: 'background:#f1f5f9;color:#64748b;text-decoration:line-through;',
+    })[status] || 'background:#fef3c7;color:#92400e;';
+  }
+
+  function _renderFeedbackActionsSection() {
+    var spec = window._study || {};
+    var fa = spec.feedback_actions;
+    if (!fa || !fa.items || fa.items.length === 0) return '';
+    var withActions = (fa.items || []).filter(function(it) { return it && it.action; });
+    if (withActions.length === 0) return '';
+
+    var rows = '';
+    withActions.forEach(function(it) {
+      var action = it.action || {};
+      var status = it.status || 'open';
+      var badge =
+        '<span style="' + _actionBadgeCss(status) +
+        'padding:1px 8px;border-radius:9999px;font-size:0.78em;' +
+        'font-family:ui-monospace,monospace;margin-right:6px">' +
+        _esc(status) + '</span>';
+      var kindChip =
+        '<code style="font-size:0.82em;background:#eef2ff;color:#3730a3;' +
+        'padding:1px 6px;border-radius:4px">' + _esc(action.kind || '') + '</code>';
+      var target = action.target_finding
+        ? ' <span class="muted" style="font-size:0.82em">→ ' + _esc(action.target_finding) + '</span>'
+        : '';
+      var applyBtn = (status === 'open')
+        ? '<button type="button" class="feedback-apply-btn" data-item-id="' +
+          _esc(it.item_id) + '" style="margin-left:auto;padding:2px 10px;' +
+          'font-size:0.82em;border:1px solid #6366f1;background:#eef2ff;' +
+          'color:#3730a3;border-radius:4px;cursor:pointer">Apply</button>'
+        : '';
+      rows +=
+        '<div style="padding:8px 14px;border-bottom:1px solid #f1f5f9">' +
+        '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">' +
+        badge + kindChip + target + applyBtn +
+        '</div>' +
+        '<p style="margin:4px 0 0 0;font-size:0.9em;color:#374151">' +
+        _esc(action.proposed_text || '') + '</p>' +
+        '<p class="muted" style="margin:2px 0 0 0;font-size:0.78em">' +
+        _esc((it.text || '').slice(0, 140)) + '</p>' +
+        '</div>';
+    });
+
+    return (
+      '<div style="margin-top:12px">' +
+      '<h3 style="font-size:0.9em;color:#475569;margin:0 0 6px 0">Proposed Actions</h3>' +
+      '<div style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden">' +
+      rows +
+      '</div>' +
+      '</div>'
+    );
+  }
+
+  function _wireFeedbackApplyButtons(container) {
+    var btns = container.querySelectorAll('.feedback-apply-btn');
+    Array.prototype.forEach.call(btns, function(btn) {
+      btn.addEventListener('click', function() {
+        var itemId = btn.dataset.itemId;
+        if (!itemId) return;
+        btn.disabled = true;
+        btn.textContent = 'Applying…';
+        fetch('/api/feedback-apply-action', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({item_id: itemId}),
+        }).then(function(r) { return r.json().then(function(j) { return {ok: r.ok, j: j}; }); })
+          .then(function(res) {
+            if (res.ok && (res.j.applied || res.j.already_applied)) {
+              btn.textContent = 'Applied';
+              btn.style.borderColor = '#10b981';
+              btn.style.background = '#d1fae5';
+              btn.style.color = '#065f46';
+            } else {
+              btn.disabled = false;
+              btn.textContent = 'Apply';
+              alert('Apply failed: ' + (res.j && res.j.error || 'unknown error'));
+            }
+          })
+          .catch(function(e) {
+            btn.disabled = false;
+            btn.textContent = 'Apply';
+            alert('Apply failed: ' + (e && e.message || e));
+          });
+      });
+    });
   }
 
   // ── DataSource bootstrap (client-fetch seam, sub-project #1) ─────────────

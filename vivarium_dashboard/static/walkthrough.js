@@ -6213,6 +6213,42 @@
       return {warns: warns, oks: oks};
     }
 
+    // SP3b: per-study feedback → action table for the report. Renders the
+    // pbg-supplied s.feedback_actions items that carry a proposed action
+    // (kind + proposed_text + open/applied status). Read-only — the report
+    // never computes the action. Returns '' when there are none.
+    function _renderReportFeedbackActions(s, slug) {
+      var fa = s && s.feedback_actions;
+      if (!fa || !fa.items || !fa.items.length) return '';
+      var withActions = fa.items.filter(function(it) { return it && it.action; });
+      if (!withActions.length) return '';
+      var badge = {
+        open:      'background:#fef3c7;color:#92400e;',
+        applied:   'background:#d1fae5;color:#065f46;',
+        dismissed: 'background:#f1f5f9;color:#64748b;',
+      };
+      var rows = withActions.map(function(it) {
+        var a = it.action || {};
+        var st = it.status || 'open';
+        return '<tr>'
+          + '<td><span style="' + (badge[st] || badge.open)
+          +   'padding:1px 8px;border-radius:9999px;font-size:0.82em;'
+          +   'font-family:ui-monospace,monospace">' + _h(st) + '</span></td>'
+          + '<td><code>' + _h(a.kind || '') + '</code>'
+          +   (a.target_finding ? ' <span class="muted small">→ ' + _h(a.target_finding) + '</span>' : '') + '</td>'
+          + '<td>' + _h(a.proposed_text || '') + '</td>'
+          + '<td class="muted small">' + _h((it.text || '').slice(0, 120)) + '</td>'
+          + '</tr>';
+      }).join('');
+      return '<div class="feedback-actions-panel" id="study-' + slug + '-feedback-actions" '
+        + 'style="margin:12px 0;padding:12px 16px;background:#f5f3ff;border:1px solid #8b5cf6;'
+        + 'border-left-width:5px;border-radius:6px;color:#3730a3">'
+        + '<strong>🔁 Feedback → action (' + withActions.length + ')</strong>'
+        + '<table class="readout-table" style="margin-top:8px"><thead><tr>'
+        + '<th>Status</th><th>Action</th><th>Proposed</th><th>From feedback</th>'
+        + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+    }
+
     function v3StudySection(s, i, statusBadge, phaseBadge, parents, kids) {
       var slug = _h(s.name);
       var sid = {
@@ -7354,6 +7390,12 @@
             }).join('')
           + '</ul></div>';
       }
+
+      // SP3b: feedback → action table. Read-only render of the pbg-supplied
+      // s.feedback_actions (open feedback items that have a proposed action +
+      // its kind / proposed_text / open-applied status). The report NEVER
+      // computes the action — it renders what study_feedback_actions returns.
+      feedbackHtml += _renderReportFeedbackActions(s, slug);
 
       // Status-drift banner (round-2 friction #2). When a stored status axis
       // (or a "planning" headline) contradicts what actually ran, say so — the

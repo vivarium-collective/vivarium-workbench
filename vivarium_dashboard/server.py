@@ -291,6 +291,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/study-comparison-add":        "_post_study_comparison_add",
     "/api/study-tests-run":             "_post_study_tests_run",
     "/api/study-seed-followup":         "_post_study_seed_followup",
+    "/api/feedback-apply-action":       "_post_feedback_apply_action",
     "/api/study-sync-runs":             "_post_study_sync_runs",
     "/api/investigation-set-status":    "_post_investigation_set_status",
     "/api/proposed-input-decision":     "_post_proposed_input_decision",
@@ -1690,6 +1691,16 @@ def _study_detail_spec(name: str):
             ft = study_feedback_tracked(WORKSPACE, name)
             # Always attach so the SPA can render the panel (empty → no items).
             spec["feedback_tracked"] = ft
+        except Exception:  # noqa: BLE001
+            pass
+
+        # SP3b: tracked feedback ACTIONS — each open feedback item joined with
+        # its proposed action (kind + proposed_text) and open/applied status.
+        # Pure Python in pbg-superpowers (the dashboard never computes the
+        # action — it renders this + applies via /api/feedback-apply-action).
+        try:
+            from pbg_superpowers.feedback_actions import study_feedback_actions
+            spec["feedback_actions"] = study_feedback_actions(WORKSPACE, name)
         except Exception:  # noqa: BLE001
             pass
 
@@ -4190,6 +4201,35 @@ def _post_study_seed_followup_for_test(ws_root: Path, body: dict):
     except Exception as e:
         return {"error": f"seed failed: {e}"}, 500
     return {"new_study_name": new_name, "new_slug": new_name}, 200
+
+
+def _post_feedback_apply_action_for_test(ws_root: Path, body: dict):
+    """Apply a tracked feedback action via the pbg-superpowers primitive.
+
+    SP3b: the dashboard NEVER computes the action — it renders the
+    ``study_feedback_actions`` data + applies via this primitive (AI-free).
+    Lazy + tolerant pbg import: if pbg-superpowers isn't installed, return a
+    clear 500 rather than crashing the server. Body: ``{item_id}``.
+    Returns ``(response_dict, status_code)``.
+    """
+    item_id = body.get("item_id")
+    if not item_id:
+        return {"error": "item_id required"}, 400
+    try:
+        from pbg_superpowers.feedback_actions import apply_feedback_action
+    except ImportError as e:
+        return {"error": f"feedback-apply requires pbg-superpowers: {e}"}, 500
+    try:
+        result = apply_feedback_action(ws_root, item_id)
+    except FileNotFoundError as e:
+        return {"error": str(e)}, 404
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"apply failed: {e}"}, 500
+    # apply_feedback_action is best-effort: a not-found / bad-target case comes
+    # back as {"error": ...} without applied=True. Surface that as a 400.
+    if result.get("error") and not result.get("applied"):
+        return result, 400
+    return result, 200
 
 
 def _post_study_rename_for_test(ws_root: Path, body: dict):
@@ -12625,6 +12665,22 @@ if __name__ == "__main__":
         response, code = _post_study_seed_followup_for_test(WORKSPACE, body)
         return self._json(response, code)
 
+
+    def _post_feedback_apply_action(self, body: dict):
+        """POST /api/feedback-apply-action {item_id} → apply a tracked action."""
+        response, code = _post_feedback_apply_action_for_test(WORKSPACE, body)
+        return self._json(response, code)
+
+    @staticmethod
+    def _feedback_apply_action_test(body: dict):
+        """Test seam: apply a feedback action against ``body['workspace']``.
+
+        Returns ``(json_bytes, status_code)`` so a test can assert on the
+        serialized response without standing up the HTTP server.
+        """
+        ws_root = body.get("workspace") or WORKSPACE
+        response, code = _post_feedback_apply_action_for_test(ws_root, body)
+        return _json_body(response), code
 
     def _post_study_sync_runs(self, body: dict):
         """POST /api/study-sync-runs {study}"""
