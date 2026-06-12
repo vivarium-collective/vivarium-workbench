@@ -153,6 +153,12 @@ def _json_body(data) -> bytes:
 _REGISTRY_CACHE: dict = {"data": None, "ts": 0.0}
 _REGISTRY_TTL = 30.0  # seconds
 
+# SP4a linkage-index cache — keyed ("linkage", ws_root) → (built_at, index dict).
+# The index is a pure derive over the workspace YAML; a short TTL keeps it cheap
+# on repeat queries while still picking up YAML edits.
+_LINKAGE_CACHE: dict = {}
+_LINKAGE_TTL = 30.0  # seconds
+
 # Cache of built composite-state payloads for /api/composite-state, keyed by ref:
 # {ref: (built_at_epoch, payload_dict)}. Building a whole-cell composite is ~1s+;
 # this makes repeat opens + pop-outs instant. Short TTL so code edits are picked up.
@@ -7315,6 +7321,64 @@ def _report_lint(ws_root: Path):
     return _json_body({"findings": findings}), 200
 
 
+def _linkage_cached_index(ws_root: Path):
+    """Return the cached linkage index for ``ws_root`` (TTL-cached like the
+    registry cache), or build + cache it. Returns ``None`` when the index
+    module is unavailable or the build fails — callers stay tolerant."""
+    import time as _time
+
+    key = ("linkage", str(Path(ws_root)))
+    now = _time.time()
+    hit = _LINKAGE_CACHE.get(key)
+    if hit is not None and now - hit[0] < _LINKAGE_TTL:
+        return hit[1]
+    try:
+        from pbg_superpowers.linkage_index import build_index
+        index = build_index(ws_root)
+    except Exception:  # noqa: BLE001 — older pbg_superpowers / unscannable ws
+        return None
+    _LINKAGE_CACHE[key] = (now, index)
+    return index
+
+
+def _linkage_index(ws_root: Path, *, investigation=None, source=None, observable=None):
+    """GET /api/linkage-index worker — ``(json_bytes, status)``.
+
+    SP4a: runs the deterministic linkage index/queries
+    (``pbg_superpowers.linkage_index``) over the workspace. Param-dispatch:
+
+    - ``source``         → ``{studies: [...]}`` (studies citing the bib_key)
+    - ``observable``     → ``{findings: [...]}`` (findings measuring the token)
+    - ``investigation``  → ``{ac_matrix, dag, nodes, edges}`` for that inv
+    - (none)             → the full ``{nodes, edges}`` graph
+
+    The dashboard adds NO AI — it only runs the deterministic derive and returns
+    JSON. Tolerant: an older/absent pbg_superpowers, or an unscannable
+    workspace, returns 200 with an empty payload rather than a 500.
+    """
+    ws_root = Path(ws_root)
+    try:
+        from pbg_superpowers import linkage_index as _li
+    except Exception:  # noqa: BLE001 — older pbg_superpowers lacks the module
+        return _json_body({"nodes": [], "edges": []}), 200
+
+    try:
+        if source:
+            return _json_body({"studies": _li.studies_for_source(ws_root, source)}), 200
+        if observable:
+            return _json_body({"findings": _li.findings_for_observable(ws_root, observable)}), 200
+        if investigation:
+            return _json_body({
+                "investigation": investigation,
+                "ac_matrix": _li.ac_gating_matrix(ws_root, investigation),
+                "dag": _li.study_dag(ws_root, investigation),
+            }), 200
+        index = _linkage_cached_index(ws_root) or {"nodes": [], "edges": []}
+        return _json_body(index), 200
+    except Exception as e:  # noqa: BLE001 — never 500 the navigate surface
+        return _json_body({"nodes": [], "edges": [], "error": str(e)}), 200
+
+
 # ---------------------------------------------------------------------------
 # HTTP handler
 # ---------------------------------------------------------------------------
@@ -7352,6 +7416,17 @@ class Handler(BaseHTTPRequestHandler):
         # Spine A3: per-study readiness panel — runs the deterministic linter.
         if _path_only_pre == "/api/report-lint":
             return self._send_json_bytes(*_report_lint(WORKSPACE))
+        # SP4a: linkage-index queries (AC→study gating matrix + gaps, source↔study,
+        # finding-by-observable, study-DAG). Read-only deterministic derive.
+        if _path_only_pre == "/api/linkage-index":
+            import urllib.parse as _up
+            _q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
+            return self._send_json_bytes(*_linkage_index(
+                WORKSPACE,
+                investigation=(_q.get("investigation") or _q.get("inv") or "").strip() or None,
+                source=(_q.get("source") or "").strip() or None,
+                observable=(_q.get("observable") or "").strip() or None,
+            ))
 
         # Resolve /api/study-* aliases to their /api/investigation-* originals so
         # the rest of the dispatch chain only needs to know one set of paths.
@@ -13170,6 +13245,13 @@ if __name__ == "__main__":
         """Test seam for GET /api/report-lint — runs the deterministic linter
         over an explicit ws_root. Returns (json_bytes, http_status)."""
         return _report_lint(ws_root)
+
+    @staticmethod
+    def _linkage_index_test(ws_root, *, investigation=None, source=None, observable=None):
+        """Test seam for GET /api/linkage-index — runs the deterministic linkage
+        queries over an explicit ws_root. Returns (json_bytes, http_status)."""
+        return _linkage_index(ws_root, investigation=investigation,
+                              source=source, observable=observable)
 
     @staticmethod
     def _iset_detail_data(name: str) -> "dict | None":
