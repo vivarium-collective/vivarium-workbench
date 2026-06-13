@@ -5781,13 +5781,13 @@
           '<div style="color:#475569;font-size:0.9em;margin-top:1px">' + _esc(d.detail || '') + '</div></div></div>';
       }).join('');
     }
-    var html = '<section class="report-section" id="rigor"><h2>Evidence &amp; rigor</h2>' +
-      '<p style="color:#475569;font-size:0.92em">Deterministic feedback on how well this ' +
-      'investigation defends its claims against a skeptical reader — computed from declared ' +
-      'fields, not judged. Gaps are an invitation to add negative controls, replicate across ' +
-      'seeds, weigh alternative explanations, state falsifiability, or add an adversarial study.</p>';
-    if (rigor.summary)
-      html += '<div style="font-weight:600;color:#1e293b;margin:6px 0 2px">' + _esc(rigor.summary) + '</div>';
+    var html = '<details class="report-fold" id="rigor"><summary>🔬 Evidence &amp; rigor'
+      + (rigor.summary ? ' <span class="rf-prev">' + _esc(rigor.summary) + '</span>' : '')
+      + '</summary>'
+      + '<p style="color:#475569;font-size:0.92em">Deterministic feedback on how well this '
+      + 'investigation defends its claims against a skeptical reader — computed from declared '
+      + 'fields, not judged. Gaps are an invitation to add negative controls, replicate across '
+      + 'seeds, weigh alternative explanations, state falsifiability, or add an adversarial study.</p>';
     html += dimRows(rigor.dimensions);
     var per = rigor.per_study || {};
     var slugs = Object.keys(per);
@@ -5795,13 +5795,13 @@
       html += '<h3 style="margin-top:16px">Per-study rigor</h3>';
       slugs.forEach(function(slug) {
         var sc = per[slug] || {};
-        html += '<div style="margin:10px 0;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px">' +
-          '<div style="font-weight:600;color:#0f172a">' + _esc(slug) +
-          ' <span style="font-weight:400;color:#64748b;font-size:0.88em">— ' + _esc(sc.summary || '') + '</span></div>' +
-          dimRows(sc.dimensions) + '</div>';
+        // Each member study folds into its own nested dropdown.
+        html += '<details class="report-fold" style="margin:8px 0"><summary>' + _esc(slug)
+          + ' <span style="font-weight:400;color:#64748b;font-size:0.88em">— ' + _esc(sc.summary || '') + '</span></summary>'
+          + dimRows(sc.dimensions) + '</details>';
       });
     }
-    html += '</section>';
+    html += '</details>';
     return html;
   }
 
@@ -6997,14 +6997,18 @@
       // STATIC view (read-only): /bigraph-loom/?static=1&stateUrl=/api/composite-
       // state/<ref>.json. Works from any report on the live dashboard.
       function _loomStaticPopout(composite) {
-        // Pop out the bigraph-loom STATIC (read-only) view of the composite.
-        // stateUrl points at the live composite-state endpoint (?ref=<id>); the
-        // loom fetches it and unwraps {state:…}. Snapshot mode serves the same
-        // shape as a pre-built /api/composite-state/<id>.json file.
-        return "var s='/api/composite-state?ref='+encodeURIComponent('" + _h(composite) + "');"
-          + "var u='/bigraph-loom/index.html?static=1&stateUrl='+encodeURIComponent(s);"
-          + "if((location.protocol||'').indexOf('http')===0){window.open(u,'loom','width=1200,height=840');}"
-          + "else{alert('Open this in the live dashboard to explore the composite in bigraph-loom.');}";
+        // Pop out the bigraph-loom STATIC (read-only) view of the composite. The
+        // dashboard origin is captured at GENERATION time and baked in as an
+        // ABSOLUTE URL, so the button works whether the report is viewed inline,
+        // in an iframe/srcdoc, or downloaded (as long as that dashboard is up) —
+        // the earlier relative URL + protocol guard failed in non-http contexts.
+        // stateUrl hits /api/composite-state?ref=<id>; the loom unwraps {state}.
+        var origin = (typeof location !== 'undefined' && location.origin
+                      && /^https?:/.test(location.origin)) ? location.origin : '';
+        return "var o='" + origin + "';"
+          + "var s=o+'/api/composite-state?ref='+encodeURIComponent('" + _h(composite) + "');"
+          + "var u=o+'/bigraph-loom/index.html?static=1&stateUrl='+encodeURIComponent(s);"
+          + "window.open(u,'loom','width=1200,height=840');";
       }
       function _compositeCell(composite) {
         if (!composite) return '<span class="muted">—</span>';
@@ -7542,8 +7546,10 @@
                   +   '<strong class="di-fup-title">' + _h(p.title || '(untitled proposal)') + '</strong>'
                   +   typeChip + trigChip + gainChip + prio
                   + '</div>'
-                  + (p.proposed_experiment ? '<div class="di-fup-exp">' + _multiline(p.proposed_experiment) + '</div>' : '')
-                  + (targets.length ? '<div class="di-fup-targets"><span class="di-lbl">Targets:</span> '
+                  + (p.motivation ? '<div class="di-fup-motivation" style="margin-top:4px"><span class="di-lbl">Why:</span> ' + _multiline(p.motivation) + '</div>' : '')
+                  + (p.proposed_experiment ? '<div class="di-fup-exp" style="margin-top:4px"><span class="di-lbl">Proposed experiment:</span> ' + _multiline(p.proposed_experiment) + '</div>' : '')
+                  + (p.hypothesized_mechanism ? '<div class="di-fup-mech" style="margin-top:4px"><span class="di-lbl">Hypothesized mechanism:</span> ' + _multiline(p.hypothesized_mechanism) + '</div>' : '')
+                  + (targets.length ? '<div class="di-fup-targets" style="margin-top:4px"><span class="di-lbl">Targets:</span> '
                       + targets.map(function(t){ return '<code>' + _h(t) + '</code>'; }).join(', ') + '</div>' : '')
                   + seedBtn
                   + '</div>';
