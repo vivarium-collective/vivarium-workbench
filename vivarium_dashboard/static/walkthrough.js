@@ -6654,7 +6654,8 @@
         links.push('<a href="#' + sid.conditions + '">Conditions ' +
                    (_condCount ? '<span class="sn-count">' + _condCount + '</span>' : '') + '</a>');
       }
-      if (sims.length)        links.push('<a href="#' + sid.sims + '">What we ran <span class="sn-count">' + sims.length + '</span></a>');
+      var _ranCount = sims.length || (s.baseline || []).length || (s.runs || []).length;
+      links.push('<a href="#' + sid.sims + '">What we ran' + (_ranCount ? ' <span class="sn-count">' + _ranCount + '</span>' : '') + '</a>');
       if (readouts.length)    links.push('<a href="#' + sid.readouts + '">What we measured <span class="sn-count">' + readouts.length + '</span></a>');
       if (charts.length)      links.push('<a href="#' + sid.charts + '">Charts <span class="sn-count">' + charts.length + '</span></a>');
       if (tests.length)       links.push('<a href="#' + sid.tests + '">How we judge it <span class="sn-count">' + tests.length + '</span></a>');
@@ -6914,12 +6915,45 @@
 
       // ── WHAT DID/WILL WE RUN? (Simulations) ──────────────────────────
       var simsHtml = '';
+      // What we ran — ENFORCED. The composite(s) + parameter settings actually
+      // simulated. Prefer the v3 simulation_set; else derive from the dashboard-
+      // managed baseline (composite + params) + recorded runs + robustness
+      // (seeds) — which is how the autopoiesis studies record runs. Always
+      // rendered; a study with neither gets an explicit gap notice. Each
+      // composite links out to the bigraph-loom explorer (popped out, live only).
+      function _short(model) {
+        if (!model) return '';
+        var p = String(model).split('.');
+        return p[p.length - 1];
+      }
+      // A composite reference rendered as a one-click pop-out to the bigraph-loom
+      // STATIC view (read-only): /bigraph-loom/?static=1&stateUrl=/api/composite-
+      // state/<ref>.json. Works from any report on the live dashboard.
+      function _loomStaticPopout(composite) {
+        // Pop out the bigraph-loom STATIC (read-only) view of the composite.
+        // stateUrl points at the live composite-state endpoint (?ref=<id>); the
+        // loom fetches it and unwraps {state:…}. Snapshot mode serves the same
+        // shape as a pre-built /api/composite-state/<id>.json file.
+        return "var s='/api/composite-state?ref='+encodeURIComponent('" + _h(composite) + "');"
+          + "var u='/bigraph-loom/index.html?static=1&stateUrl='+encodeURIComponent(s);"
+          + "if((location.protocol||'').indexOf('http')===0){window.open(u,'loom','width=1200,height=840');}"
+          + "else{alert('Open this in the live dashboard to explore the composite in bigraph-loom.');}";
+      }
+      function _compositeCell(composite) {
+        if (!composite) return '<span class="muted">—</span>';
+        return '<a href="#" class="composite-loom-link" '
+          + 'title="Open a static view of this composite in bigraph-loom" '
+          + 'onclick="event.preventDefault(); ' + _loomStaticPopout(composite) + '">'
+          + '<code>' + _h(_short(composite)) + '</code> <span aria-hidden="true">↗</span></a>';
+      }
+      function _paramsCell(params) {
+        if (!params || typeof params !== 'object' || !Object.keys(params).length)
+          return '<span class="muted">default parameters</span>';
+        return Object.keys(params).map(function(k) {
+          return '<code>' + _h(k) + ' = ' + _h(JSON.stringify(params[k])) + '</code>';
+        }).join(' ');
+      }
       if (sims.length) {
-        function _short(model) {
-          if (!model) return '';
-          var p = String(model).split('.');
-          return p[p.length - 1];
-        }
         // The first sim is the reference; describe each row as its diff from it.
         var baseSim = sims[0] || {};
         var baseParams = baseSim.params || {};
@@ -6962,18 +6996,102 @@
             ? '<div class="sim-feeds muted small">feeds: ' + tests.map(function(t){return '<code>' + _h(t) + '</code>';}).join(' ') + '</div>' : '';
           return '<tr>'
             + '<td><strong>' + _h(sim.name || '(unnamed)') + '</strong>' + feeds + '</td>'
-            + '<td><code>' + _h(_short(sim.base_model)) + '</code></td>'
+            + '<td>' + _compositeCell(sim.base_model) + '</td>'
             + '<td>' + _changes(sim) + '</td>'
             + '<td class="muted small">' + (runParts.join(' · ') || '—') + '</td>'
             + '<td>' + statusPill + '</td>'
             + '</tr>';
         }).join('');
-        simsHtml = '<div id="' + sid.sims + '"><h3>What did/will we run? <span class="muted small">(' + sims.length + ' simulations)</span></h3>'
-          + '<p class="muted small" style="margin:0 0 8px 0">One row per concrete run: the model composite, what changes vs the reference baseline, the condition / length, and its status.</p>'
-          + '<table class="sim-table"><thead><tr><th>Simulation</th><th>Model</th><th>Changes vs baseline</th><th>Run</th><th>Status</th></tr></thead>'
+        simsHtml = '<div id="' + sid.sims + '"><h3>What we ran <span class="muted small">(' + sims.length + ' simulation' + (sims.length === 1 ? '' : 's') + ')</span></h3>'
+          + '<p class="muted small" style="margin:0 0 8px 0">One row per concrete run: the model composite (click ↗ to open it in the bigraph-loom explorer), what changes vs the reference baseline, the condition / length, and its status.</p>'
+          + '<table class="sim-table"><thead><tr><th>Simulation</th><th>Composite</th><th>Changes vs baseline</th><th>Run</th><th>Status</th></tr></thead>'
           + '<tbody>' + rows + '</tbody></table>'
           + '</div>';
+      } else {
+        // No simulation_set — derive what was run from the dashboard-managed
+        // baseline (composite + parameter settings), recorded runs, and
+        // robustness (seeds). This is how the autopoiesis studies record runs.
+        var baseline = s.baseline || [];
+        var runsArr = s.runs || [];
+        var rob = s.robustness || {};
+        var runByName = {};
+        runsArr.forEach(function(r) { if (r && r.name) runByName[r.name] = r; });
+        var replCell = (rob && (rob.n_replicates || (rob.seeds && rob.seeds.length)))
+          ? ((rob.n_replicates || rob.seeds.length) + ' seed'
+             + ((rob.n_replicates || rob.seeds.length) === 1 ? '' : 's')
+             + (rob.parameter_sweep ? ' + sweep' : ''))
+          : (runsArr.length ? '1 run' : '—');
+        var entries = baseline.length
+          ? baseline
+          : runsArr.map(function(r) { return {name: r.name, composite: r.composite, params: null}; });
+        if (entries.length) {
+          var brows = entries.map(function(b) {
+            var run = runByName[b.name] || runsArr[0] || {};
+            var status = run.status || 'recorded';
+            return '<tr>'
+              + '<td><strong>' + _h(b.name || 'baseline') + '</strong></td>'
+              + '<td>' + _compositeCell(b.composite) + '</td>'
+              + '<td>' + _paramsCell(b.params) + '</td>'
+              + '<td class="muted small">' + _h(replCell) + '</td>'
+              + '<td><span class="sim-status-pill sim-status-ran">' + _h(status) + '</span></td>'
+              + '</tr>';
+          }).join('');
+          simsHtml = '<div id="' + sid.sims + '"><h3>What we ran <span class="muted small">(composite + parameters)</span></h3>'
+            + '<p class="muted small" style="margin:0 0 8px 0">The composite(s) and parameter settings actually simulated for this study (from its baseline). Click a composite ↗ to open it in the bigraph-loom explorer.</p>'
+            + '<table class="sim-table"><thead><tr><th>Run</th><th>Composite</th><th>Parameters</th><th>Replication</th><th>Status</th></tr></thead>'
+            + '<tbody>' + brows + '</tbody></table>'
+            + '</div>';
+        } else {
+          // ENFORCED: a study with no composite/params recorded is flagged.
+          simsHtml = '<div id="' + sid.sims + '"><h3>What we ran</h3>'
+            + '<p style="margin:0;color:#b45309">⚠ No composite or parameters recorded for this study — declare a baseline (composite + parameter settings) or a simulation_set so the report shows what was simulated.</p>'
+            + '</div>';
+        }
       }
+
+      // ── PROMINENT MODEL BANNER ───────────────────────────────────────────
+      // Every study runs at least one composite — surface it at the TOP of the
+      // study with its key parameters and a one-click pop-out to the bigraph-loom
+      // STATIC view. Enforced: a study with no composite is flagged in red.
+      var modelBannerHtml = (function() {
+        var entries = [];
+        if (sims.length) {
+          var seen = {};
+          sims.forEach(function(sm) {
+            var c = sm.base_model;
+            if (c && !seen[c]) { seen[c] = 1; entries.push({composite: c, params: sm.params}); }
+          });
+        } else if ((s.baseline || []).length) {
+          (s.baseline).forEach(function(b) { entries.push({composite: b.composite, params: b.params}); });
+        } else {
+          (s.runs || []).forEach(function(r) { if (r.composite) entries.push({composite: r.composite, params: null}); });
+        }
+        if (!entries.length) {
+          return '<div class="study-model-banner study-model-missing" style="margin:10px 0;padding:12px 16px;'
+            + 'background:#fef2f2;border:1px solid #fecaca;border-left:5px solid #dc2626;border-radius:8px;color:#991b1b">'
+            + '<strong>⚠ No model declared.</strong> Every study must run at least one composite — declare a '
+            + 'baseline (composite + parameters) so this study is reproducible.</div>';
+        }
+        var rows = entries.map(function(e) {
+          var params = (e.params && typeof e.params === 'object' && Object.keys(e.params).length)
+            ? Object.keys(e.params).map(function(k) { return '<code>' + _h(k) + '=' + _h(JSON.stringify(e.params[k])) + '</code>'; }).join(' ')
+            : '<span class="muted">default parameters</span>';
+          var btn = e.composite
+            ? '<button class="model-explore-btn" onclick="' + _loomStaticPopout(e.composite) + '" '
+              + 'style="font-size:0.92em;font-weight:600;padding:5px 12px;border:1px solid #2563eb;background:#eff6ff;'
+              + 'color:#1e40af;border-radius:6px;cursor:pointer;white-space:nowrap">🧬 ' + _h(_short(e.composite))
+              + ' — explore in bigraph-loom ↗</button>'
+            : '<span class="muted">(no composite)</span>';
+          return '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px">'
+            + btn + '<span style="font-size:0.88em;color:#475569">' + params + '</span></div>';
+        }).join('');
+        return '<div class="study-model-banner" style="margin:10px 0;padding:12px 16px;'
+          + 'background:#f0f9ff;border:1px solid #bae6fd;border-left:5px solid #2563eb;border-radius:8px">'
+          + '<div style="font-weight:700;color:#0c4a6e">Model</div>'
+          + '<div class="muted small" style="margin-top:2px">The composite(s) this study runs and their parameters — '
+          + 'click to open a static view in the bigraph-loom explorer.</div>'
+          + rows + '</div>';
+      })();
 
       // ── CHARTS (visualisations from runs.db) ─────────────────────────
       var chartsHtml = charts.length
@@ -7770,6 +7888,7 @@
           + '<section class="study study-planning">'
           +   subNav
           +   '<div class="study-planning-pill">PLANNING — not yet run</div>'
+          +   modelBannerHtml     // 🧬 Model: composite(s) + params + loom static popout (PROMINENT)
           +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
           +   enforcementHtml     // ⚠ declared params not applied (D.2)
           +   readinessHtml       // ✓/⚠ lint readiness panel (A3)
@@ -7803,6 +7922,7 @@
         +   '<summary class="study-panel">' + controlPanelHtml + '</summary>'
         + '<section class="study">'
         +   subNav
+        +   modelBannerHtml     // 🧬 Model: composite(s) + params + loom static popout (PROMINENT)
         +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
         +   enforcementHtml     // ⚠ declared params not applied (D.2)
         +   readinessHtml       // ✓/⚠ lint readiness panel (A3)
