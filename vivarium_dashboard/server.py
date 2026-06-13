@@ -7658,6 +7658,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_investigation_registry()
         if self.path.startswith("/api/study-charts/"):
             return self._get_study_charts()
+        if self.path.startswith("/api/study-rigor"):
+            return self._get_study_rigor()
+        if self.path.startswith("/api/investigation-rigor"):
+            return self._get_investigation_rigor()
         if self.path.startswith("/api/work-composite-diff"):
             return self._get_work_composite_diff()
         if self.path.startswith("/api/references-bib"):
@@ -10503,6 +10507,60 @@ if __name__ == "__main__":
         """
         out = _build_iset_summary_for_test(WORKSPACE)
         return self._json({"investigations": out}, 200)
+
+    def _get_study_rigor(self):
+        """GET /api/study-rigor?study=<slug> — evidence & rigor scorecard.
+
+        Deterministic feedback (replication, negative controls, alternative
+        hypotheses, claim discipline, falsifiability, engineered-vs-emergent)
+        computed by pbg_superpowers.rigor from the study's declared fields.
+        """
+        import urllib.parse as _up
+        q = _up.parse_qs(_up.urlparse(self.path).query)
+        slug = (q.get("study") or q.get("investigation") or [None])[0]
+        if not slug:
+            return self._json({"error": "missing ?study="}, 400)
+        spec = _study_detail_spec(slug)
+        if spec is None:
+            return self._json({"error": "study not found"}, 404)
+        try:
+            from pbg_superpowers.rigor import study_rigor
+            return self._json(study_rigor(spec), 200)
+        except Exception as e:
+            return self._json({"error": f"{type(e).__name__}: {e}",
+                               "dimensions": [], "score": {}, "summary": ""}, 200)
+
+    def _get_investigation_rigor(self):
+        """GET /api/investigation-rigor?investigation=<slug> — rigor roll-up
+        across the investigation's member studies + investigation-level
+        dimensions (adversarial coverage, traceable methodology)."""
+        import urllib.parse as _up
+        q = _up.parse_qs(_up.urlparse(self.path).query)
+        slug = (q.get("investigation") or [None])[0]
+        if not slug:
+            return self._json({"error": "missing ?investigation="}, 400)
+        inv_path = workspace_paths().investigations / slug / "investigation.yaml"
+        if not inv_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+        try:
+            inv_spec = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
+        except Exception as e:
+            return self._json({"error": f"unreadable investigation.yaml: {e}"}, 200)
+        member_specs = []
+        for s in (inv_spec.get("studies") or []):
+            slug_s = s if isinstance(s, str) else (
+                (s.get("slug") or s.get("study")) if isinstance(s, dict) else None)
+            if not slug_s:
+                continue
+            sp = _study_detail_spec(slug_s)
+            if sp:
+                member_specs.append(sp)
+        try:
+            from pbg_superpowers.rigor import investigation_rigor
+            return self._json(investigation_rigor(inv_spec, member_specs), 200)
+        except Exception as e:
+            return self._json({"error": f"{type(e).__name__}: {e}",
+                               "dimensions": [], "per_study": {}, "score": {}, "summary": ""}, 200)
 
     def _get_investigation_registry(self):
         """GET /api/investigation-registry — Pass C cross-worktree view.

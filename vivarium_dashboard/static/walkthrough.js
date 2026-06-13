@@ -5553,13 +5553,20 @@
           .then(function(r) { return r.ok ? r.json() : {repo: null}; })
           .then(function(j) { return (j && j.repo) || null; })
           .catch(function() { return null; });
+        // Evidence & rigor roll-up — deterministic skeptic-feedback computed
+        // by pbg_superpowers.rigor (replication, controls, alternatives,
+        // claim discipline, falsifiability, adversarial coverage).
+        var rigorFetch = fetch('/api/investigation-rigor?investigation=' + encodeURIComponent(iset.name))
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .catch(function() { return null; });
         return Promise.all([Promise.all(studyFetches), bibFetch,
                             Promise.all(chartFetches), genFetch,
-                            ghRepoFetch]).then(function(arr) {
+                            ghRepoFetch, rigorFetch]).then(function(arr) {
           var chartsByStudy = {};
           arr[2].forEach(function(c) { chartsByStudy[c.name] = c.charts; });
           var generation = arr[3];
           var ghRepo = arr[4];
+          var rigor = arr[5];
           // Second pass: now that we have the specs, fetch each study's
           // embed_visualizations URLs so the downloaded report can inline
           // them as <iframe srcdoc="...">. This makes the file truly
@@ -5594,7 +5601,7 @@
             });
             return {iset: iset, specs: specs, bibEntries: arr[1],
                     chartsByStudy: chartsByStudy, embedsByStudy: embedsByStudy,
-                    generation: generation, ghRepo: ghRepo};
+                    generation: generation, ghRepo: ghRepo, rigor: rigor};
           });
         });
       })
@@ -5602,7 +5609,7 @@
         var html = _buildInvestigationReportHtml(bundle.iset, bundle.specs,
                                                   bundle.bibEntries, bundle.chartsByStudy,
                                                   bundle.embedsByStudy, bundle.generation,
-                                                  bundle.ghRepo);
+                                                  bundle.ghRepo, bundle.rigor);
         var dateStr = new Date().toISOString().slice(0, 10);
         var filename = 'investigation-' + name + '-' + dateStr + '.html';
         _triggerDownload(filename, html, 'text/html');
@@ -5755,7 +5762,50 @@
   };
 
   // Construct the report's HTML body from the investigation + per-study specs.
-  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy, generation, ghRepo) {
+  // Render the Evidence & rigor section from an /api/investigation-rigor payload
+  // (deterministic skeptic-feedback). Returns '' when no payload (older server /
+  // fetch failure) so the report degrades gracefully.
+  function _rigorSectionHtml(rigor) {
+    if (!rigor || !((rigor.dimensions && rigor.dimensions.length) ||
+                    (rigor.per_study && Object.keys(rigor.per_study).length))) return '';
+    var color = {ok: '#16a34a', warn: '#d97706', gap: '#dc2626'};
+    var glyph = {ok: '✓', warn: '⚠', gap: '✗'};
+    function dimRows(dims) {
+      return (dims || []).map(function(d) {
+        var c = color[d.severity] || '#64748b';
+        var cm = (d.comments && d.comments.length)
+          ? ' <span style="color:#94a3b8;font-size:0.82em">' + _esc(d.comments.join(' ')) + '</span>' : '';
+        return '<div style="display:flex;gap:10px;align-items:flex-start;padding:6px 0;border-top:1px solid #f1f5f9">' +
+          '<span style="color:' + c + ';font-weight:700;min-width:1.2em">' + (glyph[d.severity] || '•') + '</span>' +
+          '<div><strong style="color:#1e293b">' + _esc(d.label || '') + '</strong>' + cm +
+          '<div style="color:#475569;font-size:0.9em;margin-top:1px">' + _esc(d.detail || '') + '</div></div></div>';
+      }).join('');
+    }
+    var html = '<section class="report-section" id="rigor"><h2>Evidence &amp; rigor</h2>' +
+      '<p style="color:#475569;font-size:0.92em">Deterministic feedback on how well this ' +
+      'investigation defends its claims against a skeptical reader — computed from declared ' +
+      'fields, not judged. Gaps are an invitation to add negative controls, replicate across ' +
+      'seeds, weigh alternative explanations, state falsifiability, or add an adversarial study.</p>';
+    if (rigor.summary)
+      html += '<div style="font-weight:600;color:#1e293b;margin:6px 0 2px">' + _esc(rigor.summary) + '</div>';
+    html += dimRows(rigor.dimensions);
+    var per = rigor.per_study || {};
+    var slugs = Object.keys(per);
+    if (slugs.length) {
+      html += '<h3 style="margin-top:16px">Per-study rigor</h3>';
+      slugs.forEach(function(slug) {
+        var sc = per[slug] || {};
+        html += '<div style="margin:10px 0;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px">' +
+          '<div style="font-weight:600;color:#0f172a">' + _esc(slug) +
+          ' <span style="font-weight:400;color:#64748b;font-size:0.88em">— ' + _esc(sc.summary || '') + '</span></div>' +
+          dimRows(sc.dimensions) + '</div>';
+      });
+    }
+    html += '</section>';
+    return html;
+  }
+
+  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy, generation, ghRepo, rigor) {
     bibEntries = bibEntries || [];
     chartsByStudy = chartsByStudy || {};
     embedsByStudy = embedsByStudy || {};
@@ -6045,6 +6095,7 @@
     var acceptanceNarrativeHtml = _acceptanceNarrativeHtml();
     var acGatingMatrixHtml = _acGatingMatrixHtml();
     var needsAttentionReportHtml = _needsAttentionReportHtml();
+    var rigorSectionHtml = _rigorSectionHtml(rigor);
 
     // Data-driven flags so the "How to read" guide describes only what this
     // investigation actually contains — no workspace-specific boilerplate.
@@ -9077,6 +9128,9 @@
       +   acGatingMatrixHtml
       +   needsAttentionReportHtml
       +   verdictDagHtml
+      // Evidence & rigor roll-up — deterministic skeptic-feedback (controls,
+      // replication, alternatives, falsifiability, adversarial coverage).
+      +   rigorSectionHtml
 
       // ── Execution-status banner (LEADS the report, before the folds) ────
       // Accurate to the actual run state: a pre-execution review notice when

@@ -340,6 +340,51 @@ def _derive_insight(spec: dict) -> str:
     return ""
 
 
+def _render_rigor(study_spec: dict) -> str:
+    """Evidence & rigor scorecard section — deterministic skeptic-feedback
+    (replication, negative controls, alternative hypotheses, claim discipline,
+    falsifiability, engineered-vs-emergent) computed by pbg_superpowers.rigor.
+
+    Returns '' if pbg-superpowers isn't importable, so the report degrades
+    gracefully.
+    """
+    try:
+        from pbg_superpowers.rigor import study_rigor
+    except Exception:
+        return ""
+    sc = study_rigor(study_spec)
+    dims = sc.get("dimensions") or []
+    if not dims:
+        return ""
+    color = {"ok": "#16a34a", "warn": "#d97706", "gap": "#dc2626"}
+    glyph = {"ok": "✓", "warn": "⚠", "gap": "✗"}
+    rows = []
+    for d in dims:
+        sev = d.get("severity", "gap")
+        c = color.get(sev, "#64748b")
+        comments = " ".join(d.get("comments") or [])
+        comment_html = (f' <span style="color:#94a3b8;font-size:0.82em">{_h(comments)}</span>'
+                        if comments else "")
+        rows.append(
+            '<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;'
+            'border-top:1px solid #f1f5f9">'
+            f'<span style="color:{c};font-weight:700;min-width:1.2em">{glyph.get(sev, "•")}</span>'
+            f'<div><strong style="color:#1e293b">{_h(d.get("label", ""))}</strong>{comment_html}'
+            f'<div style="color:#475569;font-size:0.9em;margin-top:1px">{_h(d.get("detail", ""))}</div>'
+            '</div></div>'
+        )
+    return (
+        '<section id="rigor"><h2>Evidence &amp; rigor</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Deterministic feedback '
+        'on how well this study defends its claims against a skeptical reader — computed '
+        'from declared fields. Gaps prompt the next iteration to add controls, replicates, '
+        'alternatives, or a falsifiability note.</p>'
+        f'<div style="font-weight:600;color:#1e293b;margin-bottom:2px">{_h(sc.get("summary", ""))}</div>'
+        + "".join(rows) +
+        '</section>'
+    )
+
+
 def _render_html(study_spec: dict, viz_entries: list[dict],
                  *, investigation_slug: Optional[str], generated_at: str) -> str:
     rep = study_spec.get("report") or {}
@@ -360,6 +405,7 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
     metrics_html = _render_key_metrics(key_metrics)
     biology_html = _render_biological_summary(study_spec)
     viz_html = _render_viz_embeds(viz_entries)
+    rigor_html = _render_rigor(study_spec)
 
     inv_chip = ""
     if investigation_slug:
@@ -508,6 +554,8 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
 <section id="biology">
 {biology_html}
 </section>
+
+{rigor_html}
 
 <section id="viz">
 {viz_html}
