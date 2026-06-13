@@ -340,6 +340,264 @@ def _derive_insight(spec: dict) -> str:
     return ""
 
 
+# ---------------------------------------------------------------------------
+# C2 — derived 3-track conclusion verdicts.
+# The `result` of each track is COMPUTED (read-only) from canonical fields;
+# the `basis` free-text is author/agent-supplied. These three rules are kept
+# IDENTICAL in static/walkthrough.js (_deriveConclusionVerdicts) and
+# static/study-detail.js so every surface shows the same badge.
+# ---------------------------------------------------------------------------
+
+_GATE_RESULT_NORM = {
+    "pass": "PASS", "passed": "PASS", "ok": "PASS",
+    "fail": "FAIL", "failed": "FAIL",
+    "partial": "PARTIAL", "mixed": "PARTIAL", "needs_calibration": "PARTIAL",
+}
+
+_RUN_ERRORED = {"error", "errored", "failed", "crashed", "fail"}
+_RUN_COMPLETED = {"completed", "complete", "success", "succeeded", "ok", "done", "finished"}
+
+
+def _norm_gate_result(val) -> str:
+    return _GATE_RESULT_NORM.get(str(val or "").strip().lower(), "PENDING")
+
+
+def _derive_conclusion_verdicts(spec: dict) -> dict:
+    """Compute the three verdict-track results from canonical fields.
+
+    Rules (canonical — mirrored in walkthrough.js + study-detail.js):
+      * ``biological_validation``   ← ``pipeline_gate.gate_evaluator.result``
+      * ``regression_compatibility``← PASS if all runs completed without error,
+        FAIL if any errored, PARTIAL if mixed/unknown, PENDING if no runs.
+      * ``explanatory_gain``        ← PASS if >=1 finding has
+        ``tier=='interpretation'`` (or any ``mechanism_origin`` set);
+        PARTIAL if findings but none qualify; GAP if there are no findings.
+    The authored ``basis`` free-text is carried through per track.
+    """
+    authored = spec.get("conclusion_verdicts") or {}
+
+    ge = (spec.get("pipeline_gate") or {}).get("gate_evaluator") or {}
+    bio = _norm_gate_result(ge.get("result") or spec.get("gate_status"))
+
+    runs = [r for r in (spec.get("runs") or []) if isinstance(r, dict)]
+    if not runs:
+        reg = "PENDING"
+    else:
+        statuses = [str(r.get("status", "")).strip().lower() for r in runs]
+        if any(s in _RUN_ERRORED for s in statuses):
+            reg = "FAIL"
+        elif all(s in _RUN_COMPLETED for s in statuses):
+            reg = "PASS"
+        else:
+            reg = "PARTIAL"
+
+    findings = [f for f in (spec.get("findings") or []) if isinstance(f, dict)]
+    if not findings:
+        exp = "GAP"
+    elif any((f.get("tier") == "interpretation") or f.get("mechanism_origin") for f in findings):
+        exp = "PASS"
+    else:
+        exp = "PARTIAL"
+
+    def _basis(track):
+        t = authored.get(track)
+        return (t.get("basis", "") if isinstance(t, dict) else "")
+
+    return {
+        "biological_validation":    {"result": bio, "basis": _basis("biological_validation")},
+        "regression_compatibility": {"result": reg, "basis": _basis("regression_compatibility")},
+        "explanatory_gain":         {"result": exp, "basis": _basis("explanatory_gain")},
+    }
+
+
+_TRACK_COLORS = {
+    "PASS": ("#dcfce7", "#166534"),
+    "PARTIAL": ("#fef3c7", "#92400e"),
+    "FAIL": ("#fee2e2", "#991b1b"),
+    "GAP": ("#f1f5f9", "#475569"),
+    "PENDING": ("#f1f5f9", "#475569"),
+}
+
+
+def _render_conclusion_verdicts(spec: dict) -> str:
+    """Render the derived 3-track verdict block (read-only computed badges)."""
+    cv = _derive_conclusion_verdicts(spec)
+    tracks = [
+        ("biological_validation", "Biological validation", "from gate evaluator"),
+        ("regression_compatibility", "Regression compatibility", "from run status"),
+        ("explanatory_gain", "Explanatory gain", "from interpretation-tier findings"),
+    ]
+    rows = []
+    for key, label, hint in tracks:
+        t = cv[key]
+        res = t["result"]
+        bg, fg = _TRACK_COLORS.get(res, ("#f1f5f9", "#475569"))
+        basis = t.get("basis") or ""
+        basis_html = (
+            f'<div style="color:#475569;font-size:0.9em;margin-top:2px">{_multiline(basis)}</div>'
+            if basis else ""
+        )
+        rows.append(
+            '<div style="padding:8px 0;border-top:1px solid #f1f5f9">'
+            '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'
+            f'<span style="display:inline-block;min-width:11em;font-weight:600;color:#1e293b">{_h(label)}</span>'
+            f'<span style="display:inline-block;padding:2px 10px;border-radius:9999px;'
+            f'background:{bg};color:{fg};font-weight:700;font-size:0.85em">{_h(res)}</span>'
+            f'<span style="color:#94a3b8;font-size:0.82em">{_h(hint)} · computed</span>'
+            '</div>'
+            f'{basis_html}'
+            '</div>'
+        )
+    return (
+        '<section id="verdicts"><h2>Conclusion verdicts</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Three-track verdict — '
+        'each result is <strong>computed</strong> from canonical fields (gate evaluator, run '
+        'status, finding tiers). The basis is the author\'s rationale.</p>'
+        + "".join(rows) +
+        '</section>'
+    )
+
+
+def _render_conclusion_synthesis(spec: dict) -> str:
+    """C3 — read-only four-section synthesis sourced from canonical fields:
+    Claims←findings[].statement, Evidence←findings[].evidence,
+    Limitations←limitations, Next steps←discovery_implications.followup_study_proposals.
+    """
+    findings = [f for f in (spec.get("findings") or []) if isinstance(f, dict)]
+    claims = [f.get("statement") or f.get("summary") for f in findings]
+    evidence = []
+    for f in findings:
+        ev = f.get("evidence")
+        if isinstance(ev, dict):
+            ev = ev.get("observed") or ev.get("summary") or ev.get("detail")
+        if ev is not None and ev != "":
+            evidence.append(ev)
+
+    limitations = spec.get("limitations") or []
+    if isinstance(limitations, str):
+        limitations = [limitations]
+
+    di = spec.get("discovery_implications") or {}
+    next_steps = []
+    for p in (di.get("followup_study_proposals") or []):
+        if isinstance(p, dict):
+            t = p.get("title") or p.get("id")
+            if t:
+                next_steps.append(t)
+        elif p:
+            next_steps.append(str(p))
+
+    sections = [
+        ("Claims", claims),
+        ("Evidence", evidence),
+        ("Limitations", limitations),
+        ("Next steps", next_steps),
+    ]
+    blocks = []
+    for label, items in sections:
+        items = [i for i in (items or []) if i]
+        if not items:
+            continue
+        lis = "".join(f'<li>{_multiline(str(i))}</li>' for i in items)
+        blocks.append(
+            f'<div style="margin:10px 0"><strong style="color:#1e293b">{_h(label)}</strong>'
+            f'<ul style="margin:4px 0 0;padding-left:20px;color:#334155">{lis}</ul></div>'
+        )
+    if not blocks:
+        return ""
+    return (
+        '<section id="synthesis"><h2>Conclusion synthesis</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Read-only synthesis derived '
+        'from the study\'s canonical fields (findings, limitations, follow-up proposals).</p>'
+        + "".join(blocks) +
+        '</section>'
+    )
+
+
+def _render_alternatives(spec: dict) -> str:
+    """C5 — alternative hypotheses. Canonical source is
+    ``discovery_implications.alternate_hypotheses``; fall back to top-level
+    ``alternative_hypotheses`` so authored prose anywhere still surfaces.
+    """
+    di = spec.get("discovery_implications") or {}
+    alts = di.get("alternate_hypotheses") or spec.get("alternative_hypotheses")
+    if not alts:
+        return ""
+    items = []
+    for a in alts:
+        if isinstance(a, dict):
+            claim = a.get("claim") or a.get("hypothesis") or ""
+            extra = []
+            if a.get("discriminated_by"):
+                extra.append(f'discriminated by: {_h(a["discriminated_by"])}')
+            if a.get("status"):
+                extra.append(f'status: {_h(a["status"])}')
+            extra_html = (
+                f' <span style="color:#94a3b8;font-size:0.85em">({" · ".join(extra)})</span>'
+                if extra else ""
+            )
+            if claim or extra_html:
+                items.append(f'<li>{_h(claim)}{extra_html}</li>')
+        elif a:
+            items.append(f'<li>{_h(str(a))}</li>')
+    if not items:
+        return ""
+    return (
+        '<section id="alternatives"><h2>Alternative hypotheses</h2>'
+        f'<ul style="padding-left:20px;color:#334155;line-height:1.6">{"".join(items)}</ul>'
+        '</section>'
+    )
+
+
+def _render_controls_and_falsifiability(spec: dict) -> str:
+    """Item 13 — surface the scored-but-hidden ``controls[]`` table and the
+    ``falsifiability`` statement verbatim (the rigor scorecard only emits a dot
+    for these). Returns '' when neither is present.
+    """
+    controls = [c for c in (spec.get("controls") or []) if isinstance(c, dict)]
+    falsifiability = spec.get("falsifiability")
+    bits = []
+    if controls:
+        head = (
+            '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+            '<th style="padding:4px 8px">Name</th><th style="padding:4px 8px">Kind</th>'
+            '<th style="padding:4px 8px">Hypothesis</th><th style="padding:4px 8px">Expected</th>'
+            '<th style="padding:4px 8px">Observed</th><th style="padding:4px 8px">Result</th></tr>'
+        )
+        trows = []
+        for c in controls:
+            res = str(c.get("result", "")).upper()
+            bg, fg = _TRACK_COLORS.get(res, ("#f1f5f9", "#475569"))
+            res_html = (
+                f'<span style="padding:1px 8px;border-radius:9999px;background:{bg};color:{fg};'
+                f'font-weight:600;font-size:0.82em">{_h(res)}</span>' if res else ""
+            )
+            trows.append(
+                '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+                f'<td style="padding:4px 8px">{_h(c.get("name", ""))}</td>'
+                f'<td style="padding:4px 8px">{_h(c.get("kind", ""))}</td>'
+                f'<td style="padding:4px 8px">{_h(c.get("hypothesis", ""))}</td>'
+                f'<td style="padding:4px 8px">{_h(c.get("expected", ""))}</td>'
+                f'<td style="padding:4px 8px">{_h(c.get("observed", ""))}</td>'
+                f'<td style="padding:4px 8px">{res_html}</td>'
+                '</tr>'
+            )
+        bits.append(
+            '<div id="rigor-controls" style="margin:10px 0">'
+            '<strong style="color:#1e293b">Controls</strong>'
+            '<table style="border-collapse:collapse;width:100%;margin-top:4px">'
+            + head + "".join(trows) + '</table></div>'
+        )
+    if falsifiability:
+        bits.append(
+            '<div id="rigor-falsifiability" style="margin:10px 0;padding:8px 12px;'
+            'background:#f8fafc;border-left:4px solid #64748b;border-radius:4px">'
+            f'<strong style="color:#1e293b">Falsifiability:</strong> '
+            f'{_multiline(str(falsifiability))}</div>'
+        )
+    return "".join(bits)
+
+
 def _render_rigor(study_spec: dict) -> str:
     """Evidence & rigor scorecard section — deterministic skeptic-feedback
     (replication, negative controls, alternative hypotheses, claim discipline,
@@ -358,6 +616,10 @@ def _render_rigor(study_spec: dict) -> str:
         return ""
     color = {"ok": "#16a34a", "warn": "#d97706", "gap": "#dc2626"}
     glyph = {"ok": "✓", "warn": "⚠", "gap": "✗"}
+    # Item 13 — link the controls / falsifiability dimension dots to the
+    # verbatim detail blocks we now emit below the scorecard.
+    has_controls = bool([c for c in (study_spec.get("controls") or []) if isinstance(c, dict)])
+    has_falsifiability = bool(study_spec.get("falsifiability"))
     rows = []
     for d in dims:
         sev = d.get("severity", "gap")
@@ -365,14 +627,22 @@ def _render_rigor(study_spec: dict) -> str:
         comments = " ".join(d.get("comments") or [])
         comment_html = (f' <span style="color:#94a3b8;font-size:0.82em">{_h(comments)}</span>'
                         if comments else "")
+        label = d.get("label", "")
+        ll = label.lower()
+        link = ""
+        if has_controls and ("control" in ll):
+            link = ' <a href="#rigor-controls" style="font-size:0.82em">(see controls ↓)</a>'
+        elif has_falsifiability and ("falsifi" in ll):
+            link = ' <a href="#rigor-falsifiability" style="font-size:0.82em">(see statement ↓)</a>'
         rows.append(
             '<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;'
             'border-top:1px solid #f1f5f9">'
             f'<span style="color:{c};font-weight:700;min-width:1.2em">{glyph.get(sev, "•")}</span>'
-            f'<div><strong style="color:#1e293b">{_h(d.get("label", ""))}</strong>{comment_html}'
+            f'<div><strong style="color:#1e293b">{_h(label)}</strong>{comment_html}{link}'
             f'<div style="color:#475569;font-size:0.9em;margin-top:1px">{_h(d.get("detail", ""))}</div>'
             '</div></div>'
         )
+    controls_html = _render_controls_and_falsifiability(study_spec)
     return (
         '<section id="rigor"><h2>Evidence &amp; rigor</h2>'
         '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Deterministic feedback '
@@ -380,7 +650,8 @@ def _render_rigor(study_spec: dict) -> str:
         'from declared fields. Gaps prompt the next iteration to add controls, replicates, '
         'alternatives, or a falsifiability note.</p>'
         f'<div style="font-weight:600;color:#1e293b;margin-bottom:2px">{_h(sc.get("summary", ""))}</div>'
-        + "".join(rows) +
+        + "".join(rows)
+        + controls_html +
         '</section>'
     )
 
@@ -403,7 +674,10 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
 
     badge = _render_verdict_badge(verdict)
     metrics_html = _render_key_metrics(key_metrics)
+    verdicts_html = _render_conclusion_verdicts(study_spec)
+    synthesis_html = _render_conclusion_synthesis(study_spec)
     biology_html = _render_biological_summary(study_spec)
+    alternatives_html = _render_alternatives(study_spec)
     viz_html = _render_viz_embeds(viz_entries)
     rigor_html = _render_rigor(study_spec)
 
@@ -464,8 +738,14 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
     nav_chips = []
     if head_blocks or metrics_html:
         nav_chips.append('<a href="#overview">Overview</a>')
+    if verdicts_html:
+        nav_chips.append('<a href="#verdicts">Verdicts</a>')
+    if synthesis_html:
+        nav_chips.append('<a href="#synthesis">Synthesis</a>')
     if biology_html:
         nav_chips.append('<a href="#biology">Biology</a>')
+    if alternatives_html:
+        nav_chips.append('<a href="#alternatives">Alternatives</a>')
     if viz_html:
         nav_chips.append('<a href="#viz">Visualisations</a>')
     nav_html = (
@@ -551,9 +831,15 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
   {metrics_html}
 </section>
 
+{verdicts_html}
+
+{synthesis_html}
+
 <section id="biology">
 {biology_html}
 </section>
+
+{alternatives_html}
 
 {rigor_html}
 

@@ -55,6 +55,17 @@ def test_conclusions_outcomes_defer_to_tests_tab():
 
 
 def test_verdict_form_kept_in_conclusions():
-    """De-dup must NOT remove the Decide-phase verdict form."""
-    assert "conclusion_verdicts.regression_compatibility.result" in _HTML
-    assert "conclusion_verdicts.biological_validation.result" in _HTML
+    """The Decide-phase 3-track verdict form is kept, but post-consolidation
+    (item 6) each track's *result* is COMPUTED (a read-only badge derived from
+    the gate evaluator / run status / finding tiers) rather than a hand-entered
+    select; the authored part is the per-track *basis* rationale. So the form
+    surfaces all three tracks as computed badges plus basis inputs."""
+    # Result is now a computed badge, not an editable `.result` input.
+    assert 'data-verdict-track="regression_compatibility"' in _HTML
+    assert 'data-verdict-track="biological_validation"' in _HTML
+    assert 'data-verdict-track="explanatory_gain"' in _HTML
+    # The authored basis inputs remain for each track.
+    assert "conclusion_verdicts.regression_compatibility.basis" in _HTML
+    assert "conclusion_verdicts.biological_validation.basis" in _HTML
+    # The editable result selects were removed.
+    assert "conclusion_verdicts.regression_compatibility.result" not in _HTML

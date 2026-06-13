@@ -299,9 +299,12 @@ def test_full_study_renders_all_tabs(_rich_ws):
     # in the Runs tab — verified by anchoring after the panel-visualizations id.
     assert "growth-curve" in html
 
-    # Conclusions panel is present (conclusion text is loaded by JS at runtime, not rendered in HTML)
+    # Conclusions panel is present. The legacy four-field free-text editor was
+    # retired (item 7); the non-v3 branch now renders a read-only synthesis
+    # derived from canonical fields (findings / limitations / discovery_implications).
     assert 'id="panel-conclusions"' in html
-    assert 'id="conclusion-claims"' in html
+    assert 'conclusions-synthesis' in html
+    assert 'id="conclusion-claims"' not in html
 
 
 # ---------------------------------------------------------------------------

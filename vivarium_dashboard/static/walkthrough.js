@@ -5765,7 +5765,151 @@
   // Render the Evidence & rigor section from an /api/investigation-rigor payload
   // (deterministic skeptic-feedback). Returns '' when no payload (older server /
   // fetch failure) so the report degrades gracefully.
-  function _rigorSectionHtml(rigor) {
+  // ── C2 — derived 3-track conclusion verdicts (read-only, computed) ─────
+  // These three rules are kept IDENTICAL to single_study_report.py
+  // (_derive_conclusion_verdicts) and study-detail.js so every surface
+  // shows the same badge.
+  var _GATE_RESULT_NORM = {
+    pass: 'PASS', passed: 'PASS', ok: 'PASS',
+    fail: 'FAIL', failed: 'FAIL',
+    partial: 'PARTIAL', mixed: 'PARTIAL', needs_calibration: 'PARTIAL'
+  };
+  var _RUN_ERRORED = {error: 1, errored: 1, failed: 1, crashed: 1, fail: 1};
+  var _RUN_COMPLETED = {completed: 1, complete: 1, success: 1, succeeded: 1, ok: 1, done: 1, finished: 1};
+  var _TRACK_COLORS = {
+    PASS: ['#dcfce7', '#166534'], PARTIAL: ['#fef3c7', '#92400e'],
+    FAIL: ['#fee2e2', '#991b1b'], GAP: ['#f1f5f9', '#475569'], PENDING: ['#f1f5f9', '#475569']
+  };
+  function _normGateResult(v) {
+    return _GATE_RESULT_NORM[String(v == null ? '' : v).trim().toLowerCase()] || 'PENDING';
+  }
+  function _deriveConclusionVerdicts(s) {
+    var authored = s.conclusion_verdicts || {};
+    var ge = (s.pipeline_gate || {}).gate_evaluator || {};
+    var bio = _normGateResult(ge.result || s.gate_status);
+
+    var runs = (s.runs || []).filter(function(r) { return r && typeof r === 'object'; });
+    var reg;
+    if (!runs.length) { reg = 'PENDING'; }
+    else {
+      var statuses = runs.map(function(r) { return String(r.status == null ? '' : r.status).trim().toLowerCase(); });
+      if (statuses.some(function(x) { return _RUN_ERRORED[x]; })) reg = 'FAIL';
+      else if (statuses.every(function(x) { return _RUN_COMPLETED[x]; })) reg = 'PASS';
+      else reg = 'PARTIAL';
+    }
+
+    var findings = (s.findings || []).filter(function(f) { return f && typeof f === 'object'; });
+    var exp;
+    if (!findings.length) exp = 'GAP';
+    else if (findings.some(function(f) { return f.tier === 'interpretation' || f.mechanism_origin; })) exp = 'PASS';
+    else exp = 'PARTIAL';
+
+    function basis(t) { var x = authored[t]; return (x && typeof x === 'object') ? (x.basis || '') : ''; }
+    return {
+      biological_validation:    {result: bio, basis: basis('biological_validation')},
+      regression_compatibility: {result: reg, basis: basis('regression_compatibility')},
+      explanatory_gain:         {result: exp, basis: basis('explanatory_gain')}
+    };
+  }
+  function _conclusionVerdictsHtml(s, slug) {
+    var cv = _deriveConclusionVerdicts(s);
+    var tracks = [
+      ['biological_validation', 'Biological validation', 'from gate evaluator'],
+      ['regression_compatibility', 'Regression compatibility', 'from run status'],
+      ['explanatory_gain', 'Explanatory gain', 'from interpretation-tier findings']
+    ];
+    var rows = tracks.map(function(t) {
+      var tr = cv[t[0]]; var res = tr.result;
+      var col = _TRACK_COLORS[res] || ['#f1f5f9', '#475569'];
+      var basisHtml = tr.basis
+        ? '<div style="color:#475569;font-size:0.9em;margin-top:2px">' + _multiline(tr.basis) + '</div>' : '';
+      return '<div style="padding:8px 0;border-top:1px solid #f1f5f9">'
+        + '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'
+        + '<span style="display:inline-block;min-width:11em;font-weight:600;color:#1e293b">' + _h(t[1]) + '</span>'
+        + '<span style="display:inline-block;padding:2px 10px;border-radius:9999px;background:' + col[0]
+        + ';color:' + col[1] + ';font-weight:700;font-size:0.85em">' + _h(res) + '</span>'
+        + '<span style="color:#94a3b8;font-size:0.82em">' + _h(t[2]) + ' · computed</span>'
+        + '</div>' + basisHtml + '</div>';
+    }).join('');
+    return '<div class="conclusion-verdicts" id="study-' + slug + '-verdicts">'
+      + '<h3>Conclusion verdicts</h3>'
+      + '<p class="muted small" style="margin:0 0 8px 0">Three-track verdict — each result is '
+      + '<strong>computed</strong> from canonical fields (gate evaluator, run status, finding tiers). '
+      + 'The basis is the author\'s rationale.</p>'
+      + rows + '</div>';
+  }
+  // C3 — read-only four-section synthesis sourced from canonical fields.
+  function _conclusionSynthesisHtml(s, slug) {
+    var findings = (s.findings || []).filter(function(f) { return f && typeof f === 'object'; });
+    var claims = findings.map(function(f) { return f.statement || f.summary; }).filter(Boolean);
+    var evidence = [];
+    findings.forEach(function(f) {
+      var ev = f.evidence;
+      if (ev && typeof ev === 'object') ev = ev.observed || ev.summary || ev.detail;
+      if (ev !== undefined && ev !== null && ev !== '') evidence.push(ev);
+    });
+    var limitations = s.limitations || [];
+    if (typeof limitations === 'string') limitations = [limitations];
+    var di = s.discovery_implications || {};
+    var nextSteps = [];
+    (di.followup_study_proposals || []).forEach(function(p) {
+      if (p && typeof p === 'object') { var t = p.title || p.id; if (t) nextSteps.push(t); }
+      else if (p) nextSteps.push(String(p));
+    });
+    var sections = [['Claims', claims], ['Evidence', evidence], ['Limitations', limitations], ['Next steps', nextSteps]];
+    var blocks = sections.map(function(pair) {
+      var items = (pair[1] || []).filter(Boolean);
+      if (!items.length) return '';
+      var lis = items.map(function(i) {
+        return '<li>' + _multiline(typeof i === 'string' ? i : (i.text || JSON.stringify(i))) + '</li>';
+      }).join('');
+      return '<div style="margin:10px 0"><strong style="color:#1e293b">' + _h(pair[0]) + '</strong>'
+        + '<ul style="margin:4px 0 0;padding-left:20px;color:#334155">' + lis + '</ul></div>';
+    }).join('');
+    if (!blocks) return '';
+    return '<div class="conclusion-synthesis" id="study-' + slug + '-synthesis">'
+      + '<h3>Conclusion synthesis</h3>'
+      + '<p class="muted small" style="margin:0 0 8px 0">Read-only synthesis derived from the study\'s '
+      + 'canonical fields (findings, limitations, follow-up proposals).</p>'
+      + blocks + '</div>';
+  }
+  // Item 13 — controls table + falsifiability statement verbatim.
+  function _controlsFalsifiabilityHtml(s, slug) {
+    var controls = (s.controls || []).filter(function(c) { return c && typeof c === 'object'; });
+    var fals = s.falsifiability;
+    var bits = '';
+    if (controls.length) {
+      var rows = controls.map(function(c) {
+        var res = String(c.result == null ? '' : c.result).toUpperCase();
+        var col = _TRACK_COLORS[res] || ['#f1f5f9', '#475569'];
+        var resHtml = res ? '<span style="padding:1px 8px;border-radius:9999px;background:' + col[0]
+          + ';color:' + col[1] + ';font-weight:600;font-size:0.82em">' + _h(res) + '</span>' : '';
+        return '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+          + '<td style="padding:4px 8px">' + _h(c.name || '') + '</td>'
+          + '<td style="padding:4px 8px">' + _h(c.kind || '') + '</td>'
+          + '<td style="padding:4px 8px">' + _h(c.hypothesis || '') + '</td>'
+          + '<td style="padding:4px 8px">' + _h(c.expected || '') + '</td>'
+          + '<td style="padding:4px 8px">' + _h(c.observed || '') + '</td>'
+          + '<td style="padding:4px 8px">' + resHtml + '</td></tr>';
+      }).join('');
+      bits += '<div id="study-' + slug + '-controls" style="margin:10px 0">'
+        + '<strong style="color:#1e293b">Controls</strong>'
+        + '<table style="border-collapse:collapse;width:100%;margin-top:4px">'
+        + '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+        + '<th style="padding:4px 8px">Name</th><th style="padding:4px 8px">Kind</th>'
+        + '<th style="padding:4px 8px">Hypothesis</th><th style="padding:4px 8px">Expected</th>'
+        + '<th style="padding:4px 8px">Observed</th><th style="padding:4px 8px">Result</th></tr>'
+        + rows + '</table></div>';
+    }
+    if (fals) {
+      bits += '<div id="study-' + slug + '-falsifiability" style="margin:10px 0;padding:8px 12px;'
+        + 'background:#f8fafc;border-left:4px solid #64748b;border-radius:4px">'
+        + '<strong style="color:#1e293b">Falsifiability:</strong> ' + _multiline(String(fals)) + '</div>';
+    }
+    return bits;
+  }
+
+  function _rigorSectionHtml(rigor, specs) {
     if (!rigor || !((rigor.dimensions && rigor.dimensions.length) ||
                     (rigor.per_study && Object.keys(rigor.per_study).length))) return '';
     var color = {ok: '#16a34a', warn: '#d97706', gap: '#dc2626'};
@@ -5792,13 +5936,18 @@
     var per = rigor.per_study || {};
     var slugs = Object.keys(per);
     if (slugs.length) {
+      // Item 13 — surface the scored-but-hidden controls[] table + the
+      // falsifiability statement verbatim under each study's rigor fold.
+      var specsBySlug = {};
+      (specs || []).forEach(function(sp) { if (sp && sp.name) specsBySlug[sp.name] = sp; });
       html += '<h3 style="margin-top:16px">Per-study rigor</h3>';
       slugs.forEach(function(slug) {
         var sc = per[slug] || {};
+        var detail = specsBySlug[slug] ? _controlsFalsifiabilityHtml(specsBySlug[slug], slug) : '';
         // Each member study folds into its own nested dropdown.
         html += '<details class="report-fold" style="margin:8px 0"><summary>' + _esc(slug)
           + ' <span style="font-weight:400;color:#64748b;font-size:0.88em">— ' + _esc(sc.summary || '') + '</span></summary>'
-          + dimRows(sc.dimensions) + '</details>';
+          + dimRows(sc.dimensions) + detail + '</details>';
       });
     }
     html += '</details>';
@@ -6179,7 +6328,7 @@
     var acceptanceNarrativeHtml = _acceptanceNarrativeHtml();
     var acGatingMatrixHtml = _acGatingMatrixHtml();
     var needsAttentionReportHtml = _needsAttentionReportHtml();
-    var rigorSectionHtml = _rigorSectionHtml(rigor);
+    var rigorSectionHtml = _rigorSectionHtml(rigor, specs);
 
     // Data-driven flags so the "How to read" guide describes only what this
     // investigation actually contains — no workspace-specific boilerplate.
@@ -7495,21 +7644,36 @@
           diBits.push('<div class="di-uncertainties">' + uncBits.join('') + '</div>');
         }
 
-        // Alternate hypotheses.
-        var altH = discImpl.alternate_hypotheses || [];
+        // Alternate hypotheses. Canonical source is
+        // discovery_implications.alternate_hypotheses; C5 falls back to the
+        // top-level alternative_hypotheses so authored prose anywhere still
+        // surfaces (the top-level shape uses claim/discriminated_by/status).
+        var altH = (discImpl.alternate_hypotheses && discImpl.alternate_hypotheses.length)
+          ? discImpl.alternate_hypotheses
+          : (s.alternative_hypotheses || []);
         if (altH.length) {
           diBits.push('<div class="di-group"><h4>Alternate hypotheses <span class="muted small">(' + altH.length + ')</span></h4>'
             + altH.map(function(h) {
+                if (typeof h === 'string') h = {statement: h};
                 var evFor = (h.evidence_for || []).length;
                 var evAgainst = (h.evidence_against || []).length;
                 var disc = h.discriminating_observables || [];
                 var rows = [];
                 if (h.why_plausible) rows.push('<div class="di-alt-why">' + _multiline(h.why_plausible) + '</div>');
-                rows.push('<div class="di-alt-ev"><span class="di-ev di-ev-for">▲ ' + evFor + ' for</span>'
-                  + '<span class="di-ev di-ev-against">▼ ' + evAgainst + ' against</span></div>');
+                if (evFor || evAgainst) {
+                  rows.push('<div class="di-alt-ev"><span class="di-ev di-ev-for">▲ ' + evFor + ' for</span>'
+                    + '<span class="di-ev di-ev-against">▼ ' + evAgainst + ' against</span></div>');
+                }
                 if (disc.length) {
                   rows.push('<div class="di-alt-disc"><span class="di-lbl">Discriminating observables:</span> '
                     + disc.map(function(d){ return '<code>' + _h(d) + '</code>'; }).join(', ') + '</div>');
+                }
+                // Top-level alternative_hypotheses fields.
+                if (h.discriminated_by) {
+                  rows.push('<div class="di-alt-disc"><span class="di-lbl">Discriminated by:</span> ' + _multiline(h.discriminated_by) + '</div>');
+                }
+                if (h.status) {
+                  rows.push('<div class="di-alt-status"><span class="di-lbl">Status:</span> ' + _h(h.status) + '</div>');
                 }
                 var elems = h.mechanism_elements_affected || [];
                 if (elems.length) {
@@ -7517,7 +7681,7 @@
                     + elems.map(function(e){ return '<code>' + _h(e) + '</code>'; }).join(', ') + '</div>');
                 }
                 return '<div class="di-alt-card">'
-                  + '<div class="di-alt-stmt"><strong>' + _h(h.statement || '(untitled hypothesis)') + '</strong></div>'
+                  + '<div class="di-alt-stmt"><strong>' + _h(h.statement || h.claim || h.hypothesis || '(untitled hypothesis)') + '</strong></div>'
                   + rows.join('')
                   + '</div>';
               }).join('')
@@ -7661,14 +7825,25 @@
           + '</div>';
       }
 
+      // C6 — biological_summary is the one optional override; derive the prose
+      // from findings[].statement when it is absent so the Biology callout
+      // still renders meaningful mechanism prose.
+      var _bioProse = s.biological_summary;
+      if (!_bioProse) {
+        var _bioFindings = (s.findings || [])
+          .filter(function(f) { return f && typeof f === 'object'; })
+          .map(function(f) { return f.statement || f.summary; })
+          .filter(Boolean);
+        if (_bioFindings.length) _bioProse = _bioFindings.join('\n\n');
+      }
       var biologyGlanceHtml = '';
-      if (s.biological_summary || s.study_card || s.literature_anchors) {
+      if (_bioProse || s.study_card || s.literature_anchors) {
         var bgsBits = [];
-        if (s.biological_summary) {
+        if (_bioProse) {
           bgsBits.push(
             '<div class="biology-summary-callout">'
             + '<h3 class="biology-glance-label">Biology — what this study is about</h3>'
-            + '<p class="biology-prose">' + _multiline(s.biological_summary) + '</p>'
+            + '<p class="biology-prose">' + _multiline(_bioProse) + '</p>'
             + '</div>'
           );
         }
@@ -7867,6 +8042,11 @@
       // variant's overrides + every model_setting's current/default/range.
       var conditionsHtml = _renderConditionsBlock(s, sid.conditions);
 
+      // C2 + C3 — derived 3-track verdicts + read-only four-section synthesis,
+      // both computed from canonical fields (no longer write-only).
+      var verdictsHtml = _conclusionVerdictsHtml(s, slug);
+      var synthesisHtml = _conclusionSynthesisHtml(s, slug);
+
       // ── PLANNING-PHASE DETECTION ──
       // A study is "planning" when no runs have completed yet. In that
       // mode we strip decision / takeaways / findings (post-execution
@@ -8023,6 +8203,7 @@
         +   embedsHtml          // 1a. Embedded visualizations (after the explanation)
         +   expertReviewHtml    // 2b. Pre-run expert review
         +   takeawaysHtml       // 3 + 4. Detailed findings
+        +   verdictsHtml        // Derived 3-track conclusion verdicts (computed)
         +   discoveryHtml       // Discovery implications (directly under the findings)
         +   conditionsHtml      // Conditions (what we set up) — grouped with the runs
         +   simsHtml            // What did/will we run
@@ -8033,6 +8214,7 @@
         +   reqsHtml            // 9. What to build/fix
         +   followUpsHtml       // 10. Next steps
         +   limitsHtml          // 11. Limitations
+        +   synthesisHtml       // Read-only four-section conclusion synthesis (derived)
         +   refsHtml            // 12. References
         +   decisionHtml        // Decision: can we move to the next study?
         + '</section>'
@@ -8052,6 +8234,28 @@
     // run the tests — distinct from the *code* changes captured in Build.
     function _renderConditionsBlock(s, anchorId) {
       var cond = (s.conditions && typeof s.conditions === 'object') ? s.conditions : null;
+      // C4 — single canonical run-spec. When a study has no v4 ``conditions:``
+      // mapping, derive the rich conditions table from the normalized
+      // ``simulation_set`` (the server folds top-level baseline/variants and
+      // parameter-override interventions into it), so there is one source.
+      if (!cond && Array.isArray(s.simulation_set) && s.simulation_set.length) {
+        var _derivedBaseline = {};
+        var _derivedVariants = [];
+        s.simulation_set.forEach(function(e) {
+          if (!e || typeof e !== 'object') return;
+          if (e.is_baseline) {
+            _derivedBaseline = {composite: e.base_model, params: e.params || {}};
+          } else {
+            _derivedVariants.push({
+              name: e.name,
+              composite: e.base_model,
+              parameter_overrides: e.params || {},
+              description: e.description || ''
+            });
+          }
+        });
+        cond = {baseline: _derivedBaseline, variants: _derivedVariants, model_settings: []};
+      }
       if (!cond) return '';
       var baseline = cond.baseline || {};
       var variants = cond.variants || [];
