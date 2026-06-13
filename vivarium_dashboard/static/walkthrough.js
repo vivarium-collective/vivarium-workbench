@@ -6873,17 +6873,25 @@
         var p = String(model).split('.');
         return p[p.length - 1];
       }
+      // A composite reference rendered as a one-click pop-out to the bigraph-loom
+      // STATIC view (read-only): /bigraph-loom/?static=1&stateUrl=/api/composite-
+      // state/<ref>.json. Works from any report on the live dashboard.
+      function _loomStaticPopout(composite) {
+        // Pop out the bigraph-loom STATIC (read-only) view of the composite.
+        // stateUrl points at the live composite-state endpoint (?ref=<id>); the
+        // loom fetches it and unwraps {state:…}. Snapshot mode serves the same
+        // shape as a pre-built /api/composite-state/<id>.json file.
+        return "var s='/api/composite-state?ref='+encodeURIComponent('" + _h(composite) + "');"
+          + "var u='/bigraph-loom/index.html?static=1&stateUrl='+encodeURIComponent(s);"
+          + "if((location.protocol||'').indexOf('http')===0){window.open(u,'loom','width=1200,height=840');}"
+          + "else{alert('Open this in the live dashboard to explore the composite in bigraph-loom.');}";
+      }
       function _compositeCell(composite) {
         if (!composite) return '<span class="muted">—</span>';
-        var label = _short(composite);
-        var id = composite.indexOf('.composites.') >= 0 ? composite.split('.composites.')[1] : composite;
         return '<a href="#" class="composite-loom-link" '
-          + 'title="Open this composite in the bigraph-loom explorer" '
-          + 'onclick="event.preventDefault(); if((location.protocol||\'\').indexOf(\'http\')===0){'
-          + 'window.open(location.pathname + \'?id=\' + encodeURIComponent(\'' + _h(id) + '\') + \'#composite-explore\','
-          + ' \'loom-' + _h(id) + '\', \'width=1180,height=820\');}'
-          + 'else{alert(\'Open this in the live dashboard to explore the composite in bigraph-loom.\');}">'
-          + '<code>' + _h(label) + '</code> <span aria-hidden="true">↗</span></a>';
+          + 'title="Open a static view of this composite in bigraph-loom" '
+          + 'onclick="event.preventDefault(); ' + _loomStaticPopout(composite) + '">'
+          + '<code>' + _h(_short(composite)) + '</code> <span aria-hidden="true">↗</span></a>';
       }
       function _paramsCell(params) {
         if (!params || typeof params !== 'object' || !Object.keys(params).length)
@@ -6987,6 +6995,50 @@
             + '</div>';
         }
       }
+
+      // ── PROMINENT MODEL BANNER ───────────────────────────────────────────
+      // Every study runs at least one composite — surface it at the TOP of the
+      // study with its key parameters and a one-click pop-out to the bigraph-loom
+      // STATIC view. Enforced: a study with no composite is flagged in red.
+      var modelBannerHtml = (function() {
+        var entries = [];
+        if (sims.length) {
+          var seen = {};
+          sims.forEach(function(sm) {
+            var c = sm.base_model;
+            if (c && !seen[c]) { seen[c] = 1; entries.push({composite: c, params: sm.params}); }
+          });
+        } else if ((s.baseline || []).length) {
+          (s.baseline).forEach(function(b) { entries.push({composite: b.composite, params: b.params}); });
+        } else {
+          (s.runs || []).forEach(function(r) { if (r.composite) entries.push({composite: r.composite, params: null}); });
+        }
+        if (!entries.length) {
+          return '<div class="study-model-banner study-model-missing" style="margin:10px 0;padding:12px 16px;'
+            + 'background:#fef2f2;border:1px solid #fecaca;border-left:5px solid #dc2626;border-radius:8px;color:#991b1b">'
+            + '<strong>⚠ No model declared.</strong> Every study must run at least one composite — declare a '
+            + 'baseline (composite + parameters) so this study is reproducible.</div>';
+        }
+        var rows = entries.map(function(e) {
+          var params = (e.params && typeof e.params === 'object' && Object.keys(e.params).length)
+            ? Object.keys(e.params).map(function(k) { return '<code>' + _h(k) + '=' + _h(JSON.stringify(e.params[k])) + '</code>'; }).join(' ')
+            : '<span class="muted">default parameters</span>';
+          var btn = e.composite
+            ? '<button class="model-explore-btn" onclick="' + _loomStaticPopout(e.composite) + '" '
+              + 'style="font-size:0.92em;font-weight:600;padding:5px 12px;border:1px solid #2563eb;background:#eff6ff;'
+              + 'color:#1e40af;border-radius:6px;cursor:pointer;white-space:nowrap">🧬 ' + _h(_short(e.composite))
+              + ' — explore in bigraph-loom ↗</button>'
+            : '<span class="muted">(no composite)</span>';
+          return '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px">'
+            + btn + '<span style="font-size:0.88em;color:#475569">' + params + '</span></div>';
+        }).join('');
+        return '<div class="study-model-banner" style="margin:10px 0;padding:12px 16px;'
+          + 'background:#f0f9ff;border:1px solid #bae6fd;border-left:5px solid #2563eb;border-radius:8px">'
+          + '<div style="font-weight:700;color:#0c4a6e">Model</div>'
+          + '<div class="muted small" style="margin-top:2px">The composite(s) this study runs and their parameters — '
+          + 'click to open a static view in the bigraph-loom explorer.</div>'
+          + rows + '</div>';
+      })();
 
       // ── CHARTS (visualisations from runs.db) ─────────────────────────
       var chartsHtml = charts.length
@@ -7771,6 +7823,7 @@
           + '<section class="study study-planning">'
           +   subNav
           +   '<div class="study-planning-pill">PLANNING — not yet run</div>'
+          +   modelBannerHtml     // 🧬 Model: composite(s) + params + loom static popout (PROMINENT)
           +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
           +   enforcementHtml     // ⚠ declared params not applied (D.2)
           +   readinessHtml       // ✓/⚠ lint readiness panel (A3)
@@ -7804,6 +7857,7 @@
         +   '<summary class="study-panel">' + controlPanelHtml + '</summary>'
         + '<section class="study">'
         +   subNav
+        +   modelBannerHtml     // 🧬 Model: composite(s) + params + loom static popout (PROMINENT)
         +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
         +   enforcementHtml     // ⚠ declared params not applied (D.2)
         +   readinessHtml       // ✓/⚠ lint readiness panel (A3)
