@@ -5993,6 +5993,223 @@
     return bits;
   }
 
+  // ── Wave 2 — compositional causal discovery + semantic closure ─────────
+  // All consume data the model WRITES into study.yaml (composition_commitment,
+  // invariant_check, ablations, model_representation). Mirror the server-side
+  // renderers in single_study_report.py. Each degrades to '' when absent.
+  function _chipList(items, bg, fg) {
+    bg = bg || '#f1f5f9'; fg = fg || '#0f172a';
+    return (items || []).filter(function(i) { return i != null && i !== ''; })
+      .map(function(i) {
+        return '<span style="display:inline-block;padding:2px 9px;border-radius:9999px;background:'
+          + bg + ';color:' + fg + ';margin:2px;font-size:0.82em">' + _h(String(i)) + '</span>';
+      }).join('');
+  }
+
+  // C-COMMIT — "Theoretical commitment" panel. Invariants link to earlier
+  // studies (#study-<slug>); new behaviors link to the study's own tests fold.
+  function _compositionCommitmentHtml(s, slug) {
+    var cc = s.composition_commitment;
+    if (!cc || typeof cc !== 'object') return '';
+    var rows = [];
+    var added = cc.component_added;
+    if (typeof added === 'string') added = [added];
+    if (added && added.length) {
+      rows.push('<div style="margin:8px 0"><strong style="color:#1e293b">Component added</strong> '
+        + _chipList(added, '#e0e7ff', '#3730a3') + '</div>');
+    }
+    var deficit = cc.deficit_addressed;
+    if (deficit && typeof deficit === 'object') {
+      var note = deficit.note || '';
+      var gaps = deficit.closure_gap_item; if (typeof gaps === 'string') gaps = [gaps];
+      var gapHtml = (gaps && gaps.length)
+        ? ' <span style="color:#475569;font-size:0.85em">closes:</span> ' + _chipList(gaps, '#fee2e2', '#991b1b')
+        : '';
+      if (note || gapHtml) {
+        rows.push('<div style="margin:8px 0"><strong style="color:#1e293b">Deficit addressed</strong> '
+          + (note ? _multiline(String(note)) : '') + gapHtml + '</div>');
+      }
+    } else if (typeof deficit === 'string' && deficit) {
+      rows.push('<div style="margin:8px 0"><strong style="color:#1e293b">Deficit addressed</strong> '
+        + _multiline(deficit) + '</div>');
+    }
+    var nb = cc.new_behavior; if (typeof nb === 'string') nb = [nb];
+    if (nb && nb.length) {
+      var nbHtml = nb.filter(Boolean).map(function(t) {
+        return '<a href="#study-' + _h(slug) + '" style="display:inline-block;padding:2px 9px;'
+          + 'border-radius:9999px;background:#dcfce7;color:#166534;margin:2px;font-size:0.82em;'
+          + 'text-decoration:none">' + _h(String(t)) + '</a>';
+      }).join('');
+      rows.push('<div style="margin:8px 0"><strong style="color:#1e293b">New behavior</strong> ' + nbHtml + '</div>');
+    }
+    var inv = cc.invariants_required || [];
+    var invBits = inv.map(function(iv) {
+      if (iv && typeof iv === 'object') {
+        var study = iv.study || ''; var test = iv.test || '';
+        var label = study + (test ? ' · ' + test : '');
+        if (!label) return '';
+        return study
+          ? '<li><a href="#study-' + _h(study) + '"><code>' + _h(label) + '</code></a></li>'
+          : '<li><code>' + _h(label) + '</code></li>';
+      }
+      return iv ? '<li><code>' + _h(String(iv)) + '</code></li>' : '';
+    }).filter(Boolean).join('');
+    if (invBits) {
+      rows.push('<div style="margin:8px 0"><strong style="color:#1e293b">Invariants required</strong>'
+        + '<ul style="margin:4px 0 0;padding-left:20px;color:#334155;font-size:0.92em">' + invBits + '</ul></div>');
+    }
+    var ex = cc.alternatives_excluded; if (typeof ex === 'string') ex = [ex];
+    if (ex && ex.length) {
+      rows.push('<div style="margin:8px 0"><strong style="color:#1e293b">Alternatives excluded</strong> '
+        + _chipList(ex, '#fef9c3', '#854d0e') + '</div>');
+    }
+    if (!rows.length) return '';
+    return '<div class="composition-commitment" id="study-' + slug + '-commitment">'
+      + '<h3>Theoretical commitment</h3>'
+      + '<p class="muted small" style="margin:0 0 8px 0">What this study adds to its prerequisite — '
+      + 'the component introduced, the deficit it closes, the new behavior it unlocks, the earlier '
+      + 'invariants it must preserve, and the alternatives it excludes.</p>'
+      + rows.join('') + '</div>';
+  }
+
+  // C-INVAR — "Invariant checks" sub-section (invalidated/weakened first).
+  var _INVAR_STATUS_COLORS = {
+    invalidated: ['#fee2e2', '#991b1b'], weakened: ['#fef9c3', '#854d0e'],
+    preserved: ['#dcfce7', '#166534'], strengthened: ['#dbeafe', '#1e40af']
+  };
+  var _INVAR_STATUS_RANK = {invalidated: 0, weakened: 1, preserved: 2, strengthened: 3};
+  function _invariantChecksHtml(s, slug) {
+    var checks = (s.invariant_check || []).filter(function(c) { return c && typeof c === 'object'; });
+    if (!checks.length) return '';
+    checks = checks.slice().sort(function(a, b) {
+      var ra = _INVAR_STATUS_RANK[String(a.status || '').toLowerCase()];
+      var rb = _INVAR_STATUS_RANK[String(b.status || '').toLowerCase()];
+      return (ra == null ? 9 : ra) - (rb == null ? 9 : rb);
+    });
+    var rows = checks.map(function(c) {
+      var st = String(c.status || '').toLowerCase();
+      var col = _INVAR_STATUS_COLORS[st] || ['#f1f5f9', '#475569'];
+      var chip = '<span style="padding:1px 8px;border-radius:9999px;background:' + col[0] + ';color:'
+        + col[1] + ';font-weight:600;font-size:0.82em">' + _h(st || '—') + '</span>';
+      return '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+        + '<td style="padding:4px 8px"><code>' + _h(c.study || '') + '</code></td>'
+        + '<td style="padding:4px 8px">' + _h(c.test || '') + '</td>'
+        + '<td style="padding:4px 8px">' + _h(c.prior == null ? '' : c.prior) + '</td>'
+        + '<td style="padding:4px 8px">' + _h(c.now == null ? '' : c.now) + '</td>'
+        + '<td style="padding:4px 8px">' + chip + '</td></tr>';
+    }).join('');
+    return '<div class="invariant-checks" id="study-' + slug + '-invariants">'
+      + '<h3>Invariant checks</h3>'
+      + '<p class="muted small" style="margin:0 0 8px 0">Earlier guarantees re-checked in the current '
+      + 'code state — prior vs current value and whether each was preserved. Invalidated / weakened first.</p>'
+      + '<table style="border-collapse:collapse;width:100%">'
+      + '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+      + '<th style="padding:4px 8px">Study</th><th style="padding:4px 8px">Test</th>'
+      + '<th style="padding:4px 8px">Prior</th><th style="padding:4px 8px">Now</th>'
+      + '<th style="padding:4px 8px">Status</th></tr>' + rows + '</table></div>';
+  }
+
+  // C-CF — "Causal necessity" table from study.ablations[].
+  function _causalNecessityHtml(s, slug) {
+    var abl = (s.ablations || []).filter(function(a) { return a && typeof a === 'object'; });
+    if (!abl.length) return '';
+    var roleColors = {
+      necessary: ['#fee2e2', '#991b1b'], modulatory: ['#fef9c3', '#854d0e'],
+      redundant: ['#f1f5f9', '#475569']
+    };
+    var rows = abl.map(function(a) {
+      var target = a.target;
+      if (Array.isArray(target)) target = target.join('.');
+      var procTarget = _h(String(a.process == null ? '' : a.process))
+        + (target ? ' <code style="font-size:0.82em">' + _h(String(target)) + '</code>' : '');
+      var role = String(a.role || '').toLowerCase();
+      var col = roleColors[role] || ['#f1f5f9', '#475569'];
+      var roleHtml = '<span style="padding:1px 8px;border-radius:9999px;background:' + col[0]
+        + ';color:' + col[1] + ';font-weight:600;font-size:0.82em">' + _h(role || '—') + '</span>';
+      var nec = a.causally_necessary;
+      var necHtml = nec === true ? '✓' : (nec === false ? '✗' : '—');
+      return '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+        + '<td style="padding:4px 8px">' + procTarget + '</td>'
+        + '<td style="padding:4px 8px"><code>' + _h(a.mode || '') + '</code></td>'
+        + '<td style="padding:4px 8px">' + _h(a.behavior_test || '') + '</td>'
+        + '<td style="padding:4px 8px">' + _h(String(a.baseline_result)) + ' → ' + _h(String(a.ablated_result)) + '</td>'
+        + '<td style="padding:4px 8px">' + roleHtml + '</td>'
+        + '<td style="padding:4px 8px;text-align:center;font-weight:700">' + necHtml + '</td></tr>';
+    }).join('');
+    return '<div class="causal-necessity" id="study-' + slug + '-causal">'
+      + '<h3>Causal necessity</h3>'
+      + '<p class="muted small" style="margin:0 0 8px 0">Counterfactual read of the ablation suite — '
+      + 'each component removed or perturbed, whether a behavior test flipped, and so whether it is '
+      + 'causally necessary (vs redundant or merely modulatory).</p>'
+      + '<table style="border-collapse:collapse;width:100%">'
+      + '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+      + '<th style="padding:4px 8px">Process / target</th><th style="padding:4px 8px">Mode</th>'
+      + '<th style="padding:4px 8px">Behavior test</th><th style="padding:4px 8px">Baseline → ablated</th>'
+      + '<th style="padding:4px 8px">Role</th><th style="padding:4px 8px">Necessary</th></tr>'
+      + rows + '</table></div>';
+  }
+
+  // C-MODELCARD — "Representation claims" table from s.model_representation.
+  // (The full static model card is rendered server-side in single_study_report.py
+  // so it survives the static read-only bundle; here we surface the representation
+  // labels + closure status, which need no composite fetch.)
+  var _REPR_ROLE_COLORS = {
+    'inside': ['#f1f5f9', '#475569'], 'boundary-crossing': ['#dbeafe', '#1e40af'],
+    'derived': ['#ede9fe', '#6d28d9'], 'self-produced': ['#dcfce7', '#166534']
+  };
+  function _representationHtml(s, slug) {
+    var mr = s.model_representation;
+    if (!mr || typeof mr !== 'object') return '';
+    var cats = [
+      ['self-produced', mr.self_produced], ['derived', mr.derived],
+      ['boundary-crossing', mr.boundary], ['boundary-crossing', mr.requires],
+      ['inside', mr.provides], ['inside', mr.inside]
+    ];
+    var storeRole = {};
+    cats.forEach(function(pair) {
+      var lst = pair[1]; if (typeof lst === 'string') lst = [lst];
+      (lst || []).forEach(function(st) {
+        if (storeRole[String(st)] === undefined) storeRole[String(st)] = pair[0];
+      });
+    });
+    var gap = mr.gap; if (typeof gap === 'string') gap = [gap];
+    var gapSet = {}; (gap || []).forEach(function(g) { gapSet[String(g)] = 1; });
+    var rows = Object.keys(storeRole).sort().map(function(store) {
+      var role = storeRole[store];
+      var col = _REPR_ROLE_COLORS[role] || ['#f1f5f9', '#475569'];
+      var gapBadge = gapSet[store] ? ' <span style="padding:0 6px;border-radius:9999px;background:#fee2e2;'
+        + 'color:#991b1b;font-size:0.72em">unclosed gap</span>' : '';
+      return '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+        + '<td style="padding:4px 8px"><code>' + _h(store) + '</code>' + gapBadge + '</td>'
+        + '<td style="padding:4px 8px"><span style="padding:1px 8px;border-radius:9999px;background:'
+        + col[0] + ';color:' + col[1] + ';font-weight:600;font-size:0.82em">' + _h(role) + '</span></td></tr>';
+    }).join('');
+    function closureChip(label, closed) {
+      var bg, fg, txt;
+      if (closed === true) { bg = '#dcfce7'; fg = '#166534'; txt = 'CLOSED'; }
+      else if (closed === false) { bg = '#fee2e2'; fg = '#991b1b'; txt = 'OPEN'; }
+      else { bg = '#f1f5f9'; fg = '#475569'; txt = '—'; }
+      return '<span style="margin-right:12px">' + _h(label) + ': <span style="padding:1px 8px;'
+        + 'border-radius:9999px;background:' + bg + ';color:' + fg + ';font-weight:700;font-size:0.82em">'
+        + txt + '</span></span>';
+    }
+    var semantic = (mr.semantic && typeof mr.semantic === 'object') ? mr.semantic : {};
+    var closureHtml = '<div style="margin:10px 0">'
+      + closureChip('Interface closure', mr.interface_closed)
+      + closureChip('Semantic closure', semantic.semantically_closed) + '</div>';
+    var tableHtml = rows ? ('<table style="border-collapse:collapse;width:100%;margin-top:4px">'
+      + '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+      + '<th style="padding:4px 8px">Store</th><th style="padding:4px 8px">Representation</th></tr>'
+      + rows + '</table>') : '';
+    if (!rows && mr.interface_closed == null && semantic.semantically_closed == null) return '';
+    return '<div class="representation-claims" id="study-' + slug + '-representation">'
+      + '<h3>Representation claims</h3>'
+      + '<p class="muted small" style="margin:0 0 8px 0">How each store is represented '
+      + '(inside / boundary-crossing / derived / self-produced) and whether the model achieves '
+      + 'interface closure (no missing inputs) and semantic closure (every self-produced store fluxes).</p>'
+      + closureHtml + tableHtml + '</div>';
+  }
+
   function _rigorSectionHtml(rigor, specs) {
     if (!rigor || !((rigor.dimensions && rigor.dimensions.length) ||
                     (rigor.per_study && Object.keys(rigor.per_study).length))) return '';
@@ -8132,6 +8349,12 @@
       var verdictsHtml = _conclusionVerdictsHtml(s, slug);
       var synthesisHtml = _conclusionSynthesisHtml(s, slug);
 
+      // Wave 2 — compositional causal discovery + semantic closure renders.
+      var commitmentHtml = _compositionCommitmentHtml(s, slug);   // C-COMMIT
+      var invariantsHtml = _invariantChecksHtml(s, slug);         // C-INVAR
+      var causalHtml = _causalNecessityHtml(s, slug);             // C-CF
+      var representationHtml = _representationHtml(s, slug);       // C-MODELCARD
+
       // ── PLANNING-PHASE DETECTION ──
       // A study is "planning" when no runs have completed yet. In that
       // mode we strip decision / takeaways / findings (post-execution
@@ -8248,9 +8471,12 @@
           +   readinessHtml       // ✓/⚠ lint readiness panel (A3)
           +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
           +   feedbackHtml        // 💬 imported expert feedback (B.1)
+          +   commitmentHtml      // Theoretical commitment (C-COMMIT)
+          +   invariantsHtml      // Invariant checks (C-INVAR)
           +   summaryHtml         // Question / purpose
           +   conditionsHtml      // Conditions: variants + model settings (PROMINENT)
           +   testsHtml           // Expected behavior / tests (PROMINENT for comments)
+          +   representationHtml   // Representation claims (C-MODELCARD)
           +   chartsWithBaselineNoticeHtml  // Baseline charts with BASELINE label
           +   embedsHtml          // Embedded preview HTMLs
           +   readoutsHtml        // What we'll measure
@@ -8282,6 +8508,8 @@
         +   readinessHtml       // ✓/⚠ lint readiness panel (A3)
         +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
         +   feedbackHtml        // 💬 imported expert feedback (B.1)
+        +   commitmentHtml      // Theoretical commitment (C-COMMIT)
+        +   invariantsHtml      // Invariant checks (C-INVAR)
         +   biologyGlanceHtml   // 0. Biology-at-a-glance
         +   mechanismNarrativeHtml  // 0a. Mechanism narrative (7 framework fields)
         +   summaryHtml         // 1. Plain-English summary (explanation leads, before charts)
@@ -8289,6 +8517,7 @@
         +   expertReviewHtml    // 2b. Pre-run expert review
         +   takeawaysHtml       // 3 + 4. Detailed findings
         +   verdictsHtml        // Derived 3-track conclusion verdicts (computed)
+        +   causalHtml          // Causal necessity table (C-CF)
         +   discoveryHtml       // Discovery implications (directly under the findings)
         +   conditionsHtml      // Conditions (what we set up) — grouped with the runs
         +   simsHtml            // What did/will we run
@@ -8296,6 +8525,7 @@
         +   chartsHtml          //    + Visualisations
         +   testsHtml           // 7. How we judge success
         +   buildHtml           // 8. Model changes
+        +   representationHtml   // Representation claims (C-MODELCARD)
         +   reqsHtml            // 9. What to build/fix
         +   followUpsHtml       // 10. Next steps
         +   limitsHtml          // 11. Limitations
