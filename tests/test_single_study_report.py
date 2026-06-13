@@ -530,3 +530,94 @@ def test_representation_table_rendered():
 def test_representation_omitted_when_absent():
     assert _render_representation(None) == ""
     assert _render_representation({}) == ""
+
+
+# ---------------------------------------------------------------------------
+# Wave 3a — workflow typing + framing render (critiques #10 / #7 / #18)
+# ---------------------------------------------------------------------------
+
+from vivarium_dashboard.lib.single_study_report import (  # noqa: E402
+    _study_type,
+    _render_study_type_badge,
+    _next_action_type_chip,
+    _render_preregistration_chip,
+)
+
+
+def test_study_type_reads_field_and_aliases():
+    # #10 — explicit study_type wins; kind/study_kind are aliases; default standard.
+    assert _study_type({"study_type": "diagnostic"}) == "diagnostic"
+    assert _study_type({"kind": "adversarial"}) == "adversarial"
+    assert _study_type({"study_kind": "confirmatory"}) == "confirmatory"
+    assert _study_type({}) == "standard"
+    # Unknown value falls through to the default.
+    assert _study_type({"study_type": "bogus"}) == "standard"
+
+
+def test_study_type_badge_omits_implicit_standard():
+    assert _render_study_type_badge({}) == ""
+    assert _render_study_type_badge({"study_type": "standard"}) == ""
+    badge = _render_study_type_badge({"study_type": "adversarial"})
+    assert "adversarial" in badge and "study-type-badge" in badge
+
+
+def test_study_type_badge_in_report_header(_ws):
+    _write_study(_ws, "s1", report={"title": "S1"}, study_type="diagnostic")
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert "study-type-badge" in text
+    assert "diagnostic" in text
+
+
+def test_next_action_type_chip_known_and_absent():
+    # #7 — known enum value renders; absent → no chip.
+    assert _next_action_type_chip({}) == ""
+    assert _next_action_type_chip({"next_action_type": ""}) == ""
+    chip = _next_action_type_chip({"next_action_type": "calibrate"})
+    assert "calibrate" in chip and "next-action-type" in chip
+    # Unknown still renders (faithful to the model; the linter flags it).
+    assert "weird" in _next_action_type_chip({"next_action_type": "weird"})
+
+
+def test_next_action_type_chip_in_report_finding(_ws):
+    _write_study(
+        _ws, "s1", report={"title": "S1"},
+        findings=[{"id": "F-01", "tier": "observation",
+                   "statement": "DnaA peaks at initiation.",
+                   "next_action": "rerun across seeds",
+                   "next_action_type": "replicate"}],
+    )
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert "next-action-type" in text
+    assert "replicate" in text
+
+
+def test_preregistration_chip_omitted_when_no_block(_ws):
+    # #18 — no preregistered block → no chip (also covers the no-pbg degrade).
+    assert _render_preregistration_chip({}) == ""
+    _write_study(_ws, "s1", report={"title": "S1"})
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert "prereg-chip" not in text
+
+
+def test_preregistration_chip_renders_from_status(monkeypatch):
+    # #18 — drive the chip directly via a stubbed preregistration_status so the
+    # render is covered even when pbg-superpowers isn't importable.
+    import vivarium_dashboard.lib.single_study_report as ssr
+    monkeypatch.setattr(
+        ssr, "_preregistration_status",
+        lambda spec: {"preregistered": True, "registered_before_run": True,
+                      "criteria_match": True},
+    )
+    chip = ssr._render_preregistration_chip({"preregistered": {"criteria": []}})
+    assert "prereg-chip" in chip and "pre-registered" in chip
+
+    monkeypatch.setattr(
+        ssr, "_preregistration_status",
+        lambda spec: {"preregistered": True, "registered_before_run": False,
+                      "criteria_match": False},
+    )
+    chip2 = ssr._render_preregistration_chip({"preregistered": {"criteria": []}})
+    assert "post-hoc" in chip2 and "drifted" in chip2

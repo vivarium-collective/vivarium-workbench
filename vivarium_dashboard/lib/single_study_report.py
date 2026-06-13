@@ -136,6 +136,136 @@ def _render_verdict_badge(verdict_key: str | None) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# Workflow typing chips (Wave 3a — critiques #10 / #7 / #18)
+# ---------------------------------------------------------------------------
+
+# critique #10 — study_type enum (default unset → standard; `kind`/`study_kind`
+# == "adversarial" stay valid aliases). Kept in sync with rigor._study_type and
+# study-detail.js _studyType.
+_STUDY_TYPES = (
+    "exploratory", "confirmatory", "diagnostic", "adversarial", "standard",
+)
+_STUDY_TYPE_COLORS = {
+    "exploratory":  ("#e0e7ff", "#3730a3"),
+    "confirmatory": ("#dcfce7", "#166534"),
+    "diagnostic":   ("#fef3c7", "#92400e"),
+    "adversarial":  ("#fee2e2", "#991b1b"),
+    "standard":     ("#f1f5f9", "#475569"),
+}
+
+# critique #7 — next_action_type enum (free-text next_action stays the rationale).
+_NEXT_ACTION_TYPES = (
+    "replicate", "calibrate", "ablate", "adversarially_probe",
+    "refine_representation", "split_hypothesis", "retire_hypothesis",
+    "escalate_model",
+)
+
+
+def _study_type(spec: dict) -> str:
+    """Return the study's typed workflow role (critique #10).
+
+    Reads ``study_type`` first, falls back to the legacy ``kind`` / ``study_kind``
+    aliases, defaults to ``standard``. Mirrors ``rigor._study_type`` so the
+    badge matches the rigor credit.
+    """
+    for key in ("study_type", "kind", "study_kind"):
+        val = spec.get(key)
+        if isinstance(val, str) and val.strip():
+            v = val.strip().lower()
+            if v in _STUDY_TYPES:
+                return v
+    return "standard"
+
+
+def _render_study_type_badge(spec: dict) -> str:
+    """Render the study_type pill for the report header. Omitted for the
+    implicit ``standard`` default (only an explicit type is worth a chip)."""
+    explicit = any(
+        isinstance(spec.get(k), str) and spec.get(k).strip()
+        for k in ("study_type", "kind", "study_kind")
+    )
+    st = _study_type(spec)
+    if not explicit or st == "standard":
+        return ""
+    bg, fg = _STUDY_TYPE_COLORS.get(st, ("#f1f5f9", "#475569"))
+    return (
+        f'<span class="study-type-badge" title="study type (critique #10)" '
+        f'style="display:inline-block;padding:2px 10px;border-radius:9999px;'
+        f'font-weight:600;font-size:0.78em;background:{bg};color:{fg};'
+        f'margin-left:6px;vertical-align:middle">{_h(st)}</span>'
+    )
+
+
+def _next_action_type_chip(finding: dict) -> str:
+    """Render a finding's ``next_action_type`` pill (critique #7). Returns ''
+    when absent; renders unknown values too (the linter flags them, the render
+    stays faithful to the model)."""
+    if not isinstance(finding, dict):
+        return ""
+    nat = finding.get("next_action_type")
+    if not isinstance(nat, str) or not nat.strip():
+        return ""
+    v = nat.strip()
+    known = v in _NEXT_ACTION_TYPES
+    bg, fg = ("#dbeafe", "#1e40af") if known else ("#fef9c3", "#854d0e")
+    return (
+        f'<span class="next-action-type" title="next action type (critique #7)" '
+        f'style="display:inline-block;padding:1px 8px;border-radius:9999px;'
+        f'background:{bg};color:{fg};font-weight:600;font-size:0.72em;'
+        f'margin-left:6px;vertical-align:middle">{_h(v)}</span>'
+    )
+
+
+def _preregistration_status(spec: dict) -> dict | None:
+    """critique #18 — defensive bridge to
+    ``study_verdict.preregistration_status``. Returns None when pbg-superpowers
+    (or the function) isn't importable so the chip simply doesn't render."""
+    try:
+        from pbg_superpowers.study_verdict import preregistration_status
+    except Exception:
+        return None
+    try:
+        return preregistration_status(spec)
+    except Exception:
+        return None
+
+
+def _render_preregistration_chip(spec: dict) -> str:
+    """Render the "pre-registered ✓ / post-hoc ⚠" chip (critique #18) for the
+    verdict area, driven by ``study_verdict.preregistration_status``. Omitted
+    when no ``preregistered`` block is declared (or the bridge is unavailable)."""
+    status = _preregistration_status(spec)
+    if not isinstance(status, dict) or not status.get("preregistered"):
+        return ""
+    before = status.get("registered_before_run")
+    if before is True:
+        bg, fg, label, title = (
+            "#dcfce7", "#166534", "pre-registered ✓",
+            "criteria registered before the canonical run",
+        )
+    elif before is False:
+        bg, fg, label, title = (
+            "#fef3c7", "#92400e", "post-hoc ⚠",
+            "criteria registered AFTER the run started",
+        )
+    else:
+        bg, fg, label, title = (
+            "#e2e8f0", "#475569", "pre-registered (timing unknown)",
+            "registered_at or run start time missing — timing could not be checked",
+        )
+    cm = status.get("criteria_match")
+    if cm is False:
+        label += " · thresholds drifted"
+        title += "; pre-registered thresholds differ from the current behavior tests"
+    return (
+        f'<span class="prereg-chip" title="{_h(title)}" '
+        f'style="display:inline-block;padding:2px 10px;border-radius:9999px;'
+        f'font-weight:600;font-size:0.78em;background:{bg};color:{fg};'
+        f'margin-left:6px;vertical-align:middle">{_h(label)}</span>'
+    )
+
+
 def _render_key_metrics(metrics: list) -> str:
     if not metrics:
         return ""
@@ -219,10 +349,11 @@ def _render_biological_summary(spec: dict) -> str:
                 if stmt:
                     fid = f.get("id", "")
                     chip = _finding_weight_chip(_finding_weight(spec, f))
+                    nat_chip = _next_action_type_chip(f)   # critique #7
                     derived.append(
                         f'<div class="narrative-row" style="margin:10px 0">'
                         f'<strong>Finding{(" " + _h(fid)) if fid else ""}:</strong> '
-                        f'{_multiline(stmt)}{chip}</div>'
+                        f'{_multiline(stmt)}{chip}{nat_chip}</div>'
                     )
         if derived:
             bits.append(
@@ -472,7 +603,8 @@ def _render_conclusion_synthesis(spec: dict) -> str:
         if not text:
             continue
         chip = _finding_weight_chip(_finding_weight(spec, f))
-        claim_lis.append(f'<li>{_multiline(str(text))}{chip}</li>')
+        nat_chip = _next_action_type_chip(f)   # critique #7
+        claim_lis.append(f'<li>{_multiline(str(text))}{chip}{nat_chip}</li>')
     evidence = []
     for f in findings:
         ev = f.get("evidence")
@@ -1498,6 +1630,8 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
     key_metrics = rep.get("key_metrics") or _derive_key_metrics(study_spec)
 
     badge = _render_verdict_badge(verdict)
+    study_type_badge = _render_study_type_badge(study_spec)   # critique #10
+    prereg_chip = _render_preregistration_chip(study_spec)    # critique #18
     metrics_html = _render_key_metrics(key_metrics)
     verdicts_html = _render_conclusion_verdicts(study_spec)
     synthesis_html = _render_conclusion_synthesis(study_spec)
@@ -1742,7 +1876,7 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
   {inv_chip}
   <h1>{_h(title)}</h1>
   <div class="meta" style="color:#475569;font-size:0.95em">
-    <code>{_h(study_spec.get("name", ""))}</code> {badge}
+    <code>{_h(study_spec.get("name", ""))}</code> {badge}{study_type_badge}{prereg_chip}
   </div>
   {quality_html}
 </header>
