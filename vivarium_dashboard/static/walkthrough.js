@@ -6601,7 +6601,8 @@
         links.push('<a href="#' + sid.conditions + '">Conditions ' +
                    (_condCount ? '<span class="sn-count">' + _condCount + '</span>' : '') + '</a>');
       }
-      if (sims.length)        links.push('<a href="#' + sid.sims + '">What we ran <span class="sn-count">' + sims.length + '</span></a>');
+      var _ranCount = sims.length || (s.baseline || []).length || (s.runs || []).length;
+      links.push('<a href="#' + sid.sims + '">What we ran' + (_ranCount ? ' <span class="sn-count">' + _ranCount + '</span>' : '') + '</a>');
       if (readouts.length)    links.push('<a href="#' + sid.readouts + '">What we measured <span class="sn-count">' + readouts.length + '</span></a>');
       if (charts.length)      links.push('<a href="#' + sid.charts + '">Charts <span class="sn-count">' + charts.length + '</span></a>');
       if (tests.length)       links.push('<a href="#' + sid.tests + '">How we judge it <span class="sn-count">' + tests.length + '</span></a>');
@@ -6861,12 +6862,37 @@
 
       // ── WHAT DID/WILL WE RUN? (Simulations) ──────────────────────────
       var simsHtml = '';
+      // What we ran — ENFORCED. The composite(s) + parameter settings actually
+      // simulated. Prefer the v3 simulation_set; else derive from the dashboard-
+      // managed baseline (composite + params) + recorded runs + robustness
+      // (seeds) — which is how the autopoiesis studies record runs. Always
+      // rendered; a study with neither gets an explicit gap notice. Each
+      // composite links out to the bigraph-loom explorer (popped out, live only).
+      function _short(model) {
+        if (!model) return '';
+        var p = String(model).split('.');
+        return p[p.length - 1];
+      }
+      function _compositeCell(composite) {
+        if (!composite) return '<span class="muted">—</span>';
+        var label = _short(composite);
+        var id = composite.indexOf('.composites.') >= 0 ? composite.split('.composites.')[1] : composite;
+        return '<a href="#" class="composite-loom-link" '
+          + 'title="Open this composite in the bigraph-loom explorer" '
+          + 'onclick="event.preventDefault(); if((location.protocol||\'\').indexOf(\'http\')===0){'
+          + 'window.open(location.pathname + \'?id=\' + encodeURIComponent(\'' + _h(id) + '\') + \'#composite-explore\','
+          + ' \'loom-' + _h(id) + '\', \'width=1180,height=820\');}'
+          + 'else{alert(\'Open this in the live dashboard to explore the composite in bigraph-loom.\');}">'
+          + '<code>' + _h(label) + '</code> <span aria-hidden="true">↗</span></a>';
+      }
+      function _paramsCell(params) {
+        if (!params || typeof params !== 'object' || !Object.keys(params).length)
+          return '<span class="muted">default parameters</span>';
+        return Object.keys(params).map(function(k) {
+          return '<code>' + _h(k) + ' = ' + _h(JSON.stringify(params[k])) + '</code>';
+        }).join(' ');
+      }
       if (sims.length) {
-        function _short(model) {
-          if (!model) return '';
-          var p = String(model).split('.');
-          return p[p.length - 1];
-        }
         // The first sim is the reference; describe each row as its diff from it.
         var baseSim = sims[0] || {};
         var baseParams = baseSim.params || {};
@@ -6909,17 +6935,57 @@
             ? '<div class="sim-feeds muted small">feeds: ' + tests.map(function(t){return '<code>' + _h(t) + '</code>';}).join(' ') + '</div>' : '';
           return '<tr>'
             + '<td><strong>' + _h(sim.name || '(unnamed)') + '</strong>' + feeds + '</td>'
-            + '<td><code>' + _h(_short(sim.base_model)) + '</code></td>'
+            + '<td>' + _compositeCell(sim.base_model) + '</td>'
             + '<td>' + _changes(sim) + '</td>'
             + '<td class="muted small">' + (runParts.join(' · ') || '—') + '</td>'
             + '<td>' + statusPill + '</td>'
             + '</tr>';
         }).join('');
-        simsHtml = '<div id="' + sid.sims + '"><h3>What did/will we run? <span class="muted small">(' + sims.length + ' simulations)</span></h3>'
-          + '<p class="muted small" style="margin:0 0 8px 0">One row per concrete run: the model composite, what changes vs the reference baseline, the condition / length, and its status.</p>'
-          + '<table class="sim-table"><thead><tr><th>Simulation</th><th>Model</th><th>Changes vs baseline</th><th>Run</th><th>Status</th></tr></thead>'
+        simsHtml = '<div id="' + sid.sims + '"><h3>What we ran <span class="muted small">(' + sims.length + ' simulation' + (sims.length === 1 ? '' : 's') + ')</span></h3>'
+          + '<p class="muted small" style="margin:0 0 8px 0">One row per concrete run: the model composite (click ↗ to open it in the bigraph-loom explorer), what changes vs the reference baseline, the condition / length, and its status.</p>'
+          + '<table class="sim-table"><thead><tr><th>Simulation</th><th>Composite</th><th>Changes vs baseline</th><th>Run</th><th>Status</th></tr></thead>'
           + '<tbody>' + rows + '</tbody></table>'
           + '</div>';
+      } else {
+        // No simulation_set — derive what was run from the dashboard-managed
+        // baseline (composite + parameter settings), recorded runs, and
+        // robustness (seeds). This is how the autopoiesis studies record runs.
+        var baseline = s.baseline || [];
+        var runsArr = s.runs || [];
+        var rob = s.robustness || {};
+        var runByName = {};
+        runsArr.forEach(function(r) { if (r && r.name) runByName[r.name] = r; });
+        var replCell = (rob && (rob.n_replicates || (rob.seeds && rob.seeds.length)))
+          ? ((rob.n_replicates || rob.seeds.length) + ' seed'
+             + ((rob.n_replicates || rob.seeds.length) === 1 ? '' : 's')
+             + (rob.parameter_sweep ? ' + sweep' : ''))
+          : (runsArr.length ? '1 run' : '—');
+        var entries = baseline.length
+          ? baseline
+          : runsArr.map(function(r) { return {name: r.name, composite: r.composite, params: null}; });
+        if (entries.length) {
+          var brows = entries.map(function(b) {
+            var run = runByName[b.name] || runsArr[0] || {};
+            var status = run.status || 'recorded';
+            return '<tr>'
+              + '<td><strong>' + _h(b.name || 'baseline') + '</strong></td>'
+              + '<td>' + _compositeCell(b.composite) + '</td>'
+              + '<td>' + _paramsCell(b.params) + '</td>'
+              + '<td class="muted small">' + _h(replCell) + '</td>'
+              + '<td><span class="sim-status-pill sim-status-ran">' + _h(status) + '</span></td>'
+              + '</tr>';
+          }).join('');
+          simsHtml = '<div id="' + sid.sims + '"><h3>What we ran <span class="muted small">(composite + parameters)</span></h3>'
+            + '<p class="muted small" style="margin:0 0 8px 0">The composite(s) and parameter settings actually simulated for this study (from its baseline). Click a composite ↗ to open it in the bigraph-loom explorer.</p>'
+            + '<table class="sim-table"><thead><tr><th>Run</th><th>Composite</th><th>Parameters</th><th>Replication</th><th>Status</th></tr></thead>'
+            + '<tbody>' + brows + '</tbody></table>'
+            + '</div>';
+        } else {
+          // ENFORCED: a study with no composite/params recorded is flagged.
+          simsHtml = '<div id="' + sid.sims + '"><h3>What we ran</h3>'
+            + '<p style="margin:0;color:#b45309">⚠ No composite or parameters recorded for this study — declare a baseline (composite + parameter settings) or a simulation_set so the report shows what was simulated.</p>'
+            + '</div>';
+        }
       }
 
       // ── CHARTS (visualisations from runs.db) ─────────────────────────
