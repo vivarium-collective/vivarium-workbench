@@ -127,11 +127,19 @@ window.addEventListener('pageshow', function (e) {
 }
 
 /* Workspace switcher (top of the left rail). */
-.viv-workspace-switcher { position: relative; padding: 8px 12px; }
+.viv-workspace-switcher { position: relative; padding: 0; }
+/* One dashboard per repo: the workspace identity reads as a refined header that
+   continues the Vivarium rail-brand above it — not a button. No box, no hover,
+   default cursor; a small status dot + the name, with a hairline divider that
+   sets it off as a section rather than a control. */
 .viv-workspace-name {
-  display: flex; align-items: center; gap: 6px;
-  padding: 6px 8px; font-size: 13px; color: #1c2330;
+  display: flex; align-items: center; gap: 8px;
+  padding: 2px 16px 13px;
+  font-size: 13px; font-weight: 600; letter-spacing: 0.005em;
+  color: #2c3340; cursor: default;
+  border-bottom: 1px solid #ececf1;
 }
+.viv-workspace-name .viv-workspace-switcher-glyph { font-size: 9px; }
 .viv-workspace-switcher-trigger {
   display: flex; align-items: center; gap: 6px;
   width: 100%; padding: 6px 8px; background: #fff;
