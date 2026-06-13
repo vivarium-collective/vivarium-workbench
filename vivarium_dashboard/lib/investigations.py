@@ -360,6 +360,13 @@ def _project_v4_redesign_to_legacy_view(spec: dict) -> dict:
             a.get("text", "") for a in out["assumptions"] if isinstance(a, dict)
         ]
 
+    # expert_decisions_needed — canonical authored field is ``design_pivot_required``
+    # (a list of decision/pivot dicts). The study-detail "Pre-run expert review"
+    # panel + the report (walkthrough.js) read ``expert_decisions_needed``, so
+    # mirror the canonical field onto that legacy name when it isn't already set.
+    if out.get("design_pivot_required") and not out.get("expert_decisions_needed"):
+        out["expert_decisions_needed"] = out["design_pivot_required"]
+
     # baseline — synthesise the v3 single-baseline list shape
     bl = cond.get("baseline") or {}
     if bl.get("composite") and not out.get("baseline"):
@@ -385,31 +392,76 @@ def _project_v4_redesign_to_legacy_view(spec: dict) -> dict:
             "description": v.get("description", ""),
         } for v in new_variants if isinstance(v, dict)]
 
-    # simulation_set — synthesise the v3 planned-simulations list so the
-    # study-detail Simulations tab + the report's "What we ran" section
-    # render content for v4 studies. Each variant maps to one planned sim.
-    # The baseline itself appears as a leading "baseline" entry so the
-    # tab isn't empty when there are no variants.
+    # simulation_set — the single CANONICAL run set. We normalise every
+    # documented alias into it so the study-detail Simulations tab + the
+    # report's "What we ran" section read from one source:
+    #   - ``conditions.baseline`` / ``conditions.variants`` (v4 structured)
+    #   - top-level ``baseline`` / ``variants`` (v3 legacy lists)
+    #   - ``conditions.model_settings`` (shared model knobs, merged into params)
+    #   - parameter-override ``interventions`` (folded into variants; text-only
+    #     interventions — no parameter_overrides/params — stay as interventions).
+    # All aliases remain readable in place; we only ADD the canonical set.
+    # The baseline appears as a leading "baseline" entry so the tab isn't
+    # empty when there are no variants.
     if "simulation_set" not in out:
+        ms = cond.get("model_settings")
+        model_settings = dict(ms) if isinstance(ms, dict) else {}
+
+        # Effective baseline — prefer the v4 conditions.baseline dict, else the
+        # first entry of a top-level v3 baseline list.
+        eff_bl_composite = baseline_composite
+        eff_bl_params = dict(bl.get("params") or {})
+        eff_bl_name = baseline_name
+        if not eff_bl_composite:
+            top_bl = out.get("baseline")
+            if isinstance(top_bl, list) and top_bl and isinstance(top_bl[0], dict):
+                eff_bl_composite = top_bl[0].get("composite")
+                eff_bl_params = dict(top_bl[0].get("params") or {})
+                eff_bl_name = top_bl[0].get("name") or baseline_name
+
+        # Effective variants — union of conditions.variants and any top-level
+        # variants list (de-duplicated by name; conditions wins).
+        eff_variants = [v for v in new_variants if isinstance(v, dict)]
+        seen_names = {v.get("name") for v in eff_variants}
+        top_variants = out.get("variants")
+        if isinstance(top_variants, list):
+            for v in top_variants:
+                if isinstance(v, dict) and v.get("name") not in seen_names:
+                    eff_variants.append(v)
+                    seen_names.add(v.get("name"))
+
+        # Fold parameter-override interventions into variants; keep text-only
+        # interventions (no parameter_overrides/params) under ``interventions``.
+        for iv in (out.get("interventions") or []):
+            if not isinstance(iv, dict):
+                continue
+            overrides = iv.get("parameter_overrides") or iv.get("params")
+            if overrides and iv.get("name") not in seen_names:
+                eff_variants.append({
+                    "name":                iv.get("name"),
+                    "composite":           iv.get("composite"),
+                    "parameter_overrides": dict(overrides),
+                    "description":         iv.get("description", ""),
+                })
+                seen_names.add(iv.get("name"))
+
         sim_set = []
-        if baseline_composite:
+        if eff_bl_composite:
             sim_set.append({
-                "name":        baseline_name + "-baseline",
+                "name":        eff_bl_name + "-baseline",
                 "kind":        "single",
-                "base_model":  baseline_composite,
+                "base_model":  eff_bl_composite,
                 "is_baseline": True,
                 "description": "Reference run for the study — variants below perturb this.",
-                "params":      dict(bl.get("params") or {}),
+                "params":      {**model_settings, **eff_bl_params},
             })
-        for v in new_variants:
-            if not isinstance(v, dict):
-                continue
+        for v in eff_variants:
             sim_set.append({
                 "name":        v.get("name"),
                 "kind":        v.get("kind", "single"),
-                "base_model":  v.get("composite") or v.get("base_composite") or baseline_composite,
+                "base_model":  v.get("composite") or v.get("base_composite") or eff_bl_composite,
                 "description": v.get("description", ""),
-                "params":      dict(v.get("parameter_overrides") or v.get("params") or {}),
+                "params":      {**model_settings, **dict(v.get("parameter_overrides") or v.get("params") or {})},
                 "status":      v.get("status", "ready"),
             })
         if sim_set:
