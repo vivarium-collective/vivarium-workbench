@@ -203,6 +203,31 @@ def _render_biological_summary(spec: dict) -> str:
             + "".join(rows)
             + '</section>'
         )
+    # MINIMAL fallback: no authored biology/narrative → derive the narrative from
+    # the study's objective + findings so the section still renders meaningfully.
+    if not bits:
+        derived = []
+        obj = spec.get("objective")
+        if obj:
+            derived.append(
+                f'<div class="narrative-row" style="margin:10px 0">'
+                f'<strong>Objective:</strong> {_multiline(obj)}</div>'
+            )
+        for f in (spec.get("findings") or []):
+            if isinstance(f, dict):
+                stmt = f.get("statement") or f.get("summary")
+                if stmt:
+                    fid = f.get("id", "")
+                    derived.append(
+                        f'<div class="narrative-row" style="margin:10px 0">'
+                        f'<strong>Finding{(" " + _h(fid)) if fid else ""}:</strong> '
+                        f'{_multiline(stmt)}</div>'
+                    )
+        if derived:
+            bits.append(
+                '<section class="report-narrative"><h2>Study narrative</h2>'
+                + "".join(derived) + '</section>'
+            )
     return "".join(bits)
 
 
@@ -263,19 +288,73 @@ def _render_viz_embeds(viz_entries: list[dict]) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# Derivation — when a study has no authored ``report:`` block, build the
+# standard report fields from the study's REAL content (gate evaluator, run
+# outcomes, findings, objective). A MINIMAL but valid study then still renders
+# the standard report structure instead of a near-empty page.
+# ---------------------------------------------------------------------------
+
+_GATE_TO_VERDICT = {
+    "passed": "passing", "failed": "failing-bio",
+    "needs_calibration": "calibrating", "blocked": "blocked",
+    "not_started": "not-started",
+}
+
+
+def _derive_verdict(spec: dict) -> str:
+    ge = (spec.get("pipeline_gate") or {}).get("gate_evaluator") or {}
+    return _GATE_TO_VERDICT.get(ge.get("result") or spec.get("gate_status"), "")
+
+
+def _latest_outcomes(spec: dict) -> dict:
+    for r in reversed(spec.get("runs") or []):
+        if isinstance(r, dict) and r.get("outcomes"):
+            return r["outcomes"]
+    return {}
+
+
+def _derive_key_metrics(spec: dict) -> list[dict]:
+    """Behavior-test outcomes as metric chips (PASS/FAIL + the observed value)."""
+    metrics = []
+    for name, o in _latest_outcomes(spec).items():
+        if not isinstance(o, dict):
+            continue
+        res = str(o.get("result", "")).upper()
+        observed = o.get("observed")
+        metrics.append({
+            "label": name,
+            "value": observed if observed is not None else res,
+            "status": "pass" if res == "PASS" else ("fail" if res == "FAIL" else "warn"),
+        })
+    return metrics
+
+
+def _derive_insight(spec: dict) -> str:
+    """Headline insight: the first finding's statement/summary."""
+    for f in (spec.get("findings") or []):
+        if isinstance(f, dict):
+            s = f.get("statement") or f.get("summary")
+            if s:
+                return s
+    return ""
+
+
 def _render_html(study_spec: dict, viz_entries: list[dict],
                  *, investigation_slug: Optional[str], generated_at: str) -> str:
     rep = study_spec.get("report") or {}
-    title = rep.get("title") or study_spec.get("name", "study")
-    verdict = rep.get("verdict") or ""
+    # Authored ``report:`` fields win; absent ones are DERIVED from real study
+    # content so minimal studies still render the standard structure.
+    title = rep.get("title") or study_spec.get("title") or study_spec.get("name", "study")
+    verdict = rep.get("verdict") or _derive_verdict(study_spec)
     confidence = rep.get("confidence") or ""
     evidence_quality = rep.get("evidence_quality") or ""
-    objective = rep.get("objective") or ""
+    objective = rep.get("objective") or study_spec.get("objective") or ""
     conclusion = rep.get("conclusion") or ""
-    main_insight = rep.get("main_insight") or ""
+    main_insight = rep.get("main_insight") or _derive_insight(study_spec)
     caveat = rep.get("caveat") or ""
     lit_match = rep.get("lit_match") or ""
-    key_metrics = rep.get("key_metrics") or []
+    key_metrics = rep.get("key_metrics") or _derive_key_metrics(study_spec)
 
     badge = _render_verdict_badge(verdict)
     metrics_html = _render_key_metrics(key_metrics)
