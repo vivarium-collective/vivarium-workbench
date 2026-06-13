@@ -621,3 +621,166 @@ def test_preregistration_chip_renders_from_status(monkeypatch):
     )
     chip2 = ssr._render_preregistration_chip({"preregistered": {"criteria": []}})
     assert "post-hoc" in chip2 and "drifted" in chip2
+
+
+# ---------------------------------------------------------------------------
+# Wave 3b — per-finding claim_scope (#21) / generality (#22) / lifecycle (#25)
+# chips + measurement-integrity section (threshold provenance/sensitivity #9,
+# calibration ladder #20).
+# ---------------------------------------------------------------------------
+
+from vivarium_dashboard.lib.single_study_report import (  # noqa: E402
+    _claim_scope_chip,
+    _generality_chip,
+    _lifecycle_chip,
+    _threshold_provenance_chip,
+    _pass_if_text,
+    _render_threshold_sensitivity,
+    _render_calibration_ladder,
+    _render_measurement_integrity,
+)
+
+
+def test_claim_scope_chip_known_and_absent():
+    # #21 — present value renders; absent → no chip.
+    assert _claim_scope_chip({}) == ""
+    assert _claim_scope_chip({"claim_scope": ""}) == ""
+    chip = _claim_scope_chip({"claim_scope": "theoretical"})
+    assert "theoretical" in chip and "claim-scope" in chip
+    # Unknown value still renders (faithful to the model).
+    assert "weird" in _claim_scope_chip({"claim_scope": "weird"})
+
+
+def test_generality_chip_axes_and_level():
+    # #22 — level coloured, axis count surfaced, axes in tooltip.
+    assert _generality_chip({}) == ""
+    assert _generality_chip({"generality": {}}) == ""
+    chip = _generality_chip({"generality": {
+        "axes_tested": ["parameter_regime", "initial_conditions"],
+        "level": "mechanism"}})
+    assert "generality" in chip and "mechanism" in chip
+    assert "2 ax" in chip                       # axis count
+    assert "parameter_regime" in chip           # in the title tooltip
+    # Axes-only (no level) still renders.
+    assert "generality" in _generality_chip(
+        {"generality": {"axes_tested": ["geometry"]}})
+
+
+def test_lifecycle_chip_authored_and_floor(monkeypatch):
+    # #25 — authored value wins; absent → derived floor (marked); none → ''.
+    import vivarium_dashboard.lib.single_study_report as ssr
+    monkeypatch.setattr(ssr, "_lifecycle_floor", lambda spec, f: None)
+    assert ssr._lifecycle_chip({}, {}) == ""
+    authored = ssr._lifecycle_chip({}, {"lifecycle_state": "generalized"})
+    assert "generalized" in authored and "lifecycle-state" in authored
+    assert "floor" not in authored
+    # No authored state but a derived floor → chip shows the floor, marked.
+    monkeypatch.setattr(ssr, "_lifecycle_floor",
+                        lambda spec, f: "tested-vs-alternatives")
+    derived = ssr._lifecycle_chip({}, {"id": "F-01"})
+    assert "tested-vs-alternatives" in derived and "floor" in derived
+
+
+def test_finding_chips_in_report(_ws):
+    _write_study(
+        _ws, "s1", report={"title": "S1"},
+        findings=[{"id": "F-01", "tier": "interpretation",
+                   "statement": "Life becomes mind.",
+                   "claim_scope": "theoretical",
+                   "generality": {"axes_tested": ["parameter_regime"],
+                                  "level": "instance_specific"},
+                   "lifecycle_state": "provisional-claim"}],
+    )
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert "claim-scope" in text and "theoretical" in text
+    assert "generality" in text
+    assert "lifecycle-state" in text and "provisional-claim" in text
+
+
+def test_pass_if_text_renders_ops():
+    assert _pass_if_text({"op": "in_range", "low": 0.1, "high": 0.5}) == "in [0.1, 0.5]"
+    assert "≥" in _pass_if_text({"op": "at_least", "low": 3})
+    assert "≤" in _pass_if_text({"op": "at_most", "high": 9})
+    assert "= 5" in _pass_if_text({"op": "equals", "value": 5})
+
+
+def test_threshold_provenance_chip():
+    # #9 — kind pill renders; note goes in the tooltip; absent → ''.
+    assert _threshold_provenance_chip({}) == ""
+    assert _threshold_provenance_chip({"note": "x"}) == ""
+    chip = _threshold_provenance_chip({"kind": "literature", "note": "Boesen 2024"})
+    assert "literature" in chip and "threshold-provenance" in chip
+    assert "Boesen 2024" in chip                # in the title tooltip
+
+
+def test_render_threshold_sensitivity_view():
+    assert _render_threshold_sensitivity(None) == ""
+    assert _render_threshold_sensitivity([]) == ""
+    html = _render_threshold_sensitivity([
+        {"cutoff": 0.08, "result": "PASS"},
+        {"cutoff": 0.12, "result": "FAIL"},
+    ])
+    assert "threshold-sensitivity" in html
+    assert "±20%" in html
+    assert "0.08" in html and "0.12" in html
+
+
+def test_render_calibration_ladder():
+    # #20 — table with rung cells + filled-count badge; absent → ''.
+    assert _render_calibration_ladder({}) == ""
+    html = _render_calibration_ladder({"calibration_ladder": [
+        {"metric": "containment", "known_fail": "leaky-ctrl",
+         "known_pass": "sealed-ctrl", "borderline": None, "stress": None},
+    ]})
+    assert "calibration-ladder" in html
+    assert "containment" in html
+    assert "leaky-ctrl" in html and "sealed-ctrl" in html
+    assert "2/4" in html                        # filled-rung count
+
+
+def test_measurement_integrity_section_provenance_and_ladder(_ws):
+    _write_study(
+        _ws, "s1", report={"title": "S1"},
+        behavior_tests=[{
+            "name": "growth-rate", "pass_if": {
+                "op": "in_range", "low": 0.1, "high": 0.5,
+                "provenance": {"kind": "calibration", "note": "fit to Taheri-Araghi"}}}],
+        calibration_ladder=[{"metric": "growth", "known_fail": "starve-ctrl",
+                             "known_pass": "rich-ctrl"}],
+    )
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'id="measurement-integrity"' in text
+    assert "Measurement integrity" in text
+    assert "calibration" in text               # provenance kind
+    assert "fit to Taheri-Araghi" in text      # note
+    assert "growth-rate" in text               # band name
+    assert 'id="calibration-ladder"' in text
+    assert "starve-ctrl" in text
+
+
+def test_measurement_integrity_omitted_when_absent(_ws):
+    _write_study(_ws, "s1", report={"title": "S1"},
+                 behavior_tests=[{"name": "x", "pass_if": {"op": "at_least", "low": 1}}])
+    # A band without provenance and no calibration_ladder → section omitted
+    # (unless rigor.threshold_sensitivity is importable AND returns rows; the
+    # bare 'x' test has no recorded outcomes, so it stays guarded/None).
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'id="measurement-integrity"' not in text
+
+
+def test_measurement_integrity_sensitivity_via_stub(monkeypatch, _ws):
+    # #9 — drive the sensitivity mini-view through a stubbed bridge so the
+    # render is covered even when pbg-superpowers lacks threshold_sensitivity.
+    import vivarium_dashboard.lib.single_study_report as ssr
+    monkeypatch.setattr(ssr, "_threshold_sensitivity",
+                        lambda spec, name: [{"cutoff": 0.9, "result": "PASS"},
+                                            {"cutoff": 1.1, "result": "FAIL"}])
+    html = ssr._render_measurement_integrity({
+        "behavior_tests": [{"name": "div-time", "pass_if": {"op": "at_least", "low": 1}}],
+    })
+    assert 'id="measurement-integrity"' in html
+    assert "threshold-sensitivity" in html
+    assert "div-time" in html

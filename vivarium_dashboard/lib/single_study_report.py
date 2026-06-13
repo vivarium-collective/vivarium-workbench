@@ -350,10 +350,11 @@ def _render_biological_summary(spec: dict) -> str:
                     fid = f.get("id", "")
                     chip = _finding_weight_chip(_finding_weight(spec, f))
                     nat_chip = _next_action_type_chip(f)   # critique #7
+                    wave3b = _finding_chips(spec, f)       # #21/#22/#25
                     derived.append(
                         f'<div class="narrative-row" style="margin:10px 0">'
                         f'<strong>Finding{(" " + _h(fid)) if fid else ""}:</strong> '
-                        f'{_multiline(stmt)}{chip}{nat_chip}</div>'
+                        f'{_multiline(stmt)}{chip}{nat_chip}{wave3b}</div>'
                     )
         if derived:
             bits.append(
@@ -604,7 +605,8 @@ def _render_conclusion_synthesis(spec: dict) -> str:
             continue
         chip = _finding_weight_chip(_finding_weight(spec, f))
         nat_chip = _next_action_type_chip(f)   # critique #7
-        claim_lis.append(f'<li>{_multiline(str(text))}{chip}{nat_chip}</li>')
+        wave3b = _finding_chips(spec, f)       # #21/#22/#25
+        claim_lis.append(f'<li>{_multiline(str(text))}{chip}{nat_chip}{wave3b}</li>')
     evidence = []
     for f in findings:
         ev = f.get("evidence")
@@ -856,6 +858,354 @@ def _finding_weight_chip(weight_info: dict | None) -> str:
         f'padding:1px 8px;border-radius:9999px;background:{bg};color:{fg};'
         f'font-weight:600;font-size:0.72em;margin-left:6px;vertical-align:middle">'
         f'{label}</span>'
+    )
+
+
+# ---------------------------------------------------------------------------
+# Wave 3b — per-finding claim_scope (#21) / generality (#22) / lifecycle (#25)
+# chips, rendered beside each finding's tier/weight badges. All consume
+# authored/computed fields; absent → no chip. Enums match the cross-repo
+# contract exactly (kept in sync with static/walkthrough.js).
+# ---------------------------------------------------------------------------
+
+# critique #21 — claim_scope (DISTINCT from tier; the reach of the claim).
+_CLAIM_SCOPES = (
+    "local-implementation", "mechanism", "behavioral", "theoretical", "generality",
+)
+_CLAIM_SCOPE_COLORS = {
+    "local-implementation": ("#f1f5f9", "#475569"),
+    "mechanism":            ("#dbeafe", "#1e40af"),
+    "behavioral":           ("#dcfce7", "#166534"),
+    "theoretical":          ("#ede9fe", "#6d28d9"),
+    "generality":           ("#fef9c3", "#854d0e"),
+}
+
+
+def _claim_scope_chip(finding: dict) -> str:
+    """Render a finding's ``claim_scope`` pill (critique #21). '' when absent.
+    Unknown values still render (faithful to the model; the linter flags them)."""
+    if not isinstance(finding, dict):
+        return ""
+    cs = finding.get("claim_scope")
+    if not isinstance(cs, str) or not cs.strip():
+        return ""
+    v = cs.strip()
+    bg, fg = _CLAIM_SCOPE_COLORS.get(v, ("#fef9c3", "#854d0e"))
+    return (
+        f'<span class="claim-scope" title="claim scope (critique #21)" '
+        f'style="display:inline-block;padding:1px 8px;border-radius:9999px;'
+        f'background:{bg};color:{fg};font-weight:600;font-size:0.72em;'
+        f'margin-left:6px;vertical-align:middle">scope: {_h(v)}</span>'
+    )
+
+
+# critique #22 — generality (axes tested + level).
+_GENERALITY_AXES = (
+    "parameter_regime", "initial_conditions", "discretization",
+    "geometry", "alt_implementation", "independent_authoring",
+)
+_GENERALITY_LEVELS = ("instance_specific", "mechanism", "framework")
+_GENERALITY_LEVEL_COLORS = {
+    "instance_specific": ("#fee2e2", "#991b1b"),
+    "mechanism":         ("#fef9c3", "#854d0e"),
+    "framework":         ("#dcfce7", "#166534"),
+}
+
+
+def _generality_chip(finding: dict) -> str:
+    """Render a finding's ``generality`` pill (critique #22): the level coloured
+    by reach, with the tested axes in the tooltip. '' when absent."""
+    if not isinstance(finding, dict):
+        return ""
+    g = finding.get("generality")
+    if not isinstance(g, dict) or not g:
+        return ""
+    level = str(g.get("level") or "").strip()
+    axes = g.get("axes_tested") or []
+    if isinstance(axes, str):
+        axes = [axes]
+    axes = [str(a) for a in axes if a]
+    if not level and not axes:
+        return ""
+    bg, fg = _GENERALITY_LEVEL_COLORS.get(level, ("#f1f5f9", "#475569"))
+    label = "generality" + (f": {level}" if level else "")
+    n = len(axes)
+    if n:
+        label += f" · {n} ax{'es' if n != 1 else 'is'}"
+    title = "generality (critique #22) — axes tested: " + (", ".join(axes) or "none")
+    return (
+        f'<span class="generality" title="{_h(title)}" '
+        f'style="display:inline-block;padding:1px 8px;border-radius:9999px;'
+        f'background:{bg};color:{fg};font-weight:600;font-size:0.72em;'
+        f'margin-left:6px;vertical-align:middle">{_h(label)}</span>'
+    )
+
+
+# critique #25 — lifecycle_state (DISTINCT from tier/claim-class).
+_LIFECYCLE_STATES = (
+    "observation", "candidate-explanation", "tested-vs-alternatives",
+    "provisional-claim", "generalized", "retired", "superseded",
+)
+_LIFECYCLE_COLORS = {
+    "observation":            ("#f1f5f9", "#475569"),
+    "candidate-explanation":  ("#e0e7ff", "#3730a3"),
+    "tested-vs-alternatives": ("#dbeafe", "#1e40af"),
+    "provisional-claim":      ("#fef9c3", "#854d0e"),
+    "generalized":            ("#dcfce7", "#166534"),
+    "retired":                ("#fee2e2", "#991b1b"),
+    "superseded":             ("#fee2e2", "#991b1b"),
+}
+
+
+def _lifecycle_floor(spec: dict, finding: dict) -> str | None:
+    """critique #25 — defensive bridge to ``study_verdict.lifecycle_floor``.
+    Returns None when pbg-superpowers (or the function) isn't importable, so the
+    chip falls back to the authored value (or nothing)."""
+    try:
+        from pbg_superpowers.study_verdict import lifecycle_floor
+    except Exception:
+        return None
+    try:
+        val = lifecycle_floor(finding, spec)
+    except Exception:
+        return None
+    return val if isinstance(val, str) and val.strip() else None
+
+
+def _lifecycle_chip(spec: dict, finding: dict) -> str:
+    """Render a finding's ``lifecycle_state`` pill (critique #25), beside the
+    tier/weight badges. Shows the authored state when present; otherwise the
+    DERIVED floor from ``study_verdict.lifecycle_floor`` (marked "floor"). '' when
+    neither is available."""
+    if not isinstance(finding, dict):
+        return ""
+    authored = finding.get("lifecycle_state")
+    authored = authored.strip() if isinstance(authored, str) and authored.strip() else None
+    floor = _lifecycle_floor(spec, finding)
+    state = authored or floor
+    if not state:
+        return ""
+    bg, fg = _LIFECYCLE_COLORS.get(state, ("#f1f5f9", "#475569"))
+    derived = (authored is None) and bool(floor)
+    label = state + (" · floor" if derived else "")
+    title = "lifecycle state (critique #25)"
+    if derived:
+        title += " — derived floor (no authored state)"
+    elif authored and floor and authored != floor:
+        title += f" — authored '{authored}' (floor: {floor})"
+    return (
+        f'<span class="lifecycle-state" title="{_h(title)}" '
+        f'style="display:inline-block;padding:1px 8px;border-radius:9999px;'
+        f'background:{bg};color:{fg};font-weight:600;font-size:0.72em;'
+        f'margin-left:6px;vertical-align:middle">{_h(label)}</span>'
+    )
+
+
+def _finding_chips(spec: dict, finding: dict) -> str:
+    """The Wave 3b chip cluster appended after a finding's existing chips:
+    claim_scope (#21) · generality (#22) · lifecycle_state (#25)."""
+    return (
+        _claim_scope_chip(finding)
+        + _generality_chip(finding)
+        + _lifecycle_chip(spec, finding)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Wave 3b — measurement integrity: threshold provenance + sensitivity (#9) and
+# the per-metric calibration ladder (#20). Consumes behavior_tests[].pass_if
+# .provenance, rigor.threshold_sensitivity (defensive), and calibration_ladder.
+# ---------------------------------------------------------------------------
+
+# critique #9 — threshold provenance.kind enum (DISTINCT from cites/anchor).
+_THRESHOLD_PROVENANCE_KINDS = (
+    "theory", "calibration", "literature", "expert", "exploratory", "post_hoc",
+)
+_THRESHOLD_PROV_COLORS = {
+    "theory":      ("#dbeafe", "#1e40af"),
+    "calibration": ("#dcfce7", "#166534"),
+    "literature":  ("#e0e7ff", "#3730a3"),
+    "expert":      ("#fef9c3", "#854d0e"),
+    "exploratory": ("#f1f5f9", "#475569"),
+    "post_hoc":    ("#fee2e2", "#991b1b"),
+}
+
+
+def _pass_if_text(p) -> str:
+    """Render a pass_if band as compact text (mirrors walkthrough.js _passIfText)."""
+    if not isinstance(p, dict):
+        return str(p) if p is not None else ""
+    op = str(p.get("op", "")).strip()
+    low, high, val = p.get("low"), p.get("high"), p.get("value")
+    if op == "in_range":
+        return f"in [{low}, {high}]"
+    if op == "at_least":
+        return f"≥ {low if low is not None else val}"
+    if op == "at_most":
+        return f"≤ {high if high is not None else val}"
+    if op == "equals":
+        return f"= {val}"
+    return op or ""
+
+
+def _threshold_provenance_chip(prov: dict) -> str:
+    """Render the provenance.kind pill (+ note in the tooltip) for a band."""
+    if not isinstance(prov, dict):
+        return ""
+    kind = prov.get("kind")
+    if not isinstance(kind, str) or not kind.strip():
+        return ""
+    v = kind.strip()
+    bg, fg = _THRESHOLD_PROV_COLORS.get(v, ("#fef9c3", "#854d0e"))
+    note = str(prov.get("note") or "").strip()
+    title = "threshold provenance (critique #9)" + (f" — {note}" if note else "")
+    return (
+        f'<span class="threshold-provenance" title="{_h(title)}" '
+        f'style="display:inline-block;padding:1px 8px;border-radius:9999px;'
+        f'background:{bg};color:{fg};font-weight:600;font-size:0.72em;'
+        f'margin-left:6px;vertical-align:middle">provenance: {_h(v)}</span>'
+    )
+
+
+def _threshold_sensitivity(spec: dict, test_name: str):
+    """critique #9 — defensive bridge to ``rigor.threshold_sensitivity``.
+    Returns a list of ``{cutoff, result}`` or None when unavailable/guarded."""
+    try:
+        from pbg_superpowers.rigor import threshold_sensitivity
+    except Exception:
+        return None
+    try:
+        return threshold_sensitivity(spec, test_name)
+    except Exception:
+        return None
+
+
+def _render_threshold_sensitivity(rows) -> str:
+    """Render the "passes across ±20%" mini-view from a threshold_sensitivity
+    list of ``{cutoff, result}``. '' when empty/guarded."""
+    if not isinstance(rows, (list, tuple)) or not rows:
+        return ""
+    cells = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        cutoff = r.get("cutoff")
+        res = str(r.get("result", "")).upper()
+        bg, fg = _TRACK_COLORS.get(res, ("#f1f5f9", "#475569"))
+        glyph = "✓" if res == "PASS" else ("✗" if res == "FAIL" else "·")
+        cells.append(
+            f'<span style="display:inline-block;padding:1px 7px;border-radius:9999px;'
+            f'background:{bg};color:{fg};font-size:0.72em;margin:1px">'
+            f'{_h(str(cutoff))} {glyph}</span>'
+        )
+    if not cells:
+        return ""
+    return (
+        '<div class="threshold-sensitivity" style="margin-top:3px">'
+        '<span style="color:#475569;font-size:0.78em">sensitivity (passes across ±20%):</span> '
+        + "".join(cells) + '</div>'
+    )
+
+
+def _render_calibration_ladder(spec: dict) -> str:
+    """critique #20 — per-metric calibration-ladder table (fail / pass /
+    borderline / stress rungs, each a controls[].name or "—" when unbuilt).
+    '' when no ``calibration_ladder`` is declared."""
+    ladders = [l for l in (spec.get("calibration_ladder") or []) if isinstance(l, dict)]
+    if not ladders:
+        return ""
+    head = (
+        '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+        '<th style="padding:4px 8px">Metric</th>'
+        '<th style="padding:4px 8px">known_fail</th>'
+        '<th style="padding:4px 8px">known_pass</th>'
+        '<th style="padding:4px 8px">borderline</th>'
+        '<th style="padding:4px 8px">stress</th>'
+        '<th style="padding:4px 8px">rungs</th></tr>'
+    )
+    rows = []
+    for l in ladders:
+        rungs = [l.get("known_fail"), l.get("known_pass"),
+                 l.get("borderline"), l.get("stress")]
+        filled = sum(1 for r in rungs if r)
+        if filled >= 3:
+            bg, fg = "#dcfce7", "#166534"
+        elif l.get("known_fail") and l.get("known_pass"):
+            bg, fg = "#fef9c3", "#854d0e"
+        else:
+            bg, fg = "#fee2e2", "#991b1b"
+        def _cell(v):
+            return (f'<code style="font-size:0.82em">{_h(str(v))}</code>'
+                    if v else '<span style="color:#cbd5e1">—</span>')
+        rows.append(
+            '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+            f'<td style="padding:4px 8px"><strong>{_h(str(l.get("metric", "")))}</strong></td>'
+            f'<td style="padding:4px 8px">{_cell(l.get("known_fail"))}</td>'
+            f'<td style="padding:4px 8px">{_cell(l.get("known_pass"))}</td>'
+            f'<td style="padding:4px 8px">{_cell(l.get("borderline"))}</td>'
+            f'<td style="padding:4px 8px">{_cell(l.get("stress"))}</td>'
+            f'<td style="padding:4px 8px"><span style="padding:1px 8px;border-radius:9999px;'
+            f'background:{bg};color:{fg};font-weight:600;font-size:0.82em">{filled}/4</span></td>'
+            '</tr>'
+        )
+    return (
+        '<div id="calibration-ladder" style="margin:10px 0">'
+        '<strong style="color:#1e293b">Calibration ladder</strong>'
+        '<p style="color:#475569;font-size:0.88em;margin:2px 0 4px">Per metric, which '
+        'controls anchor the fail / pass / borderline / stress rungs (≥3 filled = '
+        'calibrated; an empty rung is the gap to close).</p>'
+        '<table style="border-collapse:collapse;width:100%">'
+        + head + "".join(rows) + '</table></div>'
+    )
+
+
+def _render_measurement_integrity(spec: dict) -> str:
+    """Wave 3b — "Measurement integrity" section: per-band threshold provenance
+    + sensitivity (#9) and the per-metric calibration ladder (#20). Omitted when
+    neither a band carries provenance/sensitivity nor a calibration_ladder is
+    declared."""
+    tests = [t for t in (spec.get("behavior_tests") or spec.get("expected_behavior") or [])
+             if isinstance(t, dict)]
+    band_rows = []
+    for t in tests:
+        pass_if = t.get("pass_if") if isinstance(t.get("pass_if"), dict) else {}
+        prov = pass_if.get("provenance") if isinstance(pass_if, dict) else None
+        prov_chip = _threshold_provenance_chip(prov) if isinstance(prov, dict) else ""
+        sens = _render_threshold_sensitivity(
+            _threshold_sensitivity(spec, t.get("name", "")))
+        if not prov_chip and not sens:
+            continue
+        name = t.get("name") or "(unnamed)"
+        band = _pass_if_text(pass_if)
+        note = ""
+        if isinstance(prov, dict) and str(prov.get("note") or "").strip():
+            note = (f'<div style="color:#475569;font-size:0.82em;margin-top:1px">'
+                    f'{_h(str(prov["note"]).strip())}</div>')
+        band_rows.append(
+            '<div style="padding:7px 0;border-top:1px solid #f1f5f9">'
+            f'<code style="font-size:0.85em">{_h(name)}</code>'
+            + (f' <span style="color:#475569;font-size:0.85em">passes if '
+               f'<strong>{_h(band)}</strong></span>' if band else "")
+            + prov_chip + note + sens
+            + '</div>'
+        )
+    ladder_html = _render_calibration_ladder(spec)
+    if not band_rows and not ladder_html:
+        return ""
+    bands_block = ""
+    if band_rows:
+        bands_block = (
+            '<div style="margin:6px 0"><strong style="color:#1e293b">Threshold provenance '
+            '&amp; sensitivity</strong>' + "".join(band_rows) + '</div>'
+        )
+    return (
+        '<section id="measurement-integrity"><h2>Measurement integrity</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Where each pass/fail '
+        'threshold comes from (theory / calibration / literature / expert / exploratory / '
+        'post-hoc), how robust the verdict is to moving the cutoff ±20%, and which controls '
+        'anchor each metric\'s calibration ladder.</p>'
+        + bands_block + ladder_html +
+        '</section>'
     )
 
 
@@ -1639,6 +1989,7 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
     alternatives_html = _render_alternatives(study_spec)
     viz_html = _render_viz_embeds(viz_entries)
     rigor_html = _render_rigor(study_spec, skeptic=skeptic)
+    measurement_html = _render_measurement_integrity(study_spec)   # Wave 3b #9/#20
     debts_html = _render_epistemic_debts(study_spec)          # W15
     # Wave 2 — compositional causal discovery + semantic closure.
     commitment_html = _render_composition_commitment(study_spec)   # C-COMMIT
@@ -1746,6 +2097,7 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
             ("invariants", "Invariants", invariants_html, bool(invariants_html)),
             ("audit-trail", "Audit trail", audit_html, bool(audit_html)),
             ("rigor", "Rigor", rigor_html, bool(rigor_html)),
+            ("measurement-integrity", "Measurement integrity", measurement_html, bool(measurement_html)),
             ("rigor-detail", "Controls", controls_section_html, bool(controls_section_html)),
             ("causal-necessity", "Causal necessity", causal_html, bool(causal_html)),
             ("alternatives", "Alternatives", alternatives_html, bool(alternatives_html)),
@@ -1782,6 +2134,8 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
             nav_chips.append(_chip("model-card", "Model card"))
         if representation_html:
             nav_chips.append(_chip("representation", "Representation"))
+        if measurement_html:
+            nav_chips.append(_chip("measurement-integrity", "Measurement integrity"))
         if viz_html:
             nav_chips.append(_chip("viz", "Visualisations"))
         # W15 — the open-debts panel renders right after rigor in normal mode.
@@ -1797,6 +2151,7 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
             biology_section,
             alternatives_html,
             rigor_html,
+            measurement_html,
             causal_html,
             debts_html,
             model_card_html,
