@@ -219,6 +219,49 @@ phase: Design
 #   explanatory_gain:
 #     result: PENDING               # POSITIVE | NEUTRAL | NEGATIVE | PENDING
 #     basis: ""
+#
+# ─── RIGOR (what a skeptic asks for; the evidence & rigor scorecard reads these).
+#     Fill these before the study is "done". Guide: docs/conventions/rigor-checklist.md
+#
+# robustness:                       # replication: >=3 seeds (stochastic) OR a sweep (deterministic)
+#   n_replicates: 1
+#   seeds: [0]
+#   parameter_sweep: false
+#
+# controls:                         # a system that SHOULD fail + a passing/borderline case
+#   - name: ""                      # build the negative control with pbg_superpowers.intervention
+#     kind: negative                # negative | positive | borderline | adversarial
+#     hypothesis: ""                # why this should (not) qualify
+#     expected: ""
+#     observed: ""
+#     result: PASS                  # PASS = the control behaved as expected (discriminating)
+#
+# alternative_hypotheses:           # competing explanations + how the evidence excludes them
+#   - claim: ""
+#     discriminated_by: ""          # often the negative control
+#     status: not-excluded          # excluded | not-excluded | untested
+#
+# falsifiability: ""                # what result would overturn the claim
+#
+# limitations:                      # what this result does NOT show
+#   - ""
+#
+# discovery_implications:           # Decide-phase synthesis + next steps
+#   resolved_uncertainties: []
+#   remaining_uncertainties: []
+#   followup_study_proposals:
+#     - id: ""
+#       title: ""
+#       motivation: ""              # give a real motivation, not just a title
+#
+# kind: standard                    # set to `adversarial` for a probe that should NOT qualify
+#
+# findings:                         # each finding: tier + evidence (claim discipline)
+#   - id: F-01
+#     tier: observation             # observation | mechanism | interpretation
+#     mechanism_origin: ""          # engineered | emergent (on interpretation claims)
+#     statement: ""
+#     evidence: {{from_test: ""}}
 """
 
 
