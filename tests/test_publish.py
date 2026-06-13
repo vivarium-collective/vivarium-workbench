@@ -588,3 +588,55 @@ def test_golden_v2e_invest(tmp_path):
         "snapshot-readonly.css missing switcher hide rule"
     assert "#snapshot-repo-label" in css_text, \
         "snapshot-readonly.css missing repo-label show rule"
+
+
+# ---------------------------------------------------------------------------
+# Snapshot embed staging — figures referenced by study-detail embed_visualizations
+# must be COPIED into the bundle and base-path-prefixed, or the iframes 404.
+# ---------------------------------------------------------------------------
+
+def test_stage_embed_visualizations_copies_and_prefixes(tmp_path):
+    from vivarium_dashboard.publish import _stage_embed_visualizations
+
+    ws = tmp_path / "ws"
+    fig = ws / "reports" / "figures" / "my-study"
+    fig.mkdir(parents=True)
+    (fig / "1-fig+plus.html").write_text("<html>fig</html>")  # literal '+' in name
+
+    out = tmp_path / "bundle"
+    out.mkdir()
+
+    spec = {
+        "embed_visualizations": [
+            {"name": "1-fig+plus", "url": "/reports/figures/my-study/1-fig+plus.html"},
+            {"name": "missing", "url": "/reports/figures/my-study/absent.html"},
+            {"name": "api", "url": "/api/study/x.json"},
+            {"name": "ext", "url": "https://example.com/x.html"},
+        ]
+    }
+    _stage_embed_visualizations(spec, ws, out, "/v2ecoli/dashboard")
+
+    # present file: copied into the bundle at the same rel path + url prefixed
+    staged = out / "reports" / "figures" / "my-study" / "1-fig+plus.html"
+    assert staged.is_file()
+    assert staged.read_text() == "<html>fig</html>"
+    assert spec["embed_visualizations"][0]["url"] == \
+        "/v2ecoli/dashboard/reports/figures/my-study/1-fig+plus.html"
+    # missing source: left as-is (no crash), api/external: untouched
+    assert spec["embed_visualizations"][1]["url"] == "/reports/figures/my-study/absent.html"
+    assert spec["embed_visualizations"][2]["url"] == "/api/study/x.json"
+    assert spec["embed_visualizations"][3]["url"] == "https://example.com/x.html"
+
+
+def test_stage_embed_visualizations_no_base_path(tmp_path):
+    """With no base path (root hosting), files still copy but URLs stay root-absolute."""
+    from vivarium_dashboard.publish import _stage_embed_visualizations
+    ws = tmp_path / "ws"
+    fig = ws / "reports" / "figures" / "s"
+    fig.mkdir(parents=True)
+    (fig / "f.html").write_text("x")
+    out = tmp_path / "b"; out.mkdir()
+    spec = {"embed_visualizations": [{"url": "/reports/figures/s/f.html"}]}
+    _stage_embed_visualizations(spec, ws, out, "")
+    assert (out / "reports" / "figures" / "s" / "f.html").is_file()
+    assert spec["embed_visualizations"][0]["url"] == "/reports/figures/s/f.html"
