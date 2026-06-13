@@ -5055,6 +5055,49 @@
   }
   window._closeInvestigationDetail = _closeInvestigationDetail;
 
+  // W13 — canonical DAG-edge read. The server already feeds
+  // normalize_dag_edges() output into each study's `parent_studies` key
+  // (carrying study/condition/relation/outputs_used), but prefer the raw
+  // canonical Pass A field `pipeline_gate.prerequisites` when a full spec is
+  // present so the renderer always reads the canonical location, never the
+  // legacy `parent_studies` field directly.
+  function _dagEdges(s) {
+    var pg = s && s.pipeline_gate;
+    var raw = (pg && pg.prerequisites && pg.prerequisites.length)
+                ? pg.prerequisites
+                : ((s && s.parent_studies) || []);
+    var out = [];
+    (raw || []).forEach(function(entry) {
+      if (typeof entry === 'string') {
+        out.push({ study: entry, condition: 'tests-passed', relation: 'leads-to' });
+      } else if (entry && entry.study) {
+        var e = {};
+        for (var k in entry) { if (entry.hasOwnProperty(k)) e[k] = entry[k]; }
+        if (!e.condition) e.condition = 'tests-passed';
+        if (!e.relation) {
+          e.relation = (e.outputs_used && e.outputs_used.length) ? 'model-input' : 'leads-to';
+        }
+        out.push(e);
+      }
+    });
+    return out;
+  }
+  // W13 — edge-relation vocabulary → stroke styling + legend label.
+  var _DAG_REL_STYLE = {
+    'leads-to':             { color: '#94a3b8', dash: null,  label: 'leads to' },
+    'model-input':          { color: '#2563eb', dash: null,  label: 'model input' },
+    'evidence':             { color: '#0d9488', dash: '5 3', label: 'evidence' },
+    'calibrates-threshold': { color: '#ca8a04', dash: '2 3', label: 'calibrates threshold' },
+    'refutes-alternative':  { color: '#dc2626', dash: '5 3', label: 'refutes alternative' },
+  };
+  function _dagRelStyle(rel) {
+    // Map legacy aliases onto the canonical vocabulary.
+    if (rel === 'regulatory') rel = 'calibrates-threshold';
+    if (rel === 'refutes')    rel = 'refutes-alternative';
+    if (rel === 'leads to')   rel = 'leads-to';
+    return _DAG_REL_STYLE[rel] || _DAG_REL_STYLE['leads-to'];
+  }
+
   // Layout + render the DAG of study nodes for the active investigation.
   // VERTICAL flow: y = topological depth (top = roots), x = within-depth slot.
   // Cards as absolute-positioned <div>s; edges as SVG cubic-Bezier paths.
@@ -5074,8 +5117,8 @@
     var children = {};
     studies.forEach(function(s) { byName[s.name] = s; children[s.name] = []; });
     studies.forEach(function(s) {
-      (s.parent_studies || []).forEach(function(p) {
-        var pn = p.study || p;
+      _dagEdges(s).forEach(function(p) {
+        var pn = p.study;
         if (children[pn]) children[pn].push(s.name);
       });
     });
@@ -5084,7 +5127,7 @@
     var depth = {};
     var queue = [];
     studies.forEach(function(s) {
-      if (!(s.parent_studies || []).length) { depth[s.name] = 0; queue.push(s.name); }
+      if (!_dagEdges(s).length) { depth[s.name] = 0; queue.push(s.name); }
     });
     var guard = studies.length * 4;
     while (queue.length && guard-- > 0) {
@@ -5227,33 +5270,39 @@
       'markerWidth="7" markerHeight="7" orient="auto-start-reverse">' +
       '<path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>';
     studies.forEach(function(s) {
-      (s.parent_studies || []).forEach(function(p) {
-        var pn = p.study || p;
+      _dagEdges(s).forEach(function(p) {
+        var pn = p.study;
         if (!pos[pn] || !pos[s.name]) return;
         var x1 = pos[pn].x + CARD_W;
         var y1 = pos[pn].y + pos[pn].h / 2;
         var x2 = pos[s.name].x;
         var y2 = pos[s.name].y + pos[s.name].h / 2;
         var dx = Math.max(28, (x2 - x1) / 2);
+        var rel = p.relation || 'leads-to';
+        var st = _dagRelStyle(rel);
         var path = document.createElementNS(svgNS, 'path');
         path.setAttribute('d', 'M ' + x1 + ' ' + y1 +
                               ' C ' + (x1 + dx) + ' ' + y1 +
                               ', ' + (x2 - dx) + ' ' + y2 +
                               ', ' + x2 + ' ' + y2);
         path.setAttribute('fill', 'none');
-        path.setAttribute('stroke', '#94a3b8');
+        path.setAttribute('stroke', st.color);
         path.setAttribute('stroke-width', '1.5');
         path.setAttribute('marker-end', 'url(#dag-arrowhead)');
+        if (st.dash) path.setAttribute('stroke-dasharray', st.dash);
         edgesSvg.appendChild(path);
-        var cond = (p.relation || 'leads to');
-        if (cond === 'regulatory' || cond === 'refutes') path.setAttribute('stroke-dasharray', '5 3');
+        var labelText = st.label;
+        // model-input edges name the consumed upstream outputs when present.
+        if (rel === 'model-input' && p.outputs_used && p.outputs_used.length) {
+          labelText += ' (' + p.outputs_used.join(', ') + ')';
+        }
         var label = document.createElementNS(svgNS, 'text');
         label.setAttribute('x', (x1 + x2) / 2);
         label.setAttribute('y', (y1 + y2) / 2 - 6);
         label.setAttribute('text-anchor', 'middle');
         label.setAttribute('font-size', '10');
-        label.setAttribute('fill', '#94a3b8');
-        label.textContent = cond;
+        label.setAttribute('fill', st.color);
+        label.textContent = labelText;
         edgesSvg.appendChild(label);
       });
     });
@@ -5277,12 +5326,24 @@
       };
       legendHost.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;' +
         'font-size:0.74em;color:#64748b;padding:8px 4px 0;border-top:1px solid #f1f5f9;margin-top:8px';
+      // W13 — edge-relation legend swatches (colored solid/dashed lines).
+      var _edgeLg = function(rel) {
+        var st = _dagRelStyle(rel);
+        var line = 'border-bottom:2px ' + (st.dash ? 'dashed' : 'solid') + ' ' + st.color;
+        return '<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px">' +
+          '<span style="width:18px;' + line + ';display:inline-block;line-height:0">&nbsp;</span>' +
+          '<span>' + st.label + '</span></span>';
+      };
       legendHost.innerHTML =
         '<span style="font-weight:600;color:#475569;margin-right:10px">Confidence:</span>' +
         _lg('#16a34a', '✓', 'Accepted') + _lg('#ca8a04', '◐', 'Investigating') +
         _lg('#2563eb', '○', 'Planned') + _lg('#dc2626', '✗', 'Refuted') +
-        '<span style="margin:0 14px 0 6px"><span style="color:#94a3b8">→</span> leads to</span>' +
-        '<span><span style="color:#94a3b8;letter-spacing:-1px">⤄</span> regulatory</span>';
+        '<span style="flex-basis:100%;height:0"></span>' +
+        '<span style="font-weight:600;color:#475569;margin:6px 10px 0 0">Edges:</span>' +
+        '<span style="margin-top:6px">' +
+          _edgeLg('leads-to') + _edgeLg('model-input') + _edgeLg('evidence') +
+          _edgeLg('calibrates-threshold') + _edgeLg('refutes-alternative') +
+        '</span>';
     }
   }
   window._renderInvestigationDag = _renderInvestigationDag;
@@ -5782,6 +5843,29 @@
   };
   function _normGateResult(v) {
     return _GATE_RESULT_NORM[String(v == null ? '' : v).trim().toLowerCase()] || 'PENDING';
+  }
+  // W8 — per-finding evidential-weight chip. The weight is COMPUTED SERVER-SIDE
+  // (pbg_superpowers.rigor.finding_evidential_weight, carried on the finding as
+  // `_evidential_weight` via the report-data path) so the SPA just renders it —
+  // no JS recompute, no drift. Degrades to nothing when the field is absent.
+  var _WEIGHT_CHIP_COLORS = {
+    strong:   ['#dcfce7', '#166534'],
+    moderate: ['#fef9c3', '#854d0e'],
+    weak:     ['#fee2e2', '#991b1b']
+  };
+  function _findingWeightChip(w) {
+    if (!w || !w.weight) return '';
+    var c = _WEIGHT_CHIP_COLORS[w.weight] || ['#f1f5f9', '#475569'];
+    var label = _h(w.weight) + (typeof w.n_supporting === 'number' ? ' · ' + w.n_supporting + '/5' : '');
+    var title = '';
+    if (w.dims) {
+      var dims = []; for (var k in w.dims) { if (w.dims[k]) dims.push(k); }
+      title = ' title="evidence dims: ' + _h(dims.join(', ') || 'none') + '"';
+    }
+    return '<span class="finding-weight"' + title + ' style="display:inline-block;'
+      + 'padding:1px 8px;border-radius:9999px;background:' + c[0] + ';color:' + c[1] + ';'
+      + 'font-weight:600;font-size:0.72em;margin-left:6px;vertical-align:middle">'
+      + label + '</span>';
   }
   function _deriveConclusionVerdicts(s) {
     var authored = s.conclusion_verdicts || {};
@@ -7136,6 +7220,7 @@
                +     '<span class="finding-status-glyph">' + glyph + '</span>'
                +     '<span class="finding-id">' + _h(f.id || '') + '</span>'
                +     '<span class="finding-status-text">' + _h(statusText) + '</span>'
+               +     _findingWeightChip(f._evidential_weight)
                +   '</div>'
                +   '<div class="finding-statement">' + _multiline(f.statement || (f.id ? f.id.replace(/[-_]/g,' ') : '(no statement)')) + '</div>'
                +   evMain
