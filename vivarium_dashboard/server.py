@@ -409,6 +409,7 @@ try:
     from {package_name}.core import build_core
     core = build_core()
 
+    import inspect as _inspect
     import process_bigraph as _pb
     EMITTER_CLS = getattr(_pb, 'Emitter', None)
     try:
@@ -421,7 +422,7 @@ try:
     # Framework infrastructure packages — always shown, never "environment_only".
     _FRAMEWORK_PKGS = {{
         'process_bigraph', 'bigraph_schema', 'bigraph_viz',
-        'pbg_superpowers', 'vivarium_dashboard',
+        'pbg_superpowers', 'vivarium_dashboard', 'pbg_emitters',
     }}
 
     def _classify_source(cls):
@@ -489,6 +490,14 @@ try:
         _topmod = (getattr(cls, '__module__', '') or '').split('.')[0]
         if _topmod == 'process_bigraph' and kind in ('process', 'step', 'other'):
             continue
+        # Hide abstract base classes (e.g. pbg_emitters' BufferedEmitter) — they
+        # are intermediate bases not meant to be used directly, not registry
+        # content.
+        try:
+            if isinstance(cls, type) and _inspect.isabstract(cls):
+                continue
+        except Exception:
+            pass
         seen_classes[cls_id] = len(processes)
         processes.append({{
             "name": name,
