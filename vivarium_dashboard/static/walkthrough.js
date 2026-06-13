@@ -6584,6 +6584,8 @@
       var tests = s.behavior_tests || s.expected_behavior || [];
       var decide = s.conclusion_logic || {};
       var limitations = s.limitations || [];
+      // Tolerate a string (authors sometimes write limitations as prose, not a list).
+      if (typeof limitations === 'string') limitations = limitations.trim() ? [limitations] : [];
       var followUps = s.follow_up_studies || [];
       // Discovery Implications — alternate hypotheses, mechanism-update
       // proposals, and the richer followup_study_proposals (successor to
