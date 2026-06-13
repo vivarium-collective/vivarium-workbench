@@ -453,6 +453,15 @@ try:
             except Exception:
                 schema_preview = "<unserializable>"
         source = _classify_source(cls)
+        # Framework hygiene: hide process_bigraph's OWN built-in toy/base/protocol
+        # processes (examples, parameter_scan, math_expression, growth_division,
+        # minimal_gillespie, the composite base classes, ray/parallel/rest
+        # protocols) from every workspace's registry — they are framework
+        # infrastructure, not workspace content. Emitters + visualizations are
+        # kept (useful framework components a workspace wires in).
+        _topmod = (getattr(cls, '__module__', '') or '').split('.')[0]
+        if _topmod == 'process_bigraph' and kind in ('process', 'step', 'other'):
+            continue
         seen_classes[cls_id] = len(processes)
         processes.append({{
             "name": name,
