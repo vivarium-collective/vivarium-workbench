@@ -163,14 +163,32 @@
   }
   window._seedFollowupStudy = _seedFollowupStudy;
 
+  // critique #19 — a failing study should seed a DIAGNOSTIC child. Recognises
+  // both the normalized result (FAIL / PARTIAL) and the raw roll-up verdict
+  // (failed / needs_calibration).
+  function _isFailingVerdict(s) {
+    s = s || {};
+    var r = String(((s.computed_gate_verdict || {}).result) || s.gate_status || '')
+      .trim().toLowerCase();
+    return r === 'fail' || r === 'failed' || r === 'partial' || r === 'needs_calibration';
+  }
+
   // ── Seed a new study from a finding's next_action ────────────────────────
   // Delegates to the shared pbg seed mechanism via {parent, finding_id};
   // the finding seeds STANDALONE (no pre-existing followup proposal needed).
-  function _seedFromFinding(parentStudyName, findingId) {
-    if (!confirm('Seed a new study from this finding?\n\nA new study.yaml will be created under studies/<new-name>/ pre-populated from the finding\'s next_action, and the finding will be stamped with the seeded study.')) {
+  // An optional studyType (e.g. 'diagnostic' when the parent failed, critique
+  // #19) is threaded through to the pbg writer so the child is typed.
+  function _seedFromFinding(parentStudyName, findingId, studyType) {
+    var diag = studyType === 'diagnostic';
+    var msg = diag
+      ? 'Seed a DIAGNOSTIC study from this finding?\n\nThe parent study did not pass, so a new study_type: diagnostic study.yaml will be created under studies/<new-name>/ to diagnose the failure, stamped with the parent + failing-test lineage.'
+      : 'Seed a new study from this finding?\n\nA new study.yaml will be created under studies/<new-name>/ pre-populated from the finding\'s next_action, and the finding will be stamped with the seeded study.';
+    if (!confirm(msg)) {
       return;
     }
-    api('POST', '/api/study-seed-followup', {parent: parentStudyName, finding_id: findingId})
+    var body = {parent: parentStudyName, finding_id: findingId};
+    if (studyType) body.study_type = studyType;
+    api('POST', '/api/study-seed-followup', body)
       .then(function(res) {
         if (res.status !== 200 || res.body.error) {
           alert('Seed failed: ' + (res.body.error || res.status));
@@ -1425,9 +1443,11 @@
         ? '<span class="spine-chip-warn" title="code-computed verdict disagrees with the authored gate_status">'
           + '⚠ code: ' + e(cgv.result) + ' · authored: ' + e(s.gate_status || '—') + '</span>'
         : '';
+      // critique #18 — pre-registered ✓ / post-hoc ⚠ chip in the Verdict row.
+      var preregChip = _preregChipHtml(s);
       _row('Verdict',
         '<strong>' + e(cgv.result) + '</strong> '
-        + '<span class="spine-label">code-computed</span> ' + chip,
+        + '<span class="spine-label">code-computed</span> ' + chip + preregChip,
         '<a href="#" onclick="_setStudyTab(\'overview\');return false">details →</a>');
     }
 
@@ -1484,10 +1504,12 @@
     // ── Next — the top next_action / follow-up ─────────────────────────────
     var next = null;
     var nextFindingId = null;
+    var nextActionType = null;
     for (var i = 0; i < findings.length; i++) {
       if (findings[i] && findings[i].next_action) {
         next = findings[i].next_action;
         nextFindingId = findings[i].id || null;
+        nextActionType = findings[i].next_action_type || null;   // critique #7
         break;
       }
     }
@@ -1500,17 +1522,24 @@
       if (di[0] && di[0].title) next = di[0].title;
     }
     if (next) {
+      // critique #19 — when this study FAILED (or needs calibration), the
+      // seeded child should be a diagnostic study. Pass study_type=diagnostic
+      // through the existing seed button (the pbg writer stamps the child).
+      var failing = _isFailingVerdict(s);
       // When the "Next" is a finding's next_action, offer to seed a child
       // study from it directly (delegates to the shared pbg seed mechanism).
       var nextAction;
       if (nextFindingId) {
+        var seedType = failing ? 'diagnostic' : '';
+        var label = failing ? 'seed diagnostic study →' : 'seed study from this finding →';
         nextAction = '<a href="#" onclick="_seedFromFinding(' +
           JSON.stringify(studyName()) + ',' + JSON.stringify(nextFindingId) +
-          ');return false">seed study from this finding →</a>';
+          ',' + JSON.stringify(seedType) +
+          ');return false">' + label + '</a>';
       } else {
         nextAction = '<a href="#" onclick="_setStudyTab(\'conclusions\');return false">decide →</a>';
       }
-      _row('Next', e(next), nextAction);
+      _row('Next', e(next) + _nextActionTypeChipHtml(nextActionType), nextAction);
     }
 
     // First synchronous flush (readiness fills its slot async above).
@@ -1520,13 +1549,97 @@
   function _flushSpineSummary(container, order, slots) {
     var html = order.map(function (k) { return slots[k] || ''; }).join('');
     if (!html) { container.innerHTML = ''; return; }
-    container.innerHTML = '<div class="spine-summary-head">Spine at a glance</div>' + html;
+    // critique #10 — surface the study_type badge in the panel head.
+    var typeBadge = _studyTypeBadgeHtml(window._study || {});
+    container.innerHTML = '<div class="spine-summary-head">Spine at a glance'
+      + typeBadge + '</div>' + html;
   }
 
   function _spineEsc(v) {
     return String(v == null ? '' : v)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+
+  // ── Wave 3a workflow-typing chips (critiques #10 / #7 / #18) ──────────────
+  // study_type (#10): study_type → kind → study_kind alias → 'standard' default.
+  // Kept in sync with single_study_report._study_type + rigor._study_type.
+  var _STUDY_TYPES = {exploratory: 1, confirmatory: 1, diagnostic: 1,
+                      adversarial: 1, standard: 1};
+  var _STUDY_TYPE_COLORS = {
+    exploratory:  ['#e0e7ff', '#3730a3'], confirmatory: ['#dcfce7', '#166534'],
+    diagnostic:   ['#fef3c7', '#92400e'], adversarial:  ['#fee2e2', '#991b1b'],
+    standard:     ['#f1f5f9', '#475569']
+  };
+  function _studyType(s) {
+    s = s || {};
+    var keys = ['study_type', 'kind', 'study_kind'];
+    for (var i = 0; i < keys.length; i++) {
+      var v = s[keys[i]];
+      if (typeof v === 'string' && v.trim()) {
+        var t = v.trim().toLowerCase();
+        if (_STUDY_TYPES[t]) return t;
+      }
+    }
+    return 'standard';
+  }
+  function _studyTypeBadgeHtml(s) {
+    s = s || {};
+    var explicit = ['study_type', 'kind', 'study_kind'].some(function (k) {
+      return typeof s[k] === 'string' && s[k].trim();
+    });
+    var t = _studyType(s);
+    if (!explicit || t === 'standard') return '';
+    var c = _STUDY_TYPE_COLORS[t] || ['#f1f5f9', '#475569'];
+    return '<span class="study-type-badge" title="study type (critique #10)" '
+      + 'style="display:inline-block;padding:1px 9px;border-radius:9999px;'
+      + 'font-weight:600;font-size:0.75em;background:' + c[0] + ';color:' + c[1]
+      + ';margin-left:8px;vertical-align:middle">' + _spineEsc(t) + '</span>';
+  }
+
+  // next_action_type (#7) — known values get a blue chip, unknowns amber.
+  var _NEXT_ACTION_TYPES = {
+    replicate: 1, calibrate: 1, ablate: 1, adversarially_probe: 1,
+    refine_representation: 1, split_hypothesis: 1, retire_hypothesis: 1,
+    escalate_model: 1
+  };
+  function _nextActionTypeChipHtml(nat) {
+    if (typeof nat !== 'string' || !nat.trim()) return '';
+    var v = nat.trim();
+    var known = !!_NEXT_ACTION_TYPES[v];
+    var bg = known ? '#dbeafe' : '#fef9c3';
+    var fg = known ? '#1e40af' : '#854d0e';
+    return '<span class="next-action-type" title="next action type (critique #7)" '
+      + 'style="display:inline-block;padding:1px 8px;border-radius:9999px;background:'
+      + bg + ';color:' + fg + ';font-weight:600;font-size:0.72em;margin-left:6px;'
+      + 'vertical-align:middle">' + _spineEsc(v) + '</span>';
+  }
+
+  // preregistration (#18) — chip from window._study.preregistration_status,
+  // which the server (study_verdict.preregistration_status) attaches on the
+  // report-data path. Omitted when no preregistered block was declared.
+  function _preregChipHtml(s) {
+    var ps = (s || {}).preregistration_status;
+    if (!ps || !ps.preregistered) return '';
+    var bg, fg, label, title, before = ps.registered_before_run;
+    if (before === true) {
+      bg = '#dcfce7'; fg = '#166534'; label = 'pre-registered ✓';
+      title = 'criteria registered before the canonical run';
+    } else if (before === false) {
+      bg = '#fef3c7'; fg = '#92400e'; label = 'post-hoc ⚠';
+      title = 'criteria registered AFTER the run started';
+    } else {
+      bg = '#e2e8f0'; fg = '#475569'; label = 'pre-registered (timing unknown)';
+      title = 'registered_at or run start time missing';
+    }
+    if (ps.criteria_match === false) {
+      label += ' · thresholds drifted';
+      title += '; pre-registered thresholds differ from the current behavior tests';
+    }
+    return '<span class="prereg-chip" title="' + _spineEsc(title) + '" '
+      + 'style="display:inline-block;padding:1px 9px;border-radius:9999px;'
+      + 'font-weight:600;font-size:0.75em;background:' + bg + ';color:' + fg
+      + ';margin-left:8px;vertical-align:middle">' + _spineEsc(label) + '</span>';
   }
 
   // Spine A3: per-study readiness panel. Fetches the deterministic report
