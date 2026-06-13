@@ -5626,15 +5626,23 @@
         var fmFetch = fetch('/api/framework-metrics')
           .then(function(r) { return r.ok ? r.json() : null; })
           .catch(function() { return null; });
+        // Wave 3b #6/#16 — competing hypotheses with the COMPUTED support_log
+        // (pbg_superpowers.hypotheses.rollup_support, via the report-data path).
+        // Best-effort: [] → the panel falls back to authored iset.hypotheses.
+        var hypFetch = fetch('/api/investigation-hypotheses?investigation=' + encodeURIComponent(iset.name))
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .then(function(j) { return (j && j.hypotheses) || null; })
+          .catch(function() { return null; });
         return Promise.all([Promise.all(studyFetches), bibFetch,
                             Promise.all(chartFetches), genFetch,
-                            ghRepoFetch, rigorFetch, fmFetch]).then(function(arr) {
+                            ghRepoFetch, rigorFetch, fmFetch, hypFetch]).then(function(arr) {
           var chartsByStudy = {};
           arr[2].forEach(function(c) { chartsByStudy[c.name] = c.charts; });
           var generation = arr[3];
           var ghRepo = arr[4];
           var rigor = arr[5];
           var frameworkMetrics = arr[6];
+          var hypotheses = arr[7];
           // Second pass: now that we have the specs, fetch each study's
           // embed_visualizations URLs so the downloaded report can inline
           // them as <iframe srcdoc="...">. This makes the file truly
@@ -5670,7 +5678,7 @@
             return {iset: iset, specs: specs, bibEntries: arr[1],
                     chartsByStudy: chartsByStudy, embedsByStudy: embedsByStudy,
                     generation: generation, ghRepo: ghRepo, rigor: rigor,
-                    frameworkMetrics: frameworkMetrics};
+                    frameworkMetrics: frameworkMetrics, hypotheses: hypotheses};
           });
         });
       })
@@ -5679,7 +5687,7 @@
                                                   bundle.bibEntries, bundle.chartsByStudy,
                                                   bundle.embedsByStudy, bundle.generation,
                                                   bundle.ghRepo, bundle.rigor,
-                                                  bundle.frameworkMetrics);
+                                                  bundle.frameworkMetrics, bundle.hypotheses);
         var dateStr = new Date().toISOString().slice(0, 10);
         var filename = 'investigation-' + name + '-' + dateStr + '.html';
         _triggerDownload(filename, html, 'text/html');
@@ -5875,6 +5883,103 @@
       + 'padding:1px 8px;border-radius:9999px;background:' + c[0] + ';color:' + c[1] + ';'
       + 'font-weight:600;font-size:0.72em;margin-left:6px;vertical-align:middle">'
       + label + '</span>';
+  }
+  // Wave 3b — per-finding claim_scope (#21) / generality (#22) / lifecycle_state
+  // (#25) chips, beside the finding's tier/weight badges. Authored on the finding;
+  // the lifecycle FLOOR arrives via the report-data path as `_lifecycle_floor`
+  // (server-computed by pbg_superpowers.study_verdict.lifecycle_floor). Enums
+  // match the cross-repo contract + lib/single_study_report.py. Degrade to ''.
+  var _CLAIM_SCOPE_COLORS = {
+    'local-implementation': ['#f1f5f9', '#475569'],
+    mechanism:   ['#dbeafe', '#1e40af'],
+    behavioral:  ['#dcfce7', '#166534'],
+    theoretical: ['#ede9fe', '#6d28d9'],
+    generality:  ['#fef9c3', '#854d0e']
+  };
+  function _claimScopeChip(f) {
+    if (!f || typeof f !== 'object') return '';
+    var cs = f.claim_scope;
+    if (typeof cs !== 'string' || !cs.trim()) return '';
+    var v = cs.trim();
+    var c = _CLAIM_SCOPE_COLORS[v] || ['#fef9c3', '#854d0e'];
+    return '<span class="claim-scope" title="claim scope (critique #21)" style="display:inline-block;'
+      + 'padding:1px 8px;border-radius:9999px;background:' + c[0] + ';color:' + c[1] + ';'
+      + 'font-weight:600;font-size:0.72em;margin-left:6px;vertical-align:middle">scope: ' + _h(v) + '</span>';
+  }
+  var _GENERALITY_LEVEL_COLORS = {
+    instance_specific: ['#fee2e2', '#991b1b'],
+    mechanism:         ['#fef9c3', '#854d0e'],
+    framework:         ['#dcfce7', '#166534']
+  };
+  function _generalityChip(f) {
+    if (!f || typeof f !== 'object') return '';
+    var g = f.generality;
+    if (!g || typeof g !== 'object') return '';
+    var level = (typeof g.level === 'string') ? g.level.trim() : '';
+    var axes = g.axes_tested || [];
+    if (typeof axes === 'string') axes = [axes];
+    axes = axes.filter(Boolean).map(String);
+    if (!level && !axes.length) return '';
+    var c = _GENERALITY_LEVEL_COLORS[level] || ['#f1f5f9', '#475569'];
+    var label = 'generality' + (level ? ': ' + level : '');
+    if (axes.length) label += ' · ' + axes.length + ' ax' + (axes.length !== 1 ? 'es' : 'is');
+    var title = 'generality (critique #22) — axes tested: ' + (axes.join(', ') || 'none');
+    return '<span class="generality" title="' + _h(title) + '" style="display:inline-block;'
+      + 'padding:1px 8px;border-radius:9999px;background:' + c[0] + ';color:' + c[1] + ';'
+      + 'font-weight:600;font-size:0.72em;margin-left:6px;vertical-align:middle">' + _h(label) + '</span>';
+  }
+  var _LIFECYCLE_COLORS = {
+    observation:              ['#f1f5f9', '#475569'],
+    'candidate-explanation':  ['#e0e7ff', '#3730a3'],
+    'tested-vs-alternatives': ['#dbeafe', '#1e40af'],
+    'provisional-claim':      ['#fef9c3', '#854d0e'],
+    generalized:              ['#dcfce7', '#166534'],
+    retired:                  ['#fee2e2', '#991b1b'],
+    superseded:               ['#fee2e2', '#991b1b']
+  };
+  function _lifecycleChip(f) {
+    if (!f || typeof f !== 'object') return '';
+    var authored = (typeof f.lifecycle_state === 'string' && f.lifecycle_state.trim())
+      ? f.lifecycle_state.trim() : null;
+    var floor = (typeof f._lifecycle_floor === 'string' && f._lifecycle_floor.trim())
+      ? f._lifecycle_floor.trim() : null;
+    var state = authored || floor;
+    if (!state) return '';
+    var c = _LIFECYCLE_COLORS[state] || ['#f1f5f9', '#475569'];
+    var derived = !authored && !!floor;
+    var label = state + (derived ? ' · floor' : '');
+    var title = 'lifecycle state (critique #25)' + (derived ? ' — derived floor (no authored state)' : '');
+    return '<span class="lifecycle-state" title="' + _h(title) + '" style="display:inline-block;'
+      + 'padding:1px 8px;border-radius:9999px;background:' + c[0] + ';color:' + c[1] + ';'
+      + 'font-weight:600;font-size:0.72em;margin-left:6px;vertical-align:middle">' + _h(label) + '</span>';
+  }
+  function _findingChips(f) {
+    return _claimScopeChip(f) + _generalityChip(f) + _lifecycleChip(f);
+  }
+  // Wave 3b #9 — threshold provenance.kind chip (+ note in the tooltip) beside a
+  // pass_if band. DISTINCT from cites/calibration_anchor. Enum matches the
+  // cross-repo contract. Degrades to '' when no provenance is declared.
+  var _THRESHOLD_PROV_COLORS = {
+    theory:      ['#dbeafe', '#1e40af'],
+    calibration: ['#dcfce7', '#166534'],
+    literature:  ['#e0e7ff', '#3730a3'],
+    expert:      ['#fef9c3', '#854d0e'],
+    exploratory: ['#f1f5f9', '#475569'],
+    post_hoc:    ['#fee2e2', '#991b1b']
+  };
+  function _thresholdProvenanceChip(passIf) {
+    if (!passIf || typeof passIf !== 'object') return '';
+    var prov = passIf.provenance;
+    if (!prov || typeof prov !== 'object') return '';
+    var kind = prov.kind;
+    if (typeof kind !== 'string' || !kind.trim()) return '';
+    var v = kind.trim();
+    var c = _THRESHOLD_PROV_COLORS[v] || ['#fef9c3', '#854d0e'];
+    var note = (typeof prov.note === 'string') ? prov.note.trim() : '';
+    var title = 'threshold provenance (critique #9)' + (note ? ' — ' + note : '');
+    return '<span class="threshold-provenance" title="' + _h(title) + '" style="display:inline-block;'
+      + 'padding:1px 8px;border-radius:9999px;background:' + c[0] + ';color:' + c[1] + ';'
+      + 'font-weight:600;font-size:0.72em;margin-left:6px;vertical-align:middle">provenance: ' + _h(v) + '</span>';
   }
   function _deriveConclusionVerdicts(s) {
     var authored = s.conclusion_verdicts || {};
@@ -6280,6 +6385,76 @@
       + '</details>';
   }
 
+  // Wave 3b #6/#16 — "Competing hypotheses" panel. Each hypothesis carries its
+  // AUTHORED predictions + status and a COMPUTED support trajectory (▲ supports /
+  // ▼ weakens / ⊘ excludes) folded server-side by
+  // pbg_superpowers.hypotheses.rollup_support and delivered via the report-data
+  // path (GET /api/investigation-hypotheses). Omitted when no hypotheses are
+  // declared (degrades gracefully).
+  function _competingHypothesesHtml(hypotheses) {
+    var hyps = (hypotheses || []).filter(function(h) { return h && typeof h === 'object'; });
+    if (!hyps.length) return '';
+    var STATUS_COLORS = {
+      open:      ['#f1f5f9', '#475569'],
+      supported: ['#dcfce7', '#166534'],
+      weakened:  ['#fef9c3', '#854d0e'],
+      excluded:  ['#fee2e2', '#991b1b']
+    };
+    var DELTA = {
+      supports: ['▲', '#16a34a', 'supports'],
+      weakens:  ['▼', '#d97706', 'weakens'],
+      excludes: ['⊘', '#dc2626', 'excludes']
+    };
+    var cards = hyps.map(function(h) {
+      var status = (typeof h.status === 'string' && h.status.trim()) ? h.status.trim() : 'open';
+      var sc = STATUS_COLORS[status] || ['#f1f5f9', '#475569'];
+      var preds = (h.predictions || []).filter(function(p) { return p && typeof p === 'object'; });
+      var predHtml = preds.length
+        ? '<div style="margin-top:4px"><span class="muted small">predicts:</span>'
+          + '<ul style="margin:2px 0 0;padding-left:20px;color:#334155;font-size:0.9em">'
+          + preds.map(function(p) {
+              return '<li><code>' + _h(String(p.observable || '')) + '</code> '
+                + (p.expected != null ? '<strong>' + _h(String(p.expected)) + '</strong>' : '') + '</li>';
+            }).join('') + '</ul></div>'
+        : '';
+      var log = (h.support_log || []).filter(function(e) { return e && typeof e === 'object'; });
+      var trajHtml;
+      if (log.length) {
+        var tally = {supports: 0, weakens: 0, excludes: 0};
+        var steps = log.map(function(e) {
+          var key = String(e.delta || '').toLowerCase();
+          var d = DELTA[key] || ['·', '#94a3b8', String(e.delta || '')];
+          if (tally[key] != null) tally[key]++;
+          var tip = (e.study ? e.study + ': ' : '') + (e.observation || '') + ' (' + d[2] + ')';
+          return '<span title="' + _h(tip) + '" style="color:' + d[1] + ';font-weight:700;margin-right:6px">'
+            + d[0] + (e.study ? '<span style="color:#64748b;font-weight:400;font-size:0.82em"> '
+            + _h(String(e.study)) + '</span>' : '') + '</span>';
+        }).join('');
+        trajHtml = '<div style="margin-top:6px"><span class="muted small">support trajectory:</span> '
+          + '<span style="margin-left:4px;font-weight:600">▲' + tally.supports + ' ▼' + tally.weakens
+          + ' ⊘' + tally.excludes + '</span>'
+          + '<div style="margin-top:3px">' + steps + '</div></div>';
+      } else {
+        trajHtml = '<div class="muted small" style="margin-top:6px">no study evidence linked yet</div>';
+      }
+      return '<div style="padding:10px 0;border-top:1px solid #f1f5f9">'
+        + '<div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap">'
+        +   (h.id ? '<code style="font-size:0.82em">' + _h(String(h.id)) + '</code>' : '')
+        +   '<strong style="color:#1e293b">' + _h(String(h.statement || '(untitled hypothesis)')) + '</strong>'
+        +   '<span style="padding:1px 8px;border-radius:9999px;background:' + sc[0] + ';color:' + sc[1]
+        +     ';font-weight:600;font-size:0.78em">' + _h(status) + '</span>'
+        + '</div>' + predHtml + trajHtml + '</div>';
+    }).join('');
+    return '<details class="report-fold" id="competing-hypotheses"><summary>⚖️ Competing hypotheses'
+      + ' <span class="rf-prev">' + hyps.length + ' hypothes' + (hyps.length === 1 ? 'is' : 'es')
+      + ' under test</span></summary>'
+      + '<p style="color:#475569;font-size:0.92em">The rival explanations this investigation '
+      + 'discriminates. Each carries its authored predictions and a <strong>computed</strong> support '
+      + 'trajectory — ▲ supports / ▼ weakens / ⊘ excludes — folded from member studies\' findings + '
+      + 'alternate_hypotheses by pbg_superpowers.hypotheses.rollup_support.</p>'
+      + cards + '</details>';
+  }
+
   function _rigorSectionHtml(rigor, specs) {
     if (!rigor || !((rigor.dimensions && rigor.dimensions.length) ||
                     (rigor.per_study && Object.keys(rigor.per_study).length))) return '';
@@ -6327,12 +6502,16 @@
     return html;
   }
 
-  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy, generation, ghRepo, rigor, frameworkMetrics) {
+  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy, generation, ghRepo, rigor, frameworkMetrics, hypotheses) {
     bibEntries = bibEntries || [];
     chartsByStudy = chartsByStudy || {};
     embedsByStudy = embedsByStudy || {};
     generation = generation || null;
     ghRepo = ghRepo || null;
+    // Wave 3b #6/#16 — prefer the report-data-path enriched hypotheses (with the
+    // computed support_log); fall back to the authored iset.hypotheses so the
+    // panel still renders (un-enriched) when the fetch is unavailable.
+    hypotheses = hypotheses || (iset && iset.hypotheses) || [];
     var bibByKey = {};
     bibEntries.forEach(function(e) { bibByKey[e.key] = e; });
     var now = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
@@ -6703,6 +6882,7 @@
     var needsAttentionReportHtml = _needsAttentionReportHtml();
     var rigorSectionHtml = _rigorSectionHtml(rigor, specs);
     var frameworkScorecardHtml = _frameworkScorecardHtml(frameworkMetrics);  // #26
+    var competingHypothesesHtml = _competingHypothesesHtml(hypotheses);      // #6/#16
 
     // Data-driven flags so the "How to read" guide describes only what this
     // investigation actually contains — no workspace-specific boilerplate.
@@ -7511,6 +7691,7 @@
                +     '<span class="finding-id">' + _h(f.id || '') + '</span>'
                +     '<span class="finding-status-text">' + _h(statusText) + '</span>'
                +     _findingWeightChip(f._evidential_weight)
+               +     _findingChips(f)
                +   '</div>'
                +   '<div class="finding-statement">' + _multiline(f.statement || (f.id ? f.id.replace(/[-_]/g,' ') : '(no statement)')) + '</div>'
                +   evMain
@@ -7844,7 +8025,8 @@
                 var bandLine = t.pass_if
                   ? '<div class="pass_if-band muted small" style="margin-top:3px">passes if '
                     + (t.measure ? _measureText(t.measure) + ' ' : '')
-                    + '<strong>' + _h(_passIfText(t.pass_if)) + '</strong></div>'
+                    + '<strong>' + _h(_passIfText(t.pass_if)) + '</strong>'
+                    + _thresholdProvenanceChip(t.pass_if) + '</div>'   // #9
                   : '';
                 var detailLine = (co.detail || co.reason)
                   ? '<div class="muted small" style="margin-top:3px">' + _h(String(co.detail || co.reason)) + '</div>'
@@ -7880,6 +8062,7 @@
                    +   '<div class="test-header">'
                    +     '<span style="background:' + resBg + ';color:' + resFg + ';padding:2px 10px;border-radius:9999px;font-size:0.78em;font-weight:600">' + resGlyph + ' ' + _h(result) + '</span>'
                    +     '<span class="test-classification">' + _h(cls) + '</span>'
+                   +     _thresholdProvenanceChip(t.pass_if)   // #9 — threshold provenance
                    +   '</div>'
                    +   '<div class="test-claim"><strong>Claim:</strong> ' + _h(claim) + '</div>'
                    +   (evidence ? '<div class="test-evidence"><strong>Evidence:</strong> ' + evidence + '</div>' : '')
@@ -9948,6 +10131,10 @@
               + '<summary>How the verdict is computed — acceptance criteria, gating matrix &amp; study verdicts</summary>'
               + inner + '</details>';
           })()
+      // Competing hypotheses (#6/#16) — the rival explanations + their computed
+      // support trajectory, just above the rigor roll-up that grades the method.
+      +   competingHypothesesHtml
+
       // Evidence & rigor roll-up — deterministic skeptic-feedback (controls,
       // replication, alternatives, falsifiability, adversarial coverage).
       +   rigorSectionHtml
@@ -14077,11 +14264,16 @@
           .then(function (r) { return r.ok ? r.json() : {repo: null}; })
           .then(function (j) { return (j && j.repo) || null; })
           .catch(function () { return null; });
-        return Promise.all([Promise.all(studyFetches), bibFetch, Promise.all(chartFetches), ghRepoFetch])
+        // Wave 3b #6/#16 — competing hypotheses + computed support_log.
+        var hypFetch = fetch('/api/investigation-hypotheses?investigation=' + encodeURIComponent(iset.name))
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (j) { return (j && j.hypotheses) || null; })
+          .catch(function () { return null; });
+        return Promise.all([Promise.all(studyFetches), bibFetch, Promise.all(chartFetches), ghRepoFetch, hypFetch])
           .then(function (arr) {
             var chartsByStudy = {};
             arr[2].forEach(function (c) { chartsByStudy[c.name] = c.charts; });
-            return _buildInvestigationReportHtml(iset, arr[0], arr[1], chartsByStudy, undefined, null, arr[3]);
+            return _buildInvestigationReportHtml(iset, arr[0], arr[1], chartsByStudy, undefined, null, arr[3], undefined, undefined, arr[4]);
           });
       });
   }

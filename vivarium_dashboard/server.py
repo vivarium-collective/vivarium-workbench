@@ -1838,6 +1838,24 @@ def _study_detail_spec(name: str):
                 spec["spine_acceptance"] = sa
         except Exception:  # noqa: BLE001
             pass
+
+        # Wave 3b #25 — attach the derived lifecycle floor to each finding (the
+        # report-data path so the SPA renders the chip without a JS recompute).
+        # Defensive: a missing pbg_superpowers.study_verdict.lifecycle_floor
+        # leaves findings untouched (the chip then shows only the authored state).
+        try:
+            from pbg_superpowers.study_verdict import lifecycle_floor as _lf
+            for _f in (spec.get("findings") or []):
+                if not isinstance(_f, dict) or "_lifecycle_floor" in _f:
+                    continue
+                try:
+                    _v = _lf(_f, spec)
+                except Exception:  # noqa: BLE001
+                    continue
+                if isinstance(_v, str) and _v.strip():
+                    _f["_lifecycle_floor"] = _v.strip()
+        except Exception:  # noqa: BLE001
+            pass
     return spec
 
 
@@ -7621,6 +7639,95 @@ def _framework_metrics(ws_root: Path):
         return _json_body(base), 200
 
 
+def _investigation_hypotheses(ws_root: Path, name: str):
+    """GET /api/investigation-hypotheses worker — ``(json_bytes, status)``.
+
+    Wave 3b #6/#16: return the investigation's competing ``hypotheses[]`` with a
+    COMPUTED ``support_log`` folded in via the deterministic
+    ``pbg_superpowers.hypotheses.rollup_support`` (falling back to
+    ``score_support`` per hypothesis). The authored ``statement`` / ``predictions``
+    pass through; the SPA just renders the trajectory (no JS recompute, no drift).
+
+    AI-free + tolerant: an absent/old pbg_superpowers, a missing investigation,
+    or a compute failure returns 200 with the authored hypotheses (un-enriched)
+    rather than a 500 so the report's "Competing hypotheses" panel degrades.
+    """
+    ws_root = Path(ws_root)
+    wp = WorkspacePaths.load(ws_root)
+    base = {"hypotheses": [], "investigation": name}
+
+    inv_path = wp.investigations / name / "investigation.yaml"
+    if not inv_path.is_file():
+        return _json_body(base), 200
+    try:
+        inv_spec = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001
+        return _json_body(base), 200
+    if not isinstance(inv_spec, dict):
+        return _json_body(base), 200
+
+    authored = inv_spec.get("hypotheses")
+    authored = authored if isinstance(authored, list) else []
+    base["hypotheses"] = authored
+    if not authored:
+        return _json_body(base), 200
+
+    # Member study specs (slug strings or {name: slug}).
+    study_specs = []
+    for s in (inv_spec.get("studies") or []):
+        slug = s.get("name") if isinstance(s, dict) else s
+        if not slug:
+            continue
+        f = wp.studies / str(slug) / "study.yaml"
+        if not f.is_file():
+            continue
+        try:
+            sp = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+        except Exception:  # noqa: BLE001
+            continue
+        if isinstance(sp, dict):
+            study_specs.append(sp)
+
+    # 1) Preferred: rollup_support returns the enriched inv_spec (or list).
+    try:
+        from pbg_superpowers.hypotheses import rollup_support
+    except Exception:  # noqa: BLE001 — older/absent pbg_superpowers
+        rollup_support = None
+    if rollup_support is not None:
+        try:
+            enriched = rollup_support(inv_spec, study_specs)
+            if isinstance(enriched, dict):
+                hyps = enriched.get("hypotheses")
+                if isinstance(hyps, list):
+                    base["hypotheses"] = hyps
+                    return _json_body(base), 200
+            elif isinstance(enriched, list):
+                base["hypotheses"] = enriched
+                return _json_body(base), 200
+        except Exception:  # noqa: BLE001
+            pass
+
+    # 2) Fallback: score_support per hypothesis.
+    try:
+        from pbg_superpowers.hypotheses import score_support
+    except Exception:  # noqa: BLE001
+        return _json_body(base), 200
+    out = []
+    for h in authored:
+        if not isinstance(h, dict):
+            continue
+        h2 = dict(h)
+        try:
+            log = score_support(h, study_specs)
+            if isinstance(log, list):
+                h2["support_log"] = log
+        except Exception:  # noqa: BLE001
+            pass
+        out.append(h2)
+    base["hypotheses"] = out
+    return _json_body(base), 200
+
+
 # ---------------------------------------------------------------------------
 # HTTP handler
 # ---------------------------------------------------------------------------
@@ -7788,6 +7895,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_investigation_rigor()
         if self.path.startswith("/api/framework-metrics"):
             return self._send_json_bytes(*_framework_metrics(WORKSPACE))
+        if _path_only_pre == "/api/investigation-hypotheses":
+            import urllib.parse as _up
+            _q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
+            _slug = (_q.get("investigation") or _q.get("inv") or _q.get("name") or "").strip()
+            return self._send_json_bytes(*_investigation_hypotheses(WORKSPACE, _slug))
         if self.path.startswith("/api/work-composite-diff"):
             return self._get_work_composite_diff()
         if self.path.startswith("/api/references-bib"):
@@ -13593,6 +13705,13 @@ if __name__ == "__main__":
         """Test seam for GET /api/framework-metrics — aggregates framework-self
         metrics over an explicit ws_root. Returns (json_bytes, http_status)."""
         return _framework_metrics(ws_root)
+
+    @staticmethod
+    def _investigation_hypotheses_test(ws_root, name):
+        """Test seam for GET /api/investigation-hypotheses — returns the
+        investigation's competing hypotheses with computed support_log folded in
+        (Wave 3b #6/#16). Returns (json_bytes, http_status)."""
+        return _investigation_hypotheses(ws_root, name)
 
     @staticmethod
     def _iset_detail_data(name: str) -> "dict | None":
