@@ -569,15 +569,27 @@
     var el = document.getElementById('inputs-api-render');
     if (!el) return;
     el.innerHTML = '<p class="muted" style="font-style:italic">Loading inputs…</p>';
-    var _slug = window._currentIsetSlug || '';
-    var _p = window.DataSource
+    // Prefer the Sources-page picker selection over the git-branch-current slug.
+    var _slug = window._inputsSelectedSlug || window._currentIsetSlug || '';
+    var _pInputs = window.DataSource
       ? window.DataSource.loadInputs(_slug)
       : (function() {
           var _url = '/api/inputs' + (_slug ? ('?investigation=' + encodeURIComponent(_slug)) : '');
           return fetch(_url).then(function(r) { return r.json(); });
         })();
-    _p
-      .then(function (data) { _renderInputs(el, data || {}); })
+    // Also load the investigation list so the panel can offer a picker when no
+    // investigation is branch-current — the user chooses which investigation to
+    // load sources INTO (its own sources, not the repo-wide shared sources).
+    var _pList = fetch('/api/iset-list')
+      .then(function(r) { return r.json(); })
+      .then(function(d) { return (d && d.investigations) || []; })
+      .catch(function() { return []; });
+    Promise.all([_pInputs, _pList])
+      .then(function (arr) {
+        var data = arr[0] || {};
+        data._investigations = arr[1] || [];
+        _renderInputs(el, data);
+      })
       .catch(function (err) {
         el.innerHTML = '<p style="color:#c00">Could not load inputs: ' +
           _esc(String(err)) +
@@ -585,6 +597,14 @@
       });
   }
   window._loadInputs = _loadInputs;
+
+  // Sources-page investigation picker: set the selected slug and reload so the
+  // panel shows that investigation's sources + investigation-scoped +Add buttons.
+  function _inputsSelectInvestigation(slug) {
+    window._inputsSelectedSlug = slug || '';
+    _loadInputs();
+  }
+  window._inputsSelectInvestigation = _inputsSelectInvestigation;
 
   // A reference entry is either a bare bib key (investigation.references) or a
   // parsed bib-entry dict (global.references). Normalize to a display label.
@@ -756,7 +776,7 @@
   // POST an investigation-scoped input upload, then refresh the page.
   function _inputsPost(endpoint, body) {
     body = body || {};
-    var slug = window._currentIsetSlug || '';
+    var slug = window._inputsSelectedSlug || window._currentIsetSlug || '';
     if (slug) body.investigation = slug;
     fetch(endpoint, {
       method: 'POST',
@@ -792,8 +812,8 @@
 
   // Entry point for the "+ Add" buttons on the investigation inputs panel.
   function _inputsAdd(category) {
-    var slug = window._currentIsetSlug || '';
-    if (!slug) { alert('No investigation loaded.'); return; }
+    var slug = window._inputsSelectedSlug || window._currentIsetSlug || '';
+    if (!slug) { alert('Select an investigation first (Load sources into: …).'); return; }
 
     if (category === 'dataset') {
       var dsName = window.prompt('Dataset name?');
@@ -843,6 +863,8 @@
     var glob = data.global || {};
     var current = data.current || null;
 
+    var invList = data._investigations || [];
+
     var html = '';
 
     // --- This investigation's inputs (top) ---
@@ -850,8 +872,32 @@
     if (current) invHeading += ' — ' + _esc(current);
     html += '<div class="panel">';
     html += '<h3>' + invHeading + '</h3>';
+
+    // Investigation picker. One dashboard per repo, but a repo can hold several
+    // investigations and the Sources page isn't always opened from inside one
+    // (git-branch detection may yield no current). Let the user choose which
+    // investigation to view and load sources INTO — its own sources, not the
+    // repo-wide shared sources below.
+    if (invList.length) {
+      var opts = '<option value="">— select an investigation —</option>' +
+        invList.map(function (it) {
+          var slug = it.name || it.slug || '';
+          var label = it.title || slug;
+          var sel = (slug === current) ? ' selected' : '';
+          return '<option value="' + _esc(slug) + '"' + sel + '>' + _esc(label) + '</option>';
+        }).join('');
+      html += '<div style="margin:4px 0 12px;display:flex;align-items:center;gap:6px">' +
+        '<label style="font-size:0.85em;color:#475569">Load sources into:</label>' +
+        '<select onchange="_inputsSelectInvestigation(this.value)" ' +
+        'style="font-size:0.9em;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px">' +
+        opts + '</select></div>';
+    }
+
     if (!current) {
-      html += '<p class="muted" style="font-style:italic">No investigation loaded.</p>';
+      html += '<p class="muted" style="font-style:italic">' +
+        (invList.length
+          ? 'Select an investigation above to view and add its sources.'
+          : 'No investigation loaded.') + '</p>';
     } else {
       if (inv._repo_fallback) {
         html += '<p class="muted" style="font-style:italic;font-size:0.85em">' +
