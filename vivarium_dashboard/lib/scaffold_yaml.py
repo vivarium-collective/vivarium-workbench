@@ -199,6 +199,11 @@ phase: Design
 #       op: in_range                # in_range | at_least | at_most | equals | ...
 #       low: 0.0
 #       high: 1.0
+#       provenance:                 # critique #9 — WHERE this threshold came from
+#         kind: literature          # theory | calibration | literature | expert |
+#                                   # exploratory | post_hoc (distinct from `cites`/
+#                                   # `calibration_anchor`, which link a source)
+#         note: ""                  # one line justifying the cutoff
 #     status: pending
 #     cites: [bib_key]
 #
@@ -294,8 +299,20 @@ phase: Design
 #     observed: ""
 #     result: PENDING               # PENDING until run; PASS only with a non-empty `observed` (= the control behaved as expected / discriminating)
 #
+# calibration_ladder:               # critique #20 — per metric, index controls[] by rung.
+#   # Each rung is a `controls[].name` (or null when that rung is unbuilt — the gap
+#   # is the signal). >=3 filled rungs = a calibrated metric; known_fail+known_pass
+#   # but no borderline = WARN; <=1 rung = GAP.
+#   - metric: metric_name
+#     known_fail: ""                # control that SHOULD fail (negative)
+#     known_pass: ""                # control that SHOULD pass (positive)
+#     borderline: null              # a near-threshold case (discriminating power)
+#     stress: null                  # an extreme / adversarial case
+#
 # alternative_hypotheses:           # competing explanations + how the evidence excludes them
 #   - claim: ""
+#     hypothesis_id: ""             # critique #6 — optional link to an investigation
+#                                   # hypotheses[].id this study's evidence bears on
 #     discriminated_by: ""          # often the negative control
 #     status: not-excluded          # excluded | not-excluded | untested
 #
@@ -307,6 +324,11 @@ phase: Design
 # discovery_implications:           # Decide-phase synthesis + next steps
 #   resolved_uncertainties: []
 #   remaining_uncertainties: []
+#   alternate_hypotheses:           # critique #6 — competing explanations (canonical home)
+#     - claim: ""
+#       hypothesis_id: ""           # optional link to an investigation hypotheses[].id
+#       discriminated_by: ""        # often the negative control
+#       status: not-excluded        # excluded | not-excluded | untested
 #   followup_study_proposals:
 #     - id: ""
 #       title: ""
@@ -319,6 +341,19 @@ phase: Design
 #     tier: observation             # observation | mechanism | interpretation
 #     mechanism_origin: ""          # engineered | emergent (on interpretation claims)
 #     statement: ""
+#     claim_scope: mechanism        # critique #21 — local-implementation | mechanism |
+#                                   # behavioral | theoretical | generality (DISTINCT
+#                                   # from tier; the scope/reach of the claim)
+#     lifecycle_state: observation  # critique #25 — observation | candidate-explanation |
+#                                   # tested-vs-alternatives | provisional-claim |
+#                                   # generalized | retired | superseded. The derived
+#                                   # FLOOR (study_verdict.lifecycle_floor) is the minimum;
+#                                   # author may declare higher, never below it.
+#     generality:                   # critique #22 — across which axes was this checked?
+#       axes_tested: [parameter_regime]   # parameter_regime | initial_conditions |
+#                                   # discretization | geometry | alt_implementation |
+#                                   # independent_authoring
+#       level: instance_specific    # instance_specific | mechanism | framework
 #     next_action: ""               # free-text rationale: what to do next
 #     next_action_type: ""          # critique #7 — replicate | calibrate | ablate |
 #                                   # adversarially_probe | refine_representation |
@@ -451,6 +486,24 @@ status: planning
 #   - name: ""                      # e.g. "alternative mechanism / null model X"
 #     prediction: ""                # what it would predict, that we discriminate
 #     discriminated_by: ""          # which study/control rules it out
+#
+# hypotheses:                       # critique #6/#16 — the competing hypotheses this
+#                                   # investigation discriminates. `statement` +
+#                                   # `predictions` are AUTHORED; `support_log` is
+#                                   # COMPUTED (folded from each study's findings +
+#                                   # discovery_implications.alternate_hypotheses that
+#                                   # carry a matching hypothesis_id).
+#   - id: H1
+#     statement: ""                 # one-line competing explanation
+#     predictions:                  # what this hypothesis predicts, per observable
+#       - observable: closure_gap   # an emitted measure / finding-evidence key
+#         expected: ""              # e.g. "< 0.1" / "increases with rate" / a band
+#     required_controls: []         # controls[].name needed to test it
+#     failure_modes: []             # what observation would weaken/exclude it
+#     status: open                  # open | supported | weakened | excluded
+#     # support_log: []             # COMPUTED — list of per-study entries
+#     #                             #   (study, observation, delta) where
+#     #                             #   delta is supports | weakens | excludes
 #
 # NOTE: include at least one member study with `kind: adversarial` (a study
 # designed to break the main claim) so the investigation satisfies the

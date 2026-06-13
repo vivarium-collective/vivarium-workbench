@@ -166,6 +166,44 @@ class TestV4StudyScaffold:
         # Still parses (the new fields are comments, not live YAML).
         yaml.safe_load(text)
 
+    def test_wave3b_measurement_integrity_markers_present(self):
+        """Wave 3b — threshold provenance (#9), calibration_ladder (#20), and
+        the per-finding claim_scope (#21) / generality (#22) / lifecycle_state
+        (#25) templates carry their full enum vocabulary, and the scaffold still
+        parses as valid YAML."""
+        text = v4_study_scaffold("s", composite="pkg.composites.foo")
+        # #9 pass_if.provenance — kind enum must match the contract exactly.
+        assert "provenance:" in text
+        for v in ("theory", "calibration", "literature", "expert",
+                  "exploratory", "post_hoc"):
+            assert v in text, f"missing threshold provenance kind: {v}"
+        # #20 calibration_ladder + its rungs.
+        assert "calibration_ladder:" in text
+        for key in ("known_fail", "known_pass", "borderline", "stress"):
+            assert key in text, f"missing calibration_ladder rung: {key}"
+        # #21 claim_scope enum.
+        assert "claim_scope:" in text
+        for v in ("local-implementation", "mechanism", "behavioral",
+                  "theoretical", "generality"):
+            assert v in text, f"missing claim_scope enum value: {v}"
+        # #22 generality enum (axes + level).
+        assert "generality:" in text
+        assert "axes_tested:" in text
+        for v in ("parameter_regime", "initial_conditions", "discretization",
+                  "geometry", "alt_implementation", "independent_authoring"):
+            assert v in text, f"missing generality axis: {v}"
+        for v in ("instance_specific", "mechanism", "framework"):
+            assert v in text, f"missing generality level: {v}"
+        # #25 lifecycle_state enum.
+        assert "lifecycle_state:" in text
+        for v in ("observation", "candidate-explanation", "tested-vs-alternatives",
+                  "provisional-claim", "generalized", "retired", "superseded"):
+            assert v in text, f"missing lifecycle_state enum value: {v}"
+        # #6 hypothesis_id link on the alternate_hypotheses template.
+        assert "hypothesis_id:" in text
+        # Still parses (the new fields are comments, not live YAML).
+        yaml.safe_load(text)
+
     def test_prerequisite_item_documents_relation_key(self):
         """W13 — the commented pipeline_gate.prerequisites template surfaces
         the optional `relation` key + its vocabulary so authors know an edge
@@ -230,6 +268,21 @@ class TestV2InvestigationScaffold:
     def test_narrative_spine_present_as_commented_todos(self, marker):
         text = v2_investigation_scaffold("i")
         assert marker in text, f"missing scaffold marker: {marker!r}"
+
+    def test_wave3b_hypotheses_block_present(self):
+        """Wave 3b #6/#16 — the investigation scaffold offers a commented
+        hypotheses: block with its full authored shape (id, statement,
+        predictions[observable/expected], required_controls, failure_modes,
+        status) + the COMPUTED support_log note, and still parses."""
+        text = v2_investigation_scaffold("i")
+        assert "hypotheses:" in text
+        for key in ("statement:", "predictions:", "observable:", "expected:",
+                    "required_controls:", "failure_modes:", "support_log"):
+            assert key in text, f"missing hypotheses sub-key: {key}"
+        # The delta vocabulary the support_log uses.
+        for v in ("supports", "weakens", "excludes"):
+            assert v in text, f"missing support_log delta term: {v}"
+        yaml.safe_load(text)
 
     def test_object_of_evaluation_marker_present(self):
         """Wave 3a #1 — the investigation scaffold offers object_of_evaluation
