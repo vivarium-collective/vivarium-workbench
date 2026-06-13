@@ -86,6 +86,13 @@ created: '{created}'
 status: planned
 phase: Design
 
+# study_type: standard             # critique #10 — exploratory | confirmatory |
+#                                   # diagnostic | adversarial | standard. Default
+#                                   # (unset) = standard; `kind: adversarial` still
+#                                   # works as an alias. Shapes how rigor credits the
+#                                   # study (e.g. an exploratory pass is an observation,
+#                                   # not falsification exposure).
+
 # ─── Executive layer ─────────────────────────────────────────────────
 #
 # runtime:                          # per-study execution overrides
@@ -268,6 +275,17 @@ phase: Design
 #   seeds: [0]
 #   parameter_sweep: false
 #
+# preregistered:                    # critique #18 — criteria fixed BEFORE the run.
+#   # A confirmatory study earns full credit only when its pass criteria were
+#   # registered (registered_at predates the canonical run). Renders a
+#   # "pre-registered ✓ / post-hoc ⚠" chip in the verdict area.
+#   criteria: []                    # the pass/fail criteria fixed in advance
+#   thresholds:                     # test_name: pass_if (mirrors behavior_tests[].pass_if)
+#     test-name: {{op: in_range, low: 0.0, high: 1.0}}
+#   predictions: []                 # what you predict the run will show
+#   controls: []                    # controls registered in advance
+#   registered_at: ''               # ISO-8601 timestamp you registered these (author-supplied)
+#
 # controls:                         # a system that SHOULD fail + a passing/borderline case
 #   - name: ""                      # build the negative control with pbg_superpowers.intervention
 #     kind: negative                # negative | positive | borderline | adversarial
@@ -301,6 +319,10 @@ phase: Design
 #     tier: observation             # observation | mechanism | interpretation
 #     mechanism_origin: ""          # engineered | emergent (on interpretation claims)
 #     statement: ""
+#     next_action: ""               # free-text rationale: what to do next
+#     next_action_type: ""          # critique #7 — replicate | calibrate | ablate |
+#                                   # adversarially_probe | refine_representation |
+#                                   # split_hypothesis | retire_hypothesis | escalate_model
 #     evidence: {{from_test: ""}}
 """
 
@@ -367,6 +389,12 @@ name: {name}
 title: "{title}"
 created: '{created}'
 status: planning
+
+# object_of_evaluation: model       # critique #1 — what this investigation
+#                                    # primarily evaluates: method | model |
+#                                    # hypothesis | composition-protocol. Names the
+#                                    # thing the investigation's rigor section judges
+#                                    # ("how well the method defends its claims").
 
 # ─── Front matter ────────────────────────────────────────────────────
 #

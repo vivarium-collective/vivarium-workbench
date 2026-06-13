@@ -142,6 +142,30 @@ class TestV4StudyScaffold:
         import yaml as _yaml
         _yaml.safe_load(text)
 
+    def test_wave3a_workflow_typing_markers_present(self):
+        """Wave 3a — study_type (#10), next_action_type (#7) on findings, and a
+        preregistered block (#18) are offered as commented templates with their
+        full enum vocabulary, and the scaffold still parses as valid YAML."""
+        text = v4_study_scaffold("s", composite="pkg.composites.foo")
+        # #10 study_type enum — exact value list must match the contract.
+        assert "study_type:" in text
+        for v in ("exploratory", "confirmatory", "diagnostic",
+                  "adversarial", "standard"):
+            assert v in text, f"missing study_type enum value: {v}"
+        # #7 next_action_type enum on the findings template.
+        assert "next_action_type:" in text
+        for v in ("replicate", "calibrate", "ablate", "adversarially_probe",
+                  "refine_representation", "split_hypothesis",
+                  "retire_hypothesis", "escalate_model"):
+            assert v in text, f"missing next_action_type enum value: {v}"
+        # #18 preregistered block + its sub-keys.
+        assert "preregistered:" in text
+        for key in ("criteria", "thresholds", "predictions", "controls",
+                    "registered_at"):
+            assert key in text, f"missing preregistered sub-key: {key}"
+        # Still parses (the new fields are comments, not live YAML).
+        yaml.safe_load(text)
+
     def test_prerequisite_item_documents_relation_key(self):
         """W13 — the commented pipeline_gate.prerequisites template surfaces
         the optional `relation` key + its vocabulary so authors know an edge
@@ -206,3 +230,12 @@ class TestV2InvestigationScaffold:
     def test_narrative_spine_present_as_commented_todos(self, marker):
         text = v2_investigation_scaffold("i")
         assert marker in text, f"missing scaffold marker: {marker!r}"
+
+    def test_object_of_evaluation_marker_present(self):
+        """Wave 3a #1 — the investigation scaffold offers object_of_evaluation
+        with its full enum vocabulary, and still parses as valid YAML."""
+        text = v2_investigation_scaffold("i")
+        assert "object_of_evaluation:" in text
+        for v in ("method", "model", "hypothesis", "composition-protocol"):
+            assert v in text, f"missing object_of_evaluation enum value: {v}"
+        yaml.safe_load(text)
