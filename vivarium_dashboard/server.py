@@ -2357,22 +2357,42 @@ def _read_runs_db_for_study(name: str) -> list[dict]:
 
 
 def _iter_study_dirs():
-    """Yield every study directory across both studies/ and investigations/.
+    """Yield every study directory across studies/ and investigations/.
 
-    A name present in both locations yields only the studies/ entry (the v3
-    location wins, matching _study_dir's precedence).
+    Delegates to ``WorkspacePaths.iter_study_dirs``, which descends into the
+    nested ``investigations/<inv>/studies/<slug>/`` layout (a study dir is one
+    that holds ``study.yaml``) AND the flat ``studies/<slug>/`` layout, with the
+    nested location winning on slug collision.
+
+    The previous implementation iterated only the DIRECT children of
+    ``studies/`` and ``investigations/`` — so for a nested-layout workspace it
+    saw the investigation dirs (which hold ``investigation.yaml``, not
+    ``study.yaml``) instead of their studies, and every investigation-nested
+    study (e.g. ketchup-exchange-comparison, pdmp-*, colonies-*) was silently
+    dropped from /api/investigations -> "No investigations declared".
+
+    Legacy compatibility: a study authored directly under
+    ``investigations/<name>/`` as a pre-Phase-1 ``spec.yaml`` (no nested
+    ``studies/`` subdir, no ``investigation.yaml``) is still a study and is
+    yielded too — but a real investigation COLLECTION (one carrying
+    ``investigation.yaml``) is not, since its studies live one level down.
     """
     wp = WorkspacePaths.load(WORKSPACE)
-    seen = set()
-    for root_name in ("studies", "investigations"):
-        root = wp.dir(root_name)  # layout-aware; falls back to flat name
-        if not root.is_dir():
-            continue
-        for d in sorted(root.iterdir()):
+    seen: set[str] = set()
+    for d in wp.iter_study_dirs():
+        seen.add(d.name)
+        yield d
+    # Legacy: studies stored directly under investigations/<name>/spec.yaml.
+    inv_root = wp.dir("investigations")
+    if inv_root.is_dir():
+        for d in sorted(inv_root.iterdir()):
             if not d.is_dir() or d.name in seen:
                 continue
-            seen.add(d.name)
-            yield d
+            if (d / "investigation.yaml").is_file():
+                continue  # an investigation collection, not a study
+            if (d / "spec.yaml").is_file() or (d / "study.yaml").is_file():
+                seen.add(d.name)
+                yield d
 
 
 def _iter_iset_dirs(ws_root: Path | None = None):

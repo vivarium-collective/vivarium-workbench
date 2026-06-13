@@ -35,10 +35,20 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 def _write_json(path: Path, data) -> None:
-    """Write *data* as JSON using the server's ``_json_default`` serializer."""
-    from vivarium_dashboard.server import _json_default
+    """Write *data* as JSON using the server's ``_json_default`` serializer.
+
+    Non-finite floats (inf/-inf/nan) are coerced to ``null`` first via the
+    server's ``_json_sanitize`` — the same sanitizer the live ``_json_body``
+    uses. The browser SPA parses the bundle with ``JSON.parse``, which rejects
+    the ``Infinity``/``NaN`` tokens ``allow_nan=True`` emits (hence
+    ``allow_nan=False``); without sanitizing, a single non-finite float in any
+    composite's resolved state (e.g. the v2ecoli baseline's 9 infinite initial
+    values) would raise and abort the WHOLE static build mid-bundle.
+    """
+    from vivarium_dashboard.server import _json_default, _json_sanitize
     path.write_text(
-        json.dumps(data, default=_json_default, allow_nan=False),
+        json.dumps(_json_sanitize(data), default=_json_default,
+                   allow_nan=False),
         encoding="utf-8",
     )
 

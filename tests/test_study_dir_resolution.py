@@ -105,3 +105,37 @@ def test_iter_study_dirs_flat_layout_still_works(tmp_path, monkeypatch):
     monkeypatch.setattr(srv, "WORKSPACE", ws)
     names = sorted(d.name for d in srv._iter_study_dirs())
     assert names == ["flat-study"]
+
+
+def test_iter_study_dirs_includes_investigation_nested_studies(tmp_path, monkeypatch):
+    """A study nested under investigations/<inv>/studies/<slug>/ (the v3
+    investigation-collection layout, e.g. v2ecoli ketchup/pdmp/colonies) must be
+    discovered. Regression: _iter_study_dirs used to yield the investigation dir
+    itself (which holds investigation.yaml, not study.yaml) and dropped every
+    nested study -> /api/investigations missing them entirely."""
+    import vivarium_dashboard.server as srv
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "workspace.yaml").write_text(yaml.safe_dump({
+        "name": "demo",
+        "layout": {"investigations": "workspace/investigations"},
+    }))
+    inv = ws / "workspace" / "investigations" / "my-inv"
+    inv.mkdir(parents=True)
+    (inv / "investigation.yaml").write_text(yaml.safe_dump({
+        "schema_version": 2, "name": "my-inv", "title": "T", "studies": ["nested"],
+    }))
+    sd = inv / "studies" / "nested"
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "schema_version": 4, "name": "nested", "created": "2026-06-12",
+        "status": "ran", "objective": "obj",
+        "baseline": {"composite": "pkg.foo", "params": {}},
+        "variants": [], "runs": [], "visualizations": [],
+        "conclusion": None, "parent_studies": [],
+    }))
+    monkeypatch.setattr(srv, "WORKSPACE", ws)
+    names = sorted(d.name for d in srv._iter_study_dirs())
+    # The nested study is found; the investigation collection dir is NOT
+    # mistaken for a study.
+    assert names == ["nested"]
