@@ -99,13 +99,16 @@ class TestV4StudyScaffold:
 
     @pytest.mark.parametrize("marker", [
         "schema_version: 4",
-        "★ report:",
-        "★ study_card:",
+        # report/study_card/conclusion_verdicts demoted from ★author-first
+        # (item 12): still present as commented target shape, but derived from
+        # canonical fields so they are not hand-entry inputs.
+        "report:",
+        "study_card:",
+        "conclusion_verdicts:",
         "★ question:",
         "★ conditions:",
         "★ behavior_tests:",
         "★ readouts:",
-        "★ conclusion_verdicts:",
         "literature_anchors:",
         "design_pivot_required:",
         "biological_summary:",

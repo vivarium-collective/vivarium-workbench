@@ -252,12 +252,21 @@
       <h2 class="overview-label">📋 Report — executive summary
         <span class="narrative-card-hint">(top-of-page panel for reviewers)</span>
       </h2>
+      <p class="muted" style="margin:0 0 10px 0;font-size:0.85em">
+        Verdict + main insight are <strong>computed</strong> from canonical
+        fields (gate evaluator · findings) and shown read-only; the report
+        also derives <code>title</code>, <code>objective</code>, and
+        <code>key_metrics</code> from canonical content. Author only the
+        reviewer-facing notes below (confidence · evidence quality · caveat).
+      </p>
       <div class="narrative-grid">
+        {% set _f0 = (study.findings or [])[0] if study.findings else None %}
         <label class="narrative-row">
           <span class="narrative-label">Verdict</span>
-          <input type="text" class="narrative-input" data-narrative-path="report.verdict"
-                 value="{{ _report.verdict or '' }}"
-                 placeholder="e.g. passing | passing-with-caveats | failing-bio | not-yet-run">
+          <span class="narrative-input verdict-badge-computed"
+                title="Computed from the gate evaluator (read-only)"
+                style="display:inline-block;padding:2px 12px;border-radius:9999px;font-weight:700;font-size:0.85em;background:#f1f5f9;color:#475569">{{ (study.computed_gate_verdict or {}).result or _report.verdict or 'not-yet-run' }}</span>
+          <span class="muted small" style="margin-left:6px">computed from gate evaluator</span>
         </label>
         <label class="narrative-row">
           <span class="narrative-label">Confidence</span>
@@ -274,12 +283,11 @@
                  value="{{ _report.evidence_quality or '' }}"
                  placeholder="e.g. calibrated | literature-matched | aspirational | regression-only">
         </label>
-        <label class="narrative-row narrative-row-wide">
+        <div class="narrative-row narrative-row-wide">
           <span class="narrative-label">Main insight</span>
-          <textarea class="narrative-input narrative-textarea" rows="2"
-                    data-narrative-path="report.main_insight"
-                    placeholder="One sentence: the single most important thing this study taught us.">{{ _report.main_insight or '' }}</textarea>
-        </label>
+          <span class="narrative-input" style="background:transparent;border:0;color:#334155">{{ _report.main_insight or (_f0.statement if _f0 else '') or '(computed from findings in the report)' }}
+            <span class="muted small">— computed from findings</span></span>
+        </div>
         <label class="narrative-row narrative-row-wide">
           <span class="narrative-label">Caveat</span>
           <textarea class="narrative-input narrative-textarea" rows="2"
@@ -299,47 +307,68 @@
       {# Always-render biological_summary: empty-state textarea encourages
          the user to start writing immediately. #}
       <div class="biology-summary-callout">
-        <h2 class="biology-glance-label">Biology — what this study is about</h2>
+        <h2 class="biology-glance-label">Biology — what this study is about
+          <span class="narrative-card-hint">(optional override — derived from findings when blank)</span>
+        </h2>
         <textarea class="biology-prose narrative-input narrative-textarea" rows="4"
                   data-narrative-path="biological_summary"
                   placeholder="Multi-paragraph plain-English mechanism narrative — the 'textbook write-up' a non-modeler would read.">{{ study.biological_summary or '' }}</textarea>
+        {% if not study.biological_summary and study.findings %}
+        <div class="biology-derived-preview muted small" style="margin-top:6px;padding:8px 12px;background:#f8fafc;border-left:3px solid #cbd5e1;border-radius:4px">
+          <em>Derived from findings (shown in the report when no override is set):</em>
+          {% for _bf in study.findings %}{% if _bf.statement or _bf.summary %}<p style="margin:4px 0 0">{{ _bf.statement or _bf.summary }}</p>{% endif %}{% endfor %}
+        </div>
+        {% endif %}
       </div>
 
-      {# Always-render study_card: 5 editable rows, written one path at a
-         time via /api/study-narrative-set so the YAML round-trips cleanly. #}
+      {# study_card is DEMOTED (no longer ★author-first): every slot is
+         DERIVED from canonical fields when its override is blank
+         (goal←objective, mechanism←biological_summary/findings,
+         expected_result←hypothesis, main_expert_question←expert_questions[0],
+         why_before_next←pipeline_gate.proceed_condition). The inputs author an
+         optional override; the canonical value shows as the placeholder so the
+         card renders without duplicating the source. #}
       {% set _sc = study.study_card or {} %}
+      {% set _sc_f0 = (study.findings or [])[0] if study.findings else None %}
+      {% set _sc_eq = (study.expert_questions or [])[0] if study.expert_questions else None %}
+      {% set _sc_goal = study.objective %}
+      {% set _sc_mech = study.biological_summary or (_sc_f0.statement if _sc_f0 else None) %}
+      {% set _sc_exp = study.hypothesis %}
+      {% set _sc_why = (study.pipeline_gate or {}).proceed_condition %}
       <div class="study-card">
-        <h2 class="biology-glance-label">Study card</h2>
+        <h2 class="biology-glance-label">Study card
+          <span class="narrative-card-hint">(derived from canonical fields when a slot is blank)</span>
+        </h2>
         <table class="study-card-table">
           <tr><th>Goal</th><td>
             <input type="text" class="narrative-input narrative-card-input"
                    data-narrative-path="study_card.goal"
                    value="{{ _sc.goal or '' }}"
-                   placeholder="One sentence — the single most important thing this study does.">
+                   placeholder="{{ _sc_goal or 'One sentence — the single most important thing this study does.' }}">
           </td></tr>
           <tr><th>Mechanism</th><td>
             <input type="text" class="narrative-input narrative-card-input"
                    data-narrative-path="study_card.mechanism"
                    value="{{ _sc.mechanism or '' }}"
-                   placeholder="One paragraph — how the biology gets the result.">
+                   placeholder="{{ _sc_mech or 'One paragraph — how the biology gets the result.' }}">
           </td></tr>
           <tr><th>Why before next</th><td>
             <input type="text" class="narrative-input narrative-card-input"
                    data-narrative-path="study_card.why_before_next"
                    value="{{ _sc.why_before_next or '' }}"
-                   placeholder="Why this study must finish before the next one in the DAG.">
+                   placeholder="{{ _sc_why or 'Why this study must finish before the next one in the DAG.' }}">
           </td></tr>
           <tr><th>Expected result</th><td>
             <input type="text" class="narrative-input narrative-card-input"
                    data-narrative-path="study_card.expected_result"
                    value="{{ _sc.expected_result or '' }}"
-                   placeholder="Literature-stated success criterion.">
+                   placeholder="{{ _sc_exp or 'Literature-stated success criterion.' }}">
           </td></tr>
           <tr><th>Main expert question</th><td>
             <input type="text" class="narrative-input narrative-card-input"
                    data-narrative-path="study_card.main_expert_question"
                    value="{{ _sc.main_expert_question or '' }}"
-                   placeholder="The one question this study most wants an expert to answer.">
+                   placeholder="{{ _sc_eq or 'The one question this study most wants an expert to answer.' }}">
           </td></tr>
         </table>
       </div>
@@ -1920,19 +1949,17 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
       Each track is independent. <em>Regression</em> answers "does the code
       still build and run cleanly?", <em>biological</em> answers "does the
       model match the literature?", <em>explanatory</em> answers "did we
-      learn something new?". Set the result + basis for each as the runs
-      complete.
+      learn something new?". Each <strong>result is computed</strong> from
+      canonical fields (gate evaluator, run status, finding tiers) — author
+      only the <em>basis</em> (the rationale) for each track.
     </p>
     <div class="narrative-grid">
       <label class="narrative-row">
         <span class="narrative-label">Regression compatibility</span>
-        <select class="narrative-input" data-narrative-path="conclusion_verdicts.regression_compatibility.result">
-          <option value="">(unset)</option>
-          <option value="PASS" {% if _reg.result == 'PASS' %}selected{% endif %}>PASS</option>
-          <option value="FAIL" {% if _reg.result == 'FAIL' %}selected{% endif %}>FAIL</option>
-          <option value="MIXED" {% if _reg.result == 'MIXED' %}selected{% endif %}>MIXED</option>
-          <option value="PENDING" {% if _reg.result == 'PENDING' %}selected{% endif %}>PENDING</option>
-        </select>
+        <span class="narrative-input verdict-badge-computed" data-verdict-track="regression_compatibility"
+              title="Computed from run status (read-only)"
+              style="display:inline-block;padding:2px 12px;border-radius:9999px;font-weight:700;font-size:0.85em;background:#f1f5f9;color:#475569">{{ _reg.result or 'PENDING' }}</span>
+        <span class="muted small" style="margin-left:6px">computed from run status</span>
       </label>
       <label class="narrative-row narrative-row-wide">
         <span class="narrative-label">Regression basis</span>
@@ -1942,13 +1969,10 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
       </label>
       <label class="narrative-row">
         <span class="narrative-label">Biological validation</span>
-        <select class="narrative-input" data-narrative-path="conclusion_verdicts.biological_validation.result">
-          <option value="">(unset)</option>
-          <option value="PASS" {% if _bio.result == 'PASS' %}selected{% endif %}>PASS</option>
-          <option value="FAIL" {% if _bio.result == 'FAIL' %}selected{% endif %}>FAIL</option>
-          <option value="MIXED" {% if _bio.result == 'MIXED' %}selected{% endif %}>MIXED</option>
-          <option value="PENDING" {% if _bio.result == 'PENDING' %}selected{% endif %}>PENDING</option>
-        </select>
+        <span class="narrative-input verdict-badge-computed" data-verdict-track="biological_validation"
+              title="Computed from the gate evaluator (read-only)"
+              style="display:inline-block;padding:2px 12px;border-radius:9999px;font-weight:700;font-size:0.85em;background:#f1f5f9;color:#475569">{{ _bio.result or 'PENDING' }}</span>
+        <span class="muted small" style="margin-left:6px">computed from gate evaluator</span>
       </label>
       <label class="narrative-row narrative-row-wide">
         <span class="narrative-label">Biological basis</span>
@@ -1958,13 +1982,10 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
       </label>
       <label class="narrative-row">
         <span class="narrative-label">Explanatory gain</span>
-        <select class="narrative-input" data-narrative-path="conclusion_verdicts.explanatory_gain.result">
-          <option value="">(unset)</option>
-          <option value="POSITIVE" {% if _exp.result == 'POSITIVE' %}selected{% endif %}>POSITIVE</option>
-          <option value="NEUTRAL" {% if _exp.result == 'NEUTRAL' %}selected{% endif %}>NEUTRAL</option>
-          <option value="NEGATIVE" {% if _exp.result == 'NEGATIVE' %}selected{% endif %}>NEGATIVE</option>
-          <option value="PENDING" {% if _exp.result == 'PENDING' %}selected{% endif %}>PENDING</option>
-        </select>
+        <span class="narrative-input verdict-badge-computed" data-verdict-track="explanatory_gain"
+              title="Computed from interpretation-tier findings (read-only)"
+              style="display:inline-block;padding:2px 12px;border-radius:9999px;font-weight:700;font-size:0.85em;background:#f1f5f9;color:#475569">{{ _exp.result or 'PENDING' }}</span>
+        <span class="muted small" style="margin-left:6px">computed from interpretation-tier findings</span>
       </label>
       <label class="narrative-row narrative-row-wide">
         <span class="narrative-label">Explanatory basis</span>
@@ -2102,26 +2123,61 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
     {% endif %}
   </div>
   {% else %}
-  {# ── Legacy four-field markdown editor (kept for non-v3 studies) ──── #}
-  <div class="conclusions-grid">
+  {# ── Read-only synthesis (C3) ──────────────────────────────────────────
+     The four buckets are DERIVED from the canonical structured fields rather
+     than hand-entered free text (the old textareas saved to study.conclusion,
+     which reached no report). Claims/Evidence ← findings; Limitations ←
+     limitations; Next steps ← discovery_implications.followup_study_proposals
+     (or follow_up_studies). Edit those source fields and this synthesis — and
+     the generated report — update together. #}
+  {% set _di = study.discovery_implications or {} %}
+  {% set _nexts = _di.followup_study_proposals or study.follow_up_studies or [] %}
+  <p class="muted" style="margin:0 0 10px 0;font-size:0.85em">
+    Synthesised read-only from canonical fields — edit <code>findings</code>,
+    <code>limitations</code>, and <code>discovery_implications</code> to change
+    this (and the generated report) together.
+  </p>
+  <div class="conclusions-grid conclusions-synthesis">
     <div class="conclusion-field">
-      <h3>Claims</h3>
-      <textarea id="conclusion-claims" rows="6" data-section="Claims"></textarea>
+      <h3>Claims <span class="muted small">(from findings)</span></h3>
+      {% if study.findings %}
+      <ul class="synthesis-list">
+        {% for f in study.findings %}{% if f.statement or f.summary %}
+        <li>{{ f.statement or f.summary }}{% if f.tier %} <span class="finding-tier tier-{{ f.tier }}">{{ f.tier }}</span>{% endif %}</li>
+        {% endif %}{% endfor %}
+      </ul>
+      {% else %}<p class="muted">No findings recorded yet.</p>{% endif %}
     </div>
     <div class="conclusion-field">
-      <h3>Evidence</h3>
-      <textarea id="conclusion-evidence" rows="6" data-section="Evidence"></textarea>
+      <h3>Evidence <span class="muted small">(from findings)</span></h3>
+      {% set _has_ev = study.findings and (study.findings | selectattr('evidence') | list) %}
+      {% if _has_ev %}
+      <ul class="synthesis-list">
+        {% for f in study.findings %}{% if f.evidence %}
+        <li>{% if f.evidence is string %}{{ f.evidence }}{% elif f.evidence is mapping %}{% for k, v in f.evidence.items() %}{{ k }}: {{ v }}{% if not loop.last %}; {% endif %}{% endfor %}{% else %}{% for e in f.evidence %}{{ e }}{% if not loop.last %}; {% endif %}{% endfor %}{% endif %}</li>
+        {% endif %}{% endfor %}
+      </ul>
+      {% else %}<p class="muted">No evidence recorded on findings yet.</p>{% endif %}
     </div>
     <div class="conclusion-field">
-      <h3>Limitations</h3>
-      <textarea id="conclusion-limitations" rows="6" data-section="Limitations"></textarea>
+      <h3>Limitations <span class="muted small">(from limitations)</span></h3>
+      {% if study.limitations is string %}<p>{{ study.limitations }}</p>
+      {% elif study.limitations %}
+      <ul class="synthesis-list">{% for l in study.limitations %}<li>{{ l }}</li>{% endfor %}</ul>
+      {% else %}<p class="muted">None recorded.</p>{% endif %}
     </div>
     <div class="conclusion-field">
-      <h3>Next steps</h3>
-      <textarea id="conclusion-next-steps" rows="6" data-section="Next steps"></textarea>
+      <h3>Next steps <span class="muted small">(from discovery implications)</span></h3>
+      {% if _nexts %}
+      <ul class="synthesis-list">
+        {% for n in _nexts %}
+        {% if n is string %}<li>{{ n }}</li>
+        {% else %}<li><strong>{{ n.title or n.name or 'proposal' }}</strong>{% if n.why or n.motivation %} — {{ n.why or n.motivation }}{% endif %}</li>{% endif %}
+        {% endfor %}
+      </ul>
+      {% else %}<p class="muted">No follow-up proposals recorded yet.</p>{% endif %}
     </div>
   </div>
-  <p class="muted">Saved as one markdown blob in study.yaml.conclusion with H2 headers.</p>
   {% endif %}
 
 </section>
