@@ -6152,6 +6152,9 @@
         var q = question.charAt(0).toLowerCase() + question.slice(1);
         if (q.charAt(q.length - 1) === '.') q = q.slice(0, -1);
         sentences.push('This study asks whether ' + q + '.');
+      } else if (s.objective) {
+        // Minimal study (no purpose.question): lead with the objective.
+        sentences.push(_firstSentence(s.objective));
       }
       if (findings.length) {
         var confirms     = findings.filter(function(f){return f.status === 'confirms';}).length;
