@@ -37,18 +37,17 @@ from pathlib import Path
 def _write_json(path: Path, data) -> None:
     """Write *data* as JSON using the server's ``_json_default`` serializer.
 
-    Non-finite floats (inf/-inf/nan) are coerced to ``null`` first via the
-    server's ``_json_sanitize`` — the same sanitizer the live ``_json_body``
-    uses. The browser SPA parses the bundle with ``JSON.parse``, which rejects
-    the ``Infinity``/``NaN`` tokens ``allow_nan=True`` emits (hence
-    ``allow_nan=False``); without sanitizing, a single non-finite float in any
-    composite's resolved state (e.g. the v2ecoli baseline's 9 infinite initial
-    values) would raise and abort the WHOLE static build mid-bundle.
+    ``allow_nan=False`` keeps the bundle spec-compliant (the browser SPA parses
+    it with ``JSON.parse``, which rejects the ``Infinity``/``NaN`` tokens
+    ``allow_nan=True`` emits). This is STRICT on purpose: a non-finite float
+    makes the write raise, which the composite-state loop catches per-composite
+    to hide a broken composite from the loom Explorer (has_wiring=False) rather
+    than ship a misleading null-patched state. Callers that legitimately carry
+    non-finite values should sanitize via ``server._json_sanitize`` first.
     """
-    from vivarium_dashboard.server import _json_default, _json_sanitize
+    from vivarium_dashboard.server import _json_default
     path.write_text(
-        json.dumps(_json_sanitize(data), default=_json_default,
-                   allow_nan=False),
+        json.dumps(data, default=_json_default, allow_nan=False),
         encoding="utf-8",
     )
 
@@ -113,6 +112,41 @@ def _apply_base_path(html: str, base_path: str) -> str:
         return m.group(0)
 
     return re.sub(r'\b(src|href)="(/[^"]+)"', _prefix, html)
+
+
+def _stage_embed_visualizations(spec, ws_root: Path, out_dir: Path,
+                                base_path: str) -> None:
+    """Copy a study's ``embed_visualizations`` source files into the bundle and
+    base-path-prefix their URLs (mutates *spec* in place).
+
+    The study-detail panel renders each embed as an ``<iframe src=URL>`` the
+    browser fetches at runtime (unlike the investigation REPORT, which inlines
+    the HTML as ``srcdoc`` at generation time). The URLs are workspace-root-
+    relative (e.g. ``/reports/figures/<study>/fig.html`` from
+    ``_discover_viz_html_files``). In snapshot mode those files must (a) exist in
+    the bundle and (b) carry the hosting base path — otherwise every embed 404s
+    (the static build previously copied neither, so the study-detail "Embedded
+    visualizations" panel was broken for every investigation that used them). We
+    copy ``ws_root/<url>`` to ``out_dir/<url>`` (preserving the path) and rewrite
+    the URL to ``<base_path><url>``.
+    """
+    embeds = spec.get("embed_visualizations")
+    if not isinstance(embeds, list):
+        return
+    for embed in embeds:
+        url = (embed or {}).get("url")
+        # Only stage local, root-absolute workspace files (skip api/, externals).
+        if not url or not url.startswith("/") or url.startswith(("/api/", "//")):
+            continue
+        rel = url.lstrip("/")
+        src = ws_root / rel
+        if not src.is_file():
+            continue
+        dst = out_dir / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        if base_path:
+            embed["url"] = base_path + url
 
 
 def _normalize_asset_urls(html: str) -> str:
@@ -265,8 +299,13 @@ def build_bundle(
     # Temporarily point the server module at ws_root so all lookups
     # (_study_detail_spec, _iset_detail_data, workspace_paths …) use the right
     # workspace.  Restore afterwards, even on exceptions.
+    # Resolve symlinks: WorkspacePaths resolves its root internally, so viz
+    # discovery's ``html_file.relative_to(WORKSPACE)`` raises (and silently drops
+    # that study's figures) if WORKSPACE is left unresolved while the globbed
+    # paths come back resolved — e.g. a ws_root under /tmp (-> /private/tmp on
+    # macOS) or any symlinked parent.
     orig_ws = srv.WORKSPACE
-    srv.WORKSPACE = ws_root
+    srv.WORKSPACE = ws_root.resolve()
     srv._WP_CACHE.clear()
     try:
         return _do_build(
@@ -460,6 +499,7 @@ def _do_build(
     for slug in studies:
         data = _study_detail_spec(slug)
         if data is not None:
+            _stage_embed_visualizations(data, ws_root, out_dir, base_path)
             _write_json(api_dir / "study" / f"{slug}.json", data)
 
     # ------------------------------------------------------------------
