@@ -7276,7 +7276,7 @@
         // "➕ Add to investigation" button (seeds a new child study node).
         if (followupProposals.length) {
           diBits.push('<div class="di-group"><h4>Follow-up study proposals <span class="muted small">(' + followupProposals.length + ')</span></h4>'
-            + '<p class="muted small">Select a proposal to spawn a new study node in the investigation graph.</p>'
+            + '<p class="muted small">Click <strong>➕ Add study</strong> to spawn a new study node in the investigation graph (seeds a child study.yaml from the proposal, with a leads-to edge back to this study).</p>'
             + followupProposals.map(function(p, pi) {
                 var gain = (p.expected_information_gain || '').toLowerCase();
                 var gainChip = gain ? '<span class="di-gain-chip di-gain-' + _h(gain) + '">gain: ' + _h(gain) + '</span>' : '';
@@ -7284,10 +7284,21 @@
                 var trigChip = p.source_trigger ? '<span class="di-trigger-chip">' + _h(p.source_trigger) + '</span>' : '';
                 var targets = p.target_mechanism_elements || [];
                 var prio = p.priority ? '<span class="di-prio-chip">priority: ' + _h(String(p.priority)) + '</span>' : '';
-                // No custom "➕ Add to investigation" button: the enclosing
-                // Discovery implications section (id="study-<slug>-discovery")
-                // is a standard inline-feedback host, so reviewers annotate it
-                // with the 💬 affordance — reliable in the downloaded report.
+                // "➕ Add study" seeds a child study from this proposal via
+                // _seedFollowupProposal (POST /api/study-seed-followup). Guarded
+                // so a downloaded static report (no walkthrough.js) degrades to a
+                // hint instead of a ReferenceError; the section is also an inline-
+                // feedback host (💬) for reviewers.
+                // Single-quoted args so they sit safely inside onclick="…" (a
+                // JSON.stringify'd id would emit double quotes and break the attr).
+                var seedArgs = "'" + _h(s.name) + "', '"
+                  + _h(p.id != null ? String(p.id) : '') + "', " + pi + ", this";
+                var seedBtn = '<div class="di-fup-actions" style="margin-top:8px">'
+                  + '<button class="btn-seed-followup" '
+                  + 'onclick="event.stopPropagation(); if(window._seedFollowupProposal){_seedFollowupProposal(' + seedArgs + ');}'
+                  + 'else{alert(\'Open this investigation in the live dashboard to add the study.\');}" '
+                  + 'style="font-size:0.82em;padding:3px 10px;border:1px solid #16a34a;background:#f0fdf4;'
+                  + 'color:#166534;border-radius:6px;cursor:pointer;white-space:nowrap">➕ Add study</button></div>';
                 return '<div class="di-fup-card">'
                   + '<div class="di-fup-head">'
                   +   '<strong class="di-fup-title">' + _h(p.title || '(untitled proposal)') + '</strong>'
@@ -7296,6 +7307,7 @@
                   + (p.proposed_experiment ? '<div class="di-fup-exp">' + _multiline(p.proposed_experiment) + '</div>' : '')
                   + (targets.length ? '<div class="di-fup-targets"><span class="di-lbl">Targets:</span> '
                       + targets.map(function(t){ return '<code>' + _h(t) + '</code>'; }).join(', ') + '</div>' : '')
+                  + seedBtn
                   + '</div>';
               }).join('')
             + '</div>');
