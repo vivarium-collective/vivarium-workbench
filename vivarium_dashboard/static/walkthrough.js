@@ -5553,13 +5553,20 @@
           .then(function(r) { return r.ok ? r.json() : {repo: null}; })
           .then(function(j) { return (j && j.repo) || null; })
           .catch(function() { return null; });
+        // Evidence & rigor roll-up — deterministic skeptic-feedback computed
+        // by pbg_superpowers.rigor (replication, controls, alternatives,
+        // claim discipline, falsifiability, adversarial coverage).
+        var rigorFetch = fetch('/api/investigation-rigor?investigation=' + encodeURIComponent(iset.name))
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .catch(function() { return null; });
         return Promise.all([Promise.all(studyFetches), bibFetch,
                             Promise.all(chartFetches), genFetch,
-                            ghRepoFetch]).then(function(arr) {
+                            ghRepoFetch, rigorFetch]).then(function(arr) {
           var chartsByStudy = {};
           arr[2].forEach(function(c) { chartsByStudy[c.name] = c.charts; });
           var generation = arr[3];
           var ghRepo = arr[4];
+          var rigor = arr[5];
           // Second pass: now that we have the specs, fetch each study's
           // embed_visualizations URLs so the downloaded report can inline
           // them as <iframe srcdoc="...">. This makes the file truly
@@ -5594,7 +5601,7 @@
             });
             return {iset: iset, specs: specs, bibEntries: arr[1],
                     chartsByStudy: chartsByStudy, embedsByStudy: embedsByStudy,
-                    generation: generation, ghRepo: ghRepo};
+                    generation: generation, ghRepo: ghRepo, rigor: rigor};
           });
         });
       })
@@ -5602,7 +5609,7 @@
         var html = _buildInvestigationReportHtml(bundle.iset, bundle.specs,
                                                   bundle.bibEntries, bundle.chartsByStudy,
                                                   bundle.embedsByStudy, bundle.generation,
-                                                  bundle.ghRepo);
+                                                  bundle.ghRepo, bundle.rigor);
         var dateStr = new Date().toISOString().slice(0, 10);
         var filename = 'investigation-' + name + '-' + dateStr + '.html';
         _triggerDownload(filename, html, 'text/html');
@@ -5755,7 +5762,50 @@
   };
 
   // Construct the report's HTML body from the investigation + per-study specs.
-  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy, generation, ghRepo) {
+  // Render the Evidence & rigor section from an /api/investigation-rigor payload
+  // (deterministic skeptic-feedback). Returns '' when no payload (older server /
+  // fetch failure) so the report degrades gracefully.
+  function _rigorSectionHtml(rigor) {
+    if (!rigor || !((rigor.dimensions && rigor.dimensions.length) ||
+                    (rigor.per_study && Object.keys(rigor.per_study).length))) return '';
+    var color = {ok: '#16a34a', warn: '#d97706', gap: '#dc2626'};
+    var glyph = {ok: '✓', warn: '⚠', gap: '✗'};
+    function dimRows(dims) {
+      return (dims || []).map(function(d) {
+        var c = color[d.severity] || '#64748b';
+        var cm = (d.comments && d.comments.length)
+          ? ' <span style="color:#94a3b8;font-size:0.82em">' + _esc(d.comments.join(' ')) + '</span>' : '';
+        return '<div style="display:flex;gap:10px;align-items:flex-start;padding:6px 0;border-top:1px solid #f1f5f9">' +
+          '<span style="color:' + c + ';font-weight:700;min-width:1.2em">' + (glyph[d.severity] || '•') + '</span>' +
+          '<div><strong style="color:#1e293b">' + _esc(d.label || '') + '</strong>' + cm +
+          '<div style="color:#475569;font-size:0.9em;margin-top:1px">' + _esc(d.detail || '') + '</div></div></div>';
+      }).join('');
+    }
+    var html = '<section class="report-section" id="rigor"><h2>Evidence &amp; rigor</h2>' +
+      '<p style="color:#475569;font-size:0.92em">Deterministic feedback on how well this ' +
+      'investigation defends its claims against a skeptical reader — computed from declared ' +
+      'fields, not judged. Gaps are an invitation to add negative controls, replicate across ' +
+      'seeds, weigh alternative explanations, state falsifiability, or add an adversarial study.</p>';
+    if (rigor.summary)
+      html += '<div style="font-weight:600;color:#1e293b;margin:6px 0 2px">' + _esc(rigor.summary) + '</div>';
+    html += dimRows(rigor.dimensions);
+    var per = rigor.per_study || {};
+    var slugs = Object.keys(per);
+    if (slugs.length) {
+      html += '<h3 style="margin-top:16px">Per-study rigor</h3>';
+      slugs.forEach(function(slug) {
+        var sc = per[slug] || {};
+        html += '<div style="margin:10px 0;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px">' +
+          '<div style="font-weight:600;color:#0f172a">' + _esc(slug) +
+          ' <span style="font-weight:400;color:#64748b;font-size:0.88em">— ' + _esc(sc.summary || '') + '</span></div>' +
+          dimRows(sc.dimensions) + '</div>';
+      });
+    }
+    html += '</section>';
+    return html;
+  }
+
+  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy, generation, ghRepo, rigor) {
     bibEntries = bibEntries || [];
     chartsByStudy = chartsByStudy || {};
     embedsByStudy = embedsByStudy || {};
@@ -6109,6 +6159,7 @@
     var acceptanceNarrativeHtml = _acceptanceNarrativeHtml();
     var acGatingMatrixHtml = _acGatingMatrixHtml();
     var needsAttentionReportHtml = _needsAttentionReportHtml();
+    var rigorSectionHtml = _rigorSectionHtml(rigor);
 
     // Data-driven flags so the "How to read" guide describes only what this
     // investigation actually contains — no workspace-specific boilerplate.
@@ -6597,6 +6648,8 @@
       var tests = s.behavior_tests || s.expected_behavior || [];
       var decide = s.conclusion_logic || {};
       var limitations = s.limitations || [];
+      // Tolerate a string (authors sometimes write limitations as prose, not a list).
+      if (typeof limitations === 'string') limitations = limitations.trim() ? [limitations] : [];
       var followUps = s.follow_up_studies || [];
       // Discovery Implications — alternate hypotheses, mechanism-update
       // proposals, and the richer followup_study_proposals (successor to
@@ -6665,7 +6718,8 @@
         links.push('<a href="#' + sid.conditions + '">Conditions ' +
                    (_condCount ? '<span class="sn-count">' + _condCount + '</span>' : '') + '</a>');
       }
-      if (sims.length)        links.push('<a href="#' + sid.sims + '">What we ran <span class="sn-count">' + sims.length + '</span></a>');
+      var _ranCount = sims.length || (s.baseline || []).length || (s.runs || []).length;
+      links.push('<a href="#' + sid.sims + '">What we ran' + (_ranCount ? ' <span class="sn-count">' + _ranCount + '</span>' : '') + '</a>');
       if (readouts.length)    links.push('<a href="#' + sid.readouts + '">What we measured <span class="sn-count">' + readouts.length + '</span></a>');
       if (charts.length)      links.push('<a href="#' + sid.charts + '">Charts <span class="sn-count">' + charts.length + '</span></a>');
       if (tests.length)       links.push('<a href="#' + sid.tests + '">How we judge it <span class="sn-count">' + tests.length + '</span></a>');
@@ -6925,12 +6979,45 @@
 
       // ── WHAT DID/WILL WE RUN? (Simulations) ──────────────────────────
       var simsHtml = '';
+      // What we ran — ENFORCED. The composite(s) + parameter settings actually
+      // simulated. Prefer the v3 simulation_set; else derive from the dashboard-
+      // managed baseline (composite + params) + recorded runs + robustness
+      // (seeds) — which is how the autopoiesis studies record runs. Always
+      // rendered; a study with neither gets an explicit gap notice. Each
+      // composite links out to the bigraph-loom explorer (popped out, live only).
+      function _short(model) {
+        if (!model) return '';
+        var p = String(model).split('.');
+        return p[p.length - 1];
+      }
+      // A composite reference rendered as a one-click pop-out to the bigraph-loom
+      // STATIC view (read-only): /bigraph-loom/?static=1&stateUrl=/api/composite-
+      // state/<ref>.json. Works from any report on the live dashboard.
+      function _loomStaticPopout(composite) {
+        // Pop out the bigraph-loom STATIC (read-only) view of the composite.
+        // stateUrl points at the live composite-state endpoint (?ref=<id>); the
+        // loom fetches it and unwraps {state:…}. Snapshot mode serves the same
+        // shape as a pre-built /api/composite-state/<id>.json file.
+        return "var s='/api/composite-state?ref='+encodeURIComponent('" + _h(composite) + "');"
+          + "var u='/bigraph-loom/index.html?static=1&stateUrl='+encodeURIComponent(s);"
+          + "if((location.protocol||'').indexOf('http')===0){window.open(u,'loom','width=1200,height=840');}"
+          + "else{alert('Open this in the live dashboard to explore the composite in bigraph-loom.');}";
+      }
+      function _compositeCell(composite) {
+        if (!composite) return '<span class="muted">—</span>';
+        return '<a href="#" class="composite-loom-link" '
+          + 'title="Open a static view of this composite in bigraph-loom" '
+          + 'onclick="event.preventDefault(); ' + _loomStaticPopout(composite) + '">'
+          + '<code>' + _h(_short(composite)) + '</code> <span aria-hidden="true">↗</span></a>';
+      }
+      function _paramsCell(params) {
+        if (!params || typeof params !== 'object' || !Object.keys(params).length)
+          return '<span class="muted">default parameters</span>';
+        return Object.keys(params).map(function(k) {
+          return '<code>' + _h(k) + ' = ' + _h(JSON.stringify(params[k])) + '</code>';
+        }).join(' ');
+      }
       if (sims.length) {
-        function _short(model) {
-          if (!model) return '';
-          var p = String(model).split('.');
-          return p[p.length - 1];
-        }
         // The first sim is the reference; describe each row as its diff from it.
         var baseSim = sims[0] || {};
         var baseParams = baseSim.params || {};
@@ -6973,18 +7060,102 @@
             ? '<div class="sim-feeds muted small">feeds: ' + tests.map(function(t){return '<code>' + _h(t) + '</code>';}).join(' ') + '</div>' : '';
           return '<tr>'
             + '<td><strong>' + _h(sim.name || '(unnamed)') + '</strong>' + feeds + '</td>'
-            + '<td><code>' + _h(_short(sim.base_model)) + '</code></td>'
+            + '<td>' + _compositeCell(sim.base_model) + '</td>'
             + '<td>' + _changes(sim) + '</td>'
             + '<td class="muted small">' + (runParts.join(' · ') || '—') + '</td>'
             + '<td>' + statusPill + '</td>'
             + '</tr>';
         }).join('');
-        simsHtml = '<div id="' + sid.sims + '"><h3>What did/will we run? <span class="muted small">(' + sims.length + ' simulations)</span></h3>'
-          + '<p class="muted small" style="margin:0 0 8px 0">One row per concrete run: the model composite, what changes vs the reference baseline, the condition / length, and its status.</p>'
-          + '<table class="sim-table"><thead><tr><th>Simulation</th><th>Model</th><th>Changes vs baseline</th><th>Run</th><th>Status</th></tr></thead>'
+        simsHtml = '<div id="' + sid.sims + '"><h3>What we ran <span class="muted small">(' + sims.length + ' simulation' + (sims.length === 1 ? '' : 's') + ')</span></h3>'
+          + '<p class="muted small" style="margin:0 0 8px 0">One row per concrete run: the model composite (click ↗ to open it in the bigraph-loom explorer), what changes vs the reference baseline, the condition / length, and its status.</p>'
+          + '<table class="sim-table"><thead><tr><th>Simulation</th><th>Composite</th><th>Changes vs baseline</th><th>Run</th><th>Status</th></tr></thead>'
           + '<tbody>' + rows + '</tbody></table>'
           + '</div>';
+      } else {
+        // No simulation_set — derive what was run from the dashboard-managed
+        // baseline (composite + parameter settings), recorded runs, and
+        // robustness (seeds). This is how the autopoiesis studies record runs.
+        var baseline = s.baseline || [];
+        var runsArr = s.runs || [];
+        var rob = s.robustness || {};
+        var runByName = {};
+        runsArr.forEach(function(r) { if (r && r.name) runByName[r.name] = r; });
+        var replCell = (rob && (rob.n_replicates || (rob.seeds && rob.seeds.length)))
+          ? ((rob.n_replicates || rob.seeds.length) + ' seed'
+             + ((rob.n_replicates || rob.seeds.length) === 1 ? '' : 's')
+             + (rob.parameter_sweep ? ' + sweep' : ''))
+          : (runsArr.length ? '1 run' : '—');
+        var entries = baseline.length
+          ? baseline
+          : runsArr.map(function(r) { return {name: r.name, composite: r.composite, params: null}; });
+        if (entries.length) {
+          var brows = entries.map(function(b) {
+            var run = runByName[b.name] || runsArr[0] || {};
+            var status = run.status || 'recorded';
+            return '<tr>'
+              + '<td><strong>' + _h(b.name || 'baseline') + '</strong></td>'
+              + '<td>' + _compositeCell(b.composite) + '</td>'
+              + '<td>' + _paramsCell(b.params) + '</td>'
+              + '<td class="muted small">' + _h(replCell) + '</td>'
+              + '<td><span class="sim-status-pill sim-status-ran">' + _h(status) + '</span></td>'
+              + '</tr>';
+          }).join('');
+          simsHtml = '<div id="' + sid.sims + '"><h3>What we ran <span class="muted small">(composite + parameters)</span></h3>'
+            + '<p class="muted small" style="margin:0 0 8px 0">The composite(s) and parameter settings actually simulated for this study (from its baseline). Click a composite ↗ to open it in the bigraph-loom explorer.</p>'
+            + '<table class="sim-table"><thead><tr><th>Run</th><th>Composite</th><th>Parameters</th><th>Replication</th><th>Status</th></tr></thead>'
+            + '<tbody>' + brows + '</tbody></table>'
+            + '</div>';
+        } else {
+          // ENFORCED: a study with no composite/params recorded is flagged.
+          simsHtml = '<div id="' + sid.sims + '"><h3>What we ran</h3>'
+            + '<p style="margin:0;color:#b45309">⚠ No composite or parameters recorded for this study — declare a baseline (composite + parameter settings) or a simulation_set so the report shows what was simulated.</p>'
+            + '</div>';
+        }
       }
+
+      // ── PROMINENT MODEL BANNER ───────────────────────────────────────────
+      // Every study runs at least one composite — surface it at the TOP of the
+      // study with its key parameters and a one-click pop-out to the bigraph-loom
+      // STATIC view. Enforced: a study with no composite is flagged in red.
+      var modelBannerHtml = (function() {
+        var entries = [];
+        if (sims.length) {
+          var seen = {};
+          sims.forEach(function(sm) {
+            var c = sm.base_model;
+            if (c && !seen[c]) { seen[c] = 1; entries.push({composite: c, params: sm.params}); }
+          });
+        } else if ((s.baseline || []).length) {
+          (s.baseline).forEach(function(b) { entries.push({composite: b.composite, params: b.params}); });
+        } else {
+          (s.runs || []).forEach(function(r) { if (r.composite) entries.push({composite: r.composite, params: null}); });
+        }
+        if (!entries.length) {
+          return '<div class="study-model-banner study-model-missing" style="margin:10px 0;padding:12px 16px;'
+            + 'background:#fef2f2;border:1px solid #fecaca;border-left:5px solid #dc2626;border-radius:8px;color:#991b1b">'
+            + '<strong>⚠ No model declared.</strong> Every study must run at least one composite — declare a '
+            + 'baseline (composite + parameters) so this study is reproducible.</div>';
+        }
+        var rows = entries.map(function(e) {
+          var params = (e.params && typeof e.params === 'object' && Object.keys(e.params).length)
+            ? Object.keys(e.params).map(function(k) { return '<code>' + _h(k) + '=' + _h(JSON.stringify(e.params[k])) + '</code>'; }).join(' ')
+            : '<span class="muted">default parameters</span>';
+          var btn = e.composite
+            ? '<button class="model-explore-btn" onclick="' + _loomStaticPopout(e.composite) + '" '
+              + 'style="font-size:0.92em;font-weight:600;padding:5px 12px;border:1px solid #2563eb;background:#eff6ff;'
+              + 'color:#1e40af;border-radius:6px;cursor:pointer;white-space:nowrap">🧬 ' + _h(_short(e.composite))
+              + ' — explore in bigraph-loom ↗</button>'
+            : '<span class="muted">(no composite)</span>';
+          return '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px">'
+            + btn + '<span style="font-size:0.88em;color:#475569">' + params + '</span></div>';
+        }).join('');
+        return '<div class="study-model-banner" style="margin:10px 0;padding:12px 16px;'
+          + 'background:#f0f9ff;border:1px solid #bae6fd;border-left:5px solid #2563eb;border-radius:8px">'
+          + '<div style="font-weight:700;color:#0c4a6e">Model</div>'
+          + '<div class="muted small" style="margin-top:2px">The composite(s) this study runs and their parameters — '
+          + 'click to open a static view in the bigraph-loom explorer.</div>'
+          + rows + '</div>';
+      })();
 
       // ── CHARTS (visualisations from runs.db) ─────────────────────────
       var chartsHtml = charts.length
@@ -7340,7 +7511,7 @@
         // "➕ Add to investigation" button (seeds a new child study node).
         if (followupProposals.length) {
           diBits.push('<div class="di-group"><h4>Follow-up study proposals <span class="muted small">(' + followupProposals.length + ')</span></h4>'
-            + '<p class="muted small">Select a proposal to spawn a new study node in the investigation graph.</p>'
+            + '<p class="muted small">Click <strong>➕ Add study</strong> to spawn a new study node in the investigation graph (seeds a child study.yaml from the proposal, with a leads-to edge back to this study).</p>'
             + followupProposals.map(function(p, pi) {
                 var gain = (p.expected_information_gain || '').toLowerCase();
                 var gainChip = gain ? '<span class="di-gain-chip di-gain-' + _h(gain) + '">gain: ' + _h(gain) + '</span>' : '';
@@ -7348,10 +7519,21 @@
                 var trigChip = p.source_trigger ? '<span class="di-trigger-chip">' + _h(p.source_trigger) + '</span>' : '';
                 var targets = p.target_mechanism_elements || [];
                 var prio = p.priority ? '<span class="di-prio-chip">priority: ' + _h(String(p.priority)) + '</span>' : '';
-                // No custom "➕ Add to investigation" button: the enclosing
-                // Discovery implications section (id="study-<slug>-discovery")
-                // is a standard inline-feedback host, so reviewers annotate it
-                // with the 💬 affordance — reliable in the downloaded report.
+                // "➕ Add study" seeds a child study from this proposal via
+                // _seedFollowupProposal (POST /api/study-seed-followup). Guarded
+                // so a downloaded static report (no walkthrough.js) degrades to a
+                // hint instead of a ReferenceError; the section is also an inline-
+                // feedback host (💬) for reviewers.
+                // Single-quoted args so they sit safely inside onclick="…" (a
+                // JSON.stringify'd id would emit double quotes and break the attr).
+                var seedArgs = "'" + _h(s.name) + "', '"
+                  + _h(p.id != null ? String(p.id) : '') + "', " + pi + ", this";
+                var seedBtn = '<div class="di-fup-actions" style="margin-top:8px">'
+                  + '<button class="btn-seed-followup" '
+                  + 'onclick="event.stopPropagation(); if(window._seedFollowupProposal){_seedFollowupProposal(' + seedArgs + ');}'
+                  + 'else{alert(\'Open this investigation in the live dashboard to add the study.\');}" '
+                  + 'style="font-size:0.82em;padding:3px 10px;border:1px solid #16a34a;background:#f0fdf4;'
+                  + 'color:#166534;border-radius:6px;cursor:pointer;white-space:nowrap">➕ Add study</button></div>';
                 return '<div class="di-fup-card">'
                   + '<div class="di-fup-head">'
                   +   '<strong class="di-fup-title">' + _h(p.title || '(untitled proposal)') + '</strong>'
@@ -7360,6 +7542,7 @@
                   + (p.proposed_experiment ? '<div class="di-fup-exp">' + _multiline(p.proposed_experiment) + '</div>' : '')
                   + (targets.length ? '<div class="di-fup-targets"><span class="di-lbl">Targets:</span> '
                       + targets.map(function(t){ return '<code>' + _h(t) + '</code>'; }).join(', ') + '</div>' : '')
+                  + seedBtn
                   + '</div>';
               }).join('')
             + '</div>');
@@ -7769,6 +7952,7 @@
           + '<section class="study study-planning">'
           +   subNav
           +   '<div class="study-planning-pill">PLANNING — not yet run</div>'
+          +   modelBannerHtml     // 🧬 Model: composite(s) + params + loom static popout (PROMINENT)
           +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
           +   enforcementHtml     // ⚠ declared params not applied (D.2)
           +   readinessHtml       // ✓/⚠ lint readiness panel (A3)
@@ -7802,6 +7986,7 @@
         +   '<summary class="study-panel">' + controlPanelHtml + '</summary>'
         + '<section class="study">'
         +   subNav
+        +   modelBannerHtml     // 🧬 Model: composite(s) + params + loom static popout (PROMINENT)
         +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
         +   enforcementHtml     // ⚠ declared params not applied (D.2)
         +   readinessHtml       // ✓/⚠ lint readiness panel (A3)
@@ -9145,6 +9330,9 @@
               + '<summary>How the verdict is computed — acceptance criteria, gating matrix &amp; study verdicts</summary>'
               + inner + '</details>';
           })()
+      // Evidence & rigor roll-up — deterministic skeptic-feedback (controls,
+      // replication, alternatives, falsifiability, adversarial coverage).
+      +   rigorSectionHtml
 
       // ── Execution-status banner (LEADS the report, before the folds) ────
       // Accurate to the actual run state: a pre-execution review notice when

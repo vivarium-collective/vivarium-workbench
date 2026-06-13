@@ -182,6 +182,41 @@
   }
   window._seedFromFinding = _seedFromFinding;
 
+  // ── Seed a new study from a discovery_implications.followup_study_proposals
+  // entry (by id). This is what the "➕ Add to investigation" buttons call;
+  // it was previously undefined on the study-detail page (the button did
+  // nothing). Delegates to the shared seed endpoint with {parent, proposal_id}.
+  function _seedFollowupProposal(parentStudyName, proposalId) {
+    if (!confirm('Spawn a new study from this follow-up proposal?\n\n'
+        + 'A new study.yaml will be created under studies/<new-name>/ with a '
+        + 'leads-to edge back to ' + parentStudyName + '.')) {
+      return;
+    }
+    var body = {parent: parentStudyName};
+    if (proposalId) body.proposal_id = proposalId;
+    api('POST', '/api/study-seed-followup', body)
+      .then(function(res) {
+        if (res.status !== 200 || res.body.error) {
+          alert('Seed failed: ' + (res.body.error || res.status));
+          return;
+        }
+        alert('Created: ' + res.body.new_study_name + '\nOpening it now.');
+        window.location.href = '/studies/' + encodeURIComponent(res.body.new_study_name);
+      });
+  }
+  window._seedFollowupProposal = _seedFollowupProposal;
+
+  // ── Pop out the bigraph-loom STATIC (read-only) view of a composite. Used by
+  // the Build-tab Model block. stateUrl points at the live composite-state
+  // endpoint; the loom unwraps {state}.
+  function _openCompositeLoom(composite) {
+    if (!composite) return;
+    var stateUrl = '/api/composite-state?ref=' + encodeURIComponent(composite);
+    var u = '/bigraph-loom/index.html?static=1&stateUrl=' + encodeURIComponent(stateUrl);
+    window.open(u, 'loom', 'width=1200,height=840');
+  }
+  window._openCompositeLoom = _openCompositeLoom;
+
   // --- Inline-edit (overview fields: objective, conclusion, question, hypothesis, status) ---
   function _saveOverviewField(field, value) {
     if (field === 'objective') {
@@ -1276,7 +1311,9 @@
       var dv = (ev.divergence_factor != null)
         ? ' <span class="spine-div">×' + e(ev.divergence_factor) + ' vs expected</span>' : '';
       _row('Why', e(fwhy.statement) + dv,
-        '<a href="#" onclick="_setStudyTab(\'overview\');return false">finding →</a>');
+        '<a href="#" onclick="_setStudyTab(\'overview\');'
+        + 'var el=document.querySelector(\'.findings-section\');'
+        + 'if(el)el.scrollIntoView({behavior:\'smooth\',block:\'start\'});return false">finding →</a>');
     }
 
     // ── Acceptance — the investigation criterion this study covers (A1) ────
@@ -1308,7 +1345,9 @@
                 : 'ℹ ' + fs.length + ' note' + (fs.length === 1 ? '' : 's'));
       _row('Readiness',
         e(head) + ' <span class="spine-label">code-computed by the report linter</span>',
-        '<a href="#readiness-panel">readiness →</a>');
+        '<a href="#" onclick="_setStudyTab(\'overview\');'
+        + 'var el=document.getElementById(\'readiness-panel\');'
+        + 'if(el)el.scrollIntoView({behavior:\'smooth\',block:\'start\'});return false">readiness →</a>');
       _flush();
     });
 

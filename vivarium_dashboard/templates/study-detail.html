@@ -681,9 +681,39 @@
 </section>
 
 
-{# ─── Build tab: conditions + model_change + implementation_requirements ── #}
-{% if study.model_change or study.implementation_requirements or study.conditions %}
+{# ─── Build tab: model (composite) + conditions + model_change + impl reqs ── #}
+{% if study.model_change or study.implementation_requirements or study.conditions or study.baseline %}
 <section class="study-tab-panel" data-kind="build" id="panel-build" hidden>
+
+  {# Model — every study runs at least one composite. Auto-shown from the
+     study's baseline (composite + parameters) so the Build tab is never empty,
+     with a one-click pop-out to the bigraph-loom STATIC (read-only) view. #}
+  {% if study.baseline %}
+  <div class="overview-section" id="model-section">
+    <h3>Model <span class="muted" style="font-size:0.85em;font-weight:normal">— the composite(s) this study runs</span></h3>
+    <p class="muted" style="font-size:0.88em">Every study runs at least one composite. Click a composite to open a static view in the bigraph-loom explorer.</p>
+    {% for b in study.baseline %}
+    <div class="cond-block">
+      <div class="cond-block-title">
+        {{ b.name or 'baseline' }}
+        {% if b.composite %}
+        <button type="button" class="action-btn" style="margin-left:8px;font-size:0.82em"
+                onclick="_openCompositeLoom('{{ b.composite }}')">🧬 {{ b.composite.split('.composites.')[-1] if '.composites.' in b.composite else b.composite }} — explore in bigraph-loom ↗</button>
+        {% endif %}
+      </div>
+      {% if b.params %}
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
+        {% for k, v in b.params.items() %}
+        <span class="cond-pill"><span class="cond-pill-k">{{ k }}</span>=<code>{{ v }}</code></span>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="muted" style="font-size:0.88em;margin-top:2px">default parameters</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 
   {# Conditions (v4): baseline + variants + model_settings. Edit a value in
      the Current column and the next pbg_runner invocation picks it up. #}
