@@ -5620,14 +5620,21 @@
         var rigorFetch = fetch('/api/investigation-rigor?investigation=' + encodeURIComponent(iset.name))
           .then(function(r) { return r.ok ? r.json() : null; })
           .catch(function() { return null; });
+        // Wave 3a #26 — framework-self metrics across every study + investigation
+        // (deterministic, pbg_superpowers.rigor.framework_metrics). Renders the
+        // "Framework scorecard" section. Best-effort: null → section omitted.
+        var fmFetch = fetch('/api/framework-metrics')
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .catch(function() { return null; });
         return Promise.all([Promise.all(studyFetches), bibFetch,
                             Promise.all(chartFetches), genFetch,
-                            ghRepoFetch, rigorFetch]).then(function(arr) {
+                            ghRepoFetch, rigorFetch, fmFetch]).then(function(arr) {
           var chartsByStudy = {};
           arr[2].forEach(function(c) { chartsByStudy[c.name] = c.charts; });
           var generation = arr[3];
           var ghRepo = arr[4];
           var rigor = arr[5];
+          var frameworkMetrics = arr[6];
           // Second pass: now that we have the specs, fetch each study's
           // embed_visualizations URLs so the downloaded report can inline
           // them as <iframe srcdoc="...">. This makes the file truly
@@ -5662,7 +5669,8 @@
             });
             return {iset: iset, specs: specs, bibEntries: arr[1],
                     chartsByStudy: chartsByStudy, embedsByStudy: embedsByStudy,
-                    generation: generation, ghRepo: ghRepo, rigor: rigor};
+                    generation: generation, ghRepo: ghRepo, rigor: rigor,
+                    frameworkMetrics: frameworkMetrics};
           });
         });
       })
@@ -5670,7 +5678,8 @@
         var html = _buildInvestigationReportHtml(bundle.iset, bundle.specs,
                                                   bundle.bibEntries, bundle.chartsByStudy,
                                                   bundle.embedsByStudy, bundle.generation,
-                                                  bundle.ghRepo, bundle.rigor);
+                                                  bundle.ghRepo, bundle.rigor,
+                                                  bundle.frameworkMetrics);
         var dateStr = new Date().toISOString().slice(0, 10);
         var filename = 'investigation-' + name + '-' + dateStr + '.html';
         _triggerDownload(filename, html, 'text/html');
@@ -6210,6 +6219,67 @@
       + closureHtml + tableHtml + '</div>';
   }
 
+  // Wave 3a #1 — what the investigation primarily evaluates. Renders a small
+  // header chip; omitted when the field is unset / not a known enum value.
+  var _OBJ_OF_EVAL = {method: 1, model: 1, hypothesis: 1, 'composition-protocol': 1};
+  function _objectOfEvaluationChip(obj) {
+    if (typeof obj !== 'string' || !obj.trim()) return '';
+    var v = obj.trim().toLowerCase();
+    if (!_OBJ_OF_EVAL[v]) return '';
+    return ' <span class="badge" title="object of evaluation (critique #1) — what '
+      + 'this investigation primarily evaluates" style="background:#e0e7ff;color:#3730a3;'
+      + 'font-weight:600">evaluates: ' + _h(v) + '</span>';
+  }
+
+  // Wave 3a #26 — "Framework scorecard". Renders the deterministic framework-self
+  // metrics computed by pbg_superpowers.rigor.framework_metrics (each entry is
+  // {fraction, count, total}). The label is the dashboard's job; the math is
+  // pbg's. Omitted when the payload carries no metrics (degrades gracefully).
+  function _frameworkScorecardHtml(fm) {
+    if (!fm || typeof fm !== 'object') return '';
+    var metrics = fm.metrics || {};
+    var keys = Object.keys(metrics).filter(function (k) {
+      var m = metrics[k];
+      return m && typeof m === 'object' && (typeof m.fraction === 'number'
+        || typeof m.count === 'number' || typeof m.total === 'number');
+    });
+    if (!keys.length) return '';
+    var nInv = (typeof fm.n_investigations === 'number') ? fm.n_investigations : 0;
+    function humanize(k) {
+      return String(k).replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+    }
+    var rows = keys.map(function (k) {
+      var m = metrics[k];
+      var frac = (typeof m.fraction === 'number') ? m.fraction : null;
+      var pct = (frac == null) ? '—' : Math.round(frac * 100) + '%';
+      var cnt = (typeof m.count === 'number' && typeof m.total === 'number')
+        ? (m.count + ' / ' + m.total) : '';
+      var w = (frac == null) ? 0 : Math.max(0, Math.min(100, Math.round(frac * 100)));
+      var barColor = w >= 67 ? '#16a34a' : (w >= 34 ? '#d97706' : '#dc2626');
+      return '<div style="display:flex;gap:10px;align-items:center;padding:6px 0;'
+        + 'border-top:1px solid #f1f5f9">'
+        + '<span style="flex:0 0 16em;color:#1e293b;font-weight:600">' + _h(humanize(k)) + '</span>'
+        + '<span style="flex:1;display:flex;align-items:center;gap:8px">'
+        +   '<span style="flex:1;height:8px;background:#f1f5f9;border-radius:9999px;overflow:hidden">'
+        +     '<span style="display:block;height:100%;width:' + w + '%;background:' + barColor + '"></span>'
+        +   '</span>'
+        +   '<span style="flex:0 0 3.5em;text-align:right;font-weight:700;color:#1e293b">' + _h(pct) + '</span>'
+        +   (cnt ? '<span style="flex:0 0 5em;text-align:right;color:#64748b;font-size:0.85em">' + _h(cnt) + '</span>' : '')
+        + '</span>'
+        + '</div>';
+    }).join('');
+    return '<details class="report-fold" id="framework-scorecard"><summary>📊 Framework scorecard'
+      + ' <span class="rf-prev">framework-self metrics (n=' + nInv + ' investigation'
+      + (nInv === 1 ? '' : 's') + ')</span></summary>'
+      + '<p style="color:#475569;font-size:0.92em">Framework-self metrics aggregated across '
+      + 'every study and investigation in the workspace — how consistently the framework itself '
+      + 'applies its own rigor practices (discriminating controls, emergent-mechanism labelling, '
+      + 'threshold provenance, replication, verdict divergence, falsification exposure). Computed '
+      + 'deterministically from declared fields by pbg_superpowers.rigor.framework_metrics.</p>'
+      + rows
+      + '</details>';
+  }
+
   function _rigorSectionHtml(rigor, specs) {
     if (!rigor || !((rigor.dimensions && rigor.dimensions.length) ||
                     (rigor.per_study && Object.keys(rigor.per_study).length))) return '';
@@ -6226,11 +6296,13 @@
           '<div style="color:#475569;font-size:0.9em;margin-top:1px">' + _esc(d.detail || '') + '</div></div></div>';
       }).join('');
     }
-    var html = '<details class="report-fold" id="rigor"><summary>🔬 Evidence &amp; rigor'
+    var html = '<details class="report-fold" id="rigor"><summary>🔬 Evidence &amp; rigor — '
+      + 'how well the method defends its claims'
       + (rigor.summary ? ' <span class="rf-prev">' + _esc(rigor.summary) + '</span>' : '')
       + '</summary>'
-      + '<p style="color:#475569;font-size:0.92em">Deterministic feedback on how well this '
-      + 'investigation defends its claims against a skeptical reader — computed from declared '
+      + '<p style="color:#475569;font-size:0.92em">Deterministic feedback on how well the '
+      + '<strong>method</strong> defends its claims against a skeptical reader — a method-level '
+      + 'judgement, distinct from the per-study model verdicts above. Computed from declared '
       + 'fields, not judged. Gaps are an invitation to add negative controls, replicate across '
       + 'seeds, weigh alternative explanations, state falsifiability, or add an adversarial study.</p>';
     html += dimRows(rigor.dimensions);
@@ -6255,7 +6327,7 @@
     return html;
   }
 
-  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy, generation, ghRepo, rigor) {
+  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy, generation, ghRepo, rigor, frameworkMetrics) {
     bibEntries = bibEntries || [];
     chartsByStudy = chartsByStudy || {};
     embedsByStudy = embedsByStudy || {};
@@ -6630,6 +6702,7 @@
     var acGatingMatrixHtml = _acGatingMatrixHtml();
     var needsAttentionReportHtml = _needsAttentionReportHtml();
     var rigorSectionHtml = _rigorSectionHtml(rigor, specs);
+    var frameworkScorecardHtml = _frameworkScorecardHtml(frameworkMetrics);  // #26
 
     // Data-driven flags so the "How to read" guide describes only what this
     // investigation actually contains — no workspace-specific boilerplate.
@@ -9854,7 +9927,8 @@
       // ── Main content ──
       + '<main class="content" id="top">'
 
-      +   '<h1>' + _h(iset.title || iset.name) + ' <span class="badge badge-' + _h(iset.status || 'planning') + '">' + _h(iset.status || 'planning') + '</span></h1>'
+      +   '<h1>' + _h(iset.title || iset.name) + ' <span class="badge badge-' + _h(iset.status || 'planning') + '">' + _h(iset.status || 'planning') + '</span>'
+      +     _objectOfEvaluationChip(iset.object_of_evaluation) + '</h1>'
       +   '<p class="muted small">Investigation report · <code>' + nameClean + '</code> · generated ' + _h(now) + ' · '
       +     ((specs || []).some(function(s) { return (s.runs || []).length || (s.findings || []).length; })
           ? 'for expert review — results below reflect completed runs.'
@@ -9877,6 +9951,9 @@
       // Evidence & rigor roll-up — deterministic skeptic-feedback (controls,
       // replication, alternatives, falsifiability, adversarial coverage).
       +   rigorSectionHtml
+
+      // Framework scorecard — framework-self metrics across the workspace (#26).
+      +   frameworkScorecardHtml
 
       // ── Execution-status banner (LEADS the report, before the folds) ────
       // Accurate to the actual run state: a pre-execution review notice when
