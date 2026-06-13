@@ -93,25 +93,30 @@ phase: Design
 #   default_emitter: sqlite         # sqlite | xarray
 #   max_generations: 1              # multi-gen runs (workspace owns the loop)
 #
-# ★ report:                         # exec summary panel (top of study page)
-#   title: ""
-#   verdict: not-yet-run            # passing | passing-with-caveats | failing-bio | failing-impl | inconclusive | not-yet-run
+# report:                          # exec summary panel (top of study page)
+#   # title/objective/main_insight/verdict/key_metrics are DERIVED (read-only
+#   # computed) from canonical fields when absent — only author the optional
+#   # overrides below (caveat / evidence_quality / confidence).
 #   confidence: low                 # high | medium | low
 #   evidence_quality: aspirational  # calibrated | literature-matched | aspirational | regression-only
-#   objective: |
-#     (one paragraph: what this study measures)
-#   conclusion: ""
-#   main_insight: ""
 #   caveat: ""
-#   key_metrics:
-#     - {{label: "metric", value: null, status: pending}}
+#   # title: ""                     # override; else derived from name/objective
+#   # objective: |                  # override; else aliased to top-level objective
+#   #   (one paragraph: what this study measures)
+#   # main_insight: ""             # override; else derived from findings
+#   # verdict: not-yet-run         # override; else derived from gate_evaluator
+#   # key_metrics: []              # override; else derived from findings/outcomes
 #
-# ★ study_card:                     # one-paragraph dashboard card
-#   goal: ""
-#   mechanism: ""
-#   why_before_next: ""             # why this study must finish before the next
-#   expected_result: ""
-#   main_expert_question: ""        # the one question you most want an expert to answer
+# study_card:                       # one-paragraph dashboard card.
+#   # ALL slots are DERIVED from canonical fields when absent (goal←objective,
+#   # mechanism←biological_summary/findings, expected_result←hypothesis,
+#   # main_expert_question←expert_questions[0], why_before_next←
+#   # pipeline_gate.proceed_condition). Author a slot only to override.
+#   # goal: ""
+#   # mechanism: ""
+#   # why_before_next: ""           # why this study must finish before the next
+#   # expected_result: ""
+#   # main_expert_question: ""      # the one question you most want an expert to answer
 
 # ─── Framing layer ───────────────────────────────────────────────────
 #
@@ -209,15 +214,17 @@ phase: Design
 #     alternatives: []
 #     requested_response: ""
 #
-# ★ conclusion_verdicts:            # three-track verdict
+# conclusion_verdicts:              # three-track verdict.
+#   # Each `result` is DERIVED (read-only badge), NOT authored:
+#   #   biological_validation   ← pipeline_gate.gate_evaluator.result
+#   #   regression_compatibility← all runs completed without error
+#   #   explanatory_gain        ← >=1 finding with tier=='interpretation'
+#   # Author only the `basis` free-text (the *why*).
 #   regression_compatibility:
-#     result: PENDING               # PASS | FAIL | MIXED | PENDING
 #     basis: ""
 #   biological_validation:
-#     result: PENDING
 #     basis: ""
 #   explanatory_gain:
-#     result: PENDING               # POSITIVE | NEUTRAL | NEGATIVE | PENDING
 #     basis: ""
 #
 # ─── RIGOR (what a skeptic asks for; the evidence & rigor scorecard reads these).
@@ -234,7 +241,7 @@ phase: Design
 #     hypothesis: ""                # why this should (not) qualify
 #     expected: ""
 #     observed: ""
-#     result: PASS                  # PASS = the control behaved as expected (discriminating)
+#     result: PENDING               # PENDING until run; PASS only with a non-empty `observed` (= the control behaved as expected / discriminating)
 #
 # alternative_hypotheses:           # competing explanations + how the evidence excludes them
 #   - claim: ""
@@ -374,6 +381,19 @@ status: planning
 #   parameter_catalog: []
 #   calibration_targets: []
 #   naming_conventions: ""
+
+# ─── RIGOR (the comparative-framing dimension; the rigor scorecard reads this).
+#     An investigation scores a comparative_framing GAP until it names the
+#     competing frameworks it discriminates AND includes >=1 adversarial study.
+#
+# competing_frameworks:             # rival models/hypotheses this investigation tests against
+#   - name: ""                      # e.g. "alternative mechanism / null model X"
+#     prediction: ""                # what it would predict, that we discriminate
+#     discriminated_by: ""          # which study/control rules it out
+#
+# NOTE: include at least one member study with `kind: adversarial` (a study
+# designed to break the main claim) so the investigation satisfies the
+# adversarial-study rigor dimension.
 
 {studies_block}
 expert_docs: []
