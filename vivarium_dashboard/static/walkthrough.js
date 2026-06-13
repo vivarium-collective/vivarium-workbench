@@ -6004,6 +6004,17 @@
     function _passIfText(p) {
       if (p == null || p === '') return '';
       if (typeof p !== 'object') return String(p);
+      // {op, value} — the common shape (e.g. {op:">", value:0} -> "> 0").
+      if (p.op !== undefined && p.value !== undefined) {
+        var sym = {'>=': '≥', '<=': '≤', '>': '>', '<': '<', '==': '=', '!=': '≠',
+                   'in_range': 'in range'}[p.op] || p.op;
+        return sym + ' ' + p.value;
+      }
+      // {low, high} band.
+      if (p.low !== undefined || p.high !== undefined) {
+        return 'in [' + (p.low !== undefined ? p.low : '−∞') + ', '
+          + (p.high !== undefined ? p.high : '∞') + ']';
+      }
       var bits = [];
       if (p.min !== undefined || p.max !== undefined)
         bits.push((p.min !== undefined ? ('≥ ' + p.min) : '') +
@@ -6012,6 +6023,15 @@
         if (p[k] !== undefined) bits.push(k.replace(/_/g, ' ') + ' ' + p[k]);
       });
       return bits.length ? bits.join(', ') : JSON.stringify(p);
+    }
+    // A measure ({kind, field/path}) as readable text, e.g. "broken_network_gap (derived_scalar)".
+    function _measureText(m) {
+      if (!m) return '';
+      if (typeof m !== 'object') return String(m);
+      var f = m.field || m.path || '';
+      var k = m.kind || '';
+      if (f && k) return '<code>' + _h(f) + '</code> <span class="muted small">(' + _h(k) + ')</span>';
+      return f ? '<code>' + _h(f) + '</code>' : (k ? '<span class="muted small">' + _h(k) + '</span>' : _h(JSON.stringify(m)));
     }
     // Returns {field, passIf, observed, description} for a (study, behavior),
     // or null if the gating study / test can't be resolved.
@@ -6785,10 +6805,19 @@
       var decisionTechnical = '';
       if (gate.prerequisites || gate.enables || gate.proceed_condition || ifPass || ifFail) {
         var prereqStr = (gate.prerequisites && gate.prerequisites.length)
-          ? gate.prerequisites.map(function(p){return '<code>' + _h(p) + '</code>';}).join(' · ')
+          ? gate.prerequisites.map(function(p){
+              // prerequisites are {study, condition} objects (or bare slug strings).
+              var slug = (p && typeof p === 'object') ? (p.study || p.slug || '') : p;
+              var cond = (p && typeof p === 'object' && p.condition) ? ' <span class="muted small">(' + _h(p.condition) + ')</span>' : '';
+              return '<a href="#study-' + _h(slug) + '"><code>' + _h(slug) + '</code></a>' + cond;
+            }).join(' · ')
           : '<em class="muted">none (root study)</em>';
         var enablesStr = (gate.enables && gate.enables.length)
-          ? gate.enables.map(function(p){return '<code>' + _h(p) + '</code>';}).join(' · ')
+          ? gate.enables.map(function(p){
+              var slug = (p && typeof p === 'object') ? (p.study || p.slug || '') : p;
+              var cond = (p && typeof p === 'object' && p.condition) ? ' <span class="muted small">(' + _h(p.condition) + ')</span>' : '';
+              return '<a href="#study-' + _h(slug) + '"><code>' + _h(slug) + '</code></a>' + cond;
+            }).join(' · ')
           : '<em class="muted">—</em>';
         decisionTechnical = '<details class="tech-details"><summary>Pipeline gate &amp; conclusion logic (technical)</summary>'
           + '<p><strong>Prerequisites:</strong> ' + prereqStr + '</p>'
@@ -6922,8 +6951,9 @@
             var citedTok = (String(ev.from_test).match(/^[A-Za-z0-9_.\-]+/) || [''])[0];
             var citedTest = (tests || []).filter(function(t){ return t && t.name === citedTok; })[0];
             if (citedTest && (citedTest.pass_if || citedTest.expect)) {
-              citedBand = '<div class="pass_if-band muted small" style="margin-top:4px">judged against '
-                + '<code>pass_if: ' + _h(JSON.stringify(citedTest.pass_if || citedTest.expect)) + '</code></div>';
+              citedBand = '<div class="pass_if-band muted small" style="margin-top:4px">passes if '
+                + (citedTest.measure ? _measureText(citedTest.measure) + ' ' : '')
+                + '<strong>' + _h(_passIfText(citedTest.pass_if || citedTest.expect)) + '</strong></div>';
             }
           }
           var traceBlock = (traceBits.length || citedBand)
@@ -7288,7 +7318,9 @@
                   ? ' <span class="muted small">from run <code>' + _h(runIdent) + '</code></span>'
                   : '';
                 var bandLine = t.pass_if
-                  ? '<div class="pass_if-band muted small" style="margin-top:3px">judged against <code>pass_if: ' + _h(JSON.stringify(t.pass_if)) + '</code></div>'
+                  ? '<div class="pass_if-band muted small" style="margin-top:3px">passes if '
+                    + (t.measure ? _measureText(t.measure) + ' ' : '')
+                    + '<strong>' + _h(_passIfText(t.pass_if)) + '</strong></div>'
                   : '';
                 var detailLine = (co.detail || co.reason)
                   ? '<div class="muted small" style="margin-top:3px">' + _h(String(co.detail || co.reason)) + '</div>'
@@ -7300,8 +7332,8 @@
                   + '</div>';
               }
               var techBits = [];
-              if (t.measure) techBits.push('Measure: <code>' + _h(JSON.stringify(t.measure)) + '</code>');
-              if (t.pass_if) techBits.push('Pass condition: <code>' + _h(JSON.stringify(t.pass_if)) + '</code>');
+              if (t.measure) techBits.push('Measure: ' + _measureText(t.measure));
+              if (t.pass_if) techBits.push('Pass condition: ' + _h(_passIfText(t.pass_if)));
               else if (t.expect) techBits.push('Expect: <code>' + _h(JSON.stringify(t.expect)) + '</code>');
               // The Python that actually evaluates this test: the declarative
               // (kind, op) dispatch into the generic evaluator. There is no
