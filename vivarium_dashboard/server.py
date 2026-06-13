@@ -5988,9 +5988,17 @@ def _render_study_detail_html(name: str, spec: dict) -> str:
     # Single display name everywhere (mirrors JS _humanizeStudyName): authored
     # title:, else the slug with the ordering prefix peeled off into a chip.
     _hn = _humanize_study_name(name)
+    # PTools (Pathway Tools Omics Viewer) is a v2ecoli-style feature; only offer
+    # the "Launch ptools" action when the workspace configures ui.ptools_server_url.
+    _ptools_enabled = False
+    try:
+        _ws = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")) or {}
+        _ptools_enabled = bool((_ws.get("ui") or {}).get("ptools_server_url"))
+    except Exception:
+        _ptools_enabled = False
     return tpl.render(study=spec, name=name,
                       display_name=spec.get("title") or _hn["title"],
-                      name_chip=_hn["chip"])
+                      name_chip=_hn["chip"], ptools_enabled=_ptools_enabled)
 
 
 def _humanize_study_name(slug: str) -> dict:
