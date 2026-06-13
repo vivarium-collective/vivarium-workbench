@@ -6248,7 +6248,10 @@
         };
       }
 
-      var outcomes = latest.outcomes || {};
+      // Decide from BOTH the authored outcomes AND the run/outcome-spine
+      // computed_outcomes (authored wins) so the panel reflects the evaluator and
+      // stays current — not just hand-recorded verdicts.
+      var outcomes = Object.assign({}, latest.computed_outcomes || {}, latest.outcomes || {});
       var passed = [], failed = [], partial = [];
       Object.keys(outcomes).forEach(function(name) {
         var res = (outcomes[name] || {}).result;
@@ -7222,7 +7225,7 @@
         var _tc = { PASS: 0, FAIL: 0, PARTIAL: 0, SKIP: 0, PENDING: 0 };
         tests.forEach(function(t) {
           var o = outcomeByTest[t.name];
-          var r = o ? o.result : (t.status === 'gated' ? 'GATED' : 'PENDING');
+          var r = (o && o.result) || t.result || (t.status === 'gated' ? 'GATED' : 'PENDING');
           if (r === 'PASS') _tc.PASS++; else if (r === 'FAIL') _tc.FAIL++;
           else if (r === 'PARTIAL') _tc.PARTIAL++;
           else if (r === 'SKIP') _tc.SKIP++; else _tc.PENDING++;
@@ -7240,7 +7243,7 @@
               var name = t.name || '(unnamed)';
               var cls = t.classification || 'unclassified';
               var out = outcomeByTest[name];
-              var result = out ? out.result : (t.status === 'gated' ? 'GATED' : 'PENDING');
+              var result = (out && out.result) || t.result || (t.status === 'gated' ? 'GATED' : 'PENDING');
               var resBg = result === 'PASS' ? '#d1fae5' : (result === 'FAIL' ? '#fee2e2' : (result === 'SKIP' ? '#fef3c7' : (result === 'PARTIAL' ? '#fde68a' : '#f1f5f9')));
               var resFg = result === 'PASS' ? '#065f46' : (result === 'FAIL' ? '#991b1b' : (result === 'SKIP' ? '#92400e' : (result === 'PARTIAL' ? '#92400e' : '#475569')));
               var resGlyph = result === 'PASS' ? '✓' : (result === 'FAIL' ? '✗' : (result === 'PARTIAL' ? '◐' : '⏳'));
@@ -7870,27 +7873,11 @@
       // own annotations back, in-context per study, so the loop closes: the
       // next report makes clear what was said and lets the team show it's
       // addressed. Newest-first; author + timestamp preserved.
+      // Imported reviewer-feedback quotes are intentionally NOT rendered in the
+      // report (per request — they cluttered the top of each study). Feedback is
+      // still imported + tracked in investigations/<inv>/feedback/*.yaml, and how
+      // it was addressed shows in the study conclusion/status.
       var feedbackHtml = '';
-      var fb = s.expert_feedback;
-      if (fb && fb.length) {
-        feedbackHtml =
-          '<div class="expert-feedback-panel" id="study-' + slug + '-imported-feedback" '
-          + 'style="margin:12px 0;padding:12px 16px;background:#eff6ff;border:1px solid #3b82f6;'
-          + 'border-left-width:5px;border-radius:6px;color:#1e3a5f">'
-          + '<strong>💬 Reviewer feedback (' + fb.length + ')</strong>'
-          + '<ul style="list-style:none;margin:8px 0 0;padding:0">'
-          + fb.map(function(a) {
-              var who = _h(a.author || 'reviewer');
-              var when = a.ts ? _h(String(a.ts).replace('T', ' ').slice(0, 16)) : '';
-              return '<li style="margin:6px 0;padding:6px 10px;background:#fff;'
-                + 'border:1px solid #dbeafe;border-radius:4px">'
-                + '<div class="small" style="color:#3b82f6;font-weight:600">'
-                +   who + (when ? ' · ' + when : '') + '</div>'
-                + '<div style="margin-top:2px">' + _h(a.text || '') + '</div>'
-                + '</li>';
-            }).join('')
-          + '</ul></div>';
-      }
 
       // SP3b: feedback → action table. Read-only render of the pbg-supplied
       // s.feedback_actions (open feedback items that have a proposed action +
