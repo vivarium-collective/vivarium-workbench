@@ -5937,6 +5937,68 @@
       if (r === 'passing-with-caveats') return { glyph: '⚠', bd: '#f59e0b', bg: '#fffbeb' };
       return { glyph: '◐', bd: '#94a3b8', bg: '#f8fafc' };  // in-progress / pending
     }
+    // What an acceptance criterion IS — shown once, above the acceptance tables,
+    // so a reviewer knows these are computed metrics, not assertions.
+    var _acceptanceExplainer =
+      '<p class="muted small" style="margin:2px 0 10px 0;line-height:1.5;color:#475569">'
+      + 'Each <strong>acceptance criterion</strong> is a <em>behaviour test</em> declared in a study: a '
+      + 'measured field from the run (e.g. <code>closure_gap_size</code>) compared against an explicit '
+      + '<code>pass_if</code> band (a numeric threshold/range). The per-criterion result, each study’s '
+      + 'gate verdict, and this roll-up are <strong>computed in code from the run outcomes</strong> '
+      + '(deterministic) — not human judgement. Expand a row to see the field, the passing band, and the '
+      + 'observed value.</p>';
+    // Map study slug -> spec, to look up each criterion's underlying behaviour
+    // test (the actual metric) from the gating study.
+    var _specBySlug = {};
+    (specs || []).forEach(function(s) { if (s && s.name) _specBySlug[s.name] = s; });
+    function _passIfText(p) {
+      if (p == null || p === '') return '';
+      if (typeof p !== 'object') return String(p);
+      var bits = [];
+      if (p.min !== undefined || p.max !== undefined)
+        bits.push((p.min !== undefined ? ('≥ ' + p.min) : '') +
+                  (p.max !== undefined ? ((p.min !== undefined ? ' and ' : '') + '≤ ' + p.max) : ''));
+      ['gte', 'lte', 'gt', 'lt', 'equals', 'eq', 'min_fraction', 'at_least', 'at_most'].forEach(function(k) {
+        if (p[k] !== undefined) bits.push(k.replace(/_/g, ' ') + ' ' + p[k]);
+      });
+      return bits.length ? bits.join(', ') : JSON.stringify(p);
+    }
+    // Returns {field, passIf, observed, description} for a (study, behavior),
+    // or null if the gating study / test can't be resolved.
+    function _critMetric(study, behavior) {
+      var s = _specBySlug[study];
+      if (!s) return null;
+      var tests = s.behavior_tests || s.expected_behavior || [];
+      var t = null;
+      for (var i = 0; i < tests.length; i++) {
+        if (tests[i] && tests[i].name === behavior) { t = tests[i]; break; }
+      }
+      if (!t) return null;
+      var field = (t.measure && (t.measure.field || t.measure.kind)) || '';
+      var observed = null;
+      var runs = s.runs || [];
+      if (runs.length) {
+        var oc = (runs[runs.length - 1].outcomes || {})[behavior];
+        if (oc && oc.observed !== undefined) observed = oc.observed;
+      }
+      return { field: field, passIf: _passIfText(t.pass_if), observed: observed,
+               description: t.description || '' };
+    }
+    // A compact "field · pass-if · observed" detail line for a criterion row.
+    function _critMetricDetail(study, behavior) {
+      var m = _critMetric(study, behavior);
+      if (!m) return '';
+      var bits = [];
+      if (m.field) bits.push('field <code>' + _h(m.field) + '</code>');
+      if (m.passIf) bits.push('passes if <code>' + _h(m.passIf) + '</code>');
+      if (m.observed !== null && m.observed !== undefined)
+        bits.push('observed <strong>' + _h(typeof m.observed === 'number' ? (Math.round(m.observed * 1000) / 1000) : m.observed) + '</strong>');
+      if (!bits.length && !m.description) return '';
+      return '<div class="crit-metric muted small" style="margin:2px 0 0 0;color:#475569">'
+        + bits.join(' &middot; ')
+        + (m.description ? '<div style="margin-top:2px">' + _h(m.description.replace(/\s+/g, ' ').trim()) + '</div>' : '')
+        + '</div>';
+    }
     function _acGatingMatrixHtml() {
       var crits = (iset.acceptance_criteria || []).filter(function(c) {
         return c && typeof c === 'object';
@@ -5960,7 +6022,8 @@
           + b.bd + ';background:' + b.bg + '">' + b.glyph + ' ' + _h(result || 'pending') + '</span></td>';
         return '<tr id="acg-row-' + i + '" data-gap="' + (gap ? '1' : '0') + '" '
           + 'style="' + (gap ? 'background:#fef2f2' : '') + '">'
-          + '<td style="padding-right:10px">' + _h(behavior) + '</td>'
+          + '<td style="padding-right:10px;vertical-align:top">' + _h(behavior)
+            + _critMetricDetail(study, behavior) + '</td>'
           + studyCell + resultCell + '</tr>';
       }).join('');
       var gapNote = nGap
@@ -5976,6 +6039,7 @@
         + '<strong>AC → study gating matrix</strong> '
         + '<span class="muted small">which study gates each acceptance criterion · '
         + '⚠ = no study linked (gap)</span>'
+        + _acceptanceExplainer
         + '<table class="acg-table" style="width:100%;border-collapse:collapse;margin-top:8px;font-size:0.92em">'
         + '<thead><tr style="text-align:left;border-bottom:1px solid #cbd5e1">'
         + '<th style="padding:2px 10px 4px 0">Acceptance criterion</th>'
@@ -9070,13 +9134,17 @@
       // Coordinated-generation provenance banner (expert-feedback A.3).
       +   generationBannerHtml
 
-      // Spine C2: the investigation's verdict DAG + acceptance roll-up narrative
-      // — the dependency structure + where it passes/blocks, at a glance, before
-      // the per-study folds.
+      // Spine C2: the one-line acceptance headline stays inline; the detailed
+      // tables (gating matrix, study verdict map, needs-attention) fold into a
+      // collapsed section so the top of the report isn't a wall of tables.
       +   acceptanceNarrativeHtml
-      +   acGatingMatrixHtml
-      +   needsAttentionReportHtml
-      +   verdictDagHtml
+      +   (function() {
+            var inner = acGatingMatrixHtml + verdictDagHtml + needsAttentionReportHtml;
+            if (!inner || !inner.trim()) return '';
+            return '<details class="report-fold" id="acceptance-detail">'
+              + '<summary>How the verdict is computed — acceptance criteria, gating matrix &amp; study verdicts</summary>'
+              + inner + '</details>';
+          })()
 
       // ── Execution-status banner (LEADS the report, before the folds) ────
       // Accurate to the actual run state: a pre-execution review notice when
@@ -9157,9 +9225,17 @@
                 var rcls = (r === 'passing' || r === 'pass') ? '#16a34a'
                          : (r === 'failing' || r === 'fail') ? '#dc2626'
                          : '#92400e';
+                var m = _critMetric(c.study, c.behavior);
+                var metricCell = m
+                  ? (m.field ? '<code>' + _h(m.field) + '</code>' : '')
+                    + (m.passIf ? ' <span class="muted small">pass if ' + _h(m.passIf) + '</span>' : '')
+                    + (m.observed !== null && m.observed !== undefined
+                        ? ' → <strong>' + _h(typeof m.observed === 'number' ? (Math.round(m.observed * 1000) / 1000) : m.observed) + '</strong>' : '')
+                  : '<span class="muted small">—</span>';
                 return '<tr>'
                   + '<td style="padding:3px 8px"><a href="#study-' + _h(c.study) + '">' + _h(c.study) + '</a></td>'
                   + '<td style="padding:3px 8px">' + _h(c.behavior || '') + '</td>'
+                  + '<td style="padding:3px 8px;font-size:0.9em">' + metricCell + '</td>'
                   + '<td style="padding:3px 8px;font-weight:600;color:' + rcls + '">' + _h(c.result || '—') + '</td>'
                   + '</tr>';
               }).join('');
@@ -9171,10 +9247,12 @@
                 + '<strong>Acceptance roll-up</strong> '
                 + '<span class="muted small" style="color:#64748b">code-computed from member-study verdicts</span>'
                 + caBadge
+                + _acceptanceExplainer
                 + '<table class="small" style="margin-top:8px;border-collapse:collapse">'
                 + '<thead><tr>'
                 + '<th style="padding:3px 8px;text-align:left">Study</th>'
                 + '<th style="padding:3px 8px;text-align:left">Behavior</th>'
+                + '<th style="padding:3px 8px;text-align:left">Metric (field · pass-if → observed)</th>'
                 + '<th style="padding:3px 8px;text-align:left">Result</th>'
                 + '</tr></thead><tbody>' + critRows + '</tbody></table></div>';
             }
