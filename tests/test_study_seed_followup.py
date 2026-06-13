@@ -69,9 +69,11 @@ def test_seed_legacy_follow_up_studies(_ws):
     new_name = seed_followup_study(_ws, "p1", 0)
     child = yaml.safe_load(
         (_ws / "studies" / new_name / "study.yaml").read_text())
-    # The parent edge is written to the canonical pipeline_gate.prerequisites;
-    # the legacy parent_studies field is no longer written.
-    assert child["pipeline_gate"]["prerequisites"] == ["p1"]
+    # The parent edge is written to the canonical pipeline_gate.prerequisites
+    # in the dict form carrying the leads-to relation (W13); the legacy
+    # parent_studies field is no longer written.
+    assert child["pipeline_gate"]["prerequisites"] == [
+        {"study": "p1", "relation": "leads-to"}]
     assert "parent_studies" not in child
     assert child["seeded_from"]["parent"] == "p1"
 

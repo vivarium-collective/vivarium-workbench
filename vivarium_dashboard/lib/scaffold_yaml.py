@@ -127,6 +127,17 @@ phase: Design
 #   - text: (literature fact the study assumes)
 #     cites: [bib_key]
 #     verified_in_v2ecoli: false
+#
+# pipeline_gate:                      # Section 2 — DAG edges + proceed gate
+#   prerequisites:                    # upstream studies this one depends on
+#     - study: upstream-study-slug
+#       condition: tests-passed       # gate the upstream must satisfy
+#       relation: leads-to            # leads-to (default) | model-input |
+#                                     # evidence | calibrates-threshold |
+#                                     # refutes-alternative
+#       outputs_used: []              # upstream outputs consumed (→ model-input)
+#   enables: []                       # downstream studies unblocked by this one
+#   proceed_condition: ""             # when may the next study start
 
 {baseline_block}variants: []
 # observables / readouts → declare in `readouts:` below (v4 prefers `readouts`)

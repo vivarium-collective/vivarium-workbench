@@ -124,6 +124,19 @@ class TestV4StudyScaffold:
         text = v4_study_scaffold("s", composite="pkg.composites.foo")
         assert marker in text, f"missing scaffold marker: {marker!r}"
 
+    def test_prerequisite_item_documents_relation_key(self):
+        """W13 — the commented pipeline_gate.prerequisites template surfaces
+        the optional `relation` key + its vocabulary so authors know an edge
+        can be typed (default leads-to)."""
+        text = v4_study_scaffold("s", composite="pkg.composites.foo")
+        assert "pipeline_gate:" in text
+        assert "prerequisites:" in text
+        assert "relation:" in text
+        for rel in ("leads-to", "model-input", "evidence",
+                    "calibrates-threshold", "refutes-alternative"):
+            assert rel in text, f"missing relation vocabulary term: {rel}"
+        assert "outputs_used:" in text
+
 
 # ---------------------------------------------------------------------------
 # v2 investigation scaffold

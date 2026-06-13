@@ -204,7 +204,9 @@ def seed_followup_study(workspace: Path, parent_name: str,
         },
 
         "pipeline_gate": {
-            "prerequisites": [parent_name],
+            # Prerequisite item shape carries an optional `relation` key
+            # (default leads-to) so the DAG renderer can style the edge.
+            "prerequisites": [{"study": parent_name, "relation": "leads-to"}],
             "enables": [],
             "proceed_condition": "TBD — define before Simulate.",
         },
