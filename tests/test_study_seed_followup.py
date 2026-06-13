@@ -205,3 +205,35 @@ def test_seed_proposal_adds_child_to_parent_investigation(_ws):
     studies = yaml.safe_load(inv.read_text())["studies"]
     assert "p1" in studies
     assert new_name in studies
+
+
+# ---------------------------------------------------------------------------
+# Wave 3a #19 — a failing study seeds a typed (diagnostic) child.
+# ---------------------------------------------------------------------------
+
+def test_seed_legacy_threads_study_type(_ws):
+    """study_type passed to seed_followup_study is stamped on the seeded child
+    (legacy path — built locally, so the typing is exercised end-to-end)."""
+    _write_parent(_ws, "p1", follow_up_studies=[
+        {"title": "diagnose the failure", "kind": "new", "why": "it failed"},
+    ])
+    new_name = seed_followup_study(_ws, "p1", 0, study_type="diagnostic")
+    child = yaml.safe_load(
+        (_ws / "studies" / new_name / "study.yaml").read_text())
+    assert child["study_type"] == "diagnostic"
+
+
+def test_post_study_seed_followup_accepts_study_type(_ws):
+    """The endpoint threads study_type=diagnostic through to the seeded child
+    (critique #19 — the failed-study seed button passes it). Uses the legacy
+    followup path so the test does not depend on the pbg/ruamel finding path."""
+    from vivarium_dashboard.server import _post_study_seed_followup_for_test
+    _write_parent(_ws, "p1", follow_up_studies=[
+        {"title": "diagnose the failure", "kind": "new", "why": "it failed"},
+    ])
+    body, code = _post_study_seed_followup_for_test(
+        _ws, {"parent": "p1", "followup_idx": 0, "study_type": "diagnostic"})
+    assert code == 200, body
+    child = yaml.safe_load(
+        (_ws / "studies" / body["new_slug"] / "study.yaml").read_text())
+    assert child["study_type"] == "diagnostic"

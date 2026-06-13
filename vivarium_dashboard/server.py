@@ -1813,6 +1813,20 @@ def _study_detail_spec(name: str):
         except Exception:  # noqa: BLE001
             pass
 
+        # Wave 3a #18: pre-registration status — compare the study's declared
+        # `preregistered` block (registered_at vs the canonical run's start;
+        # thresholds vs behavior_tests[].pass_if) so the SPA / report can render
+        # a "pre-registered ✓ / post-hoc ⚠" chip in the verdict area. Pure
+        # function in pbg-superpowers; render-only, never modifies study.yaml.
+        # Defensive: degrade silently if pbg-superpowers isn't importable.
+        try:
+            from pbg_superpowers.study_verdict import preregistration_status
+            ps = preregistration_status(spec)
+            if isinstance(ps, dict) and ps.get("preregistered"):
+                spec["preregistration_status"] = ps
+        except Exception:  # noqa: BLE001
+            pass
+
         # Spine C1a: surface the owning investigation's PERSISTED acceptance
         # criterion(s) covering THIS study so the "Spine at a glance" panel can
         # show the acceptance roll-up + link to the investigation. Pure disk
@@ -4260,6 +4274,9 @@ def _post_study_seed_followup_for_test(ws_root: Path, body: dict):
     finding_id = body.get("finding_id")
     proposal_id = body.get("proposal_id")
     proposal_idx = body.get("proposal_idx")
+    # Wave 3a #19 — optional study_type (e.g. 'diagnostic' when the parent
+    # failed) threaded to the pbg writer so the seeded child is typed.
+    study_type = body.get("study_type") or None
     if proposal_idx is not None:
         try:
             proposal_idx = int(proposal_idx)
@@ -4269,13 +4286,15 @@ def _post_study_seed_followup_for_test(ws_root: Path, body: dict):
         if finding_id is not None and str(finding_id) != "":
             # Finding family — delegate to the shared pbg seed mechanism.
             new_name = seed_followup_study(
-                ws_root, parent, finding_id=finding_id, proposal_id=proposal_id)
+                ws_root, parent, finding_id=finding_id, proposal_id=proposal_id,
+                study_type=study_type)
         else:
             new_name = seed_followup_study(
                 ws_root, parent,
                 int(body.get("followup_idx", -1)),
                 proposal_id=proposal_id,
                 proposal_idx=proposal_idx,
+                study_type=study_type,
             )
     except ImportError as e:
         return {"error": f"finding-seed requires pbg-superpowers: {e}"}, 500
@@ -7543,6 +7562,65 @@ def _needs_attention(ws_root: Path, *, investigation=None):
         return _json_body(_empty), 200
 
 
+def _framework_metrics(ws_root: Path):
+    """GET /api/framework-metrics worker — ``(json_bytes, status)``.
+
+    Wave 3a #26: aggregate framework-self metrics across EVERY study + every
+    investigation in the workspace via the deterministic
+    ``pbg_superpowers.rigor.framework_metrics`` (each metric is
+    ``{fraction, count, total}``). The dashboard renders this as a
+    "Framework scorecard" section labelled "framework-self metrics (n=N
+    investigations)" — the label is the dashboard's job, the math is pbg's.
+
+    AI-free + tolerant: an absent/old pbg_superpowers, or an unreadable
+    workspace, returns 200 with ``{metrics: {}, n_investigations, n_studies}``
+    rather than a 500 so the report degrades gracefully (section omitted).
+    """
+    ws_root = Path(ws_root)
+    wp = WorkspacePaths.load(ws_root)
+
+    study_specs = []
+    studies_root = wp.studies
+    if studies_root.is_dir():
+        for d in sorted(studies_root.iterdir()):
+            f = d / "study.yaml"
+            if not f.is_file():
+                continue
+            try:
+                sp = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+            except Exception:  # noqa: BLE001 — skip unreadable studies
+                continue
+            if isinstance(sp, dict):
+                study_specs.append(sp)
+
+    inv_specs = []
+    inv_root = wp.investigations
+    if inv_root.is_dir():
+        for d in sorted(inv_root.iterdir()):
+            f = d / "investigation.yaml"
+            if not f.is_file():
+                continue
+            try:
+                isp = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+            except Exception:  # noqa: BLE001
+                continue
+            if isinstance(isp, dict):
+                inv_specs.append(isp)
+
+    base = {"metrics": {}, "n_investigations": len(inv_specs),
+            "n_studies": len(study_specs)}
+    try:
+        from pbg_superpowers.rigor import framework_metrics
+    except Exception:  # noqa: BLE001 — older pbg_superpowers lacks the function
+        return _json_body(base), 200
+    try:
+        metrics = framework_metrics(study_specs, inv_specs) or {}
+        base["metrics"] = metrics
+        return _json_body(base), 200
+    except Exception:  # noqa: BLE001 — compute can fail; stay typed + 200
+        return _json_body(base), 200
+
+
 # ---------------------------------------------------------------------------
 # HTTP handler
 # ---------------------------------------------------------------------------
@@ -7708,6 +7786,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_study_rigor()
         if self.path.startswith("/api/investigation-rigor"):
             return self._get_investigation_rigor()
+        if self.path.startswith("/api/framework-metrics"):
+            return self._send_json_bytes(*_framework_metrics(WORKSPACE))
         if self.path.startswith("/api/work-composite-diff"):
             return self._get_work_composite_diff()
         if self.path.startswith("/api/references-bib"):
@@ -13509,6 +13589,12 @@ if __name__ == "__main__":
         return _needs_attention(ws_root, investigation=investigation)
 
     @staticmethod
+    def _framework_metrics_test(ws_root):
+        """Test seam for GET /api/framework-metrics — aggregates framework-self
+        metrics over an explicit ws_root. Returns (json_bytes, http_status)."""
+        return _framework_metrics(ws_root)
+
+    @staticmethod
     def _iset_detail_data(name: str) -> "dict | None":
         """Pure builder for investigation (iset) detail — no socket I/O.
 
@@ -13644,6 +13730,10 @@ if __name__ == "__main__":
             "biological_story":    spec.get("biological_story", ""),
             "question":            spec.get("question", ""),
             "hypothesis":          spec.get("hypothesis", ""),
+            # Wave 3a #1 — what the investigation primarily evaluates
+            # (method | model | hypothesis | composition-protocol). Renders as a
+            # chip in the report header. Absent → no chip.
+            "object_of_evaluation": spec.get("object_of_evaluation"),
             "status":              spec.get("status", "planning"),
             "effective_status":    effective_status,
             "expert_docs":         _coerce_list_field(spec, "expert_docs", source=str(spec_path)),
