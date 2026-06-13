@@ -640,3 +640,29 @@ def test_stage_embed_visualizations_no_base_path(tmp_path):
     _stage_embed_visualizations(spec, ws, out, "")
     assert (out / "reports" / "figures" / "s" / "f.html").is_file()
     assert spec["embed_visualizations"][0]["url"] == "/reports/figures/s/f.html"
+
+
+def test_build_bundle_shell_embeds_are_staged_and_prefixed(tmp_workspace, tmp_path):
+    """End-to-end: a reports/figures/<study>/ figure must be copied into the
+    bundle AND its URL base-path-prefixed in BOTH the study JSON and the
+    server-rendered per-study shell (the <iframe src>). Regression for the
+    study-detail 'Embedded visualizations' 404 under a hosting base path."""
+    from vivarium_dashboard import publish
+
+    fig = server.WORKSPACE / "reports" / "figures" / "alpha"
+    fig.mkdir(parents=True)
+    (fig / "f1.html").write_text("<html><body>fig one</body></html>")
+
+    out = tmp_path / "bundle"
+    publish.build_bundle(server.WORKSPACE, out, base_path="/v2ecoli/dashboard")
+
+    # file copied into the bundle at the same workspace-relative path
+    assert (out / "reports" / "figures" / "alpha" / "f1.html").is_file()
+    # study JSON URL prefixed
+    j = json.loads((out / "api" / "study" / "alpha.json").read_text())
+    urls = [e["url"] for e in j.get("embed_visualizations", [])]
+    assert "/v2ecoli/dashboard/reports/figures/alpha/f1.html" in urls
+    # per-study SHELL iframe src prefixed (not root-absolute /reports/...)
+    shell = (out / "studies" / "alpha" / "index.html").read_text()
+    assert 'src="/v2ecoli/dashboard/reports/figures/alpha/f1.html"' in shell
+    assert 'src="/reports/figures/alpha/f1.html"' not in shell

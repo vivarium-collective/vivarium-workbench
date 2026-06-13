@@ -541,6 +541,12 @@ def _do_build(
         spec = _study_detail_spec(slug)
         if spec is None:
             continue
+        # The shell template renders embed_visualizations as <iframe src="{{v.url}}">
+        # server-side; this spec is re-fetched (not the one staged for the JSON
+        # above), so stage it too or its URLs stay root-absolute (/reports/...)
+        # and 404 under a hosting base path. (_apply_base_path only rewrites
+        # /assets/ + /bigraph-loom/, not embed URLs.)
+        _stage_embed_visualizations(spec, ws_root, out_dir, base_path)
         study_html = _render_study_detail_html(slug, spec)
         study_html = _normalize_asset_urls(study_html)
         study_html = _apply_base_path(study_html, base_path)
