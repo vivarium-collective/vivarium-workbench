@@ -124,6 +124,24 @@ class TestV4StudyScaffold:
         text = v4_study_scaffold("s", composite="pkg.composites.foo")
         assert marker in text, f"missing scaffold marker: {marker!r}"
 
+    def test_composition_commitment_template_present(self):
+        """C-COMMIT — the optional composition_commitment block is offered as a
+        commented template with its full sub-shape."""
+        text = v4_study_scaffold("s", composite="pkg.composites.foo")
+        assert "composition_commitment:" in text
+        for key in ("component_added", "deficit_addressed", "closure_gap_item",
+                    "new_behavior", "invariants_required", "alternatives_excluded"):
+            assert key in text, f"missing composition_commitment sub-key: {key}"
+
+    def test_representational_claims_slot_present(self):
+        """C-MODELCARD — model_change.representational_claims authored slot is
+        offered as a commented template."""
+        text = v4_study_scaffold("s", composite="pkg.composites.foo")
+        assert "representational_claims:" in text
+        # still parses (the slot is commented, not live YAML).
+        import yaml as _yaml
+        _yaml.safe_load(text)
+
     def test_prerequisite_item_documents_relation_key(self):
         """W13 — the commented pipeline_gate.prerequisites template surfaces
         the optional `relation` key + its vocabulary so authors know an edge

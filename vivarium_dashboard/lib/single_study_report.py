@@ -908,8 +908,580 @@ def _render_limitations(spec: dict) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# Wave 2 — compositional causal discovery + semantic closure renderers.
+# All consume data the model WRITES into study.yaml (composition_commitment,
+# invariant_check, ablations, model_representation). Each renders defensively:
+# a missing/empty field returns '' so the section is omitted entirely.
+# ---------------------------------------------------------------------------
+
+def _chip_list(items, *, bg: str = "#f1f5f9", fg: str = "#0f172a") -> str:
+    """Render a list of strings as inline pill chips. Returns '' when empty."""
+    chips = []
+    for it in items or []:
+        if it is None or it == "":
+            continue
+        chips.append(
+            f'<span style="display:inline-block;padding:2px 9px;border-radius:9999px;'
+            f'background:{bg};color:{fg};margin:2px;font-size:0.82em">{_h(str(it))}</span>'
+        )
+    return "".join(chips)
+
+
+def _render_composition_commitment(spec: dict) -> str:
+    """C-COMMIT — "Theoretical commitment" panel.
+
+    Sourced from the authored ``composition_commitment`` block: what process(es)
+    this study adds vs its prerequisite, the deficit that closes (+ closure-gap
+    chips), the new behavior it unlocks, the invariants it must preserve (links to
+    earlier studies), and the alternatives it excludes. Omitted when absent.
+    """
+    cc = spec.get("composition_commitment")
+    if not isinstance(cc, dict) or not cc:
+        return ""
+    rows = []
+
+    added = cc.get("component_added") or []
+    if isinstance(added, str):
+        added = [added]
+    if added:
+        rows.append(
+            '<div style="margin:8px 0"><strong style="color:#1e293b">Component added</strong> '
+            f'{_chip_list(added, bg="#e0e7ff", fg="#3730a3")}</div>'
+        )
+
+    deficit = cc.get("deficit_addressed")
+    if isinstance(deficit, dict) and deficit:
+        note = deficit.get("note") or ""
+        gap_items = deficit.get("closure_gap_item") or []
+        if isinstance(gap_items, str):
+            gap_items = [gap_items]
+        gap_html = (
+            ' <span style="color:#475569;font-size:0.85em">closes:</span> '
+            + _chip_list(gap_items, bg="#fee2e2", fg="#991b1b")
+        ) if gap_items else ""
+        if note or gap_html:
+            rows.append(
+                '<div style="margin:8px 0"><strong style="color:#1e293b">Deficit addressed</strong> '
+                f'{_multiline(str(note)) if note else ""}{gap_html}</div>'
+            )
+    elif isinstance(deficit, str) and deficit:
+        rows.append(
+            '<div style="margin:8px 0"><strong style="color:#1e293b">Deficit addressed</strong> '
+            f'{_multiline(deficit)}</div>'
+        )
+
+    new_behavior = cc.get("new_behavior") or []
+    if isinstance(new_behavior, str):
+        new_behavior = [new_behavior]
+    if new_behavior:
+        rows.append(
+            '<div style="margin:8px 0"><strong style="color:#1e293b">New behavior</strong> '
+            f'{_chip_list(new_behavior, bg="#dcfce7", fg="#166534")}</div>'
+        )
+
+    invariants = cc.get("invariants_required") or []
+    inv_bits = []
+    for iv in invariants:
+        if isinstance(iv, dict):
+            study = iv.get("study") or ""
+            test = iv.get("test") or ""
+            txt = study + ((" · " + test) if test else "")
+        else:
+            txt = str(iv)
+        if txt:
+            inv_bits.append(
+                f'<li><code>{_h(txt)}</code></li>'
+            )
+    if inv_bits:
+        rows.append(
+            '<div style="margin:8px 0"><strong style="color:#1e293b">Invariants required</strong>'
+            '<ul style="margin:4px 0 0;padding-left:20px;color:#334155;font-size:0.92em">'
+            + "".join(inv_bits) + '</ul></div>'
+        )
+
+    excluded = cc.get("alternatives_excluded") or []
+    if isinstance(excluded, str):
+        excluded = [excluded]
+    if excluded:
+        rows.append(
+            '<div style="margin:8px 0"><strong style="color:#1e293b">Alternatives excluded</strong> '
+            f'{_chip_list(excluded, bg="#fef9c3", fg="#854d0e")}</div>'
+        )
+
+    if not rows:
+        return ""
+    return (
+        '<section id="commitment"><h2>Theoretical commitment</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">What this study adds to its '
+        'prerequisite — the component introduced, the deficit it closes, the new behavior it '
+        'unlocks, the earlier invariants it must preserve, and the alternatives it excludes.</p>'
+        + "".join(rows) +
+        '</section>'
+    )
+
+
+_INVAR_STATUS_COLORS = {
+    "invalidated":  ("#fee2e2", "#991b1b"),
+    "weakened":     ("#fef9c3", "#854d0e"),
+    "preserved":    ("#dcfce7", "#166534"),
+    "strengthened": ("#dbeafe", "#1e40af"),
+}
+# Order so gap statuses (invalidated/weakened) render first.
+_INVAR_STATUS_RANK = {"invalidated": 0, "weakened": 1, "preserved": 2, "strengthened": 3}
+
+
+def _render_invariant_checks(spec: dict) -> str:
+    """C-INVAR render — "Invariant checks" sub-section.
+
+    Renders ``study.invariant_check[]`` (study · test · prior→now · status chip),
+    invalidated/weakened first. Omitted when absent.
+    """
+    checks = [c for c in (spec.get("invariant_check") or []) if isinstance(c, dict)]
+    if not checks:
+        return ""
+    checks = sorted(checks, key=lambda c: _INVAR_STATUS_RANK.get(
+        str(c.get("status", "")).lower(), 9))
+    head = (
+        '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+        '<th style="padding:4px 8px">Study</th><th style="padding:4px 8px">Test</th>'
+        '<th style="padding:4px 8px">Prior</th><th style="padding:4px 8px">Now</th>'
+        '<th style="padding:4px 8px">Status</th></tr>'
+    )
+    rows = []
+    for c in checks:
+        status = str(c.get("status", "")).lower()
+        bg, fg = _INVAR_STATUS_COLORS.get(status, ("#f1f5f9", "#475569"))
+        chip = (
+            f'<span style="padding:1px 8px;border-radius:9999px;background:{bg};color:{fg};'
+            f'font-weight:600;font-size:0.82em">{_h(status or "—")}</span>'
+        )
+        rows.append(
+            '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+            f'<td style="padding:4px 8px"><code>{_h(c.get("study", ""))}</code></td>'
+            f'<td style="padding:4px 8px">{_h(c.get("test", ""))}</td>'
+            f'<td style="padding:4px 8px">{_h(c.get("prior", ""))}</td>'
+            f'<td style="padding:4px 8px">{_h(c.get("now", ""))}</td>'
+            f'<td style="padding:4px 8px">{chip}</td>'
+            '</tr>'
+        )
+    return (
+        '<section id="invariants"><h2>Invariant checks</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Earlier guarantees re-checked in '
+        'the current code state — each invariant required by this study, its prior vs current value, '
+        'and whether it was preserved. Invalidated / weakened invariants are listed first.</p>'
+        '<table style="border-collapse:collapse;width:100%">'
+        + head + "".join(rows) + '</table>'
+        '</section>'
+    )
+
+
+def _render_causal_necessity(spec: dict) -> str:
+    """C-CF — "Causal necessity" table from ``study.ablations[]``.
+
+    The causal READ of the ablation suite: per process/target · mode ·
+    behavior_test · baseline→ablated · role · causally necessary. Omitted when
+    absent.
+    """
+    ablations = [a for a in (spec.get("ablations") or []) if isinstance(a, dict)]
+    if not ablations:
+        return ""
+    head = (
+        '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+        '<th style="padding:4px 8px">Process / target</th><th style="padding:4px 8px">Mode</th>'
+        '<th style="padding:4px 8px">Behavior test</th><th style="padding:4px 8px">Baseline → ablated</th>'
+        '<th style="padding:4px 8px">Role</th><th style="padding:4px 8px">Necessary</th></tr>'
+    )
+    role_colors = {
+        "necessary":  ("#fee2e2", "#991b1b"),
+        "modulatory": ("#fef9c3", "#854d0e"),
+        "redundant":  ("#f1f5f9", "#475569"),
+    }
+    rows = []
+    for a in ablations:
+        target = a.get("target")
+        if isinstance(target, (list, tuple)):
+            target = ".".join(str(t) for t in target)
+        proc = a.get("process", "")
+        proc_target = _h(str(proc)) + (f' <code style="font-size:0.82em">{_h(str(target))}</code>'
+                                       if target else "")
+        role = str(a.get("role", "")).lower()
+        rbg, rfg = role_colors.get(role, ("#f1f5f9", "#475569"))
+        role_html = (
+            f'<span style="padding:1px 8px;border-radius:9999px;background:{rbg};color:{rfg};'
+            f'font-weight:600;font-size:0.82em">{_h(role or "—")}</span>'
+        )
+        nec = a.get("causally_necessary")
+        nec_html = ("✓" if nec is True else ("✗" if nec is False else "—"))
+        baseline = a.get("baseline_result")
+        ablated = a.get("ablated_result")
+        rows.append(
+            '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+            f'<td style="padding:4px 8px">{proc_target}</td>'
+            f'<td style="padding:4px 8px"><code>{_h(a.get("mode", ""))}</code></td>'
+            f'<td style="padding:4px 8px">{_h(a.get("behavior_test", ""))}</td>'
+            f'<td style="padding:4px 8px">{_h(str(baseline))} → {_h(str(ablated))}</td>'
+            f'<td style="padding:4px 8px">{role_html}</td>'
+            f'<td style="padding:4px 8px;text-align:center;font-weight:700">{nec_html}</td>'
+            '</tr>'
+        )
+    return (
+        '<section id="causal-necessity"><h2>Causal necessity</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Counterfactual read of the ablation '
+        'suite — each process/store removed or perturbed, whether a behavior test flipped, and so '
+        'whether that component is causally necessary for the behavior (vs redundant or merely '
+        'modulatory).</p>'
+        '<table style="border-collapse:collapse;width:100%">'
+        + head + "".join(rows) + '</table>'
+        '</section>'
+    )
+
+
+def _wiring_summary(wiring) -> str:
+    """Render an inputs/outputs wiring map ({port: [store_path]}) as port→store."""
+    if not isinstance(wiring, dict) or not wiring:
+        return '<span style="color:#94a3b8">—</span>'
+    bits = []
+    for port, path in wiring.items():
+        if isinstance(path, (list, tuple)):
+            tgt = ".".join(str(p) for p in path)
+        else:
+            tgt = str(path)
+        bits.append(
+            f'<code style="font-size:0.82em">{_h(str(port))}'
+            f'<span style="color:#94a3b8">→</span>{_h(tgt)}</code>'
+        )
+    return " ".join(bits)
+
+
+def _render_model_card(composite_doc: Optional[dict],
+                       *, model_representation: Optional[dict] = None,
+                       readouts: Optional[list] = None,
+                       behavior_tests: Optional[list] = None,
+                       variants: Optional[list] = None,
+                       interventions: Optional[list] = None) -> str:
+    """C-MODELCARD — static, reader-independent model card.
+
+    Built from the (light) composite-state doc — the same ``summarize_large_values``
+    + ``process_docs`` doc the explorer uses, NOT the heavy raw composite. Renders:
+    per process (address · inputs port→store · outputs · config); stores + initial
+    values; boundary (from ``model_representation``); observables (readouts /
+    behavior-test measures); perturbations (interventions / variants).
+
+    Rendered server-side so it survives the static read-only bundle. Returns ''
+    when no composite doc is available.
+    """
+    if not isinstance(composite_doc, dict) or not composite_doc:
+        return ""
+    # The doc may be wrapped as {"state": {...}} or be the bare state mapping.
+    state = composite_doc.get("state") if isinstance(composite_doc.get("state"), dict) else composite_doc
+
+    processes = []
+    stores = []
+    for key, node in state.items():
+        if isinstance(node, dict) and node.get("_type") in ("process", "step"):
+            processes.append((key, node))
+        elif key not in ("_type",) and not (isinstance(node, dict) and node.get("_type")):
+            # Treat non-process top-level entries as stores (scalars / containers).
+            stores.append((key, node))
+
+    sections = []
+
+    if processes:
+        prows = []
+        for name, node in processes:
+            addr = node.get("address", "")
+            cfg = node.get("config") or {}
+            cfg_html = ""
+            if isinstance(cfg, dict) and cfg:
+                cfg_html = (
+                    '<div style="color:#475569;font-size:0.85em;margin-top:2px">config: '
+                    + _chip_list([f"{k}={v}" for k, v in cfg.items()]) + '</div>'
+                )
+            desc = node.get("doc") or ""
+            desc_html = (
+                f'<div style="color:#64748b;font-size:0.85em;margin-top:2px">{_h(desc[:300])}</div>'
+                if desc else ""
+            )
+            prows.append(
+                '<div style="padding:8px 0;border-top:1px solid #f1f5f9">'
+                f'<div><strong style="color:#1e293b">{_h(name)}</strong> '
+                f'<code style="font-size:0.82em">{_h(addr)}</code></div>'
+                f'<div style="font-size:0.88em;margin-top:2px"><span style="color:#475569">in:</span> '
+                f'{_wiring_summary(node.get("inputs"))}</div>'
+                f'<div style="font-size:0.88em;margin-top:2px"><span style="color:#475569">out:</span> '
+                f'{_wiring_summary(node.get("outputs"))}</div>'
+                f'{cfg_html}{desc_html}'
+                '</div>'
+            )
+        sections.append(
+            '<div style="margin:10px 0"><strong style="color:#1e293b">Processes</strong>'
+            + "".join(prows) + '</div>'
+        )
+
+    if stores:
+        boundary = set()
+        if isinstance(model_representation, dict):
+            for b in (model_representation.get("boundary") or []):
+                boundary.add(str(b))
+            for b in (model_representation.get("requires") or []):
+                boundary.add(str(b))
+        srows = []
+        for name, val in stores:
+            val_disp = val
+            if isinstance(val, (dict, list)):
+                val_disp = f"⟨{type(val).__name__}⟩"
+            badge = (
+                ' <span style="padding:0 6px;border-radius:9999px;background:#dbeafe;color:#1e40af;'
+                'font-size:0.72em">boundary</span>' if name in boundary else ""
+            )
+            srows.append(
+                '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+                f'<td style="padding:4px 8px"><code>{_h(name)}</code>{badge}</td>'
+                f'<td style="padding:4px 8px">{_h(str(val_disp))}</td></tr>'
+            )
+        sections.append(
+            '<div style="margin:10px 0"><strong style="color:#1e293b">Stores &amp; initial values</strong>'
+            '<table style="border-collapse:collapse;width:100%;margin-top:4px">'
+            '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+            '<th style="padding:4px 8px">Store</th><th style="padding:4px 8px">Initial</th></tr>'
+            + "".join(srows) + '</table></div>'
+        )
+
+    # Observables — readouts + behavior-test measures.
+    obs_bits = []
+    for r in (readouts or []):
+        if isinstance(r, dict):
+            nm = r.get("name") or r.get("store_path") or ""
+            if nm:
+                obs_bits.append(str(nm))
+        elif r:
+            obs_bits.append(str(r))
+    for bt in (behavior_tests or []):
+        if isinstance(bt, dict):
+            measure = bt.get("measure")
+            if isinstance(measure, dict):
+                m = measure.get("path") or measure.get("field") or measure.get("kind")
+                if m:
+                    obs_bits.append(str(m))
+    if obs_bits:
+        sections.append(
+            '<div style="margin:10px 0"><strong style="color:#1e293b">Observables</strong> '
+            + _chip_list(obs_bits) + '</div>'
+        )
+
+    # Perturbations — interventions + variants.
+    pert_bits = []
+    for v in (variants or []):
+        if isinstance(v, dict):
+            nm = v.get("name") or ""
+            if nm:
+                pert_bits.append(str(nm))
+        elif v:
+            pert_bits.append(str(v))
+    for iv in (interventions or []):
+        if isinstance(iv, dict):
+            nm = iv.get("name") or iv.get("mode") or ""
+            if nm:
+                pert_bits.append(str(nm))
+        elif iv:
+            pert_bits.append(str(iv))
+    if pert_bits:
+        sections.append(
+            '<div style="margin:10px 0"><strong style="color:#1e293b">Perturbations</strong> '
+            + _chip_list(pert_bits, bg="#fef9c3", fg="#854d0e") + '</div>'
+        )
+
+    if not sections:
+        return ""
+    return (
+        '<section id="model-card"><h2>Model card</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">A static, reader-independent '
+        'description of the model — its processes, wiring, stores, observables, and perturbations — '
+        'rendered from the composite state so it reads the same for everyone.</p>'
+        + "".join(sections) +
+        '</section>'
+    )
+
+
+_REPR_ROLE_COLORS = {
+    "inside":            ("#f1f5f9", "#475569"),
+    "boundary-crossing": ("#dbeafe", "#1e40af"),
+    "derived":           ("#ede9fe", "#6d28d9"),
+    "self-produced":     ("#dcfce7", "#166534"),
+}
+
+
+def _render_representation(model_representation: Optional[dict]) -> str:
+    """C-MODELCARD — "Representation claims" table.
+
+    Labels each store inside / boundary-crossing / derived / self-produced (from
+    the persisted ``model_representation``) and reports interface-vs-semantic
+    closure status. Omitted when absent.
+    """
+    mr = model_representation
+    if not isinstance(mr, dict) or not mr:
+        return ""
+
+    # Classify each store by priority. The model writes the category lists; we
+    # render a row per store with its highest-priority label.
+    categories = [
+        ("self-produced", mr.get("self_produced")),
+        ("derived", mr.get("derived")),
+        ("boundary-crossing", mr.get("boundary")),
+        ("boundary-crossing", mr.get("requires")),
+        ("inside", mr.get("provides")),
+        ("inside", mr.get("inside")),
+    ]
+    store_role: dict[str, str] = {}
+    for role, lst in categories:
+        if isinstance(lst, str):
+            lst = [lst]
+        for s in (lst or []):
+            store_role.setdefault(str(s), role)
+
+    gap = mr.get("gap") or []
+    if isinstance(gap, str):
+        gap = [gap]
+    gap_set = {str(g) for g in gap}
+
+    rows = []
+    for store, role in sorted(store_role.items()):
+        bg, fg = _REPR_ROLE_COLORS.get(role, ("#f1f5f9", "#475569"))
+        gap_badge = (
+            ' <span style="padding:0 6px;border-radius:9999px;background:#fee2e2;color:#991b1b;'
+            'font-size:0.72em">unclosed gap</span>' if store in gap_set else ""
+        )
+        rows.append(
+            '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+            f'<td style="padding:4px 8px"><code>{_h(store)}</code>{gap_badge}</td>'
+            f'<td style="padding:4px 8px"><span style="padding:1px 8px;border-radius:9999px;'
+            f'background:{bg};color:{fg};font-weight:600;font-size:0.82em">{_h(role)}</span></td>'
+            '</tr>'
+        )
+
+    table_html = ""
+    if rows:
+        table_html = (
+            '<table style="border-collapse:collapse;width:100%;margin-top:4px">'
+            '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+            '<th style="padding:4px 8px">Store</th><th style="padding:4px 8px">Representation</th></tr>'
+            + "".join(rows) + '</table>'
+        )
+
+    # Closure status strip: interface vs semantic.
+    def _closure_chip(label: str, closed) -> str:
+        if closed is True:
+            bg, fg, txt = "#dcfce7", "#166534", "CLOSED"
+        elif closed is False:
+            bg, fg, txt = "#fee2e2", "#991b1b", "OPEN"
+        else:
+            bg, fg, txt = "#f1f5f9", "#475569", "—"
+        return (
+            f'<span style="margin-right:12px">{_h(label)}: '
+            f'<span style="padding:1px 8px;border-radius:9999px;background:{bg};color:{fg};'
+            f'font-weight:700;font-size:0.82em">{txt}</span></span>'
+        )
+
+    semantic = mr.get("semantic") if isinstance(mr.get("semantic"), dict) else {}
+    interface_closed = mr.get("interface_closed")
+    semantically_closed = semantic.get("semantically_closed")
+    closure_html = (
+        '<div style="margin:10px 0">'
+        + _closure_chip("Interface closure", interface_closed)
+        + _closure_chip("Semantic closure", semantically_closed)
+        + '</div>'
+    )
+
+    if not rows and interface_closed is None and semantically_closed is None:
+        return ""
+    return (
+        '<section id="representation"><h2>Representation claims</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">How each store is represented '
+        '(inside / boundary-crossing / derived / self-produced) and whether the model achieves '
+        'interface closure (no missing inputs) and semantic closure (every self-produced store '
+        'actually fluxes).</p>'
+        + closure_html + table_html +
+        '</section>'
+    )
+
+
+def _resolve_composite_doc(ws_root: Path, spec: dict) -> Optional[dict]:
+    """Best-effort resolve the study's baseline composite to a LIGHT state doc.
+
+    Mirrors the server's ``_get_composite_state`` resolution (generator registry
+    → workspace file) but standalone, so the single-study report renders the
+    model card from the same ``summarize_large_values`` + ``process_docs`` doc the
+    explorer uses. Returns None on any failure (network-free / import-light:
+    degrades to no model card).
+    """
+    # Find the baseline composite ref (v4 conditions.baseline.composite or the
+    # legacy top-level baseline[].composite).
+    ref = None
+    conds = spec.get("conditions")
+    if isinstance(conds, dict):
+        bl = conds.get("baseline")
+        if isinstance(bl, dict):
+            ref = bl.get("composite")
+    if not ref:
+        for b in (spec.get("baseline") or []):
+            if isinstance(b, dict) and b.get("composite"):
+                ref = b["composite"]
+                break
+    if not ref:
+        return None
+
+    doc = None
+    # 1) generator registry (built composites)
+    try:
+        from pbg_superpowers.composite_generator import (
+            _REGISTRY, build_generator, discover_generators,
+        )
+        if not _REGISTRY:
+            discover_generators()
+        entry = _REGISTRY.get(ref)
+        if entry is not None:
+            doc = build_generator(entry)
+    except Exception:
+        doc = None
+
+    # 2) workspace file (dotted spec id or relative path)
+    if doc is None:
+        try:
+            from vivarium_dashboard.lib.composite_lookup import find_composite_path
+            ws_data = yaml.safe_load(
+                (Path(ws_root) / "workspace.yaml").read_text(encoding="utf-8")) or {}
+            pkg = ws_data.get("package_path") or (
+                "pbg_" + str(ws_data.get("name", "")).replace("-", "_"))
+            found = find_composite_path(Path(ws_root), pkg, ref)
+            if found is None:
+                cand = Path(ws_root) / ref
+                found = cand if cand.is_file() else None
+            if found is not None and found.is_file():
+                text = found.read_text(encoding="utf-8")
+                doc = (json.loads(text) if found.suffix.lower() == ".json"
+                       else (yaml.safe_load(text) or {}))
+        except Exception:
+            doc = None
+
+    if not isinstance(doc, dict) or not doc:
+        return None
+    try:
+        from vivarium_dashboard.lib.process_docs import (
+            attach_process_docs, summarize_large_values,
+        )
+        doc = summarize_large_values(doc)
+        attach_process_docs(doc)
+    except Exception:
+        pass
+    # A composite file usually nests the wiring under a `state:` key; the
+    # generator path returns the bare state. _render_model_card handles both.
+    return doc.get("state") if isinstance(doc.get("state"), dict) else doc
+
+
 def _render_html(study_spec: dict, viz_entries: list[dict],
                  *, investigation_slug: Optional[str], generated_at: str,
+                 composite_doc: Optional[dict] = None,
                  skeptic: bool = False) -> str:
     rep = study_spec.get("report") or {}
     # Authored ``report:`` fields win; absent ones are DERIVED from real study
@@ -934,6 +1506,20 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
     viz_html = _render_viz_embeds(viz_entries)
     rigor_html = _render_rigor(study_spec, skeptic=skeptic)
     debts_html = _render_epistemic_debts(study_spec)          # W15
+    # Wave 2 — compositional causal discovery + semantic closure.
+    commitment_html = _render_composition_commitment(study_spec)   # C-COMMIT
+    invariants_html = _render_invariant_checks(study_spec)         # C-INVAR
+    causal_html = _render_causal_necessity(study_spec)             # C-CF
+    model_card_html = _render_model_card(                          # C-MODELCARD
+        composite_doc,
+        model_representation=study_spec.get("model_representation"),
+        readouts=study_spec.get("readouts"),
+        behavior_tests=study_spec.get("behavior_tests"),
+        variants=study_spec.get("variants"),
+        interventions=study_spec.get("interventions"),
+    )
+    representation_html = _render_representation(                  # C-MODELCARD
+        study_spec.get("model_representation"))
     audit_html = _render_audit_trail(study_spec) if skeptic else ""   # W24
     limitations_html = _render_limitations(study_spec) if skeptic else ""  # W24
     # W24 — in skeptic mode controls/falsifiability is its own ordered section
@@ -1022,15 +1608,20 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
         # debts → THEN the usual verdicts / synthesis / biology / viz.
         seq = [
             ("overview", "Overview", overview_section, bool(head_blocks or metrics_html)),
+            ("commitment", "Commitment", commitment_html, bool(commitment_html)),
+            ("invariants", "Invariants", invariants_html, bool(invariants_html)),
             ("audit-trail", "Audit trail", audit_html, bool(audit_html)),
             ("rigor", "Rigor", rigor_html, bool(rigor_html)),
             ("rigor-detail", "Controls", controls_section_html, bool(controls_section_html)),
+            ("causal-necessity", "Causal necessity", causal_html, bool(causal_html)),
             ("alternatives", "Alternatives", alternatives_html, bool(alternatives_html)),
             ("limitations", "Limitations", limitations_html, bool(limitations_html)),
             ("epistemic-debts", "Open debts", debts_html, bool(debts_html)),
             ("verdicts", "Verdicts", verdicts_html, bool(verdicts_html)),
             ("synthesis", "Synthesis", synthesis_html, bool(synthesis_html)),
             ("biology", "Biology", biology_section, bool(biology_html)),
+            ("model-card", "Model card", model_card_html, bool(model_card_html)),
+            ("representation", "Representation", representation_html, bool(representation_html)),
             ("viz", "Visualisations", viz_section, bool(viz_html)),
         ]
         body_main = "\n\n".join(html for (_a, _l, html, _show) in seq if html)
@@ -1039,6 +1630,10 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
         nav_chips = []
         if head_blocks or metrics_html:
             nav_chips.append(_chip("overview", "Overview"))
+        if commitment_html:
+            nav_chips.append(_chip("commitment", "Commitment"))
+        if invariants_html:
+            nav_chips.append(_chip("invariants", "Invariants"))
         if verdicts_html:
             nav_chips.append(_chip("verdicts", "Verdicts"))
         if synthesis_html:
@@ -1047,17 +1642,31 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
             nav_chips.append(_chip("biology", "Biology"))
         if alternatives_html:
             nav_chips.append(_chip("alternatives", "Alternatives"))
+        if causal_html:
+            nav_chips.append(_chip("causal-necessity", "Causal necessity"))
+        if model_card_html:
+            nav_chips.append(_chip("model-card", "Model card"))
+        if representation_html:
+            nav_chips.append(_chip("representation", "Representation"))
         if viz_html:
             nav_chips.append(_chip("viz", "Visualisations"))
         # W15 — the open-debts panel renders right after rigor in normal mode.
+        # Wave 2 — commitment + invariants lead the framing; the causal-necessity
+        # table sits in the evidence area (after rigor); model card + representation
+        # render with the build/model detail near the end.
         body_main = "\n\n".join([
             overview_section,
+            commitment_html,
+            invariants_html,
             verdicts_html,
             synthesis_html,
             biology_section,
             alternatives_html,
             rigor_html,
+            causal_html,
             debts_html,
+            model_card_html,
+            representation_html,
             viz_section,
         ])
     nav_html = (
@@ -1177,10 +1786,15 @@ def render_single_study_report(
     study_spec = _load_study_spec(ws_root, study_slug)
     viz_entries = _collect_viz_html(ws_root, study_slug)
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    # C-MODELCARD — resolve the baseline composite to a light state doc so the
+    # model card renders from the same doc the explorer uses. Best-effort; the
+    # card is omitted when resolution fails (no composite / import-light env).
+    composite_doc = _resolve_composite_doc(ws_root, study_spec)
     html = _render_html(
         study_spec, viz_entries,
         investigation_slug=investigation_slug,
         generated_at=generated_at,
+        composite_doc=composite_doc,
         skeptic=skeptic,
     )
 

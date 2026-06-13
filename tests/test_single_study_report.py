@@ -386,3 +386,147 @@ def test_epistemic_debts_panel_rendered(_ws):
     text = (_ws / "reports" / "single-study-s1.html").read_text()
     assert 'id="epistemic-debts"' in text
     assert "Open epistemic debts" in text
+
+
+# ---------------------------------------------------------------------------
+# Wave 2 — C-COMMIT / C-INVAR / C-CF / C-MODELCARD render sections.
+# Each consumes a field the model WRITES into study.yaml and degrades to no
+# section when the field is absent.
+# ---------------------------------------------------------------------------
+
+from vivarium_dashboard.lib.single_study_report import (  # noqa: E402
+    _render_composition_commitment,
+    _render_invariant_checks,
+    _render_causal_necessity,
+    _render_model_card,
+    _render_representation,
+)
+
+
+def test_composition_commitment_panel_rendered(_ws):
+    _write_study(
+        _ws, "s1", report={"title": "S1"},
+        composition_commitment={
+            "component_added": ["Membrane"],
+            "deficit_addressed": {"note": "no boundary producer",
+                                  "closure_gap_item": ["membrane_lipids"]},
+            "new_behavior": ["grows-boundary"],
+            "invariants_required": [{"study": "study-1-loop", "test": "closes-loop"}],
+            "alternatives_excluded": ["external-maintenance"],
+        },
+    )
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'id="commitment"' in text
+    assert "Theoretical commitment" in text
+    assert "Membrane" in text
+    assert "membrane_lipids" in text
+    assert "study-1-loop" in text
+    assert "external-maintenance" in text
+
+
+def test_composition_commitment_omitted_when_absent(_ws):
+    _write_study(_ws, "s1", report={"title": "S1"})
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'id="commitment"' not in text
+
+
+def test_invariant_checks_section_rendered_and_ordered(_ws):
+    _write_study(
+        _ws, "s1", report={"title": "S1"},
+        invariant_check=[
+            {"study": "study-1", "test": "closes-loop", "prior": 0.0,
+             "now": 0.0, "status": "preserved"},
+            {"study": "study-1", "test": "precarious", "prior": 1.0,
+             "now": 0.2, "status": "invalidated"},
+        ],
+    )
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'id="invariants"' in text
+    assert "Invariant checks" in text
+    # invalidated must sort before preserved (gap statuses first). Compare the
+    # status-chip positions (the intro prose also contains "preserved").
+    assert text.index(">invalidated</span>") < text.index(">preserved</span>")
+
+
+def test_causal_necessity_table_rendered(_ws):
+    _write_study(
+        _ws, "s1", report={"title": "S1"},
+        ablations=[
+            {"process": "membrane", "target": ["membrane_lipids"], "mode": "knockout",
+             "behavior_test": "grows-boundary", "baseline_result": True,
+             "ablated_result": False, "role": "necessary", "causally_necessary": True},
+            {"process": "supply", "target": ["nutrient"], "mode": "scale",
+             "behavior_test": "grows-boundary", "baseline_result": True,
+             "ablated_result": True, "role": "redundant", "causally_necessary": False},
+        ],
+    )
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'id="causal-necessity"' in text
+    assert "Causal necessity" in text
+    assert "membrane_lipids" in text
+    assert "knockout" in text
+    assert "necessary" in text and "redundant" in text
+
+
+def test_model_card_from_composite_doc():
+    doc = {
+        "nutrient": 0.0,
+        "membrane_lipids": 40.0,
+        "membrane": {
+            "_type": "process", "address": "local:Membrane",
+            "config": {"rate": 1.0},
+            "inputs": {"lipid": ["lipid"], "membrane_lipids": ["membrane_lipids"]},
+            "outputs": {"membrane_lipids": ["membrane_lipids"]},
+            "doc": "Grows the boundary by incorporating lipids.",
+        },
+    }
+    html = _render_model_card(
+        doc,
+        model_representation={"boundary": ["nutrient"]},
+        readouts=[{"name": "membrane-size"}],
+        behavior_tests=[{"measure": {"path": "membrane_lipids"}}],
+        variants=[{"name": "starved"}],
+    )
+    assert 'id="model-card"' in html
+    assert "Membrane" in html and "local:Membrane" in html
+    assert "membrane_lipids" in html
+    assert "membrane-size" in html       # observable
+    assert "starved" in html             # perturbation
+    assert "boundary" in html            # store boundary badge
+
+
+def test_model_card_accepts_state_wrapper_and_omits_when_empty():
+    assert _render_model_card(None) == ""
+    assert _render_model_card({}) == ""
+    wrapped = {"state": {"p": {"_type": "process", "address": "local:P",
+                               "inputs": {}, "outputs": {}}}}
+    assert 'id="model-card"' in _render_model_card(wrapped)
+
+
+def test_representation_table_rendered():
+    mr = {
+        "provides": ["lipid"],
+        "requires": ["nutrient"],
+        "boundary": ["nutrient"],
+        "derived": ["volume"],
+        "self_produced": ["membrane_lipids"],
+        "gap": [],
+        "interface_closed": True,
+        "semantic": {"semantically_closed": False},
+    }
+    html = _render_representation(mr)
+    assert 'id="representation"' in html
+    assert "Representation claims" in html
+    assert "self-produced" in html
+    assert "boundary-crossing" in html
+    assert "derived" in html
+    assert "CLOSED" in html and "OPEN" in html
+
+
+def test_representation_omitted_when_absent():
+    assert _render_representation(None) == ""
+    assert _render_representation({}) == ""

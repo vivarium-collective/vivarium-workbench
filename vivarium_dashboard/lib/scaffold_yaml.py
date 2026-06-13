@@ -138,6 +138,20 @@ phase: Design
 #       outputs_used: []              # upstream outputs consumed (→ model-input)
 #   enables: []                       # downstream studies unblocked by this one
 #   proceed_condition: ""             # when may the next study start
+#
+# composition_commitment:             # the THEORETICAL commitment this study makes
+#   # Optional but high-value: states what this study ADDS to the prerequisite
+#   # study and what that buys you, so a reviewer reads the compositional claim
+#   # without diffing composites. Renders as a "Theoretical commitment" panel.
+#   component_added: []               # process(es) new vs the prerequisite study
+#   deficit_addressed:                # the gap the new component closes
+#     note: ""                        # free-text: what was missing before
+#     closure_gap_item: []            # gap store(s) this closes (auto-fillable from the meter)
+#   new_behavior: []                  # this study's primary behavior_tests[].name (link to test)
+#   invariants_required:              # earlier guarantees that must still hold (feeds invariant_check)
+#     - study: upstream-study-slug
+#       test: upstream-behavior-test-name
+#   alternatives_excluded: []         # ref to controls[].name / alternative_hypotheses this rules out
 
 {baseline_block}variants: []
 # observables / readouts → declare in `readouts:` below (v4 prefers `readouts`)
@@ -207,6 +221,14 @@ phase: Design
 #   new_parameters: []
 #   new_listeners: []
 #   modified_processes: []
+#   representational_claims:          # authored rationale the meter can't compute:
+#     # WHY each store is modelled the way it is + which alternatives were
+#     # excluded. Pairs with the computed `model_representation` (inside /
+#     # boundary-crossing / derived / self-produced labels + closure status).
+#     - store: store_name
+#       role: self-produced           # inside | boundary-crossing | derived | self-produced
+#       rationale: ""                 # why this representation (not an alternative)
+#       alternatives_excluded: []     # representations considered and rejected
 #
 # implementation_requirements:      # TODO list
 #   - id: req-1
