@@ -272,3 +272,117 @@ def test_section_nav_omits_chips_for_empty_sections(_ws):
     assert 'href="#overview"' in text       # has head_blocks
     assert 'href="#biology"' not in text    # no biological_summary
     assert 'href="#viz"' not in text        # no viz embeds
+
+
+# ---------------------------------------------------------------------------
+# W24 — skeptical-reader report mode
+# ---------------------------------------------------------------------------
+
+# These exercise the new render paths that lean on pbg_superpowers.rigor /
+# needs_attention. The renderer degrades gracefully when those aren't
+# importable, so skip the strict-content assertions in that case.
+_HAS_RIGOR = False
+try:  # pragma: no cover - environment dependent
+    from pbg_superpowers.rigor import study_rigor, finding_evidential_weight  # noqa: F401
+    from pbg_superpowers.needs_attention import open_epistemic_debts  # noqa: F401
+    _HAS_RIGOR = True
+except Exception:  # pragma: no cover
+    _HAS_RIGOR = False
+
+_needs_rigor = pytest.mark.skipif(
+    not _HAS_RIGOR, reason="pbg-superpowers rigor/needs_attention not importable")
+
+
+def _rich_skeptic_study(ws: Path, slug: str = "s1") -> Path:
+    """A study with the fields the skeptic mode / weight / debts read."""
+    return _write_study(
+        ws, slug,
+        report={"title": "Rich", "conclusion": "done"},
+        objective="Test the thing.",
+        falsifiability="A growth rate outside [0.1, 0.5] would overturn this.",
+        findings=[{
+            "id": "F-01", "tier": "interpretation", "mechanism_origin": "emergent",
+            "statement": "The model reproduces the observed division time.",
+            "evidence": {"from_test": "division-time", "observed": "42 min"},
+            "next_action": "Sweep the elongation rate to confirm.",
+            "calibration_anchor": {"divergence_factor": 1.2},
+        }],
+        controls=[{
+            "name": "shuffle-control", "kind": "negative", "result": "PASS",
+            "observed": "no division", "expected": "no division",
+        }],
+        alternative_hypotheses=[
+            {"claim": "It is an artifact.", "status": "excluded",
+             "discriminated_by": "division-time"},
+            {"claim": "Something else entirely.", "status": "not-excluded"},
+        ],
+        robustness={"n_replicates": 3, "seeds": [0, 1, 2]},
+        limitations=["Single medium only."],
+        behavior_tests=[{"name": "division-time", "pass_if": {"op": "in_range",
+                                                              "low": 0.1, "high": 0.5}}],
+    )
+
+
+def test_skeptic_mode_writes_distinct_file_and_reorders(_ws):
+    _rich_skeptic_study(_ws)
+    resp, code = build_single_study_report_for_test(
+        _ws, {"study": "s1", "skeptic": True})
+    assert code == 200
+    assert resp["skeptic"] is True
+    assert resp["html_path"] == "reports/single-study-s1-skeptic.html"
+    out = _ws / "reports" / "single-study-s1-skeptic.html"
+    assert out.is_file()
+    # The default (non-skeptic) file is NOT clobbered.
+    assert not (_ws / "reports" / "single-study-s1.html").is_file()
+    text = out.read_text()
+    # Audit trail leads the body, before the conclusion verdicts.
+    assert 'id="audit-trail"' in text
+    if 'id="verdicts"' in text:
+        assert text.index('id="audit-trail"') < text.index('id="verdicts"')
+
+
+def test_skeptic_audit_trail_threshold_provenance_none(_ws):
+    # No behavior-test band carries cites / calibration_anchor → "none".
+    _write_study(_ws, "s1", report={"title": "T"},
+                 findings=[{"id": "F-01", "statement": "claim"}],
+                 behavior_tests=[{"name": "x", "pass_if": {"op": "at_least", "low": 1}}])
+    render_single_study_report(_ws, "s1", skeptic=True)
+    text = (_ws / "reports" / "single-study-s1-skeptic.html").read_text()
+    assert "Threshold provenance" in text
+    assert "none" in text.lower()
+
+
+def test_non_skeptic_mode_has_no_audit_trail(_ws):
+    _rich_skeptic_study(_ws)
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'id="audit-trail"' not in text
+
+
+# ---------------------------------------------------------------------------
+# W8 — per-finding evidential-weight chip
+# ---------------------------------------------------------------------------
+
+@_needs_rigor
+def test_finding_weight_chip_rendered(_ws):
+    _rich_skeptic_study(_ws)
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'class="finding-weight"' in text
+    # A well-supported finding should not be labelled weak.
+    assert ("strong" in text) or ("moderate" in text)
+
+
+# ---------------------------------------------------------------------------
+# W15 — open epistemic debts panel
+# ---------------------------------------------------------------------------
+
+@_needs_rigor
+def test_epistemic_debts_panel_rendered(_ws):
+    # A bare study with no controls/alternatives/replication accrues debts.
+    _write_study(_ws, "s1", report={"title": "Bare"},
+                 findings=[{"id": "F-01", "statement": "An untested claim."}])
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'id="epistemic-debts"' in text
+    assert "Open epistemic debts" in text

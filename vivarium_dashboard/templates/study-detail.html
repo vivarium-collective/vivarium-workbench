@@ -301,7 +301,47 @@
                     placeholder="Multi-sentence: what the runs + tests demonstrated.">{{ _report.conclusion or '' }}</textarea>
         </label>
       </div>
+      {# W24 — skeptical-reader report view. Opens the single-study report
+         reordered for a skeptic (audit trail → rigor → controls →
+         alternatives → limitations → open debts → verdicts/biology/viz). #}
+      <div style="margin-top:10px">
+        <button type="button" class="btn-view-skeptic action-btn"
+                style="font-size:0.85em" data-study="{{ name }}">🕵 View as skeptic</button>
+        <span class="muted small" style="margin-left:8px">opens the report reordered for a skeptical reviewer</span>
+      </div>
     </div>
+
+    {# W15 — Open epistemic debts. Server-computed by the deterministic
+       pbg_superpowers.needs_attention.open_epistemic_debts collector (derived
+       from rigor + freshness signals so it can't drift). Rendered read-only;
+       absent when the collector is unavailable or there are no debts. #}
+    {% if epistemic_debts %}
+    <div class="overview-section" id="epistemic-debts-panel">
+      <h2 class="overview-label">🧾 Open epistemic debts
+        <span class="narrative-card-hint">(negative knowledge — what this study has not yet established)</span>
+      </h2>
+      <p class="muted" style="margin:0 0 8px 0;font-size:0.85em">
+        Untested claims, absent controls, uncalibrated metrics, un-excluded
+        alternatives, unexplored regions, and stale visuals — harvested from the
+        rigor scorecard + freshness signals.
+      </p>
+      <div style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden">
+        {% for d in epistemic_debts %}
+        {% set _sev = (d.severity or 'low')|string %}
+        {% set _bg = '#fee2e2' if _sev == 'high' else ('#fef9c3' if _sev == 'medium' else '#f1f5f9') %}
+        {% set _fg = '#991b1b' if _sev == 'high' else ('#854d0e' if _sev == 'medium' else '#475569') %}
+        <div style="display:flex;gap:10px;align-items:flex-start;padding:8px 12px;border-top:1px solid #f1f5f9">
+          <span style="padding:1px 8px;border-radius:9999px;background:{{ _bg }};color:{{ _fg }};font-weight:600;font-size:0.72em;white-space:nowrap">{{ _sev }}</span>
+          <div>
+            <strong style="color:#1e293b">{{ d.kind }}</strong>
+            {% if d.ref %}<code style="font-size:0.82em">{{ d.ref }}</code>{% endif %}
+            <div style="color:#475569;font-size:0.9em;margin-top:1px">{{ d.note }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
 
     <div class="biology-glance">
       {# Always-render biological_summary: empty-state textarea encourages

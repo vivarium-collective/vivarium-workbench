@@ -1637,6 +1637,34 @@ def _reconcile_simset_with_runs(sim_set, runs, ws_root=None):
     return sim_set
 
 
+def _enrich_findings_with_weight(study_spec: dict) -> list:
+    """W8 — return the study's findings with a server-computed evidential
+    weight attached as ``_evidential_weight`` (the report-data path so the SPA
+    just renders the chip; no JS recompute, no drift).
+
+    Each finding gets ``_evidential_weight = {"weight", "dims", "n_supporting"}``
+    via the deterministic ``pbg_superpowers.rigor.finding_evidential_weight``.
+    Defensive: if the function isn't importable (older pbg-superpowers) the
+    findings pass through unchanged, so the chip simply doesn't render.
+    """
+    findings = study_spec.get("findings") or []
+    try:
+        from pbg_superpowers.rigor import finding_evidential_weight
+    except Exception:
+        return findings
+    out = []
+    for f in findings:
+        if isinstance(f, dict):
+            try:
+                w = finding_evidential_weight(study_spec, f)
+            except Exception:
+                w = None
+            if w:
+                f = {**f, "_evidential_weight": w}
+        out.append(f)
+    return out
+
+
 def _study_detail_spec(name: str):
     """Load a study's spec for the GET /studies/<name> detail page.
 
@@ -5996,9 +6024,19 @@ def _render_study_detail_html(name: str, spec: dict) -> str:
         _ptools_enabled = bool((_ws.get("ui") or {}).get("ptools_server_url"))
     except Exception:
         _ptools_enabled = False
+    # W15 — open epistemic debts, computed server-side via the deterministic
+    # pbg_superpowers collector (derives from rigor + freshness so it can't
+    # drift). Defensive: degrade to no panel if the collector isn't importable.
+    epistemic_debts = []
+    try:
+        from pbg_superpowers.needs_attention import open_epistemic_debts
+        epistemic_debts = open_epistemic_debts(spec) or []
+    except Exception:
+        epistemic_debts = []
     return tpl.render(study=spec, name=name,
                       display_name=spec.get("title") or _hn["title"],
-                      name_chip=_hn["chip"], ptools_enabled=_ptools_enabled)
+                      name_chip=_hn["chip"], ptools_enabled=_ptools_enabled,
+                      epistemic_debts=epistemic_debts)
 
 
 def _humanize_study_name(slug: str) -> dict:
@@ -10029,6 +10067,16 @@ if __name__ == "__main__":
             from vivarium_dashboard.lib.single_study_report import (
                 build_single_study_report_for_test,
             )
+            # W24 — honor ?skeptic=1 in the URL as an alternative to the body
+            # flag, so a "View as skeptic" link can request the reordered view.
+            body = dict(body or {})
+            try:
+                from urllib.parse import urlparse, parse_qs
+                q = parse_qs(urlparse(self.path).query)
+                if "skeptic" in q and "skeptic" not in body:
+                    body["skeptic"] = q["skeptic"][0] not in ("0", "false", "")
+            except Exception:
+                pass
             resp, code = build_single_study_report_for_test(WORKSPACE, body)
             return self._json(resp, code)
         except Exception as e:  # noqa: BLE001
@@ -13506,7 +13554,7 @@ if __name__ == "__main__":
             disc_impl = study_spec.get("discovery_implications") or {}
             disc_followups = (disc_impl.get("followup_study_proposals")
                               if isinstance(disc_impl, dict) else None) or []
-            findings = study_spec.get("findings") or []
+            findings = _enrich_findings_with_weight(study_spec)
             n_runs_for_study = _count_runs_for_study(study_spec["name"], study_spec)
             raw_status = study_spec.get("status", "planned")
             studies_out.append({

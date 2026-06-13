@@ -606,3 +606,35 @@ def test_computed_outcomes_survive_enrich_runs(_ws_with_computed_outcomes):
     co = run_with_co["computed_outcomes"]
     assert "COPY_NUMBER_STABLE" in co
     assert "divergent" in (co.get("COPY_NUMBER_STABLE") or {}).get("reconcile", "")
+
+
+# ---------------------------------------------------------------------------
+# Wave 1 — W24 skeptic toggle + W15 epistemic-debts panel on the detail page
+# ---------------------------------------------------------------------------
+
+_HAS_DEBTS = False
+try:  # pragma: no cover - environment dependent
+    from pbg_superpowers.needs_attention import open_epistemic_debts  # noqa: F401
+    _HAS_DEBTS = True
+except Exception:  # pragma: no cover
+    _HAS_DEBTS = False
+
+
+def test_study_detail_has_skeptic_toggle(_ws):
+    """W24 — the 'View as skeptic' toggle renders on the study-detail page."""
+    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    spec = _study_detail_spec("study-monod_kinetics-096184")
+    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    assert "btn-view-skeptic" in html
+    assert "View as skeptic" in html
+
+
+@pytest.mark.skipif(not _HAS_DEBTS, reason="open_epistemic_debts not importable")
+def test_study_detail_renders_epistemic_debts_panel(_ws):
+    """W15 — a study with no controls/alternatives/replication accrues debts,
+    so the server-computed panel renders on the detail page."""
+    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    spec = _study_detail_spec("study-monod_kinetics-096184")
+    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    assert "Open epistemic debts" in html
+    assert 'id="epistemic-debts-panel"' in html

@@ -218,10 +218,11 @@ def _render_biological_summary(spec: dict) -> str:
                 stmt = f.get("statement") or f.get("summary")
                 if stmt:
                     fid = f.get("id", "")
+                    chip = _finding_weight_chip(_finding_weight(spec, f))
                     derived.append(
                         f'<div class="narrative-row" style="margin:10px 0">'
                         f'<strong>Finding{(" " + _h(fid)) if fid else ""}:</strong> '
-                        f'{_multiline(stmt)}</div>'
+                        f'{_multiline(stmt)}{chip}</div>'
                     )
         if derived:
             bits.append(
@@ -464,7 +465,14 @@ def _render_conclusion_synthesis(spec: dict) -> str:
     Limitations←limitations, Next steps←discovery_implications.followup_study_proposals.
     """
     findings = [f for f in (spec.get("findings") or []) if isinstance(f, dict)]
-    claims = [f.get("statement") or f.get("summary") for f in findings]
+    # Claims — one per finding, each tagged with its W8 evidential-weight chip.
+    claim_lis = []
+    for f in findings:
+        text = f.get("statement") or f.get("summary")
+        if not text:
+            continue
+        chip = _finding_weight_chip(_finding_weight(spec, f))
+        claim_lis.append(f'<li>{_multiline(str(text))}{chip}</li>')
     evidence = []
     for f in findings:
         ev = f.get("evidence")
@@ -488,12 +496,17 @@ def _render_conclusion_synthesis(spec: dict) -> str:
             next_steps.append(str(p))
 
     sections = [
-        ("Claims", claims),
         ("Evidence", evidence),
         ("Limitations", limitations),
         ("Next steps", next_steps),
     ]
     blocks = []
+    # Claims first — rendered separately because each <li> carries a weight chip.
+    if claim_lis:
+        blocks.append(
+            '<div style="margin:10px 0"><strong style="color:#1e293b">Claims</strong>'
+            f'<ul style="margin:4px 0 0;padding-left:20px;color:#334155">{"".join(claim_lis)}</ul></div>'
+        )
     for label, items in sections:
         items = [i for i in (items or []) if i]
         if not items:
@@ -598,13 +611,18 @@ def _render_controls_and_falsifiability(spec: dict) -> str:
     return "".join(bits)
 
 
-def _render_rigor(study_spec: dict) -> str:
+def _render_rigor(study_spec: dict, *, skeptic: bool = False) -> str:
     """Evidence & rigor scorecard section — deterministic skeptic-feedback
     (replication, negative controls, alternative hypotheses, claim discipline,
     falsifiability, engineered-vs-emergent) computed by pbg_superpowers.rigor.
 
     Returns '' if pbg-superpowers isn't importable, so the report degrades
     gracefully.
+
+    In ``skeptic`` mode (W24) the dimension rows are sorted by severity
+    (gap → warn → ok) so unmet rigor demands surface first, and the embedded
+    controls/falsifiability detail is omitted because the skeptic layout
+    renders it as its own ordered section immediately below.
     """
     try:
         from pbg_superpowers.rigor import study_rigor
@@ -614,6 +632,9 @@ def _render_rigor(study_spec: dict) -> str:
     dims = sc.get("dimensions") or []
     if not dims:
         return ""
+    if skeptic:
+        _sev_rank = {"gap": 0, "warn": 1, "ok": 2}
+        dims = sorted(dims, key=lambda d: _sev_rank.get(d.get("severity", "gap"), 0))
     color = {"ok": "#16a34a", "warn": "#d97706", "gap": "#dc2626"}
     glyph = {"ok": "✓", "warn": "⚠", "gap": "✗"}
     # Item 13 — link the controls / falsifiability dimension dots to the
@@ -642,7 +663,9 @@ def _render_rigor(study_spec: dict) -> str:
             f'<div style="color:#475569;font-size:0.9em;margin-top:1px">{_h(d.get("detail", ""))}</div>'
             '</div></div>'
         )
-    controls_html = _render_controls_and_falsifiability(study_spec)
+    # In skeptic mode the controls/falsifiability detail is rendered as its
+    # own ordered section below, so don't embed it here (avoid duplication).
+    controls_html = "" if skeptic else _render_controls_and_falsifiability(study_spec)
     return (
         '<section id="rigor"><h2>Evidence &amp; rigor</h2>'
         '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Deterministic feedback '
@@ -656,8 +679,238 @@ def _render_rigor(study_spec: dict) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# W8 — per-finding evidential-weight chip
+# ---------------------------------------------------------------------------
+
+_WEIGHT_CHIP_COLORS = {
+    "strong":   ("#dcfce7", "#166534"),
+    "moderate": ("#fef9c3", "#854d0e"),
+    "weak":     ("#fee2e2", "#991b1b"),
+}
+
+
+def _finding_weight(spec: dict, finding: dict) -> dict | None:
+    """W8 — per-finding evidential weight via pbg_superpowers.rigor.
+
+    Defensive: returns None when pbg-superpowers (or the new function) isn't
+    importable, so the chip simply doesn't render and the report degrades.
+    """
+    try:
+        from pbg_superpowers.rigor import finding_evidential_weight
+    except Exception:
+        return None
+    try:
+        return finding_evidential_weight(spec, finding)
+    except Exception:
+        return None
+
+
+def _finding_weight_chip(weight_info: dict | None) -> str:
+    """Render the strong/moderate/weak pill for a finding's evidential weight."""
+    if not weight_info or not weight_info.get("weight"):
+        return ""
+    w = str(weight_info["weight"])
+    bg, fg = _WEIGHT_CHIP_COLORS.get(w, ("#f1f5f9", "#475569"))
+    n = weight_info.get("n_supporting")
+    label = _h(w) + (f" · {n}/5" if isinstance(n, int) else "")
+    dims = weight_info.get("dims") or {}
+    title = ""
+    if dims:
+        supported = [k for k, v in dims.items() if v]
+        title = ' title="evidence dims: ' + _h(", ".join(supported) or "none") + '"'
+    return (
+        f'<span class="finding-weight"{title} style="display:inline-block;'
+        f'padding:1px 8px;border-radius:9999px;background:{bg};color:{fg};'
+        f'font-weight:600;font-size:0.72em;margin-left:6px;vertical-align:middle">'
+        f'{label}</span>'
+    )
+
+
+# ---------------------------------------------------------------------------
+# W15 — open epistemic debts panel
+# ---------------------------------------------------------------------------
+
+_DEBT_SEV_COLORS = {
+    "high":   ("#fee2e2", "#991b1b"),
+    "medium": ("#fef9c3", "#854d0e"),
+    "low":    ("#f1f5f9", "#475569"),
+}
+
+
+def _render_epistemic_debts(spec: dict) -> str:
+    """W15 — "Open epistemic debts" panel, driven by the deterministic
+    ``pbg_superpowers.needs_attention.open_epistemic_debts`` collector (which
+    derives from rigor + viz-freshness so it can't drift). Returns '' when the
+    collector isn't importable or there are no debts.
+    """
+    try:
+        from pbg_superpowers.needs_attention import open_epistemic_debts
+    except Exception:
+        return ""
+    try:
+        debts = open_epistemic_debts(spec) or []
+    except Exception:
+        return ""
+    if not debts:
+        return ""
+    rows = []
+    for d in debts:
+        if not isinstance(d, dict):
+            continue
+        sev = str(d.get("severity") or "low").lower()
+        bg, fg = _DEBT_SEV_COLORS.get(sev, ("#f1f5f9", "#475569"))
+        kind = _h(str(d.get("kind") or ""))
+        ref = _h(str(d.get("ref") or ""))
+        note = _multiline(str(d.get("note") or ""))
+        rows.append(
+            '<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;'
+            'border-top:1px solid #f1f5f9">'
+            f'<span style="padding:1px 8px;border-radius:9999px;background:{bg};color:{fg};'
+            f'font-weight:600;font-size:0.72em;white-space:nowrap">{_h(sev)}</span>'
+            f'<div><strong style="color:#1e293b">{kind}</strong>'
+            + (f' <code style="font-size:0.82em">{ref}</code>' if ref else "")
+            + f'<div style="color:#475569;font-size:0.9em;margin-top:1px">{note}</div>'
+            '</div></div>'
+        )
+    if not rows:
+        return ""
+    return (
+        '<section id="epistemic-debts"><h2>Open epistemic debts</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Negative knowledge — '
+        'what this study has <em>not</em> yet established (untested claims, absent '
+        'controls, uncalibrated metrics, un-excluded alternatives, unexplored regions, '
+        'stale visuals). Derived from the rigor scorecard + freshness signals.</p>'
+        + "".join(rows) +
+        '</section>'
+    )
+
+
+# ---------------------------------------------------------------------------
+# W24 — skeptical-reader audit trail + limitations strip
+# ---------------------------------------------------------------------------
+
+def _render_audit_trail(spec: dict) -> str:
+    """W24 — one compressed audit strip built from existing canonical fields:
+    claim · evidence · assumptions (falsifiability) · controls summary ·
+    limitations/remaining-uncertainties · next discriminating test · threshold
+    provenance. Shows "threshold provenance: none" (rather than omitting) when
+    no behavior-test band carries ``cites``/``calibration_anchor`` — the
+    absence is itself the signal a skeptic wants to see.
+    """
+    findings = [f for f in (spec.get("findings") or []) if isinstance(f, dict)]
+    primary = findings[0] if findings else {}
+    claim = primary.get("statement") or primary.get("summary") or spec.get("claim") or "—"
+
+    ev = primary.get("evidence")
+    if isinstance(ev, dict):
+        ev = (ev.get("observed") or ev.get("summary") or ev.get("detail")
+              or ev.get("from_test"))
+    evidence = ev or "—"
+
+    assumptions = spec.get("falsifiability") or "—"
+
+    controls = [c for c in (spec.get("controls") or []) if isinstance(c, dict)]
+    if controls:
+        n_disc = sum(1 for c in controls
+                     if str(c.get("result", "")).upper() == "PASS"
+                     and str(c.get("observed") or "").strip())
+        controls_summary = f"{len(controls)} declared · {n_disc} discriminating"
+    else:
+        controls_summary = "none"
+
+    lims = spec.get("limitations") or []
+    if isinstance(lims, str):
+        lims = [lims]
+    di = spec.get("discovery_implications") or {}
+    rem = di.get("remaining_uncertainties") or []
+    if isinstance(rem, str):
+        rem = [rem]
+    limits_text = "; ".join(str(x) for x in (list(lims) + list(rem)) if x) or "—"
+
+    next_test = None
+    for f in findings:
+        if f.get("next_action"):
+            next_test = f["next_action"]
+            break
+    if not next_test:
+        for p in (di.get("followup_study_proposals") or []):
+            if isinstance(p, dict) and (p.get("title") or p.get("motivation")):
+                next_test = p.get("title") or p.get("motivation")
+                break
+    next_test = next_test or "—"
+
+    bands = spec.get("behavior_tests") or spec.get("expected_behavior") or []
+    has_prov = any(
+        isinstance(b, dict) and (b.get("cites") or b.get("calibration_anchor"))
+        for b in bands
+    )
+    threshold = "present" if has_prov else "none"
+
+    pairs = [
+        ("Claim", claim),
+        ("Evidence", evidence),
+        ("Assumptions (falsifiability)", assumptions),
+        ("Controls", controls_summary),
+        ("Limitations / remaining uncertainties", limits_text),
+        ("Next discriminating test", next_test),
+        ("Threshold provenance", threshold),
+    ]
+    rows = "".join(
+        '<div style="display:flex;gap:10px;padding:6px 0;border-top:1px solid #e2e8f0">'
+        f'<span style="flex:0 0 16em;font-weight:600;color:#475569">{_h(label)}</span>'
+        f'<span style="color:#1e293b">{_multiline(str(val))}</span>'
+        '</div>'
+        for label, val in pairs
+    )
+    return (
+        '<section id="audit-trail"><h2>Audit trail</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">The skeptic\'s '
+        'one-glance ledger: the claim and exactly what backs it, what it assumes, '
+        'what could overturn it, and what it has not yet settled.</p>'
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;'
+        'padding:4px 14px 10px">' + rows + '</div>'
+        '</section>'
+    )
+
+
+def _render_limitations(spec: dict) -> str:
+    """W24 — dedicated limitations / remaining-uncertainties section (skeptic
+    layout renders this as its own ordered step). Returns '' when empty.
+    """
+    lims = spec.get("limitations") or []
+    if isinstance(lims, str):
+        lims = [lims]
+    di = spec.get("discovery_implications") or {}
+    rem = di.get("remaining_uncertainties") or []
+    if isinstance(rem, str):
+        rem = [rem]
+    blocks = []
+    if [x for x in lims if x]:
+        lis = "".join(f'<li>{_multiline(str(x))}</li>' for x in lims if x)
+        blocks.append(
+            '<div style="margin:10px 0"><strong style="color:#1e293b">Limitations</strong>'
+            f'<ul style="margin:4px 0 0;padding-left:20px;color:#334155">{lis}</ul></div>'
+        )
+    if [x for x in rem if x]:
+        lis = "".join(f'<li>{_multiline(str(x))}</li>' for x in rem if x)
+        blocks.append(
+            '<div style="margin:10px 0"><strong style="color:#1e293b">Remaining '
+            'uncertainties</strong>'
+            f'<ul style="margin:4px 0 0;padding-left:20px;color:#334155">{lis}</ul></div>'
+        )
+    if not blocks:
+        return ""
+    return (
+        '<section id="limitations"><h2>Limitations &amp; remaining uncertainties</h2>'
+        + "".join(blocks) +
+        '</section>'
+    )
+
+
 def _render_html(study_spec: dict, viz_entries: list[dict],
-                 *, investigation_slug: Optional[str], generated_at: str) -> str:
+                 *, investigation_slug: Optional[str], generated_at: str,
+                 skeptic: bool = False) -> str:
     rep = study_spec.get("report") or {}
     # Authored ``report:`` fields win; absent ones are DERIVED from real study
     # content so minimal studies still render the standard structure.
@@ -679,7 +932,20 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
     biology_html = _render_biological_summary(study_spec)
     alternatives_html = _render_alternatives(study_spec)
     viz_html = _render_viz_embeds(viz_entries)
-    rigor_html = _render_rigor(study_spec)
+    rigor_html = _render_rigor(study_spec, skeptic=skeptic)
+    debts_html = _render_epistemic_debts(study_spec)          # W15
+    audit_html = _render_audit_trail(study_spec) if skeptic else ""   # W24
+    limitations_html = _render_limitations(study_spec) if skeptic else ""  # W24
+    # W24 — in skeptic mode controls/falsifiability is its own ordered section
+    # (the rigor scorecard omits its embedded copy in skeptic mode).
+    controls_section_html = ""
+    if skeptic:
+        _cf = _render_controls_and_falsifiability(study_spec)
+        if _cf:
+            controls_section_html = (
+                '<section id="rigor-detail"><h2>Controls &amp; falsifiability</h2>'
+                + _cf + '</section>'
+            )
 
     inv_chip = ""
     if investigation_slug:
@@ -735,19 +1001,65 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
     # are dead-ends that confuse navigation. Mirrors the same pattern
     # the investigation report's sticky panel uses (`sp-section-nav`)
     # so single-study + investigation reports feel consistent.
-    nav_chips = []
-    if head_blocks or metrics_html:
-        nav_chips.append('<a href="#overview">Overview</a>')
-    if verdicts_html:
-        nav_chips.append('<a href="#verdicts">Verdicts</a>')
-    if synthesis_html:
-        nav_chips.append('<a href="#synthesis">Synthesis</a>')
-    if biology_html:
-        nav_chips.append('<a href="#biology">Biology</a>')
-    if alternatives_html:
-        nav_chips.append('<a href="#alternatives">Alternatives</a>')
-    if viz_html:
-        nav_chips.append('<a href="#viz">Visualisations</a>')
+    def _chip(anchor: str, label: str) -> str:
+        return f'<a href="#{anchor}">{_h(label)}</a>'
+
+    # Sections that were historically always emitted (even when empty) so the
+    # DOM is stable; their nav chips are still gated on real content.
+    overview_section = (
+        '<section class="overview" id="overview">\n'
+        f'  {"".join(head_blocks)}\n'
+        f'  {metrics_html}\n'
+        '</section>'
+    )
+    biology_section = f'<section id="biology">\n{biology_html}\n</section>'
+    viz_section = f'<section id="viz">\n{viz_html}\n</section>'
+
+    if skeptic:
+        # W24 skeptic order: audit trail → rigor (gap→warn→ok) → controls &
+        # falsifiability → alternatives (not-excluded first, from the shared
+        # renderer) → limitations/remaining-uncertainties → open epistemic
+        # debts → THEN the usual verdicts / synthesis / biology / viz.
+        seq = [
+            ("overview", "Overview", overview_section, bool(head_blocks or metrics_html)),
+            ("audit-trail", "Audit trail", audit_html, bool(audit_html)),
+            ("rigor", "Rigor", rigor_html, bool(rigor_html)),
+            ("rigor-detail", "Controls", controls_section_html, bool(controls_section_html)),
+            ("alternatives", "Alternatives", alternatives_html, bool(alternatives_html)),
+            ("limitations", "Limitations", limitations_html, bool(limitations_html)),
+            ("epistemic-debts", "Open debts", debts_html, bool(debts_html)),
+            ("verdicts", "Verdicts", verdicts_html, bool(verdicts_html)),
+            ("synthesis", "Synthesis", synthesis_html, bool(synthesis_html)),
+            ("biology", "Biology", biology_section, bool(biology_html)),
+            ("viz", "Visualisations", viz_section, bool(viz_html)),
+        ]
+        body_main = "\n\n".join(html for (_a, _l, html, _show) in seq if html)
+        nav_chips = [_chip(a, l) for (a, l, _html, show) in seq if show]
+    else:
+        nav_chips = []
+        if head_blocks or metrics_html:
+            nav_chips.append(_chip("overview", "Overview"))
+        if verdicts_html:
+            nav_chips.append(_chip("verdicts", "Verdicts"))
+        if synthesis_html:
+            nav_chips.append(_chip("synthesis", "Synthesis"))
+        if biology_html:
+            nav_chips.append(_chip("biology", "Biology"))
+        if alternatives_html:
+            nav_chips.append(_chip("alternatives", "Alternatives"))
+        if viz_html:
+            nav_chips.append(_chip("viz", "Visualisations"))
+        # W15 — the open-debts panel renders right after rigor in normal mode.
+        body_main = "\n\n".join([
+            overview_section,
+            verdicts_html,
+            synthesis_html,
+            biology_section,
+            alternatives_html,
+            rigor_html,
+            debts_html,
+            viz_section,
+        ])
     nav_html = (
         '<nav class="ssr-section-nav">' + "".join(nav_chips) + '</nav>'
     ) if nav_chips else ""
@@ -826,26 +1138,7 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
   {quality_html}
 </header>
 
-<section class="overview" id="overview">
-  {"".join(head_blocks)}
-  {metrics_html}
-</section>
-
-{verdicts_html}
-
-{synthesis_html}
-
-<section id="biology">
-{biology_html}
-</section>
-
-{alternatives_html}
-
-{rigor_html}
-
-<section id="viz">
-{viz_html}
-</section>
+{body_main}
 
 <div class="footer">
   Generated {_h(generated_at)} by vivarium-dashboard single-study report.
@@ -867,6 +1160,7 @@ def render_single_study_report(
     *,
     investigation_slug: Optional[str] = None,
     out_dir: Optional[Path] = None,
+    skeptic: bool = False,
 ) -> Path:
     """Build a self-contained HTML report for ONE study.
 
@@ -887,11 +1181,15 @@ def render_single_study_report(
         study_spec, viz_entries,
         investigation_slug=investigation_slug,
         generated_at=generated_at,
+        skeptic=skeptic,
     )
 
     out_dir = Path(out_dir) if out_dir is not None else WorkspacePaths.load(ws_root).reports
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"single-study-{study_slug}.html"
+    # The skeptic view is written to a distinct file so it never clobbers the
+    # default report (W24).
+    suffix = "-skeptic" if skeptic else ""
+    out_path = out_dir / f"single-study-{study_slug}{suffix}.html"
     out_path.write_text(html, encoding="utf-8")
     return out_path
 
@@ -911,6 +1209,7 @@ def build_single_study_report_for_test(
     body = body or {}
     study_slug = (body.get("study") or "").strip()
     inv_slug = (body.get("investigation") or "").strip()
+    skeptic = bool(body.get("skeptic"))   # W24 — skeptical-reader view
 
     if not study_slug and not inv_slug:
         return {"error": "either 'study' or 'investigation' is required"}, 400
@@ -925,6 +1224,7 @@ def build_single_study_report_for_test(
         out_path = render_single_study_report(
             ws_root, study_slug,
             investigation_slug=inv_slug or None,
+            skeptic=skeptic,
         )
     except FileNotFoundError as e:
         return {"error": str(e)}, 404
@@ -937,6 +1237,7 @@ def build_single_study_report_for_test(
         "html_path": rel,
         "size_bytes": out_path.stat().st_size,
         "study": study_slug,
+        "skeptic": skeptic,
     }
     if inv_slug:
         resp["investigation"] = inv_slug

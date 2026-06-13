@@ -469,6 +469,26 @@
     window.location = '/api/study-export?study=' + encodeURIComponent(studyName());
   });
 
+  // W24 — "View as skeptic": render the single-study report reordered for a
+  // skeptical reviewer (audit trail → rigor → controls → alternatives →
+  // limitations → open debts → verdicts/biology/viz) and open it. The server
+  // route renders the skeptic view from ?skeptic=1 / body flag; we just open
+  // the resulting HTML file.
+  bindAll('.btn-view-skeptic', function(btn) {
+    btn.disabled = true;
+    api('POST', '/api/study-report-single?skeptic=1',
+        {study: studyName(), skeptic: true})
+      .then(function(res) {
+        btn.disabled = false;
+        if (res.status === 200 && res.body && res.body.html_path) {
+          window.open('/' + res.body.html_path.replace(/^\/+/, ''), '_blank');
+        } else {
+          alert((res.body && res.body.error) || 'Could not render skeptic view.');
+        }
+      })
+      .catch(function() { btn.disabled = false; });
+  });
+
   // btn-delete has class "btn-delete danger" — selector ".btn-delete" still matches.
   // Handler _post_investigation_delete uses body key "name".
   bindAll('.btn-delete', function(btn) {
