@@ -901,10 +901,39 @@
 {% endif %}
 
 
-{# ─── Simulations tab: simulation_set ───────────────────────────────── #}
-{% if study.simulation_set %}
+{# ─── Simulations tab: what we ran (auto-derived) + simulation_set ───── #}
+{% if study.simulation_set or study.baseline or study.runs %}
 <section class="study-tab-panel" data-kind="simulations" id="panel-simulations" hidden>
-  <h3>Simulation set <span class="muted" style="font-size:0.85em;font-weight:normal">({{ study.simulation_set | length }} runs planned)</span></h3>
+
+  {# Auto-derived from baseline (composite + params) + runs + robustness, so the
+     tab is never empty for studies that record runs via the baseline rather than
+     a simulation_set. Every study runs at least one composite. #}
+  {% if study.baseline or study.runs %}
+  <div class="overview-section" id="ran-section">
+    <h3>What we ran <span class="muted" style="font-size:0.85em;font-weight:normal">(composite + parameters)</span></h3>
+    <p class="muted" style="font-size:0.88em">The composite(s) this study simulated, their parameters, replication, and run status. Click a composite to open a static view in bigraph-loom.</p>
+    {% if study.baseline %}
+    <table class="cond-table" style="width:100%;border-collapse:collapse">
+      <thead><tr><th style="text-align:left">Run</th><th style="text-align:left">Composite</th><th style="text-align:left">Parameters</th><th style="text-align:left">Replication</th><th style="text-align:left">Status</th></tr></thead>
+      <tbody>
+      {% for b in study.baseline %}
+        <tr>
+          <td style="vertical-align:top"><strong>{{ b.name or 'baseline' }}</strong></td>
+          <td style="vertical-align:top">{% if b.composite %}<button type="button" class="action-btn" style="font-size:0.82em" onclick="_openCompositeLoom('{{ b.composite }}')">🧬 {{ b.composite.split('.composites.')[-1] if '.composites.' in (b.composite|string) else b.composite }} ↗</button>{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td style="vertical-align:top">{% if b.params %}{% for k, v in b.params.items() %}<span class="cond-pill"><span class="cond-pill-k">{{ k }}</span>=<code>{{ v }}</code></span> {% endfor %}{% else %}<span class="muted">default parameters</span>{% endif %}</td>
+          <td style="vertical-align:top" class="muted small">{% if study.robustness %}{{ study.robustness.n_replicates or (study.robustness.seeds | length if study.robustness.seeds else 1) }}{{ ' (parameter sweep)' if study.robustness.parameter_sweep else ' seed(s)' }}{% elif study.runs %}{{ study.runs | length }} run(s){% else %}—{% endif %}</td>
+          <td style="vertical-align:top">{% if study.runs %}<span class="sim-status-pill sim-status-ran">{{ study.runs[0].status or 'recorded' }}</span>{% else %}<span class="muted">not run</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% if study.runs %}<p class="muted small" style="margin-top:6px">{{ study.runs | length }} recorded run(s): {% for r in study.runs %}<code>{{ r.name }}</code> ({{ r.status or '—' }}){% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+  </div>
+  {% endif %}
+
+  {% if study.simulation_set %}
+  <h3 style="margin-top:16px">Simulation set <span class="muted" style="font-size:0.85em;font-weight:normal">({{ study.simulation_set | length }} runs planned)</span></h3>
   <p class="muted" style="font-size:0.88em">Each entry is a concrete run plan: baseline or perturbation, condition, duration, seeds, readouts collected, and tests applied. Sweep entries (Pass B) render their axes, per-run results, candidates, and rejection reasons.</p>
   {% for sim in study.simulation_set %}
   {% if sim.kind == 'sweep' %}
@@ -1095,6 +1124,7 @@
   </div>
   {% endif %}
   {% endfor %}
+  {% endif %}
 </section>
 {% endif %}
 
@@ -1186,7 +1216,11 @@
       </tbody>
     </table>
     {% else %}
-    <p class="empty-message">No observables declared yet.</p>
+    {# Auto-derive readouts from the composite's bigraph state so the tab is
+       never empty — study-detail.js fills this from /api/composite-state. #}
+    <div id="auto-readouts" data-composite="{{ (study.baseline[0].composite if study.baseline else '') }}">
+      <p class="empty-message">No readouts declared — deriving the available stores from the composite…</p>
+    </div>
     {% endif %}
 
     <details class="observables-add-form" style="margin-top: 1.2em;" id="bigraph-picker-details">
