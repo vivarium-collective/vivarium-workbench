@@ -9562,13 +9562,8 @@
       + '.topbar a{font-size:0.83em;color:#334155;text-decoration:none;padding:4px 12px;border-radius:9999px;background:#f1f5f9;white-space:nowrap}'
       + '.topbar a:hover{background:#e2e8f0;color:#0f172a}'
       + '.topbar a.active{background:#dbeafe;color:#1e40af;font-weight:600}'
-      // Reader-mode toggle (Scientist / Reviewer / Developer) + tier visibility.
-      + '.tb-mode-group{display:inline-flex;margin-left:8px;border:1px solid #cbd5e1;border-radius:9999px;overflow:hidden}'
-      + '.tb-mode-btn{font:inherit;font-size:0.8em;color:#334155;background:#fff;border:0;padding:4px 11px;cursor:pointer;white-space:nowrap}'
-      + '.tb-mode-btn+.tb-mode-btn{border-left:1px solid #e2e8f0}'
-      + '.tb-mode-btn:hover{background:#f1f5f9}'
-      + '.tb-mode-btn.active{background:#dbeafe;color:#1e40af;font-weight:600}'
-      + 'body.mode-scientist .tier-reviewer,body.mode-scientist .tier-developer{display:none}'
+      // (reader-mode toggle removed — the report always shows the full view;
+      //  the tier-reviewer/tier-developer wrappers remain as inert containers.)
       /* iset switcher dropdown at the right end of the topbar (margin-left:auto
          pushes it past the section links). Calls /api/investigation-registry
          to list peer dashboards; click a peer row to navigate. Trigger styled
@@ -10154,7 +10149,7 @@
       + '.sim-status-ready,.sim-status-pill.sim-status-ready{background:#dcfce7;color:#166534}'
       + '.sim-status-ran,.sim-status-pill.sim-status-ran{background:#dbeafe;color:#1e40af}'
       + '.sim-status-gated,.sim-status-pill.sim-status-gated{background:#fef9c3;color:#854d0e}'
-      + '</style></head><body class="mode-scientist">'
+      + '</style></head><body>'
 
       // ── Embed autosize (self-reporting child pattern) ──────────────
       //
@@ -10288,39 +10283,13 @@
       + '<nav class="topbar">'
       +   '<span class="tb-title">' + _h(iset.title || iset.name) + '</span>'
       +   '<a href="#" onclick="window.scrollTo({top:0,behavior:\'smooth\'});return false;">Top</a>'
-      // Reader-centered nav: Overview → Studies → (Open questions) → (Roadmap)
-      // → (Appendices) → References. The bracketed links emit only when their
-      // section will render (same guards as the sections themselves).
-      +   '<a href="#executive">Overview</a>'
+      // Top menu kept minimal: Top · Studies · Appendices · References. The
+      // Overview/Open-questions/Roadmap sections sit close together near the top
+      // and are easily reached from Top, so they're omitted from the bar.
       +   '<a href="#studies-heading">Studies</a>'
-      +   (_hasOpenQuestions ? '<a href="#open-questions">Open questions</a>' : '')
-      +   (_hasRoadmap ? '<a href="#roadmap">Roadmap</a>' : '')
       +   (_hasAppendices ? '<a href="#appendices">Appendices</a>' : '')
       +   '<a href="#references">References</a>'
-      // Reader-mode toggle (Scientist / Reviewer / Developer) — sets a class on
-      // <body>; CSS hides reviewer/developer tiers in scientist mode. Persisted
-      // in localStorage; wired by the inline script just after this nav.
-      +   '<span class="tb-mode-group" role="group" aria-label="Reader mode">'
-      +     '<button type="button" class="tb-mode-btn" data-mode="scientist" title="Biology-first — hides appendices">Scientist</button>'
-      +     '<button type="button" class="tb-mode-btn" data-mode="reviewer" title="Adds all method, acceptance, framework &amp; decision detail">Reviewer</button>'
-      +   '</span>'
       + '</nav>'
-      + '<script>(function(){'
-      +   'var KEY="vivarium.report.readerMode";'
-      +   'function apply(m){var b=document.body;if(!b)return;'
-      +     'b.classList.remove("mode-scientist","mode-reviewer","mode-developer");'
-      +     'b.classList.add("mode-"+m);'
-      +     'Array.prototype.forEach.call(document.querySelectorAll(".tb-mode-btn"),function(btn){'
-      +       'btn.classList.toggle("active",btn.getAttribute("data-mode")===m);});'
-      +   '}'
-      +   'function init(){var m="scientist";try{var s=localStorage.getItem(KEY);if(s)m=s;}catch(e){}'
-      +     'apply(m);'
-      +     'Array.prototype.forEach.call(document.querySelectorAll(".tb-mode-btn"),function(btn){'
-      +       'btn.addEventListener("click",function(){var nm=btn.getAttribute("data-mode");'
-      +         'try{localStorage.setItem(KEY,nm);}catch(e){}apply(nm);});});'
-      +   '}'
-      +   'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",init);}else{init();}'
-      + '})();</script>'
 
       // ── Main content ──
       + '<main class="content" id="top">'
@@ -10654,7 +10623,7 @@
             if (!inner.trim()) return '';
             return '<div class="tier-reviewer">'
               + '<h2 id="appendices">Appendices</h2>'
-              + '<p class="muted small">Method-grading and verification detail — valuable for reviewers, kept out of the main narrative. Use the reader-mode toggle (top-right) to show or hide these tiers.</p>'
+              + '<p class="muted small">Method-grading and verification detail — kept at the back, after the main narrative.</p>'
               + inner
               + '</div>';
           })()
