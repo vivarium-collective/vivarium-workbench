@@ -8880,6 +8880,11 @@
             '</div>';
       }
 
+      // Reviewer-tier wrapper: technical/method subsections hide in Scientist
+      // mode (body.mode-scientist .tier-reviewer{display:none}) and show in
+      // Reviewer mode. Empty subsections stay empty (no stray wrapper div).
+      var _rv = function(h){ return (h && String(h).trim()) ? '<div class="tier-reviewer">' + h + '</div>' : ''; };
+
       if (isPlanning) {
         // Planning-phase layout — minimal, expert-comment-driven.
         // The <header class="study-header"> chrome (num + slug + phase
@@ -8898,23 +8903,23 @@
           +   subNav
           +   '<div class="study-planning-pill">PLANNING — not yet run</div>'
           +   modelBannerHtml     // 🧬 Model: composite(s) + params + loom static popout (PROMINENT)
-          +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
-          +   enforcementHtml     // ⚠ declared params not applied (D.2)
-          +   readinessHtml       // ✓/⚠ lint readiness panel (A3)
-          +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
-          +   feedbackHtml        // 💬 imported expert feedback (B.1)
-          +   commitmentHtml      // Theoretical commitment (C-COMMIT)
-          +   invariantsHtml      // Invariant checks (C-INVAR)
+          +   _rv(statusDriftHtml)     // ⚠ status out of date vs runs (#2)
+          +   _rv(enforcementHtml)     // ⚠ declared params not applied (D.2)
+          +   _rv(readinessHtml)       // ✓/⚠ lint readiness panel (A3)
+          +   _rv(reviewHtml)          // ⚠ review-readiness gates (duration / param-vs-reference)
+          +   _rv(feedbackHtml)        // 💬 imported expert feedback (B.1)
+          +   _rv(commitmentHtml)      // Theoretical commitment (C-COMMIT)
+          +   _rv(invariantsHtml)      // Invariant checks (C-INVAR)
           +   summaryHtml         // Question / purpose
-          +   conditionsHtml      // Conditions: variants + model settings (PROMINENT)
-          +   testsHtml           // Expected behavior / tests (PROMINENT for comments)
-          +   representationHtml   // Representation claims (C-MODELCARD)
+          +   _rv(conditionsHtml)      // Conditions: variants + model settings (PROMINENT)
+          +   _rv(testsHtml)           // Expected behavior / tests (PROMINENT for comments)
+          +   _rv(representationHtml)   // Representation claims (C-MODELCARD)
           +   chartsWithBaselineNoticeHtml  // Baseline charts with BASELINE label
           +   embedsHtml          // Embedded preview HTMLs
           +   readoutsHtml        // What we'll measure
-          +   buildHtml           // Model change (collapsed-ish, technical)
+          +   _rv(buildHtml)           // Model change (collapsed-ish, technical)
           +   '<details class="study-technical-fold"><summary>Technical context (model changes · implementation tasks · follow-ups · limitations · refs)</summary>'
-          +     reqsHtml          // Implementation requirements
+          +     _rv(reqsHtml)          // Implementation requirements
           +     followUpsHtml     // Follow-ups
           +     discoveryHtml     // Discovery implications
           +     limitsHtml        // Limitations
@@ -8935,30 +8940,30 @@
         + '<section class="study">'
         +   subNav
         +   modelBannerHtml     // 🧬 Model: composite(s) + params + loom static popout (PROMINENT)
-        +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
-        +   enforcementHtml     // ⚠ declared params not applied (D.2)
-        +   readinessHtml       // ✓/⚠ lint readiness panel (A3)
-        +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
-        +   feedbackHtml        // 💬 imported expert feedback (B.1)
-        +   commitmentHtml      // Theoretical commitment (C-COMMIT)
-        +   invariantsHtml      // Invariant checks (C-INVAR)
+        +   _rv(statusDriftHtml)     // ⚠ status out of date vs runs (#2)
+        +   _rv(enforcementHtml)     // ⚠ declared params not applied (D.2)
+        +   _rv(readinessHtml)       // ✓/⚠ lint readiness panel (A3)
+        +   _rv(reviewHtml)          // ⚠ review-readiness gates (duration / param-vs-reference)
+        +   _rv(feedbackHtml)        // 💬 imported expert feedback (B.1)
+        +   _rv(commitmentHtml)      // Theoretical commitment (C-COMMIT)
+        +   _rv(invariantsHtml)      // Invariant checks (C-INVAR)
         +   biologyGlanceHtml   // 0. Biology-at-a-glance
         +   mechanismNarrativeHtml  // 0a. Mechanism narrative (7 framework fields)
         +   summaryHtml         // 1. Plain-English summary (explanation leads, before charts)
         +   embedsHtml          // 1a. Embedded visualizations (after the explanation)
-        +   expertReviewHtml    // 2b. Pre-run expert review
+        +   _rv(expertReviewHtml)    // 2b. Pre-run expert review
         +   takeawaysHtml       // 3 + 4. Detailed findings
-        +   verdictsHtml        // Derived 3-track conclusion verdicts (computed)
-        +   causalHtml          // Causal necessity table (C-CF)
+        +   _rv(verdictsHtml)        // Derived 3-track conclusion verdicts (computed)
+        +   _rv(causalHtml)          // Causal necessity table (C-CF)
         +   discoveryHtml       // Discovery implications (directly under the findings)
-        +   conditionsHtml      // Conditions (what we set up) — grouped with the runs
-        +   simsHtml            // What did/will we run
+        +   _rv(conditionsHtml)      // Conditions (what we set up) — grouped with the runs
+        +   _rv(simsHtml)            // What did/will we run
         +   readoutsHtml        // What did/will we measure (above visualisations)
         +   chartsHtml          //    + Visualisations
-        +   testsHtml           // 7. How we judge success
-        +   buildHtml           // 8. Model changes
-        +   representationHtml   // Representation claims (C-MODELCARD)
-        +   reqsHtml            // 9. What to build/fix
+        +   _rv(testsHtml)           // 7. How we judge success
+        +   _rv(buildHtml)           // 8. Model changes
+        +   _rv(representationHtml)   // Representation claims (C-MODELCARD)
+        +   _rv(reqsHtml)            // 9. What to build/fix
         +   followUpsHtml       // 10. Next steps
         +   limitsHtml          // 11. Limitations
         +   synthesisHtml       // Read-only four-section conclusion synthesis (derived)
@@ -9564,7 +9569,6 @@
       + '.tb-mode-btn:hover{background:#f1f5f9}'
       + '.tb-mode-btn.active{background:#dbeafe;color:#1e40af;font-weight:600}'
       + 'body.mode-scientist .tier-reviewer,body.mode-scientist .tier-developer{display:none}'
-      + 'body.mode-reviewer .tier-developer{display:none}'
       /* iset switcher dropdown at the right end of the topbar (margin-left:auto
          pushes it past the section links). Calls /api/investigation-registry
          to list peer dashboards; click a peer row to navigate. Trigger styled
@@ -10298,8 +10302,7 @@
       // in localStorage; wired by the inline script just after this nav.
       +   '<span class="tb-mode-group" role="group" aria-label="Reader mode">'
       +     '<button type="button" class="tb-mode-btn" data-mode="scientist" title="Biology-first — hides appendices">Scientist</button>'
-      +     '<button type="button" class="tb-mode-btn" data-mode="reviewer" title="Adds method-grading appendices">Reviewer</button>'
-      +     '<button type="button" class="tb-mode-btn" data-mode="developer" title="Shows everything incl. framework internals">Developer</button>'
+      +     '<button type="button" class="tb-mode-btn" data-mode="reviewer" title="Adds all method, acceptance, framework &amp; decision detail">Reviewer</button>'
       +   '</span>'
       + '</nav>'
       + '<script>(function(){'
@@ -10479,12 +10482,12 @@
             var dec = (function() {
             var dn = (iset.executive || {}).decisions_needed || [];
             if (!dn.length) return '';
-            return '<details id="decisions-needed" class="report-fold"><summary>✋ Decisions needed from reviewers' + ' <span class="rf-chip">' + dn.length + ' item' + (dn.length===1?'':'s') + '</span>' + (dn[0] && dn[0].question ? ' <span class="rf-prev">next: ' + _h(_previewText(dn[0].question, 130)) + '</span>' : '') + '</summary><ol>'
+            return '<div class="tier-reviewer"><details id="decisions-needed" class="report-fold"><summary>✋ Decisions needed from reviewers' + ' <span class="rf-chip">' + dn.length + ' item' + (dn.length===1?'':'s') + '</span>' + (dn[0] && dn[0].question ? ' <span class="rf-prev">next: ' + _h(_previewText(dn[0].question, 130)) + '</span>' : '') + '</summary><ol>'
               + dn.map(function(d) {
                   return '<li><strong>' + _h(d.question || '') + '</strong>'
                     + (d.context ? '<div class="muted small">' + _multiline(d.context) + '</div>' : '')
                     + '</li>';
-                }).join('') + '</ol></details>';
+                }).join('') + '</ol></details></div>';
             })();
             var na = needsAttentionReportHtml;
             var inner = dec + na;
@@ -10593,11 +10596,23 @@
               }
               var actions;
               if (status === 'pending') {
-                // No custom Accept/Decline buttons: reviewers annotate this
-                // section with the standard inline-feedback 💬 affordance
-                // (the section id="proposed-inputs" is an annotatable host),
-                // which round-trips reliably in the downloaded file:// report.
-                actions = '';
+                // Accept button — records the acceptance into the SAME
+                // feedback-report channel as the follow-up "➕ Add study"
+                // button (window._decideProposedInput → _annotate →
+                // _fbAddAnnotation). No server POST: the acceptance is
+                // serialized into the downloadable feedback YAML and applied
+                // when the agent imports it. Works identically served
+                // (http/https) or offline (file://). Reviewers can still use
+                // the inline 💬 affordance for free-form notes.
+                // Single-quoted args so they sit safely inside onclick="…".
+                var acceptArgs = "'" + _h(String(it.id||'')) + "', 'accept', this, '"
+                  + _h(String(it.kind||'reference')) + "'";
+                actions = '<div class="proposed-input-actions" style="margin-top:10px">'
+                  + '<button class="btn-accept-proposed-input" '
+                  + 'onclick="event.stopPropagation(); if(window._decideProposedInput){_decideProposedInput(' + acceptArgs + ');}'
+                  + 'else{alert(\'Open this investigation in the live dashboard to accept the suggestion.\');}" '
+                  + 'style="font-size:0.82em;padding:3px 10px;border:1px solid #16a34a;background:#f0fdf4;'
+                  + 'color:#166534;border-radius:6px;cursor:pointer;white-space:nowrap">✓ Accept — add via feedback report</button></div>';
               } else {
                 actions = '<div class="proposed-input-resolved muted small" style="margin-top:10px;font-style:italic">'
                   + (status === 'accepted'
@@ -10740,14 +10755,14 @@
       +     'if(window._fbAddAnnotation){window._fbAddAnnotation(sid,text);return true;}'
       +     'return false;'
       +   '}'
-      +   'window._decideProposedInput=function(itemId,decision,btn){'
+      +   'window._decideProposedInput=function(itemId,decision,btn,kind){'
       +     'if(!itemId){alert("Missing item id");return;}'
       +     'var card=btn&&btn.closest?btn.closest(".proposed-input-card"):null;'
       +     'var actions=card?card.querySelector(".proposed-input-actions"):null;'
       +     'var accepted=decision==="accept";'
       +     'var titleEl=card?card.querySelector("div[style*=\\"font-weight:600\\"]"):null;'
       +     'var title=titleEl?titleEl.textContent.trim():"";'
-      +     'var text=(accepted?"Accept":"Decline")+" \\u2014 "+(title||"proposed input")+" [id: "+itemId+"]";'
+      +     'var text=(accepted?"Accept":"Decline")+" \\u2014 "+(kind?"["+kind+"] ":"")+(title||"proposed input")+" [id: "+itemId+"]";'
       +     'if(!_annotate("proposed-inputs",text)){alert("Could not record the decision (feedback widget unavailable).");return;}'
       +     'if(actions){actions.querySelectorAll("button").forEach(function(b){b.disabled=true;});}'
       +     'if(card){card.style.borderLeftColor=accepted?"#16a34a":"#dc2626";}'
