@@ -629,18 +629,13 @@ window.addEventListener('pageshow', function (e) {
 <!-- ===== PAGE: ANALYSES ===== -->
 <section id="page-visualizations" class="page" data-page="visualizations">
   <h2 class="page-title">Analyses</h2>
-  <p class="page-lead">Analysis scripts and visualization classes available in this workspace. <strong>Analyses</strong> are v2ecoli <code>Analysis</code> steps (registered in <code>ANALYSIS_REGISTRY</code>) that post-process simulation output. <strong>Visualizations</strong> are chart classes (subclasses of <code>pbg_superpowers.visualization.Visualization</code>) that render observable trajectories — configure one with specific settings or generate a new one with <code>/pbg-viz</code>.</p>
+  <p class="page-lead">A gallery of special, saved, interactive visualizations for this workspace &mdash; embedded <strong>3D structural models</strong> (parsimony packs) and a <strong>Pathway Tools</strong> Omics-Viewer launcher. Looking for the chart/analysis <em>class</em> catalog? It now lives in <a href="#registry" onclick="setTimeout(function(){_setRegistrySubtab&amp;&amp;_setRegistrySubtab('discovered');_setRegistryTab&amp;&amp;_setRegistryTab('visualization');},0)">Registry &rarr; Discovered &rarr; Visualizations</a>.</p>
 
-
-  <!-- Available Analysis + Visualization classes (catalog) -->
   <div class="panel">
-    <h3>Available classes <span id="viz-count" class="count-badge"></span></h3>
-    <p class="panel-lead">Classes discovered from the installed environment. Analyses are <code>v2ecoli</code> <code>ANALYSIS_REGISTRY</code> entries; Visualizations are <code>pbg_superpowers.visualization.Visualization</code> subclasses. Click <strong>Preview</strong> (Visualizations only) to see a demo render; <strong>Use</strong> to register a Visualization in this workspace. Need a new visualization? Run <code>/pbg-viz &lt;name&gt; &lt;description&gt;</code> in Claude Code.</p>
-    <input type="search" id="viz-catalog-search" placeholder="Search classes by name or doc…"
-           style="width:100%;padding:6px;margin-bottom:8px;font-size:0.9em"
-           oninput="_filterVizCatalog(this.value)">
-    <div id="viz-picker-container">
-      <p class="empty-state">Discovering classes&hellip; <span class="muted">First load walks the installed environment and can take a few seconds; subsequent loads are cached for 30 s.</span></p>
+    <h3>Saved visualizations <span id="viz-count" class="count-badge"></span></h3>
+    <p class="panel-lead">Interactive scenes saved as workspace artifacts. 3D models load embedded below; open any in a new tab for a full-window view. Produce a 3D model by running a parsimony packing composite (it writes <code>studies/&lt;name&gt;/viz/3d/&lt;name&gt;.pack.json</code>), then revisit this tab.</p>
+    <div id="analyses-gallery" class="analyses-gallery">
+      <p class="empty-state">Loading saved visualizations&hellip;</p>
     </div>
   </div>
 
@@ -734,6 +729,7 @@ window.addEventListener('pageshow', function (e) {
       <button class="registry-tab"        data-kind="step"          onclick="_setRegistryTab('step')">Steps <span class="count-badge" id="registry-step-count"></span></button>
       <button class="registry-tab"        data-kind="emitter"       onclick="_setRegistryTab('emitter')">Emitters <span class="count-badge" id="registry-emitter-count"></span></button>
       <button class="registry-tab"        data-kind="visualization" onclick="_setRegistryTab('visualization')">Visualizations <span class="count-badge" id="registry-visualization-count"></span></button>
+      <button class="registry-tab"        data-kind="analysis"      onclick="_setRegistryTab('analysis')">Analyses <span class="count-badge" id="registry-analysis-count"></span></button>
       <button class="registry-tab"        data-kind="type"          onclick="_setRegistryTab('type')">Types <span class="count-badge" id="registry-type-count"></span></button>
     </div>
 
@@ -743,6 +739,7 @@ window.addEventListener('pageshow', function (e) {
     <div class="registry-tab-panel"        data-kind="step"          id="registry-steps-container"></div>
     <div class="registry-tab-panel"        data-kind="emitter"       id="registry-emitters-container"></div>
     <div class="registry-tab-panel"        data-kind="visualization" id="registry-visualizations-container"></div>
+    <div class="registry-tab-panel"        data-kind="analysis"      id="registry-analyses-container"></div>
     <div class="registry-tab-panel"        data-kind="type"          id="registry-types-container"></div>
   </section>
 </section>

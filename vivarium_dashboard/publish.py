@@ -149,6 +149,121 @@ def _stage_embed_visualizations(spec, ws_root: Path, out_dir: Path,
             embed["url"] = base_path + url
 
 
+def _rewrite_pack_mesh_urls(obj, pack_dir_rel: str, base_no_slash: str) -> None:
+    """Recursively rewrite mesh ``url`` strings in a parsimony pack (in place).
+
+    The pack stores LOD mesh urls under ``ingredients[].shape.lods[].url`` as
+    workspace-rooted-relative paths (e.g.
+    ``studies/<name>/viz/3d/meshes/x.obj``). The viewer's ``resolveMeshUrl``
+    prepends ``/`` to any non-absolute url, so for the bundle to resolve under a
+    hosting base path the url must become ``<base>/studies/<name>/viz/3d/meshes/
+    x.obj`` *without* a leading slash (``resolveMeshUrl`` adds it back). When
+    *base_no_slash* is empty (root hosting) the url stays
+    ``studies/<name>/viz/3d/meshes/x.obj`` → ``/studies/...`` which is correct
+    for a root-served bundle.
+
+    Args:
+        pack_dir_rel: the pack's bundle-relative directory, e.g.
+            ``studies/<name>/viz/3d`` (the meshes dir is ``<pack_dir_rel>/meshes``).
+        base_no_slash: the hosting base path WITHOUT a leading slash
+            (e.g. ``v2ecoli/dashboard``), or ``""`` for root hosting.
+    """
+    prefix = (base_no_slash + "/") if base_no_slash else ""
+    mesh_base = prefix + pack_dir_rel + "/meshes/"
+
+    def _walk(node):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == "url" and isinstance(v, str) and v:
+                    if "meshes/" in v:
+                        tail = v.split("meshes/", 1)[1]
+                    elif v.endswith(".obj"):
+                        tail = v.rsplit("/", 1)[-1]
+                    else:
+                        continue
+                    node[k] = mesh_base + tail
+                else:
+                    _walk(v)
+        elif isinstance(node, list):
+            for it in node:
+                _walk(it)
+
+    _walk(obj)
+
+
+def _export_saved_visualizations(ws_root: Path, out_dir: Path, srv,
+                                 base_path: str) -> None:
+    """Export the Analyses-tab saved 3D visualizations into the static bundle.
+
+    Feature-detected on the optional ``pbg_parsimony`` package (mirrors the live
+    ``/parsimony-viewer/*`` route + ``/api/saved-visualizations`` endpoint). When
+    it's not installed this is a no-op, so the snapshot simply omits the gallery.
+
+    Writes:
+      - ``api/saved-visualizations.json`` — same payload as the live endpoint
+        (``_build_saved_visualizations``). ``pack_url``/``meta_url`` stay
+        workspace-rooted-absolute (``/studies/...``); the frontend prefixes the
+        hosting base path at render time, identical to the live (empty-base) case.
+      - ``parsimony-viewer/`` — the bundled viewer assets (index.html, viewer.js,
+        obj-worker.js) copied from ``pbg_parsimony/viewer/``.
+      - ``studies/<name>/viz/3d/`` — each saved pack + ``.meta.json`` sidecar +
+        sibling ``meshes/`` dir, with the COPIED pack's mesh urls rewritten to be
+        base-path-correct (see ``_rewrite_pack_mesh_urls``).
+    """
+    viewer_dir = srv._parsimony_viewer_dir()
+    if viewer_dir is None:
+        return  # pbg_parsimony not installed → no parsimony assets in this bundle
+
+    payload = srv._build_saved_visualizations(ws_root)
+
+    api_dir = out_dir / "api"
+    api_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(api_dir / "saved-visualizations.json", payload)
+
+    # Copy the viewer assets → bundle/parsimony-viewer/.
+    viewer_dst = out_dir / "parsimony-viewer"
+    if viewer_dst.exists():
+        shutil.rmtree(viewer_dst)
+    shutil.copytree(str(viewer_dir), str(viewer_dst))
+
+    base_no_slash = (base_path or "").lstrip("/")
+
+    # Copy each saved pack + sidecar + meshes, rewriting the copied pack's urls.
+    for entry in payload.get("saved") or []:
+        pack_url = entry.get("pack_url")
+        if not pack_url:
+            continue
+        rel = pack_url.lstrip("/")                # studies/<name>/viz/3d/<pack>.json
+        src_pack = ws_root / rel
+        if not src_pack.is_file():
+            continue
+        pack_dir_rel = str(Path(rel).parent.as_posix())   # studies/<name>/viz/3d
+        dst_pack = out_dir / rel
+        dst_pack.parent.mkdir(parents=True, exist_ok=True)
+
+        # Rewrite the copied pack's mesh urls (read → mutate → write).
+        try:
+            pack_data = json.loads(src_pack.read_text(encoding="utf-8"))
+            _rewrite_pack_mesh_urls(pack_data, pack_dir_rel, base_no_slash)
+            _write_json(dst_pack, pack_data)
+        except Exception:
+            # Fall back to a verbatim copy rather than dropping the pack entirely.
+            shutil.copy2(src_pack, dst_pack)
+
+        # Copy the .meta.json sidecar (no mesh urls → verbatim) next to the pack.
+        src_meta = src_pack.with_name(src_pack.name.replace(".pack.json", ".meta.json"))
+        if src_meta.is_file():
+            shutil.copy2(src_meta, dst_pack.with_name(src_meta.name))
+
+        # Copy the sibling meshes/ dir preserving the studies/<name>/viz/3d path.
+        src_meshes = src_pack.parent / "meshes"
+        if src_meshes.is_dir():
+            dst_meshes = dst_pack.parent / "meshes"
+            if dst_meshes.exists():
+                shutil.rmtree(dst_meshes)
+            shutil.copytree(str(src_meshes), str(dst_meshes))
+
+
 def _normalize_asset_urls(html: str) -> str:
     """Rewrite ``src``/``href`` JS/CSS asset URLs to root-absolute
     ``/assets/<basename>`` so both template conventions are normalised in the
@@ -506,8 +621,16 @@ def _do_build(
             _write_json(api_dir / "iset" / f"{inv_name}.json", data)
 
     # api/study/<slug>.json
+    # Guard per study: a single malformed study.yaml (e.g. a stub study that
+    # exists only to host saved viz assets and declares neither 'variants' nor
+    # 'composite') must not abort the whole publish — skip it and continue, the
+    # same way the charts/composites loops degrade gracefully below.
     for slug in studies:
-        data = _study_detail_spec(slug)
+        try:
+            data = _study_detail_spec(slug)
+        except Exception as exc:  # noqa: BLE001 — never abort a publish on one study
+            print(f"  warn: study-detail export failed for {slug!r}: {exc}")
+            continue
         if data is not None:
             _stage_embed_visualizations(data, ws_root, out_dir, base_path)
             _write_json(api_dir / "study" / f"{slug}.json", data)
@@ -528,6 +651,14 @@ def _do_build(
             print(f"  warn: study-charts export failed for {slug!r}: {exc}")
             continue
         _write_json(charts_api_dir / f"{slug}.json", payload)
+
+    # api/saved-visualizations.json + parsimony-viewer/ + copied packs/meshes —
+    # the Analyses-tab gallery. Feature-detected on pbg_parsimony; no-op when the
+    # viewer package isn't installed (mirrors the live /parsimony-viewer route).
+    try:
+        _export_saved_visualizations(ws_root, out_dir, srv, base_path)
+    except Exception as exc:  # noqa: BLE001 — never abort a publish on the gallery
+        print(f"  warn: saved-visualizations export failed: {exc}")
 
     # ------------------------------------------------------------------
     # 3. Copy bundled static assets → bundle/assets/
@@ -565,7 +696,11 @@ def _do_build(
     # 5. Render per-study shells → bundle/studies/<slug>/index.html
     # ------------------------------------------------------------------
     for slug in studies:
-        spec = _study_detail_spec(slug)
+        try:
+            spec = _study_detail_spec(slug)
+        except Exception as exc:  # noqa: BLE001 — one bad study must not abort
+            print(f"  warn: study-shell export failed for {slug!r}: {exc}")
+            continue
         if spec is None:
             continue
         # The shell template renders embed_visualizations as <iframe src="{{v.url}}">

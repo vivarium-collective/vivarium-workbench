@@ -666,3 +666,105 @@ def test_build_bundle_shell_embeds_are_staged_and_prefixed(tmp_workspace, tmp_pa
     shell = (out / "studies" / "alpha" / "index.html").read_text()
     assert 'src="/v2ecoli/dashboard/reports/figures/alpha/f1.html"' in shell
     assert 'src="/reports/figures/alpha/f1.html"' not in shell
+
+
+# ---------------------------------------------------------------------------
+# Analyses-tab saved-visualizations export (parsimony 3D gallery)
+# ---------------------------------------------------------------------------
+
+def _pbg_parsimony_available() -> bool:
+    import importlib.util
+    try:
+        return importlib.util.find_spec("pbg_parsimony") is not None
+    except Exception:
+        return False
+
+
+@pytest.fixture
+def ws_with_saved_pack(tmp_workspace):
+    """Add a stub study with a saved parsimony 3D pack (+ meta + meshes) to the
+    shared workspace. The pack's mesh LOD urls are workspace-rooted-relative
+    (as pbg-parsimony writes them)."""
+    sd = server.WORKSPACE / "studies" / "x" / "viz" / "3d"
+    sd.mkdir(parents=True)
+    # A stub study.yaml (no variants/composite) — exists only to host viz assets.
+    (server.WORKSPACE / "studies" / "x" / "study.yaml").write_text(
+        yaml.safe_dump({"name": "x", "description": "3d stub"})
+    )
+    pack = {
+        "format": "parsimony.pack.v1",
+        "ingredients": [{
+            "id": 0, "name": "thing",
+            "shape": {"kind": "mesh", "lods": [
+                {"url": "studies/x/viz/3d/meshes/thing.lod0.obj", "voxel_size": 16.0},
+                {"url": "studies/x/viz/3d/meshes/thing.lod1.obj", "voxel_size": 8.0},
+            ]},
+        }],
+        "placements": [],
+    }
+    (sd / "scene.pack.json").write_text(json.dumps(pack))
+    (sd / "scene.meta.json").write_text(json.dumps(
+        {"ingredients": {"thing": {"display_name": "Thing", "count": 5}}}
+    ))
+    (sd / "meshes").mkdir()
+    (sd / "meshes" / "thing.lod0.obj").write_text("o thing0\n")
+    (sd / "meshes" / "thing.lod1.obj").write_text("o thing1\n")
+    return server.WORKSPACE
+
+
+@pytest.mark.skipif(not _pbg_parsimony_available(),
+                    reason="pbg_parsimony not installed")
+def test_build_bundle_exports_saved_visualizations(ws_with_saved_pack, tmp_path):
+    """build_bundle with a base path writes the saved-visualizations API JSON,
+    copies the parsimony viewer assets, copies the pack + meta + meshes
+    preserving the studies/<name>/viz/3d path, and rewrites the copied pack's
+    mesh urls to be base-path-prefixed (so the viewer's resolveMeshUrl, which
+    prepends '/', resolves them under the hosting base path)."""
+    from vivarium_dashboard import publish
+
+    out = tmp_path / "bundle"
+    publish.build_bundle(server.WORKSPACE, out, base_path="/v2ecoli/dashboard/")
+
+    # api/saved-visualizations.json lists the stub study's pack.
+    sv = json.loads((out / "api" / "saved-visualizations.json").read_text())
+    assert sv["parsimony_available"] is True
+    saved = sv["saved"]
+    assert any(e["study"] == "x" for e in saved)
+    entry = next(e for e in saved if e["study"] == "x")
+    # pack_url/meta_url stay workspace-rooted-absolute; the frontend prefixes base.
+    assert entry["pack_url"] == "/studies/x/viz/3d/scene.pack.json"
+    assert entry["meta_url"] == "/studies/x/viz/3d/scene.meta.json"
+
+    # Parsimony viewer assets copied.
+    assert (out / "parsimony-viewer" / "index.html").is_file()
+    assert (out / "parsimony-viewer" / "viewer.js").is_file()
+
+    # Pack + meta + meshes copied preserving the studies/<name>/viz/3d path.
+    dst_pack = out / "studies" / "x" / "viz" / "3d" / "scene.pack.json"
+    assert dst_pack.is_file()
+    assert (out / "studies" / "x" / "viz" / "3d" / "scene.meta.json").is_file()
+    assert (out / "studies" / "x" / "viz" / "3d" / "meshes" / "thing.lod0.obj").is_file()
+
+    # Copied pack's mesh urls are base-path-prefixed (no leading slash → the
+    # viewer's resolveMeshUrl prepends '/' → /v2ecoli/dashboard/studies/...obj).
+    pdata = json.loads(dst_pack.read_text())
+    lods = pdata["ingredients"][0]["shape"]["lods"]
+    assert lods[0]["url"] == "v2ecoli/dashboard/studies/x/viz/3d/meshes/thing.lod0.obj"
+    assert lods[1]["url"] == "v2ecoli/dashboard/studies/x/viz/3d/meshes/thing.lod1.obj"
+    assert not lods[0]["url"].startswith("/")
+
+
+@pytest.mark.skipif(not _pbg_parsimony_available(),
+                    reason="pbg_parsimony not installed")
+def test_build_bundle_saved_viz_root_hosting(ws_with_saved_pack, tmp_path):
+    """With an empty base path (root hosting) the copied pack's mesh urls stay
+    workspace-rooted-relative (resolveMeshUrl → /studies/...obj at the root)."""
+    from vivarium_dashboard import publish
+
+    out = tmp_path / "bundle"
+    publish.build_bundle(server.WORKSPACE, out, base_path="")
+
+    dst_pack = out / "studies" / "x" / "viz" / "3d" / "scene.pack.json"
+    pdata = json.loads(dst_pack.read_text())
+    assert pdata["ingredients"][0]["shape"]["lods"][0]["url"] == \
+        "studies/x/viz/3d/meshes/thing.lod0.obj"
