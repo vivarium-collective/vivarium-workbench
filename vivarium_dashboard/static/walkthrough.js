@@ -1202,18 +1202,101 @@
     container.innerHTML = html;
   }
 
+  // -------------------------------------------------------------------------
+  // Analyses page: a gallery of special, saved, interactive visualizations —
+  // embedded parsimony 3D scenes + a PTools Omics-Viewer launcher.
+  // Backed by GET /api/saved-visualizations.
+  // -------------------------------------------------------------------------
+
+  function _render3dVizCard(v) {
+    var packUrl = v.pack_url;
+    var src = '/parsimony-viewer/index.html?file=' + encodeURIComponent(packUrl);
+    var meta = [];
+    if (v.study) meta.push('study: ' + _esc(v.study));
+    if (v.n_placed) meta.push(Number(v.n_placed).toLocaleString() + ' instances');
+    return '<div class="analyses-card">' +
+      '<div class="analyses-card-head">' +
+        '<strong>' + _esc(v.name || '3D model') + '</strong>' +
+        '<a class="btn-mini" href="' + _esc(src) + '" target="_blank" rel="noopener" title="Open full-window in a new tab">Open &#8599;</a>' +
+      '</div>' +
+      (meta.length ? '<div class="muted" style="font-size:0.82em;margin:2px 0 6px">' + meta.join(' &middot; ') + '</div>' : '') +
+      '<iframe class="viz-embed" src="' + _esc(src) + '" loading="lazy" ' +
+        'style="width:100%;height:460px;border:1px solid #2a313c;border-radius:6px;background:#0e1116"></iframe>' +
+    '</div>';
+  }
+
+  function _renderPtoolsCard(ptools) {
+    ptools = ptools || {};
+    var studies = ptools.studies || [];
+    var html = '<div class="analyses-card">' +
+      '<div class="analyses-card-head"><strong>Pathway Tools &mdash; Omics Viewer</strong></div>' +
+      '<p class="muted" style="font-size:0.85em;margin:4px 0 8px">Overlay a study\'s PTools TSV exports onto the E. coli metabolic map in the Pathway Tools Omics Viewer.</p>';
+    if (!ptools.configured) {
+      html += '<p class="empty-state muted" style="margin:0">PTools not configured. Set <code>ui.ptools_server_url</code> in <code>workspace.yaml</code> to enable launching.</p>';
+    } else if (!studies.length) {
+      html += '<p class="empty-state muted" style="margin:0">No <code>ptools/*.tsv</code> exports found yet. Run a study\'s ptools analyses first.</p>';
+    } else {
+      html += '<div class="ptools-study-list">' + studies.map(function(s) {
+        return '<div class="picker-row">' +
+          '<div class="picker-row-main"><strong>' + _esc(s.study) + '</strong>' +
+            ' <span class="muted" style="font-size:0.82em">' + (s.n_tsvs || 0) + ' TSV' + (s.n_tsvs === 1 ? '' : 's') + '</span></div>' +
+          '<div class="picker-row-actions">' +
+            '<button class="btn-mini" onclick="_launchPtools(\'' + _esc(s.study) + '\')">Launch in Omics Viewer</button>' +
+          '</div>' +
+        '</div>';
+      }).join('') + '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function _launchPtools(study) {
+    var url = '/api/ptools-launch/' + encodeURIComponent(study);
+    fetch(url).then(function(r) {
+      return r.json().then(function(d) { return { status: r.status, body: d }; });
+    }).then(function(res) {
+      var b = res.body || {};
+      if (res.status === 200 && b.url) {
+        window.open(b.url, '_blank');
+      } else if (b.error === 'ptools_server_url not configured') {
+        alert('PTools not configured.\nSet ui.ptools_server_url in workspace.yaml.');
+      } else {
+        alert('PTools launch failed: ' + (b.error || res.status));
+      }
+    }).catch(function(err) { alert('PTools launch failed: ' + err); });
+  }
+  window._launchPtools = _launchPtools;
+
   function _loadAnalysesPage() {
-    var container = document.getElementById('viz-picker-container');
+    var container = document.getElementById('analyses-gallery');
     var countEl   = document.getElementById('viz-count');
     if (!container) return;
-    window.DataSource.loadVisualizationClasses()
+    fetch('/api/saved-visualizations')
+      .then(function(r) { return r.json(); })
       .then(function(data) {
-        var classes = (data && data.classes) || [];
-        _renderAnalysesGroups(classes, container);
-        if (countEl) countEl.textContent = '(' + classes.length + ')';
+        data = data || {};
+        var saved  = data.saved || [];
+        var ptools = data.ptools || {};
+        var cards = [];
+        if (data.parsimony_available) {
+          cards = cards.concat(saved.map(_render3dVizCard));
+        } else if (saved.length) {
+          cards.push('<div class="analyses-card"><p class="empty-state muted" style="margin:0">' +
+            saved.length + ' saved 3D pack(s) found, but the <code>pbg_parsimony</code> viewer is not installed in this environment, so they cannot be embedded.</p></div>');
+        }
+        cards.push(_renderPtoolsCard(ptools));
+        if (!saved.length && !(ptools.studies || []).length && ptools.configured === false) {
+          // Still show the (empty) PTools card; only the 3D section is empty.
+        }
+        if (!cards.length) {
+          container.innerHTML = '<p class="empty-state">No saved visualizations yet. Run a parsimony packing composite or a PTools analysis to populate this gallery.</p>';
+        } else {
+          container.innerHTML = cards.join('');
+        }
+        if (countEl) countEl.textContent = saved.length ? '(' + saved.length + ')' : '';
       })
       .catch(function(err) {
-        container.innerHTML = '<p class="empty-state" style="color:#991b1b">Error loading classes: ' + _esc(String(err)) + '</p>';
+        container.innerHTML = '<p class="empty-state" style="color:#991b1b">Error loading saved visualizations: ' + _esc(String(err)) + '</p>';
       });
   }
   window._loadAnalysesPage = _loadAnalysesPage;
@@ -1387,6 +1470,61 @@
     el.innerHTML = html;
   }
 
+  // Render Analysis classes (v2ecoli ANALYSIS_REGISTRY entries) in the Registry
+  // Discovered → Analyses tab. These have {name, address, doc} shape (from
+  // /api/visualization-classes, kind === 'analysis') — no source/schema info.
+  function _renderAnalysisRegistryGrid(containerId, entries) {
+    var el = document.getElementById(containerId);
+    if (!el) return;
+    if (!entries || !entries.length) {
+      el.innerHTML = '<p class="empty-state">No Analysis classes registered. Install a workspace that provides them (e.g. v2ecoli\'s <code>ANALYSIS_REGISTRY</code>).</p>';
+      return;
+    }
+    el.innerHTML = entries.map(function(c) {
+      return '<div class="registry-entry">' +
+        '<strong>' + _esc(c.name) + '</strong><br>' +
+        '<small><code>' + _esc(c.address) + '</code></small>' +
+        (c.doc ? '<br><small style="color:#666">' + _esc(c.doc) + '</small>' : '') +
+      '</div>';
+    }).join('');
+  }
+
+  // Enrich the Registry Discovered tabs with the class catalog that the Analyses
+  // page used to own: the v2ecoli Analysis classes (new Analyses tab) and any
+  // Visualization classes from _list_visualization_classes() not already present
+  // via build_core() introspection (so nothing is lost when moving the catalog
+  // here). Best-effort — a failure leaves the build_core-derived tabs intact.
+  function _enrichRegistryWithVizClasses(vizEntries) {
+    var entries = vizEntries || [];
+    var analyses = entries.filter(function(c) { return c.kind === 'analysis'; });
+    var vizzes   = entries.filter(function(c) { return c.kind !== 'analysis'; });
+
+    // Analyses tab.
+    _renderAnalysisRegistryGrid('registry-analyses-container', analyses);
+    var aCount = document.getElementById('registry-analysis-count');
+    if (aCount) aCount.textContent = analyses.length;
+
+    // Merge viz classes into the Visualizations tab. build_core entries already
+    // rendered there carry source info; append catalog-only ones (e.g.
+    // pbg_superpowers base classes) as framework so they show, deduped by name.
+    var existing = {};
+    document.querySelectorAll('#registry-visualizations-container .registry-entry strong')
+      .forEach(function(s) { existing[(s.textContent || '').trim()] = true; });
+    var extra = vizzes.filter(function(c) { return !existing[(c.name || '').trim()]; })
+      .map(function(c) {
+        return { name: c.name, address: c.address, source: 'framework', aliases: [] };
+      });
+    if (extra.length) {
+      var container = document.getElementById('registry-visualizations-container');
+      if (container) {
+        // Re-render with the union so source grouping stays correct.
+        var current = (window._registryVizEntries || []);
+        _renderRegistryGrid('registry-visualizations-container', current.concat(extra));
+      }
+    }
+  }
+  window._enrichRegistryWithVizClasses = _enrichRegistryWithVizClasses;
+
   function _renderRegistryTypesGrid(containerId, types) {
     var el = document.getElementById(containerId);
     if (!el) return;
@@ -1465,8 +1603,16 @@
         _renderRegistryGrid('registry-processes-container', byKind.process);
         _renderRegistryGrid('registry-steps-container', byKind.step);
         _renderRegistryGrid('registry-emitters-container', byKind.emitter);
+        window._registryVizEntries = byKind.visualization;
         _renderRegistryGrid('registry-visualizations-container', byKind.visualization);
         _renderRegistryTypesGrid('registry-types-container', types);
+
+        // Enrich Visualizations + populate the new Analyses tab from the class
+        // catalog (/api/visualization-classes) — the catalog the Analyses page
+        // used to own now lives in the Registry. Best-effort.
+        window.DataSource.loadVisualizationClasses()
+          .then(function(vc) { _enrichRegistryWithVizClasses((vc && vc.classes) || []); })
+          .catch(function() { _enrichRegistryWithVizClasses([]); });
 
         // Per-tab count badges: show workspace-declared count + total in parens.
         // "in_workspace" entries are the actionable ones; environment_only are dimmed.
