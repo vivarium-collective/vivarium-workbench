@@ -708,13 +708,17 @@ def _do_build(
         # above), so stage it too or its URLs stay root-absolute (/reports/...)
         # and 404 under a hosting base path. (_apply_base_path only rewrites
         # /assets/ + /bigraph-loom/, not embed URLs.)
-        _stage_embed_visualizations(spec, ws_root, out_dir, base_path)
-        study_html = _render_study_detail_html(slug, spec)
-        study_html = _normalize_asset_urls(study_html)
-        study_html = _apply_base_path(study_html, base_path)
-        study_html = _set_snapshot_config(
-            study_html, interactive_url=interactive_url, base_path=base_path,
-        )
+        try:
+            _stage_embed_visualizations(spec, ws_root, out_dir, base_path)
+            study_html = _render_study_detail_html(slug, spec)
+            study_html = _normalize_asset_urls(study_html)
+            study_html = _apply_base_path(study_html, base_path)
+            study_html = _set_snapshot_config(
+                study_html, interactive_url=interactive_url, base_path=base_path,
+            )
+        except Exception as exc:  # noqa: BLE001 — one bad study must not abort the whole publish
+            print(f"  warn: study-shell render failed for {slug!r}: {exc}")
+            continue
         shell_dir = out_dir / "studies" / slug
         shell_dir.mkdir(parents=True, exist_ok=True)
         (shell_dir / "index.html").write_text(study_html, encoding="utf-8")
