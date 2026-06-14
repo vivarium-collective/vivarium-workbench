@@ -38,6 +38,25 @@
   </h1>
 </header>
 
+{# Composite-resolution lint banner (framework-emitters). Surfaced server-side
+   from the live registry via composite_lookup.unresolved_study_composite_refs:
+   any baseline/condition/simulation_set composite ref that doesn't resolve to a
+   registered composite. This is what would have caught the autopoiesis studies
+   2–4 (numpy-only, no registered composite). Hidden when everything resolves. #}
+{% if unresolved_composites %}
+<div class="composite-lint-banner" role="alert"
+     style="margin:8px 0 14px 0;padding:10px 14px;background:#fffbeb;border:1px solid #f59e0b;border-left-width:5px;border-radius:6px;color:#92400e;font-size:0.9em">
+  {% for _ref in unresolved_composites %}
+  <div>⚠ composite not found in registry: <code>{{ _ref }}</code></div>
+  {% endfor %}
+  <div style="margin-top:4px;font-size:0.86em;color:#a16207">
+    This study references a composite that doesn't resolve — it may not declare a
+    real, registered composite. Add a <code>.composite.yaml</code> and register it
+    in <code>core.py</code>, or fix the ref.
+  </div>
+</div>
+{% endif %}
+
 {# Spine A3: readiness panel. Populated by study-detail.js from GET
    /api/report-lint (the deterministic report linter), filtered to this study.
    Mirrors the param-enforcement banner: surfaced, connected to its source (the

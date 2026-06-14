@@ -3804,6 +3804,16 @@
       p = fetch(url).then(function(r) { return r.json(); });
     }
     p.then(function(data) {
+        if (data.unresolved) {
+          // Honest degrade: the ref doesn't resolve to a registered composite.
+          // Don't render a bare "error composite" node — explain it plainly.
+          document.getElementById('ce-loading').innerHTML =
+            '<div style="color:#92400e;background:#fffbeb;border:1px solid #f59e0b;' +
+            'border-radius:6px;padding:10px 14px">⚠ Composite not found in the ' +
+            'registry: <code>' + _esc(data.ref || id) + '</code>. This study may not ' +
+            'declare a real composite — check the study’s baseline composite ref.</div>';
+          return;
+        }
         if (data.error) {
           document.getElementById('ce-loading').innerHTML =
             '<span style="color:#c00">Error: ' + _esc(data.error) + '</span>';
@@ -13474,6 +13484,13 @@
   // "XArray"). Colors live in CSS classes emitter-sqlite/parquet/xarray.
   function _simEmitterPill(emitterType) {
     var t = (emitterType || 'SQLite');
+    // "—" = genuinely emitter-less run (summary recorded in study.yaml, no
+    // per-step trajectory persisted). Render an honest dash with a tooltip
+    // rather than a fake emitter pill.
+    if (t === '—' || t === 'none' || t === '') {
+      return '<span class="emitter-pill emitter-none" ' +
+        'title="no emitter (summary-only run)">—</span>';
+    }
     var cls = 'emitter-' + t.toLowerCase();
     return '<span class="emitter-pill ' + cls + '" ' +
       'title="emitter / persistence format">' + _escSim(t) + '</span>';

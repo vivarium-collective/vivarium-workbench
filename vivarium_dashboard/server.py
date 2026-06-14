@@ -3353,7 +3353,7 @@ def _simulations_data(ws_root: Path) -> dict:
     try:
         from vivarium_dashboard.lib.runs_index import emitter_type_of
         _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray",
-                          "none": "Recorded"}  # study.yaml-recorded run, no step emitter
+                          "none": "—"}  # no step emitter (summary-only run)
         for s in sims:
             tag = (s.get("emitter") or "").lower()
             s["emitter_type"] = _emitter_label.get(tag) or emitter_type_of(s.get("db_path"))
@@ -6125,10 +6125,22 @@ def _render_study_detail_html(name: str, spec: dict) -> str:
         epistemic_debts = open_epistemic_debts(spec) or []
     except Exception:
         epistemic_debts = []
+    # Composite-resolution lint: flag declared composite refs that don't resolve
+    # against the live registry (would have caught autopoiesis studies 2–4).
+    unresolved_composites = []
+    try:
+        from vivarium_dashboard.lib.composite_lookup import (
+            known_composite_ids, unresolved_study_composite_refs,
+        )
+        unresolved_composites = unresolved_study_composite_refs(
+            spec, known_composite_ids(WORKSPACE)) or []
+    except Exception:
+        unresolved_composites = []
     return tpl.render(study=spec, name=name,
                       display_name=spec.get("title") or _hn["title"],
                       name_chip=_hn["chip"], ptools_enabled=_ptools_enabled,
-                      epistemic_debts=epistemic_debts)
+                      epistemic_debts=epistemic_debts,
+                      unresolved_composites=unresolved_composites)
 
 
 def _humanize_study_name(slug: str) -> dict:
@@ -7507,7 +7519,65 @@ def _report_lint(ws_root: Path):
             "message":    d.get("message", ""),
             "field_path": d.get("field_path", ""),
         })
+
+    # Composite-resolution lint — the linter works on specs and has no registry,
+    # but the dashboard DOES. For each study, flag declared composite refs that
+    # don't resolve against the live registry. This is what would have caught the
+    # autopoiesis studies 2–4 (numpy-only, no registered composite).
+    findings.extend(_composite_resolution_findings(ws_root))
     return _json_body({"findings": findings}), 200
+
+
+def _composite_resolution_findings(ws_root: Path) -> list[dict]:
+    """For every study in the workspace, return report-lint findings for any
+    declared composite ref that does NOT resolve to a registered composite.
+
+    Uses the dashboard's live registry (``known_composite_ids``) + the helper
+    ``unresolved_study_composite_refs`` (which prefers pbg_superpowers'
+    ``report_linter.unresolved_composite_refs`` when available). Tolerant:
+    returns ``[]`` on any failure so the readiness panel never 500s.
+    """
+    ws_root = Path(ws_root)
+    out: list[dict] = []
+    try:
+        from vivarium_dashboard.lib.composite_lookup import (
+            known_composite_ids, unresolved_study_composite_refs,
+        )
+        known = known_composite_ids(ws_root)
+    except Exception:  # noqa: BLE001
+        return out
+    try:
+        wp = WorkspacePaths.load(ws_root)
+        studies_root = wp.studies
+    except Exception:  # noqa: BLE001
+        return out
+    if not studies_root.is_dir():
+        return out
+    for d in sorted(studies_root.iterdir()):
+        f = d / "study.yaml"
+        if not f.is_file():
+            continue
+        try:
+            spec = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+        except Exception:  # noqa: BLE001
+            continue
+        if not isinstance(spec, dict):
+            continue
+        try:
+            unresolved = unresolved_study_composite_refs(spec, known)
+        except Exception:  # noqa: BLE001
+            continue
+        for ref in unresolved:
+            out.append({
+                "study": d.name,
+                "check": "unresolved_composite",
+                "severity": "warning",
+                "message": (f"composite not found in registry: {ref} — the study "
+                            "references a composite that doesn't resolve (it may not "
+                            "declare a real, registered composite)"),
+                "field_path": "baseline[].composite",
+            })
+    return out
 
 
 def _linkage_cached_index(ws_root: Path):
@@ -10452,7 +10522,7 @@ if __name__ == "__main__":
         # source tag didn't resolve.
         from vivarium_dashboard.lib.runs_index import emitter_type_of
         _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray",
-                          "none": "Recorded"}  # study.yaml-recorded run, no step emitter
+                          "none": "—"}  # no step emitter (summary-only run)
         for s in sims:
             tag = (s.get("emitter") or "").lower()
             s["emitter_type"] = _emitter_label.get(tag) or emitter_type_of(s.get("db_path"))
@@ -14362,7 +14432,16 @@ if __name__ == "__main__":
                 path = candidate
 
         if path is None or not path.is_file():
-            return self._json({"error": f"composite not found: {ref}"}, 404)
+            # Honest, structured degrade payload so the loom / Composites view can
+            # render "composite not found / not a registered composite — this study
+            # may not declare a real composite" instead of a bare "error composite"
+            # node. ``unresolved: true`` is the machine-readable flag the client keys on.
+            return self._json({
+                "error": (f"composite not found: {ref} — not a registered composite "
+                          "(this study may not declare a real composite)"),
+                "unresolved": True,
+                "ref": ref,
+            }, 404)
 
         try:
             text = path.read_text(encoding="utf-8")
@@ -14444,7 +14523,15 @@ if __name__ == "__main__":
 
         path = find_composite_path(WORKSPACE, pkg, spec_id)
         if path is None:
-            return self._json({"error": f"spec file not found for id {spec_id}"}, 404)
+            # Honest degrade payload (see _get_composite_state): the explorer
+            # renders "composite not found / not a registered composite" rather
+            # than a bare error node, keying on ``unresolved``.
+            return self._json({
+                "error": (f"composite not found: {spec_id} — not a registered "
+                          "composite (this study may not declare a real composite)"),
+                "unresolved": True,
+                "ref": spec_id,
+            }, 404)
 
         text = path.read_text(encoding="utf-8")
         if path.suffix.lower() == ".json":

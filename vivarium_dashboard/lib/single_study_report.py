@@ -1964,7 +1964,8 @@ def _resolve_composite_doc(ws_root: Path, spec: dict) -> Optional[dict]:
 def _render_html(study_spec: dict, viz_entries: list[dict],
                  *, investigation_slug: Optional[str], generated_at: str,
                  composite_doc: Optional[dict] = None,
-                 skeptic: bool = False) -> str:
+                 skeptic: bool = False,
+                 unresolved_composites: Optional[list] = None) -> str:
     rep = study_spec.get("report") or {}
     # Authored ``report:`` fields win; absent ones are DERIVED from real study
     # content so minimal studies still render the standard structure.
@@ -2175,6 +2176,27 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
         '</div>'
     )
 
+    # Composite-resolution lint banner — declared composite refs that don't
+    # resolve against the live registry (would have caught autopoiesis studies
+    # 2–4). Rendered prominently right under the header; hidden when all resolve.
+    composite_lint_html = ""
+    if unresolved_composites:
+        _rows = "".join(
+            f'<div>⚠ composite not found in registry: <code>{_h(str(r))}</code></div>'
+            for r in unresolved_composites
+        )
+        composite_lint_html = (
+            '<div class="composite-lint-banner" role="alert" '
+            'style="margin:14px 0;padding:10px 14px;background:#fffbeb;'
+            'border:1px solid #f59e0b;border-left-width:5px;border-radius:6px;'
+            'color:#92400e;font-size:0.92em">'
+            f'{_rows}'
+            '<div style="margin-top:4px;font-size:0.9em;color:#a16207">'
+            'This study references a composite that doesn’t resolve — it may not '
+            'declare a real, registered composite.</div>'
+            '</div>'
+        )
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2236,6 +2258,8 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
   {quality_html}
 </header>
 
+{composite_lint_html}
+
 {body_main}
 
 <div class="footer">
@@ -2279,12 +2303,24 @@ def render_single_study_report(
     # model card renders from the same doc the explorer uses. Best-effort; the
     # card is omitted when resolution fails (no composite / import-light env).
     composite_doc = _resolve_composite_doc(ws_root, study_spec)
+    # Composite-resolution lint (framework-emitters): declared composite refs
+    # that don't resolve against the live registry. Best-effort; empty on failure.
+    unresolved_composites: list[str] = []
+    try:
+        from vivarium_dashboard.lib.composite_lookup import (
+            known_composite_ids, unresolved_study_composite_refs,
+        )
+        unresolved_composites = unresolved_study_composite_refs(
+            study_spec, known_composite_ids(ws_root)) or []
+    except Exception:
+        unresolved_composites = []
     html = _render_html(
         study_spec, viz_entries,
         investigation_slug=investigation_slug,
         generated_at=generated_at,
         composite_doc=composite_doc,
         skeptic=skeptic,
+        unresolved_composites=unresolved_composites,
     )
 
     out_dir = Path(out_dir) if out_dir is not None else WorkspacePaths.load(ws_root).reports
