@@ -1220,12 +1220,23 @@
     var meta = [];
     if (v.study) meta.push('study: ' + _esc(v.study));
     if (v.n_placed) meta.push(Number(v.n_placed).toLocaleString() + ' instances');
+    // How the model was built. Server may supply a per-pack `description`;
+    // otherwise fall back to the default E. coli structural-model blurb.
+    var desc = v.description ||
+      'Generated from <strong>v2ecoli</strong>\'s whole-cell molecular state: the ' +
+      'simulated copy number of each protein and complex sets how many copies are ' +
+      'placed in the cell. Each species is mapped to a real 3D structure &mdash; ' +
+      'AlphaFold-predicted monomers plus curated experimental assemblies (e.g. the ' +
+      '70S ribosome and RNA polymerase) &mdash; and packed into a capsule-shaped ' +
+      'cell volume by the <strong>parsimony</strong> engine, a Rust cellPACK-style ' +
+      'packer (via pbg-parsimony). Colors group molecules by functional category.';
     return '<div class="analyses-card">' +
       '<div class="analyses-card-head">' +
         '<strong>' + _esc(v.name || '3D model') + '</strong>' +
         '<a class="btn-mini" href="' + _esc(src) + '" target="_blank" rel="noopener" title="Open full-window in a new tab">Open &#8599;</a>' +
       '</div>' +
       (meta.length ? '<div class="muted" style="font-size:0.82em;margin:2px 0 6px">' + meta.join(' &middot; ') + '</div>' : '') +
+      '<p class="muted" style="font-size:0.85em;line-height:1.45;margin:2px 0 8px">' + desc + '</p>' +
       '<iframe class="viz-embed" src="' + _esc(src) + '" loading="lazy" ' +
         'style="width:100%;height:460px;border:1px solid #2a313c;border-radius:6px;background:#0e1116"></iframe>' +
     '</div>';
