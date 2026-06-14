@@ -145,16 +145,24 @@ window.addEventListener('pageshow', function (e) {
 .viv-workspace-name .viv-workspace-switcher-glyph { font-size: 8px; }
 .viv-workspace-switcher-glyph { color: #2ea043; font-size: 14px; }
 .viv-glyph-running { color: #2ea043; }
-/* GitHub repo link under the workspace name. */
-.viv-rail-repo {
-  display: inline-flex; align-items: center; gap: 6px;
-  margin: -2px 16px 10px; padding: 3px 8px;
-  font-size: 11.5px; font-weight: 500; line-height: 1;
-  color: #475569; text-decoration: none;
-  border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc;
+/* The workspace name links to its GitHub repo; a small mark signals it. */
+.viv-ws-repo-link {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: inherit; text-decoration: none;
 }
-.viv-rail-repo:hover { color: #0f172a; border-color: #cbd5e1; background: #f1f5f9; }
-.viv-rail-repo svg { flex: none; }
+.viv-ws-repo-link strong { font-weight: 600; }
+.viv-ws-repo-link:hover { color: #0f172a; }
+.viv-ws-gh-mark { flex: none; color: #94a3b8; }
+.viv-ws-repo-link:hover .viv-ws-gh-mark { color: #0f172a; }
+/* Collapsed rail: a single centered GitHub mark (the switcher is hidden). */
+.viv-rail-repo-mini { display: none; }
+.viv-rail.viv-rail-collapsed .viv-rail-repo-mini {
+  display: flex; justify-content: center; align-items: center;
+  padding: 2px 0 12px; color: #64748b;
+}
+.viv-rail.viv-rail-collapsed .viv-rail-repo-mini:hover { color: #0f172a; }
+/* Keep the snapshot repo label out of the collapsed rail (avoids truncation). */
+.viv-rail.viv-rail-collapsed #snapshot-repo-label { display: none !important; }
 .viv-glyph-stopped { color: #999; }
 .viv-glyph-stale   { color: #d29922; }
 .viv-glyph-missing { color: #cf222e; }
@@ -343,28 +351,44 @@ window.addEventListener('pageshow', function (e) {
       </div>
     </div>
 
+    {% if repo_url %}
+    <!-- GitHub mark, defined once and reused (workspace-name link + collapsed icon). -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="viv-gh-mark" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></symbol></svg>
+    {% endif %}
+
     <div class="viv-workspace-switcher" id="viv-workspace-switcher">
-      <!-- One dashboard per repo: the workspace name is built in here, no switcher. -->
+      <!-- One dashboard per repo: the workspace name IS the link to the
+           associated GitHub repository (git remote origin). -->
       <div class="viv-workspace-name">
         <span class="viv-workspace-switcher-glyph">●</span>
+        {% if repo_url %}
+        <a class="viv-ws-repo-link" href="{{ repo_url }}" target="_blank" rel="noopener"
+           title="Open {{ workspace_name }} on GitHub">
+          <strong>{{ workspace_name }}</strong>
+          <svg class="viv-ws-gh-mark" width="12" height="12"><use href="#viv-gh-mark"/></svg>
+        </a>
+        {% else %}
         <strong>{{ workspace_name }}</strong>
+        {% endif %}
       </div>
     </div>
     <!-- Snapshot mode: static repo label replaces the switcher dropdown. -->
     <div class="viv-repo-label" id="snapshot-repo-label" style="display:none">
       <span class="viv-workspace-switcher-glyph">●</span>
+      {% if repo_url %}
+      <a class="viv-ws-repo-link" href="{{ repo_url }}" target="_blank" rel="noopener"
+         title="Open {{ workspace_name }} on GitHub"><strong>{{ workspace_name }}</strong>
+        <svg class="viv-ws-gh-mark" width="12" height="12"><use href="#viv-gh-mark"/></svg></a>
+      {% else %}
       <strong>{{ workspace_name }}</strong>
+      {% endif %}
     </div>
 
     {% if repo_url %}
-    <!-- Link to the GitHub repository this workspace is associated with
-         (derived from `git remote origin`; present in live + published modes). -->
-    <a class="viv-rail-repo" href="{{ repo_url }}" target="_blank" rel="noopener"
-       title="Open this workspace's GitHub repository">
-      <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
-        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/>
-      </svg>
-      <span>GitHub</span>
+    <!-- Collapsed rail: a single centered GitHub mark linking to the repo. -->
+    <a class="viv-rail-repo-mini" href="{{ repo_url }}" target="_blank" rel="noopener"
+       title="Open {{ workspace_name }} on GitHub" aria-label="GitHub repository">
+      <svg width="17" height="17"><use href="#viv-gh-mark"/></svg>
     </a>
     {% endif %}
 
