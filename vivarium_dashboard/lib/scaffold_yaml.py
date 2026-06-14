@@ -467,13 +467,26 @@ runtime:
 
 # ─── Narrative spine ─────────────────────────────────────────────────
 #
-# executive:                        # headline panel at the top of the report
+# REQUIRED (lint-gated): executive · scientific_argument · biological_story.
+# A reviewer-ready investigation report must carry these three authored
+# sections. The linter (investigation_narrative_spine_required) emits a
+# warning for each missing one. For a GENUINELY SLIM investigation you may
+# explicitly opt out per-section:
+#
+#   narrative_spine_skip: [scientific_argument, biological_story]
+#   narrative_spine_skip_reason: "single-study screen; full narrative not warranted"
+#
+# (executive / scientific_argument / biological_story are the AUTHORED
+#  sections; "Decisions needed" + "Suggested additions" are framework-computed
+#  and never author-required.)
+#
+# executive:                        # ★REQUIRED — headline panel at the top of the report
 #   what_is_this: ""
 #   verdict: ""
 #   verdict_status: in-progress     # in-progress | passing | passing-with-caveats | failing | inconclusive | not-yet-run
 #   decisions_needed: []
 #
-# scientific_argument:              # structured claim/evidence
+# scientific_argument:              # ★REQUIRED — structured claim/evidence
 #   main_claim: ""
 #   evidence_for: []
 #   evidence_against: []
@@ -481,7 +494,7 @@ runtime:
 #   caveats: []
 #   interpretation_ref: ""
 #
-# biological_story: |
+# biological_story: |               # ★REQUIRED — multi-paragraph plain-English mechanism narrative
 #   (multi-paragraph plain-English mechanism narrative)
 #
 # at_a_glance:                      # one-line role per member study
