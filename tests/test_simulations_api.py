@@ -194,3 +194,26 @@ def test_delete_simulation_run_400_missing_run_id(server):
     status, body = _delete(f"{base}/api/simulation-run", {})
     assert status == 400
     assert "error" in body
+
+
+def test_post_route_matches_with_query_string(server):
+    """do_POST must strip the query string before route lookup (mirrors do_GET).
+
+    Regression: before the fix, ANY POST carrying a query string 404'd at the
+    router — including handlers that explicitly read query params (e.g.
+    ``/api/study-report-single?skeptic=1`` for the "View as skeptic" button).
+    We assert the route is REACHED (the handler's own 400 for a missing study),
+    not the router's bare 404 "not found".
+    """
+    import urllib.error
+    base = server["url"]
+    req = urllib.request.Request(
+        f"{base}/api/study-report-single?skeptic=1",
+        data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        urllib.request.urlopen(req, timeout=15)
+        assert False, "expected a 4xx error"
+    except urllib.error.HTTPError as e:
+        body = json.loads(e.read().decode())
+        assert e.code == 400, f"route not reached (got {e.code}: {body})"
+        assert "study" in (body.get("error") or "").lower()

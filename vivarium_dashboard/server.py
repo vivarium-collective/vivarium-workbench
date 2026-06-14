@@ -8160,10 +8160,17 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError as e:
             return self._json({"error": f"invalid JSON: {e}"}, 400)
 
-        if self.path.startswith("/api/study-refresh-viz/"):
+        # Match the route on the path WITHOUT its query string (mirrors do_GET).
+        # self.path is left intact so handlers can still read query params
+        # (e.g. _post_study_report_single honours ?skeptic=1). Without this,
+        # any POST carrying a query string 404s — including handlers that
+        # explicitly support query params.
+        post_path_only = self.path.split("?", 1)[0]
+
+        if post_path_only.startswith("/api/study-refresh-viz/"):
             return self._post_study_refresh_viz(body)
 
-        method_name = _POST_ROUTE_MAP.get(self.path)
+        method_name = _POST_ROUTE_MAP.get(post_path_only)
         if method_name is None:
             return self._json({"error": "not found"}, 404)
         getattr(self, method_name)(body)
