@@ -50,6 +50,12 @@
       : "/api/study/" + encodeURIComponent(slug);
   }
 
+  function _studyChartsUrl(slug) {
+    return cfg().mode === "snapshot"
+      ? _base() + "/api/study-charts/" + encodeURIComponent(slug) + ".json"
+      : "/api/study-charts/" + encodeURIComponent(slug);
+  }
+
   function _isetUrl(id) {
     return cfg().mode === "snapshot"
       ? _base() + "/api/iset/" + encodeURIComponent(id) + ".json"
@@ -139,6 +145,17 @@
      */
     async loadStudy(slug) {
       return _get(_studyUrl(slug));
+    },
+
+    /**
+     * Load the study's Visualizations-tab charts payload.
+     * Local mode:    fetches GET /api/study-charts/<slug> (live + static)
+     * Snapshot mode: fetches /api/study-charts/<slug>.json (static charts
+     *                base64-embedded at publish time) from the static bundle.
+     * @param {string} slug - the study slug.
+     */
+    async loadStudyCharts(slug) {
+      return _get(_studyChartsUrl(slug));
     },
 
     /**
