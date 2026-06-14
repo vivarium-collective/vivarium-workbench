@@ -204,6 +204,18 @@ class TestV4StudyScaffold:
         # Still parses (the new fields are comments, not live YAML).
         yaml.safe_load(text)
 
+    def test_baseline_requires_real_composite_note(self):
+        """framework-emitters — the baseline block carries a note that the
+        composite MUST be a real, registered composite (dashboard lints
+        unresolved refs) and that runs persist via the workspace emitter."""
+        text = v4_study_scaffold("s", composite="pkg.composites.foo")
+        assert "registered composite" in text
+        assert "composite not found in registry" in text
+        assert "runtime.default_emitter" in text
+        # Still parses + the live baseline ref is unchanged.
+        spec = yaml.safe_load(text)
+        assert spec["baseline"][0]["composite"] == "pkg.composites.foo"
+
     def test_prerequisite_item_documents_relation_key(self):
         """W13 — the commented pipeline_gate.prerequisites template surfaces
         the optional `relation` key + its vocabulary so authors know an edge
@@ -283,6 +295,18 @@ class TestV2InvestigationScaffold:
         for v in ("supports", "weakens", "excludes"):
             assert v in text, f"missing support_log delta term: {v}"
         yaml.safe_load(text)
+
+    def test_runtime_default_emitter_seeded_live(self):
+        """framework-emitters — the investigation scaffold sets a LIVE
+        runtime.default_emitter so every member study persists runs via an
+        emitter by default (sqlite)."""
+        text = v2_investigation_scaffold("my-inv")
+        spec = yaml.safe_load(text)
+        assert spec["runtime"]["default_emitter"] == "sqlite"
+
+    def test_runtime_default_emitter_validates(self, inv_schema):
+        text = v2_investigation_scaffold("my-inv")
+        jsonschema.validate(yaml.safe_load(text), inv_schema)
 
     def test_object_of_evaluation_marker_present(self):
         """Wave 3a #1 — the investigation scaffold offers object_of_evaluation

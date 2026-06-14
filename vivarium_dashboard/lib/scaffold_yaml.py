@@ -48,9 +48,22 @@ def v4_study_scaffold(
     """
     created = created or datetime.date.today().isoformat()
     bname = baseline_name or "baseline"
+    # The baseline composite MUST reference a REAL, registered composite (one
+    # that resolves in /api/composites — a .composite.yaml registered in
+    # core.py, or an installed pbg-* composite / @composite_generator). The
+    # dashboard lints unresolved refs (composite-resolution lint) and flags any
+    # study whose baseline doesn't resolve. Runs of this study PERSIST via the
+    # workspace's emitter (runtime.default_emitter — sqlite by default).
+    baseline_note = (
+        "# baseline.composite MUST be a REAL, registered composite (resolves in\n"
+        "# the Composites registry / /api/composites). The dashboard flags an\n"
+        "# unresolved ref with a 'composite not found in registry' banner. Runs\n"
+        "# persist via the workspace emitter (runtime.default_emitter: sqlite).\n"
+    )
     if composite:
         baseline_block = (
-            f"baseline:\n"
+            baseline_note
+            + f"baseline:\n"
             f"  - name: {bname}\n"
             f"    composite: {composite}\n"
             f"    params: {{}}\n"
@@ -60,7 +73,8 @@ def v4_study_scaffold(
         # (^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$) so the scaffold validates
         # out of the box. The user replaces it with their real composite ref.
         baseline_block = (
-            f"baseline:\n"
+            baseline_note
+            + f"baseline:\n"
             f"  - name: {bname}\n"
             f"    composite: replace_me.composites.placeholder\n"
             f"    params: {{}}\n"
@@ -424,6 +438,13 @@ name: {name}
 title: "{title}"
 created: '{created}'
 status: planning
+
+# runtime — execution defaults inherited by this investigation's studies.
+# default_emitter is the persistence backend every run uses so its trajectory
+# is recorded (not just a summary). sqlite is the portable default; xarray
+# suits large ensembles. A per-study runtime.emitter overrides this.
+runtime:
+  default_emitter: sqlite           # sqlite | xarray
 
 # object_of_evaluation: model       # critique #1 — what this investigation
 #                                    # primarily evaluates: method | model |
