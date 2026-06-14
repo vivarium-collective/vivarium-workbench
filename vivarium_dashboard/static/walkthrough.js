@@ -7060,6 +7060,17 @@
     var frameworkScorecardHtml = _frameworkScorecardHtml(frameworkMetrics);  // #26
     var competingHypothesesHtml = _competingHypothesesHtml(hypotheses);      // #6/#16
 
+    // Reader-centered reorder: precomputed booleans gate the new top-nav links
+    // so we only emit a nav anchor when that section will actually render.
+    var _hasOpenQuestions = !!(((iset.executive || {}).decisions_needed || []).length
+      || (needsAttentionReportHtml && needsAttentionReportHtml.trim()));
+    var _hasRoadmap = !!(verdictDagHtml && verdictDagHtml.trim());
+    var _hasAppendices = !!((acGatingMatrixHtml && acGatingMatrixHtml.trim())
+      || (rigorSectionHtml && rigorSectionHtml.trim())
+      || (frameworkScorecardHtml && frameworkScorecardHtml.trim())
+      || (competingHypothesesHtml && competingHypothesesHtml.trim())
+      || ((iset.proposed_inputs || {}).items || []).length);
+
     // Data-driven flags so the "How to read" guide describes only what this
     // investigation actually contains — no workspace-specific boilerplate.
     var hasDag = specs.some(function(s) {
@@ -8880,6 +8891,11 @@
             '</div>';
       }
 
+      // Reviewer-tier wrapper: technical/method subsections hide in Scientist
+      // mode (body.mode-scientist .tier-reviewer{display:none}) and show in
+      // Reviewer mode. Empty subsections stay empty (no stray wrapper div).
+      var _rv = function(h){ return (h && String(h).trim()) ? '<div class="tier-reviewer">' + h + '</div>' : ''; };
+
       if (isPlanning) {
         // Planning-phase layout — minimal, expert-comment-driven.
         // The <header class="study-header"> chrome (num + slug + phase
@@ -8898,23 +8914,23 @@
           +   subNav
           +   '<div class="study-planning-pill">PLANNING — not yet run</div>'
           +   modelBannerHtml     // 🧬 Model: composite(s) + params + loom static popout (PROMINENT)
-          +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
-          +   enforcementHtml     // ⚠ declared params not applied (D.2)
-          +   readinessHtml       // ✓/⚠ lint readiness panel (A3)
-          +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
-          +   feedbackHtml        // 💬 imported expert feedback (B.1)
-          +   commitmentHtml      // Theoretical commitment (C-COMMIT)
-          +   invariantsHtml      // Invariant checks (C-INVAR)
+          +   _rv(statusDriftHtml)     // ⚠ status out of date vs runs (#2)
+          +   _rv(enforcementHtml)     // ⚠ declared params not applied (D.2)
+          +   _rv(readinessHtml)       // ✓/⚠ lint readiness panel (A3)
+          +   _rv(reviewHtml)          // ⚠ review-readiness gates (duration / param-vs-reference)
+          +   _rv(feedbackHtml)        // 💬 imported expert feedback (B.1)
+          +   _rv(commitmentHtml)      // Theoretical commitment (C-COMMIT)
+          +   _rv(invariantsHtml)      // Invariant checks (C-INVAR)
           +   summaryHtml         // Question / purpose
-          +   conditionsHtml      // Conditions: variants + model settings (PROMINENT)
-          +   testsHtml           // Expected behavior / tests (PROMINENT for comments)
-          +   representationHtml   // Representation claims (C-MODELCARD)
+          +   _rv(conditionsHtml)      // Conditions: variants + model settings (PROMINENT)
+          +   _rv(testsHtml)           // Expected behavior / tests (PROMINENT for comments)
+          +   _rv(representationHtml)   // Representation claims (C-MODELCARD)
           +   chartsWithBaselineNoticeHtml  // Baseline charts with BASELINE label
           +   embedsHtml          // Embedded preview HTMLs
           +   readoutsHtml        // What we'll measure
-          +   buildHtml           // Model change (collapsed-ish, technical)
+          +   _rv(buildHtml)           // Model change (collapsed-ish, technical)
           +   '<details class="study-technical-fold"><summary>Technical context (model changes · implementation tasks · follow-ups · limitations · refs)</summary>'
-          +     reqsHtml          // Implementation requirements
+          +     _rv(reqsHtml)          // Implementation requirements
           +     followUpsHtml     // Follow-ups
           +     discoveryHtml     // Discovery implications
           +     limitsHtml        // Limitations
@@ -8935,30 +8951,30 @@
         + '<section class="study">'
         +   subNav
         +   modelBannerHtml     // 🧬 Model: composite(s) + params + loom static popout (PROMINENT)
-        +   statusDriftHtml     // ⚠ status out of date vs runs (#2)
-        +   enforcementHtml     // ⚠ declared params not applied (D.2)
-        +   readinessHtml       // ✓/⚠ lint readiness panel (A3)
-        +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
-        +   feedbackHtml        // 💬 imported expert feedback (B.1)
-        +   commitmentHtml      // Theoretical commitment (C-COMMIT)
-        +   invariantsHtml      // Invariant checks (C-INVAR)
+        +   _rv(statusDriftHtml)     // ⚠ status out of date vs runs (#2)
+        +   _rv(enforcementHtml)     // ⚠ declared params not applied (D.2)
+        +   _rv(readinessHtml)       // ✓/⚠ lint readiness panel (A3)
+        +   _rv(reviewHtml)          // ⚠ review-readiness gates (duration / param-vs-reference)
+        +   _rv(feedbackHtml)        // 💬 imported expert feedback (B.1)
+        +   _rv(commitmentHtml)      // Theoretical commitment (C-COMMIT)
+        +   _rv(invariantsHtml)      // Invariant checks (C-INVAR)
         +   biologyGlanceHtml   // 0. Biology-at-a-glance
         +   mechanismNarrativeHtml  // 0a. Mechanism narrative (7 framework fields)
         +   summaryHtml         // 1. Plain-English summary (explanation leads, before charts)
         +   embedsHtml          // 1a. Embedded visualizations (after the explanation)
-        +   expertReviewHtml    // 2b. Pre-run expert review
+        +   _rv(expertReviewHtml)    // 2b. Pre-run expert review
         +   takeawaysHtml       // 3 + 4. Detailed findings
-        +   verdictsHtml        // Derived 3-track conclusion verdicts (computed)
-        +   causalHtml          // Causal necessity table (C-CF)
+        +   _rv(verdictsHtml)        // Derived 3-track conclusion verdicts (computed)
+        +   _rv(causalHtml)          // Causal necessity table (C-CF)
         +   discoveryHtml       // Discovery implications (directly under the findings)
-        +   conditionsHtml      // Conditions (what we set up) — grouped with the runs
-        +   simsHtml            // What did/will we run
+        +   _rv(conditionsHtml)      // Conditions (what we set up) — grouped with the runs
+        +   _rv(simsHtml)            // What did/will we run
         +   readoutsHtml        // What did/will we measure (above visualisations)
         +   chartsHtml          //    + Visualisations
-        +   testsHtml           // 7. How we judge success
-        +   buildHtml           // 8. Model changes
-        +   representationHtml   // Representation claims (C-MODELCARD)
-        +   reqsHtml            // 9. What to build/fix
+        +   _rv(testsHtml)           // 7. How we judge success
+        +   _rv(buildHtml)           // 8. Model changes
+        +   _rv(representationHtml)   // Representation claims (C-MODELCARD)
+        +   _rv(reqsHtml)            // 9. What to build/fix
         +   followUpsHtml       // 10. Next steps
         +   limitsHtml          // 11. Limitations
         +   synthesisHtml       // Read-only four-section conclusion synthesis (derived)
@@ -9557,6 +9573,8 @@
       + '.topbar a{font-size:0.83em;color:#334155;text-decoration:none;padding:4px 12px;border-radius:9999px;background:#f1f5f9;white-space:nowrap}'
       + '.topbar a:hover{background:#e2e8f0;color:#0f172a}'
       + '.topbar a.active{background:#dbeafe;color:#1e40af;font-weight:600}'
+      // (reader-mode toggle removed — the report always shows the full view;
+      //  the tier-reviewer/tier-developer wrappers remain as inert containers.)
       /* iset switcher dropdown at the right end of the topbar (margin-left:auto
          pushes it past the section links). Calls /api/investigation-registry
          to list peer dashboards; click a peer row to navigate. Trigger styled
@@ -10276,10 +10294,11 @@
       + '<nav class="topbar">'
       +   '<span class="tb-title">' + _h(iset.title || iset.name) + '</span>'
       +   '<a href="#" onclick="window.scrollTo({top:0,behavior:\'smooth\'});return false;">Top</a>'
-      /* "Acceptance" nav link removed alongside the section it pointed to */
-      /* "Suggested additions" nav link removed per request; the section itself
-         (id="proposed-inputs") stays in the body. */
+      // Top menu kept minimal: Top · Studies · Appendices · References. The
+      // Overview/Open-questions/Roadmap sections sit close together near the top
+      // and are easily reached from Top, so they're omitted from the bar.
       +   '<a href="#studies-heading">Studies</a>'
+      +   (_hasAppendices ? '<a href="#appendices">Appendices</a>' : '')
       +   '<a href="#references">References</a>'
       + '</nav>'
 
@@ -10293,36 +10312,10 @@
           ? 'for expert review — results below reflect completed runs.'
           : 'for expert review prior to execution.') + '</p>'
 
-      // Coordinated-generation provenance banner (expert-feedback A.3).
+      // ── Coordinated-generation provenance banner (expert-feedback A.3) ──
       +   generationBannerHtml
 
-      // Spine C2: the one-line acceptance headline stays inline; the detailed
-      // tables (gating matrix, study verdict map, needs-attention) fold into a
-      // collapsed section so the top of the report isn't a wall of tables.
-      +   acceptanceNarrativeHtml
-      +   (function() {
-            var inner = acGatingMatrixHtml + verdictDagHtml + needsAttentionReportHtml;
-            if (!inner || !inner.trim()) return '';
-            return '<details class="report-fold" id="acceptance-detail">'
-              + '<summary>How the verdict is computed — acceptance criteria, gating matrix &amp; study verdicts</summary>'
-              + inner + '</details>';
-          })()
-      // Competing hypotheses (#6/#16) — the rival explanations + their computed
-      // support trajectory, just above the rigor roll-up that grades the method.
-      +   competingHypothesesHtml
-
-      // Evidence & rigor roll-up — deterministic skeptic-feedback (controls,
-      // replication, alternatives, falsifiability, adversarial coverage).
-      +   rigorSectionHtml
-
-      // Framework scorecard — framework-self metrics across the workspace (#26).
-      +   frameworkScorecardHtml
-
-      // ── Execution-status banner (LEADS the report, before the folds) ────
-      // Accurate to the actual run state: a pre-execution review notice when
-      // nothing has run yet, otherwise a concise post-execution lead that names
-      // the still-planned studies. Placed at the very top so it never wedges
-      // between the collapsible sections.
+      // ── Execution-status / planning-phase banner — run-state context up top ──
       +   (function() {
             var alls = specs || [];
             var planning = alls.filter(function(s) { return !(s.runs || []).length && !(s.findings || []).length; });
@@ -10353,10 +10346,10 @@
               + '</div>';
           })()
 
-      // ── LAYER 1: EXECUTIVE ─────────────────────────────────────────────
-      // Authored narrative + conclusions for a human reviewer, at the very
-      // top. Reads iset.executive; renders nothing if the field is absent
-      // (older investigations fall back to Overview below).
+      // ── One-line acceptance headline (full gating/verdict tables → Roadmap + Appendices) ──
+      +   acceptanceNarrativeHtml
+
+      // ── LAYER 1: EXECUTIVE — authored narrative + verdict for the reviewer ──
       +   (function() {
             var ex = iset.executive || {};
             var dn = ex.decisions_needed || [];
@@ -10431,97 +10424,15 @@
             return h + '</details>';
           })()
 
-      // ── Decisions needed (top-level fold, pulled out of Executive) ──
-      +   (function() {
-            var dn = (iset.executive || {}).decisions_needed || [];
-            if (!dn.length) return '';
-            return '<details id="decisions-needed" class="report-fold"><summary>✋ Decisions needed from reviewers' + ' <span class="rf-chip">' + dn.length + ' item' + (dn.length===1?'':'s') + '</span>' + (dn[0] && dn[0].question ? ' <span class="rf-prev">next: ' + _h(_previewText(dn[0].question, 130)) + '</span>' : '') + '</summary><ol>'
-              + dn.map(function(d) {
-                  return '<li><strong>' + _h(d.question || '') + '</strong>'
-                    + (d.context ? '<div class="muted small">' + _multiline(d.context) + '</div>' : '')
-                    + '</li>';
-                }).join('') + '</ol></details>';
-          })()
+      // ── Biology — the mechanism this investigation models ──
+      +   ((iset.biological_story || '').trim()
+          ? '<details id="biology" class="report-fold">'
+            + '<summary>🧬 Biology — the mechanism this investigation models' + ' <span class="rf-prev">' + _h(_previewText(iset.biological_story || '', 175)) + '</span>' + '</summary>'
+            + '<p style="margin:0">' + _multiline(iset.biological_story) + '</p>'
+            + '</details>'
+          : '')
 
-      // ── PROPOSED INPUTS (pending expert approval) ──────────────────────
-      // Agent-suggested references / mechanisms the expert did NOT provide.
-      // They are NOT silently integrated: each is surfaced here for the
-      // expert to Accept (→ promoted to a real provided input) or Decline.
-      // Reads iset.proposed_inputs.items; renders nothing if absent/empty.
-      // Mirrors the follow-up-proposal Accept/Decline button pattern via
-      // _decideProposedInput → POST /api/proposed-input-decision.
-      +   (function() {
-            var pi = iset.proposed_inputs || {};
-            var items = pi.items || [];
-            if (!items.length) return '';
-            var pending = items.filter(function(it){ return (it.status||'pending')==='pending'; }).length;
-            function _kindBadge(kind) {
-              var k = (kind||'reference');
-              var bg = k === 'mechanism' ? '#faf5ff' : '#eff6ff';
-              var fg = k === 'mechanism' ? '#6b21a8' : '#1e40af';
-              return '<span style="font-size:0.7em;text-transform:uppercase;letter-spacing:0.05em;'
-                + 'padding:1px 8px;border-radius:9999px;background:' + bg + ';color:' + fg + '">' + _h(k) + '</span>';
-            }
-            function _statusPill(status) {
-              var s = (status||'pending');
-              var c = s === 'accepted' ? {bg:'#dcfce7',fg:'#166534'}
-                    : s === 'declined' ? {bg:'#fee2e2',fg:'#991b1b'}
-                    : {bg:'#fef3c7',fg:'#92400e'};
-              return '<span style="font-size:0.7em;padding:1px 8px;border-radius:9999px;background:'
-                + c.bg + ';color:' + c.fg + ';margin-left:6px">' + _h(s) + '</span>';
-            }
-            var cards = items.map(function(it) {
-              var status = it.status || 'pending';
-              var headline = (it.kind === 'mechanism') ? (it.summary || '(mechanism)') : (it.citation || '(reference)');
-              var rows = [];
-              if (it.related_study) rows.push('<div class="muted small"><strong>Related study:</strong> <code>' + _h(it.related_study) + '</code></div>');
-              if (it.rationale) rows.push('<div class="small" style="margin-top:4px"><strong>Rationale.</strong> ' + _multiline(it.rationale) + '</div>');
-              if (it.provenance) rows.push('<div class="muted small" style="margin-top:4px"><strong>Provenance.</strong> ' + _multiline(it.provenance) + '</div>');
-              if (it.proposed_by || it.proposed_at) {
-                rows.push('<div class="muted small" style="margin-top:4px">proposed by ' + _h(it.proposed_by || 'agent')
-                  + (it.proposed_at ? ' · ' + _h(String(it.proposed_at)) : '') + '</div>');
-              }
-              var actions;
-              if (status === 'pending') {
-                // No custom Accept/Decline buttons: reviewers annotate this
-                // section with the standard inline-feedback 💬 affordance
-                // (the section id="proposed-inputs" is an annotatable host),
-                // which round-trips reliably in the downloaded file:// report.
-                actions = '';
-              } else {
-                actions = '<div class="proposed-input-resolved muted small" style="margin-top:10px;font-style:italic">'
-                  + (status === 'accepted'
-                      ? '✓ Accepted by the expert' + (it.kind === 'reference' ? ' — added to the investigation\'s provided references.' : ' — a human integrates the mechanism.')
-                      : '✗ Declined by the expert — not integrated.')
-                  + '</div>';
-              }
-              var borderColor = status === 'accepted' ? '#16a34a' : status === 'declined' ? '#dc2626' : '#f59e0b';
-              return '<div class="proposed-input-card" data-item-id="' + _h(String(it.id||'')) + '" '
-                + 'style="padding:12px 14px;border:1px solid #e2e8f0;border-left:4px solid ' + borderColor
-                + ';border-radius:6px;background:#fff;margin-bottom:10px">'
-                + '<div style="display:flex;align-items:flex-start;gap:8px">'
-                +   '<div style="flex:1;min-width:0">'
-                +     _kindBadge(it.kind) + _statusPill(status)
-                +     '<div style="font-weight:600;margin-top:6px">' + _h(headline) + '</div>'
-                +     rows.join('')
-                +   '</div>'
-                + '</div>'
-                + actions
-                + '</div>';
-            }).join('');
-            var note = pi._note
-              ? '<p class="muted small" style="margin:0 0 10px 0">' + _multiline(pi._note) + '</p>'
-              : '<p class="muted small" style="margin:0 0 10px 0">These references / mechanisms were proposed by the agent and were '
-                + '<strong>not</strong> provided by the expert. Nothing here is integrated until you <strong>Accept</strong> it.</p>';
-            return '<details id="proposed-inputs" class="report-fold"><summary>🧩 Suggested additions — pending your approval'
-              + ' <span class="rf-chip">' + items.length + ' item' + (items.length===1?'':'s')
-              + (pending ? ' · ' + pending + ' pending' : '') + '</span></summary>'
-              + note + cards + '</details>';
-          })()
-
-      // ── LAYER 2: SCIENTIFIC ARGUMENT ───────────────────────────────────
-      // The claim and the evidence, for the reviewer. Reads
-      // iset.scientific_argument; renders nothing if absent.
+      // ── Key findings — the scientific argument ──
       +   (function() {
             var sa = iset.scientific_argument || {};
             var ef = sa.evidence_for || [], ea = sa.evidence_against || [],
@@ -10546,13 +10457,29 @@
             return h + '</details>';
           })()
 
+      // ── Open questions & decisions needed (decisions-needed + needs-attention) ──
+      +   (function() {
+            var dec = (function() {
+            var dn = (iset.executive || {}).decisions_needed || [];
+            if (!dn.length) return '';
+            return '<div class="tier-reviewer"><details id="decisions-needed" class="report-fold"><summary>✋ Decisions needed from reviewers' + ' <span class="rf-chip">' + dn.length + ' item' + (dn.length===1?'':'s') + '</span>' + (dn[0] && dn[0].question ? ' <span class="rf-prev">next: ' + _h(_previewText(dn[0].question, 130)) + '</span>' : '') + '</summary><ol>'
+              + dn.map(function(d) {
+                  return '<li><strong>' + _h(d.question || '') + '</strong>'
+                    + (d.context ? '<div class="muted small">' + _multiline(d.context) + '</div>' : '')
+                    + '</li>';
+                }).join('') + '</ol></details></div>';
+            })();
+            var na = needsAttentionReportHtml;
+            var inner = dec + na;
+            if (!inner || !inner.trim()) return '';
+            return '<h2 id="open-questions">Open questions &amp; decisions needed</h2>' + inner;
+          })()
 
-      +   ((iset.biological_story || '').trim()
-          ? '<details id="biology" class="report-fold">'
-            + '<summary>🧬 Biology — the mechanism this investigation models' + ' <span class="rf-prev">' + _h(_previewText(iset.biological_story || '', 175)) + '</span>' + '</summary>'
-            + '<p style="margin:0">' + _multiline(iset.biological_story) + '</p>'
-            + '</details>'
-          : '')
+      // ── Investigation roadmap — the study dependency / verdict graph ──
+      +   (function() {
+            if (!verdictDagHtml || !verdictDagHtml.trim()) return '';
+            return '<h2 id="roadmap">Investigation roadmap</h2>' + verdictDagHtml;
+          })()
 
       +   ''
 
@@ -10593,6 +10520,124 @@
       +   '</div>'
       +   studiesHtml
 
+
+      // ── Future work (iset.future_work / iset.next_steps) ──
+      +   (function() {
+            var fw = (iset.future_work !== undefined && iset.future_work !== null) ? iset.future_work : iset.next_steps;
+            if (fw === undefined || fw === null) return '';
+            var body;
+            if (Object.prototype.toString.call(fw) === '[object Array]') {
+              var its = fw.filter(function(x) { return x !== null && x !== undefined && String(x).trim(); });
+              if (!its.length) return '';
+              body = '<ul>' + its.map(function(x) { return '<li>' + _multiline(typeof x === 'string' ? x : (x.text || JSON.stringify(x))) + '</li>'; }).join('') + '</ul>';
+            } else {
+              var s = String(fw);
+              if (!s.trim()) return '';
+              body = '<p>' + _multiline(s) + '</p>';
+            }
+            return '<details id="future-work" class="report-fold"><summary>🔭 Future work</summary>' + body + '</details>';
+          })()
+
+      // ── Appendices — method-grading & verification detail (reviewer / developer tiers) ──
+      +   (function() {
+            var accFold = (acGatingMatrixHtml && acGatingMatrixHtml.trim())
+              ? '<details class="report-fold tier-reviewer" id="acceptance-detail"><summary>How the verdict is computed — acceptance criteria &amp; gating matrix</summary>' + acGatingMatrixHtml + '</details>'
+              : '';
+            var proposedHtml = (function() {
+            var pi = iset.proposed_inputs || {};
+            var items = pi.items || [];
+            if (!items.length) return '';
+            var pending = items.filter(function(it){ return (it.status||'pending')==='pending'; }).length;
+            function _kindBadge(kind) {
+              var k = (kind||'reference');
+              var bg = k === 'mechanism' ? '#faf5ff' : '#eff6ff';
+              var fg = k === 'mechanism' ? '#6b21a8' : '#1e40af';
+              return '<span style="font-size:0.7em;text-transform:uppercase;letter-spacing:0.05em;'
+                + 'padding:1px 8px;border-radius:9999px;background:' + bg + ';color:' + fg + '">' + _h(k) + '</span>';
+            }
+            function _statusPill(status) {
+              var s = (status||'pending');
+              var c = s === 'accepted' ? {bg:'#dcfce7',fg:'#166534'}
+                    : s === 'declined' ? {bg:'#fee2e2',fg:'#991b1b'}
+                    : {bg:'#fef3c7',fg:'#92400e'};
+              return '<span style="font-size:0.7em;padding:1px 8px;border-radius:9999px;background:'
+                + c.bg + ';color:' + c.fg + ';margin-left:6px">' + _h(s) + '</span>';
+            }
+            var cards = items.map(function(it) {
+              var status = it.status || 'pending';
+              var headline = (it.kind === 'mechanism') ? (it.summary || '(mechanism)') : (it.citation || '(reference)');
+              var rows = [];
+              if (it.related_study) rows.push('<div class="muted small"><strong>Related study:</strong> <code>' + _h(it.related_study) + '</code></div>');
+              if (it.rationale) rows.push('<div class="small" style="margin-top:4px"><strong>Rationale.</strong> ' + _multiline(it.rationale) + '</div>');
+              if (it.provenance) rows.push('<div class="muted small" style="margin-top:4px"><strong>Provenance.</strong> ' + _multiline(it.provenance) + '</div>');
+              if (it.proposed_by || it.proposed_at) {
+                rows.push('<div class="muted small" style="margin-top:4px">proposed by ' + _h(it.proposed_by || 'agent')
+                  + (it.proposed_at ? ' · ' + _h(String(it.proposed_at)) : '') + '</div>');
+              }
+              var actions;
+              if (status === 'pending') {
+                // Accept button — records the acceptance into the SAME
+                // feedback-report channel as the follow-up "➕ Add study"
+                // button (window._decideProposedInput → _annotate →
+                // _fbAddAnnotation). No server POST: the acceptance is
+                // serialized into the downloadable feedback YAML and applied
+                // when the agent imports it. Works identically served
+                // (http/https) or offline (file://). Reviewers can still use
+                // the inline 💬 affordance for free-form notes.
+                // Single-quoted args so they sit safely inside onclick="…".
+                var acceptArgs = "'" + _h(String(it.id||'')) + "', 'accept', this, '"
+                  + _h(String(it.kind||'reference')) + "'";
+                actions = '<div class="proposed-input-actions" style="margin-top:10px">'
+                  + '<button class="btn-accept-proposed-input" '
+                  + 'onclick="event.stopPropagation(); if(window._decideProposedInput){_decideProposedInput(' + acceptArgs + ');}'
+                  + 'else{alert(\'Open this investigation in the live dashboard to accept the suggestion.\');}" '
+                  + 'style="font-size:0.82em;padding:3px 10px;border:1px solid #16a34a;background:#f0fdf4;'
+                  + 'color:#166534;border-radius:6px;cursor:pointer;white-space:nowrap">✓ Accept — add via feedback report</button></div>';
+              } else {
+                actions = '<div class="proposed-input-resolved muted small" style="margin-top:10px;font-style:italic">'
+                  + (status === 'accepted'
+                      ? '✓ Accepted by the expert' + (it.kind === 'reference' ? ' — added to the investigation\'s provided references.' : ' — a human integrates the mechanism.')
+                      : '✗ Declined by the expert — not integrated.')
+                  + '</div>';
+              }
+              var borderColor = status === 'accepted' ? '#16a34a' : status === 'declined' ? '#dc2626' : '#f59e0b';
+              return '<div class="proposed-input-card" data-item-id="' + _h(String(it.id||'')) + '" '
+                + 'style="padding:12px 14px;border:1px solid #e2e8f0;border-left:4px solid ' + borderColor
+                + ';border-radius:6px;background:#fff;margin-bottom:10px">'
+                + '<div style="display:flex;align-items:flex-start;gap:8px">'
+                +   '<div style="flex:1;min-width:0">'
+                +     _kindBadge(it.kind) + _statusPill(status)
+                +     '<div style="font-weight:600;margin-top:6px">' + _h(headline) + '</div>'
+                +     rows.join('')
+                +   '</div>'
+                + '</div>'
+                + actions
+                + '</div>';
+            }).join('');
+            var note = pi._note
+              ? '<p class="muted small" style="margin:0 0 10px 0">' + _multiline(pi._note) + '</p>'
+              : '<p class="muted small" style="margin:0 0 10px 0">These references / mechanisms were proposed by the agent and were '
+                + '<strong>not</strong> provided by the expert. Nothing here is integrated until you <strong>Accept</strong> it.</p>';
+            return '<details id="proposed-inputs" class="report-fold"><summary>🧩 Suggested additions — pending your approval'
+              + ' <span class="rf-chip">' + items.length + ' item' + (items.length===1?'':'s')
+              + (pending ? ' · ' + pending + ' pending' : '') + '</span></summary>'
+              + note + cards + '</details>';
+            })();
+            var parts = [
+              accFold,
+              (rigorSectionHtml && rigorSectionHtml.trim()) ? '<div class="tier-reviewer">' + rigorSectionHtml + '</div>' : '',
+              (frameworkScorecardHtml && frameworkScorecardHtml.trim()) ? '<div class="tier-developer">' + frameworkScorecardHtml + '</div>' : '',
+              (competingHypothesesHtml && competingHypothesesHtml.trim()) ? '<div class="tier-reviewer">' + competingHypothesesHtml + '</div>' : '',
+              (proposedHtml && proposedHtml.trim()) ? '<div class="tier-reviewer">' + proposedHtml + '</div>' : ''
+            ];
+            var inner = parts.filter(Boolean).join('');
+            if (!inner.trim()) return '';
+            return '<div class="tier-reviewer">'
+              + '<h2 id="appendices">Appendices</h2>'
+              + '<p class="muted small">Method-grading and verification detail — kept at the back, after the main narrative.</p>'
+              + inner
+              + '</div>';
+          })()
       +   '<h2 id="references">References <span class="muted small">(' + orderedCited.length + ' cited across this investigation)</span></h2>'
       +   '<p class="muted small">Union of <code>bibliography.bib_keys</code> and per-behavior <code>cites:</code> across all studies in this investigation. Click DOI or link to open the source.</p>'
       +   '<ol class="references-list" style="line-height:1.6;font-size:0.93em">'
@@ -10690,14 +10735,14 @@
       +     'if(window._fbAddAnnotation){window._fbAddAnnotation(sid,text);return true;}'
       +     'return false;'
       +   '}'
-      +   'window._decideProposedInput=function(itemId,decision,btn){'
+      +   'window._decideProposedInput=function(itemId,decision,btn,kind){'
       +     'if(!itemId){alert("Missing item id");return;}'
       +     'var card=btn&&btn.closest?btn.closest(".proposed-input-card"):null;'
       +     'var actions=card?card.querySelector(".proposed-input-actions"):null;'
       +     'var accepted=decision==="accept";'
       +     'var titleEl=card?card.querySelector("div[style*=\\"font-weight:600\\"]"):null;'
       +     'var title=titleEl?titleEl.textContent.trim():"";'
-      +     'var text=(accepted?"Accept":"Decline")+" \\u2014 "+(title||"proposed input")+" [id: "+itemId+"]";'
+      +     'var text=(accepted?"Accept":"Decline")+" \\u2014 "+(kind?"["+kind+"] ":"")+(title||"proposed input")+" [id: "+itemId+"]";'
       +     'if(!_annotate("proposed-inputs",text)){alert("Could not record the decision (feedback widget unavailable).");return;}'
       +     'if(actions){actions.querySelectorAll("button").forEach(function(b){b.disabled=true;});}'
       +     'if(card){card.style.borderLeftColor=accepted?"#16a34a":"#dc2626";}'

@@ -14503,8 +14503,21 @@ if __name__ == "__main__":
         ``build_generator`` with no overrides and returns the resulting document.
         """
         import urllib.parse
-        qs = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(self.path).query))
+        parsed = urllib.parse.urlparse(self.path)
+        qs = dict(urllib.parse.parse_qsl(parsed.query))
         ref = qs.get("ref", "").strip()
+        if not ref:
+            # Static/snapshot form used by the loom's read-only ?stateUrl= mode:
+            # /api/composite-state/<ref>.json (see walkthrough.js _renderComposite).
+            # The handler historically only read ?ref=, so the static path form
+            # returned "ref required" and the explorer degraded to an
+            # error/unresolved stub. Parse the ref out of the path instead.
+            _p = urllib.parse.unquote(parsed.path)
+            _prefix = "/api/composite-state/"
+            if _p.startswith(_prefix):
+                ref = _p[len(_prefix):].strip()
+                if ref.endswith(".json"):
+                    ref = ref[: -len(".json")]
         if not ref:
             return self._json({"error": "ref required"}, 400)
 
