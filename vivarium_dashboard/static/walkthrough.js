@@ -1209,8 +1209,14 @@
   // -------------------------------------------------------------------------
 
   function _render3dVizCard(v) {
-    var packUrl = v.pack_url;
-    var src = '/parsimony-viewer/index.html?file=' + encodeURIComponent(packUrl);
+    // Snapshot base-path: in a hosted read-only bundle (e.g. /v2ecoli/dashboard)
+    // both the parsimony viewer assets and the saved pack live under the base
+    // path, so prefix both. basePath is "" in local mode, leaving URLs unchanged.
+    var base = (window.DataSource && window.DataSource.basePath)
+      ? window.DataSource.basePath()
+      : ((window.__DASH_CONFIG__ && window.__DASH_CONFIG__.basePath) || "");
+    var packUrl = base + v.pack_url;
+    var src = base + '/parsimony-viewer/index.html?file=' + encodeURIComponent(packUrl);
     var meta = [];
     if (v.study) meta.push('study: ' + _esc(v.study));
     if (v.n_placed) meta.push(Number(v.n_placed).toLocaleString() + ' instances');
@@ -1271,7 +1277,10 @@
     var container = document.getElementById('analyses-gallery');
     var countEl   = document.getElementById('viz-count');
     if (!container) return;
-    fetch('/api/saved-visualizations')
+    var _savedUrl = (window.DataSource && window.DataSource.savedVisualizationsUrl)
+      ? window.DataSource.savedVisualizationsUrl()
+      : '/api/saved-visualizations';
+    fetch(_savedUrl)
       .then(function(r) { return r.json(); })
       .then(function(data) {
         data = data || {};
