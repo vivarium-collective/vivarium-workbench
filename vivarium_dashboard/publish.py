@@ -238,9 +238,18 @@ def _render_home_html(ws_root: Path) -> str:
         autoescape=select_autoescape(["html"]),
         keep_trailing_newline=True,
     )
+    # GitHub repository this workspace is associated with (from `git remote
+    # origin`) — rendered as a link in the rail header (live + published).
+    try:
+        from vivarium_dashboard.lib.report import _detect_github_repo
+        _repo_slug = _detect_github_repo(ws_root)
+    except Exception:
+        _repo_slug = None
+
     tpl = env.get_template("index.html.j2")
     return tpl.render(
         workspace_name=ws.get("name", ws_root.name),
+        repo_url=(f"https://github.com/{_repo_slug}" if _repo_slug else ""),
         dashboard_name=dash_cfg.get("name", ""),
         dashboard_logo="assets/vivarium-logo.png",
         active_investigation_name="",

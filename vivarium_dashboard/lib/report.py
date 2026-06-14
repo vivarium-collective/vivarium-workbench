@@ -509,8 +509,12 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     # same process don't re-hit the network.
     owner = _resolve_workspace_owner()
 
+    # GitHub repository this workspace is associated with (from `git remote
+    # origin`) — rendered as a link in the rail header.
+    _repo_slug = _detect_github_repo(ws_root)
     out.write_text(tpl.render(
         workspace_name=ws["name"],
+        repo_url=(f"https://github.com/{_repo_slug}" if _repo_slug else ""),
         dashboard_name=dashboard_name,
         dashboard_logo=dashboard_logo,
         active_investigation_name=active_investigation_name,
