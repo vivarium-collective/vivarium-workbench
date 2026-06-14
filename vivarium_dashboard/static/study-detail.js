@@ -110,21 +110,24 @@
     var panel = document.getElementById(panelId);
     if (!panel) return;
     _chartsLoadedFor[panelId] = true;
-    // In snapshot mode the /api/study-charts/ endpoint is not exported.
-    // Show a neutral placeholder instead of attempting the fetch.
+    // Both modes fetch the study-charts payload via DataSource: local mode
+    // hits the live /api/study-charts/<slug> endpoint; snapshot mode reads the
+    // /api/study-charts/<slug>.json the publisher base64-embedded at build
+    // time (static charts only — live charts need a runs.db absent from the
+    // snapshot). DataSource resolves the base-path-prefixed URL for either.
     var _cfg = window.__DASH_CONFIG__ || {};
-    if (_cfg.mode === 'snapshot') {
-      panel.innerHTML = '<p class="muted" style="margin:0">Results are served by sms-api — coming in a later update.</p>';
-      return;
-    }
+    var _isSnapshot = _cfg.mode === 'snapshot';
     panel.innerHTML = '<p class="muted" style="margin:0">Loading charts…</p>';
-    fetch('/api/study-charts/' + encodeURIComponent(studyName()))
-      .then(function(r) { return r.json(); })
+    window.DataSource.loadStudyCharts(studyName())
       .then(function(d) {
         if (!d || !d.charts || !d.charts.length) {
-          panel.innerHTML = (d && d.db_exists === false)
-            ? '<p class="muted" style="margin:0">No <code>runs.db</code> and no static charts under <code>studies/' + studyName() + '/charts/</code>.</p>'
-            : '<p class="muted" style="margin:0">No chart data available for this study.</p>';
+          if (_isSnapshot) {
+            panel.innerHTML = '<p class="muted" style="margin:0">No pre-rendered charts published for this study.</p>';
+          } else {
+            panel.innerHTML = (d && d.db_exists === false)
+              ? '<p class="muted" style="margin:0">No <code>runs.db</code> and no static charts under <code>studies/' + studyName() + '/charts/</code>.</p>'
+              : '<p class="muted" style="margin:0">No chart data available for this study.</p>';
+          }
           return;
         }
         var live = d.charts.filter(function(c) { return (c.source || 'live') === 'live'; });

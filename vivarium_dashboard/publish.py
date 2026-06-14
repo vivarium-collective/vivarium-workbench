@@ -339,6 +339,7 @@ def _do_build(
     from vivarium_dashboard.server import (
         STATIC_DIR,
         _study_detail_spec,
+        _study_charts_payload,
         _workspace_home_data,
         _render_study_detail_html,
         _build_iset_summary_for_test,
@@ -510,6 +511,23 @@ def _do_build(
         if data is not None:
             _stage_embed_visualizations(data, ws_root, out_dir, base_path)
             _write_json(api_dir / "study" / f"{slug}.json", data)
+
+    # api/study-charts/<slug>.json — the Visualizations-tab charts payload,
+    # byte-parity with GET /api/study-charts/<slug>. Without this the snapshot
+    # SPA has no charts to render and the panel falls back to a placeholder.
+    # Live charts depend on a runs.db that may be absent in CI; the static
+    # charts (base64-embedded PNG/SVG under studies/<slug>/charts/) are the
+    # snapshot-relevant ones and are always available. One study's chart-render
+    # failure must not abort the whole publish, so guard per study.
+    charts_api_dir = api_dir / "study-charts"
+    charts_api_dir.mkdir(parents=True, exist_ok=True)
+    for slug in studies:
+        try:
+            payload = _study_charts_payload(ws_root, slug)
+        except Exception as exc:  # noqa: BLE001 — never abort a publish on one study
+            print(f"  warn: study-charts export failed for {slug!r}: {exc}")
+            continue
+        _write_json(charts_api_dir / f"{slug}.json", payload)
 
     # ------------------------------------------------------------------
     # 3. Copy bundled static assets → bundle/assets/
