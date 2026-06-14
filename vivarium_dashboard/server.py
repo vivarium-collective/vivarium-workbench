@@ -2286,6 +2286,52 @@ def _discover_investigation_viz_html_files(inv_slug: str) -> list[dict]:
     return out
 
 
+def _study_yaml_run_rows(name: str) -> list[dict]:
+    """Map a study's ``study.yaml`` ``runs:`` list to run-row dicts (the shape
+    :func:`_read_runs_db_for_study` returns).
+
+    Emitter-less workspaces (e.g. numpy-based investigations like pbg-autopoiesis)
+    record each run in the spec's ``runs:`` block rather than a per-step
+    ``runs.db``. Surfacing those keeps the Simulations DB / Runs tab faithful to
+    what actually ran, for ANY workspace — not only ones backed by a SQLite/
+    Parquet emitter. Uses a light direct YAML read (``_study_spec_path``) to
+    avoid recursing through ``_study_detail_spec`` (which itself reads runs).
+    """
+    import yaml as _yaml
+    try:
+        path = _study_spec_path(name)
+        if not path or not Path(path).is_file():
+            return []
+        spec = _yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 — never let a malformed spec break the view
+        return []
+    if not isinstance(spec, dict):
+        return []
+    rows: list[dict] = []
+    for r in spec.get("runs", []) or []:
+        if not isinstance(r, dict):
+            continue
+        rid = str(r.get("run_id") or r.get("name") or "").strip()
+        if not rid:
+            continue
+        rows.append({
+            "run_id":        rid,
+            "spec_id":       name,
+            "label":         r.get("name") or rid,
+            "sim_name":      r.get("name") or rid,
+            "variant":       None,
+            "composite":     r.get("composite"),
+            "params":        {"seed": r.get("seed")} if r.get("seed") is not None else {},
+            "n_steps":       r.get("n_steps"),
+            "status":        r.get("status") or "completed",
+            "started_at":    r.get("started_at"),
+            "completed_at":  r.get("completed_at") or r.get("started_at"),
+            "generation_id": r.get("generation_id"),
+            "source":        "study.yaml",
+        })
+    return rows
+
+
 def _read_runs_db_for_study(name: str) -> list[dict]:
     """Read all runs from ``studies/<name>/runs.db`` for the Runs tab.
 
@@ -2299,15 +2345,17 @@ def _read_runs_db_for_study(name: str) -> list[dict]:
     """
     import sqlite3, json as _json, datetime as _dt
     runs_db = workspace_paths().studies / name / "runs.db"
-    if not runs_db.is_file():
-        return []
-    conn = sqlite3.connect(str(runs_db))
-    conn.row_factory = sqlite3.Row
+    # A runs.db is the canonical per-step source, but it's optional: emitter-less
+    # workspaces record runs only in study.yaml (merged in below). So don't bail
+    # when it's absent — fall through with an empty db result.
+    conn = sqlite3.connect(str(runs_db)) if runs_db.is_file() else None
+    if conn is not None:
+        conn.row_factory = sqlite3.Row
     try:
         # Discover available tables; both should exist for pbg_runner-wrapped
         # runs, but older backfilled DBs may only have runs_meta.
         tables = {row[0] for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'")}
+            "SELECT name FROM sqlite_master WHERE type='table'")} if conn is not None else set()
         # runs_meta.generation_id is a recently-added nullable column; older
         # DBs won't have it, so probe before selecting it.
         meta_cols = {row[1] for row in conn.execute("PRAGMA table_info(runs_meta)")} \
@@ -2367,7 +2415,13 @@ def _read_runs_db_for_study(name: str) -> list[dict]:
                         "source":       "simulations",
                     }
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
+
+    # Merge runs recorded in study.yaml `runs:` (emitter-less workspaces) — the
+    # db is authoritative where present, so only add spec runs not already seen.
+    for _r in _study_yaml_run_rows(name):
+        rows_by_id.setdefault(_r["run_id"], _r)
 
     def _iso(v):
         if v is None:
@@ -3298,7 +3352,8 @@ def _simulations_data(ws_root: Path) -> dict:
         return {"simulations": [], "current": None}
     try:
         from vivarium_dashboard.lib.runs_index import emitter_type_of
-        _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray"}
+        _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray",
+                          "none": "Recorded"}  # study.yaml-recorded run, no step emitter
         for s in sims:
             tag = (s.get("emitter") or "").lower()
             s["emitter_type"] = _emitter_label.get(tag) or emitter_type_of(s.get("db_path"))
@@ -10396,7 +10451,8 @@ if __name__ == "__main__":
         # produces). db_path-based detection is the fallback for any row whose
         # source tag didn't resolve.
         from vivarium_dashboard.lib.runs_index import emitter_type_of
-        _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray"}
+        _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray",
+                          "none": "Recorded"}  # study.yaml-recorded run, no step emitter
         for s in sims:
             tag = (s.get("emitter") or "").lower()
             s["emitter_type"] = _emitter_label.get(tag) or emitter_type_of(s.get("db_path"))

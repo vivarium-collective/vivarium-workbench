@@ -51,6 +51,47 @@ def test_list_cross_references_study_yaml_list_form(tmp_path):
     assert sims[0]["studies"] == ["foo"]
 
 
+def test_list_surfaces_emitterless_study_yaml_runs(tmp_path):
+    """An emitter-less workspace (no runs.db / parquet / zarr) whose runs live
+    only in study.yaml `runs:` (keyed by `name`, the numpy-investigation shape)
+    must still surface in the Simulations DB — source 'study_yaml', associated
+    to its study."""
+    ws = tmp_path / "ws"
+    (ws / "studies" / "loop").mkdir(parents=True)
+    (ws / "studies" / "loop" / "study.yaml").write_text(yaml.safe_dump({
+        "name": "loop",
+        "runs": [{"name": "autopoiesis-meter", "status": "completed",
+                  "composite": "pbg_autopoiesis.loop", "n_steps": 160,
+                  "started_at": "2026-06-13T22:00:00Z"}],
+    }))
+    sims = list_simulations(ws)
+    assert len(sims) == 1
+    s = sims[0]
+    assert s["run_id"] == "autopoiesis-meter"
+    assert s["source"] == "study_yaml"
+    assert s["n_steps"] == 160
+    assert s["studies"] == ["loop"]
+    assert s["emitter"] == "none"
+
+
+def test_runs_db_takes_priority_over_study_yaml_on_collision(tmp_path):
+    """When the same run_id exists in both runs.db and study.yaml, the DB row
+    (authoritative, with step history) wins; the study.yaml run does not
+    duplicate it."""
+    ws = tmp_path / "ws"
+    (ws / "studies" / "foo").mkdir(parents=True)
+    _seed_run(ws / "studies" / "foo" / "runs.db",
+              spec_id="pkg.y", run_id="shared", started_at=5.0, sim_name="db-run")
+    (ws / "studies" / "foo" / "study.yaml").write_text(yaml.safe_dump({
+        "name": "foo",
+        "runs": [{"name": "shared", "status": "completed", "n_steps": 99}],
+    }))
+    sims = list_simulations(ws)
+    shared = [s for s in sims if s["run_id"] == "shared"]
+    assert len(shared) == 1                       # not duplicated
+    assert shared[0]["n_steps"] == 3              # DB data authoritative (not the spec's 99)
+
+
 def test_list_cross_references_study_yaml_dict_form(tmp_path):
     ws = tmp_path / "ws"
     (ws / "studies" / "foo").mkdir(parents=True)

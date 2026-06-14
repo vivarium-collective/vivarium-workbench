@@ -197,8 +197,64 @@ def _study_yaml_run_ids(yaml_path: Path) -> list[str]:
     for entry in runs:
         if isinstance(entry, str):
             out.append(entry)
-        elif isinstance(entry, dict) and isinstance(entry.get("run_id"), str):
-            out.append(entry["run_id"])
+        elif isinstance(entry, dict):
+            # run_id is the canonical key; fall back to `name` (emitter-less
+            # workspaces — e.g. numpy investigations — record runs as {name: ...}).
+            rid = entry.get("run_id") or entry.get("name")
+            if isinstance(rid, str):
+                out.append(rid)
+    return out
+
+
+def _read_study_yaml_runs(workspace: Path) -> list[dict]:
+    """Surface runs recorded only in ``study.yaml`` ``runs:`` as first-class
+    simulation rows.
+
+    Emitter-less workspaces (numpy investigations like pbg-autopoiesis) persist
+    each run in the spec rather than a per-step ``runs.db`` / parquet hive / zarr
+    store. Without this they never appear in the Simulations DB even though they
+    ran. Rows are shaped like the DB sources so ``list_simulations``'s merge
+    treats them uniformly; a real DB row wins on ``run_id`` collision (the DB is
+    authoritative where it exists). ``source='study_yaml'``.
+    """
+    out: list[dict] = []
+    studies_root = WorkspacePaths.load(workspace).studies
+    if not studies_root.is_dir():
+        return out
+    for sdir in sorted(studies_root.iterdir()):
+        yml = sdir / "study.yaml"
+        if not sdir.is_dir() or not yml.is_file():
+            continue
+        try:
+            data = yaml.safe_load(yml.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            warnings.warn(f"simulations_index: malformed yaml at {yml}")
+            continue
+        runs = data.get("runs")
+        if not isinstance(runs, list):
+            continue
+        for entry in runs:
+            if not isinstance(entry, dict):
+                continue
+            rid = str(entry.get("run_id") or entry.get("name") or "").strip()
+            if not rid:
+                continue
+            out.append({
+                "run_id": rid,
+                "spec_id": entry.get("composite"),
+                "sim_name": entry.get("name") or rid,
+                "label": entry.get("name") or rid,
+                "status": entry.get("status") or "completed",
+                "n_steps": entry.get("n_steps"),
+                "progress_step": entry.get("n_steps") or 0,
+                "started_at": entry.get("started_at"),
+                "completed_at": entry.get("completed_at") or entry.get("started_at"),
+                "db_path": None,
+                "studies": [sdir.name],
+                "study_slug": sdir.name,
+                "investigation_slug": None,
+                "source": "study_yaml",
+            })
     return out
 
 
@@ -512,6 +568,8 @@ def _emitter_for_row(workspace: Path, row: dict) -> str:
         return "parquet"
     if src == "xarray":
         return "xarray"
+    if src == "study_yaml":
+        return "none"  # recorded in the spec, not persisted by a step emitter
     rid = row.get("run_id")
     if rid:
         run_dir = Path(workspace) / ".pbg" / "runs" / str(rid)
@@ -572,6 +630,10 @@ def list_simulations(workspace: Path) -> list[dict]:
     # investigation's default emitter. Surfaced live so they show even when no
     # runs_meta row was recorded; dedup below merges with any backfilled row.
     rows.extend(_discover_xarray_runs(workspace))
+    # Runs recorded only in study.yaml `runs:` (emitter-less workspaces — numpy
+    # investigations like pbg-autopoiesis). Added last so a real DB row for the
+    # same run_id wins in the dedup below; study.yaml-only runs still surface.
+    rows.extend(_read_study_yaml_runs(workspace))
 
     # Deduplicate by run_id, preferring runs_meta over sqlite_emitter (so
     # spec_id / status / n_steps come from the canonical bookkeeping table).
