@@ -6894,6 +6894,17 @@
     var frameworkScorecardHtml = _frameworkScorecardHtml(frameworkMetrics);  // #26
     var competingHypothesesHtml = _competingHypothesesHtml(hypotheses);      // #6/#16
 
+    // Reader-centered reorder: precomputed booleans gate the new top-nav links
+    // so we only emit a nav anchor when that section will actually render.
+    var _hasOpenQuestions = !!(((iset.executive || {}).decisions_needed || []).length
+      || (needsAttentionReportHtml && needsAttentionReportHtml.trim()));
+    var _hasRoadmap = !!(verdictDagHtml && verdictDagHtml.trim());
+    var _hasAppendices = !!((acGatingMatrixHtml && acGatingMatrixHtml.trim())
+      || (rigorSectionHtml && rigorSectionHtml.trim())
+      || (frameworkScorecardHtml && frameworkScorecardHtml.trim())
+      || (competingHypothesesHtml && competingHypothesesHtml.trim())
+      || ((iset.proposed_inputs || {}).items || []).length);
+
     // Data-driven flags so the "How to read" guide describes only what this
     // investigation actually contains — no workspace-specific boilerplate.
     var hasDag = specs.some(function(s) {
@@ -9391,6 +9402,14 @@
       + '.topbar a{font-size:0.83em;color:#334155;text-decoration:none;padding:4px 12px;border-radius:9999px;background:#f1f5f9;white-space:nowrap}'
       + '.topbar a:hover{background:#e2e8f0;color:#0f172a}'
       + '.topbar a.active{background:#dbeafe;color:#1e40af;font-weight:600}'
+      // Reader-mode toggle (Scientist / Reviewer / Developer) + tier visibility.
+      + '.tb-mode-group{display:inline-flex;margin-left:8px;border:1px solid #cbd5e1;border-radius:9999px;overflow:hidden}'
+      + '.tb-mode-btn{font:inherit;font-size:0.8em;color:#334155;background:#fff;border:0;padding:4px 11px;cursor:pointer;white-space:nowrap}'
+      + '.tb-mode-btn+.tb-mode-btn{border-left:1px solid #e2e8f0}'
+      + '.tb-mode-btn:hover{background:#f1f5f9}'
+      + '.tb-mode-btn.active{background:#dbeafe;color:#1e40af;font-weight:600}'
+      + 'body.mode-scientist .tier-reviewer,body.mode-scientist .tier-developer{display:none}'
+      + 'body.mode-reviewer .tier-developer{display:none}'
       /* iset switcher dropdown at the right end of the topbar (margin-left:auto
          pushes it past the section links). Calls /api/investigation-registry
          to list peer dashboards; click a peer row to navigate. Trigger styled
@@ -9976,7 +9995,7 @@
       + '.sim-status-ready,.sim-status-pill.sim-status-ready{background:#dcfce7;color:#166534}'
       + '.sim-status-ran,.sim-status-pill.sim-status-ran{background:#dbeafe;color:#1e40af}'
       + '.sim-status-gated,.sim-status-pill.sim-status-gated{background:#fef9c3;color:#854d0e}'
-      + '</style></head><body>'
+      + '</style></head><body class="mode-scientist">'
 
       // ── Embed autosize (self-reporting child pattern) ──────────────
       //
@@ -10110,12 +10129,40 @@
       + '<nav class="topbar">'
       +   '<span class="tb-title">' + _h(iset.title || iset.name) + '</span>'
       +   '<a href="#" onclick="window.scrollTo({top:0,behavior:\'smooth\'});return false;">Top</a>'
-      /* "Acceptance" nav link removed alongside the section it pointed to */
-      /* "Suggested additions" nav link removed per request; the section itself
-         (id="proposed-inputs") stays in the body. */
+      // Reader-centered nav: Overview → Studies → (Open questions) → (Roadmap)
+      // → (Appendices) → References. The bracketed links emit only when their
+      // section will render (same guards as the sections themselves).
+      +   '<a href="#executive">Overview</a>'
       +   '<a href="#studies-heading">Studies</a>'
+      +   (_hasOpenQuestions ? '<a href="#open-questions">Open questions</a>' : '')
+      +   (_hasRoadmap ? '<a href="#roadmap">Roadmap</a>' : '')
+      +   (_hasAppendices ? '<a href="#appendices">Appendices</a>' : '')
       +   '<a href="#references">References</a>'
+      // Reader-mode toggle (Scientist / Reviewer / Developer) — sets a class on
+      // <body>; CSS hides reviewer/developer tiers in scientist mode. Persisted
+      // in localStorage; wired by the inline script just after this nav.
+      +   '<span class="tb-mode-group" role="group" aria-label="Reader mode">'
+      +     '<button type="button" class="tb-mode-btn" data-mode="scientist" title="Biology-first — hides appendices">Scientist</button>'
+      +     '<button type="button" class="tb-mode-btn" data-mode="reviewer" title="Adds method-grading appendices">Reviewer</button>'
+      +     '<button type="button" class="tb-mode-btn" data-mode="developer" title="Shows everything incl. framework internals">Developer</button>'
+      +   '</span>'
       + '</nav>'
+      + '<script>(function(){'
+      +   'var KEY="vivarium.report.readerMode";'
+      +   'function apply(m){var b=document.body;if(!b)return;'
+      +     'b.classList.remove("mode-scientist","mode-reviewer","mode-developer");'
+      +     'b.classList.add("mode-"+m);'
+      +     'Array.prototype.forEach.call(document.querySelectorAll(".tb-mode-btn"),function(btn){'
+      +       'btn.classList.toggle("active",btn.getAttribute("data-mode")===m);});'
+      +   '}'
+      +   'function init(){var m="scientist";try{var s=localStorage.getItem(KEY);if(s)m=s;}catch(e){}'
+      +     'apply(m);'
+      +     'Array.prototype.forEach.call(document.querySelectorAll(".tb-mode-btn"),function(btn){'
+      +       'btn.addEventListener("click",function(){var nm=btn.getAttribute("data-mode");'
+      +         'try{localStorage.setItem(KEY,nm);}catch(e){}apply(nm);});});'
+      +   '}'
+      +   'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",init);}else{init();}'
+      + '})();</script>'
 
       // ── Main content ──
       + '<main class="content" id="top">'
@@ -10127,36 +10174,10 @@
           ? 'for expert review — results below reflect completed runs.'
           : 'for expert review prior to execution.') + '</p>'
 
-      // Coordinated-generation provenance banner (expert-feedback A.3).
+      // ── Coordinated-generation provenance banner (expert-feedback A.3) ──
       +   generationBannerHtml
 
-      // Spine C2: the one-line acceptance headline stays inline; the detailed
-      // tables (gating matrix, study verdict map, needs-attention) fold into a
-      // collapsed section so the top of the report isn't a wall of tables.
-      +   acceptanceNarrativeHtml
-      +   (function() {
-            var inner = acGatingMatrixHtml + verdictDagHtml + needsAttentionReportHtml;
-            if (!inner || !inner.trim()) return '';
-            return '<details class="report-fold" id="acceptance-detail">'
-              + '<summary>How the verdict is computed — acceptance criteria, gating matrix &amp; study verdicts</summary>'
-              + inner + '</details>';
-          })()
-      // Competing hypotheses (#6/#16) — the rival explanations + their computed
-      // support trajectory, just above the rigor roll-up that grades the method.
-      +   competingHypothesesHtml
-
-      // Evidence & rigor roll-up — deterministic skeptic-feedback (controls,
-      // replication, alternatives, falsifiability, adversarial coverage).
-      +   rigorSectionHtml
-
-      // Framework scorecard — framework-self metrics across the workspace (#26).
-      +   frameworkScorecardHtml
-
-      // ── Execution-status banner (LEADS the report, before the folds) ────
-      // Accurate to the actual run state: a pre-execution review notice when
-      // nothing has run yet, otherwise a concise post-execution lead that names
-      // the still-planned studies. Placed at the very top so it never wedges
-      // between the collapsible sections.
+      // ── Execution-status / planning-phase banner — run-state context up top ──
       +   (function() {
             var alls = specs || [];
             var planning = alls.filter(function(s) { return !(s.runs || []).length && !(s.findings || []).length; });
@@ -10187,10 +10208,10 @@
               + '</div>';
           })()
 
-      // ── LAYER 1: EXECUTIVE ─────────────────────────────────────────────
-      // Authored narrative + conclusions for a human reviewer, at the very
-      // top. Reads iset.executive; renders nothing if the field is absent
-      // (older investigations fall back to Overview below).
+      // ── One-line acceptance headline (full gating/verdict tables → Roadmap + Appendices) ──
+      +   acceptanceNarrativeHtml
+
+      // ── LAYER 1: EXECUTIVE — authored narrative + verdict for the reviewer ──
       +   (function() {
             var ex = iset.executive || {};
             var dn = ex.decisions_needed || [];
@@ -10265,8 +10286,42 @@
             return h + '</details>';
           })()
 
-      // ── Decisions needed (top-level fold, pulled out of Executive) ──
+      // ── Biology — the mechanism this investigation models ──
+      +   ((iset.biological_story || '').trim()
+          ? '<details id="biology" class="report-fold">'
+            + '<summary>🧬 Biology — the mechanism this investigation models' + ' <span class="rf-prev">' + _h(_previewText(iset.biological_story || '', 175)) + '</span>' + '</summary>'
+            + '<p style="margin:0">' + _multiline(iset.biological_story) + '</p>'
+            + '</details>'
+          : '')
+
+      // ── Key findings — the scientific argument ──
       +   (function() {
+            var sa = iset.scientific_argument || {};
+            var ef = sa.evidence_for || [], ea = sa.evidence_against || [],
+                kf = sa.key_figures || [], cav = sa.caveats || [];
+            if (!sa.main_claim && !ef.length && !ea.length) return '';
+            function _li(x) { return '<li>' + _multiline(typeof x === 'string' ? x : (x.text || JSON.stringify(x))) + '</li>'; }
+            var h = '<details id="scientific-argument" class="report-fold"><summary>🔬 Scientific argument' + ((ef.length || ea.length) ? ' <span class="rf-chip">' + ef.length + ' for \u00b7 ' + ea.length + ' against</span>' : '') + (sa.main_claim ? ' <span class="rf-prev">' + _h(_previewText(sa.main_claim, 150)) + '</span>' : '') + '</summary>';
+            if (sa.main_claim)
+              h += '<p><strong>Main claim.</strong> ' + _multiline(sa.main_claim) + '</p>';
+            if (ef.length || ea.length) {
+              h += '<div style="display:flex;gap:24px;flex-wrap:wrap">';
+              if (ef.length) h += '<div style="flex:1 1 280px"><h3 style="color:#065f46">Evidence for</h3><ul>' + ef.map(_li).join('') + '</ul></div>';
+              if (ea.length) h += '<div style="flex:1 1 280px"><h3 style="color:#9a3412">Evidence against</h3><ul>' + ea.map(_li).join('') + '</ul></div>';
+              h += '</div>';
+            }
+            if (kf.length)
+              h += '<h3>Key figures</h3><ul>' + kf.map(function(k) {
+                return '<li><code>' + _h(k.study || '') + '</code> · <code>' + _h(k.viz || '') + '</code> — ' + _h(k.caption || '') + '</li>';
+              }).join('') + '</ul>';
+            if (cav.length)
+              h += '<h3>Caveats</h3><ul>' + cav.map(_li).join('') + '</ul>';
+            return h + '</details>';
+          })()
+
+      // ── Open questions & decisions needed (decisions-needed + needs-attention) ──
+      +   (function() {
+            var dec = (function() {
             var dn = (iset.executive || {}).decisions_needed || [];
             if (!dn.length) return '';
             return '<details id="decisions-needed" class="report-fold"><summary>✋ Decisions needed from reviewers' + ' <span class="rf-chip">' + dn.length + ' item' + (dn.length===1?'':'s') + '</span>' + (dn[0] && dn[0].question ? ' <span class="rf-prev">next: ' + _h(_previewText(dn[0].question, 130)) + '</span>' : '') + '</summary><ol>'
@@ -10275,16 +10330,82 @@
                     + (d.context ? '<div class="muted small">' + _multiline(d.context) + '</div>' : '')
                     + '</li>';
                 }).join('') + '</ol></details>';
+            })();
+            var na = needsAttentionReportHtml;
+            var inner = dec + na;
+            if (!inner || !inner.trim()) return '';
+            return '<h2 id="open-questions">Open questions &amp; decisions needed</h2>' + inner;
           })()
 
-      // ── PROPOSED INPUTS (pending expert approval) ──────────────────────
-      // Agent-suggested references / mechanisms the expert did NOT provide.
-      // They are NOT silently integrated: each is surfaced here for the
-      // expert to Accept (→ promoted to a real provided input) or Decline.
-      // Reads iset.proposed_inputs.items; renders nothing if absent/empty.
-      // Mirrors the follow-up-proposal Accept/Decline button pattern via
-      // _decideProposedInput → POST /api/proposed-input-decision.
+      // ── Investigation roadmap — the study dependency / verdict graph ──
       +   (function() {
+            if (!verdictDagHtml || !verdictDagHtml.trim()) return '';
+            return '<h2 id="roadmap">Investigation roadmap</h2>' + verdictDagHtml;
+          })()
+
+      +   ''
+
+      /* Removed: top-of-report "Acceptance criteria" section.
+         Per-study behavior_tests + conclusion_verdicts (the v4 way
+         studies signal pass/fail) already convey "what must pass for
+         this investigation to be considered complete." The top-of-
+         report ordered list of acceptance criteria duplicated that
+         signal in a less-actionable form. */
+
+      +   '<h2 id="studies-heading">Studies' + (hasDag ? ' (dependency order)' : '') + '</h2>'
+      +   '<p class="muted small">Each study is collapsed to a one-glance control panel — scan top to bottom, then click any panel to expand its full detail.</p>'
+      +   '<div class="studies-toolbar">'
+      +     '<button type="button" id="studies-expand-all">Expand all</button>'
+      +     '<button type="button" id="studies-collapse-all">Collapse all</button>'
+      +     '<script>(function(){'
+      +       'function findFolds(){return Array.from(document.querySelectorAll(".study-fold"));}'
+      +       'function setAll(open){'
+      +         'var folds=findFolds();'
+      +         'console.log("[studies-toolbar] "+(open?"expand":"collapse")+" "+folds.length+" .study-fold elements");'
+      +         'folds.forEach(function(d){d.open=open;});'
+      +         'if(open&&folds.length){folds[0].scrollIntoView({behavior:"smooth",block:"start"});}'
+      +       '}'
+      +       'function wire(){'
+      +         'var ex=document.getElementById("studies-expand-all");'
+      +         'var co=document.getElementById("studies-collapse-all");'
+      +         'if(ex)ex.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();setAll(true);});'
+      +         'if(co)co.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();setAll(false);});'
+      +       '}'
+      +       'document.addEventListener("click",function(e){'
+      +         'var t=e.target;var h=t&&t.closest?t.closest(".sn-collapse-hint,.sp-collapse-hint"):null;'
+      +         'if(h){var d=h.closest("details.study-fold");if(d){d.open=false;d.scrollIntoView({behavior:"smooth",block:"start"});}e.preventDefault();e.stopPropagation();return;}'
+      +         'var na=t&&t.closest?t.closest(".study-nav a"):null;'
+      +         'if(na&&na.getAttribute("href")&&na.getAttribute("href").charAt(0)==="#"){var tg=document.getElementById(na.getAttribute("href").slice(1));if(tg){var fd=tg.closest("details.study-fold");if(fd&&!fd.open)fd.open=true;e.preventDefault();setTimeout(function(){tg.scrollIntoView({behavior:"smooth",block:"start"});},0);}}'
+      +       '});'
+      +       'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",wire);}else{wire();}'
+      +     '})();</script>'
+      +   '</div>'
+      +   studiesHtml
+
+
+      // ── Future work (iset.future_work / iset.next_steps) ──
+      +   (function() {
+            var fw = (iset.future_work !== undefined && iset.future_work !== null) ? iset.future_work : iset.next_steps;
+            if (fw === undefined || fw === null) return '';
+            var body;
+            if (Object.prototype.toString.call(fw) === '[object Array]') {
+              var its = fw.filter(function(x) { return x !== null && x !== undefined && String(x).trim(); });
+              if (!its.length) return '';
+              body = '<ul>' + its.map(function(x) { return '<li>' + _multiline(typeof x === 'string' ? x : (x.text || JSON.stringify(x))) + '</li>'; }).join('') + '</ul>';
+            } else {
+              var s = String(fw);
+              if (!s.trim()) return '';
+              body = '<p>' + _multiline(s) + '</p>';
+            }
+            return '<details id="future-work" class="report-fold"><summary>🔭 Future work</summary>' + body + '</details>';
+          })()
+
+      // ── Appendices — method-grading & verification detail (reviewer / developer tiers) ──
+      +   (function() {
+            var accFold = (acGatingMatrixHtml && acGatingMatrixHtml.trim())
+              ? '<details class="report-fold tier-reviewer" id="acceptance-detail"><summary>How the verdict is computed — acceptance criteria &amp; gating matrix</summary>' + acGatingMatrixHtml + '</details>'
+              : '';
+            var proposedHtml = (function() {
             var pi = iset.proposed_inputs || {};
             var items = pi.items || [];
             if (!items.length) return '';
@@ -10351,82 +10472,22 @@
               + ' <span class="rf-chip">' + items.length + ' item' + (items.length===1?'':'s')
               + (pending ? ' · ' + pending + ' pending' : '') + '</span></summary>'
               + note + cards + '</details>';
+            })();
+            var parts = [
+              accFold,
+              (rigorSectionHtml && rigorSectionHtml.trim()) ? '<div class="tier-reviewer">' + rigorSectionHtml + '</div>' : '',
+              (frameworkScorecardHtml && frameworkScorecardHtml.trim()) ? '<div class="tier-developer">' + frameworkScorecardHtml + '</div>' : '',
+              (competingHypothesesHtml && competingHypothesesHtml.trim()) ? '<div class="tier-reviewer">' + competingHypothesesHtml + '</div>' : '',
+              (proposedHtml && proposedHtml.trim()) ? '<div class="tier-reviewer">' + proposedHtml + '</div>' : ''
+            ];
+            var inner = parts.filter(Boolean).join('');
+            if (!inner.trim()) return '';
+            return '<div class="tier-reviewer">'
+              + '<h2 id="appendices">Appendices</h2>'
+              + '<p class="muted small">Method-grading and verification detail — valuable for reviewers, kept out of the main narrative. Use the reader-mode toggle (top-right) to show or hide these tiers.</p>'
+              + inner
+              + '</div>';
           })()
-
-      // ── LAYER 2: SCIENTIFIC ARGUMENT ───────────────────────────────────
-      // The claim and the evidence, for the reviewer. Reads
-      // iset.scientific_argument; renders nothing if absent.
-      +   (function() {
-            var sa = iset.scientific_argument || {};
-            var ef = sa.evidence_for || [], ea = sa.evidence_against || [],
-                kf = sa.key_figures || [], cav = sa.caveats || [];
-            if (!sa.main_claim && !ef.length && !ea.length) return '';
-            function _li(x) { return '<li>' + _multiline(typeof x === 'string' ? x : (x.text || JSON.stringify(x))) + '</li>'; }
-            var h = '<details id="scientific-argument" class="report-fold"><summary>🔬 Scientific argument' + ((ef.length || ea.length) ? ' <span class="rf-chip">' + ef.length + ' for \u00b7 ' + ea.length + ' against</span>' : '') + (sa.main_claim ? ' <span class="rf-prev">' + _h(_previewText(sa.main_claim, 150)) + '</span>' : '') + '</summary>';
-            if (sa.main_claim)
-              h += '<p><strong>Main claim.</strong> ' + _multiline(sa.main_claim) + '</p>';
-            if (ef.length || ea.length) {
-              h += '<div style="display:flex;gap:24px;flex-wrap:wrap">';
-              if (ef.length) h += '<div style="flex:1 1 280px"><h3 style="color:#065f46">Evidence for</h3><ul>' + ef.map(_li).join('') + '</ul></div>';
-              if (ea.length) h += '<div style="flex:1 1 280px"><h3 style="color:#9a3412">Evidence against</h3><ul>' + ea.map(_li).join('') + '</ul></div>';
-              h += '</div>';
-            }
-            if (kf.length)
-              h += '<h3>Key figures</h3><ul>' + kf.map(function(k) {
-                return '<li><code>' + _h(k.study || '') + '</code> · <code>' + _h(k.viz || '') + '</code> — ' + _h(k.caption || '') + '</li>';
-              }).join('') + '</ul>';
-            if (cav.length)
-              h += '<h3>Caveats</h3><ul>' + cav.map(_li).join('') + '</ul>';
-            return h + '</details>';
-          })()
-
-
-      +   ((iset.biological_story || '').trim()
-          ? '<details id="biology" class="report-fold">'
-            + '<summary>🧬 Biology — the mechanism this investigation models' + ' <span class="rf-prev">' + _h(_previewText(iset.biological_story || '', 175)) + '</span>' + '</summary>'
-            + '<p style="margin:0">' + _multiline(iset.biological_story) + '</p>'
-            + '</details>'
-          : '')
-
-      +   ''
-
-      /* Removed: top-of-report "Acceptance criteria" section.
-         Per-study behavior_tests + conclusion_verdicts (the v4 way
-         studies signal pass/fail) already convey "what must pass for
-         this investigation to be considered complete." The top-of-
-         report ordered list of acceptance criteria duplicated that
-         signal in a less-actionable form. */
-
-      +   '<h2 id="studies-heading">Studies' + (hasDag ? ' (dependency order)' : '') + '</h2>'
-      +   '<p class="muted small">Each study is collapsed to a one-glance control panel — scan top to bottom, then click any panel to expand its full detail.</p>'
-      +   '<div class="studies-toolbar">'
-      +     '<button type="button" id="studies-expand-all">Expand all</button>'
-      +     '<button type="button" id="studies-collapse-all">Collapse all</button>'
-      +     '<script>(function(){'
-      +       'function findFolds(){return Array.from(document.querySelectorAll(".study-fold"));}'
-      +       'function setAll(open){'
-      +         'var folds=findFolds();'
-      +         'console.log("[studies-toolbar] "+(open?"expand":"collapse")+" "+folds.length+" .study-fold elements");'
-      +         'folds.forEach(function(d){d.open=open;});'
-      +         'if(open&&folds.length){folds[0].scrollIntoView({behavior:"smooth",block:"start"});}'
-      +       '}'
-      +       'function wire(){'
-      +         'var ex=document.getElementById("studies-expand-all");'
-      +         'var co=document.getElementById("studies-collapse-all");'
-      +         'if(ex)ex.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();setAll(true);});'
-      +         'if(co)co.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();setAll(false);});'
-      +       '}'
-      +       'document.addEventListener("click",function(e){'
-      +         'var t=e.target;var h=t&&t.closest?t.closest(".sn-collapse-hint,.sp-collapse-hint"):null;'
-      +         'if(h){var d=h.closest("details.study-fold");if(d){d.open=false;d.scrollIntoView({behavior:"smooth",block:"start"});}e.preventDefault();e.stopPropagation();return;}'
-      +         'var na=t&&t.closest?t.closest(".study-nav a"):null;'
-      +         'if(na&&na.getAttribute("href")&&na.getAttribute("href").charAt(0)==="#"){var tg=document.getElementById(na.getAttribute("href").slice(1));if(tg){var fd=tg.closest("details.study-fold");if(fd&&!fd.open)fd.open=true;e.preventDefault();setTimeout(function(){tg.scrollIntoView({behavior:"smooth",block:"start"});},0);}}'
-      +       '});'
-      +       'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",wire);}else{wire();}'
-      +     '})();</script>'
-      +   '</div>'
-      +   studiesHtml
-
       +   '<h2 id="references">References <span class="muted small">(' + orderedCited.length + ' cited across this investigation)</span></h2>'
       +   '<p class="muted small">Union of <code>bibliography.bib_keys</code> and per-behavior <code>cites:</code> across all studies in this investigation. Click DOI or link to open the source.</p>'
       +   '<ol class="references-list" style="line-height:1.6;font-size:0.93em">'
