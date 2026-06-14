@@ -2518,6 +2518,109 @@ def _iter_study_dirs():
                 yield d
 
 
+def _parsimony_viewer_dir():
+    """Return the bundled ``pbg_parsimony`` viewer asset dir, or None when the
+    optional ``pbg_parsimony`` package is not installed.
+
+    Feature-detect seam for the ``/parsimony-viewer/*`` static route and the
+    Analyses 3D gallery — the parsimony cards/routes only appear when this
+    returns a real directory, mirroring how other optional integrations
+    (e.g. bigraph-loom) are gated.
+    """
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec("pbg_parsimony")
+        if spec is None or not spec.origin:
+            return None
+        d = Path(spec.origin).parent / "viewer"
+        return d if d.is_dir() else None
+    except Exception:
+        return None
+
+
+def _build_saved_visualizations(ws_root) -> dict:
+    """Discover saved, interactive visualizations in the workspace.
+
+    Scans every study dir for packed 3D scenes under ``viz/3d/*.pack.json``
+    (each optionally accompanied by a sibling ``.meta.json`` + ``meshes/``)
+    and for PTools TSV exports under ``**/ptools/*.tsv``.
+
+    Returns::
+
+        {
+          "parsimony_available": bool,   # the pbg_parsimony viewer is installed
+          "saved": [ {study, name, pack_url, meta_url, n_placed, created}, ... ],
+          "ptools": {"configured": bool, "studies": [ {study, n_tsvs}, ... ]},
+        }
+
+    ``pack_url`` / ``meta_url`` are rooted at the served workspace tree (the
+    generic static handler maps ``/<rel>`` → ``WORKSPACE/<rel>``).
+
+    Pure (no socket I/O) so tests can call it with an explicit ``ws_root``.
+    """
+    ws_root = Path(ws_root)
+    wp = WorkspacePaths.load(ws_root)
+    saved: list[dict] = []
+    ptools_studies: list[dict] = []
+    for study_dir in wp.iter_study_dirs():
+        study = study_dir.name
+        viz3d = study_dir / "viz" / "3d"
+        if viz3d.is_dir():
+            for pack in sorted(viz3d.glob("*.pack.json")):
+                try:
+                    rel = pack.relative_to(ws_root).as_posix()
+                except ValueError:
+                    continue
+                meta = pack.with_name(pack.name.replace(".pack.json", ".meta.json"))
+                meta_url = None
+                n_placed = None
+                if meta.is_file():
+                    try:
+                        meta_url = "/" + meta.relative_to(ws_root).as_posix()
+                    except ValueError:
+                        meta_url = None
+                    try:
+                        md = json.loads(meta.read_text(encoding="utf-8"))
+                        ing = md.get("ingredients") or {}
+                        total = sum(
+                            int(v.get("count", 0))
+                            for v in ing.values() if isinstance(v, dict)
+                        )
+                        n_placed = total or None
+                    except Exception:
+                        n_placed = None
+                try:
+                    created = int(pack.stat().st_mtime)
+                except Exception:
+                    created = None
+                saved.append({
+                    "study": study,
+                    "name": pack.name[: -len(".pack.json")],
+                    "pack_url": "/" + rel,
+                    "meta_url": meta_url,
+                    "n_placed": n_placed,
+                    "created": created,
+                })
+        if sorted(study_dir.glob("**/ptools/*.tsv")):
+            ptools_studies.append({
+                "study": study,
+                "n_tsvs": len(sorted(study_dir.glob("**/ptools/*.tsv"))),
+            })
+
+    try:
+        ws = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
+    except Exception:
+        ws = {}
+    ui = ws.get("ui") or {}
+    ptools_configured = bool(str(ui.get("ptools_server_url", "")).strip())
+
+    return {
+        "parsimony_available": _parsimony_viewer_dir() is not None,
+        "saved": saved,
+        "ptools": {"configured": ptools_configured, "studies": ptools_studies},
+    }
+
+
 def _iter_iset_dirs(ws_root: Path | None = None):
     """Yield investigations/<name>/ dirs that contain an investigation.yaml.
 
@@ -8063,6 +8166,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_visualization_instances()
         if self.path.startswith("/api/visualization-classes"):
             return self._get_visualization_classes()
+        if self.path.startswith("/api/saved-visualizations"):
+            return self._get_saved_visualizations()
         if self.path.startswith("/api/ui-config"):
             return self._get_ui_config()
         if self.path.startswith("/api/ptools-launch/"):
@@ -8086,6 +8191,21 @@ class Handler(BaseHTTPRequestHandler):
             from bigraph_loom import asset_dir
             target = asset_dir() / rel
             return self._serve_file(target, self._guess_mime(rel))
+
+        # Serve the parsimony 3D viewer at /parsimony-viewer/*. The bundle comes
+        # from the optional `pbg_parsimony` package (pbg_parsimony/viewer/),
+        # resolved at request time — like bigraph-loom above. Feature-detected:
+        # if pbg_parsimony is not installed the route simply 404s and the
+        # Analyses gallery hides the 3D cards.
+        if self.path.startswith("/parsimony-viewer"):
+            pv_dir = _parsimony_viewer_dir()
+            if pv_dir is None:
+                self.send_response(404); self.end_headers(); return
+            pv_path = self.path.split("?", 1)[0]
+            rel = pv_path[len("/parsimony-viewer"):].lstrip("/") or "index.html"
+            if ".." in rel.split("/"):
+                self.send_response(403); self.end_headers(); return
+            return self._serve_file(pv_dir / rel, self._guess_mime(rel))
 
         # Generic static file serving — also strip query strings so any
         # other route that the client appends params to still resolves.
@@ -11970,6 +12090,15 @@ if __name__ == "__main__":
         Returns: [{address, name, doc}, ...]
         """
         return self._json({"classes": self._list_visualization_classes()}, 200)
+
+    def _get_saved_visualizations(self):
+        """GET /api/saved-visualizations — list saved interactive visualizations.
+
+        Returns the workspace's packed 3D scenes (parsimony packs under
+        ``studies/*/viz/3d/*.pack.json``) plus PTools TSV exports, for the
+        Analyses gallery. See ``_build_saved_visualizations`` for the shape.
+        """
+        return self._json(_build_saved_visualizations(WORKSPACE), 200)
 
     def _get_visualization_instances(self):
         """GET /api/visualization-instances — list class-backed configured viz

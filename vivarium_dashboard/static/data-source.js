@@ -133,9 +133,25 @@
       : "/api/visualization-classes";
   }
 
+  function _savedVisualizationsUrl() {
+    return cfg().mode === "snapshot"
+      ? _base() + "/api/saved-visualizations.json"
+      : "/api/saved-visualizations";
+  }
+
   var DataSource = {
     /** Return the current source config (default: local-server). */
     config: cfg,
+
+    /** Return the configured base path ("" in local mode). */
+    basePath: _base,
+
+    /**
+     * Return the URL for the saved-visualizations payload (Analyses gallery).
+     * Local mode:    /api/saved-visualizations
+     * Snapshot mode: <base>/api/saved-visualizations.json from the static bundle
+     */
+    savedVisualizationsUrl: _savedVisualizationsUrl,
 
     /**
      * Load the study-detail spec for the given slug.
