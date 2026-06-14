@@ -1060,7 +1060,7 @@
     </div>
     {# Top-level sweep metadata #}
     <p style="margin:6px 0;font-size:0.88em">
-      {% if sim.seeds %}<strong>Seeds:</strong> <code>{{ sim.seeds | join(', ') }}</code>{% else %}<span class="muted">No seeds set</span>{% endif %}
+      {% if sim.seeds %}<strong>Seeds:</strong> <code>{{ sim.seeds | join(', ') if (sim.seeds is iterable and sim.seeds is not string) else sim.seeds }}</code>{% else %}<span class="muted">No seeds set</span>{% endif %}
       {% if sim.duration %} · <strong>Duration:</strong> {{ sim.duration }}s{% elif sim.duration_min %} · <strong>Duration:</strong> {{ sim.duration_min }} min{% endif %}
     </p>
     {% if sim.metrics %}
@@ -1187,12 +1187,12 @@
     {% endif %}
     <p style="margin:6px 0;font-size:0.9em">
       <strong>Simulation time:</strong> {% if sim.duration_min %}{{ sim.duration_min }} min{% else %}?{% endif %}{% if sim.generations %} · <strong>{{ sim.generations }} generations</strong>{% endif %}
-      · <strong>Seeds:</strong> {% if sim.seeds %}<code>{{ sim.seeds | join(', ') }}</code>{% else %}<em>not set</em>{% endif %}
+      · <strong>Seeds:</strong> {% if sim.seeds %}<code>{{ sim.seeds | join(', ') if (sim.seeds is iterable and sim.seeds is not string) else sim.seeds }}</code>{% else %}<em>not set</em>{% endif %}
     </p>
     <p style="margin:4px 0;font-size:0.86em" class="muted">
       {% if sim.n_readouts_collected %}<strong>Readouts collected:</strong> {{ sim.n_readouts_collected }} · {% endif %}
       {% if sim.n_tests_applied %}<strong>Tests applied:</strong> {{ sim.n_tests_applied }} · {% endif %}
-      {% if sim.n_runs_recorded %}<strong>Runs recorded:</strong> {{ sim.n_runs_recorded }}{% if sim.run_names %} (<code>{{ sim.run_names | join('</code>, <code>') }}</code>){% endif %}{% endif %}
+      {% if sim.n_runs_recorded %}<strong>Runs recorded:</strong> {{ sim.n_runs_recorded }}{% if sim.run_names %} (<code>{{ sim.run_names | join('</code>, <code>') if (sim.run_names is iterable and sim.run_names is not string) else sim.run_names }}</code>){% endif %}{% endif %}
     </p>
     {% if sim.readouts %}
     <p style="margin:4px 0;font-size:0.88em"><strong>Readouts:</strong>
