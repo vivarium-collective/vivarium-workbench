@@ -243,6 +243,97 @@ def _cast(value: Any, declared_type: str | None) -> Any:
     return value
 
 
+def known_composite_ids(ws_root: Path, package_path: str | None = None) -> set[str]:
+    """All composite spec ids resolvable in this workspace.
+
+    Unions the workspace's own ``.composite.yaml`` specs, installed ``pbg-*``
+    package specs, AND the live ``@composite_generator`` registry. This is the
+    "known set" the composite-resolution lint checks a study's declared refs
+    against. Tolerant: returns whatever it can discover; never raises.
+    """
+    ws_root = Path(ws_root)
+    if package_path is None:
+        try:
+            ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
+            package_path = ws_data.get("package_path") or (
+                "pbg_" + str(ws_data.get("name", "")).replace("-", "_"))
+        except Exception:  # noqa: BLE001
+            package_path = ""
+    ids: set[str] = set()
+    try:
+        ids.update(discover_all_composites(ws_root, package_path or "").keys())
+    except Exception:  # noqa: BLE001
+        pass
+    # Generator registry (also merged by discover_all_composites, but prime it
+    # directly in case discovery short-circuited before generators were loaded).
+    try:
+        from pbg_superpowers.composite_generator import _REGISTRY, discover_generators
+        if not _REGISTRY:
+            discover_generators()
+        ids.update(_REGISTRY.keys())
+    except Exception:  # noqa: BLE001
+        pass
+    return ids
+
+
+def _study_composite_refs(spec: dict) -> list[str]:
+    """Collect the composite refs a study DECLARES: ``baseline[].composite``,
+    ``conditions.baseline.composite``, ``conditions.variants[].composite`` and
+    ``simulation_set[].composite``. (Run records use short aliases and are NOT
+    treated as canonical declarations.) Order-preserving, de-duplicated."""
+    refs: list[str] = []
+
+    def _add(r):
+        if isinstance(r, str) and r.strip() and r not in refs:
+            refs.append(r.strip())
+
+    for b in (spec.get("baseline") or []):
+        if isinstance(b, dict):
+            _add(b.get("composite"))
+    conds = spec.get("conditions")
+    if isinstance(conds, dict):
+        bl = conds.get("baseline")
+        if isinstance(bl, dict):
+            _add(bl.get("composite"))
+        for v in (conds.get("variants") or []):
+            if isinstance(v, dict):
+                _add(v.get("composite"))
+    for s in (spec.get("simulation_set") or []):
+        if isinstance(s, dict):
+            _add(s.get("composite"))
+    return refs
+
+
+def _ref_resolves(ref: str, known_ids: set[str]) -> bool:
+    """A declared ref resolves if it's a known spec id, OR shares the trailing
+    ``.composites.<slug>`` segment with one (so a short ``slug`` alias matches
+    a dotted ``pkg.composites.slug`` id)."""
+    if ref in known_ids:
+        return True
+    tail = ref.rsplit(".composites.", 1)[-1]
+    for kid in known_ids:
+        if kid == ref or kid.rsplit(".composites.", 1)[-1] == tail:
+            return True
+    return False
+
+
+def unresolved_study_composite_refs(spec: dict, known_ids: set[str]) -> list[str]:
+    """Return the study's declared composite refs that DON'T resolve to any
+    registered composite id.
+
+    Prefers ``pbg_superpowers.report_linter.unresolved_composite_refs`` (the
+    canonical, spec-only contract) when available; falls back to the local
+    extraction + last-segment match. Defensive: never raises.
+    """
+    try:
+        from pbg_superpowers.report_linter import unresolved_composite_refs as _ps
+        return list(_ps(spec, set(known_ids)))
+    except Exception:  # noqa: BLE001 — older/absent pbg_superpowers → local fallback
+        pass
+    known = set(known_ids)
+    return [r for r in _study_composite_refs(spec) if not _ref_resolves(r, known)]
+
+
 def substitute_parameters(state: Any, params: dict, overrides: dict | None = None) -> Any:
     overrides = overrides or {}
     if isinstance(state, dict):

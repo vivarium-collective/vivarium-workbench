@@ -272,3 +272,515 @@ def test_section_nav_omits_chips_for_empty_sections(_ws):
     assert 'href="#overview"' in text       # has head_blocks
     assert 'href="#biology"' not in text    # no biological_summary
     assert 'href="#viz"' not in text        # no viz embeds
+
+
+# ---------------------------------------------------------------------------
+# W24 — skeptical-reader report mode
+# ---------------------------------------------------------------------------
+
+# These exercise the new render paths that lean on pbg_superpowers.rigor /
+# needs_attention. The renderer degrades gracefully when those aren't
+# importable, so skip the strict-content assertions in that case.
+_HAS_RIGOR = False
+try:  # pragma: no cover - environment dependent
+    from pbg_superpowers.rigor import study_rigor, finding_evidential_weight  # noqa: F401
+    from pbg_superpowers.needs_attention import open_epistemic_debts  # noqa: F401
+    _HAS_RIGOR = True
+except Exception:  # pragma: no cover
+    _HAS_RIGOR = False
+
+_needs_rigor = pytest.mark.skipif(
+    not _HAS_RIGOR, reason="pbg-superpowers rigor/needs_attention not importable")
+
+
+def _rich_skeptic_study(ws: Path, slug: str = "s1") -> Path:
+    """A study with the fields the skeptic mode / weight / debts read."""
+    return _write_study(
+        ws, slug,
+        report={"title": "Rich", "conclusion": "done"},
+        objective="Test the thing.",
+        falsifiability="A growth rate outside [0.1, 0.5] would overturn this.",
+        findings=[{
+            "id": "F-01", "tier": "interpretation", "mechanism_origin": "emergent",
+            "statement": "The model reproduces the observed division time.",
+            "evidence": {"from_test": "division-time", "observed": "42 min"},
+            "next_action": "Sweep the elongation rate to confirm.",
+            "calibration_anchor": {"divergence_factor": 1.2},
+        }],
+        controls=[{
+            "name": "shuffle-control", "kind": "negative", "result": "PASS",
+            "observed": "no division", "expected": "no division",
+        }],
+        alternative_hypotheses=[
+            {"claim": "It is an artifact.", "status": "excluded",
+             "discriminated_by": "division-time"},
+            {"claim": "Something else entirely.", "status": "not-excluded"},
+        ],
+        robustness={"n_replicates": 3, "seeds": [0, 1, 2]},
+        limitations=["Single medium only."],
+        behavior_tests=[{"name": "division-time", "pass_if": {"op": "in_range",
+                                                              "low": 0.1, "high": 0.5}}],
+    )
+
+
+def test_skeptic_mode_writes_distinct_file_and_reorders(_ws):
+    _rich_skeptic_study(_ws)
+    resp, code = build_single_study_report_for_test(
+        _ws, {"study": "s1", "skeptic": True})
+    assert code == 200
+    assert resp["skeptic"] is True
+    assert resp["html_path"] == "reports/single-study-s1-skeptic.html"
+    out = _ws / "reports" / "single-study-s1-skeptic.html"
+    assert out.is_file()
+    # The default (non-skeptic) file is NOT clobbered.
+    assert not (_ws / "reports" / "single-study-s1.html").is_file()
+    text = out.read_text()
+    # Audit trail leads the body, before the conclusion verdicts.
+    assert 'id="audit-trail"' in text
+    if 'id="verdicts"' in text:
+        assert text.index('id="audit-trail"') < text.index('id="verdicts"')
+
+
+def test_skeptic_audit_trail_threshold_provenance_none(_ws):
+    # No behavior-test band carries cites / calibration_anchor → "none".
+    _write_study(_ws, "s1", report={"title": "T"},
+                 findings=[{"id": "F-01", "statement": "claim"}],
+                 behavior_tests=[{"name": "x", "pass_if": {"op": "at_least", "low": 1}}])
+    render_single_study_report(_ws, "s1", skeptic=True)
+    text = (_ws / "reports" / "single-study-s1-skeptic.html").read_text()
+    assert "Threshold provenance" in text
+    assert "none" in text.lower()
+
+
+def test_non_skeptic_mode_has_no_audit_trail(_ws):
+    _rich_skeptic_study(_ws)
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'id="audit-trail"' not in text
+
+
+# ---------------------------------------------------------------------------
+# W8 — per-finding evidential-weight chip
+# ---------------------------------------------------------------------------
+
+@_needs_rigor
+def test_finding_weight_chip_rendered(_ws):
+    _rich_skeptic_study(_ws)
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'class="finding-weight"' in text
+    # A well-supported finding should not be labelled weak.
+    assert ("strong" in text) or ("moderate" in text)
+
+
+# ---------------------------------------------------------------------------
+# W15 — open epistemic debts panel
+# ---------------------------------------------------------------------------
+
+@_needs_rigor
+def test_epistemic_debts_panel_rendered(_ws):
+    # A bare study with no controls/alternatives/replication accrues debts.
+    _write_study(_ws, "s1", report={"title": "Bare"},
+                 findings=[{"id": "F-01", "statement": "An untested claim."}])
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'id="epistemic-debts"' in text
+    assert "Open epistemic debts" in text
+
+
+# ---------------------------------------------------------------------------
+# Wave 2 — C-COMMIT / C-INVAR / C-CF / C-MODELCARD render sections.
+# Each consumes a field the model WRITES into study.yaml and degrades to no
+# section when the field is absent.
+# ---------------------------------------------------------------------------
+
+from vivarium_dashboard.lib.single_study_report import (  # noqa: E402
+    _render_composition_commitment,
+    _render_invariant_checks,
+    _render_causal_necessity,
+    _render_model_card,
+    _render_representation,
+)
+
+
+def test_composition_commitment_panel_rendered(_ws):
+    _write_study(
+        _ws, "s1", report={"title": "S1"},
+        composition_commitment={
+            "component_added": ["Membrane"],
+            "deficit_addressed": {"note": "no boundary producer",
+                                  "closure_gap_item": ["membrane_lipids"]},
+            "new_behavior": ["grows-boundary"],
+            "invariants_required": [{"study": "study-1-loop", "test": "closes-loop"}],
+            "alternatives_excluded": ["external-maintenance"],
+        },
+    )
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'id="commitment"' in text
+    assert "Theoretical commitment" in text
+    assert "Membrane" in text
+    assert "membrane_lipids" in text
+    assert "study-1-loop" in text
+    assert "external-maintenance" in text
+
+
+def test_composition_commitment_omitted_when_absent(_ws):
+    _write_study(_ws, "s1", report={"title": "S1"})
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'id="commitment"' not in text
+
+
+def test_invariant_checks_section_rendered_and_ordered(_ws):
+    _write_study(
+        _ws, "s1", report={"title": "S1"},
+        invariant_check=[
+            {"study": "study-1", "test": "closes-loop", "prior": 0.0,
+             "now": 0.0, "status": "preserved"},
+            {"study": "study-1", "test": "precarious", "prior": 1.0,
+             "now": 0.2, "status": "invalidated"},
+        ],
+    )
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'id="invariants"' in text
+    assert "Invariant checks" in text
+    # invalidated must sort before preserved (gap statuses first). Compare the
+    # status-chip positions (the intro prose also contains "preserved").
+    assert text.index(">invalidated</span>") < text.index(">preserved</span>")
+
+
+def test_causal_necessity_table_rendered(_ws):
+    _write_study(
+        _ws, "s1", report={"title": "S1"},
+        ablations=[
+            {"process": "membrane", "target": ["membrane_lipids"], "mode": "knockout",
+             "behavior_test": "grows-boundary", "baseline_result": True,
+             "ablated_result": False, "role": "necessary", "causally_necessary": True},
+            {"process": "supply", "target": ["nutrient"], "mode": "scale",
+             "behavior_test": "grows-boundary", "baseline_result": True,
+             "ablated_result": True, "role": "redundant", "causally_necessary": False},
+        ],
+    )
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'id="causal-necessity"' in text
+    assert "Causal necessity" in text
+    assert "membrane_lipids" in text
+    assert "knockout" in text
+    assert "necessary" in text and "redundant" in text
+
+
+def test_model_card_from_composite_doc():
+    doc = {
+        "nutrient": 0.0,
+        "membrane_lipids": 40.0,
+        "membrane": {
+            "_type": "process", "address": "local:Membrane",
+            "config": {"rate": 1.0},
+            "inputs": {"lipid": ["lipid"], "membrane_lipids": ["membrane_lipids"]},
+            "outputs": {"membrane_lipids": ["membrane_lipids"]},
+            "doc": "Grows the boundary by incorporating lipids.",
+        },
+    }
+    html = _render_model_card(
+        doc,
+        model_representation={"boundary": ["nutrient"]},
+        readouts=[{"name": "membrane-size"}],
+        behavior_tests=[{"measure": {"path": "membrane_lipids"}}],
+        variants=[{"name": "starved"}],
+    )
+    assert 'id="model-card"' in html
+    assert "Membrane" in html and "local:Membrane" in html
+    assert "membrane_lipids" in html
+    assert "membrane-size" in html       # observable
+    assert "starved" in html             # perturbation
+    assert "boundary" in html            # store boundary badge
+
+
+def test_model_card_accepts_state_wrapper_and_omits_when_empty():
+    assert _render_model_card(None) == ""
+    assert _render_model_card({}) == ""
+    wrapped = {"state": {"p": {"_type": "process", "address": "local:P",
+                               "inputs": {}, "outputs": {}}}}
+    assert 'id="model-card"' in _render_model_card(wrapped)
+
+
+def test_representation_table_rendered():
+    mr = {
+        "provides": ["lipid"],
+        "requires": ["nutrient"],
+        "boundary": ["nutrient"],
+        "derived": ["volume"],
+        "self_produced": ["membrane_lipids"],
+        "gap": [],
+        "interface_closed": True,
+        "semantic": {"semantically_closed": False},
+    }
+    html = _render_representation(mr)
+    assert 'id="representation"' in html
+    assert "Representation claims" in html
+    assert "self-produced" in html
+    assert "boundary-crossing" in html
+    assert "derived" in html
+    assert "CLOSED" in html and "OPEN" in html
+
+
+def test_representation_omitted_when_absent():
+    assert _render_representation(None) == ""
+    assert _render_representation({}) == ""
+
+
+# ---------------------------------------------------------------------------
+# Wave 3a — workflow typing + framing render (critiques #10 / #7 / #18)
+# ---------------------------------------------------------------------------
+
+from vivarium_dashboard.lib.single_study_report import (  # noqa: E402
+    _study_type,
+    _render_study_type_badge,
+    _next_action_type_chip,
+    _render_preregistration_chip,
+)
+
+
+def test_study_type_reads_field_and_aliases():
+    # #10 — explicit study_type wins; kind/study_kind are aliases; default standard.
+    assert _study_type({"study_type": "diagnostic"}) == "diagnostic"
+    assert _study_type({"kind": "adversarial"}) == "adversarial"
+    assert _study_type({"study_kind": "confirmatory"}) == "confirmatory"
+    assert _study_type({}) == "standard"
+    # Unknown value falls through to the default.
+    assert _study_type({"study_type": "bogus"}) == "standard"
+
+
+def test_study_type_badge_omits_implicit_standard():
+    assert _render_study_type_badge({}) == ""
+    assert _render_study_type_badge({"study_type": "standard"}) == ""
+    badge = _render_study_type_badge({"study_type": "adversarial"})
+    assert "adversarial" in badge and "study-type-badge" in badge
+
+
+def test_study_type_badge_in_report_header(_ws):
+    _write_study(_ws, "s1", report={"title": "S1"}, study_type="diagnostic")
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert "study-type-badge" in text
+    assert "diagnostic" in text
+
+
+def test_next_action_type_chip_known_and_absent():
+    # #7 — known enum value renders; absent → no chip.
+    assert _next_action_type_chip({}) == ""
+    assert _next_action_type_chip({"next_action_type": ""}) == ""
+    chip = _next_action_type_chip({"next_action_type": "calibrate"})
+    assert "calibrate" in chip and "next-action-type" in chip
+    # Unknown still renders (faithful to the model; the linter flags it).
+    assert "weird" in _next_action_type_chip({"next_action_type": "weird"})
+
+
+def test_next_action_type_chip_in_report_finding(_ws):
+    _write_study(
+        _ws, "s1", report={"title": "S1"},
+        findings=[{"id": "F-01", "tier": "observation",
+                   "statement": "DnaA peaks at initiation.",
+                   "next_action": "rerun across seeds",
+                   "next_action_type": "replicate"}],
+    )
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert "next-action-type" in text
+    assert "replicate" in text
+
+
+def test_preregistration_chip_omitted_when_no_block(_ws):
+    # #18 — no preregistered block → no chip (also covers the no-pbg degrade).
+    assert _render_preregistration_chip({}) == ""
+    _write_study(_ws, "s1", report={"title": "S1"})
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert "prereg-chip" not in text
+
+
+def test_preregistration_chip_renders_from_status(monkeypatch):
+    # #18 — drive the chip directly via a stubbed preregistration_status so the
+    # render is covered even when pbg-superpowers isn't importable.
+    import vivarium_dashboard.lib.single_study_report as ssr
+    monkeypatch.setattr(
+        ssr, "_preregistration_status",
+        lambda spec: {"preregistered": True, "registered_before_run": True,
+                      "criteria_match": True},
+    )
+    chip = ssr._render_preregistration_chip({"preregistered": {"criteria": []}})
+    assert "prereg-chip" in chip and "pre-registered" in chip
+
+    monkeypatch.setattr(
+        ssr, "_preregistration_status",
+        lambda spec: {"preregistered": True, "registered_before_run": False,
+                      "criteria_match": False},
+    )
+    chip2 = ssr._render_preregistration_chip({"preregistered": {"criteria": []}})
+    assert "post-hoc" in chip2 and "drifted" in chip2
+
+
+# ---------------------------------------------------------------------------
+# Wave 3b — per-finding claim_scope (#21) / generality (#22) / lifecycle (#25)
+# chips + measurement-integrity section (threshold provenance/sensitivity #9,
+# calibration ladder #20).
+# ---------------------------------------------------------------------------
+
+from vivarium_dashboard.lib.single_study_report import (  # noqa: E402
+    _claim_scope_chip,
+    _generality_chip,
+    _lifecycle_chip,
+    _threshold_provenance_chip,
+    _pass_if_text,
+    _render_threshold_sensitivity,
+    _render_calibration_ladder,
+    _render_measurement_integrity,
+)
+
+
+def test_claim_scope_chip_known_and_absent():
+    # #21 — present value renders; absent → no chip.
+    assert _claim_scope_chip({}) == ""
+    assert _claim_scope_chip({"claim_scope": ""}) == ""
+    chip = _claim_scope_chip({"claim_scope": "theoretical"})
+    assert "theoretical" in chip and "claim-scope" in chip
+    # Unknown value still renders (faithful to the model).
+    assert "weird" in _claim_scope_chip({"claim_scope": "weird"})
+
+
+def test_generality_chip_axes_and_level():
+    # #22 — level coloured, axis count surfaced, axes in tooltip.
+    assert _generality_chip({}) == ""
+    assert _generality_chip({"generality": {}}) == ""
+    chip = _generality_chip({"generality": {
+        "axes_tested": ["parameter_regime", "initial_conditions"],
+        "level": "mechanism"}})
+    assert "generality" in chip and "mechanism" in chip
+    assert "2 ax" in chip                       # axis count
+    assert "parameter_regime" in chip           # in the title tooltip
+    # Axes-only (no level) still renders.
+    assert "generality" in _generality_chip(
+        {"generality": {"axes_tested": ["geometry"]}})
+
+
+def test_lifecycle_chip_authored_and_floor(monkeypatch):
+    # #25 — authored value wins; absent → derived floor (marked); none → ''.
+    import vivarium_dashboard.lib.single_study_report as ssr
+    monkeypatch.setattr(ssr, "_lifecycle_floor", lambda spec, f: None)
+    assert ssr._lifecycle_chip({}, {}) == ""
+    authored = ssr._lifecycle_chip({}, {"lifecycle_state": "generalized"})
+    assert "generalized" in authored and "lifecycle-state" in authored
+    assert "floor" not in authored
+    # No authored state but a derived floor → chip shows the floor, marked.
+    monkeypatch.setattr(ssr, "_lifecycle_floor",
+                        lambda spec, f: "tested-vs-alternatives")
+    derived = ssr._lifecycle_chip({}, {"id": "F-01"})
+    assert "tested-vs-alternatives" in derived and "floor" in derived
+
+
+def test_finding_chips_in_report(_ws):
+    _write_study(
+        _ws, "s1", report={"title": "S1"},
+        findings=[{"id": "F-01", "tier": "interpretation",
+                   "statement": "Life becomes mind.",
+                   "claim_scope": "theoretical",
+                   "generality": {"axes_tested": ["parameter_regime"],
+                                  "level": "instance_specific"},
+                   "lifecycle_state": "provisional-claim"}],
+    )
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert "claim-scope" in text and "theoretical" in text
+    assert "generality" in text
+    assert "lifecycle-state" in text and "provisional-claim" in text
+
+
+def test_pass_if_text_renders_ops():
+    assert _pass_if_text({"op": "in_range", "low": 0.1, "high": 0.5}) == "in [0.1, 0.5]"
+    assert "≥" in _pass_if_text({"op": "at_least", "low": 3})
+    assert "≤" in _pass_if_text({"op": "at_most", "high": 9})
+    assert "= 5" in _pass_if_text({"op": "equals", "value": 5})
+
+
+def test_threshold_provenance_chip():
+    # #9 — kind pill renders; note goes in the tooltip; absent → ''.
+    assert _threshold_provenance_chip({}) == ""
+    assert _threshold_provenance_chip({"note": "x"}) == ""
+    chip = _threshold_provenance_chip({"kind": "literature", "note": "Boesen 2024"})
+    assert "literature" in chip and "threshold-provenance" in chip
+    assert "Boesen 2024" in chip                # in the title tooltip
+
+
+def test_render_threshold_sensitivity_view():
+    assert _render_threshold_sensitivity(None) == ""
+    assert _render_threshold_sensitivity([]) == ""
+    html = _render_threshold_sensitivity([
+        {"cutoff": 0.08, "result": "PASS"},
+        {"cutoff": 0.12, "result": "FAIL"},
+    ])
+    assert "threshold-sensitivity" in html
+    assert "±20%" in html
+    assert "0.08" in html and "0.12" in html
+
+
+def test_render_calibration_ladder():
+    # #20 — table with rung cells + filled-count badge; absent → ''.
+    assert _render_calibration_ladder({}) == ""
+    html = _render_calibration_ladder({"calibration_ladder": [
+        {"metric": "containment", "known_fail": "leaky-ctrl",
+         "known_pass": "sealed-ctrl", "borderline": None, "stress": None},
+    ]})
+    assert "calibration-ladder" in html
+    assert "containment" in html
+    assert "leaky-ctrl" in html and "sealed-ctrl" in html
+    assert "2/4" in html                        # filled-rung count
+
+
+def test_measurement_integrity_section_provenance_and_ladder(_ws):
+    _write_study(
+        _ws, "s1", report={"title": "S1"},
+        behavior_tests=[{
+            "name": "growth-rate", "pass_if": {
+                "op": "in_range", "low": 0.1, "high": 0.5,
+                "provenance": {"kind": "calibration", "note": "fit to Taheri-Araghi"}}}],
+        calibration_ladder=[{"metric": "growth", "known_fail": "starve-ctrl",
+                             "known_pass": "rich-ctrl"}],
+    )
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'id="measurement-integrity"' in text
+    assert "Measurement integrity" in text
+    assert "calibration" in text               # provenance kind
+    assert "fit to Taheri-Araghi" in text      # note
+    assert "growth-rate" in text               # band name
+    assert 'id="calibration-ladder"' in text
+    assert "starve-ctrl" in text
+
+
+def test_measurement_integrity_omitted_when_absent(_ws):
+    _write_study(_ws, "s1", report={"title": "S1"},
+                 behavior_tests=[{"name": "x", "pass_if": {"op": "at_least", "low": 1}}])
+    # A band without provenance and no calibration_ladder → section omitted
+    # (unless rigor.threshold_sensitivity is importable AND returns rows; the
+    # bare 'x' test has no recorded outcomes, so it stays guarded/None).
+    render_single_study_report(_ws, "s1")
+    text = (_ws / "reports" / "single-study-s1.html").read_text()
+    assert 'id="measurement-integrity"' not in text
+
+
+def test_measurement_integrity_sensitivity_via_stub(monkeypatch, _ws):
+    # #9 — drive the sensitivity mini-view through a stubbed bridge so the
+    # render is covered even when pbg-superpowers lacks threshold_sensitivity.
+    import vivarium_dashboard.lib.single_study_report as ssr
+    monkeypatch.setattr(ssr, "_threshold_sensitivity",
+                        lambda spec, name: [{"cutoff": 0.9, "result": "PASS"},
+                                            {"cutoff": 1.1, "result": "FAIL"}])
+    html = ssr._render_measurement_integrity({
+        "behavior_tests": [{"name": "div-time", "pass_if": {"op": "at_least", "low": 1}}],
+    })
+    assert 'id="measurement-integrity"' in html
+    assert "threshold-sensitivity" in html
+    assert "div-time" in html

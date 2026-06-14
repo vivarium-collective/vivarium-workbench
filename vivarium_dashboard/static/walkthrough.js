@@ -3804,6 +3804,16 @@
       p = fetch(url).then(function(r) { return r.json(); });
     }
     p.then(function(data) {
+        if (data.unresolved) {
+          // Honest degrade: the ref doesn't resolve to a registered composite.
+          // Don't render a bare "error composite" node — explain it plainly.
+          document.getElementById('ce-loading').innerHTML =
+            '<div style="color:#92400e;background:#fffbeb;border:1px solid #f59e0b;' +
+            'border-radius:6px;padding:10px 14px">⚠ Composite not found in the ' +
+            'registry: <code>' + _esc(data.ref || id) + '</code>. This study may not ' +
+            'declare a real composite — check the study’s baseline composite ref.</div>';
+          return;
+        }
         if (data.error) {
           document.getElementById('ce-loading').innerHTML =
             '<span style="color:#c00">Error: ' + _esc(data.error) + '</span>';
@@ -5055,6 +5065,49 @@
   }
   window._closeInvestigationDetail = _closeInvestigationDetail;
 
+  // W13 — canonical DAG-edge read. The server already feeds
+  // normalize_dag_edges() output into each study's `parent_studies` key
+  // (carrying study/condition/relation/outputs_used), but prefer the raw
+  // canonical Pass A field `pipeline_gate.prerequisites` when a full spec is
+  // present so the renderer always reads the canonical location, never the
+  // legacy `parent_studies` field directly.
+  function _dagEdges(s) {
+    var pg = s && s.pipeline_gate;
+    var raw = (pg && pg.prerequisites && pg.prerequisites.length)
+                ? pg.prerequisites
+                : ((s && s.parent_studies) || []);
+    var out = [];
+    (raw || []).forEach(function(entry) {
+      if (typeof entry === 'string') {
+        out.push({ study: entry, condition: 'tests-passed', relation: 'leads-to' });
+      } else if (entry && entry.study) {
+        var e = {};
+        for (var k in entry) { if (entry.hasOwnProperty(k)) e[k] = entry[k]; }
+        if (!e.condition) e.condition = 'tests-passed';
+        if (!e.relation) {
+          e.relation = (e.outputs_used && e.outputs_used.length) ? 'model-input' : 'leads-to';
+        }
+        out.push(e);
+      }
+    });
+    return out;
+  }
+  // W13 — edge-relation vocabulary → stroke styling + legend label.
+  var _DAG_REL_STYLE = {
+    'leads-to':             { color: '#94a3b8', dash: null,  label: 'leads to' },
+    'model-input':          { color: '#2563eb', dash: null,  label: 'model input' },
+    'evidence':             { color: '#0d9488', dash: '5 3', label: 'evidence' },
+    'calibrates-threshold': { color: '#ca8a04', dash: '2 3', label: 'calibrates threshold' },
+    'refutes-alternative':  { color: '#dc2626', dash: '5 3', label: 'refutes alternative' },
+  };
+  function _dagRelStyle(rel) {
+    // Map legacy aliases onto the canonical vocabulary.
+    if (rel === 'regulatory') rel = 'calibrates-threshold';
+    if (rel === 'refutes')    rel = 'refutes-alternative';
+    if (rel === 'leads to')   rel = 'leads-to';
+    return _DAG_REL_STYLE[rel] || _DAG_REL_STYLE['leads-to'];
+  }
+
   // Layout + render the DAG of study nodes for the active investigation.
   // VERTICAL flow: y = topological depth (top = roots), x = within-depth slot.
   // Cards as absolute-positioned <div>s; edges as SVG cubic-Bezier paths.
@@ -5074,8 +5127,8 @@
     var children = {};
     studies.forEach(function(s) { byName[s.name] = s; children[s.name] = []; });
     studies.forEach(function(s) {
-      (s.parent_studies || []).forEach(function(p) {
-        var pn = p.study || p;
+      _dagEdges(s).forEach(function(p) {
+        var pn = p.study;
         if (children[pn]) children[pn].push(s.name);
       });
     });
@@ -5084,7 +5137,7 @@
     var depth = {};
     var queue = [];
     studies.forEach(function(s) {
-      if (!(s.parent_studies || []).length) { depth[s.name] = 0; queue.push(s.name); }
+      if (!_dagEdges(s).length) { depth[s.name] = 0; queue.push(s.name); }
     });
     var guard = studies.length * 4;
     while (queue.length && guard-- > 0) {
@@ -5227,33 +5280,39 @@
       'markerWidth="7" markerHeight="7" orient="auto-start-reverse">' +
       '<path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>';
     studies.forEach(function(s) {
-      (s.parent_studies || []).forEach(function(p) {
-        var pn = p.study || p;
+      _dagEdges(s).forEach(function(p) {
+        var pn = p.study;
         if (!pos[pn] || !pos[s.name]) return;
         var x1 = pos[pn].x + CARD_W;
         var y1 = pos[pn].y + pos[pn].h / 2;
         var x2 = pos[s.name].x;
         var y2 = pos[s.name].y + pos[s.name].h / 2;
         var dx = Math.max(28, (x2 - x1) / 2);
+        var rel = p.relation || 'leads-to';
+        var st = _dagRelStyle(rel);
         var path = document.createElementNS(svgNS, 'path');
         path.setAttribute('d', 'M ' + x1 + ' ' + y1 +
                               ' C ' + (x1 + dx) + ' ' + y1 +
                               ', ' + (x2 - dx) + ' ' + y2 +
                               ', ' + x2 + ' ' + y2);
         path.setAttribute('fill', 'none');
-        path.setAttribute('stroke', '#94a3b8');
+        path.setAttribute('stroke', st.color);
         path.setAttribute('stroke-width', '1.5');
         path.setAttribute('marker-end', 'url(#dag-arrowhead)');
+        if (st.dash) path.setAttribute('stroke-dasharray', st.dash);
         edgesSvg.appendChild(path);
-        var cond = (p.relation || 'leads to');
-        if (cond === 'regulatory' || cond === 'refutes') path.setAttribute('stroke-dasharray', '5 3');
+        var labelText = st.label;
+        // model-input edges name the consumed upstream outputs when present.
+        if (rel === 'model-input' && p.outputs_used && p.outputs_used.length) {
+          labelText += ' (' + p.outputs_used.join(', ') + ')';
+        }
         var label = document.createElementNS(svgNS, 'text');
         label.setAttribute('x', (x1 + x2) / 2);
         label.setAttribute('y', (y1 + y2) / 2 - 6);
         label.setAttribute('text-anchor', 'middle');
         label.setAttribute('font-size', '10');
-        label.setAttribute('fill', '#94a3b8');
-        label.textContent = cond;
+        label.setAttribute('fill', st.color);
+        label.textContent = labelText;
         edgesSvg.appendChild(label);
       });
     });
@@ -5277,12 +5336,24 @@
       };
       legendHost.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;' +
         'font-size:0.74em;color:#64748b;padding:8px 4px 0;border-top:1px solid #f1f5f9;margin-top:8px';
+      // W13 — edge-relation legend swatches (colored solid/dashed lines).
+      var _edgeLg = function(rel) {
+        var st = _dagRelStyle(rel);
+        var line = 'border-bottom:2px ' + (st.dash ? 'dashed' : 'solid') + ' ' + st.color;
+        return '<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px">' +
+          '<span style="width:18px;' + line + ';display:inline-block;line-height:0">&nbsp;</span>' +
+          '<span>' + st.label + '</span></span>';
+      };
       legendHost.innerHTML =
         '<span style="font-weight:600;color:#475569;margin-right:10px">Confidence:</span>' +
         _lg('#16a34a', '✓', 'Accepted') + _lg('#ca8a04', '◐', 'Investigating') +
         _lg('#2563eb', '○', 'Planned') + _lg('#dc2626', '✗', 'Refuted') +
-        '<span style="margin:0 14px 0 6px"><span style="color:#94a3b8">→</span> leads to</span>' +
-        '<span><span style="color:#94a3b8;letter-spacing:-1px">⤄</span> regulatory</span>';
+        '<span style="flex-basis:100%;height:0"></span>' +
+        '<span style="font-weight:600;color:#475569;margin:6px 10px 0 0">Edges:</span>' +
+        '<span style="margin-top:6px">' +
+          _edgeLg('leads-to') + _edgeLg('model-input') + _edgeLg('evidence') +
+          _edgeLg('calibrates-threshold') + _edgeLg('refutes-alternative') +
+        '</span>';
     }
   }
   window._renderInvestigationDag = _renderInvestigationDag;
@@ -5559,14 +5630,29 @@
         var rigorFetch = fetch('/api/investigation-rigor?investigation=' + encodeURIComponent(iset.name))
           .then(function(r) { return r.ok ? r.json() : null; })
           .catch(function() { return null; });
+        // Wave 3a #26 — framework-self metrics across every study + investigation
+        // (deterministic, pbg_superpowers.rigor.framework_metrics). Renders the
+        // "Framework scorecard" section. Best-effort: null → section omitted.
+        var fmFetch = fetch('/api/framework-metrics')
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .catch(function() { return null; });
+        // Wave 3b #6/#16 — competing hypotheses with the COMPUTED support_log
+        // (pbg_superpowers.hypotheses.rollup_support, via the report-data path).
+        // Best-effort: [] → the panel falls back to authored iset.hypotheses.
+        var hypFetch = fetch('/api/investigation-hypotheses?investigation=' + encodeURIComponent(iset.name))
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .then(function(j) { return (j && j.hypotheses) || null; })
+          .catch(function() { return null; });
         return Promise.all([Promise.all(studyFetches), bibFetch,
                             Promise.all(chartFetches), genFetch,
-                            ghRepoFetch, rigorFetch]).then(function(arr) {
+                            ghRepoFetch, rigorFetch, fmFetch, hypFetch]).then(function(arr) {
           var chartsByStudy = {};
           arr[2].forEach(function(c) { chartsByStudy[c.name] = c.charts; });
           var generation = arr[3];
           var ghRepo = arr[4];
           var rigor = arr[5];
+          var frameworkMetrics = arr[6];
+          var hypotheses = arr[7];
           // Second pass: now that we have the specs, fetch each study's
           // embed_visualizations URLs so the downloaded report can inline
           // them as <iframe srcdoc="...">. This makes the file truly
@@ -5601,7 +5687,8 @@
             });
             return {iset: iset, specs: specs, bibEntries: arr[1],
                     chartsByStudy: chartsByStudy, embedsByStudy: embedsByStudy,
-                    generation: generation, ghRepo: ghRepo, rigor: rigor};
+                    generation: generation, ghRepo: ghRepo, rigor: rigor,
+                    frameworkMetrics: frameworkMetrics, hypotheses: hypotheses};
           });
         });
       })
@@ -5609,7 +5696,8 @@
         var html = _buildInvestigationReportHtml(bundle.iset, bundle.specs,
                                                   bundle.bibEntries, bundle.chartsByStudy,
                                                   bundle.embedsByStudy, bundle.generation,
-                                                  bundle.ghRepo, bundle.rigor);
+                                                  bundle.ghRepo, bundle.rigor,
+                                                  bundle.frameworkMetrics, bundle.hypotheses);
         var dateStr = new Date().toISOString().slice(0, 10);
         var filename = 'investigation-' + name + '-' + dateStr + '.html';
         _triggerDownload(filename, html, 'text/html');
@@ -5783,6 +5871,126 @@
   function _normGateResult(v) {
     return _GATE_RESULT_NORM[String(v == null ? '' : v).trim().toLowerCase()] || 'PENDING';
   }
+  // W8 — per-finding evidential-weight chip. The weight is COMPUTED SERVER-SIDE
+  // (pbg_superpowers.rigor.finding_evidential_weight, carried on the finding as
+  // `_evidential_weight` via the report-data path) so the SPA just renders it —
+  // no JS recompute, no drift. Degrades to nothing when the field is absent.
+  var _WEIGHT_CHIP_COLORS = {
+    strong:   ['#dcfce7', '#166534'],
+    moderate: ['#fef9c3', '#854d0e'],
+    weak:     ['#fee2e2', '#991b1b']
+  };
+  function _findingWeightChip(w) {
+    if (!w || !w.weight) return '';
+    var c = _WEIGHT_CHIP_COLORS[w.weight] || ['#f1f5f9', '#475569'];
+    var label = _h(w.weight) + (typeof w.n_supporting === 'number' ? ' · ' + w.n_supporting + '/5' : '');
+    var title = '';
+    if (w.dims) {
+      var dims = []; for (var k in w.dims) { if (w.dims[k]) dims.push(k); }
+      title = ' title="evidence dims: ' + _h(dims.join(', ') || 'none') + '"';
+    }
+    return '<span class="finding-weight"' + title + ' style="display:inline-block;'
+      + 'padding:1px 8px;border-radius:9999px;background:' + c[0] + ';color:' + c[1] + ';'
+      + 'font-weight:600;font-size:0.72em;margin-left:6px;vertical-align:middle">'
+      + label + '</span>';
+  }
+  // Wave 3b — per-finding claim_scope (#21) / generality (#22) / lifecycle_state
+  // (#25) chips, beside the finding's tier/weight badges. Authored on the finding;
+  // the lifecycle FLOOR arrives via the report-data path as `_lifecycle_floor`
+  // (server-computed by pbg_superpowers.study_verdict.lifecycle_floor). Enums
+  // match the cross-repo contract + lib/single_study_report.py. Degrade to ''.
+  var _CLAIM_SCOPE_COLORS = {
+    'local-implementation': ['#f1f5f9', '#475569'],
+    mechanism:   ['#dbeafe', '#1e40af'],
+    behavioral:  ['#dcfce7', '#166534'],
+    theoretical: ['#ede9fe', '#6d28d9'],
+    generality:  ['#fef9c3', '#854d0e']
+  };
+  function _claimScopeChip(f) {
+    if (!f || typeof f !== 'object') return '';
+    var cs = f.claim_scope;
+    if (typeof cs !== 'string' || !cs.trim()) return '';
+    var v = cs.trim();
+    var c = _CLAIM_SCOPE_COLORS[v] || ['#fef9c3', '#854d0e'];
+    return '<span class="claim-scope" title="claim scope (critique #21)" style="display:inline-block;'
+      + 'padding:1px 8px;border-radius:9999px;background:' + c[0] + ';color:' + c[1] + ';'
+      + 'font-weight:600;font-size:0.72em;margin-left:6px;vertical-align:middle">scope: ' + _h(v) + '</span>';
+  }
+  var _GENERALITY_LEVEL_COLORS = {
+    instance_specific: ['#fee2e2', '#991b1b'],
+    mechanism:         ['#fef9c3', '#854d0e'],
+    framework:         ['#dcfce7', '#166534']
+  };
+  function _generalityChip(f) {
+    if (!f || typeof f !== 'object') return '';
+    var g = f.generality;
+    if (!g || typeof g !== 'object') return '';
+    var level = (typeof g.level === 'string') ? g.level.trim() : '';
+    var axes = g.axes_tested || [];
+    if (typeof axes === 'string') axes = [axes];
+    axes = axes.filter(Boolean).map(String);
+    if (!level && !axes.length) return '';
+    var c = _GENERALITY_LEVEL_COLORS[level] || ['#f1f5f9', '#475569'];
+    var label = 'generality' + (level ? ': ' + level : '');
+    if (axes.length) label += ' · ' + axes.length + ' ax' + (axes.length !== 1 ? 'es' : 'is');
+    var title = 'generality (critique #22) — axes tested: ' + (axes.join(', ') || 'none');
+    return '<span class="generality" title="' + _h(title) + '" style="display:inline-block;'
+      + 'padding:1px 8px;border-radius:9999px;background:' + c[0] + ';color:' + c[1] + ';'
+      + 'font-weight:600;font-size:0.72em;margin-left:6px;vertical-align:middle">' + _h(label) + '</span>';
+  }
+  var _LIFECYCLE_COLORS = {
+    observation:              ['#f1f5f9', '#475569'],
+    'candidate-explanation':  ['#e0e7ff', '#3730a3'],
+    'tested-vs-alternatives': ['#dbeafe', '#1e40af'],
+    'provisional-claim':      ['#fef9c3', '#854d0e'],
+    generalized:              ['#dcfce7', '#166534'],
+    retired:                  ['#fee2e2', '#991b1b'],
+    superseded:               ['#fee2e2', '#991b1b']
+  };
+  function _lifecycleChip(f) {
+    if (!f || typeof f !== 'object') return '';
+    var authored = (typeof f.lifecycle_state === 'string' && f.lifecycle_state.trim())
+      ? f.lifecycle_state.trim() : null;
+    var floor = (typeof f._lifecycle_floor === 'string' && f._lifecycle_floor.trim())
+      ? f._lifecycle_floor.trim() : null;
+    var state = authored || floor;
+    if (!state) return '';
+    var c = _LIFECYCLE_COLORS[state] || ['#f1f5f9', '#475569'];
+    var derived = !authored && !!floor;
+    var label = state + (derived ? ' · floor' : '');
+    var title = 'lifecycle state (critique #25)' + (derived ? ' — derived floor (no authored state)' : '');
+    return '<span class="lifecycle-state" title="' + _h(title) + '" style="display:inline-block;'
+      + 'padding:1px 8px;border-radius:9999px;background:' + c[0] + ';color:' + c[1] + ';'
+      + 'font-weight:600;font-size:0.72em;margin-left:6px;vertical-align:middle">' + _h(label) + '</span>';
+  }
+  function _findingChips(f) {
+    return _claimScopeChip(f) + _generalityChip(f) + _lifecycleChip(f);
+  }
+  // Wave 3b #9 — threshold provenance.kind chip (+ note in the tooltip) beside a
+  // pass_if band. DISTINCT from cites/calibration_anchor. Enum matches the
+  // cross-repo contract. Degrades to '' when no provenance is declared.
+  var _THRESHOLD_PROV_COLORS = {
+    theory:      ['#dbeafe', '#1e40af'],
+    calibration: ['#dcfce7', '#166534'],
+    literature:  ['#e0e7ff', '#3730a3'],
+    expert:      ['#fef9c3', '#854d0e'],
+    exploratory: ['#f1f5f9', '#475569'],
+    post_hoc:    ['#fee2e2', '#991b1b']
+  };
+  function _thresholdProvenanceChip(passIf) {
+    if (!passIf || typeof passIf !== 'object') return '';
+    var prov = passIf.provenance;
+    if (!prov || typeof prov !== 'object') return '';
+    var kind = prov.kind;
+    if (typeof kind !== 'string' || !kind.trim()) return '';
+    var v = kind.trim();
+    var c = _THRESHOLD_PROV_COLORS[v] || ['#fef9c3', '#854d0e'];
+    var note = (typeof prov.note === 'string') ? prov.note.trim() : '';
+    var title = 'threshold provenance (critique #9)' + (note ? ' — ' + note : '');
+    return '<span class="threshold-provenance" title="' + _h(title) + '" style="display:inline-block;'
+      + 'padding:1px 8px;border-radius:9999px;background:' + c[0] + ';color:' + c[1] + ';'
+      + 'font-weight:600;font-size:0.72em;margin-left:6px;vertical-align:middle">provenance: ' + _h(v) + '</span>';
+  }
   function _deriveConclusionVerdicts(s) {
     var authored = s.conclusion_verdicts || {};
     var ge = (s.pipeline_gate || {}).gate_evaluator || {};
@@ -5909,6 +6117,354 @@
     return bits;
   }
 
+  // ── Wave 2 — compositional causal discovery + semantic closure ─────────
+  // All consume data the model WRITES into study.yaml (composition_commitment,
+  // invariant_check, ablations, model_representation). Mirror the server-side
+  // renderers in single_study_report.py. Each degrades to '' when absent.
+  function _chipList(items, bg, fg) {
+    bg = bg || '#f1f5f9'; fg = fg || '#0f172a';
+    return (items || []).filter(function(i) { return i != null && i !== ''; })
+      .map(function(i) {
+        return '<span style="display:inline-block;padding:2px 9px;border-radius:9999px;background:'
+          + bg + ';color:' + fg + ';margin:2px;font-size:0.82em">' + _h(String(i)) + '</span>';
+      }).join('');
+  }
+
+  // C-COMMIT — "Theoretical commitment" panel. Invariants link to earlier
+  // studies (#study-<slug>); new behaviors link to the study's own tests fold.
+  function _compositionCommitmentHtml(s, slug) {
+    var cc = s.composition_commitment;
+    if (!cc || typeof cc !== 'object') return '';
+    var rows = [];
+    var added = cc.component_added;
+    if (typeof added === 'string') added = [added];
+    if (added && added.length) {
+      rows.push('<div style="margin:8px 0"><strong style="color:#1e293b">Component added</strong> '
+        + _chipList(added, '#e0e7ff', '#3730a3') + '</div>');
+    }
+    var deficit = cc.deficit_addressed;
+    if (deficit && typeof deficit === 'object') {
+      var note = deficit.note || '';
+      var gaps = deficit.closure_gap_item; if (typeof gaps === 'string') gaps = [gaps];
+      var gapHtml = (gaps && gaps.length)
+        ? ' <span style="color:#475569;font-size:0.85em">closes:</span> ' + _chipList(gaps, '#fee2e2', '#991b1b')
+        : '';
+      if (note || gapHtml) {
+        rows.push('<div style="margin:8px 0"><strong style="color:#1e293b">Deficit addressed</strong> '
+          + (note ? _multiline(String(note)) : '') + gapHtml + '</div>');
+      }
+    } else if (typeof deficit === 'string' && deficit) {
+      rows.push('<div style="margin:8px 0"><strong style="color:#1e293b">Deficit addressed</strong> '
+        + _multiline(deficit) + '</div>');
+    }
+    var nb = cc.new_behavior; if (typeof nb === 'string') nb = [nb];
+    if (nb && nb.length) {
+      var nbHtml = nb.filter(Boolean).map(function(t) {
+        return '<a href="#study-' + _h(slug) + '" style="display:inline-block;padding:2px 9px;'
+          + 'border-radius:9999px;background:#dcfce7;color:#166534;margin:2px;font-size:0.82em;'
+          + 'text-decoration:none">' + _h(String(t)) + '</a>';
+      }).join('');
+      rows.push('<div style="margin:8px 0"><strong style="color:#1e293b">New behavior</strong> ' + nbHtml + '</div>');
+    }
+    var inv = cc.invariants_required || [];
+    var invBits = inv.map(function(iv) {
+      if (iv && typeof iv === 'object') {
+        var study = iv.study || ''; var test = iv.test || '';
+        var label = study + (test ? ' · ' + test : '');
+        if (!label) return '';
+        return study
+          ? '<li><a href="#study-' + _h(study) + '"><code>' + _h(label) + '</code></a></li>'
+          : '<li><code>' + _h(label) + '</code></li>';
+      }
+      return iv ? '<li><code>' + _h(String(iv)) + '</code></li>' : '';
+    }).filter(Boolean).join('');
+    if (invBits) {
+      rows.push('<div style="margin:8px 0"><strong style="color:#1e293b">Invariants required</strong>'
+        + '<ul style="margin:4px 0 0;padding-left:20px;color:#334155;font-size:0.92em">' + invBits + '</ul></div>');
+    }
+    var ex = cc.alternatives_excluded; if (typeof ex === 'string') ex = [ex];
+    if (ex && ex.length) {
+      rows.push('<div style="margin:8px 0"><strong style="color:#1e293b">Alternatives excluded</strong> '
+        + _chipList(ex, '#fef9c3', '#854d0e') + '</div>');
+    }
+    if (!rows.length) return '';
+    return '<div class="composition-commitment" id="study-' + slug + '-commitment">'
+      + '<h3>Theoretical commitment</h3>'
+      + '<p class="muted small" style="margin:0 0 8px 0">What this study adds to its prerequisite — '
+      + 'the component introduced, the deficit it closes, the new behavior it unlocks, the earlier '
+      + 'invariants it must preserve, and the alternatives it excludes.</p>'
+      + rows.join('') + '</div>';
+  }
+
+  // C-INVAR — "Invariant checks" sub-section (invalidated/weakened first).
+  var _INVAR_STATUS_COLORS = {
+    invalidated: ['#fee2e2', '#991b1b'], weakened: ['#fef9c3', '#854d0e'],
+    preserved: ['#dcfce7', '#166534'], strengthened: ['#dbeafe', '#1e40af']
+  };
+  var _INVAR_STATUS_RANK = {invalidated: 0, weakened: 1, preserved: 2, strengthened: 3};
+  function _invariantChecksHtml(s, slug) {
+    var checks = (s.invariant_check || []).filter(function(c) { return c && typeof c === 'object'; });
+    if (!checks.length) return '';
+    checks = checks.slice().sort(function(a, b) {
+      var ra = _INVAR_STATUS_RANK[String(a.status || '').toLowerCase()];
+      var rb = _INVAR_STATUS_RANK[String(b.status || '').toLowerCase()];
+      return (ra == null ? 9 : ra) - (rb == null ? 9 : rb);
+    });
+    var rows = checks.map(function(c) {
+      var st = String(c.status || '').toLowerCase();
+      var col = _INVAR_STATUS_COLORS[st] || ['#f1f5f9', '#475569'];
+      var chip = '<span style="padding:1px 8px;border-radius:9999px;background:' + col[0] + ';color:'
+        + col[1] + ';font-weight:600;font-size:0.82em">' + _h(st || '—') + '</span>';
+      return '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+        + '<td style="padding:4px 8px"><code>' + _h(c.study || '') + '</code></td>'
+        + '<td style="padding:4px 8px">' + _h(c.test || '') + '</td>'
+        + '<td style="padding:4px 8px">' + _h(c.prior == null ? '' : c.prior) + '</td>'
+        + '<td style="padding:4px 8px">' + _h(c.now == null ? '' : c.now) + '</td>'
+        + '<td style="padding:4px 8px">' + chip + '</td></tr>';
+    }).join('');
+    return '<div class="invariant-checks" id="study-' + slug + '-invariants">'
+      + '<h3>Invariant checks</h3>'
+      + '<p class="muted small" style="margin:0 0 8px 0">Earlier guarantees re-checked in the current '
+      + 'code state — prior vs current value and whether each was preserved. Invalidated / weakened first.</p>'
+      + '<table style="border-collapse:collapse;width:100%">'
+      + '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+      + '<th style="padding:4px 8px">Study</th><th style="padding:4px 8px">Test</th>'
+      + '<th style="padding:4px 8px">Prior</th><th style="padding:4px 8px">Now</th>'
+      + '<th style="padding:4px 8px">Status</th></tr>' + rows + '</table></div>';
+  }
+
+  // C-CF — "Causal necessity" table from study.ablations[].
+  function _causalNecessityHtml(s, slug) {
+    var abl = (s.ablations || []).filter(function(a) { return a && typeof a === 'object'; });
+    if (!abl.length) return '';
+    var roleColors = {
+      necessary: ['#fee2e2', '#991b1b'], modulatory: ['#fef9c3', '#854d0e'],
+      redundant: ['#f1f5f9', '#475569']
+    };
+    var rows = abl.map(function(a) {
+      var target = a.target;
+      if (Array.isArray(target)) target = target.join('.');
+      var procTarget = _h(String(a.process == null ? '' : a.process))
+        + (target ? ' <code style="font-size:0.82em">' + _h(String(target)) + '</code>' : '');
+      var role = String(a.role || '').toLowerCase();
+      var col = roleColors[role] || ['#f1f5f9', '#475569'];
+      var roleHtml = '<span style="padding:1px 8px;border-radius:9999px;background:' + col[0]
+        + ';color:' + col[1] + ';font-weight:600;font-size:0.82em">' + _h(role || '—') + '</span>';
+      var nec = a.causally_necessary;
+      var necHtml = nec === true ? '✓' : (nec === false ? '✗' : '—');
+      return '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+        + '<td style="padding:4px 8px">' + procTarget + '</td>'
+        + '<td style="padding:4px 8px"><code>' + _h(a.mode || '') + '</code></td>'
+        + '<td style="padding:4px 8px">' + _h(a.behavior_test || '') + '</td>'
+        + '<td style="padding:4px 8px">' + _h(String(a.baseline_result)) + ' → ' + _h(String(a.ablated_result)) + '</td>'
+        + '<td style="padding:4px 8px">' + roleHtml + '</td>'
+        + '<td style="padding:4px 8px;text-align:center;font-weight:700">' + necHtml + '</td></tr>';
+    }).join('');
+    return '<div class="causal-necessity" id="study-' + slug + '-causal">'
+      + '<h3>Causal necessity</h3>'
+      + '<p class="muted small" style="margin:0 0 8px 0">Counterfactual read of the ablation suite — '
+      + 'each component removed or perturbed, whether a behavior test flipped, and so whether it is '
+      + 'causally necessary (vs redundant or merely modulatory).</p>'
+      + '<table style="border-collapse:collapse;width:100%">'
+      + '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+      + '<th style="padding:4px 8px">Process / target</th><th style="padding:4px 8px">Mode</th>'
+      + '<th style="padding:4px 8px">Behavior test</th><th style="padding:4px 8px">Baseline → ablated</th>'
+      + '<th style="padding:4px 8px">Role</th><th style="padding:4px 8px">Necessary</th></tr>'
+      + rows + '</table></div>';
+  }
+
+  // C-MODELCARD — "Representation claims" table from s.model_representation.
+  // (The full static model card is rendered server-side in single_study_report.py
+  // so it survives the static read-only bundle; here we surface the representation
+  // labels + closure status, which need no composite fetch.)
+  var _REPR_ROLE_COLORS = {
+    'inside': ['#f1f5f9', '#475569'], 'boundary-crossing': ['#dbeafe', '#1e40af'],
+    'derived': ['#ede9fe', '#6d28d9'], 'self-produced': ['#dcfce7', '#166534']
+  };
+  function _representationHtml(s, slug) {
+    var mr = s.model_representation;
+    if (!mr || typeof mr !== 'object') return '';
+    var cats = [
+      ['self-produced', mr.self_produced], ['derived', mr.derived],
+      ['boundary-crossing', mr.boundary], ['boundary-crossing', mr.requires],
+      ['inside', mr.provides], ['inside', mr.inside]
+    ];
+    var storeRole = {};
+    cats.forEach(function(pair) {
+      var lst = pair[1]; if (typeof lst === 'string') lst = [lst];
+      (lst || []).forEach(function(st) {
+        if (storeRole[String(st)] === undefined) storeRole[String(st)] = pair[0];
+      });
+    });
+    var gap = mr.gap; if (typeof gap === 'string') gap = [gap];
+    var gapSet = {}; (gap || []).forEach(function(g) { gapSet[String(g)] = 1; });
+    var rows = Object.keys(storeRole).sort().map(function(store) {
+      var role = storeRole[store];
+      var col = _REPR_ROLE_COLORS[role] || ['#f1f5f9', '#475569'];
+      var gapBadge = gapSet[store] ? ' <span style="padding:0 6px;border-radius:9999px;background:#fee2e2;'
+        + 'color:#991b1b;font-size:0.72em">unclosed gap</span>' : '';
+      return '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+        + '<td style="padding:4px 8px"><code>' + _h(store) + '</code>' + gapBadge + '</td>'
+        + '<td style="padding:4px 8px"><span style="padding:1px 8px;border-radius:9999px;background:'
+        + col[0] + ';color:' + col[1] + ';font-weight:600;font-size:0.82em">' + _h(role) + '</span></td></tr>';
+    }).join('');
+    function closureChip(label, closed) {
+      var bg, fg, txt;
+      if (closed === true) { bg = '#dcfce7'; fg = '#166534'; txt = 'CLOSED'; }
+      else if (closed === false) { bg = '#fee2e2'; fg = '#991b1b'; txt = 'OPEN'; }
+      else { bg = '#f1f5f9'; fg = '#475569'; txt = '—'; }
+      return '<span style="margin-right:12px">' + _h(label) + ': <span style="padding:1px 8px;'
+        + 'border-radius:9999px;background:' + bg + ';color:' + fg + ';font-weight:700;font-size:0.82em">'
+        + txt + '</span></span>';
+    }
+    var semantic = (mr.semantic && typeof mr.semantic === 'object') ? mr.semantic : {};
+    var closureHtml = '<div style="margin:10px 0">'
+      + closureChip('Interface closure', mr.interface_closed)
+      + closureChip('Semantic closure', semantic.semantically_closed) + '</div>';
+    var tableHtml = rows ? ('<table style="border-collapse:collapse;width:100%;margin-top:4px">'
+      + '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+      + '<th style="padding:4px 8px">Store</th><th style="padding:4px 8px">Representation</th></tr>'
+      + rows + '</table>') : '';
+    if (!rows && mr.interface_closed == null && semantic.semantically_closed == null) return '';
+    return '<div class="representation-claims" id="study-' + slug + '-representation">'
+      + '<h3>Representation claims</h3>'
+      + '<p class="muted small" style="margin:0 0 8px 0">How each store is represented '
+      + '(inside / boundary-crossing / derived / self-produced) and whether the model achieves '
+      + 'interface closure (no missing inputs) and semantic closure (every self-produced store fluxes).</p>'
+      + closureHtml + tableHtml + '</div>';
+  }
+
+  // Wave 3a #1 — what the investigation primarily evaluates. Renders a small
+  // header chip; omitted when the field is unset / not a known enum value.
+  var _OBJ_OF_EVAL = {method: 1, model: 1, hypothesis: 1, 'composition-protocol': 1};
+  function _objectOfEvaluationChip(obj) {
+    if (typeof obj !== 'string' || !obj.trim()) return '';
+    var v = obj.trim().toLowerCase();
+    if (!_OBJ_OF_EVAL[v]) return '';
+    return ' <span class="badge" title="object of evaluation (critique #1) — what '
+      + 'this investigation primarily evaluates" style="background:#e0e7ff;color:#3730a3;'
+      + 'font-weight:600">evaluates: ' + _h(v) + '</span>';
+  }
+
+  // Wave 3a #26 — "Framework scorecard". Renders the deterministic framework-self
+  // metrics computed by pbg_superpowers.rigor.framework_metrics (each entry is
+  // {fraction, count, total}). The label is the dashboard's job; the math is
+  // pbg's. Omitted when the payload carries no metrics (degrades gracefully).
+  function _frameworkScorecardHtml(fm) {
+    if (!fm || typeof fm !== 'object') return '';
+    var metrics = fm.metrics || {};
+    var keys = Object.keys(metrics).filter(function (k) {
+      var m = metrics[k];
+      return m && typeof m === 'object' && (typeof m.fraction === 'number'
+        || typeof m.count === 'number' || typeof m.total === 'number');
+    });
+    if (!keys.length) return '';
+    var nInv = (typeof fm.n_investigations === 'number') ? fm.n_investigations : 0;
+    function humanize(k) {
+      return String(k).replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+    }
+    var rows = keys.map(function (k) {
+      var m = metrics[k];
+      var frac = (typeof m.fraction === 'number') ? m.fraction : null;
+      var pct = (frac == null) ? '—' : Math.round(frac * 100) + '%';
+      var cnt = (typeof m.count === 'number' && typeof m.total === 'number')
+        ? (m.count + ' / ' + m.total) : '';
+      var w = (frac == null) ? 0 : Math.max(0, Math.min(100, Math.round(frac * 100)));
+      var barColor = w >= 67 ? '#16a34a' : (w >= 34 ? '#d97706' : '#dc2626');
+      return '<div style="display:flex;gap:10px;align-items:center;padding:6px 0;'
+        + 'border-top:1px solid #f1f5f9">'
+        + '<span style="flex:0 0 16em;color:#1e293b;font-weight:600">' + _h(humanize(k)) + '</span>'
+        + '<span style="flex:1;display:flex;align-items:center;gap:8px">'
+        +   '<span style="flex:1;height:8px;background:#f1f5f9;border-radius:9999px;overflow:hidden">'
+        +     '<span style="display:block;height:100%;width:' + w + '%;background:' + barColor + '"></span>'
+        +   '</span>'
+        +   '<span style="flex:0 0 3.5em;text-align:right;font-weight:700;color:#1e293b">' + _h(pct) + '</span>'
+        +   (cnt ? '<span style="flex:0 0 5em;text-align:right;color:#64748b;font-size:0.85em">' + _h(cnt) + '</span>' : '')
+        + '</span>'
+        + '</div>';
+    }).join('');
+    return '<details class="report-fold" id="framework-scorecard"><summary>📊 Framework scorecard'
+      + ' <span class="rf-prev">framework-self metrics (n=' + nInv + ' investigation'
+      + (nInv === 1 ? '' : 's') + ')</span></summary>'
+      + '<p style="color:#475569;font-size:0.92em">Framework-self metrics aggregated across '
+      + 'every study and investigation in the workspace — how consistently the framework itself '
+      + 'applies its own rigor practices (discriminating controls, emergent-mechanism labelling, '
+      + 'threshold provenance, replication, verdict divergence, falsification exposure). Computed '
+      + 'deterministically from declared fields by pbg_superpowers.rigor.framework_metrics.</p>'
+      + rows
+      + '</details>';
+  }
+
+  // Wave 3b #6/#16 — "Competing hypotheses" panel. Each hypothesis carries its
+  // AUTHORED predictions + status and a COMPUTED support trajectory (▲ supports /
+  // ▼ weakens / ⊘ excludes) folded server-side by
+  // pbg_superpowers.hypotheses.rollup_support and delivered via the report-data
+  // path (GET /api/investigation-hypotheses). Omitted when no hypotheses are
+  // declared (degrades gracefully).
+  function _competingHypothesesHtml(hypotheses) {
+    var hyps = (hypotheses || []).filter(function(h) { return h && typeof h === 'object'; });
+    if (!hyps.length) return '';
+    var STATUS_COLORS = {
+      open:      ['#f1f5f9', '#475569'],
+      supported: ['#dcfce7', '#166534'],
+      weakened:  ['#fef9c3', '#854d0e'],
+      excluded:  ['#fee2e2', '#991b1b']
+    };
+    var DELTA = {
+      supports: ['▲', '#16a34a', 'supports'],
+      weakens:  ['▼', '#d97706', 'weakens'],
+      excludes: ['⊘', '#dc2626', 'excludes']
+    };
+    var cards = hyps.map(function(h) {
+      var status = (typeof h.status === 'string' && h.status.trim()) ? h.status.trim() : 'open';
+      var sc = STATUS_COLORS[status] || ['#f1f5f9', '#475569'];
+      var preds = (h.predictions || []).filter(function(p) { return p && typeof p === 'object'; });
+      var predHtml = preds.length
+        ? '<div style="margin-top:4px"><span class="muted small">predicts:</span>'
+          + '<ul style="margin:2px 0 0;padding-left:20px;color:#334155;font-size:0.9em">'
+          + preds.map(function(p) {
+              return '<li><code>' + _h(String(p.observable || '')) + '</code> '
+                + (p.expected != null ? '<strong>' + _h(String(p.expected)) + '</strong>' : '') + '</li>';
+            }).join('') + '</ul></div>'
+        : '';
+      var log = (h.support_log || []).filter(function(e) { return e && typeof e === 'object'; });
+      var trajHtml;
+      if (log.length) {
+        var tally = {supports: 0, weakens: 0, excludes: 0};
+        var steps = log.map(function(e) {
+          var key = String(e.delta || '').toLowerCase();
+          var d = DELTA[key] || ['·', '#94a3b8', String(e.delta || '')];
+          if (tally[key] != null) tally[key]++;
+          var tip = (e.study ? e.study + ': ' : '') + (e.observation || '') + ' (' + d[2] + ')';
+          return '<span title="' + _h(tip) + '" style="color:' + d[1] + ';font-weight:700;margin-right:6px">'
+            + d[0] + (e.study ? '<span style="color:#64748b;font-weight:400;font-size:0.82em"> '
+            + _h(String(e.study)) + '</span>' : '') + '</span>';
+        }).join('');
+        trajHtml = '<div style="margin-top:6px"><span class="muted small">support trajectory:</span> '
+          + '<span style="margin-left:4px;font-weight:600">▲' + tally.supports + ' ▼' + tally.weakens
+          + ' ⊘' + tally.excludes + '</span>'
+          + '<div style="margin-top:3px">' + steps + '</div></div>';
+      } else {
+        trajHtml = '<div class="muted small" style="margin-top:6px">no study evidence linked yet</div>';
+      }
+      return '<div style="padding:10px 0;border-top:1px solid #f1f5f9">'
+        + '<div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap">'
+        +   (h.id ? '<code style="font-size:0.82em">' + _h(String(h.id)) + '</code>' : '')
+        +   '<strong style="color:#1e293b">' + _h(String(h.statement || '(untitled hypothesis)')) + '</strong>'
+        +   '<span style="padding:1px 8px;border-radius:9999px;background:' + sc[0] + ';color:' + sc[1]
+        +     ';font-weight:600;font-size:0.78em">' + _h(status) + '</span>'
+        + '</div>' + predHtml + trajHtml + '</div>';
+    }).join('');
+    return '<details class="report-fold" id="competing-hypotheses"><summary>⚖️ Competing hypotheses'
+      + ' <span class="rf-prev">' + hyps.length + ' hypothes' + (hyps.length === 1 ? 'is' : 'es')
+      + ' under test</span></summary>'
+      + '<p style="color:#475569;font-size:0.92em">The rival explanations this investigation '
+      + 'discriminates. Each carries its authored predictions and a <strong>computed</strong> support '
+      + 'trajectory — ▲ supports / ▼ weakens / ⊘ excludes — folded from member studies\' findings + '
+      + 'alternate_hypotheses by pbg_superpowers.hypotheses.rollup_support.</p>'
+      + cards + '</details>';
+  }
+
   function _rigorSectionHtml(rigor, specs) {
     if (!rigor || !((rigor.dimensions && rigor.dimensions.length) ||
                     (rigor.per_study && Object.keys(rigor.per_study).length))) return '';
@@ -5925,11 +6481,13 @@
           '<div style="color:#475569;font-size:0.9em;margin-top:1px">' + _esc(d.detail || '') + '</div></div></div>';
       }).join('');
     }
-    var html = '<details class="report-fold" id="rigor"><summary>🔬 Evidence &amp; rigor'
+    var html = '<details class="report-fold" id="rigor"><summary>🔬 Evidence &amp; rigor — '
+      + 'how well the method defends its claims'
       + (rigor.summary ? ' <span class="rf-prev">' + _esc(rigor.summary) + '</span>' : '')
       + '</summary>'
-      + '<p style="color:#475569;font-size:0.92em">Deterministic feedback on how well this '
-      + 'investigation defends its claims against a skeptical reader — computed from declared '
+      + '<p style="color:#475569;font-size:0.92em">Deterministic feedback on how well the '
+      + '<strong>method</strong> defends its claims against a skeptical reader — a method-level '
+      + 'judgement, distinct from the per-study model verdicts above. Computed from declared '
       + 'fields, not judged. Gaps are an invitation to add negative controls, replicate across '
       + 'seeds, weigh alternative explanations, state falsifiability, or add an adversarial study.</p>';
     html += dimRows(rigor.dimensions);
@@ -5954,12 +6512,16 @@
     return html;
   }
 
-  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy, generation, ghRepo, rigor) {
+  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy, generation, ghRepo, rigor, frameworkMetrics, hypotheses) {
     bibEntries = bibEntries || [];
     chartsByStudy = chartsByStudy || {};
     embedsByStudy = embedsByStudy || {};
     generation = generation || null;
     ghRepo = ghRepo || null;
+    // Wave 3b #6/#16 — prefer the report-data-path enriched hypotheses (with the
+    // computed support_log); fall back to the authored iset.hypotheses so the
+    // panel still renders (un-enriched) when the fetch is unavailable.
+    hypotheses = hypotheses || (iset && iset.hypotheses) || [];
     var bibByKey = {};
     bibEntries.forEach(function(e) { bibByKey[e.key] = e; });
     var now = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
@@ -6329,6 +6891,8 @@
     var acGatingMatrixHtml = _acGatingMatrixHtml();
     var needsAttentionReportHtml = _needsAttentionReportHtml();
     var rigorSectionHtml = _rigorSectionHtml(rigor, specs);
+    var frameworkScorecardHtml = _frameworkScorecardHtml(frameworkMetrics);  // #26
+    var competingHypothesesHtml = _competingHypothesesHtml(hypotheses);      // #6/#16
 
     // Data-driven flags so the "How to read" guide describes only what this
     // investigation actually contains — no workspace-specific boilerplate.
@@ -7136,6 +7700,8 @@
                +     '<span class="finding-status-glyph">' + glyph + '</span>'
                +     '<span class="finding-id">' + _h(f.id || '') + '</span>'
                +     '<span class="finding-status-text">' + _h(statusText) + '</span>'
+               +     _findingWeightChip(f._evidential_weight)
+               +     _findingChips(f)
                +   '</div>'
                +   '<div class="finding-statement">' + _multiline(f.statement || (f.id ? f.id.replace(/[-_]/g,' ') : '(no statement)')) + '</div>'
                +   evMain
@@ -7469,7 +8035,8 @@
                 var bandLine = t.pass_if
                   ? '<div class="pass_if-band muted small" style="margin-top:3px">passes if '
                     + (t.measure ? _measureText(t.measure) + ' ' : '')
-                    + '<strong>' + _h(_passIfText(t.pass_if)) + '</strong></div>'
+                    + '<strong>' + _h(_passIfText(t.pass_if)) + '</strong>'
+                    + _thresholdProvenanceChip(t.pass_if) + '</div>'   // #9
                   : '';
                 var detailLine = (co.detail || co.reason)
                   ? '<div class="muted small" style="margin-top:3px">' + _h(String(co.detail || co.reason)) + '</div>'
@@ -7505,6 +8072,7 @@
                    +   '<div class="test-header">'
                    +     '<span style="background:' + resBg + ';color:' + resFg + ';padding:2px 10px;border-radius:9999px;font-size:0.78em;font-weight:600">' + resGlyph + ' ' + _h(result) + '</span>'
                    +     '<span class="test-classification">' + _h(cls) + '</span>'
+                   +     _thresholdProvenanceChip(t.pass_if)   // #9 — threshold provenance
                    +   '</div>'
                    +   '<div class="test-claim"><strong>Claim:</strong> ' + _h(claim) + '</div>'
                    +   (evidence ? '<div class="test-evidence"><strong>Evidence:</strong> ' + evidence + '</div>' : '')
@@ -8047,6 +8615,12 @@
       var verdictsHtml = _conclusionVerdictsHtml(s, slug);
       var synthesisHtml = _conclusionSynthesisHtml(s, slug);
 
+      // Wave 2 — compositional causal discovery + semantic closure renders.
+      var commitmentHtml = _compositionCommitmentHtml(s, slug);   // C-COMMIT
+      var invariantsHtml = _invariantChecksHtml(s, slug);         // C-INVAR
+      var causalHtml = _causalNecessityHtml(s, slug);             // C-CF
+      var representationHtml = _representationHtml(s, slug);       // C-MODELCARD
+
       // ── PLANNING-PHASE DETECTION ──
       // A study is "planning" when no runs have completed yet. In that
       // mode we strip decision / takeaways / findings (post-execution
@@ -8163,9 +8737,12 @@
           +   readinessHtml       // ✓/⚠ lint readiness panel (A3)
           +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
           +   feedbackHtml        // 💬 imported expert feedback (B.1)
+          +   commitmentHtml      // Theoretical commitment (C-COMMIT)
+          +   invariantsHtml      // Invariant checks (C-INVAR)
           +   summaryHtml         // Question / purpose
           +   conditionsHtml      // Conditions: variants + model settings (PROMINENT)
           +   testsHtml           // Expected behavior / tests (PROMINENT for comments)
+          +   representationHtml   // Representation claims (C-MODELCARD)
           +   chartsWithBaselineNoticeHtml  // Baseline charts with BASELINE label
           +   embedsHtml          // Embedded preview HTMLs
           +   readoutsHtml        // What we'll measure
@@ -8197,6 +8774,8 @@
         +   readinessHtml       // ✓/⚠ lint readiness panel (A3)
         +   reviewHtml          // ⚠ review-readiness gates (duration / param-vs-reference)
         +   feedbackHtml        // 💬 imported expert feedback (B.1)
+        +   commitmentHtml      // Theoretical commitment (C-COMMIT)
+        +   invariantsHtml      // Invariant checks (C-INVAR)
         +   biologyGlanceHtml   // 0. Biology-at-a-glance
         +   mechanismNarrativeHtml  // 0a. Mechanism narrative (7 framework fields)
         +   summaryHtml         // 1. Plain-English summary (explanation leads, before charts)
@@ -8204,6 +8783,7 @@
         +   expertReviewHtml    // 2b. Pre-run expert review
         +   takeawaysHtml       // 3 + 4. Detailed findings
         +   verdictsHtml        // Derived 3-track conclusion verdicts (computed)
+        +   causalHtml          // Causal necessity table (C-CF)
         +   discoveryHtml       // Discovery implications (directly under the findings)
         +   conditionsHtml      // Conditions (what we set up) — grouped with the runs
         +   simsHtml            // What did/will we run
@@ -8211,6 +8791,7 @@
         +   chartsHtml          //    + Visualisations
         +   testsHtml           // 7. How we judge success
         +   buildHtml           // 8. Model changes
+        +   representationHtml   // Representation claims (C-MODELCARD)
         +   reqsHtml            // 9. What to build/fix
         +   followUpsHtml       // 10. Next steps
         +   limitsHtml          // 11. Limitations
@@ -9539,7 +10120,8 @@
       // ── Main content ──
       + '<main class="content" id="top">'
 
-      +   '<h1>' + _h(iset.title || iset.name) + ' <span class="badge badge-' + _h(iset.status || 'planning') + '">' + _h(iset.status || 'planning') + '</span></h1>'
+      +   '<h1>' + _h(iset.title || iset.name) + ' <span class="badge badge-' + _h(iset.status || 'planning') + '">' + _h(iset.status || 'planning') + '</span>'
+      +     _objectOfEvaluationChip(iset.object_of_evaluation) + '</h1>'
       +   '<p class="muted small">Investigation report · <code>' + nameClean + '</code> · generated ' + _h(now) + ' · '
       +     ((specs || []).some(function(s) { return (s.runs || []).length || (s.findings || []).length; })
           ? 'for expert review — results below reflect completed runs.'
@@ -9559,9 +10141,16 @@
               + '<summary>How the verdict is computed — acceptance criteria, gating matrix &amp; study verdicts</summary>'
               + inner + '</details>';
           })()
+      // Competing hypotheses (#6/#16) — the rival explanations + their computed
+      // support trajectory, just above the rigor roll-up that grades the method.
+      +   competingHypothesesHtml
+
       // Evidence & rigor roll-up — deterministic skeptic-feedback (controls,
       // replication, alternatives, falsifiability, adversarial coverage).
       +   rigorSectionHtml
+
+      // Framework scorecard — framework-self metrics across the workspace (#26).
+      +   frameworkScorecardHtml
 
       // ── Execution-status banner (LEADS the report, before the folds) ────
       // Accurate to the actual run state: a pre-execution review notice when
@@ -12895,6 +13484,13 @@
   // "XArray"). Colors live in CSS classes emitter-sqlite/parquet/xarray.
   function _simEmitterPill(emitterType) {
     var t = (emitterType || 'SQLite');
+    // "—" = genuinely emitter-less run (summary recorded in study.yaml, no
+    // per-step trajectory persisted). Render an honest dash with a tooltip
+    // rather than a fake emitter pill.
+    if (t === '—' || t === 'none' || t === '') {
+      return '<span class="emitter-pill emitter-none" ' +
+        'title="no emitter (summary-only run)">—</span>';
+    }
     var cls = 'emitter-' + t.toLowerCase();
     return '<span class="emitter-pill ' + cls + '" ' +
       'title="emitter / persistence format">' + _escSim(t) + '</span>';
@@ -13685,11 +14281,16 @@
           .then(function (r) { return r.ok ? r.json() : {repo: null}; })
           .then(function (j) { return (j && j.repo) || null; })
           .catch(function () { return null; });
-        return Promise.all([Promise.all(studyFetches), bibFetch, Promise.all(chartFetches), ghRepoFetch])
+        // Wave 3b #6/#16 — competing hypotheses + computed support_log.
+        var hypFetch = fetch('/api/investigation-hypotheses?investigation=' + encodeURIComponent(iset.name))
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (j) { return (j && j.hypotheses) || null; })
+          .catch(function () { return null; });
+        return Promise.all([Promise.all(studyFetches), bibFetch, Promise.all(chartFetches), ghRepoFetch, hypFetch])
           .then(function (arr) {
             var chartsByStudy = {};
             arr[2].forEach(function (c) { chartsByStudy[c.name] = c.charts; });
-            return _buildInvestigationReportHtml(iset, arr[0], arr[1], chartsByStudy, undefined, null, arr[3]);
+            return _buildInvestigationReportHtml(iset, arr[0], arr[1], chartsByStudy, undefined, null, arr[3], undefined, undefined, arr[4]);
           });
       });
   }

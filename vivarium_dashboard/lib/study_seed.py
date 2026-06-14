@@ -62,7 +62,7 @@ def _select_proposal(proposals: list, proposal_id, proposal_idx):
 
 
 def _seed_from_finding(workspace: Path, parent_name: str, finding_id: str, *,
-                       proposal_id=None, new_slug=None) -> str:
+                       proposal_id=None, new_slug=None, study_type=None) -> str:
     """Seed a child study from a parent FINDING by DELEGATING to the shared
     pbg-superpowers seed mechanism (``resolve_seed_source`` +
     ``write_child_study``), then add the dashboard's investigation back-link.
@@ -88,7 +88,18 @@ def _seed_from_finding(workspace: Path, parent_name: str, finding_id: str, *,
 
     src = resolve_seed_source(
         parent_spec, finding_id=finding_id, proposal_id=proposal_id)
-    res = write_child_study(workspace, parent_name, src, new_slug=new_slug)
+    # Wave 3a #19 — pass study_type (e.g. 'diagnostic') through to the pbg
+    # writer when supported. Defensive: older pbg-superpowers writers don't
+    # accept the kwarg, so fall back to the un-typed call (the child still
+    # seeds; it just isn't pre-typed).
+    if study_type:
+        try:
+            res = write_child_study(workspace, parent_name, src,
+                                    new_slug=new_slug, study_type=study_type)
+        except TypeError:
+            res = write_child_study(workspace, parent_name, src, new_slug=new_slug)
+    else:
+        res = write_child_study(workspace, parent_name, src, new_slug=new_slug)
     new_name = res["new_slug"]
 
     # The pbg writer is workspace-layout aware but knows nothing about the
@@ -101,7 +112,7 @@ def _seed_from_finding(workspace: Path, parent_name: str, finding_id: str, *,
 def seed_followup_study(workspace: Path, parent_name: str,
                         followup_idx: int = -1, *,
                         proposal_id=None, proposal_idx: int | None = None,
-                        finding_id=None) -> str:
+                        finding_id=None, study_type=None) -> str:
     """Create the child study.yaml and return its directory name.
 
     Source forms (the four unified followup field families):
@@ -124,7 +135,8 @@ def seed_followup_study(workspace: Path, parent_name: str,
     # Finding family — delegate to the shared pbg mechanism.
     if finding_id is not None and str(finding_id) != "":
         return _seed_from_finding(
-            workspace, parent_name, finding_id, proposal_id=proposal_id)
+            workspace, parent_name, finding_id, proposal_id=proposal_id,
+            study_type=study_type)
 
     studies_root = WorkspacePaths.load(workspace).studies
     parent_dir = studies_root / parent_name
@@ -204,7 +216,9 @@ def seed_followup_study(workspace: Path, parent_name: str,
         },
 
         "pipeline_gate": {
-            "prerequisites": [parent_name],
+            # Prerequisite item shape carries an optional `relation` key
+            # (default leads-to) so the DAG renderer can style the edge.
+            "prerequisites": [{"study": parent_name, "relation": "leads-to"}],
             "enables": [],
             "proceed_condition": "TBD — define before Simulate.",
         },
@@ -275,6 +289,9 @@ def seed_followup_study(workspace: Path, parent_name: str,
         "biological_validation": {"result": "PENDING", "basis": ""},
         "explanatory_gain": {"result": "PENDING", "basis": ""},
     }
+    # Wave 3a #19 — pre-type the seeded child (e.g. diagnostic) when requested.
+    if study_type:
+        child_spec["study_type"] = study_type
 
     new_yaml = new_dir / "study.yaml"
     header = (

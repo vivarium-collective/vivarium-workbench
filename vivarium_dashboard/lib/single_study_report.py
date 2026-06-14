@@ -136,6 +136,136 @@ def _render_verdict_badge(verdict_key: str | None) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# Workflow typing chips (Wave 3a — critiques #10 / #7 / #18)
+# ---------------------------------------------------------------------------
+
+# critique #10 — study_type enum (default unset → standard; `kind`/`study_kind`
+# == "adversarial" stay valid aliases). Kept in sync with rigor._study_type and
+# study-detail.js _studyType.
+_STUDY_TYPES = (
+    "exploratory", "confirmatory", "diagnostic", "adversarial", "standard",
+)
+_STUDY_TYPE_COLORS = {
+    "exploratory":  ("#e0e7ff", "#3730a3"),
+    "confirmatory": ("#dcfce7", "#166534"),
+    "diagnostic":   ("#fef3c7", "#92400e"),
+    "adversarial":  ("#fee2e2", "#991b1b"),
+    "standard":     ("#f1f5f9", "#475569"),
+}
+
+# critique #7 — next_action_type enum (free-text next_action stays the rationale).
+_NEXT_ACTION_TYPES = (
+    "replicate", "calibrate", "ablate", "adversarially_probe",
+    "refine_representation", "split_hypothesis", "retire_hypothesis",
+    "escalate_model",
+)
+
+
+def _study_type(spec: dict) -> str:
+    """Return the study's typed workflow role (critique #10).
+
+    Reads ``study_type`` first, falls back to the legacy ``kind`` / ``study_kind``
+    aliases, defaults to ``standard``. Mirrors ``rigor._study_type`` so the
+    badge matches the rigor credit.
+    """
+    for key in ("study_type", "kind", "study_kind"):
+        val = spec.get(key)
+        if isinstance(val, str) and val.strip():
+            v = val.strip().lower()
+            if v in _STUDY_TYPES:
+                return v
+    return "standard"
+
+
+def _render_study_type_badge(spec: dict) -> str:
+    """Render the study_type pill for the report header. Omitted for the
+    implicit ``standard`` default (only an explicit type is worth a chip)."""
+    explicit = any(
+        isinstance(spec.get(k), str) and spec.get(k).strip()
+        for k in ("study_type", "kind", "study_kind")
+    )
+    st = _study_type(spec)
+    if not explicit or st == "standard":
+        return ""
+    bg, fg = _STUDY_TYPE_COLORS.get(st, ("#f1f5f9", "#475569"))
+    return (
+        f'<span class="study-type-badge" title="study type (critique #10)" '
+        f'style="display:inline-block;padding:2px 10px;border-radius:9999px;'
+        f'font-weight:600;font-size:0.78em;background:{bg};color:{fg};'
+        f'margin-left:6px;vertical-align:middle">{_h(st)}</span>'
+    )
+
+
+def _next_action_type_chip(finding: dict) -> str:
+    """Render a finding's ``next_action_type`` pill (critique #7). Returns ''
+    when absent; renders unknown values too (the linter flags them, the render
+    stays faithful to the model)."""
+    if not isinstance(finding, dict):
+        return ""
+    nat = finding.get("next_action_type")
+    if not isinstance(nat, str) or not nat.strip():
+        return ""
+    v = nat.strip()
+    known = v in _NEXT_ACTION_TYPES
+    bg, fg = ("#dbeafe", "#1e40af") if known else ("#fef9c3", "#854d0e")
+    return (
+        f'<span class="next-action-type" title="next action type (critique #7)" '
+        f'style="display:inline-block;padding:1px 8px;border-radius:9999px;'
+        f'background:{bg};color:{fg};font-weight:600;font-size:0.72em;'
+        f'margin-left:6px;vertical-align:middle">{_h(v)}</span>'
+    )
+
+
+def _preregistration_status(spec: dict) -> dict | None:
+    """critique #18 — defensive bridge to
+    ``study_verdict.preregistration_status``. Returns None when pbg-superpowers
+    (or the function) isn't importable so the chip simply doesn't render."""
+    try:
+        from pbg_superpowers.study_verdict import preregistration_status
+    except Exception:
+        return None
+    try:
+        return preregistration_status(spec)
+    except Exception:
+        return None
+
+
+def _render_preregistration_chip(spec: dict) -> str:
+    """Render the "pre-registered ✓ / post-hoc ⚠" chip (critique #18) for the
+    verdict area, driven by ``study_verdict.preregistration_status``. Omitted
+    when no ``preregistered`` block is declared (or the bridge is unavailable)."""
+    status = _preregistration_status(spec)
+    if not isinstance(status, dict) or not status.get("preregistered"):
+        return ""
+    before = status.get("registered_before_run")
+    if before is True:
+        bg, fg, label, title = (
+            "#dcfce7", "#166534", "pre-registered ✓",
+            "criteria registered before the canonical run",
+        )
+    elif before is False:
+        bg, fg, label, title = (
+            "#fef3c7", "#92400e", "post-hoc ⚠",
+            "criteria registered AFTER the run started",
+        )
+    else:
+        bg, fg, label, title = (
+            "#e2e8f0", "#475569", "pre-registered (timing unknown)",
+            "registered_at or run start time missing — timing could not be checked",
+        )
+    cm = status.get("criteria_match")
+    if cm is False:
+        label += " · thresholds drifted"
+        title += "; pre-registered thresholds differ from the current behavior tests"
+    return (
+        f'<span class="prereg-chip" title="{_h(title)}" '
+        f'style="display:inline-block;padding:2px 10px;border-radius:9999px;'
+        f'font-weight:600;font-size:0.78em;background:{bg};color:{fg};'
+        f'margin-left:6px;vertical-align:middle">{_h(label)}</span>'
+    )
+
+
 def _render_key_metrics(metrics: list) -> str:
     if not metrics:
         return ""
@@ -218,10 +348,13 @@ def _render_biological_summary(spec: dict) -> str:
                 stmt = f.get("statement") or f.get("summary")
                 if stmt:
                     fid = f.get("id", "")
+                    chip = _finding_weight_chip(_finding_weight(spec, f))
+                    nat_chip = _next_action_type_chip(f)   # critique #7
+                    wave3b = _finding_chips(spec, f)       # #21/#22/#25
                     derived.append(
                         f'<div class="narrative-row" style="margin:10px 0">'
                         f'<strong>Finding{(" " + _h(fid)) if fid else ""}:</strong> '
-                        f'{_multiline(stmt)}</div>'
+                        f'{_multiline(stmt)}{chip}{nat_chip}{wave3b}</div>'
                     )
         if derived:
             bits.append(
@@ -464,7 +597,16 @@ def _render_conclusion_synthesis(spec: dict) -> str:
     Limitations←limitations, Next steps←discovery_implications.followup_study_proposals.
     """
     findings = [f for f in (spec.get("findings") or []) if isinstance(f, dict)]
-    claims = [f.get("statement") or f.get("summary") for f in findings]
+    # Claims — one per finding, each tagged with its W8 evidential-weight chip.
+    claim_lis = []
+    for f in findings:
+        text = f.get("statement") or f.get("summary")
+        if not text:
+            continue
+        chip = _finding_weight_chip(_finding_weight(spec, f))
+        nat_chip = _next_action_type_chip(f)   # critique #7
+        wave3b = _finding_chips(spec, f)       # #21/#22/#25
+        claim_lis.append(f'<li>{_multiline(str(text))}{chip}{nat_chip}{wave3b}</li>')
     evidence = []
     for f in findings:
         ev = f.get("evidence")
@@ -488,12 +630,17 @@ def _render_conclusion_synthesis(spec: dict) -> str:
             next_steps.append(str(p))
 
     sections = [
-        ("Claims", claims),
         ("Evidence", evidence),
         ("Limitations", limitations),
         ("Next steps", next_steps),
     ]
     blocks = []
+    # Claims first — rendered separately because each <li> carries a weight chip.
+    if claim_lis:
+        blocks.append(
+            '<div style="margin:10px 0"><strong style="color:#1e293b">Claims</strong>'
+            f'<ul style="margin:4px 0 0;padding-left:20px;color:#334155">{"".join(claim_lis)}</ul></div>'
+        )
     for label, items in sections:
         items = [i for i in (items or []) if i]
         if not items:
@@ -598,13 +745,18 @@ def _render_controls_and_falsifiability(spec: dict) -> str:
     return "".join(bits)
 
 
-def _render_rigor(study_spec: dict) -> str:
+def _render_rigor(study_spec: dict, *, skeptic: bool = False) -> str:
     """Evidence & rigor scorecard section — deterministic skeptic-feedback
     (replication, negative controls, alternative hypotheses, claim discipline,
     falsifiability, engineered-vs-emergent) computed by pbg_superpowers.rigor.
 
     Returns '' if pbg-superpowers isn't importable, so the report degrades
     gracefully.
+
+    In ``skeptic`` mode (W24) the dimension rows are sorted by severity
+    (gap → warn → ok) so unmet rigor demands surface first, and the embedded
+    controls/falsifiability detail is omitted because the skeptic layout
+    renders it as its own ordered section immediately below.
     """
     try:
         from pbg_superpowers.rigor import study_rigor
@@ -614,6 +766,9 @@ def _render_rigor(study_spec: dict) -> str:
     dims = sc.get("dimensions") or []
     if not dims:
         return ""
+    if skeptic:
+        _sev_rank = {"gap": 0, "warn": 1, "ok": 2}
+        dims = sorted(dims, key=lambda d: _sev_rank.get(d.get("severity", "gap"), 0))
     color = {"ok": "#16a34a", "warn": "#d97706", "gap": "#dc2626"}
     glyph = {"ok": "✓", "warn": "⚠", "gap": "✗"}
     # Item 13 — link the controls / falsifiability dimension dots to the
@@ -642,7 +797,9 @@ def _render_rigor(study_spec: dict) -> str:
             f'<div style="color:#475569;font-size:0.9em;margin-top:1px">{_h(d.get("detail", ""))}</div>'
             '</div></div>'
         )
-    controls_html = _render_controls_and_falsifiability(study_spec)
+    # In skeptic mode the controls/falsifiability detail is rendered as its
+    # own ordered section below, so don't embed it here (avoid duplication).
+    controls_html = "" if skeptic else _render_controls_and_falsifiability(study_spec)
     return (
         '<section id="rigor"><h2>Evidence &amp; rigor</h2>'
         '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Deterministic feedback '
@@ -656,8 +813,1159 @@ def _render_rigor(study_spec: dict) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# W8 — per-finding evidential-weight chip
+# ---------------------------------------------------------------------------
+
+_WEIGHT_CHIP_COLORS = {
+    "strong":   ("#dcfce7", "#166534"),
+    "moderate": ("#fef9c3", "#854d0e"),
+    "weak":     ("#fee2e2", "#991b1b"),
+}
+
+
+def _finding_weight(spec: dict, finding: dict) -> dict | None:
+    """W8 — per-finding evidential weight via pbg_superpowers.rigor.
+
+    Defensive: returns None when pbg-superpowers (or the new function) isn't
+    importable, so the chip simply doesn't render and the report degrades.
+    """
+    try:
+        from pbg_superpowers.rigor import finding_evidential_weight
+    except Exception:
+        return None
+    try:
+        return finding_evidential_weight(spec, finding)
+    except Exception:
+        return None
+
+
+def _finding_weight_chip(weight_info: dict | None) -> str:
+    """Render the strong/moderate/weak pill for a finding's evidential weight."""
+    if not weight_info or not weight_info.get("weight"):
+        return ""
+    w = str(weight_info["weight"])
+    bg, fg = _WEIGHT_CHIP_COLORS.get(w, ("#f1f5f9", "#475569"))
+    n = weight_info.get("n_supporting")
+    label = _h(w) + (f" · {n}/5" if isinstance(n, int) else "")
+    dims = weight_info.get("dims") or {}
+    title = ""
+    if dims:
+        supported = [k for k, v in dims.items() if v]
+        title = ' title="evidence dims: ' + _h(", ".join(supported) or "none") + '"'
+    return (
+        f'<span class="finding-weight"{title} style="display:inline-block;'
+        f'padding:1px 8px;border-radius:9999px;background:{bg};color:{fg};'
+        f'font-weight:600;font-size:0.72em;margin-left:6px;vertical-align:middle">'
+        f'{label}</span>'
+    )
+
+
+# ---------------------------------------------------------------------------
+# Wave 3b — per-finding claim_scope (#21) / generality (#22) / lifecycle (#25)
+# chips, rendered beside each finding's tier/weight badges. All consume
+# authored/computed fields; absent → no chip. Enums match the cross-repo
+# contract exactly (kept in sync with static/walkthrough.js).
+# ---------------------------------------------------------------------------
+
+# critique #21 — claim_scope (DISTINCT from tier; the reach of the claim).
+_CLAIM_SCOPES = (
+    "local-implementation", "mechanism", "behavioral", "theoretical", "generality",
+)
+_CLAIM_SCOPE_COLORS = {
+    "local-implementation": ("#f1f5f9", "#475569"),
+    "mechanism":            ("#dbeafe", "#1e40af"),
+    "behavioral":           ("#dcfce7", "#166534"),
+    "theoretical":          ("#ede9fe", "#6d28d9"),
+    "generality":           ("#fef9c3", "#854d0e"),
+}
+
+
+def _claim_scope_chip(finding: dict) -> str:
+    """Render a finding's ``claim_scope`` pill (critique #21). '' when absent.
+    Unknown values still render (faithful to the model; the linter flags them)."""
+    if not isinstance(finding, dict):
+        return ""
+    cs = finding.get("claim_scope")
+    if not isinstance(cs, str) or not cs.strip():
+        return ""
+    v = cs.strip()
+    bg, fg = _CLAIM_SCOPE_COLORS.get(v, ("#fef9c3", "#854d0e"))
+    return (
+        f'<span class="claim-scope" title="claim scope (critique #21)" '
+        f'style="display:inline-block;padding:1px 8px;border-radius:9999px;'
+        f'background:{bg};color:{fg};font-weight:600;font-size:0.72em;'
+        f'margin-left:6px;vertical-align:middle">scope: {_h(v)}</span>'
+    )
+
+
+# critique #22 — generality (axes tested + level).
+_GENERALITY_AXES = (
+    "parameter_regime", "initial_conditions", "discretization",
+    "geometry", "alt_implementation", "independent_authoring",
+)
+_GENERALITY_LEVELS = ("instance_specific", "mechanism", "framework")
+_GENERALITY_LEVEL_COLORS = {
+    "instance_specific": ("#fee2e2", "#991b1b"),
+    "mechanism":         ("#fef9c3", "#854d0e"),
+    "framework":         ("#dcfce7", "#166534"),
+}
+
+
+def _generality_chip(finding: dict) -> str:
+    """Render a finding's ``generality`` pill (critique #22): the level coloured
+    by reach, with the tested axes in the tooltip. '' when absent."""
+    if not isinstance(finding, dict):
+        return ""
+    g = finding.get("generality")
+    if not isinstance(g, dict) or not g:
+        return ""
+    level = str(g.get("level") or "").strip()
+    axes = g.get("axes_tested") or []
+    if isinstance(axes, str):
+        axes = [axes]
+    axes = [str(a) for a in axes if a]
+    if not level and not axes:
+        return ""
+    bg, fg = _GENERALITY_LEVEL_COLORS.get(level, ("#f1f5f9", "#475569"))
+    label = "generality" + (f": {level}" if level else "")
+    n = len(axes)
+    if n:
+        label += f" · {n} ax{'es' if n != 1 else 'is'}"
+    title = "generality (critique #22) — axes tested: " + (", ".join(axes) or "none")
+    return (
+        f'<span class="generality" title="{_h(title)}" '
+        f'style="display:inline-block;padding:1px 8px;border-radius:9999px;'
+        f'background:{bg};color:{fg};font-weight:600;font-size:0.72em;'
+        f'margin-left:6px;vertical-align:middle">{_h(label)}</span>'
+    )
+
+
+# critique #25 — lifecycle_state (DISTINCT from tier/claim-class).
+_LIFECYCLE_STATES = (
+    "observation", "candidate-explanation", "tested-vs-alternatives",
+    "provisional-claim", "generalized", "retired", "superseded",
+)
+_LIFECYCLE_COLORS = {
+    "observation":            ("#f1f5f9", "#475569"),
+    "candidate-explanation":  ("#e0e7ff", "#3730a3"),
+    "tested-vs-alternatives": ("#dbeafe", "#1e40af"),
+    "provisional-claim":      ("#fef9c3", "#854d0e"),
+    "generalized":            ("#dcfce7", "#166534"),
+    "retired":                ("#fee2e2", "#991b1b"),
+    "superseded":             ("#fee2e2", "#991b1b"),
+}
+
+
+def _lifecycle_floor(spec: dict, finding: dict) -> str | None:
+    """critique #25 — defensive bridge to ``study_verdict.lifecycle_floor``.
+    Returns None when pbg-superpowers (or the function) isn't importable, so the
+    chip falls back to the authored value (or nothing)."""
+    try:
+        from pbg_superpowers.study_verdict import lifecycle_floor
+    except Exception:
+        return None
+    try:
+        val = lifecycle_floor(finding, spec)
+    except Exception:
+        return None
+    return val if isinstance(val, str) and val.strip() else None
+
+
+def _lifecycle_chip(spec: dict, finding: dict) -> str:
+    """Render a finding's ``lifecycle_state`` pill (critique #25), beside the
+    tier/weight badges. Shows the authored state when present; otherwise the
+    DERIVED floor from ``study_verdict.lifecycle_floor`` (marked "floor"). '' when
+    neither is available."""
+    if not isinstance(finding, dict):
+        return ""
+    authored = finding.get("lifecycle_state")
+    authored = authored.strip() if isinstance(authored, str) and authored.strip() else None
+    floor = _lifecycle_floor(spec, finding)
+    state = authored or floor
+    if not state:
+        return ""
+    bg, fg = _LIFECYCLE_COLORS.get(state, ("#f1f5f9", "#475569"))
+    derived = (authored is None) and bool(floor)
+    label = state + (" · floor" if derived else "")
+    title = "lifecycle state (critique #25)"
+    if derived:
+        title += " — derived floor (no authored state)"
+    elif authored and floor and authored != floor:
+        title += f" — authored '{authored}' (floor: {floor})"
+    return (
+        f'<span class="lifecycle-state" title="{_h(title)}" '
+        f'style="display:inline-block;padding:1px 8px;border-radius:9999px;'
+        f'background:{bg};color:{fg};font-weight:600;font-size:0.72em;'
+        f'margin-left:6px;vertical-align:middle">{_h(label)}</span>'
+    )
+
+
+def _finding_chips(spec: dict, finding: dict) -> str:
+    """The Wave 3b chip cluster appended after a finding's existing chips:
+    claim_scope (#21) · generality (#22) · lifecycle_state (#25)."""
+    return (
+        _claim_scope_chip(finding)
+        + _generality_chip(finding)
+        + _lifecycle_chip(spec, finding)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Wave 3b — measurement integrity: threshold provenance + sensitivity (#9) and
+# the per-metric calibration ladder (#20). Consumes behavior_tests[].pass_if
+# .provenance, rigor.threshold_sensitivity (defensive), and calibration_ladder.
+# ---------------------------------------------------------------------------
+
+# critique #9 — threshold provenance.kind enum (DISTINCT from cites/anchor).
+_THRESHOLD_PROVENANCE_KINDS = (
+    "theory", "calibration", "literature", "expert", "exploratory", "post_hoc",
+)
+_THRESHOLD_PROV_COLORS = {
+    "theory":      ("#dbeafe", "#1e40af"),
+    "calibration": ("#dcfce7", "#166534"),
+    "literature":  ("#e0e7ff", "#3730a3"),
+    "expert":      ("#fef9c3", "#854d0e"),
+    "exploratory": ("#f1f5f9", "#475569"),
+    "post_hoc":    ("#fee2e2", "#991b1b"),
+}
+
+
+def _pass_if_text(p) -> str:
+    """Render a pass_if band as compact text (mirrors walkthrough.js _passIfText)."""
+    if not isinstance(p, dict):
+        return str(p) if p is not None else ""
+    op = str(p.get("op", "")).strip()
+    low, high, val = p.get("low"), p.get("high"), p.get("value")
+    if op == "in_range":
+        return f"in [{low}, {high}]"
+    if op == "at_least":
+        return f"≥ {low if low is not None else val}"
+    if op == "at_most":
+        return f"≤ {high if high is not None else val}"
+    if op == "equals":
+        return f"= {val}"
+    return op or ""
+
+
+def _threshold_provenance_chip(prov: dict) -> str:
+    """Render the provenance.kind pill (+ note in the tooltip) for a band."""
+    if not isinstance(prov, dict):
+        return ""
+    kind = prov.get("kind")
+    if not isinstance(kind, str) or not kind.strip():
+        return ""
+    v = kind.strip()
+    bg, fg = _THRESHOLD_PROV_COLORS.get(v, ("#fef9c3", "#854d0e"))
+    note = str(prov.get("note") or "").strip()
+    title = "threshold provenance (critique #9)" + (f" — {note}" if note else "")
+    return (
+        f'<span class="threshold-provenance" title="{_h(title)}" '
+        f'style="display:inline-block;padding:1px 8px;border-radius:9999px;'
+        f'background:{bg};color:{fg};font-weight:600;font-size:0.72em;'
+        f'margin-left:6px;vertical-align:middle">provenance: {_h(v)}</span>'
+    )
+
+
+def _threshold_sensitivity(spec: dict, test_name: str):
+    """critique #9 — defensive bridge to ``rigor.threshold_sensitivity``.
+    Returns a list of ``{cutoff, result}`` or None when unavailable/guarded."""
+    try:
+        from pbg_superpowers.rigor import threshold_sensitivity
+    except Exception:
+        return None
+    try:
+        return threshold_sensitivity(spec, test_name)
+    except Exception:
+        return None
+
+
+def _render_threshold_sensitivity(rows) -> str:
+    """Render the "passes across ±20%" mini-view from a threshold_sensitivity
+    list of ``{cutoff, result}``. '' when empty/guarded."""
+    if not isinstance(rows, (list, tuple)) or not rows:
+        return ""
+    cells = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        cutoff = r.get("cutoff")
+        res = str(r.get("result", "")).upper()
+        bg, fg = _TRACK_COLORS.get(res, ("#f1f5f9", "#475569"))
+        glyph = "✓" if res == "PASS" else ("✗" if res == "FAIL" else "·")
+        cells.append(
+            f'<span style="display:inline-block;padding:1px 7px;border-radius:9999px;'
+            f'background:{bg};color:{fg};font-size:0.72em;margin:1px">'
+            f'{_h(str(cutoff))} {glyph}</span>'
+        )
+    if not cells:
+        return ""
+    return (
+        '<div class="threshold-sensitivity" style="margin-top:3px">'
+        '<span style="color:#475569;font-size:0.78em">sensitivity (passes across ±20%):</span> '
+        + "".join(cells) + '</div>'
+    )
+
+
+def _render_calibration_ladder(spec: dict) -> str:
+    """critique #20 — per-metric calibration-ladder table (fail / pass /
+    borderline / stress rungs, each a controls[].name or "—" when unbuilt).
+    '' when no ``calibration_ladder`` is declared."""
+    ladders = [l for l in (spec.get("calibration_ladder") or []) if isinstance(l, dict)]
+    if not ladders:
+        return ""
+    head = (
+        '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+        '<th style="padding:4px 8px">Metric</th>'
+        '<th style="padding:4px 8px">known_fail</th>'
+        '<th style="padding:4px 8px">known_pass</th>'
+        '<th style="padding:4px 8px">borderline</th>'
+        '<th style="padding:4px 8px">stress</th>'
+        '<th style="padding:4px 8px">rungs</th></tr>'
+    )
+    rows = []
+    for l in ladders:
+        rungs = [l.get("known_fail"), l.get("known_pass"),
+                 l.get("borderline"), l.get("stress")]
+        filled = sum(1 for r in rungs if r)
+        if filled >= 3:
+            bg, fg = "#dcfce7", "#166534"
+        elif l.get("known_fail") and l.get("known_pass"):
+            bg, fg = "#fef9c3", "#854d0e"
+        else:
+            bg, fg = "#fee2e2", "#991b1b"
+        def _cell(v):
+            return (f'<code style="font-size:0.82em">{_h(str(v))}</code>'
+                    if v else '<span style="color:#cbd5e1">—</span>')
+        rows.append(
+            '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+            f'<td style="padding:4px 8px"><strong>{_h(str(l.get("metric", "")))}</strong></td>'
+            f'<td style="padding:4px 8px">{_cell(l.get("known_fail"))}</td>'
+            f'<td style="padding:4px 8px">{_cell(l.get("known_pass"))}</td>'
+            f'<td style="padding:4px 8px">{_cell(l.get("borderline"))}</td>'
+            f'<td style="padding:4px 8px">{_cell(l.get("stress"))}</td>'
+            f'<td style="padding:4px 8px"><span style="padding:1px 8px;border-radius:9999px;'
+            f'background:{bg};color:{fg};font-weight:600;font-size:0.82em">{filled}/4</span></td>'
+            '</tr>'
+        )
+    return (
+        '<div id="calibration-ladder" style="margin:10px 0">'
+        '<strong style="color:#1e293b">Calibration ladder</strong>'
+        '<p style="color:#475569;font-size:0.88em;margin:2px 0 4px">Per metric, which '
+        'controls anchor the fail / pass / borderline / stress rungs (≥3 filled = '
+        'calibrated; an empty rung is the gap to close).</p>'
+        '<table style="border-collapse:collapse;width:100%">'
+        + head + "".join(rows) + '</table></div>'
+    )
+
+
+def _render_measurement_integrity(spec: dict) -> str:
+    """Wave 3b — "Measurement integrity" section: per-band threshold provenance
+    + sensitivity (#9) and the per-metric calibration ladder (#20). Omitted when
+    neither a band carries provenance/sensitivity nor a calibration_ladder is
+    declared."""
+    tests = [t for t in (spec.get("behavior_tests") or spec.get("expected_behavior") or [])
+             if isinstance(t, dict)]
+    band_rows = []
+    for t in tests:
+        pass_if = t.get("pass_if") if isinstance(t.get("pass_if"), dict) else {}
+        prov = pass_if.get("provenance") if isinstance(pass_if, dict) else None
+        prov_chip = _threshold_provenance_chip(prov) if isinstance(prov, dict) else ""
+        sens = _render_threshold_sensitivity(
+            _threshold_sensitivity(spec, t.get("name", "")))
+        if not prov_chip and not sens:
+            continue
+        name = t.get("name") or "(unnamed)"
+        band = _pass_if_text(pass_if)
+        note = ""
+        if isinstance(prov, dict) and str(prov.get("note") or "").strip():
+            note = (f'<div style="color:#475569;font-size:0.82em;margin-top:1px">'
+                    f'{_h(str(prov["note"]).strip())}</div>')
+        band_rows.append(
+            '<div style="padding:7px 0;border-top:1px solid #f1f5f9">'
+            f'<code style="font-size:0.85em">{_h(name)}</code>'
+            + (f' <span style="color:#475569;font-size:0.85em">passes if '
+               f'<strong>{_h(band)}</strong></span>' if band else "")
+            + prov_chip + note + sens
+            + '</div>'
+        )
+    ladder_html = _render_calibration_ladder(spec)
+    if not band_rows and not ladder_html:
+        return ""
+    bands_block = ""
+    if band_rows:
+        bands_block = (
+            '<div style="margin:6px 0"><strong style="color:#1e293b">Threshold provenance '
+            '&amp; sensitivity</strong>' + "".join(band_rows) + '</div>'
+        )
+    return (
+        '<section id="measurement-integrity"><h2>Measurement integrity</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Where each pass/fail '
+        'threshold comes from (theory / calibration / literature / expert / exploratory / '
+        'post-hoc), how robust the verdict is to moving the cutoff ±20%, and which controls '
+        'anchor each metric\'s calibration ladder.</p>'
+        + bands_block + ladder_html +
+        '</section>'
+    )
+
+
+# ---------------------------------------------------------------------------
+# W15 — open epistemic debts panel
+# ---------------------------------------------------------------------------
+
+_DEBT_SEV_COLORS = {
+    "high":   ("#fee2e2", "#991b1b"),
+    "medium": ("#fef9c3", "#854d0e"),
+    "low":    ("#f1f5f9", "#475569"),
+}
+
+
+def _render_epistemic_debts(spec: dict) -> str:
+    """W15 — "Open epistemic debts" panel, driven by the deterministic
+    ``pbg_superpowers.needs_attention.open_epistemic_debts`` collector (which
+    derives from rigor + viz-freshness so it can't drift). Returns '' when the
+    collector isn't importable or there are no debts.
+    """
+    try:
+        from pbg_superpowers.needs_attention import open_epistemic_debts
+    except Exception:
+        return ""
+    try:
+        debts = open_epistemic_debts(spec) or []
+    except Exception:
+        return ""
+    if not debts:
+        return ""
+    rows = []
+    for d in debts:
+        if not isinstance(d, dict):
+            continue
+        sev = str(d.get("severity") or "low").lower()
+        bg, fg = _DEBT_SEV_COLORS.get(sev, ("#f1f5f9", "#475569"))
+        kind = _h(str(d.get("kind") or ""))
+        ref = _h(str(d.get("ref") or ""))
+        note = _multiline(str(d.get("note") or ""))
+        rows.append(
+            '<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;'
+            'border-top:1px solid #f1f5f9">'
+            f'<span style="padding:1px 8px;border-radius:9999px;background:{bg};color:{fg};'
+            f'font-weight:600;font-size:0.72em;white-space:nowrap">{_h(sev)}</span>'
+            f'<div><strong style="color:#1e293b">{kind}</strong>'
+            + (f' <code style="font-size:0.82em">{ref}</code>' if ref else "")
+            + f'<div style="color:#475569;font-size:0.9em;margin-top:1px">{note}</div>'
+            '</div></div>'
+        )
+    if not rows:
+        return ""
+    return (
+        '<section id="epistemic-debts"><h2>Open epistemic debts</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Negative knowledge — '
+        'what this study has <em>not</em> yet established (untested claims, absent '
+        'controls, uncalibrated metrics, un-excluded alternatives, unexplored regions, '
+        'stale visuals). Derived from the rigor scorecard + freshness signals.</p>'
+        + "".join(rows) +
+        '</section>'
+    )
+
+
+# ---------------------------------------------------------------------------
+# W24 — skeptical-reader audit trail + limitations strip
+# ---------------------------------------------------------------------------
+
+def _render_audit_trail(spec: dict) -> str:
+    """W24 — one compressed audit strip built from existing canonical fields:
+    claim · evidence · assumptions (falsifiability) · controls summary ·
+    limitations/remaining-uncertainties · next discriminating test · threshold
+    provenance. Shows "threshold provenance: none" (rather than omitting) when
+    no behavior-test band carries ``cites``/``calibration_anchor`` — the
+    absence is itself the signal a skeptic wants to see.
+    """
+    findings = [f for f in (spec.get("findings") or []) if isinstance(f, dict)]
+    primary = findings[0] if findings else {}
+    claim = primary.get("statement") or primary.get("summary") or spec.get("claim") or "—"
+
+    ev = primary.get("evidence")
+    if isinstance(ev, dict):
+        ev = (ev.get("observed") or ev.get("summary") or ev.get("detail")
+              or ev.get("from_test"))
+    evidence = ev or "—"
+
+    assumptions = spec.get("falsifiability") or "—"
+
+    controls = [c for c in (spec.get("controls") or []) if isinstance(c, dict)]
+    if controls:
+        n_disc = sum(1 for c in controls
+                     if str(c.get("result", "")).upper() == "PASS"
+                     and str(c.get("observed") or "").strip())
+        controls_summary = f"{len(controls)} declared · {n_disc} discriminating"
+    else:
+        controls_summary = "none"
+
+    lims = spec.get("limitations") or []
+    if isinstance(lims, str):
+        lims = [lims]
+    di = spec.get("discovery_implications") or {}
+    rem = di.get("remaining_uncertainties") or []
+    if isinstance(rem, str):
+        rem = [rem]
+    limits_text = "; ".join(str(x) for x in (list(lims) + list(rem)) if x) or "—"
+
+    next_test = None
+    for f in findings:
+        if f.get("next_action"):
+            next_test = f["next_action"]
+            break
+    if not next_test:
+        for p in (di.get("followup_study_proposals") or []):
+            if isinstance(p, dict) and (p.get("title") or p.get("motivation")):
+                next_test = p.get("title") or p.get("motivation")
+                break
+    next_test = next_test or "—"
+
+    bands = spec.get("behavior_tests") or spec.get("expected_behavior") or []
+    has_prov = any(
+        isinstance(b, dict) and (b.get("cites") or b.get("calibration_anchor"))
+        for b in bands
+    )
+    threshold = "present" if has_prov else "none"
+
+    pairs = [
+        ("Claim", claim),
+        ("Evidence", evidence),
+        ("Assumptions (falsifiability)", assumptions),
+        ("Controls", controls_summary),
+        ("Limitations / remaining uncertainties", limits_text),
+        ("Next discriminating test", next_test),
+        ("Threshold provenance", threshold),
+    ]
+    rows = "".join(
+        '<div style="display:flex;gap:10px;padding:6px 0;border-top:1px solid #e2e8f0">'
+        f'<span style="flex:0 0 16em;font-weight:600;color:#475569">{_h(label)}</span>'
+        f'<span style="color:#1e293b">{_multiline(str(val))}</span>'
+        '</div>'
+        for label, val in pairs
+    )
+    return (
+        '<section id="audit-trail"><h2>Audit trail</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">The skeptic\'s '
+        'one-glance ledger: the claim and exactly what backs it, what it assumes, '
+        'what could overturn it, and what it has not yet settled.</p>'
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;'
+        'padding:4px 14px 10px">' + rows + '</div>'
+        '</section>'
+    )
+
+
+def _render_limitations(spec: dict) -> str:
+    """W24 — dedicated limitations / remaining-uncertainties section (skeptic
+    layout renders this as its own ordered step). Returns '' when empty.
+    """
+    lims = spec.get("limitations") or []
+    if isinstance(lims, str):
+        lims = [lims]
+    di = spec.get("discovery_implications") or {}
+    rem = di.get("remaining_uncertainties") or []
+    if isinstance(rem, str):
+        rem = [rem]
+    blocks = []
+    if [x for x in lims if x]:
+        lis = "".join(f'<li>{_multiline(str(x))}</li>' for x in lims if x)
+        blocks.append(
+            '<div style="margin:10px 0"><strong style="color:#1e293b">Limitations</strong>'
+            f'<ul style="margin:4px 0 0;padding-left:20px;color:#334155">{lis}</ul></div>'
+        )
+    if [x for x in rem if x]:
+        lis = "".join(f'<li>{_multiline(str(x))}</li>' for x in rem if x)
+        blocks.append(
+            '<div style="margin:10px 0"><strong style="color:#1e293b">Remaining '
+            'uncertainties</strong>'
+            f'<ul style="margin:4px 0 0;padding-left:20px;color:#334155">{lis}</ul></div>'
+        )
+    if not blocks:
+        return ""
+    return (
+        '<section id="limitations"><h2>Limitations &amp; remaining uncertainties</h2>'
+        + "".join(blocks) +
+        '</section>'
+    )
+
+
+# ---------------------------------------------------------------------------
+# Wave 2 — compositional causal discovery + semantic closure renderers.
+# All consume data the model WRITES into study.yaml (composition_commitment,
+# invariant_check, ablations, model_representation). Each renders defensively:
+# a missing/empty field returns '' so the section is omitted entirely.
+# ---------------------------------------------------------------------------
+
+def _chip_list(items, *, bg: str = "#f1f5f9", fg: str = "#0f172a") -> str:
+    """Render a list of strings as inline pill chips. Returns '' when empty."""
+    chips = []
+    for it in items or []:
+        if it is None or it == "":
+            continue
+        chips.append(
+            f'<span style="display:inline-block;padding:2px 9px;border-radius:9999px;'
+            f'background:{bg};color:{fg};margin:2px;font-size:0.82em">{_h(str(it))}</span>'
+        )
+    return "".join(chips)
+
+
+def _render_composition_commitment(spec: dict) -> str:
+    """C-COMMIT — "Theoretical commitment" panel.
+
+    Sourced from the authored ``composition_commitment`` block: what process(es)
+    this study adds vs its prerequisite, the deficit that closes (+ closure-gap
+    chips), the new behavior it unlocks, the invariants it must preserve (links to
+    earlier studies), and the alternatives it excludes. Omitted when absent.
+    """
+    cc = spec.get("composition_commitment")
+    if not isinstance(cc, dict) or not cc:
+        return ""
+    rows = []
+
+    added = cc.get("component_added") or []
+    if isinstance(added, str):
+        added = [added]
+    if added:
+        rows.append(
+            '<div style="margin:8px 0"><strong style="color:#1e293b">Component added</strong> '
+            f'{_chip_list(added, bg="#e0e7ff", fg="#3730a3")}</div>'
+        )
+
+    deficit = cc.get("deficit_addressed")
+    if isinstance(deficit, dict) and deficit:
+        note = deficit.get("note") or ""
+        gap_items = deficit.get("closure_gap_item") or []
+        if isinstance(gap_items, str):
+            gap_items = [gap_items]
+        gap_html = (
+            ' <span style="color:#475569;font-size:0.85em">closes:</span> '
+            + _chip_list(gap_items, bg="#fee2e2", fg="#991b1b")
+        ) if gap_items else ""
+        if note or gap_html:
+            rows.append(
+                '<div style="margin:8px 0"><strong style="color:#1e293b">Deficit addressed</strong> '
+                f'{_multiline(str(note)) if note else ""}{gap_html}</div>'
+            )
+    elif isinstance(deficit, str) and deficit:
+        rows.append(
+            '<div style="margin:8px 0"><strong style="color:#1e293b">Deficit addressed</strong> '
+            f'{_multiline(deficit)}</div>'
+        )
+
+    new_behavior = cc.get("new_behavior") or []
+    if isinstance(new_behavior, str):
+        new_behavior = [new_behavior]
+    if new_behavior:
+        rows.append(
+            '<div style="margin:8px 0"><strong style="color:#1e293b">New behavior</strong> '
+            f'{_chip_list(new_behavior, bg="#dcfce7", fg="#166534")}</div>'
+        )
+
+    invariants = cc.get("invariants_required") or []
+    inv_bits = []
+    for iv in invariants:
+        if isinstance(iv, dict):
+            study = iv.get("study") or ""
+            test = iv.get("test") or ""
+            txt = study + ((" · " + test) if test else "")
+        else:
+            txt = str(iv)
+        if txt:
+            inv_bits.append(
+                f'<li><code>{_h(txt)}</code></li>'
+            )
+    if inv_bits:
+        rows.append(
+            '<div style="margin:8px 0"><strong style="color:#1e293b">Invariants required</strong>'
+            '<ul style="margin:4px 0 0;padding-left:20px;color:#334155;font-size:0.92em">'
+            + "".join(inv_bits) + '</ul></div>'
+        )
+
+    excluded = cc.get("alternatives_excluded") or []
+    if isinstance(excluded, str):
+        excluded = [excluded]
+    if excluded:
+        rows.append(
+            '<div style="margin:8px 0"><strong style="color:#1e293b">Alternatives excluded</strong> '
+            f'{_chip_list(excluded, bg="#fef9c3", fg="#854d0e")}</div>'
+        )
+
+    if not rows:
+        return ""
+    return (
+        '<section id="commitment"><h2>Theoretical commitment</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">What this study adds to its '
+        'prerequisite — the component introduced, the deficit it closes, the new behavior it '
+        'unlocks, the earlier invariants it must preserve, and the alternatives it excludes.</p>'
+        + "".join(rows) +
+        '</section>'
+    )
+
+
+_INVAR_STATUS_COLORS = {
+    "invalidated":  ("#fee2e2", "#991b1b"),
+    "weakened":     ("#fef9c3", "#854d0e"),
+    "preserved":    ("#dcfce7", "#166534"),
+    "strengthened": ("#dbeafe", "#1e40af"),
+}
+# Order so gap statuses (invalidated/weakened) render first.
+_INVAR_STATUS_RANK = {"invalidated": 0, "weakened": 1, "preserved": 2, "strengthened": 3}
+
+
+def _render_invariant_checks(spec: dict) -> str:
+    """C-INVAR render — "Invariant checks" sub-section.
+
+    Renders ``study.invariant_check[]`` (study · test · prior→now · status chip),
+    invalidated/weakened first. Omitted when absent.
+    """
+    checks = [c for c in (spec.get("invariant_check") or []) if isinstance(c, dict)]
+    if not checks:
+        return ""
+    checks = sorted(checks, key=lambda c: _INVAR_STATUS_RANK.get(
+        str(c.get("status", "")).lower(), 9))
+    head = (
+        '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+        '<th style="padding:4px 8px">Study</th><th style="padding:4px 8px">Test</th>'
+        '<th style="padding:4px 8px">Prior</th><th style="padding:4px 8px">Now</th>'
+        '<th style="padding:4px 8px">Status</th></tr>'
+    )
+    rows = []
+    for c in checks:
+        status = str(c.get("status", "")).lower()
+        bg, fg = _INVAR_STATUS_COLORS.get(status, ("#f1f5f9", "#475569"))
+        chip = (
+            f'<span style="padding:1px 8px;border-radius:9999px;background:{bg};color:{fg};'
+            f'font-weight:600;font-size:0.82em">{_h(status or "—")}</span>'
+        )
+        rows.append(
+            '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+            f'<td style="padding:4px 8px"><code>{_h(c.get("study", ""))}</code></td>'
+            f'<td style="padding:4px 8px">{_h(c.get("test", ""))}</td>'
+            f'<td style="padding:4px 8px">{_h(c.get("prior", ""))}</td>'
+            f'<td style="padding:4px 8px">{_h(c.get("now", ""))}</td>'
+            f'<td style="padding:4px 8px">{chip}</td>'
+            '</tr>'
+        )
+    return (
+        '<section id="invariants"><h2>Invariant checks</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Earlier guarantees re-checked in '
+        'the current code state — each invariant required by this study, its prior vs current value, '
+        'and whether it was preserved. Invalidated / weakened invariants are listed first.</p>'
+        '<table style="border-collapse:collapse;width:100%">'
+        + head + "".join(rows) + '</table>'
+        '</section>'
+    )
+
+
+def _render_causal_necessity(spec: dict) -> str:
+    """C-CF — "Causal necessity" table from ``study.ablations[]``.
+
+    The causal READ of the ablation suite: per process/target · mode ·
+    behavior_test · baseline→ablated · role · causally necessary. Omitted when
+    absent.
+    """
+    ablations = [a for a in (spec.get("ablations") or []) if isinstance(a, dict)]
+    if not ablations:
+        return ""
+    head = (
+        '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+        '<th style="padding:4px 8px">Process / target</th><th style="padding:4px 8px">Mode</th>'
+        '<th style="padding:4px 8px">Behavior test</th><th style="padding:4px 8px">Baseline → ablated</th>'
+        '<th style="padding:4px 8px">Role</th><th style="padding:4px 8px">Necessary</th></tr>'
+    )
+    role_colors = {
+        "necessary":  ("#fee2e2", "#991b1b"),
+        "modulatory": ("#fef9c3", "#854d0e"),
+        "redundant":  ("#f1f5f9", "#475569"),
+    }
+    rows = []
+    for a in ablations:
+        target = a.get("target")
+        if isinstance(target, (list, tuple)):
+            target = ".".join(str(t) for t in target)
+        proc = a.get("process", "")
+        proc_target = _h(str(proc)) + (f' <code style="font-size:0.82em">{_h(str(target))}</code>'
+                                       if target else "")
+        role = str(a.get("role", "")).lower()
+        rbg, rfg = role_colors.get(role, ("#f1f5f9", "#475569"))
+        role_html = (
+            f'<span style="padding:1px 8px;border-radius:9999px;background:{rbg};color:{rfg};'
+            f'font-weight:600;font-size:0.82em">{_h(role or "—")}</span>'
+        )
+        nec = a.get("causally_necessary")
+        nec_html = ("✓" if nec is True else ("✗" if nec is False else "—"))
+        baseline = a.get("baseline_result")
+        ablated = a.get("ablated_result")
+        rows.append(
+            '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+            f'<td style="padding:4px 8px">{proc_target}</td>'
+            f'<td style="padding:4px 8px"><code>{_h(a.get("mode", ""))}</code></td>'
+            f'<td style="padding:4px 8px">{_h(a.get("behavior_test", ""))}</td>'
+            f'<td style="padding:4px 8px">{_h(str(baseline))} → {_h(str(ablated))}</td>'
+            f'<td style="padding:4px 8px">{role_html}</td>'
+            f'<td style="padding:4px 8px;text-align:center;font-weight:700">{nec_html}</td>'
+            '</tr>'
+        )
+    return (
+        '<section id="causal-necessity"><h2>Causal necessity</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">Counterfactual read of the ablation '
+        'suite — each process/store removed or perturbed, whether a behavior test flipped, and so '
+        'whether that component is causally necessary for the behavior (vs redundant or merely '
+        'modulatory).</p>'
+        '<table style="border-collapse:collapse;width:100%">'
+        + head + "".join(rows) + '</table>'
+        '</section>'
+    )
+
+
+def _wiring_summary(wiring) -> str:
+    """Render an inputs/outputs wiring map ({port: [store_path]}) as port→store."""
+    if not isinstance(wiring, dict) or not wiring:
+        return '<span style="color:#94a3b8">—</span>'
+    bits = []
+    for port, path in wiring.items():
+        if isinstance(path, (list, tuple)):
+            tgt = ".".join(str(p) for p in path)
+        else:
+            tgt = str(path)
+        bits.append(
+            f'<code style="font-size:0.82em">{_h(str(port))}'
+            f'<span style="color:#94a3b8">→</span>{_h(tgt)}</code>'
+        )
+    return " ".join(bits)
+
+
+def _render_model_card(composite_doc: Optional[dict],
+                       *, model_representation: Optional[dict] = None,
+                       readouts: Optional[list] = None,
+                       behavior_tests: Optional[list] = None,
+                       variants: Optional[list] = None,
+                       interventions: Optional[list] = None) -> str:
+    """C-MODELCARD — static, reader-independent model card.
+
+    Built from the (light) composite-state doc — the same ``summarize_large_values``
+    + ``process_docs`` doc the explorer uses, NOT the heavy raw composite. Renders:
+    per process (address · inputs port→store · outputs · config); stores + initial
+    values; boundary (from ``model_representation``); observables (readouts /
+    behavior-test measures); perturbations (interventions / variants).
+
+    Rendered server-side so it survives the static read-only bundle. Returns ''
+    when no composite doc is available.
+    """
+    if not isinstance(composite_doc, dict) or not composite_doc:
+        return ""
+    # The doc may be wrapped as {"state": {...}} or be the bare state mapping.
+    state = composite_doc.get("state") if isinstance(composite_doc.get("state"), dict) else composite_doc
+
+    processes = []
+    stores = []
+    for key, node in state.items():
+        if isinstance(node, dict) and node.get("_type") in ("process", "step"):
+            processes.append((key, node))
+        elif key not in ("_type",) and not (isinstance(node, dict) and node.get("_type")):
+            # Treat non-process top-level entries as stores (scalars / containers).
+            stores.append((key, node))
+
+    sections = []
+
+    if processes:
+        prows = []
+        for name, node in processes:
+            addr = node.get("address", "")
+            cfg = node.get("config") or {}
+            cfg_html = ""
+            if isinstance(cfg, dict) and cfg:
+                cfg_html = (
+                    '<div style="color:#475569;font-size:0.85em;margin-top:2px">config: '
+                    + _chip_list([f"{k}={v}" for k, v in cfg.items()]) + '</div>'
+                )
+            desc = node.get("doc") or ""
+            desc_html = (
+                f'<div style="color:#64748b;font-size:0.85em;margin-top:2px">{_h(desc[:300])}</div>'
+                if desc else ""
+            )
+            prows.append(
+                '<div style="padding:8px 0;border-top:1px solid #f1f5f9">'
+                f'<div><strong style="color:#1e293b">{_h(name)}</strong> '
+                f'<code style="font-size:0.82em">{_h(addr)}</code></div>'
+                f'<div style="font-size:0.88em;margin-top:2px"><span style="color:#475569">in:</span> '
+                f'{_wiring_summary(node.get("inputs"))}</div>'
+                f'<div style="font-size:0.88em;margin-top:2px"><span style="color:#475569">out:</span> '
+                f'{_wiring_summary(node.get("outputs"))}</div>'
+                f'{cfg_html}{desc_html}'
+                '</div>'
+            )
+        sections.append(
+            '<div style="margin:10px 0"><strong style="color:#1e293b">Processes</strong>'
+            + "".join(prows) + '</div>'
+        )
+
+    if stores:
+        boundary = set()
+        if isinstance(model_representation, dict):
+            for b in (model_representation.get("boundary") or []):
+                boundary.add(str(b))
+            for b in (model_representation.get("requires") or []):
+                boundary.add(str(b))
+        srows = []
+        for name, val in stores:
+            val_disp = val
+            if isinstance(val, (dict, list)):
+                val_disp = f"⟨{type(val).__name__}⟩"
+            badge = (
+                ' <span style="padding:0 6px;border-radius:9999px;background:#dbeafe;color:#1e40af;'
+                'font-size:0.72em">boundary</span>' if name in boundary else ""
+            )
+            srows.append(
+                '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+                f'<td style="padding:4px 8px"><code>{_h(name)}</code>{badge}</td>'
+                f'<td style="padding:4px 8px">{_h(str(val_disp))}</td></tr>'
+            )
+        sections.append(
+            '<div style="margin:10px 0"><strong style="color:#1e293b">Stores &amp; initial values</strong>'
+            '<table style="border-collapse:collapse;width:100%;margin-top:4px">'
+            '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+            '<th style="padding:4px 8px">Store</th><th style="padding:4px 8px">Initial</th></tr>'
+            + "".join(srows) + '</table></div>'
+        )
+
+    # Observables — readouts + behavior-test measures.
+    obs_bits = []
+    for r in (readouts or []):
+        if isinstance(r, dict):
+            nm = r.get("name") or r.get("store_path") or ""
+            if nm:
+                obs_bits.append(str(nm))
+        elif r:
+            obs_bits.append(str(r))
+    for bt in (behavior_tests or []):
+        if isinstance(bt, dict):
+            measure = bt.get("measure")
+            if isinstance(measure, dict):
+                m = measure.get("path") or measure.get("field") or measure.get("kind")
+                if m:
+                    obs_bits.append(str(m))
+    if obs_bits:
+        sections.append(
+            '<div style="margin:10px 0"><strong style="color:#1e293b">Observables</strong> '
+            + _chip_list(obs_bits) + '</div>'
+        )
+
+    # Perturbations — interventions + variants.
+    pert_bits = []
+    for v in (variants or []):
+        if isinstance(v, dict):
+            nm = v.get("name") or ""
+            if nm:
+                pert_bits.append(str(nm))
+        elif v:
+            pert_bits.append(str(v))
+    for iv in (interventions or []):
+        if isinstance(iv, dict):
+            nm = iv.get("name") or iv.get("mode") or ""
+            if nm:
+                pert_bits.append(str(nm))
+        elif iv:
+            pert_bits.append(str(iv))
+    if pert_bits:
+        sections.append(
+            '<div style="margin:10px 0"><strong style="color:#1e293b">Perturbations</strong> '
+            + _chip_list(pert_bits, bg="#fef9c3", fg="#854d0e") + '</div>'
+        )
+
+    if not sections:
+        return ""
+    return (
+        '<section id="model-card"><h2>Model card</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">A static, reader-independent '
+        'description of the model — its processes, wiring, stores, observables, and perturbations — '
+        'rendered from the composite state so it reads the same for everyone.</p>'
+        + "".join(sections) +
+        '</section>'
+    )
+
+
+_REPR_ROLE_COLORS = {
+    "inside":            ("#f1f5f9", "#475569"),
+    "boundary-crossing": ("#dbeafe", "#1e40af"),
+    "derived":           ("#ede9fe", "#6d28d9"),
+    "self-produced":     ("#dcfce7", "#166534"),
+}
+
+
+def _render_representation(model_representation: Optional[dict]) -> str:
+    """C-MODELCARD — "Representation claims" table.
+
+    Labels each store inside / boundary-crossing / derived / self-produced (from
+    the persisted ``model_representation``) and reports interface-vs-semantic
+    closure status. Omitted when absent.
+    """
+    mr = model_representation
+    if not isinstance(mr, dict) or not mr:
+        return ""
+
+    # Classify each store by priority. The model writes the category lists; we
+    # render a row per store with its highest-priority label.
+    categories = [
+        ("self-produced", mr.get("self_produced")),
+        ("derived", mr.get("derived")),
+        ("boundary-crossing", mr.get("boundary")),
+        ("boundary-crossing", mr.get("requires")),
+        ("inside", mr.get("provides")),
+        ("inside", mr.get("inside")),
+    ]
+    store_role: dict[str, str] = {}
+    for role, lst in categories:
+        if isinstance(lst, str):
+            lst = [lst]
+        for s in (lst or []):
+            store_role.setdefault(str(s), role)
+
+    gap = mr.get("gap") or []
+    if isinstance(gap, str):
+        gap = [gap]
+    gap_set = {str(g) for g in gap}
+
+    rows = []
+    for store, role in sorted(store_role.items()):
+        bg, fg = _REPR_ROLE_COLORS.get(role, ("#f1f5f9", "#475569"))
+        gap_badge = (
+            ' <span style="padding:0 6px;border-radius:9999px;background:#fee2e2;color:#991b1b;'
+            'font-size:0.72em">unclosed gap</span>' if store in gap_set else ""
+        )
+        rows.append(
+            '<tr style="border-top:1px solid #f1f5f9;font-size:0.9em">'
+            f'<td style="padding:4px 8px"><code>{_h(store)}</code>{gap_badge}</td>'
+            f'<td style="padding:4px 8px"><span style="padding:1px 8px;border-radius:9999px;'
+            f'background:{bg};color:{fg};font-weight:600;font-size:0.82em">{_h(role)}</span></td>'
+            '</tr>'
+        )
+
+    table_html = ""
+    if rows:
+        table_html = (
+            '<table style="border-collapse:collapse;width:100%;margin-top:4px">'
+            '<tr style="text-align:left;color:#475569;font-size:0.82em">'
+            '<th style="padding:4px 8px">Store</th><th style="padding:4px 8px">Representation</th></tr>'
+            + "".join(rows) + '</table>'
+        )
+
+    # Closure status strip: interface vs semantic.
+    def _closure_chip(label: str, closed) -> str:
+        if closed is True:
+            bg, fg, txt = "#dcfce7", "#166534", "CLOSED"
+        elif closed is False:
+            bg, fg, txt = "#fee2e2", "#991b1b", "OPEN"
+        else:
+            bg, fg, txt = "#f1f5f9", "#475569", "—"
+        return (
+            f'<span style="margin-right:12px">{_h(label)}: '
+            f'<span style="padding:1px 8px;border-radius:9999px;background:{bg};color:{fg};'
+            f'font-weight:700;font-size:0.82em">{txt}</span></span>'
+        )
+
+    semantic = mr.get("semantic") if isinstance(mr.get("semantic"), dict) else {}
+    interface_closed = mr.get("interface_closed")
+    semantically_closed = semantic.get("semantically_closed")
+    closure_html = (
+        '<div style="margin:10px 0">'
+        + _closure_chip("Interface closure", interface_closed)
+        + _closure_chip("Semantic closure", semantically_closed)
+        + '</div>'
+    )
+
+    if not rows and interface_closed is None and semantically_closed is None:
+        return ""
+    return (
+        '<section id="representation"><h2>Representation claims</h2>'
+        '<p style="color:#475569;font-size:0.92em;margin:0 0 8px">How each store is represented '
+        '(inside / boundary-crossing / derived / self-produced) and whether the model achieves '
+        'interface closure (no missing inputs) and semantic closure (every self-produced store '
+        'actually fluxes).</p>'
+        + closure_html + table_html +
+        '</section>'
+    )
+
+
+def _resolve_composite_doc(ws_root: Path, spec: dict) -> Optional[dict]:
+    """Best-effort resolve the study's baseline composite to a LIGHT state doc.
+
+    Mirrors the server's ``_get_composite_state`` resolution (generator registry
+    → workspace file) but standalone, so the single-study report renders the
+    model card from the same ``summarize_large_values`` + ``process_docs`` doc the
+    explorer uses. Returns None on any failure (network-free / import-light:
+    degrades to no model card).
+    """
+    # Find the baseline composite ref (v4 conditions.baseline.composite or the
+    # legacy top-level baseline[].composite).
+    ref = None
+    conds = spec.get("conditions")
+    if isinstance(conds, dict):
+        bl = conds.get("baseline")
+        if isinstance(bl, dict):
+            ref = bl.get("composite")
+    if not ref:
+        for b in (spec.get("baseline") or []):
+            if isinstance(b, dict) and b.get("composite"):
+                ref = b["composite"]
+                break
+    if not ref:
+        return None
+
+    doc = None
+    # 1) generator registry (built composites)
+    try:
+        from pbg_superpowers.composite_generator import (
+            _REGISTRY, build_generator, discover_generators,
+        )
+        if not _REGISTRY:
+            discover_generators()
+        entry = _REGISTRY.get(ref)
+        if entry is not None:
+            doc = build_generator(entry)
+    except Exception:
+        doc = None
+
+    # 2) workspace file (dotted spec id or relative path)
+    if doc is None:
+        try:
+            from vivarium_dashboard.lib.composite_lookup import find_composite_path
+            ws_data = yaml.safe_load(
+                (Path(ws_root) / "workspace.yaml").read_text(encoding="utf-8")) or {}
+            pkg = ws_data.get("package_path") or (
+                "pbg_" + str(ws_data.get("name", "")).replace("-", "_"))
+            found = find_composite_path(Path(ws_root), pkg, ref)
+            if found is None:
+                cand = Path(ws_root) / ref
+                found = cand if cand.is_file() else None
+            if found is not None and found.is_file():
+                text = found.read_text(encoding="utf-8")
+                doc = (json.loads(text) if found.suffix.lower() == ".json"
+                       else (yaml.safe_load(text) or {}))
+        except Exception:
+            doc = None
+
+    if not isinstance(doc, dict) or not doc:
+        return None
+    try:
+        from vivarium_dashboard.lib.process_docs import (
+            attach_process_docs, summarize_large_values,
+        )
+        doc = summarize_large_values(doc)
+        attach_process_docs(doc)
+    except Exception:
+        pass
+    # A composite file usually nests the wiring under a `state:` key; the
+    # generator path returns the bare state. _render_model_card handles both.
+    return doc.get("state") if isinstance(doc.get("state"), dict) else doc
+
+
 def _render_html(study_spec: dict, viz_entries: list[dict],
-                 *, investigation_slug: Optional[str], generated_at: str) -> str:
+                 *, investigation_slug: Optional[str], generated_at: str,
+                 composite_doc: Optional[dict] = None,
+                 skeptic: bool = False,
+                 unresolved_composites: Optional[list] = None) -> str:
     rep = study_spec.get("report") or {}
     # Authored ``report:`` fields win; absent ones are DERIVED from real study
     # content so minimal studies still render the standard structure.
@@ -673,13 +1981,43 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
     key_metrics = rep.get("key_metrics") or _derive_key_metrics(study_spec)
 
     badge = _render_verdict_badge(verdict)
+    study_type_badge = _render_study_type_badge(study_spec)   # critique #10
+    prereg_chip = _render_preregistration_chip(study_spec)    # critique #18
     metrics_html = _render_key_metrics(key_metrics)
     verdicts_html = _render_conclusion_verdicts(study_spec)
     synthesis_html = _render_conclusion_synthesis(study_spec)
     biology_html = _render_biological_summary(study_spec)
     alternatives_html = _render_alternatives(study_spec)
     viz_html = _render_viz_embeds(viz_entries)
-    rigor_html = _render_rigor(study_spec)
+    rigor_html = _render_rigor(study_spec, skeptic=skeptic)
+    measurement_html = _render_measurement_integrity(study_spec)   # Wave 3b #9/#20
+    debts_html = _render_epistemic_debts(study_spec)          # W15
+    # Wave 2 — compositional causal discovery + semantic closure.
+    commitment_html = _render_composition_commitment(study_spec)   # C-COMMIT
+    invariants_html = _render_invariant_checks(study_spec)         # C-INVAR
+    causal_html = _render_causal_necessity(study_spec)             # C-CF
+    model_card_html = _render_model_card(                          # C-MODELCARD
+        composite_doc,
+        model_representation=study_spec.get("model_representation"),
+        readouts=study_spec.get("readouts"),
+        behavior_tests=study_spec.get("behavior_tests"),
+        variants=study_spec.get("variants"),
+        interventions=study_spec.get("interventions"),
+    )
+    representation_html = _render_representation(                  # C-MODELCARD
+        study_spec.get("model_representation"))
+    audit_html = _render_audit_trail(study_spec) if skeptic else ""   # W24
+    limitations_html = _render_limitations(study_spec) if skeptic else ""  # W24
+    # W24 — in skeptic mode controls/falsifiability is its own ordered section
+    # (the rigor scorecard omits its embedded copy in skeptic mode).
+    controls_section_html = ""
+    if skeptic:
+        _cf = _render_controls_and_falsifiability(study_spec)
+        if _cf:
+            controls_section_html = (
+                '<section id="rigor-detail"><h2>Controls &amp; falsifiability</h2>'
+                + _cf + '</section>'
+            )
 
     inv_chip = ""
     if investigation_slug:
@@ -735,19 +2073,92 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
     # are dead-ends that confuse navigation. Mirrors the same pattern
     # the investigation report's sticky panel uses (`sp-section-nav`)
     # so single-study + investigation reports feel consistent.
-    nav_chips = []
-    if head_blocks or metrics_html:
-        nav_chips.append('<a href="#overview">Overview</a>')
-    if verdicts_html:
-        nav_chips.append('<a href="#verdicts">Verdicts</a>')
-    if synthesis_html:
-        nav_chips.append('<a href="#synthesis">Synthesis</a>')
-    if biology_html:
-        nav_chips.append('<a href="#biology">Biology</a>')
-    if alternatives_html:
-        nav_chips.append('<a href="#alternatives">Alternatives</a>')
-    if viz_html:
-        nav_chips.append('<a href="#viz">Visualisations</a>')
+    def _chip(anchor: str, label: str) -> str:
+        return f'<a href="#{anchor}">{_h(label)}</a>'
+
+    # Sections that were historically always emitted (even when empty) so the
+    # DOM is stable; their nav chips are still gated on real content.
+    overview_section = (
+        '<section class="overview" id="overview">\n'
+        f'  {"".join(head_blocks)}\n'
+        f'  {metrics_html}\n'
+        '</section>'
+    )
+    biology_section = f'<section id="biology">\n{biology_html}\n</section>'
+    viz_section = f'<section id="viz">\n{viz_html}\n</section>'
+
+    if skeptic:
+        # W24 skeptic order: audit trail → rigor (gap→warn→ok) → controls &
+        # falsifiability → alternatives (not-excluded first, from the shared
+        # renderer) → limitations/remaining-uncertainties → open epistemic
+        # debts → THEN the usual verdicts / synthesis / biology / viz.
+        seq = [
+            ("overview", "Overview", overview_section, bool(head_blocks or metrics_html)),
+            ("commitment", "Commitment", commitment_html, bool(commitment_html)),
+            ("invariants", "Invariants", invariants_html, bool(invariants_html)),
+            ("audit-trail", "Audit trail", audit_html, bool(audit_html)),
+            ("rigor", "Rigor", rigor_html, bool(rigor_html)),
+            ("measurement-integrity", "Measurement integrity", measurement_html, bool(measurement_html)),
+            ("rigor-detail", "Controls", controls_section_html, bool(controls_section_html)),
+            ("causal-necessity", "Causal necessity", causal_html, bool(causal_html)),
+            ("alternatives", "Alternatives", alternatives_html, bool(alternatives_html)),
+            ("limitations", "Limitations", limitations_html, bool(limitations_html)),
+            ("epistemic-debts", "Open debts", debts_html, bool(debts_html)),
+            ("verdicts", "Verdicts", verdicts_html, bool(verdicts_html)),
+            ("synthesis", "Synthesis", synthesis_html, bool(synthesis_html)),
+            ("biology", "Biology", biology_section, bool(biology_html)),
+            ("model-card", "Model card", model_card_html, bool(model_card_html)),
+            ("representation", "Representation", representation_html, bool(representation_html)),
+            ("viz", "Visualisations", viz_section, bool(viz_html)),
+        ]
+        body_main = "\n\n".join(html for (_a, _l, html, _show) in seq if html)
+        nav_chips = [_chip(a, l) for (a, l, _html, show) in seq if show]
+    else:
+        nav_chips = []
+        if head_blocks or metrics_html:
+            nav_chips.append(_chip("overview", "Overview"))
+        if commitment_html:
+            nav_chips.append(_chip("commitment", "Commitment"))
+        if invariants_html:
+            nav_chips.append(_chip("invariants", "Invariants"))
+        if verdicts_html:
+            nav_chips.append(_chip("verdicts", "Verdicts"))
+        if synthesis_html:
+            nav_chips.append(_chip("synthesis", "Synthesis"))
+        if biology_html:
+            nav_chips.append(_chip("biology", "Biology"))
+        if alternatives_html:
+            nav_chips.append(_chip("alternatives", "Alternatives"))
+        if causal_html:
+            nav_chips.append(_chip("causal-necessity", "Causal necessity"))
+        if model_card_html:
+            nav_chips.append(_chip("model-card", "Model card"))
+        if representation_html:
+            nav_chips.append(_chip("representation", "Representation"))
+        if measurement_html:
+            nav_chips.append(_chip("measurement-integrity", "Measurement integrity"))
+        if viz_html:
+            nav_chips.append(_chip("viz", "Visualisations"))
+        # W15 — the open-debts panel renders right after rigor in normal mode.
+        # Wave 2 — commitment + invariants lead the framing; the causal-necessity
+        # table sits in the evidence area (after rigor); model card + representation
+        # render with the build/model detail near the end.
+        body_main = "\n\n".join([
+            overview_section,
+            commitment_html,
+            invariants_html,
+            verdicts_html,
+            synthesis_html,
+            biology_section,
+            alternatives_html,
+            rigor_html,
+            measurement_html,
+            causal_html,
+            debts_html,
+            model_card_html,
+            representation_html,
+            viz_section,
+        ])
     nav_html = (
         '<nav class="ssr-section-nav">' + "".join(nav_chips) + '</nav>'
     ) if nav_chips else ""
@@ -764,6 +2175,27 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
         f'  {nav_html}'
         '</div>'
     )
+
+    # Composite-resolution lint banner — declared composite refs that don't
+    # resolve against the live registry (would have caught autopoiesis studies
+    # 2–4). Rendered prominently right under the header; hidden when all resolve.
+    composite_lint_html = ""
+    if unresolved_composites:
+        _rows = "".join(
+            f'<div>⚠ composite not found in registry: <code>{_h(str(r))}</code></div>'
+            for r in unresolved_composites
+        )
+        composite_lint_html = (
+            '<div class="composite-lint-banner" role="alert" '
+            'style="margin:14px 0;padding:10px 14px;background:#fffbeb;'
+            'border:1px solid #f59e0b;border-left-width:5px;border-radius:6px;'
+            'color:#92400e;font-size:0.92em">'
+            f'{_rows}'
+            '<div style="margin-top:4px;font-size:0.9em;color:#a16207">'
+            'This study references a composite that doesn’t resolve — it may not '
+            'declare a real, registered composite.</div>'
+            '</div>'
+        )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -821,31 +2253,14 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
   {inv_chip}
   <h1>{_h(title)}</h1>
   <div class="meta" style="color:#475569;font-size:0.95em">
-    <code>{_h(study_spec.get("name", ""))}</code> {badge}
+    <code>{_h(study_spec.get("name", ""))}</code> {badge}{study_type_badge}{prereg_chip}
   </div>
   {quality_html}
 </header>
 
-<section class="overview" id="overview">
-  {"".join(head_blocks)}
-  {metrics_html}
-</section>
+{composite_lint_html}
 
-{verdicts_html}
-
-{synthesis_html}
-
-<section id="biology">
-{biology_html}
-</section>
-
-{alternatives_html}
-
-{rigor_html}
-
-<section id="viz">
-{viz_html}
-</section>
+{body_main}
 
 <div class="footer">
   Generated {_h(generated_at)} by vivarium-dashboard single-study report.
@@ -867,6 +2282,7 @@ def render_single_study_report(
     *,
     investigation_slug: Optional[str] = None,
     out_dir: Optional[Path] = None,
+    skeptic: bool = False,
 ) -> Path:
     """Build a self-contained HTML report for ONE study.
 
@@ -883,15 +2299,36 @@ def render_single_study_report(
     study_spec = _load_study_spec(ws_root, study_slug)
     viz_entries = _collect_viz_html(ws_root, study_slug)
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    # C-MODELCARD — resolve the baseline composite to a light state doc so the
+    # model card renders from the same doc the explorer uses. Best-effort; the
+    # card is omitted when resolution fails (no composite / import-light env).
+    composite_doc = _resolve_composite_doc(ws_root, study_spec)
+    # Composite-resolution lint (framework-emitters): declared composite refs
+    # that don't resolve against the live registry. Best-effort; empty on failure.
+    unresolved_composites: list[str] = []
+    try:
+        from vivarium_dashboard.lib.composite_lookup import (
+            known_composite_ids, unresolved_study_composite_refs,
+        )
+        unresolved_composites = unresolved_study_composite_refs(
+            study_spec, known_composite_ids(ws_root)) or []
+    except Exception:
+        unresolved_composites = []
     html = _render_html(
         study_spec, viz_entries,
         investigation_slug=investigation_slug,
         generated_at=generated_at,
+        composite_doc=composite_doc,
+        skeptic=skeptic,
+        unresolved_composites=unresolved_composites,
     )
 
     out_dir = Path(out_dir) if out_dir is not None else WorkspacePaths.load(ws_root).reports
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"single-study-{study_slug}.html"
+    # The skeptic view is written to a distinct file so it never clobbers the
+    # default report (W24).
+    suffix = "-skeptic" if skeptic else ""
+    out_path = out_dir / f"single-study-{study_slug}{suffix}.html"
     out_path.write_text(html, encoding="utf-8")
     return out_path
 
@@ -911,6 +2348,7 @@ def build_single_study_report_for_test(
     body = body or {}
     study_slug = (body.get("study") or "").strip()
     inv_slug = (body.get("investigation") or "").strip()
+    skeptic = bool(body.get("skeptic"))   # W24 — skeptical-reader view
 
     if not study_slug and not inv_slug:
         return {"error": "either 'study' or 'investigation' is required"}, 400
@@ -925,6 +2363,7 @@ def build_single_study_report_for_test(
         out_path = render_single_study_report(
             ws_root, study_slug,
             investigation_slug=inv_slug or None,
+            skeptic=skeptic,
         )
     except FileNotFoundError as e:
         return {"error": str(e)}, 404
@@ -937,6 +2376,7 @@ def build_single_study_report_for_test(
         "html_path": rel,
         "size_bytes": out_path.stat().st_size,
         "study": study_slug,
+        "skeptic": skeptic,
     }
     if inv_slug:
         resp["investigation"] = inv_slug

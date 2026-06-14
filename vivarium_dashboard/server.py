@@ -1637,6 +1637,34 @@ def _reconcile_simset_with_runs(sim_set, runs, ws_root=None):
     return sim_set
 
 
+def _enrich_findings_with_weight(study_spec: dict) -> list:
+    """W8 — return the study's findings with a server-computed evidential
+    weight attached as ``_evidential_weight`` (the report-data path so the SPA
+    just renders the chip; no JS recompute, no drift).
+
+    Each finding gets ``_evidential_weight = {"weight", "dims", "n_supporting"}``
+    via the deterministic ``pbg_superpowers.rigor.finding_evidential_weight``.
+    Defensive: if the function isn't importable (older pbg-superpowers) the
+    findings pass through unchanged, so the chip simply doesn't render.
+    """
+    findings = study_spec.get("findings") or []
+    try:
+        from pbg_superpowers.rigor import finding_evidential_weight
+    except Exception:
+        return findings
+    out = []
+    for f in findings:
+        if isinstance(f, dict):
+            try:
+                w = finding_evidential_weight(study_spec, f)
+            except Exception:
+                w = None
+            if w:
+                f = {**f, "_evidential_weight": w}
+        out.append(f)
+    return out
+
+
 def _study_detail_spec(name: str):
     """Load a study's spec for the GET /studies/<name> detail page.
 
@@ -1785,6 +1813,20 @@ def _study_detail_spec(name: str):
         except Exception:  # noqa: BLE001
             pass
 
+        # Wave 3a #18: pre-registration status — compare the study's declared
+        # `preregistered` block (registered_at vs the canonical run's start;
+        # thresholds vs behavior_tests[].pass_if) so the SPA / report can render
+        # a "pre-registered ✓ / post-hoc ⚠" chip in the verdict area. Pure
+        # function in pbg-superpowers; render-only, never modifies study.yaml.
+        # Defensive: degrade silently if pbg-superpowers isn't importable.
+        try:
+            from pbg_superpowers.study_verdict import preregistration_status
+            ps = preregistration_status(spec)
+            if isinstance(ps, dict) and ps.get("preregistered"):
+                spec["preregistration_status"] = ps
+        except Exception:  # noqa: BLE001
+            pass
+
         # Spine C1a: surface the owning investigation's PERSISTED acceptance
         # criterion(s) covering THIS study so the "Spine at a glance" panel can
         # show the acceptance roll-up + link to the investigation. Pure disk
@@ -1794,6 +1836,24 @@ def _study_detail_spec(name: str):
             sa = _study_acceptance_criterion(name)
             if sa:
                 spec["spine_acceptance"] = sa
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Wave 3b #25 — attach the derived lifecycle floor to each finding (the
+        # report-data path so the SPA renders the chip without a JS recompute).
+        # Defensive: a missing pbg_superpowers.study_verdict.lifecycle_floor
+        # leaves findings untouched (the chip then shows only the authored state).
+        try:
+            from pbg_superpowers.study_verdict import lifecycle_floor as _lf
+            for _f in (spec.get("findings") or []):
+                if not isinstance(_f, dict) or "_lifecycle_floor" in _f:
+                    continue
+                try:
+                    _v = _lf(_f, spec)
+                except Exception:  # noqa: BLE001
+                    continue
+                if isinstance(_v, str) and _v.strip():
+                    _f["_lifecycle_floor"] = _v.strip()
         except Exception:  # noqa: BLE001
             pass
     return spec
@@ -2226,6 +2286,52 @@ def _discover_investigation_viz_html_files(inv_slug: str) -> list[dict]:
     return out
 
 
+def _study_yaml_run_rows(name: str) -> list[dict]:
+    """Map a study's ``study.yaml`` ``runs:`` list to run-row dicts (the shape
+    :func:`_read_runs_db_for_study` returns).
+
+    Emitter-less workspaces (e.g. numpy-based investigations like pbg-autopoiesis)
+    record each run in the spec's ``runs:`` block rather than a per-step
+    ``runs.db``. Surfacing those keeps the Simulations DB / Runs tab faithful to
+    what actually ran, for ANY workspace — not only ones backed by a SQLite/
+    Parquet emitter. Uses a light direct YAML read (``_study_spec_path``) to
+    avoid recursing through ``_study_detail_spec`` (which itself reads runs).
+    """
+    import yaml as _yaml
+    try:
+        path = _study_spec_path(name)
+        if not path or not Path(path).is_file():
+            return []
+        spec = _yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 — never let a malformed spec break the view
+        return []
+    if not isinstance(spec, dict):
+        return []
+    rows: list[dict] = []
+    for r in spec.get("runs", []) or []:
+        if not isinstance(r, dict):
+            continue
+        rid = str(r.get("run_id") or r.get("name") or "").strip()
+        if not rid:
+            continue
+        rows.append({
+            "run_id":        rid,
+            "spec_id":       name,
+            "label":         r.get("name") or rid,
+            "sim_name":      r.get("name") or rid,
+            "variant":       None,
+            "composite":     r.get("composite"),
+            "params":        {"seed": r.get("seed")} if r.get("seed") is not None else {},
+            "n_steps":       r.get("n_steps"),
+            "status":        r.get("status") or "completed",
+            "started_at":    r.get("started_at"),
+            "completed_at":  r.get("completed_at") or r.get("started_at"),
+            "generation_id": r.get("generation_id"),
+            "source":        "study.yaml",
+        })
+    return rows
+
+
 def _read_runs_db_for_study(name: str) -> list[dict]:
     """Read all runs from ``studies/<name>/runs.db`` for the Runs tab.
 
@@ -2239,15 +2345,17 @@ def _read_runs_db_for_study(name: str) -> list[dict]:
     """
     import sqlite3, json as _json, datetime as _dt
     runs_db = workspace_paths().studies / name / "runs.db"
-    if not runs_db.is_file():
-        return []
-    conn = sqlite3.connect(str(runs_db))
-    conn.row_factory = sqlite3.Row
+    # A runs.db is the canonical per-step source, but it's optional: emitter-less
+    # workspaces record runs only in study.yaml (merged in below). So don't bail
+    # when it's absent — fall through with an empty db result.
+    conn = sqlite3.connect(str(runs_db)) if runs_db.is_file() else None
+    if conn is not None:
+        conn.row_factory = sqlite3.Row
     try:
         # Discover available tables; both should exist for pbg_runner-wrapped
         # runs, but older backfilled DBs may only have runs_meta.
         tables = {row[0] for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'")}
+            "SELECT name FROM sqlite_master WHERE type='table'")} if conn is not None else set()
         # runs_meta.generation_id is a recently-added nullable column; older
         # DBs won't have it, so probe before selecting it.
         meta_cols = {row[1] for row in conn.execute("PRAGMA table_info(runs_meta)")} \
@@ -2307,7 +2415,13 @@ def _read_runs_db_for_study(name: str) -> list[dict]:
                         "source":       "simulations",
                     }
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
+
+    # Merge runs recorded in study.yaml `runs:` (emitter-less workspaces) — the
+    # db is authoritative where present, so only add spec runs not already seen.
+    for _r in _study_yaml_run_rows(name):
+        rows_by_id.setdefault(_r["run_id"], _r)
 
     def _iso(v):
         if v is None:
@@ -3238,7 +3352,8 @@ def _simulations_data(ws_root: Path) -> dict:
         return {"simulations": [], "current": None}
     try:
         from vivarium_dashboard.lib.runs_index import emitter_type_of
-        _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray"}
+        _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray",
+                          "none": "—"}  # no step emitter (summary-only run)
         for s in sims:
             tag = (s.get("emitter") or "").lower()
             s["emitter_type"] = _emitter_label.get(tag) or emitter_type_of(s.get("db_path"))
@@ -4232,6 +4347,9 @@ def _post_study_seed_followup_for_test(ws_root: Path, body: dict):
     finding_id = body.get("finding_id")
     proposal_id = body.get("proposal_id")
     proposal_idx = body.get("proposal_idx")
+    # Wave 3a #19 — optional study_type (e.g. 'diagnostic' when the parent
+    # failed) threaded to the pbg writer so the seeded child is typed.
+    study_type = body.get("study_type") or None
     if proposal_idx is not None:
         try:
             proposal_idx = int(proposal_idx)
@@ -4241,13 +4359,15 @@ def _post_study_seed_followup_for_test(ws_root: Path, body: dict):
         if finding_id is not None and str(finding_id) != "":
             # Finding family — delegate to the shared pbg seed mechanism.
             new_name = seed_followup_study(
-                ws_root, parent, finding_id=finding_id, proposal_id=proposal_id)
+                ws_root, parent, finding_id=finding_id, proposal_id=proposal_id,
+                study_type=study_type)
         else:
             new_name = seed_followup_study(
                 ws_root, parent,
                 int(body.get("followup_idx", -1)),
                 proposal_id=proposal_id,
                 proposal_idx=proposal_idx,
+                study_type=study_type,
             )
     except ImportError as e:
         return {"error": f"finding-seed requires pbg-superpowers: {e}"}, 500
@@ -5996,9 +6116,31 @@ def _render_study_detail_html(name: str, spec: dict) -> str:
         _ptools_enabled = bool((_ws.get("ui") or {}).get("ptools_server_url"))
     except Exception:
         _ptools_enabled = False
+    # W15 — open epistemic debts, computed server-side via the deterministic
+    # pbg_superpowers collector (derives from rigor + freshness so it can't
+    # drift). Defensive: degrade to no panel if the collector isn't importable.
+    epistemic_debts = []
+    try:
+        from pbg_superpowers.needs_attention import open_epistemic_debts
+        epistemic_debts = open_epistemic_debts(spec) or []
+    except Exception:
+        epistemic_debts = []
+    # Composite-resolution lint: flag declared composite refs that don't resolve
+    # against the live registry (would have caught autopoiesis studies 2–4).
+    unresolved_composites = []
+    try:
+        from vivarium_dashboard.lib.composite_lookup import (
+            known_composite_ids, unresolved_study_composite_refs,
+        )
+        unresolved_composites = unresolved_study_composite_refs(
+            spec, known_composite_ids(WORKSPACE)) or []
+    except Exception:
+        unresolved_composites = []
     return tpl.render(study=spec, name=name,
                       display_name=spec.get("title") or _hn["title"],
-                      name_chip=_hn["chip"], ptools_enabled=_ptools_enabled)
+                      name_chip=_hn["chip"], ptools_enabled=_ptools_enabled,
+                      epistemic_debts=epistemic_debts,
+                      unresolved_composites=unresolved_composites)
 
 
 def _humanize_study_name(slug: str) -> dict:
@@ -7377,7 +7519,65 @@ def _report_lint(ws_root: Path):
             "message":    d.get("message", ""),
             "field_path": d.get("field_path", ""),
         })
+
+    # Composite-resolution lint — the linter works on specs and has no registry,
+    # but the dashboard DOES. For each study, flag declared composite refs that
+    # don't resolve against the live registry. This is what would have caught the
+    # autopoiesis studies 2–4 (numpy-only, no registered composite).
+    findings.extend(_composite_resolution_findings(ws_root))
     return _json_body({"findings": findings}), 200
+
+
+def _composite_resolution_findings(ws_root: Path) -> list[dict]:
+    """For every study in the workspace, return report-lint findings for any
+    declared composite ref that does NOT resolve to a registered composite.
+
+    Uses the dashboard's live registry (``known_composite_ids``) + the helper
+    ``unresolved_study_composite_refs`` (which prefers pbg_superpowers'
+    ``report_linter.unresolved_composite_refs`` when available). Tolerant:
+    returns ``[]`` on any failure so the readiness panel never 500s.
+    """
+    ws_root = Path(ws_root)
+    out: list[dict] = []
+    try:
+        from vivarium_dashboard.lib.composite_lookup import (
+            known_composite_ids, unresolved_study_composite_refs,
+        )
+        known = known_composite_ids(ws_root)
+    except Exception:  # noqa: BLE001
+        return out
+    try:
+        wp = WorkspacePaths.load(ws_root)
+        studies_root = wp.studies
+    except Exception:  # noqa: BLE001
+        return out
+    if not studies_root.is_dir():
+        return out
+    for d in sorted(studies_root.iterdir()):
+        f = d / "study.yaml"
+        if not f.is_file():
+            continue
+        try:
+            spec = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+        except Exception:  # noqa: BLE001
+            continue
+        if not isinstance(spec, dict):
+            continue
+        try:
+            unresolved = unresolved_study_composite_refs(spec, known)
+        except Exception:  # noqa: BLE001
+            continue
+        for ref in unresolved:
+            out.append({
+                "study": d.name,
+                "check": "unresolved_composite",
+                "severity": "warning",
+                "message": (f"composite not found in registry: {ref} — the study "
+                            "references a composite that doesn't resolve (it may not "
+                            "declare a real, registered composite)"),
+                "field_path": "baseline[].composite",
+            })
+    return out
 
 
 def _linkage_cached_index(ws_root: Path):
@@ -7503,6 +7703,154 @@ def _needs_attention(ws_root: Path, *, investigation=None):
         return _json_body(_na.scan_investigation(ws_root, investigation)), 200
     except Exception:  # noqa: BLE001 — scan/derive can fail; stay typed + 200
         return _json_body(_empty), 200
+
+
+def _framework_metrics(ws_root: Path):
+    """GET /api/framework-metrics worker — ``(json_bytes, status)``.
+
+    Wave 3a #26: aggregate framework-self metrics across EVERY study + every
+    investigation in the workspace via the deterministic
+    ``pbg_superpowers.rigor.framework_metrics`` (each metric is
+    ``{fraction, count, total}``). The dashboard renders this as a
+    "Framework scorecard" section labelled "framework-self metrics (n=N
+    investigations)" — the label is the dashboard's job, the math is pbg's.
+
+    AI-free + tolerant: an absent/old pbg_superpowers, or an unreadable
+    workspace, returns 200 with ``{metrics: {}, n_investigations, n_studies}``
+    rather than a 500 so the report degrades gracefully (section omitted).
+    """
+    ws_root = Path(ws_root)
+    wp = WorkspacePaths.load(ws_root)
+
+    study_specs = []
+    studies_root = wp.studies
+    if studies_root.is_dir():
+        for d in sorted(studies_root.iterdir()):
+            f = d / "study.yaml"
+            if not f.is_file():
+                continue
+            try:
+                sp = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+            except Exception:  # noqa: BLE001 — skip unreadable studies
+                continue
+            if isinstance(sp, dict):
+                study_specs.append(sp)
+
+    inv_specs = []
+    inv_root = wp.investigations
+    if inv_root.is_dir():
+        for d in sorted(inv_root.iterdir()):
+            f = d / "investigation.yaml"
+            if not f.is_file():
+                continue
+            try:
+                isp = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+            except Exception:  # noqa: BLE001
+                continue
+            if isinstance(isp, dict):
+                inv_specs.append(isp)
+
+    base = {"metrics": {}, "n_investigations": len(inv_specs),
+            "n_studies": len(study_specs)}
+    try:
+        from pbg_superpowers.rigor import framework_metrics
+    except Exception:  # noqa: BLE001 — older pbg_superpowers lacks the function
+        return _json_body(base), 200
+    try:
+        metrics = framework_metrics(study_specs, inv_specs) or {}
+        base["metrics"] = metrics
+        return _json_body(base), 200
+    except Exception:  # noqa: BLE001 — compute can fail; stay typed + 200
+        return _json_body(base), 200
+
+
+def _investigation_hypotheses(ws_root: Path, name: str):
+    """GET /api/investigation-hypotheses worker — ``(json_bytes, status)``.
+
+    Wave 3b #6/#16: return the investigation's competing ``hypotheses[]`` with a
+    COMPUTED ``support_log`` folded in via the deterministic
+    ``pbg_superpowers.hypotheses.rollup_support`` (falling back to
+    ``score_support`` per hypothesis). The authored ``statement`` / ``predictions``
+    pass through; the SPA just renders the trajectory (no JS recompute, no drift).
+
+    AI-free + tolerant: an absent/old pbg_superpowers, a missing investigation,
+    or a compute failure returns 200 with the authored hypotheses (un-enriched)
+    rather than a 500 so the report's "Competing hypotheses" panel degrades.
+    """
+    ws_root = Path(ws_root)
+    wp = WorkspacePaths.load(ws_root)
+    base = {"hypotheses": [], "investigation": name}
+
+    inv_path = wp.investigations / name / "investigation.yaml"
+    if not inv_path.is_file():
+        return _json_body(base), 200
+    try:
+        inv_spec = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001
+        return _json_body(base), 200
+    if not isinstance(inv_spec, dict):
+        return _json_body(base), 200
+
+    authored = inv_spec.get("hypotheses")
+    authored = authored if isinstance(authored, list) else []
+    base["hypotheses"] = authored
+    if not authored:
+        return _json_body(base), 200
+
+    # Member study specs (slug strings or {name: slug}).
+    study_specs = []
+    for s in (inv_spec.get("studies") or []):
+        slug = s.get("name") if isinstance(s, dict) else s
+        if not slug:
+            continue
+        f = wp.studies / str(slug) / "study.yaml"
+        if not f.is_file():
+            continue
+        try:
+            sp = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+        except Exception:  # noqa: BLE001
+            continue
+        if isinstance(sp, dict):
+            study_specs.append(sp)
+
+    # 1) Preferred: rollup_support returns the enriched inv_spec (or list).
+    try:
+        from pbg_superpowers.hypotheses import rollup_support
+    except Exception:  # noqa: BLE001 — older/absent pbg_superpowers
+        rollup_support = None
+    if rollup_support is not None:
+        try:
+            enriched = rollup_support(inv_spec, study_specs)
+            if isinstance(enriched, dict):
+                hyps = enriched.get("hypotheses")
+                if isinstance(hyps, list):
+                    base["hypotheses"] = hyps
+                    return _json_body(base), 200
+            elif isinstance(enriched, list):
+                base["hypotheses"] = enriched
+                return _json_body(base), 200
+        except Exception:  # noqa: BLE001
+            pass
+
+    # 2) Fallback: score_support per hypothesis.
+    try:
+        from pbg_superpowers.hypotheses import score_support
+    except Exception:  # noqa: BLE001
+        return _json_body(base), 200
+    out = []
+    for h in authored:
+        if not isinstance(h, dict):
+            continue
+        h2 = dict(h)
+        try:
+            log = score_support(h, study_specs)
+            if isinstance(log, list):
+                h2["support_log"] = log
+        except Exception:  # noqa: BLE001
+            pass
+        out.append(h2)
+    base["hypotheses"] = out
+    return _json_body(base), 200
 
 
 # ---------------------------------------------------------------------------
@@ -7670,6 +8018,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_study_rigor()
         if self.path.startswith("/api/investigation-rigor"):
             return self._get_investigation_rigor()
+        if self.path.startswith("/api/framework-metrics"):
+            return self._send_json_bytes(*_framework_metrics(WORKSPACE))
+        if _path_only_pre == "/api/investigation-hypotheses":
+            import urllib.parse as _up
+            _q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
+            _slug = (_q.get("investigation") or _q.get("inv") or _q.get("name") or "").strip()
+            return self._send_json_bytes(*_investigation_hypotheses(WORKSPACE, _slug))
         if self.path.startswith("/api/work-composite-diff"):
             return self._get_work_composite_diff()
         if self.path.startswith("/api/references-bib"):
@@ -7805,10 +8160,17 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError as e:
             return self._json({"error": f"invalid JSON: {e}"}, 400)
 
-        if self.path.startswith("/api/study-refresh-viz/"):
+        # Match the route on the path WITHOUT its query string (mirrors do_GET).
+        # self.path is left intact so handlers can still read query params
+        # (e.g. _post_study_report_single honours ?skeptic=1). Without this,
+        # any POST carrying a query string 404s — including handlers that
+        # explicitly support query params.
+        post_path_only = self.path.split("?", 1)[0]
+
+        if post_path_only.startswith("/api/study-refresh-viz/"):
             return self._post_study_refresh_viz(body)
 
-        method_name = _POST_ROUTE_MAP.get(self.path)
+        method_name = _POST_ROUTE_MAP.get(post_path_only)
         if method_name is None:
             return self._json({"error": "not found"}, 404)
         getattr(self, method_name)(body)
@@ -10029,6 +10391,16 @@ if __name__ == "__main__":
             from vivarium_dashboard.lib.single_study_report import (
                 build_single_study_report_for_test,
             )
+            # W24 — honor ?skeptic=1 in the URL as an alternative to the body
+            # flag, so a "View as skeptic" link can request the reordered view.
+            body = dict(body or {})
+            try:
+                from urllib.parse import urlparse, parse_qs
+                q = parse_qs(urlparse(self.path).query)
+                if "skeptic" in q and "skeptic" not in body:
+                    body["skeptic"] = q["skeptic"][0] not in ("0", "false", "")
+            except Exception:
+                pass
             resp, code = build_single_study_report_for_test(WORKSPACE, body)
             return self._json(resp, code)
         except Exception as e:  # noqa: BLE001
@@ -10156,7 +10528,8 @@ if __name__ == "__main__":
         # produces). db_path-based detection is the fallback for any row whose
         # source tag didn't resolve.
         from vivarium_dashboard.lib.runs_index import emitter_type_of
-        _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray"}
+        _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray",
+                          "none": "—"}  # no step emitter (summary-only run)
         for s in sims:
             tag = (s.get("emitter") or "").lower()
             s["emitter_type"] = _emitter_label.get(tag) or emitter_type_of(s.get("db_path"))
@@ -13461,6 +13834,19 @@ if __name__ == "__main__":
         return _needs_attention(ws_root, investigation=investigation)
 
     @staticmethod
+    def _framework_metrics_test(ws_root):
+        """Test seam for GET /api/framework-metrics — aggregates framework-self
+        metrics over an explicit ws_root. Returns (json_bytes, http_status)."""
+        return _framework_metrics(ws_root)
+
+    @staticmethod
+    def _investigation_hypotheses_test(ws_root, name):
+        """Test seam for GET /api/investigation-hypotheses — returns the
+        investigation's competing hypotheses with computed support_log folded in
+        (Wave 3b #6/#16). Returns (json_bytes, http_status)."""
+        return _investigation_hypotheses(ws_root, name)
+
+    @staticmethod
     def _iset_detail_data(name: str) -> "dict | None":
         """Pure builder for investigation (iset) detail — no socket I/O.
 
@@ -13506,7 +13892,7 @@ if __name__ == "__main__":
             disc_impl = study_spec.get("discovery_implications") or {}
             disc_followups = (disc_impl.get("followup_study_proposals")
                               if isinstance(disc_impl, dict) else None) or []
-            findings = study_spec.get("findings") or []
+            findings = _enrich_findings_with_weight(study_spec)
             n_runs_for_study = _count_runs_for_study(study_spec["name"], study_spec)
             raw_status = study_spec.get("status", "planned")
             studies_out.append({
@@ -13596,6 +13982,10 @@ if __name__ == "__main__":
             "biological_story":    spec.get("biological_story", ""),
             "question":            spec.get("question", ""),
             "hypothesis":          spec.get("hypothesis", ""),
+            # Wave 3a #1 — what the investigation primarily evaluates
+            # (method | model | hypothesis | composition-protocol). Renders as a
+            # chip in the report header. Absent → no chip.
+            "object_of_evaluation": spec.get("object_of_evaluation"),
             "status":              spec.get("status", "planning"),
             "effective_status":    effective_status,
             "expert_docs":         _coerce_list_field(spec, "expert_docs", source=str(spec_path)),
@@ -14049,7 +14439,16 @@ if __name__ == "__main__":
                 path = candidate
 
         if path is None or not path.is_file():
-            return self._json({"error": f"composite not found: {ref}"}, 404)
+            # Honest, structured degrade payload so the loom / Composites view can
+            # render "composite not found / not a registered composite — this study
+            # may not declare a real composite" instead of a bare "error composite"
+            # node. ``unresolved: true`` is the machine-readable flag the client keys on.
+            return self._json({
+                "error": (f"composite not found: {ref} — not a registered composite "
+                          "(this study may not declare a real composite)"),
+                "unresolved": True,
+                "ref": ref,
+            }, 404)
 
         try:
             text = path.read_text(encoding="utf-8")
@@ -14131,7 +14530,15 @@ if __name__ == "__main__":
 
         path = find_composite_path(WORKSPACE, pkg, spec_id)
         if path is None:
-            return self._json({"error": f"spec file not found for id {spec_id}"}, 404)
+            # Honest degrade payload (see _get_composite_state): the explorer
+            # renders "composite not found / not a registered composite" rather
+            # than a bare error node, keying on ``unresolved``.
+            return self._json({
+                "error": (f"composite not found: {spec_id} — not a registered "
+                          "composite (this study may not declare a real composite)"),
+                "unresolved": True,
+                "ref": spec_id,
+            }, 404)
 
         text = path.read_text(encoding="utf-8")
         if path.suffix.lower() == ".json":

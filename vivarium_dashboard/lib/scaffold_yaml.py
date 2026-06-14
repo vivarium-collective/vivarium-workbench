@@ -48,9 +48,22 @@ def v4_study_scaffold(
     """
     created = created or datetime.date.today().isoformat()
     bname = baseline_name or "baseline"
+    # The baseline composite MUST reference a REAL, registered composite (one
+    # that resolves in /api/composites — a .composite.yaml registered in
+    # core.py, or an installed pbg-* composite / @composite_generator). The
+    # dashboard lints unresolved refs (composite-resolution lint) and flags any
+    # study whose baseline doesn't resolve. Runs of this study PERSIST via the
+    # workspace's emitter (runtime.default_emitter — sqlite by default).
+    baseline_note = (
+        "# baseline.composite MUST be a REAL, registered composite (resolves in\n"
+        "# the Composites registry / /api/composites). The dashboard flags an\n"
+        "# unresolved ref with a 'composite not found in registry' banner. Runs\n"
+        "# persist via the workspace emitter (runtime.default_emitter: sqlite).\n"
+    )
     if composite:
         baseline_block = (
-            f"baseline:\n"
+            baseline_note
+            + f"baseline:\n"
             f"  - name: {bname}\n"
             f"    composite: {composite}\n"
             f"    params: {{}}\n"
@@ -60,7 +73,8 @@ def v4_study_scaffold(
         # (^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$) so the scaffold validates
         # out of the box. The user replaces it with their real composite ref.
         baseline_block = (
-            f"baseline:\n"
+            baseline_note
+            + f"baseline:\n"
             f"  - name: {bname}\n"
             f"    composite: replace_me.composites.placeholder\n"
             f"    params: {{}}\n"
@@ -85,6 +99,13 @@ name: {name}
 created: '{created}'
 status: planned
 phase: Design
+
+# study_type: standard             # critique #10 — exploratory | confirmatory |
+#                                   # diagnostic | adversarial | standard. Default
+#                                   # (unset) = standard; `kind: adversarial` still
+#                                   # works as an alias. Shapes how rigor credits the
+#                                   # study (e.g. an exploratory pass is an observation,
+#                                   # not falsification exposure).
 
 # ─── Executive layer ─────────────────────────────────────────────────
 #
@@ -127,6 +148,31 @@ phase: Design
 #   - text: (literature fact the study assumes)
 #     cites: [bib_key]
 #     verified_in_v2ecoli: false
+#
+# pipeline_gate:                      # Section 2 — DAG edges + proceed gate
+#   prerequisites:                    # upstream studies this one depends on
+#     - study: upstream-study-slug
+#       condition: tests-passed       # gate the upstream must satisfy
+#       relation: leads-to            # leads-to (default) | model-input |
+#                                     # evidence | calibrates-threshold |
+#                                     # refutes-alternative
+#       outputs_used: []              # upstream outputs consumed (→ model-input)
+#   enables: []                       # downstream studies unblocked by this one
+#   proceed_condition: ""             # when may the next study start
+#
+# composition_commitment:             # the THEORETICAL commitment this study makes
+#   # Optional but high-value: states what this study ADDS to the prerequisite
+#   # study and what that buys you, so a reviewer reads the compositional claim
+#   # without diffing composites. Renders as a "Theoretical commitment" panel.
+#   component_added: []               # process(es) new vs the prerequisite study
+#   deficit_addressed:                # the gap the new component closes
+#     note: ""                        # free-text: what was missing before
+#     closure_gap_item: []            # gap store(s) this closes (auto-fillable from the meter)
+#   new_behavior: []                  # this study's primary behavior_tests[].name (link to test)
+#   invariants_required:              # earlier guarantees that must still hold (feeds invariant_check)
+#     - study: upstream-study-slug
+#       test: upstream-behavior-test-name
+#   alternatives_excluded: []         # ref to controls[].name / alternative_hypotheses this rules out
 
 {baseline_block}variants: []
 # observables / readouts → declare in `readouts:` below (v4 prefers `readouts`)
@@ -167,6 +213,11 @@ phase: Design
 #       op: in_range                # in_range | at_least | at_most | equals | ...
 #       low: 0.0
 #       high: 1.0
+#       provenance:                 # critique #9 — WHERE this threshold came from
+#         kind: literature          # theory | calibration | literature | expert |
+#                                   # exploratory | post_hoc (distinct from `cites`/
+#                                   # `calibration_anchor`, which link a source)
+#         note: ""                  # one line justifying the cutoff
 #     status: pending
 #     cites: [bib_key]
 #
@@ -196,6 +247,14 @@ phase: Design
 #   new_parameters: []
 #   new_listeners: []
 #   modified_processes: []
+#   representational_claims:          # authored rationale the meter can't compute:
+#     # WHY each store is modelled the way it is + which alternatives were
+#     # excluded. Pairs with the computed `model_representation` (inside /
+#     # boundary-crossing / derived / self-produced labels + closure status).
+#     - store: store_name
+#       role: self-produced           # inside | boundary-crossing | derived | self-produced
+#       rationale: ""                 # why this representation (not an alternative)
+#       alternatives_excluded: []     # representations considered and rejected
 #
 # implementation_requirements:      # TODO list
 #   - id: req-1
@@ -235,6 +294,17 @@ phase: Design
 #   seeds: [0]
 #   parameter_sweep: false
 #
+# preregistered:                    # critique #18 — criteria fixed BEFORE the run.
+#   # A confirmatory study earns full credit only when its pass criteria were
+#   # registered (registered_at predates the canonical run). Renders a
+#   # "pre-registered ✓ / post-hoc ⚠" chip in the verdict area.
+#   criteria: []                    # the pass/fail criteria fixed in advance
+#   thresholds:                     # test_name: pass_if (mirrors behavior_tests[].pass_if)
+#     test-name: {{op: in_range, low: 0.0, high: 1.0}}
+#   predictions: []                 # what you predict the run will show
+#   controls: []                    # controls registered in advance
+#   registered_at: ''               # ISO-8601 timestamp you registered these (author-supplied)
+#
 # controls:                         # a system that SHOULD fail + a passing/borderline case
 #   - name: ""                      # build the negative control with pbg_superpowers.intervention
 #     kind: negative                # negative | positive | borderline | adversarial
@@ -243,8 +313,20 @@ phase: Design
 #     observed: ""
 #     result: PENDING               # PENDING until run; PASS only with a non-empty `observed` (= the control behaved as expected / discriminating)
 #
+# calibration_ladder:               # critique #20 — per metric, index controls[] by rung.
+#   # Each rung is a `controls[].name` (or null when that rung is unbuilt — the gap
+#   # is the signal). >=3 filled rungs = a calibrated metric; known_fail+known_pass
+#   # but no borderline = WARN; <=1 rung = GAP.
+#   - metric: metric_name
+#     known_fail: ""                # control that SHOULD fail (negative)
+#     known_pass: ""                # control that SHOULD pass (positive)
+#     borderline: null              # a near-threshold case (discriminating power)
+#     stress: null                  # an extreme / adversarial case
+#
 # alternative_hypotheses:           # competing explanations + how the evidence excludes them
 #   - claim: ""
+#     hypothesis_id: ""             # critique #6 — optional link to an investigation
+#                                   # hypotheses[].id this study's evidence bears on
 #     discriminated_by: ""          # often the negative control
 #     status: not-excluded          # excluded | not-excluded | untested
 #
@@ -256,6 +338,11 @@ phase: Design
 # discovery_implications:           # Decide-phase synthesis + next steps
 #   resolved_uncertainties: []
 #   remaining_uncertainties: []
+#   alternate_hypotheses:           # critique #6 — competing explanations (canonical home)
+#     - claim: ""
+#       hypothesis_id: ""           # optional link to an investigation hypotheses[].id
+#       discriminated_by: ""        # often the negative control
+#       status: not-excluded        # excluded | not-excluded | untested
 #   followup_study_proposals:
 #     - id: ""
 #       title: ""
@@ -268,6 +355,23 @@ phase: Design
 #     tier: observation             # observation | mechanism | interpretation
 #     mechanism_origin: ""          # engineered | emergent (on interpretation claims)
 #     statement: ""
+#     claim_scope: mechanism        # critique #21 — local-implementation | mechanism |
+#                                   # behavioral | theoretical | generality (DISTINCT
+#                                   # from tier; the scope/reach of the claim)
+#     lifecycle_state: observation  # critique #25 — observation | candidate-explanation |
+#                                   # tested-vs-alternatives | provisional-claim |
+#                                   # generalized | retired | superseded. The derived
+#                                   # FLOOR (study_verdict.lifecycle_floor) is the minimum;
+#                                   # author may declare higher, never below it.
+#     generality:                   # critique #22 — across which axes was this checked?
+#       axes_tested: [parameter_regime]   # parameter_regime | initial_conditions |
+#                                   # discretization | geometry | alt_implementation |
+#                                   # independent_authoring
+#       level: instance_specific    # instance_specific | mechanism | framework
+#     next_action: ""               # free-text rationale: what to do next
+#     next_action_type: ""          # critique #7 — replicate | calibrate | ablate |
+#                                   # adversarially_probe | refine_representation |
+#                                   # split_hypothesis | retire_hypothesis | escalate_model
 #     evidence: {{from_test: ""}}
 """
 
@@ -335,6 +439,19 @@ title: "{title}"
 created: '{created}'
 status: planning
 
+# runtime — execution defaults inherited by this investigation's studies.
+# default_emitter is the persistence backend every run uses so its trajectory
+# is recorded (not just a summary). sqlite is the portable default; xarray
+# suits large ensembles. A per-study runtime.emitter overrides this.
+runtime:
+  default_emitter: sqlite           # sqlite | xarray
+
+# object_of_evaluation: model       # critique #1 — what this investigation
+#                                    # primarily evaluates: method | model |
+#                                    # hypothesis | composition-protocol. Names the
+#                                    # thing the investigation's rigor section judges
+#                                    # ("how well the method defends its claims").
+
 # ─── Front matter ────────────────────────────────────────────────────
 #
 # question: |
@@ -350,13 +467,26 @@ status: planning
 
 # ─── Narrative spine ─────────────────────────────────────────────────
 #
-# executive:                        # headline panel at the top of the report
+# REQUIRED (lint-gated): executive · scientific_argument · biological_story.
+# A reviewer-ready investigation report must carry these three authored
+# sections. The linter (investigation_narrative_spine_required) emits a
+# warning for each missing one. For a GENUINELY SLIM investigation you may
+# explicitly opt out per-section:
+#
+#   narrative_spine_skip: [scientific_argument, biological_story]
+#   narrative_spine_skip_reason: "single-study screen; full narrative not warranted"
+#
+# (executive / scientific_argument / biological_story are the AUTHORED
+#  sections; "Decisions needed" + "Suggested additions" are framework-computed
+#  and never author-required.)
+#
+# executive:                        # ★REQUIRED — headline panel at the top of the report
 #   what_is_this: ""
 #   verdict: ""
 #   verdict_status: in-progress     # in-progress | passing | passing-with-caveats | failing | inconclusive | not-yet-run
 #   decisions_needed: []
 #
-# scientific_argument:              # structured claim/evidence
+# scientific_argument:              # ★REQUIRED — structured claim/evidence
 #   main_claim: ""
 #   evidence_for: []
 #   evidence_against: []
@@ -364,7 +494,7 @@ status: planning
 #   caveats: []
 #   interpretation_ref: ""
 #
-# biological_story: |
+# biological_story: |               # ★REQUIRED — multi-paragraph plain-English mechanism narrative
 #   (multi-paragraph plain-English mechanism narrative)
 #
 # at_a_glance:                      # one-line role per member study
@@ -390,6 +520,24 @@ status: planning
 #   - name: ""                      # e.g. "alternative mechanism / null model X"
 #     prediction: ""                # what it would predict, that we discriminate
 #     discriminated_by: ""          # which study/control rules it out
+#
+# hypotheses:                       # critique #6/#16 — the competing hypotheses this
+#                                   # investigation discriminates. `statement` +
+#                                   # `predictions` are AUTHORED; `support_log` is
+#                                   # COMPUTED (folded from each study's findings +
+#                                   # discovery_implications.alternate_hypotheses that
+#                                   # carry a matching hypothesis_id).
+#   - id: H1
+#     statement: ""                 # one-line competing explanation
+#     predictions:                  # what this hypothesis predicts, per observable
+#       - observable: closure_gap   # an emitted measure / finding-evidence key
+#         expected: ""              # e.g. "< 0.1" / "increases with rate" / a band
+#     required_controls: []         # controls[].name needed to test it
+#     failure_modes: []             # what observation would weaken/exclude it
+#     status: open                  # open | supported | weakened | excluded
+#     # support_log: []             # COMPUTED — list of per-study entries
+#     #                             #   (study, observation, delta) where
+#     #                             #   delta is supports | weakens | excludes
 #
 # NOTE: include at least one member study with `kind: adversarial` (a study
 # designed to break the main claim) so the investigation satisfies the
