@@ -374,7 +374,13 @@ def _project_v4_redesign_to_legacy_view(spec: dict) -> dict:
     # (a list of decision/pivot dicts). The study-detail "Pre-run expert review"
     # panel + the report (walkthrough.js) read ``expert_decisions_needed``, so
     # mirror the canonical field onto that legacy name when it isn't already set.
-    if out.get("design_pivot_required") and not out.get("expert_decisions_needed"):
+    # ``design_pivot_required`` is also validly authored as a bare boolean flag
+    # (``true`` = "a reviewer choice is required" without enumerated questions);
+    # only mirror the list form, else the consumers — which iterate the value —
+    # receive a bool and the template render dies ("'bool' object is not iterable").
+    if isinstance(out.get("design_pivot_required"), list) and not out.get(
+        "expert_decisions_needed"
+    ):
         out["expert_decisions_needed"] = out["design_pivot_required"]
 
     # baseline — synthesise the v3 single-baseline list shape
