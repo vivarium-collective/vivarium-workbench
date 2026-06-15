@@ -7705,16 +7705,20 @@
       var assumptions = s.key_assumptions || [];
       // implementation_requirements is authored EITHER as a list of
       // {id,title,...} dicts OR as a multi-line prose STRING
-      // (`implementation_requirements: |`). Normalize to a list of objects so
-      // we never iterate a string char-by-char (which made `.length` the
-      // character count, e.g. "(492)", and `r.title` the str.title method).
+      // (`implementation_requirements: |`), and migrations sometimes write a
+      // dict keyed by req-id. Normalize to a list of objects so we never iterate
+      // a string char-by-char (which made `.length` the character count, e.g.
+      // "(492)", and `r.title` the str.title method) and never crash on reqs.map.
       var reqs = (function(v) {
         if (v == null) return [];
         if (typeof v === 'string') {
           var t = v.trim();
           return t ? [{ _prose: true, description: t }] : [];
         }
-        if (!Array.isArray(v)) return [v];
+        if (!Array.isArray(v)) {
+          // dict keyed by req-id → its values; any other non-array → wrap once
+          v = (typeof v === 'object') ? Object.values(v) : [v];
+        }
         return v.reduce(function(acc, item) {
           if (item && typeof item === 'object') { acc.push(item); }
           else {
