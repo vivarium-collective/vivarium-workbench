@@ -2074,14 +2074,22 @@ def _study_charts_payload(ws_root, name: str) -> dict:
     import yaml as _yaml
     from vivarium_dashboard.lib.study_charts import (
         render_study_charts, render_v4_test_charts,
-        discover_static_study_charts,
+        discover_static_study_charts, discover_declared_figure_charts,
     )
     from vivarium_dashboard.lib.simulations_index import (
         discover_default_baseline_db,
     )
     from .lib.viz_freshness import chart_freshness, manifest_diff
 
-    study_dir = WorkspacePaths.load(ws_root).studies / name
+    # Layout-aware: a study may live nested under
+    # investigations/<inv>/studies/<slug>/ (custom layout) rather than the flat
+    # studies/<slug>/. Resolving flat-only silently produced an empty payload
+    # (no runs.db / charts / declared figures) for nested studies like colonies.
+    _wp = WorkspacePaths.load(ws_root)
+    try:
+        study_dir = _wp.study_dir(name)
+    except FileNotFoundError:
+        study_dir = _wp.studies / name
     runs_db = study_dir / "runs.db"
     charts_dir = study_dir / "charts"
     spec_path = study_dir / "study.yaml"
@@ -2107,6 +2115,17 @@ def _study_charts_payload(ws_root, name: str) -> dict:
     for c in live_charts:
         c.setdefault("source", "live")
     static_charts = discover_static_study_charts(charts_dir)
+    # Declared figure visualizations (e.g. ``address: gif:colony.gif``) that
+    # point at a loose figure file — resolved to self-contained data-URI/SVG
+    # chart records so they embed in BOTH the live dashboard and the published
+    # static report snapshot. Deduped against static_charts by key.
+    declared_figs = discover_declared_figure_charts(
+        study_dir, (spec or {}).get("visualizations") or [])
+    if declared_figs:
+        static_keys = {c.get("key") for c in static_charts}
+        static_charts = static_charts + [
+            c for c in declared_figs if c.get("key") not in static_keys
+        ]
 
     # Per-chart freshness for static charts. Match each on-disk chart
     # (``charts/<key>.<media>``) against the spec's visualizations[] entries
@@ -2121,6 +2140,10 @@ def _study_charts_payload(ws_root, name: str) -> dict:
     manifest_diff(study_dir, visualizations)
     latest = _latest_run_row(runs_db)
     for c in static_charts:
+        # Declared figure visualizations already carry their own freshness.
+        if c.get("source") == "declared":
+            c.setdefault("freshness", "declared")
+            continue
         rel = f"charts/{c.get('key')}.{c.get('media')}"
         entry = entry_by_chart.get(rel)
         if entry is None:

@@ -1,7 +1,10 @@
 """discover_static_study_charts: SVG inline + PNG/GIF base64 + dedupe + meta."""
 from pathlib import Path
 
-from vivarium_dashboard.lib.study_charts import discover_static_study_charts
+from vivarium_dashboard.lib.study_charts import (
+    discover_static_study_charts,
+    discover_declared_figure_charts,
+)
 
 
 def _charts_dir(tmp_path: Path) -> Path:
@@ -61,3 +64,43 @@ def test_records_sorted_by_key(tmp_path):
     (d / "01_c.gif").write_bytes(b"GIF89a")
     keys = [r["key"] for r in discover_static_study_charts(d)]
     assert keys == ["00_a", "01_c", "02_b"]
+
+
+# ── discover_declared_figure_charts (BUG 4: declared gif: figures embed) ──────
+
+def test_declared_gif_address_in_study_root(tmp_path):
+    """A `gif:colony.gif` visualization resolves a loose study-root file into a
+    self-contained data-URI chart — the colonies-report regression."""
+    (tmp_path / "colony.gif").write_bytes(b"GIF89aFAKE")
+    viz = [{"name": "colony-animation", "address": "gif:colony.gif",
+            "description": "Animated colony"}]
+    [rec] = discover_declared_figure_charts(tmp_path, viz)
+    assert rec["media"] == "gif"
+    assert rec["img"].startswith("data:image/gif;base64,")
+    assert rec["title"] == "colony-animation"
+    assert rec["caption"] == "Animated colony"
+    assert rec["source"] == "declared"
+
+
+def test_declared_svg_address_inlined(tmp_path):
+    (tmp_path / "fig.svg").write_text("<svg>x</svg>")
+    [rec] = discover_declared_figure_charts(tmp_path, [{"address": "svg:fig.svg"}])
+    assert rec["media"] == "svg"
+    assert rec["svg"] == "<svg>x</svg>"
+
+
+def test_declared_live_renderer_addresses_skipped(tmp_path):
+    """local:/dashboard: renderer addresses are left to the live path."""
+    viz = [{"address": "dashboard:study_charts"}, {"address": "local:Foo"}]
+    assert discover_declared_figure_charts(tmp_path, viz) == []
+
+
+def test_declared_missing_file_skipped(tmp_path):
+    assert discover_declared_figure_charts(tmp_path, [{"address": "gif:gone.gif"}]) == []
+
+
+def test_declared_figure_found_in_charts_subdir(tmp_path):
+    (tmp_path / "charts").mkdir()
+    (tmp_path / "charts" / "a.png").write_bytes(b"\x89PNG")
+    [rec] = discover_declared_figure_charts(tmp_path, [{"address": "png:a.png"}])
+    assert rec["img"].startswith("data:image/png;base64,")

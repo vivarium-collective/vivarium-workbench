@@ -368,6 +368,107 @@ def discover_static_study_charts(charts_dir: Path) -> list[dict]:
     return out
 
 
+# Image-figure address schemes a ``visualizations[]`` entry may declare to point
+# at a pre-rendered figure file (vs a live ``local:``/``dashboard:`` renderer).
+_FIGURE_ADDR_SCHEMES = {"gif", "png", "svg", "jpg", "jpeg", "image", "file"}
+_FIGURE_SUFFIX_MIME = {
+    ".gif": "image/gif", ".png": "image/png",
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+}
+
+
+def _resolve_figure_path(study_dir: Path, ref: str) -> Path | None:
+    """Find a declared figure file relative to a study dir.
+
+    Searches the study-dir ROOT first, then ``charts/`` and ``viz/`` subdirs, so
+    loose figures (e.g. a ``colony.gif`` checked in next to ``study.yaml``) are
+    found even when they're not under ``charts/``. Returns the first existing
+    path, or ``None``.
+    """
+    ref = (ref or "").strip()
+    if not ref:
+        return None
+    candidates = [study_dir / ref, study_dir / "charts" / ref, study_dir / "viz" / ref]
+    # Bare filename: also accept a basename match if the relative path missed.
+    for c in candidates:
+        if c.is_file():
+            return c
+    return None
+
+
+def discover_declared_figure_charts(study_dir: Path,
+                                    visualizations: list) -> list[dict]:
+    """Resolve ``visualizations[]`` entries that point at a static figure file
+    into self-contained chart records (data-URI img / inline svg).
+
+    The investigation report embeds ``chartsByStudy`` (this payload) inline, so a
+    study that declares e.g. ``address: gif:colony.gif`` gets its animation into
+    BOTH the live dashboard and the published static snapshot — previously the
+    report ignored the ``visualizations:`` block entirely and the only chart
+    sources were ``charts/*.svg`` + a populated ``runs.db``, so a study with just
+    a loose ``colony.gif`` and no run produced ZERO figures.
+
+    A declared entry is treated as a figure when its ``address`` uses a
+    ``gif:``/``png:``/``svg:``/``image:``/``file:`` scheme, or when its
+    ``chart``/``file``/``path`` field names an image/svg file on disk. Live
+    renderer addresses (``local:``/``dashboard:``) are left to the live-render
+    path and skipped here. Best-effort: unreadable/missing files are skipped.
+    """
+    out: list[dict] = []
+    seen_keys: set[str] = set()
+    for entry in (visualizations or []):
+        if not isinstance(entry, dict):
+            continue
+        ref = ""
+        addr = str(entry.get("address") or "").strip()
+        if ":" in addr:
+            scheme, _, rest = addr.partition(":")
+            if scheme.strip().lower() in _FIGURE_ADDR_SCHEMES:
+                ref = rest.strip()
+        if not ref:
+            # No figure scheme on address; try explicit file-pointer fields, but
+            # only if they look like an image/svg (so we don't grab a live
+            # renderer's config).
+            for fld in ("chart", "file", "path", "src"):
+                cand = str(entry.get(fld) or "").strip()
+                if cand and Path(cand).suffix.lower() in ({".svg"} | set(_FIGURE_SUFFIX_MIME)):
+                    ref = cand
+                    break
+        if not ref:
+            continue
+        fig = _resolve_figure_path(study_dir, ref)
+        if fig is None:
+            continue
+        suffix = fig.suffix.lower()
+        key = entry.get("name") or fig.stem
+        if key in seen_keys:
+            continue
+        meta = _static_chart_meta(fig)
+        # Study-authored name/description win over the sidecar/stem.
+        if entry.get("name"):
+            meta["title"] = str(entry["name"])
+        if entry.get("description") and not meta.get("caption"):
+            meta["caption"] = " ".join(str(entry["description"]).split())
+        try:
+            if suffix == ".svg":
+                rec = {**meta, "key": key, "svg": fig.read_text(encoding="utf-8"),
+                       "media": "svg"}
+            elif suffix in _FIGURE_SUFFIX_MIME:
+                b64 = base64.b64encode(fig.read_bytes()).decode("ascii")
+                rec = {**meta, "key": key,
+                       "img": f"data:{_FIGURE_SUFFIX_MIME[suffix]};base64,{b64}",
+                       "media": suffix.lstrip(".")}
+            else:
+                continue
+        except Exception:
+            continue
+        rec["source"] = "declared"
+        rec["freshness"] = "declared"
+        out.append(rec)
+        seen_keys.add(key)
+    return out
+
+
 def render_v4_test_charts(spec: dict,
                           runs_db: Path,
                           fallback_db: Path | None = None) -> list[dict]:

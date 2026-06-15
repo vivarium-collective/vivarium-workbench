@@ -6037,6 +6037,90 @@
   function _normGateResult(v) {
     return _GATE_RESULT_NORM[String(v == null ? '' : v).trim().toLowerCase()] || 'PENDING';
   }
+  // ── Shared run/outcome helpers (bug-fix: pills + decision read the run that
+  // actually CARRIES outcomes, not blindly runs[last]) ───────────────────────
+  // A study's recorded test outcomes live on its canonical/grade run, which is
+  // often NOT the last run in the list (composite/sim runs land after it with no
+  // outcomes). Selecting runs[last] made every pill render ⏳ PENDING even though
+  // outcomes were recorded. Pick the latest run that actually has outcomes (or a
+  // canonical run), falling back to the last run for run-identity displays.
+  function _runWithOutcomes(runs) {
+    if (!runs || !runs.length) return null;
+    var i;
+    for (i = runs.length - 1; i >= 0; i--) {
+      var r = runs[i];
+      if (r && ((r.outcomes && Object.keys(r.outcomes).length) ||
+                (r.computed_outcomes && Object.keys(r.computed_outcomes).length))) {
+        return r;
+      }
+    }
+    for (i = runs.length - 1; i >= 0; i--) {
+      if (runs[i] && runs[i].canonical) return runs[i];
+    }
+    return runs[runs.length - 1];
+  }
+  // Normalize a single recorded outcome value into an object with a `result`.
+  // Outcomes may be authored as a bare UPPERCASE string ("PASS"/"FAIL"/...) OR
+  // as an object {result, detail, ...}. A bare string fed to Object.assign({})
+  // becomes {0:'P',1:'A',...} with no `.result`, which silently read as PENDING.
+  function _normOutcome(v) {
+    if (v == null) return null;
+    if (typeof v === 'string') return { result: v.trim().toUpperCase() };
+    if (typeof v === 'object') return Object.assign({}, v);
+    return { result: String(v) };
+  }
+  // Map an authored tests[].status (passed/failed/partial/skipped) onto the
+  // UPPERCASE result vocabulary the pills use, so a recorded status surfaces even
+  // when no per-run outcome is present.
+  function _testStatusToResult(st) {
+    if (st == null) return null;
+    return ({ passed: 'PASS', pass: 'PASS', ok: 'PASS',
+              failed: 'FAIL', fail: 'FAIL', error: 'FAIL',
+              partial: 'PARTIAL', mixed: 'PARTIAL',
+              skipped: 'SKIP', skip: 'SKIP' })[String(st).trim().toLowerCase()] || null;
+  }
+  // The study's declared tests as an ARRAY. `tests:` may be authored as a dict
+  // (e.g. {auto_discover: true}) while the real list lives on `behavior_tests:`,
+  // so pick the first array-valued field (a dict has no .forEach/.length).
+  function _studyTests(s) {
+    if (!s || typeof s !== 'object') return [];
+    var cands = [s.tests, s.behavior_tests, s.expected_behavior];
+    for (var i = 0; i < cands.length; i++) {
+      if (Array.isArray(cands[i])) return cands[i];
+    }
+    return [];
+  }
+  // Is this study a descriptive/informational reference (no hypothesis test)?
+  // Such studies have no pass/fail gate; the planning/not-run framing and the ⚠
+  // "needs work" verdict pill are wrong for them.
+  function _isInformationalStudy(s) {
+    if (!s || typeof s !== 'object') return false;
+    var verdict = String(((s.report || {}).verdict) || s.verdict || '').trim().toLowerCase();
+    if (verdict === 'informational' || verdict === 'descriptive') return true;
+    var gate = String(s.gate_status || '').trim().toLowerCase();
+    var nTests = _studyTests(s).length;
+    if ((gate === 'not_applicable' || gate === 'n/a' || gate === 'na') && !nTests) return true;
+    return false;
+  }
+  // Format an evidence.observed value into display-SAFE HTML (callers must NOT
+  // re-wrap in _h). Scalars/strings are escaped and passed through; arrays join
+  // with commas; dicts render as readable "key: value" pairs (was String(obj) →
+  // the literal "[object Object]"). Recursion returns already-escaped HTML.
+  function _fmtObserved(v) {
+    if (v == null) return '';
+    if (typeof v === 'number') return _h(String(Math.round(v * 1000) / 1000));
+    if (typeof v === 'string') return _h(v);
+    if (Array.isArray(v)) {
+      return v.map(function(x) { return _fmtObserved(x); }).join(', ');
+    }
+    if (typeof v === 'object') {
+      var pairs = Object.keys(v).map(function(k) {
+        return _h(k) + ': <strong>' + _fmtObserved(v[k]) + '</strong>';
+      });
+      return pairs.length ? pairs.join(' · ') : '';
+    }
+    return _h(String(v));
+  }
   // W8 — per-finding evidential-weight chip. The weight is COMPUTED SERVER-SIDE
   // (pbg_superpowers.rigor.finding_evidential_weight, carried on the finding as
   // `_evidential_weight` via the report-data path) so the SPA just renders it —
@@ -6783,8 +6867,14 @@
     // spine-computed verdicts/acceptance (no recompute). Mirrors the
     // param-enforcement banner: surfaced, connected (nodes/criteria link to the
     // per-study sections), labeled code-computed.
-    function _spineVerdictBadge(result) {
+    function _spineVerdictBadge(result, study) {
       var r = (result || '').toString().toLowerCase();
+      // Descriptive/informational reference (not_applicable gate) → neutral
+      // "reference" badge, NOT ⚠ "needs work".
+      if (r === 'not_applicable' || r === 'n/a' || r === 'na' || r === 'informational'
+          || r === 'descriptive' || (study && _isInformationalStudy(study))) {
+        return { glyph: '📄', cls: 'none', bd: '#94a3b8' };
+      }
       if (r === 'passed' || r === 'pass') return { glyph: '✅', cls: 'pass', bd: '#16a34a' };
       if (r === 'failed' || r === 'fail') return { glyph: '⛔', cls: 'fail', bd: '#dc2626' };
       if (!r) return { glyph: '◽', cls: 'none', bd: '#cbd5e1' };
@@ -6802,7 +6892,7 @@
       var depths = Object.keys(byDepth).map(Number).sort(function(a, b) { return a - b; });
       var ranks = depths.map(function(d) {
         var nodes = byDepth[d].map(function(s) {
-          var b = _spineVerdictBadge((s.computed_gate_verdict || {}).result);
+          var b = _spineVerdictBadge((s.computed_gate_verdict || {}).result, s);
           var parents = (s.parent_studies || []).map(function(p) {
             return (typeof p === 'string') ? p : p.study;
           }).filter(Boolean);
@@ -6924,8 +7014,9 @@
       var field = (t.measure && (t.measure.field || t.measure.kind)) || '';
       var observed = null;
       var runs = s.runs || [];
-      if (runs.length) {
-        var oc = (runs[runs.length - 1].outcomes || {})[behavior];
+      var ocRun = _runWithOutcomes(runs);
+      if (ocRun) {
+        var oc = _normOutcome((ocRun.outcomes || {})[behavior]);
         if (oc && oc.observed !== undefined) observed = oc.observed;
       }
       return { field: field, passIf: _passIfText(t.pass_if), observed: observed,
@@ -6939,7 +7030,7 @@
       if (m.field) bits.push('field <code>' + _h(m.field) + '</code>');
       if (m.passIf) bits.push('passes if <code>' + _h(m.passIf) + '</code>');
       if (m.observed !== null && m.observed !== undefined)
-        bits.push('observed <strong>' + _h(typeof m.observed === 'number' ? (Math.round(m.observed * 1000) / 1000) : m.observed) + '</strong>');
+        bits.push('observed <strong>' + _fmtObserved(m.observed) + '</strong>');
       if (!bits.length && !m.description) return '';
       return '<div class="crit-metric muted small" style="margin:2px 0 0 0;color:#475569">'
         + bits.join(' &middot; ')
@@ -7132,13 +7223,25 @@
     // Decision-status helper — returns the data the decision box renders.
     function _decideDecision(s) {
       var runs = s.runs || [];
-      var latest = runs.length ? runs[runs.length - 1] : null;
+      // Read outcomes from the run that actually carries them (canonical/grade),
+      // NOT blindly runs[last] (a later composite/sim run with no outcomes).
+      var latest = _runWithOutcomes(runs);
       var followUps = s.follow_up_studies || [];
       var openFollowups = followUps.filter(function(f) {
         return f.status !== 'done' && f.kind !== 'existing';
       });
       var phase = s.phase || '';
       var status = s.status || 'planned';
+
+      // Descriptive/informational reference: no hypothesis test, no pass/fail
+      // gate. Render it as a completed reference, not a pending run.
+      if (_isInformationalStudy(s)) {
+        return {
+          label: 'Reference', cls: 'dec-passed',
+          passed: [], failed: [], blocks: [],
+          next: 'Descriptive reference — no pass/fail gate.'
+        };
+      }
 
       // No runs yet
       if (!latest) {
@@ -7159,15 +7262,26 @@
       }
 
       // Decide from BOTH the authored outcomes AND the run/outcome-spine
-      // computed_outcomes (authored wins) so the panel reflects the evaluator and
-      // stays current — not just hand-recorded verdicts.
-      var outcomes = Object.assign({}, latest.computed_outcomes || {}, latest.outcomes || {});
-      var passed = [], failed = [], partial = [];
-      Object.keys(outcomes).forEach(function(name) {
-        var res = (outcomes[name] || {}).result;
+      // computed_outcomes (authored wins), normalizing bare-string outcomes, and
+      // falling back to each test's authored tests[].status, so the panel
+      // reflects recorded results — not a stale "In progress".
+      var outcomes = Object.assign({}, latest.computed_outcomes || {});
+      Object.keys(latest.outcomes || {}).forEach(function(k) { outcomes[k] = latest.outcomes[k]; });
+      var passed = [], failed = [], partial = [], seen = {};
+      function _classify(name, res) {
         if (res === 'PASS') passed.push(name);
-        if (res === 'FAIL') failed.push(name);
-        if (res === 'PARTIAL') partial.push(name);
+        else if (res === 'FAIL') failed.push(name);
+        else if (res === 'PARTIAL') partial.push(name);
+        else return;
+        seen[name] = true;
+      }
+      Object.keys(outcomes).forEach(function(name) {
+        var o = _normOutcome(outcomes[name]);
+        _classify(name, o && o.result);
+      });
+      _studyTests(s).forEach(function(t) {
+        if (!t || !t.name || seen[t.name]) return;
+        _classify(t.name, _testStatusToResult(t.status));
       });
       var calibration = openFollowups.filter(function(f){return f.kind === 'calibration_task';});
       var infra       = openFollowups.filter(function(f){return f.kind === 'infrastructure_fix';});
@@ -7277,11 +7391,14 @@
       'preliminary':          {emoji: '🧪', label: 'Preliminary',                   cls: 'v-prelim'},
       'failing-bio':          {emoji: '❌', label: 'Failing biological validation', cls: 'v-fail'},
       'calibrating':          {emoji: '🔄', label: 'Calibration in progress',       cls: 'v-cal'},
-      'not-started':          {emoji: '📋', label: 'Not started',                   cls: 'v-none'}
+      'not-started':          {emoji: '📋', label: 'Not started',                   cls: 'v-none'},
+      'informational':        {emoji: '📄', label: 'Reference',                     cls: 'v-none'},
+      'descriptive':          {emoji: '📄', label: 'Reference',                     cls: 'v-none'}
     };
     function _verdictBadge(s, decision) {
-      var key = ((s.report || {}).verdict || '').trim().toLowerCase();
+      var key = ((s.report || {}).verdict || s.verdict || '').trim().toLowerCase();
       if (VERDICT_MAP[key]) return VERDICT_MAP[key];
+      if (_isInformationalStudy(s)) return VERDICT_MAP['informational'];
       switch (decision.cls) {
         case 'dec-passed':     return VERDICT_MAP['passing'];
         case 'dec-needscal':   return VERDICT_MAP['calibrating'];
@@ -7299,6 +7416,17 @@
     // run (pass/fail)? did it pass? (dnaa-replication reviewer feedback.)
     function _clarityStrip(s) {
       var cs = (s || {}).clarity_summary;
+      // Descriptive/informational reference: override the (possibly server-
+      // supplied) clarity strip so it reads as a completed reference rather than
+      // "○ Not run" / "Tests pending" — there is no hypothesis to run.
+      if (_isInformationalStudy(s)) {
+        cs = {
+          ran: { status: 'ran', label: 'Complete' },
+          tests: { label: 'Descriptive reference', total: 0, pending: 0 },
+          verdict: { label: 'Reference', glyph: '📄', cls: 'v-none' },
+          ambiguities: (cs && cs.ambiguities) || []
+        };
+      }
       if (!cs) {
         var runs = (s && s.runs) || [];
         var done = function (r) {
@@ -7308,13 +7436,16 @@
         var nC = runs.filter(done).length;
         var ranStatus = nC ? 'ran'
           : (runs.some(function (r) { return ((r && r.status) || '').toLowerCase() === 'running'; }) ? 'running' : 'not_run');
-        var tests = (s && (s.tests || s.behavior_tests || s.expected_behavior)) || [];
-        var latest = runs.length ? runs[runs.length - 1] : null;
+        var tests = _studyTests(s);
+        // Read outcomes from the run that carries them (canonical/grade), not
+        // blindly runs[last]; fall back to authored tests[].status.
+        var latest = _runWithOutcomes(runs);
         var outc = (latest && latest.outcomes) || {};
         var c = { pass: 0, fail: 0, skip: 0, pending: 0, total: tests.length };
         tests.forEach(function (t) {
           var o = outc[t.name];
           var r = (((o && o.result) != null ? o.result : o) || '').toString().toLowerCase();
+          if (!r) r = (_testStatusToResult(t.status) || '').toLowerCase();
           if (r === 'pass' || r === 'passed' || r === 'ok') c.pass++;
           else if (r === 'fail' || r === 'failed' || r === 'error') c.fail++;
           else if (r === 'skip' || r === 'skipped' || r === 'inconclusive' || r === 'partial') c.skip++;
@@ -7322,7 +7453,13 @@
         });
         var gate = ((s && s.gate_status) || '').toLowerCase();
         var verd;
-        if (gate === 'passed') verd = { label: 'Passed', glyph: '✅', cls: 'v-pass' };
+        if (_isInformationalStudy(s)) {
+          // Descriptive reference: no pass/fail gate; render as complete, not
+          // "Not run" / "Tests pending".
+          ranStatus = 'ran';
+          verd = { label: 'Reference', glyph: '📄', cls: 'v-none' };
+        }
+        else if (gate === 'passed') verd = { label: 'Passed', glyph: '✅', cls: 'v-pass' };
         else if (gate === 'failed' || gate === 'failed_evaluation') verd = { label: 'Failing', glyph: '❌', cls: 'v-fail' };
         else if (gate === 'blocked') verd = { label: 'Blocked', glyph: '⛔', cls: 'v-block' };
         else if (gate === 'needs_calibration') verd = { label: 'Needs calibration', glyph: '🔄', cls: 'v-cal' };
@@ -7337,9 +7474,14 @@
         if (c.fail) parts.push(c.fail + '✗');
         if (c.skip) parts.push(c.skip + '⏭');
         if (c.pending) parts.push(c.pending + '⏳');
+        var _info = _isInformationalStudy(s);
+        var _ranLabel = _info
+          ? 'Complete'
+          : (ranStatus === 'ran' ? ('Ran · ' + nC + ' run' + (nC !== 1 ? 's' : ''))
+             : (ranStatus === 'running' ? 'Running…' : 'Not run'));
         cs = {
-          ran: { status: ranStatus, label: ranStatus === 'ran' ? ('Ran · ' + nC + ' run' + (nC !== 1 ? 's' : '')) : (ranStatus === 'running' ? 'Running…' : 'Not run') },
-          tests: { label: c.total ? ('Tests: ' + parts.join(' · ')) : 'No tests declared', total: c.total, pending: c.pending },
+          ran: { status: ranStatus, label: _ranLabel },
+          tests: { label: c.total ? ('Tests: ' + parts.join(' · ')) : (_info ? 'Descriptive reference' : 'No tests declared'), total: c.total, pending: _info ? 0 : c.pending },
           verdict: verd, ambiguities: []
         };
       }
@@ -7578,7 +7720,10 @@
       var ifPass = decide.if_primary_tests_pass || decide.if_pass;
       var ifFail = decide.if_primary_tests_fail || decide.if_fail;
       var runs = s.runs || [];
-      var latestRun = runs.length ? runs[runs.length - 1] : null;
+      // Pick the run that actually carries recorded outcomes (canonical/grade),
+      // not blindly runs[last] — a later composite/sim run with no outcomes made
+      // every test pill render ⏳ PENDING.
+      var latestRun = _runWithOutcomes(runs);
 
       // Derive decision + plain-English summary FIRST so they can be linked
       // from the sub-nav and rendered at the top of the section.
@@ -7799,7 +7944,7 @@
           var evMain = '';
           if (ev.observed != null) {
             evMain = '<div class="finding-evidence"><strong>What we saw:</strong> '
-                   + _h(String(ev.observed)) + (ev.units ? ' ' + _h(ev.units) : '') + '</div>';
+                   + _fmtObserved(ev.observed) + (ev.units ? ' ' + _h(ev.units) : '') + '</div>';
           }
           var expMain = '';
           if (exp.range != null || exp.threshold != null || exp.summary) {
@@ -8132,7 +8277,7 @@
         // agrees with the authored one (reconcile).
         var outcomeByTest = {};
         if (latestRun && latestRun.outcomes) {
-          Object.keys(latestRun.outcomes).forEach(function(k) { outcomeByTest[k] = Object.assign({}, latestRun.outcomes[k]); });
+          Object.keys(latestRun.outcomes).forEach(function(k) { outcomeByTest[k] = _normOutcome(latestRun.outcomes[k]) || {}; });
         }
         if (latestRun && latestRun.computed_outcomes) {
           Object.keys(latestRun.computed_outcomes).forEach(function(k) {
@@ -8151,7 +8296,7 @@
         var _tc = { PASS: 0, FAIL: 0, PARTIAL: 0, SKIP: 0, PENDING: 0 };
         tests.forEach(function(t) {
           var o = outcomeByTest[t.name];
-          var r = (o && o.result) || t.result || (t.status === 'gated' ? 'GATED' : 'PENDING');
+          var r = (o && o.result) || t.result || _testStatusToResult(t.status) || (t.status === 'gated' ? 'GATED' : 'PENDING');
           if (r === 'PASS') _tc.PASS++; else if (r === 'FAIL') _tc.FAIL++;
           else if (r === 'PARTIAL') _tc.PARTIAL++;
           else if (r === 'SKIP') _tc.SKIP++; else _tc.PENDING++;
@@ -8169,7 +8314,7 @@
               var name = t.name || '(unnamed)';
               var cls = t.classification || 'unclassified';
               var out = outcomeByTest[name];
-              var result = (out && out.result) || t.result || (t.status === 'gated' ? 'GATED' : 'PENDING');
+              var result = (out && out.result) || t.result || _testStatusToResult(t.status) || (t.status === 'gated' ? 'GATED' : 'PENDING');
               var resBg = result === 'PASS' ? '#d1fae5' : (result === 'FAIL' ? '#fee2e2' : (result === 'SKIP' ? '#fef3c7' : (result === 'PARTIAL' ? '#fde68a' : '#f1f5f9')));
               var resFg = result === 'PASS' ? '#065f46' : (result === 'FAIL' ? '#991b1b' : (result === 'SKIP' ? '#92400e' : (result === 'PARTIAL' ? '#92400e' : '#475569')));
               var resGlyph = result === 'PASS' ? '✓' : (result === 'FAIL' ? '✗' : (result === 'PARTIAL' ? '◐' : '⏳'));
@@ -8184,7 +8329,7 @@
               // reconcile:divergent badge and a link to the run that produced
               // the value + the pass_if band it was judged against. No more
               // raw merged k:v dump (which blended authored + computed).
-              var authoredOut = (latestRun && latestRun.outcomes) ? latestRun.outcomes[name] : null;
+              var authoredOut = (latestRun && latestRun.outcomes) ? _normOutcome(latestRun.outcomes[name]) : null;
               var computedOut = (latestRun && latestRun.computed_outcomes) ? latestRun.computed_outcomes[name] : null;
               var runIdent = latestRun ? (latestRun.run_id || latestRun.name || '') : '';
               var evidence = '';
@@ -8805,7 +8950,10 @@
       // Question → Conditions → Tests → Baseline preview → Assumptions.
       // Once runs land, the full flow returns.
       var hasRuns = (s.runs || []).length > 0 || (s.findings || []).length > 0;
-      var isPlanning = !hasRuns;
+      // Informational/descriptive reference studies are "complete", not
+      // "planning" — they have no hypothesis to run, so don't show the
+      // "PLANNING — not yet run" framing.
+      var isPlanning = !hasRuns && !_isInformationalStudy(s);
 
       // Param-enforcement banner (expert-feedback D.2). When the study
       // declares enforced_params and its latest run didn't apply them, show
@@ -10318,7 +10466,7 @@
       // ── Execution-status / planning-phase banner — run-state context up top ──
       +   (function() {
             var alls = specs || [];
-            var planning = alls.filter(function(s) { return !(s.runs || []).length && !(s.findings || []).length; });
+            var planning = alls.filter(function(s) { return !(s.runs || []).length && !(s.findings || []).length && !_isInformationalStudy(s); });
             var total = alls.length, n = planning.length;
             if (!n) return '';
             var names = planning.map(function(s) { return s.name || s.slug || ''; }).filter(Boolean).join(', ');
@@ -10395,7 +10543,7 @@
                   ? (m.field ? '<code>' + _h(m.field) + '</code>' : '')
                     + (m.passIf ? ' <span class="muted small">pass if ' + _h(m.passIf) + '</span>' : '')
                     + (m.observed !== null && m.observed !== undefined
-                        ? ' → <strong>' + _h(typeof m.observed === 'number' ? (Math.round(m.observed * 1000) / 1000) : m.observed) + '</strong>' : '')
+                        ? ' → <strong>' + _fmtObserved(m.observed) + '</strong>' : '')
                   : '<span class="muted small">—</span>';
                 return '<tr>'
                   + '<td style="padding:3px 8px"><a href="#study-' + _h(c.study) + '">' + _h(c.study) + '</a></td>'
