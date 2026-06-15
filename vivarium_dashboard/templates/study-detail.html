@@ -962,6 +962,10 @@
     <h3>Implementation requirements <span class="muted" style="font-size:0.85em;font-weight:normal">({{ study.implementation_requirements | length }} items)</span></h3>
     <p class="muted" style="font-size:0.88em">Concrete pieces of work that gate this study from Design → Build. Each generates a task.</p>
     {% for r in study.implementation_requirements %}
+    {% if r._prose or r is string %}
+    {# Prose-form requirement (authored as `implementation_requirements: |`). #}
+    <div style="margin:8px 0;padding:10px 12px;background:#fff;border:1px solid #e5e7eb;border-radius:6px;border-left:3px solid #94a3b8;white-space:pre-wrap;line-height:1.5">{{ r.description if r is mapping else r }}</div>
+    {% else %}
     <details style="margin:8px 0;padding:8px 12px;background:#fff;border:1px solid #e5e7eb;border-radius:6px;border-left:3px solid {% if r.effort == 'XS' %}#10b981{% elif r.effort == 'S' %}#3b82f6{% elif r.effort == 'M' %}#f59e0b{% elif r.effort == 'L' %}#dc2626{% else %}#94a3b8{% endif %}">
       <summary style="cursor:pointer">
         <strong>{{ r.id }}</strong> — {{ r.title }}
@@ -982,6 +986,7 @@
       {% endif %}
       {% if r.defer_until %}<p class="muted" style="margin:4px 0 0 0;font-size:0.85em">Deferred until: <code>{{ r.defer_until }}</code></p>{% endif %}
     </details>
+    {% endif %}
     {% endfor %}
   </div>
   {% endif %}

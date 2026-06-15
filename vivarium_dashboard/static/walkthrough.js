@@ -7698,7 +7698,27 @@
       var sims = s.simulation_set || [];
       var modelChange = s.model_change;
       var assumptions = s.key_assumptions || [];
-      var reqs = s.implementation_requirements || [];
+      // implementation_requirements is authored EITHER as a list of
+      // {id,title,...} dicts OR as a multi-line prose STRING
+      // (`implementation_requirements: |`). Normalize to a list of objects so
+      // we never iterate a string char-by-char (which made `.length` the
+      // character count, e.g. "(492)", and `r.title` the str.title method).
+      var reqs = (function(v) {
+        if (v == null) return [];
+        if (typeof v === 'string') {
+          var t = v.trim();
+          return t ? [{ _prose: true, description: t }] : [];
+        }
+        if (!Array.isArray(v)) return [v];
+        return v.reduce(function(acc, item) {
+          if (item && typeof item === 'object') { acc.push(item); }
+          else {
+            var s2 = item == null ? '' : String(item).trim();
+            if (s2) acc.push({ _prose: true, description: s2 });
+          }
+          return acc;
+        }, []);
+      })(s.implementation_requirements || s.gaps);
       var readouts = s.readouts || [];
       var tests = s.behavior_tests || s.expected_behavior || [];
       var decide = s.conclusion_logic || {};
@@ -8445,6 +8465,11 @@
         reqsHtml = '<div id="' + sid.reqs + '"><h3>What needs to be built or fixed? <span class="muted small">(' + reqs.length + ')</span></h3>'
           + '<p class="muted small" style="margin:0 0 8px 0">Concrete engineering work to fully exercise this study.</p>'
           + reqs.map(function(r) {
+              // Prose-form requirement (authored as a single `| ` block): render
+              // the text as a plain prose card, not an id/title/effort card.
+              if (r && r._prose) {
+                return '<div class="req-card"><div class="req-key">' + _multiline(r.description || '') + '</div></div>';
+              }
               var effortBadge = r.effort ? '<span class="req-effort">' + _h(r.effort) + '</span>' : '';
               var kindBadge   = r.kind   ? '<span class="req-kind">'   + _h(r.kind)   + '</span>' : '';
               var statusBadge = '';

@@ -3600,6 +3600,48 @@ def _visualization_classes_data(ws_root: Path) -> dict:
     return {"classes": out}
 
 
+def _normalize_requirements(value) -> list:
+    """Normalize a study's ``implementation_requirements`` / ``gaps`` field to a
+    list of requirement dicts the renderers can iterate safely.
+
+    Authors write this field two ways:
+      • a YAML LIST of ``{id, title, ...}`` dicts (structured) — kept as-is;
+      • a multi-line PROSE STRING (``implementation_requirements: |``) — must
+        NOT be iterated character-by-character (that yields 1-char strings and
+        ``char.title`` resolves to the str.title *method*, rendering its repr
+        e.g. ``<built-in method title of str object>`` and a bogus
+        "(492 items)" count).
+
+    Contract:
+      • a STRING becomes ONE prose requirement → ``[{"_prose": True,
+        "description": <text>}]`` (count 1, not the character count);
+      • a LIST is kept, but bare-string items are wrapped the same prose way so
+        we never access ``.id`` / ``.title`` on a non-dict;
+      • empty/None → ``[]``.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [{"_prose": True, "description": text}] if text else []
+    if isinstance(value, dict):
+        # A single mapping authored without a list wrapper.
+        return [value]
+    if isinstance(value, (list, tuple)):
+        out = []
+        for item in value:
+            if isinstance(item, dict):
+                out.append(item)
+            else:
+                text = "" if item is None else str(item).strip()
+                if text:
+                    out.append({"_prose": True, "description": text})
+        return out
+    # Unknown scalar — wrap defensively rather than iterate.
+    text = str(value).strip()
+    return [{"_prose": True, "description": text}] if text else []
+
+
 def _investigations_data(ws_root: Path) -> dict:
     """Pure data builder for GET /api/investigations — returns ``{"investigations": [...]}`` dict.
 
@@ -3680,7 +3722,8 @@ def _investigations_data(ws_root: Path) -> dict:
         sim_set_top = spec.get("simulation_set") or []
         beh_tests_top = spec.get("behavior_tests") or spec.get("expected_behavior") or []
         readouts_top = spec.get("readouts") or spec.get("observables") or []
-        reqs_top = spec.get("implementation_requirements") or spec.get("gaps") or []
+        reqs_top = _normalize_requirements(
+            spec.get("implementation_requirements") or spec.get("gaps"))
         n_variants_top = (len(sim_set_top) if sim_set_top
                           else len(spec.get("variants") or []))
         row = {
@@ -6220,6 +6263,14 @@ def _render_study_detail_html(name: str, spec: dict) -> str:
     from vivarium_dashboard.lib.investigations import effective_status
     spec = dict(spec)
     spec["runs"] = _enrich_runs_with_meta(_study_dir(name), spec.get("runs") or [])
+    # Normalize implementation_requirements / gaps so the template iterates a
+    # list of dicts — never a prose STRING (whose per-character iteration
+    # rendered "(492 items)" with `<built-in method title of str object>`).
+    if spec.get("implementation_requirements") is not None:
+        spec["implementation_requirements"] = _normalize_requirements(
+            spec.get("implementation_requirements"))
+    if spec.get("gaps") is not None:
+        spec["gaps"] = _normalize_requirements(spec.get("gaps"))
     # F1: compute a single headline status from the multi-axis fields (with
     # legacy `status` as fallback) so the template doesn't have to encode
     # the precedence rules itself.
@@ -14064,7 +14115,7 @@ if __name__ == "__main__":
                 "parent_studies":        _normalize_parents(study_spec),
                 "n_behaviors":           len(beh_tests),
                 "n_readouts":            len(readouts),
-                "n_requirements":        len(study_spec.get("implementation_requirements") or study_spec.get("gaps") or []),
+                "n_requirements":        len(_normalize_requirements(study_spec.get("implementation_requirements") or study_spec.get("gaps"))),
                 "n_followups":           len(disc_followups) or len(follow_ups),
                 "follow_up_studies":     follow_ups,
                 "discovery_implications": disc_impl,
