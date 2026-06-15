@@ -75,3 +75,27 @@ A **"Launch ptools"** button appears in the Runs table of each study.  Clicking 
 ## TSV format
 
 Each TSV file is a frame-ID × timepoint table (rows = metabolites/genes, columns = time points), matching the Pathway Tools Omics Viewer input format.  Files are written to `studies/<name>/ptools/<analysis>__<partition>.tsv` by the simulation's analysis pipeline.
+
+## Filesystem mode (PTools reads the file from disk)
+
+Some Pathway Tools builds — including **sms-ptools 0.8.2** — load omics data via
+`overview-expression-load-omics-from-server`, which reads the data file from the
+**PTools server's own filesystem** and does *not* fetch the URL over HTTP. For
+these, set `ui.ptools_data_dir` to the container-side path of the dashboard's
+`--workspace` root and mount the workspace into the container:
+
+```yaml
+ui:
+  ptools_server_url: "http://localhost:1555"
+  ptools_data_dir: "/ptools-data"
+```
+
+```bash
+docker run -d --name sms-ptools -p 1555:1555 \
+  -v /path/to/v2ecoli/workspace:/ptools-data/workspace:ro \
+  ghcr.io/vivarium-collective/sms-ptools:0.8.2
+```
+
+The launcher then passes `url=<ptools_data_dir>/<rel>` (a server-local path)
+instead of an HTTP URL. When `ptools_data_dir` is unset, the HTTP-fetch behavior
+(via `dashboard_public_base_url`) is used.
