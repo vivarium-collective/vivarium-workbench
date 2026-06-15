@@ -1510,9 +1510,16 @@ def _build_ptools_launch_url(
     except Exception:
         pass
 
+    # Percent-encode the TSV URL before embedding it as the {tsv_url} query
+    # parameter. Left raw, the nested "http://host:port/…" lands unencoded in
+    # the Omics-Viewer query string; strict URL parsers (WebKit/Safari
+    # window.open) reject it ("SyntaxError: The string did not match the
+    # expected pattern"). PTools decodes the param, so the fetched URL is
+    # unchanged.
+    from urllib.parse import quote
     launch_url = ptools_omics_url_template.format(
         server=ptools_server_url.rstrip("/"),
-        tsv_url=tsv_url,
+        tsv_url=quote(tsv_url, safe=""),
         orgid="ECOLI",
         cls=cls,
         columns=columns,
