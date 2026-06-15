@@ -299,7 +299,17 @@ def _validate_study_v4_redesign(spec: dict) -> None:
     assumptions = spec.get("assumptions", [])
     if not isinstance(assumptions, list):
         raise InvestigationSpecError("v4 study: 'assumptions' must be a list")
+    # Tolerate the common plain-string authoring shape (``assumptions: [<str>, …]``)
+    # by promoting each string to the canonical ``{text: <str>}`` mapping in place
+    # — mirroring the ``study_card`` string-promotion above. The downstream
+    # projection (_project_v4_redesign_to_legacy_view) already filters to dicts,
+    # so this is purely about not hard-failing a legitimate study: a strict raise
+    # here propagated unhandled out of the /api/study/<slug> route and dropped the
+    # client connection ("Failed to fetch") instead of rendering the study.
     for i, a in enumerate(assumptions):
+        if isinstance(a, str) and a.strip():
+            assumptions[i] = {"text": a.strip()}
+            continue
         if not isinstance(a, dict) or not a.get("text"):
             raise InvestigationSpecError(
                 f"v4 study: assumptions[{i}] must be a mapping with at least a 'text' field"

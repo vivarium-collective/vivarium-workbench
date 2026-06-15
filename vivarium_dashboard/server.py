@@ -13994,10 +13994,30 @@ if __name__ == "__main__":
         """
         if not _SLUG_RE.match(slug):
             return _json_body({"error": "invalid slug"}), 400
-        spec = _study_detail_spec(slug)
+        # Defense-in-depth: never let a single bad/oversized study drop the
+        # connection. An unhandled exception here propagates out of do_GET (this
+        # route has no try/except wrapper) → the client sees a network-level
+        # "Failed to fetch" rather than an HTTP status, which aborts report
+        # generation. Convert any failure into a structured 500 so the SPA gets
+        # a real response it can surface, and the publish run keeps going.
+        try:
+            spec = _study_detail_spec(slug)
+        except Exception as exc:  # noqa: BLE001
+            import traceback as _tb
+            return _json_body({
+                "error": f"failed to build study {slug!r}: {type(exc).__name__}: {exc}",
+                "traceback": _tb.format_exc(),
+            }), 500
         if spec is None:
             return _json_body({"error": f"study not found: {slug}"}), 404
-        return _json_body(spec), 200
+        try:
+            return _json_body(spec), 200
+        except Exception as exc:  # noqa: BLE001
+            import traceback as _tb
+            return _json_body({
+                "error": f"failed to serialize study {slug!r}: {type(exc).__name__}: {exc}",
+                "traceback": _tb.format_exc(),
+            }), 500
 
     @staticmethod
     def _build_api_config_response():
