@@ -7557,6 +7557,12 @@
       var modelChange = s.model_change;
       var assumptions = s.key_assumptions || [];
       var reqs = s.implementation_requirements || [];
+      // Tolerate non-list shapes (authors/migrations sometimes write a string of
+      // prose or a dict keyed by req-id) — otherwise reqs.map/.length throw and
+      // the whole investigation report fails to generate.
+      if (typeof reqs === 'string') reqs = reqs.trim() ? [{ description: reqs }] : [];
+      else if (reqs && !Array.isArray(reqs) && typeof reqs === 'object') reqs = Object.values(reqs);
+      if (!Array.isArray(reqs)) reqs = [];
       var readouts = s.readouts || [];
       var tests = s.behavior_tests || s.expected_behavior || [];
       var decide = s.conclusion_logic || {};
