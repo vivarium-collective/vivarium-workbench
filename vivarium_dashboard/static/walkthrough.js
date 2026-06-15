@@ -1253,24 +1253,53 @@
     } else if (!studies.length) {
       html += '<p class="empty-state muted" style="margin:0">No <code>ptools/*.tsv</code> exports found yet. Run a study\'s ptools analyses first.</p>';
     } else {
+      // Launching builds a Pathway Tools URL server-side and points at the
+      // workspace-local sms-ptools container (ui.ptools_server_url, e.g.
+      // http://localhost:1555). Neither the /api/ptools-launch endpoint nor
+      // that container exists for the hosted read-only snapshot, so in snapshot
+      // mode we surface an honest note instead of a button that would 404 and
+      // throw "SyntaxError: The string did not match the expected pattern".
+      var _isSnapshot = (window.__DASH_CONFIG__ || {}).mode === 'snapshot';
       html += '<div class="ptools-study-list">' + studies.map(function(s) {
+        var action = _isSnapshot
+          ? '<span class="muted" style="font-size:0.8em">Launch from the local dashboard</span>'
+          : '<button class="btn-mini" onclick="_launchPtools(\'' + _esc(s.study) + '\')">Launch in Omics Viewer</button>';
         return '<div class="picker-row">' +
           '<div class="picker-row-main"><strong>' + _esc(s.study) + '</strong>' +
             ' <span class="muted" style="font-size:0.82em">' + (s.n_tsvs || 0) + ' TSV' + (s.n_tsvs === 1 ? '' : 's') + '</span></div>' +
-          '<div class="picker-row-actions">' +
-            '<button class="btn-mini" onclick="_launchPtools(\'' + _esc(s.study) + '\')">Launch in Omics Viewer</button>' +
-          '</div>' +
+          '<div class="picker-row-actions">' + action + '</div>' +
         '</div>';
       }).join('') + '</div>';
+      if (_isSnapshot) {
+        html += '<p class="muted" style="font-size:0.8em;margin:8px 0 0">' +
+          'The Omics Viewer launches against a local <code>sms-ptools</code> container and is only ' +
+          'available when running the dashboard locally; this read-only view shows which studies ' +
+          'have PTools exports.</p>';
+      }
     }
     html += '</div>';
     return html;
   }
 
   function _launchPtools(study) {
+    // The read-only snapshot has no /api/ptools-launch backend and no local
+    // sms-ptools container to launch against. Bail with a clear message rather
+    // than fetch a 404 HTML page and throw a cryptic JSON-parse SyntaxError.
+    if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot') {
+      alert('The PTools Omics Viewer launches against a local sms-ptools ' +
+            'container and is only available when running the dashboard locally.');
+      return;
+    }
     var url = '/api/ptools-launch/' + encodeURIComponent(study);
     fetch(url).then(function(r) {
-      return r.json().then(function(d) { return { status: r.status, body: d }; });
+      // Parse defensively: a non-JSON body (e.g. a 404 HTML page) otherwise
+      // throws "SyntaxError: The string did not match the expected pattern".
+      return r.text().then(function(t) {
+        var d = {};
+        try { d = t ? JSON.parse(t) : {}; }
+        catch (e) { d = { error: 'server returned ' + r.status + ' (no PTools backend)' }; }
+        return { status: r.status, body: d };
+      });
     }).then(function(res) {
       var b = res.body || {};
       if (res.status === 200 && b.url) {
