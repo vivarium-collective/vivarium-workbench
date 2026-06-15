@@ -1454,6 +1454,7 @@ def _build_ptools_launch_url(
     public_base: str,
     run_id: str | None = None,
     analysis: str | None = None,
+    data_dir: str | None = None,
 ) -> dict:
     """Pure helper: discover ptools TSVs and build a Pathway Tools Omics Viewer URL.
 
@@ -1461,9 +1462,14 @@ def _build_ptools_launch_url(
       - ``url`` + ``tsv_url`` + ``available`` on success
       - ``error`` + optional ``available`` on failure
 
-    The Pathway Tools server must be able to reach ``tsv_url`` over HTTP —
-    it must be an absolute URL on the dashboard's externally-reachable host,
-    not a localhost/relative path.
+    Two data-delivery modes (the right one depends on the PTools build):
+      - **HTTP** (default): ``tsv_url`` is an absolute URL on the dashboard's
+        externally-reachable host; the PTools server fetches it over HTTP.
+      - **Filesystem** (``data_dir`` set): the workspace is mounted into the
+        PTools container at ``data_dir``, and ``tsv_url`` is the server-local
+        path ``<data_dir>/<rel>``. Required for builds (e.g. sms-ptools 0.8.2)
+        whose ``overview-expression-load-omics-from-server`` endpoint reads the
+        data file from disk and does **not** fetch remote URLs.
     """
     study_dir = Path(study_dir)
     ws_root = Path(ws_root)
@@ -1491,7 +1497,12 @@ def _build_ptools_launch_url(
     # Use the first available TSV (most useful when analysis is filtered).
     chosen = all_tsvs[0]
     rel = available[0]
-    tsv_url = f"{public_base.rstrip('/')}/{rel}"
+    # Filesystem mode: PTools reads the file from its own disk (workspace mounted
+    # at data_dir). Otherwise PTools fetches it over HTTP from the dashboard.
+    if data_dir:
+        tsv_url = f"{data_dir.rstrip('/')}/{rel}"
+    else:
+        tsv_url = f"{public_base.rstrip('/')}/{rel}"
 
     # Object class for the overlay (gene/reaction/protein/compound).
     cls = _ptools_object_class(analysis or chosen.name)
@@ -13996,6 +14007,11 @@ if __name__ == "__main__":
         if not study_dir.is_dir():
             return self._json({"error": f"study not found: {study}"}, 404)
 
+        # Filesystem mode: if the workspace is mounted into the PTools container,
+        # ui.ptools_data_dir is its container path; the launcher then passes a
+        # server-local file path instead of an HTTP URL (sms-ptools reads from disk).
+        data_dir = (ui.get("ptools_data_dir") or "").strip() or None
+
         result = _build_ptools_launch_url(
             study_dir=study_dir,
             ws_root=WORKSPACE,
@@ -14004,6 +14020,7 @@ if __name__ == "__main__":
             public_base=public_base,
             run_id=run_id,
             analysis=analysis,
+            data_dir=data_dir,
         )
         if "error" in result:
             return self._json(result, 404)
