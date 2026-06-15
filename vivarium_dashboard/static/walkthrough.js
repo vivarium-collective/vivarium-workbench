@@ -5365,7 +5365,7 @@
       var prettyTitle = s.title || _humanizeStudyName(s.name).title;
       // Show the FULL question + claim (no truncation) — the card grows to fit.
       var asks = (s.question || '').replace(/\s+/g, ' ').split(/[.?]/)[0].trim();
-      var findings = s.findings || [];
+      var findings = _asFindings(s.findings);
       var claim = (s.claim ||
         (findings[0] && (findings[0].summary || findings[0].statement || findings[0].id)) || ''
       ).replace(/\s+/g, ' ').trim();
@@ -6246,6 +6246,15 @@
       + 'padding:1px 8px;border-radius:9999px;background:' + c[0] + ';color:' + c[1] + ';'
       + 'font-weight:600;font-size:0.72em;margin-left:6px;vertical-align:middle">provenance: ' + _h(v) + '</span>';
   }
+  // `findings` is authored EITHER as a list, OR as a {entries:[...]} object
+  // (e.g. mbp-06-gap-analysis), OR a dict keyed by id. Normalize to an array so
+  // consumers never call .filter/.forEach/.map on a non-array (which throws and
+  // aborts the whole report generation).
+  function _asFindings(v) {
+    if (Array.isArray(v)) return v;
+    if (v && typeof v === 'object') return Array.isArray(v.entries) ? v.entries : Object.values(v);
+    return [];
+  }
   function _deriveConclusionVerdicts(s) {
     var authored = s.conclusion_verdicts || {};
     var ge = (s.pipeline_gate || {}).gate_evaluator || {};
@@ -6261,7 +6270,7 @@
       else reg = 'PARTIAL';
     }
 
-    var findings = (s.findings || []).filter(function(f) { return f && typeof f === 'object'; });
+    var findings = _asFindings(s.findings).filter(function(f) { return f && typeof f === 'object'; });
     var exp;
     if (!findings.length) exp = 'GAP';
     else if (findings.some(function(f) { return f.tier === 'interpretation' || f.mechanism_origin; })) exp = 'PASS';
@@ -6303,7 +6312,7 @@
   }
   // C3 — read-only four-section synthesis sourced from canonical fields.
   function _conclusionSynthesisHtml(s, slug) {
-    var findings = (s.findings || []).filter(function(f) { return f && typeof f === 'object'; });
+    var findings = _asFindings(s.findings).filter(function(f) { return f && typeof f === 'object'; });
     var claims = findings.map(function(f) { return f.statement || f.summary; }).filter(Boolean);
     var evidence = [];
     findings.forEach(function(f) {
@@ -7338,7 +7347,7 @@
     function _studySummary(s, dec) {
       var purpose = s.purpose || {};
       var question = (purpose.question || '').trim().split('\n')[0];
-      var findings = s.findings || [];
+      var findings = _asFindings(s.findings);
       var sentences = [];
 
       if (question) {
@@ -7741,7 +7750,7 @@
       var discImpl = (s.discovery_implications && typeof s.discovery_implications === 'object')
                       ? s.discovery_implications : {};
       var followupProposals = discImpl.followup_study_proposals || [];
-      var findings = s.findings || [];
+      var findings = _asFindings(s.findings);
       var bib = (s.bibliography && s.bibliography.bib_keys) || [];
       var charts = (chartsByStudy && chartsByStudy[s.name]) || [];
 
@@ -8754,7 +8763,7 @@
       // still renders meaningful mechanism prose.
       var _bioProse = s.biological_summary;
       if (!_bioProse) {
-        var _bioFindings = (s.findings || [])
+        var _bioFindings = _asFindings(s.findings)
           .filter(function(f) { return f && typeof f === 'object'; })
           .map(function(f) { return f.statement || f.summary; })
           .filter(Boolean);
@@ -8983,7 +8992,7 @@
       // sections) and lead with the spec the expert needs to comment on:
       // Question → Conditions → Tests → Baseline preview → Assumptions.
       // Once runs land, the full flow returns.
-      var hasRuns = (s.runs || []).length > 0 || (s.findings || []).length > 0;
+      var hasRuns = (s.runs || []).length > 0 || _asFindings(s.findings).length > 0;
       // Informational/descriptive reference studies are "complete", not
       // "planning" — they have no hypothesis to run, so don't show the
       // "PLANNING — not yet run" framing.
@@ -10490,7 +10499,7 @@
       +   '<h1>' + _h(iset.title || iset.name) + ' <span class="badge badge-' + _h(iset.status || 'planning') + '">' + _h(iset.status || 'planning') + '</span>'
       +     _objectOfEvaluationChip(iset.object_of_evaluation) + '</h1>'
       +   '<p class="muted small">Investigation report · <code>' + nameClean + '</code> · generated ' + _h(now) + ' · '
-      +     ((specs || []).some(function(s) { return (s.runs || []).length || (s.findings || []).length; })
+      +     ((specs || []).some(function(s) { return (s.runs || []).length || _asFindings(s.findings).length; })
           ? 'for expert review — results below reflect completed runs.'
           : 'for expert review prior to execution.') + '</p>'
 
@@ -10500,7 +10509,7 @@
       // ── Execution-status / planning-phase banner — run-state context up top ──
       +   (function() {
             var alls = specs || [];
-            var planning = alls.filter(function(s) { return !(s.runs || []).length && !(s.findings || []).length && !_isInformationalStudy(s); });
+            var planning = alls.filter(function(s) { return !(s.runs || []).length && !_asFindings(s.findings).length && !_isInformationalStudy(s); });
             var total = alls.length, n = planning.length;
             if (!n) return '';
             var names = planning.map(function(s) { return s.name || s.slug || ''; }).filter(Boolean).join(', ');
@@ -14393,7 +14402,7 @@
           var iset = window._currentIsetData;
           var nf = 0, nr = 0;
           (iset.studies || []).forEach(function (s) {
-            nf += (s.findings || []).length;
+            nf += _asFindings(s.findings).length;
             nr += (s.n_runs || 0);
           });
           ctx.innerHTML = '<em>Suggest</em> will draft from open investigation <code>' +
@@ -14423,7 +14432,7 @@
     var allFindings = [];
     var allFollowups = [];
     studies.forEach(function (s) {
-      (s.findings || []).forEach(function (f) { allFindings.push({study: s.name, f: f}); });
+      _asFindings(s.findings).forEach(function (f) { allFindings.push({study: s.name, f: f}); });
       (s.follow_up_studies || []).forEach(function (f) { allFollowups.push({study: s.name, f: f}); });
     });
     var bioContradicts = allFindings.filter(function (e) { return e.f.kind === 'biological' && e.f.status === 'contradicts'; });
@@ -14533,7 +14542,7 @@
     lines.push('|---|---|---|---|---|');
     studies.forEach(function (s) {
       lines.push('| `' + s.name + '` | ' + (s.phase || '—') + ' | ' + (s.status || '—') +
-                 ' | ' + ((s.findings || []).length) + ' | ' + ((s.follow_up_studies || []).length) + ' |');
+                 ' | ' + (_asFindings(s.findings).length) + ' | ' + ((s.follow_up_studies || []).length) + ' |');
     });
     lines.push('');
 
@@ -15012,7 +15021,7 @@
       .then(function (r) { return r.ok ? r.json() : { findings: [] }; })
       .then(function (j) {
         var byStudy = {};
-        (j.findings || []).forEach(function (f) {
+        _asFindings(j.findings).forEach(function (f) {
           var k = f.study || '<workspace>';
           (byStudy[k] = byStudy[k] || []).push(f);
         });

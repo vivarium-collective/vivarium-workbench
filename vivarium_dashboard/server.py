@@ -3331,6 +3331,43 @@ def _catalog_data(ws_root: "Path") -> dict:
     return {"modules": modules}
 
 
+def _dedupe_alias_composites(records: list) -> list:
+    """Collapse a composite that's registered under more than one id.
+
+    A ``@composite_generator(name="baseline")`` in a same-named module registers
+    under the DOUBLED id ``v2ecoli.composites.baseline.baseline``; a workspace may
+    add a clean-id alias ``v2ecoli.composites.baseline`` so short study refs
+    resolve. Both then surface in discovery, listing the SAME composite twice.
+    Collapse generator records that share (name, module), keeping the canonical
+    id (the one equal to its module, else the shortest) so each composite appears
+    once and the kept id is the resolvable/explorable one. Records without a
+    module, or with a unique (name, module), pass through unchanged.
+    """
+    def _rank(rec, mod):
+        rid = rec.get("id") or ""
+        return (0 if rid == mod else 1, len(rid))
+
+    kept: dict = {}
+    order: list = []
+    out: list = []
+    for rec in records:
+        mod = rec.get("module") or ""
+        if not mod or rec.get("kind") != "generator":
+            out.append(rec)
+            continue
+        key = (rec.get("name"), mod)
+        prev = kept.get(key)
+        if prev is None:
+            kept[key] = rec
+            order.append(key)
+            out.append(rec)
+        elif _rank(rec, mod) < _rank(prev, mod):
+            out[out.index(prev)] = rec
+            kept[key] = rec
+        # else: drop the non-canonical duplicate
+    return out
+
+
 def _composites_data(ws_root: "Path") -> dict:
     """Pure data builder for GET /api/composites — returns ``{"composites": [...]}`` dict.
 
@@ -3364,6 +3401,7 @@ def _composites_data(ws_root: "Path") -> dict:
             rec["workspace_local"] = bool(mod == pkg or mod.startswith(ws_prefix_dot))
             out.append(rec)
         out = _filter_composites(out, ws_data)
+        out = _dedupe_alias_composites(out)
         return {"composites": out, "workspace_package": pkg}
     except Exception as e:
         return {"composites": [], "error": str(e)}
@@ -13994,10 +14032,30 @@ if __name__ == "__main__":
         """
         if not _SLUG_RE.match(slug):
             return _json_body({"error": "invalid slug"}), 400
-        spec = _study_detail_spec(slug)
+        # Defense-in-depth: never let a single bad/oversized study drop the
+        # connection. An unhandled exception here propagates out of do_GET (this
+        # route has no try/except wrapper) → the client sees a network-level
+        # "Failed to fetch" rather than an HTTP status, which aborts report
+        # generation. Convert any failure into a structured 500 so the SPA gets
+        # a real response it can surface, and the publish run keeps going.
+        try:
+            spec = _study_detail_spec(slug)
+        except Exception as exc:  # noqa: BLE001
+            import traceback as _tb
+            return _json_body({
+                "error": f"failed to build study {slug!r}: {type(exc).__name__}: {exc}",
+                "traceback": _tb.format_exc(),
+            }), 500
         if spec is None:
             return _json_body({"error": f"study not found: {slug}"}), 404
-        return _json_body(spec), 200
+        try:
+            return _json_body(spec), 200
+        except Exception as exc:  # noqa: BLE001
+            import traceback as _tb
+            return _json_body({
+                "error": f"failed to serialize study {slug!r}: {type(exc).__name__}: {exc}",
+                "traceback": _tb.format_exc(),
+            }), 500
 
     @staticmethod
     def _build_api_config_response():
