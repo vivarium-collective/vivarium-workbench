@@ -656,7 +656,7 @@
     </div>
     {% endif %}
 
-    {% if study.expert_decisions_needed %}
+    {% if study.expert_decisions_needed is sequence and study.expert_decisions_needed is not string and study.expert_decisions_needed %}
     <details class="overview-section pre-run-expert-review">
       <summary class="overview-label">Pre-run expert review</summary>
       <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
