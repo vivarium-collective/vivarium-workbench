@@ -253,6 +253,7 @@ def _read_study_yaml_runs(workspace: Path) -> list[dict]:
                 "studies": [sdir.name],
                 "study_slug": sdir.name,
                 "investigation_slug": None,
+                "emitter": entry.get("emitter"),  # declared in the spec, if any
                 "source": "study_yaml",
             })
     return out
@@ -569,7 +570,9 @@ def _emitter_for_row(workspace: Path, row: dict) -> str:
     if src == "xarray":
         return "xarray"
     if src == "study_yaml":
-        return "none"  # recorded in the spec, not persisted by a step emitter
+        # surface the emitter the run DECLARES in study.yaml (e.g. xarray), if
+        # any; else 'none' (recorded in the spec, not persisted by a step emitter).
+        return row.get("emitter") or "none"
     rid = row.get("run_id")
     if rid:
         run_dir = Path(workspace) / ".pbg" / "runs" / str(rid)
@@ -678,6 +681,7 @@ def list_simulations(workspace: Path) -> list[dict]:
     rows.sort(key=_ts, reverse=True)
 
     run_to_studies = _build_run_to_studies_map(workspace)
+    _wp = WorkspacePaths.load(workspace)
     # SQLiteEmitter runs are study-scoped by path (studies/<name>/runs.db),
     # so derive the study name from db_path when no explicit study.yaml
     # cross-reference exists.
@@ -694,6 +698,14 @@ def list_simulations(workspace: Path) -> list[dict]:
         # written before sqlite_emitter() stamped the column.
         if not r.get("study_slug") and r.get("studies"):
             r["study_slug"] = r["studies"][0]
+        # Derive the owning investigation from the study when the run record
+        # didn't carry it (study.yaml-declared runs, and legacy DBs without the
+        # investigation_slug column) — the workspace knows every study's owner.
+        if not r.get("investigation_slug") and r.get("study_slug"):
+            try:
+                r["investigation_slug"] = _wp.study_owner(r["study_slug"]) or None
+            except Exception:
+                pass
         # Emitter-awareness: tag each row with the emitter that persisted it
         # (xarray / parquet / sqlite) so the Simulations DB can show a column.
         r["emitter"] = _emitter_for_row(workspace, r)
