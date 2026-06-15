@@ -721,11 +721,26 @@
 
   // ptools-launch → _get_ptools_launch
   bindAll('.btn-launch-ptools', function(btn) {
+    // No /api/ptools-launch backend (and no local sms-ptools container) in the
+    // read-only snapshot — explain rather than fetch a 404 HTML page and throw
+    // "SyntaxError: The string did not match the expected pattern".
+    if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot') {
+      alert('The PTools Omics Viewer launches against a local sms-ptools ' +
+            'container and is only available when running the dashboard locally.');
+      return;
+    }
     var runId = btn.dataset.runId;
     var study = studyName();
     var url = '/api/ptools-launch/' + encodeURIComponent(study) + '?run=' + encodeURIComponent(runId);
     fetch(url).then(function(r) {
-      return r.json().then(function(d) { return {status: r.status, body: d}; });
+      // Parse defensively: a non-JSON body (e.g. a 404 HTML page) otherwise
+      // throws a cryptic JSON-parse SyntaxError instead of a useful message.
+      return r.text().then(function(t) {
+        var d = {};
+        try { d = t ? JSON.parse(t) : {}; }
+        catch (e) { d = { error: 'server returned ' + r.status + ' (no PTools backend)' }; }
+        return {status: r.status, body: d};
+      });
     }).then(function(res) {
       var b = res.body;
       if (res.status === 200 && b.url) {
@@ -737,7 +752,7 @@
       } else {
         alert('PTools launch failed: ' + (b && b.error || res.status));
       }
-    });
+    }).catch(function(err) { alert('PTools launch failed: ' + err); });
   });
 
   // study-run-delete → _post_investigation_run_delete
