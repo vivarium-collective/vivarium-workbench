@@ -4471,12 +4471,17 @@
       list.innerHTML = '<p class="empty-state">No investigations declared. Author one at <code>investigations/&lt;name&gt;/investigation.yaml</code>.</p>';
       return;
     }
-    // Closed/archived investigations sink to the bottom (stable sort).
+    // Closed/archived investigations sink to the bottom; the baseline
+    // investigation floats to the top (it's the reference the others build on).
+    // Otherwise stable (declaration) order.
     var ordered = (window._isetIndex || []).map(function(it, idx) { return [it, idx]; });
     ordered.sort(function(a, b) {
       var ac = (a[0].status === 'archived' || a[0].status === 'closed') ? 1 : 0;
       var bc = (b[0].status === 'archived' || b[0].status === 'closed') ? 1 : 0;
       if (ac !== bc) return ac - bc;
+      var ab = /baseline/i.test(a[0].name || '') ? 0 : 1;
+      var bb = /baseline/i.test(b[0].name || '') ? 0 : 1;
+      if (ab !== bb) return ab - bb;
       return a[1] - b[1];
     });
     list.innerHTML = ordered.map(function(pair) {
