@@ -10,6 +10,10 @@ and reports.
 
 > **Status:** in active beta. APIs and UI may change before 1.0.
 
+For a deeper look at what the dashboard does, where data lives, the run/render
+data lifecycles, and how it relates to its companion repos, see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ## Getting Started
 
 ### 1. Install
