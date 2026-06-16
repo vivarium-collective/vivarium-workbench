@@ -3,7 +3,8 @@
 This document explains **what the dashboard does**, **where data lives**, **how
 data flows and is transformed**, and **which repository is the source of truth**
 for each artifact. It is the "big picture" companion to `CLAUDE.md` (which covers
-commands and code layout).
+commands and code layout). For how the dashboard is *deployed* with a workspace
+(pip dependency, run from the workspace venv) see [USAGE.md](USAGE.md).
 
 > Status: descriptive of the code as of mid-2026. Schema versions (study/spec
 > v2→v3→v4) and emitter backends (SQLite / Parquet / XArray) coexist; where a

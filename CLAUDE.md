@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 For the full data-architecture picture — what the dashboard does, where data
 lives, the run/render lifecycles, and which companion repo owns which
-transformation — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+transformation — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). For how the
+dashboard is deployed with a workspace (it's a pip dependency of the workspace,
+run from the workspace venv) see [docs/USAGE.md](docs/USAGE.md).
 
 ## What this is
 

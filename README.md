@@ -12,7 +12,9 @@ and reports.
 
 For a deeper look at what the dashboard does, where data lives, the run/render
 data lifecycles, and how it relates to its companion repos, see
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). For how the dashboard is deployed
+alongside a workspace (it's a pip dependency installed into the workspace's
+venv), see [docs/USAGE.md](docs/USAGE.md).
 
 ## Getting Started
 
