@@ -356,6 +356,29 @@ def test_snapshot_css_bundled_in_home_shell(tmp_workspace, tmp_path):
             f"index.html: {url!r} does not resolve in bundle"
 
 
+def test_walkthrough_composite_popout_is_snapshot_aware():
+    """The report's "What we ran" composite pop-out (_loomStaticPopout) must, in
+    snapshot mode, target the STATIC composite-state file under the configured
+    base path — /api/composite-state/<id>.json prefixed by basePath — not the
+    live query form (/api/composite-state?ref=<id>) at the bare origin, which
+    404s on a GitHub Pages project subpath. It must also suppress the pop-out
+    link for a composite known to be non-navigable (has_wiring === false).
+    Regression: the pop-out opened <origin>/bigraph-loom/... with no base path
+    and the live ?ref= query, so every composite link 404'd in the read-only
+    dashboard.
+    """
+    text = (server.STATIC_DIR / "walkthrough.js").read_text()
+    # Snapshot branch builds the static .json state path...
+    assert "'/api/composite-state/' + encodeURIComponent(composite) + '.json'" in text, \
+        "loom pop-out missing snapshot static composite-state path"
+    # ...and prefixes both state + loom URLs with the configured base path.
+    assert "cfg.basePath" in text and "cfg.mode === 'snapshot'" in text, \
+        "loom pop-out not snapshot/basePath aware"
+    # Non-navigable composites render plain text instead of a broken pop-out.
+    assert "known.has_wiring === false" in text, \
+        "composite cell does not suppress pop-out for non-navigable composites"
+
+
 def test_walkthrough_has_snapshot_body_class_and_switchpage_gating():
     """walkthrough.js must set body.snapshot at DOMContentLoaded and gate
     the github/studies tabs in _switchPage.

@@ -8132,20 +8132,43 @@
       // state/<ref>.json. Works from any report on the live dashboard.
       function _loomStaticPopout(composite) {
         // Pop out the bigraph-loom STATIC (read-only) view of the composite. The
-        // dashboard origin is captured at GENERATION time and baked in as an
-        // ABSOLUTE URL, so the button works whether the report is viewed inline,
-        // in an iframe/srcdoc, or downloaded (as long as that dashboard is up) —
-        // the earlier relative URL + protocol guard failed in non-http contexts.
-        // stateUrl hits /api/composite-state?ref=<id>; the loom unwraps {state}.
+        // URL is computed at GENERATION time and baked in absolute so the button
+        // works whether the report is viewed inline, in an iframe/srcdoc, or
+        // downloaded (as long as that dashboard is up).
+        //
+        // Snapshot mode (the hosted read-only dashboard) serves pre-resolved
+        // composite state as STATIC FILES at <basePath>/api/composite-state/
+        // <id>.json and the loom entry point at <basePath>/bigraph-loom/ — BOTH
+        // must carry the configured base path (e.g. /v2ecoli/dashboard on a
+        // GitHub Pages project site). The live server instead answers the query
+        // form /api/composite-state?ref=<id> at the origin root. Using the live
+        // form (or omitting the base path) in snapshot mode 404s the pop-out —
+        // mirror _loadCompositeExplorer's snapshot handling here.
+        var cfg = (typeof window !== 'undefined' && window.__DASH_CONFIG__) || {};
+        var isSnap = cfg.mode === 'snapshot';
         var origin = (typeof location !== 'undefined' && location.origin
                       && /^https?:/.test(location.origin)) ? location.origin : '';
-        return "var o='" + origin + "';"
-          + "var s=o+'/api/composite-state?ref='+encodeURIComponent('" + _h(composite) + "');"
-          + "var u=o+'/bigraph-loom/index.html?static=1&stateUrl='+encodeURIComponent(s);"
-          + "window.open(u,'loom','width=1200,height=840');";
+        var base = origin + (isSnap ? (cfg.basePath || '') : '');
+        var stateUrl = isSnap
+          ? base + '/api/composite-state/' + encodeURIComponent(composite) + '.json'
+          : base + '/api/composite-state?ref=' + encodeURIComponent(composite);
+        var u = base + '/bigraph-loom/index.html?static=1&stateUrl=' + encodeURIComponent(stateUrl);
+        return "window.open('" + u.replace(/'/g, "\\'") + "','loom','width=1200,height=840');";
       }
       function _compositeCell(composite) {
         if (!composite) return '<span class="muted">—</span>';
+        // In the read-only snapshot a composite is navigable only if its wiring
+        // was exported at publish time (has_wiring). When we positively know it
+        // was NOT (e.g. a composite that can't resolve without the on-disk ParCa
+        // cache), render plain text — a pop-out would 404 in bigraph-loom.
+        var cfg = (typeof window !== 'undefined' && window.__DASH_CONFIG__) || {};
+        if (cfg.mode === 'snapshot') {
+          var known = (window._compositesById || {})[composite];
+          if (known && known.has_wiring === false) {
+            return '<code title="static wiring not available in the read-only snapshot">'
+              + _h(_short(composite)) + '</code>';
+          }
+        }
         return '<a href="#" class="composite-loom-link" '
           + 'title="Open a static view of this composite in bigraph-loom" '
           + 'onclick="event.preventDefault(); ' + _loomStaticPopout(composite) + '">'
