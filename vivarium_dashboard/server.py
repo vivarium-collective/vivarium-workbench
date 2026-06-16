@@ -2655,6 +2655,17 @@ def _build_saved_visualizations(ws_root) -> dict:
     ui = ws.get("ui") or {}
     ptools_configured = bool(str(ui.get("ptools_server_url", "")).strip())
 
+    # Optional per-pack external viewer URL (ui.viz_viewer_urls: {<pack-name>: url}).
+    # When set, the Analyses card links + embeds that URL instead of the bundled
+    # gh-pages viewer — e.g. to serve a heavy pack from Cloudflare R2 (no GitHub
+    # Pages rate-limiting). Keyed by pack name (e.g. "ecoli_3d").
+    viewer_urls = ui.get("viz_viewer_urls") or {}
+    if isinstance(viewer_urls, dict):
+        for entry in saved:
+            url = viewer_urls.get(entry["name"])
+            if url:
+                entry["viewer_url"] = str(url)
+
     return {
         "parsimony_available": _parsimony_viewer_dir() is not None,
         "saved": saved,

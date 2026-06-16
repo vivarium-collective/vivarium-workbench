@@ -1216,7 +1216,12 @@
       ? window.DataSource.basePath()
       : ((window.__DASH_CONFIG__ && window.__DASH_CONFIG__.basePath) || "");
     var packUrl = base + v.pack_url;
-    var src = base + '/parsimony-viewer/index.html?file=' + encodeURIComponent(packUrl);
+    // An external viewer_url (e.g. assets hosted on Cloudflare R2) overrides the
+    // bundled gh-pages viewer + pack — used to dodge GitHub Pages rate-limiting
+    // for heavy packs. Configured via ui.viz_viewer_urls in workspace.yaml.
+    var src = v.viewer_url
+      ? v.viewer_url
+      : (base + '/parsimony-viewer/index.html?file=' + encodeURIComponent(packUrl));
     var meta = [];
     if (v.study) meta.push('study: ' + _esc(v.study));
     if (v.n_placed) meta.push(Number(v.n_placed).toLocaleString() + ' instances');
