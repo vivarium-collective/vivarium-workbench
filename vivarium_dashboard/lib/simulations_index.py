@@ -572,7 +572,15 @@ def _emitter_for_row(workspace: Path, row: dict) -> str:
     if src == "study_yaml":
         # surface the emitter the run DECLARES in study.yaml (e.g. xarray), if
         # any; else 'none' (recorded in the spec, not persisted by a step emitter).
-        return row.get("emitter") or "none"
+        # The declared value may be a plain string ("parquet") or a structured
+        # dict ({"kind": "parquet", "store": ...}); normalise to the kind string
+        # so downstream label mapping (which lower-cases the tag) never sees a
+        # dict — a dict here used to crash the server's emitter_type loop and
+        # blank every row's pill to the "SQLite" default.
+        em = row.get("emitter")
+        if isinstance(em, dict):
+            em = em.get("kind")
+        return em if isinstance(em, str) and em else "none"
     rid = row.get("run_id")
     if rid:
         run_dir = Path(workspace) / ".pbg" / "runs" / str(rid)

@@ -3530,6 +3530,20 @@ def _composite_resolve_data(spec_id: str) -> "dict | None":
         return None
 
 
+def _emitter_tag(emitter) -> str:
+    """Normalise a row's ``emitter`` field to a lowercase string tag.
+
+    The value may be a plain string ("parquet"), a structured dict
+    ({"kind": "parquet", "store": ...}) declared in a study.yaml ``runs:``
+    entry, or None. A dict reaching ``.lower()`` used to raise AttributeError
+    inside the emitter_type loop — silently swallowed — which blanked every
+    row's emitter_type and made the UI default the pill to "SQLite".
+    """
+    if isinstance(emitter, dict):
+        emitter = emitter.get("kind")
+    return emitter.lower() if isinstance(emitter, str) else ""
+
+
 def _simulations_data(ws_root: Path) -> dict:
     """Pure data builder for GET /api/simulations.
 
@@ -3548,8 +3562,8 @@ def _simulations_data(ws_root: Path) -> dict:
         _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray",
                           "none": "—"}  # no step emitter (summary-only run)
         for s in sims:
-            tag = (s.get("emitter") or "").lower()
-            s["emitter_type"] = _emitter_label.get(tag) or emitter_type_of(s.get("db_path"))
+            s["emitter_type"] = _emitter_label.get(
+                _emitter_tag(s.get("emitter"))) or emitter_type_of(s.get("db_path"))
     except Exception:
         pass
     return {"simulations": sims, "current": _current_branch_slug(ws_root)}
@@ -10792,8 +10806,8 @@ if __name__ == "__main__":
         _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray",
                           "none": "—"}  # no step emitter (summary-only run)
         for s in sims:
-            tag = (s.get("emitter") or "").lower()
-            s["emitter_type"] = _emitter_label.get(tag) or emitter_type_of(s.get("db_path"))
+            s["emitter_type"] = _emitter_label.get(
+                _emitter_tag(s.get("emitter"))) or emitter_type_of(s.get("db_path"))
         return self._json(
             {"simulations": sims, "current": _current_branch_slug(WORKSPACE)}, 200)
 
