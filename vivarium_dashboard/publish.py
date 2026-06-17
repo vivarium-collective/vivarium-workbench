@@ -624,6 +624,25 @@ def _do_build(
         data_sources = {"sources": []}
     _write_json(api_dir / "data-sources.json", data_sources)
 
+    # api/references-bib.json — parsed papers.bib (GET /api/references-bib).
+    # Without this the read-only References cards fetch /api/references-bib and
+    # 404 in snapshot mode, so the published dashboard shows no papers at all.
+    try:
+        from vivarium_dashboard.lib.report import _parse_bib_entries
+        references_entries = _parse_bib_entries(ws_root)
+        try:
+            from vivarium_dashboard.lib.references_fetch import (
+                load_cache, enrich_entries,
+            )
+            references_entries = enrich_entries(
+                references_entries, load_cache(ws_root))
+        except Exception:
+            pass  # enrichment cache is optional; raw bib entries still render
+        references = {"entries": references_entries}
+    except Exception:
+        references = {"entries": []}
+    _write_json(api_dir / "references-bib.json", references)
+
     # api/investigations.json — flat studies list with DAG (GET /api/investigations)
     try:
         investigations_flat = _investigations_data(ws_root)

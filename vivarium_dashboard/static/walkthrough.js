@@ -5804,7 +5804,8 @@
                 .then(function(j) { return j.spec || j; })
           );
         });
-        var bibFetch = fetch('/api/references-bib')
+        var bibFetch = fetch((window.DataSource && window.DataSource.referencesBibUrl)
+            ? window.DataSource.referencesBibUrl() : '/api/references-bib')
           .then(function(r) { return r.ok ? r.json() : {entries: []}; })
           .then(function(j) { return j.entries || []; })
           .catch(function() { return []; });
@@ -14726,7 +14727,8 @@
                 .then(function (r) { return r.ok ? r.json() : {spec: {name: s.name}}; }))
             .then(function (j) { return j.spec || j; });
         });
-        var bibFetch = fetch('/api/references-bib')
+        var bibFetch = fetch((window.DataSource && window.DataSource.referencesBibUrl)
+            ? window.DataSource.referencesBibUrl() : '/api/references-bib')
           .then(function (r) { return r.ok ? r.json() : {entries: []}; })
           .then(function (j) { return j.entries || []; })
           .catch(function () { return []; });

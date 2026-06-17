@@ -156,6 +156,12 @@
       : "/api/saved-visualizations";
   }
 
+  function _referencesBibUrl() {
+    return cfg().mode === "snapshot"
+      ? _base() + "/api/references-bib.json"
+      : "/api/references-bib";
+  }
+
   var DataSource = {
     /** Return the current source config (default: local-server). */
     config: cfg,
@@ -169,6 +175,13 @@
      * Snapshot mode: <base>/api/saved-visualizations.json from the static bundle
      */
     savedVisualizationsUrl: _savedVisualizationsUrl,
+
+    /**
+     * Return the URL for the parsed papers.bib payload (References cards).
+     * Local mode:    /api/references-bib
+     * Snapshot mode: <base>/api/references-bib.json from the static bundle
+     */
+    referencesBibUrl: _referencesBibUrl,
 
     /**
      * Load the study-detail spec for the given slug.
