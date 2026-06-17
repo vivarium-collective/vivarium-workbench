@@ -572,6 +572,23 @@ def _do_build(
         except Exception:
             pass
 
+    # Also publish any committed override whose filename is NOT a canonical
+    # registry id — these are ALIAS forms a study.yaml references directly (e.g.
+    # `...baseline.baseline.json` when discovery canonicalizes the id to
+    # `...baseline`). The study-page loom pop-out builds its stateUrl from the
+    # raw study ref, so the static file must exist under that exact name or it
+    # 404s, even though the canonical state was already exported above.
+    if committed_state_dir.is_dir():
+        for override in sorted(committed_state_dir.glob("*.json")):
+            alias = override.stem
+            if alias in exported_wiring:
+                continue
+            try:
+                (composite_state_dir / f"{alias}.json").write_bytes(override.read_bytes())
+                exported_wiring.add(alias)
+            except Exception:
+                pass
+
     # Annotate each composite with has_wiring so the viewer can hide the
     # Explore button for composites whose state could not be exported.
     for comp in (composites.get("composites") or []):
