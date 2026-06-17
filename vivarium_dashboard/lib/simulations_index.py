@@ -28,12 +28,49 @@ class RunNotFound(Exception):
     """Raised by ``delete_simulation`` when ``run_id`` is in no known DB."""
 
 
+def _iter_all_study_dirs(workspace: Path):
+    """Yield ``(study_dir, investigation_slug, rel_prefix)`` for every study
+    directory in the workspace.
+
+    Covers BOTH layouts:
+      * root        — ``studies/<slug>/``  (investigation_slug ``None``,
+        rel_prefix ``studies/<slug>``)
+      * nested      — ``investigations/<inv>/studies/<slug>/``
+        (investigation_slug ``<inv>``, rel_prefix
+        ``investigations/<inv>/studies/<slug>``)
+
+    De-dupes by study slug with root taking precedence. The Simulations DB
+    MUST scan both: nested-layout investigations (colonies, ketchup-baseline-
+    comparison, v2ecoli-pdmp, …) keep their ``runs.db`` / ``parquet-runs`` /
+    ``study.yaml`` runs under ``investigations/<inv>/studies/<slug>/``, so a
+    root-only walk made every one of their runs invisible.
+    """
+    wp = WorkspacePaths.load(workspace)
+    seen: set[str] = set()
+    root = wp.studies
+    if root.is_dir():
+        for sdir in sorted(root.iterdir()):
+            if sdir.is_dir() and sdir.name not in seen:
+                seen.add(sdir.name)
+                yield sdir, None, f"studies/{sdir.name}"
+    invs = wp.investigations
+    if invs.is_dir():
+        for inv in sorted(invs.iterdir()):
+            nested = inv / "studies"
+            if not (inv.is_dir() and nested.is_dir()):
+                continue
+            for sdir in sorted(nested.iterdir()):
+                if sdir.is_dir() and sdir.name not in seen:
+                    seen.add(sdir.name)
+                    yield sdir, inv.name, f"investigations/{inv.name}/studies/{sdir.name}"
+
+
 def _discover_dbs(workspace: Path) -> list[tuple[Path, str]]:
     """Return list of (db_path, workspace_relative_str) for every runs DB.
 
     Skips missing files. Order: workspace-level DBs first (composite-runs
-    + default-baseline), then per-study in alphabetical order (deterministic
-    for tests).
+    + default-baseline), then per-study (root then nested investigations) in
+    alphabetical order (deterministic for tests).
 
     .pbg/default-baseline/runs.db is produced by ``scripts/run_default_baseline.py``
     (workspace.yaml:default_baseline). It's the "before any study runs"
@@ -48,14 +85,10 @@ def _discover_dbs(workspace: Path) -> list[tuple[Path, str]]:
     default_baseline = wp.pbg / "default-baseline" / "runs.db"
     if default_baseline.is_file():
         dbs.append((default_baseline, ".pbg/default-baseline/runs.db"))
-    studies_root = wp.studies
-    if studies_root.is_dir():
-        for sdir in sorted(studies_root.iterdir()):
-            if not sdir.is_dir():
-                continue
-            db = sdir / "runs.db"
-            if db.is_file():
-                dbs.append((db, f"studies/{sdir.name}/runs.db"))
+    for sdir, _inv, rel_prefix in _iter_all_study_dirs(workspace):
+        db = sdir / "runs.db"
+        if db.is_file():
+            dbs.append((db, f"{rel_prefix}/runs.db"))
     return dbs
 
 
@@ -218,12 +251,9 @@ def _read_study_yaml_runs(workspace: Path) -> list[dict]:
     authoritative where it exists). ``source='study_yaml'``.
     """
     out: list[dict] = []
-    studies_root = WorkspacePaths.load(workspace).studies
-    if not studies_root.is_dir():
-        return out
-    for sdir in sorted(studies_root.iterdir()):
+    for sdir, inv_slug, _rel in _iter_all_study_dirs(workspace):
         yml = sdir / "study.yaml"
-        if not sdir.is_dir() or not yml.is_file():
+        if not yml.is_file():
             continue
         try:
             data = yaml.safe_load(yml.read_text(encoding="utf-8")) or {}
@@ -252,7 +282,7 @@ def _read_study_yaml_runs(workspace: Path) -> list[dict]:
                 "db_path": None,
                 "studies": [sdir.name],
                 "study_slug": sdir.name,
-                "investigation_slug": None,
+                "investigation_slug": inv_slug,
                 "emitter": entry.get("emitter"),  # declared in the spec, if any
                 "source": "study_yaml",
             })
@@ -262,12 +292,7 @@ def _read_study_yaml_runs(workspace: Path) -> list[dict]:
 def _build_run_to_studies_map(workspace: Path) -> dict[str, list[str]]:
     """Return ``{run_id: [study_name, ...]}`` across every study.yaml."""
     result: dict[str, list[str]] = {}
-    studies_root = WorkspacePaths.load(workspace).studies
-    if not studies_root.is_dir():
-        return result
-    for sdir in sorted(studies_root.iterdir()):
-        if not sdir.is_dir():
-            continue
+    for sdir, _inv, _rel in _iter_all_study_dirs(workspace):
         yml = sdir / "study.yaml"
         if not yml.is_file():
             continue
@@ -337,12 +362,7 @@ def _discover_parquet_hives(workspace: Path) -> list[tuple[Path, Path, str]]:
     study slug first, then run dir mtime descending.
     """
     out: list[tuple[Path, Path, str]] = []
-    studies_root = WorkspacePaths.load(workspace).studies
-    if not studies_root.is_dir():
-        return out
-    for sdir in sorted(studies_root.iterdir()):
-        if not sdir.is_dir():
-            continue
+    for sdir, _inv, _rel in _iter_all_study_dirs(workspace):
         parquet_runs = sdir / "parquet-runs"
         if not parquet_runs.is_dir():
             continue
