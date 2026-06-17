@@ -3764,7 +3764,12 @@ def _investigations_data(ws_root: Path) -> dict:
             return False
         status = parent.get("status", "planned")
         if condition == "ran":
-            return status in ("ran", "complete")
+            # "evaluated" is a later lifecycle state than "ran"
+            # (Simulate -> Evaluate -> Decide), so an evaluated study has
+            # necessarily run and must satisfy a "ran" prerequisite. Without
+            # this, a downstream study whose parent is terminally "evaluated"
+            # stays falsely blocked.
+            return status in ("ran", "evaluated", "complete")
         if condition == "complete":
             return status == "complete"
         if condition == "tests-passed":
