@@ -896,3 +896,47 @@ def test_effective_status_ignores_null_multi_axis_fields():
         result = effective_status(spec)
     assert result == "draft"
     assert [w for w in captured if issubclass(w.category, DeprecationWarning)]
+
+
+def _mk_study(ws, name, spec):
+    """Write a study.yaml under the root studies/ layout."""
+    sd = ws / "studies" / name
+    sd.mkdir(parents=True, exist_ok=True)
+    import yaml as _yaml
+    (sd / "study.yaml").write_text(_yaml.safe_dump({"name": name, **spec}))
+
+
+def test_evaluated_parent_satisfies_ran_prerequisite(tmp_path, monkeypatch):
+    """An `evaluated` parent must satisfy a child's `ran`-condition prerequisite.
+
+    Regression: `evaluated` is a later lifecycle state than `ran`
+    (Simulate -> Evaluate -> Decide), so a study whose only prerequisite is an
+    evaluated parent must NOT be reported as blocked. Previously
+    `_condition_satisfied` accepted only ("ran", "complete"), so terminally
+    `evaluated` parents falsely blocked every downstream study (e.g. the
+    surrogate-modeling sm-02/sm-03 studies).
+    """
+    import yaml as _yaml
+    from vivarium_dashboard import server
+
+    ws = tmp_path / "ws"
+    (ws).mkdir()
+    (ws / "workspace.yaml").write_text(_yaml.safe_dump({
+        "schema_version": 2, "name": "t",
+        "layout": {"studies": "studies", "investigations": "investigations"},
+    }))
+    _mk_study(ws, "parent", {"status": "evaluated", "composite": "pkg.demo"})
+    _mk_study(ws, "child", {
+        "status": "planned",
+        "composite": "pkg.demo",
+        "pipeline_gate": {"prerequisites": [{"study": "parent", "condition": "ran"}]},
+    })
+    monkeypatch.setattr(server, "WORKSPACE", ws)
+
+    rows = {r["name"]: r for r in server._investigations_data(ws)["investigations"]}
+    assert rows["child"]["blocked"] is False, rows["child"].get("blocked_by")
+
+    # Sanity: a still-planned parent does NOT satisfy a `ran` prerequisite.
+    _mk_study(ws, "parent", {"status": "planned", "composite": "pkg.demo"})
+    rows = {r["name"]: r for r in server._investigations_data(ws)["investigations"]}
+    assert rows["child"]["blocked"] is True
