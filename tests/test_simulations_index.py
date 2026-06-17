@@ -38,6 +38,45 @@ def test_list_walks_workspace_and_studies_dbs(tmp_path):
     assert all(s["studies"] == [] for s in sims)
 
 
+def test_list_discovers_nested_investigation_study_dbs(tmp_path):
+    """Runs under the nested layout
+    ``investigations/<inv>/studies/<slug>/runs.db`` must be discovered too —
+    not just the root ``studies/<slug>/`` layout. Regression: nested-layout
+    investigations (colonies, ketchup, pdmp) were entirely missing from the
+    Simulations DB because the scanner only walked the root studies/ dir.
+    """
+    ws = tmp_path / "ws"
+    nested = ws / "investigations" / "pdmp" / "studies" / "pdmp-01"
+    nested.mkdir(parents=True)
+    _seed_run(nested / "runs.db",
+              spec_id="pkg.z", run_id="r-nested", started_at=30.0,
+              sim_name="metabolism-ode")
+
+    sims = list_simulations(ws)
+    ids = [s["run_id"] for s in sims]
+    assert "r-nested" in ids, sims
+    row = next(s for s in sims if s["run_id"] == "r-nested")
+    assert row["db_path"] == "investigations/pdmp/studies/pdmp-01/runs.db"
+
+
+def test_list_tags_nested_study_yaml_runs_with_investigation(tmp_path):
+    """A study.yaml-only run in a nested study dir surfaces and carries its
+    investigation_slug derived from the path."""
+    ws = tmp_path / "ws"
+    nested = ws / "investigations" / "colonies" / "studies" / "colonies-02"
+    nested.mkdir(parents=True)
+    (nested / "study.yaml").write_text(yaml.safe_dump({
+        "name": "colonies-02",
+        "runs": [{"name": "perf-sweep", "status": "completed"}],
+    }))
+
+    sims = list_simulations(ws)
+    row = next((s for s in sims if s["run_id"] == "perf-sweep"), None)
+    assert row is not None, sims
+    assert row["study_slug"] == "colonies-02"
+    assert row["investigation_slug"] == "colonies"
+
+
 def test_list_cross_references_study_yaml_list_form(tmp_path):
     ws = tmp_path / "ws"
     (ws / "studies" / "foo").mkdir(parents=True)
