@@ -277,8 +277,15 @@ def _read_study_yaml_runs(workspace: Path) -> list[dict]:
                 "status": entry.get("status") or "completed",
                 "n_steps": entry.get("n_steps"),
                 "progress_step": entry.get("n_steps") or 0,
-                "started_at": entry.get("started_at"),
-                "completed_at": entry.get("completed_at") or entry.get("started_at"),
+                # `record_runs` (pbg_superpowers.study_outcomes) writes the run's
+                # completion time as `timestamp` (= db completed_at or started_at),
+                # NOT as started_at/completed_at — so without this fallback the
+                # Simulations DB Time column stayed blank for every study.yaml-
+                # recorded run even though the time was recorded.
+                "started_at": entry.get("started_at") or entry.get("timestamp"),
+                "completed_at": (entry.get("completed_at")
+                                 or entry.get("started_at")
+                                 or entry.get("timestamp")),
                 "db_path": None,
                 "studies": [sdir.name],
                 "study_slug": sdir.name,
