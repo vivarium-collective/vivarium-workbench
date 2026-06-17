@@ -2708,6 +2708,13 @@ _ISET_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 # derivation rules are inspectable / overridable from tests.
 _STUDY_STATUS_FAILED = frozenset({"failed", "invalid"})
 _STUDY_STATUS_COMPLETE = frozenset({"complete", "ran"})
+# Terminal "done" states for the INVESTIGATION roll-up only. A study that has
+# been evaluated (or decided) is finished from the investigation's point of
+# view — Simulate -> Evaluate -> Decide — so an all-evaluated investigation
+# reads "complete" rather than falling through to "in_progress". Kept separate
+# from _STUDY_STATUS_COMPLETE so the PER-STUDY badge still shows "evaluated"
+# verbatim (compute_study_effective_status is unchanged).
+_STUDY_STATUS_DONE_ROLLUP = _STUDY_STATUS_COMPLETE | frozenset({"evaluated", "decided"})
 _STUDY_STATUS_RUNNING = frozenset({"running", "implementing", "runnable", "analyzing"})
 _STUDY_STATUS_PLANNED = frozenset({"planned", "planning"})
 
@@ -2738,8 +2745,8 @@ def compute_investigation_status(
     if any(s in _STUDY_STATUS_FAILED for s in statuses):
         return "failed"
 
-    # 2: non-empty list, every child complete/ran.
-    if statuses and all(s in _STUDY_STATUS_COMPLETE for s in statuses):
+    # 2: non-empty list, every child done (complete/ran/evaluated/decided).
+    if statuses and all(s in _STUDY_STATUS_DONE_ROLLUP for s in statuses):
         return "complete"
 
     # 3: anything in the "active" set → running. (Mere accumulated runs no
@@ -2748,7 +2755,7 @@ def compute_investigation_status(
         return "running"
 
     # 4: at least one done OR any accumulated runs, but not all → mixed-progress.
-    if any(s in _STUDY_STATUS_COMPLETE for s in statuses) or any(has_runs):
+    if any(s in _STUDY_STATUS_DONE_ROLLUP for s in statuses) or any(has_runs):
         return "in_progress"
 
     # 5: default.
