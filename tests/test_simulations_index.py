@@ -38,6 +38,23 @@ def test_list_walks_workspace_and_studies_dbs(tmp_path):
     assert all(s["studies"] == [] for s in sims)
 
 
+def test_study_yaml_run_timestamp_maps_to_started_completed(tmp_path):
+    """`record_runs` records a run's time as `timestamp` (not started_at/
+    completed_at). The Simulations DB must surface it so the Time column isn't
+    blank for study.yaml-recorded runs."""
+    ws = tmp_path / "ws"
+    (ws / "studies" / "foo").mkdir(parents=True)
+    (ws / "studies" / "foo" / "study.yaml").write_text(yaml.safe_dump({
+        "name": "foo",
+        "runs": [{"name": "r-ts", "status": "completed",
+                  "timestamp": 1234567890.0}],
+    }))
+    sims = list_simulations(ws)
+    row = next(s for s in sims if s["run_id"] == "r-ts")
+    assert row["started_at"] == 1234567890.0
+    assert row["completed_at"] == 1234567890.0
+
+
 def test_list_discovers_nested_investigation_study_dbs(tmp_path):
     """Runs under the nested layout
     ``investigations/<inv>/studies/<slug>/runs.db`` must be discovered too —
