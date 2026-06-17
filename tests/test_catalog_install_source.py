@@ -233,3 +233,39 @@ def test_module_registry_is_canonical_plus_overlay(tmp_path, monkeypatch):
     names2 = {m["name"] for m in srv.Handler._module_registry(object())}
     assert "pbg-localonly" in names2
     assert names2 >= names
+
+
+def test_uncurated_declared_import_surfaces_in_catalog(tmp_path, monkeypatch):
+    """A workspace.yaml import that the curated catalog doesn't know about
+    must still appear in /api/catalog as an installed module (install_source
+    'imports') — otherwise imported pbg-* repos silently vanish from the
+    Modules grid."""
+    import vivarium_dashboard.server as srv
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "workspace.yaml").write_text(yaml.safe_dump({
+        "schema_version": 2, "name": "t", "package_path": "pkg_t",
+        "imports": {
+            "pbg_ketchup": {  # NOT in the curated catalog below
+                "source": "https://github.com/x/pbg-ketchup",
+                "ref": "main", "description": "KETCHUP estimators",
+            },
+        },
+    }))
+    monkeypatch.setattr(srv, "WORKSPACE", ws)
+    # Curated catalog deliberately does NOT include pbg_ketchup.
+    monkeypatch.setattr(srv, "_read_workspace_pyproject_deps", lambda _w: set())
+    monkeypatch.setattr(srv, "_detect_workspace_venv_distributions", lambda _w: {})
+    monkeypatch.setattr(srv, "_check_installed_module_sync", lambda pkg, path: None)
+    import vivarium_dashboard.server  # ensure module ref
+    monkeypatch.setattr("pbg_superpowers.catalog.load_registry",
+                        lambda _w: [{"name": "pbg-copasi", "package": "pbg_copasi",
+                                     "description": "c"}])
+
+    data = srv._catalog_data(ws)
+    by_name = {m["name"]: m for m in data["modules"]}
+    assert "pbg_ketchup" in by_name, list(by_name)
+    ket = by_name["pbg_ketchup"]
+    assert ket["installed"] is True
+    assert ket["install_source"] == "imports"
+    assert ket.get("source") == "https://github.com/x/pbg-ketchup"
