@@ -3310,6 +3310,19 @@ def _catalog_data(ws_root: "Path") -> dict:
     pyproject_deps = _read_workspace_pyproject_deps(ws_root)
     venv_dists = _detect_workspace_venv_distributions(ws_root)
 
+    # Normalized import lookup: key each declared import by its lowercased
+    # dash- AND underscore-forms so a curated module named "pbg-oxidizeme"
+    # matches an import declared as "pbg_oxidizeme" (the dash/underscore
+    # mismatch otherwise leaves reference-mode imports marked not-installed
+    # and hidden in the read-only Modules grid).
+    _imports_norm: dict = {}
+    if isinstance(imports, dict):
+        for _k, _v in imports.items():
+            kl = str(_k).lower()
+            _imports_norm[kl] = _v
+            _imports_norm[kl.replace("-", "_")] = _v
+            _imports_norm[kl.replace("_", "-")] = _v
+
     def _name_variants(m: dict) -> list:
         out: list = [m["name"].lower()]
         pn = m.get("pypi_name")
@@ -3321,13 +3334,14 @@ def _catalog_data(ws_root: "Path") -> dict:
 
     for m in modules:
         variants = _name_variants(m)
-        declared = m["name"] in imports
+        declared_imp = next((_imports_norm[v] for v in variants if v in _imports_norm), None)
+        declared = declared_imp is not None
         in_pyproject = any(v in pyproject_deps for v in variants)
         in_venv = any(v in venv_dists for v in variants)
         if declared:
             m["installed"] = True
             m["install_source"] = "imports"
-            imp = imports.get(m["name"], {}) or {}
+            imp = declared_imp or {}
             for k in ("source", "ref", "path", "install_path", "package"):
                 v = imp.get(k)
                 if v is not None:
@@ -3354,6 +3368,42 @@ def _catalog_data(ws_root: "Path") -> dict:
                 if sync_reason:
                     m["out_of_sync"] = True
                     m["out_of_sync_reason"] = sync_reason
+
+    # Surface workspace.yaml `imports` that aren't in the curated catalog
+    # (e.g. pbg-ketchup / pbg-parsimony / pbg-torch / pbg-oxidizeme) so EVERY
+    # declared import shows in the Modules grid as an installed module, not just
+    # the curated ones. Without this, an imported pbg-* repo that pbg_superpowers'
+    # catalog doesn't know about silently never appears here.
+    if isinstance(imports, dict):
+        _known_variants: set = set()
+        for m in modules:
+            for v in _name_variants(m):
+                _known_variants.add(v)
+        for imp_name, imp in imports.items():
+            imp = imp or {}
+            pkg = (imp.get("package") or imp_name).replace("-", "_")
+            variants = {str(imp_name).lower(), pkg.lower()}
+            if variants & _known_variants:
+                continue  # already represented by a curated entry
+            desc = (imp.get("description") or "").strip().split("\n")[0]
+            mod = {
+                "name": imp_name,
+                "package": pkg,
+                "description": desc or f"Imported package {imp_name}.",
+                "installed": True,
+                "install_source": "imports",
+            }
+            for k in ("source", "ref", "path", "install_path"):
+                if imp.get(k) is not None:
+                    mod[k] = imp[k]
+            # Mirror the out-of-sync check curated installed modules get, so an
+            # imported-but-unimportable package is flagged here too.
+            sync_reason = _check_installed_module_sync(pkg, mod.get("install_path"))
+            if sync_reason:
+                mod["out_of_sync"] = True
+                mod["out_of_sync_reason"] = sync_reason
+            modules.append(mod)
+            _known_variants |= variants
 
     reexport_origins = _build_reexport_origin_modules(ws_data, modules)
     if reexport_origins:
