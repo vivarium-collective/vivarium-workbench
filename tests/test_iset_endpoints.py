@@ -631,3 +631,38 @@ def test_iset_detail_with_list_acceptance_criteria_passes_through(_ws):
     resp, code = _build_iset_detail_for_test(_ws, "inv")
     assert code == 200, resp
     assert resp["acceptance_criteria"] == crits
+
+
+def test_registry_imports_meta_dict_and_list_forms():
+    """_registry_imports_meta returns per-repo metadata from workspace.yaml
+    imports (both dict and list shapes), sorted by name."""
+    from vivarium_dashboard.server import _registry_imports_meta
+
+    dict_form = {"imports": {
+        "pbg_ketchup": {"source": "https://github.com/x/pbg-ketchup",
+                        "ref": "main", "description": "KETCHUP estimators"},
+        "pbg_copasi": {"source": "https://github.com/x/pbg-copasi"},
+    }}
+    out = _registry_imports_meta(dict_form)
+    assert [e["name"] for e in out] == ["pbg_copasi", "pbg_ketchup"]  # sorted
+    ket = next(e for e in out if e["name"] == "pbg_ketchup")
+    assert ket["package"] == "pbg_ketchup"
+    assert ket["source"] == "https://github.com/x/pbg-ketchup"
+    assert ket["ref"] == "main"
+    assert ket["description"] == "KETCHUP estimators"
+
+    list_form = {"imports": [
+        {"name": "pbg-torch", "package": "pbg_torch",
+         "source": "https://github.com/x/pbg-torch"},
+        "viva-munk",
+    ]}
+    out2 = _registry_imports_meta(list_form)
+    pkgs = {e["package"] for e in out2}
+    assert "pbg_torch" in pkgs
+    assert "viva_munk" in pkgs  # bare-string entry, dashes normalized
+
+
+def test_registry_imports_meta_empty():
+    from vivarium_dashboard.server import _registry_imports_meta
+    assert _registry_imports_meta({}) == []
+    assert _registry_imports_meta(None) == []

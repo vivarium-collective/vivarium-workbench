@@ -560,6 +560,10 @@ except Exception as e:
         # is in the list (discovery is unchanged). No-op when unset → current
         # behavior (show everything).
         _apply_registry_include_filter(data, ws_data)
+        # Imported-repositories metadata (workspace.yaml::imports): name, source
+        # URL, ref, description — so the Registry can show each imported repo
+        # alongside the processes/steps it contributes (grouped by package).
+        data["imports"] = _registry_imports_meta(ws_data)
     except Exception as e:
         data = {"error": str(e), "processes": [], "types": []}
 
@@ -785,6 +789,42 @@ def _modules_override_pkgs(ws_data: dict | None) -> set[str] | None:
             if n:
                 pkgs.add(n)
     return pkgs or None
+
+
+def _registry_imports_meta(ws_data: dict | None) -> list[dict]:
+    """Return per-imported-repository metadata from ``workspace.yaml::imports``.
+
+    Each entry: ``{name, package, source, ref, description}`` where ``package``
+    is the normalized top-level Python package (so the frontend can match it
+    against each registry class's ``address`` prefix and list the
+    processes/steps that repo contributes). Tolerates both the dict form
+    (keyed by catalog name) and the list-of-dicts form. Never raises.
+    """
+    out: list[dict] = []
+    imports_raw = (ws_data or {}).get("imports") or []
+    items: list[tuple[str, dict]] = []
+    if isinstance(imports_raw, dict):
+        for cat_name, v in imports_raw.items():
+            items.append((str(cat_name), v if isinstance(v, dict) else {}))
+    elif isinstance(imports_raw, list):
+        for entry in imports_raw:
+            if isinstance(entry, dict):
+                items.append((str(entry.get("name") or ""), entry))
+            elif isinstance(entry, str):
+                items.append((entry, {}))
+    for cat_name, v in items:
+        pkg = (v.get("package") or cat_name).replace("-", "_").split(".")[0]
+        if not pkg:
+            continue
+        out.append({
+            "name": cat_name or pkg,
+            "package": pkg,
+            "source": v.get("source"),
+            "ref": v.get("ref"),
+            "description": (v.get("description") or "").strip(),
+        })
+    out.sort(key=lambda e: e["name"].lower())
+    return out
 
 
 def _registry_include_pkgs(ws_data: dict | None) -> set[str] | None:

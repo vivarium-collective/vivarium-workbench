@@ -1484,6 +1484,71 @@
     '</div>';
   }
 
+  // Imported repositories panel: one card per workspace.yaml::imports entry,
+  // showing the repo (linked to its source) + the registry classes it
+  // contributes (grouped by kind). Lets a user see "the actual repositories
+  // that are imported, as well as their processes/steps" without hunting
+  // through the flat per-kind tabs.
+  function _renderImportedRepos(imports, processes, types) {
+    var section = document.getElementById('registry-imports-section');
+    var el = document.getElementById('registry-imports-container');
+    var countEl = document.getElementById('registry-imports-count');
+    if (!section || !el) return;
+    if (!imports || !imports.length) { section.hidden = true; return; }
+    section.hidden = false;
+    if (countEl) countEl.textContent = imports.length;
+
+    // Index classes by top-level package.
+    var byPkg = {};
+    (processes || []).forEach(function(p) {
+      var pkg = (p.address || '').split('.')[0];
+      (byPkg[pkg] = byPkg[pkg] || []).push(p);
+    });
+    (types || []).forEach(function(t) {
+      var pkg = (t.address || t.name || '').split('.')[0];
+      (byPkg[pkg] = byPkg[pkg] || []).push({name: t.name, kind: 'type'});
+    });
+
+    var KIND_LABEL = {process: 'Processes', step: 'Steps', emitter: 'Emitters',
+                      visualization: 'Visualizations', type: 'Types', other: 'Other'};
+    var KIND_ORDER = ['process', 'step', 'emitter', 'visualization', 'type', 'other'];
+
+    el.innerHTML = imports.map(function(imp) {
+      var classes = byPkg[imp.package] || [];
+      var groups = {};
+      classes.forEach(function(c) {
+        var k = c.kind || 'other';
+        (groups[k] = groups[k] || []).push(c.name);
+      });
+      var body = KIND_ORDER.filter(function(k) { return groups[k] && groups[k].length; })
+        .map(function(k) {
+          var names = groups[k].slice().sort();
+          return '<div class="imported-repo-kind">' +
+            '<span class="imported-repo-kind-label">' + _esc(KIND_LABEL[k] || k) +
+            ' (' + names.length + ')</span> ' +
+            names.map(function(n) {
+              return '<span class="tag-pill" style="background:#eef2ff;color:#3730a3">' + _esc(n) + '</span>';
+            }).join(' ') +
+            '</div>';
+        }).join('');
+      if (!classes.length) {
+        body = '<p class="muted" style="font-size:0.85em;margin:6px 0 0">No registered classes discovered (package may be install-gated).</p>';
+      }
+      var refBadge = imp.ref
+        ? ' <span class="tag-pill" style="background:#f1f5f9;color:#475569">@' + _esc(imp.ref) + '</span>'
+        : '';
+      var title = imp.source
+        ? '<a href="' + _esc(imp.source) + '" target="_blank" rel="noopener">' + _esc(imp.name) + '</a>'
+        : _esc(imp.name);
+      return '<div class="module-card module-card-workspace">' +
+        '<div class="module-card-header"><strong>' + title + '</strong>' + refBadge +
+        ' <span class="tag-pill" style="background:#dcfce7;color:#166534">' + classes.length + ' classes</span></div>' +
+        (imp.description ? '<p class="module-desc">' + _esc(imp.description) + '</p>' : '') +
+        body +
+        '</div>';
+    }).join('');
+  }
+
   function _renderRegistryGrid(containerId, entries) {
     var el = document.getElementById(containerId);
     if (!el) return;
@@ -1652,6 +1717,10 @@
           if (!byKind[k]) byKind[k] = [];
           byKind[k].push(p);
         });
+
+        // Imported repositories (workspace.yaml::imports) + their contributed
+        // processes/steps — rendered above the kind tabs.
+        _renderImportedRepos(data.imports || [], processes, types);
 
         // Render tabbed Registry browser (Registry page).
         _renderRegistryGrid('registry-processes-container', byKind.process);
@@ -1864,12 +1933,15 @@
     // between the last workspace-local item and the first non-local item
     // when the workspace-first sort is active and both groups are present.
     // Returns '' otherwise so existing layouts are byte-identical.
+    var _otherCount = composites.filter(function(c) { return !c.workspace_local; }).length;
     function _maybeDivider(prev, cur) {
       if (window._compositesSort !== 'workspace-first') return '';
       if (!prev || !cur) return '';
       if (prev.workspace_local && !cur.workspace_local) {
         return '<div class="composite-section-divider">'
-             + '<span>Other installed pbg-* modules</span></div>';
+             + '<span>Other installed pbg-* modules'
+             + (_otherCount ? ' (' + _otherCount + ')' : '')
+             + '</span></div>';
       }
       return '';
     }

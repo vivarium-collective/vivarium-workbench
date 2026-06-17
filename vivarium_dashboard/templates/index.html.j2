@@ -726,6 +726,14 @@ window.addEventListener('pageshow', function (e) {
     <button class="action-btn" onclick="_loadRegistry(true)">Refresh registry</button>
     <div id="registry-status" class="muted" style="margin:8px 0"></div>
 
+    <!-- Imported repositories (workspace.yaml::imports) + the processes/steps
+         each one contributes. Populated by _renderImportedRepos. -->
+    <div id="registry-imports-section" hidden>
+      <h3 style="margin:14px 0 2px">Imported repositories <span class="count-badge" id="registry-imports-count"></span></h3>
+      <p class="panel-lead" style="margin:2px 0 10px">External pbg-* repositories this workspace declares in <code>workspace.yaml: imports</code>, and the Processes / Steps / Emitters / Visualizations each contributes.</p>
+      <div id="registry-imports-container" class="module-grid"></div>
+    </div>
+
     <div class="registry-tabs">
       <button class="registry-tab active" data-kind="process"       onclick="_setRegistryTab('process')">Processes <span class="count-badge" id="registry-process-count"></span></button>
       <button class="registry-tab"        data-kind="step"          onclick="_setRegistryTab('step')">Steps <span class="count-badge" id="registry-step-count"></span></button>
