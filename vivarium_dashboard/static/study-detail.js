@@ -228,12 +228,26 @@
   window._seedFollowupProposal = _seedFollowupProposal;
 
   // ── Pop out the bigraph-loom STATIC (read-only) view of a composite. Used by
-  // the Build-tab Model block. stateUrl points at the live composite-state
-  // endpoint; the loom unwraps {state}.
+  // the Build-tab Model block.
+  //
+  // Snapshot mode (the hosted read-only dashboard) serves pre-resolved composite
+  // state as STATIC FILES at <basePath>/api/composite-state/<id>.json and the
+  // loom entry point at <basePath>/bigraph-loom/ — BOTH must carry the configured
+  // base path (e.g. /v2ecoli/dashboard on a GitHub Pages project site). The live
+  // server instead answers the query form /api/composite-state?ref=<id> at the
+  // origin root. Using the live form (or omitting the base path) in snapshot mode
+  // 404s the pop-out — mirror walkthrough.js _loomStaticPopout here.
   function _openCompositeLoom(composite) {
     if (!composite) return;
-    var stateUrl = '/api/composite-state?ref=' + encodeURIComponent(composite);
-    var u = '/bigraph-loom/index.html?static=1&stateUrl=' + encodeURIComponent(stateUrl);
+    var cfg = (typeof window !== 'undefined' && window.__DASH_CONFIG__) || {};
+    var isSnap = cfg.mode === 'snapshot';
+    var origin = (typeof location !== 'undefined' && location.origin
+                  && /^https?:/.test(location.origin)) ? location.origin : '';
+    var base = origin + (isSnap ? (cfg.basePath || '') : '');
+    var stateUrl = isSnap
+      ? base + '/api/composite-state/' + encodeURIComponent(composite) + '.json'
+      : base + '/api/composite-state?ref=' + encodeURIComponent(composite);
+    var u = base + '/bigraph-loom/index.html?static=1&stateUrl=' + encodeURIComponent(stateUrl);
     window.open(u, 'loom', 'width=1200,height=840');
   }
   window._openCompositeLoom = _openCompositeLoom;
