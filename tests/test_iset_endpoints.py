@@ -42,6 +42,24 @@ def test_compute_status_complete_when_all_children_ran():
     assert compute_investigation_status(["ran", "ran"]) == "complete"
 
 
+def test_compute_status_complete_when_all_children_evaluated():
+    # 'evaluated' (and 'decided') are terminal lifecycle states
+    # (Simulate -> Evaluate -> Decide), so an all-evaluated investigation reads
+    # complete rather than falling through to in_progress. Regression: the badge
+    # previously showed in_progress for finished investigations like
+    # surrogate-modeling / colonies / ketchup whose studies terminate at
+    # 'evaluated'.
+    assert compute_investigation_status(["evaluated", "evaluated"]) == "complete"
+    assert compute_investigation_status(["ran", "evaluated", "decided"]) == "complete"
+
+
+def test_compute_status_in_progress_when_evaluated_mixed_with_planned():
+    # A genuinely-unfinished investigation (some evaluated, some still planned)
+    # must stay in_progress, not flip to complete.
+    assert compute_investigation_status(
+        ["evaluated", "evaluated", "planned"]) == "in_progress"
+
+
 def test_compute_status_running_when_any_child_running():
     assert compute_investigation_status(["planned", "running", "planned"]) == "running"
 

@@ -5397,18 +5397,27 @@
       // Single display name everywhere: authored title:, else the shared
       // _humanizeStudyName derivation (same as control panel + study page).
       var prettyTitle = s.title || _humanizeStudyName(s.name).title;
-      // Show the FULL question + claim (no truncation) — the card grows to fit.
+      // Question + claim teaser. The claim can be an entire research-log
+      // paragraph (e.g. pdmp-01), which blows the card up to fill the canvas —
+      // so it's CSS line-clamped to a few lines below; the full text lives one
+      // click away on the study page (and on hover via the node title).
       var asks = (s.question || '').replace(/\s+/g, ' ').split(/[.?]/)[0].trim();
       var findings = _asFindings(s.findings);
       var claim = (s.claim ||
         (findings[0] && (findings[0].summary || findings[0].statement || findings[0].id)) || ''
       ).replace(/\s+/g, ' ').trim();
       var moreN = findings.length > 1 ? findings.length - 1 : 0;
+      // Shared line-clamp style — keeps every DAG card compact regardless of
+      // how long its question/claim text is.
+      var _clamp = function(lines) {
+        return 'display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:' +
+          lines + ';line-clamp:' + lines + ';overflow:hidden;';
+      };
 
       var node = document.createElement('div');
       node.className = 'iset-dag-node';
       node.onclick = function() { _openStudyInsideInvestigation(s.name); };
-      node.title = s.name + ' — ' + confidence;
+      node.title = s.name + ' — ' + confidence + (claim ? '\n\nFinds: ' + claim : '');
       var x = PAD_X + depth[s.name] * (CARD_W + X_GAP);
       node.style.cssText =
         'position:absolute;left:' + x + 'px;top:0px;' +
@@ -5433,14 +5442,14 @@
           '<span style="font-size:0.62em;font-weight:700;color:' + ss.color + ';white-space:nowrap;margin-top:1px">' + _esc(confidence) + '</span>' +
         '</div>' +
         (asks
-          ? '<div style="font-size:0.72em;margin-top:7px;line-height:1.35;color:#64748b">' +
+          ? '<div style="font-size:0.72em;margin-top:7px;line-height:1.35;color:#64748b;' + _clamp(2) + '">' +
               '<span style="font-weight:600;color:#475569">Asks:</span> ' + _esc(asks) + '</div>'
           : '') +
-        '<div style="font-size:0.72em;margin-top:5px;line-height:1.35;color:#64748b">' +
+        '<div style="font-size:0.72em;margin-top:5px;line-height:1.35;color:#64748b;' + _clamp(5) + '">' +
           '<span style="font-weight:600;color:#475569">Finds:</span> ' +
           (claim ? _esc(claim) : '<em style="color:#94a3b8">pending evidence</em>') +
-          (moreN ? ' <span style="color:#94a3b8">+' + moreN + ' more</span>' : '') +
         '</div>' +
+        (moreN ? '<div style="font-size:0.72em;margin-top:2px;color:#94a3b8">+' + moreN + ' more</div>' : '') +
         followUpsChip;
       node._followUps = followUps;
       nodesHost.appendChild(node);
