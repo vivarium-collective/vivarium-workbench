@@ -121,14 +121,26 @@ bulk download stays on the existing `POST /data`).
 
 ### 5. Dashboard UI (`static/`)
 A **"Run on remote (smsvpctest)"** panel within the study view, visible only when
-logged in (reuse `github-login.js` state). Inputs: repo/branch (default v2ecoli),
-`num_generations`, `num_seeds`, `n_steps`, `run_parca`, and an **observables /
-emitter-config selector** (which emitted states to capture — controls compaction).
-Launch → `remote-run-start`; progress via the existing poll pattern with the
-four-stage strip. On completion the run appears in the study's normal runs list and
-its charts render from `runs.db`.
+logged in (reuse `github-login.js` state). Inputs are **dashboard-set per launch**:
+repo/branch (default v2ecoli), `num_generations`, `num_seeds`, `n_steps`,
+`run_parca`. The **emitter config (observables) comes from the study's observables
+setting** — see §7 — not a free-form per-launch field, though the panel shows the
+effective set. Launch → `remote-run-start`; progress via the existing poll pattern
+with the four-stage strip. On completion the run appears in the study's normal runs
+list and its charts render from `runs.db`.
 
-### 6. Landing as a study run (dashboard)
+### 6. Study observables drive the emitter config
+The set of emitted states for a run is sourced from the **study's observables
+setting**. Default (when a study has not narrowed it): the **full v2ecoli set —
+all bulk molecules, all listeners, all unique molecules**. A study may narrow this
+to sample fewer states, which directly compacts the emitter store (especially
+effective with the XArray emitter). The `RemoteRunManager` reads the study's
+observables and passes them as the `observables` param at submission, so emitter
+compaction is configured once, per study, and reused by every remote run of that
+study. (Reuse the existing per-study observables concept if present; otherwise add
+a study-level observables setting.)
+
+### 7. Landing as a study run (dashboard)
 The `simulation_id` is the durable reference handle: the server creates a run record
 in `studies/<slug>/runs.db` (same path local runs use) that stores remote provenance
 — `simulation_id`, `experiment_id`, commit SHA, backend (`ray`), and the S3 results
@@ -190,9 +202,13 @@ The dashboard job threads these through and persists them on the study run recor
    suited to the XArray emitter) and defines what the results endpoint can return.
    The launch panel exposes this selector; charts default to the emitted set.
 
+3. **Run parameters are dashboard-set per launch** (`num_generations`, `num_seeds`,
+   `n_steps`, `run_parca`), not pulled from the `config.ray_*` server defaults.
+4. **Observables come from the study's observables setting** (§6). Default = the
+   full v2ecoli set (all bulk molecules, listeners, unique molecules); studies
+   narrow it to sample less and compact the emitter store.
+
 ## Open questions for review
-1. Whether `num_generations`/`num_seeds`/`n_steps` defaults should come from the
-   `config.ray_*` server defaults (`n_steps=600`, `chunk=60`, `parca_mode=full`) or
-   be dashboard-set per launch.
-2. Default observable/emitter-config preset offered in the launch panel (a sensible
-   v2ecoli readout set) vs. requiring an explicit selection each time.
+None outstanding. (One implementation detail to confirm during planning: whether a
+per-study observables setting already exists to reuse, or a new study-level setting
+is needed.)
