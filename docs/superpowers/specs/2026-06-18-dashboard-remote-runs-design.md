@@ -71,7 +71,8 @@ Dashboard Python server
    ├─ RemoteRunManager (background thread; mirrors RunJobManager)
    │     1. push v2ecoli branch  (existing git machinery + GH_TOKEN)
    │     2. POST /core/v1/simulator/upload   → simulator_id ; poll build status
-   │     3. POST /api/v1/simulations         → simulation_id (Ray auto-selected)
+   │     3. POST /api/v1/simulations         → simulation_id (Ray auto-selected;
+   │           observables param = emitter config / emitted states)
    │     4. GET  /api/v1/simulations/{id}/status   (poll to terminal)
    │     5. GET  /api/v1/simulations/{id}/observables  (NEW; read S3 emitter)
    │     6. write run record + observables into studies/<slug>/runs.db (SQLiteEmitter)
@@ -121,16 +122,21 @@ bulk download stays on the existing `POST /data`).
 ### 5. Dashboard UI (`static/`)
 A **"Run on remote (smsvpctest)"** panel within the study view, visible only when
 logged in (reuse `github-login.js` state). Inputs: repo/branch (default v2ecoli),
-`num_generations`, `num_seeds`, `n_steps`, `run_parca`. Launch → `remote-run-start`;
-progress via the existing poll pattern with the four-stage strip. On completion the
-run appears in the study's normal runs list and its charts render from `runs.db`.
+`num_generations`, `num_seeds`, `n_steps`, `run_parca`, and an **observables /
+emitter-config selector** (which emitted states to capture — controls compaction).
+Launch → `remote-run-start`; progress via the existing poll pattern with the
+four-stage strip. On completion the run appears in the study's normal runs list and
+its charts render from `runs.db`.
 
 ### 6. Landing as a study run (dashboard)
-On step 6, the server creates a run record in `studies/<slug>/runs.db` (same path
-local runs use) and writes the fetched observables through the **SQLiteEmitter**, so
-the existing chart/observable pipeline renders them with no special-casing. The run
-record stores remote provenance: `simulation_id`, `experiment_id`, commit SHA,
-backend (`ray`), and the S3 results URI.
+The `simulation_id` is the durable reference handle: the server creates a run record
+in `studies/<slug>/runs.db` (same path local runs use) that stores remote provenance
+— `simulation_id`, `experiment_id`, commit SHA, backend (`ray`), and the S3 results
+URI — keyed by `simulation_id` so results can be (re)queried at any time. It then
+fetches the emitted observables via the new endpoint and writes them through the
+**SQLiteEmitter**, so the existing chart/observable pipeline renders them with no
+special-casing. The stored `simulation_id` also lets the study later re-fetch
+additional observables (within whatever the emitter config captured) without re-running.
 
 *Alternative considered:* keep results remote and query the sms-api endpoint
 on-demand at chart render time (no local copy). Rejected for v1 because it bypasses
@@ -174,11 +180,19 @@ The dashboard job threads these through and persists them on the study run recor
   analysis-module step, arbitrary-document compose-on-Ray, multi-study/batch
   triggering.
 
+## Resolved during review
+1. **Run identity / study attachment:** the remote run returns a `simulation_id`
+   that is stored on the study run record as the durable reference handle. The run
+   attaches to the study from whose view it was launched.
+2. **Observables:** observables/readouts are the **emitted states**, set in the
+   **emitter config at submission** (the `observables` param on
+   `POST /api/v1/simulations`). This controls data compaction (especially well
+   suited to the XArray emitter) and defines what the results endpoint can return.
+   The launch panel exposes this selector; charts default to the emitted set.
+
 ## Open questions for review
-1. Exactly which study a remote run attaches to — an existing selected study, or a
-   dedicated "remote" study created on demand? (Assumed: the study from whose view
-   the user launches.)
-2. Default observable set to fetch/chart on completion (vs. requiring the user to
-   pick from the index first).
-3. Whether `num_generations`/`num_seeds`/`n_steps` defaults should come from the
-   `config.ray_*` server defaults or be dashboard-set.
+1. Whether `num_generations`/`num_seeds`/`n_steps` defaults should come from the
+   `config.ray_*` server defaults (`n_steps=600`, `chunk=60`, `parca_mode=full`) or
+   be dashboard-set per launch.
+2. Default observable/emitter-config preset offered in the launch panel (a sensible
+   v2ecoli readout set) vs. requiring an explicit selection each time.
