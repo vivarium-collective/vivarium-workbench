@@ -61,7 +61,7 @@ def land_remote_run(
     with tempfile.TemporaryDirectory() as td:
         extract_root = Path(td)
         with tarfile.open(tar_path, "r:gz") as tar:
-            tar.extractall(extract_root)  # noqa: S202 — trusted internal artifact from our own API
+            tar.extractall(extract_root, filter="data")  # noqa: S202 — trusted internal artifact from our own API
         kind, src = _detect_and_locate(extract_root, seed)
         if kind == "zarr":
             dest = study_dir / f"runs.{run_id}.zarr"
