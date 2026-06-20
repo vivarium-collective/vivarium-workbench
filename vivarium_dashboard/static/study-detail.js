@@ -730,10 +730,9 @@
   // --- Runs ---
   bindAll('.btn-view-run', function(btn) {
     // A study's results render in the Visualizations tab (charts from the run
-    // store). The old target '/composite-explorer?run_id=...' is a dead route
-    // (404 — the explorer is a hash-route in the main SPA, not a standalone
-    // page), so View opened a blank page for every run. Route to the working
-    // results view instead.
+    // store). The old target was a dead route — the composite explorer is a
+    // hash-route in the main SPA, not a standalone page (404), so View opened a
+    // blank page for every run. Route to the working results view instead.
     _setStudyTab('visualizations');
     var panel = document.getElementById('panel-visualizations');
     if (panel && panel.scrollIntoView) { try { panel.scrollIntoView({block: 'start'}); } catch (e) {} }
