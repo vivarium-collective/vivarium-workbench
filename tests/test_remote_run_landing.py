@@ -50,9 +50,10 @@ def test_land_remote_run_writes_all_three_tables(tmp_path: Path):
     assert json.loads(meta[3])["simulation_id"] == 49  # provenance persisted
 
     sim = conn.execute(
-        "SELECT simulation_id FROM simulations WHERE name=?", (run_id,)
+        "SELECT simulation_id, metadata FROM simulations WHERE name=?", (run_id,)
     ).fetchone()
     assert sim is not None and sim[0] == run_id
+    assert json.loads(sim[1])["simulation_id"] == 49  # provenance in simulations.metadata too
 
     hist = conn.execute(
         "SELECT step, global_time, state FROM history WHERE simulation_id=? ORDER BY step", (run_id,)

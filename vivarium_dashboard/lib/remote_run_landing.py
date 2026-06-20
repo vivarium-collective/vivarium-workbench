@@ -98,19 +98,21 @@ def land_remote_run(
     finally:
         conn.close()
 
-    # 2. simulations + history tables and rows (inline schema)
-    hconn = sqlite3.connect(str(db_path), isolation_level=None)
+    # 2. simulations + history tables and rows (inline schema) — single transaction
+    hconn = sqlite3.connect(str(db_path))
+    hconn.execute("PRAGMA busy_timeout=5000")
     try:
         _init_emitter_tables(hconn)
-        hconn.execute(
-            "INSERT OR REPLACE INTO simulations "
-            "(simulation_id, name, started_at, metadata) VALUES (?, ?, ?, ?)",
-            (run_id, run_id, started_iso, json.dumps(provenance)),
-        )
-        hconn.executemany(
-            "INSERT OR REPLACE INTO history (simulation_id, step, global_time, state) VALUES (?, ?, ?, ?)",
-            [(run_id, step, gt, state) for (step, gt, state) in blobs],
-        )
+        with hconn:
+            hconn.execute(
+                "INSERT OR REPLACE INTO simulations "
+                "(simulation_id, name, started_at, metadata) VALUES (?, ?, ?, ?)",
+                (run_id, run_id, started_iso, json.dumps(provenance)),
+            )
+            hconn.executemany(
+                "INSERT OR REPLACE INTO history (simulation_id, step, global_time, state) VALUES (?, ?, ?, ?)",
+                [(run_id, step, gt, state) for (step, gt, state) in blobs],
+            )
     finally:
         hconn.close()
 
