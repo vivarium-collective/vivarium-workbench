@@ -11,7 +11,7 @@
 **Repo:** `/Users/eranagmon/code/vivarium-dashboard` (branch `feat/dashboard-remote-runs`).
 
 ## Global Constraints
-- No new deps; vanilla JS only; match existing SPA style (`api(method,path,body)` wrapper, `_h()` HTML-escape, window-scoped handlers).
+- No new deps; vanilla JS only; match existing SPA style (`api(method,path,body)` wrapper, `escapeHtmlForTests()` HTML-escape, window-scoped handlers).
 - The panel calls the LIVE `/api/remote-run-start` / `/api/remote-run-status` (mutation endpoints; no snapshot/DataSource equivalent) via raw `fetch` at the origin.
 - **Login gate = the server's 401.** The handler must detect a 401 from `/api/remote-run-start` and show "Log in with GitHub to run remotely" rather than failing silently. Do not depend on the login chip existing on the study page.
 - Poll interval 2000ms; stop on job `status` of `done` or `failed` (matches the existing pattern).
@@ -20,7 +20,7 @@
 
 ## Confirmed anchors (from the codebase)
 - Runs-tab panel: `study-detail.html:1622` → `<section class="study-tab-panel" data-kind="runs" id="panel-runs">` (contains `#runs-table`). Add the launch panel at the TOP of this section.
-- `study-detail.js:3` `api(method, path, body) -> {status, body}`; `studyName()` (`study-detail.js:411`); `_h()` HTML-escape helper exists in study-detail.js.
+- `study-detail.js:3` `api(method, path, body) -> {status, body}`; `studyName()` (`study-detail.js:411`); `escapeHtmlForTests()` HTML-escape helper exists in study-detail.js.
 - Pattern to mirror: `walkthrough.js:5223` (POST→job_id), `:5265` (`setTimeout(tick, 2000)` poll loop), `:5288` (render per-item progress).
 - Tests read `(server.STATIC_DIR / "study-detail.js").read_text()` and the `study-detail.html` template text (test_data_endpoints.py:594, :159).
 
@@ -116,7 +116,7 @@ git commit -m "feat(remote-runs): launch-panel form in the study Runs tab"
 - Test: `tests/test_remote_run_panel.py`
 
 **Interfaces:**
-- Consumes (served page): `#remote-run-form`, `#remote-run-progress`, `#remote-run-btn`; `api`, `studyName`, `_h` (existing in study-detail.js); endpoints `/api/remote-run-start`, `/api/remote-run-status`.
+- Consumes (served page): `#remote-run-form`, `#remote-run-progress`, `#remote-run-btn`; `api`, `studyName`, `escapeHtmlForTests` (existing in study-detail.js); endpoints `/api/remote-run-start`, `/api/remote-run-status`.
 - Produces: `window._submitRemoteRun(ev)`, `_pollRemoteRun(jobId)`, `_renderRemoteRunProgress(job)`.
 
 - [ ] **Step 1: Write the failing test**
@@ -153,7 +153,7 @@ Expected: FAIL — `_submitRemoteRun` not in study-detail.js.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Append to `vivarium_dashboard/static/study-detail.js` (before any trailing IIFE close; if the file is a plain script, append at end). Use the existing `_h` escape helper:
+Append to `vivarium_dashboard/static/study-detail.js` (before any trailing IIFE close; if the file is a plain script, append at end). Use the existing `escapeHtmlForTests` escape helper:
 
 ```javascript
 // ---- Remote run (smsvpctest) -------------------------------------------
@@ -186,7 +186,7 @@ function _submitRemoteRun(ev) {
     }
     if (res.status !== 202 || !res.body.job_id) {
       if (prog) { prog.hidden = false; prog.innerHTML =
-        '<div class="inv-run-err">Could not start: ' + _h((res.body && res.body.error) || res.status) + '</div>'; }
+        '<div class="inv-run-err">Could not start: ' + escapeHtmlForTests((res.body && res.body.error) || res.status) + '</div>'; }
       if (btn) { btn.disabled = false; btn.textContent = '▶ Run on remote'; }
       return;
     }
@@ -220,16 +220,16 @@ function _renderRemoteRunProgress(job) {
   prog.hidden = false;
   var icon = {pending: '⋯', running: '▶', done: '✓', failed: '✗'};
   var steps = (job.steps || []).map(function(s) {
-    var msg = s.message ? ' <span class="muted">' + _h(s.message) + '</span>' : '';
+    var msg = s.message ? ' <span class="muted">' + escapeHtmlForTests(s.message) + '</span>' : '';
     return '<div class="inv-run-item inv-run-' + (s.status || 'pending') + '">'
       + '<span class="inv-run-icon">' + (icon[s.status] || '?') + '</span> '
-      + '<code>' + _h(s.name) + '</code>' + msg + '</div>';
+      + '<code>' + escapeHtmlForTests(s.name) + '</code>' + msg + '</div>';
   }).join('');
   var head;
   if (job.status === 'done') {
-    head = '<strong>✓ Done.</strong> Landed run <code>' + _h(job.run_id || '') + '</code> — refresh to see it.';
+    head = '<strong>✓ Done.</strong> Landed run <code>' + escapeHtmlForTests(job.run_id || '') + '</code> — refresh to see it.';
   } else if (job.status === 'failed') {
-    head = '<strong class="inv-run-err">✗ Failed.</strong> ' + _h(job.error || '');
+    head = '<strong class="inv-run-err">✗ Failed.</strong> ' + escapeHtmlForTests(job.error || '');
   } else {
     head = '<strong>Running…</strong>';
   }
