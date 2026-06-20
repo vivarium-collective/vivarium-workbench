@@ -207,7 +207,7 @@
         var color = d3.scaleOrdinal(d3.schemeCategory10);
         svg.selectAll("path").data(root.leaves()).enter().append("path")
           .attr("d", function (d) { return "M" + d.polygon.join("L") + "Z"; })
-          .attr("fill", function (d, i) { return color(i); })
+          .attr("fill", function (d) { return color(d.data.name); })
           .attr("stroke", "#0e1116").attr("stroke-width", 1.5)
           .append("title").text(function (d) { return d.data.name + ": " + d.data.value.toFixed(2); });
       }
