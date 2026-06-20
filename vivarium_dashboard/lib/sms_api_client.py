@@ -8,6 +8,8 @@ base_url (the SSM tunnel, default http://localhost:8080).
 from __future__ import annotations
 
 import json
+import shutil
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -99,3 +101,19 @@ class SmsApiClient:
         if observables:
             params["observables"] = observables  # list → repeated key via doseq
         return self._post("/api/v1/simulations", params=params)
+
+    def download_data(self, simulation_id: int, dest_dir: Path) -> Path:
+        """Stream the run's native-store tar.gz (POST /data) to dest_dir/sim_<id>.tar.gz."""
+        dest_dir = Path(dest_dir)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        out_path = dest_dir / f"sim_{simulation_id}.tar.gz"
+        url = f"{self.base_url}/api/v1/simulations/{simulation_id}/data"
+        req = Request(url, data=b"", method="POST", headers={"Accept": "application/gzip"})
+        try:
+            with urlopen(req, timeout=self.timeout) as r, open(out_path, "wb") as f:  # noqa: S310
+                shutil.copyfileobj(r, f)
+        except HTTPError as e:
+            raise SmsApiError(f"POST {url} -> {e.code}") from e
+        except (URLError, OSError) as e:
+            raise SmsApiError(f"POST {url} failed (sms-api unreachable — is the tunnel up?): {e}") from e
+        return out_path

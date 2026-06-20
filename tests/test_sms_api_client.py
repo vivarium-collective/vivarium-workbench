@@ -1,6 +1,7 @@
 import io
 import json
 from contextlib import contextmanager
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -95,3 +96,36 @@ def test_upload_simulator_sends_json_body(monkeypatch):
     assert cap["method"] == "POST"
     assert json.loads(cap["body"].decode())["git_commit_hash"] == "abc"
     assert "force=true" in cap["url"]
+
+
+def test_download_data_streams_to_file(monkeypatch, tmp_path):
+    cap = {}
+    payload = b"\x1f\x8b\x08fake-gzip-bytes"
+
+    class _RawResp:
+        status = 200
+
+        def __init__(self):
+            self._b = io.BytesIO(payload)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            self._b.close()
+
+        def read(self, n=-1):
+            return self._b.read(n)
+
+    def fake_urlopen(req, timeout=None):
+        cap["url"] = req.full_url
+        cap["method"] = req.get_method()
+        return _RawResp()
+
+    monkeypatch.setattr("vivarium_dashboard.lib.sms_api_client.urlopen", fake_urlopen)
+    c = SmsApiClient("http://h:8080")
+    out = c.download_data(49, tmp_path)
+    assert out == tmp_path / "sim_49.tar.gz"
+    assert out.read_bytes() == payload
+    assert cap["method"] == "POST"
+    assert cap["url"] == "http://h:8080/api/v1/simulations/49/data"
