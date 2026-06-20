@@ -31,6 +31,7 @@ class RemoteRunJob:
         self.status = "queued"
         self.steps = [{"name": n, "status": "pending", "message": ""} for n in STEP_NAMES]
         self.run_id: str | None = None
+        self.simulation_id: int | None = None
         self.error: str | None = None
         self.started_at = _now()
         self.completed_at: str | None = None
@@ -54,6 +55,7 @@ class RemoteRunJob:
                 "status": self.status,
                 "steps": [dict(s) for s in self.steps],
                 "run_id": self.run_id,
+                "simulation_id": self.simulation_id,
                 "error": self.error,
                 "started_at": self.started_at,
                 "completed_at": self.completed_at,
@@ -163,6 +165,7 @@ def run_remote_pipeline(job: RemoteRunJob, ctx: PipelineCtx) -> None:
             num_seeds=ctx.num_seeds, run_parca=ctx.run_parca, observables=ctx.observables,
         )
         simulation_id = sim["database_id"]
+        job.simulation_id = simulation_id
         experiment_id = sim.get("experiment_id") or f"sim{simulator_id}-{ctx.study}"
         job.set_step("run", "done", f"simulation {simulation_id}")
 

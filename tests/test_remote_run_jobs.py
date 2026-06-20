@@ -108,6 +108,7 @@ def test_pipeline_happy_path(tmp_path):
     run_remote_pipeline(job, ctx)
     assert job.error is None
     assert job.run_id == "run_abc"
+    assert job.to_dict()["simulation_id"] == 50  # remote sim id surfaced on the job
     assert all(s["status"] == "done" for s in job.steps)
     # observables threaded into run_simulation; commit threaded into upload + land
     run_kw = next(c[1] for c in client.calls if c[0] == "run")

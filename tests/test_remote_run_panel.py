@@ -41,6 +41,10 @@ def test_js_has_remote_run_handlers_and_endpoints():
     assert "'done'" in js or '"done"' in js
     assert ".catch(" in js  # network-error handling on submit + poll
     assert "'failed'" in js or '"failed"' in js  # poll stops on failed
+    # polish: transient-error retry, queued/running labels, sim-id surfaced
+    assert "consecutiveErrors" in js
+    assert "Queued" in js
+    assert "simulation_id" in js
 
 
 def test_rendered_study_detail_includes_remote_run_panel():

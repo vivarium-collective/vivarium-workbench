@@ -1787,19 +1787,25 @@
 
   function _pollRemoteRun(jobId) {
     if (_remoteRunTimer) clearTimeout(_remoteRunTimer);
+    var pollBtn = document.getElementById('remote-run-btn');
+    if (pollBtn) { pollBtn.textContent = 'Running…'; }  // a poll is in flight, not just "Starting…"
+    var consecutiveErrors = 0;  // tolerate transient tunnel blips before giving up
+    function _stop(msg) {
+      var prog = document.getElementById('remote-run-progress');
+      var btn = document.getElementById('remote-run-btn');
+      if (prog && msg) { prog.hidden = false; prog.innerHTML = '<div class="inv-run-err">' + msg + '</div>'; }
+      if (btn) { btn.disabled = false; btn.textContent = '▶ Run on remote'; }
+    }
     function tick() {
       fetch('/api/remote-run-status?job_id=' + encodeURIComponent(jobId))
         .then(function(r) { return r.json().then(function(j) { return {status: r.status, body: j}; }); })
         .then(function(res) {
           if (res.status !== 200) {
-            var pbtn = document.getElementById('remote-run-btn');
-            var pprog = document.getElementById('remote-run-progress');
-            if (pprog) { pprog.hidden = false; pprog.innerHTML = '<div class="inv-run-err">Poll error '
-              + escapeHtmlForTests(res.status)
-              + (res.body && res.body.error ? ': ' + escapeHtmlForTests(res.body.error) : '') + '</div>'; }
-            if (pbtn) { pbtn.disabled = false; pbtn.textContent = '▶ Run on remote'; }
+            _stop('Poll error ' + escapeHtmlForTests(res.status)
+              + (res.body && res.body.error ? ': ' + escapeHtmlForTests(res.body.error) : ''));
             return;
           }
+          consecutiveErrors = 0;  // a good response resets the transient-error budget
           _renderRemoteRunProgress(res.body);
           if (res.body.status === 'done' || res.body.status === 'failed') {
             var btn = document.getElementById('remote-run-btn');
@@ -1808,10 +1814,12 @@
           }
           _remoteRunTimer = setTimeout(tick, 2000);
         }).catch(function(err) {
-          var prog = document.getElementById('remote-run-progress');
-          var btn = document.getElementById('remote-run-btn');
-          if (prog) { prog.hidden = false; prog.innerHTML = '<div class="inv-run-err">Network error while polling: ' + escapeHtmlForTests(String(err)) + '</div>'; }
-          if (btn) { btn.disabled = false; btn.textContent = '▶ Run on remote'; }
+          consecutiveErrors += 1;
+          if (consecutiveErrors < 3) {
+            _remoteRunTimer = setTimeout(tick, 2000);  // retry; the tunnel may have blipped
+            return;
+          }
+          _stop('Network error while polling (gave up after 3 tries): ' + escapeHtmlForTests(String(err)));
         });
     }
     tick();
@@ -1828,13 +1836,16 @@
         + '<span class="inv-run-icon">' + (icon[s.status] || '?') + '</span> '
         + '<code>' + escapeHtmlForTests(s.name) + '</code>' + msg + '</div>';
     }).join('');
+    var simRef = job.simulation_id ? ' <span class="muted">(sim ' + escapeHtmlForTests(job.simulation_id) + ')</span>' : '';
     var head;
     if (job.status === 'done') {
-      head = '<strong>✓ Done.</strong> Landed run <code>' + escapeHtmlForTests(job.run_id || '') + '</code> — refresh to see it.';
+      head = '<strong>✓ Done.</strong> Landed run <code>' + escapeHtmlForTests(job.run_id || '') + '</code>' + simRef + ' — refresh to see it.';
     } else if (job.status === 'failed') {
-      head = '<strong class="inv-run-err">✗ Failed.</strong> ' + escapeHtmlForTests(job.error || '');
+      head = '<strong class="inv-run-err">✗ Failed.</strong> ' + escapeHtmlForTests(job.error || '') + simRef;
+    } else if (job.status === 'queued') {
+      head = '<strong>Queued…</strong>';
     } else {
-      head = '<strong>Running…</strong>';
+      head = '<strong>Running…</strong>' + simRef;
     }
     prog.innerHTML = '<div class="inv-run-progress-banner">' + head + '</div>'
                    + '<div class="inv-run-list">' + steps + '</div>';
