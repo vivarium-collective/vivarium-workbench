@@ -8342,6 +8342,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_composite_run()
         if self.path.startswith("/api/composite-runs"):
             return self._get_composite_runs()
+        if self.path.startswith("/api/explorer/runs"):
+            return self._get_explorer_runs()
         if self.path.startswith("/api/simulations"):
             return self._get_simulations()
         if self.path.startswith("/api/composite-state"):
@@ -10877,6 +10879,14 @@ if __name__ == "__main__":
         except Exception as e:
             data = {"error": str(e), "processes": [], "types": []}
         return self._json(data, 200)
+
+    def _get_explorer_runs(self):
+        """GET /api/explorer/runs — runs for the Data Explorer run-picker."""
+        from vivarium_dashboard.lib import explorer_data
+        try:
+            return self._json({"runs": explorer_data.list_runs(WORKSPACE)}, 200)
+        except Exception as e:  # never sink the page
+            return self._json({"error": str(e), "runs": []}, 200)
 
     def _get_simulations(self):
         """GET /api/simulations — all persisted runs across the workspace.
