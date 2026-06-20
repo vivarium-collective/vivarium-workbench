@@ -73,6 +73,9 @@ window.addEventListener('pageshow', function (e) {
 .emitter-parquet { background: #fef3c7; color: #92400e; }   /* amber */
 .emitter-xarray  { background: #ccfbf1; color: #0f766e; }   /* teal  */
 .emitter-none    { background: transparent; color: #9ca3af; }   /* no emitter (summary-only) */
+    .origin-pill { display:inline-block; padding:1px 7px; border-radius:9px; font-size:11px; font-weight:600; }
+    .origin-remote { background:#dbeafe; color:#1e40af; }   /* blue — remote (AWS) */
+    .origin-local  { background:transparent; color:#9ca3af; }
 .action-btn--secondary {
   margin-top: 10px; padding: 5px 12px;
   border: 1px solid #b91c1c; background: #fef2f2;
@@ -1129,6 +1132,7 @@ window.addEventListener('pageshow', function (e) {
         <th style="text-align:left; padding:6px 8px;">Investigation</th>
         <th style="text-align:left; padding:6px 8px;">Study</th>
         <th style="text-align:left; padding:6px 8px;">Run</th>
+        <th style="text-align:left; padding:6px 8px; width:120px;">Origin</th>
         <th style="text-align:left; padding:6px 8px; width:90px;">Emitter</th>
         <th style="text-align:left; padding:6px 8px; width:140px;">Time</th>
         <th style="text-align:left; padding:6px 8px; width:90px;">Status</th>

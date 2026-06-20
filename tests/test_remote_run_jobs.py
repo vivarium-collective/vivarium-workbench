@@ -134,3 +134,35 @@ def test_pipeline_marks_failed_step_on_error(tmp_path):
     assert push["status"] == "failed"
     # later steps never ran
     assert next(s for s in job.steps if s["name"] == "build")["status"] == "pending"
+
+
+def test_pipeline_passes_s3_uri_from_sim_config(tmp_path):
+    """When run_simulation returns a config.parca_options.outdir, it's threaded into land()."""
+    from vivarium_dashboard.lib.remote_run_jobs import RemoteRunJob
+
+    class _FakeClientWithS3(_FakeClient):
+        def run_simulation(self, **kw):
+            self.calls.append(("run", kw))
+            return {
+                "database_id": 50,
+                "config": {"parca_options": {"outdir": "s3://my-bucket/runs/exp-99/"}},
+            }
+
+    client = _FakeClientWithS3()
+    ctx, landed = _ctx(tmp_path, client)
+    job = RemoteRunJob("s")
+    run_remote_pipeline(job, ctx)
+    assert job.error is None
+    assert landed["kw"]["s3_uri"] == "s3://my-bucket/runs/exp-99/"
+
+
+def test_pipeline_s3_uri_none_when_no_config(tmp_path):
+    """When run_simulation returns no config, s3_uri is None (doesn't raise)."""
+    from vivarium_dashboard.lib.remote_run_jobs import RemoteRunJob
+
+    client = _FakeClient()  # returns {"database_id": 50} with no config
+    ctx, landed = _ctx(tmp_path, client)
+    job = RemoteRunJob("s")
+    run_remote_pipeline(job, ctx)
+    assert job.error is None
+    assert landed["kw"]["s3_uri"] is None

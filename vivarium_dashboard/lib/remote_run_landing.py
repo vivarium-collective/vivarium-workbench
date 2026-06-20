@@ -44,6 +44,7 @@ def land_remote_run(
     tar_path: Path,
     seed: int = 0,
     label: str | None = None,
+    s3_uri: str | None = None,
 ) -> str:
     """Extract tar_path, place the native store in study_dir, record runs_meta; return run_id."""
     study_dir = Path(study_dir)
@@ -55,6 +56,7 @@ def land_remote_run(
         "commit": commit,
         "backend": "ray",
         "source": "smsvpctest",
+        "s3_uri": s3_uri,
     }
     run_id = cr.generate_run_id(spec_id, params=provenance)
 

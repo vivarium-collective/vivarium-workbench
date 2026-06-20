@@ -70,3 +70,29 @@ def test_landed_zarr_is_discovered_by_study_charts(tmp_path: Path):
     )
     found = study_charts._latest_zarr_for_study(study)
     assert found == study / f"runs.{run_id}.zarr"
+
+
+def test_land_stores_s3_uri_in_provenance(tmp_path: Path):
+    """s3_uri kwarg is recorded in params_json provenance."""
+    study = tmp_path / "study"
+    study.mkdir()
+    tar = _make_remote_zarr_tar(tmp_path)
+    run_id = land_remote_run(
+        study,
+        spec_id="v2ecoli.composites.baseline",
+        simulation_id=77,
+        experiment_id="exp-s3",
+        commit="deadbeef",
+        tar_path=tar,
+        seed=0,
+        s3_uri="s3://bucket/prefix/exp/",
+    )
+    conn = sqlite3.connect(str(study / "runs.db"))
+    try:
+        meta = conn.execute(
+            "SELECT params_json FROM runs_meta WHERE run_id=?", (run_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    prov = json.loads(meta[0])
+    assert prov["s3_uri"] == "s3://bucket/prefix/exp/"

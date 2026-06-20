@@ -167,6 +167,7 @@ def run_remote_pipeline(job: RemoteRunJob, ctx: PipelineCtx) -> None:
         simulation_id = sim["database_id"]
         job.simulation_id = simulation_id
         experiment_id = sim.get("experiment_id") or f"sim{simulator_id}-{ctx.study}"
+        s3_uri = ((sim.get("config") or {}).get("parca_options") or {}).get("outdir")
         job.set_step("run", "done", f"simulation {simulation_id}")
 
         # 4. poll to terminal
@@ -190,6 +191,7 @@ def run_remote_pipeline(job: RemoteRunJob, ctx: PipelineCtx) -> None:
             run_id = ctx.land(
                 ctx.study_dir, spec_id=ctx.spec_id, simulation_id=simulation_id,
                 experiment_id=experiment_id, commit=commit, tar_path=tar_path,
+                s3_uri=s3_uri,
             )
         job.run_id = run_id
         job.set_step("land", "done", run_id)

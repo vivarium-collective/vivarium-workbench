@@ -13,6 +13,7 @@ sorted list. ``delete_simulation`` performs the full-delete pass.
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import shutil
 import sqlite3
 import warnings
@@ -105,6 +106,25 @@ def discover_default_baseline_db(workspace: Path) -> Path | None:
 
 def _row_to_dict(row, db_path_str: str) -> dict:
     """Convert a runs_meta SELECT row to the public dict shape."""
+    # Parse provenance JSON (may be absent in legacy DBs or None).
+    prov: dict = {}
+    try:
+        raw_json = row["params_json"]
+        if raw_json:
+            prov = json.loads(raw_json) or {}
+    except (KeyError, TypeError, ValueError):
+        prov = {}
+    # Detect remote run: must have both `source` (non-empty) and `simulation_id`.
+    if prov.get("source") and prov.get("simulation_id") is not None:
+        remote_origin = {
+            "deployment": prov.get("source"),
+            "simulation_id": prov.get("simulation_id"),
+            "experiment_id": prov.get("experiment_id"),
+            "backend": prov.get("backend"),
+            "s3_uri": prov.get("s3_uri"),
+        }
+    else:
+        remote_origin = None
     return {
         "run_id": row["run_id"],
         "spec_id": row["spec_id"],
@@ -121,6 +141,7 @@ def _row_to_dict(row, db_path_str: str) -> dict:
         # keys existing regardless of which emitter wrote the row.
         "study_slug": None,
         "investigation_slug": None,
+        "remote_origin": remote_origin,
     }
 
 
@@ -204,7 +225,7 @@ def _read_runs_meta(db_path: Path, db_path_str: str) -> list[dict]:
             return []
         rows = conn.execute(
             "SELECT run_id, spec_id, sim_name, label, status, n_steps, "
-            "progress_step, started_at, completed_at "
+            "progress_step, started_at, completed_at, params_json "
             "FROM runs_meta ORDER BY started_at DESC"
         ).fetchall()
     except sqlite3.OperationalError as e:
