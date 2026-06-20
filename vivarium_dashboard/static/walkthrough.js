@@ -14130,18 +14130,26 @@
     var runLabel = row.sim_name || row.label || runId;
     var runTitle = ' title="' + _escSim(runId + (row.db_path ? '\n' + row.db_path : '')) + '"';
     var timeSec = row.completed_at || row.started_at;
-    // Actions: open-in-explorer (only when there's a spec_id to seed the
-    // explorer with) + delete. The {simulations} shape carries spec_id +
-    // db_path so both are reconstructable.
+    // Actions: if the run belongs to a study → open its Runs tab at the run;
+    // else if it has a spec_id → open in the Composite Explorer. The
+    // {simulations} shape carries spec_id + db_path so both are reconstructable.
     var specId = row.spec_id || '';
-    var explorerBtn = specId
-      ? '<a href="?id=' + encodeURIComponent(specId) +
+    var studySlug = _simStudy(row);
+    var openBtn;
+    if (studySlug) {
+      openBtn = '<a href="/studies/' + encodeURIComponent(studySlug) + '#run-' + encodeURIComponent(runId) + '" ' +
+        'class="action-btn js-authoring" title="View this run\'s results in the study" ' +
+        'style="text-decoration:none;">Open</a>';
+    } else if (specId) {
+      openBtn = '<a href="?id=' + encodeURIComponent(specId) +
           '&run_id=' + encodeURIComponent(runId) + '#composite-explore" ' +
           'class="action-btn js-authoring" title="Open in Composite Explorer" ' +
           'style="text-decoration:none;" ' +
           'onclick="event.preventDefault(); _openSimulationInExplorer(\'' +
-            _escSim(runId) + '\', \'' + _escSim(specId) + '\');">Open</a>'
-      : '';
+            _escSim(runId) + '\', \'' + _escSim(specId) + '\');">Open</a>';
+    } else {
+      openBtn = '';
+    }
     var deleteBtn = '<button class="action-btn js-authoring" title="Delete simulation" ' +
       'onclick="_deleteSimulationRun(\'' + _escSim(runId) + '\')">🗑</button>';
     return (
@@ -14155,7 +14163,7 @@
       '<td style="padding:6px 8px; color:#6b7280;">' + _escSim(_simFmtTime(timeSec)) + '</td>' +
       '<td style="padding:6px 8px;">' + _simStatusChip(row.status) + '</td>' +
       '<td style="padding:6px 8px; text-align:center; white-space:nowrap;">' +
-        explorerBtn + (explorerBtn && deleteBtn ? ' ' : '') + deleteBtn + '</td>' +
+        openBtn + (openBtn && deleteBtn ? ' ' : '') + deleteBtn + '</td>' +
       '</tr>'
     );
   }

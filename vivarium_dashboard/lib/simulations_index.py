@@ -29,6 +29,16 @@ class RunNotFound(Exception):
     """Raised by ``delete_simulation`` when ``run_id`` is in no known DB."""
 
 
+def _study_slug_from_db_path(db_path_str: str) -> str | None:
+    """A runs.db lives at .../studies/<slug>/runs.db — return <slug> (last 'studies/' segment)."""
+    parts = str(db_path_str).replace("\\", "/").split("/")
+    if "studies" in parts:
+        i = len(parts) - 1 - parts[::-1].index("studies")  # last 'studies'
+        if i + 1 < len(parts):
+            return parts[i + 1]
+    return None
+
+
 def _iter_all_study_dirs(workspace: Path):
     """Yield ``(study_dir, investigation_slug, rel_prefix)`` for every study
     directory in the workspace.
@@ -150,7 +160,7 @@ def _row_to_dict(row, db_path_str: str) -> dict:
         "studies": [],  # filled in by _annotate_studies
         # Match the SQLiteEmitter shape so JS consumers can rely on the
         # keys existing regardless of which emitter wrote the row.
-        "study_slug": None,
+        "study_slug": _study_slug_from_db_path(db_path_str),
         "investigation_slug": None,
         "remote_origin": remote_origin,
     }

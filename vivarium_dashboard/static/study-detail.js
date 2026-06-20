@@ -1853,4 +1853,25 @@
 
   window._submitRemoteRun = _submitRemoteRun;
 
+  // --- URL hash → Runs tab + scroll to run row ---
+  // Links from the Simulations DB (walkthrough.js) land at
+  //   /studies/<slug>#run-<runId>
+  // Switch to the Runs tab and scroll the target row into view.
+  function _applyRunHash() {
+    var h = (window.location.hash || '');
+    if (h.indexOf('#run-') === 0 || h === '#runs') {
+      _setStudyTab('runs');
+      if (h.indexOf('#run-') === 0) {
+        var el = document.getElementById(h.slice(1));  // id="run-<runId>"
+        if (el && el.scrollIntoView) { try { el.scrollIntoView({block: 'center'}); el.style.outline = '2px solid #2b6cb0'; } catch (e) {} }
+      }
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _applyRunHash);
+  } else {
+    _applyRunHash();
+  }
+  window.addEventListener('hashchange', _applyRunHash);
+
 })();

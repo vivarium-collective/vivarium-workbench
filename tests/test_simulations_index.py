@@ -311,6 +311,35 @@ def test_list_derives_study_slug_from_path_for_legacy_per_study_db(tmp_path):
     assert sims[0]["investigation_slug"] is None
 
 
+def test_runs_meta_derives_study_slug_from_db_path(tmp_path):
+    """A runs_meta row (remote / baseline run) at studies/<slug>/runs.db
+    must surface study_slug == '<slug>' even without a study.yaml entry."""
+    ws = tmp_path / "ws"
+    (ws / "studies" / "my-study").mkdir(parents=True)
+    _seed_run(ws / "studies" / "my-study" / "runs.db",
+              spec_id="pkg.a", run_id="r-study-run", started_at=5.0)
+
+    sims = list_simulations(ws)
+    row = next((s for s in sims if s["run_id"] == "r-study-run"), None)
+    assert row is not None, "run not found"
+    assert row["study_slug"] == "my-study", f"expected 'my-study', got {row['study_slug']!r}"
+
+
+def test_runs_meta_derives_study_slug_from_nested_db_path(tmp_path):
+    """A runs_meta row nested at investigations/<inv>/studies/<slug>/runs.db
+    must surface study_slug == '<slug>'."""
+    ws = tmp_path / "ws"
+    nested = ws / "investigations" / "inv-x" / "studies" / "nested-study"
+    nested.mkdir(parents=True)
+    _seed_run(nested / "runs.db",
+              spec_id="pkg.b", run_id="r-nested-run", started_at=8.0)
+
+    sims = list_simulations(ws)
+    row = next((s for s in sims if s["run_id"] == "r-nested-run"), None)
+    assert row is not None, "run not found"
+    assert row["study_slug"] == "nested-study", f"expected 'nested-study', got {row['study_slug']!r}"
+
+
 import os
 
 from vivarium_dashboard.lib.simulations_index import (

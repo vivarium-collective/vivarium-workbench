@@ -54,3 +54,21 @@ def test_rendered_study_detail_includes_remote_run_panel():
     assert 'id="remote-run-form"' in html
     assert "Run on remote" in html
     assert 'id="remote-run-progress"' in html
+
+
+def _walkthrough_js_text():
+    return (Path(server.__file__).parent / "static" / "walkthrough.js").read_text(encoding="utf-8")
+
+
+def test_study_detail_js_has_run_hash_handler():
+    """study-detail.js must contain _applyRunHash and handle #run- fragments."""
+    js = _js_text()
+    assert "_applyRunHash" in js
+    assert "'#run-'" in js or '"#run-"' in js
+    assert "_setStudyTab" in js
+
+
+def test_walkthrough_js_sim_row_opens_study_results():
+    """walkthrough.js must route study-bearing runs to /studies/<slug>#run-<id>."""
+    js = _walkthrough_js_text()
+    assert "'/studies/'" in js or '"/studies/"' in js or "'/studies/' +" in js or '"/studies/" +' in js
