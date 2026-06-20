@@ -60,3 +60,17 @@ def test_list_runs_returns_run_dicts(tmp_path):
 
 def test_list_runs_empty_workspace(tmp_path):
     assert explorer_data.list_runs(tmp_path) == []
+
+
+def test_list_observables_groups_by_category(tmp_path):
+    db = tmp_path / "runs.db"
+    make_fake_runs_db(db, _sample_states())
+    obs = explorer_data.list_observables(str(db))
+    cats = obs["categories"]
+    # mass is a scalar leaf under listeners.mass.cell_mass
+    assert any(o["path"].endswith("mass.cell_mass") for g in cats.values() for o in g)
+    # fba_results.base_reaction_fluxes is a numeric vector
+    flux = [o for g in cats.values() for o in g if "base_reaction_fluxes" in o["path"]]
+    assert flux and flux[0]["kind"] == "vector"
+    # bulk is a list-of-pairs; exposed as a category
+    assert "Bulk molecules" in cats or any("bulk" in o["path"] for g in cats.values() for o in g)

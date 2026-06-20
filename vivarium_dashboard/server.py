@@ -8344,6 +8344,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_composite_runs()
         if self.path.startswith("/api/explorer/runs"):
             return self._get_explorer_runs()
+        if self.path.startswith("/api/explorer/observables"):
+            return self._get_explorer_observables()
         if self.path.startswith("/api/simulations"):
             return self._get_simulations()
         if self.path.startswith("/api/composite-state"):
@@ -10887,6 +10889,19 @@ if __name__ == "__main__":
             return self._json({"runs": explorer_data.list_runs(WORKSPACE)}, 200)
         except Exception as e:  # never sink the page
             return self._json({"error": str(e), "runs": []}, 200)
+
+    def _get_explorer_observables(self):
+        """GET /api/explorer/observables?db=<path>&run=<id>"""
+        import urllib.parse as _up
+        from vivarium_dashboard.lib import explorer_data
+        q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
+        db = q.get("db")
+        if not db:
+            return self._json({"error": "missing db", "categories": {}}, 200)
+        try:
+            return self._json(explorer_data.list_observables(db, q.get("run")), 200)
+        except Exception as e:
+            return self._json({"error": str(e), "categories": {}}, 200)
 
     def _get_simulations(self):
         """GET /api/simulations — all persisted runs across the workspace.
