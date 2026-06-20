@@ -387,37 +387,7 @@ def base_ids_from_run(db_path, run_id=None):
 
 def _zarr_flux(store, step):
     """(base_ids, flux_values) at one emit step from a zarr store, or ([], [])."""
-    try:
-        import xarray as xr
-    except ImportError:
-        return [], []
-    try:
-        dt = xr.open_datatree(str(store), engine="zarr")
-    except Exception:
-        return [], []
-    leaf = "base_reaction_fluxes"
-    for node in dt.subtree:
-        if node.name != leaf:
-            continue
-        gen_vars = sorted((v for v in (node.data_vars or {})
-                           if str(v).startswith("generation=")),
-                          key=lambda s: int(str(s).split("=")[1]))
-        if not gen_vars:
-            return [], []
-        arr = node[gen_vars[0]]  # first generation
-        idcoord = "id_" + leaf
-        if idcoord not in arr.dims:
-            return [], []
-        ids = ([str(x) for x in node[idcoord].values] if idcoord in node.coords
-               else [str(i) for i in range(arr.sizes[idcoord])])
-        emitdim = [d for d in arr.dims if d != idcoord]
-        if not emitdim:
-            return [], []
-        nstep = arr.sizes[emitdim[0]]
-        si = min(max(0, step), nstep - 1)
-        vals = arr.isel({emitdim[0]: si}).values.tolist()
-        return ids, [float(x) for x in vals]
-    return [], []
+    return _zarr_vector(store, "base_reaction_fluxes", step)
 
 
 def _zarr_vector(store, leaf, step):

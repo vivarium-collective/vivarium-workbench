@@ -10965,8 +10965,9 @@ if __name__ == "__main__":
         from vivarium_dashboard.lib import explorer_data
         q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
         db = q.get("db"); path = q.get("path")
+        step = 0
         if not db or not path:
-            return self._json({"error": "missing db/path", "ids": [], "values": []}, 200)
+            return self._json({"error": "missing db/path", "ids": [], "values": [], "step": 0, "time": None}, 200)
         try:
             step = int(q.get("step", "0"))
         except ValueError:
@@ -10975,7 +10976,7 @@ if __name__ == "__main__":
             return self._json(
                 explorer_data.get_vector(db, path, step, q.get("run"), WORKSPACE), 200)
         except Exception as e:
-            return self._json({"error": str(e), "ids": [], "values": []}, 200)
+            return self._json({"error": str(e), "ids": [], "values": [], "step": step, "time": None}, 200)
 
     def _get_simulations(self):
         """GET /api/simulations — all persisted runs across the workspace.
