@@ -251,3 +251,12 @@ def test_get_series_run_aware_multi_sim(tmp_path):
     assert mass_b == [500.0, 501.0, 502.0, 503.0, 504.0], (
         f"Expected run B values (500-504), got {mass_b}"
     )
+
+
+def test_list_runs_excludes_empty_db(tmp_path):
+    # A runs.db with a simulations row but ZERO history rows has nothing to
+    # explore — it must not appear in the picker.
+    studies = tmp_path / "studies" / "demo"
+    studies.mkdir(parents=True)
+    make_fake_runs_db(studies / "runs.db", [])
+    assert explorer_data.list_runs(tmp_path) == []

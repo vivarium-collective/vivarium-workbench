@@ -403,10 +403,51 @@ def get_flux_auto(db_path, step, id_map, run_id=None, workspace=None):
     return get_flux(resolved if kind == "sqlite" else db_path, step, base_ids, id_map, run_id)
 
 
+def _run_has_data(kind, resolved) -> bool:
+    """True iff the resolved store actually holds emitted history to explore.
+    Drops metadata-only records and empty/headerless DBs from the picker."""
+    try:
+        if kind == "sqlite":
+            conn = sqlite3.connect(str(resolved))
+            try:
+                tbls = {x[0] for x in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'")}
+                if "history" not in tbls:
+                    return False
+                return conn.execute(
+                    "SELECT 1 FROM history LIMIT 1").fetchone() is not None
+            finally:
+                conn.close()
+        if kind == "zarr":
+            import xarray as xr
+            dt = xr.open_datatree(str(resolved), engine="zarr")
+            for node in dt.subtree:
+                if any(str(v).startswith("generation=")
+                       for v in (node.data_vars or {})):
+                    return True
+            return False
+    except Exception:
+        return False
+    return False
+
+
 def list_runs(workspace: Path) -> list[dict]:
-    """Runs for the explorer's run-picker, projected to a small public shape."""
+    """Runs for the explorer's run-picker, projected to a small public shape.
+
+    Only runs backed by a real, non-empty emitter store (SQLite history or a
+    zarr datatree) are returned — metadata-only ``study_yaml`` records and empty
+    DBs have nothing to explore and would otherwise clutter the picker with
+    dead entries.
+    """
+    ws = Path(workspace)
     out = []
-    for r in simulations_index.list_simulations(Path(workspace)):
+    for r in simulations_index.list_simulations(ws):
+        db = r.get("db_path")
+        if not db:
+            continue
+        kind, resolved = _resolve_run_source(db, ws)
+        if kind not in ("sqlite", "zarr") or not _run_has_data(kind, resolved):
+            continue
         studies = r.get("studies") or []
         out.append({
             "run_id": r.get("run_id"),
