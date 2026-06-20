@@ -13,6 +13,7 @@ sorted list. ``delete_simulation`` performs the full-delete pass.
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import shutil
 import sqlite3
 import warnings
@@ -26,6 +27,16 @@ from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 
 class RunNotFound(Exception):
     """Raised by ``delete_simulation`` when ``run_id`` is in no known DB."""
+
+
+def _study_slug_from_db_path(db_path_str: str) -> str | None:
+    """A runs.db lives at .../studies/<slug>/runs.db — return <slug> (last 'studies/' segment)."""
+    parts = str(db_path_str).replace("\\", "/").split("/")
+    if "studies" in parts:
+        i = len(parts) - 1 - parts[::-1].index("studies")  # last 'studies'
+        if i + 1 < len(parts):
+            return parts[i + 1]
+    return None
 
 
 def _iter_all_study_dirs(workspace: Path):
@@ -105,6 +116,35 @@ def discover_default_baseline_db(workspace: Path) -> Path | None:
 
 def _row_to_dict(row, db_path_str: str) -> dict:
     """Convert a runs_meta SELECT row to the public dict shape."""
+    # Parse provenance JSON (may be absent in legacy DBs or None).
+    prov: dict = {}
+    try:
+        raw_json = row["params_json"]
+        if raw_json:
+            prov = json.loads(raw_json) or {}
+    except (KeyError, TypeError, ValueError):
+        prov = {}
+    # Detect remote run: must have both `source` (non-empty) and `simulation_id`.
+    if prov.get("source") and prov.get("simulation_id") is not None:
+        remote_origin = {
+            "deployment": prov.get("source"),
+            "simulation_id": prov.get("simulation_id"),
+            "experiment_id": prov.get("experiment_id"),
+            "backend": prov.get("backend"),
+            "s3_uri": prov.get("s3_uri"),
+        }
+    else:
+        remote_origin = None
+    # A remote run lands its native store next to runs.db (a .zarr or parquet-runs
+    # dir), so its emitter type must come from that store_path — NOT from db_path,
+    # which is always the runs.db SQLite metadata file (would mislabel it "SQLite").
+    store_path = str(prov.get("store_path") or "").lower()
+    if ".zarr" in store_path:
+        emitter: str | None = "xarray"
+    elif "parquet" in store_path:
+        emitter = "parquet"
+    else:
+        emitter = None
     return {
         "run_id": row["run_id"],
         "spec_id": row["spec_id"],
@@ -116,11 +156,13 @@ def _row_to_dict(row, db_path_str: str) -> dict:
         "started_at": row["started_at"],
         "completed_at": row["completed_at"],
         "db_path": db_path_str,
+        "emitter": emitter,  # store-derived (xarray/parquet) for remote runs; None → falls back to db_path
         "studies": [],  # filled in by _annotate_studies
         # Match the SQLiteEmitter shape so JS consumers can rely on the
         # keys existing regardless of which emitter wrote the row.
-        "study_slug": None,
+        "study_slug": _study_slug_from_db_path(db_path_str),
         "investigation_slug": None,
+        "remote_origin": remote_origin,
     }
 
 
@@ -204,7 +246,7 @@ def _read_runs_meta(db_path: Path, db_path_str: str) -> list[dict]:
             return []
         rows = conn.execute(
             "SELECT run_id, spec_id, sim_name, label, status, n_steps, "
-            "progress_step, started_at, completed_at "
+            "progress_step, started_at, completed_at, params_json "
             "FROM runs_meta ORDER BY started_at DESC"
         ).fetchall()
     except sqlite3.OperationalError as e:
@@ -591,6 +633,12 @@ def _emitter_for_row(workspace: Path, row: dict) -> str:
     (runs_meta / sqlite_emitter) we still check whether a zarr store exists on
     disk for the run_id (a backfilled XArray run lands in runs_meta but its
     data lives in zarr) before defaulting to 'sqlite'."""
+    # A remote run lands its native store next to runs.db, so _row_to_dict
+    # already derived the emitter from the store_path. Honor that — the
+    # .pbg/runs/<rid> disk probe below only covers the LOCAL backfill layout.
+    em0 = row.get("emitter")
+    if isinstance(em0, str) and em0 in ("xarray", "parquet"):
+        return em0
     src = row.get("source")
     if src == "parquet":
         return "parquet"

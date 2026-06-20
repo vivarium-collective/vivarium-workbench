@@ -729,8 +729,13 @@
 
   // --- Runs ---
   bindAll('.btn-view-run', function(btn) {
-    var runId = btn.dataset.runId;
-    window.open('/composite-explorer?run_id=' + encodeURIComponent(runId), '_blank');
+    // A study's results render in the Visualizations tab (charts from the run
+    // store). The old target was a dead route — the composite explorer is a
+    // hash-route in the main SPA, not a standalone page (404), so View opened a
+    // blank page for every run. Route to the working results view instead.
+    _setStudyTab('visualizations');
+    var panel = document.getElementById('panel-visualizations');
+    if (panel && panel.scrollIntoView) { try { panel.scrollIntoView({block: 'start'}); } catch (e) {} }
   });
 
   // ptools-launch → _get_ptools_launch
@@ -1740,5 +1745,138 @@
   (async function () {
     if (await _bootstrapStudy()) { _runStudyInit(); }
   })();
+
+  // ---- Remote run (smsvpctest) -------------------------------------------
+  var _remoteRunTimer = null;
+
+  function _submitRemoteRun(ev) {
+    ev.preventDefault();
+    var form = ev.target;
+    var btn = document.getElementById('remote-run-btn');
+    var prog = document.getElementById('remote-run-progress');
+    var body = {
+      study: studyName(),
+      num_generations: parseInt(form.num_generations.value, 10) || 1,
+      num_seeds: parseInt(form.num_seeds.value, 10) || 1,
+      run_parca: !!form.run_parca.checked,
+    };
+    if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
+    fetch('/api/remote-run-start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    }).then(function(r) {
+      return r.json().then(function(j) { return {status: r.status, body: j}; });
+    }).then(function(res) {
+      if (res.status === 401) {
+        if (prog) { prog.hidden = false; prog.innerHTML =
+          '<div class="inv-run-err">Log in with GitHub (top-right on the main dashboard) to run remotely.</div>'; }
+        if (btn) { btn.disabled = false; btn.textContent = '▶ Run on remote'; }
+        return;
+      }
+      if (res.status !== 202 || !res.body.job_id) {
+        if (prog) { prog.hidden = false; prog.innerHTML =
+          '<div class="inv-run-err">Could not start: ' + escapeHtmlForTests((res.body && res.body.error) || res.status) + '</div>'; }
+        if (btn) { btn.disabled = false; btn.textContent = '▶ Run on remote'; }
+        return;
+      }
+      _pollRemoteRun(res.body.job_id);
+    }).catch(function(err) {
+      var prog = document.getElementById('remote-run-progress');
+      var btn = document.getElementById('remote-run-btn');
+      if (prog) { prog.hidden = false; prog.innerHTML = '<div class="inv-run-err">Network error: ' + escapeHtmlForTests(String(err)) + '</div>'; }
+      if (btn) { btn.disabled = false; btn.textContent = '▶ Run on remote'; }
+    });
+    return false;
+  }
+
+  function _pollRemoteRun(jobId) {
+    if (_remoteRunTimer) clearTimeout(_remoteRunTimer);
+    var pollBtn = document.getElementById('remote-run-btn');
+    if (pollBtn) { pollBtn.textContent = 'Running…'; }  // a poll is in flight, not just "Starting…"
+    var consecutiveErrors = 0;  // tolerate transient tunnel blips before giving up
+    function _stop(msg) {
+      var prog = document.getElementById('remote-run-progress');
+      var btn = document.getElementById('remote-run-btn');
+      if (prog && msg) { prog.hidden = false; prog.innerHTML = '<div class="inv-run-err">' + msg + '</div>'; }
+      if (btn) { btn.disabled = false; btn.textContent = '▶ Run on remote'; }
+    }
+    function tick() {
+      fetch('/api/remote-run-status?job_id=' + encodeURIComponent(jobId))
+        .then(function(r) { return r.json().then(function(j) { return {status: r.status, body: j}; }); })
+        .then(function(res) {
+          if (res.status !== 200) {
+            _stop('Poll error ' + escapeHtmlForTests(res.status)
+              + (res.body && res.body.error ? ': ' + escapeHtmlForTests(res.body.error) : ''));
+            return;
+          }
+          consecutiveErrors = 0;  // a good response resets the transient-error budget
+          _renderRemoteRunProgress(res.body);
+          if (res.body.status === 'done' || res.body.status === 'failed') {
+            var btn = document.getElementById('remote-run-btn');
+            if (btn) { btn.disabled = false; btn.textContent = '▶ Run on remote'; }
+            return;
+          }
+          _remoteRunTimer = setTimeout(tick, 2000);
+        }).catch(function(err) {
+          consecutiveErrors += 1;
+          if (consecutiveErrors < 3) {
+            _remoteRunTimer = setTimeout(tick, 2000);  // retry; the tunnel may have blipped
+            return;
+          }
+          _stop('Network error while polling (gave up after 3 tries): ' + escapeHtmlForTests(String(err)));
+        });
+    }
+    tick();
+  }
+
+  function _renderRemoteRunProgress(job) {
+    var prog = document.getElementById('remote-run-progress');
+    if (!prog) return;
+    prog.hidden = false;
+    var icon = {pending: '⋯', running: '▶', done: '✓', failed: '✗'};
+    var steps = (job.steps || []).map(function(s) {
+      var msg = s.message ? ' <span class="muted">' + escapeHtmlForTests(s.message) + '</span>' : '';
+      return '<div class="inv-run-item inv-run-' + (s.status || 'pending') + '">'
+        + '<span class="inv-run-icon">' + (icon[s.status] || '?') + '</span> '
+        + '<code>' + escapeHtmlForTests(s.name) + '</code>' + msg + '</div>';
+    }).join('');
+    var simRef = job.simulation_id ? ' <span class="muted">(sim ' + escapeHtmlForTests(job.simulation_id) + ')</span>' : '';
+    var head;
+    if (job.status === 'done') {
+      head = '<strong>✓ Done.</strong> Landed run <code>' + escapeHtmlForTests(job.run_id || '') + '</code>' + simRef + ' — refresh to see it.';
+    } else if (job.status === 'failed') {
+      head = '<strong class="inv-run-err">✗ Failed.</strong> ' + escapeHtmlForTests(job.error || '') + simRef;
+    } else if (job.status === 'queued') {
+      head = '<strong>Queued…</strong>';
+    } else {
+      head = '<strong>Running…</strong>' + simRef;
+    }
+    prog.innerHTML = '<div class="inv-run-progress-banner">' + head + '</div>'
+                   + '<div class="inv-run-list">' + steps + '</div>';
+  }
+
+  window._submitRemoteRun = _submitRemoteRun;
+
+  // --- URL hash → Runs tab + scroll to run row ---
+  // Links from the Simulations DB (walkthrough.js) land at
+  //   /studies/<slug>#run-<runId>
+  // Switch to the Runs tab and scroll the target row into view.
+  function _applyRunHash() {
+    var h = (window.location.hash || '');
+    if (h.indexOf('#run-') === 0 || h === '#runs') {
+      _setStudyTab('runs');
+      if (h.indexOf('#run-') === 0) {
+        var el = document.getElementById(h.slice(1));  // id="run-<runId>"
+        if (el && el.scrollIntoView) { try { el.scrollIntoView({block: 'center'}); el.style.outline = '2px solid #2b6cb0'; } catch (e) {} }
+      }
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _applyRunHash);
+  } else {
+    _applyRunHash();
+  }
+  window.addEventListener('hashchange', _applyRunHash);
 
 })();
