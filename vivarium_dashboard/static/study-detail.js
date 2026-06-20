@@ -1776,6 +1776,11 @@
         return;
       }
       _pollRemoteRun(res.body.job_id);
+    }).catch(function(err) {
+      var prog = document.getElementById('remote-run-progress');
+      var btn = document.getElementById('remote-run-btn');
+      if (prog) { prog.hidden = false; prog.innerHTML = '<div class="inv-run-err">Network error: ' + escapeHtmlForTests(String(err)) + '</div>'; }
+      if (btn) { btn.disabled = false; btn.textContent = '▶ Run on remote'; }
     });
     return false;
   }
@@ -1794,6 +1799,11 @@
             return;
           }
           _remoteRunTimer = setTimeout(tick, 2000);
+        }).catch(function(err) {
+          var prog = document.getElementById('remote-run-progress');
+          var btn = document.getElementById('remote-run-btn');
+          if (prog) { prog.hidden = false; prog.innerHTML = '<div class="inv-run-err">Network error while polling: ' + escapeHtmlForTests(String(err)) + '</div>'; }
+          if (btn) { btn.disabled = false; btn.textContent = '▶ Run on remote'; }
         });
     }
     tick();

@@ -7,7 +7,6 @@ TPL = server.TEMPLATES_DIR / "study-detail.html" if hasattr(server, "TEMPLATES_D
 
 def _template_text():
     # study-detail.html lives next to the package templates
-    from pathlib import Path
     p = Path(server.__file__).parent / "templates" / "study-detail.html"
     return p.read_text(encoding="utf-8")
 
