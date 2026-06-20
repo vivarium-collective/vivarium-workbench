@@ -214,8 +214,6 @@
       j(u).then(function (d) {
         cache.time = d.time; cache.byField = {};
         fields.forEach(function (f) { cache.byField[f] = d.series[massPaths[f]] || []; });
-        var slider = ctrls.querySelector("#al-t");
-        slider.max = Math.max(0, d.time.length - 1); slider.value = slider.max;
         render();
       });
     }
@@ -257,7 +255,7 @@
       var total = leaves.reduce(function (s, d) { return s + d.value; }, 0) || 1;
       var root = d3.hierarchy({ children: leaves }).sum(function (d) { return d.value; });
       d3.voronoiTreemap().clip(circle)(root);
-      var color = d3.scaleOrdinal(d3.schemeCategory10);
+      var color = d3.scaleOrdinal(d3.schemeTableau10);
       var cells = svg.selectAll("g").data(root.leaves()).enter().append("g");
       cells.append("path")
         .attr("d", function (d) { return "M" + d.polygon.join("L") + "Z"; })
