@@ -302,3 +302,116 @@ def test_get_vector_zarr_by_coord(tmp_path):
                                    step=2, workspace=tmp_path)
     assert res["ids"] == ["RXN-A", "RXN-B", "RXN-C"]
     assert res["values"] == [3.0, 4.0, 5.0]
+
+
+# ---------------------------------------------------------------------------
+# Parquet / ParquetEmitter tests
+# ---------------------------------------------------------------------------
+
+def make_fake_parquet(root, variant=0, seed=0, n=4):
+    """Write a minimal hive parquet run under root/exp/history/...
+
+    Returns the lineage_seed directory (the 'db_path' for parquet runs).
+    Skips (via pytest.importorskip) if pyarrow is unavailable.
+    """
+    pa = pytest.importorskip("pyarrow")
+    pq = pytest.importorskip("pyarrow.parquet")
+
+    hist_dir = (root / "exp" / "history"
+                / "experiment_id=exp" / f"variant={variant}"
+                / f"lineage_seed={seed}" / "generation=1" / "agent_id=0")
+    hist_dir.mkdir(parents=True)
+
+    times = pa.array([float(i) for i in range(n)], type=pa.float64())
+    cell_mass = pa.array([100.0 + i for i in range(n)], type=pa.float64())
+    # 5 monomers per row, all rows identical values [0.0..4.0]
+    monomer_data = [[float(j) for j in range(5)] for _ in range(n)]
+    monomer_col = pa.array(monomer_data, type=pa.large_list(pa.float64()))
+    bulk_id_col = pa.array([["GLC", "ATP"] for _ in range(n)],
+                           type=pa.large_list(pa.large_string()))
+    bulk_cnt_col = pa.array([[10 + i, 20 + i] for i in range(n)],
+                            type=pa.large_list(pa.int64()))
+
+    tbl = pa.table({
+        "global_time": times,
+        "listeners__mass__cell_mass": cell_mass,
+        "listeners__monomer_counts": monomer_col,
+        "bulk__id": bulk_id_col,
+        "bulk__count": bulk_cnt_col,
+    })
+    pq.write_table(tbl, str(hist_dir / "0.pq"))
+
+    # Config sidecar
+    cfg_dir = (root / "exp" / "configuration"
+               / "experiment_id=exp" / f"variant={variant}"
+               / f"lineage_seed={seed}" / "generation=1" / "agent_id=0")
+    cfg_dir.mkdir(parents=True)
+    monomer_ids = [f"monomer_{j}" for j in range(5)]
+    cfg_tbl = pa.table({
+        "output_metadata__listeners__monomer_counts": pa.array(
+            [monomer_ids], type=pa.large_list(pa.large_string())),
+    })
+    pq.write_table(cfg_tbl, str(cfg_dir / "config.pq"))
+
+    return (root / "exp" / "history"
+            / "experiment_id=exp" / f"variant={variant}" / f"lineage_seed={seed}")
+
+
+def test_parquet_resolve_and_observables(tmp_path):
+    pytest.importorskip("pyarrow")
+    lineage_dir = make_fake_parquet(tmp_path)
+    kind, resolved = explorer_data._resolve_run_source(str(lineage_dir))
+    assert kind == "parquet"
+    assert resolved == lineage_dir
+
+    obs = explorer_data.list_observables(str(lineage_dir))
+    cats = obs["categories"]
+    flat = [o for g in cats.values() for o in g]
+    paths = [o["path"] for o in flat]
+
+    # cell_mass: scalar, Mass category
+    assert "listeners__mass__cell_mass" in paths, f"paths={paths}"
+    mass_obs = next(o for o in flat if o["path"] == "listeners__mass__cell_mass")
+    assert mass_obs["kind"] == "scalar"
+    assert mass_obs["unit"] == "fg"
+    assert mass_obs["mclass"] == "Mass"
+
+    # monomer_counts: vector, Protein
+    assert "listeners__monomer_counts" in paths, f"paths={paths}"
+    mc_obs = next(o for o in flat if o["path"] == "listeners__monomer_counts")
+    assert mc_obs["kind"] == "vector"
+    assert mc_obs["mclass"] == "Protein"
+
+
+def test_parquet_series(tmp_path):
+    pytest.importorskip("pyarrow")
+    lineage_dir = make_fake_parquet(tmp_path, n=4)
+
+    res = explorer_data.get_series(
+        str(lineage_dir),
+        paths=[("listeners__mass__cell_mass", None),
+               ("listeners__monomer_counts", 1)],
+        subsample=100,
+    )
+    assert len(res["time"]) == 4
+
+    mass = res["series"]["listeners__mass__cell_mass"]
+    assert mass == [100.0, 101.0, 102.0, 103.0], f"mass={mass}"
+
+    # Index-1 of [0.0, 1.0, 2.0, 3.0, 4.0] is 1.0 for every row
+    mc1 = res["series"]["listeners__monomer_counts#1"]
+    assert mc1 == [1.0, 1.0, 1.0, 1.0], f"mc1={mc1}"
+
+
+def test_parquet_vector(tmp_path):
+    pytest.importorskip("pyarrow")
+    lineage_dir = make_fake_parquet(tmp_path, n=4)
+
+    res = explorer_data.get_vector(
+        str(lineage_dir),
+        "listeners__monomer_counts",
+        step=2,
+    )
+    assert res["ids"] == [f"monomer_{j}" for j in range(5)], f"ids={res['ids']}"
+    assert res["values"] == [0.0, 1.0, 2.0, 3.0, 4.0], f"values={res['values']}"
+    assert res["step"] == 2

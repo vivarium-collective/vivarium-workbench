@@ -125,7 +125,7 @@ def _first_state(db_path: str, run_id: str | None) -> dict | None:
 
 
 def _resolve_run_source(db, workspace=None):
-    """('sqlite', Path) | ('zarr', store.zarr Path) | (None, None)."""
+    """('sqlite', Path) | ('zarr', store.zarr Path) | ('parquet', dir Path) | (None, None)."""
     p = Path(db)
     if workspace and not p.is_absolute():
         p = Path(workspace) / p
@@ -136,10 +136,111 @@ def _resolve_run_source(db, workspace=None):
                      *sorted(p.glob("*/*/store.zarr"))]:
             if cand.exists():
                 return "zarr", cand
+        # Parquet: directory with *.pq files (not a zarr store)
+        if next(p.rglob("*.pq"), None) is not None:
+            return "parquet", p
         return None, None
     if p.exists():
         return "sqlite", p
     return None, None
+
+
+# ---------------------------------------------------------------------------
+# Parquet helpers (lazy-import pyarrow; degrade to empty/None if absent)
+# ---------------------------------------------------------------------------
+
+def _parquet_files(part_dir):
+    """Sorted list of .pq paths under a partition directory."""
+    return sorted(Path(part_dir).rglob("*.pq"))
+
+
+def _parquet_table(part_dir, columns=None):
+    """Read all .pq files in part_dir, concat, sort by global_time.
+
+    Uses ParquetFile (single-file reader) to avoid the hive-partition
+    ArrowTypeError that occurs when pyarrow tries to merge schemas across
+    a partitioned directory.  Returns None on ImportError or any read error.
+    """
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError:
+        return None
+    files = _parquet_files(part_dir)
+    if not files:
+        return None
+    try:
+        tables = [pq.ParquetFile(str(f)).read(columns=columns) for f in files]
+        tbl = pa.concat_tables(tables)
+        return tbl.sort_by("global_time")
+    except Exception:
+        return None
+
+
+def _parquet_config_meta(part_dir):
+    """Return {observable_col: id_list} from the sibling configuration/config.pq.
+
+    The config file lives at the parallel path with /history/ replaced by
+    /configuration/, containing output_metadata__<col> columns.
+    """
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:
+        return {}
+    try:
+        config_root = Path(str(part_dir).replace("/history/", "/configuration/", 1))
+        config_files = list(config_root.rglob("config.pq"))
+        if not config_files:
+            return {}
+        t = pq.ParquetFile(str(config_files[0])).read()
+        result = {}
+        for col in t.column_names:
+            if col.startswith("output_metadata__"):
+                key = col[len("output_metadata__"):]
+                val = t.column(col)[0].as_py()
+                if val is not None:
+                    result[key] = val
+        return result
+    except Exception:
+        return {}
+
+
+def _parquet_observables(part_dir):
+    """Build the {categories: {...}} observable map from a parquet partition."""
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError:
+        return {"categories": {}}
+    files = _parquet_files(part_dir)
+    if not files:
+        return {"categories": {}}
+    try:
+        schema = pq.read_schema(str(files[0]))
+    except Exception:
+        return {"categories": {}}
+
+    # Columns that are hive-partition metadata or otherwise not observables
+    SKIP = {"global_time", "bulk__id", "experiment_id", "variant",
+            "lineage_seed", "generation", "agent_id"}
+    leaves = []
+    for field in schema:
+        col = field.name
+        if col in SKIP:
+            continue
+        is_large_list = pa.types.is_large_list(field.type)
+        is_list = pa.types.is_list(field.type)
+        if col == "bulk__count":
+            # Special-case: bulk molecule counts as Metabolite vector
+            leaves.append({"path": col, "index": 0, "kind": "vector",
+                           "label": "bulk", "unit": "counts", "mclass": "Metabolite"})
+        elif is_large_list or is_list:
+            leaves.append(_annotate({"path": col, "index": 0, "kind": "vector",
+                                     "label": col.split("__")[-1]}))
+        elif pa.types.is_floating(field.type) or pa.types.is_integer(field.type):
+            leaves.append(_annotate({"path": col, "index": None, "kind": "scalar",
+                                     "label": col.split("__")[-1]}))
+    return {"categories": _categorize_leaves(leaves)}
 
 
 def _categorize_leaves(leaves):
@@ -187,6 +288,8 @@ def list_observables(db_path: str, run_id: str | None = None, workspace=None) ->
     kind, resolved = _resolve_run_source(db_path, workspace)
     if kind == "zarr":
         return _zarr_observables(resolved)
+    if kind == "parquet":
+        return _parquet_observables(resolved)
     if kind != "sqlite":
         return {"categories": {}}
     state = _first_state(resolved, run_id)
@@ -272,9 +375,36 @@ def get_series(db_path, paths, subsample=400, run_id=None, workspace=None):
     which already handles the agents/0/ fallback and json_extract subsampling.
     Bulk paths of the form ``bulk[<id>]`` are dispatched to _extract_bulk_trace.
     XArrayEmitter (zarr) runs are dispatched via _extract_trace_from_zarr; bulk[id]
-    remains SQLite-only for v1 (zarr bulk would need its own leaf handling)."""
+    remains SQLite-only for v1 (zarr bulk would need its own leaf handling).
+    ParquetEmitter runs read column-by-column via _parquet_table."""
     kind, resolved = _resolve_run_source(db_path, workspace)
     series, time = {}, []
+
+    if kind == "parquet":
+        for path, index in paths:
+            try:
+                tbl = _parquet_table(resolved, columns=["global_time", path])
+                if tbl is None:
+                    series[_series_key(path, index)] = []
+                    continue
+                times_col = tbl.column("global_time").to_pylist()
+                vals_col = tbl.column(path).to_pylist()
+                if index is None:
+                    vals = [float(v) if v is not None else None for v in vals_col]
+                else:
+                    vals = []
+                    for row in vals_col:
+                        if row is not None and len(row) > index:
+                            vals.append(float(row[index]))
+                        else:
+                            vals.append(None)
+                series[_series_key(path, index)] = vals
+                if not time and times_col:
+                    time = times_col
+            except Exception:
+                series[_series_key(path, index)] = []
+        return {"time": time, "series": series}
+
     for path, index in paths:
         if kind == "zarr":
             t, v = comparative_viz._extract_trace_from_zarr(
@@ -427,12 +557,37 @@ def _zarr_vector(store, leaf, step):
 
 def get_vector(db_path, path, step, run_id=None, workspace=None):
     """One vector observable's per-entity (ids, values) at a timepoint.
-    zarr: ids from the id_<leaf> coord. sqlite: positional index ids."""
+    zarr: ids from the id_<leaf> coord. sqlite: positional index ids.
+    parquet: ids from config_meta (output_metadata__<col>), or bulk__id for bulk."""
     kind, resolved = _resolve_run_source(db_path, workspace)
     if kind == "zarr":
         leaf = path.split(".")[-1].split("[")[0]
         ids, vals = _zarr_vector(resolved, leaf, step)
         return {"ids": ids, "values": vals, "step": step, "time": None}
+    if kind == "parquet":
+        try:
+            tbl = _parquet_table(resolved, columns=["global_time", path])
+            if tbl is None:
+                return {"ids": [], "values": [], "step": step, "time": None}
+            nrows = len(tbl)
+            si = min(max(0, step), nrows - 1)
+            time_val = tbl.column("global_time")[si].as_py()
+            row_val = tbl.column(path)[si].as_py()
+            if row_val is None:
+                return {"ids": [], "values": [], "step": step, "time": time_val}
+            values = [float(v) for v in row_val]
+            if path == "bulk__count":
+                bulk_tbl = _parquet_table(resolved, columns=["global_time", "bulk__id"])
+                if bulk_tbl is not None:
+                    ids = bulk_tbl.column("bulk__id")[si].as_py() or []
+                else:
+                    ids = [str(i) for i in range(len(values))]
+            else:
+                meta = _parquet_config_meta(resolved)
+                ids = meta.get(path, [str(i) for i in range(len(values))])
+            return {"ids": ids, "values": values, "step": step, "time": time_val}
+        except Exception:
+            return {"ids": [], "values": [], "step": step, "time": None}
     if kind == "sqlite":
         time, state = _state_at_step(resolved, step, run_id)
         vec = _dig(_unwrap_agent(state), path) if state is not None else None
@@ -445,7 +600,7 @@ def get_vector(db_path, path, step, run_id=None, workspace=None):
 
 def get_flux_auto(db_path, step, id_map, run_id=None, workspace=None):
     """Emitter-aware flux: zarr reads ids+vector from the store; sqlite uses
-    get_flux with asset/run base_ids."""
+    get_flux with asset/run base_ids; parquet reads the FBA vector + config ids."""
     kind, resolved = _resolve_run_source(db_path, workspace)
     if kind == "zarr":
         ids, vals = _zarr_flux(resolved, step)
@@ -458,6 +613,31 @@ def get_flux_auto(db_path, step, id_map, run_id=None, workspace=None):
                 fluxes[bigg] = float(vals[i])
         return {"step": step, "time": None, "fluxes": fluxes,
                 "coverage": {"mapped": len(fluxes), "total": len(ids)}}
+    if kind == "parquet":
+        flux_col = "listeners__fba_results__base_reaction_fluxes"
+        try:
+            tbl = _parquet_table(resolved, columns=["global_time", flux_col])
+            if tbl is None:
+                return {"step": step, "time": None, "fluxes": {},
+                        "coverage": {"mapped": 0, "total": 0}}
+            nrows = len(tbl)
+            si = min(max(0, step), nrows - 1)
+            time_val = tbl.column("global_time")[si].as_py()
+            vals = tbl.column(flux_col)[si].as_py() or []
+            meta = _parquet_config_meta(resolved)
+            ids = meta.get(flux_col, [])
+            fluxes = {}
+            for i, rid in enumerate(ids):
+                if i >= len(vals):
+                    break
+                bigg = id_map.get(rid)
+                if bigg is not None:
+                    fluxes[bigg] = float(vals[i])
+            return {"step": step, "time": time_val, "fluxes": fluxes,
+                    "coverage": {"mapped": len(fluxes), "total": len(ids)}}
+        except Exception:
+            return {"step": step, "time": None, "fluxes": {},
+                    "coverage": {"mapped": 0, "total": 0}}
     # sqlite path
     base_ids, _ = load_flux_assets()
     if not base_ids:
@@ -496,13 +676,14 @@ def _run_has_data(kind, resolved) -> bool:
 def list_runs(workspace: Path) -> list[dict]:
     """Runs for the explorer's run-picker, projected to a small public shape.
 
-    Only runs backed by a real, non-empty emitter store (SQLite history or a
-    zarr datatree) are returned — metadata-only ``study_yaml`` records and empty
-    DBs have nothing to explore and would otherwise clutter the picker with
-    dead entries.
+    Returns SQLite/zarr runs from list_simulations (non-empty stores only), plus
+    parquet runs discovered by scanning .pbg/runs/ for hive partition directories.
+    Parquet runs are de-duplicated against any that list_simulations already surfaced.
     """
     ws = Path(workspace)
     out = []
+    existing_resolved: set[str] = set()
+
     for r in simulations_index.list_simulations(ws):
         db = r.get("db_path")
         if not db:
@@ -510,6 +691,7 @@ def list_runs(workspace: Path) -> list[dict]:
         kind, resolved = _resolve_run_source(db, ws)
         if kind not in ("sqlite", "zarr") or not _run_has_data(kind, resolved):
             continue
+        existing_resolved.add(str(resolved))
         studies = r.get("studies") or []
         out.append({
             "run_id": r.get("run_id"),
@@ -521,4 +703,47 @@ def list_runs(workspace: Path) -> list[dict]:
             "db_path": r.get("db_path"),
             "source": r.get("source"),
         })
+
+    # Discover parquet runs from .pbg/runs/
+    try:
+        import pyarrow.parquet as pq
+        _pq_available = True
+    except ImportError:
+        _pq_available = False
+
+    if _pq_available:
+        pbg_runs = ws / ".pbg" / "runs"
+        if pbg_runs.is_dir():
+            pattern = "*/*/history/experiment_id=*/variant=*/lineage_seed=*"
+            for lineage_dir in sorted(pbg_runs.glob(pattern)):
+                if not lineage_dir.is_dir():
+                    continue
+                if next(lineage_dir.rglob("*.pq"), None) is None:
+                    continue
+                if str(lineage_dir) in existing_resolved:
+                    continue
+                variant = lineage_dir.parent.name.split("=", 1)[1]
+                seed = lineage_dir.name.split("=", 1)[1]
+                # runfolder is the first segment under .pbg/runs
+                runfolder = lineage_dir.parts[len(pbg_runs.parts)]
+                run_id = f"{runfolder}:v{variant}:s{seed}"
+                label = f"{runfolder} · variant {variant} · seed {seed}"
+                n_steps = 0
+                for f in sorted(lineage_dir.rglob("*.pq")):
+                    try:
+                        n_steps += pq.read_metadata(str(f)).num_rows
+                    except Exception:
+                        pass
+                db_path_rel = str(lineage_dir.relative_to(ws))
+                out.append({
+                    "run_id": run_id,
+                    "label": label,
+                    "study": None,
+                    "investigation": None,
+                    "n_steps": n_steps,
+                    "status": None,
+                    "db_path": db_path_rel,
+                    "source": "parquet",
+                })
+
     return out
