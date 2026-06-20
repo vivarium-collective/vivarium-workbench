@@ -14,7 +14,7 @@ import time
 import traceback
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 STEP_NAMES = ["push", "build", "run", "poll", "download", "land"]
