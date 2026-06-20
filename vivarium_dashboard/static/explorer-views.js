@@ -26,10 +26,16 @@
       var sel = ctrls.querySelector("#ts-obs");
       var chosen = {};
       Array.prototype.forEach.call(sel.selectedOptions, function (o) { chosen[o.value] = 1; });
-      sel.innerHTML = opts.filter(function (o) {
+      var matches = opts.filter(function (o) {
         return (cls === "All" || o.mclass === cls) &&
                (!q || o.label.toLowerCase().indexOf(q) >= 0);
-      }).map(function (o) {
+      });
+      if (!matches.length) {
+        sel.innerHTML = '<option disabled>— no ' +
+          (cls === "All" ? "" : cls + " ") + "observables in this run —</option>";
+        return;
+      }
+      sel.innerHTML = matches.map(function (o) {
         return '<option value="' + o.key + '"' + (chosen[o.key] ? " selected" : "") +
                ">" + o.label + " [" + (o.unit || "–") + "]</option>";
       }).join("");
@@ -183,30 +189,39 @@
 
   V.allocation = function (host, ctrls) {
     // static mass hierarchy (intersected with what the run emits)
-    var MASS_TREE = {
-      "cell_mass": ["protein_mass", "rna_mass", "dna_mass", "smallMolecule_mass", "water_mass"],
-      "rna_mass": ["rRna_mass", "tRna_mass", "mRna_mass"]
-    };
-    // available mass observable paths in this run (path endswith the field name)
+    // Fine dry-mass composition. Water dwarfs everything, so it's EXCLUDED by
+    // default (toggle to add it). rna is shown as its three sub-masses so the
+    // breakdown is finer; protein/dna/smallMolecule have no emitted sub-masses.
+    var ROOT_FIELDS = ["protein_mass", "rRna_mass", "tRna_mass", "mRna_mass",
+                       "dna_mass", "smallMolecule_mass"];
+    var MASS_TREE = {};                      // leaves only; synthetic "dry" root
+    var includeWater = false;
+    // available mass observable paths in this run (field -> emitted path)
     var massPaths = {};
     Object.keys(state.observables).forEach(function (cat) {
       state.observables[cat].forEach(function (o) {
         if ((o.mclass === "Mass") || /_mass$/.test(o.path)) {
-          var field = o.path.split(".").pop();
-          massPaths[field] = o.path;
+          massPaths[o.path.split(".").pop()] = o.path;
         }
       });
     });
+    function rootFields() {
+      var fs = ROOT_FIELDS.filter(function (f) { return massPaths[f]; });
+      if (includeWater && massPaths["water_mass"]) fs = fs.concat("water_mass");
+      return fs;
+    }
     function childrenOf(field) {
       return (MASS_TREE[field] || []).filter(function (f) { return massPaths[f]; });
     }
-    var path = ["cell_mass"];               // breadcrumb of fields
+    function label(f) { return f === "dry" ? "dry mass" : f.replace(/_mass$/, ""); }
+    var path = ["dry"];                      // "dry" = synthetic root (no water)
     var cache = { time: [], byField: {} };
 
     function currentChildren() {
       var node = path[path.length - 1];
+      if (node === "dry") return rootFields();
       var kids = childrenOf(node);
-      return kids.length ? kids : [node];   // leaf → show itself
+      return kids.length ? kids : [node];
     }
 
     function load() {
@@ -226,20 +241,24 @@
     function render() {
       ctrls.innerHTML =
         '<div class="al-crumb">' + path.map(function (f, i) {
-          return '<span class="al-bc" data-i="' + i + '">' + f.replace(/_mass$/, "") + "</span>";
+          return '<span class="al-bc" data-i="' + i + '">' + label(f) + "</span>";
         }).join(" ▸ ") + "</div>" +
+        '<label><input type="checkbox" id="al-water"' + (includeWater ? " checked" : "") +
+          "> include water</label>" +
         '<label>Time <input id="al-t" type="range" min="0" max="' +
           Math.max(0, cache.time.length - 1) + '" value="' +
           Math.max(0, cache.time.length - 1) + '"></label>' +
-        '<span id="al-tlabel" class="muted"></span>' +
-        '<p class="muted" style="font-size:0.78em">double-click a cell to break it down</p>';
+        '<span id="al-tlabel" class="muted"></span>';
       ctrls.querySelectorAll(".al-bc").forEach(function (el) {
         el.addEventListener("click", function () {
           path = path.slice(0, parseInt(el.getAttribute("data-i"), 10) + 1); load();
         });
       });
+      ctrls.querySelector("#al-water").addEventListener("change", function (e) {
+        includeWater = e.target.checked; load();
+      });
       ctrls.querySelector("#al-t").addEventListener("input", draw);
-      host.innerHTML = '<svg id="al-svg" width="520" height="520"></svg>';
+      host.innerHTML = '<svg id="al-svg" width="540" height="540"></svg>';
       draw();
     }
 
@@ -249,12 +268,12 @@
         cache.time.length ? "t = " + (cache.time[ti] != null ? cache.time[ti].toFixed(1) : ti) : "";
       var fields = currentChildren();
       var leaves = fields.map(function (f) {
-        return { name: f.replace(/_mass$/, ""), field: f,
+        return { name: label(f), field: f,
                  value: Math.abs((cache.byField[f] || [])[ti] || 0) };
       }).filter(function (d) { return d.value > 0; });
       var svg = d3.select("#al-svg"); svg.selectAll("*").remove();
       if (!leaves.length) return;
-      var W = 520, H = 520, R = 250, cx = W / 2, cy = H / 2, circle = [];
+      var W = 540, H = 540, R = 260, cx = W / 2, cy = H / 2, circle = [];
       for (var a = 0; a < 2 * Math.PI; a += Math.PI / 60)
         circle.push([cx + R * Math.cos(a), cy + R * Math.sin(a)]);
       var total = leaves.reduce(function (s, d) { return s + d.value; }, 0) || 1;
@@ -273,13 +292,21 @@
         .append("title").text(function (d) {
           return d.data.name + ": " + d.data.value.toFixed(2) + " fg (" +
                  (100 * d.data.value / total).toFixed(1) + "%)"; });
+      // label every cell down to ~0.8% with name + percent (two lines)
       cells.append("text")
-        .attr("x", function (d) { return d.polygon.site.x; })
-        .attr("y", function (d) { return d.polygon.site.y; })
         .attr("text-anchor", "middle").attr("fill", "#fff")
-        .attr("font-size", "12px").style("pointer-events", "none")
-        .text(function (d) {
-          return (100 * d.data.value / total) > 4 ? d.data.name : ""; });
+        .style("pointer-events", "none")
+        .attr("transform", function (d) {
+          return "translate(" + d.polygon.site.x + "," + d.polygon.site.y + ")"; })
+        .filter(function (d) { return (100 * d.data.value / total) > 0.8; })
+        .each(function (d) {
+          var pct = 100 * d.data.value / total, g = d3.select(this);
+          g.append("tspan").attr("x", 0).attr("dy", "-0.1em")
+            .attr("font-size", pct > 6 ? "13px" : "10px").text(d.data.name);
+          g.append("tspan").attr("x", 0).attr("dy", "1.15em")
+            .attr("font-size", "9px").attr("fill", "#cfd6df")
+            .text(pct.toFixed(pct < 10 ? 1 : 0) + "%");
+        });
     }
 
     load();
