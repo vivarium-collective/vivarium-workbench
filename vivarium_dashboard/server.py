@@ -308,6 +308,8 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/workspaces/cleanup-stale": "_post_workspaces_cleanup_stale",
     "/api/workspaces/start":         "_post_workspaces_start",
     "/api/workspaces/stop":          "_post_workspaces_stop",
+    # Remote-run endpoints (Phase 3b).
+    "/api/remote-run-start":         "_post_remote_run_start",
 }
 # Inject study-alias routes into the POST route map (same method name as old).
 for _old, _new in _POST_STUDY_ALIASES.items():
@@ -6610,6 +6612,44 @@ def _has_origin_remote() -> bool:
     return "origin" in (r.stdout or "").split()
 
 
+def _sms_api_base() -> str:
+    """Base URL of the sms-api (the SSM tunnel by default)."""
+    return os.environ.get("SMS_API_BASE", "http://localhost:8080")
+
+
+def _remote_push_and_sha() -> str:
+    """Push the workspace's current branch to origin with the GH token, return HEAD SHA."""
+    from vivarium_dashboard.lib import github_auth
+
+    branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=WORKSPACE,
+        capture_output=True, text=True, timeout=5,
+    ).stdout.strip()
+    if not branch or branch == "HEAD":
+        raise RuntimeError("workspace is not on a named branch")
+    env = os.environ | github_auth.current_token_env()
+    push = subprocess.run(
+        ["git", "push", "-u", "origin", branch], cwd=WORKSPACE,
+        capture_output=True, text=True, timeout=120, env=env,
+    )
+    if push.returncode != 0:
+        raise RuntimeError(f"git push failed: {(push.stderr or push.stdout)[-300:]}")
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=WORKSPACE, capture_output=True, text=True, timeout=5,
+    ).stdout.strip()
+    if not sha:
+        raise RuntimeError("could not resolve HEAD commit")
+    return sha
+
+
+def _remote_repo_url() -> str | None:
+    r = subprocess.run(
+        ["git", "remote", "get-url", "origin"], cwd=WORKSPACE,
+        capture_output=True, text=True, timeout=5,
+    )
+    return r.stdout.strip() or None if r.returncode == 0 else None
+
+
 def _stale_branch_threshold() -> int:
     """Commits-behind-main threshold above which a branch is flagged stale.
 
@@ -8434,6 +8474,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_ptools_launch(study)
         if self.path.startswith("/api/git-status"):
             return self._get_git_status()
+        if self.path.startswith("/api/remote-run-status"):
+            return self._get_remote_run_status()
         # Serve the bigraph-loom viewer at /bigraph-loom. The bundle comes from
         # the standalone `bigraph-loom` package (a dependency), via
         # bigraph_loom.asset_dir(), rather than a vendored copy.
@@ -16366,6 +16408,73 @@ if __name__ == "__main__":
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    # ------------------------------------------------------------------
+    # Remote-run endpoints (Phase 3b)
+    # ------------------------------------------------------------------
+
+    def _post_remote_run_start(self, body: dict):
+        """POST /api/remote-run-start {study, num_generations?, num_seeds?, run_parca?}"""
+        from vivarium_dashboard.lib import github_auth
+        from vivarium_dashboard.lib.investigations import load_spec
+        from vivarium_dashboard.lib.remote_run_jobs import PipelineCtx, manager, run_remote_pipeline
+        from vivarium_dashboard.lib.remote_run_landing import land_remote_run
+        from vivarium_dashboard.lib.sms_api_client import SmsApiClient
+
+        if github_auth.current_session() is None:
+            return self._json({"error": "not authenticated"}, 401)
+        study = (body.get("study") or "").strip()
+        if not study:
+            return self._json({"error": "study is required"}, 400)
+        if not _has_origin_remote():
+            return self._json({"error": "no GitHub remote configured"}, 409)
+        repo_url = _remote_repo_url()
+        if not repo_url:
+            return self._json({"error": "could not resolve origin remote url"}, 409)
+
+        spec_path = _study_spec_path(study)
+        if spec_path is None or not spec_path.is_file():
+            return self._json({"error": f"study {study!r} not found"}, 404)
+        spec = load_spec(spec_path)
+        observables = _collect_study_observables(spec)
+
+        branch = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=WORKSPACE,
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+
+        client = SmsApiClient(_sms_api_base())
+        ctx = PipelineCtx(
+            study=study,
+            study_dir=_study_dir(study),
+            spec_id=(spec.get("baseline", [{}])[0].get("name") if spec.get("baseline") else study),
+            repo_url=repo_url,
+            branch=branch,
+            observables=observables,
+            num_generations=int(body.get("num_generations") or 1),
+            num_seeds=int(body.get("num_seeds") or 1),
+            run_parca=bool(body.get("run_parca", True)),
+            client=client,
+            push_and_sha=_remote_push_and_sha,
+            land=land_remote_run,
+        )
+        job = manager.submit(study, lambda j: run_remote_pipeline(j, ctx))
+        return self._json({"job_id": job.job_id}, 202)
+
+    def _get_remote_run_status(self):
+        """GET /api/remote-run-status?job_id=<id>"""
+        from urllib.parse import parse_qs, urlparse
+
+        from vivarium_dashboard.lib.remote_run_jobs import manager
+
+        qs = parse_qs(urlparse(self.path).query)
+        job_id = (qs.get("job_id") or [""])[0]
+        if not job_id:
+            return self._json({"jobs": manager.list_recent(10)}, 200)
+        job = manager.get(job_id)
+        if job is None:
+            return self._json({"error": "job not found"}, 404)
+        return self._json(job.to_dict(), 200)
 
     @staticmethod
     def _guess_mime(rel: str) -> str:
