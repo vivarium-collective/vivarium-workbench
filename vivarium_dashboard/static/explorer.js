@@ -103,7 +103,8 @@
     Object.keys(state.observables).forEach(function (cat) {
       state.observables[cat].forEach(function (o) {
         var key = o.path + (o.index != null ? "#" + o.index : "");
-        opts.push({ key: key, label: cat + " · " + o.label, kind: o.kind, len: o.length });
+        opts.push({ key: key, label: cat + " · " + o.label, kind: o.kind,
+                    len: o.length, unit: o.unit || "", mclass: o.mclass || "Other" });
       });
     });
     return opts;

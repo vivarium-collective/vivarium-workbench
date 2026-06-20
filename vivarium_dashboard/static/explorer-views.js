@@ -9,38 +9,75 @@
 
   V.timeseries = function (host, ctrls) {
     var opts = observableOptions();
+    var classes = ["All", "RNA", "Protein", "Metabolite", "Flux", "Mass", "Other"];
     ctrls.innerHTML =
-      '<label>Observables <select id="ts-obs" multiple size="6">' +
-      opts.map(function (o) { return '<option value="' + o.key + '">' + o.label + "</option>"; }).join("") +
+      '<label>Class <select id="ts-class">' +
+        classes.map(function (c) { return '<option>' + c + "</option>"; }).join("") +
       "</select></label>" +
+      '<label>Search <input id="ts-search" type="text" placeholder="filter…"></label>' +
+      '<label>Observables <select id="ts-obs" multiple size="10"></select></label>' +
       '<label><input type="checkbox" id="ts-log"> log y</label>' +
       '<label><input type="checkbox" id="ts-norm"> normalize</label>';
-    host.innerHTML = '<div id="ts-chart" style="height:460px"></div>';
+    host.innerHTML = '<div id="ts-chart" style="height:520px"></div>';
+
+    function refreshList() {
+      var cls = ctrls.querySelector("#ts-class").value;
+      var q = ctrls.querySelector("#ts-search").value.toLowerCase();
+      var sel = ctrls.querySelector("#ts-obs");
+      var chosen = {};
+      Array.prototype.forEach.call(sel.selectedOptions, function (o) { chosen[o.value] = 1; });
+      sel.innerHTML = opts.filter(function (o) {
+        return (cls === "All" || o.mclass === cls) &&
+               (!q || o.label.toLowerCase().indexOf(q) >= 0);
+      }).map(function (o) {
+        return '<option value="' + o.key + '"' + (chosen[o.key] ? " selected" : "") +
+               ">" + o.label + " [" + (o.unit || "–") + "]</option>";
+      }).join("");
+    }
 
     function draw() {
       var chosen = Array.prototype.map.call(
         ctrls.querySelectorAll("#ts-obs option:checked"), function (o) { return o.value; });
       if (!chosen.length) { Plotly.purge("ts-chart"); return; }
+      var unitOf = {};
+      opts.forEach(function (o) { unitOf[o.key] = o.unit || ""; });
       var u = api("/series?db=" + encodeURIComponent(state.run.db_path) +
                   "&run=" + encodeURIComponent(state.run.run_id || "") +
                   "&paths=" + encodeURIComponent(chosen.join(",")));
       j(u).then(function (d) {
         var norm = ctrls.querySelector("#ts-norm").checked;
-        var traces = Object.keys(d.series).map(function (k) {
+        var log = ctrls.querySelector("#ts-log").checked;
+        // distinct units → one stacked panel each
+        var units = [];
+        chosen.forEach(function (k) { var un = unitOf[k] || "(unitless)";
+          if (units.indexOf(un) < 0) units.push(un); });
+        var n = units.length, traces = [], layout = {
+          margin: { t: 10, r: 10 }, paper_bgcolor: "#0e1116", plot_bgcolor: "#0e1116",
+          font: { color: "#cfd6df" }, showlegend: true,
+          grid: { rows: n, columns: 1, pattern: "independent", roworder: "top to bottom" }
+        };
+        units.forEach(function (un, i) {
+          var ax = i === 0 ? "y" : "y" + (i + 1);
+          layout[i === 0 ? "yaxis" : "yaxis" + (i + 1)] =
+            { title: un, type: log ? "log" : "linear" };
+        });
+        Object.keys(d.series).forEach(function (k) {
+          var un = unitOf[k] || "(unitless)", i = units.indexOf(un);
           var y = d.series[k];
           if (norm) { var m = Math.max.apply(null, y.map(Math.abs)) || 1; y = y.map(function (v) { return v / m; }); }
-          return { type: "scatter", mode: "lines", name: k, x: d.time, y: y };
+          traces.push({ type: "scatter", mode: "lines", name: k, x: d.time, y: y,
+                        xaxis: "x", yaxis: i === 0 ? "y" : "y" + (i + 1) });
         });
-        Plotly.react("ts-chart", traces, {
-          margin: { t: 10, r: 10 }, paper_bgcolor: "#0e1116", plot_bgcolor: "#0e1116",
-          font: { color: "#cfd6df" },
-          yaxis: { type: ctrls.querySelector("#ts-log").checked ? "log" : "linear" }
-        }, { responsive: true });
+        Plotly.react("ts-chart", traces, layout, { responsive: true });
       });
     }
+
+    ctrls.querySelector("#ts-class").addEventListener("change", refreshList);
+    ctrls.querySelector("#ts-search").addEventListener("input", refreshList);
     ctrls.querySelector("#ts-obs").addEventListener("change", draw);
     ctrls.querySelector("#ts-log").addEventListener("change", draw);
     ctrls.querySelector("#ts-norm").addEventListener("change", draw);
+    refreshList();
   };
 
   V.scatter = function (host, ctrls) {

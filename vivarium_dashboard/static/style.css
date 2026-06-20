@@ -2281,3 +2281,5 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 .explorer-standalone .explorer { flex:1 1 auto; min-height:0; }
 .explorer-standalone .exp-body { flex:1 1 auto; min-height:0; }
 .explorer-standalone .exp-view { height:100%; }
+.exp-rail #ts-obs, .exp-rail #ts-search { width:100%; }
+.exp-rail #ts-obs { height:220px; }
