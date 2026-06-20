@@ -8348,6 +8348,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_explorer_observables()
         if self.path.startswith("/api/explorer/series"):
             return self._get_explorer_series()
+        if self.path.startswith("/api/explorer/flux"):
+            return self._get_explorer_flux()
         if self.path.startswith("/api/simulations"):
             return self._get_simulations()
         if self.path.startswith("/api/composite-state"):
@@ -10932,6 +10934,27 @@ if __name__ == "__main__":
                 explorer_data.get_series(db, specs, sub, q.get("run")), 200)
         except Exception as e:
             return self._json({"error": str(e), "time": [], "series": {}}, 200)
+
+    def _get_explorer_flux(self):
+        """GET /api/explorer/flux?db=<path>&step=<int>&run=<id>"""
+        import urllib.parse as _up
+        from vivarium_dashboard.lib import explorer_data
+        q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
+        db = q.get("db")
+        if not db:
+            return self._json({"error": "missing db", "fluxes": {}}, 200)
+        try:
+            step = int(q.get("step", "0"))
+        except ValueError:
+            step = 0
+        try:
+            base_ids, id_map = explorer_data.load_flux_assets()
+            if not base_ids:
+                base_ids = explorer_data.base_ids_from_run(db, q.get("run"))
+            return self._json(
+                explorer_data.get_flux(db, step, base_ids, id_map, q.get("run")), 200)
+        except Exception as e:
+            return self._json({"error": str(e), "fluxes": {}}, 200)
 
     def _get_simulations(self):
         """GET /api/simulations — all persisted runs across the workspace.

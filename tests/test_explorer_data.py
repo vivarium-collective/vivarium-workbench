@@ -114,6 +114,26 @@ def test_get_series_extracts_bulk_pair(tmp_path):
     assert res["series"]["bulk[GLC]"] == [10.0, 11.0, 12.0, 13.0, 14.0]
 
 
+def test_get_flux_remaps_to_bigg(tmp_path):
+    db = tmp_path / "runs.db"
+    make_fake_runs_db(db, _sample_states(n=4))
+    base_ids = ["RXN-A", "RXN-B", "RXN-C"]
+    id_map = {"RXN-A": "PGI", "RXN-C": "PFK"}  # RXN-B intentionally unmapped
+    res = explorer_data.get_flux(str(db), step=2, base_ids=base_ids, id_map=id_map)
+    # state at step 2: base_reaction_fluxes == [3.0, 4.0, 5.0]
+    assert res["fluxes"] == {"PGI": 3.0, "PFK": 5.0}
+    assert res["coverage"] == {"mapped": 2, "total": 3}
+    assert res["step"] == 2
+
+
+def test_base_ids_from_run_reads_emitted_ids(tmp_path):
+    db = tmp_path / "runs.db"
+    st = {"agents": {"0": {"base_reaction_ids": ["RXN-A", "RXN-B", "RXN-C"],
+          "listeners": {"fba_results": {"base_reaction_fluxes": [1.0, 2.0, 3.0]}}}}}
+    make_fake_runs_db(db, [st, st])
+    assert explorer_data.base_ids_from_run(str(db)) == ["RXN-A", "RXN-B", "RXN-C"]
+
+
 def test_explorer_assets_are_valid_json():
     import vivarium_dashboard
     base = Path(vivarium_dashboard.__file__).parent / "static" / "explorer"

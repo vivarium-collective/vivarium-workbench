@@ -182,6 +182,97 @@ def get_series(db_path, paths, subsample=400, run_id=None):
     return {"time": time, "series": series}
 
 
+_FLUX_PATH = "listeners.fba_results.base_reaction_fluxes"
+
+_ASSET_DIR = Path(__file__).resolve().parents[1] / "static" / "explorer"
+_flux_assets_cache = None
+
+
+def load_flux_assets():
+    """(base_reaction_ids, reaction_id_map), cached. Returns ([], {}) if absent."""
+    global _flux_assets_cache
+    if _flux_assets_cache is None:
+        try:
+            base = json.loads((_ASSET_DIR / "base_reaction_ids.json").read_text())
+        except (OSError, ValueError):
+            base = []
+        try:
+            idmap = json.loads((_ASSET_DIR / "reaction_id_map.json").read_text())
+        except (OSError, ValueError):
+            idmap = {}
+        _flux_assets_cache = (base, idmap)
+    return _flux_assets_cache
+
+
+def _state_at_step(db_path: str, step: int, run_id: str | None):
+    try:
+        conn = sqlite3.connect(str(db_path))
+    except sqlite3.OperationalError:
+        return None, None
+    try:
+        if run_id:
+            row = conn.execute(
+                "SELECT global_time, state FROM history WHERE simulation_id=? AND step=?",
+                (run_id, step)).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT global_time, state FROM history WHERE step=? ORDER BY simulation_id LIMIT 1",
+                (step,)).fetchone()
+        if not row:
+            return None, None
+        return row[0], json.loads(row[1])
+    finally:
+        conn.close()
+
+
+def _dig(node, dotted):
+    for k in dotted.split("."):
+        if not isinstance(node, dict) or k not in node:
+            return None
+        node = node[k]
+    return node
+
+
+def get_flux(db_path: str, step: int, base_ids, id_map, run_id: str | None = None) -> dict:
+    time, state = _state_at_step(db_path, step, run_id)
+    fluxes: dict[str, float] = {}
+    total = len(base_ids)
+    if state is not None:
+        inner = _unwrap_agent(state)
+        vec = _dig(inner, _FLUX_PATH)
+        if isinstance(vec, list):
+            for i, val in enumerate(vec):
+                if i >= len(base_ids):
+                    break
+                bigg = id_map.get(base_ids[i])
+                if bigg is not None and isinstance(val, _NUM):
+                    fluxes[bigg] = float(val)
+    return {"step": step, "time": time, "fluxes": fluxes,
+            "coverage": {"mapped": len(fluxes), "total": total}}
+
+
+def base_ids_from_run(db_path, run_id=None):
+    """Ordered base_reaction_ids emitted in the run state, or [] if absent."""
+    state = _first_state(db_path, run_id)
+    if not state:
+        return []
+    found = []
+    def _search(node):
+        if found:
+            return
+        if isinstance(node, dict):
+            v = node.get("base_reaction_ids")
+            if isinstance(v, list) and v and all(isinstance(x, str) for x in v):
+                found.extend(v); return
+            for sub in node.values():
+                _search(sub)
+        elif isinstance(node, list):
+            for sub in node:
+                _search(sub)
+    _search(_unwrap_agent(state))
+    return found
+
+
 def list_runs(workspace: Path) -> list[dict]:
     """Runs for the explorer's run-picker, projected to a small public shape."""
     out = []
