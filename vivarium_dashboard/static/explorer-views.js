@@ -51,15 +51,20 @@
         var units = [];
         chosen.forEach(function (k) { var un = unitOf[k] || "(unitless)";
           if (units.indexOf(un) < 0) units.push(un); });
-        var n = units.length, traces = [], layout = {
+        var n = units.length, traces = [];
+        var gap = 0.08;
+        var h = n > 0 ? (1 - gap * (n - 1)) / n : 1;
+        var layout = {
           margin: { t: 10, r: 10 }, paper_bgcolor: "#0e1116", plot_bgcolor: "#0e1116",
           font: { color: "#cfd6df" }, showlegend: true,
-          grid: { rows: n, columns: 1, pattern: "independent", roworder: "top to bottom" }
+          xaxis: { anchor: n <= 1 ? "y" : "y" + n }
         };
         units.forEach(function (un, i) {
-          var ax = i === 0 ? "y" : "y" + (i + 1);
-          layout[i === 0 ? "yaxis" : "yaxis" + (i + 1)] =
-            { title: un, type: log ? "log" : "linear" };
+          var top = 1 - i * (h + gap);
+          var bottom = Math.max(0, top - h);
+          var key = i === 0 ? "yaxis" : "yaxis" + (i + 1);
+          layout[key] = { title: un, type: log ? "log" : "linear",
+                          domain: [bottom, top], anchor: "x" };
         });
         Object.keys(d.series).forEach(function (k) {
           var un = unitOf[k] || "(unitless)", i = units.indexOf(un);
