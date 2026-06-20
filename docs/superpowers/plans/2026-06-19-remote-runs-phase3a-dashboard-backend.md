@@ -14,7 +14,7 @@
 
 - No new dependencies — use stdlib `urllib.request` for HTTP (matches the existing `_http_get_json` approach in `server.py`).
 - The landing format is **"reconstruct history rows (unified)"**: per-timestep `history.state` JSON = `{"observables": {<name>: <value>}}`; charts select via path `observables/<name>`. Do not invent a parallel renderer.
-- Reuse, do not reimplement: `runs_meta` rows via `vivarium_dashboard.lib.composite_runs` (`connect`, `generate_run_id`, `save_metadata`, `complete_metadata`); the `simulations`+`history` tables via `pbg_emitters.sqlite_emitter.save_simulation_metadata` (creates both tables + the `simulations` row).
+- Reuse, do not reimplement: `runs_meta` rows via `vivarium_dashboard.lib.composite_runs` (`connect`, `generate_run_id`, `save_metadata`, `complete_metadata`). The `simulations`+`history` tables are created INLINE (see schema below) — **do NOT import `pbg_emitters`**; it is a workspace-venv emitter dep, NOT installed in the dashboard venv (the dashboard only reads runs.db).
 - `runs.db` is ONE sqlite file holding `runs_meta` (dashboard) + `simulations` + `history` (pbg-emitters). All three writes target the same file.
 - The remote `simulation_id` (an int) is the durable reference handle: persist it in the `runs_meta` `params_json` and the `simulations` `metadata`.
 - AI-free: these libs are pure data/IO, no AI/skill imports (dashboard convention).
@@ -26,9 +26,20 @@
   - `generate_run_id(spec_id: str, params: dict | None = None, now: float | None = None) -> str` → `"<spec_id>__<ts>__<hash6>"`
   - `save_metadata(conn, *, spec_id, run_id, params, label, started_at, n_steps, log_path=None, generation_id=None)` (inserts `runs_meta`, status='running', commits)
   - `complete_metadata(conn, *, run_id, n_steps, status)` (updates completed_at+status, commits)
-- `pbg_emitters.sqlite_emitter`:
-  - `save_simulation_metadata(db_path, simulation_id, composite_config=None, metadata=None, name=None)` — creates `history`+`simulations` tables, upserts the `simulations` row (`simulation_id` PK, `name`, `started_at`, `metadata` JSON).
-  - `history` schema: `(simulation_id TEXT, step INTEGER, global_time REAL, state TEXT, PRIMARY KEY(simulation_id, step))`.
+- `simulations`+`history` schema (from pbg-emitters; create INLINE in the dashboard — do NOT import pbg_emitters):
+  ```sql
+  CREATE TABLE IF NOT EXISTS history (
+      simulation_id TEXT NOT NULL, step INTEGER NOT NULL,
+      global_time REAL, state TEXT NOT NULL,
+      PRIMARY KEY (simulation_id, step)
+  );
+  CREATE INDEX IF NOT EXISTS idx_history_sim_time ON history(simulation_id, global_time);
+  CREATE TABLE IF NOT EXISTS simulations (
+      simulation_id TEXT PRIMARY KEY, name TEXT, started_at TEXT NOT NULL,
+      completed_at TEXT, elapsed_seconds REAL, composite_config TEXT, metadata TEXT
+  );
+  ```
+  The `simulations` row: `simulation_id`=run_id, `name`=run_id, `started_at`=UTC ISO string `%Y-%m-%dT%H:%M:%SZ`, `metadata`=JSON provenance.
 - sms-api endpoints (base `http://localhost:8080` via tunnel): `GET /core/v1/simulator/latest?git_branch=&git_repo_url=`, `POST /core/v1/simulator/upload` (JSON body=Simulator, `?force=`), `GET /core/v1/simulator/status?simulator_id=`, `POST /api/v1/simulations?simulator_id=&num_generations=&num_seeds=&run_parca=&observables=` (repeated `observables`), `GET /api/v1/simulations/{id}/status`, `GET /api/v1/simulations/{id}/observables/index?seed=`, `GET /api/v1/simulations/{id}/observables?names=&seed=`.
 
 ## File Structure
@@ -434,9 +445,10 @@ git commit -m "feat(remote-runs): _state_blobs — reconstruct per-step state fr
 - Test: `tests/test_remote_run_landing.py`
 
 **Interfaces:**
-- Consumes: `_state_blobs` (Task 3); `composite_runs.connect/generate_run_id/save_metadata/complete_metadata`; `pbg_emitters.sqlite_emitter.save_simulation_metadata`.
+- Consumes: `_state_blobs` (Task 3); `composite_runs.connect/generate_run_id/save_metadata/complete_metadata`.
 - Produces:
-  - `land_remote_run(study_dir, *, spec_id: str, simulation_id: int, experiment_id: str, commit: str, observables: dict, label: str | None = None) -> str` — returns the new `run_id`. Writes runs_meta (status completed), the simulations row (name=run_id, metadata carries provenance), and history rows. `study_dir` is a `pathlib.Path`; writes `study_dir/runs.db`.
+  - `_init_emitter_tables(conn: sqlite3.Connection) -> None` — creates `history`+`simulations` tables inline (schema in Global Constraints).
+  - `land_remote_run(study_dir, *, spec_id: str, simulation_id: int, experiment_id: str, commit: str, observables: dict, label: str | None = None) -> str` — returns the new `run_id`. Writes runs_meta (status completed), the simulations row (name=run_id, metadata carries provenance), and history rows. `study_dir` is a `pathlib.Path`; writes `study_dir/runs.db`. Does NOT import pbg_emitters.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -492,13 +504,14 @@ def test_landed_run_is_readable_by_study_charts(tmp_path: Path):
         tmp_path, spec_id="s", simulation_id=7, experiment_id="e", commit="c", observables=obs
     )
     # The chart layer resolves the latest run from `simulations` then reads `history`.
-    parsed, times, sim_id = study_charts.load_latest_run(str(tmp_path / "runs.db"))
+    # _load_latest_run(db_path: Path) -> (parsed_states, times, simulation_id)  [study_charts.py:1075]
+    parsed, times, sim_id = study_charts._load_latest_run(tmp_path / "runs.db")
     assert sim_id == run_id
     assert times == [0.0, 1.0]
     assert parsed[1]["observables"]["mass"] == 20.0
 ```
 
-Note: confirm the helper name `study_charts.load_latest_run` against `lib/study_charts.py:1076` ("Return (parsed_states, times, simulation_id) for the latest run"). If the public name differs, use the actual symbol at that line.
+Note: `study_charts._load_latest_run(db_path: Path)` is confirmed at `lib/study_charts.py:1075` — it returns `(parsed_states, times, simulation_id)` and takes a `Path` (not str). Use it exactly as written above.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -510,10 +523,36 @@ Expected: FAIL — `ImportError: cannot import name 'land_remote_run'`.
 Add to `vivarium_dashboard/lib/remote_run_landing.py`:
 
 ```python
+import datetime as _dt
+import json
+import sqlite3
 import time as _time
 from pathlib import Path
 
 from vivarium_dashboard.lib import composite_runs as cr
+
+
+def _init_emitter_tables(conn: sqlite3.Connection) -> None:
+    """Create the pbg-emitters `history` + `simulations` tables inline.
+
+    We replicate the pbg-emitters schema rather than importing pbg_emitters,
+    which is a workspace-venv emitter dependency and not installed in the
+    dashboard venv (the dashboard only reads runs.db).
+    """
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS history ("
+        " simulation_id TEXT NOT NULL, step INTEGER NOT NULL,"
+        " global_time REAL, state TEXT NOT NULL,"
+        " PRIMARY KEY (simulation_id, step))"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_history_sim_time ON history(simulation_id, global_time)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS simulations ("
+        " simulation_id TEXT PRIMARY KEY, name TEXT, started_at TEXT NOT NULL,"
+        " completed_at TEXT, elapsed_seconds REAL, composite_config TEXT, metadata TEXT)"
+    )
 
 
 def land_remote_run(
@@ -527,8 +566,6 @@ def land_remote_run(
     label: str | None = None,
 ) -> str:
     """Land a remote run's observables into study_dir/runs.db; return the run_id."""
-    from pbg_emitters.sqlite_emitter import save_simulation_metadata
-
     study_dir = Path(study_dir)
     study_dir.mkdir(parents=True, exist_ok=True)
     db_path = study_dir / "runs.db"
@@ -543,8 +580,9 @@ def land_remote_run(
     run_id = cr.generate_run_id(spec_id, params=provenance)
     blobs = _state_blobs(observables)
     started = _time.time()
+    started_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # 1. dashboard runs_meta row (status running -> completed)
+    # 1. dashboard runs_meta row (status running)
     conn = cr.connect(db_path)
     try:
         cr.save_metadata(
@@ -559,14 +597,15 @@ def land_remote_run(
     finally:
         conn.close()
 
-    # 2. pbg-emitters simulations row (creates simulations + history tables)
-    save_simulation_metadata(str(db_path), run_id, metadata=provenance, name=run_id)
-
-    # 3. history rows
-    import sqlite3
-
+    # 2. simulations + history tables and rows (inline schema)
     hconn = sqlite3.connect(str(db_path), isolation_level=None)
     try:
+        _init_emitter_tables(hconn)
+        hconn.execute(
+            "INSERT OR REPLACE INTO simulations "
+            "(simulation_id, name, started_at, metadata) VALUES (?, ?, ?, ?)",
+            (run_id, run_id, started_iso, json.dumps(provenance)),
+        )
         hconn.executemany(
             "INSERT OR REPLACE INTO history (simulation_id, step, global_time, state) VALUES (?, ?, ?, ?)",
             [(run_id, step, gt, state) for (step, gt, state) in blobs],
@@ -574,7 +613,7 @@ def land_remote_run(
     finally:
         hconn.close()
 
-    # 4. mark runs_meta completed
+    # 3. mark runs_meta completed
     conn = cr.connect(db_path)
     try:
         cr.complete_metadata(conn, run_id=run_id, n_steps=len(blobs), status="completed")
@@ -587,7 +626,7 @@ def land_remote_run(
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_remote_run_landing.py -v`
-Expected: PASS (4 tests). If `test_landed_run_is_readable_by_study_charts` fails on the helper name, fix the import to the real symbol at `study_charts.py:1076` and re-run.
+Expected: PASS (4 tests).
 
 - [ ] **Step 5: Commit**
 
