@@ -97,7 +97,7 @@ def list_observables(db_path: str, run_id: str | None = None) -> dict:
         _walk(sub, top_key, top_key, leaves)
     categories: dict[str, list] = {}
     for leaf in leaves:
-        top = re.sub(r'\[.*\]', '', leaf["path"].split(".")[0])
+        top = re.split(r'[\[.]', leaf["path"])[0]
         cat = _category_for(top)
         categories.setdefault(cat, []).append(leaf)
     # stable ordering: by _CATEGORY_MAP order, then Other

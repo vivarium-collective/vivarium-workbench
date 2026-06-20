@@ -79,3 +79,11 @@ def test_list_observables_groups_by_category(tmp_path):
     glc = next((o for o in bulk_obs if o["path"] == "bulk[GLC]"), None)
     assert glc is not None, "Expected bulk[GLC] observable"
     assert glc["kind"] == "bulk"
+
+
+def test_bulk_id_with_dot_categorized(tmp_path):
+    db = tmp_path / "runs.db"
+    make_fake_runs_db(db, [{"agents": {"0": {"bulk": [["CPD-123.4", 7]]}}}])
+    obs = explorer_data.list_observables(str(db))
+    paths = [o["path"] for o in obs["categories"].get("Bulk molecules", [])]
+    assert "bulk[CPD-123.4]" in paths
