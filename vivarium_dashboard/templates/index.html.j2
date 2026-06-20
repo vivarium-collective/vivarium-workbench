@@ -19,6 +19,9 @@ window.addEventListener('pageshow', function (e) {
 });
 </script>
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-voronoi-treemap@1"></script>
+<script src="https://unpkg.com/escher@1.7.3/dist/escher.min.js"></script>
 <style>
 /* Modal overlay */
 .modal-overlay {
@@ -1633,6 +1636,7 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/render-helpers.js"></script>
 <script src="assets/client.js" onerror="/* live mode unavailable */"></script>
 <script src="assets/walkthrough.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* walkthrough unavailable */"></script>
+<script src="assets/explorer.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* explorer unavailable */"></script>
 <script src="assets/github-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* github-login unavailable */"></script>
 <!-- workspace-switcher.js is intentionally not loaded: the left-rail dropdown
      it used to drive has been repurposed into the investigation switcher

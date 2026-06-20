@@ -1286,6 +1286,14 @@
     return html;
   }
 
+  function _renderExplorerCard() {
+    return '<div class="analyses-card" id="explorer-card">' +
+      '<div class="analyses-card-head"><strong>Data Explorer</strong></div>' +
+      '<p class="muted" style="font-size:0.85em;margin:2px 0 8px">' +
+      'Interactively explore any run: timeseries, scatter, allocation, and flux maps.</p>' +
+      '<div id="explorer-mount"></div></div>';
+  }
+
   function _launchPtools(study) {
     // The read-only snapshot has no /api/ptools-launch backend and no local
     // sms-ptools container to launch against. Bail with a clear message rather
@@ -1342,10 +1350,18 @@
         if (!saved.length && !(ptools.studies || []).length && ptools.configured === false) {
           // Still show the (empty) PTools card; only the 3D section is empty.
         }
+        cards.push(_renderExplorerCard());
         if (!cards.length) {
           container.innerHTML = '<p class="empty-state">No saved visualizations yet. Run a parsimony packing composite or a PTools analysis to populate this gallery.</p>';
         } else {
           container.innerHTML = cards.join('');
+        }
+        if (window.Explorer) {
+          var _em = document.getElementById('explorer-mount');
+          if (_em) window.Explorer.mount(_em, {
+            basePath: (window.DataSource && window.DataSource.basePath) ? window.DataSource.basePath() : '',
+            snapshot: (window.__DASH_CONFIG__ || {}).mode === 'snapshot'
+          });
         }
         if (countEl) countEl.textContent = saved.length ? '(' + saved.length + ')' : '';
       })
