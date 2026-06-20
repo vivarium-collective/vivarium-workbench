@@ -1,77 +1,72 @@
 import json
 import sqlite3
+import tarfile
 from pathlib import Path
-
-from vivarium_dashboard.lib.remote_run_landing import _state_blobs
-
-
-def test_state_blobs_aligns_series_to_time():
-    obs = {"time": [0.0, 1.0, 2.0], "series": {"mass": [1.0, 2.0, 3.0], "vol": [0.1, 0.2, 0.3]}}
-    blobs = _state_blobs(obs)
-    assert len(blobs) == 3
-    step, gt, state = blobs[1]
-    assert step == 1
-    assert gt == 1.0
-    parsed = json.loads(state)
-    assert parsed["observables"]["mass"] == 2.0
-    assert parsed["observables"]["vol"] == 0.2
-
-
-def test_state_blobs_preserves_none():
-    obs = {"time": [0.0, 1.0], "series": {"mass": [1.0, None]}}
-    blobs = _state_blobs(obs)
-    assert json.loads(blobs[1][2])["observables"]["mass"] is None
-
 
 from vivarium_dashboard.lib.remote_run_landing import land_remote_run
 
 
-def test_land_remote_run_writes_all_three_tables(tmp_path: Path):
-    obs = {"time": [0.0, 1.0, 2.0], "series": {"mass": [1.0, 2.0, 3.0]}}
+def _make_remote_zarr_tar(tmp_path: Path, seed: int = 0) -> Path:
+    """Build a tar.gz mirroring a Ray run: seed_NN/store.zarr with an experiment_id=* partition.
+
+    Note: xarray/numpy are not installed in the dashboard venv so we create the
+    zarr directory structure manually.  _latest_zarr_for_study only requires the
+    ``experiment_id=*`` child directory to exist (study_charts.py:641), not
+    parseable zarr data, so a plain directory is sufficient for all test assertions.
+    """
+    staging = tmp_path / "staging"
+    # Minimal store: the dashboard reader only needs the runs.*.zarr dir to contain an
+    # experiment_id=* child to be selected; internal leaf detail is exercised elsewhere.
+    part = staging / f"seed_{seed:02d}" / "store.zarr" / f"experiment_id=exp-seed{seed:02d}"
+    part.mkdir(parents=True)
+    # Place a sentinel file so the partition dir is non-empty (mirrors a real zarr shard)
+    (part / ".zgroup").write_text('{"zarr_format":2}')
+    tar_path = tmp_path / "sim_49.tar.gz"
+    with tarfile.open(tar_path, "w:gz") as tar:
+        tar.add(staging, arcname=".")
+    return tar_path
+
+
+def test_land_zarr_places_store_and_writes_runs_meta(tmp_path: Path):
+    study = tmp_path / "study"
+    study.mkdir()
+    tar = _make_remote_zarr_tar(tmp_path)
     run_id = land_remote_run(
-        tmp_path,
+        study,
         spec_id="v2ecoli.composites.baseline",
         simulation_id=49,
         experiment_id="exp-abc",
         commit="abc123",
-        observables=obs,
-        label="Remote run (smsvpctest)",
+        tar_path=tar,
+        seed=0,
     )
-    db = tmp_path / "runs.db"
-    assert db.exists()
-    conn = sqlite3.connect(str(db))
+    # zarr store placed at <study>/runs.<run_id>.zarr with the experiment_id=* partition intact
+    zarr_dir = study / f"runs.{run_id}.zarr"
+    assert zarr_dir.is_dir()
+    assert next(zarr_dir.glob("experiment_id=*"), None) is not None
 
-    meta = conn.execute(
-        "SELECT spec_id, status, n_steps, params_json FROM runs_meta WHERE run_id=?", (run_id,)
-    ).fetchone()
-    assert meta[0] == "v2ecoli.composites.baseline"
-    assert meta[1] == "completed"
-    assert meta[2] == 3
-    assert json.loads(meta[3])["simulation_id"] == 49  # provenance persisted
-
-    sim = conn.execute(
-        "SELECT simulation_id, metadata FROM simulations WHERE name=?", (run_id,)
-    ).fetchone()
-    assert sim is not None and sim[0] == run_id
-    assert json.loads(sim[1])["simulation_id"] == 49  # provenance in simulations.metadata too
-
-    hist = conn.execute(
-        "SELECT step, global_time, state FROM history WHERE simulation_id=? ORDER BY step", (run_id,)
-    ).fetchall()
-    assert len(hist) == 3
-    assert json.loads(hist[2][2])["observables"]["mass"] == 3.0
+    # runs_meta written, status completed, provenance carries simulation_id, store path recorded
+    conn = sqlite3.connect(str(study / "runs.db"))
+    try:
+        meta = conn.execute(
+            "SELECT status, params_json FROM runs_meta WHERE run_id=?", (run_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert meta[0] == "completed"
+    prov = json.loads(meta[1])
+    assert prov["simulation_id"] == 49
+    assert prov["store_path"].endswith(f"runs.{run_id}.zarr")
 
 
-def test_landed_run_is_readable_by_study_charts(tmp_path: Path):
+def test_landed_zarr_is_discovered_by_study_charts(tmp_path: Path):
     from vivarium_dashboard.lib import study_charts
 
-    obs = {"time": [0.0, 1.0], "series": {"mass": [10.0, 20.0]}}
+    study = tmp_path / "study"
+    study.mkdir()
+    tar = _make_remote_zarr_tar(tmp_path)
     run_id = land_remote_run(
-        tmp_path, spec_id="s", simulation_id=7, experiment_id="e", commit="c", observables=obs
+        study, spec_id="s", simulation_id=7, experiment_id="e", commit="c", tar_path=tar, seed=0
     )
-    # The chart layer resolves the latest run from `simulations` then reads `history`.
-    # _load_latest_run(db_path: Path) -> (parsed_states, times, simulation_id)  [study_charts.py:1075]
-    parsed, times, sim_id = study_charts._load_latest_run(tmp_path / "runs.db")
-    assert sim_id == run_id
-    assert times == [0.0, 1.0]
-    assert parsed[1]["observables"]["mass"] == 20.0
+    found = study_charts._latest_zarr_for_study(study)
+    assert found == study / f"runs.{run_id}.zarr"

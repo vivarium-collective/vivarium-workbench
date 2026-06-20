@@ -1,59 +1,37 @@
-"""Land a remote simulation's observable timeseries into a study's runs.db.
+"""Land a remote simulation's NATIVE store into a study's run directory.
 
-Reconstructs per-timestep composite-state JSON from the sms-api observables
-payload ({time, series}) so the EXISTING SQLite chart pipeline renders the
-remote run identically to a local one. Writes three things into the one
-runs.db file: the dashboard runs_meta row, the pbg-emitters simulations row,
-and the history rows. Pure DB/IO — no HTTP.
+Mirror-the-store-format: extract the run's `/data` tar.gz and place the native
+store unmodified where the dashboard's native chart reader expects it
+(`<study>/runs.<run_id>.zarr` for zarr; `<study>/parquet-runs/<experiment_id>/`
+for parquet), then record a runs_meta row. No reconstruction — a remote
+`seed_NN/store.zarr` is internally identical to the dashboard's expected
+`runs.<run_id>.zarr`; only the path differs.
 """
 
 from __future__ import annotations
 
-import datetime as _dt
-import json
-import sqlite3
+import shutil
+import tarfile
+import tempfile
 import time as _time
 from pathlib import Path
 
 from vivarium_dashboard.lib import composite_runs as cr
 
 
-def _state_blobs(observables: dict) -> list[tuple[int, float, str]]:
-    """Turn {time, series:{name:[...]}} into [(step, global_time, state_json), ...].
-
-    Each state blob is {"observables": {name: value_at_that_step}}; chart
-    selectors address values as ``observables/<name>``.
-    """
-    time = observables.get("time") or []
-    series = observables.get("series") or {}
-    blobs: list[tuple[int, float, str]] = []
-    for i, t in enumerate(time):
-        state = {"observables": {name: vals[i] for name, vals in series.items()}}
-        blobs.append((i, float(t), json.dumps(state)))
-    return blobs
-
-
-def _init_emitter_tables(conn: sqlite3.Connection) -> None:
-    """Create the pbg-emitters `history` + `simulations` tables inline.
-
-    We replicate the pbg-emitters schema rather than importing pbg_emitters,
-    which is a workspace-venv emitter dependency and not installed in the
-    dashboard venv (the dashboard only reads runs.db).
-    """
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS history ("
-        " simulation_id TEXT NOT NULL, step INTEGER NOT NULL,"
-        " global_time REAL, state TEXT NOT NULL,"
-        " PRIMARY KEY (simulation_id, step))"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_history_sim_time ON history(simulation_id, global_time)"
-    )
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS simulations ("
-        " simulation_id TEXT PRIMARY KEY, name TEXT, started_at TEXT NOT NULL,"
-        " completed_at TEXT, elapsed_seconds REAL, composite_config TEXT, metadata TEXT)"
-    )
+def _detect_and_locate(extract_root: Path, seed: int) -> tuple[str, Path]:
+    """Find the native store under an extracted tar. Returns (kind, source_path)."""
+    seed_store = next(extract_root.glob(f"**/seed_{seed:02d}/store.zarr"), None)
+    if seed_store is not None and seed_store.is_dir():
+        return "zarr", seed_store
+    # parquet: locate the experiment dir that contains a history/ subtree of .pq files
+    pq = next(extract_root.glob("**/history/**/*.pq"), None)
+    if pq is not None:
+        # the experiment root is the parent of the `history` dir
+        for parent in pq.parents:
+            if parent.name == "history":
+                return "parquet", parent.parent
+    raise FileNotFoundError(f"no zarr (seed_{seed:02d}/store.zarr) or parquet (history/**/*.pq) store in {extract_root}")
 
 
 def land_remote_run(
@@ -63,13 +41,13 @@ def land_remote_run(
     simulation_id: int,
     experiment_id: str,
     commit: str,
-    observables: dict,
+    tar_path: Path,
+    seed: int = 0,
     label: str | None = None,
 ) -> str:
-    """Land a remote run's observables into study_dir/runs.db; return the run_id."""
+    """Extract tar_path, place the native store in study_dir, record runs_meta; return run_id."""
     study_dir = Path(study_dir)
     study_dir.mkdir(parents=True, exist_ok=True)
-    db_path = study_dir / "runs.db"
 
     provenance = {
         "simulation_id": simulation_id,
@@ -79,12 +57,24 @@ def land_remote_run(
         "source": "smsvpctest",
     }
     run_id = cr.generate_run_id(spec_id, params=provenance)
-    blobs = _state_blobs(observables)
-    started = _time.time()
-    started_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # 1. dashboard runs_meta row (status running)
-    conn = cr.connect(db_path)
+    with tempfile.TemporaryDirectory() as td:
+        extract_root = Path(td)
+        with tarfile.open(tar_path, "r:gz") as tar:
+            tar.extractall(extract_root)  # noqa: S202 — trusted internal artifact from our own API
+        kind, src = _detect_and_locate(extract_root, seed)
+        if kind == "zarr":
+            dest = study_dir / f"runs.{run_id}.zarr"
+        else:
+            dest = study_dir / "parquet-runs" / experiment_id
+            dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(src, dest)
+
+    provenance["store_path"] = str(dest)
+    started = _time.time()
+    conn = cr.connect(study_dir / "runs.db")
     try:
         cr.save_metadata(
             conn,
@@ -93,33 +83,9 @@ def land_remote_run(
             params=provenance,
             label=label or "Remote run (smsvpctest)",
             started_at=started,
-            n_steps=len(blobs),
+            n_steps=0,
         )
-    finally:
-        conn.close()
-
-    # 2. simulations + history tables and rows (inline schema) — single transaction
-    hconn = sqlite3.connect(str(db_path))
-    hconn.execute("PRAGMA busy_timeout=5000")
-    try:
-        _init_emitter_tables(hconn)
-        with hconn:
-            hconn.execute(
-                "INSERT OR REPLACE INTO simulations "
-                "(simulation_id, name, started_at, metadata) VALUES (?, ?, ?, ?)",
-                (run_id, run_id, started_iso, json.dumps(provenance)),
-            )
-            hconn.executemany(
-                "INSERT OR REPLACE INTO history (simulation_id, step, global_time, state) VALUES (?, ?, ?, ?)",
-                [(run_id, step, gt, state) for (step, gt, state) in blobs],
-            )
-    finally:
-        hconn.close()
-
-    # 3. mark runs_meta completed
-    conn = cr.connect(db_path)
-    try:
-        cr.complete_metadata(conn, run_id=run_id, n_steps=len(blobs), status="completed")
+        cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="completed")
     finally:
         conn.close()
 
