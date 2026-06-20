@@ -189,3 +189,15 @@ def test_run_strategy_generic_vs_scripts(tmp_path: Path):
     code2 = _code_text(json.loads(out2["ipynb"].read_text()))
     assert "from scripts.run_study_sims import run_study" in code2
     assert "run_study(" in code2
+
+
+def test_viz_cells_use_iframe_isolation(tmp_path):
+    """Viz HTML (which embeds Plotly scripts) is shown via an iframe srcdoc, so
+    the scripts execute in JupyterLab instead of rendering blank."""
+    inv = _build_workspace(tmp_path)
+    out = export_investigation_notebook(tmp_path, inv)
+    code = _code_text(json.loads(out["ipynb"].read_text()))
+    assert "def show_viz(" in code          # setup defines the iframe helper
+    assert "<iframe srcdoc=" in code
+    assert "show_viz(_render_one(" in code   # viz cells route through it
+    assert "display(HTML(_render_one(" not in code  # old, blank-rendering form gone

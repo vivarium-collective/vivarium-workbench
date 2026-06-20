@@ -373,6 +373,18 @@ RERUN = True
         "    with _contextlib.redirect_stdout(_io.StringIO()):\n"
         "        yield"
     )
+    src += (
+        "\n\nimport html as _htmlmod\n"
+        "def show_viz(_h, height=560):\n"
+        '    """Display a visualization\'s HTML in an isolated iframe.\n\n'
+        "    The figures embed their own scripts (e.g. Plotly); JupyterLab does not\n"
+        "    execute <script> tags from display(HTML(...)), so an iframe srcdoc is\n"
+        '    used instead — the browser runs the scripts inside the frame."""\n'
+        "    display(HTML(\n"
+        "        '<iframe srcdoc=\"{}\" style=\"width:100%;height:{}px;border:0\">'\n"
+        "        '</iframe>'.format(_htmlmod.escape(_h, quote=True), height)\n"
+        "    ))"
+    )
     return [_code(src)]
 
 
@@ -539,7 +551,7 @@ def _build_blocks(ws_root: Path, layout: dict, inv: dict, slug: str, strat: dict
 def _viz_code_for_notebook(b: dict) -> str:
     return (
         f"# {b['name']}\n"
-        f"display(HTML(_render_one({b['address']!r}, {b['config']!r}, RUNS_DB, STUDY_YAML)))"
+        f"show_viz(_render_one({b['address']!r}, {b['config']!r}, RUNS_DB, STUDY_YAML))"
     )
 
 
