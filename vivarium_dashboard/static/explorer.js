@@ -160,7 +160,62 @@
       });
       draw();
     },
-    allocation: function (h) { h.textContent = "allocation (todo)"; },
+    allocation: function (host, ctrls) {
+      var cats = Object.keys(state.observables);
+      ctrls.innerHTML =
+        '<label>Category <select id="al-cat">' +
+          cats.map(function (c) { return '<option>' + c + "</option>"; }).join("") +
+        "</select></label>" +
+        '<label>Time <input type="range" id="al-t" min="0" max="0" value="0"></label>' +
+        '<span id="al-tlabel" class="muted"></span>';
+      host.innerHTML = '<svg id="al-svg" width="460" height="460"></svg>';
+      var cache = { time: [], members: {} };
+
+      function loadCategory() {
+        var cat = ctrls.querySelector("#al-cat").value;
+        var members = (state.observables[cat] || []).map(function (o) {
+          return o.path + (o.index != null ? "#" + o.index : "");
+        });
+        if (!members.length) return;
+        var u = api("/series?db=" + encodeURIComponent(state.run.db_path) +
+                    "&run=" + encodeURIComponent(state.run.run_id || "") +
+                    "&paths=" + encodeURIComponent(members.join(",")));
+        j(u).then(function (d) {
+          cache.time = d.time; cache.members = d.series;
+          var slider = ctrls.querySelector("#al-t");
+          slider.max = Math.max(0, d.time.length - 1); slider.value = slider.max;
+          draw();
+        });
+      }
+
+      function draw() {
+        var ti = parseInt(ctrls.querySelector("#al-t").value, 10) || 0;
+        ctrls.querySelector("#al-tlabel").textContent =
+          cache.time.length ? "t = " + (cache.time[ti] != null ? cache.time[ti].toFixed(1) : ti) : "";
+        var leaves = Object.keys(cache.members).map(function (k) {
+          var v = cache.members[k][ti]; return { name: k.split(".").pop(), value: Math.abs(v || 0) };
+        }).filter(function (d) { return d.value > 0; });
+        var svg = d3.select("#al-svg"); svg.selectAll("*").remove();
+        if (!leaves.length) return;
+        var W = 460, H = 460, R = 220, cx = W / 2, cy = H / 2;
+        var circle = [];
+        for (var a = 0; a < 2 * Math.PI; a += Math.PI / 50)
+          circle.push([cx + R * Math.cos(a), cy + R * Math.sin(a)]);
+        var root = d3.hierarchy({ children: leaves }).sum(function (d) { return d.value; });
+        var vt = d3.voronoiTreemap().clip(circle);
+        vt(root);
+        var color = d3.scaleOrdinal(d3.schemeCategory10);
+        svg.selectAll("path").data(root.leaves()).enter().append("path")
+          .attr("d", function (d) { return "M" + d.polygon.join("L") + "Z"; })
+          .attr("fill", function (d, i) { return color(i); })
+          .attr("stroke", "#0e1116").attr("stroke-width", 1.5)
+          .append("title").text(function (d) { return d.data.name + ": " + d.data.value.toFixed(2); });
+      }
+
+      ctrls.querySelector("#al-cat").addEventListener("change", loadCategory);
+      ctrls.querySelector("#al-t").addEventListener("input", draw);
+      loadCategory();
+    },
     flux: function (h) { h.textContent = "flux (todo)"; }
   };
 
