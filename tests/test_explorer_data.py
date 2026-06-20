@@ -2,6 +2,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from vivarium_dashboard.lib import explorer_data
 
 
@@ -110,3 +112,13 @@ def test_get_series_extracts_bulk_pair(tmp_path):
     make_fake_runs_db(db, _sample_states(n=5))
     res = explorer_data.get_series(str(db), paths=[("bulk[GLC]", None)], subsample=100)
     assert res["series"]["bulk[GLC]"] == [10.0, 11.0, 12.0, 13.0, 14.0]
+
+
+def test_explorer_assets_are_valid_json():
+    import vivarium_dashboard
+    base = Path(vivarium_dashboard.__file__).parent / "static" / "explorer"
+    for name in ("ecoli_core.map.json", "reaction_id_map.json", "base_reaction_ids.json"):
+        p = base / name
+        if not p.exists():
+            pytest.skip(f"asset {name} not generated yet")
+        json.loads(p.read_text())  # raises if invalid
