@@ -188,7 +188,10 @@ def _parquet_config_meta(part_dir):
     except ImportError:
         return {}
     try:
-        config_root = Path(str(part_dir).replace("/history/", "/configuration/", 1))
+        # Anchor the swap at the partition boundary so a workspace path that
+        # happens to contain "/history/" isn't corrupted.
+        config_root = Path(str(part_dir).replace(
+            "/history/experiment_id=", "/configuration/experiment_id=", 1))
         config_files = list(config_root.rglob("config.pq"))
         if not config_files:
             return {}
@@ -746,4 +749,8 @@ def list_runs(workspace: Path) -> list[dict]:
                     "source": "parquet",
                 })
 
-    return out
+    # Parquet runs carry the richest observable set (molecules + fluxes + mass),
+    # so surface them first — the picker defaults to one and scatter defaults to
+    # the first two (e.g. baseline vs a variant of the same run).
+    return ([r for r in out if r["source"] == "parquet"] +
+            [r for r in out if r["source"] != "parquet"])
