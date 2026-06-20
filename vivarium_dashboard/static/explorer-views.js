@@ -177,60 +177,109 @@
   };
 
   V.allocation = function (host, ctrls) {
-    var cats = Object.keys(state.observables);
-    ctrls.innerHTML =
-      '<label>Category <select id="al-cat">' +
-        cats.map(function (c) { return '<option>' + c + "</option>"; }).join("") +
-      "</select></label>" +
-      '<label>Time <input type="range" id="al-t" min="0" max="0" value="0"></label>' +
-      '<span id="al-tlabel" class="muted"></span>';
-    host.innerHTML = '<svg id="al-svg" width="460" height="460"></svg>';
-    var cache = { time: [], members: {} };
-
-    function loadCategory() {
-      var cat = ctrls.querySelector("#al-cat").value;
-      var members = (state.observables[cat] || []).map(function (o) {
-        return o.path + (o.index != null ? "#" + o.index : "");
+    // static mass hierarchy (intersected with what the run emits)
+    var MASS_TREE = {
+      "cell_mass": ["protein_mass", "rna_mass", "dna_mass", "smallMolecule_mass", "water_mass"],
+      "rna_mass": ["rRna_mass", "tRna_mass", "mRna_mass"]
+    };
+    // available mass observable paths in this run (path endswith the field name)
+    var massPaths = {};
+    Object.keys(state.observables).forEach(function (cat) {
+      state.observables[cat].forEach(function (o) {
+        if ((o.mclass === "Mass") || /_mass$/.test(o.path)) {
+          var field = o.path.split(".").pop();
+          massPaths[field] = o.path;
+        }
       });
-      if (!members.length) return;
+    });
+    function childrenOf(field) {
+      return (MASS_TREE[field] || []).filter(function (f) { return massPaths[f]; });
+    }
+    var path = ["cell_mass"];               // breadcrumb of fields
+    var cache = { time: [], byField: {} };
+
+    function currentChildren() {
+      var node = path[path.length - 1];
+      var kids = childrenOf(node);
+      return kids.length ? kids : [node];   // leaf → show itself
+    }
+
+    function load() {
+      var fields = currentChildren();
+      var paths = fields.map(function (f) { return massPaths[f]; }).filter(Boolean);
+      if (!paths.length) { render(); return; }
       var u = api("/series?db=" + encodeURIComponent(state.run.db_path) +
                   "&run=" + encodeURIComponent(state.run.run_id || "") +
-                  "&paths=" + encodeURIComponent(members.join(",")));
+                  "&paths=" + encodeURIComponent(paths.join(",")));
       j(u).then(function (d) {
-        cache.time = d.time; cache.members = d.series;
+        cache.time = d.time; cache.byField = {};
+        fields.forEach(function (f) { cache.byField[f] = d.series[massPaths[f]] || []; });
         var slider = ctrls.querySelector("#al-t");
         slider.max = Math.max(0, d.time.length - 1); slider.value = slider.max;
-        draw();
+        render();
       });
+    }
+
+    function render() {
+      ctrls.innerHTML =
+        '<div class="al-crumb">' + path.map(function (f, i) {
+          return '<span class="al-bc" data-i="' + i + '">' + f.replace(/_mass$/, "") + "</span>";
+        }).join(" ▸ ") + "</div>" +
+        '<label>Time <input id="al-t" type="range" min="0" max="' +
+          Math.max(0, cache.time.length - 1) + '" value="' +
+          Math.max(0, cache.time.length - 1) + '"></label>' +
+        '<span id="al-tlabel" class="muted"></span>' +
+        '<p class="muted" style="font-size:0.78em">double-click a cell to break it down</p>';
+      ctrls.querySelectorAll(".al-bc").forEach(function (el) {
+        el.addEventListener("click", function () {
+          path = path.slice(0, parseInt(el.getAttribute("data-i"), 10) + 1); load();
+        });
+      });
+      ctrls.querySelector("#al-t").addEventListener("input", draw);
+      host.innerHTML = '<svg id="al-svg" width="520" height="520"></svg>';
+      draw();
     }
 
     function draw() {
       var ti = parseInt(ctrls.querySelector("#al-t").value, 10) || 0;
       ctrls.querySelector("#al-tlabel").textContent =
         cache.time.length ? "t = " + (cache.time[ti] != null ? cache.time[ti].toFixed(1) : ti) : "";
-      var leaves = Object.keys(cache.members).map(function (k) {
-        var v = cache.members[k][ti]; return { name: k.split(".").pop(), value: Math.abs(v || 0) };
+      var fields = currentChildren();
+      var leaves = fields.map(function (f) {
+        return { name: f.replace(/_mass$/, ""), field: f,
+                 value: Math.abs((cache.byField[f] || [])[ti] || 0) };
       }).filter(function (d) { return d.value > 0; });
       var svg = d3.select("#al-svg"); svg.selectAll("*").remove();
       if (!leaves.length) return;
-      var W = 460, H = 460, R = 220, cx = W / 2, cy = H / 2;
-      var circle = [];
-      for (var a = 0; a < 2 * Math.PI; a += Math.PI / 50)
+      var W = 520, H = 520, R = 250, cx = W / 2, cy = H / 2, circle = [];
+      for (var a = 0; a < 2 * Math.PI; a += Math.PI / 60)
         circle.push([cx + R * Math.cos(a), cy + R * Math.sin(a)]);
+      var total = leaves.reduce(function (s, d) { return s + d.value; }, 0) || 1;
       var root = d3.hierarchy({ children: leaves }).sum(function (d) { return d.value; });
-      var vt = d3.voronoiTreemap().clip(circle);
-      vt(root);
+      d3.voronoiTreemap().clip(circle)(root);
       var color = d3.scaleOrdinal(d3.schemeCategory10);
-      svg.selectAll("path").data(root.leaves()).enter().append("path")
+      var cells = svg.selectAll("g").data(root.leaves()).enter().append("g");
+      cells.append("path")
         .attr("d", function (d) { return "M" + d.polygon.join("L") + "Z"; })
         .attr("fill", function (d) { return color(d.data.name); })
         .attr("stroke", "#0e1116").attr("stroke-width", 1.5)
-        .append("title").text(function (d) { return d.data.name + ": " + d.data.value.toFixed(2); });
+        .style("cursor", "pointer")
+        .on("dblclick", function (ev, d) {
+          if (childrenOf(d.data.field).length) { path.push(d.data.field); load(); }
+        })
+        .append("title").text(function (d) {
+          return d.data.name + ": " + d.data.value.toFixed(2) + " fg (" +
+                 (100 * d.data.value / total).toFixed(1) + "%)"; });
+      cells.append("text")
+        .attr("x", function (d) { return d.polygon.site.x; })
+        .attr("y", function (d) { return d.polygon.site.y; })
+        .attr("text-anchor", "middle").attr("fill", "#fff")
+        .attr("font-size", "12px").style("pointer-events", "none")
+        .text(function (d) {
+          return (100 * d.data.value / total) > 4 ? d.data.name : ""; });
     }
 
-    ctrls.querySelector("#al-cat").addEventListener("change", loadCategory);
-    ctrls.querySelector("#al-t").addEventListener("input", draw);
-    loadCategory();
+    load();
   };
 
   V.flux = function (host, ctrls) {

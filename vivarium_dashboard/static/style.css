@@ -2283,3 +2283,8 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 .explorer-standalone .exp-view { height:100%; }
 .exp-rail #ts-obs, .exp-rail #ts-search { width:100%; }
 .exp-rail #ts-obs { height:220px; }
+
+/* Allocation view breadcrumb */
+.al-crumb { font-size:0.85em; color:#cfd6df; margin-bottom:6px; }
+.al-bc { cursor:pointer; color:#9db4d6; }
+.al-bc:hover { color:#fff; text-decoration:underline; }
