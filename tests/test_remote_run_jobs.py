@@ -50,3 +50,86 @@ def test_set_step_updates_status_and_message():
     build = next(s for s in job.to_dict()["steps"] if s["name"] == "build")
     assert build["status"] == "done"
     assert build["message"] == "simulator 15"
+
+
+from pathlib import Path
+
+from vivarium_dashboard.lib.remote_run_jobs import PipelineCtx, run_remote_pipeline
+
+
+class _FakeClient:
+    def __init__(self):
+        self.calls = []
+
+    def upload_simulator(self, simulator, force=False):
+        self.calls.append(("upload", simulator))
+        return {"database_id": 15, "status": "running"}
+
+    def simulator_status(self, simulator_id):
+        return {"status": "completed"}
+
+    def run_simulation(self, **kw):
+        self.calls.append(("run", kw))
+        return {"database_id": 50}
+
+    def simulation_status(self, simulation_id):
+        return {"status": "completed"}
+
+    def download_data(self, simulation_id, dest_dir):
+        p = Path(dest_dir) / f"sim_{simulation_id}.tar.gz"
+        p.write_bytes(b"x")
+        return p
+
+
+def _ctx(tmp_path, client, **over):
+    landed = {}
+
+    def land(study_dir, **kw):
+        landed["kw"] = kw
+        return "run_abc"
+
+    base = dict(
+        study="s", study_dir=tmp_path, spec_id="v2ecoli.composites.baseline",
+        repo_url="https://github.com/x/v2ecoli", branch="main",
+        observables=["listeners/mass/cell_mass"], num_generations=1, num_seeds=1,
+        run_parca=True, client=client, push_and_sha=lambda: "deadbeef",
+        land=land, poll_interval=0.0, poll_timeout=5.0,
+    )
+    base.update(over)
+    return PipelineCtx(**base), landed
+
+
+def test_pipeline_happy_path(tmp_path):
+    from vivarium_dashboard.lib.remote_run_jobs import RemoteRunJob
+
+    client = _FakeClient()
+    ctx, landed = _ctx(tmp_path, client)
+    job = RemoteRunJob("s")
+    run_remote_pipeline(job, ctx)
+    assert job.error is None
+    assert job.run_id == "run_abc"
+    assert all(s["status"] == "done" for s in job.steps)
+    # observables threaded into run_simulation; commit threaded into upload + land
+    run_kw = next(c[1] for c in client.calls if c[0] == "run")
+    assert run_kw["observables"] == ["listeners/mass/cell_mass"]
+    assert run_kw["simulator_id"] == 15
+    assert landed["kw"]["simulation_id"] == 50
+    assert landed["kw"]["commit"] == "deadbeef"
+
+
+def test_pipeline_marks_failed_step_on_error(tmp_path):
+    from vivarium_dashboard.lib.remote_run_jobs import RemoteRunJob
+
+    client = _FakeClient()
+
+    def boom():
+        raise RuntimeError("push rejected")
+
+    ctx, _ = _ctx(tmp_path, client, push_and_sha=boom)
+    job = RemoteRunJob("s")
+    run_remote_pipeline(job, ctx)
+    assert job.error is not None and "push rejected" in job.error
+    push = next(s for s in job.steps if s["name"] == "push")
+    assert push["status"] == "failed"
+    # later steps never ran
+    assert next(s for s in job.steps if s["name"] == "build")["status"] == "pending"

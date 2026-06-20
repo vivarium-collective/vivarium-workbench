@@ -8,11 +8,14 @@ fakes — this module has no network/git/sms-api knowledge itself.
 
 from __future__ import annotations
 
+import tempfile
 import threading
 import time
 import traceback
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
 
 STEP_NAMES = ["push", "build", "run", "poll", "download", "land"]
 
@@ -97,3 +100,98 @@ class RemoteRunManager:
 
 
 manager = RemoteRunManager()
+
+
+@dataclass
+class PipelineCtx:
+    study: str
+    study_dir: Path
+    spec_id: str
+    repo_url: str
+    branch: str
+    observables: list[str]
+    num_generations: int
+    num_seeds: int
+    run_parca: bool
+    client: object
+    push_and_sha: Callable[[], str]
+    land: Callable[..., str]
+    poll_interval: float = 5.0
+    poll_timeout: float = 3600.0
+
+
+def _poll(get_status: Callable[[], dict], terminal: set[str], interval: float, timeout: float) -> dict:
+    t0 = time.time()
+    while True:
+        st = get_status()
+        if str(st.get("status", "")).lower() in terminal:
+            return st
+        if time.time() - t0 > timeout:
+            raise TimeoutError(f"polling timed out after {timeout}s (last status {st.get('status')!r})")
+        time.sleep(interval)
+
+
+_TERMINAL_OK = {"completed", "done", "succeeded"}
+_TERMINAL_BAD = {"failed", "cancelled", "error"}
+
+
+def run_remote_pipeline(job: RemoteRunJob, ctx: PipelineCtx) -> None:
+    """Run push→build→run→poll→download→land, updating job. Records job.error on failure."""
+    try:
+        # 1. push → commit SHA
+        job.set_step("push", "running")
+        commit = ctx.push_and_sha()
+        job.set_step("push", "done", commit[:12])
+
+        # 2. build simulator from the pushed commit
+        job.set_step("build", "running")
+        simulator = {"git_commit_hash": commit, "git_repo_url": ctx.repo_url, "git_branch": ctx.branch}
+        uploaded = ctx.client.upload_simulator(simulator)
+        simulator_id = uploaded["database_id"]
+        build = _poll(
+            lambda: ctx.client.simulator_status(simulator_id),
+            _TERMINAL_OK | _TERMINAL_BAD, ctx.poll_interval, ctx.poll_timeout,
+        )
+        if str(build.get("status", "")).lower() in _TERMINAL_BAD:
+            raise RuntimeError(f"simulator build failed: {build.get('error_message') or build.get('status')}")
+        job.set_step("build", "done", f"simulator {simulator_id}")
+
+        # 3. run simulation (Ray auto-selected for v2ecoli)
+        job.set_step("run", "running")
+        sim = ctx.client.run_simulation(
+            simulator_id=simulator_id, num_generations=ctx.num_generations,
+            num_seeds=ctx.num_seeds, run_parca=ctx.run_parca, observables=ctx.observables,
+        )
+        simulation_id = sim["database_id"]
+        experiment_id = sim.get("experiment_id") or f"sim{simulator_id}-{ctx.study}"
+        job.set_step("run", "done", f"simulation {simulation_id}")
+
+        # 4. poll to terminal
+        job.set_step("poll", "running")
+        st = _poll(
+            lambda: ctx.client.simulation_status(simulation_id),
+            _TERMINAL_OK | _TERMINAL_BAD, ctx.poll_interval, ctx.poll_timeout,
+        )
+        if str(st.get("status", "")).lower() in _TERMINAL_BAD:
+            raise RuntimeError(f"simulation failed: {st.get('error_message') or st.get('status')}")
+        job.set_step("poll", "done")
+
+        # 5. download native store
+        job.set_step("download", "running")
+        with tempfile.TemporaryDirectory() as td:
+            tar_path = ctx.client.download_data(simulation_id, Path(td))
+            job.set_step("download", "done")
+
+            # 6. land as a study run
+            job.set_step("land", "running")
+            run_id = ctx.land(
+                ctx.study_dir, spec_id=ctx.spec_id, simulation_id=simulation_id,
+                experiment_id=experiment_id, commit=commit, tar_path=tar_path,
+            )
+        job.run_id = run_id
+        job.set_step("land", "done", run_id)
+    except Exception as e:  # noqa: BLE001 — surface any step failure on the job
+        job.error = f"{type(e).__name__}: {e}"
+        for s in job.steps:
+            if s["status"] == "running":
+                job.set_step(s["name"], "failed", str(e))
