@@ -77,9 +77,54 @@
     else if (state.view === "flux") Views.flux(host, ctrls);
   }
 
+  function observableOptions() {
+    var opts = [];
+    Object.keys(state.observables).forEach(function (cat) {
+      state.observables[cat].forEach(function (o) {
+        var key = o.path + (o.index != null ? "#" + o.index : "");
+        opts.push({ key: key, label: cat + " · " + o.label, kind: o.kind, len: o.length });
+      });
+    });
+    return opts;
+  }
+
   // Filled in by later tasks.
   var Views = {
-    timeseries: function (h) { h.textContent = "timeseries (todo)"; },
+    timeseries: function (host, ctrls) {
+      var opts = observableOptions();
+      ctrls.innerHTML =
+        '<label>Observables <select id="ts-obs" multiple size="6">' +
+        opts.map(function (o) { return '<option value="' + o.key + '">' + o.label + "</option>"; }).join("") +
+        "</select></label>" +
+        '<label><input type="checkbox" id="ts-log"> log y</label>' +
+        '<label><input type="checkbox" id="ts-norm"> normalize</label>';
+      host.innerHTML = '<div id="ts-chart" style="height:460px"></div>';
+
+      function draw() {
+        var chosen = Array.prototype.map.call(
+          ctrls.querySelectorAll("#ts-obs option:checked"), function (o) { return o.value; });
+        if (!chosen.length) { Plotly.purge("ts-chart"); return; }
+        var u = api("/series?db=" + encodeURIComponent(state.run.db_path) +
+                    "&run=" + encodeURIComponent(state.run.run_id || "") +
+                    "&paths=" + encodeURIComponent(chosen.join(",")));
+        j(u).then(function (d) {
+          var norm = ctrls.querySelector("#ts-norm").checked;
+          var traces = Object.keys(d.series).map(function (k) {
+            var y = d.series[k];
+            if (norm) { var m = Math.max.apply(null, y.map(Math.abs)) || 1; y = y.map(function (v) { return v / m; }); }
+            return { type: "scatter", mode: "lines", name: k, x: d.time, y: y };
+          });
+          Plotly.react("ts-chart", traces, {
+            margin: { t: 10, r: 10 }, paper_bgcolor: "#0e1116", plot_bgcolor: "#0e1116",
+            font: { color: "#cfd6df" },
+            yaxis: { type: ctrls.querySelector("#ts-log").checked ? "log" : "linear" }
+          }, { responsive: true });
+        });
+      }
+      ctrls.querySelector("#ts-obs").addEventListener("change", draw);
+      ctrls.querySelector("#ts-log").addEventListener("change", draw);
+      ctrls.querySelector("#ts-norm").addEventListener("change", draw);
+    },
     scatter: function (h) { h.textContent = "scatter (todo)"; },
     allocation: function (h) { h.textContent = "allocation (todo)"; },
     flux: function (h) { h.textContent = "flux (todo)"; }
