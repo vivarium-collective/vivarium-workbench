@@ -8368,6 +8368,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_iset_report()
         if self.path.startswith("/api/iset/"):
             return self._get_iset_detail()
+        if self.path.startswith("/api/investigation-notebook/"):
+            return self._get_investigation_notebook()
         if self.path.startswith("/api/investigation-run-unblocked-status"):
             return self._get_investigation_run_unblocked_status()
         if self.path.startswith("/api/investigation-registry"):
@@ -11710,6 +11712,38 @@ if __name__ == "__main__":
         if result is None:
             return self._json({"error": f"no investigation.yaml for {name!r}"}, 404)
         return self._json(result, 200)
+
+    def _get_investigation_notebook(self):
+        """GET /api/investigation-notebook/<slug>[?format=py] — generate and
+        download the investigation's runnable Jupyter notebook (.ipynb) or the
+        matching Python script (.py).
+
+        Deterministic export (no AI), identical to what publish.py ships
+        statically; the coder-facing complement to the HTML report.
+        """
+        import urllib.parse
+        parsed = urllib.parse.urlparse(self.path)
+        slug = parsed.path.split("/api/investigation-notebook/", 1)[-1].strip("/")
+        if not slug:
+            return self._json({"error": "investigation slug required"}, 400)
+        fmt = (urllib.parse.parse_qs(parsed.query).get("format") or ["ipynb"])[0]
+        try:
+            from vivarium_dashboard.lib.notebook_export import export_investigation_notebook
+            paths = export_investigation_notebook(WORKSPACE, slug)
+        except FileNotFoundError:
+            return self._json({"error": f"no investigation {slug!r}"}, 404)
+        except Exception as exc:  # noqa: BLE001 — surface, don't crash the server
+            return self._json({"error": f"notebook export failed: {exc}"}, 500)
+        path = paths["py"] if fmt == "py" else paths["ipynb"]
+        mime = "text/x-python" if fmt == "py" else "application/x-ipynb+json"
+        data = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Disposition", f'attachment; filename="{path.name}"')
+        self.end_headers()
+        self.wfile.write(data)
 
     def _get_study_bigraph_paths(self):
         """GET /api/study-bigraph-paths?study=<slug>[&baseline=<name>][&max_depth=<n>]

@@ -855,6 +855,7 @@ window.addEventListener('pageshow', function (e) {
       <button class="btn-mini" id="investigation-detail-refresh" onclick="_refreshInvestigationDetail()" title="Re-fetch the investigation + its studies from disk. Use after editing YAML files directly (which the dashboard can't see otherwise).">↻ Refresh</button>
       <button class="btn-mini" id="investigation-run-unblocked" onclick="_runUnblockedSimulations()" title="Run every variant whose model_settings don't have any unset 'required-before-run' gates. Sequential — one variant at a time on a background thread. Progress shown in the panel below.">▶ Run unblocked</button>
       <button class="btn-mini" onclick="_generateInvestigationReport()" title="Generate a shareable HTML report (self-contained, attach to email)">Generate report 📄</button>
+      <button class="btn-mini" onclick="_downloadInvestigationNotebook()" title="Download a self-contained Jupyter notebook (+ matching .py) that re-runs this investigation's studies via the process-bigraph protocol and renders their figures. The coder-facing complement to the HTML report.">Download notebook 📓</button>
       <button class="btn-mini" onclick="_openCloneIsetModal()" title="Clone this investigation into a fresh planning state (no run results). Useful for a parallel attempt or a demo fixture.">Clone ⎘</button>
     </div>
     <!-- Run-progress panel: rendered while a run-unblocked job is active. -->

@@ -77,10 +77,15 @@ def _reports_dir(ws_root: Path, layout: dict) -> Path:
 
 
 def _load_investigation(ws_root: Path, layout: dict, slug: str) -> dict:
-    path = _investigations_dir(ws_root, layout) / slug / "investigation.yaml"
-    if not path.is_file():
-        raise FileNotFoundError(f"investigation not found: {path}")
-    return _load_yaml(path)
+    # Accept the v2 `investigation.yaml` and the legacy `spec.yaml` filename.
+    inv_dir = _investigations_dir(ws_root, layout) / slug
+    for fname in ("investigation.yaml", "spec.yaml"):
+        path = inv_dir / fname
+        if path.is_file():
+            return _load_yaml(path)
+    raise FileNotFoundError(
+        f"investigation not found: {inv_dir}/(investigation|spec).yaml"
+    )
 
 
 def _load_study(ws_root: Path, layout: dict, slug: str) -> dict | None:
@@ -332,8 +337,12 @@ import os
 import sys
 from pathlib import Path
 
-# The repository this notebook was generated for.
-REPO = Path({repo!r})
+# The repository this notebook was generated for. Falls back to $VIVARIUM_REPO
+# or the current directory, so a downloaded notebook still works when the repo
+# is cloned at a different path than the one it was generated on.
+REPO = Path(os.environ.get("VIVARIUM_REPO") or {repo!r})
+if not REPO.is_dir():
+    REPO = Path.cwd()
 sys.path.insert(0, str(REPO))
 # Composite specs use repo-root-relative paths (datasets, caches), and the
 # workspace's runner/renderer assume cwd == repo root — so run from there.
