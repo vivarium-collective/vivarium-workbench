@@ -316,7 +316,8 @@ for _node, _body in (spec.get("state") or {{}}).items():
             print(f"      {{_port}} ports: {{_body[_port]}}")
 
 # Realize the document as a live process-bigraph Composite.
-_comp = build_composite_from_spec(spec, core=core)
+with quiet():  # building loads the simulators, which can be chatty
+    _comp = build_composite_from_spec(spec, core=core)
 print("\\nrealized composite — top-level stores:", list(_comp.state))'''
 
 
@@ -363,6 +364,15 @@ RERUN = True
     if imports:
         src += "\n" + "\n".join(imports)
     src += "\n\nfrom IPython.display import HTML, display"
+    src += (
+        "\n\nimport contextlib as _contextlib, io as _io\n"
+        "@_contextlib.contextmanager\n"
+        "def quiet():\n"
+        '    """Silence the simulator\'s verbose per-step stdout so the notebook\n'
+        '    output stays readable (the figures below are the results)."""\n'
+        "    with _contextlib.redirect_stdout(_io.StringIO()):\n"
+        "        yield"
+    )
     return [_code(src)]
 
 
@@ -403,6 +413,7 @@ def _study_blocks(ws_root: Path, layout: dict, slug: str, strat: dict) -> list[d
     ]
     if recipes and strat["run_kind"] == "scripts":
         run_lines.append("if RERUN:")
+        run_lines.append("    with quiet():  # the sim prints per-step progress; keep it out of the notebook")
         for r in recipes:
             spec_id = r["spec_id"]
             sim = r["sim"]
@@ -410,17 +421,19 @@ def _study_blocks(ws_root: Path, layout: dict, slug: str, strat: dict) -> list[d
             interval = r["params"].get("interval", 0.1)
             comp_rel = f"{package}/composites/{spec_id}.composite.yaml"
             run_lines.append(
-                f"    # sim {sim!r}: composite {spec_id!r}, {steps} steps, interval {interval}"
+                f"        # sim {sim!r}: composite {spec_id!r}, {steps} steps, interval {interval}"
             )
             run_lines.append(
-                f"    run_study(STUDY, {sim!r}, str(REPO / {comp_rel!r}), {steps}, {interval})"
+                f"        run_study(STUDY, {sim!r}, str(REPO / {comp_rel!r}), {steps}, {interval})"
             )
+        run_lines.append(f"    print(f'ran {len(recipes)} simulation(s) -> {{RUNS_DB}}')")
         run_lines.append("else:")
         run_lines.append('    print("RERUN=False — rendering committed", RUNS_DB)')
     elif recipes and strat["run_kind"] == "generic":
         run_lines.append("# Generic process-bigraph protocol (no workspace runner detected):")
         run_lines.append("from pbg_superpowers.composite_spec import load_spec, build_composite_from_spec")
         run_lines.append("if RERUN:")
+        run_lines.append("    with quiet():  # the sim prints per-step progress; keep it out of the notebook")
         for r in recipes:
             spec_id = r["spec_id"]
             steps = r["n_steps"]
@@ -428,12 +441,13 @@ def _study_blocks(ws_root: Path, layout: dict, slug: str, strat: dict) -> list[d
             comp_rel = f"{package}/composites/{spec_id}.composite.yaml"
             overrides = {k: v for k, v in params.items() if k != "steps"}
             run_lines.append(
-                f"    spec = load_spec(REPO / {comp_rel!r})"
+                f"        spec = load_spec(REPO / {comp_rel!r})"
             )
             run_lines.append(
-                f"    comp = build_composite_from_spec(spec, {overrides!r}, core=core)"
+                f"        comp = build_composite_from_spec(spec, {overrides!r}, core=core)"
             )
-            run_lines.append(f"    comp.run({steps})  # writes the composite's declared emitter")
+            run_lines.append(f"        comp.run({steps})  # writes the composite's declared emitter")
+        run_lines.append(f"    print(f'ran {len(recipes)} simulation(s) -> {{RUNS_DB}}')")
         run_lines.append("else:")
         run_lines.append('    print("RERUN=False — rendering committed", RUNS_DB)')
     else:
