@@ -629,6 +629,10 @@ def get_flux_auto(db_path, step, id_map, run_id=None, workspace=None):
             vals = tbl.column(flux_col)[si].as_py() or []
             meta = _parquet_config_meta(resolved)
             ids = meta.get(flux_col, [])
+            if not ids:
+                # config didn't carry the base-reaction ids — fall back to the
+                # static ordered base_reaction_ids asset (same model ordering).
+                ids, _ = load_flux_assets()
             fluxes = {}
             for i, rid in enumerate(ids):
                 if i >= len(vals):
