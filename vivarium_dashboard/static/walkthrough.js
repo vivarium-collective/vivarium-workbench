@@ -5999,6 +5999,31 @@
   }
   window._generateInvestigationReport = _generateInvestigationReport;
 
+  // Download the coder-facing notebook for the current investigation. In a
+  // published (snapshot) bundle this is a static file under
+  // investigation-notebooks/; in local mode the server generates it on demand.
+  // Optional fmt === 'py' fetches the matching script instead of the .ipynb.
+  function _downloadInvestigationNotebook(fmt) {
+    var name = window._currentIset;
+    if (!name) {
+      console.warn('_downloadInvestigationNotebook: no current investigation');
+      return;
+    }
+    var c = window.__DASH_CONFIG__ || {};
+    var base = c.basePath || '';
+    var ext = fmt === 'py' ? '.py' : '.ipynb';
+    var url = (c.mode === 'snapshot')
+      ? base + '/investigation-notebooks/' + encodeURIComponent(name) + ext
+      : '/api/investigation-notebook/' + encodeURIComponent(name) + (fmt === 'py' ? '?format=py' : '');
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = name + ext;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+  window._downloadInvestigationNotebook = _downloadInvestigationNotebook;
+
   function _triggerDownload(filename, content, mime) {
     var blob = new Blob([content], {type: mime || 'text/plain'});
     var url = URL.createObjectURL(blob);

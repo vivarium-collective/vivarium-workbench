@@ -791,3 +791,36 @@ def test_build_bundle_saved_viz_root_hosting(ws_with_saved_pack, tmp_path):
     pdata = json.loads(dst_pack.read_text())
     assert pdata["ingredients"][0]["shape"]["lods"][0]["url"] == \
         "studies/x/viz/3d/meshes/thing.lod0.obj"
+
+
+# ---------------------------------------------------------------------------
+# Notebook export — publish hook (follow-up to the notebook_export feature)
+# ---------------------------------------------------------------------------
+
+def test_build_bundle_exports_investigation_notebooks(tmp_workspace, tmp_path):
+    """build_bundle ships a runnable notebook + .py per investigation and a
+    manifest, without mutating the (parity-checked) iset payloads."""
+    from vivarium_dashboard import publish
+
+    out = tmp_path / "bundle"
+    summary = publish.build_bundle(server.WORKSPACE, out)
+
+    for inv_name in summary["investigations"]:
+        ipynb = out / "investigation-notebooks" / f"{inv_name}.ipynb"
+        py = out / "investigation-notebooks" / f"{inv_name}.py"
+        assert ipynb.is_file(), f"missing {ipynb}"
+        assert py.is_file(), f"missing {py}"
+        nb = json.loads(ipynb.read_text())
+        assert nb["nbformat"] == 4 and nb["cells"]
+
+    # the manifest lists every exported notebook with bundle-relative urls
+    manifest = json.loads((out / "api" / "investigation-notebooks.json").read_text())
+    by_slug = {n["slug"]: n for n in manifest["notebooks"]}
+    assert set(summary["investigations"]) <= set(by_slug)
+    for inv_name in summary["investigations"]:
+        assert by_slug[inv_name]["ipynb"] == f"investigation-notebooks/{inv_name}.ipynb"
+        assert by_slug[inv_name]["py"] == f"investigation-notebooks/{inv_name}.py"
+
+    # the published iset JSON stays byte-parity with the live builder (no mutation)
+    iset = json.loads((out / "api" / "iset" / "main-inv.json").read_text())
+    assert "notebook" not in iset
