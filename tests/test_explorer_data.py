@@ -197,3 +197,57 @@ def test_zarr_flux(tmp_path):
                                       workspace=tmp_path)
     assert res["fluxes"] == {"PGI": 3.0, "PFK": 5.0}
     assert res["coverage"]["total"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Run-awareness: multi-sim runs.db
+# ---------------------------------------------------------------------------
+
+def _insert_second_sim(db_path: Path, states: list[dict], run_id: str, name: str):
+    """Insert a second simulation into an existing runs.db (reuses its schema)."""
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "INSERT INTO simulations VALUES (?,?,?,?,?)",
+        (run_id, name, "2026-01-02T00:00:00", "2026-01-02T00:01:00", 60.0),
+    )
+    for step, st in enumerate(states):
+        conn.execute(
+            "INSERT INTO history VALUES (?,?,?,?)",
+            (run_id, step, float(step), json.dumps(st)),
+        )
+    conn.commit()
+    conn.close()
+
+
+def _states_with_mass(mass_base: float, n: int = 5):
+    """Sample states where cell_mass starts at mass_base."""
+    return [
+        {"agents": {"0": {"listeners": {"mass": {"cell_mass": mass_base + i}}}}}
+        for i in range(n)
+    ]
+
+
+def test_get_series_run_aware_multi_sim(tmp_path):
+    """get_series honours run_id when the db contains multiple simulations."""
+    db = tmp_path / "runs.db"
+    # Run A: cell_mass 200..204
+    make_fake_runs_db(db, _states_with_mass(200.0), run_id="A", name="run-a")
+    # Run B: cell_mass 500..504  (inserted into the same file)
+    _insert_second_sim(db, _states_with_mass(500.0), run_id="B", name="run-b")
+
+    res_a = explorer_data.get_series(
+        str(db), [("listeners.mass.cell_mass", None)], subsample=100, run_id="A"
+    )
+    res_b = explorer_data.get_series(
+        str(db), [("listeners.mass.cell_mass", None)], subsample=100, run_id="B"
+    )
+
+    mass_a = res_a["series"]["listeners.mass.cell_mass"]
+    mass_b = res_b["series"]["listeners.mass.cell_mass"]
+
+    assert mass_a == [200.0, 201.0, 202.0, 203.0, 204.0], (
+        f"Expected run A values (200-204), got {mass_a}"
+    )
+    assert mass_b == [500.0, 501.0, 502.0, 503.0, 504.0], (
+        f"Expected run B values (500-504), got {mass_b}"
+    )

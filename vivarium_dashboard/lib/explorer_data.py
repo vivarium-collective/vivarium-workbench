@@ -246,7 +246,7 @@ def get_series(db_path, paths, subsample=400, run_id=None, workspace=None):
                                        mol_id, subsample, run_id)
         elif kind == "sqlite":
             t, v = comparative_viz._extract_trace(
-                resolved, path, index, subsample, sim_name=None)
+                resolved, path, index, subsample, sim_name=None, sim_id=run_id)
         else:
             t, v = [], []
         series[_series_key(path, index)] = v

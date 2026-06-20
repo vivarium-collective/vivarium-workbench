@@ -49,18 +49,25 @@ def _extract_trace(db_path: Path,
                    observable_path: str,
                    observable_index: int | None,
                    subsample: int,
-                   sim_name: str | None = None) -> tuple[list[float], list[float]]:
+                   sim_name: str | None = None,
+                   sim_id: str | None = None) -> tuple[list[float], list[float]]:
     """Pull (times, values) for one observable from one run db.
 
     Uses SQLite's json_extract to avoid the cost of materialising every
     state blob. Returns ([], []) on any error so a missing path doesn't
     sink the whole multi-run chart.
 
-    When ``sim_name`` is given, selects the latest simulation_id whose
-    ``simulations.name == sim_name``. This is the per-study comparative
-    pattern — multiple variants share one ``studies/<slug>/runs.db``
-    and are disambiguated by their sim name. When ``sim_name`` is None
-    falls back to the most-recently-started simulation in the db.
+    When ``sim_id`` is given and truthy, it is used directly as the
+    simulation_id — no name/latest lookup is performed. This is the
+    run-aware path used by the Analyses Data Explorer when the caller
+    already knows the exact run_id.
+
+    When ``sim_name`` is given (and ``sim_id`` is None), selects the
+    latest simulation_id whose ``simulations.name == sim_name``. This is
+    the per-study comparative pattern — multiple variants share one
+    ``studies/<slug>/runs.db`` and are disambiguated by their sim name.
+    When both are None falls back to the most-recently-started simulation
+    in the db.
     """
     if not db_path.exists():
         return [], []
@@ -78,30 +85,36 @@ def _extract_trace(db_path: Path,
         ).fetchall()}
         if "simulations" not in tables or "history" not in tables:
             return [], []
-        if sim_name:
-            # ``simulations.name`` is written by the SQLiteEmitter but is
-            # typically empty for runs produced by the dashboard's
-            # _post_study_run_variant path — the sim's label lives in
-            # ``runs_meta.sim_name`` instead. Try simulations.name first
-            # (in case future emit pipelines set it), then fall back to
-            # runs_meta which is what the dashboard's run-variant path
-            # populates. simulation_id in history == run_id in runs_meta.
-            row = conn.execute(
-                "SELECT simulation_id FROM simulations WHERE name=? "
-                "ORDER BY started_at DESC LIMIT 1", (sim_name,)
-            ).fetchone()
-            if row is None and "runs_meta" in tables:
+        if sim_id:
+            # Caller supplied the exact simulation_id — use it directly,
+            # skipping the name/latest lookup entirely.
+            pass
+        else:
+            row = None
+            if sim_name:
+                # ``simulations.name`` is written by the SQLiteEmitter but is
+                # typically empty for runs produced by the dashboard's
+                # _post_study_run_variant path — the sim's label lives in
+                # ``runs_meta.sim_name`` instead. Try simulations.name first
+                # (in case future emit pipelines set it), then fall back to
+                # runs_meta which is what the dashboard's run-variant path
+                # populates. simulation_id in history == run_id in runs_meta.
                 row = conn.execute(
-                    "SELECT run_id FROM runs_meta WHERE sim_name=? "
+                    "SELECT simulation_id FROM simulations WHERE name=? "
                     "ORDER BY started_at DESC LIMIT 1", (sim_name,)
                 ).fetchone()
-        else:
-            row = conn.execute(
-                "SELECT simulation_id FROM simulations ORDER BY started_at DESC LIMIT 1"
-            ).fetchone()
-        if row is None:
-            return [], []
-        sim_id = row[0]
+                if row is None and "runs_meta" in tables:
+                    row = conn.execute(
+                        "SELECT run_id FROM runs_meta WHERE sim_name=? "
+                        "ORDER BY started_at DESC LIMIT 1", (sim_name,)
+                    ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT simulation_id FROM simulations ORDER BY started_at DESC LIMIT 1"
+                ).fetchone()
+            if row is None:
+                return [], []
+            sim_id = row[0]
         n_rows = conn.execute(
             "SELECT COUNT(*) FROM history WHERE simulation_id=?", (sim_id,)
         ).fetchone()[0] or 0
