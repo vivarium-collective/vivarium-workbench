@@ -52,3 +52,50 @@ class SmsApiClient:
         if names:
             params["names"] = ",".join(names)
         return self._get(f"/api/v1/simulations/{simulation_id}/observables", params)
+
+    def _post(self, path: str, params: dict | None = None, json_body: dict | None = None) -> dict:
+        # doseq=True so list-valued params become repeated keys (?observables=a&observables=b)
+        url = self.base_url + path
+        if params:
+            url = f"{url}?{urlencode(params, doseq=True)}"
+        data = json.dumps(json_body).encode() if json_body is not None else None
+        headers = {"Accept": "application/json"}
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+        req = Request(url, data=data, method="POST", headers=headers)
+        try:
+            with urlopen(req, timeout=self.timeout) as r:  # noqa: S310
+                return json.loads(r.read().decode())
+        except HTTPError as e:
+            raise SmsApiError(f"POST {url} -> {e.code}") from e
+        except (URLError, OSError) as e:
+            raise SmsApiError(f"POST {url} failed (sms-api unreachable — is the tunnel up?): {e}") from e
+
+    def upload_simulator(self, simulator: dict, force: bool = False) -> dict:
+        params = {"force": "true"} if force else None
+        return self._post("/core/v1/simulator/upload", params=params, json_body=simulator)
+
+    def run_simulation(
+        self,
+        *,
+        simulator_id: int,
+        num_generations: int,
+        num_seeds: int,
+        run_parca: bool,
+        observables: list[str],
+        experiment_id: str | None = None,
+        description: str | None = None,
+    ) -> dict:
+        params: dict = {
+            "simulator_id": simulator_id,
+            "num_generations": num_generations,
+            "num_seeds": num_seeds,
+            "run_parca": run_parca,
+        }
+        if experiment_id is not None:
+            params["experiment_id"] = experiment_id
+        if description is not None:
+            params["description"] = description
+        if observables:
+            params["observables"] = observables  # list → repeated key via doseq
+        return self._post("/api/v1/simulations", params=params)

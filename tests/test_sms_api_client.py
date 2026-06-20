@@ -1,6 +1,7 @@
 import io
 import json
 from contextlib import contextmanager
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -65,3 +66,32 @@ def test_non_200_raises(monkeypatch):
         c = SmsApiClient("http://h:8080")
         with pytest.raises(SmsApiError):
             c.simulation_status(999)
+
+
+def test_run_simulation_query_and_repeated_observables(monkeypatch):
+    cap = {}
+    with _patch_urlopen(monkeypatch, cap, {"database_id": 50}):
+        c = SmsApiClient("http://h:8080")
+        out = c.run_simulation(
+            simulator_id=15, num_generations=1, num_seeds=1, run_parca=True,
+            observables=["mass", "volume"], experiment_id="exp1",
+        )
+    assert out["database_id"] == 50
+    assert cap["method"] == "POST"
+    qs = parse_qs(urlsplit(cap["url"]).query)
+    assert qs["simulator_id"] == ["15"]
+    assert qs["num_generations"] == ["1"]
+    assert qs["run_parca"] == ["True"]
+    assert qs["observables"] == ["mass", "volume"]  # repeated key, not comma-joined
+    assert qs["experiment_id"] == ["exp1"]
+
+
+def test_upload_simulator_sends_json_body(monkeypatch):
+    cap = {}
+    with _patch_urlopen(monkeypatch, cap, {"database_id": 16, "status": "running"}):
+        c = SmsApiClient("http://h:8080")
+        out = c.upload_simulator({"git_commit_hash": "abc", "git_repo_url": "u", "git_branch": "b"}, force=True)
+    assert out["database_id"] == 16
+    assert cap["method"] == "POST"
+    assert json.loads(cap["body"].decode())["git_commit_hash"] == "abc"
+    assert "force=true" in cap["url"]
