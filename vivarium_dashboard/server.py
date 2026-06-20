@@ -8350,6 +8350,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_explorer_series()
         if self.path.startswith("/api/explorer/flux"):
             return self._get_explorer_flux()
+        if self.path.startswith("/api/explorer/vector"):
+            return self._get_explorer_vector()
         if self.path.startswith("/api/simulations"):
             return self._get_simulations()
         if self.path.startswith("/api/composite-state"):
@@ -10956,6 +10958,24 @@ if __name__ == "__main__":
                                             workspace=WORKSPACE), 200)
         except Exception as e:
             return self._json({"error": str(e), "fluxes": {}}, 200)
+
+    def _get_explorer_vector(self):
+        """GET /api/explorer/vector?db=&run=&path=&step="""
+        import urllib.parse as _up
+        from vivarium_dashboard.lib import explorer_data
+        q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
+        db = q.get("db"); path = q.get("path")
+        if not db or not path:
+            return self._json({"error": "missing db/path", "ids": [], "values": []}, 200)
+        try:
+            step = int(q.get("step", "0"))
+        except ValueError:
+            step = 0
+        try:
+            return self._json(
+                explorer_data.get_vector(db, path, step, q.get("run"), WORKSPACE), 200)
+        except Exception as e:
+            return self._json({"error": str(e), "ids": [], "values": []}, 200)
 
     def _get_simulations(self):
         """GET /api/simulations — all persisted runs across the workspace.

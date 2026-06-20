@@ -283,3 +283,22 @@ def test_list_observables_carries_unit_and_class(tmp_path):
     assert flat and all("unit" in o and "mclass" in o for o in flat)
     mass = [o for o in flat if o["path"].endswith("mass.cell_mass")][0]
     assert mass["unit"] == "fg" and mass["mclass"] == "Mass"
+
+
+def test_get_vector_sqlite_by_index(tmp_path):
+    db = tmp_path / "runs.db"
+    make_fake_runs_db(db, _sample_states(n=4))
+    # step 2 base_reaction_fluxes == [3.0, 4.0, 5.0]
+    res = explorer_data.get_vector(str(db),
+        "listeners.fba_results.base_reaction_fluxes", step=2)
+    assert res["values"] == [3.0, 4.0, 5.0]
+    assert res["ids"] == ["0", "1", "2"]
+
+
+def test_get_vector_zarr_by_coord(tmp_path):
+    run = tmp_path / ".pbg" / "runs" / "r1"; run.mkdir(parents=True)
+    make_fake_zarr(run / "store.zarr")  # base_reaction_fluxes vector w/ id coord
+    res = explorer_data.get_vector(".pbg/runs/r1", "base_reaction_fluxes",
+                                   step=2, workspace=tmp_path)
+    assert res["ids"] == ["RXN-A", "RXN-B", "RXN-C"]
+    assert res["values"] == [3.0, 4.0, 5.0]

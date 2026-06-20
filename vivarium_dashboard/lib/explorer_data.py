@@ -420,6 +420,59 @@ def _zarr_flux(store, step):
     return [], []
 
 
+def _zarr_vector(store, leaf, step):
+    """(ids, values) for one vector leaf at one emit step, ids from id_<leaf>."""
+    try:
+        import xarray as xr
+    except ImportError:
+        return [], []
+    try:
+        dt = xr.open_datatree(str(store), engine="zarr")
+    except Exception:
+        return [], []
+    for node in dt.subtree:
+        if node.name != leaf:
+            continue
+        gen_vars = sorted((v for v in (node.data_vars or {})
+                           if str(v).startswith("generation=")),
+                          key=lambda s: int(str(s).split("=")[1]))
+        if not gen_vars:
+            return [], []
+        arr = node[gen_vars[0]]
+        idcoord = "id_" + leaf
+        if idcoord not in arr.dims:
+            return [], []
+        ids = ([str(x) for x in node[idcoord].values]
+               if idcoord in node.coords
+               else [str(i) for i in range(arr.sizes[idcoord])])
+        emitdim = [d for d in arr.dims if d != idcoord]
+        if not emitdim:
+            return [], []
+        nstep = arr.sizes[emitdim[0]]
+        si = min(max(0, step), nstep - 1)
+        vals = arr.isel({emitdim[0]: si}).values.tolist()
+        return ids, [float(x) for x in vals]
+    return [], []
+
+
+def get_vector(db_path, path, step, run_id=None, workspace=None):
+    """One vector observable's per-entity (ids, values) at a timepoint.
+    zarr: ids from the id_<leaf> coord. sqlite: positional index ids."""
+    kind, resolved = _resolve_run_source(db_path, workspace)
+    if kind == "zarr":
+        leaf = path.split(".")[-1].split("[")[0]
+        ids, vals = _zarr_vector(resolved, leaf, step)
+        return {"ids": ids, "values": vals, "step": step, "time": None}
+    if kind == "sqlite":
+        time, state = _state_at_step(resolved, step, run_id)
+        vec = _dig(_unwrap_agent(state), path) if state is not None else None
+        if isinstance(vec, list) and all(isinstance(x, _NUM) for x in vec):
+            return {"ids": [str(i) for i in range(len(vec))],
+                    "values": [float(x) for x in vec], "step": step, "time": time}
+        return {"ids": [], "values": [], "step": step, "time": time}
+    return {"ids": [], "values": [], "step": step, "time": None}
+
+
 def get_flux_auto(db_path, step, id_map, run_id=None, workspace=None):
     """Emitter-aware flux: zarr reads ids+vector from the store; sqlite uses
     get_flux with asset/run base_ids."""
