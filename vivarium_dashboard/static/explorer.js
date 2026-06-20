@@ -125,7 +125,41 @@
       ctrls.querySelector("#ts-log").addEventListener("change", draw);
       ctrls.querySelector("#ts-norm").addEventListener("change", draw);
     },
-    scatter: function (h) { h.textContent = "scatter (todo)"; },
+    scatter: function (host, ctrls) {
+      var opts = observableOptions();
+      function sel(id, label) {
+        return '<label>' + label + ' <select id="' + id + '">' +
+          opts.map(function (o) { return '<option value="' + o.key + '">' + o.label + "</option>"; }).join("") +
+          "</select></label>";
+      }
+      ctrls.innerHTML = sel("sc-x", "X") + sel("sc-y", "Y") +
+        '<label><input type="checkbox" id="sc-time" checked> color by time</label>';
+      host.innerHTML = '<div id="sc-chart" style="height:460px"></div>';
+
+      function draw() {
+        var x = ctrls.querySelector("#sc-x").value, y = ctrls.querySelector("#sc-y").value;
+        if (!x || !y) return;
+        var u = api("/series?db=" + encodeURIComponent(state.run.db_path) +
+                    "&run=" + encodeURIComponent(state.run.run_id || "") +
+                    "&paths=" + encodeURIComponent([x, y].join(",")));
+        j(u).then(function (d) {
+          var trace = {
+            type: "scatter", mode: "markers", x: d.series[x], y: d.series[y],
+            marker: ctrls.querySelector("#sc-time").checked
+              ? { color: d.time, colorscale: "Viridis", showscale: true, size: 6 }
+              : { size: 6 }
+          };
+          Plotly.react("sc-chart", [trace], {
+            margin: { t: 10, r: 10 }, paper_bgcolor: "#0e1116", plot_bgcolor: "#0e1116",
+            font: { color: "#cfd6df" }, xaxis: { title: x }, yaxis: { title: y }
+          }, { responsive: true });
+        });
+      }
+      ["sc-x", "sc-y", "sc-time"].forEach(function (id) {
+        ctrls.querySelector("#" + id).addEventListener("change", draw);
+      });
+      draw();
+    },
     allocation: function (h) { h.textContent = "allocation (todo)"; },
     flux: function (h) { h.textContent = "flux (todo)"; }
   };
