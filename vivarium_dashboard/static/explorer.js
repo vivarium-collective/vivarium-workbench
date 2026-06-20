@@ -9,17 +9,30 @@
   function j(url) { return fetch(url).then(function (r) { return r.json(); }); }
 
   function mount(el, opts) {
-    state.el = el; state.basePath = (opts && opts.basePath) || "";
+    opts = opts || {};
+    state.el = el; state.basePath = opts.basePath || "";
+    state.standalone = !!opts.standalone;  // full-window page hides the pop-out link
     // In snapshot/read-only mode, the backend explorer endpoints don't exist;
     // degrade gracefully rather than 404-ing.
-    if (opts && opts.snapshot) { renderEmpty(); return; }
+    if (opts.snapshot) { renderEmpty(); return; }
     el.innerHTML = '<div class="explorer-loading">Loading runs…</div>';
     j(api("/runs")).then(function (d) {
       state.runs = (d && d.runs) || [];
       if (!state.runs.length) { renderEmpty(); return; }
-      state.run = state.runs[0];
+      var want = opts.initialRun;
+      state.run = (want && state.runs.find(function (r) {
+        return String(r.run_id) === String(want);
+      })) || state.runs[0];
       loadObservables().then(renderShell);
     }).catch(function () { renderEmpty(); });
+  }
+
+  // Full-window pop-out URL for the current run (mirrors the parsimony viewer's
+  // "Open ↗"). The standalone page (assets/explorer.html) re-mounts this same
+  // controller full-bleed, pre-selecting the run.
+  function popoutHref() {
+    return state.basePath + "/assets/explorer.html?run=" +
+      encodeURIComponent(state.run.run_id || "");
   }
 
   function renderEmpty() {
@@ -42,18 +55,26 @@
       return '<button class="exp-tab' + (v === state.view ? " active" : "") +
              '" data-view="' + v + '">' + v + "</button>";
     }).join("");
+    var popout = state.standalone ? "" :
+      '<a class="exp-popout" id="exp-popout" target="_blank" rel="noopener" ' +
+      'href="' + popoutHref() + '" title="Open full-window in a new tab">Open &#8599;</a>';
     state.el.innerHTML =
       '<div class="explorer">' +
-        '<div class="exp-controls">' +
-          '<label>Run <select id="exp-run">' + runOpts + "</select></label>" +
+        '<div class="exp-topbar">' +
+          '<label class="exp-runsel">Run <select id="exp-run">' + runOpts + "</select></label>" +
           '<div class="exp-tabs">' + tabs + "</div>" +
-          '<div id="exp-view-controls"></div>' +
+          popout +
         "</div>" +
-        '<div id="exp-view" class="exp-view"></div>' +
+        '<div class="exp-body">' +
+          '<div id="exp-view-controls" class="exp-rail"></div>' +
+          '<div id="exp-view" class="exp-view"></div>' +
+        "</div>" +
       "</div>";
     state.el.querySelector("#exp-run").value = state.run.run_id;
     state.el.querySelector("#exp-run").addEventListener("change", function (e) {
       state.run = state.runs.find(function (r) { return r.run_id === e.target.value; });
+      var po = state.el.querySelector("#exp-popout");
+      if (po) po.href = popoutHref();
       loadObservables().then(renderView);
     });
     state.el.querySelectorAll(".exp-tab").forEach(function (b) {
