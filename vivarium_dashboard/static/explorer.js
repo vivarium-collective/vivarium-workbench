@@ -216,7 +216,53 @@
       ctrls.querySelector("#al-t").addEventListener("input", draw);
       loadCategory();
     },
-    flux: function (h) { h.textContent = "flux (todo)"; }
+    flux: function (host, ctrls) {
+      if (!window.escher) {
+        host.innerHTML = '<p class="muted">Flux map library failed to load.</p>'; return;
+      }
+      ctrls.innerHTML =
+        '<label>Step <input type="range" id="fx-t" min="0" max="' +
+          Math.max(0, (state.run.n_steps || 1) - 1) + '" value="0"></label>' +
+        '<span id="fx-cov" class="muted"></span>';
+      host.innerHTML = '<div id="fx-map" style="height:460px;background:#fff;border-radius:6px"></div>';
+      var builder = null;
+
+      function ensureBuilder() {
+        if (builder) return Promise.resolve(builder);
+        var mapUrl = state.basePath + "/assets/explorer/ecoli_core.map.json";
+        return fetch(mapUrl).then(function (r) { return r.json(); }).then(function (mapData) {
+          try {
+            var sel = (escher.libs && escher.libs.d3_select)
+              ? escher.libs.d3_select("#fx-map")
+              : d3.select("#fx-map");
+            builder = escher.Builder(mapData, null, null, sel, {
+              never_ask_before_quit: true, menu: "zoom", scroll_behavior: "zoom",
+              reaction_styles: ["color", "size", "abs"], enable_editing: false
+            });
+          } catch (e) {
+            return Promise.reject(e);
+          }
+          return builder;
+        });
+      }
+
+      function draw() {
+        var step = parseInt(ctrls.querySelector("#fx-t").value, 10) || 0;
+        var u = api("/flux?db=" + encodeURIComponent(state.run.db_path) +
+                    "&run=" + encodeURIComponent(state.run.run_id || "") + "&step=" + step);
+        Promise.all([ensureBuilder(), j(u)]).then(function (res) {
+          var b = res[0], d = res[1];
+          b.set_reaction_data(d.fluxes || {});
+          var c = d.coverage || { mapped: 0, total: 0 };
+          ctrls.querySelector("#fx-cov").textContent =
+            "mapped " + c.mapped + "/" + c.total + " reactions";
+        }).catch(function (e) {
+          host.innerHTML = '<p class="muted">Flux map unavailable: ' + e + "</p>";
+        });
+      }
+      ctrls.querySelector("#fx-t").addEventListener("input", draw);
+      draw();
+    }
   };
 
   window.Explorer = { mount: mount, _state: state, _api: api, _j: j, _Views: Views };
