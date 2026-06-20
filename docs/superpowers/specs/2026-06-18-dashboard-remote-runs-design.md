@@ -156,9 +156,16 @@ the existing chart pipeline and makes the study view depend on a live tunnel.
 
 ## sms-cdk changes
 - **No ALB change** — endpoint lives under `/api/*`, already routed.
-- **IRSA S3 read:** verify the api pod's role can `s3:GetObject`/`s3:ListBucket`
-  on the XArray output prefix (`s3_output_prefix`) in the shared bucket; add a
-  policy statement only if missing.
+- **IRSA S3 read — VERIFIED (2026-06-20): no change needed (Phase 2 is a no-op).**
+  The sms-api pod runs as service account `batch-submit` (`sms-api/kustomize/base/api.yaml:17`)
+  in the `irsaNamespace` from config. The CDK's `batchSubmitRole`
+  (`sms-cdk/lib/batch-stack.ts:402`) trust-binds exactly
+  `system:serviceaccount:${irsaNamespace}:batch-submit` (line 407) and already has
+  `sharedBucket.grantReadWrite(batchSubmitRole)` (line 435) — full `s3:GetObject` +
+  `s3:ListBucket` (+ writes) on the shared bucket, covering `{s3_output_prefix}/…store.zarr`.
+  So the observables endpoint and `/data` download already have the read access they
+  need; nothing to add. (No least-privilege tightening either — the same pod
+  legitimately writes the Nextflow work dir / ParCa cache / outputs.)
 - **Operational (docs only):** document the `kubectl port-forward` fallback for
   when the ALB target flakes to `Target.Timeout` (per sms-api CLAUDE.md), since the
   tunnel is the integration's lifeline.
