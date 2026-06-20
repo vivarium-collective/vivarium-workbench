@@ -81,36 +81,78 @@
   };
 
   V.scatter = function (host, ctrls) {
-    var opts = observableOptions();
-    function sel(id, label) {
-      return '<label>' + label + ' <select id="' + id + '">' +
-        opts.map(function (o) { return '<option value="' + o.key + '">' + o.label + "</option>"; }).join("") +
-        "</select></label>";
+    // class -> the vector observable path that represents it
+    var CLASS_PATH = {
+      Protein: "listeners.monomer_counts",
+      RNA: "listeners.rna_counts.mRNA_counts",
+      Flux: "listeners.fba_results.base_reaction_fluxes"
+    };
+    var classes = Object.keys(CLASS_PATH);
+    if (state.runs.length < 2) {
+      ctrls.innerHTML = "";
+      host.innerHTML = '<p class="muted" style="padding:12px">Run-vs-run scatter ' +
+        'needs at least two runs in this workspace.</p>';
+      return;
     }
-    ctrls.innerHTML = sel("sc-x", "X") + sel("sc-y", "Y") +
-      '<label><input type="checkbox" id="sc-time" checked> color by time</label>';
-    host.innerHTML = '<div id="sc-chart" style="height:460px"></div>';
+    function runOpts(sel) {
+      return state.runs.map(function (r) {
+        return '<option value="' + r.run_id + '"' +
+          (r.run_id === sel ? " selected" : "") + ">" + (r.label || r.run_id) + "</option>";
+      }).join("");
+    }
+    var a0 = state.runs[0].run_id, b0 = state.runs[1].run_id;
+    ctrls.innerHTML =
+      '<label>Class <select id="sc-class">' +
+        classes.map(function (c) { return "<option>" + c + "</option>"; }).join("") +
+      "</select></label>" +
+      '<label>Run A (x) <select id="sc-a">' + runOpts(a0) + "</select></label>" +
+      '<label>Run B (y) <select id="sc-b">' + runOpts(b0) + "</select></label>" +
+      '<label>Step <input id="sc-step" type="range" min="0" max="0" value="0"></label>' +
+      '<label><input type="checkbox" id="sc-log" checked> log-log</label>';
+    host.innerHTML = '<div id="sc-chart" style="height:520px"></div>';
+
+    function runById(id) { return state.runs.find(function (r) { return r.run_id === id; }); }
 
     function draw() {
-      var x = ctrls.querySelector("#sc-x").value, y = ctrls.querySelector("#sc-y").value;
-      if (!x || !y) return;
-      var u = api("/series?db=" + encodeURIComponent(state.run.db_path) +
-                  "&run=" + encodeURIComponent(state.run.run_id || "") +
-                  "&paths=" + encodeURIComponent([x, y].join(",")));
-      j(u).then(function (d) {
-        var trace = {
-          type: "scatter", mode: "markers", x: d.series[x], y: d.series[y],
-          marker: ctrls.querySelector("#sc-time").checked
-            ? { color: d.time, colorscale: "Viridis", showscale: true, size: 6 }
-            : { size: 6 }
-        };
-        Plotly.react("sc-chart", [trace], {
+      var cls = ctrls.querySelector("#sc-class").value;
+      var path = CLASS_PATH[cls];
+      var ra = runById(ctrls.querySelector("#sc-a").value);
+      var rb = runById(ctrls.querySelector("#sc-b").value);
+      var step = parseInt(ctrls.querySelector("#sc-step").value, 10) || 0;
+      function vec(r) {
+        return j(api("/vector?db=" + encodeURIComponent(r.db_path) +
+                     "&run=" + encodeURIComponent(r.run_id || "") +
+                     "&path=" + encodeURIComponent(path) + "&step=" + step));
+      }
+      Promise.all([vec(ra), vec(rb)]).then(function (res) {
+        var A = res[0], B = res[1];
+        // join by id when both provide ids, else by index
+        var mapA = {}; A.ids.forEach(function (id, i) { mapA[id] = A.values[i]; });
+        var xs = [], ys = [], labels = [];
+        B.ids.forEach(function (id, i) {
+          if (id in mapA) { xs.push(mapA[id]); ys.push(B.values[i]); labels.push(id); }
+        });
+        var log = ctrls.querySelector("#sc-log").checked;
+        var lo = 1, hi = 1;
+        xs.concat(ys).forEach(function (v) { if (v > hi) hi = v; if (v > 0 && v < lo) lo = v; });
+        var trace = { type: "scattergl", mode: "markers", x: xs, y: ys, text: labels,
+          hovertemplate: "%{text}<br>A=%{x:.3g} B=%{y:.3g}<extra></extra>",
+          marker: { size: 5, opacity: 0.6, color: "#4c8bf5" } };
+        var diag = { type: "scatter", mode: "lines", x: [lo, hi], y: [lo, hi],
+          line: { color: "#888", dash: "dot" }, hoverinfo: "skip", showlegend: false };
+        Plotly.react("sc-chart", [trace, diag], {
           margin: { t: 10, r: 10 }, paper_bgcolor: "#0e1116", plot_bgcolor: "#0e1116",
-          font: { color: "#cfd6df" }, xaxis: { title: x }, yaxis: { title: y }
+          font: { color: "#cfd6df" },
+          xaxis: { title: (ra.label || ra.run_id) + " (" + cls + ")", type: log ? "log" : "linear" },
+          yaxis: { title: (rb.label || rb.run_id), type: log ? "log" : "linear" }
         }, { responsive: true });
       });
     }
-    ["sc-x", "sc-y", "sc-time"].forEach(function (id) {
+    // set step slider max from the larger run's n_steps
+    var maxStep = Math.max(0, ((runById(a0).n_steps || 1) - 1));
+    ctrls.querySelector("#sc-step").max = String(maxStep);
+    ctrls.querySelector("#sc-step").value = String(maxStep);  // default final step
+    ["sc-class", "sc-a", "sc-b", "sc-step", "sc-log"].forEach(function (id) {
       ctrls.querySelector("#" + id).addEventListener("change", draw);
     });
     draw();
