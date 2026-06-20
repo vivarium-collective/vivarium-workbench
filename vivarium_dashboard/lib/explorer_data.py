@@ -36,7 +36,7 @@ def _unwrap_agent(state: dict) -> dict:
 
 def _category_for(top_key: str) -> str:
     for key, friendly in _CATEGORY_MAP:
-        if top_key == key or top_key.startswith(key):
+        if top_key == key or top_key.startswith(key + "."):
             return friendly
     return "Other"
 
@@ -52,8 +52,8 @@ def _walk(node, prefix, top_key, out):
                and isinstance(x[0], str) and isinstance(x[1], _NUM)
                for x in node):
             for name, _val in node:
-                out.append({"path": f"{prefix}.{name}", "index": None,
-                            "label": name, "kind": "scalar"})
+                out.append({"path": f"{prefix}[{name}]", "index": None,
+                            "label": name, "kind": "bulk"})
         # pure numeric vector
         elif all(isinstance(x, _NUM) for x in node):
             out.append({"path": prefix, "index": 0, "label": prefix.split(".")[-1],
@@ -66,23 +66,25 @@ def _walk(node, prefix, top_key, out):
 def _first_state(db_path: str, run_id: str | None) -> dict | None:
     try:
         conn = sqlite3.connect(str(db_path))
-    except sqlite3.OperationalError:
-        return None
-    try:
-        tbls = {r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-        if "history" not in tbls:
+        try:
+            tbls = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            if "history" not in tbls:
+                return None
+            if run_id:
+                row = conn.execute(
+                    "SELECT state FROM history WHERE simulation_id=? ORDER BY step LIMIT 1",
+                    (run_id,)).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT state FROM history ORDER BY step LIMIT 1").fetchone()
+            return json.loads(row[0]) if row else None
+        except Exception:
             return None
-        if run_id:
-            row = conn.execute(
-                "SELECT state FROM history WHERE simulation_id=? ORDER BY step LIMIT 1",
-                (run_id,)).fetchone()
-        else:
-            row = conn.execute(
-                "SELECT state FROM history ORDER BY step LIMIT 1").fetchone()
-        return json.loads(row[0]) if row else None
-    finally:
-        conn.close()
+        finally:
+            conn.close()
+    except Exception:
+        return None
 
 
 def list_observables(db_path: str, run_id: str | None = None) -> dict:
@@ -95,7 +97,8 @@ def list_observables(db_path: str, run_id: str | None = None) -> dict:
         _walk(sub, top_key, top_key, leaves)
     categories: dict[str, list] = {}
     for leaf in leaves:
-        cat = _category_for(leaf["path"].split(".")[0])
+        top = re.sub(r'\[.*\]', '', leaf["path"].split(".")[0])
+        cat = _category_for(top)
         categories.setdefault(cat, []).append(leaf)
     # stable ordering: by _CATEGORY_MAP order, then Other
     order = [f for _, f in _CATEGORY_MAP] + ["Other"]

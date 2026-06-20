@@ -72,5 +72,10 @@ def test_list_observables_groups_by_category(tmp_path):
     # fba_results.base_reaction_fluxes is a numeric vector
     flux = [o for g in cats.values() for o in g if "base_reaction_fluxes" in o["path"]]
     assert flux and flux[0]["kind"] == "vector"
-    # bulk is a list-of-pairs; exposed as a category
-    assert "Bulk molecules" in cats or any("bulk" in o["path"] for g in cats.values() for o in g)
+    # bulk is a list-of-pairs; exposed with bracket-delimited paths under "Bulk molecules"
+    assert "Bulk molecules" in cats
+    bulk_obs = cats["Bulk molecules"]
+    assert any(o["path"].startswith("bulk[") for o in bulk_obs)
+    glc = next((o for o in bulk_obs if o["path"] == "bulk[GLC]"), None)
+    assert glc is not None, "Expected bulk[GLC] observable"
+    assert glc["kind"] == "bulk"
