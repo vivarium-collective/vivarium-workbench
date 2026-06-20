@@ -87,3 +87,26 @@ def test_bulk_id_with_dot_categorized(tmp_path):
     obs = explorer_data.list_observables(str(db))
     paths = [o["path"] for o in obs["categories"].get("Bulk molecules", [])]
     assert "bulk[CPD-123.4]" in paths
+
+
+def test_get_series_extracts_scalar_and_vector(tmp_path):
+    db = tmp_path / "runs.db"
+    make_fake_runs_db(db, _sample_states(n=5))
+    res = explorer_data.get_series(
+        str(db),
+        paths=[("listeners.mass.cell_mass", None),
+               ("listeners.fba_results.base_reaction_fluxes", 1)],
+        subsample=100,
+    )
+    assert len(res["time"]) == 5
+    mass = res["series"]["listeners.mass.cell_mass"]
+    assert mass == [100.0, 101.0, 102.0, 103.0, 104.0]
+    flux1 = res["series"]["listeners.fba_results.base_reaction_fluxes#1"]
+    assert flux1 == [2.0, 3.0, 4.0, 5.0, 6.0]
+
+
+def test_get_series_extracts_bulk_pair(tmp_path):
+    db = tmp_path / "runs.db"
+    make_fake_runs_db(db, _sample_states(n=5))
+    res = explorer_data.get_series(str(db), paths=[("bulk[GLC]", None)], subsample=100)
+    assert res["series"]["bulk[GLC]"] == [10.0, 11.0, 12.0, 13.0, 14.0]

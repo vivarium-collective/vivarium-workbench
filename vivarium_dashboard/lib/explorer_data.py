@@ -106,6 +106,82 @@ def list_observables(db_path: str, run_id: str | None = None) -> dict:
                            for c in order if c in categories}}
 
 
+def _series_key(path: str, index: int | None) -> str:
+    return f"{path}#{index}" if index is not None else path
+
+
+def _extract_bulk_trace(db_path, mol_id, subsample=400, run_id=None):
+    """(times, values) for one bulk molecule id, from the array-of-pairs store."""
+    try:
+        conn = sqlite3.connect(str(db_path))
+    except sqlite3.OperationalError:
+        return [], []
+    try:
+        tbls = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if "simulations" not in tbls or "history" not in tbls:
+            return [], []
+        if run_id:
+            row = conn.execute(
+                "SELECT simulation_id FROM simulations WHERE simulation_id=? LIMIT 1",
+                (run_id,)).fetchone() or (run_id,)
+            sim_id = row[0]
+        else:
+            row = conn.execute(
+                "SELECT simulation_id FROM simulations ORDER BY started_at DESC LIMIT 1"
+            ).fetchone()
+            if row is None:
+                return [], []
+            sim_id = row[0]
+        n_rows = conn.execute(
+            "SELECT COUNT(*) FROM history WHERE simulation_id=?", (sim_id,)
+        ).fetchone()[0] or 0
+        if n_rows == 0:
+            return [], []
+        stride = max(1, n_rows // subsample)
+        # One row per step; json_each over the bulk array, match the id pair.
+        # Try top-level bulk, then agents/0 bulk; whichever yields a value wins.
+        sql = (
+            "SELECT h.global_time, "
+            "  (SELECT json_extract(j.value,'$[1]') FROM json_each(h.state,'$.bulk') j "
+            "     WHERE json_extract(j.value,'$[0]')=?), "
+            "  (SELECT json_extract(j.value,'$[1]') FROM json_each(h.state,'$.agents.0.bulk') j "
+            "     WHERE json_extract(j.value,'$[0]')=?) "
+            "FROM history h WHERE h.simulation_id=? AND (h.step % ?)=0 ORDER BY h.step ASC"
+        )
+        times, values = [], []
+        for tm, v_top, v_ag in conn.execute(sql, (mol_id, mol_id, sim_id, stride)):
+            val = v_top if v_top is not None else v_ag
+            if val is None:
+                continue
+            try:
+                values.append(float(val)); times.append(float(tm))
+            except (TypeError, ValueError):
+                continue
+        return times, values
+    finally:
+        conn.close()
+
+
+def get_series(db_path, paths, subsample=400, run_id=None):
+    """Aligned (time, values-per-path). Time comes from the first non-empty path.
+    `paths` is a list of (path, index|None). Reuses comparative_viz._extract_trace,
+    which already handles the agents/0/ fallback and json_extract subsampling.
+    Bulk paths of the form ``bulk[<id>]`` are dispatched to _extract_bulk_trace."""
+    series, time = {}, []
+    for path, index in paths:
+        if path.startswith("bulk[") and path.endswith("]"):
+            mol_id = path[len("bulk["):-1]
+            t, v = _extract_bulk_trace(db_path, mol_id, subsample, run_id)
+        else:
+            t, v = comparative_viz._extract_trace(
+                Path(db_path), path, index, subsample, sim_name=None)
+        series[_series_key(path, index)] = v
+        if not time and t:
+            time = t
+    return {"time": time, "series": series}
+
+
 def list_runs(workspace: Path) -> list[dict]:
     """Runs for the explorer's run-picker, projected to a small public shape."""
     out = []

@@ -8346,6 +8346,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_explorer_runs()
         if self.path.startswith("/api/explorer/observables"):
             return self._get_explorer_observables()
+        if self.path.startswith("/api/explorer/series"):
+            return self._get_explorer_series()
         if self.path.startswith("/api/simulations"):
             return self._get_simulations()
         if self.path.startswith("/api/composite-state"):
@@ -10902,6 +10904,34 @@ if __name__ == "__main__":
             return self._json(explorer_data.list_observables(db, q.get("run")), 200)
         except Exception as e:
             return self._json({"error": str(e), "categories": {}}, 200)
+
+    def _get_explorer_series(self):
+        """GET /api/explorer/series?db=<path>&paths=a,b#2&subsample=N&run=<id>"""
+        import urllib.parse as _up
+        from vivarium_dashboard.lib import explorer_data
+        q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
+        db = q.get("db")
+        if not db:
+            return self._json({"error": "missing db", "time": [], "series": {}}, 200)
+        specs = []
+        for tok in (q.get("paths") or "").split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            if "#" in tok:
+                p, _, i = tok.partition("#")
+                specs.append((p, int(i) if i.isdigit() else None))
+            else:
+                specs.append((tok, None))
+        try:
+            sub = int(q.get("subsample", "400"))
+        except ValueError:
+            sub = 400
+        try:
+            return self._json(
+                explorer_data.get_series(db, specs, sub, q.get("run")), 200)
+        except Exception as e:
+            return self._json({"error": str(e), "time": [], "series": {}}, 200)
 
     def _get_simulations(self):
         """GET /api/simulations — all persisted runs across the workspace.
