@@ -142,3 +142,58 @@ def test_explorer_assets_are_valid_json():
         if not p.exists():
             pytest.skip(f"asset {name} not generated yet")
         json.loads(p.read_text())  # raises if invalid
+
+
+# ---------------------------------------------------------------------------
+# Zarr / XArrayEmitter tests
+# ---------------------------------------------------------------------------
+
+def make_fake_zarr(store_path, n_steps=4, n_rxn=3):
+    import numpy as np
+    import xarray as xr
+
+    emit = list(range(n_steps))
+    part = xr.Dataset({"time_gen=1": ("emitstep_gen=1", [float(s) for s in emit])})
+    mass = xr.Dataset({"generation=1": ("emitstep_gen=1",
+                       [100.0 + s for s in emit])})
+    flux = xr.Dataset(
+        {"generation=1": (("emitstep_gen=1", "id_base_reaction_fluxes"),
+                          np.array([[1.0 + s, 2.0 + s, 3.0 + s] for s in emit]))},
+        coords={"id_base_reaction_fluxes": ["RXN-A", "RXN-B", "RXN-C"][:n_rxn]})
+    dt = xr.DataTree.from_dict({
+        "experiment_id=e/variant=0/lineage_seed=0": part,
+        "experiment_id=e/variant=0/lineage_seed=0/cell_mass": mass,
+        "experiment_id=e/variant=0/lineage_seed=0/base_reaction_fluxes": flux,
+    })
+    dt.to_zarr(str(store_path), mode="w")
+
+
+def test_zarr_resolver_and_observables(tmp_path):
+    run = tmp_path / ".pbg" / "runs" / "r1"
+    run.mkdir(parents=True)
+    make_fake_zarr(run / "store.zarr")
+    kind, resolved = explorer_data._resolve_run_source(".pbg/runs/r1", tmp_path)
+    assert kind == "zarr" and resolved.name == "store.zarr"
+    obs = explorer_data.list_observables(".pbg/runs/r1", workspace=tmp_path)
+    paths = [o["path"] for g in obs["categories"].values() for o in g]
+    assert "cell_mass" in paths and "base_reaction_fluxes" in paths
+
+
+def test_zarr_series(tmp_path):
+    run = tmp_path / ".pbg" / "runs" / "r1"
+    run.mkdir(parents=True)
+    make_fake_zarr(run / "store.zarr")
+    res = explorer_data.get_series(".pbg/runs/r1", [("cell_mass", None)],
+                                   workspace=tmp_path)
+    assert res["series"]["cell_mass"] == [100.0, 101.0, 102.0, 103.0]
+
+
+def test_zarr_flux(tmp_path):
+    run = tmp_path / ".pbg" / "runs" / "r1"
+    run.mkdir(parents=True)
+    make_fake_zarr(run / "store.zarr")
+    idmap = {"RXN-A": "PGI", "RXN-C": "PFK"}
+    res = explorer_data.get_flux_auto(".pbg/runs/r1", step=2, id_map=idmap,
+                                      workspace=tmp_path)
+    assert res["fluxes"] == {"PGI": 3.0, "PFK": 5.0}
+    assert res["coverage"]["total"] == 3

@@ -10903,7 +10903,8 @@ if __name__ == "__main__":
         if not db:
             return self._json({"error": "missing db", "categories": {}}, 200)
         try:
-            return self._json(explorer_data.list_observables(db, q.get("run")), 200)
+            return self._json(
+                explorer_data.list_observables(db, q.get("run"), workspace=WORKSPACE), 200)
         except Exception as e:
             return self._json({"error": str(e), "categories": {}}, 200)
 
@@ -10931,7 +10932,8 @@ if __name__ == "__main__":
             sub = 400
         try:
             return self._json(
-                explorer_data.get_series(db, specs, sub, q.get("run")), 200)
+                explorer_data.get_series(db, specs, sub, q.get("run"),
+                                         workspace=WORKSPACE), 200)
         except Exception as e:
             return self._json({"error": str(e), "time": [], "series": {}}, 200)
 
@@ -10948,11 +10950,10 @@ if __name__ == "__main__":
         except ValueError:
             step = 0
         try:
-            base_ids, id_map = explorer_data.load_flux_assets()
-            if not base_ids:
-                base_ids = explorer_data.base_ids_from_run(db, q.get("run"))
+            _, id_map = explorer_data.load_flux_assets()
             return self._json(
-                explorer_data.get_flux(db, step, base_ids, id_map, q.get("run")), 200)
+                explorer_data.get_flux_auto(db, step, id_map, q.get("run"),
+                                            workspace=WORKSPACE), 200)
         except Exception as e:
             return self._json({"error": str(e), "fluxes": {}}, 200)
 

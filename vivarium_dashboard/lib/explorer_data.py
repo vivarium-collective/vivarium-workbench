@@ -87,8 +87,72 @@ def _first_state(db_path: str, run_id: str | None) -> dict | None:
         return None
 
 
-def list_observables(db_path: str, run_id: str | None = None) -> dict:
-    state = _first_state(db_path, run_id)
+def _resolve_run_source(db, workspace=None):
+    """('sqlite', Path) | ('zarr', store.zarr Path) | (None, None)."""
+    p = Path(db)
+    if workspace and not p.is_absolute():
+        p = Path(workspace) / p
+    if str(p).endswith(".zarr") and p.exists():
+        return "zarr", p
+    if p.is_dir():
+        for cand in [p / "store.zarr", *sorted(p.glob("*/store.zarr")),
+                     *sorted(p.glob("*/*/store.zarr"))]:
+            if cand.exists():
+                return "zarr", cand
+        return None, None
+    if p.exists():
+        return "sqlite", p
+    return None, None
+
+
+def _categorize_leaves(leaves):
+    """Group zarr leaf names (no nested store key) by a name heuristic."""
+    def cat(name):
+        n = name.lower()
+        if "mass" in n:
+            return "Mass"
+        if "flux" in n or "fba" in n:
+            return "Fluxes"
+        if n.startswith("bulk"):
+            return "Bulk molecules"
+        if "growth" in n or "division" in n:
+            return "Growth & division"
+        return "Listeners"
+    out = {}
+    for leaf in leaves:
+        out.setdefault(cat(leaf["path"]), []).append(leaf)
+    order = ["Mass", "Bulk molecules", "Fluxes", "Listeners", "Growth & division"]
+    return {c: sorted(out[c], key=lambda o: o["path"]) for c in order if c in out}
+
+
+def _zarr_observables(store):
+    try:
+        import xarray as xr
+    except ImportError:
+        return {"categories": {}}
+    try:
+        dt = xr.open_datatree(str(store), engine="zarr")
+    except Exception:
+        return {"categories": {}}
+    leaves = []
+    for node in dt.subtree:
+        gen_vars = [v for v in (node.data_vars or {}) if str(v).startswith("generation=")]
+        if not gen_vars:
+            continue
+        leaf = node.name
+        is_vec = any(("id_" + leaf) in node[v].dims for v in gen_vars)
+        leaves.append({"path": leaf, "index": 0 if is_vec else None,
+                       "label": leaf, "kind": "vector" if is_vec else "scalar"})
+    return {"categories": _categorize_leaves(leaves)}
+
+
+def list_observables(db_path: str, run_id: str | None = None, workspace=None) -> dict:
+    kind, resolved = _resolve_run_source(db_path, workspace)
+    if kind == "zarr":
+        return _zarr_observables(resolved)
+    if kind != "sqlite":
+        return {"categories": {}}
+    state = _first_state(resolved, run_id)
     if not state:
         return {"categories": {}}
     inner = _unwrap_agent(state)
@@ -163,19 +227,28 @@ def _extract_bulk_trace(db_path, mol_id, subsample=400, run_id=None):
         conn.close()
 
 
-def get_series(db_path, paths, subsample=400, run_id=None):
+def get_series(db_path, paths, subsample=400, run_id=None, workspace=None):
     """Aligned (time, values-per-path). Time comes from the first non-empty path.
     `paths` is a list of (path, index|None). Reuses comparative_viz._extract_trace,
     which already handles the agents/0/ fallback and json_extract subsampling.
-    Bulk paths of the form ``bulk[<id>]`` are dispatched to _extract_bulk_trace."""
+    Bulk paths of the form ``bulk[<id>]`` are dispatched to _extract_bulk_trace.
+    XArrayEmitter (zarr) runs are dispatched via _extract_trace_from_zarr; bulk[id]
+    remains SQLite-only for v1 (zarr bulk would need its own leaf handling)."""
+    kind, resolved = _resolve_run_source(db_path, workspace)
     series, time = {}, []
     for path, index in paths:
-        if path.startswith("bulk[") and path.endswith("]"):
+        if kind == "zarr":
+            t, v = comparative_viz._extract_trace_from_zarr(
+                resolved, path, subsample, index)
+        elif path.startswith("bulk[") and path.endswith("]"):
             mol_id = path[len("bulk["):-1]
-            t, v = _extract_bulk_trace(db_path, mol_id, subsample, run_id)
-        else:
+            t, v = _extract_bulk_trace(resolved if kind == "sqlite" else db_path,
+                                       mol_id, subsample, run_id)
+        elif kind == "sqlite":
             t, v = comparative_viz._extract_trace(
-                Path(db_path), path, index, subsample, sim_name=None)
+                resolved, path, index, subsample, sim_name=None)
+        else:
+            t, v = [], []
         series[_series_key(path, index)] = v
         if not time and t:
             time = t
@@ -271,6 +344,63 @@ def base_ids_from_run(db_path, run_id=None):
                 _search(sub)
     _search(_unwrap_agent(state))
     return found
+
+
+def _zarr_flux(store, step):
+    """(base_ids, flux_values) at one emit step from a zarr store, or ([], [])."""
+    try:
+        import xarray as xr
+    except ImportError:
+        return [], []
+    try:
+        dt = xr.open_datatree(str(store), engine="zarr")
+    except Exception:
+        return [], []
+    leaf = "base_reaction_fluxes"
+    for node in dt.subtree:
+        if node.name != leaf:
+            continue
+        gen_vars = sorted((v for v in (node.data_vars or {})
+                           if str(v).startswith("generation=")),
+                          key=lambda s: int(str(s).split("=")[1]))
+        if not gen_vars:
+            return [], []
+        arr = node[gen_vars[0]]  # first generation
+        idcoord = "id_" + leaf
+        if idcoord not in arr.dims:
+            return [], []
+        ids = ([str(x) for x in node[idcoord].values] if idcoord in node.coords
+               else [str(i) for i in range(arr.sizes[idcoord])])
+        emitdim = [d for d in arr.dims if d != idcoord]
+        if not emitdim:
+            return [], []
+        nstep = arr.sizes[emitdim[0]]
+        si = min(max(0, step), nstep - 1)
+        vals = arr.isel({emitdim[0]: si}).values.tolist()
+        return ids, [float(x) for x in vals]
+    return [], []
+
+
+def get_flux_auto(db_path, step, id_map, run_id=None, workspace=None):
+    """Emitter-aware flux: zarr reads ids+vector from the store; sqlite uses
+    get_flux with asset/run base_ids."""
+    kind, resolved = _resolve_run_source(db_path, workspace)
+    if kind == "zarr":
+        ids, vals = _zarr_flux(resolved, step)
+        fluxes = {}
+        for i, rid in enumerate(ids):
+            if i >= len(vals):
+                break
+            bigg = id_map.get(rid)
+            if bigg is not None:
+                fluxes[bigg] = float(vals[i])
+        return {"step": step, "time": None, "fluxes": fluxes,
+                "coverage": {"mapped": len(fluxes), "total": len(ids)}}
+    # sqlite path
+    base_ids, _ = load_flux_assets()
+    if not base_ids:
+        base_ids = base_ids_from_run(resolved if kind == "sqlite" else db_path, run_id)
+    return get_flux(resolved if kind == "sqlite" else db_path, step, base_ids, id_map, run_id)
 
 
 def list_runs(workspace: Path) -> list[dict]:
