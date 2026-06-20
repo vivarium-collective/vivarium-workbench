@@ -39,6 +39,8 @@ def test_js_has_remote_run_handlers_and_endpoints():
     # poll cadence + terminal stop
     assert "2000" in js
     assert "'done'" in js or '"done"' in js
+    assert ".catch(" in js  # network-error handling on submit + poll
+    assert "'failed'" in js or '"failed"' in js  # poll stops on failed
 
 
 def test_rendered_study_detail_includes_remote_run_panel():

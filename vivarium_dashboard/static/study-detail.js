@@ -1791,7 +1791,15 @@
       fetch('/api/remote-run-status?job_id=' + encodeURIComponent(jobId))
         .then(function(r) { return r.json().then(function(j) { return {status: r.status, body: j}; }); })
         .then(function(res) {
-          if (res.status !== 200) return;
+          if (res.status !== 200) {
+            var pbtn = document.getElementById('remote-run-btn');
+            var pprog = document.getElementById('remote-run-progress');
+            if (pprog) { pprog.hidden = false; pprog.innerHTML = '<div class="inv-run-err">Poll error '
+              + escapeHtmlForTests(res.status)
+              + (res.body && res.body.error ? ': ' + escapeHtmlForTests(res.body.error) : '') + '</div>'; }
+            if (pbtn) { pbtn.disabled = false; pbtn.textContent = '▶ Run on remote'; }
+            return;
+          }
           _renderRemoteRunProgress(res.body);
           if (res.body.status === 'done' || res.body.status === 'failed') {
             var btn = document.getElementById('remote-run-btn');
