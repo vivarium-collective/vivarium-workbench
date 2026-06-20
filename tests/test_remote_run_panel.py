@@ -39,3 +39,12 @@ def test_js_has_remote_run_handlers_and_endpoints():
     # poll cadence + terminal stop
     assert "2000" in js
     assert "'done'" in js or '"done"' in js
+
+
+def test_rendered_study_detail_includes_remote_run_panel():
+    # Render the template with a minimal spec; the panel is static markup so any
+    # spec that renders should include it.
+    html = server._render_study_detail_html("demo-study", {"name": "demo-study"})
+    assert 'id="remote-run-form"' in html
+    assert "Run on remote" in html
+    assert 'id="remote-run-progress"' in html
