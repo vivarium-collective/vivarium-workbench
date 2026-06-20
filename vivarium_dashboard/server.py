@@ -2645,8 +2645,40 @@ def _build_saved_visualizations(ws_root) -> dict:
     wp = WorkspacePaths.load(ws_root)
     saved: list[dict] = []
     ptools_studies: list[dict] = []
+    report_cards: list[dict] = []
     for study_dir in wp.iter_study_dirs():
         study = study_dir.name
+        # Saved comparison report cards — self-contained HTML produced by the
+        # vEcoli<->v2ecoli comparison harness (statistical-equivalence cards).
+        # Discovered like the 3D packs: a study writes them under
+        # ``viz/report_card/<name>.html`` (+ optional ``<name>.verdict.json``
+        # sidecar carrying the ``overall`` verdict for the gallery badge).
+        rc_dir = study_dir / "viz" / "report_card"
+        if rc_dir.is_dir():
+            for rep in sorted(rc_dir.glob("*.html")):
+                try:
+                    rel = rep.relative_to(ws_root).as_posix()
+                except ValueError:
+                    continue
+                verdict = None
+                vfile = rep.with_name(rep.name[: -len(".html")] + ".verdict.json")
+                if vfile.is_file():
+                    try:
+                        verdict = json.loads(
+                            vfile.read_text(encoding="utf-8")).get("overall")
+                    except Exception:
+                        verdict = None
+                try:
+                    created = int(rep.stat().st_mtime)
+                except Exception:
+                    created = None
+                report_cards.append({
+                    "study": study,
+                    "name": rep.name[: -len(".html")],
+                    "url": "/" + rel,
+                    "verdict": verdict,
+                    "created": created,
+                })
         viz3d = study_dir / "viz" / "3d"
         if viz3d.is_dir():
             for pack in sorted(viz3d.glob("*.pack.json")):
@@ -2712,6 +2744,7 @@ def _build_saved_visualizations(ws_root) -> dict:
         "parsimony_available": _parsimony_viewer_dir() is not None,
         "saved": saved,
         "ptools": {"configured": ptools_configured, "studies": ptools_studies},
+        "report_cards": report_cards,
     }
 
 
@@ -6642,12 +6675,28 @@ def _remote_push_and_sha() -> str:
     return sha
 
 
+def _normalize_repo_url(url: str) -> str:
+    """Normalize a git remote URL for sms-api's simulator/upload.
+
+    sms-api's ``/core/v1/simulator/upload`` 500s on a ``.git``-suffixed URL
+    (it builds an image tag / repo path from the URL), so strip a trailing
+    ``.git`` and surrounding whitespace.
+    """
+    url = url.strip()
+    if url.endswith(".git"):
+        url = url[: -len(".git")]
+    return url
+
+
 def _remote_repo_url() -> str | None:
     r = subprocess.run(
         ["git", "remote", "get-url", "origin"], cwd=WORKSPACE,
         capture_output=True, text=True, timeout=5,
     )
-    return r.stdout.strip() or None if r.returncode == 0 else None
+    if r.returncode != 0:
+        return None
+    raw = r.stdout.strip()
+    return _normalize_repo_url(raw) if raw else None
 
 
 def _stale_branch_threshold() -> int:

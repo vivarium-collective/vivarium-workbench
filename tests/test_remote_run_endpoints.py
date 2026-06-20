@@ -10,6 +10,14 @@ def test_sms_api_base_default_and_override(monkeypatch):
     assert server._sms_api_base() == "http://localhost:9000"
 
 
+def test_normalize_repo_url_strips_git_suffix():
+    server = importlib.import_module("vivarium_dashboard.server")
+    # sms-api simulator/upload 500s on a .git-suffixed URL
+    assert server._normalize_repo_url("https://github.com/x/v2ecoli.git") == "https://github.com/x/v2ecoli"
+    assert server._normalize_repo_url("  https://github.com/x/v2ecoli  ") == "https://github.com/x/v2ecoli"
+    assert server._normalize_repo_url("https://github.com/x/v2ecoli") == "https://github.com/x/v2ecoli"
+
+
 def test_remote_run_start_requires_login(monkeypatch):
     server = importlib.import_module("vivarium_dashboard.server")
     from vivarium_dashboard.lib import github_auth
