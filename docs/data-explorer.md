@@ -7,13 +7,15 @@ The Analyses Data Explorer is a client-side panel on the **Analyses** tab that l
 ## Views
 
 ### Timeseries
-Plot one or more scalar, vector-indexed, or bulk-molecule observables as time-series lines. Observables are grouped by category (Listeners, Bulk molecules, …). Multiple series can be overlaid on the same axes.
+Plot one or more scalar, vector-indexed, or bulk-molecule observables as time-series lines. Observables are browsed through a **molecule-class filter** (RNA / Protein / Metabolite / Flux / Mass) and a free-text **search box**. Series from different unit families are stacked into **separate per-unit panels** (e.g. one panel for `fg`, another for `mmol·s⁻¹`) so axes stay meaningful. Units and molecule class (`mclass`) are derived automatically from the observable's path using `_unit_for` and `_mol_class` in `explorer_data.py`.
 
-### Scatter / Correlation
-Select any two scalar observables (X and Y) from the run; points are drawn one-per-step. Useful for visualising correlations between cell variables (e.g. mass vs. RNA counts).
+### Scatter (run-vs-run omics)
+Compare the same observable across two runs at a chosen simulation step. Each point is a molecule or reaction; the X axis is run A, the Y axis is run B. A **y = x diagonal** is drawn as a visual reference. Molecules are joined by **id** when the vector carries named coordinates (zarr/XArray); otherwise they are joined by **index position**. A **step slider** defaults to the final step of the shorter run. A note is shown when fewer than two runs are available.
 
-### Allocation (polygonal Voronoi)
-Renders a Voronoi-treemap breakdown of molecule allocations in the cell. Each tile is coloured by molecule category; area encodes relative count. Uses `d3-voronoi-treemap` + D3 (loaded as peer deps on first open).
+> **Deferred:** sim-vs-experiment scatter (comparing simulation output against experimental omics measurements) is not yet implemented and is outside the current scope.
+
+### Allocation (labeled Voronoi drill-down)
+Renders a Voronoi-treemap breakdown of molecule mass in the cell. Each tile is **labeled** with the molecule name. Single-clicking a tile **selects** it (cursor highlight); **double-clicking drills down** into its sub-category. A **breadcrumb trail** tracks the current path through the mass hierarchy. The tree is the intersection of the `mass` listener hierarchy and the observables available in the run.
 
 ### Flux map (Escher / *e_coli_core*)
 Overlays per-reaction fluxes from `listeners.fba_results.base_reaction_fluxes` onto the Escher central-carbon metabolic map for *E. coli* core (`e_coli_core.map.json`). Reactions are keyed by their BiGG IDs; a coverage badge shows how many of the model's base reaction IDs were successfully mapped.
@@ -29,9 +31,10 @@ All endpoints live under `/api/explorer/` and are registered in `vivarium_dashbo
 | Endpoint | Method | Description |
 |---|---|---|
 | `/api/explorer/runs` | GET | List all runs discoverable in the current workspace (SQLite `runs.db` files + zarr stores). Returns `{runs: [...]}`. |
-| `/api/explorer/observables` | GET | `?run=<db_path_or_store>` — return all observable paths grouped by category. Returns `{categories: {<group>: [{path, label, kind}, ...]}}`. |
+| `/api/explorer/observables` | GET | `?run=<db_path_or_store>` — return all observable paths grouped by category. Returns `{categories: {<group>: [{path, label, kind, unit, mclass}, ...]}}`. `unit` and `mclass` are path-derived. |
 | `/api/explorer/series` | POST | Body: `{run, paths: [[path, index|null], ...], subsample}` — return aligned `{time: [...], series: {<key>: [...]}}`. Vector paths use the `path#index` key form; bulk molecules use the `bulk[ID]` form. |
 | `/api/explorer/flux` | GET | `?run=<db_path_or_store>&step=<int>` — return `{fluxes: {<bigg_id>: value}, coverage: {mapped, total}, step}` for the requested simulation step. |
+| `/api/explorer/vector` | GET | `?run=<db_path_or_store>&path=<obs_path>&step=<int>` — return a full numeric vector at one step: `{ids: [...], values: [...], step, time}`. `ids` are named coordinates when available (zarr); otherwise sequential string indices (`"0"`, `"1"`, …). Used by the Scatter view. |
 
 ### Snapshot / read-only mode
 

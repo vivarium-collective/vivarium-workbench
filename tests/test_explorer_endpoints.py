@@ -116,3 +116,22 @@ def test_full_explorer_flow(tmp_path):
     assert "step" in flux, "get_flux result must carry the requested step"
     assert isinstance(flux["fluxes"], dict)
     assert {"mapped", "total"} <= set(flux["coverage"])
+
+
+def test_vector_flow(tmp_path):
+    # Load test_explorer_data by file path to avoid collision with the venv's
+    # unrelated 'tests' package (unum's tests/__init__.py requires nose).
+    _spec = importlib.util.spec_from_file_location(
+        "_ted", Path(__file__).parent / "test_explorer_data.py"
+    )
+    _mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    make_fake_runs_db = _mod.make_fake_runs_db
+    _sample_states = _mod._sample_states
+
+    studies = tmp_path / "studies" / "demo"; studies.mkdir(parents=True)
+    db = studies / "runs.db"
+    make_fake_runs_db(db, _sample_states(n=4))
+    res = explorer_data.get_vector(str(db),
+        "listeners.fba_results.base_reaction_fluxes", step=1)
+    assert res["values"] and res["ids"]
