@@ -125,6 +125,16 @@ def _row_to_dict(row, db_path_str: str) -> dict:
         }
     else:
         remote_origin = None
+    # A remote run lands its native store next to runs.db (a .zarr or parquet-runs
+    # dir), so its emitter type must come from that store_path — NOT from db_path,
+    # which is always the runs.db SQLite metadata file (would mislabel it "SQLite").
+    store_path = str(prov.get("store_path") or "").lower()
+    if ".zarr" in store_path:
+        emitter: str | None = "xarray"
+    elif "parquet" in store_path:
+        emitter = "parquet"
+    else:
+        emitter = None
     return {
         "run_id": row["run_id"],
         "spec_id": row["spec_id"],
@@ -136,6 +146,7 @@ def _row_to_dict(row, db_path_str: str) -> dict:
         "started_at": row["started_at"],
         "completed_at": row["completed_at"],
         "db_path": db_path_str,
+        "emitter": emitter,  # store-derived (xarray/parquet) for remote runs; None → falls back to db_path
         "studies": [],  # filled in by _annotate_studies
         # Match the SQLiteEmitter shape so JS consumers can rely on the
         # keys existing regardless of which emitter wrote the row.
@@ -612,6 +623,12 @@ def _emitter_for_row(workspace: Path, row: dict) -> str:
     (runs_meta / sqlite_emitter) we still check whether a zarr store exists on
     disk for the run_id (a backfilled XArray run lands in runs_meta but its
     data lives in zarr) before defaulting to 'sqlite'."""
+    # A remote run lands its native store next to runs.db, so _row_to_dict
+    # already derived the emitter from the store_path. Honor that — the
+    # .pbg/runs/<rid> disk probe below only covers the LOCAL backfill layout.
+    em0 = row.get("emitter")
+    if isinstance(em0, str) and em0 in ("xarray", "parquet"):
+        return em0
     src = row.get("source")
     if src == "parquet":
         return "parquet"

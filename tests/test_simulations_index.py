@@ -645,6 +645,7 @@ def _seed_remote_run(db_file, *, run_id, spec_id, simulation_id, source, started
         "backend": "ray",
         "source": source,
         "s3_uri": f"s3://bucket/prefix/{simulation_id}/",
+        "store_path": str(db_file.parent / f"runs.{run_id}.zarr"),
     }
     save_metadata(conn, spec_id=spec_id, run_id=run_id, params=provenance,
                   label="Remote run", started_at=started_at, n_steps=0)
@@ -670,6 +671,8 @@ def test_list_surfaces_remote_origin_from_params_json(tmp_path):
     assert ro["simulation_id"] == 99
     assert ro["backend"] == "ray"
     assert ro["s3_uri"] == "s3://bucket/prefix/99/"
+    # emitter derives from the landed .zarr store_path, NOT the runs.db (else "sqlite")
+    assert row["emitter"] == "xarray"
 
 
 def test_list_local_run_has_null_remote_origin(tmp_path):
