@@ -41,6 +41,43 @@ def _category_for(top_key: str) -> str:
     return "Other"
 
 
+def _unit_for(path: str) -> str:
+    """Physical unit for an observable, inferred from its path (units live in
+    listener port schemas, not in the emitted payload)."""
+    p = path.lower()
+    if "fraction" in p or "ratio" in p or "growth_rate" in p:
+        return ""
+    if "_mass" in p or p.endswith("mass"):
+        return "fg"
+    if "fba_results" in p or "flux" in p:
+        return "mmol·s⁻¹"
+    if "rna_counts" in p or "monomer_counts" in p or p.startswith("bulk["):
+        return "counts"
+    return ""
+
+
+def _mol_class(path: str) -> str:
+    """Molecule class for an observable, inferred from its path."""
+    p = path.lower()
+    if "rna_counts" in p:
+        return "RNA"
+    if "monomer_counts" in p:
+        return "Protein"
+    if p.startswith("bulk["):
+        return "Metabolite"
+    if "fba_results" in p or "flux" in p:
+        return "Flux"
+    if "mass" in p:
+        return "Mass"
+    return "Other"
+
+
+def _annotate(leaf: dict) -> dict:
+    leaf["unit"] = _unit_for(leaf["path"])
+    leaf["mclass"] = _mol_class(leaf["path"])
+    return leaf
+
+
 def _walk(node, prefix, top_key, out):
     """Collect numeric scalar leaves and numeric vectors as observable dicts."""
     if isinstance(node, dict):
@@ -141,8 +178,8 @@ def _zarr_observables(store):
             continue
         leaf = node.name
         is_vec = any(("id_" + leaf) in node[v].dims for v in gen_vars)
-        leaves.append({"path": leaf, "index": 0 if is_vec else None,
-                       "label": leaf, "kind": "vector" if is_vec else "scalar"})
+        leaves.append(_annotate({"path": leaf, "index": 0 if is_vec else None,
+                       "label": leaf, "kind": "vector" if is_vec else "scalar"}))
     return {"categories": _categorize_leaves(leaves)}
 
 
@@ -159,6 +196,8 @@ def list_observables(db_path: str, run_id: str | None = None, workspace=None) ->
     leaves: list[dict] = []
     for top_key, sub in inner.items():
         _walk(sub, top_key, top_key, leaves)
+    for _leaf in leaves:
+        _annotate(_leaf)
     categories: dict[str, list] = {}
     for leaf in leaves:
         top = re.split(r'[\[.]', leaf["path"])[0]

@@ -260,3 +260,26 @@ def test_list_runs_excludes_empty_db(tmp_path):
     studies.mkdir(parents=True)
     make_fake_runs_db(studies / "runs.db", [])
     assert explorer_data.list_runs(tmp_path) == []
+
+
+def test_unit_and_class_helpers():
+    assert explorer_data._unit_for("listeners.mass.protein_mass") == "fg"
+    assert explorer_data._unit_for("listeners.mass.protein_mass_fraction") == ""
+    assert explorer_data._unit_for("listeners.fba_results.base_reaction_fluxes") == "mmol·s⁻¹"
+    assert explorer_data._unit_for("listeners.monomer_counts") == "counts"
+    assert explorer_data._unit_for("bulk[GLC]") == "counts"
+    assert explorer_data._mol_class("listeners.rna_counts.mRNA_counts") == "RNA"
+    assert explorer_data._mol_class("listeners.monomer_counts") == "Protein"
+    assert explorer_data._mol_class("bulk[GLC]") == "Metabolite"
+    assert explorer_data._mol_class("listeners.fba_results.base_reaction_fluxes") == "Flux"
+    assert explorer_data._mol_class("listeners.mass.cell_mass") == "Mass"
+
+
+def test_list_observables_carries_unit_and_class(tmp_path):
+    db = tmp_path / "runs.db"
+    make_fake_runs_db(db, _sample_states())
+    obs = explorer_data.list_observables(str(db))
+    flat = [o for g in obs["categories"].values() for o in g]
+    assert flat and all("unit" in o and "mclass" in o for o in flat)
+    mass = [o for o in flat if o["path"].endswith("mass.cell_mass")][0]
+    assert mass["unit"] == "fg" and mass["mclass"] == "Mass"
