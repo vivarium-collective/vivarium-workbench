@@ -113,6 +113,15 @@
 
     function runById(id) { return state.runs.find(function (r) { return r.run_id === id; }); }
 
+    function refreshSlider() {
+      var ra = runById(ctrls.querySelector("#sc-a").value);
+      var rb = runById(ctrls.querySelector("#sc-b").value);
+      var slider = ctrls.querySelector("#sc-step");
+      var newMax = Math.max(0, Math.max((ra.n_steps || 1), (rb.n_steps || 1)) - 1);
+      slider.max = String(newMax);
+      if (parseInt(slider.value, 10) > newMax) slider.value = String(newMax);
+    }
+
     function draw() {
       var cls = ctrls.querySelector("#sc-class").value;
       var path = CLASS_PATH[cls];
@@ -126,6 +135,10 @@
       }
       Promise.all([vec(ra), vec(rb)]).then(function (res) {
         var A = res[0], B = res[1];
+        if (!A.ids || !B.ids || !A.ids.length || !B.ids.length) {
+          host.innerHTML = '<p class="muted" style="padding:12px">No data for this class at this step.</p>';
+          return;
+        }
         // join by id when both provide ids, else by index
         var mapA = {}; A.ids.forEach(function (id, i) { mapA[id] = A.values[i]; });
         var xs = [], ys = [], labels = [];
@@ -133,8 +146,9 @@
           if (id in mapA) { xs.push(mapA[id]); ys.push(B.values[i]); labels.push(id); }
         });
         var log = ctrls.querySelector("#sc-log").checked;
-        var lo = 1, hi = 1;
+        var lo = Infinity, hi = 1;
         xs.concat(ys).forEach(function (v) { if (v > hi) hi = v; if (v > 0 && v < lo) lo = v; });
+        if (lo === Infinity) lo = 1e-6;
         var trace = { type: "scattergl", mode: "markers", x: xs, y: ys, text: labels,
           hovertemplate: "%{text}<br>A=%{x:.3g} B=%{y:.3g}<extra></extra>",
           marker: { size: 5, opacity: 0.6, color: "#4c8bf5" } };
@@ -146,14 +160,18 @@
           xaxis: { title: (ra.label || ra.run_id) + " (" + cls + ")", type: log ? "log" : "linear" },
           yaxis: { title: (rb.label || rb.run_id), type: log ? "log" : "linear" }
         }, { responsive: true });
-      });
+      }).catch(function (e) { console.error("scatter fetch:", e); });
     }
-    // set step slider max from the larger run's n_steps
-    var maxStep = Math.max(0, ((runById(a0).n_steps || 1) - 1));
-    ctrls.querySelector("#sc-step").max = String(maxStep);
-    ctrls.querySelector("#sc-step").value = String(maxStep);  // default final step
-    ["sc-class", "sc-a", "sc-b", "sc-step", "sc-log"].forEach(function (id) {
+    // initialise slider from both selected runs; default to the final step
+    refreshSlider();
+    ctrls.querySelector("#sc-step").value = ctrls.querySelector("#sc-step").max;
+    ["sc-class", "sc-step", "sc-log"].forEach(function (id) {
       ctrls.querySelector("#" + id).addEventListener("change", draw);
+    });
+    ["sc-a", "sc-b"].forEach(function (id) {
+      ctrls.querySelector("#" + id).addEventListener("change", function () {
+        refreshSlider(); draw();
+      });
     });
     draw();
   };
