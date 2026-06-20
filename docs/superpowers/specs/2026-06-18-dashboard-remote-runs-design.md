@@ -192,6 +192,46 @@ The dashboard job threads these through and persists them on the study run recor
   analysis-module step, arbitrary-document compose-on-Ray, multi-study/batch
   triggering.
 
+## REVISION (2026-06-19) — store-mirroring landing supersedes unified-SQLite landing
+
+The "reconstruct history rows (unified)" landing below was **superseded**. Reason:
+v2ecoli studies set `runtime.default_emitter: xarray` (or `parquet`), so the
+dashboard charts from the **on-disk zarr/parquet store** (`study_charts._emitter_kind`
+→ `_extract_paths_from_zarr` / `_extract_paths_from_parquet`); the SQLite `history`
+path is only a per-test fallback. Writing results into SQLite was therefore the one
+format v2ecoli does **not** primarily chart from.
+
+**New landing = mirror the store format.** Land the native store the remote produced,
+in the layout the matching dashboard reader expects, and record a `runs_meta` row
+pointing at it:
+
+| Remote backend | Store | sms-api fetch (exists) | Land at | Rendered by |
+|---|---|---|---|---|
+| Ray | zarr | `_stream_s3_tar_gz_ray` via `POST /api/v1/simulations/{id}/data` (tar.gz) | `<study>/runs.<run_id>.zarr` | `_extract_paths_from_zarr` |
+| Batch | parquet | sibling Nextflow streamer, same `/data` endpoint | `<study>/parquet-runs/<experiment_id>/history/...` | `_extract_paths_from_parquet` |
+
+**Confirmed layout mapping (from emitter + reader source):**
+- A remote Ray `seed_NN/store.zarr` is **internally identical** to the dashboard's
+  expected `runs.<run_id>.zarr` — same `experiment_id=*/variant=*/lineage_seed=*`
+  partitions, same `generation=N` / `time_gen=N` / `id_<leaf>` / leaf-name structure.
+  **Only the path differs** → place/extract the store at `<study>/runs.<run_id>.zarr`;
+  no internal restructure. A Ray run yields multiple seeds; v1 lands one seed (default
+  seed 0) as the run's zarr dir.
+- Parquet: `__`-flattened columns + hive partitions already match; copy into
+  `<study>/parquet-runs/<experiment_id>/history/...`.
+
+**Implications for the build:**
+- The Phase 1 `observables` endpoint stays as a **lightweight preview/picker**, and
+  its locator (`_build_store_uri`, currently zarr-only) is generalized to find the
+  parquet store too — closing the parquet/zarr asymmetry. It is no longer the landing
+  mechanism.
+- `SmsApiClient` gains `download_data(simulation_id, dest)` (streams the `/data`
+  tar.gz). `remote_run_landing.py` is rewritten from SQLite-history-write to
+  download → extract → place-native-store → record `runs_meta`. Store kind is detected
+  from the extracted contents (a `store.zarr` dir → zarr; `.pq` files → parquet).
+- Phase 3a's `SmsApiClient` is unchanged and reused; Phase 3a's `_state_blobs` +
+  SQLite `land_remote_run` (PR #288, unmerged) are replaced.
+
 ## Resolved during review
 1. **Run identity / study attachment:** the remote run returns a `simulation_id`
    that is stored on the study run record as the durable reference handle. The run
