@@ -16493,10 +16493,16 @@ if __name__ == "__main__":
         ).stdout.strip()
 
         client = SmsApiClient(_sms_api_base())
+        # spec_id = the study's baseline COMPOSITE ref (what local runs use:
+        # _post_study_run_baseline_for_test -> entry.get("composite")), NOT the
+        # baseline entry's `name` (which is the study slug). Falls back to the
+        # study slug only when no baseline composite is declared.
+        _baseline = spec.get("baseline") or []
+        _spec_id = (_baseline[0].get("composite") if _baseline else None) or study
         ctx = PipelineCtx(
             study=study,
             study_dir=_study_dir(study),
-            spec_id=(spec.get("baseline", [{}])[0].get("name") if spec.get("baseline") else study),
+            spec_id=_spec_id,
             repo_url=repo_url,
             branch=branch,
             observables=observables,
