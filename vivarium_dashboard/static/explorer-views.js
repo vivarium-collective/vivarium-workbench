@@ -20,25 +20,69 @@
       '<label><input type="checkbox" id="ts-norm"> normalize</label>';
     host.innerHTML = '<div id="ts-chart" style="height:520px"></div>';
 
+    // Vector observables (monomer_counts, rna_counts, bulk, fluxes) are expanded
+    // into one selectable entry PER element (per protein/RNA/metabolite/reaction),
+    // labeled by its id, so individual molecules can be plotted over time.
+    var idCache = {};       // vecPath -> [ids]
+    var classCache = {};    // class -> [{key,label,unit}]
+    var baseUnit = {};      // base path -> unit
+    opts.forEach(function (o) { baseUnit[o.path] = o.unit || ""; });
+
+    function fetchIds(vecPath) {
+      if (idCache[vecPath]) return Promise.resolve(idCache[vecPath]);
+      var u = api("/vector?db=" + encodeURIComponent(state.run.db_path) +
+                  "&run=" + encodeURIComponent(state.run.run_id || "") +
+                  "&path=" + encodeURIComponent(vecPath) + "&step=0");
+      return j(u).then(function (d) { idCache[vecPath] = d.ids || []; return idCache[vecPath]; });
+    }
+
+    function optionsForClass(cls, cb) {
+      if (classCache[cls]) { cb(classCache[cls]); return; }
+      var inClass = opts.filter(function (o) { return cls === "All" || o.mclass === cls; });
+      var vectors = (cls === "All") ? [] : inClass.filter(function (o) { return o.kind === "vector"; });
+      var scalars = inClass.filter(function (o) { return vectors.indexOf(o) < 0; });
+      if (!vectors.length) { classCache[cls] = inClass; cb(inClass); return; }
+      Promise.all(vectors.map(function (o) {
+        return fetchIds(o.path).then(function (ids) {
+          return ids.map(function (id, i) {
+            return { key: o.path + "#" + i, label: id, unit: o.unit || "" };
+          });
+        });
+      })).then(function (lists) {
+        var expanded = scalars.slice();
+        lists.forEach(function (l) { expanded = expanded.concat(l); });
+        classCache[cls] = expanded; cb(expanded);
+      }).catch(function () { classCache[cls] = scalars; cb(scalars); });
+    }
+
     function refreshList() {
       var cls = ctrls.querySelector("#ts-class").value;
       var q = ctrls.querySelector("#ts-search").value.toLowerCase();
       var sel = ctrls.querySelector("#ts-obs");
       var chosen = {};
       Array.prototype.forEach.call(sel.selectedOptions, function (o) { chosen[o.value] = 1; });
-      var matches = opts.filter(function (o) {
-        return (cls === "All" || o.mclass === cls) &&
-               (!q || o.label.toLowerCase().indexOf(q) >= 0);
+      sel.innerHTML = '<option disabled>loading…</option>';
+      optionsForClass(cls, function (items) {
+        var matches = items.filter(function (o) {
+          return !q || (o.label || "").toLowerCase().indexOf(q) >= 0;
+        });
+        var shown = matches.slice(0, 1500);  // cap DOM; narrow with Search
+        if (!matches.length) {
+          sel.innerHTML = '<option disabled>— no ' +
+            (cls === "All" ? "" : cls + " ") + "observables (try Search) —</option>";
+          return;
+        }
+        sel.innerHTML = shown.map(function (o) {
+          return '<option value="' + o.key + '"' + (chosen[o.key] ? " selected" : "") +
+                 ">" + o.label + (o.unit ? " [" + o.unit + "]" : "") + "</option>";
+        }).join("") + (matches.length > shown.length ?
+          '<option disabled>… ' + (matches.length - shown.length) + " more — refine Search —</option>" : "");
       });
-      if (!matches.length) {
-        sel.innerHTML = '<option disabled>— no ' +
-          (cls === "All" ? "" : cls + " ") + "observables in this run —</option>";
-        return;
-      }
-      sel.innerHTML = matches.map(function (o) {
-        return '<option value="' + o.key + '"' + (chosen[o.key] ? " selected" : "") +
-               ">" + o.label + " [" + (o.unit || "–") + "]</option>";
-      }).join("");
+    }
+
+    function unitForKey(k) {
+      var base = k.indexOf("#") >= 0 ? k.slice(0, k.indexOf("#")) : k;
+      return baseUnit[base] || "";
     }
 
     function draw() {
@@ -46,7 +90,7 @@
         ctrls.querySelectorAll("#ts-obs option:checked"), function (o) { return o.value; });
       if (!chosen.length) { Plotly.purge("ts-chart"); return; }
       var unitOf = {};
-      opts.forEach(function (o) { unitOf[o.key] = o.unit || ""; });
+      chosen.forEach(function (k) { unitOf[k] = unitForKey(k); });
       var u = api("/series?db=" + encodeURIComponent(state.run.db_path) +
                   "&run=" + encodeURIComponent(state.run.run_id || "") +
                   "&paths=" + encodeURIComponent(chosen.join(",")));
@@ -111,7 +155,18 @@
           (r.run_id === sel ? " selected" : "") + ">" + (r.label || r.run_id) + "</option>";
       }).join("");
     }
-    var a0 = state.runs[0].run_id, b0 = state.runs[1].run_id;
+    function runById(id) { return state.runs.find(function (r) { return r.run_id === id; }); }
+    // Default Run A = the active run; Run B = a COMPARABLE run (same emitter,
+    // different store — e.g. the sibling variant) so the scatter has shared
+    // observables, not the mass-only run.
+    var a0 = (state.run && runById(state.run.run_id)) ? state.run.run_id : state.runs[0].run_id;
+    var aR = runById(a0) || state.runs[0];
+    var b0 = (state.runs.find(function (r) {
+                return r.run_id !== a0 && r.db_path !== aR.db_path && r.source === aR.source;
+              }) ||
+              state.runs.find(function (r) {
+                return r.run_id !== a0 && r.db_path !== aR.db_path;
+              }) || state.runs[1]).run_id;
     ctrls.innerHTML =
       '<label>Class <select id="sc-class">' +
         classes.map(function (c) { return "<option>" + c + "</option>"; }).join("") +
@@ -121,8 +176,6 @@
       '<label>Step <input id="sc-step" type="range" min="0" max="0" value="0"></label>' +
       '<label><input type="checkbox" id="sc-log" checked> log-log</label>';
     host.innerHTML = '<div id="sc-chart" style="height:520px"></div>';
-
-    function runById(id) { return state.runs.find(function (r) { return r.run_id === id; }); }
 
     function refreshSlider() {
       var ra = runById(ctrls.querySelector("#sc-a").value);
@@ -147,7 +200,10 @@
       Promise.all([vec(ra), vec(rb)]).then(function (res) {
         var A = res[0], B = res[1];
         if (!A.ids || !B.ids || !A.ids.length || !B.ids.length) {
-          host.innerHTML = '<p class="muted" style="padding:12px">No data for this class at this step.</p>';
+          var miss = (!B.ids || !B.ids.length) ? (rb.label || rb.run_id) : (ra.label || ra.run_id);
+          host.innerHTML = '<p class="muted" style="padding:12px"><b>' + miss +
+            '</b> has no <b>' + cls + '</b> data — pick a Run with the same emitter/observables ' +
+            '(e.g. another variant of this run).</p>';
           return;
         }
         // join by id when both provide ids, else by index
@@ -213,7 +269,20 @@
     function childrenOf(field) {
       return (MASS_TREE[field] || []).filter(function (f) { return massPaths[f]; });
     }
-    function label(f) { return f === "dry" ? "dry mass" : f.replace(/_mass$/, ""); }
+    // protein → functional-category drill: needs the monomer_counts vector path.
+    var proteinPath = null;
+    Object.keys(state.observables).forEach(function (cat) {
+      state.observables[cat].forEach(function (o) {
+        if (!proteinPath && o.mclass === "Protein" && o.kind === "vector") proteinPath = o.path;
+      });
+    });
+    var PROTEIN_NODE = "protein:cat";
+    function isProtein(node) { return node === PROTEIN_NODE; }
+    function label(f) {
+      return f === "dry" ? "dry mass"
+        : f === PROTEIN_NODE ? "protein"
+        : f.replace(/_mass$/, "");
+    }
     var path = ["dry"];                      // "dry" = synthetic root (no water)
     var cache = { time: [], byField: {} };
 
@@ -225,6 +294,8 @@
     }
 
     function load() {
+      var node = path[path.length - 1];
+      if (isProtein(node)) { render(); return; }  // reuse cache.time; draw fetches breakdown
       var fields = currentChildren();
       var paths = fields.map(function (f) { return massPaths[f]; }).filter(Boolean);
       if (!paths.length) { render(); return; }
@@ -239,22 +310,26 @@
     }
 
     function render() {
+      var atRoot = path[path.length - 1] === "dry";
       ctrls.innerHTML =
         '<div class="al-crumb">' + path.map(function (f, i) {
           return '<span class="al-bc" data-i="' + i + '">' + label(f) + "</span>";
         }).join(" ▸ ") + "</div>" +
-        '<label><input type="checkbox" id="al-water"' + (includeWater ? " checked" : "") +
-          "> include water</label>" +
+        (atRoot ? '<label><input type="checkbox" id="al-water"' +
+          (includeWater ? " checked" : "") + "> include water</label>" : "") +
         '<label>Time <input id="al-t" type="range" min="0" max="' +
           Math.max(0, cache.time.length - 1) + '" value="' +
           Math.max(0, cache.time.length - 1) + '"></label>' +
-        '<span id="al-tlabel" class="muted"></span>';
+        '<span id="al-tlabel" class="muted"></span>' +
+        (proteinPath && atRoot ? '<p class="muted" style="font-size:0.78em">' +
+          "double-click <b>protein</b> to break it down by function</p>" : "");
       ctrls.querySelectorAll(".al-bc").forEach(function (el) {
         el.addEventListener("click", function () {
           path = path.slice(0, parseInt(el.getAttribute("data-i"), 10) + 1); load();
         });
       });
-      ctrls.querySelector("#al-water").addEventListener("change", function (e) {
+      var water = ctrls.querySelector("#al-water");
+      if (water) water.addEventListener("change", function (e) {
         includeWater = e.target.checked; load();
       });
       ctrls.querySelector("#al-t").addEventListener("input", draw);
@@ -262,15 +337,8 @@
       draw();
     }
 
-    function draw() {
-      var ti = parseInt(ctrls.querySelector("#al-t").value, 10) || 0;
-      ctrls.querySelector("#al-tlabel").textContent =
-        cache.time.length ? "t = " + (cache.time[ti] != null ? cache.time[ti].toFixed(1) : ti) : "";
-      var fields = currentChildren();
-      var leaves = fields.map(function (f) {
-        return { name: label(f), field: f,
-                 value: Math.abs((cache.byField[f] || [])[ti] || 0) };
-      }).filter(function (d) { return d.value > 0; });
+    // Shared voronoi renderer for a set of {name, field, value} leaves.
+    function renderCells(leaves) {
       var svg = d3.select("#al-svg"); svg.selectAll("*").remove();
       if (!leaves.length) return;
       var W = 540, H = 540, R = 260, cx = W / 2, cy = H / 2, circle = [];
@@ -287,12 +355,14 @@
         .attr("stroke", "#0e1116").attr("stroke-width", 1.5)
         .style("cursor", "pointer")
         .on("dblclick", function (ev, d) {
-          if (childrenOf(d.data.field).length) { path.push(d.data.field); load(); }
+          if (d.data.field === "protein_mass" && proteinPath) {
+            path.push(PROTEIN_NODE); load();
+          } else if (childrenOf(d.data.field).length) {
+            path.push(d.data.field); load();
+          }
         })
         .append("title").text(function (d) {
-          return d.data.name + ": " + d.data.value.toFixed(2) + " fg (" +
-                 (100 * d.data.value / total).toFixed(1) + "%)"; });
-      // label every cell down to ~0.8% with name + percent (two lines)
+          return d.data.name + ": " + (100 * d.data.value / total).toFixed(1) + "%"; });
       cells.append("text")
         .attr("text-anchor", "middle").attr("fill", "#fff")
         .style("pointer-events", "none")
@@ -307,6 +377,33 @@
             .attr("font-size", "9px").attr("fill", "#cfd6df")
             .text(pct.toFixed(pct < 10 ? 1 : 0) + "%");
         });
+    }
+
+    function draw() {
+      var ti = parseInt(ctrls.querySelector("#al-t").value, 10) || 0;
+      ctrls.querySelector("#al-tlabel").textContent =
+        cache.time.length ? "t = " + (cache.time[ti] != null ? cache.time[ti].toFixed(1) : ti) : "";
+      if (isProtein(path[path.length - 1])) {
+        // protein functional-category breakdown at this timepoint
+        var u = api("/protein-breakdown?db=" + encodeURIComponent(state.run.db_path) +
+                    "&run=" + encodeURIComponent(state.run.run_id || "") +
+                    "&step=" + ti + "&path=" + encodeURIComponent(proteinPath));
+        d3.select("#al-svg").selectAll("*").remove();
+        j(u).then(function (d) {
+          var bd = (d && d.breakdown) || {};
+          var leaves = Object.keys(bd).map(function (k) {
+            return { name: k, field: k, value: Math.abs(bd[k] || 0) };
+          }).filter(function (x) { return x.value > 0; });
+          renderCells(leaves);
+        }).catch(function () {});
+        return;
+      }
+      var fields = currentChildren();
+      var leaves = fields.map(function (f) {
+        return { name: label(f), field: f,
+                 value: Math.abs((cache.byField[f] || [])[ti] || 0) };
+      }).filter(function (d) { return d.value > 0; });
+      renderCells(leaves);
     }
 
     load();
