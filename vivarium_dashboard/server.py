@@ -15077,6 +15077,24 @@ if __name__ == "__main__":
                 try:
                     doc = build_generator(entry)
                 except Exception as e:  # noqa: BLE001
+                    # ROBUST FALLBACK: a live build can fail for environmental reasons
+                    # (e.g. a stale ParCa cache missing 'tf_ids') even when the composite
+                    # is perfectly valid. Rather than degrade the loom pop-out to an
+                    # error/unresolved stub, serve the pre-generated static state from
+                    # reports/composite-state/<ref>.json if it exists.
+                    _static = WORKSPACE / "reports" / "composite-state" / (ref + ".json")
+                    if _static.is_file():
+                        try:
+                            _doc = json.loads(_static.read_text(encoding="utf-8"))
+                            _inner = _doc.get("state", _doc) if isinstance(_doc, dict) else _doc
+                            from vivarium_dashboard.lib.process_docs import attach_process_docs as _apd
+                            _apd(_inner)
+                            _payload = {"state": _inner, "kind": "static-fallback",
+                                        "note": f"served pre-generated state (live build failed: {e})"}
+                            cache[ref] = (_time.time(), _payload)
+                            return self._json(_payload, 200)
+                        except Exception:
+                            pass
                     return self._json({"error": f"generator build failed: {e}"}, 400)
                 from vivarium_dashboard.lib.process_docs import (
                     attach_process_docs, summarize_large_values,
@@ -15108,6 +15126,14 @@ if __name__ == "__main__":
             candidate = WORKSPACE / ref
             if candidate.is_file():
                 path = candidate
+
+        # ROBUST: a pre-generated static composite-state (incl. alias forms a study
+        # ref uses, e.g. `baseline` or `...baseline_millard`). Lets the loom resolve
+        # any composite with a committed state even when the live build is unavailable.
+        if path is None:
+            _static = WORKSPACE / "reports" / "composite-state" / (ref + ".json")
+            if _static.is_file():
+                path = _static
 
         if path is None or not path.is_file():
             # Honest, structured degrade payload so the loom / Composites view can
