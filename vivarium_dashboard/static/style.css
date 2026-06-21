@@ -2249,3 +2249,42 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 }
 .analyses-card .viz-embed { display: block; }
 .ptools-study-list { display: flex; flex-direction: column; gap: 4px; }
+.explorer { display:flex; flex-direction:column; gap:10px; }
+/* top bar: run picker · view tabs · pop-out */
+.exp-topbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center;
+  padding-bottom:8px; border-bottom:1px solid #2a313c; }
+.exp-runsel { display:flex; align-items:center; gap:6px; font-size:0.85em; color:#8896a5; }
+.exp-runsel select { max-width:340px; }
+.exp-tabs { display:flex; gap:4px; }
+.exp-tab { text-transform:capitalize; padding:4px 12px; border:1px solid #2a313c;
+  background:#11151b; color:#cfd6df; border-radius:5px; cursor:pointer; font-size:0.85em; }
+.exp-tab:hover { border-color:#3a4453; }
+.exp-tab.active { border-color:#4c8bf5; background:#16243d; color:#fff; }
+.exp-popout { margin-left:auto; font-size:0.82em; padding:4px 10px; border:1px solid #2a313c;
+  border-radius:5px; color:#9db4d6; text-decoration:none; white-space:nowrap; }
+.exp-popout:hover { border-color:#4c8bf5; color:#fff; }
+/* body: left control rail + chart area */
+.exp-body { display:flex; gap:14px; align-items:flex-start; }
+.exp-rail { flex:0 0 230px; display:flex; flex-direction:column; gap:10px;
+  font-size:0.82em; color:#8896a5; }
+.exp-rail label { display:flex; flex-direction:column; gap:4px; }
+.exp-rail select, .exp-rail input[type="range"] { width:100%; }
+.exp-rail select[multiple] { height:200px; }
+.exp-rail label:has(> input[type="checkbox"]) { flex-direction:row; align-items:center; gap:6px; }
+.exp-view { flex:1 1 auto; min-width:0; min-height:460px;
+  background:#0e1116; border:1px solid #1d2530; border-radius:6px; }
+.exp-view svg { display:block; margin:0 auto; }
+.explorer-loading { color:#8896a5; font-size:0.9em; padding:8px 0; }
+/* full-window standalone page */
+.explorer-standalone { position:fixed; inset:0; padding:14px 18px; box-sizing:border-box;
+  display:flex; flex-direction:column; background:#0b0e12; }
+.explorer-standalone .explorer { flex:1 1 auto; min-height:0; }
+.explorer-standalone .exp-body { flex:1 1 auto; min-height:0; }
+.explorer-standalone .exp-view { height:100%; }
+.exp-rail #ts-obs, .exp-rail #ts-search { width:100%; }
+.exp-rail #ts-obs { height:220px; }
+
+/* Allocation view breadcrumb */
+.al-crumb { font-size:0.85em; color:#cfd6df; margin-bottom:6px; }
+.al-bc { cursor:pointer; color:#9db4d6; }
+.al-bc:hover { color:#fff; text-decoration:underline; }

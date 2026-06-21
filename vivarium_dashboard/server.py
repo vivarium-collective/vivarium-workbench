@@ -8431,6 +8431,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_composite_run()
         if self.path.startswith("/api/composite-runs"):
             return self._get_composite_runs()
+        if self.path.startswith("/api/explorer/runs"):
+            return self._get_explorer_runs()
+        if self.path.startswith("/api/explorer/observables"):
+            return self._get_explorer_observables()
+        if self.path.startswith("/api/explorer/series"):
+            return self._get_explorer_series()
+        if self.path.startswith("/api/explorer/flux"):
+            return self._get_explorer_flux()
+        if self.path.startswith("/api/explorer/vector"):
+            return self._get_explorer_vector()
         if self.path.startswith("/api/simulations"):
             return self._get_simulations()
         if self.path.startswith("/api/composite-state"):
@@ -10970,6 +10980,96 @@ if __name__ == "__main__":
         except Exception as e:
             data = {"error": str(e), "processes": [], "types": []}
         return self._json(data, 200)
+
+    def _get_explorer_runs(self):
+        """GET /api/explorer/runs — runs for the Data Explorer run-picker."""
+        from vivarium_dashboard.lib import explorer_data
+        try:
+            return self._json({"runs": explorer_data.list_runs(WORKSPACE)}, 200)
+        except Exception as e:  # never sink the page
+            return self._json({"error": str(e), "runs": []}, 200)
+
+    def _get_explorer_observables(self):
+        """GET /api/explorer/observables?db=<path>&run=<id>"""
+        import urllib.parse as _up
+        from vivarium_dashboard.lib import explorer_data
+        q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
+        db = q.get("db")
+        if not db:
+            return self._json({"error": "missing db", "categories": {}}, 200)
+        try:
+            return self._json(
+                explorer_data.list_observables(db, q.get("run"), workspace=WORKSPACE), 200)
+        except Exception as e:
+            return self._json({"error": str(e), "categories": {}}, 200)
+
+    def _get_explorer_series(self):
+        """GET /api/explorer/series?db=<path>&paths=a,b#2&subsample=N&run=<id>"""
+        import urllib.parse as _up
+        from vivarium_dashboard.lib import explorer_data
+        q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
+        db = q.get("db")
+        if not db:
+            return self._json({"error": "missing db", "time": [], "series": {}}, 200)
+        specs = []
+        for tok in (q.get("paths") or "").split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            if "#" in tok:
+                p, _, i = tok.partition("#")
+                specs.append((p, int(i) if i.isdigit() else None))
+            else:
+                specs.append((tok, None))
+        try:
+            sub = int(q.get("subsample", "400"))
+        except ValueError:
+            sub = 400
+        try:
+            return self._json(
+                explorer_data.get_series(db, specs, sub, q.get("run"),
+                                         workspace=WORKSPACE), 200)
+        except Exception as e:
+            return self._json({"error": str(e), "time": [], "series": {}}, 200)
+
+    def _get_explorer_flux(self):
+        """GET /api/explorer/flux?db=<path>&step=<int>&run=<id>"""
+        import urllib.parse as _up
+        from vivarium_dashboard.lib import explorer_data
+        q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
+        db = q.get("db")
+        if not db:
+            return self._json({"error": "missing db", "fluxes": {}}, 200)
+        try:
+            step = int(q.get("step", "0"))
+        except ValueError:
+            step = 0
+        try:
+            _, id_map = explorer_data.load_flux_assets()
+            return self._json(
+                explorer_data.get_flux_auto(db, step, id_map, q.get("run"),
+                                            workspace=WORKSPACE), 200)
+        except Exception as e:
+            return self._json({"error": str(e), "fluxes": {}}, 200)
+
+    def _get_explorer_vector(self):
+        """GET /api/explorer/vector?db=&run=&path=&step="""
+        import urllib.parse as _up
+        from vivarium_dashboard.lib import explorer_data
+        q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
+        db = q.get("db"); path = q.get("path")
+        step = 0
+        if not db or not path:
+            return self._json({"error": "missing db/path", "ids": [], "values": [], "step": 0, "time": None}, 200)
+        try:
+            step = int(q.get("step", "0"))
+        except ValueError:
+            step = 0
+        try:
+            return self._json(
+                explorer_data.get_vector(db, path, step, q.get("run"), WORKSPACE), 200)
+        except Exception as e:
+            return self._json({"error": str(e), "ids": [], "values": [], "step": step, "time": None}, 200)
 
     def _get_simulations(self):
         """GET /api/simulations — all persisted runs across the workspace.
