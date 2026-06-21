@@ -415,3 +415,18 @@ def test_parquet_vector(tmp_path):
     assert res["ids"] == [f"monomer_{j}" for j in range(5)], f"ids={res['ids']}"
     assert res["values"] == [0.0, 1.0, 2.0, 3.0, 4.0], f"values={res['values']}"
     assert res["step"] == 2
+
+
+def test_get_protein_breakdown_groups_by_category(tmp_path, monkeypatch):
+    # state carries a monomer_counts vector under agents/0/listeners
+    states = [{"agents": {"0": {"listeners": {"monomer_counts": [10, 20, 30]}}}}]
+    db = tmp_path / "runs.db"
+    make_fake_runs_db(db, states)
+    # fake per-monomer MW + category aligned to the vector
+    monkeypatch.setattr(explorer_data, "_protein_meta_cache",
+                        ([1.0, 2.0, 3.0], ["Enzyme", "Transport", "Enzyme"]))
+    res = explorer_data.get_protein_breakdown(
+        str(db), "listeners.monomer_counts", step=0)
+    bd = res["breakdown"]
+    assert bd["Enzyme"] == 10 * 1.0 + 30 * 3.0   # 100
+    assert bd["Transport"] == 20 * 2.0           # 40

@@ -449,6 +449,44 @@ def load_flux_assets():
     return _flux_assets_cache
 
 
+_protein_meta_cache = None
+
+
+def load_protein_meta():
+    """(mw_list, category_list) aligned to monomer_counts order, cached.
+    Returns ([], []) if the monomer_meta asset is absent."""
+    global _protein_meta_cache
+    if _protein_meta_cache is None:
+        try:
+            d = json.loads((_ASSET_DIR / "monomer_meta.json").read_text())
+            _protein_meta_cache = (d.get("mw") or [], d.get("category") or [])
+        except (OSError, ValueError):
+            _protein_meta_cache = ([], [])
+    return _protein_meta_cache
+
+
+def get_protein_breakdown(db_path, path, step, run_id=None, workspace=None):
+    """Protein mass grouped by functional category at one timepoint.
+    Reads the monomer_counts vector (per-protein counts) at `step`, multiplies by
+    per-protein molecular weight, and sums by category. Returns
+    {breakdown: {category: relative_mass}, step, time}. Relative units (count*MW)
+    — only proportions matter for the allocation Voronoi."""
+    vec = get_vector(db_path, path, step, run_id, workspace)
+    mw, cats = load_protein_meta()
+    values = vec.get("values") or []
+    breakdown: dict[str, float] = {}
+    n = min(len(values), len(mw), len(cats))
+    for i in range(n):
+        try:
+            m = float(values[i]) * float(mw[i])
+        except (TypeError, ValueError):
+            continue
+        if m:
+            breakdown[cats[i]] = breakdown.get(cats[i], 0.0) + m
+    return {"breakdown": breakdown, "step": vec.get("step", step),
+            "time": vec.get("time")}
+
+
 def _state_at_step(db_path: str, step: int, run_id: str | None):
     try:
         conn = sqlite3.connect(str(db_path))

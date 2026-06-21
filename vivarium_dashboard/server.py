@@ -8439,6 +8439,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_explorer_series()
         if self.path.startswith("/api/explorer/flux"):
             return self._get_explorer_flux()
+        if self.path.startswith("/api/explorer/protein-breakdown"):
+            return self._get_explorer_protein_breakdown()
         if self.path.startswith("/api/explorer/vector"):
             return self._get_explorer_vector()
         if self.path.startswith("/api/simulations"):
@@ -11070,6 +11072,25 @@ if __name__ == "__main__":
                 explorer_data.get_vector(db, path, step, q.get("run"), WORKSPACE), 200)
         except Exception as e:
             return self._json({"error": str(e), "ids": [], "values": [], "step": step, "time": None}, 200)
+
+    def _get_explorer_protein_breakdown(self):
+        """GET /api/explorer/protein-breakdown?db=&run=&path=&step= — protein mass
+        grouped by functional category at one timepoint (count x MW by category)."""
+        import urllib.parse as _up
+        from vivarium_dashboard.lib import explorer_data
+        q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
+        db = q.get("db"); path = q.get("path")
+        if not db or not path:
+            return self._json({"error": "missing db/path", "breakdown": {}, "step": 0, "time": None}, 200)
+        try:
+            step = int(q.get("step", "0"))
+        except ValueError:
+            step = 0
+        try:
+            return self._json(
+                explorer_data.get_protein_breakdown(db, path, step, q.get("run"), WORKSPACE), 200)
+        except Exception as e:
+            return self._json({"error": str(e), "breakdown": {}, "step": step, "time": None}, 200)
 
     def _get_simulations(self):
         """GET /api/simulations — all persisted runs across the workspace.

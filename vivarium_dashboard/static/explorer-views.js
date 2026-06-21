@@ -213,7 +213,20 @@
     function childrenOf(field) {
       return (MASS_TREE[field] || []).filter(function (f) { return massPaths[f]; });
     }
-    function label(f) { return f === "dry" ? "dry mass" : f.replace(/_mass$/, ""); }
+    // protein → functional-category drill: needs the monomer_counts vector path.
+    var proteinPath = null;
+    Object.keys(state.observables).forEach(function (cat) {
+      state.observables[cat].forEach(function (o) {
+        if (!proteinPath && o.mclass === "Protein" && o.kind === "vector") proteinPath = o.path;
+      });
+    });
+    var PROTEIN_NODE = "protein:cat";
+    function isProtein(node) { return node === PROTEIN_NODE; }
+    function label(f) {
+      return f === "dry" ? "dry mass"
+        : f === PROTEIN_NODE ? "protein"
+        : f.replace(/_mass$/, "");
+    }
     var path = ["dry"];                      // "dry" = synthetic root (no water)
     var cache = { time: [], byField: {} };
 
@@ -225,6 +238,8 @@
     }
 
     function load() {
+      var node = path[path.length - 1];
+      if (isProtein(node)) { render(); return; }  // reuse cache.time; draw fetches breakdown
       var fields = currentChildren();
       var paths = fields.map(function (f) { return massPaths[f]; }).filter(Boolean);
       if (!paths.length) { render(); return; }
@@ -239,22 +254,26 @@
     }
 
     function render() {
+      var atRoot = path[path.length - 1] === "dry";
       ctrls.innerHTML =
         '<div class="al-crumb">' + path.map(function (f, i) {
           return '<span class="al-bc" data-i="' + i + '">' + label(f) + "</span>";
         }).join(" ▸ ") + "</div>" +
-        '<label><input type="checkbox" id="al-water"' + (includeWater ? " checked" : "") +
-          "> include water</label>" +
+        (atRoot ? '<label><input type="checkbox" id="al-water"' +
+          (includeWater ? " checked" : "") + "> include water</label>" : "") +
         '<label>Time <input id="al-t" type="range" min="0" max="' +
           Math.max(0, cache.time.length - 1) + '" value="' +
           Math.max(0, cache.time.length - 1) + '"></label>' +
-        '<span id="al-tlabel" class="muted"></span>';
+        '<span id="al-tlabel" class="muted"></span>' +
+        (proteinPath && atRoot ? '<p class="muted" style="font-size:0.78em">' +
+          "double-click <b>protein</b> to break it down by function</p>" : "");
       ctrls.querySelectorAll(".al-bc").forEach(function (el) {
         el.addEventListener("click", function () {
           path = path.slice(0, parseInt(el.getAttribute("data-i"), 10) + 1); load();
         });
       });
-      ctrls.querySelector("#al-water").addEventListener("change", function (e) {
+      var water = ctrls.querySelector("#al-water");
+      if (water) water.addEventListener("change", function (e) {
         includeWater = e.target.checked; load();
       });
       ctrls.querySelector("#al-t").addEventListener("input", draw);
@@ -262,15 +281,8 @@
       draw();
     }
 
-    function draw() {
-      var ti = parseInt(ctrls.querySelector("#al-t").value, 10) || 0;
-      ctrls.querySelector("#al-tlabel").textContent =
-        cache.time.length ? "t = " + (cache.time[ti] != null ? cache.time[ti].toFixed(1) : ti) : "";
-      var fields = currentChildren();
-      var leaves = fields.map(function (f) {
-        return { name: label(f), field: f,
-                 value: Math.abs((cache.byField[f] || [])[ti] || 0) };
-      }).filter(function (d) { return d.value > 0; });
+    // Shared voronoi renderer for a set of {name, field, value} leaves.
+    function renderCells(leaves) {
       var svg = d3.select("#al-svg"); svg.selectAll("*").remove();
       if (!leaves.length) return;
       var W = 540, H = 540, R = 260, cx = W / 2, cy = H / 2, circle = [];
@@ -287,12 +299,14 @@
         .attr("stroke", "#0e1116").attr("stroke-width", 1.5)
         .style("cursor", "pointer")
         .on("dblclick", function (ev, d) {
-          if (childrenOf(d.data.field).length) { path.push(d.data.field); load(); }
+          if (d.data.field === "protein_mass" && proteinPath) {
+            path.push(PROTEIN_NODE); load();
+          } else if (childrenOf(d.data.field).length) {
+            path.push(d.data.field); load();
+          }
         })
         .append("title").text(function (d) {
-          return d.data.name + ": " + d.data.value.toFixed(2) + " fg (" +
-                 (100 * d.data.value / total).toFixed(1) + "%)"; });
-      // label every cell down to ~0.8% with name + percent (two lines)
+          return d.data.name + ": " + (100 * d.data.value / total).toFixed(1) + "%"; });
       cells.append("text")
         .attr("text-anchor", "middle").attr("fill", "#fff")
         .style("pointer-events", "none")
@@ -307,6 +321,33 @@
             .attr("font-size", "9px").attr("fill", "#cfd6df")
             .text(pct.toFixed(pct < 10 ? 1 : 0) + "%");
         });
+    }
+
+    function draw() {
+      var ti = parseInt(ctrls.querySelector("#al-t").value, 10) || 0;
+      ctrls.querySelector("#al-tlabel").textContent =
+        cache.time.length ? "t = " + (cache.time[ti] != null ? cache.time[ti].toFixed(1) : ti) : "";
+      if (isProtein(path[path.length - 1])) {
+        // protein functional-category breakdown at this timepoint
+        var u = api("/protein-breakdown?db=" + encodeURIComponent(state.run.db_path) +
+                    "&run=" + encodeURIComponent(state.run.run_id || "") +
+                    "&step=" + ti + "&path=" + encodeURIComponent(proteinPath));
+        d3.select("#al-svg").selectAll("*").remove();
+        j(u).then(function (d) {
+          var bd = (d && d.breakdown) || {};
+          var leaves = Object.keys(bd).map(function (k) {
+            return { name: k, field: k, value: Math.abs(bd[k] || 0) };
+          }).filter(function (x) { return x.value > 0; });
+          renderCells(leaves);
+        }).catch(function () {});
+        return;
+      }
+      var fields = currentChildren();
+      var leaves = fields.map(function (f) {
+        return { name: label(f), field: f,
+                 value: Math.abs((cache.byField[f] || [])[ti] || 0) };
+      }).filter(function (d) { return d.value > 0; });
+      renderCells(leaves);
     }
 
     load();
