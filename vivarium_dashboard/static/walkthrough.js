@@ -5485,12 +5485,20 @@
     // -- Pass 1: build every card at its column x (top TBD), append, measure --
     studies.forEach(function(s) {
       var liveStatus = s.effective_status || s.status || 'planned';
-      var confidence = s.confidence || (function(st) {
-        if (st === 'completed' || st === 'complete' || st === 'ran') return 'Accepted';
-        if (st === 'in_progress' || st === 'running') return 'Investigating';
-        if (st === 'failed' || st === 'invalid') return 'Refuted';
+      // Derive confidence from the spine's gate_status VERDICT first, so the badge
+      // tracks the computed verdict rather than the drift-prone hand-set `status`
+      // (a stale `status: in_progress` on a passed study used to mis-show
+      // "Investigating"). Fall back to lifecycle status only when no gate verdict.
+      var gateV = String(s.gate_status || '').trim().toLowerCase();
+      var confidence = s.confidence || (function() {
+        if (gateV === 'passed' || gateV === 'pass') return 'Accepted';
+        if (gateV === 'partial' || gateV === 'needs_calibration') return 'Investigating';
+        if (gateV === 'failed' || gateV === 'failed_evaluation' || gateV === 'refuted' || gateV === 'blocked') return 'Refuted';
+        if (liveStatus === 'completed' || liveStatus === 'complete' || liveStatus === 'ran') return 'Accepted';
+        if (liveStatus === 'in_progress' || liveStatus === 'running') return 'Investigating';
+        if (liveStatus === 'failed' || liveStatus === 'invalid') return 'Refuted';
         return 'Planned';
-      })(liveStatus);
+      })();
       var ss = ({
         Accepted:      {color: '#16a34a', icon: '✓'},
         Investigating: {color: '#ca8a04', icon: '◐'},
@@ -7475,6 +7483,27 @@
       var infra       = openFollowups.filter(function(f){return f.kind === 'infrastructure_fix';});
       var newWork     = openFollowups.filter(function(f){return f.kind === 'new';});
 
+      // The authored/spine gate_status is the verdict of record. A study can carry
+      // intended-negative results (controls, productive-negative diagnostics) whose
+      // raw test FAILs must NOT read as "Blocked". An explicit pass/partial gate wins
+      // over the raw-outcome classification below.
+      var gateAuthored = String((s && s.gate_status) || '').trim().toLowerCase();
+      if (gateAuthored === 'passed' || gateAuthored === 'pass') {
+        var enP = (s.pipeline_gate && s.pipeline_gate.enables) || [];
+        return {
+          label: 'Passed', cls: 'dec-passed',
+          passed: passed, failed: failed, partial: partial, blocks: [],
+          next: enP.length ? 'Gate cleared. Next: ' + enP.join(', ') : 'Gate cleared.'
+        };
+      }
+      if (gateAuthored === 'partial') {
+        return {
+          label: 'Partial', cls: 'dec-inprogress',
+          passed: passed, failed: failed, partial: partial, blocks: [],
+          next: 'Gate is PARTIAL — core objective met with a noted caveat (see findings); not a blocker.'
+        };
+      }
+
       if (failed.length === 0 && partial.length === 0 && passed.length > 0) {
         var enables = (s.pipeline_gate && s.pipeline_gate.enables) || [];
         return {
@@ -7647,8 +7676,9 @@
           ranStatus = 'ran';
           verd = { label: 'Reference', glyph: '📄', cls: 'v-none' };
         }
-        else if (gate === 'passed') verd = { label: 'Passed', glyph: '✅', cls: 'v-pass' };
-        else if (gate === 'failed' || gate === 'failed_evaluation') verd = { label: 'Failing', glyph: '❌', cls: 'v-fail' };
+        else if (gate === 'passed' || gate === 'pass') verd = { label: 'Passed', glyph: '✅', cls: 'v-pass' };
+        else if (gate === 'partial') verd = { label: 'Partial', glyph: '◐', cls: 'v-warn' };
+        else if (gate === 'failed' || gate === 'failed_evaluation' || gate === 'refuted') verd = { label: 'Failing', glyph: '❌', cls: 'v-fail' };
         else if (gate === 'blocked') verd = { label: 'Blocked', glyph: '⛔', cls: 'v-block' };
         else if (gate === 'needs_calibration') verd = { label: 'Needs calibration', glyph: '🔄', cls: 'v-cal' };
         else if (gate === 'in_progress') verd = { label: 'In progress', glyph: '🔶', cls: 'v-warn' };
