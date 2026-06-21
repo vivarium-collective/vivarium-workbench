@@ -20,25 +20,69 @@
       '<label><input type="checkbox" id="ts-norm"> normalize</label>';
     host.innerHTML = '<div id="ts-chart" style="height:520px"></div>';
 
+    // Vector observables (monomer_counts, rna_counts, bulk, fluxes) are expanded
+    // into one selectable entry PER element (per protein/RNA/metabolite/reaction),
+    // labeled by its id, so individual molecules can be plotted over time.
+    var idCache = {};       // vecPath -> [ids]
+    var classCache = {};    // class -> [{key,label,unit}]
+    var baseUnit = {};      // base path -> unit
+    opts.forEach(function (o) { baseUnit[o.path] = o.unit || ""; });
+
+    function fetchIds(vecPath) {
+      if (idCache[vecPath]) return Promise.resolve(idCache[vecPath]);
+      var u = api("/vector?db=" + encodeURIComponent(state.run.db_path) +
+                  "&run=" + encodeURIComponent(state.run.run_id || "") +
+                  "&path=" + encodeURIComponent(vecPath) + "&step=0");
+      return j(u).then(function (d) { idCache[vecPath] = d.ids || []; return idCache[vecPath]; });
+    }
+
+    function optionsForClass(cls, cb) {
+      if (classCache[cls]) { cb(classCache[cls]); return; }
+      var inClass = opts.filter(function (o) { return cls === "All" || o.mclass === cls; });
+      var vectors = (cls === "All") ? [] : inClass.filter(function (o) { return o.kind === "vector"; });
+      var scalars = inClass.filter(function (o) { return vectors.indexOf(o) < 0; });
+      if (!vectors.length) { classCache[cls] = inClass; cb(inClass); return; }
+      Promise.all(vectors.map(function (o) {
+        return fetchIds(o.path).then(function (ids) {
+          return ids.map(function (id, i) {
+            return { key: o.path + "#" + i, label: id, unit: o.unit || "" };
+          });
+        });
+      })).then(function (lists) {
+        var expanded = scalars.slice();
+        lists.forEach(function (l) { expanded = expanded.concat(l); });
+        classCache[cls] = expanded; cb(expanded);
+      }).catch(function () { classCache[cls] = scalars; cb(scalars); });
+    }
+
     function refreshList() {
       var cls = ctrls.querySelector("#ts-class").value;
       var q = ctrls.querySelector("#ts-search").value.toLowerCase();
       var sel = ctrls.querySelector("#ts-obs");
       var chosen = {};
       Array.prototype.forEach.call(sel.selectedOptions, function (o) { chosen[o.value] = 1; });
-      var matches = opts.filter(function (o) {
-        return (cls === "All" || o.mclass === cls) &&
-               (!q || o.label.toLowerCase().indexOf(q) >= 0);
+      sel.innerHTML = '<option disabled>loading…</option>';
+      optionsForClass(cls, function (items) {
+        var matches = items.filter(function (o) {
+          return !q || (o.label || "").toLowerCase().indexOf(q) >= 0;
+        });
+        var shown = matches.slice(0, 1500);  // cap DOM; narrow with Search
+        if (!matches.length) {
+          sel.innerHTML = '<option disabled>— no ' +
+            (cls === "All" ? "" : cls + " ") + "observables (try Search) —</option>";
+          return;
+        }
+        sel.innerHTML = shown.map(function (o) {
+          return '<option value="' + o.key + '"' + (chosen[o.key] ? " selected" : "") +
+                 ">" + o.label + (o.unit ? " [" + o.unit + "]" : "") + "</option>";
+        }).join("") + (matches.length > shown.length ?
+          '<option disabled>… ' + (matches.length - shown.length) + " more — refine Search —</option>" : "");
       });
-      if (!matches.length) {
-        sel.innerHTML = '<option disabled>— no ' +
-          (cls === "All" ? "" : cls + " ") + "observables in this run —</option>";
-        return;
-      }
-      sel.innerHTML = matches.map(function (o) {
-        return '<option value="' + o.key + '"' + (chosen[o.key] ? " selected" : "") +
-               ">" + o.label + " [" + (o.unit || "–") + "]</option>";
-      }).join("");
+    }
+
+    function unitForKey(k) {
+      var base = k.indexOf("#") >= 0 ? k.slice(0, k.indexOf("#")) : k;
+      return baseUnit[base] || "";
     }
 
     function draw() {
@@ -46,7 +90,7 @@
         ctrls.querySelectorAll("#ts-obs option:checked"), function (o) { return o.value; });
       if (!chosen.length) { Plotly.purge("ts-chart"); return; }
       var unitOf = {};
-      opts.forEach(function (o) { unitOf[o.key] = o.unit || ""; });
+      chosen.forEach(function (k) { unitOf[k] = unitForKey(k); });
       var u = api("/series?db=" + encodeURIComponent(state.run.db_path) +
                   "&run=" + encodeURIComponent(state.run.run_id || "") +
                   "&paths=" + encodeURIComponent(chosen.join(",")));
@@ -111,7 +155,18 @@
           (r.run_id === sel ? " selected" : "") + ">" + (r.label || r.run_id) + "</option>";
       }).join("");
     }
-    var a0 = state.runs[0].run_id, b0 = state.runs[1].run_id;
+    function runById(id) { return state.runs.find(function (r) { return r.run_id === id; }); }
+    // Default Run A = the active run; Run B = a COMPARABLE run (same emitter,
+    // different store — e.g. the sibling variant) so the scatter has shared
+    // observables, not the mass-only run.
+    var a0 = (state.run && runById(state.run.run_id)) ? state.run.run_id : state.runs[0].run_id;
+    var aR = runById(a0) || state.runs[0];
+    var b0 = (state.runs.find(function (r) {
+                return r.run_id !== a0 && r.db_path !== aR.db_path && r.source === aR.source;
+              }) ||
+              state.runs.find(function (r) {
+                return r.run_id !== a0 && r.db_path !== aR.db_path;
+              }) || state.runs[1]).run_id;
     ctrls.innerHTML =
       '<label>Class <select id="sc-class">' +
         classes.map(function (c) { return "<option>" + c + "</option>"; }).join("") +
@@ -121,8 +176,6 @@
       '<label>Step <input id="sc-step" type="range" min="0" max="0" value="0"></label>' +
       '<label><input type="checkbox" id="sc-log" checked> log-log</label>';
     host.innerHTML = '<div id="sc-chart" style="height:520px"></div>';
-
-    function runById(id) { return state.runs.find(function (r) { return r.run_id === id; }); }
 
     function refreshSlider() {
       var ra = runById(ctrls.querySelector("#sc-a").value);
@@ -147,7 +200,10 @@
       Promise.all([vec(ra), vec(rb)]).then(function (res) {
         var A = res[0], B = res[1];
         if (!A.ids || !B.ids || !A.ids.length || !B.ids.length) {
-          host.innerHTML = '<p class="muted" style="padding:12px">No data for this class at this step.</p>';
+          var miss = (!B.ids || !B.ids.length) ? (rb.label || rb.run_id) : (ra.label || ra.run_id);
+          host.innerHTML = '<p class="muted" style="padding:12px"><b>' + miss +
+            '</b> has no <b>' + cls + '</b> data — pick a Run with the same emitter/observables ' +
+            '(e.g. another variant of this run).</p>';
           return;
         }
         // join by id when both provide ids, else by index
