@@ -117,6 +117,19 @@
       alert('No composite loaded in this view yet — open a composite first.');
       return;
     }
+    // Snapshot (read-only) mode: there is no in-memory state to re-post and no
+    // live API. Open the popup straight at the static loom URL (same ?static=1
+    // &stateUrl= the iframe uses) so it fetches and renders the cached state.
+    if (snapshot.snapshot && snapshot.loomUrl) {
+      var sw = window.open(snapshot.loomUrl, '_blank',
+        'width=1200,height=800,menubar=no,toolbar=no,location=no,resizable=yes,scrollbars=yes');
+      if (!sw) {
+        alert('Popup blocked. Allow popups from this site to pop out the wiring view.');
+        return;
+      }
+      _showPopoutPlaceholder(iframeId, sw);
+      return;
+    }
     // Include id in the URL so the popup can call /api/composite-test-run
     // even before the parent has a chance to postMessage. The composite:load
     // message we re-send after explore:ready still wins for metadata, but the
@@ -4239,8 +4252,21 @@
     if (document.body.classList.contains('snapshot')) {
       var _snapshotBase = (window.__DASH_CONFIG__ && window.__DASH_CONFIG__.basePath) || "";
       var stateUrl = _snapshotBase + '/api/composite-state/' + encodeURIComponent(ref) + '.json';
-      iframe.src = _snapshotBase + '/bigraph-loom/index.html?static=1&stateUrl=' + encodeURIComponent(stateUrl);
+      var loomUrl = _snapshotBase + '/bigraph-loom/index.html?static=1&stateUrl=' + encodeURIComponent(stateUrl);
+      iframe.src = loomUrl;
       iframe.style.display = '';
+      // Record the loaded composite so "Pop out" works in snapshot mode. There
+      // is no in-memory state to re-post (the loom iframe fetches stateUrl
+      // itself) and no live API, so we stash the static loom URL for the popup
+      // to open directly. Without this, _popoutLoom finds no _loomLastState
+      // entry and falsely reports "No composite loaded in this view yet."
+      window._loomLastState = window._loomLastState || {};
+      window._loomLastState[iframe.id] = {
+        snapshot: true,
+        loomUrl: loomUrl,
+        metadata: { name: nameHint || ref, library: libraryHint || '', id: ref },
+      };
+      window._explorerEmitPaths = [];
       return;
     }
 
