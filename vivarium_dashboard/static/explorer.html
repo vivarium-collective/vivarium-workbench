@@ -23,7 +23,8 @@
       window.Explorer.mount(document.getElementById("explorer-root"), {
         basePath: "",                       // standalone is served same-origin
         standalone: true,                   // hide the pop-out link
-        initialRun: params.get("run") || null
+        initialRun: params.get("run") || null,
+        initialDb: params.get("db") || null  // open an explicit run store (per-run view)
       });
     })();
   </script>

@@ -729,10 +729,22 @@
 
   // --- Runs ---
   bindAll('.btn-view-run', function(btn) {
-    // A study's results render in the Visualizations tab (charts from the run
-    // store). The old target was a dead route — the composite explorer is a
-    // hash-route in the main SPA, not a standalone page (404), so View opened a
-    // blank page for every run. Route to the working results view instead.
+    // Per-run viewer: open THIS run's own store (zarr/parquet/sqlite) in the
+    // Data Explorer standalone page. Prefer the run's provenance store_path
+    // (data-store-path) so it works even when the store lives outside the
+    // explorer's run-picker discovery; fall back to run_id (the explorer
+    // resolves it via /api/explorer/runs).
+    var row = btn.closest('tr');
+    var runId = btn.dataset.runId || (row && row.dataset.runId) || '';
+    var store = (row && row.dataset.storePath) || '';
+    if (store || runId) {
+      var u = '/assets/explorer.html?' +
+        (store ? 'db=' + encodeURIComponent(store) + '&' : '') +
+        'run=' + encodeURIComponent(runId);
+      window.open(u, '_blank');
+      return;
+    }
+    // No run identity → fall back to the study-level results view.
     _setStudyTab('visualizations');
     var panel = document.getElementById('panel-visualizations');
     if (panel && panel.scrollIntoView) { try { panel.scrollIntoView({block: 'start'}); } catch (e) {} }
@@ -807,7 +819,7 @@
   });
 
   // --- Viz ---
-  // NOTE: .btn-view-run intentionally left as-is (broken URL is a follow-up task).
+  // .btn-view-run now opens the per-run Data Explorer (see handler above).
   bindAll('.btn-add-viz', function() {
     // The add-viz modal lives on the main dashboard page. Take the user there.
     location.href = '/#composite-explore?study=' + encodeURIComponent(studyName());

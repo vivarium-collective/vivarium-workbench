@@ -18,11 +18,22 @@
     el.innerHTML = '<div class="explorer-loading">Loading runs…</div>';
     j(api("/runs")).then(function (d) {
       state.runs = (d && d.runs) || [];
-      if (!state.runs.length) { renderEmpty(); return; }
       var want = opts.initialRun;
-      state.run = (want && state.runs.find(function (r) {
+      var run = want && state.runs.find(function (r) {
         return String(r.run_id) === String(want);
-      })) || state.runs[0];
+      });
+      // Per-run launch (e.g. a study's "View" button): open an explicit store
+      // path even if the picker didn't discover it — synthesize + prepend it so
+      // the explorer acts as a single-run viewer for that run.
+      if (!run && opts.initialDb) {
+        run = { run_id: want || opts.initialDb,
+                label: opts.initialRunLabel || want || "run",
+                db_path: opts.initialDb, source: "parquet", n_steps: 0 };
+        state.runs = [run].concat(state.runs);
+      }
+      run = run || state.runs[0];
+      if (!run) { renderEmpty(); return; }
+      state.run = run;
       loadObservables().then(renderShell);
     }).catch(function () { renderEmpty(); });
   }
