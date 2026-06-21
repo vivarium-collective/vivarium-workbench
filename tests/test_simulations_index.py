@@ -311,6 +311,35 @@ def test_list_derives_study_slug_from_path_for_legacy_per_study_db(tmp_path):
     assert sims[0]["investigation_slug"] is None
 
 
+def test_runs_meta_derives_study_slug_from_db_path(tmp_path):
+    """A runs_meta row (remote / baseline run) at studies/<slug>/runs.db
+    must surface study_slug == '<slug>' even without a study.yaml entry."""
+    ws = tmp_path / "ws"
+    (ws / "studies" / "my-study").mkdir(parents=True)
+    _seed_run(ws / "studies" / "my-study" / "runs.db",
+              spec_id="pkg.a", run_id="r-study-run", started_at=5.0)
+
+    sims = list_simulations(ws)
+    row = next((s for s in sims if s["run_id"] == "r-study-run"), None)
+    assert row is not None, "run not found"
+    assert row["study_slug"] == "my-study", f"expected 'my-study', got {row['study_slug']!r}"
+
+
+def test_runs_meta_derives_study_slug_from_nested_db_path(tmp_path):
+    """A runs_meta row nested at investigations/<inv>/studies/<slug>/runs.db
+    must surface study_slug == '<slug>'."""
+    ws = tmp_path / "ws"
+    nested = ws / "investigations" / "inv-x" / "studies" / "nested-study"
+    nested.mkdir(parents=True)
+    _seed_run(nested / "runs.db",
+              spec_id="pkg.b", run_id="r-nested-run", started_at=8.0)
+
+    sims = list_simulations(ws)
+    row = next((s for s in sims if s["run_id"] == "r-nested-run"), None)
+    assert row is not None, "run not found"
+    assert row["study_slug"] == "nested-study", f"expected 'nested-study', got {row['study_slug']!r}"
+
+
 import os
 
 from vivarium_dashboard.lib.simulations_index import (
@@ -628,3 +657,60 @@ def test_discover_parquet_hives_finds_nested_and_flat(tmp_path):
     for hive, _run, slug in found:
         assert (hive / "history").is_dir() and (hive / "configuration").is_dir()
         assert slug == "s1"
+
+
+# ---------------------------------------------------------------------------
+# remote_origin provenance (added 2026-06-20 for smsvpctest origin badge)
+# ---------------------------------------------------------------------------
+
+def _seed_remote_run(db_file, *, run_id, spec_id, simulation_id, source, started_at=1.0):
+    """Seed a runs_meta row with remote-provenance params_json."""
+    import json as _json
+    conn = connect(db_file)
+    provenance = {
+        "simulation_id": simulation_id,
+        "experiment_id": f"exp-{simulation_id}",
+        "commit": "abc123",
+        "backend": "ray",
+        "source": source,
+        "s3_uri": f"s3://bucket/prefix/{simulation_id}/",
+        "store_path": str(db_file.parent / f"runs.{run_id}.zarr"),
+    }
+    save_metadata(conn, spec_id=spec_id, run_id=run_id, params=provenance,
+                  label="Remote run", started_at=started_at, n_steps=0)
+    conn.close()
+
+
+def test_list_surfaces_remote_origin_from_params_json(tmp_path):
+    """A runs_meta row with remote provenance params_json yields a non-None
+    remote_origin dict on the row, with the deployment, simulation_id, etc."""
+    ws = tmp_path / "ws"
+    (ws / "studies" / "dnaa-01").mkdir(parents=True)
+    db = ws / "studies" / "dnaa-01" / "runs.db"
+    _seed_remote_run(db, run_id="r-remote", spec_id="pkg.x",
+                     simulation_id=99, source="smsvpctest")
+
+    sims = list_simulations(ws)
+    assert len(sims) == 1
+    row = sims[0]
+    assert row["run_id"] == "r-remote"
+    ro = row.get("remote_origin")
+    assert ro is not None, f"expected remote_origin, got: {row}"
+    assert ro["deployment"] == "smsvpctest"
+    assert ro["simulation_id"] == 99
+    assert ro["backend"] == "ray"
+    assert ro["s3_uri"] == "s3://bucket/prefix/99/"
+    # emitter derives from the landed .zarr store_path, NOT the runs.db (else "sqlite")
+    assert row["emitter"] == "xarray"
+
+
+def test_list_local_run_has_null_remote_origin(tmp_path):
+    """A plain runs_meta row (no remote provenance) yields remote_origin=None."""
+    ws = tmp_path / "ws"
+    (ws / ".pbg").mkdir(parents=True)
+    _seed_run(ws / ".pbg" / "composite-runs.db",
+              spec_id="pkg.x", run_id="r-local", started_at=1.0)
+
+    sims = list_simulations(ws)
+    assert len(sims) == 1
+    assert sims[0]["remote_origin"] is None

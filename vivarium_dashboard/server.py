@@ -308,6 +308,8 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/workspaces/cleanup-stale": "_post_workspaces_cleanup_stale",
     "/api/workspaces/start":         "_post_workspaces_start",
     "/api/workspaces/stop":          "_post_workspaces_stop",
+    # Remote-run endpoints (Phase 3b).
+    "/api/remote-run-start":         "_post_remote_run_start",
 }
 # Inject study-alias routes into the POST route map (same method name as old).
 for _old, _new in _POST_STUDY_ALIASES.items():
@@ -2643,8 +2645,40 @@ def _build_saved_visualizations(ws_root) -> dict:
     wp = WorkspacePaths.load(ws_root)
     saved: list[dict] = []
     ptools_studies: list[dict] = []
+    report_cards: list[dict] = []
     for study_dir in wp.iter_study_dirs():
         study = study_dir.name
+        # Saved comparison report cards — self-contained HTML produced by the
+        # vEcoli<->v2ecoli comparison harness (statistical-equivalence cards).
+        # Discovered like the 3D packs: a study writes them under
+        # ``viz/report_card/<name>.html`` (+ optional ``<name>.verdict.json``
+        # sidecar carrying the ``overall`` verdict for the gallery badge).
+        rc_dir = study_dir / "viz" / "report_card"
+        if rc_dir.is_dir():
+            for rep in sorted(rc_dir.glob("*.html")):
+                try:
+                    rel = rep.relative_to(ws_root).as_posix()
+                except ValueError:
+                    continue
+                verdict = None
+                vfile = rep.with_name(rep.name[: -len(".html")] + ".verdict.json")
+                if vfile.is_file():
+                    try:
+                        verdict = json.loads(
+                            vfile.read_text(encoding="utf-8")).get("overall")
+                    except Exception:
+                        verdict = None
+                try:
+                    created = int(rep.stat().st_mtime)
+                except Exception:
+                    created = None
+                report_cards.append({
+                    "study": study,
+                    "name": rep.name[: -len(".html")],
+                    "url": "/" + rel,
+                    "verdict": verdict,
+                    "created": created,
+                })
         viz3d = study_dir / "viz" / "3d"
         if viz3d.is_dir():
             for pack in sorted(viz3d.glob("*.pack.json")):
@@ -2710,6 +2744,7 @@ def _build_saved_visualizations(ws_root) -> dict:
         "parsimony_available": _parsimony_viewer_dir() is not None,
         "saved": saved,
         "ptools": {"configured": ptools_configured, "studies": ptools_studies},
+        "report_cards": report_cards,
     }
 
 
@@ -6610,6 +6645,60 @@ def _has_origin_remote() -> bool:
     return "origin" in (r.stdout or "").split()
 
 
+def _sms_api_base() -> str:
+    """Base URL of the sms-api (the SSM tunnel by default)."""
+    return os.environ.get("SMS_API_BASE", "http://localhost:8080")
+
+
+def _remote_push_and_sha() -> str:
+    """Push the workspace's current branch to origin with the GH token, return HEAD SHA."""
+    from vivarium_dashboard.lib import github_auth
+
+    branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=WORKSPACE,
+        capture_output=True, text=True, timeout=5,
+    ).stdout.strip()
+    if not branch or branch == "HEAD":
+        raise RuntimeError("workspace is not on a named branch")
+    env = os.environ | github_auth.current_token_env()
+    push = subprocess.run(
+        ["git", "push", "-u", "origin", branch], cwd=WORKSPACE,
+        capture_output=True, text=True, timeout=120, env=env,
+    )
+    if push.returncode != 0:
+        raise RuntimeError(f"git push failed: {(push.stderr or push.stdout)[-300:]}")
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=WORKSPACE, capture_output=True, text=True, timeout=5,
+    ).stdout.strip()
+    if not sha:
+        raise RuntimeError("could not resolve HEAD commit")
+    return sha
+
+
+def _normalize_repo_url(url: str) -> str:
+    """Normalize a git remote URL for sms-api's simulator/upload.
+
+    sms-api's ``/core/v1/simulator/upload`` 500s on a ``.git``-suffixed URL
+    (it builds an image tag / repo path from the URL), so strip a trailing
+    ``.git`` and surrounding whitespace.
+    """
+    url = url.strip()
+    if url.endswith(".git"):
+        url = url[: -len(".git")]
+    return url
+
+
+def _remote_repo_url() -> str | None:
+    r = subprocess.run(
+        ["git", "remote", "get-url", "origin"], cwd=WORKSPACE,
+        capture_output=True, text=True, timeout=5,
+    )
+    if r.returncode != 0:
+        return None
+    raw = r.stdout.strip()
+    return _normalize_repo_url(raw) if raw else None
+
+
 def _stale_branch_threshold() -> int:
     """Commits-behind-main threshold above which a branch is flagged stale.
 
@@ -8378,6 +8467,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_iset_report()
         if self.path.startswith("/api/iset/"):
             return self._get_iset_detail()
+        if self.path.startswith("/api/investigation-notebook/"):
+            return self._get_investigation_notebook()
         if self.path.startswith("/api/investigation-run-unblocked-status"):
             return self._get_investigation_run_unblocked_status()
         if self.path.startswith("/api/investigation-registry"):
@@ -8444,6 +8535,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_ptools_launch(study)
         if self.path.startswith("/api/git-status"):
             return self._get_git_status()
+        if self.path.startswith("/api/remote-run-status"):
+            return self._get_remote_run_status()
         # Serve the bigraph-loom viewer at /bigraph-loom. The bundle comes from
         # the standalone `bigraph-loom` package (a dependency), via
         # bigraph_loom.asset_dir(), rather than a vendored copy.
@@ -11810,6 +11903,38 @@ if __name__ == "__main__":
         if result is None:
             return self._json({"error": f"no investigation.yaml for {name!r}"}, 404)
         return self._json(result, 200)
+
+    def _get_investigation_notebook(self):
+        """GET /api/investigation-notebook/<slug>[?format=py] — generate and
+        download the investigation's runnable Jupyter notebook (.ipynb) or the
+        matching Python script (.py).
+
+        Deterministic export (no AI), identical to what publish.py ships
+        statically; the coder-facing complement to the HTML report.
+        """
+        import urllib.parse
+        parsed = urllib.parse.urlparse(self.path)
+        slug = parsed.path.split("/api/investigation-notebook/", 1)[-1].strip("/")
+        if not slug:
+            return self._json({"error": "investigation slug required"}, 400)
+        fmt = (urllib.parse.parse_qs(parsed.query).get("format") or ["ipynb"])[0]
+        try:
+            from vivarium_dashboard.lib.notebook_export import export_investigation_notebook
+            paths = export_investigation_notebook(WORKSPACE, slug)
+        except FileNotFoundError:
+            return self._json({"error": f"no investigation {slug!r}"}, 404)
+        except Exception as exc:  # noqa: BLE001 — surface, don't crash the server
+            return self._json({"error": f"notebook export failed: {exc}"}, 500)
+        path = paths["py"] if fmt == "py" else paths["ipynb"]
+        mime = "text/x-python" if fmt == "py" else "application/x-ipynb+json"
+        data = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Disposition", f'attachment; filename="{path.name}"')
+        self.end_headers()
+        self.wfile.write(data)
 
     def _get_study_bigraph_paths(self):
         """GET /api/study-bigraph-paths?study=<slug>[&baseline=<name>][&max_depth=<n>]
@@ -16466,6 +16591,79 @@ if __name__ == "__main__":
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    # ------------------------------------------------------------------
+    # Remote-run endpoints (Phase 3b)
+    # ------------------------------------------------------------------
+
+    def _post_remote_run_start(self, body: dict):
+        """POST /api/remote-run-start {study, num_generations?, num_seeds?, run_parca?}"""
+        from vivarium_dashboard.lib import github_auth
+        from vivarium_dashboard.lib.investigations import load_spec
+        from vivarium_dashboard.lib.remote_run_jobs import PipelineCtx, manager, run_remote_pipeline
+        from vivarium_dashboard.lib.remote_run_landing import land_remote_run
+        from vivarium_dashboard.lib.sms_api_client import SmsApiClient
+
+        if github_auth.current_session() is None:
+            return self._json({"error": "not authenticated"}, 401)
+        study = (body.get("study") or "").strip()
+        if not study:
+            return self._json({"error": "study is required"}, 400)
+        if not _has_origin_remote():
+            return self._json({"error": "no GitHub remote configured"}, 409)
+        repo_url = _remote_repo_url()
+        if not repo_url:
+            return self._json({"error": "could not resolve origin remote url"}, 409)
+
+        spec_path = _study_spec_path(study)
+        if spec_path is None or not spec_path.is_file():
+            return self._json({"error": f"study {study!r} not found"}, 404)
+        spec = load_spec(spec_path)
+        observables = _collect_study_observables(spec)
+
+        branch = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=WORKSPACE,
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+
+        client = SmsApiClient(_sms_api_base())
+        # spec_id = the study's baseline COMPOSITE ref (what local runs use:
+        # _post_study_run_baseline_for_test -> entry.get("composite")), NOT the
+        # baseline entry's `name` (which is the study slug). Falls back to the
+        # study slug only when no baseline composite is declared.
+        _baseline = spec.get("baseline") or []
+        _spec_id = (_baseline[0].get("composite") if _baseline else None) or study
+        ctx = PipelineCtx(
+            study=study,
+            study_dir=_study_dir(study),
+            spec_id=_spec_id,
+            repo_url=repo_url,
+            branch=branch,
+            observables=observables,
+            num_generations=int(body.get("num_generations") or 1),
+            num_seeds=int(body.get("num_seeds") or 1),
+            run_parca=bool(body.get("run_parca", True)),
+            client=client,
+            push_and_sha=_remote_push_and_sha,
+            land=land_remote_run,
+        )
+        job = manager.submit(study, lambda j: run_remote_pipeline(j, ctx))
+        return self._json({"job_id": job.job_id}, 202)
+
+    def _get_remote_run_status(self):
+        """GET /api/remote-run-status?job_id=<id>"""
+        from urllib.parse import parse_qs, urlparse
+
+        from vivarium_dashboard.lib.remote_run_jobs import manager
+
+        qs = parse_qs(urlparse(self.path).query)
+        job_id = (qs.get("job_id") or [""])[0]
+        if not job_id:
+            return self._json({"jobs": manager.list_recent(10)}, 200)
+        job = manager.get(job_id)
+        if job is None:
+            return self._json({"error": "job not found"}, 404)
+        return self._json(job.to_dict(), 200)
 
     @staticmethod
     def _guess_mime(rel: str) -> str:

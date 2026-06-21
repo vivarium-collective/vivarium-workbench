@@ -650,11 +650,31 @@ def _do_build(
         investigations_flat = {"investigations": []}
     _write_json(api_dir / "investigations.json", investigations_flat)
 
-    # api/iset/<id>.json
+    # api/iset/<id>.json  (+ per-investigation runnable notebook export)
+    # Each investigation also ships a self-contained Jupyter notebook + .py under
+    # bundle/investigation-notebooks/ — the coder-facing complement to the HTML
+    # report. Deterministic; guarded per investigation so one failure never
+    # aborts the publish (same pattern as the study/charts loops).
+    from vivarium_dashboard.lib.notebook_export import export_investigation_notebook
+    nb_out_dir = out_dir / "investigation-notebooks"
+    notebook_manifest: list[dict] = []
     for inv_name in investigations:
         data = srv.Handler._iset_detail_data(inv_name)
-        if data is not None:
-            _write_json(api_dir / "iset" / f"{inv_name}.json", data)
+        if data is None:
+            continue
+        # iset JSON stays byte-parity with the live builder; notebook urls live
+        # in the separate manifest (the SPA derives the snapshot url from slug).
+        _write_json(api_dir / "iset" / f"{inv_name}.json", data)
+        try:
+            paths = export_investigation_notebook(ws_root, inv_name, out_dir=nb_out_dir)
+            notebook_manifest.append({
+                "slug": inv_name,
+                "ipynb": f"investigation-notebooks/{paths['ipynb'].name}",
+                "py": f"investigation-notebooks/{paths['py'].name}",
+            })
+        except Exception as exc:  # noqa: BLE001 — never abort a publish on one notebook
+            print(f"  warn: notebook export failed for {inv_name!r}: {exc}")
+    _write_json(api_dir / "investigation-notebooks.json", {"notebooks": notebook_manifest})
 
     # api/study/<slug>.json
     # Guard per study: a single malformed study.yaml (e.g. a stub study that

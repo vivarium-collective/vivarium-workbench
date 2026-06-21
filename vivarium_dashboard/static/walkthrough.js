@@ -1247,6 +1247,35 @@
     '</div>';
   }
 
+  function _renderReportCardCard(rc) {
+    // Embed a saved vEcoli<->v2ecoli comparison report (statistical-equivalence
+    // report cards). Self-contained HTML served from the workspace tree, same
+    // base-path handling as the 3D cards for the hosted snapshot.
+    var base = (window.DataSource && window.DataSource.basePath)
+      ? window.DataSource.basePath()
+      : ((window.__DASH_CONFIG__ && window.__DASH_CONFIG__.basePath) || "");
+    var src = base + rc.url;
+    var meta = [];
+    if (rc.study) meta.push('study: ' + _esc(rc.study));
+    if (rc.verdict) meta.push('overall: ' + _esc(rc.verdict));
+    var desc =
+      'Statistical-equivalence <strong>report cards</strong> from the ' +
+      '<strong>vEcoli &#8596; v2ecoli comparison harness</strong>: the same config ' +
+      'loaded into both engines, their converted processes and ParCa/sim_data ' +
+      'diffed, and cell mass / growth rate compared per condition (Welch t &middot; ' +
+      'Cohen\'s d &middot; relative-mean &Delta;) against a within-tolerance band.';
+    return '<div class="analyses-card">' +
+      '<div class="analyses-card-head">' +
+        '<strong>' + _esc(rc.name || 'comparison report') + '</strong>' +
+        '<a class="btn-mini" href="' + _esc(src) + '" target="_blank" rel="noopener" title="Open full-window in a new tab">Open &#8599;</a>' +
+      '</div>' +
+      (meta.length ? '<div class="muted" style="font-size:0.82em;margin:2px 0 6px">' + meta.join(' &middot; ') + '</div>' : '') +
+      '<p class="muted" style="font-size:0.85em;line-height:1.45;margin:2px 0 8px">' + desc + '</p>' +
+      '<iframe class="viz-embed" src="' + _esc(src) + '" loading="lazy" ' +
+        'style="width:100%;height:520px;border:1px solid #2a313c;border-radius:6px;background:#fff"></iframe>' +
+    '</div>';
+  }
+
   function _renderPtoolsCard(ptools) {
     ptools = ptools || {};
     var studies = ptools.studies || [];
@@ -1339,7 +1368,10 @@
         data = data || {};
         var saved  = data.saved || [];
         var ptools = data.ptools || {};
+        var reportCards = data.report_cards || [];
         var cards = [];
+        // Comparison report cards lead the gallery (no viewer dependency).
+        cards = cards.concat(reportCards.map(_renderReportCardCard));
         if (data.parsimony_available) {
           cards = cards.concat(saved.map(_render3dVizCard));
         } else if (saved.length) {
@@ -1363,7 +1395,8 @@
             snapshot: (window.__DASH_CONFIG__ || {}).mode === 'snapshot'
           });
         }
-        if (countEl) countEl.textContent = saved.length ? '(' + saved.length + ')' : '';
+        var _n = saved.length + reportCards.length;
+        if (countEl) countEl.textContent = _n ? '(' + _n + ')' : '';
       })
       .catch(function(err) {
         container.innerHTML = '<p class="empty-state" style="color:#991b1b">Error loading saved visualizations: ' + _esc(String(err)) + '</p>';
@@ -6014,6 +6047,31 @@
       });
   }
   window._generateInvestigationReport = _generateInvestigationReport;
+
+  // Download the coder-facing notebook for the current investigation. In a
+  // published (snapshot) bundle this is a static file under
+  // investigation-notebooks/; in local mode the server generates it on demand.
+  // Optional fmt === 'py' fetches the matching script instead of the .ipynb.
+  function _downloadInvestigationNotebook(fmt) {
+    var name = window._currentIset;
+    if (!name) {
+      console.warn('_downloadInvestigationNotebook: no current investigation');
+      return;
+    }
+    var c = window.__DASH_CONFIG__ || {};
+    var base = c.basePath || '';
+    var ext = fmt === 'py' ? '.py' : '.ipynb';
+    var url = (c.mode === 'snapshot')
+      ? base + '/investigation-notebooks/' + encodeURIComponent(name) + ext
+      : '/api/investigation-notebook/' + encodeURIComponent(name) + (fmt === 'py' ? '?format=py' : '');
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = name + ext;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+  window._downloadInvestigationNotebook = _downloadInvestigationNotebook;
 
   function _triggerDownload(filename, content, mime) {
     var blob = new Blob([content], {type: mime || 'text/plain'});
@@ -14053,6 +14111,17 @@
       'title="emitter / persistence format">' + _escSim(t) + '</span>';
   }
 
+  function _simOriginPill(row) {
+    var o = row && row.remote_origin;
+    if (!o) return '<span class="origin-pill origin-local" title="local run">local</span>';
+    var dep = o.deployment || 'remote';
+    var tip = 'Remote run on ' + dep + ' (AWS GovCloud)'
+      + (o.simulation_id != null ? ' — sim ' + o.simulation_id : '')
+      + (o.experiment_id ? '\nexperiment: ' + o.experiment_id : '')
+      + (o.s3_uri ? '\nS3: ' + o.s3_uri : '');
+    return '<span class="origin-pill origin-remote" title="' + _escSim(tip) + '">' + _escSim(dep) + '</span>';
+  }
+
   // Format an epoch-seconds timestamp as a readable local time.
   function _simFmtTime(sec) {
     if (!sec) return '—';
@@ -14102,18 +14171,26 @@
     var runLabel = row.sim_name || row.label || runId;
     var runTitle = ' title="' + _escSim(runId + (row.db_path ? '\n' + row.db_path : '')) + '"';
     var timeSec = row.completed_at || row.started_at;
-    // Actions: open-in-explorer (only when there's a spec_id to seed the
-    // explorer with) + delete. The {simulations} shape carries spec_id +
-    // db_path so both are reconstructable.
+    // Actions: if the run belongs to a study → open its Runs tab at the run;
+    // else if it has a spec_id → open in the Composite Explorer. The
+    // {simulations} shape carries spec_id + db_path so both are reconstructable.
     var specId = row.spec_id || '';
-    var explorerBtn = specId
-      ? '<a href="?id=' + encodeURIComponent(specId) +
+    var studySlug = _simStudy(row);
+    var openBtn;
+    if (studySlug) {
+      openBtn = '<a href="/studies/' + encodeURIComponent(studySlug) + '#run-' + encodeURIComponent(runId) + '" ' +
+        'class="action-btn js-authoring" title="View this run\'s results in the study" ' +
+        'style="text-decoration:none;">Open</a>';
+    } else if (specId) {
+      openBtn = '<a href="?id=' + encodeURIComponent(specId) +
           '&run_id=' + encodeURIComponent(runId) + '#composite-explore" ' +
           'class="action-btn js-authoring" title="Open in Composite Explorer" ' +
           'style="text-decoration:none;" ' +
           'onclick="event.preventDefault(); _openSimulationInExplorer(\'' +
-            _escSim(runId) + '\', \'' + _escSim(specId) + '\');">Open</a>'
-      : '';
+            _escSim(runId) + '\', \'' + _escSim(specId) + '\');">Open</a>';
+    } else {
+      openBtn = '';
+    }
     var deleteBtn = '<button class="action-btn js-authoring" title="Delete simulation" ' +
       'onclick="_deleteSimulationRun(\'' + _escSim(runId) + '\')">🗑</button>';
     return (
@@ -14122,11 +14199,12 @@
       '<td style="padding:6px 8px;">' + studyCell + '</td>' +
       '<td style="padding:6px 8px;"><code style="font-size:11px; color:#6b7280;"' +
         runTitle + '>' + _escSim(runLabel) + '</code></td>' +
+      '<td style="padding:6px 8px;">' + _simOriginPill(row) + '</td>' +
       '<td style="padding:6px 8px;">' + _simEmitterPill(row.emitter_type) + '</td>' +
       '<td style="padding:6px 8px; color:#6b7280;">' + _escSim(_simFmtTime(timeSec)) + '</td>' +
       '<td style="padding:6px 8px;">' + _simStatusChip(row.status) + '</td>' +
       '<td style="padding:6px 8px; text-align:center; white-space:nowrap;">' +
-        explorerBtn + (explorerBtn && deleteBtn ? ' ' : '') + deleteBtn + '</td>' +
+        openBtn + (openBtn && deleteBtn ? ' ' : '') + deleteBtn + '</td>' +
       '</tr>'
     );
   }
