@@ -48,6 +48,31 @@ authors and every result produced lives in the workspace, never in this repo
 - **The workspace's** git history = the scientific audit trail the dashboard
   writes on the user's behalf.
 
+### The HTTP layer and the typed-API migration
+
+Today the server is a single ~17k-line stdlib `http.server` handler
+(`server.py`) with hand-dispatched `/api/*` routes returning plain `dict`
+payloads. That layer is being migrated, incrementally, to a **typed API**:
+
+- **`lib/models.py`** — pydantic models are the single source of truth for the
+  JSON the server sends the browser (`SimRow`, `ChartPayload`, `RemoteRunJob`,
+  the `runs_meta` row shape, …). Handlers validate their output against these,
+  so the contract cannot silently drift — validating real output already caught
+  a latent bug (`runs_meta.started_at`/`completed_at` are epoch floats, not
+  strings).
+- **`api/app.py`** — a FastAPI app (a *strangler-fig* alongside the stdlib
+  handler) that serves a growing set of routes with those typed models, giving
+  automatic validation + an OpenAPI schema. Routes move over a few at a time;
+  both servers back onto the same `lib/` functions, so there is one
+  implementation, not two.
+- **`mypy`** (scoped, widening) gates the typed modules, and the browser-side
+  **TypeScript types are generated from the pydantic models**
+  (`lib/generate_ts.py`) — so the client contract is *derived*, not hand-copied.
+
+The goal is a fully FastAPI-served, end-to-end-typed API that eventually retires
+the stdlib handler, pursued incrementally so the dashboard keeps working
+throughout.
+
 ---
 
 ## 2. The domain model

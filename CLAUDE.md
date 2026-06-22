@@ -62,6 +62,15 @@ pass the `_csrf_ok()` origin check (see below). Most real logic lives in
 `python -m vivarium_dashboard.server --workspace ... --port ...` is how tests
 spawn it as a subprocess.
 
+This layer is being migrated, incrementally, to a **typed API**: `lib/models.py`
+holds pydantic models that are the single source of truth for the JSON payloads
+(handlers validate against them), and `api/app.py` is a FastAPI app
+(*strangler-fig*) that serves a growing set of routes with those models — both
+servers calling the same `lib/` functions. `mypy` gates the typed modules and the
+client TypeScript types are generated from the models (`lib/generate_ts.py`). When
+porting a route: extract its builder into `lib/`, return a pydantic model from the
+FastAPI route, and leave a thin delegating shim in `server.py` for back-compat.
+
 ### `lib/` — the domain logic
 Each module owns one concern and is independently testable. Key ones:
 - `workspace_paths.py` — **canonical** resolution of a workspace's directory
