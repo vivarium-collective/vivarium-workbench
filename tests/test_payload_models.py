@@ -96,15 +96,29 @@ def test_simulations_payload_shape():
 
 
 def test_remote_run_job_to_dict_validates():
-    """The real RemoteRunJob.to_dict() output validates against the model."""
+    """RemoteRunJob.to_dict() is model-backed and validates against the model."""
     job = RemoteRunJob("study-a")
     job.set_step("push", "ok", "pushed abc123")
     job.simulation_id = 105
-    model = RemoteRunJobModel.model_validate(job.to_dict())
+    out = job.to_dict()
+    # to_dict now builds output via RemoteRunJobModel.model_dump() — re-validating
+    # and dumping is a no-op, confirming it came through the model.
+    assert RemoteRunJobModel.model_validate(out).model_dump() == out
+    model = RemoteRunJobModel.model_validate(out)
     assert model.status == "queued"
     assert [s.name for s in model.steps] == ["push", "build", "run", "poll", "download", "land"]
     assert model.steps[0].status == "ok"
     assert model.simulation_id == 105
+
+
+def test_remote_run_job_falls_back_on_bad_status(recwarn):
+    """An unexpected status (outside the RemoteJobStatus literal) warns and
+    returns the legacy dict rather than breaking the status endpoint."""
+    job = RemoteRunJob("study-a")
+    job.status = "bogus-status"
+    out = job.to_dict()
+    assert out["status"] == "bogus-status"          # legacy dict still served
+    assert any("RemoteRunJob" in str(w.message) for w in recwarn.list)
 
 
 def test_chart_payload_shape():
