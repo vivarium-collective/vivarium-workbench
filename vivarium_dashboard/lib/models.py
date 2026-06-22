@@ -15,7 +15,7 @@ handler too, or the JSON contract drifts.
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -124,3 +124,35 @@ class StudyChartsPayload(BaseModel):
     """
 
     charts: list[ChartPayload]
+
+
+class DashConfig(BaseModel):
+    """``GET /api/config`` payload (server.py ``Handler._build_api_config_response``).
+
+    Selects the client data source; local mode returns ``{"mode": "local-server"}``.
+    """
+
+    mode: str = "local-server"
+    basePath: Optional[str] = None
+
+
+class InvestigationSummary(BaseModel):
+    """One entry of the ``GET /api/iset-list`` payload.
+
+    Mirrors ``_build_iset_summary_for_test`` in server.py. A parse failure yields
+    a minimal ``{name, error}`` entry, so every field but ``name`` is optional.
+    ``lifecycle`` is passed through untyped (``Any``) for now.
+    """
+
+    name: str
+    title: Optional[str] = None
+    status: Optional[str] = None
+    effective_status: Optional[str] = None
+    description: Optional[str] = None
+    question: Optional[str] = None
+    hypothesis: Optional[str] = None
+    n_studies: Optional[int] = None
+    studies: list[str] = []
+    lifecycle: Any = None
+    current: Optional[bool] = None
+    error: Optional[str] = None

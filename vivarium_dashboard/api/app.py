@@ -25,7 +25,12 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI
 
-from vivarium_dashboard.lib.models import SimRow, SimulationsPayload
+from vivarium_dashboard.lib.models import (
+    DashConfig,
+    InvestigationSummary,
+    SimRow,
+    SimulationsPayload,
+)
 from vivarium_dashboard.lib.simulations_index import list_simulations
 
 WORKSPACE_ENV = "VIVARIUM_DASHBOARD_WORKSPACE"
@@ -56,6 +61,28 @@ def create_app() -> FastAPI:
         """
         rows = [SimRow.model_validate(r) for r in list_simulations(ws)]
         return SimulationsPayload(simulations=rows, current=None)
+
+    @app.get("/api/config", response_model=DashConfig)
+    def config() -> DashConfig:
+        """Client data-source selector (mirrors the stdlib /api/config)."""
+        return DashConfig(mode="local-server")
+
+    @app.get("/api/iset-list", response_model=list[InvestigationSummary])
+    def iset_list(ws: Path = Depends(get_workspace)) -> list[InvestigationSummary]:
+        """Investigations summary list (mirrors the stdlib /api/iset-list).
+
+        Transitional: backed by server.py's HTTP-free `_build_iset_summary_for_test`
+        builder. That builder (and its helpers) move into `lib/` in a follow-up;
+        the typed pydantic response + OpenAPI schema land now.
+        """
+        # Imported lazily so the heavy stdlib server module only loads when this
+        # route is actually used, keeping import of the FastAPI app light.
+        from vivarium_dashboard import server
+
+        return [
+            InvestigationSummary.model_validate(d)
+            for d in server._build_iset_summary_for_test(ws)
+        ]
 
     return app
 

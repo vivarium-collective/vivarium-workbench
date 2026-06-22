@@ -47,6 +47,10 @@ files = ["vivarium_dashboard/lib/models.py", "vivarium_dashboard/api/app.py"]
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true
 warn_unused_ignores = false
+# api/app.py imports the (still-untyped) stdlib server module to reuse its
+# HTTP-free payload builders. Don't descend into it (or its heavy transitive
+# deps) — treat followed imports as Any so only models.py + app.py are checked.
+follow_imports = "skip"
 
 [tool.hatch.metadata]
 allow-direct-references = true

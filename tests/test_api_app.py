@@ -62,6 +62,47 @@ def test_openapi_includes_typed_models(client):
     assert components["SimRow"]["properties"]["started_at"]["type"] == "number"
 
 
+def test_config_route(client):
+    r = client.get("/api/config")
+    assert r.status_code == 200
+    assert r.json() == {"mode": "local-server", "basePath": None}
+
+
+def test_iset_list_empty_workspace(client):
+    r = client.get("/api/iset-list")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_iset_list_typed_passthrough(client, monkeypatch):
+    """The route validates the builder's output through InvestigationSummary —
+    including the untyped `lifecycle` passthrough (not stripped) and the minimal
+    {name, error} parse-failure variant."""
+    from vivarium_dashboard import server
+
+    summaries = [
+        {"name": "inv-a", "title": "Inv A", "status": "active",
+         "effective_status": "in-progress", "description": "d", "question": "q",
+         "hypothesis": "h", "n_studies": 2, "studies": ["s1", "s2"],
+         "lifecycle": {"phase": "run", "extra": 1}, "current": True},
+        {"name": "inv-bad", "error": "parse failed: boom"},
+    ]
+    monkeypatch.setattr(server, "_build_iset_summary_for_test", lambda ws: summaries)
+
+    body = client.get("/api/iset-list").json()
+    assert body[0]["studies"] == ["s1", "s2"]
+    assert body[0]["lifecycle"] == {"phase": "run", "extra": 1}   # Any field: not stripped
+    assert body[0]["current"] is True
+    assert body[1]["name"] == "inv-bad" and body[1]["error"] == "parse failed: boom"
+    assert body[1]["studies"] == [] and body[1]["lifecycle"] is None
+
+
+def test_new_routes_in_openapi(client):
+    components = client.get("/openapi.json").json()["components"]["schemas"]
+    assert "DashConfig" in components
+    assert "InvestigationSummary" in components
+
+
 def test_workspace_default_is_cwd(monkeypatch):
     """get_workspace honors the env var and defaults to cwd."""
     monkeypatch.delenv("VIVARIUM_DASHBOARD_WORKSPACE", raising=False)
