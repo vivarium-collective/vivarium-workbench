@@ -13,9 +13,14 @@ import threading
 import time
 import traceback
 import uuid
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+
+from pydantic import ValidationError
+
+from vivarium_dashboard.lib.models import RemoteRunJob as RemoteRunJobModel
 
 STEP_NAMES = ["push", "build", "run", "poll", "download", "land"]
 
@@ -49,7 +54,7 @@ class RemoteRunJob:
 
     def to_dict(self) -> dict:
         with self._lock:
-            return {
+            raw = {
                 "job_id": self.job_id,
                 "study": self.study,
                 "status": self.status,
@@ -60,6 +65,17 @@ class RemoteRunJob:
                 "started_at": self.started_at,
                 "completed_at": self.completed_at,
             }
+        # Validate/normalize through the typed model (single source of truth).
+        # Identical JSON for well-formed jobs; an unexpected job warns and falls
+        # back to the legacy dict rather than breaking the status endpoint.
+        try:
+            return RemoteRunJobModel.model_validate(raw).model_dump()
+        except ValidationError as e:
+            warnings.warn(
+                f"remote_run_jobs: job {raw.get('job_id')!r} failed "
+                f"RemoteRunJob validation: {e}"
+            )
+            return raw
 
 
 class RemoteRunManager:

@@ -591,10 +591,17 @@ def test_snapshot_css_hides_inv_composites_subtab():
 # ---------------------------------------------------------------------------
 
 def test_study_detail_charts_gated_in_snapshot():
-    """study-detail.js _loadCharts must short-circuit in snapshot mode and
-    show a placeholder instead of fetching /api/study-charts/."""
+    """study-detail.js _loadCharts must be snapshot-aware.
+
+    Since #262 (aec000d) snapshot mode no longer short-circuits — the publisher
+    base64-embeds the static charts into the snapshot, so _loadCharts fetches
+    them and shows a snapshot-specific empty-state placeholder when none were
+    published (live charts need a runs.db absent from the snapshot). This test
+    was previously asserting the pre-#262 "Results are served by sms-api"
+    short-circuit text, which #262 removed without updating the test.
+    """
     text = (server.STATIC_DIR / "study-detail.js").read_text()
     assert "mode === 'snapshot'" in text or 'mode === "snapshot"' in text, \
         "study-detail.js _loadCharts missing snapshot mode gate"
-    assert "Results are served by sms-api" in text, \
-        "study-detail.js _loadCharts missing snapshot placeholder text"
+    assert "No pre-rendered charts published" in text, \
+        "study-detail.js _loadCharts missing snapshot empty-state placeholder"

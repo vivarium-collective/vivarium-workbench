@@ -14,6 +14,8 @@ dependencies = [
     "jsonschema[format-nongpl]>=4.21",
     "pypdf>=4.0",
     "numpy",
+    "pydantic>=2",
+    "fastapi>=0.110",
     "process-bigraph",
     "bigraph-schema>=1.4.1",
     "pbg-superpowers",
@@ -22,7 +24,7 @@ dependencies = [
 
 [project.optional-dependencies]
 viz = ["matplotlib", "imageio", "numpy"]
-dev = ["pytest>=7.4", "pytest-timeout", "pytest-json-report>=1.5"]
+dev = ["pytest>=7.4", "pytest-timeout", "pytest-json-report>=1.5", "mypy>=1.8", "httpx>=0.27", "uvicorn>=0.29"]
 
 [project.scripts]
 vivarium-dashboard = "vivarium_dashboard.cli:main"
@@ -31,6 +33,16 @@ vivarium-dashboard-publish = "vivarium_dashboard.publish:main"
 # bigraph-loom is a PEP 508 direct git URL (not on PyPI), so the wheel build
 # backend must opt into direct references — without this, hatchling refuses the
 # build on stricter uv/hatchling versions.
+[tool.mypy]
+python_version = "3.11"
+# Incremental adoption: type-check only the new, fully-typed modules for now.
+# Widen `files` as more of lib/ is annotated. The bulk of the codebase
+# (server.py, the dict-building helpers) is intentionally not checked yet.
+files = ["vivarium_dashboard/lib/models.py", "vivarium_dashboard/api/app.py"]
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+warn_unused_ignores = false
+
 [tool.hatch.metadata]
 allow-direct-references = true
 
