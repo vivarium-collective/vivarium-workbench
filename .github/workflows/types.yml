@@ -1,0 +1,25 @@
+name: types
+
+# Keeps the pydantic payload models honest: mypy on the typed modules + the
+# model tests that validate real handler output against them. Scoped, fast gate;
+# broader pytest CI can be added as a separate workflow later.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  types:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install (locked)
+        run: uv sync --extra dev
+      - name: mypy (typed modules)
+        run: uv run mypy
+      - name: Payload-model tests (real-output validation)
+        run: uv run pytest tests/test_payload_models.py -q

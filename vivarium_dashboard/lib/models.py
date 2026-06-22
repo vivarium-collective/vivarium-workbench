@@ -58,15 +58,18 @@ class SimRow(BaseModel):
     ``db_path`` label).
     """
 
+    # Types/nullability copied from the runs_meta schema (lib/composite_runs.py):
+    # started_at/completed_at are REAL epoch seconds; sim_name/label/n_steps/
+    # progress_step are nullable (some are ALTER-added columns).
     run_id: str
     spec_id: str
-    sim_name: str
-    label: str
+    sim_name: Optional[str] = None
+    label: Optional[str] = None
     status: str                # "completed" | "running" | "failed" | ...
-    n_steps: int
-    progress_step: int
-    started_at: Optional[str] = None
-    completed_at: Optional[str] = None
+    n_steps: Optional[int] = None
+    progress_step: Optional[int] = None
+    started_at: float          # unix epoch seconds (REAL NOT NULL)
+    completed_at: Optional[float] = None
     db_path: str
     emitter: Optional[EmitterKind] = None
     studies: list[StudyRef] = []

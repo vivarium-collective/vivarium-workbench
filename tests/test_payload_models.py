@@ -28,8 +28,8 @@ def _row(**overrides):
         "status": "completed",
         "n_steps": 10,
         "progress_step": 10,
-        "started_at": None,
-        "completed_at": None,
+        "started_at": 1700000000.0,   # runs_meta.started_at is REAL epoch seconds
+        "completed_at": 1700000050.0,
         "params_json": None,
     }
     base.update(overrides)
@@ -43,6 +43,24 @@ def test_simrow_matches_local_row():
     assert model.emitter is None
     assert model.remote_origin is None
     assert model.run_id == "r1"
+    assert isinstance(model.started_at, float)   # epoch seconds, not a string
+
+
+def test_row_to_dict_is_model_backed():
+    """_row_to_dict now builds output via SimRow.model_dump() (load-bearing)."""
+    out = _row_to_dict(_row(), "/ws/study-a/runs.db")
+    # The returned dict equals a fresh model_dump of the same data → it came
+    # through the model, and re-validating is a no-op.
+    assert SimRow.model_validate(out).model_dump() == out
+
+
+def test_malformed_row_falls_back_with_warning(recwarn):
+    """A row that fails validation (started_at None) warns and returns the raw dict
+    rather than raising — the simulations index must not 500 on one bad row."""
+    out = _row_to_dict(_row(started_at=None), "/ws/study-a/runs.db")
+    assert out["run_id"] == "r1"            # legacy dict still served
+    assert out["started_at"] is None
+    assert any("SimRow" in str(w.message) for w in recwarn.list)
 
 
 def test_simrow_matches_remote_zarr_row():
