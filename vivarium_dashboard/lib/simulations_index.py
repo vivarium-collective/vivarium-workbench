@@ -20,8 +20,10 @@ import warnings
 from pathlib import Path
 
 import yaml
+from pydantic import ValidationError
 
 from vivarium_dashboard.lib import composite_runs as cr
+from vivarium_dashboard.lib.models import SimRow
 from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 
 
@@ -145,7 +147,7 @@ def _row_to_dict(row, db_path_str: str) -> dict:
         emitter = "parquet"
     else:
         emitter = None
-    return {
+    raw = {
         "run_id": row["run_id"],
         "spec_id": row["spec_id"],
         "sim_name": row["sim_name"],
@@ -164,6 +166,18 @@ def _row_to_dict(row, db_path_str: str) -> dict:
         "investigation_slug": None,
         "remote_origin": remote_origin,
     }
+    # Validate/normalize through the typed model (single source of truth). The
+    # dumped dict is identical to `raw` for well-formed rows; on an unexpected
+    # row we keep serving the legacy dict and surface the drift as a warning
+    # rather than 500-ing the whole simulations index.
+    try:
+        return SimRow.model_validate(raw).model_dump()
+    except ValidationError as e:
+        warnings.warn(
+            f"simulations_index: row {raw.get('run_id')!r} failed SimRow "
+            f"validation: {e}"
+        )
+        return raw
 
 
 def _read_sqlite_emitter(db_path: Path, db_path_str: str) -> list[dict]:
