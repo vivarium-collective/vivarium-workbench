@@ -74,3 +74,37 @@ def test_json_sanitize_terminates_on_self_referential_objects():
     result = _json_sanitize({"q": _Quantityish(), "vals": [1.0, math.inf]})
     assert result["vals"] == [1.0, None]
     assert isinstance(result["q"], _Quantityish)  # left for json.dumps(default=…)
+
+
+def test_structured_arrays_serialize_with_field_names():
+    """NumPy structured arrays keep their field names through JSON serialization
+    instead of degrading to positional tuples (which render as 0,1,2,… indices).
+
+    - an `id`-fielded array (bulk molecules) becomes an {id: count} map;
+    - other structured arrays become a list of {field: value} records.
+    """
+    import json
+    import numpy as np
+    from vivarium_dashboard.server import _json_default, _json_body
+
+    bulk = np.array(
+        [("WATER[c]", 120), ("K+[c]", 9)],
+        dtype=[("id", "U16"), ("count", "i8")],
+    )
+    assert _json_default(bulk) == {"WATER[c]": 120, "K+[c]": 9}
+
+    unique = np.array(
+        [(1, 0.0), (2, 3.5)],
+        dtype=[("unique_index", "i8"), ("massDiff", "f8")],
+    )
+    assert _json_default(unique) == [
+        {"unique_index": 1, "massDiff": 0.0},
+        {"unique_index": 2, "massDiff": 3.5},
+    ]
+
+    # A plain (non-structured) array is unaffected — still a positional list.
+    assert _json_default(np.array([1, 2, 3])) == [1, 2, 3]
+
+    # Round-trips cleanly through the full body serializer.
+    parsed = json.loads(_json_body({"state": {"bulk": bulk, "unique": unique}}))
+    assert parsed["state"]["bulk"] == {"WATER[c]": 120, "K+[c]": 9}

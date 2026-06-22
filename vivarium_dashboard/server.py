@@ -77,6 +77,31 @@ def _strip_process_instances(state):
     return state
 
 
+def _structured_array_to_json(o):
+    """Serialize a NumPy structured array preserving its field names; else None.
+
+    - With an ``id`` field (bulk molecules): an ``{id: count}`` map when a
+      ``count`` field exists, otherwise ``{id: {other fields}}``.
+    - Otherwise (unique molecules, etc.): a list of ``{field: value}`` records.
+
+    Returns None for anything that isn't a 1-D+ structured array, so the caller
+    falls through to its normal handling.
+    """
+    names = getattr(getattr(o, "dtype", None), "names", None)
+    if not names or getattr(o, "ndim", 0) < 1:
+        return None
+    try:
+        rows = o.tolist()  # list of per-row tuples
+        records = [dict(zip(names, row)) for row in rows]
+    except Exception:
+        return None
+    if "id" in names:
+        if "count" in names:
+            return {str(r["id"]): r["count"] for r in records}
+        return {str(r["id"]): {k: v for k, v in r.items() if k != "id"} for r in records}
+    return records
+
+
 def _json_default(o):
     """JSON serialization fallback for objects json.dumps can't handle natively.
 
@@ -85,6 +110,17 @@ def _json_default(o):
     and anything with .tolist(). Falls back to repr() so a bad object still
     surfaces a string rather than killing the whole response.
     """
+    # NumPy STRUCTURED array (a dtype with named fields, e.g. a bulk-molecule
+    # array `(id, count, …submasses)` or a unique-molecule array `(unique_index,
+    # domain_index, …)`). A plain `.tolist()` degrades each row to a positional
+    # tuple, dropping the field names — which is why viewers render these stores
+    # as meaningless 0,1,2,… indices. Preserve the field names so any consumer
+    # shows real labels: an array with an `id` field becomes an {id: count} (or
+    # {id: record}) map; otherwise a list of field-keyed records.
+    structured = _structured_array_to_json(o)
+    if structured is not None:
+        return structured
+
     # numpy duck-typing without importing numpy (cheaper boot)
     tolist = getattr(o, "tolist", None)
     if callable(tolist):
