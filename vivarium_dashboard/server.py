@@ -2146,8 +2146,13 @@ def _latest_run_row(runs_db) -> dict | None:
         return None
 
 
-def _study_charts_payload(ws_root, name: str) -> dict:
+def _study_charts_payload(ws_root, name: str, *, hide_superseded: bool = False) -> dict:
     """Build the /api/study-charts/<name> payload (pure, unit-testable).
+
+    ``hide_superseded`` (opt-in, default False): when True, static charts
+    produced by a superseded (non-canonical, unpinned) run are dropped from
+    the payload — used by the per-investigation report render so it shows only
+    current figures. The interactive dashboard endpoint leaves it False.
 
     Two chart sources, merged in display order (live first, static after):
 
@@ -2210,7 +2215,7 @@ def _study_charts_payload(ws_root, name: str) -> dict:
             live_charts = render_study_charts(runs_db, run_name=None)
     for c in live_charts:
         c.setdefault("source", "live")
-    static_charts = discover_static_study_charts(charts_dir)
+    static_charts = discover_static_study_charts(charts_dir, hide_superseded=hide_superseded)
     # Declared figure visualizations (e.g. ``address: gif:colony.gif``) that
     # point at a loose figure file — resolved to self-contained data-URI/SVG
     # chart records so they embed in BOTH the live dashboard and the published
@@ -5373,6 +5378,25 @@ def _post_study_run_baseline_for_test(ws_root, body):
             study_outcomes.sync(study_dir)  # record runs + compute outcomes
         except Exception as exc:  # never fail a successful run on a record error
             print(f"[study_outcomes] sync failed: {exc}", file=sys.stderr)
+        # Feedback-friction: capture this run's effective parameters onto
+        # runs[].provenance.params (guarded; no-op on older pbg_superpowers).
+        # Runs AFTER study_outcomes.sync so the runs[] entry exists to attach to.
+        try:
+            from pbg_superpowers import run_params
+            captured = run_params.capture_run_params(
+                full_params, overrides=generator_overrides)
+            run_params.write_run_params(
+                study_dir, run_id, captured, source="dashboard-runner")
+        except Exception as exc:
+            print(f"[run_params] capture failed: {exc}", file=sys.stderr)
+        # Feedback-friction: auto-evaluate the study's behavior tests against the
+        # just-completed run so per-study test pills stop showing pending
+        # (guarded; SAFE DEFAULT — never stamps canonical).
+        try:
+            from pbg_superpowers import auto_evaluate
+            auto_evaluate.evaluate_on_run_completion(study_dir, run_id, ws_root=ws_root)
+        except Exception as exc:  # never fail a successful run on an eval error
+            print(f"[auto_evaluate] failed: {exc}", file=sys.stderr)
         _sync_parent_investigation(ws_root, study_dir)  # SP1: roll up to investigation
     return response, code
 
@@ -6065,6 +6089,25 @@ def _post_study_run_variant_for_test(ws_root, body):
             study_outcomes.sync(study_dir)  # record runs + compute outcomes
         except Exception as exc:  # never fail a successful run on a record error
             print(f"[study_outcomes] sync failed: {exc}", file=sys.stderr)
+        # Feedback-friction: capture this run's effective parameters onto
+        # runs[].provenance.params (guarded; no-op on older pbg_superpowers).
+        # Runs AFTER study_outcomes.sync so the runs[] entry exists to attach to.
+        try:
+            from pbg_superpowers import run_params
+            captured = run_params.capture_run_params(
+                full_params, overrides=generator_overrides)
+            run_params.write_run_params(
+                study_dir, run_id, captured, source="dashboard-runner")
+        except Exception as exc:
+            print(f"[run_params] capture failed: {exc}", file=sys.stderr)
+        # Feedback-friction: auto-evaluate the study's behavior tests against the
+        # just-completed run so per-study test pills stop showing pending
+        # (guarded; SAFE DEFAULT — never stamps canonical).
+        try:
+            from pbg_superpowers import auto_evaluate
+            auto_evaluate.evaluate_on_run_completion(study_dir, run_id, ws_root=ws_root)
+        except Exception as exc:  # never fail a successful run on an eval error
+            print(f"[auto_evaluate] failed: {exc}", file=sys.stderr)
         _sync_parent_investigation(ws_root, study_dir)  # SP1: roll up to investigation
     return response, code
 
