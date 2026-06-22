@@ -292,7 +292,9 @@ def _static_chart_meta(asset_path: Path) -> dict:
             "simulations": simulations, "interpretation": interpretation}
 
 
-def discover_static_study_charts(charts_dir: Path) -> list[dict]:
+def discover_static_study_charts(
+    charts_dir: Path, *, hide_superseded: bool = False,
+) -> list[dict]:
     """Return chart records for pre-rendered figures under ``charts_dir``.
 
     Companion to ``render_study_charts``: where that one runs SQL against
@@ -333,10 +335,23 @@ def discover_static_study_charts(charts_dir: Path) -> list[dict]:
     """
     if not charts_dir.exists() or not charts_dir.is_dir():
         return []
+    # Feedback-friction (opt-in): hide charts produced by a superseded
+    # (non-canonical, unpinned) run so a report shows only current figures.
+    # Guarded import — empty skip-set (no hiding) on older pbg_superpowers.
+    # Default OFF; charts_dir's parent is the study dir.
+    skip: set[str] = set()
+    if hide_superseded:
+        try:
+            from pbg_superpowers import chart_store
+            skip = chart_store.superseded_chart_names(charts_dir.parent)
+        except Exception:
+            skip = set()
     out: list[dict] = []
     svg_stems = {p.stem for p in charts_dir.glob("*.svg")}
     # Vector SVGs — inlined verbatim.
     for svg_path in charts_dir.glob("*.svg"):
+        if svg_path.name in skip:
+            continue  # superseded — hidden from this render
         try:
             svg_text = svg_path.read_text(encoding="utf-8")
         except Exception:
@@ -351,6 +366,8 @@ def discover_static_study_charts(charts_dir: Path) -> list[dict]:
     # Raster PNG/GIF — base64 data-URI so downloaded reports stay self-contained.
     for ext, mime in _RASTER_CHART_MIME.items():
         for img_path in charts_dir.glob("*" + ext):
+            if img_path.name in skip:
+                continue  # superseded — hidden from this render
             if img_path.stem in svg_stems:
                 continue  # a vector version exists — prefer it
             try:

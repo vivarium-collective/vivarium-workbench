@@ -66,6 +66,42 @@ def test_records_sorted_by_key(tmp_path):
     assert keys == ["00_a", "01_c", "02_b"]
 
 
+# ── hide_superseded (feedback-friction opt-in chart hiding) ──────────────────
+
+def test_hide_superseded_default_keeps_all(tmp_path):
+    """Default (hide_superseded=False) is unchanged — no charts hidden."""
+    d = _charts_dir(tmp_path)
+    (d / "00_a.svg").write_text("<svg/>")
+    (d / "01_b.png").write_bytes(b"\x89PNG")
+    assert len(discover_static_study_charts(d)) == 2
+
+
+def test_hide_superseded_true_no_manifest_keeps_all(tmp_path):
+    """Opt-in but no resolvable canonical run → empty skip-set → safe no-op."""
+    d = _charts_dir(tmp_path)
+    (d / "00_a.svg").write_text("<svg/>")
+    (d / "01_b.png").write_bytes(b"\x89PNG")
+    # No chart_store manifest / canonical run in this bare tmp study, so
+    # superseded_chart_names() returns empty and nothing is hidden.
+    assert len(discover_static_study_charts(d, hide_superseded=True)) == 2
+
+
+def test_hide_superseded_filters_named_charts(monkeypatch, tmp_path):
+    """When chart_store reports a superseded basename, it's dropped (True path)."""
+    chart_store = __import__("pbg_superpowers.chart_store",
+                             fromlist=["superseded_chart_names"])
+    monkeypatch.setattr(chart_store, "superseded_chart_names",
+                        lambda study_dir: {"01_old.png"})
+    d = _charts_dir(tmp_path)
+    (d / "00_keep.svg").write_text("<svg/>")
+    (d / "01_old.png").write_bytes(b"\x89PNG")
+    keys = [r["key"] for r in discover_static_study_charts(d, hide_superseded=True)]
+    assert keys == ["00_keep"]
+    # Default path ignores the skip-set entirely.
+    keys_default = [r["key"] for r in discover_static_study_charts(d)]
+    assert set(keys_default) == {"00_keep", "01_old"}
+
+
 # ── discover_declared_figure_charts (BUG 4: declared gif: figures embed) ──────
 
 def test_declared_gif_address_in_study_root(tmp_path):

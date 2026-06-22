@@ -702,7 +702,9 @@ def _do_build(
     charts_api_dir.mkdir(parents=True, exist_ok=True)
     for slug in studies:
         try:
-            payload = _study_charts_payload(ws_root, slug)
+            # Feedback-friction: the published per-investigation report shows
+            # only current figures — hide charts from superseded runs (opt-in).
+            payload = _study_charts_payload(ws_root, slug, hide_superseded=True)
         except Exception as exc:  # noqa: BLE001 — never abort a publish on one study
             print(f"  warn: study-charts export failed for {slug!r}: {exc}")
             continue
