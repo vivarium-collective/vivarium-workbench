@@ -43,7 +43,11 @@ python_version = "3.11"
 # Incremental adoption: type-check only the new, fully-typed modules for now.
 # Widen `files` as more of lib/ is annotated. The bulk of the codebase
 # (server.py, the dict-building helpers) is intentionally not checked yet.
-files = ["vivarium_dashboard/lib/models.py", "vivarium_dashboard/api/app.py"]
+files = [
+    "vivarium_dashboard/lib/models.py",
+    "vivarium_dashboard/lib/investigation_status.py",
+    "vivarium_dashboard/api/app.py",
+]
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true
 warn_unused_ignores = false

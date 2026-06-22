@@ -25,6 +25,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI
 
+from vivarium_dashboard.lib import investigation_status
 from vivarium_dashboard.lib.models import (
     DashConfig,
     InvestigationSummary,
@@ -71,18 +72,20 @@ def create_app() -> FastAPI:
     def iset_list(ws: Path = Depends(get_workspace)) -> list[InvestigationSummary]:
         """Investigations summary list (mirrors the stdlib /api/iset-list).
 
-        Transitional: backed by server.py's HTTP-free `_build_iset_summary_for_test`
-        builder. That builder (and its helpers) move into `lib/` in a follow-up;
-        the typed pydantic response + OpenAPI schema land now.
+        Fully library-backed: builds the payload via
+        ``lib.investigation_status.build_iset_summary`` and supplies the
+        runs-presence signal from the simulations index — no dependency on the
+        stdlib server module.
         """
-        # Imported lazily so the heavy stdlib server module only loads when this
-        # route is actually used, keeping import of the FastAPI app light.
-        from vivarium_dashboard import server
+        run_slugs = investigation_status.study_run_slugs(ws)
 
-        return [
-            InvestigationSummary.model_validate(d)
-            for d in server._build_iset_summary_for_test(ws)
-        ]
+        def study_has_runs(slug: str, spec: dict) -> bool:
+            # Parity with the stdlib path's _count_runs_for_study(...) > 0:
+            # a study has runs if the index records one, or its spec lists runs.
+            return slug in run_slugs or bool((spec or {}).get("runs"))
+
+        summaries = investigation_status.build_iset_summary(ws, study_has_runs=study_has_runs)
+        return [InvestigationSummary.model_validate(d) for d in summaries]
 
     return app
 

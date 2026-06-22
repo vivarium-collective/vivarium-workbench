@@ -78,8 +78,6 @@ def test_iset_list_typed_passthrough(client, monkeypatch):
     """The route validates the builder's output through InvestigationSummary —
     including the untyped `lifecycle` passthrough (not stripped) and the minimal
     {name, error} parse-failure variant."""
-    from vivarium_dashboard import server
-
     summaries = [
         {"name": "inv-a", "title": "Inv A", "status": "active",
          "effective_status": "in-progress", "description": "d", "question": "q",
@@ -87,7 +85,10 @@ def test_iset_list_typed_passthrough(client, monkeypatch):
          "lifecycle": {"phase": "run", "extra": 1}, "current": True},
         {"name": "inv-bad", "error": "parse failed: boom"},
     ]
-    monkeypatch.setattr(server, "_build_iset_summary_for_test", lambda ws: summaries)
+    monkeypatch.setattr(
+        api_app.investigation_status, "build_iset_summary",
+        lambda ws, **kw: summaries,
+    )
 
     body = client.get("/api/iset-list").json()
     assert body[0]["studies"] == ["s1", "s2"]
