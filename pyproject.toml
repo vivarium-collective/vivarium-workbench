@@ -23,6 +23,11 @@ dependencies = [
 [project.optional-dependencies]
 viz = ["matplotlib", "imageio", "numpy"]
 dev = ["pytest>=7.4", "pytest-timeout", "pytest-json-report>=1.5"]
+# Optional readers used only by parts of the test suite (parquet/zarr run
+# stores). Without them those tests skip (via pytest.importorskip) rather than
+# fail. Install with: uv pip install -e ".[dev,test]". See CONTRIBUTING.md.
+# (zarr is needed alongside xarray for DataTree.to_zarr in the zarr tests.)
+test = ["polars", "xarray", "zarr", "pyarrow"]
 
 [project.scripts]
 vivarium-dashboard = "vivarium_dashboard.cli:main"

@@ -13,8 +13,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import polars as pl
 import pytest
+
+# This whole module exercises the parquet reader path, which needs polars
+# (an optional dep). Skip the module cleanly when it isn't installed.
+pl = pytest.importorskip("polars")
 
 from vivarium_dashboard.lib.study_charts import (
     _emitter_choice,

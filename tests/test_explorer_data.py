@@ -149,6 +149,7 @@ def test_explorer_assets_are_valid_json():
 # ---------------------------------------------------------------------------
 
 def make_fake_zarr(store_path, n_steps=4, n_rxn=3):
+    pytest.importorskip("xarray")  # zarr tests need xarray (optional dep)
     import numpy as np
     import xarray as xr
 

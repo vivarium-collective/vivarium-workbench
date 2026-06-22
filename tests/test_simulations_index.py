@@ -1,6 +1,7 @@
 """Unit tests for vivarium_dashboard.lib.simulations_index."""
 from pathlib import Path
 
+import pytest
 import yaml
 
 from vivarium_dashboard.lib.composite_runs import connect, save_metadata
@@ -490,6 +491,7 @@ def _write_parquet_hive(study_dir, experiment_id, *,
     history/ (the captured trajectory), and an empty success/ subdir
     when ``completed=True`` so the scanner reads ``status=completed``.
     """
+    pytest.importorskip("polars")  # parquet runs need polars (optional dep)
     import polars as pl
     exp = study_dir / "parquet-runs" / experiment_id
     # History — minimal columns the scanner reads (only the row count
