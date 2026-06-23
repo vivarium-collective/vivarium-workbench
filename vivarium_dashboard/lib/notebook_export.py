@@ -281,44 +281,148 @@ def _parameters_md(study: dict, recipes: list[dict], package: str) -> str:
 
 
 _COMPOSITE_INTRO_MD = (
-    "### Composite structure (process-bigraph)\n\n"
+    "### Specification (process-bigraph) — load, inspect, edit\n\n"
     "Each composite is a process-bigraph *document*: named processes "
     "(`_type: process`) bound to an `address`, wired by `inputs`/`outputs` "
-    "ports over shared stores. The cell below loads the spec, lists its "
-    "processes, configuration parameters and wiring, then realizes it as a "
-    "live `Composite` and shows the resulting store tree."
+    "ports over shared stores. For every composite below the first cell loads "
+    "the spec into a plain **editable Python dict** and prints its structure; "
+    "the second cell is a **control panel** listing every configuration value "
+    "and per-process `interval` so you can tweak any of them. Your edits are "
+    "read when the composite is built and run, in the **Run** section."
 )
 
 
-def _composite_code(package: str, spec_id: str) -> str:
+def _py_ident(name: Any) -> str:
+    """A safe Python identifier fragment from a spec/sim name."""
+    import re
+
+    s = re.sub(r"\W+", "_", str(name or "")).strip("_")
+    if not s or s[0].isdigit():
+        s = "x_" + s
+    return s or "x"
+
+
+def _spec_var(spec_id: str) -> str:
+    return f"spec_{_py_ident(spec_id)}"
+
+
+def _load_inspect_code(package: str, spec_id: str, var: str) -> str:
     comp_rel = f"{package}/composites/{spec_id}.composite.yaml"
-    return f'''from pbg_superpowers.composite_spec import load_spec, build_composite_from_spec
+    return (
+        "from pbg_superpowers.composite_spec import load_spec\n"
+        f"{var} = load_spec(REPO / {comp_rel!r})\n"
+        f"describe_spec({var})"
+    )
 
-spec = load_spec(REPO / {comp_rel!r})
-print("composite:", spec.get("name"))
-if spec.get("description"):
-    print("description:", spec["description"])
 
-print("\\nparameters (overridable):")
-for _p, _pdef in (spec.get("parameters") or {{}}).items():
-    print(f"  {{_p}}: default={{_pdef.get('default')!r}}  type={{_pdef.get('type')}}")
+def _is_scalar(v: Any) -> bool:
+    return isinstance(v, (str, int, float, bool)) or v is None
 
-print("\\nprocesses  (node -> address):")
-for _node, _body in (spec.get("state") or {{}}).items():
-    if not (isinstance(_body, dict) and _body.get("_type") == "process"):
-        continue
-    print(f"  {{_node}}  ->  {{_body.get('address')}}")
-    for _k, _v in (_body.get("config") or {{}}).items():
-        _vs = _v if not isinstance(_v, (dict, list)) else f"<{{type(_v).__name__}}, {{len(_v)}} entries>"
-        print(f"      config.{{_k}} = {{_vs}}")
-    for _port in ("inputs", "outputs"):
-        if _body.get(_port):
-            print(f"      {{_port}} ports: {{_body[_port]}}")
 
-# Realize the document as a live process-bigraph Composite.
-with quiet():  # building loads the simulators, which can be chatty
-    _comp = build_composite_from_spec(spec, core=core)
-print("\\nrealized composite — top-level stores:", list(_comp.state))'''
+def _leaf_assignments(prefix: str, value: Any, out: list[str]) -> None:
+    """Emit `<prefix> = <repr>` lines for every scalar leaf under ``value``.
+
+    Scalar-only lists are emitted whole; nested dicts/lists recurse so the
+    control panel reaches every editable knob (mirrors the cylindermodel
+    notebook, which sets each parameter explicitly)."""
+    if isinstance(value, dict):
+        for k, v in value.items():
+            _leaf_assignments(f"{prefix}[{k!r}]", v, out)
+    elif isinstance(value, list):
+        if all(_is_scalar(x) for x in value):
+            out.append(f"{prefix} = {value!r}")
+        else:
+            for i, v in enumerate(value):
+                _leaf_assignments(f"{prefix}[{i}]", v, out)
+    else:
+        out.append(f"{prefix} = {value!r}")
+
+
+def _control_panel_code(var: str, spec: dict) -> str:
+    """A flat, fully editable assignment list for one composite's parameters."""
+    lines = [
+        f"# === Edit parameters for composite {spec.get('name')!r} ===",
+        "# Each line is the spec's CURRENT value — change any, then run the Run cell",
+        "# below. The spec is a plain dict, so you may also add or remove keys.",
+        "",
+    ]
+    params = spec.get("parameters") or {}
+    if params:
+        lines.append("# tunable parameters (filled into ${name} placeholders):")
+        for p, pdef in params.items():
+            if isinstance(pdef, dict) and "default" in pdef:
+                lines.append(f"{var}['parameters'][{p!r}]['default'] = {pdef.get('default')!r}")
+        lines.append("")
+    for node, body in (spec.get("state") or {}).items():
+        if not (isinstance(body, dict) and body.get("_type") == "process"):
+            continue
+        lines.append(f"# process {node!r}  ({body.get('address')})")
+        iv = body.get("interval")
+        if isinstance(iv, str) and iv.strip().startswith("${"):
+            lines.append(
+                f"# {var}['state'][{node!r}]['interval'] = 0.01"
+                "   # pin this process's dt (else filled by INTERVAL below)"
+            )
+        elif iv is not None:
+            lines.append(f"{var}['state'][{node!r}]['interval'] = {iv!r}")
+        leaves: list[str] = []
+        _leaf_assignments(f"{var}['state'][{node!r}]['config']", body.get("config") or {}, leaves)
+        lines.extend(leaves)
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def _run_code(slug: str, studies_rel: str, recipes: list[dict],
+              spec_vars: dict[str, str], strat: dict) -> str:
+    """The Run cell: editable runtime/interval knobs + build-and-run per sim."""
+    lines = [
+        f"# === Study: {slug} ===",
+        f"STUDY = {slug!r}",
+        f"STUDY_DIR = REPO / {studies_rel!r} / STUDY",
+        'STUDY_YAML = str(STUDY_DIR / "study.yaml")',
+        'RUNS_DB = str(STUDY_DIR / "runs.db")',
+        "",
+    ]
+    if not recipes:
+        lines.append('print("No recorded runs for this study; nothing to reproduce.")')
+        return "\n".join(lines)
+
+    lines += [
+        "# Runtime knobs — edit freely. STEPS = number of composite steps;",
+        "# INTERVAL = global dt filling ${interval} placeholders (a per-process",
+        "# interval pinned in the edit cell above takes precedence).",
+    ]
+    for r in recipes:
+        sl = _py_ident(r["sim"])
+        lines.append(f"STEPS_{sl} = {int(r['n_steps'])}")
+        lines.append(f"INTERVAL_{sl} = {r['params'].get('interval', 0.1)!r}")
+    lines.append("")
+    lines.append("if RERUN:")
+    lines.append("    with quiet():  # the sim prints per-step progress; keep it out of the notebook")
+    if strat["run_kind"] == "scripts":
+        for r in recipes:
+            sl = _py_ident(r["sim"])
+            var = spec_vars[r["spec_id"]]
+            lines.append(
+                f"        # sim {r['sim']!r} <- edited composite spec {var} ({r['spec_id']!r})"
+            )
+            lines.append(
+                f"        run_study(STUDY, {r['sim']!r}, {var}, STEPS_{sl}, INTERVAL_{sl})"
+            )
+    else:
+        lines.append("        # Generic process-bigraph protocol (no workspace runner detected):")
+        lines.append("        from pbg_superpowers.composite_spec import build_composite_from_spec")
+        for r in recipes:
+            sl = _py_ident(r["sim"])
+            var = spec_vars[r["spec_id"]]
+            lines.append(
+                f"        comp = build_composite_from_spec({var}, {{'interval': INTERVAL_{sl}}}, core=core)"
+            )
+            lines.append(f"        comp.run(STEPS_{sl})  # writes the composite's declared emitter")
+    lines.append(f"    print(f'ran {len(recipes)} simulation(s) -> {{RUNS_DB}}')")
+    lines.append("else:")
+    lines.append('    print("RERUN=False — rendering committed", RUNS_DB)')
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -385,6 +489,31 @@ RERUN = True
         "        '</iframe>'.format(_htmlmod.escape(_h, quote=True), height)\n"
         "    ))"
     )
+    src += (
+        "\n\nimport json as _json\n"
+        "def describe_spec(spec):\n"
+        '    """Print a composite spec\'s structure (parameters, processes, wiring)\n'
+        "    then the full editable dict. The spec is plain data — assign to any\n"
+        '    field (e.g. spec[\'state\'][proc][\'config\'][...]) before building."""\n'
+        '    print("composite:", spec.get("name"))\n'
+        '    if spec.get("description"):\n'
+        '        print("description:", str(spec["description"]).strip())\n'
+        '    _params = spec.get("parameters") or {}\n'
+        "    if _params:\n"
+        '        print("\\nparameters (filled into ${name} placeholders):")\n'
+        "        for _p, _pdef in _params.items():\n"
+        "            print(f\"  {_p}: default={_pdef.get('default')!r}  type={_pdef.get('type')}\")\n"
+        '    print("\\nprocesses (node -> address):")\n'
+        '    for _node, _body in (spec.get("state") or {}).items():\n'
+        '        if not (isinstance(_body, dict) and _body.get("_type") == "process"):\n'
+        "            continue\n"
+        "        print(f\"  {_node}  ->  {_body.get('address')}   interval={_body.get('interval')!r}\")\n"
+        '        for _port in ("inputs", "outputs"):\n'
+        "            if _body.get(_port):\n"
+        '                print(f"      {_port} ports: {_body[_port]}")\n'
+        '    print("\\nfull editable spec dict:")\n'
+        "    print(_json.dumps(spec, indent=2, default=str))"
+    )
     return [_code(src)]
 
 
@@ -403,69 +532,32 @@ def _study_blocks(ws_root: Path, layout: dict, slug: str, strat: dict) -> list[d
     # --- parameters (no results) ---
     blocks.append(_md(_parameters_md(study, recipes, package)))
 
-    # --- process-bigraph composite structure (one cell per unique composite) ---
+    # --- editable spec: one load/inspect + control-panel cell per composite ---
     seen_specs: list[str] = []
     for r in recipes:
         if r["spec_id"] not in seen_specs:
             seen_specs.append(r["spec_id"])
+    spec_vars = {sid: _spec_var(sid) for sid in seen_specs}
+    composites_dir = ws_root / package / "composites"
     if seen_specs:
         blocks.append(_md(_COMPOSITE_INTRO_MD))
         for spec_id in seen_specs:
-            blocks.append(_md(f"**Composite `{spec_id}`**"))
-            blocks.append(_code(_composite_code(package, spec_id)))
+            var = spec_vars[spec_id]
+            blocks.append(_md(f"**Composite `{spec_id}`** — `{var}` (a plain, editable dict)"))
+            blocks.append(_code(_load_inspect_code(package, spec_id, var)))
+            comp_path = composites_dir / f"{spec_id}.composite.yaml"
+            if comp_path.is_file():
+                blocks.append(_code(_control_panel_code(var, _load_yaml(comp_path))))
 
-    # --- per-study path constants + run cell ---
-    run_lines = [
-        f'# === Study: {slug} ===',
-        f'STUDY = {slug!r}',
-        f'STUDY_DIR = REPO / {studies_rel!r} / STUDY',
-        'STUDY_YAML = str(STUDY_DIR / "study.yaml")',
-        'RUNS_DB = str(STUDY_DIR / "runs.db")',
-        '',
-    ]
-    if recipes and strat["run_kind"] == "scripts":
-        run_lines.append("if RERUN:")
-        run_lines.append("    with quiet():  # the sim prints per-step progress; keep it out of the notebook")
-        for r in recipes:
-            spec_id = r["spec_id"]
-            sim = r["sim"]
-            steps = r["n_steps"]
-            interval = r["params"].get("interval", 0.1)
-            comp_rel = f"{package}/composites/{spec_id}.composite.yaml"
-            run_lines.append(
-                f"        # sim {sim!r}: composite {spec_id!r}, {steps} steps, interval {interval}"
-            )
-            run_lines.append(
-                f"        run_study(STUDY, {sim!r}, str(REPO / {comp_rel!r}), {steps}, {interval})"
-            )
-        run_lines.append(f"    print(f'ran {len(recipes)} simulation(s) -> {{RUNS_DB}}')")
-        run_lines.append("else:")
-        run_lines.append('    print("RERUN=False — rendering committed", RUNS_DB)')
-    elif recipes and strat["run_kind"] == "generic":
-        run_lines.append("# Generic process-bigraph protocol (no workspace runner detected):")
-        run_lines.append("from pbg_superpowers.composite_spec import load_spec, build_composite_from_spec")
-        run_lines.append("if RERUN:")
-        run_lines.append("    with quiet():  # the sim prints per-step progress; keep it out of the notebook")
-        for r in recipes:
-            spec_id = r["spec_id"]
-            steps = r["n_steps"]
-            params = r["params"]
-            comp_rel = f"{package}/composites/{spec_id}.composite.yaml"
-            overrides = {k: v for k, v in params.items() if k != "steps"}
-            run_lines.append(
-                f"        spec = load_spec(REPO / {comp_rel!r})"
-            )
-            run_lines.append(
-                f"        comp = build_composite_from_spec(spec, {overrides!r}, core=core)"
-            )
-            run_lines.append(f"        comp.run({steps})  # writes the composite's declared emitter")
-        run_lines.append(f"    print(f'ran {len(recipes)} simulation(s) -> {{RUNS_DB}}')")
-        run_lines.append("else:")
-        run_lines.append('    print("RERUN=False — rendering committed", RUNS_DB)')
-    else:
-        run_lines.append('print("No recorded runs for this study; nothing to reproduce.")')
-
-    blocks.append(_code("\n".join(run_lines)))
+    # --- run section: editable runtime/interval, build & run the edited spec ---
+    blocks.append(
+        _md(
+            "### Run\n\n_Set the runtime (`STEPS`) and step size (`INTERVAL`), then run. "
+            "Each simulation builds the (edited) spec above and writes `runs.db`; the "
+            "figures below read it. Set `RERUN = False` to skip re-simulating._"
+        )
+    )
+    blocks.append(_code(_run_code(slug, studies_rel, recipes, spec_vars, strat)))
 
     # --- per-visualization render blocks ---
     # The figures ARE the results — text stays parameter-only, so the authored

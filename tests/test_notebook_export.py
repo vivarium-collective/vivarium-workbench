@@ -142,7 +142,7 @@ def test_text_states_parameters_not_results(tmp_path: Path):
     # design intent + structure sections are present
     assert "Can parameter K drive the widget count?" in md
     assert "### Parameters" in md
-    assert "Composite structure (process-bigraph)" in md
+    assert "Specification (process-bigraph) — load, inspect, edit" in md
     assert "### Acceptance criteria" in md
 
     # parameters and pre-registered thresholds are kept
@@ -172,13 +172,32 @@ def test_process_bigraph_section_and_recipe(tmp_path: Path):
     assert "12" in code and "0.05" in code
 
 
+def test_editable_spec_control_panel(tmp_path: Path):
+    """The spec is loaded into an editable dict and every config value + the
+    ${}-parameters are surfaced as assignment lines the user can tweak."""
+    inv = _build_workspace(tmp_path)
+    out = export_investigation_notebook(tmp_path, inv)
+    code = _code_text(json.loads(out["ipynb"].read_text()))
+
+    # spec loaded into an editable, named dict and described (not silently built)
+    assert "spec_demo = load_spec(REPO / 'demo_pkg/composites/demo.composite.yaml')" in code
+    assert "describe_spec(spec_demo)" in code
+    # control panel surfaces the ${}-parameter default and every config leaf
+    assert "spec_demo['parameters']['interval']['default'] = 0.05" in code
+    assert "spec_demo['state']['Proc']['config']['k'] = 1" in code
+    # the assignment list is valid Python (also covered by the compile test)
+    compile(out["py"].read_text(), str(out["py"]), "exec")
+
+
 def test_run_strategy_generic_vs_scripts(tmp_path: Path):
     inv = _build_workspace(tmp_path)
 
-    # no scripts/ → generic process-bigraph run path
+    # no scripts/ → generic process-bigraph run path, driven by editable knobs
     out = export_investigation_notebook(tmp_path, inv)
     code = _code_text(json.loads(out["ipynb"].read_text()))
-    assert "comp.run(12)" in code
+    assert "STEPS_main = 12" in code           # runtime knob seeded from the recipe
+    assert "comp.run(STEPS_main)" in code      # run uses the editable knob, not a literal
+    assert "build_composite_from_spec(spec_demo" in code  # builds the editable spec dict
     assert "run_study(" not in code
 
     # add the workspace's bespoke runner + renderer → scripts path is discovered
