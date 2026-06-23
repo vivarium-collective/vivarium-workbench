@@ -44,6 +44,8 @@ _MODELS: list[type[BaseModel]] = [
     _models.RemoteRunJob,
     _models.ChartPayload,
     _models.StudyChartsPayload,
+    _models.DashConfig,
+    _models.InvestigationSummary,
 ]
 
 OUTPUT_PATH = (
@@ -94,6 +96,8 @@ def _ts_type(tp: object) -> str:
         return "number"
     if tp is bool:
         return "boolean"
+    if tp is typing.Any:
+        return "any"
 
     # Nested model -> reference by name.
     if isinstance(tp, type) and issubclass(tp, BaseModel):

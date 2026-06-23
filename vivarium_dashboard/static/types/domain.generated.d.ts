@@ -69,3 +69,23 @@ export interface ChartPayload {
 export interface StudyChartsPayload {
   charts: ChartPayload[];
 }
+
+export interface DashConfig {
+  mode: string;
+  basePath: string | null;
+}
+
+export interface InvestigationSummary {
+  name: string;
+  title: string | null;
+  status: string | null;
+  effective_status: string | null;
+  description: string | null;
+  question: string | null;
+  hypothesis: string | null;
+  n_studies: number | null;
+  studies: string[];
+  lifecycle: any;
+  current: boolean | null;
+  error: string | null;
+}
