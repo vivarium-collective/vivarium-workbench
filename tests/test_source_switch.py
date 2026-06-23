@@ -1,4 +1,5 @@
 from pathlib import Path
+import yaml
 from vivarium_dashboard import server
 from vivarium_dashboard.lib import _root
 from vivarium_dashboard.lib.data_sources import _DATA_SOURCES_CACHE
@@ -82,3 +83,27 @@ def test_index_template_includes_source_switch():
     t = (Path(server.__file__).parent / "templates" / "index.html.j2").read_text(encoding="utf-8")
     assert "source-switch.js" in t
     assert "viv-source-switch" in t
+
+
+def _make_ws(d, name):
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "workspace.yaml").write_text(yaml.safe_dump({"name": name}))
+    return d
+
+
+def test_one_server_switches_between_two_workspaces(tmp_path):
+    a = _make_ws(tmp_path / "wa", "alpha")
+    b = _make_ws(tmp_path / "wb", "beta")
+
+    def active_name():
+        root = _root.get_workspace_root()
+        return yaml.safe_load((root / "workspace.yaml").read_text())["name"]
+
+    server._switch_active_workspace(a)
+    assert server.WORKSPACE == a and active_name() == "alpha"
+
+    server._switch_active_workspace(b)
+    assert server.WORKSPACE == b and active_name() == "beta"   # re-pointed, no restart
+
+    server._switch_active_workspace(a)
+    assert active_name() == "alpha"                             # and back
