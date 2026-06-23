@@ -359,6 +359,7 @@ window.addEventListener('pageshow', function (e) {
         <strong>Vivarium</strong>
         <small>dashboard</small>
       </div>
+      <span id="viv-source-switch" class="viv-source-switch"></span>
     </div>
 
     {% if repo_url %}
@@ -1649,6 +1650,7 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
      (investigation-switcher.js). The /api/workspaces endpoints remain available
      for CLI tooling. -->
 <script src="assets/investigation-switcher.js"></script>
+<script src="assets/source-switch.js"></script>
 <script>
 // Initialize drop zones once walkthrough.js is loaded.
 document.addEventListener("DOMContentLoaded", function() {

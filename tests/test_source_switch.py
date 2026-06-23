@@ -4,6 +4,10 @@ from vivarium_dashboard.lib import _root
 from vivarium_dashboard.lib.data_sources import _DATA_SOURCES_CACHE
 
 
+def _static(name):
+    return (Path(server.__file__).parent / "static" / name).read_text(encoding="utf-8")
+
+
 def test_switch_active_workspace_repoints_and_invalidates(tmp_path):
     a = tmp_path / "a"; (a).mkdir(); (a / "workspace.yaml").write_text("name: a\n")
     b = tmp_path / "b"; (b).mkdir(); (b / "workspace.yaml").write_text("name: b\n")
@@ -64,3 +68,17 @@ def test_source_switch_accepts_registered_path(tmp_path, monkeypatch):
     assert captured["code"] == 200
     assert captured["obj"]["ok"] is True
     assert server.WORKSPACE == ws.resolve()
+
+
+def test_source_switch_js_present_and_wired():
+    js = _static("source-switch.js")
+    assert "/api/workspaces" in js          # lists the catalog
+    assert "/api/source/switch" in js       # POSTs the switch
+    assert "window.location.reload" in js   # reload after switch
+    assert "viv-source-switch" in js        # the control id
+
+
+def test_index_template_includes_source_switch():
+    t = (Path(server.__file__).parent / "templates" / "index.html.j2").read_text(encoding="utf-8")
+    assert "source-switch.js" in t
+    assert "viv-source-switch" in t
