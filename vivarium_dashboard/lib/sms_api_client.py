@@ -43,6 +43,27 @@ class SmsApiClient:
     def simulator_status(self, simulator_id: int) -> dict:
         return self._get("/core/v1/simulator/status", {"simulator_id": simulator_id})
 
+    def list_simulators(self) -> dict:
+        """GET /core/v1/simulator/versions — all registered simulator builds."""
+        return self._get("/core/v1/simulator/versions")
+
+    def download_workspace(self, simulator_id: int, dest_dir: Path) -> Path:
+        """Stream a build's repo@commit workspace tarball (SP1's endpoint) to
+        dest_dir/workspace.tar.gz."""
+        dest_dir = Path(dest_dir)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        out_path = dest_dir / "workspace.tar.gz"
+        url = f"{self.base_url}/api/v1/simulations/workspace?simulator_id={simulator_id}"
+        req = Request(url, method="GET", headers={"Accept": "application/gzip"})
+        try:
+            with urlopen(req, timeout=self.timeout) as r, open(out_path, "wb") as f:  # noqa: S310
+                shutil.copyfileobj(r, f)
+        except HTTPError as e:
+            raise SmsApiError(f"GET {url} -> {e.code}") from e
+        except (URLError, OSError) as e:
+            raise SmsApiError(f"GET {url} failed (sms-api unreachable — is the tunnel up?): {e}") from e
+        return out_path
+
     def simulation_status(self, simulation_id: int) -> dict:
         return self._get(f"/api/v1/simulations/{simulation_id}/status")
 
