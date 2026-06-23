@@ -5,21 +5,49 @@
 (function () {
   "use strict";
 
+  function _localOption(ws) {
+    const opt = document.createElement("option");
+    opt.value = "local:" + ws.path;
+    opt.textContent = ws.name || ws.path;
+    if (ws.status === "current") opt.selected = true;
+    return opt;
+  }
+
   async function _populate(sel) {
+    sel.innerHTML = "";
+    // Local workspaces (existing catalog).
     try {
       const r = await fetch("/api/workspaces");
-      if (!r.ok) return;
-      const data = await r.json();
-      const items = (data && data.workspaces) || data || [];
-      sel.innerHTML = "";
-      items.forEach(function (ws) {
-        const opt = document.createElement("option");
-        opt.value = ws.path;
-        opt.textContent = ws.name || ws.path;
-        if (ws.status === "current") opt.selected = true;
-        sel.appendChild(opt);
-      });
-    } catch (e) { /* offline / static mode — leave empty */ }
+      if (r.ok) {
+        const data = await r.json();
+        const items = (data && data.workspaces) || data || [];
+        if (items.length) {
+          const g = document.createElement("optgroup");
+          g.label = "Local";
+          items.forEach(function (ws) { g.appendChild(_localOption(ws)); });
+          sel.appendChild(g);
+        }
+      }
+    } catch (e) { /* offline */ }
+    // Remote sms-api builds (best-effort).
+    try {
+      const r = await fetch("/api/source/builds");
+      if (r.ok) {
+        const data = await r.json();
+        const builds = (data && data.builds) || [];
+        if (builds.length) {
+          const g = document.createElement("optgroup");
+          g.label = "Builds";
+          builds.forEach(function (b) {
+            const opt = document.createElement("option");
+            opt.value = "build:" + b.simulator_id;
+            opt.textContent = b.label;
+            g.appendChild(opt);
+          });
+          sel.appendChild(g);
+        }
+      }
+    } catch (e) { /* sms-api down — Local only */ }
   }
 
   async function _switch(path) {
@@ -39,12 +67,35 @@
     }
   }
 
+  async function _switchBuild(simulatorId, sel) {
+    if (sel) { sel.disabled = true; }   // "Loading build…" — first select downloads
+    const r = await fetch("/api/source/switch-build", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ simulator_id: Number(simulatorId) }),
+    });
+    if (r.ok) {
+      try { sessionStorage.setItem("viv-source-switched", "1"); } catch (e) {}
+      window.location.reload();
+    } else {
+      if (sel) { sel.disabled = false; }
+      const d = await r.json().catch(function () { return {}; });
+      alert("Switch failed: " + (d.error || r.status));
+    }
+  }
+
+  function _onChange(sel) {
+    const v = sel.value || "";
+    if (v.indexOf("build:") === 0) { _switchBuild(v.slice(6), sel); }
+    else if (v.indexOf("local:") === 0) { _switch(v.slice(6)); }
+  }
+
   function _mount() {
     const host = document.getElementById("viv-source-switch");
     if (!host) return;
     const sel = document.createElement("select");
     sel.id = "viv-source-switch-select";
-    sel.addEventListener("change", function () { _switch(sel.value); });
+    sel.addEventListener("change", function () { _onChange(sel); });
     host.appendChild(sel);
     _populate(sel);
     try {

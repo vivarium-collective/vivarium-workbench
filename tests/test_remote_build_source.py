@@ -218,3 +218,13 @@ def test_switch_build_materialize_failure_502_leaves_state_unchanged(monkeypatch
     server.Handler._post_source_switch_build(H(), {"simulator_id": 45})
     assert captured["code"] == 502
     assert switched == {}  # switch never fired → active workspace unchanged
+
+
+def test_source_switch_js_has_builds_section():
+    from pathlib import Path
+    from vivarium_dashboard import server
+    js = (Path(server.__file__).parent / "static" / "source-switch.js").read_text()
+    assert "/api/source/builds" in js
+    assert "/api/source/switch-build" in js
+    assert "optgroup" in js
+    assert "simulator_id" in js
