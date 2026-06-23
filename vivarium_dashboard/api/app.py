@@ -27,12 +27,14 @@ from fastapi import Depends, FastAPI
 
 from vivarium_dashboard.lib import data_sources as _data_sources
 from vivarium_dashboard.lib import investigation_status
+from vivarium_dashboard.lib import saved_visualizations as _saved_viz
 from vivarium_dashboard.lib.models import (
     BibEntry,
     DashConfig,
     DataSourcesPayload,
     InvestigationSummary,
     ReferencesBibPayload,
+    SavedVisualizationsPayload,
     SimRow,
     SimulationsPayload,
 )
@@ -113,6 +115,13 @@ def create_app() -> FastAPI:
         except Exception:
             pass  # cache failures must never break the references view
         return ReferencesBibPayload(entries=[BibEntry.model_validate(e) for e in entries])
+
+    @app.get("/api/saved-visualizations", response_model=SavedVisualizationsPayload)
+    def saved_visualizations(ws: Path = Depends(get_workspace)) -> SavedVisualizationsPayload:
+        """Saved interactive visualizations (3D packs, report cards, PTools TSVs),
+        via lib.saved_visualizations — no stdlib server dependency."""
+        return SavedVisualizationsPayload.model_validate(
+            _saved_viz.build_saved_visualizations(ws))
 
     return app
 

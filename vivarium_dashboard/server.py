@@ -49,6 +49,7 @@ from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 from vivarium_dashboard.lib.atomic_io import atomic_write_text
 from vivarium_dashboard.lib import investigation_status as _invstatus
 from vivarium_dashboard.lib import data_sources as _data_sources_lib
+from vivarium_dashboard.lib import saved_visualizations as _savedviz_lib
 from vivarium_dashboard.lib.investigation_status import (
     compute_investigation_status,
     _STUDY_STATUS_FAILED,
@@ -2584,24 +2585,10 @@ def _iter_study_dirs():
                 yield d
 
 
-def _parsimony_viewer_dir():
-    """Return the bundled ``pbg_parsimony`` viewer asset dir, or None when the
-    optional ``pbg_parsimony`` package is not installed.
-
-    Feature-detect seam for the ``/parsimony-viewer/*`` static route and the
-    Analyses 3D gallery — the parsimony cards/routes only appear when this
-    returns a real directory, mirroring how other optional integrations
-    (e.g. bigraph-loom) are gated.
-    """
-    try:
-        import importlib.util
-        spec = importlib.util.find_spec("pbg_parsimony")
-        if spec is None or not spec.origin:
-            return None
-        d = Path(spec.origin).parent / "viewer"
-        return d if d.is_dir() else None
-    except Exception:
-        return None
+# Saved-visualizations discovery + the parsimony feature-detect moved to
+# lib.saved_visualizations; these aliases keep the existing call-sites (the
+# /parsimony-viewer/* static route + the /api/saved-visualizations handler).
+_parsimony_viewer_dir = _savedviz_lib.parsimony_viewer_dir
 
 
 def _build_saved_visualizations(ws_root) -> dict:
@@ -2624,111 +2611,7 @@ def _build_saved_visualizations(ws_root) -> dict:
 
     Pure (no socket I/O) so tests can call it with an explicit ``ws_root``.
     """
-    ws_root = Path(ws_root)
-    wp = WorkspacePaths.load(ws_root)
-    saved: list[dict] = []
-    ptools_studies: list[dict] = []
-    report_cards: list[dict] = []
-    for study_dir in wp.iter_study_dirs():
-        study = study_dir.name
-        # Saved comparison report cards — self-contained HTML produced by the
-        # vEcoli<->v2ecoli comparison harness (statistical-equivalence cards).
-        # Discovered like the 3D packs: a study writes them under
-        # ``viz/report_card/<name>.html`` (+ optional ``<name>.verdict.json``
-        # sidecar carrying the ``overall`` verdict for the gallery badge).
-        rc_dir = study_dir / "viz" / "report_card"
-        if rc_dir.is_dir():
-            for rep in sorted(rc_dir.glob("*.html")):
-                try:
-                    rel = rep.relative_to(ws_root).as_posix()
-                except ValueError:
-                    continue
-                verdict = None
-                vfile = rep.with_name(rep.name[: -len(".html")] + ".verdict.json")
-                if vfile.is_file():
-                    try:
-                        verdict = json.loads(
-                            vfile.read_text(encoding="utf-8")).get("overall")
-                    except Exception:
-                        verdict = None
-                try:
-                    created = int(rep.stat().st_mtime)
-                except Exception:
-                    created = None
-                report_cards.append({
-                    "study": study,
-                    "name": rep.name[: -len(".html")],
-                    "url": "/" + rel,
-                    "verdict": verdict,
-                    "created": created,
-                })
-        viz3d = study_dir / "viz" / "3d"
-        if viz3d.is_dir():
-            for pack in sorted(viz3d.glob("*.pack.json")):
-                try:
-                    rel = pack.relative_to(ws_root).as_posix()
-                except ValueError:
-                    continue
-                meta = pack.with_name(pack.name.replace(".pack.json", ".meta.json"))
-                meta_url = None
-                n_placed = None
-                if meta.is_file():
-                    try:
-                        meta_url = "/" + meta.relative_to(ws_root).as_posix()
-                    except ValueError:
-                        meta_url = None
-                    try:
-                        md = json.loads(meta.read_text(encoding="utf-8"))
-                        ing = md.get("ingredients") or {}
-                        total = sum(
-                            int(v.get("count", 0))
-                            for v in ing.values() if isinstance(v, dict)
-                        )
-                        n_placed = total or None
-                    except Exception:
-                        n_placed = None
-                try:
-                    created = int(pack.stat().st_mtime)
-                except Exception:
-                    created = None
-                saved.append({
-                    "study": study,
-                    "name": pack.name[: -len(".pack.json")],
-                    "pack_url": "/" + rel,
-                    "meta_url": meta_url,
-                    "n_placed": n_placed,
-                    "created": created,
-                })
-        if sorted(study_dir.glob("**/ptools/*.tsv")):
-            ptools_studies.append({
-                "study": study,
-                "n_tsvs": len(sorted(study_dir.glob("**/ptools/*.tsv"))),
-            })
-
-    try:
-        ws = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
-    except Exception:
-        ws = {}
-    ui = ws.get("ui") or {}
-    ptools_configured = bool(str(ui.get("ptools_server_url", "")).strip())
-
-    # Optional per-pack external viewer URL (ui.viz_viewer_urls: {<pack-name>: url}).
-    # When set, the Analyses card links + embeds that URL instead of the bundled
-    # gh-pages viewer — e.g. to serve a heavy pack from Cloudflare R2 (no GitHub
-    # Pages rate-limiting). Keyed by pack name (e.g. "ecoli_3d").
-    viewer_urls = ui.get("viz_viewer_urls") or {}
-    if isinstance(viewer_urls, dict):
-        for entry in saved:
-            url = viewer_urls.get(entry["name"])
-            if url:
-                entry["viewer_url"] = str(url)
-
-    return {
-        "parsimony_available": _parsimony_viewer_dir() is not None,
-        "saved": saved,
-        "ptools": {"configured": ptools_configured, "studies": ptools_studies},
-        "report_cards": report_cards,
-    }
+    return _savedviz_lib.build_saved_visualizations(ws_root)
 
 
 def _iter_iset_dirs(ws_root: Path | None = None):

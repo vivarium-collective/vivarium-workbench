@@ -136,10 +136,42 @@ def test_references_bib_preserves_extra_fields(client, monkeypatch):
     assert e["weird_field"] == "xyz"    # preserved, not stripped
 
 
+def test_saved_visualizations_empty(client):
+    """An empty workspace yields the typed empty bundle (no studies)."""
+    b = client.get("/api/saved-visualizations").json()
+    assert b["saved"] == []
+    assert b["report_cards"] == []
+    assert b["ptools"]["studies"] == []
+
+
+def test_saved_visualizations_typed(client, monkeypatch):
+    payload = {
+        "parsimony_available": True,
+        "saved": [{"study": "s1", "name": "ecoli_3d",
+                   "pack_url": "/studies/s1/viz/3d/ecoli_3d.pack.json",
+                   "meta_url": None, "n_placed": 1200, "created": 1700000000,
+                   "viewer_url": "http://x"}],
+        "ptools": {"configured": True, "studies": [{"study": "s1", "n_tsvs": 3}]},
+        "report_cards": [{"study": "s1", "name": "rc",
+                          "url": "/studies/s1/viz/report_card/rc.html",
+                          "verdict": "PASS", "created": 1700000001}],
+    }
+    monkeypatch.setattr(api_app._saved_viz, "build_saved_visualizations",
+                        lambda ws: payload)
+    b = client.get("/api/saved-visualizations").json()
+    assert b["parsimony_available"] is True
+    sv = b["saved"][0]
+    assert sv["name"] == "ecoli_3d" and sv["n_placed"] == 1200
+    assert sv["viewer_url"] == "http://x"
+    assert b["ptools"]["studies"][0]["n_tsvs"] == 3
+    assert b["report_cards"][0]["verdict"] == "PASS"
+
+
 def test_new_routes_in_openapi(client):
     components = client.get("/openapi.json").json()["components"]["schemas"]
     for name in ("DashConfig", "InvestigationSummary", "DataSourcesPayload",
-                 "DataSource", "BibEntry", "ReferencesBibPayload"):
+                 "DataSource", "BibEntry", "ReferencesBibPayload",
+                 "SavedVisualizationsPayload", "SavedViz", "ReportCard"):
         assert name in components
 
 

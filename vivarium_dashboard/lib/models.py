@@ -200,3 +200,44 @@ class ReferencesBibPayload(BaseModel):
     """``GET /api/references-bib`` payload (server.py ``_get_references_bib``)."""
 
     entries: list[BibEntry] = []
+
+
+class SavedViz(BaseModel):
+    """One saved 3D visualization pack (``saved`` list)."""
+
+    study: str
+    name: str
+    pack_url: str
+    meta_url: Optional[str] = None
+    n_placed: Optional[int] = None
+    created: Optional[int] = None
+    viewer_url: Optional[str] = None  # set only when ui.viz_viewer_urls maps it
+
+
+class PtoolsStudy(BaseModel):
+    study: str
+    n_tsvs: int
+
+
+class PtoolsInfo(BaseModel):
+    configured: bool = False
+    studies: list[PtoolsStudy] = []
+
+
+class ReportCard(BaseModel):
+    """One saved comparison report card (``report_cards`` list)."""
+
+    study: Optional[str] = None
+    name: str
+    url: str
+    verdict: Optional[str] = None
+    created: Optional[int] = None
+
+
+class SavedVisualizationsPayload(BaseModel):
+    """``GET /api/saved-visualizations`` payload (lib.saved_visualizations)."""
+
+    parsimony_available: bool = False
+    saved: list[SavedViz] = []
+    ptools: PtoolsInfo = PtoolsInfo()
+    report_cards: list[ReportCard] = []

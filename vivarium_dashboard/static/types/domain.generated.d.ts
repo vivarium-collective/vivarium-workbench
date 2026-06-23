@@ -120,3 +120,38 @@ export interface BibEntry {
 export interface ReferencesBibPayload {
   entries: BibEntry[];
 }
+
+export interface SavedViz {
+  study: string;
+  name: string;
+  pack_url: string;
+  meta_url: string | null;
+  n_placed: number | null;
+  created: number | null;
+  viewer_url: string | null;
+}
+
+export interface PtoolsStudy {
+  study: string;
+  n_tsvs: number;
+}
+
+export interface PtoolsInfo {
+  configured: boolean;
+  studies: PtoolsStudy[];
+}
+
+export interface ReportCard {
+  study: string | null;
+  name: string;
+  url: string;
+  verdict: string | null;
+  created: number | null;
+}
+
+export interface SavedVisualizationsPayload {
+  parsimony_available: boolean;
+  saved: SavedViz[];
+  ptools: PtoolsInfo;
+  report_cards: ReportCard[];
+}

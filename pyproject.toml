@@ -50,6 +50,7 @@ python_version = "3.11"
 files = [
     "vivarium_dashboard/lib/models.py",
     "vivarium_dashboard/lib/investigation_status.py",
+    "vivarium_dashboard/lib/saved_visualizations.py",
     "vivarium_dashboard/lib/data_sources.py",
     "vivarium_dashboard/api/app.py",
 ]
