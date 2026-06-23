@@ -107,6 +107,15 @@ def test_materialize_reuses_cache(_cache, tmp_path):
     assert client.downloads == 1                  # reused, not re-downloaded
 
 
+def test_materialize_rejects_unsafe_commit(_cache, tmp_path):
+    tb = tmp_path / "src.tar.gz"; _make_tarball(tb)
+    client = _FakeClient(tb)
+    for bad in ["../escape", "", "abc/../../etc", "deadbeef; rm -rf"]:
+        with pytest.raises(sac.SmsApiError):
+            rbs.materialize_build(client, 45, bad)
+    assert client.downloads == 0  # never even reached the download
+
+
 def test_list_build_sources_maps_and_labels():
     client = _FakeClient(None)
     out = rbs.list_build_sources(client)
@@ -181,6 +190,23 @@ def test_switch_build_materializes_and_switches(monkeypatch, tmp_path):
     assert captured["code"] == 200 and captured["obj"]["ok"] is True
     assert switched["root"] == cache
     assert server._POST_ROUTE_MAP.get("/api/source/switch-build") == "_post_source_switch_build"
+
+
+def test_switch_build_sms_api_down_502_not_404(monkeypatch):
+    from vivarium_dashboard import server
+    from vivarium_dashboard.lib import remote_build_source
+    # sms-api unreachable: list degrades to empty builds + an error reason.
+    monkeypatch.setattr(remote_build_source, "list_build_sources",
+                        lambda client: {"builds": [], "error": "tunnel down"})
+    captured = {}
+
+    class H:
+        def _json(self, obj, code):
+            captured.update(obj=obj, code=code)
+
+    server.Handler._post_source_switch_build(H(), {"simulator_id": 45})
+    assert captured["code"] == 502  # not a misleading 404
+    assert "tunnel down" in captured["obj"]["error"]
 
 
 def test_switch_build_missing_id_400():

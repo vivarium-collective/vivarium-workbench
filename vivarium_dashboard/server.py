@@ -16518,6 +16518,8 @@ if __name__ == "__main__":
         listing = remote_build_source.list_build_sources(client)
         entry = next((b for b in listing["builds"] if b["simulator_id"] == sim_id), None)
         if entry is None:
+            if listing.get("error"):
+                return self._json({"error": f"sms-api unavailable: {listing['error']}"}, 502)
             return self._json({"error": f"build {sim_id} not found"}, 404)
         try:
             cache_dir = remote_build_source.materialize_build(client, sim_id, entry["commit"])

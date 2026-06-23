@@ -10,6 +10,7 @@ dir and serves the build as a full local workspace.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import tarfile
 import tempfile
@@ -17,6 +18,13 @@ from pathlib import Path
 from typing import Any
 
 from vivarium_dashboard.lib.sms_api_client import SmsApiError
+
+# A git commit ref (the only non-server-controlled value that flows into a
+# filesystem path) must be plain hex. This closes the one allow-list gap in the
+# build-switch path: a malicious/compromised sms-api can't smuggle `../` (path
+# traversal) or an empty ref into cache_dir_for. Raising SmsApiError routes
+# through the handler's existing 502 path (active workspace left unchanged).
+_COMMIT_RE = re.compile(r"\A[0-9a-fA-F]{4,40}\Z")
 
 
 def build_cache_root() -> Path:
@@ -29,6 +37,12 @@ def cache_dir_for(simulator_id: int, commit: str) -> Path:
     return build_cache_root() / f"sim{simulator_id}-{commit}"
 
 
+def _safe_commit(commit: str) -> str:
+    if not commit or not _COMMIT_RE.match(commit):
+        raise SmsApiError(f"refusing unsafe/empty commit ref from sms-api: {commit!r}")
+    return commit
+
+
 def materialize_build(client: Any, simulator_id: int, commit: str, *, force: bool = False) -> Path:
     """Return a local workspace dir for the build, downloading+extracting once.
 
@@ -36,6 +50,7 @@ def materialize_build(client: Any, simulator_id: int, commit: str, *, force: boo
     under the cache root (same filesystem) then os.replace()s into place, so a
     partial download never leaves a half-written cache.
     """
+    commit = _safe_commit(commit)
     cache = cache_dir_for(simulator_id, commit)
     if cache.exists() and not force:
         return cache
