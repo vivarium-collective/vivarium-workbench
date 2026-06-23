@@ -1262,21 +1262,49 @@ wheels = [
 ]
 
 [[package]]
+name = "pbg-basic-processes"
+version = "0.1.0"
+source = { git = "https://github.com/vivarium-collective/pbg-basic-processes.git?rev=main#cbd10e73b79e4e8c7dd9e33bf84614881b559072" }
+dependencies = [
+    { name = "bigraph-schema" },
+    { name = "numpy" },
+    { name = "process-bigraph" },
+    { name = "sympy" },
+]
+
+[[package]]
+name = "pbg-emitters"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "bigraph-schema" },
+    { name = "numpy" },
+    { name = "process-bigraph" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0c/1c/1063f6960ff3e8370f80377435fb8cbdaf3c6d3839982318a68235f2091c/pbg_emitters-0.1.0.tar.gz", hash = "sha256:66467794014e18164e86670bdcfa2d3f1a623da16edf04965705181cf2f2e320", size = 83884, upload-time = "2026-06-12T19:38:03.633Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c3/70/ed636028647867cf7734c997ff253f51cbd6eb7bdcd0fbdd0c5d0386f2d4/pbg_emitters-0.1.0-py3-none-any.whl", hash = "sha256:bf715f3c14a12ef2e1d3d22655b5a89e9f28da2e800bd776cec45f13bf24ddaf", size = 75983, upload-time = "2026-06-12T19:38:02.304Z" },
+]
+
+[[package]]
 name = "pbg-superpowers"
-version = "0.12.0"
+version = "0.14.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "click" },
     { name = "jinja2" },
     { name = "jsonschema", extra = ["format-nongpl"] },
+    { name = "pbg-basic-processes" },
+    { name = "pbg-emitters" },
     { name = "process-bigraph" },
     { name = "pypdf" },
     { name = "pyyaml" },
+    { name = "ruamel-yaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/74/a5/11c04d36c4a9d294e95df440d609b631eccdef14c9f7c2ce209c844d3001/pbg_superpowers-0.12.0.tar.gz", hash = "sha256:1d64da7895add842e5c3f4d13f5e7326aa99d4444f5fe42befb1aa3cf7f56bc6", size = 985014, upload-time = "2026-05-30T19:44:17.968Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/20/24/222dc744002902389163e310885ab0d659349f80b24a434a0200887086c7/pbg_superpowers-0.14.0.tar.gz", hash = "sha256:31379d9545da898a58b62dea338ca7741152c6fad636aa67231b9118d6a900ee", size = 1394176, upload-time = "2026-06-22T23:42:04.142Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/78/cd/91786444c699f749a9514b7d8be32ae9372b35560b77d9bb264293d8ae99/pbg_superpowers-0.12.0-py3-none-any.whl", hash = "sha256:9fd73390a74fb488ca247206a64e2a0fe3244a922ce0220b0e164f14c7ffcd91", size = 173414, upload-time = "2026-05-30T19:44:16.395Z" },
+    { url = "https://files.pythonhosted.org/packages/33/e6/3deb6183eca7b0568816492e8061cccc620adf7c66a33779f0bfdaa060e6/pbg_superpowers-0.14.0-py3-none-any.whl", hash = "sha256:0de7272d5e88eafa82f35a8df50b0817d4a5b645055284414de2debb380dc40e", size = 351946, upload-time = "2026-06-22T23:42:02.219Z" },
 ]
 
 [[package]]
@@ -2098,6 +2126,15 @@ wheels = [
 ]
 
 [[package]]
+name = "ruamel-yaml"
+version = "0.19.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/3b/ebda527b56beb90cb7652cb1c7e4f91f48649fbcd8d2eb2fb6e77cd3329b/ruamel_yaml-0.19.1.tar.gz", hash = "sha256:53eb66cd27849eff968ebf8f0bf61f46cdac2da1d1f3576dd4ccee9b25c31993", size = 142709, upload-time = "2026-01-02T16:50:31.84Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b8/0c/51f6841f1d84f404f92463fc2b1ba0da357ca1e3db6b7fbda26956c3b82a/ruamel_yaml-0.19.1-py3-none-any.whl", hash = "sha256:27592957fedf6e0b62f281e96effd28043345e0e66001f97683aa9a40c667c93", size = 118102, upload-time = "2026-01-02T16:50:29.201Z" },
+]
+
+[[package]]
 name = "scipy"
 version = "1.17.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2283,6 +2320,7 @@ dependencies = [
     { name = "jinja2" },
     { name = "jsonschema", extra = ["format-nongpl"] },
     { name = "numpy" },
+    { name = "pbg-basic-processes" },
     { name = "pbg-superpowers" },
     { name = "process-bigraph" },
     { name = "pydantic" },
@@ -2325,7 +2363,8 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8" },
     { name = "numpy" },
     { name = "numpy", marker = "extra == 'viz'" },
-    { name = "pbg-superpowers" },
+    { name = "pbg-basic-processes", git = "https://github.com/vivarium-collective/pbg-basic-processes.git?rev=main" },
+    { name = "pbg-superpowers", specifier = ">=0.14.0" },
     { name = "polars", marker = "extra == 'test'" },
     { name = "process-bigraph" },
     { name = "pyarrow", marker = "extra == 'test'" },
