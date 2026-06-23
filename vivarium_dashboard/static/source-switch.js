@@ -29,6 +29,9 @@
       body: JSON.stringify({ path: path }),
     });
     if (r.ok) {
+      // Until SP2b (composite subprocess-isolation), Composite Explorer may show
+      // the previous workspace's composites until the server restarts.
+      try { sessionStorage.setItem("viv-source-switched", "1"); } catch (e) {}
       window.location.reload();
     } else {
       const d = await r.json().catch(function () { return {}; });
@@ -44,6 +47,12 @@
     sel.addEventListener("change", function () { _switch(sel.value); });
     host.appendChild(sel);
     _populate(sel);
+    try {
+      if (sessionStorage.getItem("viv-source-switched")) {
+        sessionStorage.removeItem("viv-source-switched");
+        console.info("Switched workspace. Note: Composite Explorer may need a server restart to refresh.");
+      }
+    } catch (e) {}
   }
 
   window._openSourceSwitch = _mount;

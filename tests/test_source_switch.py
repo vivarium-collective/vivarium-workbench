@@ -107,3 +107,8 @@ def test_one_server_switches_between_two_workspaces(tmp_path):
 
     server._switch_active_workspace(a)
     assert active_name() == "alpha"                             # and back
+
+
+def test_source_switch_warns_about_composites():
+    js = _static("source-switch.js")
+    assert "Composite" in js   # the honest until-SP2b note
