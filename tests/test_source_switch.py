@@ -1,6 +1,7 @@
 from pathlib import Path
 from vivarium_dashboard import server
 from vivarium_dashboard.lib import _root
+from vivarium_dashboard.lib.data_sources import _DATA_SOURCES_CACHE
 
 
 def test_switch_active_workspace_repoints_and_invalidates(tmp_path):
@@ -15,13 +16,16 @@ def test_switch_active_workspace_repoints_and_invalidates(tmp_path):
     server._COMPOSITE_STATE_CACHE["x"] = 1
     server._RUN_STORE_SUMMARY_CACHE["x"] = 1
     server._WP_CACHE["x"] = 1
+    _DATA_SOURCES_CACHE["x"] = 1
 
     server._switch_active_workspace(b)
 
-    assert server.WORKSPACE == b
-    assert _root.get_workspace_root() == b
+    assert server.WORKSPACE == b.resolve()
+    assert _root.get_workspace_root() == b.resolve()
     assert server._REGISTRY_CACHE["data"] is None
+    assert server._REGISTRY_CACHE["ts"] == 0.0
     assert server._LINKAGE_CACHE == {}
     assert server._COMPOSITE_STATE_CACHE == {}
     assert server._RUN_STORE_SUMMARY_CACHE == {}
     assert server._WP_CACHE == {}
+    assert _DATA_SOURCES_CACHE == {}

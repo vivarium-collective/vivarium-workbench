@@ -37,7 +37,6 @@ import sqlite3
 import subprocess
 import sys
 import textwrap
-import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -215,7 +214,7 @@ _COMPOSITE_STATE_TTL_S = 300.0
 
 # Serializes runtime workspace re-pointing (SP2). A switch must not interleave
 # with another switch.
-_SWITCH_LOCK = threading.Lock()
+_SWITCH_LOCK = Lock()
 
 
 def _invalidate_workspace_caches() -> None:
