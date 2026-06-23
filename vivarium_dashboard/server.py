@@ -2062,147 +2062,19 @@ def _latest_run_timestamp(runs_db: Path) -> float | None:
 
 
 def _latest_run_row(runs_db) -> dict | None:
-    """Newest runs_meta row as {run_id, completed_at, generation_id, emitter_path},
-    tolerating older DBs missing the optional columns. Mirrors
-    pbg_superpowers.run_registry.latest_run (not importable here)."""
-    from pathlib import Path
-    import sqlite3
-    runs_db = Path(runs_db)
-    if not runs_db.is_file():
-        return None
-    want = ("run_id", "completed_at", "generation_id", "emitter_path")
-    try:
-        conn = sqlite3.connect(f"file:{runs_db}?mode=ro", uri=True, timeout=1.0)
-        try:
-            have = {r[1] for r in conn.execute("PRAGMA table_info(runs_meta)")}
-            cols = [c for c in want if c in have]
-            if "run_id" not in cols:
-                return None
-            row = conn.execute(
-                f"SELECT {', '.join(cols)} FROM runs_meta "
-                "ORDER BY COALESCE(completed_at, started_at) DESC LIMIT 1"
-            ).fetchone()
-        finally:
-            conn.close()
-        return dict(zip(cols, row)) if row else None
-    except sqlite3.Error:
-        return None
+    """Thin forwarder; the implementation lives in lib.study_charts (one source)."""
+    from vivarium_dashboard.lib.study_charts import latest_run_row
+    return latest_run_row(runs_db)
 
 
 def _study_charts_payload(ws_root, name: str, *, hide_superseded: bool = False) -> dict:
-    """Build the /api/study-charts/<name> payload (pure, unit-testable).
+    """Thin forwarder to lib.study_charts.build_study_charts_payload.
 
-    ``hide_superseded`` (opt-in, default False): when True, static charts
-    produced by a superseded (non-canonical, unpinned) run are dropped from
-    the payload — used by the per-investigation report render so it shows only
-    current figures. The interactive dashboard endpoint leaves it False.
-
-    Two chart sources, merged in display order (live first, static after):
-
-      live    — ``studies/<name>/runs.db`` (the per-step history
-                emitted by SQLiteEmitter). Picks the latest entry
-                from the ``simulations`` table (filtered to
-                ``baseline-steady-state`` when present) and renders
-                a small canonical set of line charts.
-      static  — any pre-rendered ``studies/<name>/charts/*.svg`` files
-                (with optional ``*.meta.json`` sidecars providing title +
-                caption). These are the domain-specific charts the study
-                authors checked in directly (e.g. chromosome maps).
-
-    Each STATIC chart additionally carries a ``freshness`` badge —
-    ``fresh`` / ``stale`` / ``unrendered`` for charts declared in the spec's
-    ``visualizations[]`` (computed against the study's latest run via the
-    vendored :func:`chart_freshness`), and ``untracked`` for on-disk chart
-    files with no matching ``visualizations[]`` entry.
+    The /api/study-charts/<slug> payload assembly now lives in lib so the FastAPI
+    seam (api/app.py) and this stdlib handler share one implementation.
     """
-    import yaml as _yaml
-    from vivarium_dashboard.lib.study_charts import (
-        render_study_charts, render_v4_test_charts,
-        discover_static_study_charts, discover_declared_figure_charts,
-    )
-    from vivarium_dashboard.lib.simulations_index import (
-        discover_default_baseline_db,
-    )
-    from .lib.viz_freshness import chart_freshness, manifest_diff
-
-    # Layout-aware: a study may live nested under
-    # investigations/<inv>/studies/<slug>/ (custom layout) rather than the flat
-    # studies/<slug>/. Resolving flat-only silently produced an empty payload
-    # (no runs.db / charts / declared figures) for nested studies like colonies.
-    _wp = WorkspacePaths.load(ws_root)
-    try:
-        study_dir = _wp.study_dir(name)
-    except FileNotFoundError:
-        study_dir = _wp.studies / name
-    runs_db = study_dir / "runs.db"
-    charts_dir = study_dir / "charts"
-    spec_path = study_dir / "study.yaml"
-
-    # Detect v4: study.yaml with schema_version: 4 → render charts per-test
-    # from tests[].measure.path, with default-baseline fallback when the
-    # per-study runs.db is empty.
-    spec = None
-    if spec_path.is_file():
-        try:
-            spec = _yaml.safe_load(spec_path.read_text(encoding="utf-8"))
-        except Exception:
-            spec = None
-    is_v4 = isinstance(spec, dict) and spec.get("schema_version") == 4
-
-    if is_v4:
-        fallback_db = discover_default_baseline_db(ws_root)
-        live_charts = render_v4_test_charts(spec, runs_db, fallback_db=fallback_db)
-    else:
-        live_charts = render_study_charts(runs_db, run_name="baseline-steady-state")
-        if not live_charts:
-            live_charts = render_study_charts(runs_db, run_name=None)
-    for c in live_charts:
-        c.setdefault("source", "live")
-    static_charts = discover_static_study_charts(charts_dir, hide_superseded=hide_superseded)
-    # Declared figure visualizations (e.g. ``address: gif:colony.gif``) that
-    # point at a loose figure file — resolved to self-contained data-URI/SVG
-    # chart records so they embed in BOTH the live dashboard and the published
-    # static report snapshot. Deduped against static_charts by key.
-    declared_figs = discover_declared_figure_charts(
-        study_dir, (spec or {}).get("visualizations") or [])
-    if declared_figs:
-        static_keys = {c.get("key") for c in static_charts}
-        static_charts = static_charts + [
-            c for c in declared_figs if c.get("key") not in static_keys
-        ]
-
-    # Per-chart freshness for static charts. Match each on-disk chart
-    # (``charts/<key>.<media>``) against the spec's visualizations[] entries
-    # by their ``chart:`` field; declared entries get fresh/stale/unrendered,
-    # everything else is untracked.
-    visualizations = (spec or {}).get("visualizations") or []
-    entry_by_chart = {
-        e.get("chart"): e for e in visualizations if isinstance(e, dict) and e.get("chart")
-    }
-    # manifest_diff ensures untracked on-disk charts are accounted for; the
-    # static-chart list already includes them, so we just use it to confirm.
-    manifest_diff(study_dir, visualizations)
-    latest = _latest_run_row(runs_db)
-    for c in static_charts:
-        # Declared figure visualizations already carry their own freshness.
-        if c.get("source") == "declared":
-            c.setdefault("freshness", "declared")
-            continue
-        rel = f"charts/{c.get('key')}.{c.get('media')}"
-        entry = entry_by_chart.get(rel)
-        if entry is None:
-            c["freshness"] = "untracked"
-        else:
-            c["freshness"] = chart_freshness(study_dir, entry, latest)
-
-    return {
-        "study": name,
-        "schema_version": (spec or {}).get("schema_version"),
-        "charts": live_charts + static_charts,
-        "db_exists": runs_db.exists(),
-        "static_count": len(static_charts),
-        "live_count": len(live_charts),
-    }
+    from vivarium_dashboard.lib.study_charts import build_study_charts_payload
+    return build_study_charts_payload(ws_root, name, hide_superseded=hide_superseded)
 
 
 def _study_refresh_viz(ws_root, name: str) -> dict:

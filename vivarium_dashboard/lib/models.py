@@ -108,22 +108,44 @@ class RemoteRunJob(BaseModel):
 
 
 class ChartPayload(BaseModel):
-    """One inline-SVG chart (``lib/study_charts.py``)."""
+    """One chart in a study-charts payload (``lib/study_charts.py``).
+
+    Charts are polymorphic by ``source``: ``live`` charts carry an inline ``svg``;
+    ``static`` / ``declared`` charts may instead carry an ``img`` data-URI (PNG/GIF)
+    plus ``media`` / ``freshness`` / ``simulations`` / ``interpretation``. Only the
+    common keys are enumerated; ``extra='allow'`` preserves any source-specific
+    field (and ``svg`` is optional since image charts use ``img``).
+    """
+
+    model_config = ConfigDict(extra="allow")
 
     key: str
     title: str
     caption: str
-    svg: str
+    svg: Optional[str] = None
+    img: Optional[str] = None
+    source: Optional[str] = None
+    media: Optional[str] = None
+    freshness: Optional[str] = None
+    simulations: Optional[str] = None
+    interpretation: Optional[str] = None
+    data_source: Optional[str] = None
 
 
 class StudyChartsPayload(BaseModel):
-    """``GET /api/study-charts/<slug>`` payload (server.py ``_study_charts_payload``).
+    """``GET /api/study-charts/<slug>`` payload.
 
-    The handler may attach additional top-level keys; only ``charts`` is part of
-    the typed contract here. Unknown keys are ignored on validation.
+    Source: ``lib.study_charts.build_study_charts_payload`` (the single
+    implementation shared by the FastAPI seam and the stdlib server's
+    ``_study_charts_payload`` forwarder). Every field below is always present.
     """
 
+    study: str
+    schema_version: Optional[Any] = None
     charts: list[ChartPayload]
+    db_exists: bool
+    static_count: int
+    live_count: int
 
 
 class DashConfig(BaseModel):

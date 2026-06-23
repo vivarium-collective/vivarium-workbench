@@ -63,11 +63,23 @@ export interface ChartPayload {
   key: string;
   title: string;
   caption: string;
-  svg: string;
+  svg: string | null;
+  img: string | null;
+  source: string | null;
+  media: string | null;
+  freshness: string | null;
+  simulations: string | null;
+  interpretation: string | null;
+  data_source: string | null;
 }
 
 export interface StudyChartsPayload {
+  study: string;
+  schema_version: any | null;
   charts: ChartPayload[];
+  db_exists: boolean;
+  static_count: number;
+  live_count: number;
 }
 
 export interface DashConfig {

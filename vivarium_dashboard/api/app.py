@@ -8,10 +8,16 @@ routes with **typed pydantic responses** (so they get automatic validation and
 an OpenAPI schema). Routes move over a few at a time; both servers back onto the
 same ``lib/`` functions, so there is one implementation, not two.
 
-Run it standalone (does not yet replace the stdlib server):
+Run it standalone (does not yet replace the stdlib server) and browse the
+auto-generated **Swagger UI** to see every typed route:
 
-    VIVARIUM_DASHBOARD_WORKSPACE=/path/to/workspace \\
-        uvicorn vivarium_dashboard.api.app:app --reload
+    python -m vivarium_dashboard.api --workspace /path/to/workspace
+    # → Swagger UI at http://127.0.0.1:8001/docs
+    #   ReDoc      at http://127.0.0.1:8001/redoc
+    #   raw schema at http://127.0.0.1:8001/openapi.json
+
+(or, equivalently, ``uvicorn vivarium_dashboard.api.app:app --reload`` with
+``VIVARIUM_DASHBOARD_WORKSPACE`` set.)
 
 Today's routes are read-only and stateless (workspace-backed). Stateful routes
 (e.g. remote-run status, which reads the in-memory RemoteRunManager owned by the
@@ -37,8 +43,10 @@ from vivarium_dashboard.lib.models import (
     SavedVisualizationsPayload,
     SimRow,
     SimulationsPayload,
+    StudyChartsPayload,
 )
 from vivarium_dashboard.lib.simulations_index import list_simulations
+from vivarium_dashboard.lib.study_charts import build_study_charts_payload
 
 WORKSPACE_ENV = "VIVARIUM_DASHBOARD_WORKSPACE"
 
@@ -53,6 +61,14 @@ def create_app() -> FastAPI:
         title="vivarium-dashboard API",
         version="0.1.0",
         summary="Typed seam over the dashboard HTTP API (strangler-fig migration).",
+        description=(
+            "Auto-generated, typed view of the dashboard routes that have been "
+            "ported from the legacy stdlib `http.server` handler to FastAPI + "
+            "pydantic. This page (**Swagger UI**) and `/redoc` are generated from "
+            "the same pydantic models that validate every response — so the "
+            "schema can't drift from what the routes actually return. Routes are "
+            "added a few at a time; the legacy server still serves the rest."
+        ),
     )
 
     @app.get("/health")
@@ -122,6 +138,17 @@ def create_app() -> FastAPI:
         via lib.saved_visualizations — no stdlib server dependency."""
         return SavedVisualizationsPayload.model_validate(
             _saved_viz.build_saved_visualizations(ws))
+
+    @app.get("/api/study-charts/{slug}", response_model=StudyChartsPayload)
+    def study_charts(slug: str, ws: Path = Depends(get_workspace)) -> StudyChartsPayload:
+        """Per-study charts (mirrors the stdlib /api/study-charts/<slug>).
+
+        Library-backed via ``lib.study_charts.build_study_charts_payload`` — the
+        single implementation the stdlib handler now forwards to. Charts are
+        polymorphic: ``live`` charts carry inline SVG, ``static`` / ``declared``
+        charts carry an image data-URI plus a freshness badge (see ChartPayload).
+        """
+        return StudyChartsPayload.model_validate(build_study_charts_payload(ws, slug))
 
     return app
 
