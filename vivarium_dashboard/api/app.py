@@ -25,10 +25,14 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI
 
+from vivarium_dashboard.lib import data_sources as _data_sources
 from vivarium_dashboard.lib import investigation_status
 from vivarium_dashboard.lib.models import (
+    BibEntry,
     DashConfig,
+    DataSourcesPayload,
     InvestigationSummary,
+    ReferencesBibPayload,
     SimRow,
     SimulationsPayload,
 )
@@ -86,6 +90,29 @@ def create_app() -> FastAPI:
 
         summaries = investigation_status.build_iset_summary(ws, study_has_runs=study_has_runs)
         return [InvestigationSummary.model_validate(d) for d in summaries]
+
+    @app.get("/api/data-sources", response_model=DataSourcesPayload)
+    def data_sources(ws: Path = Depends(get_workspace)) -> DataSourcesPayload:
+        """Repo-wide data-source bundle (workspace.yaml `dashboard.data_sources`
+        provider), via lib.data_sources — no stdlib server dependency."""
+        return DataSourcesPayload.model_validate(_data_sources.enumerate_data_sources(ws))
+
+    @app.get("/api/references-bib", response_model=ReferencesBibPayload)
+    def references_bib(ws: Path = Depends(get_workspace)) -> ReferencesBibPayload:
+        """Parsed `references/papers.bib` entries (+ enrichment cache). Bibtex
+        fields vary, so `BibEntry` preserves unknown keys (extra='allow')."""
+        from vivarium_dashboard.lib.references_fetch import enrich_entries, load_cache
+        from vivarium_dashboard.lib.report import _parse_bib_entries
+
+        try:
+            entries = _parse_bib_entries(ws)
+        except Exception:
+            return ReferencesBibPayload(entries=[])
+        try:
+            entries = enrich_entries(entries, load_cache(ws))
+        except Exception:
+            pass  # cache failures must never break the references view
+        return ReferencesBibPayload(entries=[BibEntry.model_validate(e) for e in entries])
 
     return app
 

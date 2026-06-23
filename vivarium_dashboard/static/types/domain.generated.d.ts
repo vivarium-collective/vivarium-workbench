@@ -89,3 +89,34 @@ export interface InvestigationSummary {
   current: boolean | null;
   error: string | null;
 }
+
+export interface DataSource {
+  key: string;
+  path: string;
+  category: string;
+  kind: string;
+  size_bytes: number;
+  url: string;
+}
+
+export interface DataSourcesPayload {
+  label: string | null;
+  sources: DataSource[];
+  error: string | null;
+}
+
+export interface BibEntry {
+  key: string;
+  type: string | null;
+  title: string | null;
+  author: string | null;
+  journal: string | null;
+  year: string | null;
+  doi: string | null;
+  url: string | null;
+  note: string | null;
+}
+
+export interface ReferencesBibPayload {
+  entries: BibEntry[];
+}

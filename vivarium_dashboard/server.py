@@ -48,6 +48,7 @@ import yaml
 from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 from vivarium_dashboard.lib.atomic_io import atomic_write_text
 from vivarium_dashboard.lib import investigation_status as _invstatus
+from vivarium_dashboard.lib import data_sources as _data_sources_lib
 from vivarium_dashboard.lib.investigation_status import (
     compute_investigation_status,
     _STUDY_STATUS_FAILED,
@@ -682,86 +683,18 @@ def _dashboard_config(ws_data: dict | None) -> dict:
 #   {key, path (abs str), category, kind: "override"|"inherited", size_bytes}
 #
 # Optional — workspaces without it keep current behavior ({sources: []}).
-# Enumeration is cached (same 30s TTL as the registry) because it can stat
-# 100s of files. The server already runs inside the workspace venv (it spawns
-# build_core() via sys.executable), so the provider imports in-process.
-_DATA_SOURCES_CACHE: dict = {"data": None, "ts": 0.0}
-_DATA_SOURCES_TTL = 30.0  # seconds
+# Data-source enumeration + caching moved to lib.data_sources; thin shims below
+# delegate to it (names retained for the existing handler call-sites).
+_data_sources_config = _data_sources_lib.data_sources_config
 
 
-def _data_sources_config(ws_data: dict | None) -> dict:
-    """Return the ``dashboard.data_sources`` block (or {})."""
-    dash = _dashboard_config(ws_data)
-    ds = dash.get("data_sources")
-    return ds if isinstance(ds, dict) else {}
-
-
-def _import_provider(spec: str):
-    """Import a ``module:func`` spec and return the callable.
-
-    Raises ImportError/AttributeError/ValueError on a malformed or unresolvable
-    spec; the caller is expected to catch and surface as an error payload.
-    """
-    import importlib
-    if ":" not in spec:
-        raise ValueError(f"provider must be 'module:func', got {spec!r}")
-    mod_name, _, func_name = spec.partition(":")
-    mod = importlib.import_module(mod_name)
-    fn = getattr(mod, func_name)
-    if not callable(fn):
-        raise TypeError(f"provider {spec!r} is not callable")
-    return fn
+_import_provider = _data_sources_lib.import_provider
 
 
 def _enumerate_data_sources(bypass_cache: bool = False) -> dict:
-    """Resolve + invoke the workspace data-source provider, with 30s caching.
-
-    Always returns ``{"label": <str|None>, "sources": [...]}`` (never raises).
-    On a missing provider returns ``{"sources": []}``. On a provider error
-    returns ``{"label", "sources": [], "error": <str>}`` so the UI can degrade.
-    """
-    global _DATA_SOURCES_CACHE
-    now = time.time()
-    if not bypass_cache and _DATA_SOURCES_CACHE["data"] is not None:
-        if now - _DATA_SOURCES_CACHE["ts"] < _DATA_SOURCES_TTL:
-            return _DATA_SOURCES_CACHE["data"]
-
-    data: dict
-    try:
-        ws_yaml = WORKSPACE / "workspace.yaml"
-        ws_data = yaml.safe_load(ws_yaml.read_text(encoding="utf-8")) or {}
-        cfg = _data_sources_config(ws_data)
-        provider = str(cfg.get("provider") or "").strip()
-        label = cfg.get("label")
-        if not provider:
-            data = {"sources": []}
-        else:
-            fn = _import_provider(provider)
-            raw = fn() or []
-            sources = []
-            for entry in raw:
-                if not isinstance(entry, dict) or "key" not in entry:
-                    continue
-                sources.append({
-                    "key": str(entry.get("key")),
-                    "path": str(entry.get("path") or ""),
-                    "category": str(entry.get("category") or "uncategorized"),
-                    "kind": str(entry.get("kind") or "inherited"),
-                    "size_bytes": int(entry.get("size_bytes") or 0),
-                    # Optional external link (e.g. a GitHub raw URL for an
-                    # inherited source). When present the SPA renders a
-                    # hyperlink — the ONLY working access path in the published
-                    # static snapshot (the /api/data-source-file "Open" button
-                    # is server-only).
-                    "url": str(entry.get("url") or ""),
-                })
-            data = {"label": label, "sources": sources}
-    except Exception as e:  # noqa: BLE001 — never break the dashboard
-        data = {"label": None, "sources": [], "error": f"{type(e).__name__}: {e}"}
-
-    _DATA_SOURCES_CACHE["data"] = data
-    _DATA_SOURCES_CACHE["ts"] = now
-    return data
+    """Back-compat shim — delegates to lib.data_sources.enumerate_data_sources
+    for the module-level WORKSPACE."""
+    return _data_sources_lib.enumerate_data_sources(WORKSPACE, bypass_cache)
 
 
 # Map of file extension → (content-type, inline?) for serving a data-source

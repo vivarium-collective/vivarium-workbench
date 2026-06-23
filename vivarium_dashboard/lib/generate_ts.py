@@ -46,6 +46,10 @@ _MODELS: list[type[BaseModel]] = [
     _models.StudyChartsPayload,
     _models.DashConfig,
     _models.InvestigationSummary,
+    _models.DataSource,
+    _models.DataSourcesPayload,
+    _models.BibEntry,
+    _models.ReferencesBibPayload,
 ]
 
 OUTPUT_PATH = (
