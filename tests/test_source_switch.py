@@ -1,8 +1,19 @@
 from pathlib import Path
+import pytest
 import yaml
 from vivarium_dashboard import server
 from vivarium_dashboard.lib import _root
 from vivarium_dashboard.lib.data_sources import _DATA_SOURCES_CACHE
+
+
+@pytest.fixture(autouse=True)
+def _restore_workspace():
+    saved_ws = getattr(server, "WORKSPACE", None)
+    saved_root = _root.get_workspace_root()
+    yield
+    server.WORKSPACE = saved_ws
+    if saved_root is not None:
+        _root.set_workspace_root(saved_root)
 
 
 def _static(name):

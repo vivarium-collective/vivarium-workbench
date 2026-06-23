@@ -16,7 +16,7 @@
         const opt = document.createElement("option");
         opt.value = ws.path;
         opt.textContent = ws.name || ws.path;
-        if (ws.active || ws.current) opt.selected = true;
+        if (ws.status === "current") opt.selected = true;
         sel.appendChild(opt);
       });
     } catch (e) { /* offline / static mode — leave empty */ }
