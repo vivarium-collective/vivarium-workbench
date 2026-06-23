@@ -385,6 +385,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/workspaces/start":         "_post_workspaces_start",
     "/api/workspaces/stop":          "_post_workspaces_stop",
     "/api/source/switch":            "_post_source_switch",
+    "/api/source/switch-build":      "_post_source_switch_build",
     # Remote-run endpoints (Phase 3b).
     "/api/remote-run-start":         "_post_remote_run_start",
 }
@@ -8321,6 +8322,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_auth_github_orgs()
         if self.path.startswith("/api/workspaces"):
             return self._get_workspaces()
+        if self.path.startswith("/api/source/builds"):
+            return self._get_source_builds()
         if self.path.startswith("/api/state"):
             return self._serve_state()
         if self.path.startswith("/api/events"):
@@ -16494,6 +16497,34 @@ if __name__ == "__main__":
              "source": {"path": str(entry["path"]), "name": entry.get("name")}},
             200,
         )
+
+    def _get_source_builds(self):
+        """GET /api/source/builds — remote sms-api simulator builds for the
+        source dropdown. Best-effort; empty list + reason if sms-api is down."""
+        from vivarium_dashboard.lib import remote_build_source
+        from vivarium_dashboard.lib.sms_api_client import SmsApiClient
+        payload = remote_build_source.list_build_sources(SmsApiClient(_sms_api_base()))
+        return self._json(payload, 200)
+
+    def _post_source_switch_build(self, body: dict):
+        """POST /api/source/switch-build — materialize a build's workspace (once,
+        cached) and re-point to it in-process (SP2). Body: {simulator_id}."""
+        from vivarium_dashboard.lib import remote_build_source
+        from vivarium_dashboard.lib.sms_api_client import SmsApiClient, SmsApiError
+        sim_id = body.get("simulator_id")
+        if sim_id is None:
+            return self._json({"error": "missing 'simulator_id'"}, 400)
+        client = SmsApiClient(_sms_api_base())
+        listing = remote_build_source.list_build_sources(client)
+        entry = next((b for b in listing["builds"] if b["simulator_id"] == sim_id), None)
+        if entry is None:
+            return self._json({"error": f"build {sim_id} not found"}, 404)
+        try:
+            cache_dir = remote_build_source.materialize_build(client, sim_id, entry["commit"])
+        except SmsApiError as e:
+            return self._json({"error": f"materialize failed: {e}"}, 502)
+        _switch_active_workspace(cache_dir)
+        return self._json({"ok": True, "source": {"path": str(cache_dir), "name": entry["label"]}}, 200)
 
     def _read_workspace_name(self, root: Path) -> str:
         """Read `name` from <root>/workspace.yaml; fall back to dir basename."""

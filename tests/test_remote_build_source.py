@@ -123,3 +123,61 @@ def test_list_build_sources_degrades_on_error():
             raise SmsApiError("tunnel down")
     out = rbs.list_build_sources(_Boom())
     assert out["builds"] == [] and "tunnel down" in out["error"]
+
+
+def test_source_builds_route_in_do_get(monkeypatch):
+    from vivarium_dashboard import server
+    from vivarium_dashboard.lib import remote_build_source
+    monkeypatch.setattr(
+        remote_build_source, "list_build_sources",
+        lambda client: {"builds": [{"simulator_id": 7, "label": "x"}], "error": None},
+    )
+    captured = {}
+
+    class H:
+        path = "/api/source/builds"
+        def _json(self, obj, code):
+            captured.update(obj=obj, code=code)
+
+    server.Handler._get_source_builds(H())
+    assert captured["code"] == 200
+    assert captured["obj"]["builds"][0]["simulator_id"] == 7
+
+
+def test_switch_build_unknown_id_404(monkeypatch):
+    from vivarium_dashboard import server
+    from vivarium_dashboard.lib import remote_build_source
+    monkeypatch.setattr(remote_build_source, "list_build_sources",
+                        lambda client: {"builds": [], "error": None})
+    captured = {}
+
+    class H:
+        def _json(self, obj, code):
+            captured.update(obj=obj, code=code)
+
+    server.Handler._post_source_switch_build(H(), {"simulator_id": 999})
+    assert captured["code"] == 404
+
+
+def test_switch_build_materializes_and_switches(monkeypatch, tmp_path):
+    from vivarium_dashboard import server
+    from vivarium_dashboard.lib import remote_build_source
+    cache = tmp_path / "sim45-32b901"; cache.mkdir()
+    (cache / "workspace.yaml").write_text("name: built\n")
+    monkeypatch.setattr(remote_build_source, "list_build_sources",
+                        lambda client: {"builds": [{"simulator_id": 45, "commit": "32b901",
+                                                    "label": "v2ecoli @ 32b901 (build #45)"}], "error": None})
+    monkeypatch.setattr(remote_build_source, "materialize_build",
+                        lambda client, sim_id, commit, **k: cache)
+    switched = {}
+    monkeypatch.setattr(server, "_switch_active_workspace", lambda root: switched.update(root=root))
+    captured = {}
+
+    class H:
+        def _json(self, obj, code):
+            captured.update(obj=obj, code=code)
+
+    server.Handler._post_source_switch_build(H(), {"simulator_id": 45})
+    assert captured["code"] == 200 and captured["obj"]["ok"] is True
+    assert switched["root"] == cache
+    assert server._POST_ROUTE_MAP.get("/api/source/switch-build") == "_post_source_switch_build"
