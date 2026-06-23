@@ -47,6 +47,16 @@ import yaml
 
 from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 from vivarium_dashboard.lib.atomic_io import atomic_write_text
+from vivarium_dashboard.lib import investigation_status as _invstatus
+from vivarium_dashboard.lib import data_sources as _data_sources_lib
+from vivarium_dashboard.lib.investigation_status import (
+    compute_investigation_status,
+    _STUDY_STATUS_FAILED,
+    _STUDY_STATUS_COMPLETE,
+    _STUDY_STATUS_DONE_ROLLUP,
+    _STUDY_STATUS_RUNNING,
+    _STUDY_STATUS_PLANNED,
+)
 
 
 def _strip_process_instances(state):
@@ -673,86 +683,18 @@ def _dashboard_config(ws_data: dict | None) -> dict:
 #   {key, path (abs str), category, kind: "override"|"inherited", size_bytes}
 #
 # Optional — workspaces without it keep current behavior ({sources: []}).
-# Enumeration is cached (same 30s TTL as the registry) because it can stat
-# 100s of files. The server already runs inside the workspace venv (it spawns
-# build_core() via sys.executable), so the provider imports in-process.
-_DATA_SOURCES_CACHE: dict = {"data": None, "ts": 0.0}
-_DATA_SOURCES_TTL = 30.0  # seconds
+# Data-source enumeration + caching moved to lib.data_sources; thin shims below
+# delegate to it (names retained for the existing handler call-sites).
+_data_sources_config = _data_sources_lib.data_sources_config
 
 
-def _data_sources_config(ws_data: dict | None) -> dict:
-    """Return the ``dashboard.data_sources`` block (or {})."""
-    dash = _dashboard_config(ws_data)
-    ds = dash.get("data_sources")
-    return ds if isinstance(ds, dict) else {}
-
-
-def _import_provider(spec: str):
-    """Import a ``module:func`` spec and return the callable.
-
-    Raises ImportError/AttributeError/ValueError on a malformed or unresolvable
-    spec; the caller is expected to catch and surface as an error payload.
-    """
-    import importlib
-    if ":" not in spec:
-        raise ValueError(f"provider must be 'module:func', got {spec!r}")
-    mod_name, _, func_name = spec.partition(":")
-    mod = importlib.import_module(mod_name)
-    fn = getattr(mod, func_name)
-    if not callable(fn):
-        raise TypeError(f"provider {spec!r} is not callable")
-    return fn
+_import_provider = _data_sources_lib.import_provider
 
 
 def _enumerate_data_sources(bypass_cache: bool = False) -> dict:
-    """Resolve + invoke the workspace data-source provider, with 30s caching.
-
-    Always returns ``{"label": <str|None>, "sources": [...]}`` (never raises).
-    On a missing provider returns ``{"sources": []}``. On a provider error
-    returns ``{"label", "sources": [], "error": <str>}`` so the UI can degrade.
-    """
-    global _DATA_SOURCES_CACHE
-    now = time.time()
-    if not bypass_cache and _DATA_SOURCES_CACHE["data"] is not None:
-        if now - _DATA_SOURCES_CACHE["ts"] < _DATA_SOURCES_TTL:
-            return _DATA_SOURCES_CACHE["data"]
-
-    data: dict
-    try:
-        ws_yaml = WORKSPACE / "workspace.yaml"
-        ws_data = yaml.safe_load(ws_yaml.read_text(encoding="utf-8")) or {}
-        cfg = _data_sources_config(ws_data)
-        provider = str(cfg.get("provider") or "").strip()
-        label = cfg.get("label")
-        if not provider:
-            data = {"sources": []}
-        else:
-            fn = _import_provider(provider)
-            raw = fn() or []
-            sources = []
-            for entry in raw:
-                if not isinstance(entry, dict) or "key" not in entry:
-                    continue
-                sources.append({
-                    "key": str(entry.get("key")),
-                    "path": str(entry.get("path") or ""),
-                    "category": str(entry.get("category") or "uncategorized"),
-                    "kind": str(entry.get("kind") or "inherited"),
-                    "size_bytes": int(entry.get("size_bytes") or 0),
-                    # Optional external link (e.g. a GitHub raw URL for an
-                    # inherited source). When present the SPA renders a
-                    # hyperlink — the ONLY working access path in the published
-                    # static snapshot (the /api/data-source-file "Open" button
-                    # is server-only).
-                    "url": str(entry.get("url") or ""),
-                })
-            data = {"label": label, "sources": sources}
-    except Exception as e:  # noqa: BLE001 — never break the dashboard
-        data = {"label": None, "sources": [], "error": f"{type(e).__name__}: {e}"}
-
-    _DATA_SOURCES_CACHE["data"] = data
-    _DATA_SOURCES_CACHE["ts"] = now
-    return data
+    """Back-compat shim — delegates to lib.data_sources.enumerate_data_sources
+    for the module-level WORKSPACE."""
+    return _data_sources_lib.enumerate_data_sources(WORKSPACE, bypass_cache)
 
 
 # Map of file extension → (content-type, inline?) for serving a data-source
@@ -2790,23 +2732,9 @@ def _build_saved_visualizations(ws_root) -> dict:
 
 
 def _iter_iset_dirs(ws_root: Path | None = None):
-    """Yield investigations/<name>/ dirs that contain an investigation.yaml.
-
-    'iset' = investigation-set (a named collection of studies with the v3
-    'investigations as collections' semantics, distinct from the legacy
-    investigations/<name>/spec.yaml study format).
-
-    ``ws_root`` defaults to the module-level WORKSPACE constant; tests can
-    pass an explicit path to walk an isolated tmp workspace.
-    """
-    root = WorkspacePaths.load(ws_root or WORKSPACE).dir("investigations")
-    if not root.is_dir():
-        return
-    for d in sorted(root.iterdir()):
-        if not d.is_dir():
-            continue
-        if (d / "investigation.yaml").is_file():
-            yield d
+    """Back-compat shim — delegates to lib.investigation_status.iter_iset_dirs,
+    defaulting to the module-level WORKSPACE when ws_root is omitted."""
+    yield from _invstatus.iter_iset_dirs(ws_root or WORKSPACE)
 
 
 # ---------------------------------------------------------------------------
@@ -2820,62 +2748,12 @@ def _iter_iset_dirs(ws_root: Path | None = None):
 _ISET_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
-# Sets used by compute_investigation_status. Defined at module scope so the
-# derivation rules are inspectable / overridable from tests.
-_STUDY_STATUS_FAILED = frozenset({"failed", "invalid"})
-_STUDY_STATUS_COMPLETE = frozenset({"complete", "ran"})
-# Terminal "done" states for the INVESTIGATION roll-up only. A study that has
-# been evaluated (or decided) is finished from the investigation's point of
-# view — Simulate -> Evaluate -> Decide — so an all-evaluated investigation
-# reads "complete" rather than falling through to "in_progress". Kept separate
-# from _STUDY_STATUS_COMPLETE so the PER-STUDY badge still shows "evaluated"
-# verbatim (compute_study_effective_status is unchanged).
-_STUDY_STATUS_DONE_ROLLUP = _STUDY_STATUS_COMPLETE | frozenset({"evaluated", "decided"})
-_STUDY_STATUS_RUNNING = frozenset({"running", "implementing", "runnable", "analyzing"})
-_STUDY_STATUS_PLANNED = frozenset({"planned", "planning"})
+# The _STUDY_STATUS_* sets are imported from lib.investigation_status (top of
+# file); compute_study_effective_status below uses them.
 
 
-def compute_investigation_status(
-    study_statuses: list[str],
-    has_runs: list[bool] | None = None,
-) -> str:
-    """Derive an investigation's effective status from its member studies.
-
-    Rules, applied in order (first match wins):
-
-    1. Any child in ``{failed, invalid}`` → ``"failed"``.
-    2. All children in ``{complete, ran}`` (non-empty) → ``"complete"``.
-    3. Any child in ``{running, implementing, runnable, analyzing}`` OR with
-       accumulated runs (via ``has_runs[i] == True``) → ``"running"``.
-    4. At least one child in ``{complete, ran}`` but not all → ``"in_progress"``.
-    5. Otherwise (empty, or all planned/planning/unknown) → ``"planning"``.
-
-    ``has_runs`` is an optional parallel list of bools (one per study)
-    indicating whether each study has accumulated at least one run. When
-    omitted, rule 3 considers only the status set.
-    """
-    statuses = list(study_statuses or [])
-    has_runs = list(has_runs or [False] * len(statuses))
-
-    # 1: any failed/invalid child poisons the whole investigation.
-    if any(s in _STUDY_STATUS_FAILED for s in statuses):
-        return "failed"
-
-    # 2: non-empty list, every child done (complete/ran/evaluated/decided).
-    if statuses and all(s in _STUDY_STATUS_DONE_ROLLUP for s in statuses):
-        return "complete"
-
-    # 3: anything in the "active" set → running. (Mere accumulated runs no
-    # longer count as running — completed history is not active execution.)
-    if any(s in _STUDY_STATUS_RUNNING for s in statuses):
-        return "running"
-
-    # 4: at least one done OR any accumulated runs, but not all → mixed-progress.
-    if any(s in _STUDY_STATUS_DONE_ROLLUP for s in statuses) or any(has_runs):
-        return "in_progress"
-
-    # 5: default.
-    return "planning"
+# compute_investigation_status moved to lib.investigation_status (imported at
+# top of file; same name, so existing call-sites are unchanged).
 
 
 def compute_study_effective_status(
@@ -2922,28 +2800,12 @@ def _iset_report_file(ws_root: Path, slug: str):
 
 
 def _read_study_status(ws_root: Path, slug: str) -> tuple[str, bool]:
-    """Read (status, has_runs) for a member study referenced by an iset.
-
-    Returns ``("planning", False)`` if the study can't be located or parsed —
-    treat missing-children as benign for status derivation rather than
-    poisoning the entire investigation.
-    """
-    # Resolve the study dir nested-aware (investigations/<inv>/studies/<slug>/),
-    # falling back to the legacy v2 spec.yaml. study_dir() handles flat back-compat.
-    try:
-        sp = WorkspacePaths.load(ws_root).study_dir(slug) / "study.yaml"
-    except FileNotFoundError:
-        sp = ws_root / "investigations" / slug / "spec.yaml"
-    if sp.is_file():
-        try:
-            spec = yaml.safe_load(sp.read_text(encoding="utf-8")) or {}
-        except Exception:
-            return "planning", False
-        status = spec.get("status") or "planning"
-        # F2: count via _count_runs_for_study so we see runs that landed in
-        # runs.db without a matching study.yaml entry. spec.runs merged via max().
-        return status, _count_runs_for_study(slug, spec) > 0
-    return "planning", False
+    """Back-compat shim — delegates to lib.investigation_status.read_study_status,
+    injecting the server's runs.db-backed runs-presence check."""
+    return _invstatus.read_study_status(
+        ws_root, slug,
+        study_has_runs=lambda s, spec: _count_runs_for_study(s, spec) > 0,
+    )
 
 
 # Pass A multi-axis status: the six independent axes added to study.yaml in
@@ -3002,46 +2864,13 @@ def _read_study_discovery_implications(ws_root: Path, slug: str) -> dict:
 
 
 def _iset_lifecycle(ws_root: Path, slug: str) -> str:
-    """Git lifecycle of an investigation: 'merged' if its dir exists in the
-    merge-base with main (i.e. already on main), else 'wip'. Any git error or
-    non-repo -> 'wip'."""
-    import subprocess
-    rel = WorkspacePaths.load(ws_root).rel("investigations") + f"/{slug}/investigation.yaml"
-    try:
-        base = subprocess.run(["git", "merge-base", "HEAD", "main"], cwd=str(ws_root),
-                              capture_output=True, text=True)
-        ref = base.stdout.strip() if base.returncode == 0 else "main"
-        r = subprocess.run(["git", "cat-file", "-e", f"{ref}:{rel}"], cwd=str(ws_root),
-                          capture_output=True, text=True)
-        return "merged" if r.returncode == 0 else "wip"
-    except Exception:
-        return "wip"
+    """Back-compat shim — delegates to lib.investigation_status.iset_lifecycle."""
+    return _invstatus.iset_lifecycle(ws_root, slug)
 
 
 def _current_branch_slug(ws_root: Path) -> str | None:
-    """The investigation slug matching the workspace's current git branch, or None."""
-    import re, subprocess
-    try:
-        br = subprocess.run(["git", "-C", str(ws_root), "branch", "--show-current"],
-                            capture_output=True, text=True, timeout=2).stdout.strip()
-    except Exception:
-        return None
-    if not br:
-        return None
-    slugs = [d.name for d in _iter_iset_dirs(ws_root)]
-    if br in slugs:
-        return br
-    for s in slugs:
-        if br == f"investigation/{s}" or br.endswith("/" + s):
-            return s
-    brtok = set(t for t in re.split(r"[/_\-.]+", br.lower()) if t)
-    best, best_n = None, 0
-    for s in slugs:
-        stok = set(t for t in re.split(r"[/_\-.]+", s.lower()) if t)
-        n = len(brtok & stok)
-        if n > best_n:
-            best, best_n = s, n
-    return best if best_n > 0 else None
+    """Back-compat shim — delegates to lib.investigation_status.current_branch_slug."""
+    return _invstatus.current_branch_slug(ws_root)
 
 
 def _inputs_payload(ws_root: Path, slug: str | None = None) -> dict:
@@ -3309,40 +3138,13 @@ def _decide_proposed_input_for_test(
 
 
 def _build_iset_summary_for_test(ws_root: Path) -> list[dict]:
-    """Pure function backing ``GET /api/iset-list`` — emits the same list
-    of summary dicts that the handler returns, but without HTTP plumbing.
-
-    Each entry includes ``effective_status`` derived from the member
-    studies' current statuses.
-    """
-    out: list[dict] = []
-    current_slug = _current_branch_slug(ws_root)
-    for d in _iter_iset_dirs(ws_root):
-        try:
-            spec = yaml.safe_load((d / "investigation.yaml").read_text(encoding="utf-8")) or {}
-        except Exception as e:
-            out.append({"name": d.name, "error": f"parse failed: {e}"})
-            continue
-        study_slugs = list(spec.get("studies") or [])
-        statuses_and_runs = [_read_study_status(ws_root, s) for s in study_slugs]
-        statuses = [s for s, _ in statuses_and_runs]
-        has_runs = [r for _, r in statuses_and_runs]
-        author_status = spec.get("status", "planning")
-        effective_status = compute_investigation_status(statuses, has_runs=has_runs)
-        out.append({
-            "name":             spec.get("name", d.name),
-            "title":            spec.get("title", spec.get("name", d.name)),
-            "status":           author_status,
-            "effective_status": effective_status,
-            "description":      spec.get("description", ""),
-            "question":         spec.get("question", ""),
-            "hypothesis":       spec.get("hypothesis", ""),
-            "n_studies":        len(study_slugs),
-            "studies":          study_slugs,
-            "lifecycle":        _iset_lifecycle(ws_root, spec.get("name", d.name)),
-            "current":          (d.name == current_slug),
-        })
-    return out
+    """Back-compat shim — delegates to lib.investigation_status.build_iset_summary,
+    injecting the server's runs.db-backed runs-presence check. (Name retained for
+    the stdlib /api/iset-list handler + existing tests.)"""
+    return _invstatus.build_iset_summary(
+        ws_root,
+        study_has_runs=lambda s, spec: _count_runs_for_study(s, spec) > 0,
+    )
 
 
 def _catalog_data(ws_root: "Path") -> dict:

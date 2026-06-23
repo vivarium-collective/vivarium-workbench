@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 # Which emitter wrote a run's store (derived from its store path).
 EmitterKind = Literal["xarray", "parquet", "sqlite"]
@@ -156,3 +156,47 @@ class InvestigationSummary(BaseModel):
     lifecycle: Any = None
     current: Optional[bool] = None
     error: Optional[str] = None
+
+
+class DataSource(BaseModel):
+    """One entry of the ``GET /api/data-sources`` ``sources`` list."""
+
+    key: str
+    path: str = ""
+    category: str = "uncategorized"
+    kind: str = "inherited"
+    size_bytes: int = 0
+    url: str = ""
+
+
+class DataSourcesPayload(BaseModel):
+    """``GET /api/data-sources`` payload (lib.data_sources.enumerate_data_sources)."""
+
+    label: Optional[str] = None
+    sources: list[DataSource] = []
+    error: Optional[str] = None
+
+
+class BibEntry(BaseModel):
+    """One parsed references.bib entry. Bibtex fields vary, so unknown keys are
+    preserved (``extra="allow"``) rather than stripped — only ``key`` is required.
+    The documented fields below + enrichment fields (enriched_doi, publisher_url,
+    oa_pdf_url, oa_status, …) are added in place by the references-fetch cache."""
+
+    model_config = ConfigDict(extra="allow")
+
+    key: str
+    type: Optional[str] = None
+    title: Optional[str] = None
+    author: Optional[str] = None
+    journal: Optional[str] = None
+    year: Optional[str] = None
+    doi: Optional[str] = None
+    url: Optional[str] = None
+    note: Optional[str] = None
+
+
+class ReferencesBibPayload(BaseModel):
+    """``GET /api/references-bib`` payload (server.py ``_get_references_bib``)."""
+
+    entries: list[BibEntry] = []

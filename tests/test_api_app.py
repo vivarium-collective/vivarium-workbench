@@ -78,8 +78,6 @@ def test_iset_list_typed_passthrough(client, monkeypatch):
     """The route validates the builder's output through InvestigationSummary —
     including the untyped `lifecycle` passthrough (not stripped) and the minimal
     {name, error} parse-failure variant."""
-    from vivarium_dashboard import server
-
     summaries = [
         {"name": "inv-a", "title": "Inv A", "status": "active",
          "effective_status": "in-progress", "description": "d", "question": "q",
@@ -87,7 +85,10 @@ def test_iset_list_typed_passthrough(client, monkeypatch):
          "lifecycle": {"phase": "run", "extra": 1}, "current": True},
         {"name": "inv-bad", "error": "parse failed: boom"},
     ]
-    monkeypatch.setattr(server, "_build_iset_summary_for_test", lambda ws: summaries)
+    monkeypatch.setattr(
+        api_app.investigation_status, "build_iset_summary",
+        lambda ws, **kw: summaries,
+    )
 
     body = client.get("/api/iset-list").json()
     assert body[0]["studies"] == ["s1", "s2"]
@@ -97,10 +98,49 @@ def test_iset_list_typed_passthrough(client, monkeypatch):
     assert body[1]["studies"] == [] and body[1]["lifecycle"] is None
 
 
+def test_data_sources_no_provider(client, tmp_path):
+    """A workspace with no data-source provider yields the typed empty bundle."""
+    (tmp_path / "workspace.yaml").write_text("{}")
+    r = client.get("/api/data-sources")
+    assert r.status_code == 200
+    assert r.json()["sources"] == []
+
+
+def test_data_sources_typed(client, monkeypatch):
+    payload = {"label": "My data", "sources": [
+        {"key": "k1", "path": "/p", "category": "genome", "kind": "local",
+         "size_bytes": 42, "url": "http://x"}]}
+    monkeypatch.setattr(api_app._data_sources, "enumerate_data_sources",
+                        lambda ws, **kw: payload)
+    body = client.get("/api/data-sources").json()
+    assert body["label"] == "My data"
+    assert body["sources"][0]["key"] == "k1"
+    assert body["sources"][0]["size_bytes"] == 42
+
+
+def test_references_bib_preserves_extra_fields(client, monkeypatch):
+    """BibEntry uses extra='allow', so arbitrary bibtex fields survive the typed
+    response (FastAPI does not strip them) — only `key` is required."""
+    import vivarium_dashboard.lib.references_fetch as rf
+    import vivarium_dashboard.lib.report as report_mod
+
+    entries = [{"key": "smith2020", "title": "T", "author": "Smith",
+                "publisher": "ACME", "weird_field": "xyz"}]
+    monkeypatch.setattr(report_mod, "_parse_bib_entries", lambda ws: entries)
+    monkeypatch.setattr(rf, "load_cache", lambda ws: {})
+    monkeypatch.setattr(rf, "enrich_entries", lambda e, c: e)
+
+    e = client.get("/api/references-bib").json()["entries"][0]
+    assert e["key"] == "smith2020"
+    assert e["publisher"] == "ACME"     # unknown bibtex field preserved
+    assert e["weird_field"] == "xyz"    # preserved, not stripped
+
+
 def test_new_routes_in_openapi(client):
     components = client.get("/openapi.json").json()["components"]["schemas"]
-    assert "DashConfig" in components
-    assert "InvestigationSummary" in components
+    for name in ("DashConfig", "InvestigationSummary", "DataSourcesPayload",
+                 "DataSource", "BibEntry", "ReferencesBibPayload"):
+        assert name in components
 
 
 def test_workspace_default_is_cwd(monkeypatch):
