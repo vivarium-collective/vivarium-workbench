@@ -384,6 +384,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/workspaces/cleanup-stale": "_post_workspaces_cleanup_stale",
     "/api/workspaces/start":         "_post_workspaces_start",
     "/api/workspaces/stop":          "_post_workspaces_stop",
+    "/api/source/switch":            "_post_source_switch",
     # Remote-run endpoints (Phase 3b).
     "/api/remote-run-start":         "_post_remote_run_start",
 }
@@ -16466,6 +16467,33 @@ if __name__ == "__main__":
             "error": "stop_timeout",
             "hint": f"PID {pid} still alive; SIGKILL it manually if stuck",
         }, 504)
+
+    def _post_source_switch(self, body: dict):
+        """POST /api/source/switch — re-point the active workspace in-process.
+
+        Body: {"path": <workspace dir>}. The path MUST be a registered catalog
+        entry (validated against workspace_catalog.list_workspaces(); no arbitrary
+        paths). Returns {ok, source}; the client reloads.
+        """
+        from pbg_superpowers import workspace_catalog
+        path = str(body.get("path") or "").strip()
+        if not path:
+            return self._json({"error": "missing 'path'"}, 400)
+        target = str(Path(path).resolve())
+        entry = next(
+            (w for w in workspace_catalog.list_workspaces()
+             if str(Path(w["path"]).resolve()) == target),
+            None,
+        )
+        if entry is None:
+            return self._json(
+                {"error": f"{path!r} is not a registered workspace"}, 400)
+        _switch_active_workspace(Path(entry["path"]))
+        return self._json(
+            {"ok": True,
+             "source": {"path": str(entry["path"]), "name": entry.get("name")}},
+            200,
+        )
 
     def _read_workspace_name(self, root: Path) -> str:
         """Read `name` from <root>/workspace.yaml; fall back to dir basename."""
