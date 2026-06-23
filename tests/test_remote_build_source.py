@@ -1,10 +1,13 @@
 import io
 import json
+import os
+import tarfile
 from pathlib import Path
 
 import pytest
 
 from vivarium_dashboard.lib import sms_api_client as sac
+from vivarium_dashboard.lib import remote_build_source as rbs
 
 
 class _Resp:
@@ -51,3 +54,72 @@ def test_download_workspace_streams_to_file(monkeypatch, tmp_path):
     assert out == tmp_path / "workspace.tar.gz"
     assert out.read_bytes() == b"TARBALLBYTES"
     assert seen["url"] == "http://x/api/v1/simulations/workspace?simulator_id=45"
+
+
+def _make_tarball(path, top="org-repo-abc1234"):
+    """A GitHub-style tarball: one top-level dir containing workspace.yaml."""
+    with tarfile.open(path, "w:gz") as tar:
+        data = b"name: built-ws\n"
+        info = tarfile.TarInfo(f"{top}/workspace.yaml")
+        info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+
+
+class _FakeClient:
+    def __init__(self, tarball_src):
+        self._src = tarball_src
+        self.downloads = 0
+
+    def download_workspace(self, simulator_id, dest_dir):
+        import shutil
+        self.downloads += 1
+        dest = Path(dest_dir) / "workspace.tar.gz"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(self._src, dest)
+        return dest
+
+    def list_simulators(self):
+        return {"versions": [
+            {"database_id": 45, "git_repo_url": "https://github.com/org/v2ecoli",
+             "git_commit_hash": "32b901", "git_branch": "main"},
+        ]}
+
+
+@pytest.fixture
+def _cache(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIVARIUM_DASHBOARD_BUILD_CACHE", str(tmp_path / "bc"))
+    return tmp_path
+
+
+def test_materialize_extracts_and_strips_top_dir(_cache, tmp_path):
+    tb = tmp_path / "src.tar.gz"; _make_tarball(tb)
+    client = _FakeClient(tb)
+    cache = rbs.materialize_build(client, 45, "32b901")
+    assert cache == rbs.cache_dir_for(45, "32b901")
+    assert (cache / "workspace.yaml").read_text() == "name: built-ws\n"   # top dir stripped
+
+
+def test_materialize_reuses_cache(_cache, tmp_path):
+    tb = tmp_path / "src.tar.gz"; _make_tarball(tb)
+    client = _FakeClient(tb)
+    rbs.materialize_build(client, 45, "32b901")
+    rbs.materialize_build(client, 45, "32b901")   # second call
+    assert client.downloads == 1                  # reused, not re-downloaded
+
+
+def test_list_build_sources_maps_and_labels():
+    client = _FakeClient(None)
+    out = rbs.list_build_sources(client)
+    assert out["error"] is None
+    b = out["builds"][0]
+    assert b["simulator_id"] == 45 and b["commit"] == "32b901"
+    assert b["label"] == "v2ecoli @ 32b901 (build #45)"
+
+
+def test_list_build_sources_degrades_on_error():
+    class _Boom:
+        def list_simulators(self):
+            from vivarium_dashboard.lib.sms_api_client import SmsApiError
+            raise SmsApiError("tunnel down")
+    out = rbs.list_build_sources(_Boom())
+    assert out["builds"] == [] and "tunnel down" in out["error"]
