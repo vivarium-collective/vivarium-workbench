@@ -37,6 +37,7 @@ import sqlite3
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -211,6 +212,36 @@ _LINKAGE_TTL = 30.0  # seconds
 # this makes repeat opens + pop-outs instant. Short TTL so code edits are picked up.
 _COMPOSITE_STATE_CACHE: dict = {}
 _COMPOSITE_STATE_TTL_S = 300.0
+
+# Serializes runtime workspace re-pointing (SP2). A switch must not interleave
+# with another switch.
+_SWITCH_LOCK = threading.Lock()
+
+
+def _invalidate_workspace_caches() -> None:
+	"""Clear every cache keyed to the active workspace. Called ONLY from
+	_switch_active_workspace, so the invalidation surface is auditable."""
+	_REGISTRY_CACHE["data"] = None
+	_REGISTRY_CACHE["ts"] = 0.0
+	_LINKAGE_CACHE.clear()
+	_COMPOSITE_STATE_CACHE.clear()
+	_RUN_STORE_SUMMARY_CACHE.clear()
+	_WP_CACHE.clear()
+	# lib-level caches keyed by workspace (defensive — data_sources keys by
+	# ws_root, but clear so a re-point starts clean).
+	from vivarium_dashboard.lib.data_sources import _DATA_SOURCES_CACHE
+	_DATA_SOURCES_CACHE.clear()
+
+
+def _switch_active_workspace(new_root: Path) -> None:
+	"""Re-point the active workspace in-process: update the WORKSPACE global +
+	lib._root, then invalidate all workspace-keyed caches. Serialized by lock."""
+	from vivarium_dashboard.lib._root import set_workspace_root
+	global WORKSPACE
+	with _SWITCH_LOCK:
+		WORKSPACE = Path(new_root).resolve()
+		set_workspace_root(WORKSPACE)
+		_invalidate_workspace_caches()
 
 # Canonical investigation Overview status values (see Task A3.5 / set-overview).
 _VALID_OVERVIEW_STATUSES = {"draft", "in-progress", "completed", "archived"}
