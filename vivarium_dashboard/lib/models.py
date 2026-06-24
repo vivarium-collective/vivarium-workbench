@@ -351,6 +351,38 @@ class RegistryPayload(BaseModel):
     imports: list[RegistryImport] = []
 
 
+class CompositeRecord(BaseModel):
+    """One composite entry in the ``GET /api/composites`` payload.
+
+    Composites come in two kinds: ``spec`` (a ``*.composite.yaml`` / ``.json``
+    file) and ``generator`` (a ``@composite_generator``-decorated Python function).
+    Generator entries carry varied additional fields (``parameters``,
+    ``visualizations``, ``workspace_local``, etc.) that differ across workspaces;
+    ``extra="allow"`` passes them through untouched so the browser receives the
+    full payload.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+    kind: str = "spec"
+    module: str = ""
+
+
+class CompositesPayload(BaseModel):
+    """``GET /api/composites`` payload (lib.composites_query.composites_via_subprocess).
+
+    Discovery runs in a fresh subprocess to avoid stale ``sys.modules`` hiding
+    generators.  On subprocess failure the route returns an empty list with an
+    ``error`` string rather than a 500.
+    """
+
+    composites: list[CompositeRecord] = []
+    workspace_package: Optional[str] = None
+    error: Optional[str] = None
+
+
 class CompositeResolvePayload(BaseModel):
     """``GET /api/composite-resolve`` payload (lib.composite_resolve.resolve_composite).
 

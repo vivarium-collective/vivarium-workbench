@@ -436,3 +436,80 @@ def test_registry_in_openapi(client):
     components = spec["components"]["schemas"]
     for name in ("RegistryPayload", "RegistryProcess", "RegistryType", "RegistryImport"):
         assert name in components, f"{name} missing from openapi.json"
+
+
+# ---------------------------------------------------------------------------
+# /api/composites
+# ---------------------------------------------------------------------------
+
+def test_composites_typed_passthrough(client, monkeypatch):
+    """The route validates composites_via_subprocess output through CompositesPayload.
+
+    Both a spec-kind and a generator-kind composite survive; the generator carries
+    an extra field (workspace_local) that is preserved by CompositeRecord extra='allow'.
+    """
+    import vivarium_dashboard.api.app as _app
+
+    payload = {
+        "composites": [
+            {
+                "id": "pbg_ws.composites.baseline",
+                "name": "baseline",
+                "kind": "spec",
+                "module": "pbg_ws.composites",
+            },
+            {
+                "id": "pbg_ws.composites.growth.growth",
+                "name": "growth",
+                "kind": "generator",
+                "module": "pbg_ws.composites.growth",
+                "workspace_local": True,           # extra field — must survive
+                "default_n_steps": 100,            # another extra field
+            },
+        ],
+        "workspace_package": "pbg_ws",
+    }
+    monkeypatch.setattr(_app, "composites_via_subprocess", lambda ws: payload)
+
+    r = client.get("/api/composites")
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body["workspace_package"] == "pbg_ws"
+    assert body["error"] is None
+    assert len(body["composites"]) == 2
+
+    spec_rec = body["composites"][0]
+    assert spec_rec["id"] == "pbg_ws.composites.baseline"
+    assert spec_rec["kind"] == "spec"
+    assert spec_rec["module"] == "pbg_ws.composites"
+
+    gen_rec = body["composites"][1]
+    assert gen_rec["kind"] == "generator"
+    assert gen_rec["workspace_local"] is True         # extra="allow" preserved
+    assert gen_rec["default_n_steps"] == 100          # extra="allow" preserved
+
+
+def test_composites_subprocess_none_returns_error_payload(client, monkeypatch):
+    """When composites_via_subprocess returns None the route must not 500 — it
+    returns the empty + error payload with HTTP 200."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(_app, "composites_via_subprocess", lambda ws: None)
+
+    r = client.get("/api/composites")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["composites"] == []
+    assert body["error"] is not None
+    assert "unavailable" in body["error"]
+
+
+def test_composites_in_openapi(client):
+    """The /api/composites route and CompositesPayload / CompositeRecord appear
+    in the generated OpenAPI schema."""
+    spec = client.get("/openapi.json").json()
+    assert "/api/composites" in spec["paths"]
+    components = spec["components"]["schemas"]
+    for name in ("CompositesPayload", "CompositeRecord"):
+        assert name in components, f"{name} missing from openapi.json"

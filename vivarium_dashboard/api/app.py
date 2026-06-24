@@ -36,9 +36,12 @@ from vivarium_dashboard.lib import data_sources as _data_sources
 from vivarium_dashboard.lib import investigation_status
 from vivarium_dashboard.lib import saved_visualizations as _saved_viz
 from vivarium_dashboard.lib.composite_resolve import resolve_composite
+from vivarium_dashboard.lib.composites_query import composites_via_subprocess
 from vivarium_dashboard.lib.models import (
     BibEntry,
+    CompositeRecord,
     CompositeResolvePayload,
+    CompositesPayload,
     DashConfig,
     DataSourcesPayload,
     InvestigationSummary,
@@ -190,6 +193,35 @@ def create_app() -> FastAPI:
         implementation the stdlib ``_get_registry_data`` now forwards to.
         """
         return RegistryPayload.model_validate(build_registry(ws))
+
+    @app.get("/api/composites", response_model=CompositesPayload)
+    def composites(ws: Path = Depends(get_workspace)) -> CompositesPayload:
+        """Composite spec / generator index for this workspace.
+
+        Mirrors ``GET /api/composites`` from the stdlib server.  Discovery runs
+        in a fresh Python subprocess so that stale ``sys.modules`` in the
+        long-running server process cannot hide ``@composite_generator``-decorated
+        entries.
+
+        On subprocess failure (timeout / import error / parse error) the route
+        returns ``{"composites": [], "error": "composite discovery unavailable"}``
+        rather than a 500 — keeping the UI operational even when the workspace
+        package can't be imported.
+
+        Library-backed via ``lib.composites_query.composites_via_subprocess``.
+        """
+        data = composites_via_subprocess(ws)
+        if data is None:
+            return CompositesPayload(
+                composites=[],
+                error="composite discovery unavailable",
+            )
+        raw_composites = data.get("composites") or []
+        return CompositesPayload(
+            composites=[CompositeRecord.model_validate(c) for c in raw_composites],
+            workspace_package=data.get("workspace_package"),
+            error=data.get("error"),
+        )
 
     @app.get("/api/composite-resolve", response_model=Optional[CompositeResolvePayload])
     def composite_resolve(
