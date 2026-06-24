@@ -398,12 +398,6 @@ window.addEventListener('pageshow', function (e) {
       <div class="viv-workspace-name" title="Current source (manage in the Branch tab)">
         <span class="viv-workspace-switcher-glyph">●</span>
         <strong>{{ workspace_name }}</strong>
-        {% if repo_url %}
-        <a class="viv-ws-repo-link" href="{{ repo_url }}" target="_blank" rel="noopener"
-           title="Open {{ workspace_name }} on GitHub" aria-label="Open on GitHub">
-          <svg class="viv-ws-gh-mark" width="12" height="12"><use href="#viv-gh-mark"/></svg>
-        </a>
-        {% endif %}
       </div>
     </div>
     <!-- Snapshot mode: static repo label replaces the switcher dropdown. -->
