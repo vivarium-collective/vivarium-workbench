@@ -415,6 +415,36 @@ class InvestigationsPayload(BaseModel):
     investigations: list[InvestigationRow] = []
 
 
+class CatalogModule(BaseModel):
+    """One module entry in the ``GET /api/catalog`` ``modules`` list.
+
+    Source: ``lib.catalog.build_catalog``.  The stable display/install keys
+    are enumerated; install-source, tags, and workspace-specific metadata vary
+    across entries, so ``extra="allow"`` preserves them intact.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    installed: bool = False
+    install_source: Optional[str] = None
+    module: Optional[str] = None
+    description: Optional[str] = None
+
+
+class CatalogPayload(BaseModel):
+    """``GET /api/catalog`` payload (lib.catalog.build_catalog).
+
+    Returns the pbg module catalog annotated with per-workspace install state.
+    ``extra="allow"`` forwards any top-level keys the builder may add in future
+    (e.g. ``error``).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    modules: list[CatalogModule] = []
+
+
 class CompositeResolvePayload(BaseModel):
     """``GET /api/composite-resolve`` payload (lib.composite_resolve.resolve_composite).
 

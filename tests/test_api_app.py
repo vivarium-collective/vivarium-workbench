@@ -603,3 +603,88 @@ def test_investigations_in_openapi(client):
     components = spec["components"]["schemas"]
     for name in ("InvestigationsPayload", "InvestigationRow"):
         assert name in components, f"{name} missing from openapi.json"
+
+
+# ---------------------------------------------------------------------------
+# /api/catalog
+# ---------------------------------------------------------------------------
+
+def test_catalog_empty_workspace(client):
+    """An empty workspace (no workspace.yaml) returns 200 with an empty or
+    error-flagged modules list — never a 500."""
+    r = client.get("/api/catalog")
+    assert r.status_code == 200
+    body = r.json()
+    # May have an 'error' key but must have a 'modules' list.
+    assert "modules" in body
+    assert isinstance(body["modules"], list)
+
+
+def test_catalog_typed_passthrough(client):
+    """The route validates the builder output through CatalogPayload.
+
+    Covers:
+    - A rich module row with many extra keys (extra='allow' preserves them).
+    - Extra keys on the payload itself (extra='allow' on CatalogPayload).
+    Both must validate through the model without 422.
+    """
+    from unittest.mock import patch
+
+    rich_module = {
+        "name": "viva-munk",
+        "installed": True,
+        "install_source": "pyproject",
+        "module": "viva_munk",
+        "description": "Particle visualization library.",
+        "package": "viva_munk",
+        "tags": ["visualization", "particles"],
+        "version": "0.4.2",             # extra key — preserved
+        "workspace_local": False,        # extra key — preserved
+        "future_key": "preserved",       # extra key — preserved
+    }
+    payload = {"modules": [rich_module], "extra_top_level": "ok"}
+
+    with patch(
+        "vivarium_dashboard.api.app.build_catalog",
+        return_value=payload,
+    ):
+        r = client.get("/api/catalog")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["modules"]) == 1
+
+    mod = body["modules"][0]
+    assert mod["name"] == "viva-munk"
+    assert mod["installed"] is True
+    assert mod["install_source"] == "pyproject"
+    assert mod["description"] == "Particle visualization library."
+    assert mod["future_key"] == "preserved"     # extra="allow" works
+    assert mod["tags"] == ["visualization", "particles"]
+
+
+def test_catalog_workspace_yaml(tmp_path):
+    """A workspace.yaml without imports yields the workspace's own module (if
+    the package dir exists) or an empty modules list."""
+    import yaml as _yaml
+    from vivarium_dashboard.lib.catalog import build_catalog
+
+    # Minimal workspace.yaml — no package_path, no imports, no pbg_superpowers
+    (tmp_path / "workspace.yaml").write_text(
+        _yaml.dump({"name": "test-ws", "description": "test"}),
+        encoding="utf-8",
+    )
+    result = build_catalog(tmp_path)
+    assert isinstance(result, dict)
+    assert "modules" in result
+    assert isinstance(result["modules"], list)
+
+
+def test_catalog_in_openapi(client):
+    """The /api/catalog route and CatalogPayload / CatalogModule appear in
+    the generated OpenAPI schema."""
+    spec = client.get("/openapi.json").json()
+    assert "/api/catalog" in spec["paths"]
+    components = spec["components"]["schemas"]
+    for name in ("CatalogPayload", "CatalogModule"):
+        assert name in components, f"{name} missing from openapi.json"

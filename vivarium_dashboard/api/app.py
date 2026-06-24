@@ -39,6 +39,8 @@ from vivarium_dashboard.lib.composite_resolve import resolve_composite
 from vivarium_dashboard.lib.composites_query import composites_via_subprocess
 from vivarium_dashboard.lib.models import (
     BibEntry,
+    CatalogModule,
+    CatalogPayload,
     CompositeRecord,
     CompositeResolvePayload,
     CompositesPayload,
@@ -55,6 +57,7 @@ from vivarium_dashboard.lib.models import (
     VisualizationClassesPayload,
     VizClass,
 )
+from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
 from vivarium_dashboard.lib.visualization_classes import list_visualization_classes
 from vivarium_dashboard.lib.simulations_index import list_simulations
@@ -259,6 +262,19 @@ def create_app() -> FastAPI:
         from vivarium_dashboard.lib.investigations_index import build_investigations
 
         return InvestigationsPayload.model_validate(build_investigations(ws))
+
+    @app.get("/api/catalog", response_model=CatalogPayload)
+    def catalog(ws: Path = Depends(get_workspace)) -> CatalogPayload:
+        """Package catalog for this workspace (mirrors the stdlib /api/catalog).
+
+        Returns the pbg module catalog annotated with per-workspace install
+        state (imports / pyproject / venv presence).  Best-effort: venv/
+        pyproject probes swallow errors — the route never returns 500.
+
+        Library-backed via ``lib.catalog.build_catalog`` — the single
+        implementation the stdlib ``_catalog_data`` now forwards to.
+        """
+        return CatalogPayload.model_validate(build_catalog(ws))
 
     return app
 
