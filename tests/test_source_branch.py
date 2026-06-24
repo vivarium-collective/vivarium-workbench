@@ -53,8 +53,9 @@ def test_branch_push_commits_and_pushes(tmp_path, monkeypatch):
     bare = tmp_path / "remote.git"; _git(tmp_path, "init", "-q", "--bare", str(bare))
     ws = tmp_path / "ws"; ws.mkdir()
     _git(ws, "init", "-q"); _git(ws, "checkout", "-q", "-b", "feat/x")
+    _git(ws, "config", "user.email", "t@t.t"); _git(ws, "config", "user.name", "t")
     _git(ws, "remote", "add", "origin", str(bare))
-    _git(ws, "-c", "user.email=a@b.c", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "base")
+    _git(ws, "commit", "-q", "--allow-empty", "-m", "base")
     (ws / "f.txt").write_text("hi")
     monkeypatch.setattr(server, "WORKSPACE", ws)
     captured = {}

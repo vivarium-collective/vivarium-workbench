@@ -153,6 +153,10 @@
           pushBtn.disabled = false; pushBtn.textContent = "Commit + Push";
           if (res.ok) alert("Pushed " + (res.d.branch || "") + " @ " + (res.d.commit || "").slice(0, 7));
           else alert("Push failed: " + (res.d.error || "error"));
+        })
+        .catch(function () {
+          pushBtn.disabled = false; pushBtn.textContent = "Commit + Push";
+          alert("Push failed: network error");
         });
     });
     actions.appendChild(pushBtn);
