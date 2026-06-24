@@ -1387,16 +1387,7 @@
         var cards = [];
         // Comparison report cards lead the gallery (no viewer dependency).
         cards = cards.concat(reportCards.map(_renderReportCardCard));
-        if (data.parsimony_available) {
-          cards = cards.concat(saved.map(_render3dVizCard));
-        } else if (saved.length) {
-          cards.push('<div class="analyses-card"><p class="empty-state muted" style="margin:0">' +
-            saved.length + ' saved 3D pack(s) found, but the <code>pbg_parsimony</code> viewer is not installed in this environment, so they cannot be embedded.</p></div>');
-        }
         cards.push(_renderPtoolsCard(ptools));
-        if (!saved.length && !(ptools.studies || []).length && ptools.configured === false) {
-          // Still show the (empty) PTools card; only the 3D section is empty.
-        }
         cards.push(_renderExplorerCard());
         if (!cards.length) {
           container.innerHTML = '<p class="empty-state">No saved visualizations yet. Run a parsimony packing composite or a PTools analysis to populate this gallery.</p>';
@@ -1410,7 +1401,7 @@
             snapshot: (window.__DASH_CONFIG__ || {}).mode === 'snapshot'
           });
         }
-        var _n = saved.length + reportCards.length;
+        var _n = reportCards.length;
         if (countEl) countEl.textContent = _n ? '(' + _n + ')' : '';
       })
       .catch(function(err) {
@@ -2377,8 +2368,12 @@
         var divider = _maybeSectionDivider(prevG, m);
         prevG = m;
         var tags = ''; // tag pills hidden
-        var homepage = m.homepage
-          ? '<a href="' + _esc(m.homepage) + '" target="_blank" class="module-link">GitHub &#8599;</a>'
+        // Installed-via-imports modules carry their GitHub URL in `source`, not
+        // `homepage` (which only the curated catalog populates) — fall back to a
+        // URL-shaped source so they get the same "GitHub" header link.
+        var _hp = m.homepage || (/^https?:\/\//.test(m.source || '') ? m.source : '');
+        var homepage = _hp
+          ? '<a href="' + _esc(_hp) + '" target="_blank" class="module-link">GitHub &#8599;</a>'
           : '';
         var workspaceCls = (m.kind === 'workspace') ? ' module-card-workspace'
                           : (m.installed ? ' module-card-installed' : '');

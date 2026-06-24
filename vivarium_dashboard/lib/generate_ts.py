@@ -50,6 +50,11 @@ _MODELS: list[type[BaseModel]] = [
     _models.DataSourcesPayload,
     _models.BibEntry,
     _models.ReferencesBibPayload,
+    _models.SavedViz,
+    _models.PtoolsStudy,
+    _models.PtoolsInfo,
+    _models.ReportCard,
+    _models.SavedVisualizationsPayload,
 ]
 
 OUTPUT_PATH = (
