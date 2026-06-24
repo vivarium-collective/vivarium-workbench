@@ -16229,6 +16229,30 @@ if __name__ == "__main__":
         """
         from pbg_superpowers import workspace_catalog
 
+        def _branch_label(name: str, path: str) -> str:
+            """Disambiguate the many worktrees/clones of one repo by branch.
+
+            ``v2ecoli`` → ``v2ecoli:dnaa-biology`` etc. Falls back to the path
+            leaf when git can't resolve a branch; plain name on the default
+            branch or when the leaf adds nothing."""
+            import subprocess
+            variant = None
+            try:
+                r = subprocess.run(
+                    ["git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD"],
+                    capture_output=True, text=True, timeout=2,
+                )
+                br = r.stdout.strip()
+                if br and br not in ("main", "master", "HEAD"):
+                    variant = br
+            except Exception:
+                pass
+            if variant is None:
+                leaf = Path(path).name
+                if leaf and leaf != name:
+                    variant = leaf
+            return f"{name}:{variant}" if variant else name
+
         current_root = WORKSPACE
         current_resolved = str(current_root.resolve())
 
@@ -16253,7 +16277,9 @@ if __name__ == "__main__":
 
         for entry in catalog:
             path = entry.get("path", "")
-            row = {"name": entry.get("name") or Path(path).name, "path": path}
+            name = entry.get("name") or Path(path).name
+            row = {"name": name, "path": path}
+            row["label"] = _branch_label(name, path) if Path(path).is_dir() else name
             if not Path(path).is_dir():
                 row["status"] = "missing"
             elif path == current_resolved:
