@@ -15066,11 +15066,11 @@
       // Legacy single-string box (still populated for any consumer that
       // reads it). The GitHub-tab settings page renders the same data into
       // individual rows via _renderGitStatusRows below.
+      // Legacy single-line banner is superseded by the per-row "Workspace
+      // repository" detail (_renderGitStatusRows); keep it permanently hidden
+      // so it doesn't duplicate that section.
       var box = document.getElementById('viv-git-status');
-      if (box) {
-        if (!s.branch) { box.hidden = true; }
-        else { box.hidden = false; }
-      }
+      if (box) { box.hidden = true; }
       if (!s.branch) {
         _renderGitStatusRows(null);
         return;
