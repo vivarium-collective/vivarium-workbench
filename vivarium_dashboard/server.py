@@ -212,6 +212,12 @@ _LINKAGE_TTL = 30.0  # seconds
 _COMPOSITE_STATE_CACHE: dict = {}
 _COMPOSITE_STATE_TTL_S = 300.0
 
+# Cache of the /api/composites list per workspace path. Discovery runs in a
+# SUBPROCESS (clean import — the long-running server's stale import state misses
+# @composite_generator entries; SP2b), which is ~slow, so cache the result and
+# invalidate on workspace switch. {ws_path: payload_dict}
+_COMPOSITES_LIST_CACHE: dict = {}
+
 # Serializes runtime workspace re-pointing (SP2). A switch must not interleave
 # with another switch.
 _SWITCH_LOCK = Lock()
@@ -224,6 +230,7 @@ def _invalidate_workspace_caches() -> None:
     _REGISTRY_CACHE["ts"] = 0.0
     _LINKAGE_CACHE.clear()
     _COMPOSITE_STATE_CACHE.clear()
+    _COMPOSITES_LIST_CACHE.clear()
     _RUN_STORE_SUMMARY_CACHE.clear()
     _WP_CACHE.clear()
     # lib-level caches keyed by workspace (defensive — data_sources keys by
@@ -3436,6 +3443,38 @@ def _composites_data(ws_root: "Path") -> dict:
         return {"composites": out, "workspace_package": pkg}
     except Exception as e:
         return {"composites": [], "error": str(e)}
+
+
+def _composites_data_subprocess(ws_root: "Path") -> "dict | None":
+    """Run :func:`_composites_data` in a fresh subprocess (clean Python import).
+
+    @composite_generator discovery imports package modules and scans decorators;
+    that registration is unreliable in the long-running server's stale
+    sys.modules state (it misses the generators), but works in a clean process
+    (SP2b). Returns the discovered payload, or ``None`` if the subprocess fails
+    (the caller then degrades to the in-process spec-only result).
+    """
+    # Discovery prints import warnings to stdout, so fence the JSON between
+    # explicit start/end markers and extract exactly that (don't trust line order).
+    script = (
+        "import sys, json; from pathlib import Path;"
+        "import vivarium_dashboard.server as s;"
+        "s.WORKSPACE = Path(sys.argv[1]);"
+        "_r = s._composites_data(s.WORKSPACE);"
+        "sys.stdout.write('@@@C_START@@@' + json.dumps(_r) + '@@@C_END@@@')"
+    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(ws_root)],
+            cwd=str(ws_root), capture_output=True, text=True, timeout=180,
+        )
+        out = result.stdout
+        i, j = out.find("@@@C_START@@@"), out.find("@@@C_END@@@")
+        if i != -1 and j != -1:
+            return json.loads(out[i + len("@@@C_START@@@"):j])
+    except Exception:
+        pass
+    return None
 
 
 def _composite_resolve_data(spec_id: str) -> "dict | None":
@@ -14978,12 +15017,24 @@ if __name__ == "__main__":
             return self._json({"error": f"workstream error: {e}"}, 500)
 
     def _get_composites(self):
-        """GET /api/composites — return composite specs from the workspace AND every installed pbg-* package.
+        """GET /api/composites — composite specs from the workspace AND installed pbg-* packages.
 
-        Delegates data assembly to the module-level ``_composites_data(ws_root)``
-        pure builder; wraps the result in the HTTP JSON response.
+        Discovery runs in a SUBPROCESS for a clean Python import: @composite_generator
+        scanning is unreliable in the long-running server's stale sys.modules state
+        (a fresh process finds the generators, the in-process call misses them — SP2b).
+        Result is cached per workspace and invalidated on switch. Falls back to the
+        in-process (spec-only) builder if the subprocess fails.
         """
-        return self._json(_composites_data(WORKSPACE), 200)
+        ws_key = str(WORKSPACE)
+        cached = _COMPOSITES_LIST_CACHE.get(ws_key)
+        if cached is not None:
+            return self._json(cached, 200)
+        payload = _composites_data_subprocess(WORKSPACE)
+        if payload is None:
+            payload = _composites_data(WORKSPACE)  # degraded: spec-only in-process
+        else:
+            _COMPOSITES_LIST_CACHE[ws_key] = payload
+        return self._json(payload, 200)
 
     def _get_composite_state(self):
         """GET /api/composite-state?ref=<id-or-path>
