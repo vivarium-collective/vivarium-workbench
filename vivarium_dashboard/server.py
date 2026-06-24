@@ -51,6 +51,11 @@ from vivarium_dashboard.lib import investigation_status as _invstatus
 from vivarium_dashboard.lib import data_sources as _data_sources_lib
 from vivarium_dashboard.lib import saved_visualizations as _savedviz_lib
 from vivarium_dashboard.lib import registry as _registry_lib
+from vivarium_dashboard.lib.investigations_index import (
+    _conclusions_excerpt,
+    _format_baseline_source,
+    _http_get_json,
+)
 from vivarium_dashboard.lib.registry import (
     clear_registry_cache,
     _dashboard_config,
@@ -1867,40 +1872,10 @@ def _read_runs_db_for_study(name: str) -> list[dict]:
 def _iter_study_dirs():
     """Yield every study directory across studies/ and investigations/.
 
-    Delegates to ``WorkspacePaths.iter_study_dirs``, which descends into the
-    nested ``investigations/<inv>/studies/<slug>/`` layout (a study dir is one
-    that holds ``study.yaml``) AND the flat ``studies/<slug>/`` layout, with the
-    nested location winning on slug collision.
-
-    The previous implementation iterated only the DIRECT children of
-    ``studies/`` and ``investigations/`` — so for a nested-layout workspace it
-    saw the investigation dirs (which hold ``investigation.yaml``, not
-    ``study.yaml``) instead of their studies, and every investigation-nested
-    study (e.g. ketchup-exchange-comparison, pdmp-*, colonies-*) was silently
-    dropped from /api/investigations -> "No investigations declared".
-
-    Legacy compatibility: a study authored directly under
-    ``investigations/<name>/`` as a pre-Phase-1 ``spec.yaml`` (no nested
-    ``studies/`` subdir, no ``investigation.yaml``) is still a study and is
-    yielded too — but a real investigation COLLECTION (one carrying
-    ``investigation.yaml``) is not, since its studies live one level down.
+    Thin wrapper: delegates to the lib implementation, injecting WORKSPACE.
     """
-    wp = WorkspacePaths.load(WORKSPACE)
-    seen: set[str] = set()
-    for d in wp.iter_study_dirs():
-        seen.add(d.name)
-        yield d
-    # Legacy: studies stored directly under investigations/<name>/spec.yaml.
-    inv_root = wp.dir("investigations")
-    if inv_root.is_dir():
-        for d in sorted(inv_root.iterdir()):
-            if not d.is_dir() or d.name in seen:
-                continue
-            if (d / "investigation.yaml").is_file():
-                continue  # an investigation collection, not a study
-            if (d / "spec.yaml").is_file() or (d / "study.yaml").is_file():
-                seen.add(d.name)
-                yield d
+    from vivarium_dashboard.lib.investigations_index import _iter_study_dirs as _ii_iter
+    return _ii_iter(WORKSPACE)
 
 
 # Saved-visualizations discovery + the parsimony feature-detect moved to
@@ -2706,22 +2681,6 @@ def _investigations_data(ws_root: Path) -> dict:
 _REGISTRY_TTL_S = 5.0
 _registry_cache: dict[str, tuple[float, dict]] = {}
 
-
-def _http_get_json(url: str, timeout: float = 1.5) -> dict | None:
-    """Best-effort GET → JSON. Returns None on any failure (timeout, non-2xx,
-    invalid JSON). Never raises — callers treat None as 'peer unreachable'.
-    """
-    import urllib.request
-    import urllib.error
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            if resp.status != 200:
-                return None
-            data = resp.read()
-            return json.loads(data.decode("utf-8", errors="replace"))
-    except (urllib.error.URLError, TimeoutError, OSError,
-            json.JSONDecodeError, ValueError):
-        return None
 
 
 def _peer_current_investigation(url: str) -> dict | None:
@@ -3626,26 +3585,9 @@ def _post_study_create_from_run_for_test(ws_root, body):
 
 
 def _count_runs_for_study(name: str, spec: dict | None = None) -> int:
-    """Count runs in studies/<name>/runs.db, falling back to len(spec.runs).
-
-    F2: ``runs.db`` is the canonical source of truth. We still merge with
-    the count from ``spec.get("runs")`` to surface legacy v3 specs that
-    have historical ``runs:`` entries which never made it into the DB
-    (e.g. workspaces predating pbg_runner). Returns the larger of the two
-    so the dashboard never undercounts.
-    """
-    try:
-        db_runs = _read_runs_db_for_study(name)
-    except Exception:
-        db_runs = []
-    db_count = len(db_runs)
-    spec_count = 0
-    if spec is not None:
-        spec_count = len(spec.get("runs") or [])
-    # Most workspaces will have db_count >= spec_count after F2 lands.
-    # If they ever diverge below, max() preserves the union — better to
-    # over-report than under-report when both sources should agree.
-    return max(db_count, spec_count)
+    """Count runs for a study. Thin wrapper: delegates to lib, injecting WORKSPACE."""
+    from vivarium_dashboard.lib.investigations_index import _count_runs_for_study as _ii_count
+    return _ii_count(WORKSPACE, name, spec)
 
 
 def _has_active_run_for_study(
@@ -5973,56 +5915,8 @@ def _safe_slug(s: str) -> str:
     return s[:40]
 
 
-def _format_baseline_source(spec: dict) -> str:
-    """Summarise a v3 study's baseline as a short label.
-
-    - 1 entry: pkg_short:name if the composite contains '.composites.';
-      otherwise the composite verbatim.
-    - N entries: format the first as above, then append ' (+N-1 more)'.
-    - 0 entries / missing / not a list: ''.
-    """
-    baseline = spec.get("baseline") or []
-    if not isinstance(baseline, list) or not baseline:
-        return ""
-    first = baseline[0] if isinstance(baseline[0], dict) else None
-    if first is None:
-        return ""
-    composite = (first.get("composite") or "").strip()
-    if not composite:
-        return ""
-    if ".composites." in composite:
-        pkg, _, rest = composite.partition(".composites.")
-        label = f"{pkg}:{rest}"
-    else:
-        label = composite
-    if len(baseline) > 1:
-        return f"{label} (+{len(baseline) - 1} more)"
-    return label
-
-
-def _conclusions_excerpt(spec: dict, limit: int = 240) -> str:
-    """Return a single-line preview of ``spec.conclusions`` for the index cards.
-
-    The Conclusions tab (B6) stores a structured markdown document with H2
-    headers (``## Claims``, ``## Evidence``, ``## Limitations``, ``## Next
-    steps``). For an at-a-glance preview we drop those headers, collapse
-    whitespace, and truncate to ``limit`` characters.
-    """
-    text = (spec.get("conclusions") or "").strip()
-    if not text:
-        return ""
-    # Drop the structured H2 headers so the excerpt is just the prose.
-    text = re.sub(
-        r"^##\s+(Claims|Evidence|Limitations|Next steps)\s*$",
-        "",
-        text,
-        flags=re.MULTILINE | re.IGNORECASE,
-    )
-    # Collapse whitespace + truncate.
-    text = re.sub(r"\s+", " ", text).strip()
-    if len(text) > limit:
-        text = text[:limit].rstrip() + "…"
-    return text
+# _format_baseline_source and _conclusions_excerpt are imported from
+# vivarium_dashboard.lib.investigations_index at the top of this module.
 
 
 def _active_branch_action(commit_message: str, action_fn) -> tuple[dict, int]:
