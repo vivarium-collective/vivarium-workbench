@@ -47,6 +47,7 @@ import yaml
 
 from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 from vivarium_dashboard.lib.atomic_io import atomic_write_text
+from vivarium_dashboard.lib import git_status as _git_status_lib
 from vivarium_dashboard.lib import investigation_status as _invstatus
 from vivarium_dashboard.lib import data_sources as _data_sources_lib
 from vivarium_dashboard.lib import saved_visualizations as _savedviz_lib
@@ -5048,12 +5049,12 @@ def _submodule_paths() -> set[str]:
 
 
 def _has_origin_remote() -> bool:
-    """True if a git remote named 'origin' is configured."""
-    r = subprocess.run(
-        ["git", "remote"],
-        cwd=WORKSPACE, capture_output=True, text=True, check=False,
-    )
-    return "origin" in (r.stdout or "").split()
+    """True if a git remote named 'origin' is configured.
+
+    Delegates to ``lib.git_status.has_origin_remote(WORKSPACE)`` — kept as a
+    shim so existing call-sites in this module continue to work unchanged.
+    """
+    return _git_status_lib.has_origin_remote(WORKSPACE)
 
 
 def _sms_api_base() -> str:
@@ -5142,36 +5143,19 @@ def _remote_repo_url() -> str | None:
 def _stale_branch_threshold() -> int:
     """Commits-behind-main threshold above which a branch is flagged stale.
 
-    Default 20 (matches the dnaa-biology friction report's "24 commits
-    behind, two trivial conflicts" anchor). Override per-server with
-    PBG_STALE_BRANCH_THRESHOLD=<int>."""
-    raw = os.environ.get("PBG_STALE_BRANCH_THRESHOLD")
-    if raw:
-        try:
-            n = int(raw)
-            return max(n, 1)
-        except ValueError:
-            pass
-    return 20
+    Delegates to ``lib.git_status.stale_branch_threshold()`` — kept as a
+    shim so existing call-sites in this module continue to work unchanged.
+    """
+    return _git_status_lib.stale_branch_threshold()
 
 
 def _commits_behind(branch: str, base: str = "main") -> tuple[int, str]:
-    """Return (commits_behind, ref_used). Probes origin/<base> first
-    (matches what `git merge origin/<base>` would have to fast-forward
-    over — the actual integration cost). Falls back to local <base>.
-    Returns (0, "") on any git failure so callers don't have to
-    branch on the error case."""
-    for ref in (f"origin/{base}", base):
-        r = subprocess.run(
-            ["git", "rev-list", "--count", f"{branch}..{ref}"],
-            cwd=WORKSPACE, capture_output=True, text=True, check=False,
-        )
-        if r.returncode == 0:
-            try:
-                return int(r.stdout.strip() or 0), ref
-            except ValueError:
-                pass
-    return 0, ""
+    """Return (commits_behind, ref_used).
+
+    Delegates to ``lib.git_status.commits_behind(WORKSPACE, branch, base)``
+    — kept as a shim so existing call-sites in this module continue to work.
+    """
+    return _git_status_lib.commits_behind(WORKSPACE, branch, base)
 
 
 def _diagnose_push_error(err: str) -> dict | None:
@@ -5606,23 +5590,12 @@ def _count_viz_steps_in_state(state: dict) -> int:
 
 
 def _dirty_workspace() -> str:
-    """Return the porcelain status excluding generated reports + submodule pointers."""
-    status = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=WORKSPACE, capture_output=True, text=True, check=True,
-    ).stdout
-    submodules = _submodule_paths()
-    kept = []
-    for raw in status.splitlines():
-        if len(raw) < 4:
-            continue
-        path = raw[3:]
-        if _is_generated_path(path):
-            continue
-        if path in submodules:
-            continue
-        kept.append(raw)
-    return "\n".join(kept)
+    """Return the porcelain status excluding generated reports + submodule pointers.
+
+    Delegates to ``lib.git_status.dirty_workspace(WORKSPACE)`` — kept as a
+    shim so existing call-sites in this module continue to work unchanged.
+    """
+    return _git_status_lib.dirty_workspace(WORKSPACE)
 
 
 def _suggest_dirty_commit_message(paths: list[str]) -> str:
