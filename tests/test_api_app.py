@@ -513,3 +513,93 @@ def test_composites_in_openapi(client):
     components = spec["components"]["schemas"]
     for name in ("CompositesPayload", "CompositeRecord"):
         assert name in components, f"{name} missing from openapi.json"
+
+
+# ---------------------------------------------------------------------------
+# /api/investigations
+# ---------------------------------------------------------------------------
+
+def test_investigations_empty_workspace(client):
+    """An empty workspace yields the typed empty payload (no study dirs), not a 500."""
+    r = client.get("/api/investigations")
+    assert r.status_code == 200
+    assert r.json() == {"investigations": []}
+
+
+def test_investigations_typed_passthrough(client, monkeypatch):
+    """The route validates the builder output through InvestigationsPayload.
+
+    Covers:
+    - A rich valid row with many extra keys (extra='allow' preserves them).
+    - An invalid row {name, status, error} (the parse-failure shape).
+    Both must validate through the model without 422.
+    """
+    import vivarium_dashboard.api.app as _app
+
+    rich_row = {
+        "name": "dnaa-1",
+        "status": "ran",
+        "phase": "simulate",
+        "n_simulations": 3,
+        "n_studies": None,
+        "description": "DnaA binding study",
+        "composite": "pbg_ws.composites.dnaa",
+        "composites": [],
+        "topic": "replication",
+        "tags": ["dnaa", "binding"],
+        "last_run": None,
+        "baseline_names": ["dnaa-baseline"],
+        "n_baseline": 1,
+        "n_variants": 2,
+        "n_groups": 0,
+        "n_interventions": 0,
+        "n_behaviors": 3,
+        "n_readouts": 5,
+        "n_requirements": 1,
+        "n_comparisons": 0,
+        "n_runs": 3,
+        "baseline_source": "pbg_ws:dnaa_baseline",
+        "conclusions_excerpt": "The binding affinity...",
+        "parent_studies": [],
+        "blocked": False,
+        "blocked_by": [],
+        "extra_future_key": "preserved",   # extra="allow"
+    }
+    invalid_row = {
+        "name": "broken-study",
+        "status": "invalid",
+        "error": "malformed YAML: ...",
+    }
+    payload = {"investigations": [rich_row, invalid_row]}
+
+    from unittest.mock import patch
+    with patch(
+        "vivarium_dashboard.lib.investigations_index.build_investigations",
+        return_value=payload,
+    ):
+        r = client.get("/api/investigations")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["investigations"]) == 2
+
+    row0 = body["investigations"][0]
+    assert row0["name"] == "dnaa-1"
+    assert row0["status"] == "ran"
+    assert row0["n_simulations"] == 3
+    assert row0["extra_future_key"] == "preserved"   # extra="allow" works
+
+    row1 = body["investigations"][1]
+    assert row1["name"] == "broken-study"
+    assert row1["status"] == "invalid"
+    assert "malformed YAML" in row1["error"]
+
+
+def test_investigations_in_openapi(client):
+    """The /api/investigations route and InvestigationsPayload / InvestigationRow
+    appear in the generated OpenAPI schema."""
+    spec = client.get("/openapi.json").json()
+    assert "/api/investigations" in spec["paths"]
+    components = spec["components"]["schemas"]
+    for name in ("InvestigationsPayload", "InvestigationRow"):
+        assert name in components, f"{name} missing from openapi.json"

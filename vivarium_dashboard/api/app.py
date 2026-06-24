@@ -45,6 +45,7 @@ from vivarium_dashboard.lib.models import (
     DashConfig,
     DataSourcesPayload,
     InvestigationSummary,
+    InvestigationsPayload,
     ReferencesBibPayload,
     RegistryPayload,
     SavedVisualizationsPayload,
@@ -242,6 +243,22 @@ def create_app() -> FastAPI:
         if result is None:
             return None
         return CompositeResolvePayload.model_validate(result)
+
+    @app.get("/api/investigations", response_model=InvestigationsPayload)
+    def investigations(ws: Path = Depends(get_workspace)) -> InvestigationsPayload:
+        """Investigations index (mirrors the stdlib /api/investigations).
+
+        Returns the per-study index used by the Investigations tab. Each row
+        is either a full investigation-row dict (~26 keys) or a minimal
+        ``{name, status: "invalid", error}`` entry for a malformed spec.yaml.
+
+        Library-backed via ``lib.investigations_index.build_investigations`` --
+        the single implementation the stdlib ``_investigations_data`` now
+        forwards to.
+        """
+        from vivarium_dashboard.lib.investigations_index import build_investigations
+
+        return InvestigationsPayload.model_validate(build_investigations(ws))
 
     return app
 

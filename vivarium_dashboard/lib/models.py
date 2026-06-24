@@ -383,6 +383,38 @@ class CompositesPayload(BaseModel):
     error: Optional[str] = None
 
 
+class InvestigationRow(BaseModel):
+    """One row of the ``GET /api/investigations`` ``investigations`` list.
+
+    The row has ~26 keys. The stable scalar/count fields are typed; the rest
+    (including the invalid-row shape ``{name, status: "invalid", error}``) are
+    preserved via ``extra="allow"``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    status: Optional[str] = None
+    phase: Optional[str] = None
+    n_studies: Optional[int] = None
+    n_simulations: Optional[int] = None
+    description: Optional[str] = None
+    error: Optional[str] = None
+
+
+class InvestigationsPayload(BaseModel):
+    """``GET /api/investigations`` payload
+    (lib.investigations_index.build_investigations).
+
+    Returns the per-study index used by the Investigations tab.  Each row is
+    either a full ``InvestigationRow`` (valid spec) or a minimal
+    ``{name, status: "invalid", error}`` entry (malformed spec.yaml).
+    ``extra="allow"`` on ``InvestigationRow`` preserves all ~26 builder keys.
+    """
+
+    investigations: list[InvestigationRow] = []
+
+
 class CompositeResolvePayload(BaseModel):
     """``GET /api/composite-resolve`` payload (lib.composite_resolve.resolve_composite).
 

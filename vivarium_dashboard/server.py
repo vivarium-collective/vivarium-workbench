@@ -2678,124 +2678,14 @@ from vivarium_dashboard.lib.spec_norm import normalize_requirements as _normaliz
 
 
 def _investigations_data(ws_root: Path) -> dict:
-    """Pure data builder for GET /api/investigations — returns ``{"investigations": [...]}`` dict.
+    """Thin wrapper: delegates to ``lib.investigations_index.build_investigations``.
 
-    Includes the study-dependency DAG: each row carries ``parent_studies``
-    (normalized to [{study, condition}]) and a computed ``blocked`` flag
-    plus ``blocked_by`` list pointing at parents that don't yet satisfy
-    their condition.
-
-    Called by ``Handler._get_investigations`` (which wraps it in the HTTP
-    response) and by ``publish.build_bundle`` to export
-    ``api/investigations.json``.  Requires ``WORKSPACE`` to be set to
-    *ws_root*.
+    The single implementation lives in ``lib/investigations_index.py`` so both
+    this stdlib handler and the FastAPI seam (``api/app.py``) share one code
+    path without either importing the other.
     """
-    _ws_add_to_sys_path()
-    from vivarium_dashboard.lib.investigations import (
-        load_spec,
-        InvestigationSpecError,
-        normalize_dag_edges,
-    )
-
-    # First pass: load every spec so we can resolve cross-study conditions.
-    loaded: list[tuple[Path, dict]] = []   # (dir, spec)
-    for d in _iter_study_dirs():
-        spec_path = d / "study.yaml" if (d / "study.yaml").is_file() else d / "spec.yaml"
-        if not spec_path.is_file():
-            continue
-        try:
-            loaded.append((d, load_spec(spec_path)))
-        except InvestigationSpecError as e:
-            loaded.append((d, {"__invalid__": True, "name": d.name, "error": str(e)}))
-
-    by_name: dict[str, dict] = {s["name"]: s for _, s in loaded if not s.get("__invalid__")}
-
-    def _normalize_parents(spec: dict) -> list[dict]:
-        return normalize_dag_edges(spec)
-
-    def _condition_satisfied(parent: dict | None, condition: str) -> bool:
-        if parent is None:
-            return False
-        status = parent.get("status", "planned")
-        if condition == "ran":
-            # "evaluated" is a later lifecycle state than "ran"
-            # (Simulate -> Evaluate -> Decide), so an evaluated study has
-            # necessarily run and must satisfy a "ran" prerequisite. Without
-            # this, a downstream study whose parent is terminally "evaluated"
-            # stays falsely blocked.
-            return status in ("ran", "evaluated", "complete")
-        if condition == "complete":
-            return status == "complete"
-        if condition == "tests-passed":
-            from pbg_superpowers import study_status
-            counts = study_status.count_test_outcomes(parent, parent.get("runs"))
-            return counts["fail"] == 0 and counts["pass"] > 0
-        return False
-
-    out = []
-    for d, spec in loaded:
-        if spec.get("__invalid__"):
-            out.append({"name": spec["name"], "status": "invalid", "error": spec["error"]})
-            continue
-        composites = spec.get("composites") or []
-        if composites:
-            composite_summary = ", ".join(c.get("name", "") for c in composites)
-            n_runs = _count_runs_for_study(spec["name"], spec)
-        else:
-            composite_summary = spec.get("composite", "")
-            n_runs = _count_runs_for_study(spec["name"], spec)
-            if n_runs == 0:
-                n_runs = len(spec.get("simulations") or [])
-
-        parents = _normalize_parents(spec)
-        blocked_by = []
-        for p in parents:
-            parent_spec = by_name.get(p["study"])
-            if not _condition_satisfied(parent_spec, p["condition"]):
-                blocked_by.append({
-                    "study":     p["study"],
-                    "condition": p["condition"],
-                    "missing":   "parent-not-found" if parent_spec is None else
-                                 f"parent.status={parent_spec.get('status', 'planned')}",
-                })
-
-        sim_set_top = spec.get("simulation_set") or []
-        beh_tests_top = spec.get("behavior_tests") or spec.get("expected_behavior") or []
-        readouts_top = spec.get("readouts") or spec.get("observables") or []
-        reqs_top = _normalize_requirements(
-            spec.get("implementation_requirements") or spec.get("gaps"))
-        n_variants_top = (len(sim_set_top) if sim_set_top
-                          else len(spec.get("variants") or []))
-        row = {
-            "name":            spec["name"],
-            "composite":       composite_summary,
-            "composites":      composites,
-            "description":     spec.get("description", ""),
-            "topic":           spec.get("topic", ""),
-            "tags":            spec.get("tags") or [],
-            "status":          spec.get("status", "planned"),
-            "phase":           spec.get("phase"),
-            "last_run":        spec.get("last_run"),
-            "n_simulations":   n_runs,
-            "baseline_names":  [b.get("name", "") for b in (spec.get("baseline") or [])
-                                if isinstance(b, dict)],
-            "n_baseline":      len(spec.get("baseline") or []),
-            "n_variants":      n_variants_top,
-            "n_groups":        len(spec.get("groups") or []),
-            "n_interventions": len(spec.get("interventions") or []),
-            "n_behaviors":     len(beh_tests_top),
-            "n_readouts":      len(readouts_top),
-            "n_requirements":  len(reqs_top),
-            "n_comparisons":   len(spec.get("comparisons") or []),
-            "n_runs":          n_runs,
-            "baseline_source": _format_baseline_source(spec),
-            "conclusions_excerpt": _conclusions_excerpt(spec),
-            "parent_studies":  parents,
-            "blocked":         len(blocked_by) > 0,
-            "blocked_by":      blocked_by,
-        }
-        out.append(row)
-    return {"investigations": out}
+    from vivarium_dashboard.lib.investigations_index import build_investigations
+    return build_investigations(ws_root)
 
 
 # --- Pass C: cross-worktree investigation registry --------------------------
