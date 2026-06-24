@@ -1124,8 +1124,10 @@ window.addEventListener('pageshow', function (e) {
   <p class="page-lead">
     Persisted runs gathered from each <code>studies/&lt;name&gt;/runs.db</code>,
     tagged by investigation and study, with the storage location for each run.
-    Scoped to the current branch's investigation by default and refreshed
-    automatically. <span id="sim-scope-note" style="color:#6b7280;"></span>
+    On a remote build, the deployment's runs for that build's commit are
+    included too (Origin column). Scoped to the current branch's investigation
+    by default and refreshed automatically.
+    <span id="sim-scope-note" style="color:#6b7280;"></span>
   </p>
 
   <div style="margin: 8px 0 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
@@ -1165,7 +1167,7 @@ window.addEventListener('pageshow', function (e) {
         <th style="text-align:left; padding:6px 8px; width:130px;">Study</th>
         <th style="text-align:left; padding:6px 8px;">Run</th>
         <th style="text-align:left; padding:6px 8px; width:150px;">Location</th>
-        <th style="text-align:left; padding:6px 8px; width:64px;">Origin</th>
+        <th style="text-align:left; padding:6px 8px; width:90px;">Origin</th>
         <th style="text-align:left; padding:6px 8px; width:80px;">Emitter</th>
         <th style="text-align:left; padding:6px 8px; width:104px;">Time</th>
         <th style="text-align:left; padding:6px 8px; width:84px;">Status</th>

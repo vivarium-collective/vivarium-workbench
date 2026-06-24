@@ -3646,6 +3646,19 @@ def _emitter_tag(emitter) -> str:
     return emitter.lower() if isinstance(emitter, str) else ""
 
 
+def _append_remote_simulations(sims: list, ws_root: Path) -> list:
+    """Append the active remote build's server-side runs (scoped to the build's
+    commit/repo) to the local Simulations-DB rows. No-op for local workspaces
+    or when sms-api is unreachable — single source for the local+remote merge,
+    shared by ``_simulations_data`` and the ``/api/simulations`` handler."""
+    try:
+        from vivarium_dashboard.lib.remote_simulations import list_remote_simulations
+        remote = list_remote_simulations(ws_root)
+    except Exception:
+        remote = []
+    return list(sims) + remote if remote else sims
+
+
 def _simulations_data(ws_root: Path) -> dict:
     """Pure data builder for GET /api/simulations.
 
@@ -3668,6 +3681,7 @@ def _simulations_data(ws_root: Path) -> dict:
                 _emitter_tag(s.get("emitter"))) or emitter_type_of(s.get("db_path"))
     except Exception:
         pass
+    sims = _append_remote_simulations(sims, ws_root)
     return {"simulations": sims, "current": _current_branch_slug(ws_root)}
 
 
@@ -11179,6 +11193,7 @@ if __name__ == "__main__":
         for s in sims:
             s["emitter_type"] = _emitter_label.get(
                 _emitter_tag(s.get("emitter"))) or emitter_type_of(s.get("db_path"))
+        sims = _append_remote_simulations(sims, WORKSPACE)
         return self._json(
             {"simulations": sims, "current": _current_branch_slug(WORKSPACE)}, 200)
 
