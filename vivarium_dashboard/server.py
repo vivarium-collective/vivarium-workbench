@@ -16621,6 +16621,17 @@ if __name__ == "__main__":
             cache_dir = remote_build_source.materialize_build(client, sim_id, entry["commit"])
         except SmsApiError as e:
             return self._json({"error": f"materialize failed: {e}"}, 502)
+        # Stamp build provenance into the cache dir so the rail chip can show
+        # "<branch> @ <commit> · remote build #<id>" (a materialized build is not
+        # a git repo, so the chip can't derive branch/commit from git).
+        try:
+            (Path(cache_dir) / ".viv-build.json").write_text(json.dumps({
+                "simulator_id": sim_id, "repo": entry.get("repo", ""),
+                "branch": entry.get("branch", ""), "commit": entry.get("commit", ""),
+                "repo_url": entry.get("repo_url", ""),
+            }))
+        except Exception:
+            pass  # provenance stamp is best-effort, never block the switch
         _switch_active_workspace(cache_dir)
         return self._json({"ok": True, "source": {"path": str(cache_dir), "name": entry["label"]}}, 200)
 
