@@ -30,15 +30,23 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI
+import subprocess
+
+from fastapi import Depends, FastAPI, HTTPException
 
 from vivarium_dashboard.lib import data_sources as _data_sources
+from vivarium_dashboard.lib import git_status as _git_status
 from vivarium_dashboard.lib import investigation_status
 from vivarium_dashboard.lib import saved_visualizations as _saved_viz
 from vivarium_dashboard.lib.composite_resolve import resolve_composite
 from vivarium_dashboard.lib.composites_query import composites_via_subprocess
 from vivarium_dashboard.lib.models import (
     BibEntry,
+    BranchDiff,
+    BranchesPayload,
+    BranchInfo,
+    BranchCommit,
+    BranchStaleness,
     CatalogModule,
     CatalogPayload,
     CompositeRecord,
@@ -46,6 +54,9 @@ from vivarium_dashboard.lib.models import (
     CompositesPayload,
     DashConfig,
     DataSourcesPayload,
+    DirtyFile,
+    DirtyStatus,
+    GitStatus,
     InvestigationSummary,
     InvestigationsPayload,
     ReferencesBibPayload,
@@ -56,6 +67,7 @@ from vivarium_dashboard.lib.models import (
     StudyChartsPayload,
     VisualizationClassesPayload,
     VizClass,
+    WorkStatus,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -114,6 +126,14 @@ _OPENAPI_TAGS = [
         "description": (
             "BibTeX reference entries (with DOI enrichment) and workspace "
             "data-source bundle."
+        ),
+    },
+    {
+        "name": "Git & branches",
+        "description": (
+            "Read-only git/branch status endpoints: live sync state, workstream "
+            "activity, branch staleness, dirty-file list, stage-branch index, "
+            "and branch diff summary."
         ),
     },
 ]
@@ -389,6 +409,147 @@ def create_app() -> FastAPI:
         implementation the stdlib ``_catalog_data`` now forwards to.
         """
         return CatalogPayload.model_validate(build_catalog(ws))
+
+    # -----------------------------------------------------------------------
+    # Git & branches routes
+    # -----------------------------------------------------------------------
+
+    @app.get(
+        "/api/git-status",
+        response_model=GitStatus,
+        tags=["Git & branches"],
+        summary="Live git sync state for the workspace",
+    )
+    def git_status_route(ws: Path = Depends(get_workspace)) -> GitStatus:
+        """Live sync state for the workspace's git remote.
+
+        Returns branch, push state (pushed/ahead/behind/diverged/no_origin),
+        commit counts, PR linkage, dirty-file count, and GitHub availability.
+
+        Library-backed via ``lib.git_status.build_git_status`` — always 200,
+        degrades gracefully when origin is absent or git is not available.
+        """
+        return GitStatus.model_validate(_git_status.build_git_status(ws))
+
+    @app.get(
+        "/api/work-status",
+        response_model=WorkStatus,
+        tags=["Git & branches"],
+        summary="Active workstream status (branch + ahead/behind counts)",
+    )
+    def work_status_route(ws: Path = Depends(get_workspace)) -> WorkStatus:
+        """Active workstream status.
+
+        Returns ``{active: false}`` when no workstream is running, or the
+        full branch/commit-ahead/behind/staleness/push payload otherwise.
+
+        Library-backed via ``lib.git_status.build_work_status``.
+        """
+        return WorkStatus.model_validate(_git_status.build_work_status(ws))
+
+    @app.get(
+        "/api/branch-staleness",
+        response_model=BranchStaleness,
+        tags=["Git & branches"],
+        summary="How many commits is a branch behind its base?",
+    )
+    def branch_staleness_route(
+        branch: Optional[str] = None,
+        base: str = "main",
+        ws: Path = Depends(get_workspace),
+    ) -> BranchStaleness:
+        """Branch staleness check (commits behind base).
+
+        ``?branch=<name>`` defaults to the workspace's current HEAD.
+        ``?base=<name>`` defaults to ``main``.
+
+        HTTP 400 when neither ``?branch=`` is given nor the current HEAD can
+        be determined (detached HEAD / not a git repo).
+
+        Library-backed via ``lib.git_status.build_branch_staleness``.
+        """
+        try:
+            payload = _git_status.build_branch_staleness(ws, branch=branch, base=base)
+        except _git_status.NoBranchError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return BranchStaleness.model_validate(payload)
+
+    @app.get(
+        "/api/dirty-status",
+        response_model=DirtyStatus,
+        tags=["Git & branches"],
+        summary="Filtered list of uncommitted files in the workspace",
+    )
+    def dirty_status_route(ws: Path = Depends(get_workspace)) -> DirtyStatus:
+        """Filtered list of uncommitted files (excludes reports/, out/, .pbg/).
+
+        HTTP 500 when ``git status`` itself fails (not a git repo, corrupt
+        index, etc.).
+
+        Library-backed via ``lib.git_status.build_dirty_status``.
+        """
+        try:
+            payload = _git_status.build_dirty_status(ws)
+        except subprocess.CalledProcessError as exc:
+            stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+            raise HTTPException(
+                status_code=500,
+                detail=f"git status failed: {stderr[:200]}",
+            )
+        files = [DirtyFile.model_validate(f) for f in payload["files"]]
+        return DirtyStatus(count=payload["count"], files=files)
+
+    @app.get(
+        "/api/branches",
+        response_model=BranchesPayload,
+        tags=["Git & branches"],
+        summary="stage/* branches with last-commit info",
+    )
+    def branches_route(ws: Path = Depends(get_workspace)) -> BranchesPayload:
+        """List ``stage/*`` branches with last-commit SHA/subject/date and
+        commits-ahead-of-main count.
+
+        Returns ``{branches: [], current: <HEAD>}`` when no stage branches
+        exist. Never 500 — errors per-branch are swallowed.
+
+        Library-backed via ``lib.git_status.list_branches``.
+        """
+        payload = _git_status.list_branches(ws)
+        raw_branches = payload.get("branches") or []
+        branch_list = []
+        for b in raw_branches:
+            lc = b.get("last_commit") or {}
+            branch_list.append(BranchInfo(
+                name=b["name"],
+                last_commit=BranchCommit.model_validate(lc),
+                ahead_of_main=b.get("ahead_of_main", 0),
+            ))
+        return BranchesPayload(
+            branches=branch_list,
+            current=payload.get("current"),
+        )
+
+    @app.get(
+        "/api/branch-diff",
+        response_model=BranchDiff,
+        tags=["Git & branches"],
+        summary="Short diff summary for a branch vs main",
+    )
+    def branch_diff_route(
+        branch: str,
+        ws: Path = Depends(get_workspace),
+    ) -> BranchDiff:
+        """Short log + diff-stat summary for ``?branch=<name>`` vs ``main``.
+
+        HTTP 400 when ``?branch=`` is missing or contains unsafe characters.
+
+        Library-backed via ``lib.git_status.build_branch_diff``.
+        """
+        try:
+            payload = _git_status.build_branch_diff(ws, branch)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return BranchDiff.model_validate(payload)
 
     return app
 
