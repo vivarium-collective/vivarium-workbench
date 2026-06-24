@@ -158,6 +158,9 @@ def _row_to_dict(row, db_path_str: str) -> dict:
         "started_at": row["started_at"],
         "completed_at": row["completed_at"],
         "db_path": db_path_str,
+        # Native data store: a .zarr/parquet dir (local) or an s3:// uri (remote);
+        # None means the run's data lives in the runs.db SQLite at db_path.
+        "store_path": (prov.get("store_path") or remote_origin and remote_origin.get("s3_uri")) or None,
         "emitter": emitter,  # store-derived (xarray/parquet) for remote runs; None → falls back to db_path
         "studies": [],  # filled in by _annotate_studies
         # Match the SQLiteEmitter shape so JS consumers can rely on the
@@ -343,6 +346,10 @@ def _read_study_yaml_runs(workspace: Path) -> list[dict]:
                                  or entry.get("started_at")
                                  or entry.get("timestamp")),
                 "db_path": None,
+                # Native store recorded in the spec (parquet/zarr dir); the run's
+                # data lives here even though there's no per-step runs.db.
+                "store_path": (entry.get("parquet") or entry.get("store_path")
+                               or entry.get("zarr") or None),
                 "studies": [sdir.name],
                 "study_slug": sdir.name,
                 "investigation_slug": inv_slug,

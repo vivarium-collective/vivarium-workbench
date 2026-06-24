@@ -71,6 +71,7 @@ class SimRow(BaseModel):
     started_at: float          # unix epoch seconds (REAL NOT NULL)
     completed_at: Optional[float] = None
     db_path: str
+    store_path: Optional[str] = None   # native data store (zarr/parquet dir or s3 uri); None -> data lives in db_path
     emitter: Optional[EmitterKind] = None
     studies: list[StudyRef] = []
     study_slug: Optional[str] = None

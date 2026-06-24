@@ -404,10 +404,14 @@ window.addEventListener('pageshow', function (e) {
     {% endif %}
 
     <div class="viv-workspace-switcher" id="viv-workspace-switcher">
-      <!-- The workspace-name chip is the source switcher trigger: click to pick
-           another local workspace or a remote sms-api build (source-switch.js).
-           The small GitHub mark stays a direct link to the repo. -->
-      <div class="viv-workspace-name">
+      <!-- The workspace-name chip opens the Branch page (#github): source,
+           repo/branch/commit, push & build actions. Replaces the old rail
+           dropdown and the standalone Branch rail item. -->
+      <div class="viv-workspace-name" role="button" tabindex="0"
+           title="Open Branch: source, repo · branch · commit, push & build"
+           style="cursor:pointer"
+           onclick="window.location.hash='#github'; if(window._switchPage)_switchPage('github');"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault(); window.location.hash='#github'; if(window._switchPage)_switchPage('github');}">
         <span class="viv-workspace-switcher-glyph{% if workspace_is_remote %} viv-glyph-remote{% endif %}">●</span>
         <span class="viv-ws-text">
           <strong>{{ workspace_name }}{% if workspace_is_remote %} <span class="viv-ws-remote-tag">remote</span>{% endif %}</strong>
@@ -527,24 +531,9 @@ window.addEventListener('pageshow', function (e) {
         </span>
         <span class="viv-rail-link-label">Analyses</span>
       </a>
-      <!-- Branch: workspace branch + remote (formerly "GitHub"). The icon
-           is a branch-and-node glyph; renaming the label to "Branch"
-           better reflects that this tab is about the local branch state,
-           the workspace repo's remote, and PR/merge actions — not just
-           GitHub-the-product. Hash route #github kept for back-compat
-           with bookmarks. -->
-      <a href="#github"            class="viv-rail-link menu-link" data-page="github">
-        <span class="viv-rail-link-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <circle cx="6" cy="6" r="2"/>
-            <circle cx="6" cy="18" r="2"/>
-            <circle cx="18" cy="12" r="2"/>
-            <path d="M6 8v8"/>
-            <path d="M6 8a6 6 0 0 0 6 6h4"/>
-          </svg>
-        </span>
-        <span class="viv-rail-link-label">Branch</span>
-      </a>
+      <!-- The Branch page (#github) is no longer a rail item — it's reached by
+           clicking the workspace source display at the top of the rail (see
+           #viv-workspace-switcher). Hash route #github kept for back-compat. -->
     </nav>
 
     <!-- Studies of the active investigation, dependency-ordered. -->
@@ -1133,14 +1122,19 @@ window.addEventListener('pageshow', function (e) {
 <section id="page-simulations" class="page" data-page="simulations">
   <h2 class="page-title">Simulations DB</h2>
   <p class="page-lead">
-    Every persisted run across this workspace, tagged by investigation and
-    study, gathered from each <code>studies/&lt;name&gt;/runs.db</code>.
-    Shows all investigations by default — untoggle to scope to the current one.
+    Persisted runs gathered from each <code>studies/&lt;name&gt;/runs.db</code>,
+    tagged by investigation and study, with the storage location for each run.
+    Scoped to the current branch's investigation by default and refreshed
+    automatically. <span id="sim-scope-note" style="color:#6b7280;"></span>
   </p>
 
   <div style="margin: 8px 0 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
     <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
-      <input id="sim-all-toggle" type="checkbox" checked /> All investigations
+      Investigation
+      <select id="sim-inv-filter" style="padding:4px 8px; font-size:13px;
+              border:1px solid #d1d5db; border-radius:4px;">
+        <option value="">All</option>
+      </select>
     </label>
     <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
       Study
@@ -1170,6 +1164,7 @@ window.addEventListener('pageshow', function (e) {
         <th style="text-align:left; padding:6px 8px;">Investigation</th>
         <th style="text-align:left; padding:6px 8px;">Study</th>
         <th style="text-align:left; padding:6px 8px;">Run</th>
+        <th style="text-align:left; padding:6px 8px;">Location</th>
         <th style="text-align:left; padding:6px 8px; width:120px;">Origin</th>
         <th style="text-align:left; padding:6px 8px; width:90px;">Emitter</th>
         <th style="text-align:left; padding:6px 8px; width:140px;">Time</th>
