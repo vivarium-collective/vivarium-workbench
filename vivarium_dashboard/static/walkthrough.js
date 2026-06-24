@@ -14200,7 +14200,8 @@
     var norm = String(loc).replace(/\\/g, '/');
     var parts = norm.split('/');
     var tail = parts.length > 2 ? '…/' + parts.slice(-2).join('/') : norm;
-    return '<code style="font-size:11px; color:#6b7280;" title="' +
+    return '<code style="font-size:11px; color:#6b7280; display:block; ' +
+      'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="' +
       _escSim(loc) + '">' + _escSim(tail) + '</code>';
   }
 
@@ -14258,11 +14259,12 @@
       'onclick="_deleteSimulationRun(\'' + _escSim(runId) + '\')">🗑</button>';
     return (
       '<tr data-run-id="' + _escSim(runId) + '" style="border-bottom:1px solid #f3f4f6;">' +
-      '<td style="padding:6px 8px;">' + invCell + '</td>' +
-      '<td style="padding:6px 8px;">' + studyCell + '</td>' +
-      '<td style="padding:6px 8px;"><code style="font-size:11px; color:#6b7280;"' +
+      '<td style="padding:6px 8px; overflow-wrap:anywhere;">' + invCell + '</td>' +
+      '<td style="padding:6px 8px; overflow-wrap:anywhere;">' + studyCell + '</td>' +
+      '<td style="padding:6px 8px; overflow:hidden;"><code style="font-size:11px; color:#6b7280; ' +
+        'display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"' +
         runTitle + '>' + _escSim(runLabel) + '</code></td>' +
-      '<td style="padding:6px 8px;">' + _simLocation(row) + '</td>' +
+      '<td style="padding:6px 8px; overflow:hidden;">' + _simLocation(row) + '</td>' +
       '<td style="padding:6px 8px;">' + _simOriginPill(row) + '</td>' +
       '<td style="padding:6px 8px;">' + _simEmitterPill(row.emitter_type) + '</td>' +
       '<td style="padding:6px 8px; color:#6b7280;">' + _escSim(_simFmtTime(timeSec)) + '</td>' +
