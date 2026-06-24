@@ -664,15 +664,15 @@ body.focus-mode .page.active{ display:block !important; min-height:0 !important 
   font-size:0.74em; color:#6b7280; line-height:1.2;
 }
 
+/* Plain read-only source display (no longer a clickable switcher button —
+   source management lives in the Branch tab). */
 .viv-workspace-switcher{
   margin:12px 12px 4px;
-  padding:8px 10px;
-  background:#fff; border:1px solid #e5e7eb; border-radius:6px;
+  padding:0;
   font-size:0.86em; color:#1f2937;
-  display:flex; align-items:center; justify-content:space-between;
-  cursor:pointer; user-select:none;
+  display:flex; align-items:center;
 }
-.viv-workspace-switcher:hover{ background:#f3f4f6 }
+.viv-workspace-switcher:hover{ background:none }
 .viv-workspace-switcher .viv-ws-name{
   font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
