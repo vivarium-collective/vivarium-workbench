@@ -71,6 +71,54 @@ def get_workspace() -> Path:
     return Path(os.environ.get(WORKSPACE_ENV, ".")).resolve()
 
 
+_OPENAPI_TAGS = [
+    {
+        "name": "System",
+        "description": "Service health and client-configuration endpoints.",
+    },
+    {
+        "name": "Simulations",
+        "description": (
+            "Workspace-wide simulation run index — all runs across all studies."
+        ),
+    },
+    {
+        "name": "Investigations",
+        "description": (
+            "Investigation and study metadata: sidebar summary list and full "
+            "per-study index."
+        ),
+    },
+    {
+        "name": "Studies & visualizations",
+        "description": (
+            "Per-study charts (live + static), saved 3D/report-card "
+            "visualizations, and registered visualization classes."
+        ),
+    },
+    {
+        "name": "Composites",
+        "description": (
+            "Composite spec/generator discovery and single-composite resolution."
+        ),
+    },
+    {
+        "name": "Registry & catalog",
+        "description": (
+            "Process/type/emitter registry and pbg package catalog for the "
+            "active workspace."
+        ),
+    },
+    {
+        "name": "References & data",
+        "description": (
+            "BibTeX reference entries (with DOI enrichment) and workspace "
+            "data-source bundle."
+        ),
+    },
+]
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="vivarium-dashboard API",
@@ -84,13 +132,19 @@ def create_app() -> FastAPI:
             "schema can't drift from what the routes actually return. Routes are "
             "added a few at a time; the legacy server still serves the rest."
         ),
+        openapi_tags=_OPENAPI_TAGS,
     )
 
-    @app.get("/health")
+    @app.get("/health", tags=["System"], summary="Service liveness check")
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/api/simulations", response_model=SimulationsPayload)
+    @app.get(
+        "/api/simulations",
+        response_model=SimulationsPayload,
+        tags=["Simulations"],
+        summary="Workspace-wide simulations index (all runs)",
+    )
     def simulations(ws: Path = Depends(get_workspace)) -> SimulationsPayload:
         """Workspace-wide simulations index (mirrors the stdlib /api/simulations).
 
@@ -100,12 +154,22 @@ def create_app() -> FastAPI:
         rows = [SimRow.model_validate(r) for r in list_simulations(ws)]
         return SimulationsPayload(simulations=rows, current=None)
 
-    @app.get("/api/config", response_model=DashConfig)
+    @app.get(
+        "/api/config",
+        response_model=DashConfig,
+        tags=["System"],
+        summary="Client data-source mode selector",
+    )
     def config() -> DashConfig:
         """Client data-source selector (mirrors the stdlib /api/config)."""
         return DashConfig(mode="local-server")
 
-    @app.get("/api/iset-list", response_model=list[InvestigationSummary])
+    @app.get(
+        "/api/iset-list",
+        response_model=list[InvestigationSummary],
+        tags=["Investigations"],
+        summary="Investigation summary list for the sidebar",
+    )
     def iset_list(ws: Path = Depends(get_workspace)) -> list[InvestigationSummary]:
         """Investigations summary list (mirrors the stdlib /api/iset-list).
 
@@ -124,13 +188,23 @@ def create_app() -> FastAPI:
         summaries = investigation_status.build_iset_summary(ws, study_has_runs=study_has_runs)
         return [InvestigationSummary.model_validate(d) for d in summaries]
 
-    @app.get("/api/data-sources", response_model=DataSourcesPayload)
+    @app.get(
+        "/api/data-sources",
+        response_model=DataSourcesPayload,
+        tags=["References & data"],
+        summary="Workspace data-source bundle (from workspace.yaml)",
+    )
     def data_sources(ws: Path = Depends(get_workspace)) -> DataSourcesPayload:
         """Repo-wide data-source bundle (workspace.yaml `dashboard.data_sources`
         provider), via lib.data_sources — no stdlib server dependency."""
         return DataSourcesPayload.model_validate(_data_sources.enumerate_data_sources(ws))
 
-    @app.get("/api/references-bib", response_model=ReferencesBibPayload)
+    @app.get(
+        "/api/references-bib",
+        response_model=ReferencesBibPayload,
+        tags=["References & data"],
+        summary="Parsed BibTeX entries with DOI enrichment cache",
+    )
     def references_bib(ws: Path = Depends(get_workspace)) -> ReferencesBibPayload:
         """Parsed `references/papers.bib` entries (+ enrichment cache). Bibtex
         fields vary, so `BibEntry` preserves unknown keys (extra='allow')."""
@@ -147,14 +221,24 @@ def create_app() -> FastAPI:
             pass  # cache failures must never break the references view
         return ReferencesBibPayload(entries=[BibEntry.model_validate(e) for e in entries])
 
-    @app.get("/api/saved-visualizations", response_model=SavedVisualizationsPayload)
+    @app.get(
+        "/api/saved-visualizations",
+        response_model=SavedVisualizationsPayload,
+        tags=["Studies & visualizations"],
+        summary="Saved 3D packs, report cards, and PTools TSVs",
+    )
     def saved_visualizations(ws: Path = Depends(get_workspace)) -> SavedVisualizationsPayload:
         """Saved interactive visualizations (3D packs, report cards, PTools TSVs),
         via lib.saved_visualizations — no stdlib server dependency."""
         return SavedVisualizationsPayload.model_validate(
             _saved_viz.build_saved_visualizations(ws))
 
-    @app.get("/api/study-charts/{slug}", response_model=StudyChartsPayload)
+    @app.get(
+        "/api/study-charts/{slug}",
+        response_model=StudyChartsPayload,
+        tags=["Studies & visualizations"],
+        summary="Per-study charts (live SVG + static images)",
+    )
     def study_charts(slug: str, ws: Path = Depends(get_workspace)) -> StudyChartsPayload:
         """Per-study charts (mirrors the stdlib /api/study-charts/<slug>).
 
@@ -165,7 +249,12 @@ def create_app() -> FastAPI:
         """
         return StudyChartsPayload.model_validate(build_study_charts_payload(ws, slug))
 
-    @app.get("/api/visualization-classes", response_model=VisualizationClassesPayload)
+    @app.get(
+        "/api/visualization-classes",
+        response_model=VisualizationClassesPayload,
+        tags=["Studies & visualizations"],
+        summary="Registered Visualization and Analysis classes",
+    )
     def visualization_classes(ws: Path = Depends(get_workspace)) -> VisualizationClassesPayload:
         """List registered Visualization / Analysis classes for this workspace.
 
@@ -184,7 +273,12 @@ def create_app() -> FastAPI:
             classes=[VizClass.model_validate(c) for c in result.get("classes", [])]
         )
 
-    @app.get("/api/registry", response_model=RegistryPayload)
+    @app.get(
+        "/api/registry",
+        response_model=RegistryPayload,
+        tags=["Registry & catalog"],
+        summary="Process/type/emitter registry for this workspace",
+    )
     def registry(ws: Path = Depends(get_workspace)) -> RegistryPayload:
         """Process/type registry for this workspace.
 
@@ -198,7 +292,12 @@ def create_app() -> FastAPI:
         """
         return RegistryPayload.model_validate(build_registry(ws))
 
-    @app.get("/api/composites", response_model=CompositesPayload)
+    @app.get(
+        "/api/composites",
+        response_model=CompositesPayload,
+        tags=["Composites"],
+        summary="Discoverable composites (specs + generators)",
+    )
     def composites(ws: Path = Depends(get_workspace)) -> CompositesPayload:
         """Composite spec / generator index for this workspace.
 
@@ -227,7 +326,12 @@ def create_app() -> FastAPI:
             error=data.get("error"),
         )
 
-    @app.get("/api/composite-resolve", response_model=Optional[CompositeResolvePayload])
+    @app.get(
+        "/api/composite-resolve",
+        response_model=Optional[CompositeResolvePayload],
+        tags=["Composites"],
+        summary="Resolve a single composite spec or generator by ID",
+    )
     def composite_resolve(
         ref: str, ws: Path = Depends(get_workspace)
     ) -> Optional[CompositeResolvePayload]:
@@ -247,7 +351,12 @@ def create_app() -> FastAPI:
             return None
         return CompositeResolvePayload.model_validate(result)
 
-    @app.get("/api/investigations", response_model=InvestigationsPayload)
+    @app.get(
+        "/api/investigations",
+        response_model=InvestigationsPayload,
+        tags=["Investigations"],
+        summary="Per-study investigations index (all rows)",
+    )
     def investigations(ws: Path = Depends(get_workspace)) -> InvestigationsPayload:
         """Investigations index (mirrors the stdlib /api/investigations).
 
@@ -263,7 +372,12 @@ def create_app() -> FastAPI:
 
         return InvestigationsPayload.model_validate(build_investigations(ws))
 
-    @app.get("/api/catalog", response_model=CatalogPayload)
+    @app.get(
+        "/api/catalog",
+        response_model=CatalogPayload,
+        tags=["Registry & catalog"],
+        summary="Package catalog with per-workspace install state",
+    )
     def catalog(ws: Path = Depends(get_workspace)) -> CatalogPayload:
         """Package catalog for this workspace (mirrors the stdlib /api/catalog).
 
