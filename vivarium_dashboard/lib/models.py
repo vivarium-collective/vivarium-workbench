@@ -263,3 +263,207 @@ class SavedVisualizationsPayload(BaseModel):
     saved: list[SavedViz] = []
     ptools: PtoolsInfo = PtoolsInfo()
     report_cards: list[ReportCard] = []
+
+
+class VizClass(BaseModel):
+    """One entry in the ``GET /api/visualization-classes`` ``classes`` list.
+
+    Fields vary slightly between visualization and analysis kinds, so unknown
+    keys are preserved (``extra="allow"``).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    address: str
+    name: str
+    doc: str = ""
+    kind: str = "visualization"
+
+
+class VisualizationClassesPayload(BaseModel):
+    """``GET /api/visualization-classes`` payload
+    (lib.visualization_classes.list_visualization_classes).
+
+    Returns all Visualization subclasses registered in the workspace's core
+    registry plus standard pbg-superpowers visualization classes and, when
+    v2ecoli is installed, its Analysis classes.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    classes: list[VizClass] = []
+
+
+class RegistryProcess(BaseModel):
+    """One process/step/emitter/visualization entry in the registry.
+
+    The subprocess script in ``lib.registry.build_registry`` emits these fields;
+    ``extra="allow"`` preserves any future additions without breaking the route.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    address: str = ""
+    kind: str = "other"
+    schema_preview: str = ""
+    aliases: list[str] = []
+    source: str = "environment_only"
+
+
+class RegistryType(BaseModel):
+    """One type-schema entry in the registry.
+
+    ``extra="allow"`` for forward-compatibility.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    schema_preview: str = ""
+
+
+class RegistryImport(BaseModel):
+    """One imported-repository metadata entry (workspace.yaml imports)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    package: str = ""
+    source: Optional[str] = None
+    ref: Optional[str] = None
+    description: str = ""
+
+
+class RegistryPayload(BaseModel):
+    """``GET /api/registry`` payload (lib.registry.build_registry).
+
+    Returns the process/type registry discovered from the workspace's
+    ``build_core()`` subprocess. Extra keys (e.g. ``workspace_pkgs``,
+    ``registry_include``, ``default_emitter``, ``error``) are preserved by
+    ``extra="allow"`` so the frontend receives the full payload unchanged.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    processes: list[RegistryProcess] = []
+    types: list[RegistryType] = []
+    imports: list[RegistryImport] = []
+
+
+class CompositeRecord(BaseModel):
+    """One composite entry in the ``GET /api/composites`` payload.
+
+    Composites come in two kinds: ``spec`` (a ``*.composite.yaml`` / ``.json``
+    file) and ``generator`` (a ``@composite_generator``-decorated Python function).
+    Generator entries carry varied additional fields (``parameters``,
+    ``visualizations``, ``workspace_local``, etc.) that differ across workspaces;
+    ``extra="allow"`` passes them through untouched so the browser receives the
+    full payload.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+    kind: str = "spec"
+    module: str = ""
+
+
+class CompositesPayload(BaseModel):
+    """``GET /api/composites`` payload (lib.composites_query.composites_via_subprocess).
+
+    Discovery runs in a fresh subprocess to avoid stale ``sys.modules`` hiding
+    generators.  On subprocess failure the route returns an empty list with an
+    ``error`` string rather than a 500.
+    """
+
+    composites: list[CompositeRecord] = []
+    workspace_package: Optional[str] = None
+    error: Optional[str] = None
+
+
+class InvestigationRow(BaseModel):
+    """One row of the ``GET /api/investigations`` ``investigations`` list.
+
+    The row has ~26 keys. The stable scalar/count fields are typed; the rest
+    (including the invalid-row shape ``{name, status: "invalid", error}``) are
+    preserved via ``extra="allow"``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    status: Optional[str] = None
+    phase: Optional[str] = None
+    n_studies: Optional[int] = None
+    n_simulations: Optional[int] = None
+    description: Optional[str] = None
+    error: Optional[str] = None
+
+
+class InvestigationsPayload(BaseModel):
+    """``GET /api/investigations`` payload
+    (lib.investigations_index.build_investigations).
+
+    Returns the per-study index used by the Investigations tab.  Each row is
+    either a full ``InvestigationRow`` (valid spec) or a minimal
+    ``{name, status: "invalid", error}`` entry (malformed spec.yaml).
+    ``extra="allow"`` on ``InvestigationRow`` preserves all ~26 builder keys.
+    """
+
+    investigations: list[InvestigationRow] = []
+
+
+class CatalogModule(BaseModel):
+    """One module entry in the ``GET /api/catalog`` ``modules`` list.
+
+    Source: ``lib.catalog.build_catalog``.  The stable display/install keys
+    are enumerated; install-source, tags, and workspace-specific metadata vary
+    across entries, so ``extra="allow"`` preserves them intact.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    installed: bool = False
+    install_source: Optional[str] = None
+    module: Optional[str] = None
+    description: Optional[str] = None
+
+
+class CatalogPayload(BaseModel):
+    """``GET /api/catalog`` payload (lib.catalog.build_catalog).
+
+    Returns the pbg module catalog annotated with per-workspace install state.
+    ``extra="allow"`` forwards any top-level keys the builder may add in future
+    (e.g. ``error``).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    modules: list[CatalogModule] = []
+
+
+class CompositeResolvePayload(BaseModel):
+    """``GET /api/composite-resolve`` payload (lib.composite_resolve.resolve_composite).
+
+    Returned when a composite spec or generator is found.  The route returns
+    ``null`` (200 with empty body) when ``ref`` is not found — use
+    ``Optional[CompositeResolvePayload]`` at the route level.
+
+    ``extra="allow"`` preserves any generator-specific keys (e.g. ``parameters``
+    entries with unusual shapes) that aren't enumerated here.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+    description: Optional[str] = None
+    parameters: Optional[Any] = None
+    state: Optional[Any] = None
+    svg: Optional[str] = None
+    kind: Optional[str] = None
+    module: Optional[str] = None
+    default_n_steps: Optional[int] = None

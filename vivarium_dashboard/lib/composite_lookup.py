@@ -334,6 +334,47 @@ def unresolved_study_composite_refs(spec: dict, known_ids: set[str]) -> list[str
     return [r for r in _study_composite_refs(spec) if not _ref_resolves(r, known)]
 
 
+def _dedupe_alias_composites(records: list) -> list:
+    """Collapse a composite that's registered under more than one id.
+
+    A ``@composite_generator(name="baseline")`` in a same-named module registers
+    under the DOUBLED id ``v2ecoli.composites.baseline.baseline``; a workspace may
+    add a clean-id alias ``v2ecoli.composites.baseline`` so short study refs
+    resolve. Both then surface in discovery, listing the SAME composite twice.
+    Collapse generator records that share (name, module), keeping the canonical
+    id (the one equal to its module, else the shortest) so each composite appears
+    once and the kept id is the resolvable/explorable one. Records without a
+    module, or with a unique (name, module), pass through unchanged.
+
+    Moved from ``vivarium_dashboard.server`` (Task 6) so it can be shared by
+    ``server._composites_data`` (imported back) and ``lib.catalog`` without
+    duplication.
+    """
+    def _rank(rec, mod):
+        rid = rec.get("id") or ""
+        return (0 if rid == mod else 1, len(rid))
+
+    kept: dict = {}
+    order: list = []
+    out: list = []
+    for rec in records:
+        mod = rec.get("module") or ""
+        if not mod or rec.get("kind") != "generator":
+            out.append(rec)
+            continue
+        key = (rec.get("name"), mod)
+        prev = kept.get(key)
+        if prev is None:
+            kept[key] = rec
+            order.append(key)
+            out.append(rec)
+        elif _rank(rec, mod) < _rank(prev, mod):
+            out[out.index(prev)] = rec
+            kept[key] = rec
+        # else: drop the non-canonical duplicate
+    return out
+
+
 def substitute_parameters(state: Any, params: dict, overrides: dict | None = None) -> Any:
     overrides = overrides or {}
     if isinstance(state, dict):
