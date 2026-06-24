@@ -7,6 +7,15 @@
   var api = E._api, j = E._j, state = E._state, observableOptions = E._obsOptions;
   var V = E._Views;
 
+  // EcoCyc pathway names carry HTML markup (<i>, &beta;, &alpha;…). Render them
+  // human-readable: strip tags, then decode entities. Keep the raw name as the
+  // option value so it still keys into pathways.json.
+  var _decoder = document.createElement("textarea");
+  function prettyName(s) {
+    _decoder.innerHTML = String(s).replace(/<[^>]+>/g, "");
+    return _decoder.value;
+  }
+
   V.timeseries = function (host, ctrls) {
     var opts = observableOptions();
     var classes = ["All", "RNA", "Protein", "Metabolite", "Flux", "Mass", "Other"];
@@ -14,9 +23,16 @@
       '<label>Class <select id="ts-class">' +
         classes.map(function (c) { return '<option>' + c + "</option>"; }).join("") +
       "</select></label>" +
+      '<label>Pathway preset <select id="ts-pathway"><option value="">— none —</option></select></label>' +
+      '<label>Labels <select id="ts-label">' +
+        '<option value="id">BioCyc id</option><option value="name">common name</option>' +
+      "</select></label>" +
       '<label>Search <input id="ts-search" type="text" placeholder="filter…"></label>' +
       '<label>Observables <select id="ts-obs" multiple size="10"></select></label>' +
-      '<label><input type="checkbox" id="ts-log"> log y</label>' +
+      '<label>y-scale <select id="ts-scale">' +
+        '<option value="linear">linear</option><option value="log">log</option>' +
+        '<option value="symlog">symlog</option>' +
+      "</select></label>" +
       '<label><input type="checkbox" id="ts-norm"> normalize</label>';
     host.innerHTML = '<div id="ts-chart" style="height:520px"></div>';
 
@@ -26,7 +42,23 @@
     var idCache = {};       // vecPath -> [ids]
     var classCache = {};    // class -> [{key,label,unit}]
     var baseUnit = {};      // base path -> unit
+    var keyLabel = {};      // key -> display label (for legend/options)
+    var selected = {};      // key -> 1 (selection source of truth)
+    var labels = {};        // {monomer:{id:name}, rna:{id:name}}
+    var pathways = {};      // {name: {reactions, proteins/compounds, genes}}
     opts.forEach(function (o) { baseUnit[o.path] = o.unit || ""; });
+
+    // common-name lookup for a vector element id (monomers + mRNAs)
+    function nameFor(id) {
+      var base = id.replace(/\[[^\]]*\]$/, "");
+      var m = labels.monomer || {}, r = labels.rna || {};
+      return m[base] || r[base] || r[base + "_RNA"] || id;
+    }
+    function displayLabel(o) {
+      // scalars carry a "cat · label" label; only remap raw vector-element ids
+      if ((o.label || "").indexOf(" · ") >= 0) return o.label;
+      return ctrls.querySelector("#ts-label").value === "name" ? nameFor(o.label) : o.label;
+    }
 
     function fetchIds(vecPath) {
       if (idCache[vecPath]) return Promise.resolve(idCache[vecPath]);
@@ -59,24 +91,58 @@
       var cls = ctrls.querySelector("#ts-class").value;
       var q = ctrls.querySelector("#ts-search").value.toLowerCase();
       var sel = ctrls.querySelector("#ts-obs");
-      var chosen = {};
-      Array.prototype.forEach.call(sel.selectedOptions, function (o) { chosen[o.value] = 1; });
       sel.innerHTML = '<option disabled>loading…</option>';
       optionsForClass(cls, function (items) {
         var matches = items.filter(function (o) {
-          return !q || (o.label || "").toLowerCase().indexOf(q) >= 0;
+          if (!q) return true;
+          return (o.label || "").toLowerCase().indexOf(q) >= 0 ||
+                 displayLabel(o).toLowerCase().indexOf(q) >= 0;
         });
         var shown = matches.slice(0, 1500);  // cap DOM; narrow with Search
         if (!matches.length) {
-          sel.innerHTML = '<option disabled>— no ' +
-            (cls === "All" ? "" : cls + " ") + "observables (try Search) —</option>";
+          // distinguish "this run emits nothing in this class" from "search hid
+          // everything" — mass-only runs legitimately have no Protein/RNA/Flux.
+          sel.innerHTML = q
+            ? '<option disabled>— no matches for "' + q + '" —</option>'
+            : '<option disabled>— this run emits no ' +
+              (cls === "All" ? "" : cls + " ") + "data (try another run) —</option>";
           return;
         }
         sel.innerHTML = shown.map(function (o) {
-          return '<option value="' + o.key + '"' + (chosen[o.key] ? " selected" : "") +
-                 ">" + o.label + (o.unit ? " [" + o.unit + "]" : "") + "</option>";
+          var dl = displayLabel(o); keyLabel[o.key] = dl;
+          return '<option value="' + o.key + '"' + (selected[o.key] ? " selected" : "") +
+                 ">" + dl + (o.unit ? " [" + o.unit + "]" : "") + "</option>";
         }).join("") + (matches.length > shown.length ?
           '<option disabled>… ' + (matches.length - shown.length) + " more — refine Search —</option>" : "");
+      });
+    }
+
+    function syncSelectedFromDOM() {
+      selected = {};
+      Array.prototype.forEach.call(
+        ctrls.querySelectorAll("#ts-obs option:checked"), function (o) { selected[o.value] = 1; });
+    }
+
+    // Auto-select every observable belonging to the chosen pathway, for the
+    // active class (proteins/metabolites <- compounds, RNA <- genes, Flux <- reactions).
+    function applyPathway() {
+      var pw = ctrls.querySelector("#ts-pathway").value;
+      var cls = ctrls.querySelector("#ts-class").value;
+      if (!pw || !pathways[pw]) { return; }
+      var P = pathways[pw], want = {};
+      function add(a) { (a || []).forEach(function (x) { want[x] = 1; }); }
+      if (cls === "Protein" || cls === "Metabolite" || cls === "All") add(P.compounds);
+      if (cls === "RNA" || cls === "All") {
+        add(P.genes); (P.genes || []).forEach(function (g) { want[g + "_RNA"] = 1; });
+      }
+      if (cls === "Flux" || cls === "All") add(P.reactions);
+      optionsForClass(cls, function (items) {
+        selected = {};
+        items.forEach(function (o) {
+          var base = o.label.replace(/\[[^\]]*\]$/, ""), alt = base.replace(/_RNA$/, "");
+          if (want[o.label] || want[base] || want[alt]) selected[o.key] = 1;
+        });
+        refreshList(); draw();
       });
     }
 
@@ -85,9 +151,19 @@
       return baseUnit[base] || "";
     }
 
+    // Plotly has no native symlog; fake it with a sign·log10(1+|y|) transform on
+    // a linear axis, labeling ticks back in original units so it stays readable.
+    function symTransform(y) {
+      return y.map(function (v) { return (v < 0 ? -1 : 1) * Math.log10(1 + Math.abs(v)); });
+    }
+    function symTicks(maxAbs) {
+      var vals = [0], text = ["0"], dec = 1;
+      while (dec <= (maxAbs || 0)) { vals.push(Math.log10(1 + dec)); text.push(String(dec)); dec *= 10; }
+      return { vals: vals, text: text };
+    }
+
     function draw() {
-      var chosen = Array.prototype.map.call(
-        ctrls.querySelectorAll("#ts-obs option:checked"), function (o) { return o.value; });
+      var chosen = Object.keys(selected);
       if (!chosen.length) { Plotly.purge("ts-chart"); return; }
       var unitOf = {};
       chosen.forEach(function (k) { unitOf[k] = unitForKey(k); });
@@ -96,12 +172,12 @@
                   "&paths=" + encodeURIComponent(chosen.join(",")));
       j(u).then(function (d) {
         var norm = ctrls.querySelector("#ts-norm").checked;
-        var log = ctrls.querySelector("#ts-log").checked;
+        var scale = ctrls.querySelector("#ts-scale").value;
         // distinct units → one stacked panel each
         var units = [];
         chosen.forEach(function (k) { var un = unitOf[k] || "(unitless)";
           if (units.indexOf(un) < 0) units.push(un); });
-        var n = units.length, traces = [];
+        var n = units.length, traces = [], unitMax = {};
         var gap = 0.08;
         var h = n > 0 ? (1 - gap * (n - 1)) / n : 1;
         var layout = {
@@ -109,29 +185,52 @@
           font: { color: "#cfd6df" }, showlegend: true,
           xaxis: { anchor: n <= 1 ? "y" : "y" + n }
         };
-        units.forEach(function (un, i) {
-          var top = 1 - i * (h + gap);
-          var bottom = Math.max(0, top - h);
-          var key = i === 0 ? "yaxis" : "yaxis" + (i + 1);
-          layout[key] = { title: un, type: log ? "log" : "linear",
-                          domain: [bottom, top], anchor: "x" };
-        });
         Object.keys(d.series).forEach(function (k) {
           var un = unitOf[k] || "(unitless)", i = units.indexOf(un);
           var y = d.series[k];
           if (norm) { var m = Math.max.apply(null, y.map(Math.abs)) || 1; y = y.map(function (v) { return v / m; }); }
-          traces.push({ type: "scatter", mode: "lines", name: k, x: d.time, y: y,
+          var mx = Math.max.apply(null, y.map(Math.abs)) || 0;
+          if (mx > (unitMax[un] || 0)) unitMax[un] = mx;
+          if (scale === "symlog") y = symTransform(y);
+          traces.push({ type: "scatter", mode: "lines", name: keyLabel[k] || k, x: d.time, y: y,
                         xaxis: "x", yaxis: i === 0 ? "y" : "y" + (i + 1) });
+        });
+        units.forEach(function (un, i) {
+          var top = 1 - i * (h + gap);
+          var bottom = Math.max(0, top - h);
+          var key = i === 0 ? "yaxis" : "yaxis" + (i + 1);
+          var ax = { title: un + (scale === "symlog" ? " (symlog)" : ""),
+                     domain: [bottom, top], anchor: "x",
+                     type: scale === "log" ? "log" : "linear" };
+          if (scale === "symlog") {
+            var t = symTicks(unitMax[un]);
+            ax.tickmode = "array"; ax.tickvals = t.vals; ax.ticktext = t.text;
+          }
+          layout[key] = ax;
         });
         Plotly.react("ts-chart", traces, layout, { responsive: true });
       });
     }
 
-    ctrls.querySelector("#ts-class").addEventListener("change", refreshList);
+    ctrls.querySelector("#ts-class").addEventListener("change", function () {
+      ctrls.querySelector("#ts-pathway").value = ""; refreshList();
+    });
+    ctrls.querySelector("#ts-pathway").addEventListener("change", applyPathway);
+    ctrls.querySelector("#ts-label").addEventListener("change", function () { refreshList(); draw(); });
     ctrls.querySelector("#ts-search").addEventListener("input", refreshList);
-    ctrls.querySelector("#ts-obs").addEventListener("change", draw);
-    ctrls.querySelector("#ts-log").addEventListener("change", draw);
+    ctrls.querySelector("#ts-obs").addEventListener("change", function () { syncSelectedFromDOM(); draw(); });
+    ctrls.querySelector("#ts-scale").addEventListener("change", draw);
     ctrls.querySelector("#ts-norm").addEventListener("change", draw);
+
+    // load pathway presets + label maps, then populate the pathway dropdown
+    E._aux().then(function (aux) {
+      labels = aux.labels || {}; pathways = aux.pathways || {};
+      var sel = ctrls.querySelector("#ts-pathway");
+      Object.keys(pathways).sort().forEach(function (nm) {
+        var o = document.createElement("option"); o.value = nm; o.textContent = prettyName(nm); sel.appendChild(o);
+      });
+      refreshList();
+    });
     refreshList();
   };
 
@@ -252,12 +351,15 @@
                        "dna_mass", "smallMolecule_mass"];
     var MASS_TREE = {};                      // leaves only; synthetic "dry" root
     var includeWater = false;
-    // available mass observable paths in this run (field -> emitted path)
+    // available mass observable paths in this run (field -> emitted path).
+    // Paths are dot-separated (sqlite/zarr) OR "__"-separated (parquet); take the
+    // last segment either way so ROOT_FIELDS (short names) match both.
+    function leafOf(p) { return p.split("__").pop().split(".").pop(); }
     var massPaths = {};
     Object.keys(state.observables).forEach(function (cat) {
       state.observables[cat].forEach(function (o) {
         if ((o.mclass === "Mass") || /_mass$/.test(o.path)) {
-          massPaths[o.path.split(".").pop()] = o.path;
+          massPaths[leafOf(o.path)] = o.path;
         }
       });
     });
@@ -424,18 +526,35 @@
       if (builder) return Promise.resolve(builder);
       var mapUrl = state.basePath + "/assets/explorer/ecoli_core.map.json";
       return fetch(mapUrl).then(function (r) { return r.json(); }).then(function (mapData) {
-        try {
-          var sel = (escher.libs && escher.libs.d3_select)
-            ? escher.libs.d3_select("#fx-map")
-            : d3.select("#fx-map");
-          builder = escher.Builder(mapData, null, null, sel, {
-            never_ask_before_quit: true, menu: "zoom", scroll_behavior: "zoom",
-            reaction_styles: ["color", "size", "abs"], enable_editing: false
-          });
-        } catch (e) {
-          return Promise.reject(e);
-        }
-        return builder;
+        // escher.Builder loads the map asynchronously; calling set_reaction_data
+        // before the map exists throws "this.map ... apply_reaction_data_to_map".
+        // Gate readiness on first_load_callback (fall back to a tick if the build
+        // is synchronous and the callback never fires).
+        return new Promise(function (resolve, reject) {
+          try {
+            var sel = (escher.libs && escher.libs.d3_select)
+              ? escher.libs.d3_select("#fx-map")
+              : d3.select("#fx-map");
+            var settled = false;
+            var done = function (b) { if (!settled) { settled = true; builder = b; resolve(b); } };
+            var b = escher.Builder(mapData, null, null, sel, {
+              never_ask_before_quit: true, menu: "zoom", scroll_behavior: "zoom",
+              reaction_styles: ["color", "size", "abs"], enable_editing: false,
+              first_load_callback: function () { if (b && b.map) done(b); }
+            });
+            // Safety net: if the map is already built (no callback), resolve once
+            // it has a map object; otherwise poll briefly.
+            var tries = 0;
+            (function check() {
+              if (settled) return;
+              if (b && b.map) { done(b); return; }
+              if (tries++ > 100) { reject(new Error("escher map did not finish loading")); return; }
+              setTimeout(check, 30);
+            })();
+          } catch (e) {
+            reject(e);
+          }
+        });
       });
     }
 
@@ -455,5 +574,231 @@
     }
     ctrls.querySelector("#fx-t").addEventListener("input", draw);
     draw();
+  };
+
+  // Pathways — EcoCyc-pathway-grouped FBA fluxes. Shows EVERY emitted reaction
+  // (including transport/uptake that the Escher central-carbon map omits),
+  // organized by EcoCyc pathway. Pick a pathway -> horizontal bar of each
+  // reaction's flux at the chosen step; an "unassigned" group catches transport
+  // and demand reactions that belong to no small-molecule pathway.
+  V.pathways = function (host, ctrls) {
+    var nsteps = (state.run && state.run.n_steps) || 1;
+    var last = Math.max(0, nsteps - 1);
+    ctrls.innerHTML =
+      '<label>Pathway <select id="pw-sel"><option value="">loading…</option></select></label>' +
+      '<label>Step <input id="pw-step" type="range" min="0" max="' + last + '" value="' + last + '">' +
+        '<span id="pw-tlabel" class="muted"></span></label>' +
+      '<label><input type="checkbox" id="pw-nz" checked> hide zero-flux</label>' +
+      '<div id="pw-stat" class="muted" style="margin-top:8px;font-size:12px"></div>';
+    host.innerHTML = '<div id="pw-chart" style="height:560px"></div>';
+
+    var UNASSIGNED = "— transport / other (no EcoCyc pathway) —";
+    var pathways = {};     // name -> {reactions:[...]}
+    var assigned = {};     // reaction id -> 1 if in any pathway
+    var fluxCache = {};    // step -> base-fluxes response
+
+    function loadFluxes(step) {
+      if (fluxCache[step]) return Promise.resolve(fluxCache[step]);
+      var u = api("/base-fluxes?db=" + encodeURIComponent(state.run.db_path) +
+                  "&run=" + encodeURIComponent(state.run.run_id || "") + "&step=" + step);
+      return j(u).then(function (d) { fluxCache[step] = d; return d; });
+    }
+
+    function reactionIds(name, fluxes) {
+      if (name === UNASSIGNED) {
+        return Object.keys(fluxes).filter(function (r) { return !assigned[r]; });
+      }
+      return ((pathways[name] || {}).reactions || []).filter(function (r) { return r in fluxes; });
+    }
+
+    function draw() {
+      var name = ctrls.querySelector("#pw-sel").value;
+      var step = parseInt(ctrls.querySelector("#pw-step").value, 10) || 0;
+      var hideZero = ctrls.querySelector("#pw-nz").checked;
+      var stat = ctrls.querySelector("#pw-stat");
+      if (!name) { Plotly.purge("pw-chart"); return; }
+      stat.textContent = "loading…";
+      loadFluxes(step).then(function (d) {
+        var fluxes = d.fluxes || {};
+        ctrls.querySelector("#pw-tlabel").textContent =
+          d.time != null ? " t=" + (+d.time).toFixed(0) : "";
+        if (!Object.keys(fluxes).length) {
+          Plotly.purge("pw-chart");
+          stat.innerHTML = d.error ? ("⚠ " + d.error)
+            : "This run emits no FBA fluxes (listeners.fba_results.base_reaction_fluxes).";
+          return;
+        }
+        var ids = reactionIds(name, fluxes);
+        var totalInGroup = ids.length;
+        var rows = ids.map(function (r) { return { id: r, v: fluxes[r] || 0 }; });
+        if (hideZero) rows = rows.filter(function (x) { return Math.abs(x.v) > 1e-9; });
+        var nNonzero = rows.length;
+        // cap very large groups (e.g. unassigned transport) to the strongest fluxes
+        var capped = 0;
+        if (rows.length > 60) {
+          rows.sort(function (a, b) { return Math.abs(b.v) - Math.abs(a.v); });
+          capped = rows.length - 60; rows = rows.slice(0, 60);
+        }
+        rows.sort(function (a, b) { return a.v - b.v; });  // signed; consumed at bottom
+        if (!rows.length) {
+          Plotly.purge("pw-chart");
+          stat.innerHTML = "Pathway has " + totalInGroup + " reactions in this run, " +
+            "all zero-flux at this step (uncheck “hide zero-flux” to list them).";
+          return;
+        }
+        var trace = {
+          type: "bar", orientation: "h",
+          x: rows.map(function (r) { return r.v; }),
+          y: rows.map(function (r) { return r.id; }),
+          marker: { color: rows.map(function (r) { return r.v >= 0 ? "#4c8bf5" : "#e15759"; }) },
+          hovertemplate: "%{y}<br>flux = %{x:.4g}<extra></extra>"
+        };
+        Plotly.react("pw-chart", [trace], {
+          margin: { t: 10, r: 10, l: 220 }, paper_bgcolor: "#0e1116", plot_bgcolor: "#0e1116",
+          font: { color: "#cfd6df" }, bargap: 0.25,
+          xaxis: { title: "flux (mmol/gDCW/h, signed)", zeroline: true, zerolinecolor: "#555" },
+          yaxis: { automargin: true, tickfont: { size: 9 } }
+        }, { responsive: true });
+        stat.innerHTML = "<b>" + prettyName(name) + "</b> · " + nNonzero + " active / " +
+          totalInGroup + " reactions" + (capped ? " · showing top 60 by |flux| (" +
+          capped + " more)" : "");
+      });
+    }
+
+    E._aux().then(function (aux) {
+      pathways = aux.pathways || {};
+      Object.keys(pathways).forEach(function (nm) {
+        (pathways[nm].reactions || []).forEach(function (r) { assigned[r] = 1; });
+      });
+      // populate dropdown with pathways present in THIS run; default to the one
+      // with the most active reactions so the chart opens populated.
+      loadFluxes(last).then(function (d) {
+        var fluxes = d.fluxes || {};
+        var sel = ctrls.querySelector("#pw-sel");
+        var present = Object.keys(pathways).filter(function (nm) {
+          return (pathways[nm].reactions || []).some(function (r) { return r in fluxes; });
+        });
+        // rank by number of nonzero-flux reactions (most interesting first)
+        function activeCount(nm) {
+          return (pathways[nm].reactions || []).filter(function (r) {
+            return r in fluxes && Math.abs(fluxes[r]) > 1e-9; }).length;
+        }
+        present.sort(function (a, b) { return activeCount(b) - activeCount(a) || a.localeCompare(b); });
+        var opts = present.map(function (nm) {
+          return '<option value="' + nm.replace(/"/g, "&quot;") + '">' +
+                 prettyName(nm) + " (" + activeCount(nm) + ")</option>";
+        });
+        sel.innerHTML =
+          '<option value="' + UNASSIGNED + '">' + UNASSIGNED + "</option>" + opts.join("");
+        sel.value = present.length ? present[0] : UNASSIGNED;
+        draw();
+      });
+    });
+
+    ctrls.querySelector("#pw-sel").addEventListener("change", draw);
+    ctrls.querySelector("#pw-step").addEventListener("input", draw);
+    ctrls.querySelector("#pw-nz").addEventListener("change", draw);
+  };
+
+  // Validation — simulated (time-averaged) protein counts vs experimental
+  // proteomics (Schmidt 2015 / Wisniewski 2014), log-log with a parity line and
+  // Pearson r. Ported from sms-api's marimo explore.py. An optional pathway
+  // filter narrows to one module's proteins.
+  V.validation = function (host, ctrls) {
+    ctrls.innerHTML =
+      '<label>Dataset <select id="vl-ds">' +
+        '<option value="schmidt">Schmidt 2015 (glucose)</option>' +
+        '<option value="wisniewski">Wisniewski 2014</option>' +
+      "</select></label>" +
+      '<label>Pathway filter <select id="vl-pw"><option value="">— all proteins —</option></select></label>' +
+      '<label><input type="checkbox" id="vl-log" checked> log-log</label>' +
+      '<div id="vl-stat" class="muted" style="margin-top:8px;font-size:12px"></div>';
+    host.innerHTML = '<div id="vl-chart" style="height:520px"></div>';
+
+    var nsteps = (state.run && state.run.n_steps) || 0;
+    var dsCache = {};         // dataset -> response
+    var pwProteins = {};      // pathway name -> [monomer base ids]
+
+    function load(ds) {
+      if (dsCache[ds]) return Promise.resolve(dsCache[ds]);
+      var u = api("/validation?db=" + encodeURIComponent(state.run.db_path) +
+                  "&run=" + encodeURIComponent(state.run.run_id || "") +
+                  "&dataset=" + ds + "&nsteps=" + nsteps);
+      return j(u).then(function (d) { dsCache[ds] = d; return d; });
+    }
+
+    function pearson(xs, ys) {
+      var n = xs.length, i; if (n < 2) return null;
+      var mx = 0, my = 0;
+      for (i = 0; i < n; i++) { mx += xs[i]; my += ys[i]; }
+      mx /= n; my /= n;
+      var sxx = 0, syy = 0, sxy = 0, dx, dy;
+      for (i = 0; i < n; i++) { dx = xs[i] - mx; dy = ys[i] - my; sxx += dx * dx; syy += dy * dy; sxy += dx * dy; }
+      if (sxx <= 0 || syy <= 0) return null;
+      return sxy / Math.sqrt(sxx * syy);
+    }
+
+    function draw() {
+      var ds = ctrls.querySelector("#vl-ds").value;
+      var pw = ctrls.querySelector("#vl-pw").value;
+      var log = ctrls.querySelector("#vl-log").checked;
+      var stat = ctrls.querySelector("#vl-stat");
+      stat.textContent = "loading…";
+      load(ds).then(function (d) {
+        var pts = d.points || [];
+        if (!pts.length) {
+          Plotly.purge("vl-chart");
+          stat.innerHTML = d.error ? ("⚠ " + d.error) :
+            "No overlapping proteins — this run has no monomer_counts, or the " +
+            "validation asset is missing (run scripts/build_explorer_bio_assets.py).";
+          return;
+        }
+        if (pw && pwProteins[pw]) {
+          var set = {}; pwProteins[pw].forEach(function (id) { set[id] = 1; });
+          pts = pts.filter(function (p) { return set[p.id]; });
+        }
+        if (!pts.length) {
+          Plotly.purge("vl-chart");
+          stat.textContent = "No validated proteins in pathway “" + pw + "”.";
+          return;
+        }
+        var f = function (v) { return log ? Math.log10(v + 1) : v; };
+        var xs = pts.map(function (p) { return f(p.exp); });
+        var ys = pts.map(function (p) { return f(p.sim); });
+        var text = pts.map(function (p) { return p.gene + (p.name ? " — " + p.name : ""); });
+        var hi = 1; xs.concat(ys).forEach(function (v) { if (v > hi) hi = v; });
+        var trace = { type: "scattergl", mode: "markers", x: xs, y: ys, text: text,
+          hovertemplate: "%{text}<br>exp=%{x:.3g} sim=%{y:.3g}<extra></extra>",
+          marker: { size: 6, opacity: 0.55, color: "#4c8bf5" } };
+        var parity = { type: "scatter", mode: "lines", x: [0, hi], y: [0, hi],
+          line: { color: "#e15759", dash: "dash" }, hoverinfo: "skip", showlegend: false };
+        var dsLabel = ds === "wisniewski" ? "Wisniewski 2014" : "Schmidt 2015";
+        var axis = log ? "log10(counts + 1)" : "counts";
+        Plotly.react("vl-chart", [trace, parity], {
+          margin: { t: 10, r: 10 }, paper_bgcolor: "#0e1116", plot_bgcolor: "#0e1116",
+          font: { color: "#cfd6df" },
+          xaxis: { title: dsLabel + " experimental " + axis },
+          yaxis: { title: "Simulation avg " + axis }
+        }, { responsive: true });
+        var r = pearson(xs, ys);
+        stat.innerHTML = "<b>Pearson r = " + (r == null ? "n/a" : r.toFixed(3)) + "</b> · " +
+          pts.length + " proteins" + (d.n_steps ? " · avg over " + d.n_steps + " timepoints" : "");
+      });
+    }
+
+    E._aux().then(function (aux) {
+      var pw = aux.pathways || {}, sel = ctrls.querySelector("#vl-pw");
+      Object.keys(pw).sort().forEach(function (nm) {
+        // monomers in this pathway (compounds ending in -MONOMER) are candidate
+        // validated proteins; keep all compounds — the filter intersects anyway
+        pwProteins[nm] = pw[nm].compounds || [];
+        var o = document.createElement("option"); o.value = nm; o.textContent = nm; sel.appendChild(o);
+      });
+      draw();
+    });
+
+    ["vl-ds", "vl-pw", "vl-log"].forEach(function (id) {
+      ctrls.querySelector("#" + id).addEventListener("change", draw);
+    });
   };
 })();

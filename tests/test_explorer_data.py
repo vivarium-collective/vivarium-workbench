@@ -126,6 +126,51 @@ def test_get_flux_remaps_to_bigg(tmp_path):
     assert res["step"] == 2
 
 
+def test_get_flux_sums_colliding_reactions(tmp_path):
+    # Two EcoCyc reactions mapping to the SAME BiGG reaction (e.g. gpmA/gpmM ->
+    # PGM) must be SUMMED, not overwritten.
+    db = tmp_path / "runs.db"
+    make_fake_runs_db(db, _sample_states(n=4))
+    base_ids = ["RXN-A", "RXN-B", "RXN-C"]
+    id_map = {"RXN-A": "PGM", "RXN-C": "PGM"}  # both collide onto PGM
+    res = explorer_data.get_flux(str(db), step=2, base_ids=base_ids, id_map=id_map)
+    # state at step 2: base_reaction_fluxes == [3.0, 4.0, 5.0]; PGM = 3.0 + 5.0
+    assert res["fluxes"] == {"PGM": 8.0}
+    assert res["coverage"] == {"mapped": 1, "total": 3}
+
+
+def test_get_flux_auto_merges_exchange_fluxes(tmp_path, monkeypatch):
+    # environment exchange fluxes get mapped onto the map's EX_ reactions so
+    # uptake/secretion (e.g. glucose EX_glc__D_e) is visible.
+    monkeypatch.setattr(explorer_data, "_flux_assets_cache", (["RXN-A"], {}))
+    monkeypatch.setattr(explorer_data, "_exchange_assets_cache",
+                        (["GLC[p]", "OXYGEN-MOLECULE[p]"], {"GLC[p]": "EX_glc__D_e"}))
+    st = {"agents": {"0": {"listeners": {"fba_results": {
+        "base_reaction_fluxes": [3.0],
+        "external_exchange_fluxes": [-4.5, 1.2]}}}}}
+    db = tmp_path / "runs.db"
+    make_fake_runs_db(db, [st, st])
+    out = explorer_data.get_flux_auto(str(db), 1, {"RXN-A": "PGI"}, "run-1", tmp_path)
+    assert out["fluxes"]["PGI"] == 3.0               # internal reaction
+    assert out["fluxes"]["EX_glc__D_e"] == -4.5       # glucose exchange (uptake)
+    assert "EX_o2_e" not in out["fluxes"]             # O2 not in curated map -> skipped
+    assert out["coverage"]["exchange"] == 1
+
+
+def test_get_base_fluxes_keys_by_ecocyc_id(tmp_path, monkeypatch):
+    # base fluxes keep native EcoCyc ids (no BiGG remap) so they can be grouped
+    # by EcoCyc pathway — the full metabolism, transport included.
+    monkeypatch.setattr(explorer_data, "_flux_assets_cache", ([], {}))
+    st = {"agents": {"0": {
+        "base_reaction_ids": ["RXN-A", "RXN-B", "RXN-C"],
+        "listeners": {"fba_results": {"base_reaction_fluxes": [1.5, 0.0, -2.0]}}}}}
+    db = tmp_path / "runs.db"
+    make_fake_runs_db(db, [st, st])
+    out = explorer_data.get_base_fluxes(str(db), step=1, workspace=tmp_path)
+    assert out["fluxes"] == {"RXN-A": 1.5, "RXN-B": 0.0, "RXN-C": -2.0}
+    assert out["n"] == 3 and out["nonzero"] == 2
+
+
 def test_base_ids_from_run_reads_emitted_ids(tmp_path):
     db = tmp_path / "runs.db"
     st = {"agents": {"0": {"base_reaction_ids": ["RXN-A", "RXN-B", "RXN-C"],
@@ -137,11 +182,64 @@ def test_base_ids_from_run_reads_emitted_ids(tmp_path):
 def test_explorer_assets_are_valid_json():
     import vivarium_dashboard
     base = Path(vivarium_dashboard.__file__).parent / "static" / "explorer"
-    for name in ("ecoli_core.map.json", "reaction_id_map.json", "base_reaction_ids.json"):
+    for name in ("ecoli_core.map.json", "reaction_id_map.json", "base_reaction_ids.json",
+                 "pathways.json", "validation_proteomics.json", "explorer_labels.json"):
         p = base / name
         if not p.exists():
             pytest.skip(f"asset {name} not generated yet")
         json.loads(p.read_text())  # raises if invalid
+
+
+def test_base_id_strips_compartment():
+    assert explorer_data._base_id("AROG-MONOMER[c]") == "AROG-MONOMER"
+    assert explorer_data._base_id("ALARACEBIOSYN-MONOMER") == "ALARACEBIOSYN-MONOMER"
+
+
+def test_pick_even_subsamples():
+    assert explorer_data._pick_even([0, 1, 2], 12) == [0, 1, 2]
+    picked = explorer_data._pick_even(list(range(100)), 5)
+    assert picked == [0, 25, 50, 74, 99]  # endpoints included, evenly spaced
+
+
+def test_pearson_log10_perfect_correlation():
+    pts = [{"sim": v, "exp": v} for v in (1, 10, 100, 1000)]
+    assert explorer_data._pearson_log10(pts) == pytest.approx(1.0)
+    assert explorer_data._pearson_log10(pts[:1]) is None  # < 2 points
+
+
+def test_get_validation_scatter_averages_and_joins(tmp_path, monkeypatch):
+    # 3-step run; monomer_counts is a 3-element vector (sqlite -> positional ids,
+    # so the loader substitutes the aligned monomer-meta ids).
+    states = [
+        {"agents": {"0": {"listeners": {"monomer_counts": [2 + 2 * i, 99, 4 + 4 * i]}}}}
+        for i in range(3)
+    ]
+    db = tmp_path / "runs.db"
+    make_fake_runs_db(db, states, run_id="r1")
+    monkeypatch.setattr(explorer_data, "_monomer_ids_cache",
+                        ["AAA-MONOMER", "BBB-MONOMER", "CCC-MONOMER"])
+    monkeypatch.setattr(explorer_data, "_validation_cache", {
+        "AAA-MONOMER": {"gene_name": "aaa", "monomer_name": "Aprot",
+                        "schmidt": 10.0, "wisniewski": 5.0},
+        "CCC-MONOMER": {"gene_name": "ccc", "monomer_name": "Cprot",
+                        "schmidt": None, "wisniewski": 8.0},
+    })
+    out = explorer_data.get_validation_scatter(str(db), "schmidt", "r1", tmp_path, n_steps=3)
+    by_id = {p["id"]: p for p in out["points"]}
+    # AAA: avg over steps (2,4,6)=4, joined to schmidt=10
+    assert by_id["AAA-MONOMER"]["sim"] == pytest.approx(4.0)
+    assert by_id["AAA-MONOMER"]["exp"] == pytest.approx(10.0)
+    assert by_id["AAA-MONOMER"]["gene"] == "aaa"
+    # CCC has no schmidt value -> excluded from the schmidt scatter
+    assert "CCC-MONOMER" not in by_id
+    # BBB not in the validation set -> excluded
+    assert "BBB-MONOMER" not in by_id
+
+    # wisniewski dataset includes CCC (avg over (4,8,12)=8 joined to wisniewski=8)
+    out_w = explorer_data.get_validation_scatter(str(db), "wisniewski", "r1", tmp_path, n_steps=3)
+    by_id_w = {p["id"]: p for p in out_w["points"]}
+    assert by_id_w["CCC-MONOMER"]["sim"] == pytest.approx(8.0)
+    assert by_id_w["CCC-MONOMER"]["exp"] == pytest.approx(8.0)
 
 
 # ---------------------------------------------------------------------------

@@ -6745,6 +6745,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_explorer_protein_breakdown()
         if self.path.startswith("/api/explorer/vector"):
             return self._get_explorer_vector()
+        if self.path.startswith("/api/explorer/validation"):
+            return self._get_explorer_validation()
+        if self.path.startswith("/api/explorer/base-fluxes"):
+            return self._get_explorer_base_fluxes()
         if self.path.startswith("/api/simulations"):
             return self._get_simulations()
         if self.path.startswith("/api/composite-state"):
@@ -9391,6 +9395,46 @@ if __name__ == "__main__":
                 explorer_data.get_protein_breakdown(db, path, step, q.get("run"), WORKSPACE), 200)
         except Exception as e:
             return self._json({"error": str(e), "breakdown": {}, "step": step, "time": None}, 200)
+
+    def _get_explorer_validation(self):
+        """GET /api/explorer/validation?db=&run=&dataset=schmidt|wisniewski&nsteps=
+        — simulated (time-averaged monomer counts) vs experimental proteomics."""
+        import urllib.parse as _up
+        from vivarium_dashboard.lib import explorer_data
+        q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
+        db = q.get("db")
+        if not db:
+            return self._json({"error": "missing db", "points": [], "n": 0, "pearson": None}, 200)
+        try:
+            nsteps = int(q.get("nsteps", "0"))
+        except ValueError:
+            nsteps = 0
+        try:
+            return self._json(
+                explorer_data.get_validation_scatter(
+                    db, q.get("dataset", "schmidt"), q.get("run"), WORKSPACE,
+                    n_steps=nsteps or None), 200)
+        except Exception as e:
+            return self._json({"error": str(e), "points": [], "n": 0, "pearson": None}, 200)
+
+    def _get_explorer_base_fluxes(self):
+        """GET /api/explorer/base-fluxes?db=&run=&step= — per-reaction FBA fluxes
+        keyed by EcoCyc base reaction id (full metabolism, for pathway grouping)."""
+        import urllib.parse as _up
+        from vivarium_dashboard.lib import explorer_data
+        q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
+        db = q.get("db")
+        if not db:
+            return self._json({"error": "missing db", "fluxes": {}, "n": 0}, 200)
+        try:
+            step = int(q.get("step", "0"))
+        except ValueError:
+            step = 0
+        try:
+            return self._json(
+                explorer_data.get_base_fluxes(db, step, q.get("run"), WORKSPACE), 200)
+        except Exception as e:
+            return self._json({"error": str(e), "fluxes": {}, "n": 0}, 200)
 
     def _get_simulations(self):
         """GET /api/simulations — all persisted runs across the workspace.

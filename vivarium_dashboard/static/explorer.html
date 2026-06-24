@@ -23,6 +23,9 @@
       window.Explorer.mount(document.getElementById("explorer-root"), {
         basePath: "",                       // standalone is served same-origin
         standalone: true,                   // hide the pop-out link
+        // published bundles set __DASH_CONFIG__.mode = "snapshot"; honor it so the
+        // full-window page reads static JSON like the embedded card does.
+        snapshot: (window.__DASH_CONFIG__ || {}).mode === "snapshot",
         initialRun: params.get("run") || null,
         initialDb: params.get("db") || null  // open an explicit run store (per-run view)
       });

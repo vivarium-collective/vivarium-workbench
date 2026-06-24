@@ -149,6 +149,13 @@ def _resolve_run_source(db, workspace=None):
 # Parquet helpers (lazy-import pyarrow; degrade to empty/None if absent)
 # ---------------------------------------------------------------------------
 
+def _parquet_col(path):
+    """Parquet stores flatten store paths with ``__`` separators. Accept dotted
+    paths too (e.g. the scatter view's hardcoded ``listeners.monomer_counts``) by
+    translating ``.`` -> ``__`` so any caller's path resolves to a real column."""
+    return path.replace(".", "__") if "." in path else path
+
+
 def _parquet_files(part_dir):
     """Sorted list of .pq paths under a partition directory."""
     return sorted(Path(part_dir).rglob("*.pq"))
@@ -386,12 +393,13 @@ def get_series(db_path, paths, subsample=400, run_id=None, workspace=None):
     if kind == "parquet":
         for path, index in paths:
             try:
-                tbl = _parquet_table(resolved, columns=["global_time", path])
+                col = _parquet_col(path)
+                tbl = _parquet_table(resolved, columns=["global_time", col])
                 if tbl is None:
                     series[_series_key(path, index)] = []
                     continue
                 times_col = tbl.column("global_time").to_pylist()
-                vals_col = tbl.column(path).to_pylist()
+                vals_col = tbl.column(col).to_pylist()
                 if index is None:
                     vals = [float(v) if v is not None else None for v in vals_col]
                 else:
@@ -487,6 +495,160 @@ def get_protein_breakdown(db_path, path, step, run_id=None, workspace=None):
             "time": vec.get("time")}
 
 
+_MONOMER_PATH = "listeners.monomer_counts"
+_validation_cache = None
+_monomer_ids_cache = None
+
+
+def _base_id(mid: str) -> str:
+    """Strip a trailing ``[c]``/``[i]``/... compartment tag from a molecule id."""
+    return re.sub(r"\[[^\]]*\]$", "", str(mid))
+
+
+def load_validation_proteomics() -> dict:
+    """{monomer_base_id: {gene, gene_name, monomer_name, schmidt, wisniewski}}.
+    Empty dict if the asset is absent (built by build_explorer_bio_assets.py)."""
+    global _validation_cache
+    if _validation_cache is None:
+        try:
+            _validation_cache = json.loads(
+                (_ASSET_DIR / "validation_proteomics.json").read_text())
+        except (OSError, ValueError):
+            _validation_cache = {}
+    return _validation_cache
+
+
+def _monomer_meta_ids() -> list:
+    """monomer ids aligned 1:1 to monomer_counts order (from monomer_meta.json)."""
+    global _monomer_ids_cache
+    if _monomer_ids_cache is None:
+        try:
+            _monomer_ids_cache = json.loads(
+                (_ASSET_DIR / "monomer_meta.json").read_text()).get("ids") or []
+        except (OSError, ValueError):
+            _monomer_ids_cache = []
+    return _monomer_ids_cache
+
+
+def _pick_even(seq, k):
+    """Up to k evenly spaced elements of seq (preserving order, no duplicates)."""
+    n = len(seq)
+    if n <= k:
+        return list(seq)
+    idx = sorted({round(i * (n - 1) / (k - 1)) for i in range(k)})
+    return [seq[i] for i in idx]
+
+
+def _validation_step_keys(db_path, run_id, workspace, n_steps_hint, samples):
+    """Up to `samples` step keys to average over. sqlite uses real step values;
+    parquet/zarr use positional indices (get_vector indexes positionally)."""
+    kind, resolved = _resolve_run_source(db_path, workspace)
+    if kind == "sqlite":
+        try:
+            conn = sqlite3.connect(str(resolved))
+        except sqlite3.OperationalError:
+            return []
+        try:
+            if run_id:
+                rows = conn.execute(
+                    "SELECT DISTINCT step FROM history WHERE simulation_id=? ORDER BY step",
+                    (run_id,)).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT DISTINCT step FROM history ORDER BY step").fetchall()
+        except sqlite3.OperationalError:
+            return []
+        finally:
+            conn.close()
+        return _pick_even([r[0] for r in rows], samples)
+    n = n_steps_hint or 0
+    if n <= 0 and kind == "parquet":
+        tbl = _parquet_table(resolved, columns=["global_time"])
+        n = len(tbl) if tbl is not None else 0
+    if n <= 0:
+        n = 1
+    return _pick_even(list(range(n)), samples)
+
+
+def _pearson_log10(points):
+    """Pearson r of log10(exp+1) vs log10(sim+1); None if < 2 points."""
+    import math
+    if len(points) < 2:
+        return None
+    xs = [math.log10(p["exp"] + 1) for p in points]
+    ys = [math.log10(p["sim"] + 1) for p in points]
+    n = len(xs)
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    sxx = sum((x - mx) ** 2 for x in xs)
+    syy = sum((y - my) ** 2 for y in ys)
+    sxy = sum((xs[i] - mx) * (ys[i] - my) for i in range(n))
+    if sxx <= 0 or syy <= 0:
+        return None
+    return sxy / math.sqrt(sxx * syy)
+
+
+def get_validation_scatter(db_path, dataset="schmidt", run_id=None, workspace=None,
+                           n_steps=None, samples=12):
+    """Simulated (time-averaged monomer counts) vs experimental proteomics counts.
+
+    Averages the monomer_counts vector over up to `samples` timepoints, joins to
+    the experimental dataset (Schmidt 2015 glucose / Wisniewski 2014 avg) by
+    monomer id, and returns log-log-ready points plus the Pearson r.
+
+    Returns {points: [{id, gene, name, sim, exp}], dataset, n, pearson, n_steps}.
+    """
+    field = "wisniewski" if str(dataset).lower().startswith("w") else "schmidt"
+    valid = load_validation_proteomics()
+    if not valid:
+        return {"points": [], "dataset": field, "n": 0, "pearson": None,
+                "error": "validation asset missing"}
+    # parquet columns use "__" separators; sqlite/zarr use dotted paths.
+    kind, _ = _resolve_run_source(db_path, workspace)
+    mpath = "listeners__monomer_counts" if kind == "parquet" else _MONOMER_PATH
+    steps = _validation_step_keys(db_path, run_id, workspace, n_steps, samples)
+    sums = None
+    ids = None
+    count = 0
+    for s in steps:
+        vec = get_vector(db_path, mpath, s, run_id, workspace)
+        vals = vec.get("values") or []
+        if not vals:
+            continue
+        if ids is None:
+            got = vec.get("ids") or []
+            # sqlite yields positional ids — substitute the aligned monomer ids
+            ids = (got if got and not all(str(x).isdigit() for x in got)
+                   else (_monomer_meta_ids() if len(_monomer_meta_ids()) == len(vals) else got))
+        if sums is None:
+            sums = [0.0] * len(vals)
+        for i, v in enumerate(vals):
+            if i < len(sums):
+                try:
+                    sums[i] += float(v)
+                except (TypeError, ValueError):
+                    pass
+        count += 1
+    if not sums or not ids or not count:
+        return {"points": [], "dataset": field, "n": 0, "pearson": None}
+    points = []
+    for i, mid in enumerate(ids):
+        if i >= len(sums):
+            break
+        rec = valid.get(_base_id(mid))
+        if not rec:
+            continue
+        exp = rec.get(field)
+        if exp is None:
+            continue
+        points.append({"id": _base_id(mid),
+                       "gene": rec.get("gene_name") or rec.get("gene") or _base_id(mid),
+                       "name": rec.get("monomer_name") or "",
+                       "sim": sums[i] / count, "exp": float(exp)})
+    return {"points": points, "dataset": field, "n": len(points),
+            "pearson": _pearson_log10(points), "n_steps": len(steps)}
+
+
 def _state_at_step(db_path: str, step: int, run_id: str | None):
     try:
         conn = sqlite3.connect(str(db_path))
@@ -529,7 +691,9 @@ def get_flux(db_path: str, step: int, base_ids, id_map, run_id: str | None = Non
                     break
                 bigg = id_map.get(base_ids[i])
                 if bigg is not None and isinstance(val, _NUM):
-                    fluxes[bigg] = float(val)
+                    # multiple EcoCyc reactions (e.g. isozymes gpmA/gpmM -> PGM)
+                    # can map to one BiGG reaction — SUM, don't overwrite.
+                    fluxes[bigg] = fluxes.get(bigg, 0.0) + float(val)
     return {"step": step, "time": time, "fluxes": fluxes,
             "coverage": {"mapped": len(fluxes), "total": total}}
 
@@ -607,17 +771,18 @@ def get_vector(db_path, path, step, run_id=None, workspace=None):
         return {"ids": ids, "values": vals, "step": step, "time": None}
     if kind == "parquet":
         try:
-            tbl = _parquet_table(resolved, columns=["global_time", path])
+            col = _parquet_col(path)
+            tbl = _parquet_table(resolved, columns=["global_time", col])
             if tbl is None:
                 return {"ids": [], "values": [], "step": step, "time": None}
             nrows = len(tbl)
             si = min(max(0, step), nrows - 1)
             time_val = tbl.column("global_time")[si].as_py()
-            row_val = tbl.column(path)[si].as_py()
+            row_val = tbl.column(col)[si].as_py()
             if row_val is None:
                 return {"ids": [], "values": [], "step": step, "time": time_val}
             values = [float(v) for v in row_val]
-            if path == "bulk__count":
+            if col == "bulk__count":
                 bulk_tbl = _parquet_table(resolved, columns=["global_time", "bulk__id"])
                 if bulk_tbl is not None:
                     ids = bulk_tbl.column("bulk__id")[si].as_py() or []
@@ -625,7 +790,7 @@ def get_vector(db_path, path, step, run_id=None, workspace=None):
                     ids = [str(i) for i in range(len(values))]
             else:
                 meta = _parquet_config_meta(resolved)
-                ids = meta.get(path, [str(i) for i in range(len(values))])
+                ids = meta.get(col, [str(i) for i in range(len(values))])
             return {"ids": ids, "values": values, "step": step, "time": time_val}
         except Exception:
             return {"ids": [], "values": [], "step": step, "time": None}
@@ -639,55 +804,154 @@ def get_vector(db_path, path, step, run_id=None, workspace=None):
     return {"ids": [], "values": [], "step": step, "time": None}
 
 
-def get_flux_auto(db_path, step, id_map, run_id=None, workspace=None):
-    """Emitter-aware flux: zarr reads ids+vector from the store; sqlite uses
-    get_flux with asset/run base_ids; parquet reads the FBA vector + config ids."""
-    kind, resolved = _resolve_run_source(db_path, workspace)
-    if kind == "zarr":
-        ids, vals = _zarr_flux(resolved, step)
-        fluxes = {}
-        for i, rid in enumerate(ids):
-            if i >= len(vals):
-                break
-            bigg = id_map.get(rid)
-            if bigg is not None:
-                fluxes[bigg] = float(vals[i])
-        return {"step": step, "time": None, "fluxes": fluxes,
-                "coverage": {"mapped": len(fluxes), "total": len(ids)}}
-    if kind == "parquet":
-        flux_col = "listeners__fba_results__base_reaction_fluxes"
+_exchange_assets_cache = None
+
+
+def _load_exchange_assets():
+    """(ordered external-molecule ids, {ecocyc_id: EX_<bigg>} map), cached."""
+    global _exchange_assets_cache
+    if _exchange_assets_cache is None:
         try:
-            tbl = _parquet_table(resolved, columns=["global_time", flux_col])
-            if tbl is None:
-                return {"step": step, "time": None, "fluxes": {},
-                        "coverage": {"mapped": 0, "total": 0}}
-            nrows = len(tbl)
-            si = min(max(0, step), nrows - 1)
-            time_val = tbl.column("global_time")[si].as_py()
-            vals = tbl.column(flux_col)[si].as_py() or []
-            meta = _parquet_config_meta(resolved)
-            ids = meta.get(flux_col, [])
-            if not ids:
-                # config didn't carry the base-reaction ids — fall back to the
-                # static ordered base_reaction_ids asset (same model ordering).
-                ids, _ = load_flux_assets()
-            fluxes = {}
+            ids = json.loads((_ASSET_DIR / "exchange_molecule_ids.json").read_text())
+        except (OSError, ValueError):
+            ids = []
+        try:
+            bmap = json.loads((_ASSET_DIR / "exchange_bigg_map.json").read_text())
+        except (OSError, ValueError):
+            bmap = {}
+        _exchange_assets_cache = (ids, bmap)
+    return _exchange_assets_cache
+
+
+_EXCHANGE_PATH = "listeners.fba_results.external_exchange_fluxes"
+
+
+def _exchange_bigg_fluxes(kind, resolved, db_path, step, run_id):
+    """{EX_<bigg>: flux} from external_exchange_fluxes, mapped via the curated
+    EcoCyc->BiGG exchange map. Lets the Escher map colour uptake/secretion
+    (e.g. glucose EX_glc__D_e). Empty if the run didn't emit exchange fluxes."""
+    ids, bmap = _load_exchange_assets()
+    if not bmap:
+        return {}
+    vals = []
+    try:
+        if kind == "zarr":
+            zids, vals = _zarr_vector(resolved, "external_exchange_fluxes", step)
+            if zids:
+                ids = zids
+        elif kind == "parquet":
+            col = "listeners__fba_results__external_exchange_fluxes"
+            tbl = _parquet_table(resolved, columns=["global_time", col])
+            if tbl is not None:
+                si = min(max(0, step), len(tbl) - 1)
+                vals = tbl.column(col)[si].as_py() or []
+        else:  # sqlite
+            _, state = _state_at_step(resolved if kind == "sqlite" else db_path, step, run_id)
+            if state is not None:
+                v = _dig(_unwrap_agent(state), _EXCHANGE_PATH)
+                if isinstance(v, list):
+                    vals = v
+    except Exception:
+        return {}
+    out = {}
+    for i, mid in enumerate(ids):
+        if i >= len(vals):
+            break
+        ex = bmap.get(str(mid))
+        if ex is not None and isinstance(vals[i], _NUM):
+            out[ex] = out.get(ex, 0.0) + float(vals[i])
+    return out
+
+
+def get_flux_auto(db_path, step, id_map, run_id=None, workspace=None):
+    """Emitter-aware flux for the Escher map. zarr reads ids+vector from the
+    store; sqlite uses get_flux with asset/run base_ids; parquet reads the FBA
+    vector + config ids. Environment exchange fluxes (external_exchange_fluxes)
+    are merged onto the map's EX_ reactions when the run emits them."""
+    kind, resolved = _resolve_run_source(db_path, workspace)
+    fluxes, total, time_val = {}, 0, None
+    try:
+        if kind == "zarr":
+            ids, vals = _zarr_flux(resolved, step)
+            total = len(ids)
             for i, rid in enumerate(ids):
                 if i >= len(vals):
                     break
                 bigg = id_map.get(rid)
                 if bigg is not None:
-                    fluxes[bigg] = float(vals[i])
-            return {"step": step, "time": time_val, "fluxes": fluxes,
-                    "coverage": {"mapped": len(fluxes), "total": len(ids)}}
-        except Exception:
-            return {"step": step, "time": None, "fluxes": {},
-                    "coverage": {"mapped": 0, "total": 0}}
-    # sqlite path
-    base_ids, _ = load_flux_assets()
-    if not base_ids:
-        base_ids = base_ids_from_run(resolved if kind == "sqlite" else db_path, run_id)
-    return get_flux(resolved if kind == "sqlite" else db_path, step, base_ids, id_map, run_id)
+                    fluxes[bigg] = fluxes.get(bigg, 0.0) + float(vals[i])
+        elif kind == "parquet":
+            flux_col = "listeners__fba_results__base_reaction_fluxes"
+            tbl = _parquet_table(resolved, columns=["global_time", flux_col])
+            if tbl is not None:
+                si = min(max(0, step), len(tbl) - 1)
+                time_val = tbl.column("global_time")[si].as_py()
+                vals = tbl.column(flux_col)[si].as_py() or []
+                ids = _parquet_config_meta(resolved).get(flux_col, []) or load_flux_assets()[0]
+                total = len(ids)
+                for i, rid in enumerate(ids):
+                    if i >= len(vals):
+                        break
+                    bigg = id_map.get(rid)
+                    if bigg is not None:
+                        fluxes[bigg] = fluxes.get(bigg, 0.0) + float(vals[i])
+        else:  # sqlite
+            base_ids, _ = load_flux_assets()
+            if not base_ids:
+                base_ids = base_ids_from_run(resolved if kind == "sqlite" else db_path, run_id)
+            r = get_flux(resolved if kind == "sqlite" else db_path, step, base_ids, id_map, run_id)
+            fluxes, total, time_val = r["fluxes"], r["coverage"]["total"], r.get("time")
+    except Exception:
+        return {"step": step, "time": None, "fluxes": {},
+                "coverage": {"mapped": 0, "total": 0, "exchange": 0}}
+    # merge environment exchange fluxes onto the map's EX_ reactions
+    ex = _exchange_bigg_fluxes(kind, resolved, db_path, step, run_id)
+    fluxes.update(ex)
+    return {"step": step, "time": time_val, "fluxes": fluxes,
+            "coverage": {"mapped": len(fluxes), "total": total, "exchange": len(ex)}}
+
+
+def get_base_fluxes(db_path, step, run_id=None, workspace=None):
+    """Per-reaction FBA fluxes keyed by EcoCyc base reaction id at one timepoint.
+
+    Unlike get_flux_auto (which remaps to BiGG for the Escher map and so drops
+    every reaction without a BiGG cross-reference), this returns ALL emitted
+    reactions under their native EcoCyc ids — the full metabolism, suitable for
+    grouping by EcoCyc pathway. Returns {step, time, fluxes: {base_id: flux}}.
+    """
+    kind, resolved = _resolve_run_source(db_path, workspace)
+    ids, vals, time_val = [], [], None
+    if kind == "zarr":
+        ids, vals = _zarr_flux(resolved, step)
+    elif kind == "parquet":
+        flux_col = "listeners__fba_results__base_reaction_fluxes"
+        tbl = _parquet_table(resolved, columns=["global_time", flux_col])
+        if tbl is not None:
+            nrows = len(tbl)
+            si = min(max(0, step), nrows - 1)
+            time_val = tbl.column("global_time")[si].as_py()
+            vals = tbl.column(flux_col)[si].as_py() or []
+            meta = _parquet_config_meta(resolved)
+            ids = meta.get(flux_col, []) or load_flux_assets()[0]
+    else:  # sqlite
+        time_val, state = _state_at_step(
+            resolved if kind == "sqlite" else db_path, step, run_id)
+        if state is not None:
+            vec = _dig(_unwrap_agent(state), _FLUX_PATH)
+            if isinstance(vec, list):
+                vals = vec
+        ids = load_flux_assets()[0]
+        if not ids:
+            ids = base_ids_from_run(resolved if kind == "sqlite" else db_path, run_id)
+    fluxes = {}
+    for i, rid in enumerate(ids):
+        if i >= len(vals):
+            break
+        v = vals[i]
+        if isinstance(v, _NUM):
+            fluxes[str(rid)] = float(v)
+    return {"step": step, "time": time_val, "fluxes": fluxes,
+            "n": len(fluxes), "nonzero": sum(1 for v in fluxes.values() if abs(v) > 1e-12)}
 
 
 def _run_has_data(kind, resolved) -> bool:
