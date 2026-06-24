@@ -97,8 +97,10 @@ def list_build_sources(client: Any) -> dict:
         builds.append({
             "simulator_id": sim_id,
             "repo": repo,
+            "repo_url": v.get("git_repo_url", ""),
             "commit": commit,
             "branch": v.get("git_branch", ""),
+            "created_at": v.get("created_at", ""),
             "label": f"{repo} @ {commit} (build #{sim_id})",
         })
     return {"builds": builds, "error": None}
