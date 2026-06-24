@@ -63,11 +63,23 @@ export interface ChartPayload {
   key: string;
   title: string;
   caption: string;
-  svg: string;
+  svg: string | null;
+  img: string | null;
+  source: string | null;
+  media: string | null;
+  freshness: string | null;
+  simulations: string | null;
+  interpretation: string | null;
+  data_source: string | null;
 }
 
 export interface StudyChartsPayload {
+  study: string;
+  schema_version: any | null;
   charts: ChartPayload[];
+  db_exists: boolean;
+  static_count: number;
+  live_count: number;
 }
 
 export interface DashConfig {
@@ -119,4 +131,39 @@ export interface BibEntry {
 
 export interface ReferencesBibPayload {
   entries: BibEntry[];
+}
+
+export interface SavedViz {
+  study: string;
+  name: string;
+  pack_url: string;
+  meta_url: string | null;
+  n_placed: number | null;
+  created: number | null;
+  viewer_url: string | null;
+}
+
+export interface PtoolsStudy {
+  study: string;
+  n_tsvs: number;
+}
+
+export interface PtoolsInfo {
+  configured: boolean;
+  studies: PtoolsStudy[];
+}
+
+export interface ReportCard {
+  study: string | null;
+  name: string;
+  url: string;
+  verdict: string | null;
+  created: number | null;
+}
+
+export interface SavedVisualizationsPayload {
+  parsimony_available: boolean;
+  saved: SavedViz[];
+  ptools: PtoolsInfo;
+  report_cards: ReportCard[];
 }

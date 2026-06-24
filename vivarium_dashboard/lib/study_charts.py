@@ -1434,3 +1434,121 @@ def _render_perf_sweep_charts(conn) -> list[dict]:
         })
 
     return charts
+
+
+def latest_run_row(runs_db) -> dict | None:
+    """Newest runs_meta row as {run_id, completed_at, generation_id, emitter_path},
+    tolerating older DBs missing the optional columns. Mirrors
+    pbg_superpowers.run_registry.latest_run (not importable here)."""
+    runs_db = Path(runs_db)
+    if not runs_db.is_file():
+        return None
+    want = ("run_id", "completed_at", "generation_id", "emitter_path")
+    try:
+        conn = sqlite3.connect(f"file:{runs_db}?mode=ro", uri=True, timeout=1.0)
+        try:
+            have = {r[1] for r in conn.execute("PRAGMA table_info(runs_meta)")}
+            cols = [c for c in want if c in have]
+            if "run_id" not in cols:
+                return None
+            row = conn.execute(
+                f"SELECT {', '.join(cols)} FROM runs_meta "
+                "ORDER BY COALESCE(completed_at, started_at) DESC LIMIT 1"
+            ).fetchone()
+        finally:
+            conn.close()
+        return dict(zip(cols, row)) if row else None
+    except sqlite3.Error:
+        return None
+
+
+def build_study_charts_payload(ws_root, name: str, *, hide_superseded: bool = False) -> dict:
+    """Build the ``GET /api/study-charts/<name>`` payload (pure, unit-testable).
+
+    The single implementation shared by the FastAPI seam (``api/app.py``) and the
+    stdlib server's ``_study_charts_payload`` forwarder. ``hide_superseded``
+    (opt-in) drops static charts from a superseded run — used by the
+    per-investigation report render.
+
+    Two chart sources, merged in display order (live first, static after):
+    ``live`` from ``studies/<name>/runs.db`` and ``static`` from pre-rendered
+    ``studies/<name>/charts/*`` files (plus declared figure visualizations). Each
+    static chart carries a ``freshness`` badge.
+    """
+    import yaml as _yaml
+
+    from vivarium_dashboard.lib.simulations_index import discover_default_baseline_db
+    from vivarium_dashboard.lib.viz_freshness import chart_freshness, manifest_diff
+    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+
+    # Layout-aware: a study may live nested under
+    # investigations/<inv>/studies/<slug>/ rather than the flat studies/<slug>/.
+    _wp = WorkspacePaths.load(ws_root)
+    try:
+        study_dir = _wp.study_dir(name)
+    except FileNotFoundError:
+        study_dir = _wp.studies / name
+    runs_db = study_dir / "runs.db"
+    charts_dir = study_dir / "charts"
+    spec_path = study_dir / "study.yaml"
+
+    # Detect v4: study.yaml with schema_version: 4 → render charts per-test from
+    # tests[].measure.path, with default-baseline fallback when the per-study
+    # runs.db is empty.
+    spec = None
+    if spec_path.is_file():
+        try:
+            spec = _yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+        except Exception:
+            spec = None
+    is_v4 = isinstance(spec, dict) and spec.get("schema_version") == 4
+
+    if is_v4:
+        fallback_db = discover_default_baseline_db(ws_root)
+        live_charts = render_v4_test_charts(spec, runs_db, fallback_db=fallback_db)
+    else:
+        live_charts = render_study_charts(runs_db, run_name="baseline-steady-state")
+        if not live_charts:
+            live_charts = render_study_charts(runs_db, run_name=None)
+    for c in live_charts:
+        c.setdefault("source", "live")
+    static_charts = discover_static_study_charts(charts_dir, hide_superseded=hide_superseded)
+    # Declared figure visualizations resolved to self-contained chart records so
+    # they embed in both the live dashboard and the static report snapshot.
+    # Deduped against static_charts by key.
+    declared_figs = discover_declared_figure_charts(
+        study_dir, (spec or {}).get("visualizations") or [])
+    if declared_figs:
+        static_keys = {c.get("key") for c in static_charts}
+        static_charts = static_charts + [
+            c for c in declared_figs if c.get("key") not in static_keys
+        ]
+
+    # Per-chart freshness for static charts, matched on-disk against the spec's
+    # visualizations[] entries by their ``chart:`` field.
+    visualizations = (spec or {}).get("visualizations") or []
+    entry_by_chart = {
+        e.get("chart"): e for e in visualizations if isinstance(e, dict) and e.get("chart")
+    }
+    manifest_diff(study_dir, visualizations)
+    latest = latest_run_row(runs_db)
+    for c in static_charts:
+        # Declared figure visualizations already carry their own freshness.
+        if c.get("source") == "declared":
+            c.setdefault("freshness", "declared")
+            continue
+        rel = f"charts/{c.get('key')}.{c.get('media')}"
+        entry = entry_by_chart.get(rel)
+        if entry is None:
+            c["freshness"] = "untracked"
+        else:
+            c["freshness"] = chart_freshness(study_dir, entry, latest)
+
+    return {
+        "study": name,
+        "schema_version": (spec or {}).get("schema_version"),
+        "charts": live_charts + static_charts,
+        "db_exists": runs_db.exists(),
+        "static_count": len(static_charts),
+        "live_count": len(live_charts),
+    }

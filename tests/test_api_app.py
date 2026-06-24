@@ -136,10 +136,42 @@ def test_references_bib_preserves_extra_fields(client, monkeypatch):
     assert e["weird_field"] == "xyz"    # preserved, not stripped
 
 
+def test_saved_visualizations_empty(client):
+    """An empty workspace yields the typed empty bundle (no studies)."""
+    b = client.get("/api/saved-visualizations").json()
+    assert b["saved"] == []
+    assert b["report_cards"] == []
+    assert b["ptools"]["studies"] == []
+
+
+def test_saved_visualizations_typed(client, monkeypatch):
+    payload = {
+        "parsimony_available": True,
+        "saved": [{"study": "s1", "name": "ecoli_3d",
+                   "pack_url": "/studies/s1/viz/3d/ecoli_3d.pack.json",
+                   "meta_url": None, "n_placed": 1200, "created": 1700000000,
+                   "viewer_url": "http://x"}],
+        "ptools": {"configured": True, "studies": [{"study": "s1", "n_tsvs": 3}]},
+        "report_cards": [{"study": "s1", "name": "rc",
+                          "url": "/studies/s1/viz/report_card/rc.html",
+                          "verdict": "PASS", "created": 1700000001}],
+    }
+    monkeypatch.setattr(api_app._saved_viz, "build_saved_visualizations",
+                        lambda ws: payload)
+    b = client.get("/api/saved-visualizations").json()
+    assert b["parsimony_available"] is True
+    sv = b["saved"][0]
+    assert sv["name"] == "ecoli_3d" and sv["n_placed"] == 1200
+    assert sv["viewer_url"] == "http://x"
+    assert b["ptools"]["studies"][0]["n_tsvs"] == 3
+    assert b["report_cards"][0]["verdict"] == "PASS"
+
+
 def test_new_routes_in_openapi(client):
     components = client.get("/openapi.json").json()["components"]["schemas"]
     for name in ("DashConfig", "InvestigationSummary", "DataSourcesPayload",
-                 "DataSource", "BibEntry", "ReferencesBibPayload"):
+                 "DataSource", "BibEntry", "ReferencesBibPayload",
+                 "SavedVisualizationsPayload", "SavedViz", "ReportCard"):
         assert name in components
 
 
@@ -149,3 +181,510 @@ def test_workspace_default_is_cwd(monkeypatch):
     assert get_workspace() == Path(".").resolve()
     monkeypatch.setenv("VIVARIUM_DASHBOARD_WORKSPACE", "/tmp/ws-xyz")
     assert get_workspace() == Path("/tmp/ws-xyz").resolve()
+
+
+def test_study_charts_empty_workspace(client):
+    """A study with no runs.db / charts yields the typed empty payload, not a 500."""
+    r = client.get("/api/study-charts/dnaa-1")
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {
+        "study": "dnaa-1", "schema_version": None, "charts": [],
+        "db_exists": False, "static_count": 0, "live_count": 0,
+    }
+
+
+def test_study_charts_validates_polymorphic_charts(client, monkeypatch):
+    """Live (svg) and static (img) charts both pass through the typed response."""
+    payload = {
+        "study": "dnaa-1", "schema_version": 4,
+        "charts": [
+            {"key": "live1", "title": "Live", "caption": "c", "svg": "<svg/>", "source": "live"},
+            {"key": "stat1", "title": "Static", "caption": "c", "img": "data:image/png;base64,AA",
+             "source": "static", "media": "png", "freshness": "fresh"},
+        ],
+        "db_exists": True, "static_count": 1, "live_count": 1,
+    }
+    monkeypatch.setattr(api_app, "build_study_charts_payload", lambda ws, slug: payload)
+    body = client.get("/api/study-charts/dnaa-1").json()
+    assert body["live_count"] == 1 and body["static_count"] == 1
+    assert body["charts"][0]["svg"] == "<svg/>" and body["charts"][0]["img"] is None
+    assert body["charts"][1]["img"].startswith("data:image/png") and body["charts"][1]["svg"] is None
+
+
+def test_study_charts_in_openapi(client):
+    """The study-charts route + its models appear in the generated OpenAPI schema."""
+    spec = client.get("/openapi.json").json()
+    assert "/api/study-charts/{slug}" in spec["paths"]
+    for name in ("StudyChartsPayload", "ChartPayload"):
+        assert name in spec["components"]["schemas"]
+
+
+def test_swagger_ui_and_redoc_served(client):
+    """The auto-generated docs pages are reachable (the whole point of the seam)."""
+    assert client.get("/docs").status_code == 200          # Swagger UI HTML
+    assert client.get("/redoc").status_code == 200         # ReDoc HTML
+    assert client.get("/openapi.json").status_code == 200  # raw schema
+
+
+# ---------------------------------------------------------------------------
+# /api/visualization-classes
+# ---------------------------------------------------------------------------
+
+def test_visualization_classes_empty_workspace(client, monkeypatch):
+    """An empty workspace (no workspace.yaml / no core module) yields the typed
+    payload — not a 500.  We patch ``list_visualization_classes`` to return
+    empty so the assertion is deterministic regardless of which pbg packages are
+    installed in the test environment."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(_app, "list_visualization_classes", lambda ws: {"classes": []})
+    r = client.get("/api/visualization-classes")
+    assert r.status_code == 200
+    assert r.json() == {"classes": []}
+
+
+def test_visualization_classes_typed_passthrough(client, monkeypatch):
+    """The route validates the builder's output through VisualizationClassesPayload;
+    extra fields on each VizClass entry are preserved (extra='allow')."""
+    import vivarium_dashboard.api.app as _app
+
+    payload = {
+        "classes": [
+            {"address": "local:TimeSeriesPlot", "name": "TimeSeriesPlot",
+             "doc": "A time-series plot.", "kind": "visualization",
+             "extra_meta": "kept"},
+            {"address": "local:v2ecoli.workflow.analysis.GrowthAnalysis",
+             "name": "GrowthAnalysis", "doc": "Growth analysis.", "kind": "analysis"},
+        ]
+    }
+    monkeypatch.setattr(_app, "list_visualization_classes", lambda ws: payload)
+    r = client.get("/api/visualization-classes")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["classes"]) == 2
+    c0 = body["classes"][0]
+    assert c0["name"] == "TimeSeriesPlot"
+    assert c0["kind"] == "visualization"
+    assert c0["extra_meta"] == "kept"   # extra="allow" preserved
+    c1 = body["classes"][1]
+    assert c1["name"] == "GrowthAnalysis"
+    assert c1["kind"] == "analysis"
+
+
+def test_visualization_classes_in_openapi(client):
+    """The /api/visualization-classes route and VisualizationClassesPayload / VizClass
+    appear in the generated OpenAPI schema."""
+    spec = client.get("/openapi.json").json()
+    assert "/api/visualization-classes" in spec["paths"]
+    for name in ("VisualizationClassesPayload", "VizClass"):
+        assert name in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# /api/composite-resolve
+# ---------------------------------------------------------------------------
+
+def test_composite_resolve_missing_returns_null(client):
+    """A ref that doesn't match any spec/generator returns 200 with null body
+    (empty workspace has no workspace.yaml → resolver returns None immediately)."""
+    r = client.get("/api/composite-resolve?ref=missing")
+    assert r.status_code == 200
+    assert r.json() is None
+
+
+def test_composite_resolve_typed_passthrough(client, monkeypatch):
+    """A valid resolve payload validates through CompositeResolvePayload."""
+    import vivarium_dashboard.api.app as _app
+
+    payload = {
+        "id": "pbg_ws.composites.my_comp",
+        "name": "My Composite",
+        "description": "A test composite",
+        "parameters": {"n": 10},
+        "state": {"store": {}},
+        "svg": None,
+        "kind": "spec",
+        "module": "pbg_ws.composites",
+        "default_n_steps": None,
+        "extra_field": "preserved",
+    }
+    monkeypatch.setattr(_app, "resolve_composite", lambda ws, ref: payload)
+    r = client.get("/api/composite-resolve?ref=pbg_ws.composites.my_comp")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["id"] == "pbg_ws.composites.my_comp"
+    assert body["name"] == "My Composite"
+    assert body["kind"] == "spec"
+    assert body["extra_field"] == "preserved"   # extra="allow" works
+
+
+def test_composite_resolve_in_openapi(client):
+    """The /api/composite-resolve route and CompositeResolvePayload appear in
+    the OpenAPI schema — proving the typed seam is wired up correctly."""
+    spec = client.get("/openapi.json").json()
+    assert "/api/composite-resolve" in spec["paths"]
+    assert "CompositeResolvePayload" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# /api/registry
+# ---------------------------------------------------------------------------
+
+def test_registry_empty_workspace(client, monkeypatch):
+    """An empty workspace yields the typed empty payload, not a 500.
+
+    We patch ``build_registry`` to return the empty shape that a workspace with
+    no importable package would produce (subprocess fails gracefully) so the
+    test is deterministic regardless of which pbg packages are installed."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(_app, "build_registry", lambda ws, **kw: {
+        "processes": [], "types": [], "imports": [],
+    })
+    r = client.get("/api/registry")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["processes"] == []
+    assert body["types"] == []
+    assert body["imports"] == []
+
+
+def test_registry_typed_passthrough(client, monkeypatch):
+    """The route validates the builder's output through RegistryPayload;
+    extra top-level fields (default_emitter, workspace_pkgs, error) are
+    preserved by extra='allow'."""
+    import vivarium_dashboard.api.app as _app
+
+    payload = {
+        "processes": [
+            {
+                "name": "MyProcess",
+                "address": "pbg_ws.processes.my_process.MyProcess",
+                "kind": "process",
+                "schema_preview": "{}",
+                "aliases": ["my_process.MyProcess"],
+                "source": "in_workspace",
+            },
+            {
+                "name": "ParquetEmitter",
+                "address": "pbg_emitters.parquet.ParquetEmitter",
+                "kind": "emitter",
+                "schema_preview": "",
+                "aliases": [],
+                "source": "framework",
+                "is_workspace_default": True,   # extra field
+            },
+        ],
+        "types": [
+            {"name": "float", "schema_preview": "<class 'float'>"},
+        ],
+        "imports": [
+            {"name": "pbg-oxidizeme", "package": "pbg_oxidizeme",
+             "source": "https://github.com/x/pbg-oxidizeme",
+             "ref": "main", "description": "oxidative stress"},
+        ],
+        "default_emitter": "parquet",          # top-level extra field
+        "workspace_pkgs": ["pbg_ws"],          # top-level extra field
+    }
+    monkeypatch.setattr(_app, "build_registry", lambda ws, **kw: payload)
+    r = client.get("/api/registry")
+    assert r.status_code == 200
+    body = r.json()
+
+    # Typed fields
+    assert len(body["processes"]) == 2
+    p0 = body["processes"][0]
+    assert p0["name"] == "MyProcess"
+    assert p0["kind"] == "process"
+    assert p0["source"] == "in_workspace"
+    p1 = body["processes"][1]
+    assert p1["kind"] == "emitter"
+    assert p1["is_workspace_default"] is True     # extra="allow" on RegistryProcess
+
+    assert body["types"][0]["name"] == "float"
+    imp = body["imports"][0]
+    assert imp["package"] == "pbg_oxidizeme"
+    assert imp["description"] == "oxidative stress"
+
+    # Extra top-level keys preserved by RegistryPayload extra="allow"
+    assert body["default_emitter"] == "parquet"
+    assert body["workspace_pkgs"] == ["pbg_ws"]
+
+
+def test_registry_error_field_preserved(client, monkeypatch):
+    """When the subprocess fails, build_registry returns an 'error' key alongside
+    empty lists.  The route must not 422 — RegistryPayload extra='allow' keeps it."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(_app, "build_registry", lambda ws, **kw: {
+        "processes": [], "types": [], "imports": [],
+        "error": "subprocess failed: ModuleNotFoundError: No module named 'pbg_ws'",
+    })
+    r = client.get("/api/registry")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["processes"] == []
+    assert "error" in body
+    assert "ModuleNotFoundError" in body["error"]
+
+
+def test_registry_in_openapi(client):
+    """The /api/registry route and RegistryPayload appear in the OpenAPI schema."""
+    spec = client.get("/openapi.json").json()
+    assert "/api/registry" in spec["paths"]
+    components = spec["components"]["schemas"]
+    for name in ("RegistryPayload", "RegistryProcess", "RegistryType", "RegistryImport"):
+        assert name in components, f"{name} missing from openapi.json"
+
+
+# ---------------------------------------------------------------------------
+# /api/composites
+# ---------------------------------------------------------------------------
+
+def test_composites_typed_passthrough(client, monkeypatch):
+    """The route validates composites_via_subprocess output through CompositesPayload.
+
+    Both a spec-kind and a generator-kind composite survive; the generator carries
+    an extra field (workspace_local) that is preserved by CompositeRecord extra='allow'.
+    """
+    import vivarium_dashboard.api.app as _app
+
+    payload = {
+        "composites": [
+            {
+                "id": "pbg_ws.composites.baseline",
+                "name": "baseline",
+                "kind": "spec",
+                "module": "pbg_ws.composites",
+            },
+            {
+                "id": "pbg_ws.composites.growth.growth",
+                "name": "growth",
+                "kind": "generator",
+                "module": "pbg_ws.composites.growth",
+                "workspace_local": True,           # extra field — must survive
+                "default_n_steps": 100,            # another extra field
+            },
+        ],
+        "workspace_package": "pbg_ws",
+    }
+    monkeypatch.setattr(_app, "composites_via_subprocess", lambda ws: payload)
+
+    r = client.get("/api/composites")
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body["workspace_package"] == "pbg_ws"
+    assert body["error"] is None
+    assert len(body["composites"]) == 2
+
+    spec_rec = body["composites"][0]
+    assert spec_rec["id"] == "pbg_ws.composites.baseline"
+    assert spec_rec["kind"] == "spec"
+    assert spec_rec["module"] == "pbg_ws.composites"
+
+    gen_rec = body["composites"][1]
+    assert gen_rec["kind"] == "generator"
+    assert gen_rec["workspace_local"] is True         # extra="allow" preserved
+    assert gen_rec["default_n_steps"] == 100          # extra="allow" preserved
+
+
+def test_composites_subprocess_none_returns_error_payload(client, monkeypatch):
+    """When composites_via_subprocess returns None the route must not 500 — it
+    returns the empty + error payload with HTTP 200."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(_app, "composites_via_subprocess", lambda ws: None)
+
+    r = client.get("/api/composites")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["composites"] == []
+    assert body["error"] is not None
+    assert "unavailable" in body["error"]
+
+
+def test_composites_in_openapi(client):
+    """The /api/composites route and CompositesPayload / CompositeRecord appear
+    in the generated OpenAPI schema."""
+    spec = client.get("/openapi.json").json()
+    assert "/api/composites" in spec["paths"]
+    components = spec["components"]["schemas"]
+    for name in ("CompositesPayload", "CompositeRecord"):
+        assert name in components, f"{name} missing from openapi.json"
+
+
+# ---------------------------------------------------------------------------
+# /api/investigations
+# ---------------------------------------------------------------------------
+
+def test_investigations_empty_workspace(client):
+    """An empty workspace yields the typed empty payload (no study dirs), not a 500."""
+    r = client.get("/api/investigations")
+    assert r.status_code == 200
+    assert r.json() == {"investigations": []}
+
+
+def test_investigations_typed_passthrough(client, monkeypatch):
+    """The route validates the builder output through InvestigationsPayload.
+
+    Covers:
+    - A rich valid row with many extra keys (extra='allow' preserves them).
+    - An invalid row {name, status, error} (the parse-failure shape).
+    Both must validate through the model without 422.
+    """
+    import vivarium_dashboard.api.app as _app
+
+    rich_row = {
+        "name": "dnaa-1",
+        "status": "ran",
+        "phase": "simulate",
+        "n_simulations": 3,
+        "n_studies": None,
+        "description": "DnaA binding study",
+        "composite": "pbg_ws.composites.dnaa",
+        "composites": [],
+        "topic": "replication",
+        "tags": ["dnaa", "binding"],
+        "last_run": None,
+        "baseline_names": ["dnaa-baseline"],
+        "n_baseline": 1,
+        "n_variants": 2,
+        "n_groups": 0,
+        "n_interventions": 0,
+        "n_behaviors": 3,
+        "n_readouts": 5,
+        "n_requirements": 1,
+        "n_comparisons": 0,
+        "n_runs": 3,
+        "baseline_source": "pbg_ws:dnaa_baseline",
+        "conclusions_excerpt": "The binding affinity...",
+        "parent_studies": [],
+        "blocked": False,
+        "blocked_by": [],
+        "extra_future_key": "preserved",   # extra="allow"
+    }
+    invalid_row = {
+        "name": "broken-study",
+        "status": "invalid",
+        "error": "malformed YAML: ...",
+    }
+    payload = {"investigations": [rich_row, invalid_row]}
+
+    from unittest.mock import patch
+    with patch(
+        "vivarium_dashboard.lib.investigations_index.build_investigations",
+        return_value=payload,
+    ):
+        r = client.get("/api/investigations")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["investigations"]) == 2
+
+    row0 = body["investigations"][0]
+    assert row0["name"] == "dnaa-1"
+    assert row0["status"] == "ran"
+    assert row0["n_simulations"] == 3
+    assert row0["extra_future_key"] == "preserved"   # extra="allow" works
+
+    row1 = body["investigations"][1]
+    assert row1["name"] == "broken-study"
+    assert row1["status"] == "invalid"
+    assert "malformed YAML" in row1["error"]
+
+
+def test_investigations_in_openapi(client):
+    """The /api/investigations route and InvestigationsPayload / InvestigationRow
+    appear in the generated OpenAPI schema."""
+    spec = client.get("/openapi.json").json()
+    assert "/api/investigations" in spec["paths"]
+    components = spec["components"]["schemas"]
+    for name in ("InvestigationsPayload", "InvestigationRow"):
+        assert name in components, f"{name} missing from openapi.json"
+
+
+# ---------------------------------------------------------------------------
+# /api/catalog
+# ---------------------------------------------------------------------------
+
+def test_catalog_empty_workspace(client):
+    """An empty workspace (no workspace.yaml) returns 200 with an empty or
+    error-flagged modules list — never a 500."""
+    r = client.get("/api/catalog")
+    assert r.status_code == 200
+    body = r.json()
+    # May have an 'error' key but must have a 'modules' list.
+    assert "modules" in body
+    assert isinstance(body["modules"], list)
+
+
+def test_catalog_typed_passthrough(client):
+    """The route validates the builder output through CatalogPayload.
+
+    Covers:
+    - A rich module row with many extra keys (extra='allow' preserves them).
+    - Extra keys on the payload itself (extra='allow' on CatalogPayload).
+    Both must validate through the model without 422.
+    """
+    from unittest.mock import patch
+
+    rich_module = {
+        "name": "viva-munk",
+        "installed": True,
+        "install_source": "pyproject",
+        "module": "viva_munk",
+        "description": "Particle visualization library.",
+        "package": "viva_munk",
+        "tags": ["visualization", "particles"],
+        "version": "0.4.2",             # extra key — preserved
+        "workspace_local": False,        # extra key — preserved
+        "future_key": "preserved",       # extra key — preserved
+    }
+    payload = {"modules": [rich_module], "extra_top_level": "ok"}
+
+    with patch(
+        "vivarium_dashboard.api.app.build_catalog",
+        return_value=payload,
+    ):
+        r = client.get("/api/catalog")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["modules"]) == 1
+
+    mod = body["modules"][0]
+    assert mod["name"] == "viva-munk"
+    assert mod["installed"] is True
+    assert mod["install_source"] == "pyproject"
+    assert mod["description"] == "Particle visualization library."
+    assert mod["future_key"] == "preserved"     # extra="allow" works
+    assert mod["tags"] == ["visualization", "particles"]
+
+
+def test_catalog_workspace_yaml(tmp_path):
+    """A workspace.yaml without imports yields the workspace's own module (if
+    the package dir exists) or an empty modules list."""
+    import yaml as _yaml
+    from vivarium_dashboard.lib.catalog import build_catalog
+
+    # Minimal workspace.yaml — no package_path, no imports, no pbg_superpowers
+    (tmp_path / "workspace.yaml").write_text(
+        _yaml.dump({"name": "test-ws", "description": "test"}),
+        encoding="utf-8",
+    )
+    result = build_catalog(tmp_path)
+    assert isinstance(result, dict)
+    assert "modules" in result
+    assert isinstance(result["modules"], list)
+
+
+def test_catalog_in_openapi(client):
+    """The /api/catalog route and CatalogPayload / CatalogModule appear in
+    the generated OpenAPI schema."""
+    spec = client.get("/openapi.json").json()
+    assert "/api/catalog" in spec["paths"]
+    components = spec["components"]["schemas"]
+    for name in ("CatalogPayload", "CatalogModule"):
+        assert name in components, f"{name} missing from openapi.json"
