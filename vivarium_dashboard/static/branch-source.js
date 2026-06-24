@@ -162,7 +162,23 @@
     actions.appendChild(pushBtn);
 
     var buildBtn = _el("button", "viv-bs-action", "Build via sms-api"); buildBtn.id = "viv-bs-build";
-    actions.appendChild(buildBtn);  // wired in Task 5
+    buildBtn.disabled = !(state.repo && String(state.repo).indexOf("http") === 0);
+    buildBtn.title = buildBtn.disabled ? "Select a Remote source (full repo URL) to register a build" : "";
+    buildBtn.addEventListener("click", function () {
+      var repo = state.repo, branch = state.branch;
+      if (!repo || !branch) { alert("Pick a repo and branch first"); return; }
+      buildBtn.disabled = true; buildBtn.textContent = "Registering…";
+      fetch("/api/source/build-remote", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo: repo, branch: branch }),
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          buildBtn.disabled = false; buildBtn.textContent = "Build via sms-api";
+          if (res.ok) { alert("Registered build #" + res.d.simulator_id + " @ " + (res.d.commit || "").slice(0, 7)); state.scope = "remote"; refresh(); }
+          else alert("Build failed: " + (res.d.error || "error"));
+        });
+    });
+    actions.appendChild(buildBtn);
 
     host.appendChild(actions);
 

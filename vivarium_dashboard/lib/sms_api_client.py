@@ -40,6 +40,12 @@ class SmsApiClient:
     def latest_simulator(self, repo_url: str, branch: str) -> dict:
         return self._get("/core/v1/simulator/latest", {"git_branch": branch, "git_repo_url": repo_url})
 
+    def register_simulator(self, repo_url: str, branch: str, commit: str) -> dict:
+        """POST /core/v1/simulator/upload — register a repo@commit build (async image build)."""
+        return self._post("/core/v1/simulator/upload", json_body={
+            "git_repo_url": repo_url, "git_branch": branch, "git_commit_hash": commit,
+        })
+
     def simulator_status(self, simulator_id: int) -> dict:
         return self._get("/core/v1/simulator/status", {"simulator_id": simulator_id})
 

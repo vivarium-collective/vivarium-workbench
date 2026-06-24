@@ -79,3 +79,42 @@ def test_branch_push_non_git_409(tmp_path, monkeypatch):
 
     server.Handler._post_branch_push(H(), {"message": "x"})
     assert captured["code"] == 409
+
+
+def test_register_simulator_posts_upload(monkeypatch):
+    from vivarium_dashboard.lib import sms_api_client as sac
+    seen = {}
+    monkeypatch.setattr(sac.SmsApiClient, "_post",
+                        lambda self, path, params=None, json_body=None: seen.update(path=path, body=json_body) or {"database_id": 99})
+    out = sac.SmsApiClient("http://x").register_simulator("https://github.com/o/r", "main", "abc1234")
+    assert out["database_id"] == 99
+    assert seen["path"] == "/core/v1/simulator/upload"
+    assert seen["body"]["git_branch"] == "main" and seen["body"]["git_commit_hash"] == "abc1234"
+
+
+def test_build_remote_endpoint(monkeypatch):
+    from vivarium_dashboard import server
+    from vivarium_dashboard.lib import sms_api_client as sac
+    monkeypatch.setattr(sac.SmsApiClient, "latest_simulator",
+                        lambda self, repo, branch: {"git_commit_hash": "deadbee"})
+    monkeypatch.setattr(sac.SmsApiClient, "register_simulator",
+                        lambda self, repo, branch, commit: {"database_id": 64, "git_commit_hash": commit})
+    captured = {}
+
+    class H:
+        def _json(self, obj, code): captured.update(obj=obj, code=code)
+
+    server.Handler._post_source_build_remote(H(), {"repo": "https://github.com/o/v2ecoli", "branch": "main"})
+    assert captured["code"] == 200
+    assert captured["obj"]["simulator_id"] == 64 and captured["obj"]["commit"] == "deadbee"
+
+
+def test_build_remote_missing_args_400(monkeypatch):
+    from vivarium_dashboard import server
+    captured = {}
+
+    class H:
+        def _json(self, obj, code): captured.update(obj=obj, code=code)
+
+    server.Handler._post_source_build_remote(H(), {"repo": ""})
+    assert captured["code"] == 400

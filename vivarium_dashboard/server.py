@@ -387,6 +387,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/source/switch":            "_post_source_switch",
     "/api/source/switch-build":      "_post_source_switch_build",
     "/api/branch/push":              "_post_branch_push",
+    "/api/source/build-remote":      "_post_source_build_remote",
     # Remote-run endpoints (Phase 3b).
     "/api/remote-run-start":         "_post_remote_run_start",
 }
@@ -16572,6 +16573,23 @@ if __name__ == "__main__":
             return self._json({"error": str(e)}, 409)
         except Exception as e:
             return self._json({"error": str(e)}, 500)
+
+    def _post_source_build_remote(self, body: dict):
+        """POST /api/source/build-remote — register a repo+branch's HEAD as an sms-api build."""
+        from vivarium_dashboard.lib.sms_api_client import SmsApiClient, SmsApiError
+        repo = (body or {}).get("repo") or ""
+        branch = (body or {}).get("branch") or ""
+        if not repo or not branch:
+            return self._json({"error": "repo and branch are required"}, 400)
+        client = SmsApiClient(_sms_api_base())
+        try:
+            latest = client.latest_simulator(repo, branch)
+            commit = latest.get("git_commit_hash") or ""
+            reg = client.register_simulator(repo, branch, commit)
+        except SmsApiError as e:
+            return self._json({"error": f"sms-api: {e}"}, 502)
+        return self._json({"ok": True, "simulator_id": reg.get("database_id"),
+                           "repo": repo, "branch": branch, "commit": commit}, 200)
 
     def _get_source_builds(self):
         """GET /api/source/builds — remote sms-api simulator builds for the
