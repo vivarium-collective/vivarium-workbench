@@ -2371,8 +2371,12 @@
         var divider = _maybeSectionDivider(prevG, m);
         prevG = m;
         var tags = ''; // tag pills hidden
-        var homepage = m.homepage
-          ? '<a href="' + _esc(m.homepage) + '" target="_blank" class="module-link">GitHub &#8599;</a>'
+        // Installed-via-imports modules carry their GitHub URL in `source`, not
+        // `homepage` (which only the curated catalog populates) — fall back to a
+        // URL-shaped source so they get the same "GitHub" header link.
+        var _hp = m.homepage || (/^https?:\/\//.test(m.source || '') ? m.source : '');
+        var homepage = _hp
+          ? '<a href="' + _esc(_hp) + '" target="_blank" class="module-link">GitHub &#8599;</a>'
           : '';
         var workspaceCls = (m.kind === 'workspace') ? ' module-card-workspace'
                           : (m.installed ? ' module-card-installed' : '');
