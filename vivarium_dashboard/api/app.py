@@ -28,14 +28,17 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Optional
 
 from fastapi import Depends, FastAPI
 
 from vivarium_dashboard.lib import data_sources as _data_sources
 from vivarium_dashboard.lib import investigation_status
 from vivarium_dashboard.lib import saved_visualizations as _saved_viz
+from vivarium_dashboard.lib.composite_resolve import resolve_composite
 from vivarium_dashboard.lib.models import (
     BibEntry,
+    CompositeResolvePayload,
     DashConfig,
     DataSourcesPayload,
     InvestigationSummary,
@@ -149,6 +152,26 @@ def create_app() -> FastAPI:
         charts carry an image data-URI plus a freshness badge (see ChartPayload).
         """
         return StudyChartsPayload.model_validate(build_study_charts_payload(ws, slug))
+
+    @app.get("/api/composite-resolve", response_model=Optional[CompositeResolvePayload])
+    def composite_resolve(
+        ref: str, ws: Path = Depends(get_workspace)
+    ) -> Optional[CompositeResolvePayload]:
+        """Resolve a single composite spec or generator by ID.
+
+        Mirrors ``GET /api/composite-resolve?ref=<spec_id>`` from the stdlib
+        server.  Returns the composite payload when found, or ``null`` (200 with
+        null body) when ``ref`` doesn't match any spec or generator — identical
+        miss-behaviour to the legacy handler.
+
+        Library-backed via ``lib.composite_resolve.resolve_composite`` — the
+        single implementation the stdlib ``_composite_resolve_data`` now forwards
+        to.
+        """
+        result = resolve_composite(ws, ref)
+        if result is None:
+            return None
+        return CompositeResolvePayload.model_validate(result)
 
     return app
 

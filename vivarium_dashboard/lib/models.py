@@ -263,3 +263,27 @@ class SavedVisualizationsPayload(BaseModel):
     saved: list[SavedViz] = []
     ptools: PtoolsInfo = PtoolsInfo()
     report_cards: list[ReportCard] = []
+
+
+class CompositeResolvePayload(BaseModel):
+    """``GET /api/composite-resolve`` payload (lib.composite_resolve.resolve_composite).
+
+    Returned when a composite spec or generator is found.  The route returns
+    ``null`` (200 with empty body) when ``ref`` is not found — use
+    ``Optional[CompositeResolvePayload]`` at the route level.
+
+    ``extra="allow"`` preserves any generator-specific keys (e.g. ``parameters``
+    entries with unusual shapes) that aren't enumerated here.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+    description: Optional[str] = None
+    parameters: Optional[Any] = None
+    state: Optional[Any] = None
+    svg: Optional[str] = None
+    kind: Optional[str] = None
+    module: Optional[str] = None
+    default_n_steps: Optional[int] = None

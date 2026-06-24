@@ -225,3 +225,49 @@ def test_swagger_ui_and_redoc_served(client):
     assert client.get("/docs").status_code == 200          # Swagger UI HTML
     assert client.get("/redoc").status_code == 200         # ReDoc HTML
     assert client.get("/openapi.json").status_code == 200  # raw schema
+
+
+# ---------------------------------------------------------------------------
+# /api/composite-resolve
+# ---------------------------------------------------------------------------
+
+def test_composite_resolve_missing_returns_null(client):
+    """A ref that doesn't match any spec/generator returns 200 with null body
+    (empty workspace has no workspace.yaml → resolver returns None immediately)."""
+    r = client.get("/api/composite-resolve?ref=missing")
+    assert r.status_code == 200
+    assert r.json() is None
+
+
+def test_composite_resolve_typed_passthrough(client, monkeypatch):
+    """A valid resolve payload validates through CompositeResolvePayload."""
+    import vivarium_dashboard.api.app as _app
+
+    payload = {
+        "id": "pbg_ws.composites.my_comp",
+        "name": "My Composite",
+        "description": "A test composite",
+        "parameters": {"n": 10},
+        "state": {"store": {}},
+        "svg": None,
+        "kind": "spec",
+        "module": "pbg_ws.composites",
+        "default_n_steps": None,
+        "extra_field": "preserved",
+    }
+    monkeypatch.setattr(_app, "resolve_composite", lambda ws, ref: payload)
+    r = client.get("/api/composite-resolve?ref=pbg_ws.composites.my_comp")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["id"] == "pbg_ws.composites.my_comp"
+    assert body["name"] == "My Composite"
+    assert body["kind"] == "spec"
+    assert body["extra_field"] == "preserved"   # extra="allow" works
+
+
+def test_composite_resolve_in_openapi(client):
+    """The /api/composite-resolve route and CompositeResolvePayload appear in
+    the OpenAPI schema — proving the typed seam is wired up correctly."""
+    spec = client.get("/openapi.json").json()
+    assert "/api/composite-resolve" in spec["paths"]
+    assert "CompositeResolvePayload" in spec["components"]["schemas"]

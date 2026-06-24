@@ -3160,104 +3160,18 @@ def _composites_data(ws_root: "Path") -> dict:
 
 
 def _composite_resolve_data(spec_id: str) -> "dict | None":
-    """Pure data builder for a single composite — returns the resolve payload dict.
+    """Thin forwarder → ``lib.composite_resolve.resolve_composite``.
 
-    Mirrors the data returned by ``GET /api/composite-resolve`` (minus the
-    expensive SVG render, which is set to ``None``).  Used by ``publish.build_bundle``
-    to pre-build ``api/composite-state/<id>.json`` files consumed by the
-    bigraph-loom ``?static=1&stateUrl=`` read-only mode.
+    The implementation has moved to ``vivarium_dashboard.lib.composite_resolve``
+    so the FastAPI seam can call it without importing this server module.
+    This wrapper preserves the original call-site name used throughout server.py
+    and by ``publish.build_bundle``.
 
     Returns ``None`` on any failure (not found, import errors, missing packages).
     Requires ``WORKSPACE`` to already be set.
     """
-    _ws_add_to_sys_path()
-    try:
-        from vivarium_dashboard.lib.composite_lookup import (
-            substitute_parameters,
-            find_composite_path,
-        )
-        ws_data = yaml.safe_load(
-            (WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")
-        )
-        pkg = ws_data.get("package_path") or (
-            "pbg_" + ws_data.get("name", "").replace("-", "_")
-        )
-
-        # Generator-kind branch (pbg-superpowers @composite_generator)
-        try:
-            from pbg_superpowers.composite_generator import (
-                _REGISTRY, build_generator, discover_generators,
-            )
-            if not _REGISTRY:
-                discover_generators()
-            entry = _REGISTRY.get(spec_id)
-        except ImportError:
-            entry = None
-
-        if entry is not None:
-            try:
-                doc = build_generator(entry, overrides={})
-            except Exception:
-                return None
-            if isinstance(doc, dict) and "state" in doc and isinstance(doc["state"], dict):
-                state = doc["state"]
-            else:
-                state = doc
-            try:
-                from vivarium_dashboard.lib.process_docs import attach_process_docs
-                attach_process_docs(state)
-            except Exception:
-                pass
-            return {
-                "id": spec_id,
-                "name": entry.name,
-                "description": entry.description,
-                "parameters": entry.parameters,
-                "state": state,
-                "svg": None,
-                "kind": "generator",
-                "module": entry.module,
-                "default_n_steps": getattr(entry, "default_n_steps", None),
-            }
-
-        # Spec-file branch
-        path = find_composite_path(WORKSPACE, pkg, spec_id)
-        if path is None:
-            return None
-
-        text = path.read_text(encoding="utf-8")
-        spec = (
-            json.loads(text) if path.suffix.lower() == ".json"
-            else yaml.safe_load(text)
-        )
-        state = substitute_parameters(
-            spec.get("state") or {},
-            spec.get("parameters") or {},
-            {},
-        )
-        try:
-            from vivarium_dashboard.lib.composite_lookup import _derive_module_from_spec_id
-            module = _derive_module_from_spec_id(spec_id)
-        except Exception:
-            module = ""
-        try:
-            from vivarium_dashboard.lib.process_docs import attach_process_docs
-            attach_process_docs(state)
-        except Exception:
-            pass
-        return {
-            "id": spec_id,
-            "name": spec.get("name", spec_id.rsplit(".composites.", 1)[-1]),
-            "description": spec.get("description", ""),
-            "parameters": spec.get("parameters") or {},
-            "state": state,
-            "svg": None,
-            "kind": "spec",
-            "module": module,
-            "default_n_steps": None,
-        }
-    except Exception:
-        return None
+    from vivarium_dashboard.lib.composite_resolve import resolve_composite
+    return resolve_composite(WORKSPACE, spec_id)
 
 
 def _emitter_tag(emitter) -> str:
