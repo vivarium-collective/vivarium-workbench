@@ -289,6 +289,8 @@ class VisualizationClassesPayload(BaseModel):
     v2ecoli is installed, its Analysis classes.
     """
 
+    model_config = ConfigDict(extra="allow")
+
     classes: list[VizClass] = []
 
 

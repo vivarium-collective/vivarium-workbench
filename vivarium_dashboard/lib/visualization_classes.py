@@ -12,7 +12,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from vivarium_dashboard.lib.spec_norm import normalize_requirements  # noqa: F401 (re-exported)
 
 
 def _ws_add_to_sys_path(ws_root: Path) -> None:
