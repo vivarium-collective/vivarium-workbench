@@ -49,6 +49,30 @@ from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 from vivarium_dashboard.lib.atomic_io import atomic_write_text
 from vivarium_dashboard.lib import investigation_status as _invstatus
 from vivarium_dashboard.lib import data_sources as _data_sources_lib
+from vivarium_dashboard.lib import saved_visualizations as _savedviz_lib
+from vivarium_dashboard.lib import registry as _registry_lib
+from vivarium_dashboard.lib.investigations_index import (
+    _conclusions_excerpt,
+    _format_baseline_source,
+    _http_get_json,
+)
+from vivarium_dashboard.lib.registry import (
+    clear_registry_cache,
+    _dashboard_config,
+    _registry_modules_override,
+    _modules_override_pkgs,
+    _registry_include_pkgs,
+    _build_reexport_map,
+    _apply_registry_include_filter,
+    _mark_default_emitter,
+    _registry_imports_meta,
+)
+from vivarium_dashboard.lib.composite_lookup import _dedupe_alias_composites
+from vivarium_dashboard.lib.catalog import (
+    build_catalog,
+    _detect_workspace_venv_distributions,
+    _read_workspace_pyproject_deps,
+)
 from vivarium_dashboard.lib.investigation_status import (
     compute_investigation_status,
     _STUDY_STATUS_FAILED,
@@ -196,9 +220,12 @@ def _json_body(data) -> bytes:
 # ---------------------------------------------------------------------------
 # Registry cache (module-level, shared across requests)
 # ---------------------------------------------------------------------------
-
-_REGISTRY_CACHE: dict = {"data": None, "ts": 0.0}
-_REGISTRY_TTL = 30.0  # seconds
+# The authoritative cache now lives in vivarium_dashboard.lib.registry.
+# _REGISTRY_CACHE here is a reference alias kept for any residual direct
+# reads inside this module; mutations MUST go through clear_registry_cache()
+# or build_registry() (both imported from lib.registry above).
+_REGISTRY_CACHE = _registry_lib._REGISTRY_CACHE   # type: ignore[attr-defined]
+_REGISTRY_TTL = _registry_lib._REGISTRY_TTL       # type: ignore[attr-defined]
 
 # SP4a linkage-index cache — keyed ("linkage", ws_root) → (built_at, index dict).
 # The index is a pure derive over the workspace YAML; a short TTL keeps it cheap
@@ -415,300 +442,17 @@ _DELETE_ROUTE_MAP: dict[str, str] = {
 
 
 def _get_registry_data(bypass_cache: bool = False) -> dict:
-    """Return registry data from build_core() subprocess, with 30s caching.
+    """Thin wrapper — delegates to ``lib.registry.build_registry`` with the
+    module-level ``WORKSPACE`` global.
 
-    Always returns {processes: [...], types: [...]} plus optional 'error' key.
-    Each process entry includes a ``source`` field:
-      - ``"in_workspace"`` — class belongs to the workspace's own package or a
-        declared import (workspace.yaml.imports).
-      - ``"framework"`` — class is from the process-bigraph framework infrastructure
-        (process_bigraph, bigraph_schema, bigraph_viz, pbg_superpowers,
-        vivarium_dashboard).
-      - ``"environment_only"`` — discovered via allocate_core() entry-point scan
-        but not declared in workspace.yaml.  Installed in the Python env but not
-        explicitly imported by this workspace.
-    Never raises.
+    All logic (subprocess discovery, caching, post-processing) now lives in
+    ``vivarium_dashboard.lib.registry.build_registry`` so the FastAPI seam
+    can call it without importing this module.
     """
-    global _REGISTRY_CACHE
-    now = time.time()
-    if not bypass_cache and _REGISTRY_CACHE["data"] is not None:
-        if now - _REGISTRY_CACHE["ts"] < _REGISTRY_TTL:
-            return _REGISTRY_CACHE["data"]
-
-    try:
-        ws_yaml = WORKSPACE / "workspace.yaml"
-        ws_data = yaml.safe_load(ws_yaml.read_text(encoding="utf-8"))
-        slug = ws_data.get("name", "")
-        # Support explicit package_path in workspace.yaml (most reliable).
-        package_name = ws_data.get("package_path") or ("pbg_" + slug.replace("-", "_"))
-
-        # Build the set of top-level package names that this workspace
-        # explicitly owns or imports. Used inside the subprocess to tag
-        # each discovered class.
-        #
-        # ``workspace.yaml.imports`` ships in two shapes across the
-        # ecosystem:
-        #   * dict (older convention, keyed by catalog name):
-        #       imports:
-        #         pbg-oxidizeme:
-        #           package: pbg_oxidizeme
-        #           source:  https://github.com/.../pbg-oxidizeme
-        #   * list of dicts (v2ecoli + newer pbg-template workspaces):
-        #       imports:
-        #         - name:    pbg_oxidizeme
-        #           source:  https://github.com/.../pbg-oxidizeme
-        #
-        # Normalize both into the loop so the registry endpoint doesn't
-        # crash with "'list' object has no attribute 'items'" when the
-        # workspace uses the list form.
-        imports_raw = ws_data.get("imports") or []
-        _ws_import_pkgs: list[str] = []
-        if isinstance(imports_raw, dict):
-            for cat_name, imp_val in imports_raw.items():
-                if isinstance(imp_val, dict):
-                    pkg = imp_val.get("package") or cat_name.replace("-", "_")
-                else:
-                    pkg = cat_name.replace("-", "_")
-                _ws_import_pkgs.append(pkg.split(".")[0])
-        elif isinstance(imports_raw, list):
-            for entry in imports_raw:
-                if isinstance(entry, dict):
-                    # name is the catalog identity; package is the
-                    # importable Python package name (defaults to name
-                    # with dashes → underscores).
-                    cat_name = entry.get("name") or ""
-                    pkg = entry.get("package") or cat_name.replace("-", "_")
-                elif isinstance(entry, str):
-                    pkg = entry.replace("-", "_")
-                else:
-                    continue
-                if pkg:
-                    _ws_import_pkgs.append(pkg.split(".")[0])
-        # Any other shape (e.g. None) yields no imports — registry just
-        # shows the workspace's own package + framework classes.
-        # The workspace's own package is always "in_workspace".
-        _ws_import_pkgs.append(package_name.split(".")[0])
-        # Dedupe while preserving insertion order.
-        _workspace_pkgs_repr = repr(list(dict.fromkeys(_ws_import_pkgs)))
-
-        py = sys.executable
-        script = textwrap.dedent(f"""
-import json, sys
-try:
-    from {package_name}.core import build_core
-    core = build_core()
-
-    import inspect as _inspect
-    import process_bigraph as _pb
-    EMITTER_CLS = getattr(_pb, 'Emitter', None)
-    try:
-        from pbg_superpowers.visualization import Visualization as VISUALIZATION_CLS
-    except ImportError:
-        VISUALIZATION_CLS = None
-
-    # Packages declared in this workspace (own package + workspace.yaml imports).
-    _WORKSPACE_PKGS = set({_workspace_pkgs_repr})
-    # Framework infrastructure packages — always shown, never "environment_only".
-    _FRAMEWORK_PKGS = {{
-        'process_bigraph', 'bigraph_schema', 'bigraph_viz',
-        'pbg_superpowers', 'vivarium_dashboard', 'pbg_emitters',
-    }}
-
-    def _classify_source(cls):
-        try:
-            top_pkg = cls.__module__.split('.')[0]
-        except Exception:
-            return 'environment_only'
-        if top_pkg in _WORKSPACE_PKGS:
-            return 'in_workspace'
-        if top_pkg in _FRAMEWORK_PKGS:
-            return 'framework'
-        return 'environment_only'
-
-    # Processes (and other linkable components) live in core.link_registry,
-    # a dict keyed by both short names ('Composite') and fully-qualified
-    # names ('process_bigraph.composite.Composite'). Dedupe by class identity
-    # and prefer the short name.
-    processes = []
-    seen_classes = {{}}
-    link_reg = getattr(core, 'link_registry', {{}}) or {{}}
-    for name, cls in link_reg.items():
-        cls_id = id(cls)
-        is_qualified = '.' in name
-        if cls_id in seen_classes:
-            # already saw this class; only update if current name is shorter (preferred)
-            existing = seen_classes[cls_id]
-            if not is_qualified and '.' in processes[existing]['name']:
-                processes[existing]['aliases'].append(processes[existing]['name'])
-                processes[existing]['name'] = name
-            else:
-                processes[existing]['aliases'].append(name)
-            continue
-        try:
-            addr = f"{{cls.__module__}}.{{cls.__qualname__}}"
-        except Exception:
-            addr = str(cls)
-        # Categorize by ancestry
-        kind = "other"
-        if isinstance(cls, type):
-            if EMITTER_CLS is not None and issubclass(cls, EMITTER_CLS) and cls is not EMITTER_CLS:
-                kind = "emitter"
-            elif VISUALIZATION_CLS is not None and issubclass(cls, VISUALIZATION_CLS) and cls is not VISUALIZATION_CLS:
-                kind = "visualization"
-            elif hasattr(cls, '__mro__'):
-                for ancestor in cls.__mro__:
-                    if ancestor.__name__ in ('Process', 'ProcessEnsemble'):
-                        kind = "process"
-                        break
-                    if ancestor.__name__ == 'Step':
-                        kind = "step"
-                        break
-        schema_preview = ""
-        if hasattr(cls, 'config_schema'):
-            try:
-                schema_preview = json.dumps(cls.config_schema, default=str)[:400]
-            except Exception:
-                schema_preview = "<unserializable>"
-        source = _classify_source(cls)
-        # Framework hygiene: hide process_bigraph's OWN built-in toy/base/protocol
-        # processes (examples, parameter_scan, math_expression, growth_division,
-        # minimal_gillespie, the composite base classes, ray/parallel/rest
-        # protocols) from every workspace's registry — they are framework
-        # infrastructure, not workspace content. Emitters + visualizations are
-        # kept (useful framework components a workspace wires in).
-        _topmod = (getattr(cls, '__module__', '') or '').split('.')[0]
-        if _topmod == 'process_bigraph' and kind in ('process', 'step', 'other'):
-            continue
-        # Hide abstract base classes (e.g. pbg_emitters' BufferedEmitter) — they
-        # are intermediate bases not meant to be used directly, not registry
-        # content.
-        try:
-            if isinstance(cls, type) and _inspect.isabstract(cls):
-                continue
-        except Exception:
-            pass
-        seen_classes[cls_id] = len(processes)
-        processes.append({{
-            "name": name,
-            "address": addr,
-            "kind": kind,
-            "schema_preview": schema_preview,
-            "aliases": [],
-            "source": source,
-        }})
-    # Re-sort by name so output is deterministic; promote short names.
-    # Within each source group: in_workspace first, then framework, then environment_only.
-    _source_order = {{"in_workspace": 0, "framework": 1, "environment_only": 2}}
-    processes.sort(key=lambda p: (_source_order.get(p.get('source', 'environment_only'), 2), '.' in p['name'], p['name']))
-
-    # Types: core.registry is a dict of registered type schemas.
-    types = []
-    type_reg = getattr(core, 'registry', {{}}) or {{}}
-    for name in sorted(type_reg.keys()):
-        try:
-            td = core.access(name)
-            preview = str(td)[:200] if td is not None else ""
-        except Exception as e:
-            preview = f"<error: {{e}}>"
-        types.append({{"name": name, "schema_preview": preview}})
-
-    print(json.dumps({{"processes": processes, "types": types, "workspace_pkgs": list(_WORKSPACE_PKGS)}}))
-except ImportError as e:
-    print(json.dumps({{"error": f"could not import {package_name}.core: {{e}}", "processes": [], "types": []}}))
-except Exception as e:
-    print(json.dumps({{"error": f"build_core() failed: {{e}}", "processes": [], "types": []}}))
-""")
-        result = subprocess.run(
-            [py, "-c", script],
-            cwd=WORKSPACE, capture_output=True, text=True, timeout=15,
-        )
-        if result.returncode != 0:
-            data: dict = {
-                "error": f"subprocess failed: {(result.stderr or '').strip()[:300]}",
-                "processes": [],
-                "types": [],
-            }
-        else:
-            try:
-                last_line = result.stdout.strip().split("\n")[-1]
-                data = json.loads(last_line)
-            except (json.JSONDecodeError, IndexError):
-                data = {
-                    "error": f"invalid output: {result.stdout[:300]}",
-                    "processes": [],
-                    "types": [],
-                }
-
-        # Annotate emitter entries with is_workspace_default per
-        # workspace.yaml::runtime.default_emitter. ws_data was loaded above;
-        # treat the emitter-name match permissively (case-insensitive substring
-        # against the class name, e.g. 'parquet' → ParquetEmitter).
-        _mark_default_emitter(data, ws_data)
-        # Optional display-only allow-list: workspace.yaml::dashboard.registry.include.
-        # When set, the Registry tab shows ONLY classes whose originating package
-        # is in the list (discovery is unchanged). No-op when unset → current
-        # behavior (show everything).
-        _apply_registry_include_filter(data, ws_data)
-        # Imported-repositories metadata (workspace.yaml::imports): name, source
-        # URL, ref, description — so the Registry can show each imported repo
-        # alongside the processes/steps it contributes (grouped by package).
-        data["imports"] = _registry_imports_meta(ws_data)
-    except Exception as e:
-        data = {"error": str(e), "processes": [], "types": []}
-
-    _REGISTRY_CACHE["data"] = data
-    _REGISTRY_CACHE["ts"] = now
-    return data
+    return _registry_lib.build_registry(WORKSPACE, bypass_cache=bypass_cache)
 
 
-def _mark_default_emitter(data: dict, ws_data: dict | None) -> None:
-    """Set ``is_workspace_default: True`` on emitter entries that match
-    ``ws_data['runtime']['default_emitter']``.
-
-    The match is a case-insensitive substring check against the entry's
-    ``name`` (e.g. ``'parquet'`` matches ``ParquetEmitter``). All emitter
-    entries get the field set explicitly (True or False) so the frontend
-    can render the badge consistently. No-op when ``ws_data`` is missing
-    or has no runtime block.
-    """
-    if not isinstance(data, dict):
-        return
-    processes = data.get("processes") or []
-    default_emitter = ""
-    if isinstance(ws_data, dict):
-        rt = ws_data.get("runtime") or {}
-        if isinstance(rt, dict):
-            default_emitter = str(rt.get("default_emitter") or "").strip().lower()
-    needle = default_emitter
-    for p in processes:
-        if not isinstance(p, dict):
-            continue
-        if p.get("kind") != "emitter":
-            continue
-        name = str(p.get("name") or "")
-        p["is_workspace_default"] = bool(needle) and (needle in name.lower())
-    # Expose the resolved value at the top level for convenience / debugging.
-    data["default_emitter"] = default_emitter or None
-
-
-def _dashboard_config(ws_data: dict | None) -> dict:
-    """Return the ``dashboard:`` block from workspace.yaml as a dict (or {}).
-
-    The block is the single source for per-workspace dashboard customization::
-
-        dashboard:
-          name: "sms-ecoli dashboard"        # header/brand + <title>
-          logo: assets/sms-ecoli-logo.png    # workspace-relative logo file
-          registry:
-            include: [pkg-a, pkg-b]           # display allow-list (by package)
-
-    All keys optional; missing block → {} → current default behavior.
-    """
-    if not isinstance(ws_data, dict):
-        return {}
-    dash = ws_data.get("dashboard")
-    return dash if isinstance(dash, dict) else {}
-
+# _mark_default_emitter, _dashboard_config — moved to lib/registry.py (imported above).
 
 # ---------------------------------------------------------------------------
 # Repo-wide data sources (workspace.yaml dashboard.data_sources provider hook)
@@ -756,340 +500,14 @@ _DATA_SOURCE_MIME: dict[str, tuple[str, bool]] = {
 }
 
 
-def _registry_modules_override(ws_data: dict | None) -> list | None:
-    """Resolve ``dashboard.registry.modules`` to a list of entries, or ``None``.
-
-    The ``modules`` block is the per-workspace catalog OVERRIDE: when present
-    and non-empty it REPLACES pbg's default catalog (unlike ``include``, which
-    only filters the default). Each entry is either:
-
-      - a bare string  → the name of an entry in pbg's default catalog whose
-        full metadata should be inherited (or a minimal stub if pbg doesn't
-        ship it); or
-      - a dict         → a custom catalog module that pbg doesn't ship
-        (e.g. ``viva-munk``), used verbatim with missing display fields filled.
-
-    Returns ``None`` when unset/not-a-list/empty → caller falls back to the
-    default catalog + ``include`` filter (unchanged behavior).
-    """
-    dash = _dashboard_config(ws_data)
-    reg = dash.get("registry")
-    if not isinstance(reg, dict):
-        return None
-    modules = reg.get("modules")
-    if not isinstance(modules, list) or not modules:
-        return None
-    return modules
-
-
-def _modules_override_pkgs(ws_data: dict | None) -> set[str] | None:
-    """Normalized top-level package names named by ``dashboard.registry.modules``.
-
-    Used so the process-registry (``/api/registry``) filter shows the SAME set
-    as the override catalog even when no explicit ``include`` is present. For a
-    string entry the package is the name itself; for a dict entry the ``package``
-    field (falling back to the snake_case ``name``). Returns ``None`` when no
-    override is configured.
-    """
-    modules = _registry_modules_override(ws_data)
-    if modules is None:
-        return None
-
-    def _norm(s) -> str:
-        return str(s or "").strip().replace("-", "_").split(".")[0]
-
-    pkgs: set[str] = set()
-    for entry in modules:
-        if isinstance(entry, str):
-            n = _norm(entry)
-            if n:
-                pkgs.add(n)
-        elif isinstance(entry, dict):
-            pkg = entry.get("package") or entry.get("name")
-            n = _norm(pkg)
-            if n:
-                pkgs.add(n)
-    return pkgs or None
-
-
-def _registry_imports_meta(ws_data: dict | None) -> list[dict]:
-    """Return per-imported-repository metadata from ``workspace.yaml::imports``.
-
-    Each entry: ``{name, package, source, ref, description}`` where ``package``
-    is the normalized top-level Python package (so the frontend can match it
-    against each registry class's ``address`` prefix and list the
-    processes/steps that repo contributes). Tolerates both the dict form
-    (keyed by catalog name) and the list-of-dicts form. Never raises.
-    """
-    out: list[dict] = []
-    imports_raw = (ws_data or {}).get("imports") or []
-    items: list[tuple[str, dict]] = []
-    if isinstance(imports_raw, dict):
-        for cat_name, v in imports_raw.items():
-            items.append((str(cat_name), v if isinstance(v, dict) else {}))
-    elif isinstance(imports_raw, list):
-        for entry in imports_raw:
-            if isinstance(entry, dict):
-                items.append((str(entry.get("name") or ""), entry))
-            elif isinstance(entry, str):
-                items.append((entry, {}))
-    for cat_name, v in items:
-        pkg = (v.get("package") or cat_name).replace("-", "_").split(".")[0]
-        if not pkg:
-            continue
-        out.append({
-            "name": cat_name or pkg,
-            "package": pkg,
-            "source": v.get("source"),
-            "ref": v.get("ref"),
-            "description": (v.get("description") or "").strip(),
-        })
-    out.sort(key=lambda e: e["name"].lower())
-    return out
-
-
-def _registry_include_pkgs(ws_data: dict | None) -> set[str] | None:
-    """Resolve ``dashboard.registry.include`` to a set of normalized top-level
-    package names (dashes → underscores), or ``None`` when unset.
-
-    ``None`` means "no filter" (show everything — current behavior); an empty
-    list also means no filter (treated as unset, to avoid an accidental
-    blank registry).
-
-    When ``dashboard.registry.modules`` (the catalog override) is present but
-    no explicit ``include`` is given, the allow-list is DERIVED from the module
-    names — so the process-registry class grid stays in sync with the override
-    catalog (same set: workspace-self + each declared module).
-    """
-    dash = _dashboard_config(ws_data)
-    reg = dash.get("registry")
-    if not isinstance(reg, dict):
-        return None
-    include = reg.get("include")
-    if not isinstance(include, list) or not include:
-        # No explicit include: derive from the modules override (if any) so the
-        # process registry matches the override catalog. The workspace's own
-        # package is always allowed alongside the declared modules.
-        derived = _modules_override_pkgs(ws_data)
-        if derived is None:
-            return None
-        slug = str((ws_data or {}).get("name", "") or "").strip().replace("-", "_")
-        pkg_path = str((ws_data or {}).get("package_path", "") or "").strip().replace("-", "_")
-        for s in (slug, pkg_path):
-            if s:
-                derived.add(s)
-        return derived or None
-    pkgs = {
-        str(p).strip().replace("-", "_").split(".")[0]
-        for p in include
-        if str(p).strip()
-    }
-    return pkgs or None
-
-
-def _build_reexport_map(include: set[str]) -> dict[str, str]:
-    """Map re-exported classes → the allow-listed package that re-exports them.
-
-    For each allow-listed package, import it and scan its top-level namespace
-    (``dir(mod)``) for classes whose ``__module__`` top-level segment is a
-    DIFFERENT package. Those are re-exports: a class defined elsewhere (e.g.
-    ``spatio_flux.visualizations.field_heatmap.FieldHeatmap``) that the
-    allow-listed package surfaces as part of its own API (e.g. exposed as
-    ``viva_munk.FieldHeatmap``).
-
-    The returned map is keyed by the class's full definition address
-    (``def_module + '.' + qualname``, e.g.
-    ``spatio_flux.visualizations.field_heatmap.FieldHeatmap``) AND, as a
-    looser fallback, by ``(def_top_pkg, class_name)`` joined as
-    ``"<def_top_pkg>::<name>"``. The value is the re-exporting package's
-    normalized name (e.g. ``viva_munk``).
-
-    Imports are guarded with try/except — a single bad import never blanks the
-    registry; the worst case is a class is not surfaced. The allow-listed set is
-    small (a handful of packages) so importing them here is cheap.
-    """
-    import importlib
-    import inspect
-
-    # Framework infrastructure packages are intentionally hidden from the
-    # filtered registry; do NOT resurrect them as re-exports just because an
-    # allow-listed package re-imports e.g. process_bigraph.Composite into its
-    # namespace. Mirrors _FRAMEWORK_PKGS in the registry subprocess.
-    _FRAMEWORK_PKGS = {
-        "process_bigraph", "bigraph_schema", "bigraph_viz",
-        "pbg_superpowers", "vivarium_dashboard",
-    }
-
-    reexports: dict[str, str] = {}
-    for pkg in sorted(include):
-        try:
-            mod = importlib.import_module(pkg)
-        except Exception:
-            continue
-        for attr in dir(mod):
-            try:
-                obj = getattr(mod, attr)
-            except Exception:
-                continue
-            if not inspect.isclass(obj):
-                continue
-            def_mod = getattr(obj, "__module__", "") or ""
-            def_top = def_mod.split(".")[0].replace("-", "_")
-            if not def_top or def_top == pkg:
-                continue  # defined in the re-exporting package itself → not a re-export
-            if def_top in include:
-                continue  # already surfaced by its own allow-listed package
-            if def_top in _FRAMEWORK_PKGS:
-                continue  # framework infra stays hidden; not a workspace re-export
-            qualname = getattr(obj, "__qualname__", attr) or attr
-            full_addr = f"{def_mod}.{qualname}"
-            reexports[full_addr] = pkg
-            reexports[f"{def_top}::{qualname}"] = pkg
-    return reexports
-
-
-def _apply_registry_include_filter(data: dict, ws_data: dict | None) -> None:
-    """Filter ``data['processes']`` to only classes from allow-listed packages.
-
-    Display-only: matches each entry's originating top-level package (derived
-    from its ``address`` = ``module.qualname``, falling back to the entry
-    ``name`` if it is dotted) against the normalized
-    ``dashboard.registry.include`` set. Dashes/underscores are normalized on
-    both sides (``pbg-bioreactordesign`` ↔ ``pbg_bioreactordesign``).
-
-    Re-exports are honored: a class DEFINED in a non-allow-listed package but
-    RE-EXPORTED in an allow-listed package's top-level namespace (e.g.
-    ``viva_munk.FieldHeatmap``, defined in ``spatio_flux``) survives the filter
-    and is re-attributed to the re-exporting package — its ``source`` becomes
-    ``in_workspace`` and its top-level package tag flips to the re-exporter, so
-    the UI groups it under (e.g.) viva_munk rather than spatio_flux. The true
-    definition module is preserved in ``aliases`` so the attribution is not
-    misleading. Classes from a non-allow-listed package that are NOT re-exported
-    stay filtered out.
-
-    No-op when no include list is configured (current behavior: show all).
-    Allow-listed packages surface regardless of in_workspace/framework/
-    environment_only classification.
-    """
-    if not isinstance(data, dict):
-        return
-    include = _registry_include_pkgs(ws_data)
-    if include is None:
-        return
-
-    def _top_pkg(entry: dict) -> str:
-        addr = str(entry.get("address") or "")
-        mod = addr
-        # address is "module.path.ClassName"; the module is everything we have,
-        # but the qualname tail is the class. The top-level package is just the
-        # first dotted segment, so we can take it directly from the address.
-        if not mod:
-            mod = str(entry.get("name") or "")
-        return mod.split(".")[0].replace("-", "_")
-
-    # Build the re-export map (guarded so a bad import never blanks the grid).
-    try:
-        reexports = _build_reexport_map(include)
-    except Exception:
-        reexports = {}
-
-    def _reexporter(entry: dict) -> str | None:
-        """Return the allow-listed pkg that re-exports this entry, else None."""
-        if not reexports:
-            return None
-        addr = str(entry.get("address") or "").strip()
-        if addr and addr in reexports:
-            return reexports[addr]
-        # Looser match: definition top-level package + class name. The class
-        # name is the last segment of the address (or the entry name).
-        def_top = _top_pkg(entry)
-        cls_name = addr.split(".")[-1] if addr else str(entry.get("name") or "")
-        key = f"{def_top}::{cls_name}"
-        return reexports.get(key)
-
-    procs = data.get("processes") or []
-    kept: list[dict] = []
-    for p in procs:
-        if not isinstance(p, dict):
-            continue
-        own_pkg = _top_pkg(p)
-        if own_pkg in include:
-            kept.append(p)
-            continue
-        # Always surface emitters regardless of the include allow-list. They are
-        # the workspace's I/O backends (the configured runtime.default_emitter is
-        # one of them) and live in framework/env packages (process_bigraph,
-        # pbg_emitters) outside the include list — so a repo-scoped include like
-        # [v2ecoli] would otherwise leave the Registry's Emitters section empty.
-        if p.get("kind") == "emitter":
-            kept.append(p)
-            continue
-        reexporter = _reexporter(p)
-        if reexporter is not None:
-            # Re-attribute to the re-exporting package: keep the true definition
-            # module in aliases (so it is not misleading), flip the address's
-            # top-level segment and source classification to the re-exporter.
-            true_addr = str(p.get("address") or "")
-            aliases = list(p.get("aliases") or [])
-            if true_addr and true_addr not in aliases:
-                aliases.append(true_addr)
-            p["aliases"] = aliases
-            p["reexported_from"] = own_pkg
-            p["source"] = "in_workspace"
-            # Re-tag the address's top-level package so _top_pkg / the UI group
-            # it under the re-exporter. The class is re-exported as
-            # ``<reexporter>.<ClassName>``.
-            cls_name = true_addr.split(".")[-1] if true_addr else str(p.get("name") or "")
-            p["address"] = f"{reexporter}.{cls_name}"
-            kept.append(p)
-    data["processes"] = kept
-    # Record what was applied for debugging / frontend awareness.
-    data["registry_include"] = sorted(include)
-
-
-def _filter_catalog_modules(modules: list, ws_data: dict | None) -> list:
-    """Apply ``dashboard.registry.include`` to the package catalog (/api/catalog).
-
-    Same allow-list, same normalization as the registry filter
-    (``_apply_registry_include_filter``): dashes ↔ underscores, top-level
-    package segment only. A catalog module's package identity is matched
-    against any of its name variants — ``name`` (e.g. ``pbg-bioreactordesign``,
-    ``spatio-flux``), ``pypi_name``, and ``package`` (the snake_case import
-    name) — so e.g. ``viva-munk`` ↔ ``viva_munk`` and the workspace's own
-    first-party module (``kind: "workspace"``, ``name`` = slug = ``v2ecoli``)
-    all resolve correctly.
-
-    No-op when no include list is configured (returns ``modules`` unchanged →
-    current behavior: show the full catalog).
-    """
-    if not isinstance(modules, list):
-        return modules
-    include = _registry_include_pkgs(ws_data)
-    if include is None:
-        return modules
-
-    def _norm(s) -> str:
-        return str(s or "").strip().replace("-", "_").split(".")[0]
-
-    def _allowed(m: dict) -> bool:
-        if not isinstance(m, dict):
-            return False
-        variants = {_norm(m.get("name"))}
-        if m.get("pypi_name"):
-            variants.add(_norm(m.get("pypi_name")))
-        # `package` may be absent; fall back to name→snake_case like elsewhere.
-        pkg = m.get("package") or str(m.get("name") or "").replace("-", "_")
-        variants.add(_norm(pkg))
-        variants.discard("")
-        return bool(variants & include)
-
-    # Always keep modules that are actually INSTALLED in this workspace — the
-    # catalog's job is to show what's active here, and "modules active in this
-    # workspace appear at the top" is its stated contract. The include allow-list
-    # only governs which *non-installed* (available-to-install) modules also
-    # surface. (Without this, `registry.include: [v2ecoli]` hid the workspace's
-    # own installed deps — pbg-emitters, viva-munk, … — leaving only v2ecoli.)
-    return [m for m in modules if _allowed(m) or m.get("installed")]
+# _registry_modules_override, _modules_override_pkgs, _registry_imports_meta,
+# _registry_include_pkgs, _build_reexport_map, _apply_registry_include_filter
+# — all moved to lib/registry.py (imported above).
+# _filter_catalog_modules, _build_override_catalog, _build_reexport_origin_modules,
+# _name_variants, _check_installed_module_sync (ws_root-parameterized),
+# _CATALOG_VENV_PROBE_SCRIPT, _detect_workspace_venv_distributions,
+# _read_workspace_pyproject_deps — all moved to lib/catalog.py (imported above).
+# _dedupe_alias_composites — moved to lib/composite_lookup.py (imported above).
 
 
 def _composite_top_pkg(rec: dict) -> str:
@@ -1153,190 +571,7 @@ def _filter_composites(records: list, ws_data: dict | None) -> list:
     return [r for r in records if _keep(r)]
 
 
-def _build_override_catalog(override: list, default_modules: list) -> list:
-    """Build a catalog from ``dashboard.registry.modules`` (the override).
-
-    The override REPLACES pbg's default catalog. ``default_modules`` is pbg's
-    default catalog (``load_registry`` + workspace overlay) used only to resolve
-    bare-string entries by inheriting their full metadata.
-
-    Resolution per entry:
-
-      - **string** → look the name up in ``default_modules``; if found, deep-copy
-        its full metadata dict; if NOT found, emit a minimal stub
-        (``name`` + a short ``description`` note) so the row still renders.
-      - **dict** → a custom module pbg doesn't ship; used verbatim with missing
-        display fields filled with sensible defaults so the row renders and the
-        Install/Uninstall button works (needs at least ``name``; ``package``
-        defaults to the snake_case name; ``source``/``description``/``tags`` get
-        placeholder fallbacks).
-
-    Install-state is NOT set here — the caller's existing install-detection loop
-    (imports / pyproject / venv probe) annotates each entry, so a custom entry
-    whose ``package`` is importable in the venv (e.g. ``viva_munk``) is marked
-    installed exactly like a default-catalog entry.
-
-    Order is preserved from the override list. Unrecognized entry types are
-    skipped.
-    """
-    by_name = {
-        str(m.get("name")): m
-        for m in (default_modules or [])
-        if isinstance(m, dict) and m.get("name")
-    }
-    out: list[dict] = []
-    seen: set[str] = set()
-
-    for entry in override:
-        if isinstance(entry, str):
-            name = entry.strip()
-            if not name or name in seen:
-                continue
-            seen.add(name)
-            found = by_name.get(name)
-            if found is not None:
-                out.append(copy.deepcopy(found))
-            else:
-                # pbg doesn't ship this name — minimal stub so it still renders.
-                out.append({
-                    "name": name,
-                    "package": name.replace("-", "_"),
-                    "description": (
-                        f"{name} — declared in this workspace's "
-                        "dashboard.registry.modules but not found in the default "
-                        "pbg catalog (no inherited metadata)."
-                    ),
-                    "tags": [],
-                    "override_stub": True,
-                })
-        elif isinstance(entry, dict):
-            name = str(entry.get("name") or "").strip()
-            if not name or name in seen:
-                continue
-            seen.add(name)
-            m = copy.deepcopy(entry)
-            m.setdefault("package", name.replace("-", "_"))
-            m.setdefault(
-                "description",
-                f"{name} — custom workspace catalog entry.",
-            )
-            m.setdefault("source", "")
-            m.setdefault("tags", [])
-            # Surface a single-tag category as a tag too (display convenience).
-            cat = m.get("category")
-            if cat and isinstance(m.get("tags"), list) and cat not in m["tags"]:
-                m["tags"] = list(m["tags"]) + [cat]
-            m["override_custom"] = True
-            out.append(m)
-        # else: unknown entry type → skip silently.
-
-    return out
-
-
-def _build_reexport_origin_modules(
-    ws_data: dict | None, existing_modules: list
-) -> list[dict]:
-    """Synthesize catalog entries for re-export-ORIGIN packages.
-
-    A re-export origin is a package that is (a) NOT in the registry allow-list
-    itself, but (b) has ≥1 class re-exported by an allow-listed package (per
-    :func:`_build_reexport_map`). The canonical example: ``spatio_flux`` is not
-    allow-listed, but ``viva_munk`` re-exports 7 of its classes into its own
-    top-level namespace — so spatio-flux is a genuine dependency of an
-    allow-listed package and should be SHOWN in the catalog (tagged
-    ``📦 via viva-munk``) rather than fully hidden.
-
-    For each such origin package we emit one catalog entry stamped with
-    ``install_source: "venv"`` + ``installed_via: [<allow-listed re-exporters>]``
-    so the install-source badge renders ``📦 via <parents>`` and the UI shows
-    "(remove parent to uninstall)" instead of an Install button. This
-    install_source attribution is DELIBERATELY forced to the re-exporter(s)
-    even when the package is also a direct pyproject dependency of the
-    workspace (e.g. v2ecoli pins spatio-flux): the meaningful reason it appears
-    in this filtered catalog is the re-export, per v2ecoli's own pyproject
-    comment.
-
-    Guarded: returns ``[]`` unless a registry allow-list is configured AND the
-    re-export map yields at least one origin package. Origin packages already
-    present in ``existing_modules`` (by name/package variant) are skipped so we
-    never duplicate or shadow a primary catalog entry.
-    """
-    include = _registry_include_pkgs(ws_data)
-    if include is None:
-        return []
-    try:
-        reexports = _build_reexport_map(include)
-    except Exception:
-        return []
-    if not reexports:
-        return []
-
-    def _norm(s) -> str:
-        return str(s or "").strip().replace("-", "_").split(".")[0]
-
-    # Collect, per origin package, the set of allow-listed re-exporters.
-    # Map keys are either ``def_module.qualname`` (full address) or
-    # ``"<def_top_pkg>::<name>"``; the value is the re-exporting package. Only
-    # the ``::`` keys cleanly expose the origin top-level package, so derive
-    # origins from those.
-    # Stdlib / builtin module names are NOT installable workspace packages —
-    # an allow-listed package re-importing e.g. ``typing.TypeVar`` or
-    # ``dataclasses.dataclass`` into its namespace must not surface a bogus
-    # "typing" catalog row. Mirror the framework-pkg guard in _build_reexport_map
-    # for the standard library.
-    import sys as _sys
-    _stdlib = set(getattr(_sys, "stdlib_module_names", ()))
-    _builtins = set(_sys.builtin_module_names)
-
-    origins: dict[str, set[str]] = {}
-    for key, reexporter in reexports.items():
-        if "::" not in key:
-            continue
-        def_top = _norm(key.split("::", 1)[0])
-        if not def_top or def_top in include:
-            continue
-        if def_top in _stdlib or def_top in _builtins:
-            continue
-        origins.setdefault(def_top, set()).add(reexporter)
-    if not origins:
-        return []
-
-    # Don't duplicate a package that the override catalog already lists.
-    existing: set[str] = set()
-    for m in existing_modules or []:
-        if not isinstance(m, dict):
-            continue
-        existing.add(_norm(m.get("name")))
-        if m.get("pypi_name"):
-            existing.add(_norm(m.get("pypi_name")))
-        existing.add(_norm(m.get("package") or m.get("name")))
-    existing.discard("")
-
-    out: list[dict] = []
-    for origin_pkg in sorted(origins):
-        if origin_pkg in existing:
-            continue
-        # Re-exporters as their catalog display names (dash form for the badge).
-        parents = sorted(p.replace("_", "-") for p in origins[origin_pkg])
-        display_name = origin_pkg.replace("_", "-")
-        out.append({
-            "name": display_name,
-            "package": origin_pkg,
-            "description": (
-                f"Re-exported by {', '.join(parents)} "
-                "(particles + visualizations)."
-            ),
-            "tags": ["dependency", "re-export"],
-            "category": "dependency",
-            "installed": True,
-            # Force the venv/via-parent attribution even if this package is also
-            # a direct pyproject dep — the reason it's surfaced here is the
-            # re-export, not the direct pin.
-            "install_source": "venv",
-            "installed_via": parents,
-            "reexport_origin": True,
-        })
-    return out
+# _build_override_catalog, _build_reexport_origin_modules — moved to lib/catalog.py.
 
 
 def _save_upload(file_b64: str, target_path: Path) -> str:
@@ -2102,147 +1337,19 @@ def _latest_run_timestamp(runs_db: Path) -> float | None:
 
 
 def _latest_run_row(runs_db) -> dict | None:
-    """Newest runs_meta row as {run_id, completed_at, generation_id, emitter_path},
-    tolerating older DBs missing the optional columns. Mirrors
-    pbg_superpowers.run_registry.latest_run (not importable here)."""
-    from pathlib import Path
-    import sqlite3
-    runs_db = Path(runs_db)
-    if not runs_db.is_file():
-        return None
-    want = ("run_id", "completed_at", "generation_id", "emitter_path")
-    try:
-        conn = sqlite3.connect(f"file:{runs_db}?mode=ro", uri=True, timeout=1.0)
-        try:
-            have = {r[1] for r in conn.execute("PRAGMA table_info(runs_meta)")}
-            cols = [c for c in want if c in have]
-            if "run_id" not in cols:
-                return None
-            row = conn.execute(
-                f"SELECT {', '.join(cols)} FROM runs_meta "
-                "ORDER BY COALESCE(completed_at, started_at) DESC LIMIT 1"
-            ).fetchone()
-        finally:
-            conn.close()
-        return dict(zip(cols, row)) if row else None
-    except sqlite3.Error:
-        return None
+    """Thin forwarder; the implementation lives in lib.study_charts (one source)."""
+    from vivarium_dashboard.lib.study_charts import latest_run_row
+    return latest_run_row(runs_db)
 
 
 def _study_charts_payload(ws_root, name: str, *, hide_superseded: bool = False) -> dict:
-    """Build the /api/study-charts/<name> payload (pure, unit-testable).
+    """Thin forwarder to lib.study_charts.build_study_charts_payload.
 
-    ``hide_superseded`` (opt-in, default False): when True, static charts
-    produced by a superseded (non-canonical, unpinned) run are dropped from
-    the payload — used by the per-investigation report render so it shows only
-    current figures. The interactive dashboard endpoint leaves it False.
-
-    Two chart sources, merged in display order (live first, static after):
-
-      live    — ``studies/<name>/runs.db`` (the per-step history
-                emitted by SQLiteEmitter). Picks the latest entry
-                from the ``simulations`` table (filtered to
-                ``baseline-steady-state`` when present) and renders
-                a small canonical set of line charts.
-      static  — any pre-rendered ``studies/<name>/charts/*.svg`` files
-                (with optional ``*.meta.json`` sidecars providing title +
-                caption). These are the domain-specific charts the study
-                authors checked in directly (e.g. chromosome maps).
-
-    Each STATIC chart additionally carries a ``freshness`` badge —
-    ``fresh`` / ``stale`` / ``unrendered`` for charts declared in the spec's
-    ``visualizations[]`` (computed against the study's latest run via the
-    vendored :func:`chart_freshness`), and ``untracked`` for on-disk chart
-    files with no matching ``visualizations[]`` entry.
+    The /api/study-charts/<slug> payload assembly now lives in lib so the FastAPI
+    seam (api/app.py) and this stdlib handler share one implementation.
     """
-    import yaml as _yaml
-    from vivarium_dashboard.lib.study_charts import (
-        render_study_charts, render_v4_test_charts,
-        discover_static_study_charts, discover_declared_figure_charts,
-    )
-    from vivarium_dashboard.lib.simulations_index import (
-        discover_default_baseline_db,
-    )
-    from .lib.viz_freshness import chart_freshness, manifest_diff
-
-    # Layout-aware: a study may live nested under
-    # investigations/<inv>/studies/<slug>/ (custom layout) rather than the flat
-    # studies/<slug>/. Resolving flat-only silently produced an empty payload
-    # (no runs.db / charts / declared figures) for nested studies like colonies.
-    _wp = WorkspacePaths.load(ws_root)
-    try:
-        study_dir = _wp.study_dir(name)
-    except FileNotFoundError:
-        study_dir = _wp.studies / name
-    runs_db = study_dir / "runs.db"
-    charts_dir = study_dir / "charts"
-    spec_path = study_dir / "study.yaml"
-
-    # Detect v4: study.yaml with schema_version: 4 → render charts per-test
-    # from tests[].measure.path, with default-baseline fallback when the
-    # per-study runs.db is empty.
-    spec = None
-    if spec_path.is_file():
-        try:
-            spec = _yaml.safe_load(spec_path.read_text(encoding="utf-8"))
-        except Exception:
-            spec = None
-    is_v4 = isinstance(spec, dict) and spec.get("schema_version") == 4
-
-    if is_v4:
-        fallback_db = discover_default_baseline_db(ws_root)
-        live_charts = render_v4_test_charts(spec, runs_db, fallback_db=fallback_db)
-    else:
-        live_charts = render_study_charts(runs_db, run_name="baseline-steady-state")
-        if not live_charts:
-            live_charts = render_study_charts(runs_db, run_name=None)
-    for c in live_charts:
-        c.setdefault("source", "live")
-    static_charts = discover_static_study_charts(charts_dir, hide_superseded=hide_superseded)
-    # Declared figure visualizations (e.g. ``address: gif:colony.gif``) that
-    # point at a loose figure file — resolved to self-contained data-URI/SVG
-    # chart records so they embed in BOTH the live dashboard and the published
-    # static report snapshot. Deduped against static_charts by key.
-    declared_figs = discover_declared_figure_charts(
-        study_dir, (spec or {}).get("visualizations") or [])
-    if declared_figs:
-        static_keys = {c.get("key") for c in static_charts}
-        static_charts = static_charts + [
-            c for c in declared_figs if c.get("key") not in static_keys
-        ]
-
-    # Per-chart freshness for static charts. Match each on-disk chart
-    # (``charts/<key>.<media>``) against the spec's visualizations[] entries
-    # by their ``chart:`` field; declared entries get fresh/stale/unrendered,
-    # everything else is untracked.
-    visualizations = (spec or {}).get("visualizations") or []
-    entry_by_chart = {
-        e.get("chart"): e for e in visualizations if isinstance(e, dict) and e.get("chart")
-    }
-    # manifest_diff ensures untracked on-disk charts are accounted for; the
-    # static-chart list already includes them, so we just use it to confirm.
-    manifest_diff(study_dir, visualizations)
-    latest = _latest_run_row(runs_db)
-    for c in static_charts:
-        # Declared figure visualizations already carry their own freshness.
-        if c.get("source") == "declared":
-            c.setdefault("freshness", "declared")
-            continue
-        rel = f"charts/{c.get('key')}.{c.get('media')}"
-        entry = entry_by_chart.get(rel)
-        if entry is None:
-            c["freshness"] = "untracked"
-        else:
-            c["freshness"] = chart_freshness(study_dir, entry, latest)
-
-    return {
-        "study": name,
-        "schema_version": (spec or {}).get("schema_version"),
-        "charts": live_charts + static_charts,
-        "db_exists": runs_db.exists(),
-        "static_count": len(static_charts),
-        "live_count": len(live_charts),
-    }
+    from vivarium_dashboard.lib.study_charts import build_study_charts_payload
+    return build_study_charts_payload(ws_root, name, hide_superseded=hide_superseded)
 
 
 def _study_refresh_viz(ws_root, name: str) -> dict:
@@ -2589,60 +1696,16 @@ def _read_runs_db_for_study(name: str) -> list[dict]:
 def _iter_study_dirs():
     """Yield every study directory across studies/ and investigations/.
 
-    Delegates to ``WorkspacePaths.iter_study_dirs``, which descends into the
-    nested ``investigations/<inv>/studies/<slug>/`` layout (a study dir is one
-    that holds ``study.yaml``) AND the flat ``studies/<slug>/`` layout, with the
-    nested location winning on slug collision.
-
-    The previous implementation iterated only the DIRECT children of
-    ``studies/`` and ``investigations/`` — so for a nested-layout workspace it
-    saw the investigation dirs (which hold ``investigation.yaml``, not
-    ``study.yaml``) instead of their studies, and every investigation-nested
-    study (e.g. ketchup-exchange-comparison, pdmp-*, colonies-*) was silently
-    dropped from /api/investigations -> "No investigations declared".
-
-    Legacy compatibility: a study authored directly under
-    ``investigations/<name>/`` as a pre-Phase-1 ``spec.yaml`` (no nested
-    ``studies/`` subdir, no ``investigation.yaml``) is still a study and is
-    yielded too — but a real investigation COLLECTION (one carrying
-    ``investigation.yaml``) is not, since its studies live one level down.
+    Thin wrapper: delegates to the lib implementation, injecting WORKSPACE.
     """
-    wp = WorkspacePaths.load(WORKSPACE)
-    seen: set[str] = set()
-    for d in wp.iter_study_dirs():
-        seen.add(d.name)
-        yield d
-    # Legacy: studies stored directly under investigations/<name>/spec.yaml.
-    inv_root = wp.dir("investigations")
-    if inv_root.is_dir():
-        for d in sorted(inv_root.iterdir()):
-            if not d.is_dir() or d.name in seen:
-                continue
-            if (d / "investigation.yaml").is_file():
-                continue  # an investigation collection, not a study
-            if (d / "spec.yaml").is_file() or (d / "study.yaml").is_file():
-                seen.add(d.name)
-                yield d
+    from vivarium_dashboard.lib.investigations_index import _iter_study_dirs as _ii_iter
+    return _ii_iter(WORKSPACE)
 
 
-def _parsimony_viewer_dir():
-    """Return the bundled ``pbg_parsimony`` viewer asset dir, or None when the
-    optional ``pbg_parsimony`` package is not installed.
-
-    Feature-detect seam for the ``/parsimony-viewer/*`` static route and the
-    Analyses 3D gallery — the parsimony cards/routes only appear when this
-    returns a real directory, mirroring how other optional integrations
-    (e.g. bigraph-loom) are gated.
-    """
-    try:
-        import importlib.util
-        spec = importlib.util.find_spec("pbg_parsimony")
-        if spec is None or not spec.origin:
-            return None
-        d = Path(spec.origin).parent / "viewer"
-        return d if d.is_dir() else None
-    except Exception:
-        return None
+# Saved-visualizations discovery + the parsimony feature-detect moved to
+# lib.saved_visualizations; these aliases keep the existing call-sites (the
+# /parsimony-viewer/* static route + the /api/saved-visualizations handler).
+_parsimony_viewer_dir = _savedviz_lib.parsimony_viewer_dir
 
 
 def _build_saved_visualizations(ws_root) -> dict:
@@ -2665,111 +1728,7 @@ def _build_saved_visualizations(ws_root) -> dict:
 
     Pure (no socket I/O) so tests can call it with an explicit ``ws_root``.
     """
-    ws_root = Path(ws_root)
-    wp = WorkspacePaths.load(ws_root)
-    saved: list[dict] = []
-    ptools_studies: list[dict] = []
-    report_cards: list[dict] = []
-    for study_dir in wp.iter_study_dirs():
-        study = study_dir.name
-        # Saved comparison report cards — self-contained HTML produced by the
-        # vEcoli<->v2ecoli comparison harness (statistical-equivalence cards).
-        # Discovered like the 3D packs: a study writes them under
-        # ``viz/report_card/<name>.html`` (+ optional ``<name>.verdict.json``
-        # sidecar carrying the ``overall`` verdict for the gallery badge).
-        rc_dir = study_dir / "viz" / "report_card"
-        if rc_dir.is_dir():
-            for rep in sorted(rc_dir.glob("*.html")):
-                try:
-                    rel = rep.relative_to(ws_root).as_posix()
-                except ValueError:
-                    continue
-                verdict = None
-                vfile = rep.with_name(rep.name[: -len(".html")] + ".verdict.json")
-                if vfile.is_file():
-                    try:
-                        verdict = json.loads(
-                            vfile.read_text(encoding="utf-8")).get("overall")
-                    except Exception:
-                        verdict = None
-                try:
-                    created = int(rep.stat().st_mtime)
-                except Exception:
-                    created = None
-                report_cards.append({
-                    "study": study,
-                    "name": rep.name[: -len(".html")],
-                    "url": "/" + rel,
-                    "verdict": verdict,
-                    "created": created,
-                })
-        viz3d = study_dir / "viz" / "3d"
-        if viz3d.is_dir():
-            for pack in sorted(viz3d.glob("*.pack.json")):
-                try:
-                    rel = pack.relative_to(ws_root).as_posix()
-                except ValueError:
-                    continue
-                meta = pack.with_name(pack.name.replace(".pack.json", ".meta.json"))
-                meta_url = None
-                n_placed = None
-                if meta.is_file():
-                    try:
-                        meta_url = "/" + meta.relative_to(ws_root).as_posix()
-                    except ValueError:
-                        meta_url = None
-                    try:
-                        md = json.loads(meta.read_text(encoding="utf-8"))
-                        ing = md.get("ingredients") or {}
-                        total = sum(
-                            int(v.get("count", 0))
-                            for v in ing.values() if isinstance(v, dict)
-                        )
-                        n_placed = total or None
-                    except Exception:
-                        n_placed = None
-                try:
-                    created = int(pack.stat().st_mtime)
-                except Exception:
-                    created = None
-                saved.append({
-                    "study": study,
-                    "name": pack.name[: -len(".pack.json")],
-                    "pack_url": "/" + rel,
-                    "meta_url": meta_url,
-                    "n_placed": n_placed,
-                    "created": created,
-                })
-        if sorted(study_dir.glob("**/ptools/*.tsv")):
-            ptools_studies.append({
-                "study": study,
-                "n_tsvs": len(sorted(study_dir.glob("**/ptools/*.tsv"))),
-            })
-
-    try:
-        ws = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
-    except Exception:
-        ws = {}
-    ui = ws.get("ui") or {}
-    ptools_configured = bool(str(ui.get("ptools_server_url", "")).strip())
-
-    # Optional per-pack external viewer URL (ui.viz_viewer_urls: {<pack-name>: url}).
-    # When set, the Analyses card links + embeds that URL instead of the bundled
-    # gh-pages viewer — e.g. to serve a heavy pack from Cloudflare R2 (no GitHub
-    # Pages rate-limiting). Keyed by pack name (e.g. "ecoli_3d").
-    viewer_urls = ui.get("viz_viewer_urls") or {}
-    if isinstance(viewer_urls, dict):
-        for entry in saved:
-            url = viewer_urls.get(entry["name"])
-            if url:
-                entry["viewer_url"] = str(url)
-
-    return {
-        "parsimony_available": _parsimony_viewer_dir() is not None,
-        "saved": saved,
-        "ptools": {"configured": ptools_configured, "studies": ptools_studies},
-        "report_cards": report_cards,
-    }
+    return _savedviz_lib.build_saved_visualizations(ws_root)
 
 
 def _iter_iset_dirs(ws_root: Path | None = None):
@@ -3189,221 +2148,16 @@ def _build_iset_summary_for_test(ws_root: Path) -> list[dict]:
 
 
 def _catalog_data(ws_root: "Path") -> dict:
-    """Pure data builder for GET /api/catalog — returns ``{"modules": [...]}`` dict.
+    """Thin delegation to ``lib.catalog.build_catalog``.
 
-    Called by ``Handler._get_catalog`` (which wraps it in the HTTP response)
-    and by ``publish.build_bundle`` to export ``api/catalog.json``.
-
-    Requires the ``WORKSPACE`` global to already be set to *ws_root*
-    (``build_bundle`` ensures this before calling).
+    Kept here so ``Handler._get_catalog`` and ``publish.build_bundle``
+    continue to call the same name unchanged.  The single implementation lives
+    in ``vivarium_dashboard.lib.catalog.build_catalog`` (Task 6 extraction).
     """
-    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths as _WP
-
-    try:
-        ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8"))
-    except Exception as e:
-        return {"modules": [], "error": f"workspace.yaml: {e}"}
-
-    # Module registry (canonical pbg-superpowers list + per-workspace overlay)
-    try:
-        from pbg_superpowers.catalog import load_registry as _lr
-        default_modules: list = _lr(ws_root)
-    except Exception:
-        _wp = _WP.load(ws_root)
-        legacy = _wp.scripts / "_catalog" / "modules.json"
-        if legacy.is_file():
-            try:
-                default_modules = json.loads(legacy.read_text(encoding="utf-8"))
-            except Exception:
-                default_modules = []
-        else:
-            default_modules = []
-
-    override = _registry_modules_override(ws_data)
-    if override is not None:
-        modules = _build_override_catalog(override, default_modules)
-    else:
-        modules = default_modules
-
-    imports = (ws_data or {}).get("imports", {}) or {}
-    pyproject_deps = _read_workspace_pyproject_deps(ws_root)
-    venv_dists = _detect_workspace_venv_distributions(ws_root)
-
-    # Normalized import lookup: key each declared import by its lowercased
-    # dash- AND underscore-forms so a curated module named "pbg-oxidizeme"
-    # matches an import declared as "pbg_oxidizeme" (the dash/underscore
-    # mismatch otherwise leaves reference-mode imports marked not-installed
-    # and hidden in the read-only Modules grid).
-    _imports_norm: dict = {}
-    if isinstance(imports, dict):
-        for _k, _v in imports.items():
-            kl = str(_k).lower()
-            _imports_norm[kl] = _v
-            _imports_norm[kl.replace("-", "_")] = _v
-            _imports_norm[kl.replace("_", "-")] = _v
-
-    def _name_variants(m: dict) -> list:
-        out: list = [m["name"].lower()]
-        pn = m.get("pypi_name")
-        if pn:
-            out.append(pn.lower())
-        pkg = m.get("package") or m["name"].replace("-", "_")
-        out.append(pkg.lower())
-        return out
-
-    for m in modules:
-        variants = _name_variants(m)
-        declared_imp = next((_imports_norm[v] for v in variants if v in _imports_norm), None)
-        declared = declared_imp is not None
-        in_pyproject = any(v in pyproject_deps for v in variants)
-        in_venv = any(v in venv_dists for v in variants)
-        if declared:
-            m["installed"] = True
-            m["install_source"] = "imports"
-            imp = declared_imp or {}
-            for k in ("source", "ref", "path", "install_path", "package"):
-                v = imp.get(k)
-                if v is not None:
-                    m[k] = v
-        elif in_pyproject:
-            m["installed"] = True
-            m["install_source"] = "pyproject"
-        elif in_venv:
-            m["installed"] = True
-            m["install_source"] = "venv"
-            parents: list = []
-            for v in variants:
-                info = venv_dists.get(v)
-                if info:
-                    parents.extend(info.get("requires_by") or [])
-                    break
-            m["installed_via"] = sorted(set(parents))
-        else:
-            m["installed"] = False
-        if m["installed"]:
-            if m.get("install_source") in ("imports", "pyproject"):
-                pkg_name = m.get("package") or m["name"].replace("-", "_")
-                sync_reason = _check_installed_module_sync(pkg_name, m.get("install_path"))
-                if sync_reason:
-                    m["out_of_sync"] = True
-                    m["out_of_sync_reason"] = sync_reason
-
-    # Surface workspace.yaml `imports` that aren't in the curated catalog
-    # (e.g. pbg-ketchup / pbg-parsimony / pbg-torch / pbg-oxidizeme) so EVERY
-    # declared import shows in the Modules grid as an installed module, not just
-    # the curated ones. Without this, an imported pbg-* repo that pbg_superpowers'
-    # catalog doesn't know about silently never appears here.
-    if isinstance(imports, dict):
-        _known_variants: set = set()
-        for m in modules:
-            for v in _name_variants(m):
-                _known_variants.add(v)
-        for imp_name, imp in imports.items():
-            imp = imp or {}
-            pkg = (imp.get("package") or imp_name).replace("-", "_")
-            variants = {str(imp_name).lower(), pkg.lower()}
-            if variants & _known_variants:
-                continue  # already represented by a curated entry
-            desc = (imp.get("description") or "").strip().split("\n")[0]
-            mod = {
-                "name": imp_name,
-                "package": pkg,
-                "description": desc or f"Imported package {imp_name}.",
-                "installed": True,
-                "install_source": "imports",
-            }
-            for k in ("source", "ref", "path", "install_path"):
-                if imp.get(k) is not None:
-                    mod[k] = imp[k]
-            # Mirror the out-of-sync check curated installed modules get, so an
-            # imported-but-unimportable package is flagged here too.
-            sync_reason = _check_installed_module_sync(pkg, mod.get("install_path"))
-            if sync_reason:
-                mod["out_of_sync"] = True
-                mod["out_of_sync_reason"] = sync_reason
-            modules.append(mod)
-            _known_variants |= variants
-
-    reexport_origins = _build_reexport_origin_modules(ws_data, modules)
-    if reexport_origins:
-        modules = modules + reexport_origins
-
-    # Workspace self-module (mirrors Handler._workspace_self_module)
-    slug = (ws_data or {}).get("name", "") or ""
-    ws_pkg = (ws_data or {}).get("package_path")
-    if not ws_pkg:
-        ws_pkg = "pbg_" + slug.replace("-", "_") if slug else None
-    if ws_pkg:
-        pkg_dir = ws_root / ws_pkg
-        if pkg_dir.is_dir():
-            sync_reason = _check_installed_module_sync(ws_pkg, ws_pkg)
-            try:
-                ref = subprocess.run(
-                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                    cwd=ws_root, capture_output=True, text=True, timeout=2,
-                ).stdout.strip() or "—"
-            except (subprocess.TimeoutExpired, OSError):
-                ref = "—"
-            ws_self: dict = {
-                "kind":         "workspace",
-                "name":         slug or ws_pkg,
-                "package":      ws_pkg,
-                "install_path": ws_pkg,
-                "description":  "Workspace's own first-party package — provides the "
-                                "Processes, Steps, Composites, and Types that "
-                                "build_core() registers for this workspace.",
-                "source":       "workspace",
-                "ref":          ref,
-                "tags":         ["workspace"],
-                "installed":    True,
-            }
-            if sync_reason:
-                ws_self["out_of_sync"] = True
-                ws_self["out_of_sync_reason"] = sync_reason
-            modules = [ws_self] + modules
-
-    if override is None:
-        kept_origins = [m for m in modules if isinstance(m, dict) and m.get("reexport_origin")]
-        modules = _filter_catalog_modules(modules, ws_data) + kept_origins
-
-    return {"modules": modules}
+    return build_catalog(ws_root)
 
 
-def _dedupe_alias_composites(records: list) -> list:
-    """Collapse a composite that's registered under more than one id.
-
-    A ``@composite_generator(name="baseline")`` in a same-named module registers
-    under the DOUBLED id ``v2ecoli.composites.baseline.baseline``; a workspace may
-    add a clean-id alias ``v2ecoli.composites.baseline`` so short study refs
-    resolve. Both then surface in discovery, listing the SAME composite twice.
-    Collapse generator records that share (name, module), keeping the canonical
-    id (the one equal to its module, else the shortest) so each composite appears
-    once and the kept id is the resolvable/explorable one. Records without a
-    module, or with a unique (name, module), pass through unchanged.
-    """
-    def _rank(rec, mod):
-        rid = rec.get("id") or ""
-        return (0 if rid == mod else 1, len(rid))
-
-    kept: dict = {}
-    order: list = []
-    out: list = []
-    for rec in records:
-        mod = rec.get("module") or ""
-        if not mod or rec.get("kind") != "generator":
-            out.append(rec)
-            continue
-        key = (rec.get("name"), mod)
-        prev = kept.get(key)
-        if prev is None:
-            kept[key] = rec
-            order.append(key)
-            out.append(rec)
-        elif _rank(rec, mod) < _rank(prev, mod):
-            out[out.index(prev)] = rec
-            kept[key] = rec
-        # else: drop the non-canonical duplicate
-    return out
+# _dedupe_alias_composites — moved to lib/composite_lookup.py (imported above).
 
 
 def _composites_data(ws_root: "Path") -> dict:
@@ -3478,104 +2232,18 @@ def _composites_data_subprocess(ws_root: "Path") -> "dict | None":
 
 
 def _composite_resolve_data(spec_id: str) -> "dict | None":
-    """Pure data builder for a single composite — returns the resolve payload dict.
+    """Thin forwarder → ``lib.composite_resolve.resolve_composite``.
 
-    Mirrors the data returned by ``GET /api/composite-resolve`` (minus the
-    expensive SVG render, which is set to ``None``).  Used by ``publish.build_bundle``
-    to pre-build ``api/composite-state/<id>.json`` files consumed by the
-    bigraph-loom ``?static=1&stateUrl=`` read-only mode.
+    The implementation has moved to ``vivarium_dashboard.lib.composite_resolve``
+    so the FastAPI seam can call it without importing this server module.
+    This wrapper preserves the original call-site name used throughout server.py
+    and by ``publish.build_bundle``.
 
     Returns ``None`` on any failure (not found, import errors, missing packages).
     Requires ``WORKSPACE`` to already be set.
     """
-    _ws_add_to_sys_path()
-    try:
-        from vivarium_dashboard.lib.composite_lookup import (
-            substitute_parameters,
-            find_composite_path,
-        )
-        ws_data = yaml.safe_load(
-            (WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")
-        )
-        pkg = ws_data.get("package_path") or (
-            "pbg_" + ws_data.get("name", "").replace("-", "_")
-        )
-
-        # Generator-kind branch (pbg-superpowers @composite_generator)
-        try:
-            from pbg_superpowers.composite_generator import (
-                _REGISTRY, build_generator, discover_generators,
-            )
-            if not _REGISTRY:
-                discover_generators()
-            entry = _REGISTRY.get(spec_id)
-        except ImportError:
-            entry = None
-
-        if entry is not None:
-            try:
-                doc = build_generator(entry, overrides={})
-            except Exception:
-                return None
-            if isinstance(doc, dict) and "state" in doc and isinstance(doc["state"], dict):
-                state = doc["state"]
-            else:
-                state = doc
-            try:
-                from vivarium_dashboard.lib.process_docs import attach_process_docs
-                attach_process_docs(state)
-            except Exception:
-                pass
-            return {
-                "id": spec_id,
-                "name": entry.name,
-                "description": entry.description,
-                "parameters": entry.parameters,
-                "state": state,
-                "svg": None,
-                "kind": "generator",
-                "module": entry.module,
-                "default_n_steps": getattr(entry, "default_n_steps", None),
-            }
-
-        # Spec-file branch
-        path = find_composite_path(WORKSPACE, pkg, spec_id)
-        if path is None:
-            return None
-
-        text = path.read_text(encoding="utf-8")
-        spec = (
-            json.loads(text) if path.suffix.lower() == ".json"
-            else yaml.safe_load(text)
-        )
-        state = substitute_parameters(
-            spec.get("state") or {},
-            spec.get("parameters") or {},
-            {},
-        )
-        try:
-            from vivarium_dashboard.lib.composite_lookup import _derive_module_from_spec_id
-            module = _derive_module_from_spec_id(spec_id)
-        except Exception:
-            module = ""
-        try:
-            from vivarium_dashboard.lib.process_docs import attach_process_docs
-            attach_process_docs(state)
-        except Exception:
-            pass
-        return {
-            "id": spec_id,
-            "name": spec.get("name", spec_id.rsplit(".composites.", 1)[-1]),
-            "description": spec.get("description", ""),
-            "parameters": spec.get("parameters") or {},
-            "state": state,
-            "svg": None,
-            "kind": "spec",
-            "module": module,
-            "default_n_steps": None,
-        }
-    except Exception:
-        return None
+    from vivarium_dashboard.lib.composite_resolve import resolve_composite
+    return resolve_composite(WORKSPACE, spec_id)
 
 
 def _emitter_tag(emitter) -> str:
@@ -3620,276 +2288,30 @@ def _simulations_data(ws_root: Path) -> dict:
 def _visualization_classes_data(ws_root: Path) -> dict:
     """Pure data builder for GET /api/visualization-classes.
 
-    Returns ``{"classes": [...]}`` with the same shape as
-    ``Handler._list_visualization_classes()``.  Tolerates missing packages /
-    build_core failures → returns empty list.
-    Called by ``publish.build_bundle`` to export ``api/visualization-classes.json``.
+    Thin wrapper: delegates to ``lib.visualization_classes.list_visualization_classes``
+    so the FastAPI seam can call the same implementation without importing this
+    stdlib server module.  Called by ``publish.build_bundle`` to export
+    ``api/visualization-classes.json``.
     """
-    _ws_add_to_sys_path()
-    try:
-        ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
-        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-        sys.path.insert(0, str(ws_root))
-        core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
-        core = core_module.build_core()
-        registry: dict = dict(core.link_registry)
-    except Exception:
-        registry = {}
-
-    # Inject standard pbg-superpowers visualization classes
-    try:
-        from pbg_superpowers.visualizations import (
-            TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap,
-        )
-        for cls in [TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap]:
-            registry[cls.__name__] = cls
-    except ImportError:
-        pass
-
-    # Inject workspace-local viz classes
-    try:
-        from pbg_superpowers.visualization import Visualization as _VizBase
-        import pkgutil as _pkgutil, importlib as _importlib
-        viz_pkg = _importlib.import_module(f"{ws_data.get('package_path') or ('pbg_' + ws_data.get('name','').replace('-','_'))}.visualizations")
-        for _, modname, _ in _pkgutil.iter_modules(viz_pkg.__path__):
-            try:
-                mod = _importlib.import_module(f"{pkg}.visualizations.{modname}")
-                for attr_val in vars(mod).values():
-                    if not isinstance(attr_val, type):
-                        continue
-                    if attr_val is _VizBase:
-                        continue
-                    if issubclass(attr_val, _VizBase):
-                        registry[attr_val.__name__] = attr_val
-            except Exception:
-                continue
-    except Exception:
-        pass
-        _VizBase = None
-
-    # Filter to Visualization subclasses
-    try:
-        from pbg_superpowers.visualization import Visualization as _VB
-    except ImportError:
-        _VB = None
-
-    def _is_viz(cls):
-        if _VB is not None and cls is _VB:
-            return False
-        marker = getattr(cls, "is_visualization", None)
-        if callable(marker):
-            try:
-                if marker() is True:
-                    return True
-            except Exception:
-                pass
-        if _VB is not None:
-            try:
-                if isinstance(cls, type) and issubclass(cls, _VB):
-                    return True
-            except TypeError:
-                pass
-        return False
-
-    per_cls: dict = {}
-    for name, cls in registry.items():
-        if not _is_viz(cls) or name == "Visualization":
-            continue
-        existing = per_cls.get(id(cls))
-        if existing is None or len(name) < len(existing[0]):
-            per_cls[id(cls)] = (name, cls)
-
-    out = []
-    for name, cls in sorted(per_cls.values(), key=lambda kv: kv[0]):
-        try:
-            doc = (cls.__doc__ or "").strip().split("\n", 1)[0] if cls.__doc__ else ""
-        except Exception:
-            doc = ""
-        out.append({"address": f"local:{name}", "name": name, "doc": doc, "kind": "visualization"})
-
-    # Append Analysis classes from v2ecoli
-    try:
-        import v2ecoli.workflow.analyses  # noqa: F401
-        from v2ecoli.workflow.analysis import ANALYSIS_REGISTRY, Analysis
-        for _name, _cls in sorted(ANALYSIS_REGISTRY.items()):
-            if isinstance(_cls, type) and issubclass(_cls, Analysis):
-                try:
-                    _doc = (_cls.__doc__ or "").strip().split("\n")[0]
-                except Exception:
-                    _doc = ""
-                out.append({
-                    "address": f"local:{_cls.__module__}.{_cls.__qualname__}",
-                    "name": _name,
-                    "doc": _doc,
-                    "kind": "analysis",
-                })
-    except Exception:
-        pass
-
-    return {"classes": out}
+    from vivarium_dashboard.lib.visualization_classes import list_visualization_classes
+    return list_visualization_classes(ws_root)
 
 
-def _normalize_requirements(value) -> list:
-    """Normalize a study's ``implementation_requirements`` / ``gaps`` field to a
-    list of requirement dicts the renderers can iterate safely.
-
-    Authors write this field two ways:
-      • a YAML LIST of ``{id, title, ...}`` dicts (structured) — kept as-is;
-      • a multi-line PROSE STRING (``implementation_requirements: |``) — must
-        NOT be iterated character-by-character (that yields 1-char strings and
-        ``char.title`` resolves to the str.title *method*, rendering its repr
-        e.g. ``<built-in method title of str object>`` and a bogus
-        "(492 items)" count).
-
-    Contract:
-      • a STRING becomes ONE prose requirement → ``[{"_prose": True,
-        "description": <text>}]`` (count 1, not the character count);
-      • a LIST is kept, but bare-string items are wrapped the same prose way so
-        we never access ``.id`` / ``.title`` on a non-dict;
-      • empty/None → ``[]``.
-    """
-    if value is None:
-        return []
-    if isinstance(value, str):
-        text = value.strip()
-        return [{"_prose": True, "description": text}] if text else []
-    if isinstance(value, dict):
-        # A single mapping authored without a list wrapper.
-        return [value]
-    if isinstance(value, (list, tuple)):
-        out = []
-        for item in value:
-            if isinstance(item, dict):
-                out.append(item)
-            else:
-                text = "" if item is None else str(item).strip()
-                if text:
-                    out.append({"_prose": True, "description": text})
-        return out
-    # Unknown scalar — wrap defensively rather than iterate.
-    text = str(value).strip()
-    return [{"_prose": True, "description": text}] if text else []
+# Moved to lib/spec_norm.py (shared with Task 5 / lib.investigations_index).
+# Re-import under the old private name so every existing call-site in this file
+# continues to work without any other change.
+from vivarium_dashboard.lib.spec_norm import normalize_requirements as _normalize_requirements  # noqa: E402
 
 
 def _investigations_data(ws_root: Path) -> dict:
-    """Pure data builder for GET /api/investigations — returns ``{"investigations": [...]}`` dict.
+    """Thin wrapper: delegates to ``lib.investigations_index.build_investigations``.
 
-    Includes the study-dependency DAG: each row carries ``parent_studies``
-    (normalized to [{study, condition}]) and a computed ``blocked`` flag
-    plus ``blocked_by`` list pointing at parents that don't yet satisfy
-    their condition.
-
-    Called by ``Handler._get_investigations`` (which wraps it in the HTTP
-    response) and by ``publish.build_bundle`` to export
-    ``api/investigations.json``.  Requires ``WORKSPACE`` to be set to
-    *ws_root*.
+    The single implementation lives in ``lib/investigations_index.py`` so both
+    this stdlib handler and the FastAPI seam (``api/app.py``) share one code
+    path without either importing the other.
     """
-    _ws_add_to_sys_path()
-    from vivarium_dashboard.lib.investigations import (
-        load_spec,
-        InvestigationSpecError,
-        normalize_dag_edges,
-    )
-
-    # First pass: load every spec so we can resolve cross-study conditions.
-    loaded: list[tuple[Path, dict]] = []   # (dir, spec)
-    for d in _iter_study_dirs():
-        spec_path = d / "study.yaml" if (d / "study.yaml").is_file() else d / "spec.yaml"
-        if not spec_path.is_file():
-            continue
-        try:
-            loaded.append((d, load_spec(spec_path)))
-        except InvestigationSpecError as e:
-            loaded.append((d, {"__invalid__": True, "name": d.name, "error": str(e)}))
-
-    by_name: dict[str, dict] = {s["name"]: s for _, s in loaded if not s.get("__invalid__")}
-
-    def _normalize_parents(spec: dict) -> list[dict]:
-        return normalize_dag_edges(spec)
-
-    def _condition_satisfied(parent: dict | None, condition: str) -> bool:
-        if parent is None:
-            return False
-        status = parent.get("status", "planned")
-        if condition == "ran":
-            # "evaluated" is a later lifecycle state than "ran"
-            # (Simulate -> Evaluate -> Decide), so an evaluated study has
-            # necessarily run and must satisfy a "ran" prerequisite. Without
-            # this, a downstream study whose parent is terminally "evaluated"
-            # stays falsely blocked.
-            return status in ("ran", "evaluated", "complete")
-        if condition == "complete":
-            return status == "complete"
-        if condition == "tests-passed":
-            from pbg_superpowers import study_status
-            counts = study_status.count_test_outcomes(parent, parent.get("runs"))
-            return counts["fail"] == 0 and counts["pass"] > 0
-        return False
-
-    out = []
-    for d, spec in loaded:
-        if spec.get("__invalid__"):
-            out.append({"name": spec["name"], "status": "invalid", "error": spec["error"]})
-            continue
-        composites = spec.get("composites") or []
-        if composites:
-            composite_summary = ", ".join(c.get("name", "") for c in composites)
-            n_runs = _count_runs_for_study(spec["name"], spec)
-        else:
-            composite_summary = spec.get("composite", "")
-            n_runs = _count_runs_for_study(spec["name"], spec)
-            if n_runs == 0:
-                n_runs = len(spec.get("simulations") or [])
-
-        parents = _normalize_parents(spec)
-        blocked_by = []
-        for p in parents:
-            parent_spec = by_name.get(p["study"])
-            if not _condition_satisfied(parent_spec, p["condition"]):
-                blocked_by.append({
-                    "study":     p["study"],
-                    "condition": p["condition"],
-                    "missing":   "parent-not-found" if parent_spec is None else
-                                 f"parent.status={parent_spec.get('status', 'planned')}",
-                })
-
-        sim_set_top = spec.get("simulation_set") or []
-        beh_tests_top = spec.get("behavior_tests") or spec.get("expected_behavior") or []
-        readouts_top = spec.get("readouts") or spec.get("observables") or []
-        reqs_top = _normalize_requirements(
-            spec.get("implementation_requirements") or spec.get("gaps"))
-        n_variants_top = (len(sim_set_top) if sim_set_top
-                          else len(spec.get("variants") or []))
-        row = {
-            "name":            spec["name"],
-            "composite":       composite_summary,
-            "composites":      composites,
-            "description":     spec.get("description", ""),
-            "topic":           spec.get("topic", ""),
-            "tags":            spec.get("tags") or [],
-            "status":          spec.get("status", "planned"),
-            "phase":           spec.get("phase"),
-            "last_run":        spec.get("last_run"),
-            "n_simulations":   n_runs,
-            "baseline_names":  [b.get("name", "") for b in (spec.get("baseline") or [])
-                                if isinstance(b, dict)],
-            "n_baseline":      len(spec.get("baseline") or []),
-            "n_variants":      n_variants_top,
-            "n_groups":        len(spec.get("groups") or []),
-            "n_interventions": len(spec.get("interventions") or []),
-            "n_behaviors":     len(beh_tests_top),
-            "n_readouts":      len(readouts_top),
-            "n_requirements":  len(reqs_top),
-            "n_comparisons":   len(spec.get("comparisons") or []),
-            "n_runs":          n_runs,
-            "baseline_source": _format_baseline_source(spec),
-            "conclusions_excerpt": _conclusions_excerpt(spec),
-            "parent_studies":  parents,
-            "blocked":         len(blocked_by) > 0,
-            "blocked_by":      blocked_by,
-        }
-        out.append(row)
-    return {"investigations": out}
+    from vivarium_dashboard.lib.investigations_index import build_investigations
+    return build_investigations(ws_root)
 
 
 # --- Pass C: cross-worktree investigation registry --------------------------
@@ -3910,22 +2332,6 @@ def _investigations_data(ws_root: Path) -> dict:
 _REGISTRY_TTL_S = 5.0
 _registry_cache: dict[str, tuple[float, dict]] = {}
 
-
-def _http_get_json(url: str, timeout: float = 1.5) -> dict | None:
-    """Best-effort GET → JSON. Returns None on any failure (timeout, non-2xx,
-    invalid JSON). Never raises — callers treat None as 'peer unreachable'.
-    """
-    import urllib.request
-    import urllib.error
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            if resp.status != 200:
-                return None
-            data = resp.read()
-            return json.loads(data.decode("utf-8", errors="replace"))
-    except (urllib.error.URLError, TimeoutError, OSError,
-            json.JSONDecodeError, ValueError):
-        return None
 
 
 def _peer_current_investigation(url: str) -> dict | None:
@@ -4830,26 +3236,9 @@ def _post_study_create_from_run_for_test(ws_root, body):
 
 
 def _count_runs_for_study(name: str, spec: dict | None = None) -> int:
-    """Count runs in studies/<name>/runs.db, falling back to len(spec.runs).
-
-    F2: ``runs.db`` is the canonical source of truth. We still merge with
-    the count from ``spec.get("runs")`` to surface legacy v3 specs that
-    have historical ``runs:`` entries which never made it into the DB
-    (e.g. workspaces predating pbg_runner). Returns the larger of the two
-    so the dashboard never undercounts.
-    """
-    try:
-        db_runs = _read_runs_db_for_study(name)
-    except Exception:
-        db_runs = []
-    db_count = len(db_runs)
-    spec_count = 0
-    if spec is not None:
-        spec_count = len(spec.get("runs") or [])
-    # Most workspaces will have db_count >= spec_count after F2 lands.
-    # If they ever diverge below, max() preserves the union — better to
-    # over-report than under-report when both sources should agree.
-    return max(db_count, spec_count)
+    """Count runs for a study. Thin wrapper: delegates to lib, injecting WORKSPACE."""
+    from vivarium_dashboard.lib.investigations_index import _count_runs_for_study as _ii_count
+    return _ii_count(WORKSPACE, name, spec)
 
 
 def _has_active_run_for_study(
@@ -7206,56 +5595,8 @@ def _safe_slug(s: str) -> str:
     return s[:40]
 
 
-def _format_baseline_source(spec: dict) -> str:
-    """Summarise a v3 study's baseline as a short label.
-
-    - 1 entry: pkg_short:name if the composite contains '.composites.';
-      otherwise the composite verbatim.
-    - N entries: format the first as above, then append ' (+N-1 more)'.
-    - 0 entries / missing / not a list: ''.
-    """
-    baseline = spec.get("baseline") or []
-    if not isinstance(baseline, list) or not baseline:
-        return ""
-    first = baseline[0] if isinstance(baseline[0], dict) else None
-    if first is None:
-        return ""
-    composite = (first.get("composite") or "").strip()
-    if not composite:
-        return ""
-    if ".composites." in composite:
-        pkg, _, rest = composite.partition(".composites.")
-        label = f"{pkg}:{rest}"
-    else:
-        label = composite
-    if len(baseline) > 1:
-        return f"{label} (+{len(baseline) - 1} more)"
-    return label
-
-
-def _conclusions_excerpt(spec: dict, limit: int = 240) -> str:
-    """Return a single-line preview of ``spec.conclusions`` for the index cards.
-
-    The Conclusions tab (B6) stores a structured markdown document with H2
-    headers (``## Claims``, ``## Evidence``, ``## Limitations``, ``## Next
-    steps``). For an at-a-glance preview we drop those headers, collapse
-    whitespace, and truncate to ``limit`` characters.
-    """
-    text = (spec.get("conclusions") or "").strip()
-    if not text:
-        return ""
-    # Drop the structured H2 headers so the excerpt is just the prose.
-    text = re.sub(
-        r"^##\s+(Claims|Evidence|Limitations|Next steps)\s*$",
-        "",
-        text,
-        flags=re.MULTILINE | re.IGNORECASE,
-    )
-    # Collapse whitespace + truncate.
-    text = re.sub(r"\s+", " ", text).strip()
-    if len(text) > limit:
-        text = text[:limit].rstrip() + "…"
-    return text
+# _format_baseline_source and _conclusions_excerpt are imported from
+# vivarium_dashboard.lib.investigations_index at the top of this module.
 
 
 def _active_branch_action(commit_message: str, action_fn) -> tuple[dict, int]:
@@ -7534,128 +5875,20 @@ def _check_system_dep(check: dict, venv_py: Path) -> tuple[bool, str | None]:
 
 
 def _check_installed_module_sync(pkg_name: str, install_path: str | None) -> str | None:
-    """Return None if the module is consistently installed; else a one-line reason.
+    """Thin wrapper — forwards to ``lib.catalog._check_installed_module_sync``.
 
-    Best-effort, fast: verifies the Python package is importable from the
-    workspace venv. Surfaces drift between workspace.yaml.imports and the
-    actual venv state (e.g., user pip-uninstalled a package without touching
-    workspace.yaml).
+    Supplies the active ``WORKSPACE`` global so Handler call-sites (which don't
+    carry ``ws_root``) keep working unchanged.  The single implementation lives
+    in ``vivarium_dashboard.lib.catalog`` (Task 6 extraction).
     """
-    venv_py = WORKSPACE / ".venv" / "bin" / "python3"
-    if not venv_py.is_file():
-        return None  # no venv to introspect; treat as consistent
-    try:
-        result = subprocess.run(
-            [str(venv_py), "-c", f"import {pkg_name}"],
-            cwd=WORKSPACE, capture_output=True, text=True, timeout=3,
-        )
-        if result.returncode != 0:
-            return f"Python import of '{pkg_name}' failed (was the venv updated?)"
-    except subprocess.TimeoutExpired:
-        return f"Python import of '{pkg_name}' timed out"
-    except Exception as e:
-        return f"Python import check errored: {e}"
-    return None
+    from vivarium_dashboard.lib.catalog import (
+        _check_installed_module_sync as _f,
+    )
+    return _f(WORKSPACE, pkg_name, install_path)
 
 
-# Cached for the lifetime of a request. The bulk-venv-probe takes ~200ms;
-# cache invalidation is fine because each Handler instance is per-request.
-_CATALOG_VENV_PROBE_SCRIPT = r'''
-import importlib.metadata as md, json, re, sys
-out = {}
-for d in md.distributions():
-    name = (d.metadata.get("Name") or "").lower()
-    if not name:
-        continue
-    requires_raw = list(d.requires or [])
-    requires_names = []
-    for r in requires_raw:
-        # Bare-name extract: strip version markers, extras, environment markers.
-        bare = re.split(r"[\s;<>=!~\[]", r, 1)[0].strip().lower()
-        if bare:
-            requires_names.append(bare)
-    out[name] = {"version": d.version, "requires": requires_names}
-json.dump(out, sys.stdout)
-'''
-
-
-def _detect_workspace_venv_distributions(ws_root: Path) -> dict[str, dict]:
-    """Single bulk venv probe — returns {package_name_lower: {version, requires, requires_by}}.
-
-    Used by `/api/catalog` to detect packages that are installed in the
-    workspace venv but NOT declared in workspace.yaml.imports — the
-    transitive-dependency case (e.g., v2ecoli depends on viva-munk via
-    pyproject.toml, viva-munk shows up in the venv but workspace.yaml has
-    no entry for it).
-
-    `requires_by` is the reverse index: for each package, which OTHER
-    installed packages declared it as a dependency. Lets the UI show
-    "transitive: brought in by X, Y" for venv-only-installed catalog
-    entries.
-
-    Returns {} if the venv is missing, probe times out, or JSON parse
-    fails — caller should degrade gracefully (no transitive detection).
-    """
-    venv_py = ws_root / ".venv" / "bin" / "python3"
-    if not venv_py.is_file():
-        return {}
-    try:
-        result = subprocess.run(
-            [str(venv_py), "-c", _CATALOG_VENV_PROBE_SCRIPT],
-            cwd=ws_root, capture_output=True, text=True, timeout=5,
-        )
-        if result.returncode != 0:
-            return {}
-        data = json.loads(result.stdout)
-    except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError):
-        return {}
-    # Build reverse index: requires_by[child] = [parent_pkgs]
-    rev: dict[str, list[str]] = {}
-    for name, info in data.items():
-        for req in info.get("requires", []):
-            rev.setdefault(req, []).append(name)
-    for name, info in data.items():
-        info["requires_by"] = sorted(rev.get(name, []))
-    return data
-
-
-def _read_workspace_pyproject_deps(ws_root: Path) -> set[str]:
-    """Return the set of declared dependencies (bare package names, lowercased)
-    from the workspace's pyproject.toml `[project.dependencies]`.
-
-    Used by `/api/catalog` to mark a catalog module as installed when the
-    workspace's pyproject.toml declares it directly — even if
-    workspace.yaml.imports has no entry. This is the SECOND of three
-    install-source layers the dashboard now checks (after
-    workspace.yaml.imports, before raw venv presence).
-
-    Returns empty set on parse failure or missing file — degrades gracefully.
-    """
-    pyp = ws_root / "pyproject.toml"
-    if not pyp.is_file():
-        return set()
-    try:
-        import tomllib
-    except ImportError:
-        try:
-            import tomli as tomllib   # type: ignore
-        except ImportError:
-            return set()
-    try:
-        data = tomllib.loads(pyp.read_text(encoding="utf-8"))
-    except Exception:
-        return set()
-    deps = ((data.get("project") or {}).get("dependencies") or [])
-    out: set[str] = set()
-    for d in deps:
-        if not isinstance(d, str):
-            continue
-        # Strip version markers / extras / env markers — same regex as the
-        # venv probe so the two sources can be compared directly.
-        bare = re.split(r"[\s;<>=!~\[]", d, 1)[0].strip().lower()
-        if bare:
-            out.add(bare)
-    return out
+# _CATALOG_VENV_PROBE_SCRIPT, _detect_workspace_venv_distributions,
+# _read_workspace_pyproject_deps — moved to lib/catalog.py (imported above).
 
 
 # ---------------------------------------------------------------------------
@@ -9687,8 +7920,7 @@ if __name__ == "__main__":
 
         # Invalidate the module-level registry cache so the next registry
         # fetch will rebuild from disk.
-        global _REGISTRY_CACHE
-        _REGISTRY_CACHE["data"] = None
+        clear_registry_cache()
 
         # Attempt a fresh in-process import to verify the file loads cleanly.
         try:
@@ -10061,8 +8293,7 @@ if __name__ == "__main__":
         resp, code = _active_branch_action(commit_msg, action)
 
         # Invalidate registry cache so next /api/registry call sees fresh data.
-        global _REGISTRY_CACHE
-        _REGISTRY_CACHE["data"] = None
+        clear_registry_cache()
 
         # The pip install itself succeeded; if the metadata mutation was a
         # no-op (workspace.yaml already has installed=True on main), that's
@@ -16022,8 +14253,7 @@ if __name__ == "__main__":
         install_mode = install_mode_holder[0] if install_mode_holder else ("pypi" if pypi_name else "git")
 
         # Invalidate registry cache.
-        global _REGISTRY_CACHE
-        _REGISTRY_CACHE["data"] = None
+        clear_registry_cache()
 
         if code == 200:
             resp["ok"] = True
@@ -16142,8 +14372,7 @@ if __name__ == "__main__":
                 except Exception as e:
                     log.append(f"rm external/{name} failed: {e}")
 
-        global _REGISTRY_CACHE
-        _REGISTRY_CACHE["data"] = None
+        clear_registry_cache()
 
         return self._json({
             "ok": True,
@@ -16286,8 +14515,7 @@ if __name__ == "__main__":
         uninstall_mode = uninstall_mode_holder[0] if uninstall_mode_holder else mode
 
         # Invalidate registry cache.
-        global _REGISTRY_CACHE
-        _REGISTRY_CACHE["data"] = None
+        clear_registry_cache()
 
         if code == 200:
             resp["ok"] = True
