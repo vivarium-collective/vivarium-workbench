@@ -141,16 +141,17 @@ window.addEventListener('pageshow', function (e) {
    the current source name under the Vivarium brand. Click to switch local
    workspace / remote build (source-switch.js opens a dropdown below it). */
 .viv-workspace-name {
-  display: flex; align-items: center; gap: 7px;
+  display: flex; align-items: flex-start; gap: 7px;
   padding: 0 16px 10px; margin: 0;
   font-size: 12.5px; font-weight: 600;
   color: #64748b; cursor: default;
   background: none; border: none; border-radius: 0;
 }
 .viv-workspace-name strong { font-weight: 600; }
-.viv-ws-branch { color: #94a3b8; font-weight: 400; font-size: 0.92em;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.viv-workspace-name .viv-workspace-switcher-glyph { font-size: 8px; }
+.viv-ws-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.viv-ws-branch { color: #94a3b8; font-weight: 400; font-size: 0.84em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.viv-workspace-name .viv-workspace-switcher-glyph { font-size: 8px; margin-top: 4px; }
 .viv-workspace-switcher-glyph { color: #2ea043; font-size: 14px; }
 .viv-glyph-running { color: #2ea043; }
 /* The workspace name links to its GitHub repo; a small mark signals it. */
@@ -405,8 +406,10 @@ window.addEventListener('pageshow', function (e) {
            The small GitHub mark stays a direct link to the repo. -->
       <div class="viv-workspace-name">
         <span class="viv-workspace-switcher-glyph">●</span>
-        <strong>{{ workspace_name }}</strong>
-        {% if workspace_branch %}<span class="viv-ws-branch">· {{ workspace_branch }}</span>{% endif %}
+        <span class="viv-ws-text">
+          <strong>{{ workspace_name }}</strong>
+          {% if workspace_branch %}<span class="viv-ws-branch" title="{{ workspace_branch }}">{{ workspace_branch }}</span>{% endif %}
+        </span>
       </div>
     </div>
     <!-- Snapshot mode: static repo label replaces the switcher dropdown. -->
