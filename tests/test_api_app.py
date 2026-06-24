@@ -181,3 +181,47 @@ def test_workspace_default_is_cwd(monkeypatch):
     assert get_workspace() == Path(".").resolve()
     monkeypatch.setenv("VIVARIUM_DASHBOARD_WORKSPACE", "/tmp/ws-xyz")
     assert get_workspace() == Path("/tmp/ws-xyz").resolve()
+
+
+def test_study_charts_empty_workspace(client):
+    """A study with no runs.db / charts yields the typed empty payload, not a 500."""
+    r = client.get("/api/study-charts/dnaa-1")
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {
+        "study": "dnaa-1", "schema_version": None, "charts": [],
+        "db_exists": False, "static_count": 0, "live_count": 0,
+    }
+
+
+def test_study_charts_validates_polymorphic_charts(client, monkeypatch):
+    """Live (svg) and static (img) charts both pass through the typed response."""
+    payload = {
+        "study": "dnaa-1", "schema_version": 4,
+        "charts": [
+            {"key": "live1", "title": "Live", "caption": "c", "svg": "<svg/>", "source": "live"},
+            {"key": "stat1", "title": "Static", "caption": "c", "img": "data:image/png;base64,AA",
+             "source": "static", "media": "png", "freshness": "fresh"},
+        ],
+        "db_exists": True, "static_count": 1, "live_count": 1,
+    }
+    monkeypatch.setattr(api_app, "build_study_charts_payload", lambda ws, slug: payload)
+    body = client.get("/api/study-charts/dnaa-1").json()
+    assert body["live_count"] == 1 and body["static_count"] == 1
+    assert body["charts"][0]["svg"] == "<svg/>" and body["charts"][0]["img"] is None
+    assert body["charts"][1]["img"].startswith("data:image/png") and body["charts"][1]["svg"] is None
+
+
+def test_study_charts_in_openapi(client):
+    """The study-charts route + its models appear in the generated OpenAPI schema."""
+    spec = client.get("/openapi.json").json()
+    assert "/api/study-charts/{slug}" in spec["paths"]
+    for name in ("StudyChartsPayload", "ChartPayload"):
+        assert name in spec["components"]["schemas"]
+
+
+def test_swagger_ui_and_redoc_served(client):
+    """The auto-generated docs pages are reachable (the whole point of the seam)."""
+    assert client.get("/docs").status_code == 200          # Swagger UI HTML
+    assert client.get("/redoc").status_code == 200         # ReDoc HTML
+    assert client.get("/openapi.json").status_code == 200  # raw schema

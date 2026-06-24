@@ -124,5 +124,20 @@ def test_remote_run_job_falls_back_on_bad_status(recwarn):
 def test_chart_payload_shape():
     chart = {"key": "cell_mass", "title": "Cell mass", "caption": "over time", "svg": "<svg/>"}
     assert ChartPayload.model_validate(chart).key == "cell_mass"
-    payload = StudyChartsPayload.model_validate({"charts": [chart], "extra_ignored": True})
+    payload = StudyChartsPayload.model_validate({
+        "study": "dnaa-1", "schema_version": 4, "charts": [chart],
+        "db_exists": True, "static_count": 0, "live_count": 1,
+    })
     assert len(payload.charts) == 1
+    assert payload.study == "dnaa-1" and payload.live_count == 1
+
+
+def test_chart_payload_polymorphic_static():
+    """A static image chart (img data-URI, no svg) validates and keeps extras."""
+    chart = {
+        "key": "chromosome-map", "title": "Chromosome", "caption": "static",
+        "img": "data:image/png;base64,AAAA", "source": "static",
+        "media": "png", "freshness": "fresh", "simulations": "baseline",
+    }
+    c = ChartPayload.model_validate(chart)
+    assert c.svg is None and c.img.startswith("data:image/png") and c.source == "static"
