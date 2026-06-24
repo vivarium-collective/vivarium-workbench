@@ -36,3 +36,12 @@ def test_branch_source_mounted_in_github_page():
     tpl = (Path(server.__file__).parent / "templates" / "index.html.j2").read_text()
     assert 'id="viv-branch-source"' in tpl
     assert "assets/branch-source.js" in tpl
+
+
+def test_chip_is_display_only_and_no_source_switch_js():
+    from pathlib import Path
+    from vivarium_dashboard import server
+    tpl = (Path(server.__file__).parent / "templates" / "index.html.j2").read_text()
+    # The chip block keeps the source label but is no longer a button/dropdown trigger.
+    assert "assets/source-switch.js" not in tpl
+    assert 'id="viv-source-switch-trigger"' not in tpl

@@ -142,15 +142,12 @@ window.addEventListener('pageshow', function (e) {
    workspace / remote build (source-switch.js opens a dropdown below it). */
 .viv-workspace-name {
   display: flex; align-items: center; gap: 7px;
-  padding: 6px 16px 6px; margin: 4px 8px 8px;
+  padding: 0 16px 10px; margin: 0;
   font-size: 12.5px; font-weight: 600;
-  color: #64748b; cursor: pointer; user-select: none;
-  background: none; border: 1px solid transparent; border-radius: 6px;
+  color: #64748b; cursor: default;
+  background: none; border: none; border-radius: 0;
 }
-.viv-workspace-name:hover { background: #f6f8fa; border-color: #e5e7eb; }
 .viv-workspace-name strong { font-weight: 600; }
-.viv-ws-switch-caret { margin-left: auto; color: #9ca3af; font-size: 10px; }
-.viv-workspace-name:hover .viv-ws-switch-caret { color: #6b7280; }
 .viv-workspace-name .viv-workspace-switcher-glyph { font-size: 8px; }
 .viv-workspace-switcher-glyph { color: #2ea043; font-size: 14px; }
 .viv-glyph-running { color: #2ea043; }
@@ -398,8 +395,7 @@ window.addEventListener('pageshow', function (e) {
       <!-- The workspace-name chip is the source switcher trigger: click to pick
            another local workspace or a remote sms-api build (source-switch.js).
            The small GitHub mark stays a direct link to the repo. -->
-      <div class="viv-workspace-name" id="viv-source-switch-trigger" role="button"
-           tabindex="0" aria-haspopup="menu" title="Switch workspace or build source">
+      <div class="viv-workspace-name" title="Current source (manage in the Branch tab)">
         <span class="viv-workspace-switcher-glyph">●</span>
         <strong>{{ workspace_name }}</strong>
         {% if repo_url %}
@@ -408,7 +404,6 @@ window.addEventListener('pageshow', function (e) {
           <svg class="viv-ws-gh-mark" width="12" height="12"><use href="#viv-gh-mark"/></svg>
         </a>
         {% endif %}
-        <span class="viv-ws-switch-caret" aria-hidden="true">▾</span>
       </div>
     </div>
     <!-- Snapshot mode: static repo label replaces the switcher dropdown. -->
@@ -1679,7 +1674,6 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
      (investigation-switcher.js). The /api/workspaces endpoints remain available
      for CLI tooling. -->
 <script src="assets/investigation-switcher.js"></script>
-<script src="assets/source-switch.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
 <script src="assets/branch-source.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
 <script>
 // Initialize drop zones once walkthrough.js is loaded.
