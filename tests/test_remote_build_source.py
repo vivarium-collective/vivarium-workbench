@@ -123,6 +123,8 @@ def test_list_build_sources_maps_and_labels():
     b = out["builds"][0]
     assert b["simulator_id"] == 45 and b["commit"] == "32b901"
     assert b["label"] == "v2ecoli @ 32b901 (build #45)"
+    # repo_url must be the raw URL from sms-api (not the bare display name)
+    assert b["repo_url"] == "https://github.com/org/v2ecoli"
 
 
 def test_list_build_sources_degrades_on_error():

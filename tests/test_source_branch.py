@@ -118,3 +118,39 @@ def test_build_remote_missing_args_400(monkeypatch):
 
     server.Handler._post_source_build_remote(H(), {"repo": ""})
     assert captured["code"] == 400
+
+
+def test_build_remote_normalizes_git_suffix(monkeypatch):
+    """A .git-suffixed repo URL must be stripped before it reaches sms-api."""
+    from vivarium_dashboard import server
+    from vivarium_dashboard.lib import sms_api_client as sac
+    seen = {}
+    monkeypatch.setattr(sac.SmsApiClient, "latest_simulator",
+                        lambda self, repo, branch: seen.update(repo=repo) or {"git_commit_hash": "deadbee"})
+    monkeypatch.setattr(sac.SmsApiClient, "register_simulator",
+                        lambda self, repo, branch, commit: {"database_id": 7, "git_commit_hash": commit})
+    captured = {}
+
+    class H:
+        def _json(self, obj, code): captured.update(obj=obj, code=code)
+
+    server.Handler._post_source_build_remote(H(), {"repo": "https://github.com/o/v2ecoli.git", "branch": "main"})
+    assert captured["code"] == 200
+    # .git must be stripped before reaching the client
+    assert seen["repo"] == "https://github.com/o/v2ecoli"
+
+
+def test_build_remote_empty_commit_502(monkeypatch):
+    """When sms-api returns an empty commit hash, return 502 immediately."""
+    from vivarium_dashboard import server
+    from vivarium_dashboard.lib import sms_api_client as sac
+    monkeypatch.setattr(sac.SmsApiClient, "latest_simulator",
+                        lambda self, repo, branch: {"git_commit_hash": ""})
+    captured = {}
+
+    class H:
+        def _json(self, obj, code): captured.update(obj=obj, code=code)
+
+    server.Handler._post_source_build_remote(H(), {"repo": "https://github.com/o/v2ecoli", "branch": "main"})
+    assert captured["code"] == 502
+    assert "could not resolve branch HEAD" in captured["obj"]["error"]

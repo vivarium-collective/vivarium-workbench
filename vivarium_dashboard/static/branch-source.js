@@ -63,7 +63,7 @@
       var db = rb.ok ? await rb.json() : { builds: [], error: "unreachable" };
       state.error = db.error || null;
       state.entries = (db.builds || []).map(function (b) {
-        return { repo: b.repo, branch: b.branch || "", commit: b.commit || "",
+        return { repo: b.repo, repo_url: b.repo_url, branch: b.branch || "", commit: b.commit || "",
                  label: b.label, simulator_id: b.simulator_id };
       });
     }
@@ -92,7 +92,10 @@
     host.appendChild(scopeRow);
 
     var repos = _distinct(state.entries, "repo");
-    if (state.repo == null) state.repo = (state.current && state.current.repo) || repos[0] || null;
+    if (state.repo == null || repos.indexOf(state.repo) < 0) {
+      var seed = (state.current && state.current.repo);
+      state.repo = (seed && repos.indexOf(seed) >= 0) ? seed : (repos[0] || null);
+    }
 
     host.appendChild(_selectRow("Repo", "viv-bs-repo", repos, state.repo, function (v) {
       state.repo = v; state.branch = null; _render();
@@ -100,7 +103,7 @@
 
     var inRepo = state.entries.filter(function (e) { return e.repo === state.repo; });
     var branches = _distinct(inRepo, "branch");
-    if (state.branch == null) state.branch = branches[0] || null;
+    if (state.branch == null || branches.indexOf(state.branch) < 0) state.branch = branches[0] || null;
     host.appendChild(_selectRow("Branch", "viv-bs-branch", branches, state.branch, function (v) {
       state.branch = v; _render();
     }));
@@ -162,10 +165,10 @@
     actions.appendChild(pushBtn);
 
     var buildBtn = _el("button", "viv-bs-action", "Build via sms-api"); buildBtn.id = "viv-bs-build";
-    buildBtn.disabled = !(state.repo && String(state.repo).indexOf("http") === 0);
+    buildBtn.disabled = !(state.scope === "remote" && state.selected && state.selected.repo_url);
     buildBtn.title = buildBtn.disabled ? "Select a Remote source (full repo URL) to register a build" : "";
     buildBtn.addEventListener("click", function () {
-      var repo = state.repo, branch = state.branch;
+      var repo = (state.selected && state.selected.repo_url) || "", branch = state.branch;
       if (!repo || !branch) { alert("Pick a repo and branch first"); return; }
       buildBtn.disabled = true; buildBtn.textContent = "Registering…";
       fetch("/api/source/build-remote", {
@@ -176,6 +179,10 @@
           buildBtn.disabled = false; buildBtn.textContent = "Build via sms-api";
           if (res.ok) { alert("Registered build #" + res.d.simulator_id + " @ " + (res.d.commit || "").slice(0, 7)); state.scope = "remote"; refresh(); }
           else alert("Build failed: " + (res.d.error || "error"));
+        })
+        .catch(function () {
+          buildBtn.disabled = false; buildBtn.textContent = "Build via sms-api";
+          alert("Build failed: network error");
         });
     });
     actions.appendChild(buildBtn);

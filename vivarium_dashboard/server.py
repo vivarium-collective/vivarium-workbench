@@ -16581,10 +16581,13 @@ if __name__ == "__main__":
         branch = (body or {}).get("branch") or ""
         if not repo or not branch:
             return self._json({"error": "repo and branch are required"}, 400)
+        repo = _normalize_repo_url(repo)
         client = SmsApiClient(_sms_api_base())
         try:
             latest = client.latest_simulator(repo, branch)
             commit = latest.get("git_commit_hash") or ""
+            if not commit:
+                return self._json({"error": "could not resolve branch HEAD via sms-api"}, 502)
             reg = client.register_simulator(repo, branch, commit)
         except SmsApiError as e:
             return self._json({"error": f"sms-api: {e}"}, 502)
