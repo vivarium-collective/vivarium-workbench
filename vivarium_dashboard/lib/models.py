@@ -446,6 +446,137 @@ class CatalogPayload(BaseModel):
     modules: list[CatalogModule] = []
 
 
+# ---------------------------------------------------------------------------
+# Git / branch models
+# ---------------------------------------------------------------------------
+
+class GitStatus(BaseModel):
+    """``GET /api/git-status`` payload (lib.git_status.build_git_status).
+
+    Live sync state for the workspace's git.  All network-dependent fields are
+    Optional so the response degrades gracefully when origin is absent.
+    ``extra="allow"`` preserves any future extension keys.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    upstream_repo: Optional[str] = None
+    branch: Optional[str] = None
+    push_state: str = "no_origin"
+    ahead: int = 0
+    behind: int = 0
+    branch_url: Optional[str] = None
+    repo_url: Optional[str] = None
+    pr_number: Optional[int] = None
+    pr_url: Optional[str] = None
+    base: str = "main"
+    ahead_of_base: int = 0
+    dirty_count: int = 0
+    compare_url: Optional[str] = None
+    pr_state: Optional[str] = None
+    gh_available: bool = False
+    has_active_workstream: bool = False
+
+
+class WorkStatus(BaseModel):
+    """``GET /api/work-status`` payload (lib.git_status.build_work_status).
+
+    ``active: False`` when no workstream is active (all other fields absent).
+    ``extra="allow"`` preserves any future extension keys.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    active: bool = False
+    branch: Optional[str] = None
+    base: Optional[str] = None
+    commits_ahead: Optional[int] = None
+    commits_behind: Optional[int] = None
+    behind_ref: Optional[str] = None
+    stale: Optional[bool] = None
+    stale_threshold: Optional[int] = None
+    unpushed: Optional[int] = None
+    pushed: Optional[bool] = None
+    has_origin: Optional[bool] = None
+    gh_available: Optional[bool] = None
+    pr_number: Optional[int] = None
+    pr_url: Optional[str] = None
+
+
+class BranchStaleness(BaseModel):
+    """``GET /api/branch-staleness`` payload (lib.git_status.build_branch_staleness).
+
+    HTTP 400 when the branch cannot be determined (no ``?branch=`` and HEAD is
+    detached / not on a named branch).
+    """
+
+    branch: str
+    base: str = "main"
+    behind_ref: str = ""
+    commits_behind: int = 0
+    stale_threshold: int = 20
+    stale: bool = False
+
+
+class DirtyFile(BaseModel):
+    """One entry in the ``DirtyStatus.files`` list."""
+
+    status: str
+    path: str
+
+
+class DirtyStatus(BaseModel):
+    """``GET /api/dirty-status`` payload (lib.git_status.build_dirty_status).
+
+    HTTP 500 when ``git status`` itself fails.
+    """
+
+    count: int = 0
+    files: list[DirtyFile] = []
+
+
+class BranchCommit(BaseModel):
+    """Last-commit summary for a stage branch."""
+
+    model_config = ConfigDict(extra="allow")
+
+    sha: str = ""
+    subject: str = ""
+    date: str = ""
+
+
+class BranchInfo(BaseModel):
+    """One branch entry in the ``GET /api/branches`` payload."""
+
+    name: str
+    last_commit: BranchCommit = BranchCommit()
+    ahead_of_main: int = 0
+
+
+class BranchesPayload(BaseModel):
+    """``GET /api/branches`` payload (lib.git_status.list_branches).
+
+    Returns all ``stage/*`` branches with last-commit info.  ``extra="allow"``
+    preserves an ``error`` key returned on subprocess failure.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    branches: list[BranchInfo] = []
+    current: Optional[str] = None
+
+
+class BranchDiff(BaseModel):
+    """``GET /api/branch-diff`` payload (lib.git_status.build_branch_diff).
+
+    HTTP 400 when ``?branch=`` is missing or contains unsafe characters.
+    """
+
+    branch: str
+    log: str = ""
+    diff_stat: str = ""
+
+
 class CompositeResolvePayload(BaseModel):
     """``GET /api/composite-resolve`` payload (lib.composite_resolve.resolve_composite).
 
