@@ -53,6 +53,14 @@ class SmsApiClient:
         """GET /core/v1/simulator/versions — all registered simulator builds."""
         return self._get("/core/v1/simulator/versions")
 
+    def list_build_simulations(self, simulator_id: int) -> list:
+        """GET /api/v1/simulations?simulator_id=N — simulation runs on the
+        deployment. The ``simulator_id`` query param is required by the API but
+        does not actually filter (the server returns every recorded simulation),
+        so callers must filter the returned list by ``simulator_id`` themselves.
+        Returns the raw list of simulation records."""
+        return self._get("/api/v1/simulations", {"simulator_id": simulator_id})
+
     def download_workspace(self, simulator_id: int, dest_dir: Path) -> Path:
         """Stream a build's repo@commit workspace tarball (SP1's endpoint) to
         dest_dir/workspace.tar.gz."""

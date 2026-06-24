@@ -1373,6 +1373,10 @@ body.focus-mode .page.active{ display:block !important; min-height:0 !important 
 #btn-open-pr { padding: 0.4rem 0.8rem; font-weight: 500; }
 
 /* Top-bar live git-status strip */
+/* The `display: inline-flex` below overrides the `[hidden]` attribute's
+   UA `display:none`, so the legacy single-line banner leaked through even
+   when JS set hidden=true. This restores hidden semantics. */
+.git-status[hidden] { display: none !important; }
 .git-status {
   display: inline-flex;
   align-items: center;
