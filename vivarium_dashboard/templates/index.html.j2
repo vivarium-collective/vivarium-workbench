@@ -310,6 +310,25 @@ window.addEventListener('pageshow', function (e) {
   display: flex; align-items: center; gap: 8px;
 }
 .viv-iset-menu-row-title { flex: 1; font-size: 13px; color: #111827; }
+.viv-branch-source { padding: 4px 0 16px; max-width: 640px; }
+.viv-bs-title { font-size: 15px; margin: 0 0 12px; }
+.viv-bs-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.viv-bs-key { width: 64px; color: #6b7280; font-size: 13px; }
+.viv-bs-select, .viv-bs-commit-select { padding: 4px 8px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 13px; }
+.viv-bs-toggle { padding: 4px 12px; border: 1px solid #d0d7de; background: #fff; cursor: pointer; border-radius: 6px; font-size: 13px; }
+.viv-bs-toggle.active { background: #eef4ff; border-color: #94b4ff; color: #1e40af; }
+.viv-bs-commit { font-family: ui-monospace, monospace; font-size: 13px; }
+.viv-bs-current { color: #1e40af; font-weight: 600; font-size: 12px; }
+.viv-bs-actions { display: flex; gap: 8px; margin: 14px 0; }
+.viv-bs-action { padding: 6px 14px; border: 1px solid #d0d7de; background: #fff; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.viv-bs-action:disabled { opacity: 0.45; cursor: default; }
+.viv-bs-note { color: #b45309; font-size: 12px; margin: 6px 0; }
+.viv-bs-list { list-style: none; margin: 10px 0 0; padding: 0; border-top: 1px solid #f3f4f6; }
+.viv-bs-list-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 1px solid #f3f4f6; font-size: 13px; }
+.viv-bs-list-row.current { background: #eef4ff; }
+.viv-bs-list-label { flex: 1; }
+.viv-bs-forget { border: none; background: none; cursor: pointer; color: #c0c4cc; }
+.viv-bs-forget:hover { color: #d1242f; }
 .viv-iset-menu-forget {
   flex: 0 0 auto; border: none; background: none; cursor: pointer;
   color: #c0c4cc; font-size: 12px; line-height: 1; padding: 2px 4px;
@@ -943,6 +962,7 @@ window.addEventListener('pageshow', function (e) {
 <!-- GitHub: in-UI sign-in + (future) org picker. The github-login.js widget
      activates the #viv-gh-chip element on load. No-AI-agent setup path. -->
 <section id="page-github" class="page" data-page="github">
+  <div id="viv-branch-source" class="viv-branch-source"></div>
   <h2 class="page-title">Branch</h2>
 
   <!-- Settings-style single panel: three sections (Account, Workspace
@@ -1660,6 +1680,7 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
      for CLI tooling. -->
 <script src="assets/investigation-switcher.js"></script>
 <script src="assets/source-switch.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
+<script src="assets/branch-source.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
 <script>
 // Initialize drop zones once walkthrough.js is loaded.
 document.addEventListener("DOMContentLoaded", function() {
