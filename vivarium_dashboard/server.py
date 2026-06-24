@@ -386,6 +386,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/workspaces/stop":          "_post_workspaces_stop",
     "/api/source/switch":            "_post_source_switch",
     "/api/source/switch-build":      "_post_source_switch_build",
+    "/api/branch/push":              "_post_branch_push",
     # Remote-run endpoints (Phase 3b).
     "/api/remote-run-start":         "_post_remote_run_start",
 }
@@ -6586,6 +6587,35 @@ def _remote_push_and_sha() -> str:
     if not sha:
         raise RuntimeError("could not resolve HEAD commit")
     return sha
+
+
+class _NotAGitRepo(RuntimeError):
+    pass
+
+
+def _remote_commit_and_push(message: str) -> dict:
+    """Stage+commit WORKSPACE changes (skip if clean), push current branch, return result."""
+    inside = subprocess.run(
+        ["git", "-C", str(WORKSPACE), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True, text=True,
+    )
+    if inside.returncode != 0 or inside.stdout.strip() != "true":
+        raise _NotAGitRepo("active source is not a git workspace (no commit/push)")
+    subprocess.run(["git", "-C", str(WORKSPACE), "add", "-A"], capture_output=True, text=True, timeout=30)
+    status = subprocess.run(
+        ["git", "-C", str(WORKSPACE), "status", "--porcelain"], capture_output=True, text=True, timeout=10,
+    ).stdout.strip()
+    if status:
+        c = subprocess.run(
+            ["git", "-C", str(WORKSPACE), "commit", "-m", message or "dashboard commit"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if c.returncode != 0:
+            raise RuntimeError(f"git commit failed: {(c.stderr or c.stdout)[-300:]}")
+    sha = _remote_push_and_sha()
+    return {"ok": True, "pushed": bool(status), "commit": sha,
+            "branch": subprocess.run(["git", "-C", str(WORKSPACE), "rev-parse", "--abbrev-ref", "HEAD"],
+                                     capture_output=True, text=True).stdout.strip()}
 
 
 def _normalize_repo_url(url: str) -> str:
@@ -16532,6 +16562,16 @@ if __name__ == "__main__":
              "source": {"path": str(entry["path"]), "name": entry.get("name")}},
             200,
         )
+
+    def _post_branch_push(self, body: dict):
+        """POST /api/branch/push — commit WORKSPACE changes + push current branch."""
+        message = (body or {}).get("message") or "dashboard commit"
+        try:
+            return self._json(_remote_commit_and_push(message), 200)
+        except _NotAGitRepo as e:
+            return self._json({"error": str(e)}, 409)
+        except Exception as e:
+            return self._json({"error": str(e)}, 500)
 
     def _get_source_builds(self):
         """GET /api/source/builds — remote sms-api simulator builds for the

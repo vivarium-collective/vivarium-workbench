@@ -140,7 +140,22 @@
 
     var pushBtn = _el("button", "viv-bs-action", "Commit + Push"); pushBtn.id = "viv-bs-push";
     pushBtn.disabled = state.scope !== "local";
-    actions.appendChild(pushBtn);   // wired in Task 4
+    pushBtn.addEventListener("click", function () {
+      if (pushBtn.disabled) return;
+      var msg = window.prompt("Commit message for push:", "dashboard commit");
+      if (msg == null) return;
+      pushBtn.disabled = true; pushBtn.textContent = "Pushing…";
+      fetch("/api/branch/push", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: msg }),
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          pushBtn.disabled = false; pushBtn.textContent = "Commit + Push";
+          if (res.ok) alert("Pushed " + (res.d.branch || "") + " @ " + (res.d.commit || "").slice(0, 7));
+          else alert("Push failed: " + (res.d.error || "error"));
+        });
+    });
+    actions.appendChild(pushBtn);
 
     var buildBtn = _el("button", "viv-bs-action", "Build via sms-api"); buildBtn.id = "viv-bs-build";
     actions.appendChild(buildBtn);  // wired in Task 5

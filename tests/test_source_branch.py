@@ -45,3 +45,36 @@ def test_chip_is_display_only_and_no_source_switch_js():
     # The chip block keeps the source label but is no longer a button/dropdown trigger.
     assert "assets/source-switch.js" not in tpl
     assert 'id="viv-source-switch-trigger"' not in tpl
+
+
+def test_branch_push_commits_and_pushes(tmp_path, monkeypatch):
+    from vivarium_dashboard import server
+    # bare remote + working clone on a named branch with a dirty tree
+    bare = tmp_path / "remote.git"; _git(tmp_path, "init", "-q", "--bare", str(bare))
+    ws = tmp_path / "ws"; ws.mkdir()
+    _git(ws, "init", "-q"); _git(ws, "checkout", "-q", "-b", "feat/x")
+    _git(ws, "remote", "add", "origin", str(bare))
+    _git(ws, "-c", "user.email=a@b.c", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "base")
+    (ws / "f.txt").write_text("hi")
+    monkeypatch.setattr(server, "WORKSPACE", ws)
+    captured = {}
+
+    class H:
+        def _json(self, obj, code): captured.update(obj=obj, code=code)
+
+    server.Handler._post_branch_push(H(), {"message": "add f"})
+    assert captured["code"] == 200 and captured["obj"]["pushed"] is True
+    log = subprocess.run(["git", "-C", str(ws), "log", "--oneline"], capture_output=True, text=True).stdout
+    assert "add f" in log
+
+
+def test_branch_push_non_git_409(tmp_path, monkeypatch):
+    from vivarium_dashboard import server
+    monkeypatch.setattr(server, "WORKSPACE", tmp_path)  # not a git repo
+    captured = {}
+
+    class H:
+        def _json(self, obj, code): captured.update(obj=obj, code=code)
+
+    server.Handler._post_branch_push(H(), {"message": "x"})
+    assert captured["code"] == 409
