@@ -325,3 +325,114 @@ def test_composite_resolve_in_openapi(client):
     spec = client.get("/openapi.json").json()
     assert "/api/composite-resolve" in spec["paths"]
     assert "CompositeResolvePayload" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# /api/registry
+# ---------------------------------------------------------------------------
+
+def test_registry_empty_workspace(client, monkeypatch):
+    """An empty workspace yields the typed empty payload, not a 500.
+
+    We patch ``build_registry`` to return the empty shape that a workspace with
+    no importable package would produce (subprocess fails gracefully) so the
+    test is deterministic regardless of which pbg packages are installed."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(_app, "build_registry", lambda ws, **kw: {
+        "processes": [], "types": [], "imports": [],
+    })
+    r = client.get("/api/registry")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["processes"] == []
+    assert body["types"] == []
+    assert body["imports"] == []
+
+
+def test_registry_typed_passthrough(client, monkeypatch):
+    """The route validates the builder's output through RegistryPayload;
+    extra top-level fields (default_emitter, workspace_pkgs, error) are
+    preserved by extra='allow'."""
+    import vivarium_dashboard.api.app as _app
+
+    payload = {
+        "processes": [
+            {
+                "name": "MyProcess",
+                "address": "pbg_ws.processes.my_process.MyProcess",
+                "kind": "process",
+                "schema_preview": "{}",
+                "aliases": ["my_process.MyProcess"],
+                "source": "in_workspace",
+            },
+            {
+                "name": "ParquetEmitter",
+                "address": "pbg_emitters.parquet.ParquetEmitter",
+                "kind": "emitter",
+                "schema_preview": "",
+                "aliases": [],
+                "source": "framework",
+                "is_workspace_default": True,   # extra field
+            },
+        ],
+        "types": [
+            {"name": "float", "schema_preview": "<class 'float'>"},
+        ],
+        "imports": [
+            {"name": "pbg-oxidizeme", "package": "pbg_oxidizeme",
+             "source": "https://github.com/x/pbg-oxidizeme",
+             "ref": "main", "description": "oxidative stress"},
+        ],
+        "default_emitter": "parquet",          # top-level extra field
+        "workspace_pkgs": ["pbg_ws"],          # top-level extra field
+    }
+    monkeypatch.setattr(_app, "build_registry", lambda ws, **kw: payload)
+    r = client.get("/api/registry")
+    assert r.status_code == 200
+    body = r.json()
+
+    # Typed fields
+    assert len(body["processes"]) == 2
+    p0 = body["processes"][0]
+    assert p0["name"] == "MyProcess"
+    assert p0["kind"] == "process"
+    assert p0["source"] == "in_workspace"
+    p1 = body["processes"][1]
+    assert p1["kind"] == "emitter"
+    assert p1["is_workspace_default"] is True     # extra="allow" on RegistryProcess
+
+    assert body["types"][0]["name"] == "float"
+    imp = body["imports"][0]
+    assert imp["package"] == "pbg_oxidizeme"
+    assert imp["description"] == "oxidative stress"
+
+    # Extra top-level keys preserved by RegistryPayload extra="allow"
+    assert body["default_emitter"] == "parquet"
+    assert body["workspace_pkgs"] == ["pbg_ws"]
+
+
+def test_registry_error_field_preserved(client, monkeypatch):
+    """When the subprocess fails, build_registry returns an 'error' key alongside
+    empty lists.  The route must not 422 — RegistryPayload extra='allow' keeps it."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(_app, "build_registry", lambda ws, **kw: {
+        "processes": [], "types": [], "imports": [],
+        "error": "subprocess failed: ModuleNotFoundError: No module named 'pbg_ws'",
+    })
+    r = client.get("/api/registry")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["processes"] == []
+    assert "error" in body
+    assert "ModuleNotFoundError" in body["error"]
+
+
+def test_registry_in_openapi(client):
+    """The /api/registry route and RegistryPayload appear in the OpenAPI schema."""
+    spec = client.get("/openapi.json").json()
+    assert "/api/registry" in spec["paths"]
+    components = spec["components"]["schemas"]
+    for name in ("RegistryPayload", "RegistryProcess", "RegistryType", "RegistryImport"):
+        assert name in components, f"{name} missing from openapi.json"

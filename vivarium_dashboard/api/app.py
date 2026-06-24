@@ -43,6 +43,7 @@ from vivarium_dashboard.lib.models import (
     DataSourcesPayload,
     InvestigationSummary,
     ReferencesBibPayload,
+    RegistryPayload,
     SavedVisualizationsPayload,
     SimRow,
     SimulationsPayload,
@@ -50,6 +51,7 @@ from vivarium_dashboard.lib.models import (
     VisualizationClassesPayload,
     VizClass,
 )
+from vivarium_dashboard.lib.registry import build_registry
 from vivarium_dashboard.lib.visualization_classes import list_visualization_classes
 from vivarium_dashboard.lib.simulations_index import list_simulations
 from vivarium_dashboard.lib.study_charts import build_study_charts_payload
@@ -174,6 +176,20 @@ def create_app() -> FastAPI:
         return VisualizationClassesPayload(
             classes=[VizClass.model_validate(c) for c in result.get("classes", [])]
         )
+
+    @app.get("/api/registry", response_model=RegistryPayload)
+    def registry(ws: Path = Depends(get_workspace)) -> RegistryPayload:
+        """Process/type registry for this workspace.
+
+        Mirrors ``GET /api/registry`` from the stdlib server.  Runs
+        ``build_core()`` in a subprocess to discover registered processes,
+        steps, emitters and visualization classes without polluting the
+        server's import state.  The response is cached for 30 s.
+
+        Library-backed via ``lib.registry.build_registry`` — the single
+        implementation the stdlib ``_get_registry_data`` now forwards to.
+        """
+        return RegistryPayload.model_validate(build_registry(ws))
 
     @app.get("/api/composite-resolve", response_model=Optional[CompositeResolvePayload])
     def composite_resolve(

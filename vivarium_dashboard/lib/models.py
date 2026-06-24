@@ -294,6 +294,63 @@ class VisualizationClassesPayload(BaseModel):
     classes: list[VizClass] = []
 
 
+class RegistryProcess(BaseModel):
+    """One process/step/emitter/visualization entry in the registry.
+
+    The subprocess script in ``lib.registry.build_registry`` emits these fields;
+    ``extra="allow"`` preserves any future additions without breaking the route.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    address: str = ""
+    kind: str = "other"
+    schema_preview: str = ""
+    aliases: list[str] = []
+    source: str = "environment_only"
+
+
+class RegistryType(BaseModel):
+    """One type-schema entry in the registry.
+
+    ``extra="allow"`` for forward-compatibility.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    schema_preview: str = ""
+
+
+class RegistryImport(BaseModel):
+    """One imported-repository metadata entry (workspace.yaml imports)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    package: str = ""
+    source: Optional[str] = None
+    ref: Optional[str] = None
+    description: str = ""
+
+
+class RegistryPayload(BaseModel):
+    """``GET /api/registry`` payload (lib.registry.build_registry).
+
+    Returns the process/type registry discovered from the workspace's
+    ``build_core()`` subprocess. Extra keys (e.g. ``workspace_pkgs``,
+    ``registry_include``, ``default_emitter``, ``error``) are preserved by
+    ``extra="allow"`` so the frontend receives the full payload unchanged.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    processes: list[RegistryProcess] = []
+    types: list[RegistryType] = []
+    imports: list[RegistryImport] = []
+
+
 class CompositeResolvePayload(BaseModel):
     """``GET /api/composite-resolve`` payload (lib.composite_resolve.resolve_composite).
 
