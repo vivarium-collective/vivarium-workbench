@@ -688,3 +688,290 @@ def test_catalog_in_openapi(client):
     components = spec["components"]["schemas"]
     for name in ("CatalogPayload", "CatalogModule"):
         assert name in components, f"{name} missing from openapi.json"
+
+
+# ---------------------------------------------------------------------------
+# /api/git-status
+# ---------------------------------------------------------------------------
+
+def test_git_status_empty_workspace(client, monkeypatch):
+    """Empty workspace (no git) → 200 with default/null fields, not a 500."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(
+        _app._git_status, "build_git_status",
+        lambda ws: {
+            "upstream_repo": None, "branch": None, "push_state": "no_origin",
+            "ahead": 0, "behind": 0, "branch_url": None, "repo_url": None,
+            "pr_number": None, "pr_url": None, "base": "main",
+            "ahead_of_base": 0, "dirty_count": 0, "compare_url": None,
+            "pr_state": None, "gh_available": False, "has_active_workstream": False,
+        },
+    )
+    r = client.get("/api/git-status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["push_state"] == "no_origin"
+    assert body["branch"] is None
+    assert body["gh_available"] is False
+
+
+def test_git_status_with_data(client, monkeypatch):
+    """Typed response validates a realistic payload through GitStatus."""
+    import vivarium_dashboard.api.app as _app
+
+    payload = {
+        "upstream_repo": "org/repo", "branch": "feat/thing", "push_state": "ahead",
+        "ahead": 3, "behind": 0, "branch_url": "https://github.com/org/repo/tree/feat/thing",
+        "repo_url": "https://github.com/org/repo", "pr_number": 42,
+        "pr_url": "https://github.com/org/repo/pull/42", "base": "main",
+        "ahead_of_base": 3, "dirty_count": 1, "compare_url": "https://github.com/org/repo/compare/main...feat/thing",
+        "pr_state": "OPEN", "gh_available": True, "has_active_workstream": True,
+    }
+    monkeypatch.setattr(_app._git_status, "build_git_status", lambda ws: payload)
+    r = client.get("/api/git-status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["upstream_repo"] == "org/repo"
+    assert body["push_state"] == "ahead"
+    assert body["pr_number"] == 42
+    assert body["gh_available"] is True
+
+
+def test_git_status_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/git-status" in spec["paths"]
+    assert "GitStatus" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# /api/work-status
+# ---------------------------------------------------------------------------
+
+def test_work_status_inactive(client, monkeypatch):
+    """No active workstream → {active: false}."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(_app._git_status, "build_work_status", lambda ws: {"active": False})
+    r = client.get("/api/work-status")
+    assert r.status_code == 200
+    assert r.json()["active"] is False
+
+
+def test_work_status_active(client, monkeypatch):
+    """Active workstream → full payload with commit counts."""
+    import vivarium_dashboard.api.app as _app
+
+    payload = {
+        "active": True, "branch": "feat/my-branch", "base": "main",
+        "commits_ahead": 5, "commits_behind": 2, "behind_ref": "origin/main",
+        "stale": False, "stale_threshold": 20, "unpushed": 5, "pushed": False,
+        "has_origin": True, "gh_available": True, "pr_number": None, "pr_url": None,
+    }
+    monkeypatch.setattr(_app._git_status, "build_work_status", lambda ws: payload)
+    r = client.get("/api/work-status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["active"] is True
+    assert body["commits_ahead"] == 5
+    assert body["stale"] is False
+
+
+def test_work_status_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/work-status" in spec["paths"]
+    assert "WorkStatus" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# /api/branch-staleness
+# ---------------------------------------------------------------------------
+
+def test_branch_staleness_with_branch(client, monkeypatch):
+    """Happy path: explicit ?branch= param."""
+    import vivarium_dashboard.api.app as _app
+
+    payload = {
+        "branch": "feat/x", "base": "main", "behind_ref": "origin/main",
+        "commits_behind": 3, "stale_threshold": 20, "stale": False,
+    }
+    monkeypatch.setattr(
+        _app._git_status, "build_branch_staleness",
+        lambda ws, branch, base: payload,
+    )
+    r = client.get("/api/branch-staleness?branch=feat%2Fx")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["branch"] == "feat/x"
+    assert body["commits_behind"] == 3
+
+
+def test_branch_staleness_400_no_branch(client, monkeypatch):
+    """No ?branch= and HEAD can't be resolved → HTTP 400."""
+    import vivarium_dashboard.api.app as _app
+
+    from vivarium_dashboard.lib.git_status import NoBranchError
+
+    def _raise(ws, branch, base):
+        raise NoBranchError("could not determine current branch + no ?branch= given")
+
+    monkeypatch.setattr(_app._git_status, "build_branch_staleness", _raise)
+    r = client.get("/api/branch-staleness")
+    assert r.status_code == 400
+    assert "could not determine" in r.json()["detail"]
+
+
+def test_branch_staleness_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/branch-staleness" in spec["paths"]
+    assert "BranchStaleness" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# /api/dirty-status
+# ---------------------------------------------------------------------------
+
+def test_dirty_status_clean(client, monkeypatch):
+    """Clean workspace → {count: 0, files: []}."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(
+        _app._git_status, "build_dirty_status",
+        lambda ws: {"count": 0, "files": []},
+    )
+    r = client.get("/api/dirty-status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {"count": 0, "files": []}
+
+
+def test_dirty_status_with_files(client, monkeypatch):
+    """Dirty workspace → count + files list."""
+    import vivarium_dashboard.api.app as _app
+
+    payload = {
+        "count": 2,
+        "files": [
+            {"status": "M", "path": "src/foo.py"},
+            {"status": "??", "path": "new_file.txt"},
+        ],
+    }
+    monkeypatch.setattr(_app._git_status, "build_dirty_status", lambda ws: payload)
+    r = client.get("/api/dirty-status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] == 2
+    assert body["files"][0]["status"] == "M"
+    assert body["files"][1]["path"] == "new_file.txt"
+
+
+def test_dirty_status_500_git_failure(client, monkeypatch):
+    """git status failure → HTTP 500."""
+    import subprocess
+    import vivarium_dashboard.api.app as _app
+
+    def _raise(ws):
+        raise subprocess.CalledProcessError(128, ["git", "status"], stderr="not a git repo")
+
+    monkeypatch.setattr(_app._git_status, "build_dirty_status", _raise)
+    r = client.get("/api/dirty-status")
+    assert r.status_code == 500
+    assert "git status failed" in r.json()["detail"]
+
+
+def test_dirty_status_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/dirty-status" in spec["paths"]
+    for name in ("DirtyStatus", "DirtyFile"):
+        assert name in spec["components"]["schemas"], f"{name} missing"
+
+
+# ---------------------------------------------------------------------------
+# /api/branches
+# ---------------------------------------------------------------------------
+
+def test_branches_empty(client, monkeypatch):
+    """No stage/* branches → empty list, not a 500."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(
+        _app._git_status, "list_branches",
+        lambda ws: {"branches": [], "current": "main"},
+    )
+    r = client.get("/api/branches")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["branches"] == []
+    assert body["current"] == "main"
+
+
+def test_branches_with_data(client, monkeypatch):
+    """Stage branches are typed through BranchInfo + BranchCommit."""
+    import vivarium_dashboard.api.app as _app
+
+    payload = {
+        "branches": [
+            {
+                "name": "stage/feat-a",
+                "last_commit": {"sha": "abc1234", "subject": "add feat", "date": "2024-01-01"},
+                "ahead_of_main": 2,
+            }
+        ],
+        "current": "main",
+    }
+    monkeypatch.setattr(_app._git_status, "list_branches", lambda ws: payload)
+    r = client.get("/api/branches")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["branches"]) == 1
+    b = body["branches"][0]
+    assert b["name"] == "stage/feat-a"
+    assert b["last_commit"]["sha"] == "abc1234"
+    assert b["ahead_of_main"] == 2
+
+
+def test_branches_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/branches" in spec["paths"]
+    for name in ("BranchesPayload", "BranchInfo", "BranchCommit"):
+        assert name in spec["components"]["schemas"], f"{name} missing"
+
+
+# ---------------------------------------------------------------------------
+# /api/branch-diff
+# ---------------------------------------------------------------------------
+
+def test_branch_diff_valid(client, monkeypatch):
+    """Happy path: ?branch= returns log + diff_stat."""
+    import vivarium_dashboard.api.app as _app
+
+    payload = {
+        "branch": "stage/feat-a",
+        "log": "abc1234 add feat\n",
+        "diff_stat": " src/foo.py | 1 +\n 1 file changed\n",
+    }
+    monkeypatch.setattr(_app._git_status, "build_branch_diff", lambda ws, branch: payload)
+    r = client.get("/api/branch-diff?branch=stage%2Ffeat-a")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["branch"] == "stage/feat-a"
+    assert "add feat" in body["log"]
+
+
+def test_branch_diff_400_invalid_branch(client, monkeypatch):
+    """Invalid branch name → HTTP 400."""
+    import vivarium_dashboard.api.app as _app
+
+    def _raise(ws, branch):
+        raise ValueError(f"invalid branch name: {branch!r}")
+
+    monkeypatch.setattr(_app._git_status, "build_branch_diff", _raise)
+    r = client.get("/api/branch-diff?branch=../evil")
+    assert r.status_code == 400
+    assert "invalid branch name" in r.json()["detail"]
+
+
+def test_branch_diff_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/branch-diff" in spec["paths"]
+    assert "BranchDiff" in spec["components"]["schemas"]
