@@ -2317,30 +2317,25 @@
         //   venv      — present in venv via another package's transitive
         //               dep; cannot be uninstalled directly (the user has
         //               to remove the parent). Show "via X, Y" hint instead.
+        // Uninstall from the dashboard is intentionally NOT offered — module
+        // removal is a workspace/venv edit best done deliberately outside the
+        // UI. Installed cards show only their install-source badge.
         var src = m.install_source || 'imports';
         var srcBadge = '';
-        var action = '';
         if (src === 'venv') {
           var via = (m.installed_via || []);
           if (via.length === 0) {
-            // No parent claims it — orphaned editable / hand-installed pkg.
-            // Workspace.yaml doesn't declare it and no installed dep requires
-            // it. User can uninstall directly from the dashboard.
-            srcBadge = '<span class="install-src-pill install-src-unmanaged" title="Installed in the venv but not declared in workspace.yaml.imports and not required by any installed package. Safe to uninstall.">📦 unmanaged</span>';
-            action = '<button class="action-btn action-btn--secondary js-authoring" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
+            srcBadge = '<span class="install-src-pill install-src-unmanaged" title="Installed in the venv but not declared in workspace.yaml.imports and not required by any installed package.">📦 unmanaged</span>';
           } else {
             var viaText = 'via ' + via.slice(0, 3).map(_esc).join(', ') + (via.length > 3 ? ' +' + (via.length - 3) : '');
-            srcBadge = '<span class="install-src-pill install-src-venv" title="Brought in by another installed package; cannot be uninstalled directly.">📦 ' + viaText + '</span>';
-            action = '<span class="muted" style="font-size:0.78em" title="Remove the parent package to drop this transitive dependency.">(remove parent to uninstall)</span>';
+            srcBadge = '<span class="install-src-pill install-src-venv" title="Brought in by another installed package.">📦 ' + viaText + '</span>';
           }
         } else if (src === 'pyproject') {
-          srcBadge = '<span class="install-src-pill install-src-pyproject" title="Declared in pyproject.toml [project.dependencies]; workspace.yaml.imports does not have an explicit entry.">📋 via pyproject</span>';
-          action = '<button class="action-btn action-btn--secondary js-authoring" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
+          srcBadge = '<span class="install-src-pill install-src-pyproject" title="Declared in pyproject.toml [project.dependencies].">📋 via pyproject</span>';
         } else {
           srcBadge = '<span class="status-pill installed">installed</span>';
-          action = '<button class="action-btn action-btn--secondary js-authoring" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>';
         }
-        return srcBadge + ' ' + action;
+        return srcBadge;
       }
       return '<button class="action-btn js-authoring" onclick="_installFromCatalog(\'' + _esc(m.name) + '\')">Install</button>';
     }
@@ -2477,7 +2472,7 @@
         '<td><code>' + source + '</code> @ <code>' + ref + '</code></td>' +
         '<td><code>' + path + '</code></td>' +
         '<td><span class="status-pill installed">installed</span></td>' +
-        '<td><button class="action-btn action-btn--secondary" onclick="_uninstallFromInstalled(\'' + name + '\')">Uninstall</button>' + sysDepsBtn + '</td>' +
+        '<td>' + (sysDepsBtn.trim() || '<span style="color:#9ca3af;font-size:0.85em">—</span>') + '</td>' +
         '</tr>';
     }).join('');
 
@@ -4689,12 +4684,10 @@
         : '<span class="status-pill ' + pillClass + '" style="font-size:0.78em">' + _esc(effStatus) + '</span>';
       var cardStyle = 'background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;cursor:pointer;transition:box-shadow 0.1s,border-color 0.1s;' +
         (closed ? 'opacity:0.6;' : '');
-      var actionLabel = closed ? 'Reopen' : 'Close';
-      var actionStatus = closed ? 'in-progress' : 'archived';
-      var actionBtn = '<button type="button" class="js-authoring" onclick="event.stopPropagation();_setInvestigationStatus(this,\'' +
-        _esc(iset.name) + '\',\'' + actionStatus + '\')" ' +
-        'style="font-size:0.78em;padding:3px 10px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;color:#334155;cursor:pointer">' +
-        actionLabel + '</button>';
+      // Close/Reopen is intentionally NOT offered from the dashboard — an
+      // investigation's lifecycle is managed via its branch/PR, not the UI.
+      // The status pill (incl. a gray "Closed") still displays above.
+      var actionBtn = '';
       return '<div class="investigation-set-card" onclick="_openInvestigationDetail(\'' + _esc(iset.name) + '\')" ' +
              'style="' + cardStyle + '">' +
         '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px;">' +
