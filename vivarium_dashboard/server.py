@@ -3216,155 +3216,19 @@ def _simulations_data(ws_root: Path) -> dict:
 def _visualization_classes_data(ws_root: Path) -> dict:
     """Pure data builder for GET /api/visualization-classes.
 
-    Returns ``{"classes": [...]}`` with the same shape as
-    ``Handler._list_visualization_classes()``.  Tolerates missing packages /
-    build_core failures → returns empty list.
-    Called by ``publish.build_bundle`` to export ``api/visualization-classes.json``.
+    Thin wrapper: delegates to ``lib.visualization_classes.list_visualization_classes``
+    so the FastAPI seam can call the same implementation without importing this
+    stdlib server module.  Called by ``publish.build_bundle`` to export
+    ``api/visualization-classes.json``.
     """
-    _ws_add_to_sys_path()
-    try:
-        ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
-        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-        sys.path.insert(0, str(ws_root))
-        core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
-        core = core_module.build_core()
-        registry: dict = dict(core.link_registry)
-    except Exception:
-        registry = {}
-
-    # Inject standard pbg-superpowers visualization classes
-    try:
-        from pbg_superpowers.visualizations import (
-            TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap,
-        )
-        for cls in [TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap]:
-            registry[cls.__name__] = cls
-    except ImportError:
-        pass
-
-    # Inject workspace-local viz classes
-    try:
-        from pbg_superpowers.visualization import Visualization as _VizBase
-        import pkgutil as _pkgutil, importlib as _importlib
-        viz_pkg = _importlib.import_module(f"{ws_data.get('package_path') or ('pbg_' + ws_data.get('name','').replace('-','_'))}.visualizations")
-        for _, modname, _ in _pkgutil.iter_modules(viz_pkg.__path__):
-            try:
-                mod = _importlib.import_module(f"{pkg}.visualizations.{modname}")
-                for attr_val in vars(mod).values():
-                    if not isinstance(attr_val, type):
-                        continue
-                    if attr_val is _VizBase:
-                        continue
-                    if issubclass(attr_val, _VizBase):
-                        registry[attr_val.__name__] = attr_val
-            except Exception:
-                continue
-    except Exception:
-        pass
-        _VizBase = None
-
-    # Filter to Visualization subclasses
-    try:
-        from pbg_superpowers.visualization import Visualization as _VB
-    except ImportError:
-        _VB = None
-
-    def _is_viz(cls):
-        if _VB is not None and cls is _VB:
-            return False
-        marker = getattr(cls, "is_visualization", None)
-        if callable(marker):
-            try:
-                if marker() is True:
-                    return True
-            except Exception:
-                pass
-        if _VB is not None:
-            try:
-                if isinstance(cls, type) and issubclass(cls, _VB):
-                    return True
-            except TypeError:
-                pass
-        return False
-
-    per_cls: dict = {}
-    for name, cls in registry.items():
-        if not _is_viz(cls) or name == "Visualization":
-            continue
-        existing = per_cls.get(id(cls))
-        if existing is None or len(name) < len(existing[0]):
-            per_cls[id(cls)] = (name, cls)
-
-    out = []
-    for name, cls in sorted(per_cls.values(), key=lambda kv: kv[0]):
-        try:
-            doc = (cls.__doc__ or "").strip().split("\n", 1)[0] if cls.__doc__ else ""
-        except Exception:
-            doc = ""
-        out.append({"address": f"local:{name}", "name": name, "doc": doc, "kind": "visualization"})
-
-    # Append Analysis classes from v2ecoli
-    try:
-        import v2ecoli.workflow.analyses  # noqa: F401
-        from v2ecoli.workflow.analysis import ANALYSIS_REGISTRY, Analysis
-        for _name, _cls in sorted(ANALYSIS_REGISTRY.items()):
-            if isinstance(_cls, type) and issubclass(_cls, Analysis):
-                try:
-                    _doc = (_cls.__doc__ or "").strip().split("\n")[0]
-                except Exception:
-                    _doc = ""
-                out.append({
-                    "address": f"local:{_cls.__module__}.{_cls.__qualname__}",
-                    "name": _name,
-                    "doc": _doc,
-                    "kind": "analysis",
-                })
-    except Exception:
-        pass
-
-    return {"classes": out}
+    from vivarium_dashboard.lib.visualization_classes import list_visualization_classes
+    return list_visualization_classes(ws_root)
 
 
-def _normalize_requirements(value) -> list:
-    """Normalize a study's ``implementation_requirements`` / ``gaps`` field to a
-    list of requirement dicts the renderers can iterate safely.
-
-    Authors write this field two ways:
-      • a YAML LIST of ``{id, title, ...}`` dicts (structured) — kept as-is;
-      • a multi-line PROSE STRING (``implementation_requirements: |``) — must
-        NOT be iterated character-by-character (that yields 1-char strings and
-        ``char.title`` resolves to the str.title *method*, rendering its repr
-        e.g. ``<built-in method title of str object>`` and a bogus
-        "(492 items)" count).
-
-    Contract:
-      • a STRING becomes ONE prose requirement → ``[{"_prose": True,
-        "description": <text>}]`` (count 1, not the character count);
-      • a LIST is kept, but bare-string items are wrapped the same prose way so
-        we never access ``.id`` / ``.title`` on a non-dict;
-      • empty/None → ``[]``.
-    """
-    if value is None:
-        return []
-    if isinstance(value, str):
-        text = value.strip()
-        return [{"_prose": True, "description": text}] if text else []
-    if isinstance(value, dict):
-        # A single mapping authored without a list wrapper.
-        return [value]
-    if isinstance(value, (list, tuple)):
-        out = []
-        for item in value:
-            if isinstance(item, dict):
-                out.append(item)
-            else:
-                text = "" if item is None else str(item).strip()
-                if text:
-                    out.append({"_prose": True, "description": text})
-        return out
-    # Unknown scalar — wrap defensively rather than iterate.
-    text = str(value).strip()
-    return [{"_prose": True, "description": text}] if text else []
+# Moved to lib/spec_norm.py (shared with Task 5 / lib.investigations_index).
+# Re-import under the old private name so every existing call-site in this file
+# continues to work without any other change.
+from vivarium_dashboard.lib.spec_norm import normalize_requirements as _normalize_requirements  # noqa: E402
 
 
 def _investigations_data(ws_root: Path) -> dict:

@@ -265,6 +265,33 @@ class SavedVisualizationsPayload(BaseModel):
     report_cards: list[ReportCard] = []
 
 
+class VizClass(BaseModel):
+    """One entry in the ``GET /api/visualization-classes`` ``classes`` list.
+
+    Fields vary slightly between visualization and analysis kinds, so unknown
+    keys are preserved (``extra="allow"``).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    address: str
+    name: str
+    doc: str = ""
+    kind: str = "visualization"
+
+
+class VisualizationClassesPayload(BaseModel):
+    """``GET /api/visualization-classes`` payload
+    (lib.visualization_classes.list_visualization_classes).
+
+    Returns all Visualization subclasses registered in the workspace's core
+    registry plus standard pbg-superpowers visualization classes and, when
+    v2ecoli is installed, its Analysis classes.
+    """
+
+    classes: list[VizClass] = []
+
+
 class CompositeResolvePayload(BaseModel):
     """``GET /api/composite-resolve`` payload (lib.composite_resolve.resolve_composite).
 

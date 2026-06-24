@@ -228,6 +228,60 @@ def test_swagger_ui_and_redoc_served(client):
 
 
 # ---------------------------------------------------------------------------
+# /api/visualization-classes
+# ---------------------------------------------------------------------------
+
+def test_visualization_classes_empty_workspace(client, monkeypatch):
+    """An empty workspace (no workspace.yaml / no core module) yields the typed
+    payload — not a 500.  We patch ``list_visualization_classes`` to return
+    empty so the assertion is deterministic regardless of which pbg packages are
+    installed in the test environment."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(_app, "list_visualization_classes", lambda ws: {"classes": []})
+    r = client.get("/api/visualization-classes")
+    assert r.status_code == 200
+    assert r.json() == {"classes": []}
+
+
+def test_visualization_classes_typed_passthrough(client, monkeypatch):
+    """The route validates the builder's output through VisualizationClassesPayload;
+    extra fields on each VizClass entry are preserved (extra='allow')."""
+    import vivarium_dashboard.api.app as _app
+
+    payload = {
+        "classes": [
+            {"address": "local:TimeSeriesPlot", "name": "TimeSeriesPlot",
+             "doc": "A time-series plot.", "kind": "visualization",
+             "extra_meta": "kept"},
+            {"address": "local:v2ecoli.workflow.analysis.GrowthAnalysis",
+             "name": "GrowthAnalysis", "doc": "Growth analysis.", "kind": "analysis"},
+        ]
+    }
+    monkeypatch.setattr(_app, "list_visualization_classes", lambda ws: payload)
+    r = client.get("/api/visualization-classes")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["classes"]) == 2
+    c0 = body["classes"][0]
+    assert c0["name"] == "TimeSeriesPlot"
+    assert c0["kind"] == "visualization"
+    assert c0["extra_meta"] == "kept"   # extra="allow" preserved
+    c1 = body["classes"][1]
+    assert c1["name"] == "GrowthAnalysis"
+    assert c1["kind"] == "analysis"
+
+
+def test_visualization_classes_in_openapi(client):
+    """The /api/visualization-classes route and VisualizationClassesPayload / VizClass
+    appear in the generated OpenAPI schema."""
+    spec = client.get("/openapi.json").json()
+    assert "/api/visualization-classes" in spec["paths"]
+    for name in ("VisualizationClassesPayload", "VizClass"):
+        assert name in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
 # /api/composite-resolve
 # ---------------------------------------------------------------------------
 

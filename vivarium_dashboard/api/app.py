@@ -47,7 +47,10 @@ from vivarium_dashboard.lib.models import (
     SimRow,
     SimulationsPayload,
     StudyChartsPayload,
+    VisualizationClassesPayload,
+    VizClass,
 )
+from vivarium_dashboard.lib.visualization_classes import list_visualization_classes
 from vivarium_dashboard.lib.simulations_index import list_simulations
 from vivarium_dashboard.lib.study_charts import build_study_charts_payload
 
@@ -152,6 +155,25 @@ def create_app() -> FastAPI:
         charts carry an image data-URI plus a freshness badge (see ChartPayload).
         """
         return StudyChartsPayload.model_validate(build_study_charts_payload(ws, slug))
+
+    @app.get("/api/visualization-classes", response_model=VisualizationClassesPayload)
+    def visualization_classes(ws: Path = Depends(get_workspace)) -> VisualizationClassesPayload:
+        """List registered Visualization / Analysis classes for this workspace.
+
+        Mirrors ``GET /api/visualization-classes`` from the stdlib server.
+        Returns all Visualization subclasses found in the workspace's core
+        registry plus standard pbg-superpowers classes and (when installed)
+        v2ecoli Analysis classes.  Tolerates missing packages / build_core
+        failures — returns an empty ``classes`` list rather than 500.
+
+        Library-backed via ``lib.visualization_classes.list_visualization_classes``
+        — the single implementation the stdlib ``_visualization_classes_data``
+        now forwards to.
+        """
+        result = list_visualization_classes(ws)
+        return VisualizationClassesPayload(
+            classes=[VizClass.model_validate(c) for c in result.get("classes", [])]
+        )
 
     @app.get("/api/composite-resolve", response_model=Optional[CompositeResolvePayload])
     def composite_resolve(
