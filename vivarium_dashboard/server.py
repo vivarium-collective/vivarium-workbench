@@ -8219,6 +8219,22 @@ def _investigation_hypotheses(ws_root: Path, name: str):
 # HTTP handler
 # ---------------------------------------------------------------------------
 
+
+def _git_branch_commit(path: str) -> tuple[str, str]:
+    """(branch, short_commit) for a git workspace; ('', '') when unresolvable."""
+
+    def _run(args: list[str]) -> str:
+        try:
+            r = subprocess.run(
+                ["git", "-C", path, *args], capture_output=True, text=True, timeout=2,
+            )
+            return r.stdout.strip() if r.returncode == 0 else ""
+        except Exception:
+            return ""
+
+    return _run(["rev-parse", "--abbrev-ref", "HEAD"]), _run(["rev-parse", "--short", "HEAD"])
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a, **kw):  # silence default request logging
         pass
@@ -16229,24 +16245,13 @@ if __name__ == "__main__":
         """
         from pbg_superpowers import workspace_catalog
 
-        def _branch_label(name: str, path: str) -> str:
+        def _branch_label(name: str, branch: str, path: str) -> str:
             """Disambiguate the many worktrees/clones of one repo by branch.
 
             ``v2ecoli`` → ``v2ecoli:dnaa-biology`` etc. Falls back to the path
             leaf when git can't resolve a branch; plain name on the default
             branch or when the leaf adds nothing."""
-            import subprocess
-            variant = None
-            try:
-                r = subprocess.run(
-                    ["git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD"],
-                    capture_output=True, text=True, timeout=2,
-                )
-                br = r.stdout.strip()
-                if br and br not in ("main", "master", "HEAD"):
-                    variant = br
-            except Exception:
-                pass
+            variant = branch if branch and branch not in ("main", "master", "HEAD") else None
             if variant is None:
                 leaf = Path(path).name
                 if leaf and leaf != name:
@@ -16279,7 +16284,11 @@ if __name__ == "__main__":
             path = entry.get("path", "")
             name = entry.get("name") or Path(path).name
             row = {"name": name, "path": path}
-            row["label"] = _branch_label(name, path) if Path(path).is_dir() else name
+            branch, commit = _git_branch_commit(path) if Path(path).is_dir() else ("", "")
+            row["repo"] = name
+            row["branch"] = branch
+            row["commit"] = commit
+            row["label"] = _branch_label(name, branch, path) if Path(path).is_dir() else name
             if not Path(path).is_dir():
                 row["status"] = "missing"
             elif path == current_resolved:
