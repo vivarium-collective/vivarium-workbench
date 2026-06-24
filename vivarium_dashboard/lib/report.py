@@ -512,8 +512,20 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     # GitHub repository this workspace is associated with (from `git remote
     # origin`) — rendered as a link in the rail header.
     _repo_slug = _detect_github_repo(ws_root)
+    # Current git branch of the workspace — shown next to the name in the rail
+    # so the chip reads "<repo> · <branch>" (empty for non-git build snapshots).
+    try:
+        import subprocess as _sp
+        _br = _sp.run(["git", "-C", str(ws_root), "rev-parse", "--abbrev-ref", "HEAD"],
+                      capture_output=True, text=True, timeout=2)
+        _workspace_branch = _br.stdout.strip() if _br.returncode == 0 else ""
+        if _workspace_branch == "HEAD":
+            _workspace_branch = ""
+    except Exception:
+        _workspace_branch = ""
     out.write_text(tpl.render(
         workspace_name=ws["name"],
+        workspace_branch=_workspace_branch,
         repo_url=(f"https://github.com/{_repo_slug}" if _repo_slug else ""),
         dashboard_name=dashboard_name,
         dashboard_logo=dashboard_logo,
