@@ -81,7 +81,7 @@ class _FakeClient:
     def list_simulators(self):
         return {"versions": [
             {"database_id": 45, "git_repo_url": "https://github.com/org/v2ecoli",
-             "git_commit_hash": "32b901", "git_branch": "main"},
+             "git_commit_hash": "32b901", "git_branch": "main", "created_at": "2026-06-18T00:00:00"},
         ]}
 
 
@@ -125,6 +125,7 @@ def test_list_build_sources_maps_and_labels():
     assert b["label"] == "v2ecoli @ 32b901 (build #45)"
     # repo_url must be the raw URL from sms-api (not the bare display name)
     assert b["repo_url"] == "https://github.com/org/v2ecoli"
+    assert b["created_at"] == "2026-06-18T00:00:00"
 
 
 def test_list_build_sources_degrades_on_error():
