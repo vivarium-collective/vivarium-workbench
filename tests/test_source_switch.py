@@ -90,10 +90,10 @@ def test_source_switch_js_present_and_wired():
     assert "viv-source-switch" in js        # the control id
 
 
-def test_index_template_includes_source_switch():
-    t = (Path(server.__file__).parent / "templates" / "index.html.j2").read_text(encoding="utf-8")
-    assert "source-switch.js" in t
-    assert "viv-source-switch" in t
+# NOTE: the rail source-switch dropdown was superseded by the Branch-tab Source
+# panel (branch-source.js); its template-presence test was removed. The
+# /api/source/switch endpoint it relied on is still exercised below and by
+# branch-source.js. source-switch.js remains on disk as (now unloaded) dead code.
 
 
 def _make_ws(d, name):

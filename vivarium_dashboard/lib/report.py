@@ -512,8 +512,42 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     # GitHub repository this workspace is associated with (from `git remote
     # origin`) — rendered as a link in the rail header.
     _repo_slug = _detect_github_repo(ws_root)
+    # Rail-chip subtitle describing the ACTIVE source. A materialized remote
+    # build (.../build-cache/sim<id>-<commit>) carries a .viv-build.json with its
+    # branch/commit/id (stamped at switch time) and isn't a git repo; a local
+    # workspace uses its git branch. `workspace_is_remote` flags the build case
+    # so the chip can render a distinct dot + "remote build #<id>".
+    _workspace_subtitle = ""
+    _workspace_is_remote = False
+    _build_meta_path = ws_root / ".viv-build.json"
+    if _build_meta_path.is_file():
+        try:
+            import json as _json
+            _bm = _json.loads(_build_meta_path.read_text())
+            _workspace_is_remote = True
+            _parts = []
+            if _bm.get("branch"):
+                _parts.append(str(_bm["branch"]))
+            if _bm.get("commit"):
+                _parts.append("@ " + str(_bm["commit"])[:10])
+            _parts.append("· remote build #" + str(_bm.get("simulator_id", "?")))
+            _workspace_subtitle = " ".join(_parts)
+        except Exception:
+            _workspace_subtitle = "remote build"
+            _workspace_is_remote = True
+    else:
+        try:
+            import subprocess as _sp
+            _br = _sp.run(["git", "-C", str(ws_root), "rev-parse", "--abbrev-ref", "HEAD"],
+                          capture_output=True, text=True, timeout=2)
+            _b = _br.stdout.strip() if _br.returncode == 0 else ""
+            _workspace_subtitle = "" if _b == "HEAD" else _b
+        except Exception:
+            _workspace_subtitle = ""
     out.write_text(tpl.render(
         workspace_name=ws["name"],
+        workspace_branch=_workspace_subtitle,
+        workspace_is_remote=_workspace_is_remote,
         repo_url=(f"https://github.com/{_repo_slug}" if _repo_slug else ""),
         dashboard_name=dashboard_name,
         dashboard_logo=dashboard_logo,

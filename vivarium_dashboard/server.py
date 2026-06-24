@@ -212,6 +212,12 @@ _LINKAGE_TTL = 30.0  # seconds
 _COMPOSITE_STATE_CACHE: dict = {}
 _COMPOSITE_STATE_TTL_S = 300.0
 
+# Cache of the /api/composites list per workspace path. Discovery runs in a
+# SUBPROCESS (clean import — the long-running server's stale import state misses
+# @composite_generator entries; SP2b), which is ~slow, so cache the result and
+# invalidate on workspace switch. {ws_path: payload_dict}
+_COMPOSITES_LIST_CACHE: dict = {}
+
 # Serializes runtime workspace re-pointing (SP2). A switch must not interleave
 # with another switch.
 _SWITCH_LOCK = Lock()
@@ -224,6 +230,7 @@ def _invalidate_workspace_caches() -> None:
     _REGISTRY_CACHE["ts"] = 0.0
     _LINKAGE_CACHE.clear()
     _COMPOSITE_STATE_CACHE.clear()
+    _COMPOSITES_LIST_CACHE.clear()
     _RUN_STORE_SUMMARY_CACHE.clear()
     _WP_CACHE.clear()
     # lib-level caches keyed by workspace (defensive — data_sources keys by
@@ -385,6 +392,9 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/workspaces/start":         "_post_workspaces_start",
     "/api/workspaces/stop":          "_post_workspaces_stop",
     "/api/source/switch":            "_post_source_switch",
+    "/api/source/switch-build":      "_post_source_switch_build",
+    "/api/branch/push":              "_post_branch_push",
+    "/api/source/build-remote":      "_post_source_build_remote",
     # Remote-run endpoints (Phase 3b).
     "/api/remote-run-start":         "_post_remote_run_start",
 }
@@ -3433,6 +3443,38 @@ def _composites_data(ws_root: "Path") -> dict:
         return {"composites": out, "workspace_package": pkg}
     except Exception as e:
         return {"composites": [], "error": str(e)}
+
+
+def _composites_data_subprocess(ws_root: "Path") -> "dict | None":
+    """Run :func:`_composites_data` in a fresh subprocess (clean Python import).
+
+    @composite_generator discovery imports package modules and scans decorators;
+    that registration is unreliable in the long-running server's stale
+    sys.modules state (it misses the generators), but works in a clean process
+    (SP2b). Returns the discovered payload, or ``None`` if the subprocess fails
+    (the caller then degrades to the in-process spec-only result).
+    """
+    # Discovery prints import warnings to stdout, so fence the JSON between
+    # explicit start/end markers and extract exactly that (don't trust line order).
+    script = (
+        "import sys, json; from pathlib import Path;"
+        "import vivarium_dashboard.server as s;"
+        "s.WORKSPACE = Path(sys.argv[1]);"
+        "_r = s._composites_data(s.WORKSPACE);"
+        "sys.stdout.write('@@@C_START@@@' + json.dumps(_r) + '@@@C_END@@@')"
+    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(ws_root)],
+            cwd=str(ws_root), capture_output=True, text=True, timeout=180,
+        )
+        out = result.stdout
+        i, j = out.find("@@@C_START@@@"), out.find("@@@C_END@@@")
+        if i != -1 and j != -1:
+            return json.loads(out[i + len("@@@C_START@@@"):j])
+    except Exception:
+        pass
+    return None
 
 
 def _composite_resolve_data(spec_id: str) -> "dict | None":
@@ -6587,6 +6629,35 @@ def _remote_push_and_sha() -> str:
     return sha
 
 
+class _NotAGitRepo(RuntimeError):
+    pass
+
+
+def _remote_commit_and_push(message: str) -> dict:
+    """Stage+commit WORKSPACE changes (skip if clean), push current branch, return result."""
+    inside = subprocess.run(
+        ["git", "-C", str(WORKSPACE), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True, text=True,
+    )
+    if inside.returncode != 0 or inside.stdout.strip() != "true":
+        raise _NotAGitRepo("active source is not a git workspace (no commit/push)")
+    subprocess.run(["git", "-C", str(WORKSPACE), "add", "-A"], capture_output=True, text=True, timeout=30)
+    status = subprocess.run(
+        ["git", "-C", str(WORKSPACE), "status", "--porcelain"], capture_output=True, text=True, timeout=10,
+    ).stdout.strip()
+    if status:
+        c = subprocess.run(
+            ["git", "-C", str(WORKSPACE), "commit", "-m", message or "dashboard commit"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if c.returncode != 0:
+            raise RuntimeError(f"git commit failed: {(c.stderr or c.stdout)[-300:]}")
+    sha = _remote_push_and_sha()
+    return {"ok": True, "pushed": bool(status), "commit": sha,
+            "branch": subprocess.run(["git", "-C", str(WORKSPACE), "rev-parse", "--abbrev-ref", "HEAD"],
+                                     capture_output=True, text=True).stdout.strip()}
+
+
 def _normalize_repo_url(url: str) -> str:
     """Normalize a git remote URL for sms-api's simulator/upload.
 
@@ -8218,6 +8289,22 @@ def _investigation_hypotheses(ws_root: Path, name: str):
 # HTTP handler
 # ---------------------------------------------------------------------------
 
+
+def _git_branch_commit(path: str) -> tuple[str, str]:
+    """(branch, short_commit) for a git workspace; ('', '') when unresolvable."""
+
+    def _run(args: list[str]) -> str:
+        try:
+            r = subprocess.run(
+                ["git", "-C", path, *args], capture_output=True, text=True, timeout=2,
+            )
+            return r.stdout.strip() if r.returncode == 0 else ""
+        except Exception:
+            return ""
+
+    return _run(["rev-parse", "--abbrev-ref", "HEAD"]), _run(["rev-parse", "--short", "HEAD"])
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a, **kw):  # silence default request logging
         pass
@@ -8321,6 +8408,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_auth_github_orgs()
         if self.path.startswith("/api/workspaces"):
             return self._get_workspaces()
+        if self.path.startswith("/api/source/builds"):
+            return self._get_source_builds()
         if self.path.startswith("/api/state"):
             return self._serve_state()
         if self.path.startswith("/api/events"):
@@ -14928,12 +15017,24 @@ if __name__ == "__main__":
             return self._json({"error": f"workstream error: {e}"}, 500)
 
     def _get_composites(self):
-        """GET /api/composites — return composite specs from the workspace AND every installed pbg-* package.
+        """GET /api/composites — composite specs from the workspace AND installed pbg-* packages.
 
-        Delegates data assembly to the module-level ``_composites_data(ws_root)``
-        pure builder; wraps the result in the HTTP JSON response.
+        Discovery runs in a SUBPROCESS for a clean Python import: @composite_generator
+        scanning is unreliable in the long-running server's stale sys.modules state
+        (a fresh process finds the generators, the in-process call misses them — SP2b).
+        Result is cached per workspace and invalidated on switch. Falls back to the
+        in-process (spec-only) builder if the subprocess fails.
         """
-        return self._json(_composites_data(WORKSPACE), 200)
+        ws_key = str(WORKSPACE)
+        cached = _COMPOSITES_LIST_CACHE.get(ws_key)
+        if cached is not None:
+            return self._json(cached, 200)
+        payload = _composites_data_subprocess(WORKSPACE)
+        if payload is None:
+            payload = _composites_data(WORKSPACE)  # degraded: spec-only in-process
+        else:
+            _COMPOSITES_LIST_CACHE[ws_key] = payload
+        return self._json(payload, 200)
 
     def _get_composite_state(self):
         """GET /api/composite-state?ref=<id-or-path>
@@ -16226,6 +16327,19 @@ if __name__ == "__main__":
         """
         from pbg_superpowers import workspace_catalog
 
+        def _branch_label(name: str, branch: str, path: str) -> str:
+            """Disambiguate the many worktrees/clones of one repo by branch.
+
+            ``v2ecoli`` → ``v2ecoli:dnaa-biology`` etc. Falls back to the path
+            leaf when git can't resolve a branch; plain name on the default
+            branch or when the leaf adds nothing."""
+            variant = branch if branch and branch not in ("main", "master", "HEAD") else None
+            if variant is None:
+                leaf = Path(path).name
+                if leaf and leaf != name:
+                    variant = leaf
+            return f"{name}:{variant}" if variant else name
+
         current_root = WORKSPACE
         current_resolved = str(current_root.resolve())
 
@@ -16250,7 +16364,13 @@ if __name__ == "__main__":
 
         for entry in catalog:
             path = entry.get("path", "")
-            row = {"name": entry.get("name") or Path(path).name, "path": path}
+            name = entry.get("name") or Path(path).name
+            row = {"name": name, "path": path}
+            branch, commit = _git_branch_commit(path) if Path(path).is_dir() else ("", "")
+            row["repo"] = name
+            row["branch"] = branch
+            row["commit"] = commit
+            row["label"] = _branch_label(name, branch, path) if Path(path).is_dir() else name
             if not Path(path).is_dir():
                 row["status"] = "missing"
             elif path == current_resolved:
@@ -16494,6 +16614,77 @@ if __name__ == "__main__":
              "source": {"path": str(entry["path"]), "name": entry.get("name")}},
             200,
         )
+
+    def _post_branch_push(self, body: dict):
+        """POST /api/branch/push — commit WORKSPACE changes + push current branch."""
+        message = (body or {}).get("message") or "dashboard commit"
+        try:
+            return self._json(_remote_commit_and_push(message), 200)
+        except _NotAGitRepo as e:
+            return self._json({"error": str(e)}, 409)
+        except Exception as e:
+            return self._json({"error": str(e)}, 500)
+
+    def _post_source_build_remote(self, body: dict):
+        """POST /api/source/build-remote — register a repo+branch's HEAD as an sms-api build."""
+        from vivarium_dashboard.lib.sms_api_client import SmsApiClient, SmsApiError
+        repo = (body or {}).get("repo") or ""
+        branch = (body or {}).get("branch") or ""
+        if not repo or not branch:
+            return self._json({"error": "repo and branch are required"}, 400)
+        repo = _normalize_repo_url(repo)
+        client = SmsApiClient(_sms_api_base())
+        try:
+            latest = client.latest_simulator(repo, branch)
+            commit = latest.get("git_commit_hash") or ""
+            if not commit:
+                return self._json({"error": "could not resolve branch HEAD via sms-api"}, 502)
+            reg = client.register_simulator(repo, branch, commit)
+        except SmsApiError as e:
+            return self._json({"error": f"sms-api: {e}"}, 502)
+        return self._json({"ok": True, "simulator_id": reg.get("database_id"),
+                           "repo": repo, "branch": branch, "commit": commit}, 200)
+
+    def _get_source_builds(self):
+        """GET /api/source/builds — remote sms-api simulator builds for the
+        source dropdown. Best-effort; empty list + reason if sms-api is down."""
+        from vivarium_dashboard.lib import remote_build_source
+        from vivarium_dashboard.lib.sms_api_client import SmsApiClient
+        payload = remote_build_source.list_build_sources(SmsApiClient(_sms_api_base()))
+        return self._json(payload, 200)
+
+    def _post_source_switch_build(self, body: dict):
+        """POST /api/source/switch-build — materialize a build's workspace (once,
+        cached) and re-point to it in-process (SP2). Body: {simulator_id}."""
+        from vivarium_dashboard.lib import remote_build_source
+        from vivarium_dashboard.lib.sms_api_client import SmsApiClient, SmsApiError
+        sim_id = body.get("simulator_id")
+        if sim_id is None:
+            return self._json({"error": "missing 'simulator_id'"}, 400)
+        client = SmsApiClient(_sms_api_base())
+        listing = remote_build_source.list_build_sources(client)
+        entry = next((b for b in listing["builds"] if b["simulator_id"] == sim_id), None)
+        if entry is None:
+            if listing.get("error"):
+                return self._json({"error": f"sms-api unavailable: {listing['error']}"}, 502)
+            return self._json({"error": f"build {sim_id} not found"}, 404)
+        try:
+            cache_dir = remote_build_source.materialize_build(client, sim_id, entry["commit"])
+        except SmsApiError as e:
+            return self._json({"error": f"materialize failed: {e}"}, 502)
+        # Stamp build provenance into the cache dir so the rail chip can show
+        # "<branch> @ <commit> · remote build #<id>" (a materialized build is not
+        # a git repo, so the chip can't derive branch/commit from git).
+        try:
+            (Path(cache_dir) / ".viv-build.json").write_text(json.dumps({
+                "simulator_id": sim_id, "repo": entry.get("repo", ""),
+                "branch": entry.get("branch", ""), "commit": entry.get("commit", ""),
+                "repo_url": entry.get("repo_url", ""),
+            }))
+        except Exception:
+            pass  # provenance stamp is best-effort, never block the switch
+        _switch_active_workspace(cache_dir)
+        return self._json({"ok": True, "source": {"path": str(cache_dir), "name": entry["label"]}}, 200)
 
     def _read_workspace_name(self, root: Path) -> str:
         """Read `name` from <root>/workspace.yaml; fall back to dir basename."""
