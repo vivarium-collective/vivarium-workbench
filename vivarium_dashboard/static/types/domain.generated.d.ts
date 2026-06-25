@@ -168,3 +168,85 @@ export interface SavedVisualizationsPayload {
   ptools: PtoolsInfo;
   report_cards: ReportCard[];
 }
+
+export interface GitStatus {
+  upstream_repo: string | null;
+  branch: string | null;
+  push_state: string;
+  ahead: number;
+  behind: number;
+  branch_url: string | null;
+  repo_url: string | null;
+  pr_number: number | null;
+  pr_url: string | null;
+  base: string;
+  ahead_of_base: number;
+  dirty_count: number;
+  compare_url: string | null;
+  pr_state: string | null;
+  gh_available: boolean;
+  has_active_workstream: boolean;
+}
+
+export interface WorkStatusInactive {
+  active: false;
+}
+
+export interface WorkStatusActive {
+  active: true;
+  branch: string | null;
+  base: string | null;
+  commits_ahead: number | null;
+  commits_behind: number | null;
+  behind_ref: string | null;
+  stale: boolean | null;
+  stale_threshold: number | null;
+  unpushed: number | null;
+  pushed: boolean | null;
+  has_origin: boolean | null;
+  gh_available: boolean | null;
+  pr_number: number | null;
+  pr_url: string | null;
+}
+
+export interface BranchStaleness {
+  branch: string;
+  base: string;
+  behind_ref: string;
+  commits_behind: number;
+  stale_threshold: number;
+  stale: boolean;
+}
+
+export interface DirtyFile {
+  status: string;
+  path: string;
+}
+
+export interface DirtyStatus {
+  count: number;
+  files: DirtyFile[];
+}
+
+export interface BranchCommit {
+  sha: string;
+  subject: string;
+  date: string;
+}
+
+export interface BranchInfo {
+  name: string;
+  last_commit: BranchCommit;
+  ahead_of_main: number;
+}
+
+export interface BranchesPayload {
+  branches: BranchInfo[];
+  current: string | null;
+}
+
+export interface BranchDiff {
+  branch: string;
+  log: string;
+  diff_stat: string;
+}

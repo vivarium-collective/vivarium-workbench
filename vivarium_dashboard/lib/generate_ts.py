@@ -55,6 +55,17 @@ _MODELS: list[type[BaseModel]] = [
     _models.PtoolsInfo,
     _models.ReportCard,
     _models.SavedVisualizationsPayload,
+    # Git & branch models
+    _models.GitStatus,
+    _models.WorkStatusInactive,
+    _models.WorkStatusActive,
+    _models.BranchStaleness,
+    _models.DirtyFile,
+    _models.DirtyStatus,
+    _models.BranchCommit,
+    _models.BranchInfo,
+    _models.BranchesPayload,
+    _models.BranchDiff,
 ]
 
 OUTPUT_PATH = (
