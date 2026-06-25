@@ -3286,6 +3286,7 @@ class TestIsetReportRoute:
         r = client.get("/api/iset/inv-a/report")
         assert r.status_code == 200
         assert r.headers["content-type"] == "text/html"
+        assert r.headers["cache-control"] == "no-store"  # mirrors stdlib _serve_file
         assert r.text == "<html>r</html>"
 
     def test_404_no_report(self, client):
@@ -3306,6 +3307,7 @@ class TestGuidanceRoute:
         r = client.get("/api/guidance")
         assert r.status_code == 200
         assert r.headers["content-type"] == "text/html"
+        assert r.headers["cache-control"] == "no-store"  # mirrors stdlib _serve_file
         assert r.text == "<html>guide</html>"
 
     def test_204_when_absent(self, client):

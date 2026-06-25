@@ -2170,8 +2170,12 @@ def create_app() -> FastAPI:
                 content={"error": f"no report for investigation {slug!r}"},
             )
         # Content-Type via headers (not media_type) so Starlette keeps the
-        # legacy bare "text/html" (no "; charset=utf-8" suffix).
-        return FileResponse(path, headers={"Content-Type": "text/html"})
+        # legacy bare "text/html" (no "; charset=utf-8" suffix). Cache-Control:
+        # no-store mirrors the stdlib _serve_file (these reports are live-
+        # regenerated, so a conditional 304 must never serve stale content).
+        return FileResponse(
+            path, headers={"Content-Type": "text/html", "Cache-Control": "no-store"}
+        )
 
     @app.get(
         "/api/guidance",
@@ -2191,8 +2195,10 @@ def create_app() -> FastAPI:
         if latest is None:
             return Response(status_code=204)
         # Content-Type via headers (not media_type) so Starlette keeps the
-        # legacy bare "text/html" (no "; charset=utf-8" suffix).
-        return FileResponse(latest, headers={"Content-Type": "text/html"})
+        # legacy bare "text/html"; Cache-Control: no-store mirrors _serve_file.
+        return FileResponse(
+            latest, headers={"Content-Type": "text/html", "Cache-Control": "no-store"}
+        )
 
     @app.get(
         "/api/investigation-notebook/{slug}",
