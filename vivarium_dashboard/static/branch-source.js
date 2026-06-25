@@ -5,6 +5,7 @@
   "use strict";
 
   var state = { scope: "local", repo: null, branch: null, entries: [], current: null };
+  var pollTimer = null;
 
   function _el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -84,6 +85,7 @@
   }
 
   async function _loadEntries() {
+    state.error = null;  // start each load clean so a stale remote error never lingers
     if (state.scope === "local") {
       var r = await fetch("/api/workspaces");
       var d = r.ok ? await r.json() : { workspaces: [] };
@@ -225,7 +227,23 @@
 
     host.appendChild(actions);
 
-    if (state.error) host.appendChild(_el("div", "viv-bs-note", "sms-api: " + state.error));
+    if (state.error) {
+      var errNote = _el("div", "viv-bs-note", "sms-api: " + state.error);
+      var retryBtn = _el("button", "viv-bs-toggle", "Retry");
+      retryBtn.style.marginLeft = "8px";
+      retryBtn.title = "Re-check sms-api now";
+      retryBtn.addEventListener("click", function () { _stopBuildsPoll(); refresh(); });
+      errNote.appendChild(retryBtn);
+      if (state.scope === "remote") {
+        var hint = _el("span", "viv-bs-retry-hint", " · auto-retrying every 5s…");
+        hint.style.opacity = "0.7";
+        errNote.appendChild(hint);
+        _ensureBuildsPoll();   // recover automatically when the tunnel comes back
+      }
+      host.appendChild(errNote);
+    } else {
+      _stopBuildsPoll();
+    }
 
     // Search / paste-a-commit filter. While filtering in remote scope, search
     // across ALL builds of the repo (every branch) so you can paste any commit.
@@ -287,9 +305,28 @@
     return row;
   }
 
+  function _stopBuildsPoll() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  // While a Remote source is selected but sms-api is unreachable, keep
+  // re-checking in the background so a recovered tunnel clears the error and
+  // populates the builds on its own — no manual page reload needed.
+  function _ensureBuildsPoll() {
+    if (pollTimer) return;
+    pollTimer = setInterval(function () {
+      if (state.scope !== "remote") { _stopBuildsPoll(); return; }
+      _loadEntries().then(function () {
+        if (!state.error) _stopBuildsPoll();
+        _render();
+      }).catch(function () {});
+    }, 5000);
+  }
+
   async function refresh() {
     var host = document.getElementById("viv-branch-source");
     if (!host) return;
+    _stopBuildsPoll();
     var r = await fetch("/api/workspaces").catch(function () { return null; });
     var cur = (r && r.ok) ? ((await r.json()).current || null) : null;
     var curPath = (cur && cur.path) || "";
