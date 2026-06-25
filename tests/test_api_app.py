@@ -749,17 +749,20 @@ def test_git_status_in_openapi(client):
 # ---------------------------------------------------------------------------
 
 def test_work_status_inactive(client, monkeypatch):
-    """No active workstream → {active: false}."""
+    """No active workstream → EXACTLY {active: false} (byte-identical to legacy).
+
+    The discriminated union must not leak the active model's 13 null defaults.
+    """
     import vivarium_dashboard.api.app as _app
 
     monkeypatch.setattr(_app._git_status, "build_work_status", lambda ws: {"active": False})
     r = client.get("/api/work-status")
     assert r.status_code == 200
-    assert r.json()["active"] is False
+    assert r.json() == {"active": False}     # exactly one key, no null leakage
 
 
 def test_work_status_active(client, monkeypatch):
-    """Active workstream → full payload with commit counts."""
+    """Active workstream → full 14-key payload, including null pr_number/pr_url."""
     import vivarium_dashboard.api.app as _app
 
     payload = {
@@ -772,15 +775,18 @@ def test_work_status_active(client, monkeypatch):
     r = client.get("/api/work-status")
     assert r.status_code == 200
     body = r.json()
+    assert body == payload                   # byte-identical, all 14 keys incl. nulls
     assert body["active"] is True
     assert body["commits_ahead"] == 5
-    assert body["stale"] is False
+    assert body["pr_number"] is None         # nullable active-path key NOT dropped
 
 
 def test_work_status_in_openapi(client):
     spec = client.get("/openapi.json").json()
     assert "/api/work-status" in spec["paths"]
-    assert "WorkStatus" in spec["components"]["schemas"]
+    schemas = spec["components"]["schemas"]
+    assert "WorkStatusActive" in schemas
+    assert "WorkStatusInactive" in schemas
 
 
 # ---------------------------------------------------------------------------
@@ -930,6 +936,20 @@ def test_branches_with_data(client, monkeypatch):
     assert b["ahead_of_main"] == 2
 
 
+def test_branches_500_on_git_error(client, monkeypatch):
+    """A top-level git failure (builder returns {error}) → HTTP 500, matching
+    the legacy _serve_branches — not a swallowed 200."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(
+        _app._git_status, "list_branches",
+        lambda ws: {"error": "fatal: not a git repository"},
+    )
+    r = client.get("/api/branches")
+    assert r.status_code == 500
+    assert "not a git repository" in r.json()["detail"]
+
+
 def test_branches_in_openapi(client):
     spec = client.get("/openapi.json").json()
     assert "/api/branches" in spec["paths"]
@@ -969,6 +989,15 @@ def test_branch_diff_400_invalid_branch(client, monkeypatch):
     r = client.get("/api/branch-diff?branch=../evil")
     assert r.status_code == 400
     assert "invalid branch name" in r.json()["detail"]
+
+
+def test_branch_diff_400_missing_param(client):
+    """Missing ?branch= → HTTP 400 (NOT FastAPI's 422 'field required').
+
+    Hits the real builder on the empty tmp workspace; the empty branch fails
+    the builder's name validation and surfaces as 400, matching legacy."""
+    r = client.get("/api/branch-diff")
+    assert r.status_code == 400
 
 
 def test_branch_diff_in_openapi(client):
