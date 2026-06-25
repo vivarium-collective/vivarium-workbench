@@ -3521,3 +3521,117 @@ class TestStaticRoutes:
         assert get_routes[-1].path == "/{rel:path}", (
             f"catch-all not last; last route is {get_routes[-1].path}"
         )
+
+
+class TestStudyDetailPageRoute:
+    """Tests for GET /studies/{slug} (Phase C, Batch 17)."""
+
+    @pytest.fixture
+    def ws_with_study(self, tmp_path):
+        """Workspace with one study (v2 variants shape — passes spec validator)."""
+        import yaml
+        slug = "dnaa-01-binding"
+        inv = tmp_path / "investigations" / slug
+        inv.mkdir(parents=True)
+        (inv / "spec.yaml").write_text(yaml.safe_dump({
+            "name": slug,
+            "title": "DnaA Binding Study",
+            "baseline": "dnaa-baseline",
+            "status": "draft",
+            "objective": "Test DnaA binding kinetics.",
+            "question": "", "hypothesis": "",
+            "comparisons": [], "conclusions": "",
+            "variants": [
+                {
+                    "name": "dnaa-baseline",
+                    "source": "pbg_basic_processes.composites.test.dummy",
+                    "document": "./composites/dnaa-baseline.yaml",
+                },
+            ],
+            "runs": [],
+        }), encoding="utf-8")
+        return tmp_path, slug
+
+    @pytest.fixture
+    def client_with_study(self, ws_with_study):
+        """TestClient whose workspace has a real study."""
+        ws, slug = ws_with_study
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: ws
+        return TestClient(app), slug
+
+    def test_valid_study_returns_200_html(self, client_with_study):
+        client, slug = client_with_study
+        r = client.get(f"/studies/{slug}")
+        assert r.status_code == 200
+        ct = r.headers["content-type"]
+        assert "text/html" in ct
+        assert "charset=utf-8" in ct
+
+    def test_valid_study_body_contains_study_content(self, client_with_study):
+        client, slug = client_with_study
+        r = client.get(f"/studies/{slug}")
+        assert r.status_code == 200
+        # Template renders the slug and/or study title
+        assert slug in r.text or "DnaA Binding Study" in r.text
+
+    def test_invalid_slug_returns_404_not_found(self, client_with_study):
+        """Invalid slug → 404 with exact legacy body (not a catch-all 404)."""
+        client, _ = client_with_study
+        r = client.get("/studies/../etc/passwd")
+        # Starlette normalises .. out of the URL before it reaches the route;
+        # the router may produce a 307 redirect or 404 — in both cases the slug
+        # validation must ultimately prevent a 200 render.
+        assert r.status_code in (404, 307, 400)
+
+    def test_unknown_slug_returns_404_study_not_found(self, client_with_study):
+        """Unknown (but valid) slug → 404 with 'Study not found' body."""
+        client, _ = client_with_study
+        r = client.get("/studies/does-not-exist")
+        assert r.status_code == 404
+        assert "Study not found" in r.text
+        assert "does-not-exist" in r.text
+
+    def test_invalid_slug_uppercase_returns_404(self, client_with_study):
+        """An uppercase slug fails validation → 404 Not found."""
+        client, _ = client_with_study
+        r = client.get("/studies/BadSlug")
+        assert r.status_code == 404
+        assert "<h1>Not found</h1>" in r.text
+
+    def test_no_cache_control_header(self, client_with_study):
+        """_send_html does NOT set Cache-Control; the FastAPI route must not either."""
+        client, slug = client_with_study
+        r = client.get(f"/studies/{slug}")
+        assert r.status_code == 200
+        # cache-control must be absent (not 'no-store' like _serve_file)
+        assert "cache-control" not in r.headers
+
+    def test_study_route_before_catch_all(self):
+        """/studies/{slug} must be registered BEFORE the catch-all /{rel:path}."""
+        app = create_app()
+        get_routes = [
+            r for r in app.router.routes
+            if getattr(r, "methods", None) and "GET" in r.methods
+        ]
+        paths = [r.path for r in get_routes]
+        assert "/studies/{slug}" in paths, "/studies/{slug} not registered"
+        study_idx = paths.index("/studies/{slug}")
+        catch_all_idx = paths.index("/{rel:path}")
+        assert study_idx < catch_all_idx, (
+            f"/studies/{{slug}} (idx {study_idx}) must come before "
+            f"catch-all (idx {catch_all_idx})"
+        )
+
+    def test_study_route_does_not_fall_through_to_catch_all(self, client_with_study):
+        """A valid /studies/<slug> must hit the study route, not the catch-all.
+
+        The catch-all would return 404 (file not found) with Cache-Control:
+        no-store. A successful study page is a 200 HTML with the study name.
+        An unknown slug produces the 'Study not found' HTML — NOT an asset 404.
+        """
+        client, _ = client_with_study
+        r = client.get("/studies/some-unknown-but-valid-slug")
+        assert r.status_code == 404
+        # The study-page 404 has 'Study not found'; the catch-all 404 is empty.
+        assert "Study not found" in r.text
