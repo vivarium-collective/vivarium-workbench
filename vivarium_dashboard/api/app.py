@@ -33,7 +33,7 @@ from typing import Optional, Union
 import subprocess
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError
 
 from vivarium_dashboard.lib import composite_run_views as _cr_views
@@ -49,6 +49,7 @@ from vivarium_dashboard.lib import observables_views as _obs_views
 from vivarium_dashboard.lib import report_views as _report_views
 from vivarium_dashboard.lib import rigor_views as _rigor_views
 from vivarium_dashboard.lib import saved_visualizations as _saved_viz
+from vivarium_dashboard.lib import static_serving as _static_serving
 from vivarium_dashboard.lib import study_spec as _study_spec
 from vivarium_dashboard.lib import study_viz_views as _study_viz
 from vivarium_dashboard.lib import system_info as _system_info
@@ -293,6 +294,18 @@ _OPENAPI_TAGS = [
             "``event: state`` frame whenever the file changes.  First event fires "
             "immediately if the file already exists.  Uses raw "
             "``StreamingResponse`` (no sse-starlette dep)."
+        ),
+    },
+    {
+        "name": "Static & shell",
+        "description": (
+            "Static-asset + SPA-shell serving (FileResponse, not a JSON model): "
+            "the ``/`` index shell (best-effort re-render then serve "
+            "``reports/index.html``), the standalone ``bigraph-loom`` and "
+            "``pbg_parsimony`` viewer bundles, and a catch-all asset route. The "
+            "catch-all is registered LAST so every specific route (all "
+            "``/api/*``, ``/``, the viewers, ``/docs``) matches first. All served "
+            "files carry ``Cache-Control: no-store`` with the legacy bare mime."
         ),
     },
 ]
@@ -2159,7 +2172,7 @@ def create_app() -> FastAPI:
         "/api/iset/{slug}/report",
         tags=["Downloads"],
         summary="Per-investigation HTML report file",
-        response_class=FileResponse,
+        response_class=Response,
     )
     def iset_report_route(
         slug: str,
@@ -2179,19 +2192,20 @@ def create_app() -> FastAPI:
                 status_code=404,
                 content={"error": f"no report for investigation {slug!r}"},
             )
-        # Content-Type via headers (not media_type) so Starlette keeps the
-        # legacy bare "text/html" (no "; charset=utf-8" suffix). Cache-Control:
-        # no-store mirrors the stdlib _serve_file (these reports are live-
-        # regenerated, so a conditional 304 must never serve stale content).
-        return FileResponse(
-            path, headers={"Content-Type": "text/html", "Cache-Control": "no-store"}
+        # Plain Response(read_bytes): byte-identical header set to _serve_file
+        # (bare text/html + Cache-Control: no-store, no FileResponse ETag/
+        # Last-Modified/Accept-Ranges). These reports are live-regenerated, so a
+        # conditional 304 must never serve stale content.
+        return Response(
+            content=path.read_bytes(),
+            headers={"Content-Type": "text/html", "Cache-Control": "no-store"},
         )
 
     @app.get(
         "/api/guidance",
         tags=["Downloads"],
         summary="Latest guidance HTML (204 when none)",
-        response_class=FileResponse,
+        response_class=Response,
     )
     def guidance_route(ws: Path = Depends(get_workspace)) -> Response:
         """Serve the latest ``*.html`` in ``<pbg>/server/content`` as
@@ -2204,10 +2218,10 @@ def create_app() -> FastAPI:
         latest = _download_views.resolve_guidance(ws)
         if latest is None:
             return Response(status_code=204)
-        # Content-Type via headers (not media_type) so Starlette keeps the
-        # legacy bare "text/html"; Cache-Control: no-store mirrors _serve_file.
-        return FileResponse(
-            latest, headers={"Content-Type": "text/html", "Cache-Control": "no-store"}
+        # Plain Response(read_bytes): byte-identical header set to _serve_file.
+        return Response(
+            content=latest.read_bytes(),
+            headers={"Content-Type": "text/html", "Cache-Control": "no-store"},
         )
 
     @app.get(
@@ -2276,6 +2290,160 @@ def create_app() -> FastAPI:
             media_type="text/event-stream",
             headers={"Cache-Control": "no-store"},
         )
+
+    # -----------------------------------------------------------------------
+    # Static + SPA-shell serving (Phase C, Batch 16): the SPA index, the
+    # standalone loom/parsimony viewer bundles, and a catch-all asset route.
+    # FileResponse (not a pydantic model); each reproduces the legacy
+    # ``do_GET`` static branch byte-for-byte — the bundled→assets-strip→
+    # workspace→reports resolution priority, the ``_guess_mime`` table, and
+    # ``Cache-Control: no-store`` on every served file.  ``/studies/{slug}``
+    # (the study-detail HTML page) is DEFERRED (needs the heavy
+    # ``_render_study_detail_html`` extraction) and is NOT ported here.
+    # -----------------------------------------------------------------------
+
+    def _serve_static_file(target: Path, rel: str) -> Response:
+        """Serve *target* with the guessed bare mime + ``Cache-Control: no-store``;
+        404 (empty body) when it is not a file.  Mirrors ``server._serve_file``."""
+        if not target.is_file():
+            return Response(status_code=404)
+        # Read the bytes and return a plain Response (NOT FileResponse) so the
+        # header set is byte-identical to the legacy _serve_file: Content-Type
+        # (bare mime, no charset suffix via the headers dict) + Cache-Control:
+        # no-store, and nothing else. FileResponse would also emit ETag /
+        # Last-Modified / Accept-Ranges, enabling conditional 304s and Range
+        # 206s that _serve_file never did (it always sends a full 200).
+        return Response(
+            content=target.read_bytes(),
+            headers={
+                "Content-Type": _static_serving.guess_mime(rel),
+                "Cache-Control": "no-store",
+            },
+        )
+
+    @app.get(
+        "/",
+        tags=["Static & shell"],
+        summary="SPA shell index (re-render then serve reports/index.html)",
+        response_class=Response,
+        include_in_schema=False,
+    )
+    @app.get(
+        "/index.html",
+        tags=["Static & shell"],
+        summary="SPA shell index (re-render then serve reports/index.html)",
+        response_class=Response,
+        include_in_schema=False,
+    )
+    def index_shell(ws: Path = Depends(get_workspace)) -> Response:
+        """Render the SPA shell (best-effort) then serve ``reports/index.html``.
+
+        Re-renders via ``lib.report.render_workspace_report`` BEFORE serving so
+        the live dashboard is decoupled from the on-disk ``reports/index.html``
+        (which offline tools may overwrite); a render failure never blocks the
+        load — we fall back to whatever is on disk.  Served as ``text/html`` with
+        ``Cache-Control: no-store``; 404 when the file is absent.
+
+        Mirrors the legacy ``do_GET`` ``("/", "/index.html")`` branch.
+        """
+        try:
+            from vivarium_dashboard.lib.report import render_workspace_report
+            render_workspace_report(ws)
+        except Exception as render_exc:  # noqa: BLE001 — never block load
+            import sys as _sys
+            print(
+                f"[dashboard] / re-render failed; serving on-disk file: "
+                f"{type(render_exc).__name__}: {render_exc}", file=_sys.stderr,
+            )
+        path = _static_serving.index_html_path(ws)
+        if not path.is_file():
+            return Response(status_code=404)
+        # Plain Response(read_bytes) — byte-identical header set to _serve_file
+        # (no FileResponse ETag/Last-Modified/Accept-Ranges).
+        return Response(
+            content=path.read_bytes(),
+            headers={"Content-Type": "text/html", "Cache-Control": "no-store"},
+        )
+
+    @app.get(
+        "/bigraph-loom/{rel:path}",
+        tags=["Static & shell"],
+        summary="bigraph-loom viewer bundle asset",
+        response_class=Response,
+        include_in_schema=False,
+    )
+    def bigraph_loom_asset(rel: str = "") -> Response:
+        """Serve a ``bigraph-loom`` viewer asset from ``bigraph_loom.asset_dir()``.
+
+        ``rel`` empty → ``index.html``.  HTTP 403 (empty body) on a ``..`` path
+        segment (traversal guard); 404 when the file is absent.  Served with the
+        guessed bare mime + ``Cache-Control: no-store``.  Mirrors the legacy
+        ``/bigraph-loom`` branch.
+
+        Library-backed via ``lib.static_serving.resolve_loom_asset``.
+        """
+        try:
+            target = _static_serving.resolve_loom_asset(rel)
+        except _static_serving.AssetTraversal:
+            return Response(status_code=403)
+        return _serve_static_file(target, rel or "index.html")
+
+    @app.get(
+        "/parsimony-viewer/{rel:path}",
+        tags=["Static & shell"],
+        summary="pbg_parsimony 3D viewer bundle asset (404 when not installed)",
+        response_class=Response,
+        include_in_schema=False,
+    )
+    def parsimony_viewer_asset(rel: str = "") -> Response:
+        """Serve a ``pbg_parsimony`` viewer asset (feature-detected).
+
+        HTTP 404 (empty body) when ``pbg_parsimony`` is not installed (the
+        Analyses gallery hides its 3D cards), or when the file is absent; HTTP
+        403 on a ``..`` path segment.  ``rel`` empty → ``index.html``.  Served
+        with the guessed bare mime + ``Cache-Control: no-store``.  Mirrors the
+        legacy ``/parsimony-viewer`` branch.
+
+        Library-backed via ``lib.static_serving.resolve_parsimony_asset``.
+        """
+        try:
+            target = _static_serving.resolve_parsimony_asset(rel)
+        except _static_serving.AssetTraversal:
+            return Response(status_code=403)
+        if target is None:
+            return Response(status_code=404)
+        return _serve_static_file(target, rel or "index.html")
+
+    # -----------------------------------------------------------------------
+    # CATCH-ALL — MUST stay registered LAST (immediately before ``return app``)
+    # so Starlette, which matches routes in registration order, resolves every
+    # specific route first (all ``/api/*``, ``/``, the loom/parsimony viewers,
+    # FastAPI's ``/docs`` & ``/openapi.json``).  This route only handles
+    # otherwise-unmatched paths.  DO NOT add routes below it.
+    # -----------------------------------------------------------------------
+    @app.get(
+        "/{rel:path}",
+        tags=["Static & shell"],
+        summary="Catch-all static asset (bundled → assets-strip → workspace → reports)",
+        response_class=Response,
+        include_in_schema=False,
+    )
+    def catch_all_asset(rel: str, ws: Path = Depends(get_workspace)) -> Response:
+        """Generic static-file serving for otherwise-unmatched GET paths.
+
+        Resolution priority (mirrors the legacy ``do_GET`` static fall-through):
+        package-bundled ``STATIC_DIR`` → ``assets/``-prefix-strip retry against
+        ``STATIC_DIR`` → the workspace tree → the rendered ``reports/`` dir
+        (served unconditionally → 404 when absent).  HTTP 403 on a ``..`` path
+        segment; served with the guessed bare mime + ``Cache-Control: no-store``.
+
+        Library-backed via ``lib.static_serving.resolve_asset``.
+        """
+        rel = rel.lstrip("/")
+        if ".." in rel.split("/"):
+            return Response(status_code=403)
+        target = _static_serving.resolve_asset(ws, rel)
+        return _serve_static_file(target, rel)
 
     return app
 
