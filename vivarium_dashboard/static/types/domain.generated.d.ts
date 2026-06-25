@@ -330,3 +330,22 @@ export interface LinkageIndex {
 
 export interface CompositeState {
 }
+
+export interface FrameworkMetrics {
+  metrics: any;
+  n_investigations: number;
+  n_studies: number;
+}
+
+export interface GithubRepo {
+  repo: string | null;
+}
+
+export interface UiConfig {
+  composite_view: string;
+  ptools_server_url: string;
+  ptools_omics_url_template: string;
+}
+
+export interface WorkspaceHome {
+}

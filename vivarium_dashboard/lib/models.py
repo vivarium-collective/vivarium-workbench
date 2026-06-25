@@ -962,3 +962,66 @@ class LinkageIndex(BaseModel):
     """
 
     model_config = ConfigDict(extra="allow")
+
+
+# ---------------------------------------------------------------------------
+# System & workspace models
+# ---------------------------------------------------------------------------
+
+class FrameworkMetrics(BaseModel):
+    """``GET /api/framework-metrics`` payload (lib.system_info.build_framework_metrics).
+
+    Aggregated framework-self metrics over every study + investigation in the
+    workspace.  Always HTTP 200 (best-effort): ``metrics`` is ``{}`` when
+    pbg_superpowers is absent or the compute raises.
+
+    ``extra="allow"`` preserves any forward-compat keys the builder may add.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    metrics: Any
+    n_investigations: int
+    n_studies: int
+
+
+class GithubRepo(BaseModel):
+    """``GET /api/github-repo`` payload (lib.system_info.build_github_repo).
+
+    Returns the workspace's GitHub ``owner/name`` slug, or ``null`` when neither
+    the git remote nor workspace.yaml resolves to a GitHub URL.  Always 200.
+
+    ``extra="allow"`` for forward-compat.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    repo: Optional[str] = None
+
+
+class UiConfig(BaseModel):
+    """``GET /api/ui-config`` payload (lib.system_info.build_ui_config).
+
+    UI feature flags read from workspace.yaml's ``ui:`` block, all with
+    typed defaults when the block is absent.  Always HTTP 200.
+
+    ``extra="allow"`` for forward-compat.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    composite_view: str
+    ptools_server_url: str
+    ptools_omics_url_template: str
+
+
+class WorkspaceHome(BaseModel):
+    """``GET /api/workspace`` payload (lib.system_info.build_workspace_home).
+
+    Workspace narrative metadata: name, description, imports map, and the
+    per-investigation summary list.  Shape is variable (investigations list
+    rows vary), so this is a pure pass-through (``extra="allow"``, no declared
+    fields) — the builder dict survives verbatim.
+    """
+
+    model_config = ConfigDict(extra="allow")

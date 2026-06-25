@@ -2388,3 +2388,129 @@ def test_composite_state_in_openapi(client):
     assert "/api/composite-state" in spec["paths"]
     assert "/api/composite-state/{ref}" in spec["paths"]
     assert "CompositeState" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# System & workspace routes — Batch 6
+# ---------------------------------------------------------------------------
+
+class TestFrameworkMetricsRoute:
+    def test_empty_workspace_returns_200_and_typed_shape(self, client):
+        r = client.get("/api/framework-metrics")
+        assert r.status_code == 200
+        body = r.json()
+        assert "metrics" in body
+        assert isinstance(body["metrics"], dict)
+        assert body["n_investigations"] == 0
+        assert body["n_studies"] == 0
+
+    def test_framework_metrics_in_openapi(self, client):
+        components = client.get("/openapi.json").json()["components"]["schemas"]
+        assert "FrameworkMetrics" in components
+
+    def test_delegates_to_lib_builder(self, client, monkeypatch, tmp_path):
+        """Route body == lib builder output on the same workspace."""
+        from vivarium_dashboard.lib.system_info import build_framework_metrics
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: tmp_path
+        from fastapi.testclient import TestClient
+        c = TestClient(app)
+        r = c.get("/api/framework-metrics")
+        assert r.status_code == 200
+        assert r.json() == build_framework_metrics(tmp_path)
+
+
+class TestGithubRepoRoute:
+    def test_no_git_no_yaml_returns_null(self, client):
+        r = client.get("/api/github-repo")
+        assert r.status_code == 200
+        assert r.json() == {"repo": None}
+
+    def test_yaml_github_repo_returned(self, client, tmp_path):
+        import yaml as _yaml
+        (tmp_path / "workspace.yaml").write_text(_yaml.safe_dump({
+            "dashboard": {"github_repo": "org/my-repo"},
+        }))
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: tmp_path
+        from fastapi.testclient import TestClient
+        r = TestClient(app).get("/api/github-repo")
+        assert r.status_code == 200
+        assert r.json() == {"repo": "org/my-repo"}
+
+    def test_github_repo_in_openapi(self, client):
+        components = client.get("/openapi.json").json()["components"]["schemas"]
+        assert "GithubRepo" in components
+
+
+class TestUiConfigRoute:
+    def test_defaults_on_empty_workspace(self, client):
+        from vivarium_dashboard.lib.system_info import _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE
+        r = client.get("/api/ui-config")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["composite_view"] == "bigraph-loom"
+        assert body["ptools_server_url"] == ""
+        assert body["ptools_omics_url_template"] == _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE
+
+    def test_reads_workspace_yaml_ui_block(self, tmp_path):
+        import yaml as _yaml
+        (tmp_path / "workspace.yaml").write_text(_yaml.safe_dump({
+            "ui": {
+                "composite_view": "custom-view",
+                "ptools_server_url": "http://ptools:1555",
+            },
+        }))
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: tmp_path
+        from fastapi.testclient import TestClient
+        body = TestClient(app).get("/api/ui-config").json()
+        assert body["composite_view"] == "custom-view"
+        assert body["ptools_server_url"] == "http://ptools:1555"
+
+    def test_ui_config_in_openapi(self, client):
+        components = client.get("/openapi.json").json()["components"]["schemas"]
+        assert "UiConfig" in components
+
+    def test_non_string_ui_field_degrades_to_raw_200(self, tmp_path):
+        """A non-string ui.composite_view (off-spec) must NOT 500 — the route
+        returns 200 with the raw builder dict (byte-identical to legacy)."""
+        import yaml as _yaml
+        (tmp_path / "workspace.yaml").write_text(_yaml.safe_dump({
+            "ui": {"composite_view": 42},
+        }))
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: tmp_path
+        from fastapi.testclient import TestClient
+        r = TestClient(app).get("/api/ui-config")
+        assert r.status_code == 200
+        # Raw value survives — UiConfig validation was bypassed via the fallback.
+        assert r.json()["composite_view"] == 42
+
+
+class TestWorkspaceHomeRoute:
+    def test_empty_workspace_returns_200(self, client, tmp_path):
+        r = client.get("/api/workspace")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["investigations"] == []
+        assert body["imports"] == {}
+
+    def test_returns_workspace_metadata(self, tmp_path):
+        import yaml as _yaml
+        (tmp_path / "workspace.yaml").write_text(_yaml.safe_dump({
+            "name": "my-ws",
+            "description": "Test workspace",
+            "imports": {"pbg-core": "0.1.0"},
+        }))
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: tmp_path
+        from fastapi.testclient import TestClient
+        body = TestClient(app).get("/api/workspace").json()
+        assert body["name"] == "my-ws"
+        assert body["description"] == "Test workspace"
+        assert body["imports"] == {"pbg-core": "0.1.0"}
+
+    def test_workspace_home_in_openapi(self, client):
+        components = client.get("/openapi.json").json()["components"]["schemas"]
+        assert "WorkspaceHome" in components
