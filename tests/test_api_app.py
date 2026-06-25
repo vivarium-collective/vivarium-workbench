@@ -1369,3 +1369,169 @@ def test_investigation_rigor_in_openapi(client):
     spec = client.get("/openapi.json").json()
     assert "/api/investigation-rigor" in spec["paths"]
     assert "InvestigationRigor" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# /api/study/{slug}
+# ---------------------------------------------------------------------------
+
+import sqlite3  # noqa: E402
+import yaml as _yaml  # noqa: E402
+
+
+def _make_study_workspace(tmp_path):
+    """Workspace with a 'my-study' study and a run in runs.db."""
+    study_dir = tmp_path / "studies" / "my-study"
+    study_dir.mkdir(parents=True)
+    (study_dir / "study.yaml").write_text(
+        _yaml.dump({
+            "name": "my-study",
+            "composite": "pbg_ws.composites.baseline",
+            "runs": [],
+            "simulation_set": [
+                {"name": "baseline", "is_baseline": True, "status": "ready"},
+            ],
+        }),
+        encoding="utf-8",
+    )
+    conn = sqlite3.connect(str(study_dir / "runs.db"))
+    conn.execute(
+        "CREATE TABLE runs_meta (run_id TEXT, spec_id TEXT, label TEXT, "
+        "params_json TEXT, started_at REAL, completed_at REAL, n_steps INTEGER, "
+        "status TEXT, sim_name TEXT, generation_id TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO runs_meta VALUES (?,?,?,?,?,?,?,?,?,?)",
+        ("r1", "my-study", "Run", "{}", 1700000000.0, 1700000010.0,
+         100, "completed", "baseline", None),
+    )
+    conn.commit()
+    conn.close()
+    return tmp_path
+
+
+def test_study_detail_200(tmp_path):
+    """A study with a runs.db → 200, spec has run_id in 'runs'."""
+    ws = _make_study_workspace(tmp_path)
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: ws
+    c = TestClient(app)
+    r = c.get("/api/study/my-study")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["name"] == "my-study"
+    run_ids = {(rr or {}).get("run_id") for rr in body.get("runs", [])}
+    assert "r1" in run_ids
+
+
+def test_study_detail_404_unknown(client):
+    """Unknown study slug → 404, {"error": "study not found: <slug>"}."""
+    r = client.get("/api/study/no-such-study")
+    assert r.status_code == 404
+    body = r.json()
+    assert body == {"error": "study not found: no-such-study"}
+    assert "detail" not in body
+
+
+def test_study_detail_400_invalid_slug(client):
+    """Invalid slug → 400, {"error": "invalid slug"}.
+
+    FastAPI routes the request first, so only slugs that arrive at the handler
+    can be tested here.  Path-traversal slugs that contain an encoded '/'
+    (%2F) cause Starlette to normalize the URL before routing, which yields 404
+    (the path ceases to match the route pattern) rather than reaching the slug
+    validation.  We test slugs that ARE routed but fail the SLUG_RE check:
+    uppercase letters, leading/trailing hyphens, underscores at boundaries, etc.
+    """
+    # These slugs reach the handler but fail SLUG_RE → 400.
+    for bad in ("UPPER", "-leading-hyphen", "trailing-"):
+        r = client.get(f"/api/study/{bad}")
+        assert r.status_code == 400, f"expected 400 for {bad!r}, got {r.status_code}"
+        assert r.json() == {"error": "invalid slug"}
+        assert "detail" not in r.json()
+
+
+def test_study_detail_in_openapi(client):
+    """The /api/study/{slug} route and StudyDetail appear in the OpenAPI schema."""
+    spec = client.get("/openapi.json").json()
+    assert "/api/study/{slug}" in spec["paths"]
+    assert "StudyDetail" in spec["components"]["schemas"]
+
+
+def test_study_detail_extra_keys_preserved(tmp_path):
+    """StudyDetail uses extra='allow' — the loader's extra keys survive the typed response."""
+    ws = _make_study_workspace(tmp_path)
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: ws
+    c = TestClient(app)
+    r = c.get("/api/study/my-study")
+    assert r.status_code == 200
+    body = r.json()
+    # simulation_set is one such "extra" key not declared on StudyDetail
+    assert "simulation_set" in body
+    assert isinstance(body["simulation_set"], list)
+
+
+def test_study_detail_500_loader_exception(client, monkeypatch):
+    """Loader raising → 500 with error + traceback fields."""
+    monkeypatch.setattr(
+        api_app._study_spec, "load_study_detail_spec",
+        lambda ws, slug: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    r = client.get("/api/study/any-study")
+    assert r.status_code == 500
+    body = r.json()
+    assert "error" in body and "traceback" in body
+    assert "RuntimeError" in body["error"] and "boom" in body["error"]
+    assert "detail" not in body
+
+
+class TestStudyDetailServerShimParity:
+    """The FastAPI route body matches the legacy server builder for 200 + 404 + 400."""
+
+    def test_200_parity(self, tmp_path, monkeypatch):
+        ws = _make_study_workspace(tmp_path)
+        import vivarium_dashboard.server as srv
+        monkeypatch.setattr(srv, "WORKSPACE", ws)
+        srv._WP_CACHE.clear()
+
+        # Legacy builder response
+        legacy_bytes, legacy_status = srv.Handler._build_api_study_response("my-study")
+        import json as _json
+        legacy_body = _json.loads(legacy_bytes)
+
+        # FastAPI route response
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: ws
+        from fastapi.testclient import TestClient as _TC
+        c = _TC(app)
+        r = c.get("/api/study/my-study")
+
+        assert r.status_code == legacy_status == 200
+        assert r.json() == legacy_body
+
+    def test_404_parity(self, client, tmp_path, monkeypatch):
+        import vivarium_dashboard.server as srv
+        monkeypatch.setattr(srv, "WORKSPACE", tmp_path)
+        srv._WP_CACHE.clear()
+
+        legacy_bytes, legacy_status = srv.Handler._build_api_study_response("no-study")
+        import json as _json
+        legacy_body = _json.loads(legacy_bytes)
+
+        r = client.get("/api/study/no-study")
+        assert r.status_code == legacy_status == 404
+        assert r.json() == legacy_body
+
+    def test_400_parity(self, client):
+        """Slug that fails SLUG_RE → identical 400 body from both paths."""
+        import vivarium_dashboard.server as srv
+        import json as _json
+        # Use a slug that FastAPI routes (no encoded '/') but SLUG_RE rejects
+        bad_slug = "UPPER-CASE"
+        legacy_bytes, legacy_status = srv.Handler._build_api_study_response(bad_slug)
+        legacy_body = _json.loads(legacy_bytes)
+
+        r = client.get(f"/api/study/{bad_slug}")
+        assert r.status_code == legacy_status == 400
+        assert r.json() == legacy_body
