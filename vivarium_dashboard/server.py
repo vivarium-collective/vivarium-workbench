@@ -372,7 +372,6 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/composite-test-run": "_post_composite_test_run",
     "/api/iset-create":         "_post_iset_create",
     "/api/iset-clone":          "_post_iset_clone",
-    "/api/references-fetch":    "_post_references_fetch",
     "/api/investigation-create":      "_post_investigation_create",
     "/api/investigation-delete":      "_post_investigation_delete",
     "/api/investigation-run":         "_post_investigation_run",
@@ -5377,10 +5376,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_explorer_protein_breakdown()
         if self.path.startswith("/api/explorer/vector"):
             return self._get_explorer_vector()
-        if self.path.startswith("/api/explorer/validation"):
-            return self._get_explorer_validation()
-        if self.path.startswith("/api/explorer/base-fluxes"):
-            return self._get_explorer_base_fluxes()
         if self.path.startswith("/api/simulations"):
             return self._get_simulations()
         if self.path.startswith("/api/composite-state"):
@@ -7816,46 +7811,6 @@ if __name__ == "__main__":
         except Exception as e:
             return self._json({"error": str(e), "breakdown": {}, "step": step, "time": None}, 200)
 
-    def _get_explorer_validation(self):
-        """GET /api/explorer/validation?db=&run=&dataset=schmidt|wisniewski&nsteps=
-        — simulated (time-averaged monomer counts) vs experimental proteomics."""
-        import urllib.parse as _up
-        from vivarium_dashboard.lib import explorer_data
-        q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
-        db = q.get("db")
-        if not db:
-            return self._json({"error": "missing db", "points": [], "n": 0, "pearson": None}, 200)
-        try:
-            nsteps = int(q.get("nsteps", "0"))
-        except ValueError:
-            nsteps = 0
-        try:
-            return self._json(
-                explorer_data.get_validation_scatter(
-                    db, q.get("dataset", "schmidt"), q.get("run"), WORKSPACE,
-                    n_steps=nsteps or None), 200)
-        except Exception as e:
-            return self._json({"error": str(e), "points": [], "n": 0, "pearson": None}, 200)
-
-    def _get_explorer_base_fluxes(self):
-        """GET /api/explorer/base-fluxes?db=&run=&step= — per-reaction FBA fluxes
-        keyed by EcoCyc base reaction id (full metabolism, for pathway grouping)."""
-        import urllib.parse as _up
-        from vivarium_dashboard.lib import explorer_data
-        q = dict(_up.parse_qsl(_up.urlparse(self.path).query))
-        db = q.get("db")
-        if not db:
-            return self._json({"error": "missing db", "fluxes": {}, "n": 0}, 200)
-        try:
-            step = int(q.get("step", "0"))
-        except ValueError:
-            step = 0
-        try:
-            return self._json(
-                explorer_data.get_base_fluxes(db, step, q.get("run"), WORKSPACE), 200)
-        except Exception as e:
-            return self._json({"error": str(e), "fluxes": {}, "n": 0}, 200)
-
     def _get_simulations(self):
         """GET /api/simulations — all persisted runs across the workspace.
 
@@ -8308,48 +8263,6 @@ if __name__ == "__main__":
             pass
         return self._json({"entries": entries}, 200)
 
-    def _post_references_fetch(self, body: dict):
-        """POST /api/references-fetch — fetch DOI + Unpaywall enrichment.
-
-        Body:
-            key:    optional bib key. If set, fetch only that entry.
-            force:  optional bool, default false. If true, re-fetch entries
-                    that already have a cached record.
-
-        With neither set, fetches all entries that lack a cached record.
-        Returns ``{updated: [<key>, ...], entries: [...refreshed entries...]}``.
-        """
-        _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.report import _parse_bib_entries
-        from vivarium_dashboard.lib.references_fetch import (
-            fetch_missing, load_cache, enrich_entries, resolve_contact_email,
-        )
-        try:
-            entries = _parse_bib_entries(WORKSPACE)
-        except Exception as e:
-            return self._json({"error": str(e)}, 500)
-        key = (body.get("key") or "").strip() or None
-        force = bool(body.get("force"))
-        if key and not any(e.get("key") == key for e in entries):
-            return self._json({"error": f"unknown bib key: {key}"}, 404)
-
-        cache_before = load_cache(WORKSPACE)
-        try:
-            cache_after = fetch_missing(
-                entries, WORKSPACE,
-                only_key=key, email=resolve_contact_email(WORKSPACE), force=force,
-            )
-        except Exception as e:
-            return self._json({"error": f"fetch failed: {e}"}, 500)
-
-        if force:
-            updated = sorted(cache_after)
-        else:
-            updated = sorted(set(cache_after) - set(cache_before))
-        enriched = enrich_entries(entries, cache_after)
-        return self._json({"updated": updated, "entries": enriched}, 200)
-
-    def _get_work_composite_diff(self):
         """GET /api/work-composite-diff — files changed on the active branch
         that look like model code (composites + processes + steps + library
         helpers). Powers a "Model changes" section in the PR body Suggest.
