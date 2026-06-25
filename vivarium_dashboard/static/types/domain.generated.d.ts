@@ -327,3 +327,6 @@ export interface StudyObservableCheck {
 
 export interface LinkageIndex {
 }
+
+export interface CompositeState {
+}

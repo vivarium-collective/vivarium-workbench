@@ -2295,3 +2295,96 @@ def test_observables_routes_in_openapi(client):
     assert "ObservablesPayload" in schemas
     assert "StudyObservableCheck" in schemas
     assert "LinkageIndex" in schemas
+
+
+# ---------------------------------------------------------------------------
+# /api/composite-state (Batch 9)
+# ---------------------------------------------------------------------------
+
+import json as _json_cs
+
+
+def _cs_ws(tmp_path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
+    return ws
+
+
+def _cs_client(ws):
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: ws
+    return TestClient(app)
+
+
+def _patch_cs_subprocess(monkeypatch, result):
+    from vivarium_dashboard.lib import composite_state_views as _csv
+    _csv.clear_cache()
+    monkeypatch.setattr(_csv, "composite_state_via_subprocess", lambda ws, ref: result)
+
+
+def test_composite_state_no_ref_400(client):
+    r = client.get("/api/composite-state")
+    assert r.status_code == 400
+    assert r.json() == {"error": "ref required"}
+
+
+def test_composite_state_unknown_ref_404(tmp_path, monkeypatch):
+    ws = _cs_ws(tmp_path)
+    _patch_cs_subprocess(monkeypatch, {"__not_registered__": True})
+    r = _cs_client(ws).get("/api/composite-state", params={"ref": "nope.x"})
+    assert r.status_code == 404
+    body = r.json()
+    assert body["unresolved"] is True
+    assert body["ref"] == "nope.x"
+
+
+def test_composite_state_spec_200(tmp_path, monkeypatch):
+    ws = _cs_ws(tmp_path)
+    (ws / "comp.yaml").write_text("a: 1\n", encoding="utf-8")
+    _patch_cs_subprocess(monkeypatch, {"__not_registered__": True})
+    r = _cs_client(ws).get("/api/composite-state", params={"ref": "comp.yaml"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["kind"] == "spec"
+    assert body["state"] == {"a": 1}
+
+
+def test_composite_state_path_form_200(tmp_path, monkeypatch):
+    ws = _cs_ws(tmp_path)
+    sd = ws / "reports" / "composite-state"
+    sd.mkdir(parents=True)
+    (sd / "myref.json").write_text(_json_cs.dumps({"state": {"x": 1}}), encoding="utf-8")
+    _patch_cs_subprocess(monkeypatch, {"__not_registered__": True})
+    # Path form with a trailing .json (the loom ?stateUrl= form).
+    r = _cs_client(ws).get("/api/composite-state/myref.json")
+    assert r.status_code == 200
+    assert r.json()["kind"] == "spec"
+
+
+def test_composite_state_static_fallback_200(tmp_path, monkeypatch):
+    ws = _cs_ws(tmp_path)
+    sd = ws / "reports" / "composite-state"
+    sd.mkdir(parents=True)
+    (sd / "gen.json").write_text(_json_cs.dumps({"state": {"y": 2}}), encoding="utf-8")
+    _patch_cs_subprocess(monkeypatch, {"__build_error__": "boom"})
+    r = _cs_client(ws).get("/api/composite-state", params={"ref": "gen"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["kind"] == "static-fallback"
+    assert body["state"] == {"y": 2}
+
+
+def test_composite_state_build_error_400(tmp_path, monkeypatch):
+    ws = _cs_ws(tmp_path)
+    _patch_cs_subprocess(monkeypatch, {"__build_error__": "boom"})
+    r = _cs_client(ws).get("/api/composite-state", params={"ref": "gen"})
+    assert r.status_code == 400
+    assert r.json() == {"error": "generator build failed: boom"}
+
+
+def test_composite_state_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/composite-state" in spec["paths"]
+    assert "/api/composite-state/{ref}" in spec["paths"]
+    assert "CompositeState" in spec["components"]["schemas"]

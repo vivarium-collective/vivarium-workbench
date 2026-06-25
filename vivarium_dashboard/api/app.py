@@ -35,6 +35,7 @@ import subprocess
 from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 
+from vivarium_dashboard.lib import composite_state_views as _composite_state_views
 from vivarium_dashboard.lib import data_sources as _data_sources
 from vivarium_dashboard.lib import explorer_data as _explorer_data
 from vivarium_dashboard.lib import git_status as _git_status
@@ -58,6 +59,7 @@ from vivarium_dashboard.lib.models import (
     CatalogPayload,
     CompositeRecord,
     CompositeResolvePayload,
+    CompositeState,
     CompositesPayload,
     DashConfig,
     DataSourcesPayload,
@@ -450,6 +452,77 @@ def create_app() -> FastAPI:
         if result is None:
             return None
         return CompositeResolvePayload.model_validate(result)
+
+    def _composite_state_response(
+        ref: str, fresh: Optional[str], ws: Path
+    ) -> Union[CompositeState, JSONResponse]:
+        """Shared worker for both composite-state URL forms.
+
+        Mirrors the legacy ``_get_composite_state``: no ref → 400; else build via
+        the lib seam (TTL cache, subprocess generator build, static fallback,
+        spec/path resolution) and carry the exact legacy status + body.
+        """
+        ref = (ref or "").strip()
+        if not ref:
+            return JSONResponse(status_code=400, content={"error": "ref required"})
+        body, status = _composite_state_views.build_composite_state(
+            ws, ref, fresh=fresh in ("1", "true", "yes")
+        )
+        if status == 200:
+            return CompositeState.model_validate(body)
+        return JSONResponse(status_code=status, content=body)
+
+    @app.get(
+        "/api/composite-state",
+        response_model=CompositeState,
+        tags=["Composites"],
+        summary="Built/parsed composite-state document for the Explorer",
+    )
+    def composite_state(
+        ref: Optional[str] = None,
+        fresh: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[CompositeState, JSONResponse]:
+        """Composite-state document for a dotted spec ID or workspace-relative path.
+
+        Mirrors ``GET /api/composite-state?ref=<id-or-path>&fresh=<bool>`` from
+        the stdlib server.  For a ``@composite_generator`` entry it runs
+        ``build_generator`` in a fresh subprocess (its own main thread) and
+        returns the summarized document; otherwise it parses the resolved spec
+        file.  Success: ``{state, kind: "generator"|"static-fallback"|"spec",
+        ...}`` (plus ``cached: true`` on a TTL cache hit; ``?fresh=1|true|yes``
+        bypasses the cache).
+
+        Error paths replicate the legacy handler's exact status codes + bodies
+        (carried via :class:`JSONResponse`): HTTP 400 (no ref, or generator
+        build failed with no static fallback); HTTP 404 (nothing resolves —
+        ``{error, unresolved: true, ref}``); HTTP 500 (spec parse failed).
+
+        Library-backed via ``lib.composite_state_views.build_composite_state``.
+        """
+        return _composite_state_response(ref or "", fresh, ws)
+
+    @app.get(
+        "/api/composite-state/{ref:path}",
+        response_model=CompositeState,
+        tags=["Composites"],
+        summary="Composite-state document (loom static ?stateUrl= form)",
+    )
+    def composite_state_path(
+        ref: str,
+        fresh: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[CompositeState, JSONResponse]:
+        """Path form of ``/api/composite-state`` for the loom's ``?stateUrl=`` mode.
+
+        Mirrors ``GET /api/composite-state/<ref>.json`` — the read-only loom's
+        static-snapshot form (``{ref:path}`` so dotted/aliased refs match).  A
+        trailing ``.json`` is stripped, then resolution is identical to the
+        query form.
+        """
+        if ref.endswith(".json"):
+            ref = ref[: -len(".json")]
+        return _composite_state_response(ref, fresh, ws)
 
     @app.get(
         "/api/investigations",
