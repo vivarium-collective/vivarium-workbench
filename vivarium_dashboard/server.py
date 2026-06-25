@@ -55,6 +55,7 @@ from vivarium_dashboard.lib import investigation_status as _invstatus
 from vivarium_dashboard.lib import data_sources as _data_sources_lib
 from vivarium_dashboard.lib import saved_visualizations as _savedviz_lib
 from vivarium_dashboard.lib import registry as _registry_lib
+from vivarium_dashboard.lib import composite_state_views as _composite_state_views
 from vivarium_dashboard.lib import observables_views as _obs_views
 from vivarium_dashboard.lib import report_views as _report_views
 from vivarium_dashboard.lib.investigations_index import (
@@ -237,11 +238,9 @@ _REGISTRY_TTL = _registry_lib._REGISTRY_TTL       # type: ignore[attr-defined]
 # derive over the workspace YAML). Cleared on workspace switch via
 # _report_views.clear_cache() in _invalidate_workspace_caches.
 
-# Cache of built composite-state payloads for /api/composite-state, keyed by ref:
-# {ref: (built_at_epoch, payload_dict)}. Building a whole-cell composite is ~1s+;
-# this makes repeat opens + pop-outs instant. Short TTL so code edits are picked up.
-_COMPOSITE_STATE_CACHE: dict = {}
-_COMPOSITE_STATE_TTL_S = 300.0
+# The /api/composite-state build cache now lives in lib.composite_state_views
+# (TTL-cached subprocess composite build). Cleared on workspace switch via
+# _composite_state_views.clear_cache() in _invalidate_workspace_caches.
 
 # Cache of the /api/composites list per workspace path. Discovery runs in a
 # SUBPROCESS (clean import — the long-running server's stale import state misses
@@ -261,7 +260,7 @@ def _invalidate_workspace_caches() -> None:
     _REGISTRY_CACHE["ts"] = 0.0
     _report_views.clear_cache()       # SP4a linkage-index cache (lib)
     _obs_views.clear_cache()          # observables build cache (lib)
-    _COMPOSITE_STATE_CACHE.clear()
+    _composite_state_views.clear_cache()  # composite-state build cache (lib)
     _COMPOSITES_LIST_CACHE.clear()
     _RUN_STORE_SUMMARY_CACHE.clear()
     _WP_CACHE.clear()
@@ -1597,57 +1596,16 @@ def _composites_data_subprocess(ws_root: "Path") -> "dict | None":
 
 
 def _composite_state_via_subprocess(ref: str, ws_root: "Path") -> "dict | None":
-    """Build a generator composite's state in a fresh subprocess (its own MAIN thread).
+    """Thin forwarder → ``lib.composite_state_views.composite_state_via_subprocess``.
 
-    ``build_generator`` (and the discovery that primes it) lazily imports
-    composite-specific deps; some call ``signal.signal()`` at import, which only
-    works in the main thread — so building inside a ThreadingHTTPServer worker
-    raised "signal only works in main thread of the main interpreter". Running
-    the whole generator path (discover + lookup + build + summarize) in a
-    subprocess avoids that. Returns one of:
-      {"state": <doc>, "module": <str>}   on success (already summarized + docs)
-      {"__build_error__": <str>}          generator found but build raised
-      {"__not_registered__": true}        ref is not a registered generator
-      None                                the subprocess itself failed
+    The implementation (and its embedded subprocess script — which no longer
+    imports this server module) has moved to the lib seam so the FastAPI app
+    can call it without importing ``vivarium_dashboard.server``. This wrapper
+    preserves the original call-site name/signature (``ref`` first) used in
+    ``_get_composite_state``.
     """
-    script = (
-        "import sys, json\n"
-        "from pathlib import Path\n"
-        "import vivarium_dashboard.server as s\n"
-        "s.WORKSPACE = Path(sys.argv[1])\n"
-        "s._ws_add_to_sys_path()\n"
-        "ref = sys.argv[2]\n"
-        "out = {'__not_registered__': True}\n"
-        "try:\n"
-        "    from pbg_superpowers.composite_generator import _REGISTRY, build_generator, discover_generators\n"
-        "    if not _REGISTRY:\n"
-        "        discover_generators()\n"
-        "    entry = _REGISTRY.get(ref)\n"
-        "    if entry is not None:\n"
-        "        try:\n"
-        "            doc = build_generator(entry)\n"
-        "            from vivarium_dashboard.lib.process_docs import attach_process_docs, summarize_large_values\n"
-        "            doc = summarize_large_values(doc)\n"
-        "            attach_process_docs(doc)\n"
-        "            out = {'state': doc, 'module': getattr(entry, 'module', None)}\n"
-        "        except Exception as _e:\n"
-        "            out = {'__build_error__': str(_e)}\n"
-        "except Exception as _e:\n"
-        "    out = {'__build_error__': str(_e)}\n"
-        "sys.stdout.write('@@@S_START@@@' + json.dumps(out, default=str) + '@@@S_END@@@')\n"
-    )
-    try:
-        result = subprocess.run(
-            [sys.executable, "-c", script, str(ws_root), ref],
-            cwd=str(ws_root), capture_output=True, text=True, timeout=180,
-        )
-        out = result.stdout
-        i, j = out.find("@@@S_START@@@"), out.find("@@@S_END@@@")
-        if i != -1 and j != -1:
-            return json.loads(out[i + len("@@@S_START@@@"):j])
-    except Exception:
-        pass
-    return None
+    from vivarium_dashboard.lib.composite_state_views import composite_state_via_subprocess
+    return composite_state_via_subprocess(ws_root, ref)
 
 
 def _composite_resolve_data(spec_id: str) -> "dict | None":
@@ -11949,102 +11907,13 @@ if __name__ == "__main__":
         if not ref:
             return self._json({"error": "ref required"}, 400)
 
-        # Building a whole-cell composite (build_generator) takes ~3s and is
-        # re-run on every explorer open / pop-out. Cache the built (and value-
-        # summarized) doc per ref with a short TTL so repeat opens are instant
-        # but code edits are still picked up. Checked FIRST so a hit skips the
-        # per-request sys.path + registry setup entirely. Bypass with ?fresh=1.
-        import time as _time
-        fresh = qs.get("fresh") in ("1", "true", "yes")
-        cache = _COMPOSITE_STATE_CACHE
-        if not fresh:
-            hit = cache.get(ref)
-            if hit is not None and (_time.time() - hit[0]) < _COMPOSITE_STATE_TTL_S:
-                return self._json({**hit[1], "cached": True}, 200)
-
+        # All branch logic (TTL cache, subprocess generator build, static
+        # fallback, spec/path resolution, 404) lives in the lib seam.
         _ws_add_to_sys_path()
-
-        # Generator-kind branch: build in a SUBPROCESS (its own main thread).
-        # build_generator (+ the discovery that primes it) lazily imports
-        # composite deps; some call signal.signal() at import, which only works
-        # in the main thread — building inside a ThreadingHTTPServer worker raised
-        # "signal only works in main thread". The subprocess does discover +
-        # lookup + build + summarize and returns the small state doc.
-        res = _composite_state_via_subprocess(ref, WORKSPACE)
-        if res is not None and "state" in res:
-            payload = {"state": res["state"], "kind": "generator", "module": res.get("module")}
-            cache[ref] = (_time.time(), payload)
-            if len(cache) > 16:  # cap memory; drop the oldest entry
-                cache.pop(next(iter(cache)))
-            return self._json(payload, 200)
-        if res is not None and "__build_error__" in res:
-            # ROBUST FALLBACK: a live build can fail for environmental reasons
-            # (e.g. a stale ParCa cache missing 'tf_ids') even when the composite
-            # is valid — serve the pre-generated static state if it exists.
-            e = res["__build_error__"]
-            _static = WORKSPACE / "reports" / "composite-state" / (ref + ".json")
-            if _static.is_file():
-                try:
-                    _doc = json.loads(_static.read_text(encoding="utf-8"))
-                    _inner = _doc.get("state", _doc) if isinstance(_doc, dict) else _doc
-                    from vivarium_dashboard.lib.process_docs import attach_process_docs as _apd
-                    _apd(_inner)
-                    _payload = {"state": _inner, "kind": "static-fallback",
-                                "note": f"served pre-generated state (live build failed: {e})"}
-                    cache[ref] = (_time.time(), _payload)
-                    return self._json(_payload, 200)
-                except Exception:
-                    pass
-            return self._json({"error": f"generator build failed: {e}"}, 400)
-        # __not_registered__ or subprocess failure → fall through to path resolution.
-
-        path = None
-        # Try to resolve as a dotted spec ID via composite_lookup.
-        try:
-            from vivarium_dashboard.lib.composite_lookup import find_composite_path
-            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
-            pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-            found = find_composite_path(WORKSPACE, pkg, ref)
-            if found is not None:
-                path = found
-        except Exception:
-            pass
-
-        # Fall back to workspace-relative path.
-        if path is None:
-            candidate = WORKSPACE / ref
-            if candidate.is_file():
-                path = candidate
-
-        # ROBUST: a pre-generated static composite-state (incl. alias forms a study
-        # ref uses, e.g. `baseline` or `...baseline_millard`). Lets the loom resolve
-        # any composite with a committed state even when the live build is unavailable.
-        if path is None:
-            _static = WORKSPACE / "reports" / "composite-state" / (ref + ".json")
-            if _static.is_file():
-                path = _static
-
-        if path is None or not path.is_file():
-            # Honest, structured degrade payload so the loom / Composites view can
-            # render "composite not found / not a registered composite — this study
-            # may not declare a real composite" instead of a bare "error composite"
-            # node. ``unresolved: true`` is the machine-readable flag the client keys on.
-            return self._json({
-                "error": (f"composite not found: {ref} — not a registered composite "
-                          "(this study may not declare a real composite)"),
-                "unresolved": True,
-                "ref": ref,
-            }, 404)
-
-        try:
-            text = path.read_text(encoding="utf-8")
-            doc = json.loads(text) if path.suffix.lower() == ".json" else (yaml.safe_load(text) or {})
-        except Exception as e:
-            return self._json({"error": f"parse failed: {e}"}, 500)
-
-        from vivarium_dashboard.lib.process_docs import attach_process_docs
-        attach_process_docs(doc)  # per-process docstrings for the inspector
-        return self._json({"state": doc, "kind": "spec"}, 200)
+        fresh = qs.get("fresh") in ("1", "true", "yes")
+        body, status = _composite_state_views.build_composite_state(
+            WORKSPACE, ref, fresh=fresh)
+        return self._json(body, status)
 
     def _get_composite_resolve(self):
         """GET /api/composite-resolve — resolve a composite spec with param overrides, return state + SVG.

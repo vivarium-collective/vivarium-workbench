@@ -94,6 +94,8 @@ _MODELS: list[type[BaseModel]] = [
     _models.ObservablesPayload,
     _models.StudyObservableCheck,
     _models.LinkageIndex,
+    # Composite-state model
+    _models.CompositeState,
 ]
 
 OUTPUT_PATH = (

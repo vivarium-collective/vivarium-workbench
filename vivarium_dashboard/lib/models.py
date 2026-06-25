@@ -916,6 +916,23 @@ class ObservablesPayload(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class CompositeState(BaseModel):
+    """``GET /api/composite-state?ref=<id-or-path>`` payload.
+
+    Backed by ``lib.composite_state_views.build_composite_state``.  Success
+    shape: ``{state: <composite document>, kind: "generator"|"static-fallback"|
+    "spec", ...}`` (``module`` for generator, ``note`` for static-fallback, plus
+    ``cached: true`` on a TTL cache hit).  Error shapes (``{error}`` at 400 /
+    500, or ``{error, unresolved: true, ref}`` at 404) are carried at their
+    legacy status code via :class:`fastapi.responses.JSONResponse`, not this
+    model.  The composite document is composite-specific, so this is a pure
+    pass-through (``extra="allow"``, no declared fields) — the builder dict
+    survives verbatim, see :class:`ExplorerRuns`.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
 class StudyObservableCheck(BaseModel):
     """``GET /api/study-observable-check?study=<slug>`` payload.
 
