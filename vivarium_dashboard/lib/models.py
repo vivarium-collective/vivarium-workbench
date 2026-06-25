@@ -1203,3 +1203,57 @@ class PtoolsLaunch(BaseModel):
     """
 
     model_config = ConfigDict(extra="allow")
+
+
+class SourceBuilds(BaseModel):
+    """``GET /api/source/builds`` payload (lib.workspace_deps_views.build_source_builds).
+
+    Best-effort remote build list: ``{builds: [...], error: str|null}``.  Always
+    HTTP 200 — ``builds`` is empty and ``error`` carries a reason when the
+    sms-api is unreachable.
+
+    Pure pass-through (``extra="allow"``, no declared fields) so build-entry
+    keys (simulator_id, repo, branch, commit, label, …) survive verbatim.
+
+    Source: ``lib.workspace_deps_views.build_source_builds``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class WorkspacesList(BaseModel):
+    """``GET /api/workspaces`` payload (lib.workspace_deps_views.build_workspaces).
+
+    Workspace-switcher dropdown: ``{current: {name, path}, workspaces: [...]}``.
+    Each workspace row carries ``name, path, repo, branch, commit, label,
+    status`` plus optional ``url`` and ``pid`` when the server is live.
+
+    Always HTTP 200 (falls back to current-only on a missing/corrupt catalog).
+
+    Pure pass-through (``extra="allow"``, no declared fields) so row keys and
+    future catalog annotations survive verbatim.
+
+    Source: ``lib.workspace_deps_views.build_workspaces``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class SystemDepsCheck(BaseModel):
+    """``GET /api/system-deps-check?name=<module>`` payload
+    (lib.workspace_deps_views.build_system_deps_check).
+
+    Success shape (HTTP 200): ``{name, platform, ok, checks: [{name,
+    description, ok, reason, install, notes}]}``.  Error shapes (carried via
+    :class:`fastapi.responses.JSONResponse`):
+
+    - HTTP 400 ``{error: "name required"}`` — ``?name=`` missing or empty.
+    - HTTP 404 ``{error: "unknown module: <name>"}`` — module not in registry.
+
+    Pure pass-through (``extra="allow"``, no declared fields) so ``checks[]``
+    entries and future install-spec sub-keys survive verbatim.
+
+    Source: ``lib.workspace_deps_views.build_system_deps_check``.
+    """
+
+    model_config = ConfigDict(extra="allow")

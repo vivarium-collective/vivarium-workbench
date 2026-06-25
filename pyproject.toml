@@ -64,6 +64,7 @@ files = [
     "vivarium_dashboard/lib/system_info.py",
     "vivarium_dashboard/lib/study_viz_views.py",
     "vivarium_dashboard/lib/work_views.py",
+    "vivarium_dashboard/lib/workspace_deps_views.py",
     "vivarium_dashboard/api/app.py",
 ]
 plugins = ["pydantic.mypy"]

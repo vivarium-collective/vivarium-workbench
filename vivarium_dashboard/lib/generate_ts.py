@@ -117,6 +117,10 @@ _MODELS: list[type[BaseModel]] = [
     _models.VisualizationStatus,
     _models.VisualizationInstances,
     _models.PtoolsLaunch,
+    # Workspace & source models
+    _models.SourceBuilds,
+    _models.WorkspacesList,
+    _models.SystemDepsCheck,
 ]
 
 OUTPUT_PATH = (
