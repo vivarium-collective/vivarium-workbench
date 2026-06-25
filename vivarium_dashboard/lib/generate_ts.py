@@ -106,6 +106,11 @@ _MODELS: list[type[BaseModel]] = [
     _models.CompositeRunTrajectory,
     _models.CompositeRunState,
     _models.CompositeRunStatus,
+    # Batch 11: study-bigraph-paths, visualization status/instances, ptools-launch
+    _models.StudyBigraphPaths,
+    _models.VisualizationStatus,
+    _models.VisualizationInstances,
+    _models.PtoolsLaunch,
 ]
 
 OUTPUT_PATH = (

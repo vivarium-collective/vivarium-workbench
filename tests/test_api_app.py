@@ -2709,3 +2709,188 @@ class TestCompositeRunStatusRoute:
     def test_composite_run_status_in_openapi(self, client):
         components = client.get("/openapi.json").json()["components"]["schemas"]
         assert "CompositeRunStatus" in components
+
+# Batch 11: /api/study-bigraph-paths
+# ---------------------------------------------------------------------------
+
+class TestStudyBigraphPaths:
+    def test_missing_study_param_returns_400(self, client):
+        r = client.get("/api/study-bigraph-paths")
+        assert r.status_code == 400
+        assert r.json() == {"error": "study slug required (?study=<slug>)"}
+        assert "detail" not in r.json()
+
+    def test_no_study_yaml_returns_404(self, client):
+        r = client.get("/api/study-bigraph-paths?study=no-such-study")
+        assert r.status_code == 404
+        body = r.json()
+        assert "error" in body
+        assert "detail" not in body
+
+    def test_happy_path_returns_200(self, client, monkeypatch):
+        import vivarium_dashboard.api.app as _app
+        monkeypatch.setattr(
+            _app._study_viz, "build_study_bigraph_paths",
+            lambda ws, slug, **kw: (
+                {"composite": "c", "source_file": "f", "max_depth": 8,
+                 "node_count": 2, "nodes": [{"path": "a"}, {"path": "b"}]},
+                200,
+            ),
+        )
+        r = client.get("/api/study-bigraph-paths?study=my-study")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["node_count"] == 2
+        assert len(body["nodes"]) == 2
+
+    def test_max_depth_parsed_defensively(self, client, monkeypatch):
+        """Non-numeric max_depth falls back to 8 (mirrors legacy int(..., default 8))."""
+        import vivarium_dashboard.api.app as _app
+        captured: dict = {}
+
+        def _cap(ws, slug, baseline_name="", max_depth=8):
+            captured["max_depth"] = max_depth
+            return {"error": "x"}, 400
+
+        monkeypatch.setattr(_app._study_viz, "build_study_bigraph_paths", _cap)
+        client.get("/api/study-bigraph-paths?study=s&max_depth=not_a_number")
+        assert captured["max_depth"] == 8
+
+    def test_study_bigraph_paths_in_openapi(self, client):
+        spec = client.get("/openapi.json").json()
+        assert "/api/study-bigraph-paths" in spec["paths"]
+        assert "StudyBigraphPaths" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# Batch 11: /api/visualization-status
+# ---------------------------------------------------------------------------
+
+class TestVisualizationStatusRoute:
+    def test_missing_name_returns_400(self, client):
+        r = client.get("/api/visualization-status")
+        assert r.status_code == 400
+        assert r.json() == {"error": "missing name"}
+        assert "detail" not in r.json()
+
+    def test_name_not_in_workspace_returns_200_missing(self, client, tmp_path, monkeypatch):
+        import vivarium_dashboard.api.app as _app
+        monkeypatch.setattr(
+            _app._study_viz, "build_visualization_status",
+            lambda ws, name: ({"status": "missing", "name": name}, 200),
+        )
+        r = client.get("/api/visualization-status?name=nonexistent")
+        assert r.status_code == 200
+        assert r.json()["status"] == "missing"
+        assert r.json()["name"] == "nonexistent"
+
+    def test_happy_path_described(self, client, tmp_path, monkeypatch):
+        import vivarium_dashboard.api.app as _app
+        monkeypatch.setattr(
+            _app._study_viz, "build_visualization_status",
+            lambda ws, name: ({
+                "status": "described",
+                "name": name,
+                "has_request": False,
+                "has_response": False,
+                "has_staged": False,
+                "has_committed": False,
+            }, 200),
+        )
+        r = client.get("/api/visualization-status?name=my_viz")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["status"] == "described"
+        assert body["has_committed"] is False
+
+    def test_visualization_status_in_openapi(self, client):
+        spec = client.get("/openapi.json").json()
+        assert "/api/visualization-status" in spec["paths"]
+        assert "VisualizationStatus" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# Batch 11: /api/visualization-instances
+# ---------------------------------------------------------------------------
+
+class TestVisualizationInstancesRoute:
+    def test_empty_workspace_returns_empty_instances(self, client):
+        r = client.get("/api/visualization-instances")
+        assert r.status_code == 200
+        assert r.json() == {"instances": []}
+
+    def test_happy_path(self, client, monkeypatch):
+        import vivarium_dashboard.api.app as _app
+        monkeypatch.setattr(
+            _app._study_viz, "build_visualization_instances",
+            lambda ws: {"instances": [
+                {"name": "my_viz", "class": "TimeSeriesPlot",
+                 "address": "local:TimeSeriesPlot", "config": {}, "description": ""}
+            ]},
+        )
+        r = client.get("/api/visualization-instances")
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["instances"]) == 1
+        assert body["instances"][0]["class"] == "TimeSeriesPlot"
+
+    def test_visualization_instances_in_openapi(self, client):
+        spec = client.get("/openapi.json").json()
+        assert "/api/visualization-instances" in spec["paths"]
+        assert "VisualizationInstances" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# Batch 11: /api/ptools-launch/{study}
+# ---------------------------------------------------------------------------
+
+class TestPtoolsLaunchRoute:
+    def test_invalid_slug_returns_400(self, client):
+        r = client.get("/api/ptools-launch/INVALID-SLUG")
+        assert r.status_code == 400
+        assert r.json() == {"error": "invalid study name"}
+        assert "detail" not in r.json()
+
+    def test_no_ptools_config_returns_400(self, client, monkeypatch):
+        import vivarium_dashboard.api.app as _app
+        monkeypatch.setattr(
+            _app._study_viz, "build_ptools_launch",
+            lambda ws, study, **kw: ({"error": "ptools_server_url not configured"}, 400),
+        )
+        r = client.get("/api/ptools-launch/my-study")
+        assert r.status_code == 400
+        assert r.json() == {"error": "ptools_server_url not configured"}
+        assert "detail" not in r.json()
+
+    def test_study_not_found_returns_404(self, client, monkeypatch):
+        import vivarium_dashboard.api.app as _app
+        monkeypatch.setattr(
+            _app._study_viz, "build_ptools_launch",
+            lambda ws, study, **kw: ({"error": f"study not found: {study}"}, 404),
+        )
+        r = client.get("/api/ptools-launch/my-study")
+        assert r.status_code == 404
+        assert "study not found" in r.json()["error"]
+        assert "detail" not in r.json()
+
+    def test_happy_path_returns_200(self, client, monkeypatch):
+        import vivarium_dashboard.api.app as _app
+        monkeypatch.setattr(
+            _app._study_viz, "build_ptools_launch",
+            lambda ws, study, **kw: ({
+                "url": "http://ptools.example.com/omics?omics=t",
+                "tsv_url": "http://dash.example.com/studies/s/ptools/f.tsv",
+                "available": ["studies/s/ptools/f.tsv"],
+            }, 200),
+        )
+        r = client.get("/api/ptools-launch/my-study")
+        assert r.status_code == 200
+        body = r.json()
+        assert "url" in body
+        assert "tsv_url" in body
+        assert "available" in body
+
+    def test_ptools_launch_in_openapi(self, client):
+        spec = client.get("/openapi.json").json()
+        assert "/api/ptools-launch/{study}" in spec["paths"]
+        assert "PtoolsLaunch" in spec["components"]["schemas"]

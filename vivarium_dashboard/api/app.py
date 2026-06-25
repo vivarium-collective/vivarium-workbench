@@ -32,7 +32,7 @@ from typing import Optional, Union
 
 import subprocess
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
@@ -48,6 +48,7 @@ from vivarium_dashboard.lib import report_views as _report_views
 from vivarium_dashboard.lib import rigor_views as _rigor_views
 from vivarium_dashboard.lib import saved_visualizations as _saved_viz
 from vivarium_dashboard.lib import study_spec as _study_spec
+from vivarium_dashboard.lib import study_viz_views as _study_viz
 from vivarium_dashboard.lib import system_info as _system_info
 from vivarium_dashboard.lib.composite_resolve import resolve_composite
 from vivarium_dashboard.lib.composites_query import composites_via_subprocess
@@ -100,11 +101,15 @@ from vivarium_dashboard.lib.models import (
     StudyRigor,
     RegistryPayload,
     SavedVisualizationsPayload,
+    PtoolsLaunch,
     SimRow,
     SimulationsPayload,
+    StudyBigraphPaths,
     StudyChartsPayload,
     UiConfig,
     VisualizationClassesPayload,
+    VisualizationInstances,
+    VisualizationStatus,
     VizClass,
     WorkspaceHome,
     WorkStatusActive,
@@ -403,6 +408,131 @@ def create_app() -> FastAPI:
         return VisualizationClassesPayload(
             classes=[VizClass.model_validate(c) for c in result.get("classes", [])]
         )
+
+    # -----------------------------------------------------------------------
+    # Batch 11: study-bigraph-paths, visualization-status/instances, ptools-launch
+    # -----------------------------------------------------------------------
+
+    @app.get(
+        "/api/study-bigraph-paths",
+        response_model=StudyBigraphPaths,
+        tags=["Studies & visualizations"],
+        summary="Bigraph node paths for a study's baseline composite",
+    )
+    def study_bigraph_paths(
+        study: Optional[str] = None,
+        baseline: Optional[str] = None,
+        max_depth: str = "8",
+        ws: Path = Depends(get_workspace),
+    ) -> Union[StudyBigraphPaths, JSONResponse]:
+        """Bigraph node paths extracted from a study's serialized composite state.
+
+        Mirrors ``GET /api/study-bigraph-paths?study=<slug>[&baseline=<name>][&max_depth=<n>]``
+        from the stdlib server.
+
+        Status codes:
+          - 400  missing ``?study=`` / study has no baseline entries
+          - 404  no study.yaml or spec.yaml / baseline not found / no serialized state
+          - 500  spec parse failure
+          - 200  ``{composite, source_file, max_depth, node_count, nodes:[...]}``
+
+        Library-backed via ``lib.study_viz_views.build_study_bigraph_paths``.
+        """
+        try:
+            depth = int(max_depth)
+        except (ValueError, TypeError):
+            depth = 8
+        body, status = _study_viz.build_study_bigraph_paths(
+            ws, study or "", baseline_name=baseline or "", max_depth=depth,
+        )
+        if status == 200:
+            return StudyBigraphPaths.model_validate(body)
+        return JSONResponse(status_code=status, content=body)
+
+    @app.get(
+        "/api/visualization-status",
+        response_model=VisualizationStatus,
+        tags=["Studies & visualizations"],
+        summary="Lifecycle status for a named visualization",
+    )
+    def visualization_status(
+        name: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[VisualizationStatus, JSONResponse]:
+        """Visualization lifecycle status for a named viz.
+
+        Mirrors ``GET /api/visualization-status?name=<name>`` from the stdlib server.
+
+        Status codes:
+          - 400  missing ``?name=``
+          - 200  ``{status, name, has_request, has_response, has_staged, has_committed}``
+                 status ∈ ``described | requested | created | added | committed | missing``
+
+        Library-backed via ``lib.study_viz_views.build_visualization_status``.
+        """
+        body, status = _study_viz.build_visualization_status(ws, name or "")
+        if status == 200:
+            return VisualizationStatus.model_validate(body)
+        return JSONResponse(status_code=status, content=body)
+
+    @app.get(
+        "/api/visualization-instances",
+        response_model=VisualizationInstances,
+        tags=["Studies & visualizations"],
+        summary="Class-backed visualization instances from workspace.yaml",
+    )
+    def visualization_instances(
+        ws: Path = Depends(get_workspace),
+    ) -> VisualizationInstances:
+        """Class-backed visualization instances configured in workspace.yaml.
+
+        Mirrors ``GET /api/visualization-instances`` from the stdlib server.
+        Always returns HTTP 200 — errors degrade to ``{instances: []}``.
+
+        Library-backed via ``lib.study_viz_views.build_visualization_instances``.
+        """
+        return VisualizationInstances.model_validate(
+            _study_viz.build_visualization_instances(ws)
+        )
+
+    @app.get(
+        "/api/ptools-launch/{study}",
+        response_model=PtoolsLaunch,
+        tags=["Studies & visualizations"],
+        summary="Pathway Tools Omics Viewer launch URL for a study",
+    )
+    def ptools_launch(
+        study: str,
+        run: Optional[str] = None,
+        analysis: Optional[str] = None,
+        request: Request = None,  # type: ignore[assignment]
+        ws: Path = Depends(get_workspace),
+    ) -> Union[PtoolsLaunch, JSONResponse]:
+        """Pathway Tools Omics Viewer launch URL for a study.
+
+        Mirrors ``GET /api/ptools-launch/<study>?run=<run_id>&analysis=<name>``
+        from the stdlib server.  The slug is validated before delegation
+        (identical to the dispatcher's check).
+
+        Status codes:
+          - 400  ``ptools_server_url not configured`` / invalid slug
+          - 404  study not found / no ptools TSVs found
+          - 200  ``{url, tsv_url, available}``
+
+        Library-backed via ``lib.study_viz_views.build_ptools_launch``.
+        """
+        if not _study_spec.SLUG_RE.match(study):
+            return JSONResponse(status_code=400, content={"error": "invalid study name"})
+        # Resolve public_base from the Host header; workspace.yaml config
+        # (ui.dashboard_public_base_url) takes priority inside the lib builder.
+        host = (request.headers.get("host", "localhost") if request else "localhost")
+        public_base = f"http://{host}"
+        body, status = _study_viz.build_ptools_launch(
+            ws, study, run=run, analysis=analysis, public_base=public_base,
+        )
+        if status == 200:
+            return PtoolsLaunch.model_validate(body)
+        return JSONResponse(status_code=status, content=body)
 
     @app.get(
         "/api/registry",

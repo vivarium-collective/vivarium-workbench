@@ -1081,3 +1081,42 @@ class CompositeRunStatus(BaseModel):
     """
 
     model_config = ConfigDict(extra="allow")
+
+
+class StudyBigraphPaths(BaseModel):
+    """``GET /api/study-bigraph-paths`` payload (lib.study_viz_views.build_study_bigraph_paths).
+
+    Bigraph node paths extracted from a serialized composite state snapshot.
+    Variable-shape ``nodes`` entries use pass-through (``extra="allow"``).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class VisualizationStatus(BaseModel):
+    """``GET /api/visualization-status`` payload (lib.study_viz_views.build_visualization_status).
+
+    Lifecycle status for a named visualization:
+    ``described`` → ``requested`` → ``created`` → ``added`` → ``committed``.
+    Also ``missing`` when the viz name is not in workspace.yaml.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class VisualizationInstances(BaseModel):
+    """``GET /api/visualization-instances`` payload (lib.study_viz_views.build_visualization_instances).
+
+    Class-backed visualization instances configured in workspace.yaml.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class PtoolsLaunch(BaseModel):
+    """``GET /api/ptools-launch/{study}`` payload (lib.study_viz_views.build_ptools_launch).
+
+    Pathway Tools Omics Viewer launch URL + TSV discovery result.
+    """
+
+    model_config = ConfigDict(extra="allow")
