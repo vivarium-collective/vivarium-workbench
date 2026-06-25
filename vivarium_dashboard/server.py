@@ -61,6 +61,7 @@ from vivarium_dashboard.lib import report_views as _report_views
 from vivarium_dashboard.lib import study_viz_views as _study_viz
 from vivarium_dashboard.lib import system_info as _system_info_lib
 from vivarium_dashboard.lib import download_views as _download_views
+from vivarium_dashboard.lib import events as _events_lib
 from vivarium_dashboard.lib.investigations_index import (
     _conclusions_excerpt,
     _format_baseline_source,
@@ -12791,10 +12792,7 @@ if __name__ == "__main__":
                 if ws_file.exists():
                     text = ws_file.read_text(encoding="utf-8")
                     if text != last_state:
-                        try:
-                            payload = json.dumps(yaml.safe_load(text))
-                        except Exception:
-                            payload = json.dumps({"_error": "yaml parse"})
+                        payload = _events_lib.workspace_state_payload(WORKSPACE)
                         self.wfile.write(b"event: state\ndata: ")
                         self.wfile.write(payload.encode())
                         self.wfile.write(b"\n\n")
