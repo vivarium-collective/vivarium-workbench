@@ -217,7 +217,7 @@ def render_study_detail_html(ws_root: Path, name: str, spec: dict) -> str:
                       unresolved_composites=unresolved_composites)
 
 
-def build_study_detail_page(ws_root: Path, slug: str) -> tuple:
+def build_study_detail_page(ws_root: Path, slug: str) -> tuple[str, int]:
     """Full study-detail page builder: validate → load spec → render.
 
     Returns ``(html, status_code)`` where status_code is 200 on success
