@@ -57,7 +57,8 @@ _MODELS: list[type[BaseModel]] = [
     _models.SavedVisualizationsPayload,
     # Git & branch models
     _models.GitStatus,
-    _models.WorkStatus,
+    _models.WorkStatusInactive,
+    _models.WorkStatusActive,
     _models.BranchStaleness,
     _models.DirtyFile,
     _models.DirtyStatus,

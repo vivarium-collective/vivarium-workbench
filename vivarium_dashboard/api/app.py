@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import subprocess
 
@@ -67,7 +67,8 @@ from vivarium_dashboard.lib.models import (
     StudyChartsPayload,
     VisualizationClassesPayload,
     VizClass,
-    WorkStatus,
+    WorkStatusActive,
+    WorkStatusInactive,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -433,19 +434,29 @@ def create_app() -> FastAPI:
 
     @app.get(
         "/api/work-status",
-        response_model=WorkStatus,
+        response_model=Union[WorkStatusInactive, WorkStatusActive],
         tags=["Git & branches"],
         summary="Active workstream status (branch + ahead/behind counts)",
     )
-    def work_status_route(ws: Path = Depends(get_workspace)) -> WorkStatus:
+    def work_status_route(
+        ws: Path = Depends(get_workspace),
+    ) -> Union[WorkStatusInactive, WorkStatusActive]:
         """Active workstream status.
 
-        Returns ``{active: false}`` when no workstream is running, or the
-        full branch/commit-ahead/behind/staleness/push payload otherwise.
+        Returns exactly ``{active: false}`` (one key) when no workstream is
+        running, or the full 14-key branch/commit-ahead/behind/staleness/push
+        payload otherwise.  Modelled as a discriminated union (on ``active``)
+        so the inactive path stays byte-identical to the legacy handler's
+        single-key body while the active path keeps every key (including the
+        nullable ``pr_number`` / ``pr_url``), rather than a single model whose
+        14 null defaults would leak into the inactive response.
 
         Library-backed via ``lib.git_status.build_work_status``.
         """
-        return WorkStatus.model_validate(_git_status.build_work_status(ws))
+        payload = _git_status.build_work_status(ws)
+        if payload.get("active"):
+            return WorkStatusActive.model_validate(payload)
+        return WorkStatusInactive.model_validate(payload)
 
     @app.get(
         "/api/branch-staleness",
@@ -510,11 +521,15 @@ def create_app() -> FastAPI:
         commits-ahead-of-main count.
 
         Returns ``{branches: [], current: <HEAD>}`` when no stage branches
-        exist. Never 500 — errors per-branch are swallowed.
+        exist. Per-branch errors are swallowed by the builder, but a top-level
+        git failure (the builder returns ``{"error": ...}``) maps to HTTP 500,
+        matching the legacy ``_serve_branches`` behaviour.
 
         Library-backed via ``lib.git_status.list_branches``.
         """
         payload = _git_status.list_branches(ws)
+        if "error" in payload:
+            raise HTTPException(status_code=500, detail=payload["error"])
         raw_branches = payload.get("branches") or []
         branch_list = []
         for b in raw_branches:
@@ -536,17 +551,20 @@ def create_app() -> FastAPI:
         summary="Short diff summary for a branch vs main",
     )
     def branch_diff_route(
-        branch: str,
+        branch: Optional[str] = None,
         ws: Path = Depends(get_workspace),
     ) -> BranchDiff:
         """Short log + diff-stat summary for ``?branch=<name>`` vs ``main``.
 
-        HTTP 400 when ``?branch=`` is missing or contains unsafe characters.
+        HTTP 400 when ``?branch=`` is missing/empty or contains unsafe
+        characters — matching the legacy ``_get_branch_diff``.  (``branch`` is
+        declared Optional so a missing query param yields a 400 from the
+        builder, not FastAPI's 422 "field required".)
 
         Library-backed via ``lib.git_status.build_branch_diff``.
         """
         try:
-            payload = _git_status.build_branch_diff(ws, branch)
+            payload = _git_status.build_branch_diff(ws, branch or "")
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         return BranchDiff.model_validate(payload)

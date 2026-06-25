@@ -188,8 +188,12 @@ export interface GitStatus {
   has_active_workstream: boolean;
 }
 
-export interface WorkStatus {
-  active: boolean;
+export interface WorkStatusInactive {
+  active: false;
+}
+
+export interface WorkStatusActive {
+  active: true;
   branch: string | null;
   base: string | null;
   commits_ahead: number | null;

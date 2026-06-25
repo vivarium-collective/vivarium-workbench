@@ -478,16 +478,29 @@ class GitStatus(BaseModel):
     has_active_workstream: bool = False
 
 
-class WorkStatus(BaseModel):
-    """``GET /api/work-status`` payload (lib.git_status.build_work_status).
+class WorkStatusInactive(BaseModel):
+    """``GET /api/work-status`` payload when no workstream is active.
 
-    ``active: False`` when no workstream is active (all other fields absent).
-    ``extra="allow"`` preserves any future extension keys.
+    Byte-identical to the legacy ``{"active": false}`` — exactly one key. The
+    inactive and active responses are modelled as a discriminated union (on
+    ``active``) so the inactive path does not leak the active model's null
+    defaults (legacy emits only this one key when inactive).
+    """
+
+    active: Literal[False] = False
+
+
+class WorkStatusActive(BaseModel):
+    """``GET /api/work-status`` payload when a workstream IS active.
+
+    Every field is always present — legacy ``_get_work_status`` emits them even
+    when null (notably ``pr_number`` / ``pr_url`` when no PR is linked), so they
+    are NOT excluded.  ``extra="allow"`` preserves any future extension keys.
     """
 
     model_config = ConfigDict(extra="allow")
 
-    active: bool = False
+    active: Literal[True] = True
     branch: Optional[str] = None
     base: Optional[str] = None
     commits_ahead: Optional[int] = None
