@@ -33,12 +33,13 @@ from typing import Optional, Union
 import subprocess
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import ValidationError
 
 from vivarium_dashboard.lib import composite_run_views as _cr_views
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
 from vivarium_dashboard.lib import data_sources as _data_sources
+from vivarium_dashboard.lib import download_views as _download_views
 from vivarium_dashboard.lib import explorer_data as _explorer_data
 from vivarium_dashboard.lib import git_status as _git_status
 from vivarium_dashboard.lib import investigation_status
@@ -90,6 +91,7 @@ from vivarium_dashboard.lib.models import (
     GitStatus,
     InvestigationCompositeDocPayload,
     InvestigationCompositesPayload,
+    InvestigationStateTree,
     InvestigationHypothesesPayload,
     InvestigationSummary,
     InvestigationRigor,
@@ -269,6 +271,18 @@ _OPENAPI_TAGS = [
             "run's trajectory or a single-step state snapshot, and poll lightweight "
             "status (progress, terminal-state error excerpt, completed viz_html). "
             "All read from ``.pbg/composite-runs.db``."
+        ),
+    },
+    {
+        "name": "Downloads",
+        "description": (
+            "Binary / HTML file-download routes (FileResponse / Response, not a "
+            "JSON model): study-export zip, single data-source bundle file, "
+            "per-investigation HTML report, latest guidance HTML, and the "
+            "investigation notebook/script export.  Each reproduces the legacy "
+            "Content-Type, inline-vs-attachment disposition, and status codes "
+            "(incl. guidance 204 No Content). Error paths return ``{\"error\": "
+            "...}`` JSON."
         ),
     },
 ]
@@ -1085,6 +1099,40 @@ def create_app() -> FastAPI:
         except _inv_views.InvViewError as exc:
             return JSONResponse(status_code=exc.status, content=exc.body)
         return InvestigationCompositeDocPayload.model_validate(body)
+
+    @app.get(
+        "/api/investigation-state-tree",
+        response_model=InvestigationStateTree,
+        tags=["Investigations detail"],
+        summary="Flattened state tree of an investigation's composite document",
+    )
+    def investigation_state_tree_route(
+        investigation: Optional[str] = None,
+        composite: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[InvestigationStateTree, JSONResponse]:
+        """Flatten a composite YAML document into a list of state-tree nodes.
+
+        Reads ``studies/<inv>/composites/<composite>.yaml`` and returns
+        ``{nodes: [...]}`` (each node: ``path`` + ``kind`` plus store/process
+        fields) for the bigraph state-tree picker.
+
+        HTTP 400 when ``?investigation=`` or ``?composite=`` is missing; HTTP 404
+        when the composite YAML file does not exist (body carries the resolved
+        path); HTTP 500 on YAML parse failure.  Error bodies are
+        ``{"error": <msg>}`` — byte-identical to the legacy
+        ``_get_investigation_state_tree``.
+
+        Library-backed via
+        ``lib.investigation_views.build_investigation_state_tree``.
+        """
+        try:
+            body = _inv_views.build_investigation_state_tree(
+                ws, (investigation or "").strip(), (composite or "").strip()
+            )
+        except _inv_views.InvViewError as exc:
+            return JSONResponse(status_code=exc.status, content=exc.body)
+        return InvestigationStateTree.model_validate(body)
 
     @app.get(
         "/api/investigation-hypotheses",
@@ -2024,6 +2072,169 @@ def create_app() -> FastAPI:
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return SystemDepsCheck.model_validate(body)
+
+    # -----------------------------------------------------------------------
+    # Downloads — binary / HTML file responses (FileResponse / Response, not a
+    # pydantic model; a response_model would 422 binary content).  Each route
+    # reproduces the legacy Content-Type + inline-vs-attachment disposition +
+    # status codes exactly; error paths return ``{"error": ...}`` JSON.
+    # -----------------------------------------------------------------------
+
+    @app.get(
+        "/api/study-export",
+        tags=["Downloads"],
+        summary="Download a study directory as a zip archive",
+        response_class=Response,
+    )
+    def study_export_route(
+        study: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Response:
+        """Zip ``studies/<study>/`` and serve it as ``application/zip`` attachment
+        ``<study>.zip`` (mirrors the stdlib GET /api/study-export).
+
+        HTTP 400 ``{"error": "missing study"}`` when ``?study=`` is missing;
+        HTTP 404 ``{"error": "study not found"}`` when the study dir is absent.
+
+        Library-backed via ``lib.download_views.build_study_export``.
+        """
+        try:
+            data, mime, filename = _download_views.build_study_export(
+                ws, (study or "").strip()
+            )
+        except _download_views.DownloadError as exc:
+            return JSONResponse(status_code=exc.status, content=exc.body)
+        return Response(
+            content=data,
+            media_type=mime,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.get(
+        "/api/data-source-file",
+        tags=["Downloads"],
+        summary="Serve one workspace data-source bundle file by key",
+        response_class=Response,
+    )
+    def data_source_file_route(
+        key: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Response:
+        """Serve the bytes of the data-source bundle entry whose ``key`` matches
+        (mirrors the stdlib GET /api/data-source-file?key=...).
+
+        The path comes ONLY from the provider enumeration (no traversal
+        surface).  Text kinds (tsv/csv/json/txt/fasta/yaml/md) are served
+        inline; anything else as an attachment.  All responses carry
+        ``Cache-Control: no-store``.
+
+        HTTP 400 ``{"error": "missing ?key="}`` when ``?key=`` is missing;
+        HTTP 404 when the key is unknown or its file is missing; HTTP 500 on an
+        OS read error.
+
+        Library-backed via ``lib.download_views.resolve_data_source_file``.
+        """
+        try:
+            data, mime, inline, filename = _download_views.resolve_data_source_file(
+                ws, key
+            )
+        except _download_views.DownloadError as exc:
+            return JSONResponse(status_code=exc.status, content=exc.body)
+        headers = {"Cache-Control": "no-store"}
+        if not inline:
+            headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return Response(content=data, media_type=mime, headers=headers)
+
+    @app.get(
+        "/api/iset/{slug}/report",
+        tags=["Downloads"],
+        summary="Per-investigation HTML report file",
+        response_class=FileResponse,
+    )
+    def iset_report_route(
+        slug: str,
+        ws: Path = Depends(get_workspace),
+    ) -> Response:
+        """Serve the per-investigation report ``index.html`` as ``text/html``
+        (mirrors the stdlib GET /api/iset/<slug>/report).
+
+        HTTP 404 ``{"error": "no report for investigation '<slug>'"}`` when no
+        report file exists.
+
+        Library-backed via ``lib.download_views.resolve_iset_report``.
+        """
+        path = _download_views.resolve_iset_report(ws, slug)
+        if path is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"no report for investigation {slug!r}"},
+            )
+        # Content-Type via headers (not media_type) so Starlette keeps the
+        # legacy bare "text/html" (no "; charset=utf-8" suffix).
+        return FileResponse(path, headers={"Content-Type": "text/html"})
+
+    @app.get(
+        "/api/guidance",
+        tags=["Downloads"],
+        summary="Latest guidance HTML (204 when none)",
+        response_class=FileResponse,
+    )
+    def guidance_route(ws: Path = Depends(get_workspace)) -> Response:
+        """Serve the latest ``*.html`` in ``<pbg>/server/content`` as
+        ``text/html`` (mirrors the stdlib GET /api/guidance).
+
+        HTTP 204 No Content when the content dir or any ``*.html`` is absent.
+
+        Library-backed via ``lib.download_views.resolve_guidance``.
+        """
+        latest = _download_views.resolve_guidance(ws)
+        if latest is None:
+            return Response(status_code=204)
+        # Content-Type via headers (not media_type) so Starlette keeps the
+        # legacy bare "text/html" (no "; charset=utf-8" suffix).
+        return FileResponse(latest, headers={"Content-Type": "text/html"})
+
+    @app.get(
+        "/api/investigation-notebook/{slug}",
+        tags=["Downloads"],
+        summary="Download an investigation's runnable notebook (.ipynb) or script (.py)",
+        response_class=Response,
+    )
+    def investigation_notebook_route(
+        slug: str,
+        format: str = "ipynb",
+        ws: Path = Depends(get_workspace),
+    ) -> Response:
+        """Generate + download an investigation's notebook/script (mirrors the
+        stdlib GET /api/investigation-notebook/<slug>[?format=py]).
+
+        Deterministic export (no AI). ``?format=py`` → ``text/x-python``;
+        otherwise → ``application/x-ipynb+json``.  Served as an attachment with
+        ``Cache-Control: no-store``.
+
+        HTTP 400 ``{"error": "investigation slug required"}`` when ``slug`` is
+        empty; HTTP 404 ``{"error": "no investigation '<slug>'"}`` when absent;
+        HTTP 500 on export failure.
+
+        Library-backed via ``lib.download_views.build_investigation_notebook``.
+        """
+        try:
+            data, mime, filename = _download_views.build_investigation_notebook(
+                ws, slug, format
+            )
+        except _download_views.DownloadError as exc:
+            return JSONResponse(status_code=exc.status, content=exc.body)
+        # Set Content-Type via headers (not media_type) so Starlette does not
+        # append "; charset=utf-8" to the legacy bare "text/x-python" /
+        # "application/x-ipynb+json" values — keeps the header byte-identical.
+        return Response(
+            content=data,
+            headers={
+                "Content-Type": mime,
+                "Cache-Control": "no-store",
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
 
     return app
 

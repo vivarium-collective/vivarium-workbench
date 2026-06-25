@@ -3159,3 +3159,188 @@ class TestSystemDepsCheckRoute:
     def test_system_deps_in_openapi(self, client):
         components = client.get("/openapi.json").json()["components"]["schemas"]
         assert "SystemDepsCheck" in components
+
+
+# ===========================================================================
+# Batch 14: investigation-state-tree (typed JSON) + the download routes
+# ===========================================================================
+
+import yaml as _yaml14
+
+
+class TestInvestigationStateTreeRoute:
+    def _write_composite(self, ws, inv="my-inv", comp="c", state=None):
+        d = ws / "studies" / inv / "composites"
+        d.mkdir(parents=True, exist_ok=True)
+        body = {"state": state} if state is not None else {"process": "P"}
+        (d / f"{comp}.yaml").write_text(_yaml14.dump(body), encoding="utf-8")
+
+    def test_200_nodes(self, client, tmp_path):
+        self._write_composite(
+            tmp_path, state={"s": {"_type": "float", "_default": 0.0}}
+        )
+        r = client.get("/api/investigation-state-tree?investigation=my-inv&composite=c")
+        assert r.status_code == 200
+        body = r.json()
+        assert "nodes" in body
+        assert any(n["path"] == ["s"] for n in body["nodes"])
+
+    def test_400_missing_args(self, client):
+        r = client.get("/api/investigation-state-tree")
+        assert r.status_code == 400
+        assert r.json() == {"error": "investigation + composite required"}
+
+    def test_404_not_found(self, client):
+        r = client.get("/api/investigation-state-tree?investigation=x&composite=ghost")
+        assert r.status_code == 404
+        assert "not found" in r.json()["error"]
+
+    def test_in_openapi(self, client):
+        components = client.get("/openapi.json").json()["components"]["schemas"]
+        assert "InvestigationStateTree" in components
+        paths = client.get("/openapi.json").json()["paths"]
+        assert "/api/investigation-state-tree" in paths
+
+
+class TestStudyExportRoute:
+    def _make_study(self, ws, name="s1"):
+        d = ws / "studies" / name
+        d.mkdir(parents=True)
+        (d / "study.yaml").write_text("name: s1\n", encoding="utf-8")
+        (d / "data.txt").write_text("hello", encoding="utf-8")
+
+    def test_200_zip(self, client, tmp_path):
+        self._make_study(tmp_path)
+        r = client.get("/api/study-export?study=s1")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "application/zip"
+        assert r.headers["content-disposition"] == 'attachment; filename="s1.zip"'
+        import io, zipfile
+        zf = zipfile.ZipFile(io.BytesIO(r.content))
+        assert any(n.endswith("data.txt") for n in zf.namelist())
+
+    def test_400_missing(self, client):
+        r = client.get("/api/study-export")
+        assert r.status_code == 400
+        assert r.json() == {"error": "missing study"}
+
+    def test_404_not_found(self, client):
+        r = client.get("/api/study-export?study=ghost")
+        assert r.status_code == 404
+        assert r.json() == {"error": "study not found"}
+
+    def test_in_openapi(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        assert "/api/study-export" in paths
+
+
+class TestDataSourceFileRoute:
+    def test_200_inline_text(self, client, monkeypatch):
+        from vivarium_dashboard.lib import download_views as dv
+        monkeypatch.setattr(
+            dv, "resolve_data_source_file",
+            lambda ws, key: (b"a\tb\n", "text/tab-separated-values; charset=utf-8", True, "t.tsv"),
+        )
+        r = client.get("/api/data-source-file?key=k1")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "text/tab-separated-values; charset=utf-8"
+        assert r.headers["cache-control"] == "no-store"
+        assert "content-disposition" not in r.headers   # inline → no attachment
+        assert r.content == b"a\tb\n"
+
+    def test_200_binary_attachment(self, client, monkeypatch):
+        from vivarium_dashboard.lib import download_views as dv
+        monkeypatch.setattr(
+            dv, "resolve_data_source_file",
+            lambda ws, key: (b"\x00\x01", "application/octet-stream", False, "blob.bin"),
+        )
+        r = client.get("/api/data-source-file?key=k1")
+        assert r.status_code == 200
+        assert r.headers["content-disposition"] == 'attachment; filename="blob.bin"'
+        assert r.headers["cache-control"] == "no-store"
+
+    def test_400_missing_key(self, client):
+        r = client.get("/api/data-source-file")
+        assert r.status_code == 400
+        assert r.json() == {"error": "missing ?key="}
+
+    def test_404_unknown_key(self, client, monkeypatch):
+        from vivarium_dashboard.lib import download_views as dv
+        def _raise(ws, key):
+            raise dv.DownloadError({"error": f"key not in data-source bundle: {key!r}"}, 404)
+        monkeypatch.setattr(dv, "resolve_data_source_file", _raise)
+        r = client.get("/api/data-source-file?key=ghost")
+        assert r.status_code == 404
+        assert "ghost" in r.json()["error"]
+
+    def test_in_openapi(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        assert "/api/data-source-file" in paths
+
+
+class TestIsetReportRoute:
+    def test_200_html(self, client, tmp_path):
+        rep = tmp_path / "investigations" / "inv-a" / "reports"
+        rep.mkdir(parents=True)
+        (rep / "index.html").write_text("<html>r</html>", encoding="utf-8")
+        r = client.get("/api/iset/inv-a/report")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "text/html"
+        assert r.text == "<html>r</html>"
+
+    def test_404_no_report(self, client):
+        r = client.get("/api/iset/ghost/report")
+        assert r.status_code == 404
+        assert "ghost" in r.json()["error"]
+
+    def test_in_openapi(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        assert "/api/iset/{slug}/report" in paths
+
+
+class TestGuidanceRoute:
+    def test_200_latest_html(self, client, tmp_path):
+        content = tmp_path / ".pbg" / "server" / "content"
+        content.mkdir(parents=True)
+        (content / "g.html").write_text("<html>guide</html>", encoding="utf-8")
+        r = client.get("/api/guidance")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "text/html"
+        assert r.text == "<html>guide</html>"
+
+    def test_204_when_absent(self, client):
+        r = client.get("/api/guidance")
+        assert r.status_code == 204
+        assert r.content == b""
+
+    def test_in_openapi(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        assert "/api/guidance" in paths
+
+
+class TestInvestigationNotebookRoute:
+    def test_200_download(self, client, monkeypatch):
+        from vivarium_dashboard.lib import download_views as dv
+        monkeypatch.setattr(
+            dv, "build_investigation_notebook",
+            lambda ws, slug, fmt: (b"print(1)\n", "text/x-python", "inv.py"),
+        )
+        r = client.get("/api/investigation-notebook/inv?format=py")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "text/x-python"
+        assert r.headers["cache-control"] == "no-store"
+        assert r.headers["content-disposition"] == 'attachment; filename="inv.py"'
+        assert r.content == b"print(1)\n"
+
+    def test_404_unknown(self, client, monkeypatch):
+        from vivarium_dashboard.lib import download_views as dv
+        def _raise(ws, slug, fmt):
+            raise dv.DownloadError({"error": f"no investigation {slug!r}"}, 404)
+        monkeypatch.setattr(dv, "build_investigation_notebook", _raise)
+        r = client.get("/api/investigation-notebook/ghost")
+        assert r.status_code == 404
+        assert "ghost" in r.json()["error"]
+
+    def test_in_openapi(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        assert "/api/investigation-notebook/{slug}" in paths

@@ -78,6 +78,7 @@ _MODELS: list[type[BaseModel]] = [
     _models.InvestigationCompositeEntry,
     _models.InvestigationCompositesPayload,
     _models.InvestigationCompositeDocPayload,
+    _models.InvestigationStateTree,
     _models.InvestigationHypothesesPayload,
     # Rigor models
     _models.StudyRigor,

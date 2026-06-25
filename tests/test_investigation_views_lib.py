@@ -223,6 +223,73 @@ class TestBuildInvestigationCompositeDoc:
 
 
 # ---------------------------------------------------------------------------
+# build_investigation_state_tree
+# ---------------------------------------------------------------------------
+
+def _write_state_composite(ws: Path) -> None:
+    """Add studies/my-inv/composites/with-state.yaml carrying a `state` block."""
+    (ws / "studies" / "my-inv" / "composites" / "with-state.yaml").write_text(
+        yaml.dump({
+            "state": {
+                "store_a": {"_type": "float", "_default": 1.0},
+                "proc_b": {"_type": "process", "address": "local:Foo", "config": {"k": 2}},
+            },
+        }),
+        encoding="utf-8",
+    )
+
+
+class TestBuildInvestigationStateTree:
+    def test_happy_path(self, tmp_path: Path) -> None:
+        ws = _make_workspace(tmp_path)
+        _write_state_composite(ws)
+        result = inv_views.build_investigation_state_tree(ws, "my-inv", "with-state")
+        assert "nodes" in result
+        nodes = result["nodes"]
+        paths = {tuple(n["path"]): n for n in nodes}
+        assert ("store_a",) in paths
+        assert paths[("store_a",)]["kind"] == "store"
+        assert ("proc_b",) in paths
+        assert paths[("proc_b",)]["kind"] == "process"
+        assert paths[("proc_b",)]["address"] == "local:Foo"
+
+    def test_no_state_key_returns_empty_nodes(self, tmp_path: Path) -> None:
+        ws = _make_workspace(tmp_path)
+        # my-comp.yaml has no `state` key → empty node list.
+        result = inv_views.build_investigation_state_tree(ws, "my-inv", "my-comp")
+        assert result == {"nodes": []}
+
+    def test_missing_investigation_raises_400(self, tmp_path: Path) -> None:
+        with pytest.raises(inv_views.InvViewError) as exc_info:
+            inv_views.build_investigation_state_tree(tmp_path, "", "x")
+        assert exc_info.value.status == 400
+        assert "required" in exc_info.value.body["error"]
+
+    def test_missing_composite_raises_400(self, tmp_path: Path) -> None:
+        ws = _make_workspace(tmp_path)
+        with pytest.raises(inv_views.InvViewError) as exc_info:
+            inv_views.build_investigation_state_tree(ws, "my-inv", "")
+        assert exc_info.value.status == 400
+
+    def test_composite_not_found_raises_404(self, tmp_path: Path) -> None:
+        ws = _make_workspace(tmp_path)
+        with pytest.raises(inv_views.InvViewError) as exc_info:
+            inv_views.build_investigation_state_tree(ws, "my-inv", "nonexistent")
+        assert exc_info.value.status == 404
+        assert "not found" in exc_info.value.body["error"]
+
+    def test_invalid_yaml_raises_500(self, tmp_path: Path) -> None:
+        ws = _make_workspace(tmp_path)
+        (ws / "studies" / "my-inv" / "composites" / "bad.yaml").write_bytes(
+            b": invalid: yaml: {{{"
+        )
+        with pytest.raises(inv_views.InvViewError) as exc_info:
+            inv_views.build_investigation_state_tree(ws, "my-inv", "bad")
+        assert exc_info.value.status == 500
+        assert "failed to parse" in exc_info.value.body["error"]
+
+
+# ---------------------------------------------------------------------------
 # build_investigation_hypotheses
 # ---------------------------------------------------------------------------
 
@@ -397,6 +464,42 @@ class TestServerShimParity:
         assert captured["status"] == 404
         try:
             inv_views.build_investigation_composite_doc(ws, "my-inv", "missing")
+        except inv_views.InvViewError as exc:
+            assert captured["body"] == exc.body
+
+    # --- investigation-state-tree ---
+
+    def test_state_tree_200_parity(self, monkeypatch: Any, tmp_path: Path) -> None:
+        ws = _make_workspace(tmp_path)
+        _write_state_composite(ws)
+        captured = self._invoke(
+            monkeypatch, ws, "_get_investigation_state_tree",
+            "/api/investigation-state-tree?investigation=my-inv&composite=with-state",
+        )
+        lib_body = inv_views.build_investigation_state_tree(ws, "my-inv", "with-state")
+        assert captured["status"] == 200
+        assert captured["body"] == lib_body
+
+    def test_state_tree_400_parity(self, monkeypatch: Any, tmp_path: Path) -> None:
+        captured = self._invoke(
+            monkeypatch, tmp_path, "_get_investigation_state_tree",
+            "/api/investigation-state-tree",
+        )
+        assert captured["status"] == 400
+        try:
+            inv_views.build_investigation_state_tree(tmp_path, "", "")
+        except inv_views.InvViewError as exc:
+            assert captured["body"] == exc.body
+
+    def test_state_tree_404_parity(self, monkeypatch: Any, tmp_path: Path) -> None:
+        ws = _make_workspace(tmp_path)
+        captured = self._invoke(
+            monkeypatch, ws, "_get_investigation_state_tree",
+            "/api/investigation-state-tree?investigation=my-inv&composite=missing",
+        )
+        assert captured["status"] == 404
+        try:
+            inv_views.build_investigation_state_tree(ws, "my-inv", "missing")
         except inv_views.InvViewError as exc:
             assert captured["body"] == exc.body
 

@@ -12,10 +12,11 @@ reconciles simulation_set), which ``pbg_superpowers.rigor`` reads via
 
 Builders
 --------
-build_investigation_viz_html     → GET /api/investigation-viz-html
-build_investigation_composites   → GET /api/investigation-composites
-build_investigation_composite_doc→ GET /api/investigation-composite-doc
-build_investigation_hypotheses   → GET /api/investigation-hypotheses
+build_investigation_viz_html      → GET /api/investigation-viz-html
+build_investigation_composites    → GET /api/investigation-composites
+build_investigation_composite_doc → GET /api/investigation-composite-doc
+build_investigation_state_tree    → GET /api/investigation-state-tree
+build_investigation_hypotheses    → GET /api/investigation-hypotheses
 """
 
 from __future__ import annotations
@@ -183,6 +184,41 @@ def build_investigation_composite_doc(
     except Exception as e:  # noqa: BLE001
         raise InvViewError({"error": f"parse failed: {e}"}, 500)
     return {"state": doc}
+
+
+def build_investigation_state_tree(
+    ws_root: Path,
+    investigation: str,
+    composite: str,
+) -> dict:
+    """Build the GET /api/investigation-state-tree payload for *ws_root*.
+
+    Reads ``study_dir(investigation)/composites/<composite>.yaml`` and flattens
+    its ``state`` into a list of node records via
+    ``lib.composite_recipes.walk_state_tree``.  Returns ``{nodes: [...]}``.
+
+    Raises ``InvViewError``:
+    - 400 when ``investigation`` or ``composite`` is empty.
+    - 404 when the composite YAML file does not exist (body carries the
+      resolved path, matching the legacy handler).
+    - 500 on YAML parse failure.
+
+    Mirrors ``server.Handler._get_investigation_state_tree``.
+    """
+    from vivarium_dashboard.lib.composite_recipes import walk_state_tree
+
+    if not investigation or not composite:
+        raise InvViewError({"error": "investigation + composite required"}, 400)
+    composite_path = _study_dir(ws_root, investigation) / "composites" / f"{composite}.yaml"
+    if not composite_path.is_file():
+        raise InvViewError(
+            {"error": f"composite document not found: {composite_path}"}, 404
+        )
+    try:
+        doc = yaml.safe_load(composite_path.read_text(encoding="utf-8")) or {}
+    except Exception as e:  # noqa: BLE001
+        raise InvViewError({"error": f"failed to parse composite: {e}"}, 500)
+    return {"nodes": walk_state_tree(doc)}
 
 
 def build_investigation_hypotheses(ws_root: Path, name: str) -> dict:
