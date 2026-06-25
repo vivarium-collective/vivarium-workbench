@@ -2164,3 +2164,134 @@ def test_iset_detail_in_openapi(client):
     spec = client.get("/openapi.json").json()
     assert "/api/iset/{slug}" in spec["paths"]
     assert "IsetDetail" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# /api/observables, /api/study-observable-check, /api/linkage-index (Batch 8)
+# ---------------------------------------------------------------------------
+
+import shutil as _shutil
+
+_OBS_FIXTURE = Path(__file__).parent / "_fixtures" / "ws_increase_demo"
+_OBS_REF = "pbg_ws_increase_demo.composites.increase-demo"
+
+
+def _obs_demo_client(tmp_path):
+    """A TestClient over a throwaway copy of the real increase-demo workspace."""
+    import yaml as _yaml
+    ws = tmp_path / "ws"
+    _shutil.copytree(_OBS_FIXTURE, ws)
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: ws
+    return TestClient(app), ws, _yaml
+
+
+def test_observables_no_ref_400(client):
+    r = client.get("/api/observables")
+    assert r.status_code == 400
+    assert r.json() == {"error": "ref required"}
+
+
+def test_observables_unknown_ref_404(tmp_path):
+    c, _ws, _yaml = _obs_demo_client(tmp_path)
+    r = c.get("/api/observables", params={"ref": "nope.not.a.composite"})
+    # Unknown ref → 404 (or 501 if the validator is absent — match legacy).
+    assert r.status_code in (404, 501)
+    assert "error" in r.json()
+
+
+def test_observables_real_build_200(tmp_path):
+    from vivarium_dashboard.lib import observables_views as _ov
+    _ov.clear_cache()
+    c, _ws, _yaml = _obs_demo_client(tmp_path)
+    r = c.get("/api/observables", params={"ref": _OBS_REF})
+    if r.status_code == 501:
+        pytest.skip("readout_validation unavailable in this interpreter")
+    assert r.status_code == 200
+    body = r.json()
+    assert "stores.level" in body["leaves"]
+    assert body["ref"] == _OBS_REF
+
+
+def test_study_observable_check_invalid_slug_400(client):
+    r = client.get("/api/study-observable-check", params={"study": "UPPER-CASE"})
+    assert r.status_code == 400
+    assert r.json() == {"error": "invalid slug"}
+
+
+def test_study_observable_check_not_found_404(client):
+    r = client.get("/api/study-observable-check", params={"study": "no-such-study"})
+    assert r.status_code == 404
+    assert "error" in r.json()
+
+
+def test_study_observable_check_real_build_200(tmp_path):
+    c, ws, _yaml = _obs_demo_client(tmp_path)
+    sdir = ws / "studies" / "the-study"
+    sdir.mkdir(parents=True, exist_ok=True)
+    (sdir / "study.yaml").write_text(_yaml.safe_dump({
+        "name": "the-study",
+        "baseline": [{"name": "base", "composite": _OBS_REF}],
+        "readouts": [
+            {"name": "real-one", "store_path": "stores.level"},
+            {"name": "phantom-one", "store_path": "stores.nonexistent"},
+        ],
+    }), encoding="utf-8")
+    r = c.get("/api/study-observable-check", params={"study": "the-study"})
+    if r.status_code == 501:
+        pytest.skip("readout_validation unavailable in this interpreter")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["composite"] == _OBS_REF
+    assert any(rr["name"] == "phantom-one" and rr["status"] == "not_in_structure"
+               for rr in body["readouts"])
+
+
+def test_linkage_index_200(client):
+    """Empty workspace → always 200 with a typed (empty) payload."""
+    r = client.get("/api/linkage-index")
+    assert r.status_code == 200
+    body = r.json()
+    assert "nodes" in body and "edges" in body
+
+
+def test_linkage_index_parity_with_server(tmp_path, monkeypatch):
+    """FastAPI linkage route body == legacy server worker (source query)."""
+    import yaml as _yaml
+    import json as _json
+    import vivarium_dashboard.server as srv
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True)
+    (ws / "workspace.yaml").write_text("name: ws\n")
+    inv = ws / "investigations" / "the-inv"
+    inv.mkdir(parents=True)
+    inv.joinpath("investigation.yaml").write_text(_yaml.safe_dump({
+        "name": "the-inv", "studies": ["s1"],
+        "acceptance_criteria": [{"study": "s1", "behavior": "b1"}],
+    }))
+    sd = ws / "studies" / "s1"
+    sd.mkdir(parents=True)
+    sd.joinpath("study.yaml").write_text(_yaml.safe_dump({
+        "name": "s1", "investigation": "the-inv", "cites": ["bib-X"],
+        "tests": [{"name": "b1"}],
+    }))
+    legacy_bytes, legacy_status = srv.Handler._linkage_index_test(ws, source="bib-X")
+    legacy_body = _json.loads(legacy_bytes)
+
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: ws
+    c = TestClient(app)
+    r = c.get("/api/linkage-index", params={"source": "bib-X"})
+    assert r.status_code == legacy_status == 200
+    assert r.json() == legacy_body
+
+
+def test_observables_routes_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/observables" in spec["paths"]
+    assert "/api/study-observable-check" in spec["paths"]
+    assert "/api/linkage-index" in spec["paths"]
+    schemas = spec["components"]["schemas"]
+    assert "ObservablesPayload" in schemas
+    assert "StudyObservableCheck" in schemas
+    assert "LinkageIndex" in schemas

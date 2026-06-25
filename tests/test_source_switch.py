@@ -3,6 +3,8 @@ import pytest
 import yaml
 from vivarium_dashboard import server
 from vivarium_dashboard.lib import _root
+from vivarium_dashboard.lib import observables_views as _obs_views
+from vivarium_dashboard.lib import report_views as _report_views
 from vivarium_dashboard.lib.data_sources import _DATA_SOURCES_CACHE
 
 
@@ -28,7 +30,8 @@ def test_switch_active_workspace_repoints_and_invalidates(tmp_path):
     _root.set_workspace_root(a)
     # Dirty every workspace-keyed cache.
     server._REGISTRY_CACHE["data"] = {"stale": True}
-    server._LINKAGE_CACHE["x"] = 1
+    _report_views._LINKAGE_CACHE["x"] = 1     # linkage cache moved to lib
+    _obs_views._OBS_CACHE["x"] = 1            # observables build cache (lib)
     server._COMPOSITE_STATE_CACHE["x"] = 1
     server._RUN_STORE_SUMMARY_CACHE["x"] = 1
     server._WP_CACHE["x"] = 1
@@ -40,7 +43,8 @@ def test_switch_active_workspace_repoints_and_invalidates(tmp_path):
     assert _root.get_workspace_root() == b.resolve()
     assert server._REGISTRY_CACHE["data"] is None
     assert server._REGISTRY_CACHE["ts"] == 0.0
-    assert server._LINKAGE_CACHE == {}
+    assert _report_views._LINKAGE_CACHE == {}
+    assert _obs_views._OBS_CACHE == {}
     assert server._COMPOSITE_STATE_CACHE == {}
     assert server._RUN_STORE_SUMMARY_CACHE == {}
     assert server._WP_CACHE == {}

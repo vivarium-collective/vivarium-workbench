@@ -830,11 +830,6 @@ class ExplorerProteinBreakdown(BaseModel):
 # ---------------------------------------------------------------------------
 # Reports & inputs models  (GET /api/report-lint, /api/needs-attention, etc.)
 # ---------------------------------------------------------------------------
-#
-# NOTE: GET /api/linkage-index is intentionally NOT ported in this batch (its
-# observable_registry/composite paths require server._observables_for_ref,
-# which isn't in lib yet).  No ``LinkageIndex`` model here — re-added with the
-# route in a later observables/composite-state batch.
 
 
 class ReportLint(BaseModel):
@@ -897,6 +892,56 @@ class IsetDetail(BaseModel):
     JSONResponse, not through this model).
 
     Source: ``lib.report_views.build_iset_detail``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+# ---------------------------------------------------------------------------
+# Observables / never-fabricate guard + linkage-index models
+# ---------------------------------------------------------------------------
+
+class ObservablesPayload(BaseModel):
+    """``GET /api/observables?ref=<composite>`` payload (lib.observables_views.build_observables).
+
+    Success shape: ``{ref, leaves: [dotted paths], catalogs: {observable: [labels]}}``
+    (plus ``cached: true`` on a TTL cache hit).  Error shapes (carried with the
+    legacy status code via :class:`fastapi.responses.JSONResponse`, NOT this
+    model): ``{error}`` at 400 (no ref / build fail) / 404 (unknown ref) / 500
+    (introspection fail) / 501 (validator absent).  Pure pass-through
+    (``extra="allow"``, no declared fields) so the builder dict survives
+    verbatim — see :class:`ExplorerRuns`.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class StudyObservableCheck(BaseModel):
+    """``GET /api/study-observable-check?study=<slug>`` payload.
+
+    Backed by ``lib.observables_views.build_study_observable_check``.  Success
+    shape: ``{composite: ref, readouts: [{name, status, detail}]}`` where
+    ``status`` ∈ ``ok|unresolved|not_in_structure|aspirational``.  Error / 422
+    fallback shapes (``{error, readouts}`` or ``{composite, readouts, note}``)
+    are carried at their legacy status code via
+    :class:`fastapi.responses.JSONResponse`, not this model.  Pure pass-through
+    (``extra="allow"``, no declared fields) so the builder dict survives
+    verbatim — see :class:`ExplorerRuns`.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class LinkageIndex(BaseModel):
+    """``GET /api/linkage-index`` payload (lib.report_views.build_linkage_index).
+
+    SP4a/SP4b navigate surface — ALWAYS HTTP 200.  The shape is param-dependent:
+    ``{nodes, edges}`` (no filter), ``{studies}`` (source), ``{findings}``
+    (observable), ``{investigation, ac_matrix, dag}`` (investigation),
+    ``{studies, composites}`` (observable_registry), or ``{emits,
+    used_by_studies}`` (composite); plus an ``error`` key on the tolerant
+    fallback.  Pure pass-through (``extra="allow"``, no declared fields) so the
+    builder dict survives verbatim — see :class:`StudyDetail`.
     """
 
     model_config = ConfigDict(extra="allow")

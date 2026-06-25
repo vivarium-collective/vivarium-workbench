@@ -90,6 +90,10 @@ _MODELS: list[type[BaseModel]] = [
     _models.NeedsAttention,
     _models.InputsPayload,
     _models.IsetDetail,
+    # Observables + linkage-index models
+    _models.ObservablesPayload,
+    _models.StudyObservableCheck,
+    _models.LinkageIndex,
 ]
 
 OUTPUT_PATH = (
