@@ -39,6 +39,7 @@ from vivarium_dashboard.lib import data_sources as _data_sources
 from vivarium_dashboard.lib import git_status as _git_status
 from vivarium_dashboard.lib import investigation_status
 from vivarium_dashboard.lib import investigation_views as _inv_views
+from vivarium_dashboard.lib import rigor_views as _rigor_views
 from vivarium_dashboard.lib import saved_visualizations as _saved_viz
 from vivarium_dashboard.lib.composite_resolve import resolve_composite
 from vivarium_dashboard.lib.composites_query import composites_via_subprocess
@@ -63,9 +64,11 @@ from vivarium_dashboard.lib.models import (
     InvestigationCompositesPayload,
     InvestigationHypothesesPayload,
     InvestigationSummary,
+    InvestigationRigor,
     InvestigationVizHtmlPayload,
     InvestigationsPayload,
     ReferencesBibPayload,
+    StudyRigor,
     RegistryPayload,
     SavedVisualizationsPayload,
     SimRow,
@@ -149,6 +152,14 @@ _OPENAPI_TAGS = [
             "Per-investigation detail endpoints: viz HTML files, composite "
             "baseline list, rigor roll-up, composite YAML document, and "
             "competing hypotheses with support-log enrichment."
+        ),
+    },
+    {
+        "name": "Rigor",
+        "description": (
+            "Deterministic evidence/rigor scorecards computed by "
+            "pbg_superpowers.rigor over the run-merged study spec: per-study "
+            "and per-investigation roll-up."
         ),
     },
 ]
@@ -662,12 +673,8 @@ def create_app() -> FastAPI:
             return JSONResponse(status_code=exc.status, content=exc.body)
         return InvestigationCompositesPayload.model_validate(body)
 
-    # NOTE: /api/investigation-rigor is intentionally NOT ported in this batch.
-    # It depends on per-study run-merging (server._study_detail_spec merges
-    # runs.db + reconciles simulation_set), which pbg_superpowers.rigor reads
-    # via spec["runs"] (replication + run-persistence dimensions). Extracting
-    # that run-merging loader belongs with Batch 3 (study/<slug>, study-rigor),
-    # so the rigor route stays on the legacy stdlib handler for now.
+    # /api/study-rigor and /api/investigation-rigor are ported below (Batch 3),
+    # on top of the run-merging loader extracted to lib.study_spec.
 
     @app.get(
         "/api/investigation-composite-doc",
@@ -732,6 +739,74 @@ def create_app() -> FastAPI:
         slug = (investigation or inv or name or "").strip()
         body = _inv_views.build_investigation_hypotheses(ws, slug)
         return InvestigationHypothesesPayload.model_validate(body)
+
+    # -----------------------------------------------------------------------
+    # Rigor routes
+    # -----------------------------------------------------------------------
+
+    @app.get(
+        "/api/study-rigor",
+        response_model=StudyRigor,
+        tags=["Rigor"],
+        summary="Per-study evidence & rigor scorecard",
+    )
+    def study_rigor_route(
+        study: Optional[str] = None,
+        investigation: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[StudyRigor, JSONResponse]:
+        """Per-study rigor scorecard (mirrors the stdlib /api/study-rigor).
+
+        Deterministic dimensions (replication, negative controls, alternative
+        hypotheses, claim discipline, falsifiability, …) from
+        ``pbg_superpowers.rigor`` over the **run-merged** study spec — the
+        runs.db merge feeds the replication + run-persistence dimensions.
+
+        ``?study=`` selects the study (legacy ``?investigation=`` alias also
+        accepted). HTTP 400 when neither is given; HTTP 404 when the study has
+        no spec file. Error bodies are ``{"error": <msg>}`` — byte-identical to
+        the legacy ``_get_study_rigor`` (not FastAPI's ``{"detail": ...}``).  A
+        rigor-computation failure degrades to a 200 body carrying ``error`` plus
+        empty ``dimensions``/``score``/``summary``.
+
+        Library-backed via ``lib.rigor_views.build_study_rigor``.
+        """
+        slug = study or investigation
+        try:
+            body = _rigor_views.build_study_rigor(ws, slug)
+        except _rigor_views.RigorViewError as exc:
+            return JSONResponse(status_code=exc.status, content=exc.body)
+        return StudyRigor.model_validate(body)
+
+    @app.get(
+        "/api/investigation-rigor",
+        response_model=InvestigationRigor,
+        tags=["Rigor"],
+        summary="Investigation-level rigor roll-up across member studies",
+    )
+    def investigation_rigor_route(
+        investigation: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[InvestigationRigor, JSONResponse]:
+        """Investigation rigor roll-up (mirrors the stdlib /api/investigation-rigor).
+
+        Aggregates per-study rigor across the investigation's member studies
+        (each loaded run-merged) plus investigation-level dimensions
+        (adversarial coverage, traceable methodology).
+
+        HTTP 400 when ``?investigation=`` is missing; HTTP 404 when the
+        investigation.yaml does not exist. Error bodies are ``{"error": <msg>}``.
+        An unreadable investigation.yaml or a rigor-computation failure degrade
+        to a 200 body carrying ``error`` — byte-identical to the legacy
+        ``_get_investigation_rigor``.
+
+        Library-backed via ``lib.rigor_views.build_investigation_rigor``.
+        """
+        try:
+            body = _rigor_views.build_investigation_rigor(ws, investigation)
+        except _rigor_views.RigorViewError as exc:
+            return JSONResponse(status_code=exc.status, content=exc.body)
+        return InvestigationRigor.model_validate(body)
 
     return app
 

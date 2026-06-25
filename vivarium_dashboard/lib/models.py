@@ -674,6 +674,34 @@ class InvestigationHypothesesPayload(BaseModel):
     investigation: str = ""
 
 
+class StudyRigor(BaseModel):
+    """``GET /api/study-rigor`` payload (lib.rigor_views.build_study_rigor).
+
+    The per-study rigor scorecard from ``pbg_superpowers.rigor.study_rigor``:
+    ``study_type`` / ``mode`` / ``descriptive`` / ``dimensions`` / ``score`` /
+    ``summary`` on the success path, or ``{error, dimensions, score, summary}``
+    on the 200-shaped failure fallback.  The dimension/score shapes are nested
+    and vary by study type, so this is a pure pass-through model — no declared
+    fields, ``extra="allow"`` so every key the builder emits survives verbatim
+    (and none are injected).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class InvestigationRigor(BaseModel):
+    """``GET /api/investigation-rigor`` payload (lib.rigor_views.build_investigation_rigor).
+
+    The rigor roll-up across member studies from
+    ``pbg_superpowers.rigor.investigation_rigor`` (``dimensions`` / ``per_study``
+    / ``score`` / ``summary``), or one of the 200-shaped error fallbacks.  Like
+    :class:`StudyRigor`, a pure pass-through (``extra="allow"``, no declared
+    fields) so nothing is stripped or injected.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
 class CompositeResolvePayload(BaseModel):
     """``GET /api/composite-resolve`` payload (lib.composite_resolve.resolve_composite).
 

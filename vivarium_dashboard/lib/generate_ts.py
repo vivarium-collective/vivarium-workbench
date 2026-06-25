@@ -73,6 +73,9 @@ _MODELS: list[type[BaseModel]] = [
     _models.InvestigationCompositesPayload,
     _models.InvestigationCompositeDocPayload,
     _models.InvestigationHypothesesPayload,
+    # Rigor models
+    _models.StudyRigor,
+    _models.InvestigationRigor,
 ]
 
 OUTPUT_PATH = (

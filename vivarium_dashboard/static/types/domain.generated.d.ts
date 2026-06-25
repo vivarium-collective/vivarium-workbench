@@ -279,3 +279,9 @@ export interface InvestigationHypothesesPayload {
   hypotheses: any[];
   investigation: string;
 }
+
+export interface StudyRigor {
+}
+
+export interface InvestigationRigor {
+}
