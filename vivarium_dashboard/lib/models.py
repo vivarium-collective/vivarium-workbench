@@ -742,3 +742,86 @@ class CompositeResolvePayload(BaseModel):
     kind: Optional[str] = None
     module: Optional[str] = None
     default_n_steps: Optional[int] = None
+
+
+# ---------------------------------------------------------------------------
+# Data explorer models  (GET /api/explorer/*)
+# ---------------------------------------------------------------------------
+
+class ExplorerRuns(BaseModel):
+    """``GET /api/explorer/runs`` payload (lib.explorer_data.list_runs).
+
+    Returns the run-picker list for the Data Explorer card (``{runs: [...]}``),
+    or ``{error, runs: []}`` on failure — still HTTP 200 (never-500 contract).
+    Pure pass-through (``extra="allow"``, no declared fields) like
+    :class:`StudyDetail` / :class:`StudyRigor`: a declared field with a default
+    would be serialized even when the builder omits it (injecting a spurious
+    key) and an ``int`` field would coerce a float — both break byte-identity
+    with the legacy handler.  No declared fields → the builder dict survives
+    verbatim.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ExplorerObservables(BaseModel):
+    """``GET /api/explorer/observables`` payload (lib.explorer_data.list_observables).
+
+    Success shape: ``{categories: {<category>: [<observable>, …], …}}``.
+    Error/missing-db shape (still HTTP 200): ``{error, categories: {}}``.
+    Pure pass-through (``extra="allow"``, no declared fields) so the builder dict
+    survives verbatim — see :class:`ExplorerRuns`.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ExplorerSeries(BaseModel):
+    """``GET /api/explorer/series`` payload (lib.explorer_data.get_series).
+
+    Success shape: ``{time: […], series: {<key>: […], …}}``.
+    Error/missing-db shape (still HTTP 200): ``{error, time: [], series: {}}``.
+    Pure pass-through (``extra="allow"``, no declared fields) — see
+    :class:`ExplorerRuns`.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ExplorerFlux(BaseModel):
+    """``GET /api/explorer/flux`` payload (lib.explorer_data.get_flux_auto).
+
+    Success shape: ``{step, time, fluxes: {<bigg_id>: <float>}, coverage: {…}}``.
+    Error/missing-db shape (still HTTP 200): ``{error, fluxes: {}}``.
+    Pure pass-through (``extra="allow"``, no declared fields) — see
+    :class:`ExplorerRuns`.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ExplorerVector(BaseModel):
+    """``GET /api/explorer/vector`` payload (lib.explorer_data.get_vector).
+
+    Success shape: ``{ids: […], values: […], step: int, time: float|null}``.
+    Error/missing-db shape (still HTTP 200):
+    ``{error, ids: [], values: [], step: int, time: null}``.
+    Pure pass-through (``extra="allow"``, no declared fields) — see
+    :class:`ExplorerRuns`.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ExplorerProteinBreakdown(BaseModel):
+    """``GET /api/explorer/protein-breakdown`` payload.
+
+    Backed by ``lib.explorer_data.get_protein_breakdown``.
+    Success shape: ``{breakdown: {<category>: <mass>}, step: int, time: float|null}``.
+    Error/missing-db shape (still HTTP 200):
+    ``{error, breakdown: {}, step: int, time: null}``.
+    Pure pass-through (``extra="allow"``, no declared fields) — see
+    :class:`ExplorerRuns`.
+    """
+
+    model_config = ConfigDict(extra="allow")
