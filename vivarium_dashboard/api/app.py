@@ -65,6 +65,11 @@ from vivarium_dashboard.lib.models import (
     ExplorerObservables,
     ExplorerProteinBreakdown,
     ExplorerRuns,
+    IsetDetail,
+    InputsPayload,
+    LinkageIndex,
+    NeedsAttention,
+    ReportLint,
     ExplorerSeries,
     ExplorerVector,
     GitStatus,
@@ -93,6 +98,7 @@ from vivarium_dashboard.lib.registry import build_registry
 from vivarium_dashboard.lib.visualization_classes import list_visualization_classes
 from vivarium_dashboard.lib.simulations_index import list_simulations
 from vivarium_dashboard.lib.study_charts import build_study_charts_payload
+from vivarium_dashboard.lib import report_views as _report_views
 
 WORKSPACE_ENV = "VIVARIUM_DASHBOARD_WORKSPACE"
 
@@ -186,6 +192,15 @@ _OPENAPI_TAGS = [
             "discovery, time-series, flux map, vector snapshots, and protein "
             "breakdown.  All routes always return HTTP 200 — errors are carried "
             "in the body under an ``error`` key with empty-default data fields."
+        ),
+    },
+    {
+        "name": "Reports & inputs",
+        "description": (
+            "Report-readiness linter, linkage-index graph, needs-attention "
+            "scan, investigation inputs, and iset detail.  All routes except "
+            "``/api/iset/{slug}`` always return HTTP 200 — errors degrade "
+            "gracefully to empty payloads rather than 500."
         ),
     },
 ]
@@ -1144,6 +1159,150 @@ def create_app() -> FastAPI:
             return ExplorerProteinBreakdown.model_validate(
                 {"error": str(exc), "breakdown": {}, "step": step_int, "time": None}
             )
+
+    # -----------------------------------------------------------------------
+    # Reports & inputs routes
+    # -----------------------------------------------------------------------
+
+    @app.get(
+        "/api/report-lint",
+        response_model=ReportLint,
+        tags=["Reports & inputs"],
+        summary="Per-study report-readiness linter findings",
+    )
+    def report_lint(ws: Path = Depends(get_workspace)) -> ReportLint:
+        """Run the deterministic workspace report-linter and return its findings.
+
+        Runs ``pbg_superpowers.report_linter.lint_workspace_report`` over the
+        workspace and returns ``{findings: [{study, check, severity, message,
+        field_path}]}``, in the linter's stable error→warning→info order.
+
+        Always HTTP 200 — degrades to ``{findings: []}`` when the linter is
+        unavailable (older pbg_superpowers) or the workspace cannot be scanned.
+
+        Library-backed via ``lib.report_views.build_report_lint``.
+        """
+        body, _ = _report_views.build_report_lint(ws)
+        return ReportLint.model_validate(body)
+
+    @app.get(
+        "/api/linkage-index",
+        response_model=LinkageIndex,
+        tags=["Reports & inputs"],
+        summary="Linkage-index graph / per-query slice",
+    )
+    def linkage_index(
+        investigation: Optional[str] = None,
+        source: Optional[str] = None,
+        observable: Optional[str] = None,
+        observable_registry: Optional[str] = None,
+        composite: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> LinkageIndex:
+        """Run the deterministic linkage index over the workspace.
+
+        Query-param dispatch (first match wins):
+        - ``?observable_registry=``  → ``{studies, composites}``
+        - ``?composite=``            → ``{emits, used_by_studies}``
+        - ``?source=``               → ``{studies: [...]}``
+        - ``?observable=``           → ``{findings: [...]}``
+        - ``?investigation=``        → ``{investigation, ac_matrix, dag}``
+        - (none)                     → full ``{nodes, edges}`` graph
+
+        Always HTTP 200.  The SP4b observable_registry / composite paths
+        require a live composite build; without the server-side
+        ``_observables_for_ref`` injectable, those paths degrade gracefully
+        to ``{studies: [], composites: []}`` / ``{emits: [], used_by_studies:
+        []}``.
+
+        Library-backed via ``lib.report_views.build_linkage_index``.
+        """
+        body, _ = _report_views.build_linkage_index(
+            ws,
+            investigation=investigation,
+            source=source,
+            observable=observable,
+            observable_registry=observable_registry,
+            composite=composite,
+            # No observables_for_ref_fn here — composite builds are a
+            # server.py concern (the stdlib server injects _observables_for_ref).
+        )
+        return LinkageIndex.model_validate(body)
+
+    @app.get(
+        "/api/needs-attention",
+        response_model=NeedsAttention,
+        tags=["Reports & inputs"],
+        summary="Investigation needs-attention scan",
+    )
+    def needs_attention(
+        investigation: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> NeedsAttention:
+        """Run the deterministic needs-attention scan for an investigation.
+
+        Returns ``{investigation, items: [...], summary: {by_severity,
+        by_kind, total}}``.  Always HTTP 200 — degrades to empty lists/zeroes
+        when ``pbg_superpowers.needs_attention`` is unavailable.
+
+        Library-backed via ``lib.report_views.build_needs_attention``.
+        """
+        body, _ = _report_views.build_needs_attention(ws, investigation=investigation)
+        return NeedsAttention.model_validate(body)
+
+    @app.get(
+        "/api/inputs",
+        response_model=InputsPayload,
+        tags=["Reports & inputs"],
+        summary="Investigation inputs + global inputs for the Inputs tab",
+    )
+    def inputs(
+        investigation: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> InputsPayload:
+        """Loaded investigation's inputs (top) + repo-wide global inputs.
+
+        Returns ``{investigation: {...}, global: {...}, current: slug|null}``.
+        ``?investigation=<slug>`` overrides the git-branch-derived slug so the
+        tab follows the SPA-selected investigation.
+
+        Always HTTP 200.  Source: ``server._inputs_payload`` (ws_root-
+        parameterized, re-used as-is — no re-extraction needed).
+        """
+        from vivarium_dashboard.server import _inputs_payload  # noqa: PLC0415
+        body = _inputs_payload(ws, investigation)
+        return InputsPayload.model_validate(body)
+
+    @app.get(
+        "/api/iset/{slug}",
+        response_model=IsetDetail,
+        tags=["Reports & inputs"],
+        summary="Full investigation detail (one investigation.yaml + resolved studies)",
+    )
+    def iset_detail(
+        slug: str,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[IsetDetail, JSONResponse]:
+        """Full investigation-detail dict for the investigation-detail SPA page.
+
+        Returns the complete investigation payload built by
+        ``lib.report_views.build_iset_detail``: investigation.yaml fields +
+        each member study's resolved spec (n_runs, effective_status, findings,
+        discovery_implications, acceptance roll-up, etc.).
+
+        HTTP 404 ``{"error": "no investigation.yaml for '<slug>'"}`` when the
+        investigation.yaml does not exist — byte-identical to the legacy
+        ``_get_iset_detail`` handler.
+
+        Library-backed via ``lib.report_views.build_iset_detail``.
+        """
+        result = _report_views.build_iset_detail(ws, slug)
+        if result is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"no investigation.yaml for {slug!r}"},
+            )
+        return IsetDetail.model_validate(result)
 
     return app
 

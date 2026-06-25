@@ -57,6 +57,7 @@ files = [
     "vivarium_dashboard/lib/study_spec.py",
     "vivarium_dashboard/lib/study_enrichment.py",
     "vivarium_dashboard/lib/rigor_views.py",
+    "vivarium_dashboard/lib/report_views.py",
     "vivarium_dashboard/api/app.py",
 ]
 plugins = ["pydantic.mypy"]
