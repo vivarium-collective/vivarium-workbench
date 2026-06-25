@@ -40,6 +40,8 @@ from vivarium_dashboard.lib import explorer_data as _explorer_data
 from vivarium_dashboard.lib import git_status as _git_status
 from vivarium_dashboard.lib import investigation_status
 from vivarium_dashboard.lib import investigation_views as _inv_views
+from vivarium_dashboard.lib import observables_views as _obs_views
+from vivarium_dashboard.lib import report_views as _report_views
 from vivarium_dashboard.lib import rigor_views as _rigor_views
 from vivarium_dashboard.lib import saved_visualizations as _saved_viz
 from vivarium_dashboard.lib import study_spec as _study_spec
@@ -79,7 +81,10 @@ from vivarium_dashboard.lib.models import (
     InvestigationRigor,
     InvestigationVizHtmlPayload,
     InvestigationsPayload,
+    LinkageIndex,
+    ObservablesPayload,
     ReferencesBibPayload,
+    StudyObservableCheck,
     StudyDetail,
     StudyRigor,
     RegistryPayload,
@@ -97,7 +102,6 @@ from vivarium_dashboard.lib.registry import build_registry
 from vivarium_dashboard.lib.visualization_classes import list_visualization_classes
 from vivarium_dashboard.lib.simulations_index import list_simulations
 from vivarium_dashboard.lib.study_charts import build_study_charts_payload
-from vivarium_dashboard.lib import report_views as _report_views
 
 WORKSPACE_ENV = "VIVARIUM_DASHBOARD_WORKSPACE"
 
@@ -200,6 +204,16 @@ _OPENAPI_TAGS = [
             "scan, investigation inputs, and iset detail.  All routes except "
             "``/api/iset/{slug}`` always return HTTP 200 — errors degrade "
             "gracefully to empty payloads rather than 500."
+        ),
+    },
+    {
+        "name": "Observables",
+        "description": (
+            "Never-fabricate observable guard + SP4a/SP4b navigate surface: the "
+            "in-process composite build's emittable observables, per-study "
+            "readout validation against the real composite structure, and the "
+            "deterministic linkage index/queries (AC→study gating, source↔study, "
+            "finding-by-observable, study DAG, observable registry)."
         ),
     },
 ]
@@ -1184,16 +1198,6 @@ def create_app() -> FastAPI:
         body, _ = _report_views.build_report_lint(ws)
         return ReportLint.model_validate(body)
 
-    # NOTE: GET /api/linkage-index is intentionally NOT ported in this batch.
-    # Legacy ``server._linkage_index`` builds composites for the
-    # ``observable_registry=`` / ``composite=`` params via
-    # ``server._observables_for_ref`` (+ its composite cache), which are not yet
-    # in lib.  Injecting them here would require an api/app.py → server import,
-    # violating the lib-only architecture.  The route is re-added in a later
-    # observables/composite-state batch once ``_observables_for_ref`` moves to
-    # lib.  The lib builder (``lib.report_views.build_linkage_index``) and the
-    # ``server._linkage_index`` shim already exist and are parity-tested.
-
     @app.get(
         "/api/needs-attention",
         response_model=NeedsAttention,
@@ -1268,6 +1272,133 @@ def create_app() -> FastAPI:
                 content={"error": f"no investigation.yaml for {slug!r}"},
             )
         return IsetDetail.model_validate(result)
+
+    # -----------------------------------------------------------------------
+    # Observables / never-fabricate guard + linkage-index routes
+    # -----------------------------------------------------------------------
+
+    @app.get(
+        "/api/observables",
+        response_model=ObservablesPayload,
+        tags=["Observables"],
+        summary="Emittable observables of a composite (never-fabricate source)",
+    )
+    def observables(
+        ref: str = "",
+        ws: Path = Depends(get_workspace),
+    ) -> Union[ObservablesPayload, JSONResponse]:
+        """Emittable observables of a composite (mirrors the stdlib /api/observables).
+
+        Runs the SAME in-process composite build the Composite Explorer uses and
+        reports its emittable observables via
+        ``pbg_superpowers.readout_validation.available_observables``:
+        ``{ref, leaves: [dotted paths], catalogs: {observable: [labels]}}`` (plus
+        ``cached: true`` on a TTL cache hit).
+
+        Error paths replicate the legacy worker's exact status codes + bodies
+        (``{"error": ...}`` via :class:`JSONResponse`):
+
+        - HTTP 400 — no ``?ref=`` (``{"error": "ref required"}``) or composite
+          build failure.
+        - HTTP 404 — unknown ref.
+        - HTTP 500 — observable introspection failed.
+        - HTTP 501 — ``readout_validation`` validator absent.
+        - HTTP 200 — the payload dict (validated through ``ObservablesPayload``).
+
+        Library-backed via ``lib.observables_views.build_observables``.
+        """
+        body, status = _obs_views.build_observables(ws, ref)
+        if status == 200:
+            return ObservablesPayload.model_validate(body)
+        return JSONResponse(status_code=status, content=body)
+
+    @app.get(
+        "/api/study-observable-check",
+        response_model=StudyObservableCheck,
+        tags=["Observables"],
+        summary="Validate a study's readouts against its composite structure",
+    )
+    def study_observable_check(
+        study: str = "",
+        investigation: str = "",
+        name: str = "",
+        ws: Path = Depends(get_workspace),
+    ) -> Union[StudyObservableCheck, JSONResponse]:
+        """Per-readout never-fabricate validation (mirrors /api/study-observable-check).
+
+        The study slug is read from ``?study=`` (falling back to
+        ``?investigation=`` then ``?name=``), matching the legacy do_GET
+        dispatch.  Validates every readout against the study's baseline composite
+        structure: ``{composite: ref, readouts: [{name, status, detail}]}`` with
+        ``status`` ∈ ``ok|unresolved|not_in_structure|aspirational``.
+
+        Error paths replicate the legacy worker's exact status codes + bodies via
+        :class:`JSONResponse`:
+
+        - HTTP 400 — invalid slug, or study spec parse failure.
+        - HTTP 404 — study not found.
+        - HTTP 422 — no baseline composite / no composite ref, OR the composite
+          could not be built (every readout surfaced as ``aspirational`` with a
+          note — never a 500).
+        - HTTP 501 — ``readout_validation`` validator absent.
+        - HTTP 500 — readout validation itself raised.
+        - HTTP 200 — the payload dict (validated through ``StudyObservableCheck``).
+
+        Library-backed via ``lib.observables_views.build_study_observable_check``.
+        """
+        slug = (study or investigation or name or "").strip()
+        body, status = _obs_views.build_study_observable_check(ws, slug)
+        if status == 200:
+            return StudyObservableCheck.model_validate(body)
+        return JSONResponse(status_code=status, content=body)
+
+    @app.get(
+        "/api/linkage-index",
+        response_model=LinkageIndex,
+        tags=["Observables"],
+        summary="Deterministic linkage index / navigate queries (always 200)",
+    )
+    def linkage_index(
+        investigation: str = "",
+        inv: str = "",
+        source: str = "",
+        observable: str = "",
+        observable_registry: str = "",
+        composite: str = "",
+        ws: Path = Depends(get_workspace),
+    ) -> LinkageIndex:
+        """SP4a/SP4b linkage index + navigate queries (mirrors /api/linkage-index).
+
+        Param-dispatch (all optional; ``investigation`` accepts the ``inv``
+        alias, matching the legacy do_GET):
+
+        - ``?source=``               → ``{studies: [...]}`` (studies citing the bib_key)
+        - ``?observable=``           → ``{findings: [...]}`` (findings measuring the token)
+        - ``?observable_registry=``  → ``{studies, composites}`` emitting the token
+        - ``?composite=``            → ``{emits, used_by_studies}`` for that composite
+        - ``?investigation=`` (or ``?inv=``) → ``{investigation, ac_matrix, dag}``
+        - (none)                     → the full ``{nodes, edges}`` graph
+
+        ALWAYS HTTP 200 — an older/absent pbg_superpowers or an unscannable
+        workspace returns an empty/typed payload rather than erroring.  The
+        ``observable_registry`` / ``composite`` paths trigger a (cached)
+        composite build, sourcing observables from
+        ``lib.observables_views.observables_for_ref_payload`` — so this route
+        produces identical linkage data to the legacy stdlib worker.
+
+        Library-backed via ``lib.report_views.build_linkage_index``.
+        """
+        body, _ = _report_views.build_linkage_index(
+            ws,
+            investigation=(investigation or inv).strip() or None,
+            source=source.strip() or None,
+            observable=observable.strip() or None,
+            observable_registry=observable_registry.strip() or None,
+            composite=composite.strip() or None,
+            # The enrich callable takes (ws_root, ref) — pass the lib function directly.
+            observables_for_ref_fn=_obs_views.observables_for_ref_payload,
+        )
+        return LinkageIndex.model_validate(body)
 
     return app
 

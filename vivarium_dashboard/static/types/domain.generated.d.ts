@@ -318,3 +318,12 @@ export interface InputsPayload {
 
 export interface IsetDetail {
 }
+
+export interface ObservablesPayload {
+}
+
+export interface StudyObservableCheck {
+}
+
+export interface LinkageIndex {
+}
