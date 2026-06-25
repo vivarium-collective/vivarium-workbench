@@ -250,3 +250,32 @@ export interface BranchDiff {
   log: string;
   diff_stat: string;
 }
+
+export interface VizHtmlFile {
+  name: string;
+  html_path: string;
+}
+
+export interface InvestigationVizHtmlPayload {
+  viz_files: VizHtmlFile[];
+  error: string | null;
+}
+
+export interface InvestigationCompositeEntry {
+  name: string;
+  source: string;
+  params: any;
+}
+
+export interface InvestigationCompositesPayload {
+  composites: InvestigationCompositeEntry[];
+}
+
+export interface InvestigationCompositeDocPayload {
+  state: any;
+}
+
+export interface InvestigationHypothesesPayload {
+  hypotheses: any[];
+  investigation: string;
+}
