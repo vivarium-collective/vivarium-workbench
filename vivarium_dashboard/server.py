@@ -7731,11 +7731,14 @@ if __name__ == "__main__":
         return self._json(body, 200)
 
     def _serve_pending(self):
-        """Return pending entries from unmerged stage/* branches."""
-        try:
-            return self._json(_pending_entries(), 200)
-        except Exception as e:
-            return self._json({"error": str(e)}, 500)
+        """Return pending entries from unmerged stage/* branches.
+
+        Single-source shim over lib.work_views.build_pending; WORKSPACE passes
+        the ws_root so the builder is git-cwd-agnostic.
+        """
+        from vivarium_dashboard.lib.work_views import build_pending
+        body, status = build_pending(WORKSPACE)
+        return self._json(body, status)
 
     def _get_branch_diff(self):
         """Return a short diff summary for ?branch=<name>.
@@ -8331,28 +8334,13 @@ if __name__ == "__main__":
     def _get_generation(self):
         """GET /api/generation — the workspace's current coordinated generation.
 
-        Returns ``{generation: {generation_id, git_sha, param_set_hash,
-        created_at, label, n_runs}}`` or ``{generation: null}`` when no
-        generation is active. Backs the report's generation banner so the
-        live dashboard and the exported HTML stamp the same provenance
-        (expert-feedback A.3). Best-effort: any error reports null rather
-        than 500, so a missing generation never breaks the report.
+        Single-source shim over lib.work_views.build_generation. Returns
+        ``{generation: {generation_id, git_sha, param_set_hash, created_at,
+        label, n_runs}}`` or ``{generation: null}`` when no generation is
+        active. Best-effort: any error → null, never 500.
         """
-        try:
-            from pbg_superpowers import generation as _gen
-            g = _gen.current_generation(WORKSPACE)
-        except Exception:  # noqa: BLE001
-            g = None
-        if g is None:
-            return self._json({"generation": None}, 200)
-        return self._json({"generation": {
-            "generation_id": g.generation_id,
-            "git_sha": g.git_sha,
-            "param_set_hash": g.param_set_hash,
-            "created_at": g.created_at,
-            "label": g.label,
-            "n_runs": len(g.runs),
-        }}, 200)
+        from vivarium_dashboard.lib.work_views import build_generation
+        return self._json(build_generation(WORKSPACE), 200)
 
     def _get_github_repo(self):
         """GET /api/github-repo — the workspace's GitHub repo as ``owner/name``.
@@ -8432,82 +8420,11 @@ if __name__ == "__main__":
         that look like model code (composites + processes + steps + library
         helpers). Powers a "Model changes" section in the PR body Suggest.
 
-        Returns ``{base, branch, changes: [{path, lines_added, lines_removed,
-        category}, ...]}``. Empty list when the branch is at base, or when
-        the diff is huge (capped at 500 entries).
+        Single-source shim over lib.work_views.build_work_composite_diff.
+        Always HTTP 200 (errors in body). Capped at 500 entries.
         """
-        _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.work_state import load_state
-        state = load_state()
-        branch = state.get("active_branch") or ""
-        if not branch:
-            head = subprocess.run(["git", "branch", "--show-current"],
-                                  cwd=WORKSPACE, capture_output=True, text=True, timeout=5)
-            if head.returncode == 0:
-                branch = head.stdout.strip()
-        base = state.get("base") or "main"
-
-        # Get numstat (per-file lines added/removed) vs the merge-base with base.
-        mb = subprocess.run(
-            ["git", "merge-base", base, "HEAD"],
-            cwd=WORKSPACE, capture_output=True, text=True, timeout=10,
-        )
-        if mb.returncode != 0:
-            return self._json({"base": base, "branch": branch, "changes": [],
-                               "error": f"merge-base failed: {(mb.stderr or mb.stdout)[:200]}"}, 200)
-        ref = mb.stdout.strip() or base
-        diff = subprocess.run(
-            ["git", "diff", "--numstat", f"{ref}...HEAD"],
-            cwd=WORKSPACE, capture_output=True, text=True, timeout=15,
-        )
-        if diff.returncode != 0:
-            return self._json({"base": base, "branch": branch, "changes": [],
-                               "error": f"diff failed: {(diff.stderr or diff.stdout)[:200]}"}, 200)
-
-        # Category mapping: a file is included only if it matches one of these
-        # path patterns (model code in the v2ecoli layout). Other repos can
-        # extend the pattern list; for now we hardcode the canonical roots.
-        CATEGORIES = [
-            ("composites/",      "composite"),
-            ("/composites/",     "composite"),
-            ("processes/",       "process"),
-            ("/processes/",      "process"),
-            ("steps/",           "step"),
-            ("/steps/",          "step"),
-            ("library/",         "library helper"),
-            ("/library/",        "library helper"),
-            ("types/",           "type definition"),
-            ("/types/",          "type definition"),
-        ]
-
-        changes = []
-        for line in diff.stdout.splitlines()[:500]:
-            parts = line.split("\t", 2)
-            if len(parts) != 3:
-                continue
-            added, removed, path = parts
-            try:
-                a = int(added) if added != "-" else 0
-                r = int(removed) if removed != "-" else 0
-            except ValueError:
-                continue
-            cat = None
-            for sub, label in CATEGORIES:
-                if sub in "/" + path:
-                    cat = label
-                    break
-            if cat is None:
-                continue
-            changes.append({
-                "path": path,
-                "lines_added": a,
-                "lines_removed": r,
-                "category": cat,
-            })
-
-        # Sort by largest diff first (lines_added + lines_removed).
-        changes.sort(key=lambda c: -(c["lines_added"] + c["lines_removed"]))
-        return self._json({"base": base, "branch": branch, "changes": changes}, 200)
+        from vivarium_dashboard.lib.work_views import build_work_composite_diff
+        return self._json(build_work_composite_diff(WORKSPACE), 200)
 
     def _get_study_charts(self):
         """GET /api/study-charts/<name> — inline-SVG charts for the study.

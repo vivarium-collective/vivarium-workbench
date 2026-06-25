@@ -50,6 +50,7 @@ from vivarium_dashboard.lib import saved_visualizations as _saved_viz
 from vivarium_dashboard.lib import study_spec as _study_spec
 from vivarium_dashboard.lib import study_viz_views as _study_viz
 from vivarium_dashboard.lib import system_info as _system_info
+from vivarium_dashboard.lib import work_views as _work_views
 from vivarium_dashboard.lib.composite_resolve import resolve_composite
 from vivarium_dashboard.lib.composites_query import composites_via_subprocess
 from vivarium_dashboard.lib.models import (
@@ -114,6 +115,11 @@ from vivarium_dashboard.lib.models import (
     WorkspaceHome,
     WorkStatusActive,
     WorkStatusInactive,
+    Generation,
+    GenerationSummary,
+    PendingEntries,
+    WorkCompositeDiff,
+    WorkCompositeDiffEntry,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -890,6 +896,78 @@ def create_app() -> FastAPI:
         except ValueError:
             return JSONResponse(status_code=400, content={"error": "invalid branch name"})
         return BranchDiff.model_validate(payload)
+
+    @app.get(
+        "/api/pending",
+        response_model=PendingEntries,
+        tags=["Git & branches"],
+        summary="Pending entries from unmerged stage/* branches",
+    )
+    def pending_route(
+        ws: Path = Depends(get_workspace),
+    ) -> Union[PendingEntries, JSONResponse]:
+        """Unmerged ``stage/*`` branch entries not yet on ``main``'s ``workspace.yaml``.
+
+        Returns ``{observables, visualizations, phases, datasets,
+        references_pdfs, expert_docs, imports}`` — each a list of
+        ``{entry, branch}`` objects for entries new relative to ``main``.
+        Returns ``{}`` (empty lists) when there are no stage branches or the
+        workspace is not a git repo.
+
+        HTTP 200 on success; HTTP 500 ``{error}`` when an unexpected exception
+        escapes the inner git walk.
+
+        Library-backed via ``lib.work_views.build_pending``.
+        """
+        body, status = _work_views.build_pending(ws)
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return PendingEntries.model_validate(body)
+
+    @app.get(
+        "/api/generation",
+        response_model=Generation,
+        tags=["Git & branches"],
+        summary="Workspace coordinated-generation provenance banner",
+    )
+    def generation_route(
+        ws: Path = Depends(get_workspace),
+    ) -> Generation:
+        """Current coordinated generation for the workspace.
+
+        Returns ``{generation: {generation_id, git_sha, param_set_hash,
+        created_at, label, n_runs}}`` or ``{generation: null}`` when no
+        generation is active.  Always HTTP 200 (best-effort; any error →
+        ``{generation: null}`` rather than 500).
+
+        Library-backed via ``lib.work_views.build_generation``.
+        """
+        return Generation.model_validate(_work_views.build_generation(ws))
+
+    @app.get(
+        "/api/work-composite-diff",
+        response_model=WorkCompositeDiff,
+        tags=["Git & branches"],
+        summary="Model-code changes on the active branch vs its merge-base",
+    )
+    def work_composite_diff_route(
+        ws: Path = Depends(get_workspace),
+    ) -> WorkCompositeDiff:
+        """Files changed on the active branch that look like model code.
+
+        Returns ``{base, branch, changes: [{path, lines_added, lines_removed,
+        category}, ...]}`` sorted by largest diff, capped at 500 entries.
+        Categories: ``composite``, ``process``, ``step``, ``library helper``,
+        ``type definition``.
+
+        Always HTTP 200 — merge-base / diff failures carry an ``error`` key
+        with an empty ``changes`` list rather than a 500.
+
+        Library-backed via ``lib.work_views.build_work_composite_diff``.
+        """
+        return WorkCompositeDiff.model_validate(
+            _work_views.build_work_composite_diff(ws)
+        )
 
     # -----------------------------------------------------------------------
     # Investigations detail routes

@@ -591,6 +591,92 @@ class BranchDiff(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Work & branches models (pending entries, generation, composite diff)
+# ---------------------------------------------------------------------------
+
+class PendingEntries(BaseModel):
+    """``GET /api/pending`` payload (lib.work_views.build_pending).
+
+    Panel-keyed dict of unmerged ``stage/*`` branch entries not yet on
+    ``main``'s ``workspace.yaml``.  Each panel is a list of
+    ``{entry: <dict>, branch: <str>}`` objects.
+
+    HTTP 200 on success; HTTP 500 ``{error}`` on an unexpected exception.
+    ``extra="allow"`` preserves any future panel additions without breaking
+    the route.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    observables: list[Any] = []
+    visualizations: list[Any] = []
+    phases: list[Any] = []
+    datasets: list[Any] = []
+    references_pdfs: list[Any] = []
+    expert_docs: list[Any] = []
+    imports: list[Any] = []
+
+
+class GenerationSummary(BaseModel):
+    """The inner ``generation`` object inside ``GET /api/generation``.
+
+    Fields from ``pbg_superpowers.generation.Generation``.
+    ``extra="allow"`` for forward-compat.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    generation_id: str
+    git_sha: Optional[str] = None
+    param_set_hash: Optional[str] = None
+    created_at: Optional[str] = None
+    label: Optional[str] = None
+    n_runs: int = 0
+
+
+class Generation(BaseModel):
+    """``GET /api/generation`` payload (lib.work_views.build_generation).
+
+    Returns ``{generation: <summary>}`` or ``{generation: null}`` when no
+    generation is active.  Always HTTP 200 (best-effort; errors → null).
+    ``extra="allow"`` for forward-compat.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    generation: Optional[GenerationSummary] = None
+
+
+class WorkCompositeDiffEntry(BaseModel):
+    """One file entry in the ``GET /api/work-composite-diff`` ``changes`` list."""
+
+    path: str
+    lines_added: int = 0
+    lines_removed: int = 0
+    category: str
+
+
+class WorkCompositeDiff(BaseModel):
+    """``GET /api/work-composite-diff`` payload (lib.work_views.build_work_composite_diff).
+
+    Files changed on the active branch that look like model code (composites,
+    processes, steps, library helpers, type definitions).  Sorted by largest
+    diff; capped at 500 entries from the ``git diff --numstat`` output.
+
+    Always HTTP 200 — merge-base/diff failures carry an ``error`` key with an
+    empty ``changes`` list rather than raising.  ``extra="allow"`` preserves
+    any future additions.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    base: str = "main"
+    branch: str = ""
+    changes: list[WorkCompositeDiffEntry] = []
+    error: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
 # Investigation detail models
 # ---------------------------------------------------------------------------
 

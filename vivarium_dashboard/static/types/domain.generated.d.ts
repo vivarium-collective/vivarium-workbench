@@ -251,6 +251,43 @@ export interface BranchDiff {
   diff_stat: string;
 }
 
+export interface PendingEntries {
+  observables: any[];
+  visualizations: any[];
+  phases: any[];
+  datasets: any[];
+  references_pdfs: any[];
+  expert_docs: any[];
+  imports: any[];
+}
+
+export interface GenerationSummary {
+  generation_id: string;
+  git_sha: string | null;
+  param_set_hash: string | null;
+  created_at: string | null;
+  label: string | null;
+  n_runs: number;
+}
+
+export interface Generation {
+  generation: GenerationSummary | null;
+}
+
+export interface WorkCompositeDiffEntry {
+  path: string;
+  lines_added: number;
+  lines_removed: number;
+  category: string;
+}
+
+export interface WorkCompositeDiff {
+  base: string;
+  branch: string;
+  changes: WorkCompositeDiffEntry[];
+  error: string | null;
+}
+
 export interface VizHtmlFile {
   name: string;
   html_path: string;
