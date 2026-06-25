@@ -3346,3 +3346,44 @@ class TestInvestigationNotebookRoute:
     def test_in_openapi(self, client):
         paths = client.get("/openapi.json").json()["paths"]
         assert "/api/investigation-notebook/{slug}" in paths
+
+
+# ---------------------------------------------------------------------------
+# /api/events — SSE workspace-state stream (Phase C, Batch 15)
+# ---------------------------------------------------------------------------
+
+class TestEventsRoute:
+    def test_events_headers_and_first_chunk(self, client, tmp_path, monkeypatch):
+        """SSE response has correct headers and first event has correct SSE framing.
+
+        The TestClient blocks until the ASGI generator finishes, so we
+        monkeypatch ``workspace_state_stream`` to a finite one-shot generator.
+        The real infinite loop is covered by ``tests/test_events_lib.py``.
+        """
+        import yaml as _yaml
+        import vivarium_dashboard.lib.events as _ev
+
+        (tmp_path / "workspace.yaml").write_text(
+            _yaml.safe_dump({"name": "test-ws"}), encoding="utf-8"
+        )
+
+        # One-shot: yield the first event and stop so the TestClient completes.
+        async def _one_shot(ws_root, *, poll_interval: float = 1.0):
+            yield (
+                b"event: state\ndata: "
+                + _ev.workspace_state_payload(ws_root).encode()
+                + b"\n\n"
+            )
+
+        monkeypatch.setattr(_ev, "workspace_state_stream", _one_shot)
+
+        r = client.get("/api/events")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("text/event-stream")
+        assert r.headers["cache-control"] == "no-store"
+        lines = r.text.split("\n")
+        assert lines[0].startswith("event: state")
+
+    def test_events_in_openapi(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        assert "/api/events" in paths
