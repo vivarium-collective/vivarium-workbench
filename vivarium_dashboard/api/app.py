@@ -41,6 +41,7 @@ from vivarium_dashboard.lib import investigation_status
 from vivarium_dashboard.lib import investigation_views as _inv_views
 from vivarium_dashboard.lib import rigor_views as _rigor_views
 from vivarium_dashboard.lib import saved_visualizations as _saved_viz
+from vivarium_dashboard.lib import study_spec as _study_spec
 from vivarium_dashboard.lib.composite_resolve import resolve_composite
 from vivarium_dashboard.lib.composites_query import composites_via_subprocess
 from vivarium_dashboard.lib.models import (
@@ -68,6 +69,7 @@ from vivarium_dashboard.lib.models import (
     InvestigationVizHtmlPayload,
     InvestigationsPayload,
     ReferencesBibPayload,
+    StudyDetail,
     StudyRigor,
     RegistryPayload,
     SavedVisualizationsPayload,
@@ -160,6 +162,14 @@ _OPENAPI_TAGS = [
             "Deterministic evidence/rigor scorecards computed by "
             "pbg_superpowers.rigor over the run-merged study spec: per-study "
             "and per-investigation roll-up."
+        ),
+    },
+    {
+        "name": "Studies detail",
+        "description": (
+            "Full per-study run-merged detail spec (the same payload the SPA "
+            "study-detail page consumes): runs, simulation_set, param_enforcement, "
+            "expert_feedback, spine_acceptance, and all lifecycle-derived keys."
         ),
     },
 ]
@@ -807,6 +817,77 @@ def create_app() -> FastAPI:
         except _rigor_views.RigorViewError as exc:
             return JSONResponse(status_code=exc.status, content=exc.body)
         return InvestigationRigor.model_validate(body)
+
+    # -----------------------------------------------------------------------
+    # Studies detail routes
+    # -----------------------------------------------------------------------
+
+    @app.get(
+        "/api/study/{slug}",
+        response_model=StudyDetail,
+        tags=["Studies detail"],
+        summary="Full run-merged study detail spec",
+    )
+    def study_detail_route(
+        slug: str,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[StudyDetail, JSONResponse]:
+        """Full run-merged study detail spec (mirrors the stdlib GET /api/study/<slug>).
+
+        Returns the complete per-study payload built by
+        ``lib.study_spec.load_study_detail_spec``: the spec from study.yaml /
+        spec.yaml with runs.db rows merged in, ``simulation_set`` reconciled,
+        param-enforcement computed, expert feedback attached, and all
+        lifecycle-derived keys (derived_status, computed_gate_verdict, …).
+
+        Error paths replicate the legacy builder's exact HTTP status codes and
+        body shapes (``{"error": ...}`` with an optional ``"traceback"`` field):
+
+        - HTTP 400 ``{"error": "invalid slug"}`` — path segment fails slug RE.
+        - HTTP 500 ``{"error": "failed to build study '<slug>': <Type>: <msg>",
+          "traceback": "..."}`` — loader raised an exception.
+        - HTTP 404 ``{"error": "study not found: <slug>"}`` — no spec file.
+        - HTTP 500 ``{"error": "failed to serialize study '<slug>': ...",
+          "traceback": "..."}`` — JSON serialization failed.
+        - HTTP 200 — the full study spec dict (validated through StudyDetail).
+
+        ``StudyDetail`` is a pure pass-through (``extra="allow"``, no declared
+        fields) so no keys are stripped or injected.
+
+        Note: the stdlib also serves ``/api/investigation/<slug>`` as an alias
+        of this route via a do_GET path-rewrite map. That alias is a dispatch-
+        layer concern handled at the flip; this batch ports only
+        ``/api/study/{slug}``.
+        """
+        import traceback as _tb
+
+        if not _study_spec.SLUG_RE.match(slug):
+            return JSONResponse(status_code=400, content={"error": "invalid slug"})
+        try:
+            spec = _study_spec.load_study_detail_spec(ws, slug)
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": f"failed to build study {slug!r}: {type(exc).__name__}: {exc}",
+                    "traceback": _tb.format_exc(),
+                },
+            )
+        if spec is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"study not found: {slug}"},
+            )
+        try:
+            return StudyDetail.model_validate(spec)
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": f"failed to serialize study {slug!r}: {type(exc).__name__}: {exc}",
+                    "traceback": _tb.format_exc(),
+                },
+            )
 
     return app
 

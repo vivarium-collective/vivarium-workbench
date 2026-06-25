@@ -285,3 +285,6 @@ export interface StudyRigor {
 
 export interface InvestigationRigor {
 }
+
+export interface StudyDetail {
+}

@@ -1,4 +1,4 @@
-"""Run-merging study-detail spec loader extracted from server.py.
+"""Run-merging study-detail loader and slug-validation constant.
 
 This is the **keystone** of the FastAPI strangler-fig migration's study side:
 the per-study loader that resolves a study's spec, **merges the runs recorded in
@@ -6,10 +6,8 @@ the per-study loader that resolves a study's spec, **merges the runs recorded in
 study.yaml, **reconciles ``simulation_set``** with what actually ran, and
 **auto-discovers pre-rendered viz HTML**.  Several routes need exactly this
 merged spec — most importantly rigor (``pbg_superpowers.rigor`` reads
-``spec["runs"]`` for the replication + run-persistence dimensions), and later
-``study/<slug>``.  Extracting it here lets those routes share one
-``ws_root``-parameterised implementation instead of reaching into the stdlib
-server module.
+``spec["runs"]`` for the replication + run-persistence dimensions), and
+``GET /api/study/{slug}`` (Phase A, Batch 4).
 
 The legacy ``server.py`` helpers now delegate to these functions (thin shims
 passing the module-level ``WORKSPACE``), so the many existing call-sites keep
@@ -23,17 +21,17 @@ read_runs_db_for_study    ← server._read_runs_db_for_study
 discover_viz_html_files   ← server._discover_viz_html_files
 load_study_detail_spec    ← server._study_detail_spec  (the full run-merging mirror)
 
-The render-only enrichment tail of ``load_study_detail_spec`` (param-enforcement,
-imported expert feedback, derived status, gate verdict, …) delegates back to the
-stdlib ``server`` helpers via a lazy import — the structural core (spec load +
-runs.db merge + simulation_set reconcile + viz auto-embed) is fully contained
-here and ``ws_root``-parameterised, which is everything rigor scoring depends on.
+``SLUG_RE`` — the compiled regex shared by server.py and api/app.py so neither
+imports the other.  Study/investigation names are generated with underscores
+(e.g. derived from composite names like ``monod_kinetics``), so the pattern
+allows ``_`` alongside ``-``, anchored to alphanumerics at both ends.
 """
 
 from __future__ import annotations
 
 import datetime as _dt
 import json as _json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Optional
@@ -41,6 +39,13 @@ from typing import Optional
 import yaml
 
 from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+
+# Slug pattern shared by server.py and api/app.py (neither imports the other).
+# Study/investigation names are generated with underscores (e.g. derived from
+# composite names like ``monod_kinetics``), so the pattern allows ``_``
+# alongside ``-``, anchored to alphanumerics at both ends (keeps out path
+# traversal: ``..``, ``/``, leading dots).
+SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$")
 
 
 # ---------------------------------------------------------------------------
@@ -403,16 +408,17 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
     Mirrors ``server._study_detail_spec`` parameterised on ``ws_root``.
     """
     from vivarium_dashboard.lib.investigations import load_spec
+    from vivarium_dashboard.lib.study_enrichment import (  # noqa: PLC0415
+        reconcile_simset_with_runs,
+        compute_param_enforcement,
+        collect_study_feedback,
+        study_acceptance_criterion,
+    )
     spec_path = study_spec_path(ws_root, name)
     if not spec_path.is_file():
         return None
     spec = load_spec(spec_path)
     if isinstance(spec, dict):
-        # The render-only enrichment tail reuses the stdlib server's helpers
-        # (kept there so their many other call-sites stay intact). Imported
-        # lazily so importing this module does not pull in server.py.
-        from vivarium_dashboard import server
-
         try:
             db_runs = read_runs_db_for_study(ws_root, name)
         except Exception:
@@ -429,7 +435,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         # tab reflects current status (seeds / duration / run-count / ran) rather
         # than the authored-or-synthesized plan's "? min / not set / ready".
         try:
-            spec["simulation_set"] = server._reconcile_simset_with_runs(
+            spec["simulation_set"] = reconcile_simset_with_runs(
                 spec.get("simulation_set"), spec.get("runs"), ws_root=ws_root)
             # Fill the rest of each entry's promise: condition + tests applied.
             _cond = (spec.get("condition") or spec.get("media")
@@ -471,7 +477,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         # report renders as a banner, instead of the silent default-use the
         # reviewer caught. Best-effort — never breaks the study response.
         try:
-            spec["param_enforcement"] = server._compute_param_enforcement(spec)
+            spec["param_enforcement"] = compute_param_enforcement(spec)
         except Exception:  # noqa: BLE001
             pass
 
@@ -479,7 +485,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         # annotations a reviewer left on this study's sections so the report
         # shows them back in-context, closing the loop. Best-effort.
         try:
-            fb = server._collect_study_feedback(name)
+            fb = collect_study_feedback(ws_root, name)
             if fb:
                 spec["expert_feedback"] = fb
         except Exception:  # noqa: BLE001
@@ -562,7 +568,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         # read of executive.computed_acceptance — NO recompute (the live
         # roll-up still happens in the investigation builder). Best-effort.
         try:
-            sa = server._study_acceptance_criterion(name)
+            sa = study_acceptance_criterion(ws_root, name)
             if sa:
                 spec["spine_acceptance"] = sa
         except Exception:  # noqa: BLE001

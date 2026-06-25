@@ -702,6 +702,24 @@ class InvestigationRigor(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class StudyDetail(BaseModel):
+    """``GET /api/study/{slug}`` payload (lib.study_spec.load_study_detail_spec).
+
+    The full run-merged study spec built by the loader: ``name``, ``composite``,
+    ``runs``, ``simulation_set``, ``param_enforcement``, ``expert_feedback``,
+    ``spine_acceptance``, and dozens of other optional keys that vary by study
+    type and lifecycle stage.  The shape is open-ended (new keys added as the
+    spine matures), so this is a pure pass-through model — no declared fields,
+    ``extra="allow"`` so every key the loader emits survives verbatim (and none
+    are injected by the model).
+
+    Error paths use :class:`fastapi.responses.JSONResponse` directly
+    (400 / 404 / 500) rather than this model.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
 class CompositeResolvePayload(BaseModel):
     """``GET /api/composite-resolve`` payload (lib.composite_resolve.resolve_composite).
 
