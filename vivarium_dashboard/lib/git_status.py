@@ -141,8 +141,16 @@ def dirty_workspace(ws_root: Path) -> str:
 # ---------------------------------------------------------------------------
 
 def _load_work_state(ws_root: Path) -> dict:
-    """Read .pbg/state.json for *ws_root*, returning {} on any failure."""
-    state_path = ws_root / ".pbg" / "state.json"
+    """Read the workstream state.json for *ws_root*, returning {} on any failure.
+
+    Resolves the ``.pbg`` directory via ``WorkspacePaths`` so a custom
+    ``layout:`` in workspace.yaml is honoured — byte-identical to
+    ``lib.work_state.load_state`` (which reads
+    ``WorkspacePaths.load(workspace_root()).pbg / "state.json"``).
+    """
+    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+
+    state_path = WorkspacePaths.load(ws_root).pbg / "state.json"
     if not state_path.exists():
         return {}
     try:

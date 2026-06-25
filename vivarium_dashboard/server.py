@@ -8840,51 +8840,12 @@ if __name__ == "__main__":
         }, 200)
 
     def _get_work_status(self):
-        _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.work_state import load_state
-        state = load_state()
-        if not state.get("active_branch"):
-            return self._json({"active": False}, 200)
-        branch = state["active_branch"]
-        base = state.get("base", "main")
+        """GET /api/work-status — delegates to lib.git_status.build_work_status.
 
-        # commits ahead of base
-        r = subprocess.run(["git", "rev-list", "--count", f"{base}..{branch}"],
-                           cwd=WORKSPACE, capture_output=True, text=True)
-        commits_ahead = int(r.stdout.strip() or 0) if r.returncode == 0 else 0
-
-        # commits behind base — surfaces the friction-#5 case where a long-running
-        # investigation branch drifts so far that framework migrations need
-        # manual conflict-resolution. Computed against origin/<base> when present
-        # (matches what a `git merge origin/main` would have to fast-forward
-        # over) and falls back to local <base>.
-        commits_behind, behind_ref = _commits_behind(branch, base)
-        stale_threshold = _stale_branch_threshold()
-
-        # unpushed commits
-        if state.get("pushed"):
-            r2 = subprocess.run(["git", "rev-list", "--count", f"origin/{branch}..{branch}"],
-                                cwd=WORKSPACE, capture_output=True, text=True)
-            unpushed = int(r2.stdout.strip() or 0) if r2.returncode == 0 else commits_ahead
-        else:
-            unpushed = commits_ahead
-
-        return self._json({
-            "active": True,
-            "branch": branch,
-            "base": base,
-            "commits_ahead": commits_ahead,
-            "commits_behind": commits_behind,
-            "behind_ref": behind_ref,
-            "stale": commits_behind >= stale_threshold,
-            "stale_threshold": stale_threshold,
-            "unpushed": unpushed,
-            "pushed": state.get("pushed", False),
-            "has_origin": _has_origin_remote(),
-            "gh_available": shutil.which("gh") is not None,
-            "pr_number": state.get("pr_number"),
-            "pr_url": state.get("pr_url"),
-        }, 200)
+        Single-source shim: the payload (and the ``{active: False}`` short-circuit)
+        live in the lib so the FastAPI seam and this stdlib handler stay identical.
+        """
+        return self._json(_git_status_lib.build_work_status(WORKSPACE), 200)
 
     def _get_branch_staleness(self):
         """Generic helper: how many commits is <branch> behind <base>?
@@ -8906,23 +8867,13 @@ if __name__ == "__main__":
         branch = (qs.get("branch") or [None])[0]
         base = (qs.get("base") or ["main"])[0]
 
-        if not branch:
-            r = subprocess.run(["git", "branch", "--show-current"],
-                               cwd=WORKSPACE, capture_output=True, text=True)
-            branch = r.stdout.strip() if r.returncode == 0 else ""
-        if not branch:
-            return self._json({"error": "could not determine current branch + no ?branch= given"}, 400)
-
-        commits_behind, behind_ref = _commits_behind(branch, base)
-        threshold = _stale_branch_threshold()
-        return self._json({
-            "branch": branch,
-            "base": base,
-            "behind_ref": behind_ref,
-            "commits_behind": commits_behind,
-            "stale_threshold": threshold,
-            "stale": commits_behind >= threshold,
-        }, 200)
+        # Single-source shim: query parsing + status-code mapping stay here;
+        # the staleness computation lives in lib.git_status.build_branch_staleness.
+        try:
+            body = _git_status_lib.build_branch_staleness(WORKSPACE, branch, base)
+        except _git_status_lib.NoBranchError as e:
+            return self._json({"error": str(e)}, 400)
+        return self._json(body, 200)
 
     def _post_work_end(self, body: dict):
         _ws_add_to_sys_path()
@@ -8938,18 +8889,17 @@ if __name__ == "__main__":
         return self._json({"ok": True}, 200)
 
     def _get_dirty_status(self):
-        """Return the filtered porcelain list of uncommitted files."""
+        """Return the filtered porcelain list of uncommitted files.
+
+        Single-source shim over lib.git_status.build_dirty_status; the 500
+        status-code mapping on a ``git status`` failure stays here.
+        """
         try:
-            dirty = _dirty_workspace()
+            body = _git_status_lib.build_dirty_status(WORKSPACE)
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
             return self._json({"error": f"git status failed: {stderr[:200]}"}, 500)
-        files = []
-        for raw in dirty.splitlines():
-            if len(raw) < 4:
-                continue
-            files.append({"status": raw[:2].strip(), "path": raw[3:]})
-        return self._json({"count": len(files), "files": files}, 200)
+        return self._json(body, 200)
 
     def _get_git_status(self):
         """GET /api/git-status — live sync state for the workspace's git.
@@ -8971,105 +8921,10 @@ if __name__ == "__main__":
               compare_url: str | null,
               pr_state: str | null,
             }
+
+        Single-source shim over lib.git_status.build_git_status (always 200).
         """
-        result = {
-            "upstream_repo": None, "branch": None, "push_state": "no_origin",
-            "ahead": 0, "behind": 0,
-            "branch_url": None, "repo_url": None,
-            "pr_number": None, "pr_url": None,
-            "base": "main", "ahead_of_base": 0,
-            "dirty_count": 0, "compare_url": None, "pr_state": None,
-            "gh_available": bool(shutil.which("gh")),
-            "has_active_workstream": False,
-        }
-        # current branch
-        r = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                           cwd=WORKSPACE, capture_output=True, text=True)
-        if r.returncode != 0:
-            return self._json(result, 200)
-        result["branch"] = (r.stdout or "").strip()
-        # upstream repo (from origin remote)
-        r = subprocess.run(["git", "remote", "get-url", "origin"],
-                           cwd=WORKSPACE, capture_output=True, text=True)
-        if r.returncode != 0:
-            return self._json(result, 200)
-        origin_url = (r.stdout or "").strip()
-        m = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?$", origin_url)
-        if m:
-            result["upstream_repo"] = m.group(1)
-            result["repo_url"] = f"https://github.com/{m.group(1)}"
-            result["branch_url"] = f"https://github.com/{m.group(1)}/tree/{result['branch']}"
-        # ahead/behind vs origin/<branch>
-        ref = f"origin/{result['branch']}"
-        r = subprocess.run(["git", "rev-list", "--left-right", "--count", f"{ref}...HEAD"],
-                           cwd=WORKSPACE, capture_output=True, text=True)
-        if r.returncode != 0:
-            # origin/<branch> probably doesn't exist yet
-            result["push_state"] = "no_origin"
-        else:
-            parts = (r.stdout or "").strip().split()
-            if len(parts) == 2:
-                behind = int(parts[0]); ahead = int(parts[1])
-                result["ahead"] = ahead; result["behind"] = behind
-                if ahead == 0 and behind == 0:
-                    result["push_state"] = "pushed"
-                elif ahead > 0 and behind == 0:
-                    result["push_state"] = "ahead"
-                elif ahead == 0 and behind > 0:
-                    result["push_state"] = "behind"
-                else:
-                    result["push_state"] = "diverged"
-        # PR info + base — read from .pbg/state.json (cheaper than gh API)
-        try:
-            from vivarium_dashboard.lib.work_state import load_state
-            state = load_state()
-            result["pr_url"] = state.get("pr_url")
-            result["pr_number"] = state.get("pr_number")
-            result["base"] = state.get("base") or "main"
-            result["has_active_workstream"] = bool(state.get("active_branch"))
-        except Exception:
-            pass
-        # ahead_of_base: commits on branch not yet merged into base
-        base = result["base"]
-        branch = result["branch"]
-        if branch:
-            for base_ref in (base, f"origin/{base}"):
-                r_aob = subprocess.run(
-                    ["git", "rev-list", "--count", f"{base_ref}..HEAD"],
-                    cwd=WORKSPACE, capture_output=True, text=True,
-                )
-                if r_aob.returncode == 0:
-                    try:
-                        result["ahead_of_base"] = int(r_aob.stdout.strip())
-                    except ValueError:
-                        pass
-                    break
-            if result["upstream_repo"]:
-                result["compare_url"] = (
-                    f"https://github.com/{result['upstream_repo']}"
-                    f"/compare/{base}...{branch}"
-                )
-        # dirty_count: number of uncommitted files (filtered, same as dirty-status)
-        try:
-            dirty_output = _dirty_workspace()
-            result["dirty_count"] = len([
-                l for l in dirty_output.splitlines() if len(l) >= 4
-            ])
-        except Exception:
-            pass
-        # pr_state: query gh if a PR number is known
-        if result.get("pr_number"):
-            try:
-                r_pr = subprocess.run(
-                    ["gh", "pr", "view", str(result["pr_number"]),
-                     "--json", "state", "--jq", ".state"],
-                    cwd=WORKSPACE, capture_output=True, text=True, timeout=5,
-                )
-                if r_pr.returncode == 0:
-                    result["pr_state"] = r_pr.stdout.strip() or None
-            except Exception:
-                pass
-        return self._json(result, 200)
+        return self._json(_git_status_lib.build_git_status(WORKSPACE), 200)
 
     def _post_dirty_commit_all(self, body: dict):
         """Stage and commit all dirty files (minus reports/) under the active workstream."""
@@ -9166,52 +9021,16 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------
 
     def _serve_branches(self):
-        """Return list of stage/* branches with last-commit info."""
-        try:
-            raw = subprocess.run(
-                ["git", "branch", "--list", "stage/*"],
-                cwd=WORKSPACE, capture_output=True, text=True, check=True,
-            ).stdout
-            stage_branches = [b.strip().lstrip("* ") for b in raw.splitlines() if b.strip()]
+        """Return list of stage/* branches with last-commit info.
 
-            current = subprocess.run(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                cwd=WORKSPACE, capture_output=True, text=True, check=True,
-            ).stdout.strip()
-
-            branches = []
-            for bname in stage_branches:
-                try:
-                    log = subprocess.run(
-                        ["git", "log", "-1", "--format=%H|%s|%ci", bname],
-                        cwd=WORKSPACE, capture_output=True, text=True, check=True,
-                    ).stdout.strip()
-                    parts = log.split("|", 2)
-                    sha = parts[0] if parts else ""
-                    subject = parts[1] if len(parts) > 1 else ""
-                    date_str = parts[2] if len(parts) > 2 else ""
-
-                    ahead_raw = subprocess.run(
-                        ["git", "rev-list", "--count", f"main..{bname}"],
-                        cwd=WORKSPACE, capture_output=True, text=True,
-                    ).stdout.strip()
-                    ahead = int(ahead_raw) if ahead_raw.isdigit() else 0
-
-                    branches.append({
-                        "name": bname,
-                        "last_commit": {
-                            "sha": sha[:7],
-                            "subject": subject,
-                            "date": date_str,
-                        },
-                        "ahead_of_main": ahead,
-                    })
-                except Exception:
-                    branches.append({"name": bname, "last_commit": {}, "ahead_of_main": 0})
-
-            return self._json({"branches": branches, "current": current}, 200)
-        except Exception as e:
-            return self._json({"error": str(e)}, 500)
+        Single-source shim over lib.git_status.list_branches; the builder
+        returns ``{"error": ...}`` on a top-level git failure, which this
+        handler maps to HTTP 500 (matching the legacy behaviour).
+        """
+        body = _git_status_lib.list_branches(WORKSPACE)
+        if "error" in body:
+            return self._json(body, 500)
+        return self._json(body, 200)
 
     def _serve_pending(self):
         """Return pending entries from unmerged stage/* branches."""
@@ -9221,25 +9040,19 @@ if __name__ == "__main__":
             return self._json({"error": str(e)}, 500)
 
     def _get_branch_diff(self):
-        """Return a short diff summary for ?branch=<name>."""
+        """Return a short diff summary for ?branch=<name>.
+
+        Single-source shim over lib.git_status.build_branch_diff; an invalid /
+        missing branch name maps to HTTP 400 (matching the legacy behaviour).
+        """
         from urllib.parse import urlparse, parse_qs
         qs = parse_qs(urlparse(self.path).query)
         branch = (qs.get("branch") or [""])[0]
-        if not branch or not re.match(r"^[A-Za-z0-9./_-]+$", branch) or ".." in branch:
+        try:
+            body = _git_status_lib.build_branch_diff(WORKSPACE, branch)
+        except ValueError:
             return self._json({"error": "invalid branch name"}, 400)
-        log = subprocess.run(
-            ["git", "log", "--oneline", f"main..{branch}"],
-            cwd=WORKSPACE, capture_output=True, text=True, check=False,
-        )
-        diff_stat = subprocess.run(
-            ["git", "diff", "--stat", f"main...{branch}"],
-            cwd=WORKSPACE, capture_output=True, text=True, check=False,
-        )
-        return self._json({
-            "branch": branch,
-            "log": log.stdout,
-            "diff_stat": diff_stat.stdout,
-        }, 200)
+        return self._json(body, 200)
 
     def _get_registry(self):
         """GET /api/registry — live introspection of build_core(); cached 30s.
