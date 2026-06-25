@@ -2894,3 +2894,160 @@ class TestPtoolsLaunchRoute:
         spec = client.get("/openapi.json").json()
         assert "/api/ptools-launch/{study}" in spec["paths"]
         assert "PtoolsLaunch" in spec["components"]["schemas"]
+
+# /api/pending
+# ---------------------------------------------------------------------------
+
+class TestPendingRoute:
+    def test_pending_empty_workspace_returns_200(self, client):
+        """A non-git tmp workspace → 200 with EXACTLY {} (byte-identical to legacy).
+
+        PendingEntries is a pure pass-through (no declared fields), so the
+        builder's ``{}`` is NOT inflated into the 7-empty-panel structure.
+        """
+        r = client.get("/api/pending")
+        assert r.status_code == 200
+        assert r.json() == {}
+
+    def test_pending_typed_passthrough(self, client, monkeypatch):
+        """A full pending payload validates through PendingEntries (extra='allow')."""
+        import vivarium_dashboard.api.app as _app
+
+        payload = {
+            "observables": [{"entry": {"name": "obs-b"}, "branch": "stage/obs-b"}],
+            "visualizations": [],
+            "phases": [],
+            "datasets": [],
+            "references_pdfs": [],
+            "expert_docs": [],
+            "imports": [],
+        }
+        monkeypatch.setattr(_app._work_views, "build_pending",
+                            lambda ws: (payload, 200))
+        r = client.get("/api/pending")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["observables"][0]["entry"]["name"] == "obs-b"
+        assert body["observables"][0]["branch"] == "stage/obs-b"
+
+    def test_pending_500_on_exception(self, client, monkeypatch):
+        """An unexpected exception in build_pending → HTTP 500 with {error}."""
+        import vivarium_dashboard.api.app as _app
+
+        monkeypatch.setattr(_app._work_views, "build_pending",
+                            lambda ws: ({"error": "boom"}, 500))
+        r = client.get("/api/pending")
+        assert r.status_code == 500
+        assert r.json()["error"] == "boom"
+
+    def test_pending_in_openapi(self, client):
+        spec = client.get("/openapi.json").json()
+        assert "/api/pending" in spec["paths"]
+        for name in ("PendingEntries",):
+            assert name in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# /api/generation
+# ---------------------------------------------------------------------------
+
+class TestGenerationRoute:
+    def test_generation_null_when_empty(self, client, monkeypatch):
+        """An empty workspace (no pbg_superpowers generation) → {generation: null}."""
+        import vivarium_dashboard.api.app as _app
+
+        monkeypatch.setattr(_app._work_views, "build_generation",
+                            lambda ws: {"generation": None})
+        r = client.get("/api/generation")
+        assert r.status_code == 200
+        assert r.json() == {"generation": None}
+
+    def test_generation_typed_passthrough(self, client, monkeypatch):
+        """A full generation summary validates through Generation."""
+        import vivarium_dashboard.api.app as _app
+
+        gen_data = {
+            "generation": {
+                "generation_id": "gen-001",
+                "git_sha": "abc123",
+                "param_set_hash": "hashXYZ",
+                "created_at": "2026-06-25T00:00:00",
+                "label": "round-1",
+                "n_runs": 5,
+            }
+        }
+        monkeypatch.setattr(_app._work_views, "build_generation",
+                            lambda ws: gen_data)
+        r = client.get("/api/generation")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["generation"]["generation_id"] == "gen-001"
+        assert body["generation"]["n_runs"] == 5
+
+    def test_generation_in_openapi(self, client):
+        spec = client.get("/openapi.json").json()
+        assert "/api/generation" in spec["paths"]
+        for name in ("Generation", "GenerationSummary"):
+            assert name in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# /api/work-composite-diff
+# ---------------------------------------------------------------------------
+
+class TestWorkCompositeDiffRoute:
+    def test_work_composite_diff_empty_workspace_returns_200(self, client):
+        """An empty tmp workspace → 200 with error in body (non-git dir)."""
+        r = client.get("/api/work-composite-diff")
+        assert r.status_code == 200
+        body = r.json()
+        assert "changes" in body
+        assert "base" in body
+
+    def test_work_composite_diff_typed_passthrough(self, client, monkeypatch):
+        """A full diff payload validates through WorkCompositeDiff."""
+        import vivarium_dashboard.api.app as _app
+
+        payload = {
+            "base": "main",
+            "branch": "feat/my-feature",
+            "changes": [
+                {
+                    "path": "composites/my_composite.py",
+                    "lines_added": 42,
+                    "lines_removed": 3,
+                    "category": "composite",
+                }
+            ],
+        }
+        monkeypatch.setattr(_app._work_views, "build_work_composite_diff",
+                            lambda ws: payload)
+        r = client.get("/api/work-composite-diff")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["branch"] == "feat/my-feature"
+        assert len(body["changes"]) == 1
+        assert body["changes"][0]["category"] == "composite"
+        assert body["changes"][0]["lines_added"] == 42
+
+    def test_work_composite_diff_error_in_body(self, client, monkeypatch):
+        """On merge-base failure the response is still 200 with error in body."""
+        import vivarium_dashboard.api.app as _app
+
+        monkeypatch.setattr(_app._work_views, "build_work_composite_diff",
+                            lambda ws: {
+                                "base": "main", "branch": "",
+                                "changes": [],
+                                "error": "merge-base failed: not a git repo",
+                            })
+        r = client.get("/api/work-composite-diff")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["error"] == "merge-base failed: not a git repo"
+        assert body["changes"] == []
+
+    def test_work_composite_diff_in_openapi(self, client):
+        spec = client.get("/openapi.json").json()
+        assert "/api/work-composite-diff" in spec["paths"]
+        for name in ("WorkCompositeDiff", "WorkCompositeDiffEntry"):
+            assert name in spec["components"]["schemas"]

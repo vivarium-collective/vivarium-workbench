@@ -66,6 +66,12 @@ _MODELS: list[type[BaseModel]] = [
     _models.BranchInfo,
     _models.BranchesPayload,
     _models.BranchDiff,
+    # Work & branches models (pending entries, generation, composite diff)
+    _models.PendingEntries,
+    _models.GenerationSummary,
+    _models.Generation,
+    _models.WorkCompositeDiffEntry,
+    _models.WorkCompositeDiff,
     # Investigation detail models
     _models.VizHtmlFile,
     _models.InvestigationVizHtmlPayload,
