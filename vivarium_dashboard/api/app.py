@@ -33,7 +33,7 @@ from typing import Optional, Union
 import subprocess
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError
 
 from vivarium_dashboard.lib import composite_run_views as _cr_views
@@ -2172,7 +2172,7 @@ def create_app() -> FastAPI:
         "/api/iset/{slug}/report",
         tags=["Downloads"],
         summary="Per-investigation HTML report file",
-        response_class=FileResponse,
+        response_class=Response,
     )
     def iset_report_route(
         slug: str,
@@ -2192,19 +2192,20 @@ def create_app() -> FastAPI:
                 status_code=404,
                 content={"error": f"no report for investigation {slug!r}"},
             )
-        # Content-Type via headers (not media_type) so Starlette keeps the
-        # legacy bare "text/html" (no "; charset=utf-8" suffix). Cache-Control:
-        # no-store mirrors the stdlib _serve_file (these reports are live-
-        # regenerated, so a conditional 304 must never serve stale content).
-        return FileResponse(
-            path, headers={"Content-Type": "text/html", "Cache-Control": "no-store"}
+        # Plain Response(read_bytes): byte-identical header set to _serve_file
+        # (bare text/html + Cache-Control: no-store, no FileResponse ETag/
+        # Last-Modified/Accept-Ranges). These reports are live-regenerated, so a
+        # conditional 304 must never serve stale content.
+        return Response(
+            content=path.read_bytes(),
+            headers={"Content-Type": "text/html", "Cache-Control": "no-store"},
         )
 
     @app.get(
         "/api/guidance",
         tags=["Downloads"],
         summary="Latest guidance HTML (204 when none)",
-        response_class=FileResponse,
+        response_class=Response,
     )
     def guidance_route(ws: Path = Depends(get_workspace)) -> Response:
         """Serve the latest ``*.html`` in ``<pbg>/server/content`` as
@@ -2217,10 +2218,10 @@ def create_app() -> FastAPI:
         latest = _download_views.resolve_guidance(ws)
         if latest is None:
             return Response(status_code=204)
-        # Content-Type via headers (not media_type) so Starlette keeps the
-        # legacy bare "text/html"; Cache-Control: no-store mirrors _serve_file.
-        return FileResponse(
-            latest, headers={"Content-Type": "text/html", "Cache-Control": "no-store"}
+        # Plain Response(read_bytes): byte-identical header set to _serve_file.
+        return Response(
+            content=latest.read_bytes(),
+            headers={"Content-Type": "text/html", "Cache-Control": "no-store"},
         )
 
     @app.get(
@@ -2306,10 +2307,14 @@ def create_app() -> FastAPI:
         404 (empty body) when it is not a file.  Mirrors ``server._serve_file``."""
         if not target.is_file():
             return Response(status_code=404)
-        # Content-Type via headers (not media_type) so Starlette keeps the bare
-        # mime with no "; charset=..." suffix — byte-identical to _serve_file.
-        return FileResponse(
-            target,
+        # Read the bytes and return a plain Response (NOT FileResponse) so the
+        # header set is byte-identical to the legacy _serve_file: Content-Type
+        # (bare mime, no charset suffix via the headers dict) + Cache-Control:
+        # no-store, and nothing else. FileResponse would also emit ETag /
+        # Last-Modified / Accept-Ranges, enabling conditional 304s and Range
+        # 206s that _serve_file never did (it always sends a full 200).
+        return Response(
+            content=target.read_bytes(),
             headers={
                 "Content-Type": _static_serving.guess_mime(rel),
                 "Cache-Control": "no-store",
@@ -2320,14 +2325,14 @@ def create_app() -> FastAPI:
         "/",
         tags=["Static & shell"],
         summary="SPA shell index (re-render then serve reports/index.html)",
-        response_class=FileResponse,
+        response_class=Response,
         include_in_schema=False,
     )
     @app.get(
         "/index.html",
         tags=["Static & shell"],
         summary="SPA shell index (re-render then serve reports/index.html)",
-        response_class=FileResponse,
+        response_class=Response,
         include_in_schema=False,
     )
     def index_shell(ws: Path = Depends(get_workspace)) -> Response:
@@ -2353,15 +2358,18 @@ def create_app() -> FastAPI:
         path = _static_serving.index_html_path(ws)
         if not path.is_file():
             return Response(status_code=404)
-        return FileResponse(
-            path, headers={"Content-Type": "text/html", "Cache-Control": "no-store"}
+        # Plain Response(read_bytes) — byte-identical header set to _serve_file
+        # (no FileResponse ETag/Last-Modified/Accept-Ranges).
+        return Response(
+            content=path.read_bytes(),
+            headers={"Content-Type": "text/html", "Cache-Control": "no-store"},
         )
 
     @app.get(
         "/bigraph-loom/{rel:path}",
         tags=["Static & shell"],
         summary="bigraph-loom viewer bundle asset",
-        response_class=FileResponse,
+        response_class=Response,
         include_in_schema=False,
     )
     def bigraph_loom_asset(rel: str = "") -> Response:
@@ -2384,7 +2392,7 @@ def create_app() -> FastAPI:
         "/parsimony-viewer/{rel:path}",
         tags=["Static & shell"],
         summary="pbg_parsimony 3D viewer bundle asset (404 when not installed)",
-        response_class=FileResponse,
+        response_class=Response,
         include_in_schema=False,
     )
     def parsimony_viewer_asset(rel: str = "") -> Response:
@@ -2417,7 +2425,7 @@ def create_app() -> FastAPI:
         "/{rel:path}",
         tags=["Static & shell"],
         summary="Catch-all static asset (bundled → assets-strip → workspace → reports)",
-        response_class=FileResponse,
+        response_class=Response,
         include_in_schema=False,
     )
     def catch_all_asset(rel: str, ws: Path = Depends(get_workspace)) -> Response:

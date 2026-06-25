@@ -3438,6 +3438,13 @@ class TestStaticRoutes:
         assert r.headers["content-type"] == "text/plain"
         assert r.headers["cache-control"] == "no-store"
         assert r.text == "hello"
+        # Byte-identical header set to the stdlib _serve_file: a plain
+        # Response(read_bytes), NOT FileResponse — so none of FileResponse's
+        # ETag / Last-Modified / Accept-Ranges (which would enable conditional
+        # 304s / Range 206s the legacy handler never did).
+        assert "etag" not in r.headers
+        assert "last-modified" not in r.headers
+        assert "accept-ranges" not in r.headers
 
     def test_catch_all_serves_bundled_first(self, client, tmp_path, monkeypatch):
         """A bundled STATIC_DIR file wins (step 1) and serves as application/javascript."""
