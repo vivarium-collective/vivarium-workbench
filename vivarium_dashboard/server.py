@@ -4061,66 +4061,18 @@ def _enrich_runs_with_meta(study_dir: Path, runs: list[dict]) -> list[dict]:
 
 
 def _render_study_detail_html(name: str, spec: dict) -> str:
-    """Render study-detail.html via Jinja2."""
-    import jinja2
-    from vivarium_dashboard.lib.investigations import effective_status
-    spec = dict(spec)
-    spec["runs"] = _enrich_runs_with_meta(_study_dir(name), spec.get("runs") or [])
-    # Normalize implementation_requirements / gaps so the template iterates a
-    # list of dicts — never a prose STRING (whose per-character iteration
-    # rendered "(492 items)" with `<built-in method title of str object>`).
-    if spec.get("implementation_requirements") is not None:
-        spec["implementation_requirements"] = _normalize_requirements(
-            spec.get("implementation_requirements"))
-    if spec.get("gaps") is not None:
-        spec["gaps"] = _normalize_requirements(spec.get("gaps"))
-    # F1: compute a single headline status from the multi-axis fields (with
-    # legacy `status` as fallback) so the template doesn't have to encode
-    # the precedence rules itself.
-    spec["_effective_status"] = effective_status(spec)
-    env = jinja2.Environment(
-        loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
-        autoescape=True,
-    )
-    env.filters["fmt_ts"] = _jinja_fmt_ts
-    env.filters["fmt_duration"] = _jinja_fmt_duration
-    tpl = env.get_template("study-detail.html")
-    # Single display name everywhere (mirrors JS _humanizeStudyName): authored
-    # title:, else the slug with the ordering prefix peeled off into a chip.
-    _hn = _humanize_study_name(name)
-    # PTools (Pathway Tools Omics Viewer) is a v2ecoli-style feature; only offer
-    # the "Launch ptools" action when the workspace configures ui.ptools_server_url.
-    _ptools_enabled = False
-    try:
-        _ws = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")) or {}
-        _ptools_enabled = bool((_ws.get("ui") or {}).get("ptools_server_url"))
-    except Exception:
-        _ptools_enabled = False
-    # W15 — open epistemic debts, computed server-side via the deterministic
-    # pbg_superpowers collector (derives from rigor + freshness so it can't
-    # drift). Defensive: degrade to no panel if the collector isn't importable.
-    epistemic_debts = []
-    try:
-        from pbg_superpowers.needs_attention import open_epistemic_debts
-        epistemic_debts = open_epistemic_debts(spec) or []
-    except Exception:
-        epistemic_debts = []
-    # Composite-resolution lint: flag declared composite refs that don't resolve
-    # against the live registry (would have caught autopoiesis studies 2–4).
-    unresolved_composites = []
-    try:
-        from vivarium_dashboard.lib.composite_lookup import (
-            known_composite_ids, unresolved_study_composite_refs,
-        )
-        unresolved_composites = unresolved_study_composite_refs(
-            spec, known_composite_ids(WORKSPACE)) or []
-    except Exception:
-        unresolved_composites = []
-    return tpl.render(study=spec, name=name,
-                      display_name=spec.get("title") or _hn["title"],
-                      name_chip=_hn["chip"], ptools_enabled=_ptools_enabled,
-                      epistemic_debts=epistemic_debts,
-                      unresolved_composites=unresolved_composites)
+    """Render study-detail.html via Jinja2.
+
+    Thin shim: delegates to ``lib.study_page.render_study_detail_html``
+    injecting the module-level WORKSPACE as ``ws_root``.
+
+    CRITICAL call-site constraint: ``publish.py`` imports this function
+    directly and calls it as ``_render_study_detail_html(slug, spec)``
+    (2-arg). This shim MUST keep the ``(name, spec)`` signature so those
+    call-sites keep working unchanged.
+    """
+    from vivarium_dashboard.lib import study_page as _study_page
+    return _study_page.render_study_detail_html(WORKSPACE, name, spec)
 
 
 def _humanize_study_name(slug: str) -> dict:

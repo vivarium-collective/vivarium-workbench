@@ -50,6 +50,7 @@ from vivarium_dashboard.lib import report_views as _report_views
 from vivarium_dashboard.lib import rigor_views as _rigor_views
 from vivarium_dashboard.lib import saved_visualizations as _saved_viz
 from vivarium_dashboard.lib import static_serving as _static_serving
+from vivarium_dashboard.lib import study_page as _study_page
 from vivarium_dashboard.lib import study_spec as _study_spec
 from vivarium_dashboard.lib import study_viz_views as _study_viz
 from vivarium_dashboard.lib import system_info as _system_info
@@ -2413,6 +2414,38 @@ def create_app() -> FastAPI:
         if target is None:
             return Response(status_code=404)
         return _serve_static_file(target, rel or "index.html")
+
+    # -----------------------------------------------------------------------
+    # Study-detail HTML page (Phase C, Batch 17)
+    # MUST be registered BEFORE the catch-all ``/{rel:path}`` below so
+    # Starlette matches ``/studies/<slug>`` here instead of falling through
+    # to the catch-all asset handler (which would serve a 404 for the path).
+    # -----------------------------------------------------------------------
+
+    @app.get(
+        "/studies/{slug}",
+        tags=["Static & shell"],
+        summary="Study-detail HTML page (server-side rendered)",
+        response_class=Response,
+        include_in_schema=False,
+    )
+    def study_detail_page(slug: str, ws: Path = Depends(get_workspace)) -> Response:
+        """Render the study-detail HTML page for ``/studies/<slug>``.
+
+        Validates *slug* against ``lib.study_spec.SLUG_RE``; invalid slug →
+        404 ``<h1>Not found</h1>``.  Unknown slug (no spec file) → 404 with
+        the "Study not found" body.  Valid study → 200 HTML page.
+
+        ``media_type="text/html"`` causes Starlette to emit
+        ``Content-Type: text/html; charset=utf-8`` — byte-identical to the
+        legacy ``_send_html`` content-type.  No ``Cache-Control`` header is
+        set (``_send_html`` omits it; it is NOT the ``no-store`` of
+        ``_serve_file``).
+
+        Library-backed via ``lib.study_page.build_study_detail_page``.
+        """
+        html, status = _study_page.build_study_detail_page(ws, slug)
+        return Response(content=html, status_code=status, media_type="text/html")
 
     # -----------------------------------------------------------------------
     # CATCH-ALL — MUST stay registered LAST (immediately before ``return app``)
