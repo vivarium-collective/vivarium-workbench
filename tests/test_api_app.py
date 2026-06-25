@@ -1833,68 +1833,96 @@ def test_explorer_protein_breakdown_in_openapi(client):
 
 
 # ---------------------------------------------------------------------------
-# Parity: FastAPI route body == lib function result for runs, observables, series
+# Parity: FastAPI route body == REAL legacy stdlib Handler body
 # ---------------------------------------------------------------------------
 
 class TestExplorerServerShimParity:
-    """FastAPI explorer route bodies match the lib function results exactly.
+    """The FastAPI explorer route bodies match the REAL legacy stdlib handler.
 
-    Both the FastAPI routes and the legacy stdlib handlers call the same lib
-    functions with the same arguments.  Parity is verified by calling the lib
-    function directly and comparing with the FastAPI route response — this
-    catches any accidental wrapping/stripping in the route layer.
+    Both servers back onto the same ``lib.explorer_data`` builders, but the
+    legacy *handler* also does its own query-string parsing and dict-wrapping
+    (e.g. ``{"runs": ...}``).  Comparing against the lib function alone can't
+    catch a divergence in that handler-level wrapping, so these tests invoke the
+    actual ``server.Handler._get_explorer_*`` methods — constructed via
+    ``__new__`` to bypass the socket-bound ``__init__``, with ``_json`` patched
+    to capture ``(body, status)`` and ``self.path`` set to the request URL the
+    handler parses — and assert the captured body == the FastAPI route body
+    (and status 200).  This mirrors ``TestStudyDetailServerShimParity`` and the
+    git/rigor/investigation-view ``TestServerShimParity`` classes.
     """
 
-    def _make_ws(self, tmp_path: Path) -> Path:
-        return _make_explorer_workspace(tmp_path)
+    @staticmethod
+    def _invoke_legacy(monkeypatch, ws_root: Path, method_name: str, path: str):
+        """Call the real stdlib explorer handler, capturing (body, status)."""
+        import vivarium_dashboard.server as server
 
-    def test_runs_parity(self, tmp_path):
-        """GET /api/explorer/runs body == {'runs': list_runs(ws)}."""
-        from vivarium_dashboard.lib import explorer_data as _ed
+        monkeypatch.setattr(server, "WORKSPACE", ws_root)
+        handler = server.Handler.__new__(server.Handler)
+        captured: dict = {}
 
-        ws = self._make_ws(tmp_path)
-        expected_runs = _ed.list_runs(ws)
+        def _fake_json(data, code):
+            captured["body"] = data
+            captured["status"] = code
 
+        handler._json = _fake_json          # type: ignore[method-assign]
+        handler.path = path
+        getattr(handler, method_name)()
+        return captured
+
+    @staticmethod
+    def _fastapi_body(ws_root: Path, path: str):
         app = create_app()
-        app.dependency_overrides[get_workspace] = lambda: ws
+        app.dependency_overrides[get_workspace] = lambda: ws_root
         c = TestClient(app)
-        body = c.get("/api/explorer/runs").json()
+        return c.get(path)
 
-        assert body == {"runs": expected_runs}
+    def test_runs_parity(self, tmp_path, monkeypatch):
+        """GET /api/explorer/runs: real handler body == FastAPI route body."""
+        ws = _make_explorer_workspace(tmp_path)
+        path = "/api/explorer/runs"
 
-    def test_observables_parity(self, tmp_path):
-        """GET /api/explorer/observables?db=… body == list_observables(db, ws)."""
-        from vivarium_dashboard.lib import explorer_data as _ed
+        legacy = self._invoke_legacy(monkeypatch, ws, "_get_explorer_runs", path)
+        assert legacy["status"] == 200
+        # Non-trivial: the handler wraps list_runs() under a "runs" key.
+        assert "runs" in legacy["body"] and legacy["body"]["runs"]
 
-        ws = self._make_ws(tmp_path)
+        r = self._fastapi_body(ws, path)
+        assert r.status_code == 200
+        assert r.json() == legacy["body"]
+
+    def test_observables_parity(self, tmp_path, monkeypatch):
+        """GET /api/explorer/observables: real handler body == FastAPI route body."""
+        ws = _make_explorer_workspace(tmp_path)
         db_path = str(ws / "studies" / "demo" / "runs.db")
-        expected = _ed.list_observables(db_path, None, workspace=ws)
+        path = f"/api/explorer/observables?db={db_path}&run=run-1"
 
-        app = create_app()
-        app.dependency_overrides[get_workspace] = lambda: ws
-        c = TestClient(app)
-        body = c.get(f"/api/explorer/observables?db={db_path}").json()
+        legacy = self._invoke_legacy(
+            monkeypatch, ws, "_get_explorer_observables", path)
+        assert legacy["status"] == 200
+        # Non-trivial: real categorized observables, not an empty/error body.
+        assert legacy["body"].get("categories")
 
-        assert body == expected
+        r = self._fastapi_body(ws, path)
+        assert r.status_code == 200
+        assert r.json() == legacy["body"]
 
-    def test_series_parity(self, tmp_path):
-        """GET /api/explorer/series?db=…&paths=… body == get_series(db, specs, ws)."""
-        from vivarium_dashboard.lib import explorer_data as _ed
-
-        ws = self._make_ws(tmp_path)
+    def test_series_parity(self, tmp_path, monkeypatch):
+        """GET /api/explorer/series: real handler body == FastAPI route body."""
+        ws = _make_explorer_workspace(tmp_path)
         db_path = str(ws / "studies" / "demo" / "runs.db")
-        path_param = "listeners.mass.cell_mass"
-        specs = [("listeners.mass.cell_mass", None)]
-        expected = _ed.get_series(db_path, specs, 400, None, workspace=ws)
+        path = (f"/api/explorer/series?db={db_path}"
+                f"&paths=listeners.mass.cell_mass&run=run-1")
 
-        app = create_app()
-        app.dependency_overrides[get_workspace] = lambda: ws
-        c = TestClient(app)
-        body = c.get(
-            f"/api/explorer/series?db={db_path}&paths={path_param}"
-        ).json()
+        legacy = self._invoke_legacy(
+            monkeypatch, ws, "_get_explorer_series", path)
+        assert legacy["status"] == 200
+        # Non-trivial: a real time axis + named series, not the empty error body.
+        assert legacy["body"]["time"]
+        assert "listeners.mass.cell_mass" in legacy["body"]["series"]
 
-        assert body == expected
+        r = self._fastapi_body(ws, path)
+        assert r.status_code == 200
+        assert r.json() == legacy["body"]
 
 
 class TestStudyDetailServerShimParity:

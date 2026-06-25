@@ -751,17 +751,17 @@ class CompositeResolvePayload(BaseModel):
 class ExplorerRuns(BaseModel):
     """``GET /api/explorer/runs`` payload (lib.explorer_data.list_runs).
 
-    Returns the run-picker list for the Data Explorer card.  On error the body
-    carries ``error`` plus an empty ``runs`` list — still HTTP 200 (never-500
-    contract).  ``extra="allow"`` passes the ``error`` key through on the error
-    path and any future builder keys through intact.  No ``error`` field is
-    declared here so that the success path does NOT inject ``"error": null``
-    (that would break byte-identity with the legacy handler).
+    Returns the run-picker list for the Data Explorer card (``{runs: [...]}``),
+    or ``{error, runs: []}`` on failure — still HTTP 200 (never-500 contract).
+    Pure pass-through (``extra="allow"``, no declared fields) like
+    :class:`StudyDetail` / :class:`StudyRigor`: a declared field with a default
+    would be serialized even when the builder omits it (injecting a spurious
+    key) and an ``int`` field would coerce a float — both break byte-identity
+    with the legacy handler.  No declared fields → the builder dict survives
+    verbatim.
     """
 
     model_config = ConfigDict(extra="allow")
-
-    runs: list[Any] = []
 
 
 class ExplorerObservables(BaseModel):
@@ -769,13 +769,11 @@ class ExplorerObservables(BaseModel):
 
     Success shape: ``{categories: {<category>: [<observable>, …], …}}``.
     Error/missing-db shape (still HTTP 200): ``{error, categories: {}}``.
-    ``extra="allow"`` passes ``error`` through on the error path without
-    injecting ``"error": null`` on the success path.
+    Pure pass-through (``extra="allow"``, no declared fields) so the builder dict
+    survives verbatim — see :class:`ExplorerRuns`.
     """
 
     model_config = ConfigDict(extra="allow")
-
-    categories: Any = None
 
 
 class ExplorerSeries(BaseModel):
@@ -783,13 +781,11 @@ class ExplorerSeries(BaseModel):
 
     Success shape: ``{time: […], series: {<key>: […], …}}``.
     Error/missing-db shape (still HTTP 200): ``{error, time: [], series: {}}``.
-    ``extra="allow"`` passes ``error`` through on the error path.
+    Pure pass-through (``extra="allow"``, no declared fields) — see
+    :class:`ExplorerRuns`.
     """
 
     model_config = ConfigDict(extra="allow")
-
-    time: list[Any] = []
-    series: Any = None
 
 
 class ExplorerFlux(BaseModel):
@@ -797,13 +793,11 @@ class ExplorerFlux(BaseModel):
 
     Success shape: ``{step, time, fluxes: {<bigg_id>: <float>}, coverage: {…}}``.
     Error/missing-db shape (still HTTP 200): ``{error, fluxes: {}}``.
-    ``extra="allow"`` preserves ``step``, ``time``, ``coverage`` from the builder
-    and passes ``error`` through on the error path.
+    Pure pass-through (``extra="allow"``, no declared fields) — see
+    :class:`ExplorerRuns`.
     """
 
     model_config = ConfigDict(extra="allow")
-
-    fluxes: Any = None
 
 
 class ExplorerVector(BaseModel):
@@ -812,15 +806,11 @@ class ExplorerVector(BaseModel):
     Success shape: ``{ids: […], values: […], step: int, time: float|null}``.
     Error/missing-db shape (still HTTP 200):
     ``{error, ids: [], values: [], step: int, time: null}``.
-    ``extra="allow"`` passes ``error`` through on the error path.
+    Pure pass-through (``extra="allow"``, no declared fields) — see
+    :class:`ExplorerRuns`.
     """
 
     model_config = ConfigDict(extra="allow")
-
-    ids: list[Any] = []
-    values: list[Any] = []
-    step: int = 0
-    time: Any = None
 
 
 class ExplorerProteinBreakdown(BaseModel):
@@ -830,11 +820,8 @@ class ExplorerProteinBreakdown(BaseModel):
     Success shape: ``{breakdown: {<category>: <mass>}, step: int, time: float|null}``.
     Error/missing-db shape (still HTTP 200):
     ``{error, breakdown: {}, step: int, time: null}``.
-    ``extra="allow"`` passes ``error`` through on the error path.
+    Pure pass-through (``extra="allow"``, no declared fields) — see
+    :class:`ExplorerRuns`.
     """
 
     model_config = ConfigDict(extra="allow")
-
-    breakdown: Any = None
-    step: int = 0
-    time: Any = None

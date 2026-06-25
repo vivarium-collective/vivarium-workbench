@@ -290,31 +290,19 @@ export interface StudyDetail {
 }
 
 export interface ExplorerRuns {
-  runs: any[];
 }
 
 export interface ExplorerObservables {
-  categories: any;
 }
 
 export interface ExplorerSeries {
-  time: any[];
-  series: any;
 }
 
 export interface ExplorerFlux {
-  fluxes: any;
 }
 
 export interface ExplorerVector {
-  ids: any[];
-  values: any[];
-  step: number;
-  time: any;
 }
 
 export interface ExplorerProteinBreakdown {
-  breakdown: any;
-  step: number;
-  time: any;
 }
