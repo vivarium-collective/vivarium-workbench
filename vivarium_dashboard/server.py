@@ -49,6 +49,8 @@ from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 from vivarium_dashboard.lib.atomic_io import atomic_write_text
 from vivarium_dashboard.lib import git_status as _git_status_lib
 from vivarium_dashboard.lib import investigation_views as _inv_views
+from vivarium_dashboard.lib import study_spec as _study_spec_lib
+from vivarium_dashboard.lib import rigor_views as _rigor_views
 from vivarium_dashboard.lib import investigation_status as _invstatus
 from vivarium_dashboard.lib import data_sources as _data_sources_lib
 from vivarium_dashboard.lib import saved_visualizations as _savedviz_lib
@@ -666,23 +668,9 @@ def _study_dir(name: str):
     """Resolve a study directory, preferring the v3 ``studies/`` location
     over the legacy ``investigations/`` location.
 
-    Uses ``WorkspacePaths.study_dir`` as the primary lookup (handles nested
-    ``investigations/<inv>/studies/<slug>/`` layouts used by workspaces with a
-    custom ``layout:`` map in ``workspace.yaml``, e.g. v2e-invest).  Falls back
-    to the flat ``investigations/<name>/`` path for callers that reference a
-    pre-Phase-1 spec.yaml that is not discovered by ``iter_study_dirs``.
+    Thin shim: delegates to ``lib.study_spec.study_dir`` injecting WORKSPACE.
     """
-    try:
-        return workspace_paths().study_dir(name)
-    except FileNotFoundError:
-        pass
-    # Guard: flat studies/<name>/ exists but has only spec.yaml (no study.yaml),
-    # so iter_study_dirs() skipped it.  Return it rather than falling back to
-    # the legacy investigations/<name> location.
-    flat_candidate = workspace_paths().studies / name
-    if flat_candidate.is_dir():
-        return flat_candidate
-    return workspace_paths().investigations / name
+    return _study_spec_lib.study_dir(WORKSPACE, name)
 
 
 def _study_spec_file(study_dir):
@@ -690,22 +678,17 @@ def _study_spec_file(study_dir):
     have a ``study_dir`` (e.g. ``*_for_test`` callers that take ``ws_root``
     explicitly rather than using the WORKSPACE global).
 
-    Prefers ``study.yaml`` (v3 convention) when present, falls back to legacy
-    ``spec.yaml``. Returns ``study_dir / "study.yaml"`` as the not-found
-    default so callers' ``is_file()`` checks behave the same as before.
+    Thin shim: delegates to ``lib.study_spec.study_spec_file``.
     """
-    study_yaml = study_dir / "study.yaml"
-    if study_yaml.is_file():
-        return study_yaml
-    spec_yaml = study_dir / "spec.yaml"
-    if spec_yaml.is_file():
-        return spec_yaml
-    return study_yaml
+    return _study_spec_lib.study_spec_file(study_dir)
 
 
 def _study_spec_path(name: str):
-    """Resolve a study's spec file: ``study.yaml`` (v3) or ``spec.yaml`` (legacy)."""
-    return _study_spec_file(_study_dir(name))
+    """Resolve a study's spec file: ``study.yaml`` (v3) or ``spec.yaml`` (legacy).
+
+    Thin shim: delegates to ``lib.study_spec.study_spec_path`` injecting WORKSPACE.
+    """
+    return _study_spec_lib.study_spec_path(WORKSPACE, name)
 
 
 # ---------------------------------------------------------------------------
@@ -994,185 +977,7 @@ def _study_detail_spec(name: str):
     persisted in study.yaml. Without this merge, programmatic runs via
     ``pbg_runner`` populate the db but never appear on the Runs tab.
     """
-    from vivarium_dashboard.lib.investigations import load_spec
-    spec_path = _study_spec_path(name)
-    if not spec_path.is_file():
-        return None
-    spec = load_spec(spec_path)
-    if isinstance(spec, dict):
-        try:
-            db_runs = _read_runs_db_for_study(name)
-        except Exception:
-            db_runs = []
-        if db_runs:
-            existing_ids = {(r or {}).get("run_id") for r in (spec.get("runs") or [])}
-            merged = list(spec.get("runs") or [])
-            for r in db_runs:
-                if r.get("run_id") not in existing_ids:
-                    merged.append(r)
-            spec["runs"] = merged
-
-        # Reconcile the simulation_set with the actual runs so the Simulations
-        # tab reflects current status (seeds / duration / run-count / ran) rather
-        # than the authored-or-synthesized plan's "? min / not set / ready".
-        try:
-            spec["simulation_set"] = _reconcile_simset_with_runs(
-                spec.get("simulation_set"), spec.get("runs"), ws_root=WORKSPACE)
-            # Fill the rest of each entry's promise: condition + tests applied.
-            _cond = (spec.get("condition") or spec.get("media")
-                     or (spec.get("model_change") or {}).get("condition"))
-            _ntests = len(spec.get("tests") or spec.get("behavior_tests") or [])
-            for _e in (spec.get("simulation_set") or []):
-                if not isinstance(_e, dict):
-                    continue
-                if _cond and not _e.get("condition"):
-                    _e["condition"] = _cond
-                if _ntests and not _e.get("n_tests_applied"):
-                    _e["n_tests_applied"] = _ntests
-        except Exception:  # noqa: BLE001
-            pass
-
-        # Auto-discover any pre-rendered Plotly HTML files at
-        # studies/<name>/viz/*.html (produced by render_visualizations
-        # after a CLI- or dashboard-launched run). They get surfaced on
-        # the Visualizations tab as embed_visualizations entries — no
-        # manual study.yaml edit required.
-        try:
-            auto_embeds = _discover_viz_html_files(name)
-        except Exception:
-            auto_embeds = []
-        if auto_embeds:
-            existing_urls = {
-                (e or {}).get("url")
-                for e in (spec.get("embed_visualizations") or [])
-            }
-            merged_embeds = list(spec.get("embed_visualizations") or [])
-            for e in auto_embeds:
-                if e.get("url") not in existing_urls:
-                    merged_embeds.append(e)
-            spec["embed_visualizations"] = merged_embeds
-
-        # Param-enforcement gate (expert-feedback D.2): if the study declares
-        # `enforced_params`, verify the latest run actually applied them.
-        # Surfaces "declared but not applied" as structured violations the
-        # report renders as a banner, instead of the silent default-use the
-        # reviewer caught. Best-effort — never breaks the study response.
-        try:
-            spec["param_enforcement"] = _compute_param_enforcement(spec)
-        except Exception:  # noqa: BLE001
-            pass
-
-        # Imported expert feedback (expert-feedback B.1): attach any
-        # annotations a reviewer left on this study's sections so the report
-        # shows them back in-context, closing the loop. Best-effort.
-        try:
-            fb = _collect_study_feedback(name)
-            if fb:
-                spec["expert_feedback"] = fb
-        except Exception:  # noqa: BLE001
-            pass
-
-        # Stage-3c: tracked feedback index with per-item status
-        # (open / addressed / dismissed).  Pure Python in pbg-superpowers —
-        # no AI dependency.  Best-effort; empty result on any error.
-        try:
-            from pbg_superpowers.feedback_tracking import study_feedback_tracked
-            ft = study_feedback_tracked(WORKSPACE, name)
-            # Always attach so the SPA can render the panel (empty → no items).
-            spec["feedback_tracked"] = ft
-        except Exception:  # noqa: BLE001
-            pass
-
-        # SP3b: tracked feedback ACTIONS — each open feedback item joined with
-        # its proposed action (kind + proposed_text) and open/applied status.
-        # Pure Python in pbg-superpowers (the dashboard never computes the
-        # action — it renders this + applies via /api/feedback-apply-action).
-        try:
-            from pbg_superpowers.feedback_actions import study_feedback_actions
-            spec["feedback_actions"] = study_feedback_actions(WORKSPACE, name)
-        except Exception:  # noqa: BLE001
-            pass
-
-        # Derive-on-read status (round-2 friction #2): compute the observable
-        # status axes from runs.db so the report shows what actually ran, and
-        # flag any stored axis (or legacy planning headline) that contradicts
-        # execution state. Stops the "planning status after execution" drift.
-        try:
-            from pbg_superpowers import study_status as _ss
-            runs = spec.get("runs") or []
-            spec["derived_status"] = _ss.derive_status(spec, runs)
-            diss = _ss.status_disagreements(spec, runs)
-            if diss:
-                spec["status_disagreements"] = diss
-            # Single-sourced reviewer-facing run/test/verdict summary — the
-            # downloadable report's per-study clarity strip renders from this so
-            # the markers are derived once (here) and shown consistently.
-            spec["clarity_summary"] = _ss.study_clarity_summary(spec, runs)
-        except Exception:  # noqa: BLE001
-            pass
-
-        # Coded gate verdict (spine stage #2): surface the study verdict
-        # alongside the authored gate_status so the SPA can render both and flag
-        # divergence. PREFER the PERSISTED pipeline_gate.gate_evaluator written
-        # by study_verdict.write_gate_evaluator — it carries result,
-        # evaluated_by AND diverges_from_authored (the code-vs-authored signal).
-        # Only fall back to roll_up_verdict (a render-only recompute that DROPS
-        # diverges_from_authored) when no persisted slot exists. Does NOT modify
-        # study.yaml; this is render-only.
-        try:
-            persisted_ge = (spec.get("pipeline_gate") or {}).get("gate_evaluator")
-            if isinstance(persisted_ge, dict) and persisted_ge.get("result"):
-                spec["computed_gate_verdict"] = dict(persisted_ge)
-            else:
-                from pbg_superpowers.study_verdict import roll_up_verdict
-                spec["computed_gate_verdict"] = roll_up_verdict(spec)
-        except Exception:  # noqa: BLE001
-            pass
-
-        # Wave 3a #18: pre-registration status — compare the study's declared
-        # `preregistered` block (registered_at vs the canonical run's start;
-        # thresholds vs behavior_tests[].pass_if) so the SPA / report can render
-        # a "pre-registered ✓ / post-hoc ⚠" chip in the verdict area. Pure
-        # function in pbg-superpowers; render-only, never modifies study.yaml.
-        # Defensive: degrade silently if pbg-superpowers isn't importable.
-        try:
-            from pbg_superpowers.study_verdict import preregistration_status
-            ps = preregistration_status(spec)
-            if isinstance(ps, dict) and ps.get("preregistered"):
-                spec["preregistration_status"] = ps
-        except Exception:  # noqa: BLE001
-            pass
-
-        # Spine C1a: surface the owning investigation's PERSISTED acceptance
-        # criterion(s) covering THIS study so the "Spine at a glance" panel can
-        # show the acceptance roll-up + link to the investigation. Pure disk
-        # read of executive.computed_acceptance — NO recompute (the live
-        # roll-up still happens in the investigation builder). Best-effort.
-        try:
-            sa = _study_acceptance_criterion(name)
-            if sa:
-                spec["spine_acceptance"] = sa
-        except Exception:  # noqa: BLE001
-            pass
-
-        # Wave 3b #25 — attach the derived lifecycle floor to each finding (the
-        # report-data path so the SPA renders the chip without a JS recompute).
-        # Defensive: a missing pbg_superpowers.study_verdict.lifecycle_floor
-        # leaves findings untouched (the chip then shows only the authored state).
-        try:
-            from pbg_superpowers.study_verdict import lifecycle_floor as _lf
-            for _f in (spec.get("findings") or []):
-                if not isinstance(_f, dict) or "_lifecycle_floor" in _f:
-                    continue
-                try:
-                    _v = _lf(_f, spec)
-                except Exception:  # noqa: BLE001
-                    continue
-                if isinstance(_v, str) and _v.strip():
-                    _f["_lifecycle_floor"] = _v.strip()
-        except Exception:  # noqa: BLE001
-            pass
-    return spec
+    return _study_spec_lib.load_study_detail_spec(WORKSPACE, name)
 
 
 def _study_acceptance_criterion(name: str):
@@ -1422,55 +1227,7 @@ def _discover_viz_html_files(name: str) -> list[dict]:
     has actually run OR has hand-authored figures. Past-run staleness on the
     auto-rendered side is *surfaced* (stale: True), not swallowed.
     """
-    out: list[dict] = []
-
-    # Source 1: studies/<name>/viz/*.html (auto-rendered from runs.db).
-    viz_dir = workspace_paths().studies / name / "viz"
-    runs_db = workspace_paths().studies / name / "runs.db"
-    if viz_dir.is_dir() and runs_db.is_file():
-        # Freshness reference: the latest recorded run time (WAL-immune), not the
-        # db file mtime. A small grace absorbs sub-second render/commit ordering.
-        fresh_ref = _latest_run_timestamp(runs_db)
-        grace_s = 5.0
-        for html_file in sorted(viz_dir.glob("*.html")):
-            mtime = html_file.stat().st_mtime
-            size_kb = max(1, html_file.stat().st_size // 1024)
-            rel = html_file.relative_to(WORKSPACE).as_posix()
-            stale = fresh_ref is not None and mtime + grace_s < fresh_ref
-            desc = (
-                f"Auto-discovered Plotly viz ({size_kb} KB) rendered by "
-                f"render_visualizations against the study's runs.db history."
-            )
-            if stale:
-                desc = (
-                    "⚠ May predate the latest run — this chart was "
-                    "rendered before the most recent simulation completed; re-run "
-                    "the study to refresh it. " + desc
-                )
-            out.append({
-                "name": f"{html_file.stem} (auto)",
-                "url": f"/{rel}",
-                "description": desc,
-                "stale": stale,
-            })
-
-    # Source 2: reports/figures/<name>/*.html (hand-authored cross-skill output).
-    # No runs.db gate — these aren't auto-rendered.
-    figures_dir = workspace_paths().reports / "figures" / name
-    if figures_dir.is_dir():
-        for html_file in sorted(figures_dir.glob("*.html")):
-            size_kb = max(1, html_file.stat().st_size // 1024)
-            rel = html_file.relative_to(WORKSPACE).as_posix()
-            out.append({
-                "name": f"{html_file.stem}",
-                "url": f"/{rel}",
-                "description": (
-                    f"Hand-authored figure ({size_kb} KB) from reports/figures/{name}/."
-                ),
-                "stale": False,
-            })
-
-    return out
+    return _study_spec_lib.discover_viz_html_files(WORKSPACE, name)
 
 
 def _discover_investigation_viz_html_files(inv_slug: str) -> list[dict]:
@@ -1559,140 +1316,7 @@ def _read_runs_db_for_study(name: str) -> list[dict]:
 
     Returns ``[]`` if the db doesn't exist or has neither table.
     """
-    import sqlite3, json as _json, datetime as _dt
-    runs_db = workspace_paths().studies / name / "runs.db"
-    # A runs.db is the canonical per-step source, but it's optional: emitter-less
-    # workspaces record runs only in study.yaml (merged in below). So don't bail
-    # when it's absent — fall through with an empty db result.
-    conn = sqlite3.connect(str(runs_db)) if runs_db.is_file() else None
-    if conn is not None:
-        conn.row_factory = sqlite3.Row
-    try:
-        # Discover available tables; both should exist for pbg_runner-wrapped
-        # runs, but older backfilled DBs may only have runs_meta.
-        tables = {row[0] for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'")} if conn is not None else set()
-        # runs_meta.generation_id is a recently-added nullable column; older
-        # DBs won't have it, so probe before selecting it.
-        meta_cols = {row[1] for row in conn.execute("PRAGMA table_info(runs_meta)")} \
-            if "runs_meta" in tables else set()
-        _gen_col = "generation_id" if "generation_id" in meta_cols else "NULL AS generation_id"
-        rows_by_id: dict[str, dict] = {}
-        if "runs_meta" in tables:
-            for r in conn.execute(
-                "SELECT run_id, spec_id, label, params_json, started_at, "
-                f"completed_at, n_steps, status, sim_name, {_gen_col} "
-                "FROM runs_meta ORDER BY started_at DESC"
-            ):
-                try:
-                    params = _json.loads(r["params_json"] or "{}")
-                except Exception:
-                    params = {}
-                rows_by_id[r["run_id"]] = {
-                    "run_id":        r["run_id"],
-                    "spec_id":       r["spec_id"],
-                    "label":         r["label"] or r["sim_name"] or "",
-                    "sim_name":      r["sim_name"] or r["label"] or "",
-                    "variant":       params.get("variant"),
-                    "composite":     params.get("composite") or r["spec_id"],
-                    "params":        params,
-                    "n_steps":       r["n_steps"],
-                    "status":        r["status"],
-                    "started_at":    r["started_at"],
-                    "completed_at":  r["completed_at"],
-                    "generation_id": r["generation_id"],
-                    "source":        "runs_meta",
-                }
-        if "simulations" in tables:
-            for r in conn.execute(
-                "SELECT simulation_id, name, started_at, completed_at "
-                "FROM simulations ORDER BY started_at DESC"
-            ):
-                sid = r["simulation_id"]
-                existing = rows_by_id.get(sid)
-                if existing:
-                    # Fall back to SQLiteEmitter values when runs_meta lacks
-                    # a name / timestamp.
-                    if not existing.get("sim_name"):
-                        existing["sim_name"] = r["name"] or ""
-                else:
-                    rows_by_id[sid] = {
-                        "run_id":       sid,
-                        "spec_id":      name,
-                        "label":        r["name"] or "",
-                        "sim_name":     r["name"] or "",
-                        "variant":      None,
-                        "composite":    None,
-                        "params":       {},
-                        "n_steps":      None,
-                        "status":       "ran",
-                        "started_at":   r["started_at"],
-                        "completed_at": r["completed_at"],
-                        "source":       "simulations",
-                    }
-    finally:
-        if conn is not None:
-            conn.close()
-
-    # Merge runs recorded in study.yaml `runs:` (emitter-less workspaces) — the
-    # db is authoritative where present, so only add spec runs not already seen.
-    for _r in _study_yaml_run_rows(name):
-        rows_by_id.setdefault(_r["run_id"], _r)
-
-    def _iso(v):
-        if v is None:
-            return ""
-        if isinstance(v, (int, float)):
-            try:
-                return _dt.datetime.fromtimestamp(
-                    float(v), tz=_dt.timezone.utc
-                ).strftime("%Y-%m-%dT%H:%M:%SZ")
-            except Exception:
-                return str(v)
-        return str(v)
-
-    # Coordinated-generation staleness (expert-feedback A.2): a run from an
-    # older generation than the workspace's current one is flagged so the
-    # report/Runs tab can mark it instead of silently mixing it in.
-    try:
-        from pbg_superpowers import generation as _gen
-        _cur_gen = _gen.current_generation_id(WORKSPACE)
-    except Exception:  # noqa: BLE001
-        _cur_gen = None
-
-    out = []
-    for r in rows_by_id.values():
-        r["started_at_iso"] = _iso(r.get("started_at"))
-        try:
-            r["stale"] = _gen.is_stale(r.get("generation_id"), _cur_gen)
-        except Exception:  # noqa: BLE001
-            r["stale"] = False
-        # Compact params summary for the table cell (e.g., "seed=0, rida_rate=4.6").
-        params = r.get("params") or {}
-        if params:
-            shown = {k: v for k, v in params.items() if not k.startswith("_")}
-            r["params_summary"] = ", ".join(
-                f"{k}={v}" for k, v in sorted(shown.items())
-            )[:80]
-        else:
-            r["params_summary"] = ""
-        out.append(r)
-
-    def _sort_key(r):
-        v = r.get("started_at")
-        if v is None:
-            return 0.0
-        if isinstance(v, (int, float)):
-            return float(v)
-        if isinstance(v, str):
-            try:
-                return _dt.datetime.fromisoformat(
-                    v.replace("Z", "+00:00")).timestamp()
-            except Exception:
-                return 0.0
-        return 0.0
-    out.sort(key=_sort_key, reverse=True)
-    return out
+    return _study_spec_lib.read_runs_db_for_study(WORKSPACE, name)
 
 
 def _iter_study_dirs():
@@ -9477,17 +9101,11 @@ if __name__ == "__main__":
         import urllib.parse as _up
         q = _up.parse_qs(_up.urlparse(self.path).query)
         slug = (q.get("study") or q.get("investigation") or [None])[0]
-        if not slug:
-            return self._json({"error": "missing ?study="}, 400)
-        spec = _study_detail_spec(slug)
-        if spec is None:
-            return self._json({"error": "study not found"}, 404)
         try:
-            from pbg_superpowers.rigor import study_rigor
-            return self._json(study_rigor(spec), 200)
-        except Exception as e:
-            return self._json({"error": f"{type(e).__name__}: {e}",
-                               "dimensions": [], "score": {}, "summary": ""}, 200)
+            body = _rigor_views.build_study_rigor(WORKSPACE, slug)
+        except _rigor_views.RigorViewError as e:
+            return self._json(e.body, e.status)
+        return self._json(body, 200)
 
     def _get_investigation_rigor(self):
         """GET /api/investigation-rigor?investigation=<slug> — rigor roll-up
@@ -9496,30 +9114,11 @@ if __name__ == "__main__":
         import urllib.parse as _up
         q = _up.parse_qs(_up.urlparse(self.path).query)
         slug = (q.get("investigation") or [None])[0]
-        if not slug:
-            return self._json({"error": "missing ?investigation="}, 400)
-        inv_path = workspace_paths().investigations / slug / "investigation.yaml"
-        if not inv_path.is_file():
-            return self._json({"error": "investigation not found"}, 404)
         try:
-            inv_spec = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
-        except Exception as e:
-            return self._json({"error": f"unreadable investigation.yaml: {e}"}, 200)
-        member_specs = []
-        for s in (inv_spec.get("studies") or []):
-            slug_s = s if isinstance(s, str) else (
-                (s.get("slug") or s.get("study")) if isinstance(s, dict) else None)
-            if not slug_s:
-                continue
-            sp = _study_detail_spec(slug_s)
-            if sp:
-                member_specs.append(sp)
-        try:
-            from pbg_superpowers.rigor import investigation_rigor
-            return self._json(investigation_rigor(inv_spec, member_specs), 200)
-        except Exception as e:
-            return self._json({"error": f"{type(e).__name__}: {e}",
-                               "dimensions": [], "per_study": {}, "score": {}, "summary": ""}, 200)
+            body = _rigor_views.build_investigation_rigor(WORKSPACE, slug)
+        except _rigor_views.RigorViewError as e:
+            return self._json(e.body, e.status)
+        return self._json(body, 200)
 
     def _get_investigation_registry(self):
         """GET /api/investigation-registry — Pass C cross-worktree view.
