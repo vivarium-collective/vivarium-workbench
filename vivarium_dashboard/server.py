@@ -9492,18 +9492,34 @@ if __name__ == "__main__":
     def _get_investigation_rigor(self):
         """GET /api/investigation-rigor?investigation=<slug> — rigor roll-up
         across the investigation's member studies + investigation-level
-        dimensions (adversarial coverage, traceable methodology).
-
-        Thin delegating shim → ``lib.investigation_views.build_investigation_rigor``.
-        """
+        dimensions (adversarial coverage, traceable methodology)."""
         import urllib.parse as _up
         q = _up.parse_qs(_up.urlparse(self.path).query)
-        slug = (q.get("investigation") or [""])[0] or ""
+        slug = (q.get("investigation") or [None])[0]
+        if not slug:
+            return self._json({"error": "missing ?investigation="}, 400)
+        inv_path = workspace_paths().investigations / slug / "investigation.yaml"
+        if not inv_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
         try:
-            body = _inv_views.build_investigation_rigor(WORKSPACE, slug)
-            return self._json(body, 200)
-        except _inv_views.InvViewError as exc:
-            return self._json(exc.body, exc.status)
+            inv_spec = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
+        except Exception as e:
+            return self._json({"error": f"unreadable investigation.yaml: {e}"}, 200)
+        member_specs = []
+        for s in (inv_spec.get("studies") or []):
+            slug_s = s if isinstance(s, str) else (
+                (s.get("slug") or s.get("study")) if isinstance(s, dict) else None)
+            if not slug_s:
+                continue
+            sp = _study_detail_spec(slug_s)
+            if sp:
+                member_specs.append(sp)
+        try:
+            from pbg_superpowers.rigor import investigation_rigor
+            return self._json(investigation_rigor(inv_spec, member_specs), 200)
+        except Exception as e:
+            return self._json({"error": f"{type(e).__name__}: {e}",
+                               "dimensions": [], "per_study": {}, "score": {}, "summary": ""}, 200)
 
     def _get_investigation_registry(self):
         """GET /api/investigation-registry — Pass C cross-worktree view.

@@ -1118,68 +1118,9 @@ def test_investigation_composites_in_openapi(client):
         assert name in spec["components"]["schemas"], f"{name} missing from OpenAPI schema"
 
 
-# ---------------------------------------------------------------------------
-# /api/investigation-rigor
-# ---------------------------------------------------------------------------
-
-def test_investigation_rigor_200(client, monkeypatch):
-    """Happy path: returns rigor payload (variable shape, extra='allow')."""
-    import vivarium_dashboard.api.app as _app
-    monkeypatch.setattr(
-        _app._inv_views, "build_investigation_rigor",
-        lambda ws, inv: {
-            "dimensions": [{"name": "replication", "score": 0.8}],
-            "per_study": {"s1": {"score": 0.8}},
-            "score": {"total": 0.8},
-            "summary": "Good rigor",
-            "extra_field": "preserved",
-        },
-    )
-    r = client.get("/api/investigation-rigor?investigation=my-inv")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["summary"] == "Good rigor"
-    assert body["extra_field"] == "preserved"     # extra="allow"
-
-
-def test_investigation_rigor_200_with_error_field(client, monkeypatch):
-    """YAML parse failure / pbg_superpowers absence → 200 with error key (not 500)."""
-    import vivarium_dashboard.api.app as _app
-    monkeypatch.setattr(
-        _app._inv_views, "build_investigation_rigor",
-        lambda ws, inv: {"error": "ImportError: ..."},
-    )
-    r = client.get("/api/investigation-rigor?investigation=my-inv")
-    assert r.status_code == 200
-    assert "error" in r.json()
-
-
-def test_investigation_rigor_400_missing(client):
-    """Missing ?investigation= → HTTP 400, {"error": ...}."""
-    r = client.get("/api/investigation-rigor")
-    assert r.status_code == 400
-    assert "error" in r.json()
-    assert "detail" not in r.json()
-
-
-def test_investigation_rigor_404_not_found(client, monkeypatch):
-    """Unknown investigation → HTTP 404."""
-    import vivarium_dashboard.api.app as _app
-    from vivarium_dashboard.lib.investigation_views import InvViewError
-
-    def _raise(ws, inv):
-        raise InvViewError({"error": "investigation not found"}, 404)
-
-    monkeypatch.setattr(_app._inv_views, "build_investigation_rigor", _raise)
-    r = client.get("/api/investigation-rigor?investigation=missing")
-    assert r.status_code == 404
-    assert r.json() == {"error": "investigation not found"}
-
-
-def test_investigation_rigor_in_openapi(client):
-    spec = client.get("/openapi.json").json()
-    assert "/api/investigation-rigor" in spec["paths"]
-    assert "InvestigationRigorPayload" in spec["components"]["schemas"]
+# NOTE: /api/investigation-rigor is intentionally NOT ported in this batch
+# (deferred to Batch 3 — it needs the per-study run-merging loader). The route
+# stays on the legacy stdlib handler, so there are no FastAPI rigor tests here.
 
 
 # ---------------------------------------------------------------------------
@@ -1274,6 +1215,31 @@ def test_investigation_hypotheses_missing_returns_empty(client):
     body = r.json()
     assert "hypotheses" in body
     assert body["hypotheses"] == []
+
+
+def test_investigation_hypotheses_query_param_aliases(client, monkeypatch):
+    """The slug accepts ?investigation= / ?inv= / ?name= (legacy precedence:
+    investigation > inv > name), matching the stdlib dispatcher."""
+    import vivarium_dashboard.api.app as _app
+    seen = {}
+
+    def _capture(ws, name):
+        seen["slug"] = name
+        return {"hypotheses": [], "investigation": name}
+
+    monkeypatch.setattr(_app._inv_views, "build_investigation_hypotheses", _capture)
+
+    # ?inv= alias resolves when ?investigation= is absent
+    client.get("/api/investigation-hypotheses?inv=via-inv")
+    assert seen["slug"] == "via-inv"
+
+    # ?name= alias resolves when both ?investigation= and ?inv= are absent
+    client.get("/api/investigation-hypotheses?name=via-name")
+    assert seen["slug"] == "via-name"
+
+    # precedence: investigation wins over inv and name
+    client.get("/api/investigation-hypotheses?investigation=win&inv=lose&name=lose2")
+    assert seen["slug"] == "win"
 
 
 def test_investigation_hypotheses_extra_fields_preserved(client, monkeypatch):

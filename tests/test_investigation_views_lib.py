@@ -175,39 +175,9 @@ class TestBuildInvestigationComposites:
         assert result == {"composites": []}
 
 
-# ---------------------------------------------------------------------------
-# build_investigation_rigor
-# ---------------------------------------------------------------------------
-
-class TestBuildInvestigationRigor:
-    def test_missing_slug_raises_400(self, tmp_path: Path) -> None:
-        with pytest.raises(inv_views.InvViewError) as exc_info:
-            inv_views.build_investigation_rigor(tmp_path, "")
-        assert exc_info.value.status == 400
-        assert "missing" in exc_info.value.body["error"]
-
-    def test_not_found_raises_404(self, tmp_path: Path) -> None:
-        with pytest.raises(inv_views.InvViewError) as exc_info:
-            inv_views.build_investigation_rigor(tmp_path, "does-not-exist")
-        assert exc_info.value.status == 404
-        assert "not found" in exc_info.value.body["error"]
-
-    def test_unreadable_yaml_returns_200_with_error(self, tmp_path: Path) -> None:
-        inv_dir = tmp_path / "investigations" / "bad-inv"
-        inv_dir.mkdir(parents=True)
-        (inv_dir / "investigation.yaml").write_bytes(b"\xff\xfe")  # invalid YAML
-        # Should return 200 (not raise) with an error key.
-        result = inv_views.build_investigation_rigor(tmp_path, "bad-inv")
-        assert isinstance(result, dict)
-        assert "error" in result
-
-    def test_valid_inv_returns_dict(self, tmp_path: Path) -> None:
-        """A valid investigation.yaml returns a dict (200 path)."""
-        ws = _make_workspace(tmp_path)
-        result = inv_views.build_investigation_rigor(ws, "my-inv")
-        # The result shape depends on pbg_superpowers.rigor availability.
-        # Either success (variable keys) or graceful error (error key present).
-        assert isinstance(result, dict)
+# NOTE: investigation-rigor is intentionally NOT ported in this batch (deferred
+# to Batch 3 — needs the per-study run-merging loader that pbg_superpowers.rigor
+# reads via spec["runs"]). No lib builder / parity test for rigor here.
 
 
 # ---------------------------------------------------------------------------
@@ -392,40 +362,8 @@ class TestServerShimParity:
         except inv_views.InvViewError as exc:
             assert captured["body"] == exc.body
 
-    # --- investigation-rigor ---
-
-    def test_rigor_400_parity(self, monkeypatch: Any, tmp_path: Path) -> None:
-        captured = self._invoke(
-            monkeypatch, tmp_path, "_get_investigation_rigor",
-            "/api/investigation-rigor",
-        )
-        assert captured["status"] == 400
-        try:
-            inv_views.build_investigation_rigor(tmp_path, "")
-        except inv_views.InvViewError as exc:
-            assert captured["body"] == exc.body
-
-    def test_rigor_404_parity(self, monkeypatch: Any, tmp_path: Path) -> None:
-        captured = self._invoke(
-            monkeypatch, tmp_path, "_get_investigation_rigor",
-            "/api/investigation-rigor?investigation=missing",
-        )
-        assert captured["status"] == 404
-        try:
-            inv_views.build_investigation_rigor(tmp_path, "missing")
-        except inv_views.InvViewError as exc:
-            assert captured["body"] == exc.body
-
-    def test_rigor_200_parity(self, monkeypatch: Any, tmp_path: Path) -> None:
-        """Valid investigation → 200 parity between shim and lib builder."""
-        ws = _make_workspace(tmp_path)
-        captured = self._invoke(
-            monkeypatch, ws, "_get_investigation_rigor",
-            "/api/investigation-rigor?investigation=my-inv",
-        )
-        lib_body = inv_views.build_investigation_rigor(ws, "my-inv")
-        assert captured["status"] == 200
-        assert captured["body"] == lib_body
+    # NOTE: investigation-rigor stays on the legacy handler (deferred to
+    # Batch 3) — no shim parity test for it here.
 
     # --- investigation-composite-doc ---
 

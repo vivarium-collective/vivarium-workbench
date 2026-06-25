@@ -71,7 +71,6 @@ _MODELS: list[type[BaseModel]] = [
     _models.InvestigationVizHtmlPayload,
     _models.InvestigationCompositeEntry,
     _models.InvestigationCompositesPayload,
-    _models.InvestigationRigorPayload,
     _models.InvestigationCompositeDocPayload,
     _models.InvestigationHypothesesPayload,
 ]

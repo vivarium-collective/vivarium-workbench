@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 # Which emitter wrote a run's store (derived from its store path).
 EmitterKind = Literal["xarray", "parquet", "sqlite"]
@@ -622,12 +622,13 @@ class InvestigationCompositeEntry(BaseModel):
     """One composite entry in the ``GET /api/investigation-composites`` payload.
 
     Projected from the investigation's v3 ``baseline[]`` list:
-    ``name`` / ``source`` (was ``composite``) / ``params``.
+    ``name`` / ``source`` (was ``composite``) / ``params``.  Legacy always
+    emits ``params`` as a dict (never null), so the default is ``{}``.
     """
 
     name: str = ""
     source: str = ""
-    params: Optional[Any] = None
+    params: Any = Field(default_factory=dict)
 
 
 class InvestigationCompositesPayload(BaseModel):
@@ -640,26 +641,6 @@ class InvestigationCompositesPayload(BaseModel):
     """
 
     composites: list[InvestigationCompositeEntry] = []
-
-
-class InvestigationRigorPayload(BaseModel):
-    """``GET /api/investigation-rigor`` payload.
-
-    The shape returned by ``pbg_superpowers.rigor.investigation_rigor`` is
-    variable (dimension objects, per-study breakdown, aggregate score).
-    ``extra="allow"`` passes all keys through without stripping.
-
-    HTTP 400 when ``?investigation=`` is missing; HTTP 404 when the
-    investigation.yaml does not exist.  YAML parse errors and
-    ``pbg_superpowers`` import failures return 200 with an ``error`` key
-    (degraded, not 500).
-
-    Source: ``lib.investigation_views.build_investigation_rigor``.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    error: Optional[str] = None
 
 
 class InvestigationCompositeDocPayload(BaseModel):

@@ -1,15 +1,19 @@
 """Investigation-detail view builders extracted from server.py.
 
-These are the ``ws_root``-parameterised public builders for the 5
+These are the ``ws_root``-parameterised public builders for the 4
 investigation-detail read-only routes ported in Phase A, Batch 2.  The legacy
 ``server.py`` handlers now delegate to these functions (thin shims), so there
 is one implementation shared by both the stdlib server and the FastAPI seam.
+
+``investigation-rigor`` is intentionally NOT ported here: it depends on the
+per-study run-merging loader (``server._study_detail_spec`` merges runs.db +
+reconciles simulation_set), which ``pbg_superpowers.rigor`` reads via
+``spec["runs"]`` — extracting that loader belongs with Batch 3.
 
 Builders
 --------
 build_investigation_viz_html     → GET /api/investigation-viz-html
 build_investigation_composites   → GET /api/investigation-composites
-build_investigation_rigor        → GET /api/investigation-rigor
 build_investigation_composite_doc→ GET /api/investigation-composite-doc
 build_investigation_hypotheses   → GET /api/investigation-hypotheses
 """
@@ -76,26 +80,6 @@ def _study_spec_path(ws_root: Path, name: str) -> Path:
         if p.is_file():
             return p
     return study_dir / "study.yaml"   # not-found default
-
-
-def _load_study_spec_simple(ws_root: Path, name: str) -> Optional[dict]:
-    """Load a study spec without run-merging or simset reconciliation.
-
-    Used by :func:`build_investigation_rigor` to load each member study's
-    authored spec fields.  The rigor computation reads only declared fields
-    (behaviour tests, hypotheses, etc.) — not the live run list — so the
-    lighter load is functionally equivalent for that purpose.
-
-    Returns ``None`` when the spec file is absent or cannot be parsed.
-    """
-    from vivarium_dashboard.lib.investigations import load_spec
-    spec_path = _study_spec_path(ws_root, name)
-    if not spec_path.is_file():
-        return None
-    try:
-        return load_spec(spec_path)
-    except Exception:  # noqa: BLE001
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -170,56 +154,6 @@ def build_investigation_composites(ws_root: Path, investigation: str) -> dict:
         if isinstance(b, dict)
     ]
     return {"composites": items}
-
-
-def build_investigation_rigor(ws_root: Path, investigation: str) -> dict:
-    """Build the GET /api/investigation-rigor payload for *ws_root*.
-
-    Returns a nested rigor roll-up dict (variable shape — see
-    ``pbg_superpowers.rigor.investigation_rigor``).  On YAML parse failure or
-    when ``pbg_superpowers.rigor`` is unavailable, returns a 200 with an
-    ``{error, dimensions, per_study, score, summary}`` fallback body rather
-    than a 500.
-
-    Raises ``InvViewError``:
-    - 400 when ``investigation`` is empty.
-    - 404 when ``investigations/<slug>/investigation.yaml`` does not exist.
-
-    Mirrors ``server.Handler._get_investigation_rigor``.
-    """
-    if not investigation:
-        raise InvViewError({"error": "missing ?investigation="}, 400)
-    wp = WorkspacePaths.load(ws_root)
-    inv_path = wp.investigations / investigation / "investigation.yaml"
-    if not inv_path.is_file():
-        raise InvViewError({"error": "investigation not found"}, 404)
-    try:
-        inv_spec: dict = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
-    except Exception as e:  # noqa: BLE001
-        return {"error": f"unreadable investigation.yaml: {e}"}
-    member_specs = []
-    for s in (inv_spec.get("studies") or []):
-        slug_s = (
-            s if isinstance(s, str)
-            else (s.get("slug") or s.get("study")) if isinstance(s, dict)
-            else None
-        )
-        if not slug_s:
-            continue
-        sp = _load_study_spec_simple(ws_root, str(slug_s))
-        if sp:
-            member_specs.append(sp)
-    try:
-        from pbg_superpowers.rigor import investigation_rigor  # type: ignore[import]
-        return investigation_rigor(inv_spec, member_specs)  # type: ignore[no-any-return]
-    except Exception as e:  # noqa: BLE001
-        return {
-            "error": f"{type(e).__name__}: {e}",
-            "dimensions": [],
-            "per_study": {},
-            "score": {},
-            "summary": "",
-        }
 
 
 def build_investigation_composite_doc(

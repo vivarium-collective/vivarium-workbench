@@ -264,15 +264,11 @@ export interface InvestigationVizHtmlPayload {
 export interface InvestigationCompositeEntry {
   name: string;
   source: string;
-  params: any | null;
+  params: any;
 }
 
 export interface InvestigationCompositesPayload {
   composites: InvestigationCompositeEntry[];
-}
-
-export interface InvestigationRigorPayload {
-  error: string | null;
 }
 
 export interface InvestigationCompositeDocPayload {

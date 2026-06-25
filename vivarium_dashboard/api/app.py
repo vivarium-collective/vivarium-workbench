@@ -62,7 +62,6 @@ from vivarium_dashboard.lib.models import (
     InvestigationCompositeDocPayload,
     InvestigationCompositesPayload,
     InvestigationHypothesesPayload,
-    InvestigationRigorPayload,
     InvestigationSummary,
     InvestigationVizHtmlPayload,
     InvestigationsPayload,
@@ -663,38 +662,12 @@ def create_app() -> FastAPI:
             return JSONResponse(status_code=exc.status, content=exc.body)
         return InvestigationCompositesPayload.model_validate(body)
 
-    @app.get(
-        "/api/investigation-rigor",
-        response_model=InvestigationRigorPayload,
-        tags=["Investigations detail"],
-        summary="Rigor roll-up across an investigation's member studies",
-    )
-    def investigation_rigor_route(
-        investigation: Optional[str] = None,
-        ws: Path = Depends(get_workspace),
-    ) -> Union[InvestigationRigorPayload, JSONResponse]:
-        """Rigor roll-up across the investigation's member studies.
-
-        Returns a nested rigor dict from
-        ``pbg_superpowers.rigor.investigation_rigor``.  When
-        ``pbg_superpowers.rigor`` is unavailable or raises, returns 200 with
-        ``{error, dimensions, per_study, score, summary}`` (degraded — never
-        500).  A YAML parse failure on the investigation.yaml also returns
-        200 with an ``error`` field.
-
-        HTTP 400 when ``?investigation=`` is missing; HTTP 404 when
-        ``investigations/<slug>/investigation.yaml`` does not exist.  Error
-        bodies are ``{"error": <msg>}`` — byte-identical to the legacy
-        ``_get_investigation_rigor``.
-
-        Library-backed via
-        ``lib.investigation_views.build_investigation_rigor``.
-        """
-        try:
-            body = _inv_views.build_investigation_rigor(ws, investigation or "")
-        except _inv_views.InvViewError as exc:
-            return JSONResponse(status_code=exc.status, content=exc.body)
-        return InvestigationRigorPayload.model_validate(body)
+    # NOTE: /api/investigation-rigor is intentionally NOT ported in this batch.
+    # It depends on per-study run-merging (server._study_detail_spec merges
+    # runs.db + reconciles simulation_set), which pbg_superpowers.rigor reads
+    # via spec["runs"] (replication + run-persistence dimensions). Extracting
+    # that run-merging loader belongs with Batch 3 (study/<slug>, study-rigor),
+    # so the rigor route stays on the legacy stdlib handler for now.
 
     @app.get(
         "/api/investigation-composite-doc",
@@ -737,6 +710,8 @@ def create_app() -> FastAPI:
     )
     def investigation_hypotheses_route(
         investigation: Optional[str] = None,
+        inv: Optional[str] = None,
+        name: Optional[str] = None,
         ws: Path = Depends(get_workspace),
     ) -> InvestigationHypothesesPayload:
         """Competing hypotheses for an investigation, with support-log enrichment.
@@ -747,10 +722,15 @@ def create_app() -> FastAPI:
         Always HTTP 200 — missing investigations return an empty list rather
         than 404; import / compute failures degrade to the authored hypotheses.
 
+        The investigation slug accepts the legacy query-param aliases
+        ``?investigation=`` / ``?inv=`` / ``?name=`` (same precedence as the
+        stdlib dispatcher at ``server.py``).
+
         Library-backed via
         ``lib.investigation_views.build_investigation_hypotheses``.
         """
-        body = _inv_views.build_investigation_hypotheses(ws, investigation or "")
+        slug = (investigation or inv or name or "").strip()
+        body = _inv_views.build_investigation_hypotheses(ws, slug)
         return InvestigationHypothesesPayload.model_validate(body)
 
     return app
