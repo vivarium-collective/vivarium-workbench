@@ -2015,63 +2015,10 @@ def test_report_lint_in_openapi(client):
     assert "ReportLint" in spec["components"]["schemas"]
 
 
-# ---------------------------------------------------------------------------
-# /api/linkage-index
-# ---------------------------------------------------------------------------
-
-def test_linkage_index_200_empty_workspace(client):
-    """Empty workspace → 200 with a dict (nodes/edges or empty map)."""
-    r = client.get("/api/linkage-index")
-    assert r.status_code == 200
-    assert isinstance(r.json(), dict)
-
-
-def test_linkage_index_typed_passthrough(client, monkeypatch):
-    """Linkage payload keys survive the pass-through model."""
-    import vivarium_dashboard.api.app as _app
-
-    monkeypatch.setattr(
-        _app._report_views, "build_linkage_index",
-        lambda ws, **kw: (
-            {"nodes": ["s1", "s2"], "edges": [{"from": "s1", "to": "s2"}],
-             "extra_key": "preserved"},
-            200,
-        ),
-    )
-    body = client.get("/api/linkage-index").json()
-    assert body["nodes"] == ["s1", "s2"]
-    assert body["extra_key"] == "preserved"
-
-
-def test_linkage_index_query_params_forwarded(client, monkeypatch):
-    """All 5 optional query params are forwarded to build_linkage_index."""
-    import vivarium_dashboard.api.app as _app
-    captured: dict = {}
-
-    def _spy(ws, **kw):
-        captured.update(kw)
-        return {"nodes": [], "edges": []}, 200
-
-    monkeypatch.setattr(_app._report_views, "build_linkage_index", _spy)
-    client.get(
-        "/api/linkage-index"
-        "?investigation=inv-a"
-        "&source=bib-x"
-        "&observable=cell_mass"
-        "&observable_registry=mass.token"
-        "&composite=my.comp"
-    )
-    assert captured["investigation"] == "inv-a"
-    assert captured["source"] == "bib-x"
-    assert captured["observable"] == "cell_mass"
-    assert captured["observable_registry"] == "mass.token"
-    assert captured["composite"] == "my.comp"
-
-
-def test_linkage_index_in_openapi(client):
-    spec = client.get("/openapi.json").json()
-    assert "/api/linkage-index" in spec["paths"]
-    assert "LinkageIndex" in spec["components"]["schemas"]
+# NOTE: GET /api/linkage-index is intentionally NOT ported in this batch (see
+# api/app.py).  Its server worker is exercised by tests/test_linkage_index_endpoint.py
+# and the lib builder by tests/test_report_views_lib.py.  Route + LinkageIndex
+# model re-added in a later observables/composite-state batch.
 
 
 # ---------------------------------------------------------------------------
@@ -2120,15 +2067,15 @@ def test_inputs_200_empty_workspace(client):
 
 
 def test_inputs_investigation_param(client, monkeypatch):
-    """?investigation= slug is forwarded to _inputs_payload."""
-    import vivarium_dashboard.server as srv
+    """?investigation= slug is forwarded to lib.report_views.build_inputs."""
+    import vivarium_dashboard.api.app as _app
     captured: list = []
 
     def _spy(ws, slug=None):
         captured.append(slug)
         return {"investigation": {}, "global": {}, "current": slug}
 
-    monkeypatch.setattr(srv, "_inputs_payload", _spy)
+    monkeypatch.setattr(_app._report_views, "build_inputs", _spy)
     client.get("/api/inputs?investigation=my-slug")
     assert captured and captured[0] == "my-slug"
 
@@ -2185,31 +2132,32 @@ def test_iset_detail_404_unknown_slug(client):
     assert "detail" not in body   # must NOT be FastAPI default {"detail":...}
 
 
-def test_iset_detail_404_body_matches_legacy(tmp_path):
-    """Exact 404 body parity with legacy _get_iset_detail."""
-    import json as _json
+def test_iset_detail_404_body_matches_legacy(tmp_path, monkeypatch):
+    """Exact 404 body parity with the legacy _get_iset_detail handler.
+
+    The legacy handler maps ``_iset_detail_data(...) is None`` to the verbatim
+    body ``{"error": "no investigation.yaml for '<slug>'"}``; the FastAPI route
+    must emit the identical 404 body.
+    """
     import vivarium_dashboard.server as srv
 
     ws = _make_iset_workspace(tmp_path)
     slug = "no-such"
 
-    # Legacy handler response (using the _build_iset_detail_for_test seam)
-    from vivarium_dashboard.server import _build_iset_detail_for_test
-    legacy_body, legacy_status = _build_iset_detail_for_test(ws, slug)
-    # That seam may use a different 404 msg; check the HTTP handler's seam
-    # by checking _iset_detail_data returns None → handler maps to the verbatim string
+    # Legacy handler maps a None builder result to the verbatim 404 string.
+    monkeypatch.setattr(srv, "WORKSPACE", ws)
+    srv._WP_CACHE.clear()
     assert srv.Handler._iset_detail_data(slug) is None
+    legacy_body = {"error": f"no investigation.yaml for {slug!r}"}
 
-    # FastAPI route 404 body
+    # FastAPI route 404 body must be byte-identical.
     app = create_app()
     app.dependency_overrides[get_workspace] = lambda: ws
     from fastapi.testclient import TestClient as _TC
     c = _TC(app)
     r = c.get(f"/api/iset/{slug}")
     assert r.status_code == 404
-    # Body matches the legacy handler string: "no investigation.yaml for '<slug>'"
-    assert "no investigation.yaml" in r.json()["error"]
-    assert slug in r.json()["error"]
+    assert r.json() == legacy_body
 
 
 def test_iset_detail_in_openapi(client):

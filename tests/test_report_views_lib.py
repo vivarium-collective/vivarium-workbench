@@ -284,16 +284,38 @@ class TestServerShimParity:
         assert json.loads(handler_bytes) == lib_body
 
     def test_inputs_parity(self, tmp_ws):
-        """inputs: both sides call _inputs_payload directly."""
-        import vivarium_dashboard.server as server
+        """inputs: the legacy server seam body == the lib builder body.
 
-        # The FastAPI route calls _inputs_payload(ws, slug) too — just verify
-        # the function returns a structurally valid dict.
-        result = server._inputs_payload(server.WORKSPACE)
-        assert "investigation" in result
-        assert "global" in result
-        # current may be None in a non-git tmp workspace
-        assert "current" in result
+        ``server._inputs_payload`` is now a thin shim over
+        ``lib.report_views.build_inputs``; assert byte-identical output on a
+        fixture (explicit slug so the investigation block is exercised) and
+        verify the structure / global references are populated.
+        """
+        import vivarium_dashboard.server as server
+        from vivarium_dashboard.lib.report_views import build_inputs
+
+        # Explicit slug exercises the investigation-inputs + ref-enrichment path
+        # (the fixture is not a git repo, so the branch-derived slug is None).
+        handler_body = server._inputs_payload(server.WORKSPACE, "the-inv")
+        lib_body = build_inputs(server.WORKSPACE, "the-inv")
+        assert handler_body == lib_body
+
+        assert set(handler_body) == {"investigation", "global", "current"}
+        assert handler_body["current"] == "the-inv"
+        # Global references parsed from references/papers.bib (Ref2024).
+        glob_refs = handler_body["global"]["references"]
+        assert any(r.get("key") == "Ref2024" for r in glob_refs)
+
+    def test_inputs_no_slug_uses_branch(self, tmp_ws):
+        """No slug → current resolves via lib.investigation_status (None in a
+        non-git fixture) and the shim still returns the typed empty shape."""
+        import vivarium_dashboard.server as server
+        from vivarium_dashboard.lib.report_views import build_inputs
+
+        handler_body = server._inputs_payload(server.WORKSPACE)
+        lib_body = build_inputs(server.WORKSPACE)
+        assert handler_body == lib_body
+        assert handler_body["current"] is None  # non-git fixture
 
     def test_iset_detail_parity(self, tmp_ws):
         """Handler._iset_detail_data now delegates to build_iset_detail."""

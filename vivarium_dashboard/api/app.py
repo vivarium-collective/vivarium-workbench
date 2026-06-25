@@ -67,7 +67,6 @@ from vivarium_dashboard.lib.models import (
     ExplorerRuns,
     IsetDetail,
     InputsPayload,
-    LinkageIndex,
     NeedsAttention,
     ReportLint,
     ExplorerSeries,
@@ -1185,49 +1184,15 @@ def create_app() -> FastAPI:
         body, _ = _report_views.build_report_lint(ws)
         return ReportLint.model_validate(body)
 
-    @app.get(
-        "/api/linkage-index",
-        response_model=LinkageIndex,
-        tags=["Reports & inputs"],
-        summary="Linkage-index graph / per-query slice",
-    )
-    def linkage_index(
-        investigation: Optional[str] = None,
-        source: Optional[str] = None,
-        observable: Optional[str] = None,
-        observable_registry: Optional[str] = None,
-        composite: Optional[str] = None,
-        ws: Path = Depends(get_workspace),
-    ) -> LinkageIndex:
-        """Run the deterministic linkage index over the workspace.
-
-        Query-param dispatch (first match wins):
-        - ``?observable_registry=``  → ``{studies, composites}``
-        - ``?composite=``            → ``{emits, used_by_studies}``
-        - ``?source=``               → ``{studies: [...]}``
-        - ``?observable=``           → ``{findings: [...]}``
-        - ``?investigation=``        → ``{investigation, ac_matrix, dag}``
-        - (none)                     → full ``{nodes, edges}`` graph
-
-        Always HTTP 200.  The SP4b observable_registry / composite paths
-        require a live composite build; without the server-side
-        ``_observables_for_ref`` injectable, those paths degrade gracefully
-        to ``{studies: [], composites: []}`` / ``{emits: [], used_by_studies:
-        []}``.
-
-        Library-backed via ``lib.report_views.build_linkage_index``.
-        """
-        body, _ = _report_views.build_linkage_index(
-            ws,
-            investigation=investigation,
-            source=source,
-            observable=observable,
-            observable_registry=observable_registry,
-            composite=composite,
-            # No observables_for_ref_fn here — composite builds are a
-            # server.py concern (the stdlib server injects _observables_for_ref).
-        )
-        return LinkageIndex.model_validate(body)
+    # NOTE: GET /api/linkage-index is intentionally NOT ported in this batch.
+    # Legacy ``server._linkage_index`` builds composites for the
+    # ``observable_registry=`` / ``composite=`` params via
+    # ``server._observables_for_ref`` (+ its composite cache), which are not yet
+    # in lib.  Injecting them here would require an api/app.py → server import,
+    # violating the lib-only architecture.  The route is re-added in a later
+    # observables/composite-state batch once ``_observables_for_ref`` moves to
+    # lib.  The lib builder (``lib.report_views.build_linkage_index``) and the
+    # ``server._linkage_index`` shim already exist and are parity-tested.
 
     @app.get(
         "/api/needs-attention",
@@ -1266,11 +1231,11 @@ def create_app() -> FastAPI:
         ``?investigation=<slug>`` overrides the git-branch-derived slug so the
         tab follows the SPA-selected investigation.
 
-        Always HTTP 200.  Source: ``server._inputs_payload`` (ws_root-
-        parameterized, re-used as-is — no re-extraction needed).
+        Always HTTP 200.  Library-backed via ``lib.report_views.build_inputs``
+        — the single implementation the stdlib ``server._inputs_payload`` now
+        forwards to.
         """
-        from vivarium_dashboard.server import _inputs_payload  # noqa: PLC0415
-        body = _inputs_payload(ws, investigation)
+        body = _report_views.build_inputs(ws, investigation)
         return InputsPayload.model_validate(body)
 
     @app.get(

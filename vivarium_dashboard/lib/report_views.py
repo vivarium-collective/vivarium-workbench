@@ -354,6 +354,97 @@ def build_needs_attention(
         return _empty, 200
 
 
+def build_inputs(ws_root: Path, slug: Optional[str] = None) -> dict:
+    """GET /api/inputs builder.
+
+    Returns the loaded investigation's owned inputs (the investigation whose
+    slug matches the current git branch, or ``slug`` when given), the repo-wide
+    global inputs (workspace.yaml ``datasets`` + parsed BibTeX references), and
+    that current slug.  Mirrors the SimulationsDB current-investigation-first
+    layout.
+
+    Mirrors ``server._inputs_payload`` parameterised on ``ws_root``; the
+    current-branch slug comes from ``lib.investigation_status.current_branch_slug``.
+    """
+    from vivarium_dashboard.lib.investigation_inputs import investigation_inputs
+    from vivarium_dashboard.lib.investigation_status import current_branch_slug
+    from vivarium_dashboard.lib.report import _parse_bib_entries, _enrich_with_file_info
+
+    ws_root = Path(ws_root)
+    current = slug or current_branch_slug(ws_root)
+    if current:
+        investigation = investigation_inputs(ws_root, current, repo_fallback=False)
+    else:
+        investigation = {"datasets": [], "references": [],
+                         "expert_docs": [], "_repo_fallback": False}
+
+    # Repo-level (global) inputs: reuse the same data sources the global Inputs
+    # page builds from — workspace.yaml `datasets` (file-enriched) and the
+    # parsed BibTeX references.
+    try:
+        ws = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001
+        ws = {}
+    try:
+        global_datasets = _enrich_with_file_info(ws.get("datasets") or [], ws_root)
+    except Exception:  # noqa: BLE001
+        global_datasets = list(ws.get("datasets") or [])
+    try:
+        bib_entries = _parse_bib_entries(ws_root)
+    except Exception:  # noqa: BLE001
+        bib_entries = []
+    global_references = bib_entries
+    global_block = {"datasets": global_datasets, "references": global_references}
+
+    # Enrich the investigation block:
+    #  - references: the investigation's references are bare bib keys; join them
+    #    against the parsed BibTeX entries so the UI gets rich dicts (title,
+    #    author, year, journal, doi, url, bibtex). Unmatched keys are flagged.
+    #  - datasets / expert_docs: ensure each carries a workspace-relative
+    #    `path` (download href) and a `name`.
+    by_key = {e.get("key"): e for e in bib_entries if isinstance(e, dict) and e.get("key")}
+    # references_pdfs maps a bib key -> stored PDF path (drop-and-go uploads).
+    pdf_by_key: dict = {}
+    for rp in (ws.get("references_pdfs") or []):
+        if isinstance(rp, dict) and rp.get("bib_key") and rp.get("path"):
+            pdf_by_key[rp["bib_key"]] = rp["path"]
+
+    def _enrich_ref(ref: Any) -> dict:
+        key = ref if isinstance(ref, str) else (
+            (ref or {}).get("key") or (ref or {}).get("bib_key") if isinstance(ref, dict) else None)
+        if isinstance(ref, dict) and not key:
+            # Already a rich dict without a recognizable key field; pass through.
+            out = dict(ref)
+        elif key and key in by_key:
+            out = dict(by_key[key])
+        elif key:
+            out = {"key": key, "title": key, "_unmatched": True}
+        else:
+            out = {"key": str(ref), "title": str(ref), "_unmatched": True}
+        k = out.get("key")
+        if k and k in pdf_by_key and not out.get("pdf_path"):
+            out["pdf_path"] = pdf_by_key[k]
+        return out
+
+    investigation["references"] = [_enrich_ref(r) for r in (investigation.get("references") or [])]
+
+    def _norm_input(item: Any) -> dict:
+        if isinstance(item, str):
+            return {"name": item.rsplit("/", 1)[-1], "path": item}
+        if isinstance(item, dict):
+            out = dict(item)
+            p = out.get("path") or out.get("url") or ""
+            if not out.get("name"):
+                out["name"] = (p.rsplit("/", 1)[-1] if p else "") or "(unnamed)"
+            return out
+        return {"name": str(item)}
+
+    investigation["datasets"] = [_norm_input(d) for d in (investigation.get("datasets") or [])]
+    investigation["expert_docs"] = [_norm_input(d) for d in (investigation.get("expert_docs") or [])]
+
+    return {"investigation": investigation, "global": global_block, "current": current}
+
+
 def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     """GET /api/iset/<name> builder.
 

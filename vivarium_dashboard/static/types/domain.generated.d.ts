@@ -310,9 +310,6 @@ export interface ExplorerProteinBreakdown {
 export interface ReportLint {
 }
 
-export interface LinkageIndex {
-}
-
 export interface NeedsAttention {
 }
 

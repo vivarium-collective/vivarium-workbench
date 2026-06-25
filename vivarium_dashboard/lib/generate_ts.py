@@ -87,7 +87,6 @@ _MODELS: list[type[BaseModel]] = [
     _models.ExplorerProteinBreakdown,
     # Reports & inputs models
     _models.ReportLint,
-    _models.LinkageIndex,
     _models.NeedsAttention,
     _models.InputsPayload,
     _models.IsetDetail,

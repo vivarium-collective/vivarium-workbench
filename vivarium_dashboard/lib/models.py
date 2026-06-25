@@ -828,8 +828,13 @@ class ExplorerProteinBreakdown(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Reports & inputs models  (GET /api/report-lint, /api/linkage-index, etc.)
+# Reports & inputs models  (GET /api/report-lint, /api/needs-attention, etc.)
 # ---------------------------------------------------------------------------
+#
+# NOTE: GET /api/linkage-index is intentionally NOT ported in this batch (its
+# observable_registry/composite paths require server._observables_for_ref,
+# which isn't in lib yet).  No ``LinkageIndex`` model here — re-added with the
+# route in a later observables/composite-state batch.
 
 
 class ReportLint(BaseModel):
@@ -843,26 +848,6 @@ class ReportLint(BaseModel):
     output key survives verbatim.
 
     Source: ``lib.report_views.build_report_lint``.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-
-class LinkageIndex(BaseModel):
-    """``GET /api/linkage-index`` payload (lib.report_views.build_linkage_index).
-
-    Shape varies by query-param dispatch:
-    - no params → ``{nodes, edges}`` full graph
-    - ``?source=``               → ``{studies: [...]}``
-    - ``?observable=``           → ``{findings: [...]}``
-    - ``?observable_registry=``  → ``{studies, composites}``
-    - ``?composite=``            → ``{emits, used_by_studies}``
-    - ``?investigation=``        → ``{investigation, ac_matrix, dag}``
-
-    Always HTTP 200.  Pure pass-through (``extra="allow"``, no declared
-    fields) to accommodate all dispatch-path shapes without stripping keys.
-
-    Source: ``lib.report_views.build_linkage_index``.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -885,7 +870,7 @@ class NeedsAttention(BaseModel):
 
 
 class InputsPayload(BaseModel):
-    """``GET /api/inputs`` payload (server._inputs_payload).
+    """``GET /api/inputs`` payload (lib.report_views.build_inputs).
 
     Shape: ``{investigation: {...}, global: {...}, current: slug|null}``.
     The investigation + global sub-dicts carry arbitrary keys (datasets,
@@ -894,7 +879,8 @@ class InputsPayload(BaseModel):
     Always HTTP 200.  Pure pass-through (``extra="allow"``, no declared
     fields).
 
-    Source: ``server._inputs_payload`` (already ws_root-parameterized).
+    Source: ``lib.report_views.build_inputs`` — the single implementation the
+    stdlib ``server._inputs_payload`` now forwards to.
     """
 
     model_config = ConfigDict(extra="allow")
