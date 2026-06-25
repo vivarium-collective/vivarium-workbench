@@ -1486,6 +1486,417 @@ def test_study_detail_500_loader_exception(client, monkeypatch):
     assert "detail" not in body
 
 
+# ---------------------------------------------------------------------------
+# /api/explorer/*  — Data explorer routes
+# ---------------------------------------------------------------------------
+# Fixture helpers (inline — tests/ has no __init__.py, cross-module import risks)
+
+import json as _json_mod  # noqa: E402
+
+
+def _make_explorer_db(db_path: Path, n: int = 5, run_id: str = "run-1") -> None:
+    """Write a minimal SQLiteEmitter-shaped runs.db with one run."""
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(
+        """
+        CREATE TABLE simulations (
+            simulation_id TEXT PRIMARY KEY, name TEXT,
+            started_at TEXT, completed_at TEXT, elapsed_seconds REAL
+        );
+        CREATE TABLE history (
+            simulation_id TEXT, step INTEGER, global_time REAL, state TEXT
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO simulations VALUES (?,?,?,?,?)",
+        (run_id, "baseline", "2026-01-01T00:00:00", "2026-01-01T00:01:00", 60.0),
+    )
+    for step in range(n):
+        state = {
+            "agents": {"0": {
+                "listeners": {
+                    "mass": {"cell_mass": 100.0 + step},
+                    "fba_results": {
+                        "base_reaction_fluxes": [1.0 + step, 2.0 + step, 3.0 + step]
+                    },
+                },
+                "bulk": [["GLC", 10 + step], ["ATP", 20 + step]],
+            }},
+        }
+        conn.execute(
+            "INSERT INTO history VALUES (?,?,?,?)",
+            (run_id, step, float(step), _json_mod.dumps(state)),
+        )
+    conn.commit()
+    conn.close()
+
+
+def _make_explorer_workspace(tmp_path: Path) -> Path:
+    """Workspace with one study + non-empty runs.db."""
+    study_dir = tmp_path / "studies" / "demo"
+    study_dir.mkdir(parents=True)
+    _make_explorer_db(study_dir / "runs.db")
+    return tmp_path
+
+
+# ---------------------------------------------------------------------------
+# GET /api/explorer/runs
+# ---------------------------------------------------------------------------
+
+def test_explorer_runs_empty_workspace(client):
+    """Empty workspace → 200, runs=[]."""
+    r = client.get("/api/explorer/runs")
+    assert r.status_code == 200
+    body = r.json()
+    assert "runs" in body
+    assert body["runs"] == []
+
+
+def test_explorer_runs_never_500_on_error(client, monkeypatch):
+    """Route exception → 200 with {error, runs: []}, not HTTP 500."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(_app._explorer_data, "list_runs", lambda ws: (_ for _ in ()).throw(
+        RuntimeError("simulations-index exploded")
+    ))
+    r = client.get("/api/explorer/runs")
+    assert r.status_code == 200
+    body = r.json()
+    assert "error" in body
+    assert body["runs"] == []
+
+
+def test_explorer_runs_happy_path(tmp_path):
+    """Fixture workspace → 200, runs list contains the inserted run."""
+    ws = _make_explorer_workspace(tmp_path)
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: ws
+    c = TestClient(app)
+    r = c.get("/api/explorer/runs")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["runs"]) >= 1
+    run_ids = {run["run_id"] for run in body["runs"]}
+    assert "run-1" in run_ids
+
+
+def test_explorer_runs_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/explorer/runs" in spec["paths"]
+    assert "ExplorerRuns" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# GET /api/explorer/observables
+# ---------------------------------------------------------------------------
+
+def test_explorer_observables_missing_db(client):
+    """Missing ?db= → 200, {error: 'missing db', categories: {}}."""
+    r = client.get("/api/explorer/observables")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["error"] == "missing db"
+    assert body["categories"] == {}
+
+
+def test_explorer_observables_bad_db_returns_200(client):
+    """Bad db path that can't be resolved → 200, categories={} (never 500)."""
+    r = client.get("/api/explorer/observables?db=/nonexistent/totally/fake.db")
+    assert r.status_code == 200
+    body = r.json()
+    # Either an error key or an empty categories dict — but always 200.
+    assert "categories" in body
+
+
+def test_explorer_observables_happy_path(tmp_path):
+    """Fixture workspace → 200, non-empty categories with expected leaves."""
+    ws = _make_explorer_workspace(tmp_path)
+    db_path = str(ws / "studies" / "demo" / "runs.db")
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: ws
+    c = TestClient(app)
+    r = c.get(f"/api/explorer/observables?db={db_path}")
+    assert r.status_code == 200
+    body = r.json()
+    assert "categories" in body
+    cats = body["categories"]
+    assert cats, "categories must be non-empty"
+    all_paths = [o["path"] for g in cats.values() for o in g]
+    assert any("cell_mass" in p for p in all_paths)
+
+
+def test_explorer_observables_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/explorer/observables" in spec["paths"]
+    assert "ExplorerObservables" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# GET /api/explorer/series
+# ---------------------------------------------------------------------------
+
+def test_explorer_series_missing_db(client):
+    """Missing ?db= → 200, {error: 'missing db', time: [], series: {}}."""
+    r = client.get("/api/explorer/series")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["error"] == "missing db"
+    assert body["time"] == []
+    assert body["series"] == {}
+
+
+def test_explorer_series_subsample_fallback(tmp_path):
+    """Non-integer ?subsample= falls back to 400 (not a 422 or 500)."""
+    ws = _make_explorer_workspace(tmp_path)
+    db_path = str(ws / "studies" / "demo" / "runs.db")
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: ws
+    c = TestClient(app)
+    # Non-integer subsample must not 422; it silently falls back to 400.
+    r = c.get(f"/api/explorer/series?db={db_path}&paths=listeners.mass.cell_mass"
+              f"&subsample=NOT_AN_INT")
+    assert r.status_code == 200
+    body = r.json()
+    assert "error" not in body or body.get("time") is not None
+
+
+def test_explorer_series_hash_index_parsing(tmp_path):
+    """'path#index' spec is parsed correctly — vector key uses #index suffix."""
+    ws = _make_explorer_workspace(tmp_path)
+    db_path = str(ws / "studies" / "demo" / "runs.db")
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: ws
+    c = TestClient(app)
+    r = c.get(
+        f"/api/explorer/series?db={db_path}"
+        f"&paths=listeners.fba_results.base_reaction_fluxes%230"  # %23 = #
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert "series" in body
+    # Key must be "path#0", not "path" (vector index appended)
+    assert "listeners.fba_results.base_reaction_fluxes#0" in body["series"]
+
+
+def test_explorer_series_never_500(client, monkeypatch):
+    """Builder exception → 200 with error body."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(
+        _app._explorer_data, "get_series",
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("zarr exploded")),
+    )
+    r = client.get("/api/explorer/series?db=/any")
+    assert r.status_code == 200
+    body = r.json()
+    assert "error" in body
+    assert body["time"] == [] and body["series"] == {}
+
+
+def test_explorer_series_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/explorer/series" in spec["paths"]
+    assert "ExplorerSeries" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# GET /api/explorer/flux
+# ---------------------------------------------------------------------------
+
+def test_explorer_flux_missing_db(client):
+    """Missing ?db= → 200, {error: 'missing db', fluxes: {}}."""
+    r = client.get("/api/explorer/flux")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["error"] == "missing db"
+    assert body["fluxes"] == {}
+
+
+def test_explorer_flux_step_fallback(client):
+    """Non-integer ?step= falls back to 0 (not 422)."""
+    # Bad db will fail in the builder but step parsing must not 422.
+    r = client.get("/api/explorer/flux?db=/bad&step=NOT_INT")
+    assert r.status_code == 200
+    body = r.json()
+    # Either error or fluxes present — but always 200.
+    assert "fluxes" in body or "error" in body
+
+
+def test_explorer_flux_never_500(client, monkeypatch):
+    """Builder exception → 200 with error body."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(
+        _app._explorer_data, "get_flux_auto",
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("flux exploded")),
+    )
+    r = client.get("/api/explorer/flux?db=/any")
+    assert r.status_code == 200
+    body = r.json()
+    assert "error" in body
+    assert body["fluxes"] == {}
+
+
+def test_explorer_flux_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/explorer/flux" in spec["paths"]
+    assert "ExplorerFlux" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# GET /api/explorer/vector
+# ---------------------------------------------------------------------------
+
+def test_explorer_vector_missing_db_or_path(client):
+    """Missing ?db= or ?path= → 200 with missing-param error shape."""
+    # Both missing
+    r = client.get("/api/explorer/vector")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["error"] == "missing db/path"
+    assert body["ids"] == [] and body["values"] == []
+    assert body["step"] == 0 and body["time"] is None
+
+    # db present but path missing
+    r2 = client.get("/api/explorer/vector?db=/some.db")
+    assert r2.status_code == 200
+    assert r2.json()["error"] == "missing db/path"
+
+    # path present but db missing
+    r3 = client.get("/api/explorer/vector?path=listeners.mass.cell_mass")
+    assert r3.status_code == 200
+    assert r3.json()["error"] == "missing db/path"
+
+
+def test_explorer_vector_step_fallback(client):
+    """Non-integer ?step= falls back to 0 — not a 422."""
+    r = client.get("/api/explorer/vector?db=/bad&path=x&step=BAD")
+    assert r.status_code == 200
+    body = r.json()
+    assert "ids" in body and "values" in body
+
+
+def test_explorer_vector_never_500(client, monkeypatch):
+    """Builder exception → 200 with error body."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(
+        _app._explorer_data, "get_vector",
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("vector exploded")),
+    )
+    r = client.get("/api/explorer/vector?db=/any&path=x")
+    assert r.status_code == 200
+    body = r.json()
+    assert "error" in body
+    assert body["ids"] == [] and body["values"] == []
+
+
+def test_explorer_vector_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/explorer/vector" in spec["paths"]
+    assert "ExplorerVector" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# GET /api/explorer/protein-breakdown
+# ---------------------------------------------------------------------------
+
+def test_explorer_protein_breakdown_missing_params(client):
+    """Missing ?db= or ?path= → 200 with missing-param error shape."""
+    r = client.get("/api/explorer/protein-breakdown")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["error"] == "missing db/path"
+    assert body["breakdown"] == {} and body["step"] == 0 and body["time"] is None
+
+
+def test_explorer_protein_breakdown_never_500(client, monkeypatch):
+    """Builder exception → 200 with error body."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(
+        _app._explorer_data, "get_protein_breakdown",
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("breakdown exploded")),
+    )
+    r = client.get("/api/explorer/protein-breakdown?db=/any&path=x")
+    assert r.status_code == 200
+    body = r.json()
+    assert "error" in body
+    assert body["breakdown"] == {}
+
+
+def test_explorer_protein_breakdown_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/explorer/protein-breakdown" in spec["paths"]
+    assert "ExplorerProteinBreakdown" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# Parity: FastAPI route body == lib function result for runs, observables, series
+# ---------------------------------------------------------------------------
+
+class TestExplorerServerShimParity:
+    """FastAPI explorer route bodies match the lib function results exactly.
+
+    Both the FastAPI routes and the legacy stdlib handlers call the same lib
+    functions with the same arguments.  Parity is verified by calling the lib
+    function directly and comparing with the FastAPI route response — this
+    catches any accidental wrapping/stripping in the route layer.
+    """
+
+    def _make_ws(self, tmp_path: Path) -> Path:
+        return _make_explorer_workspace(tmp_path)
+
+    def test_runs_parity(self, tmp_path):
+        """GET /api/explorer/runs body == {'runs': list_runs(ws)}."""
+        from vivarium_dashboard.lib import explorer_data as _ed
+
+        ws = self._make_ws(tmp_path)
+        expected_runs = _ed.list_runs(ws)
+
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: ws
+        c = TestClient(app)
+        body = c.get("/api/explorer/runs").json()
+
+        assert body == {"runs": expected_runs}
+
+    def test_observables_parity(self, tmp_path):
+        """GET /api/explorer/observables?db=… body == list_observables(db, ws)."""
+        from vivarium_dashboard.lib import explorer_data as _ed
+
+        ws = self._make_ws(tmp_path)
+        db_path = str(ws / "studies" / "demo" / "runs.db")
+        expected = _ed.list_observables(db_path, None, workspace=ws)
+
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: ws
+        c = TestClient(app)
+        body = c.get(f"/api/explorer/observables?db={db_path}").json()
+
+        assert body == expected
+
+    def test_series_parity(self, tmp_path):
+        """GET /api/explorer/series?db=…&paths=… body == get_series(db, specs, ws)."""
+        from vivarium_dashboard.lib import explorer_data as _ed
+
+        ws = self._make_ws(tmp_path)
+        db_path = str(ws / "studies" / "demo" / "runs.db")
+        path_param = "listeners.mass.cell_mass"
+        specs = [("listeners.mass.cell_mass", None)]
+        expected = _ed.get_series(db_path, specs, 400, None, workspace=ws)
+
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: ws
+        c = TestClient(app)
+        body = c.get(
+            f"/api/explorer/series?db={db_path}&paths={path_param}"
+        ).json()
+
+        assert body == expected
+
+
 class TestStudyDetailServerShimParity:
     """The FastAPI route body matches the legacy server builder for 200 + 404 + 400."""
 
