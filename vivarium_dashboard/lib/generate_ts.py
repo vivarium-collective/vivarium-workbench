@@ -96,6 +96,11 @@ _MODELS: list[type[BaseModel]] = [
     _models.LinkageIndex,
     # Composite-state model
     _models.CompositeState,
+    # System & workspace models
+    _models.FrameworkMetrics,
+    _models.GithubRepo,
+    _models.UiConfig,
+    _models.WorkspaceHome,
 ]
 
 OUTPUT_PATH = (

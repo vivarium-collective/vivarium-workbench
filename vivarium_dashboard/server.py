@@ -58,6 +58,7 @@ from vivarium_dashboard.lib import registry as _registry_lib
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
 from vivarium_dashboard.lib import observables_views as _obs_views
 from vivarium_dashboard.lib import report_views as _report_views
+from vivarium_dashboard.lib import system_info as _system_info_lib
 from vivarium_dashboard.lib.investigations_index import (
     _conclusions_excerpt,
     _format_baseline_source,
@@ -608,45 +609,12 @@ def workspace_paths() -> WorkspacePaths:
 def _workspace_home_data(ws_root: "Path | None" = None) -> dict:
     """Return workspace narrative metadata for GET /api/workspace and publish.
 
-    Reads workspace.yaml + enumerates investigation dirs.  Pure (no socket I/O).
-    Returned dict shape: {name, description, imports, investigations:[...]}.
+    Thin shim: delegates to ``lib.system_info.build_workspace_home`` (which is
+    the single implementation).  The shim is kept so publish.py's
+    ``from vivarium_dashboard.server import _workspace_home_data`` still resolves.
     """
-    ws_root = Path(ws_root) if ws_root is not None else Path(WORKSPACE)
-    wp = WorkspacePaths.load(ws_root)
-    ws: dict = {}
-    wf = ws_root / "workspace.yaml"
-    if wf.exists():
-        try:
-            ws = yaml.safe_load(wf.read_text(encoding="utf-8")) or {}
-        except Exception:
-            ws = {}
-
-    investigations: list[dict] = []
-    inv_root = wp.investigations
-    if inv_root.is_dir():
-        for inv_dir in sorted(
-            d for d in inv_root.iterdir()
-            if d.is_dir() and (d / "investigation.yaml").is_file()
-        ):
-            try:
-                inv_spec = yaml.safe_load(
-                    (inv_dir / "investigation.yaml").read_text(encoding="utf-8")
-                ) or {}
-                investigations.append({
-                    "name":        inv_spec.get("name", inv_dir.name),
-                    "title":       inv_spec.get("title") or inv_spec.get("name") or inv_dir.name,
-                    "status":      inv_spec.get("status", "planning"),
-                    "description": inv_spec.get("description", ""),
-                })
-            except Exception:
-                investigations.append({"name": inv_dir.name, "status": "error"})
-
-    return {
-        "name":           ws.get("name", ws_root.name),
-        "description":    ws.get("description", ""),
-        "imports":        ws.get("imports") or {},
-        "investigations": investigations,
-    }
+    _root = Path(ws_root) if ws_root is not None else Path(WORKSPACE)
+    return _system_info_lib.build_workspace_home(_root)
 
 
 # ---------------------------------------------------------------------------
@@ -699,13 +667,11 @@ def _study_spec_path(name: str):
 # the param format is documented in the server's celOverviewHelp.shtml):
 #   omics=t        enable the Omics Viewer overlay
 #   url=<datafile> the data file to paint (reachable BY the PTools server)
-#   class=<cls>    object type of the rows: gene | reaction | protein | compound
-#   column1=<N|a-b> data column(s); a range (e.g. 1-6) animates across timepoints
-# Placeholders: {server}, {orgid}, {tsv_url}, {cls}, {columns}.  Override with
-# ``ui.ptools_omics_url_template`` in workspace.yaml if your PTools build differs.
-_PTOOLS_DEFAULT_OMICS_URL_TEMPLATE = (
-    "{server}/overviewsWeb/celOv.shtml"
-    "?omics=t&url={tsv_url}&orgid={orgid}&class={cls}&column1={columns}"
+# DEFAULT TEMPLATE — single-sourced from lib.system_info; imported here so all
+# call-sites in this module (GET /api/ui-config, _get_ptools_launch, etc.) share
+# the same value without duplicating it.
+from vivarium_dashboard.lib.system_info import (  # noqa: E402
+    _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
 )
 
 
@@ -5398,60 +5364,11 @@ def _needs_attention(ws_root: Path, *, investigation=None):
 def _framework_metrics(ws_root: Path):
     """GET /api/framework-metrics worker — ``(json_bytes, status)``.
 
-    Wave 3a #26: aggregate framework-self metrics across EVERY study + every
-    investigation in the workspace via the deterministic
-    ``pbg_superpowers.rigor.framework_metrics`` (each metric is
-    ``{fraction, count, total}``). The dashboard renders this as a
-    "Framework scorecard" section labelled "framework-self metrics (n=N
-    investigations)" — the label is the dashboard's job, the math is pbg's.
-
-    AI-free + tolerant: an absent/old pbg_superpowers, or an unreadable
-    workspace, returns 200 with ``{metrics: {}, n_investigations, n_studies}``
-    rather than a 500 so the report degrades gracefully (section omitted).
+    Thin shim: delegates to ``lib.system_info.build_framework_metrics`` for the
+    dict payload, then wraps it in ``(json_bytes, 200)`` for the legacy handler.
+    Always returns HTTP 200 (best-effort, never raises).
     """
-    ws_root = Path(ws_root)
-    wp = WorkspacePaths.load(ws_root)
-
-    study_specs = []
-    studies_root = wp.studies
-    if studies_root.is_dir():
-        for d in sorted(studies_root.iterdir()):
-            f = d / "study.yaml"
-            if not f.is_file():
-                continue
-            try:
-                sp = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
-            except Exception:  # noqa: BLE001 — skip unreadable studies
-                continue
-            if isinstance(sp, dict):
-                study_specs.append(sp)
-
-    inv_specs = []
-    inv_root = wp.investigations
-    if inv_root.is_dir():
-        for d in sorted(inv_root.iterdir()):
-            f = d / "investigation.yaml"
-            if not f.is_file():
-                continue
-            try:
-                isp = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
-            except Exception:  # noqa: BLE001
-                continue
-            if isinstance(isp, dict):
-                inv_specs.append(isp)
-
-    base = {"metrics": {}, "n_investigations": len(inv_specs),
-            "n_studies": len(study_specs)}
-    try:
-        from pbg_superpowers.rigor import framework_metrics
-    except Exception:  # noqa: BLE001 — older pbg_superpowers lacks the function
-        return _json_body(base), 200
-    try:
-        metrics = framework_metrics(study_specs, inv_specs) or {}
-        base["metrics"] = metrics
-        return _json_body(base), 200
-    except Exception:  # noqa: BLE001 — compute can fail; stay typed + 200
-        return _json_body(base), 200
+    return _json_body(_system_info_lib.build_framework_metrics(Path(ws_root))), 200
 
 
 def _investigation_hypotheses(ws_root: Path, name: str):
@@ -8619,39 +8536,10 @@ if __name__ == "__main__":
     def _get_github_repo(self):
         """GET /api/github-repo — the workspace's GitHub repo as ``owner/name``.
 
-        Resolution order (first hit wins):
-          1. ``git remote get-url origin`` parsed for github.com (the live
-             checkout's actual remote — authoritative for v2ecoli =
-             ``vivarium-collective/v2ecoli``).
-          2. workspace.yaml ``dashboard.github_repo`` / ``dashboard.repository``.
-
-        Returns ``{repo: "owner/name"}`` or ``{repo: null}`` when neither
-        resolves. Backs the report's inline-feedback "Open GitHub issue"
-        button so the exported HTML can pre-fill issues against the right
-        repo without prompting the reviewer. Best-effort: never 500s.
+        Thin shim: delegates to ``lib.system_info.build_github_repo``.
+        Best-effort: never 500s.
         """
-        repo = None
-        try:
-            from vivarium_dashboard.lib.report import _detect_github_repo
-            repo = _detect_github_repo(WORKSPACE)
-        except Exception:  # noqa: BLE001
-            repo = None
-        if not repo:
-            try:
-                ws_data = yaml.safe_load(
-                    (WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")
-                ) or {}
-                dash = _dashboard_config(ws_data)
-                cand = dash.get("github_repo") or dash.get("repository")
-                if isinstance(cand, str) and cand.strip():
-                    # Normalize a full URL down to owner/name.
-                    import re as _re
-                    cand = cand.strip()
-                    m = _re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", cand)
-                    repo = m.group(1) if m else cand.replace(".git", "").strip("/")
-            except Exception:  # noqa: BLE001
-                repo = None
-        return self._json({"repo": repo or None}, 200)
+        return self._json(_system_info_lib.build_github_repo(WORKSPACE), 200)
 
     def _get_references_bib(self):
         """GET /api/references-bib — parsed contents of references/papers.bib.
@@ -9550,24 +9438,11 @@ if __name__ == "__main__":
         return out
 
     def _get_ui_config(self):
-        """GET /api/ui-config — return UI feature flags from workspace.yaml."""
-        try:
-            ws = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")) or {}
-        except Exception:
-            ws = {}
-        ui = ws.get("ui") or {}
-        # NOTE (ptools_omics_url_template): the default targets the Omics Viewer
-        # auto-load endpoint (omics=t&url=…&class=…&column1=…), verified against
-        # sms-ptools 0.8.2. Override via ui.ptools_omics_url_template if your
-        # PTools build differs. Placeholders: {server},{orgid},{tsv_url},{cls},{columns}.
-        return self._json({
-            "composite_view": ui.get("composite_view", "bigraph-loom"),
-            "ptools_server_url": ui.get("ptools_server_url", ""),
-            "ptools_omics_url_template": ui.get(
-                "ptools_omics_url_template",
-                _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
-            ),
-        }, 200)
+        """GET /api/ui-config — return UI feature flags from workspace.yaml.
+
+        Thin shim: delegates to ``lib.system_info.build_ui_config``.
+        """
+        return self._json(_system_info_lib.build_ui_config(WORKSPACE), 200)
 
     def _get_visualization_classes(self):
         """GET /api/visualization-classes — list registered Visualization v2 classes.

@@ -46,6 +46,7 @@ from vivarium_dashboard.lib import report_views as _report_views
 from vivarium_dashboard.lib import rigor_views as _rigor_views
 from vivarium_dashboard.lib import saved_visualizations as _saved_viz
 from vivarium_dashboard.lib import study_spec as _study_spec
+from vivarium_dashboard.lib import system_info as _system_info
 from vivarium_dashboard.lib.composite_resolve import resolve_composite
 from vivarium_dashboard.lib.composites_query import composites_via_subprocess
 from vivarium_dashboard.lib.models import (
@@ -75,6 +76,8 @@ from vivarium_dashboard.lib.models import (
     ReportLint,
     ExplorerSeries,
     ExplorerVector,
+    FrameworkMetrics,
+    GithubRepo,
     GitStatus,
     InvestigationCompositeDocPayload,
     InvestigationCompositesPayload,
@@ -94,8 +97,10 @@ from vivarium_dashboard.lib.models import (
     SimRow,
     SimulationsPayload,
     StudyChartsPayload,
+    UiConfig,
     VisualizationClassesPayload,
     VizClass,
+    WorkspaceHome,
     WorkStatusActive,
     WorkStatusInactive,
 )
@@ -117,6 +122,15 @@ _OPENAPI_TAGS = [
     {
         "name": "System",
         "description": "Service health and client-configuration endpoints.",
+    },
+    {
+        "name": "System & workspace",
+        "description": (
+            "Workspace-level read-only info: framework-self metrics, GitHub "
+            "repo slug, UI feature flags, and workspace narrative metadata. "
+            "All routes always return HTTP 200 (best-effort; errors degrade "
+            "to empty-default bodies)."
+        ),
     },
     {
         "name": "Simulations",
@@ -1472,6 +1486,87 @@ def create_app() -> FastAPI:
             observables_for_ref_fn=_obs_views.observables_for_ref_payload,
         )
         return LinkageIndex.model_validate(body)
+
+    # -----------------------------------------------------------------------
+    # System & workspace routes
+    # -----------------------------------------------------------------------
+
+    @app.get(
+        "/api/framework-metrics",
+        response_model=FrameworkMetrics,
+        tags=["System & workspace"],
+        summary="Aggregated framework-self metrics across all studies + investigations",
+    )
+    def framework_metrics_route(ws: Path = Depends(get_workspace)) -> FrameworkMetrics:
+        """Framework-self metrics scorecard for GET /api/framework-metrics.
+
+        Aggregates ``pbg_superpowers.rigor.framework_metrics`` over every
+        study + investigation in the workspace.  Returns
+        ``{metrics: {…}, n_investigations: int, n_studies: int}``.
+
+        Always HTTP 200 (best-effort): ``metrics`` degrades to ``{}`` when
+        pbg_superpowers is absent or the compute raises.
+
+        Library-backed via ``lib.system_info.build_framework_metrics``.
+        """
+        return FrameworkMetrics.model_validate(
+            _system_info.build_framework_metrics(ws)
+        )
+
+    @app.get(
+        "/api/github-repo",
+        response_model=GithubRepo,
+        tags=["System & workspace"],
+        summary="Workspace GitHub repo slug (owner/name or null)",
+    )
+    def github_repo_route(ws: Path = Depends(get_workspace)) -> GithubRepo:
+        """The workspace's GitHub repo slug for GET /api/github-repo.
+
+        Resolution order (first hit wins):
+          1. ``git remote get-url origin`` parsed for github.com.
+          2. workspace.yaml ``dashboard.github_repo`` / ``dashboard.repository``.
+
+        Returns ``{repo: "owner/name"}`` or ``{repo: null}``.  Always 200.
+
+        Library-backed via ``lib.system_info.build_github_repo``.
+        """
+        return GithubRepo.model_validate(_system_info.build_github_repo(ws))
+
+    @app.get(
+        "/api/ui-config",
+        response_model=UiConfig,
+        tags=["System & workspace"],
+        summary="UI feature flags from workspace.yaml",
+    )
+    def ui_config_route(ws: Path = Depends(get_workspace)) -> UiConfig:
+        """UI feature-flag config for GET /api/ui-config.
+
+        Reads workspace.yaml's ``ui:`` block.  Missing/unreadable workspace →
+        all-default values.  Always 200.
+
+        Keys: ``composite_view`` (default "bigraph-loom"),
+        ``ptools_server_url`` (default ""),
+        ``ptools_omics_url_template`` (default template string).
+
+        Library-backed via ``lib.system_info.build_ui_config``.
+        """
+        return UiConfig.model_validate(_system_info.build_ui_config(ws))
+
+    @app.get(
+        "/api/workspace",
+        response_model=WorkspaceHome,
+        tags=["System & workspace"],
+        summary="Workspace narrative metadata (name, description, investigations)",
+    )
+    def workspace_home_route(ws: Path = Depends(get_workspace)) -> WorkspaceHome:
+        """Workspace home metadata for GET /api/workspace.
+
+        Reads workspace.yaml + enumerates investigation dirs.  Returns
+        ``{name, description, imports, investigations: [...]}``.  Always 200.
+
+        Library-backed via ``lib.system_info.build_workspace_home``.
+        """
+        return WorkspaceHome.model_validate(_system_info.build_workspace_home(ws))
 
     return app
 
