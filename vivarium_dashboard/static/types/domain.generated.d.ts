@@ -305,6 +305,10 @@ export interface InvestigationCompositeDocPayload {
   state: any;
 }
 
+export interface InvestigationStateTree {
+  nodes: any[];
+}
+
 export interface InvestigationHypothesesPayload {
   hypotheses: any[];
   investigation: string;

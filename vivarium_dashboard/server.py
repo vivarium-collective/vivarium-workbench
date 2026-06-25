@@ -60,6 +60,7 @@ from vivarium_dashboard.lib import observables_views as _obs_views
 from vivarium_dashboard.lib import report_views as _report_views
 from vivarium_dashboard.lib import study_viz_views as _study_viz
 from vivarium_dashboard.lib import system_info as _system_info_lib
+from vivarium_dashboard.lib import download_views as _download_views
 from vivarium_dashboard.lib.investigations_index import (
     _conclusions_excerpt,
     _format_baseline_source,
@@ -489,21 +490,9 @@ def _enumerate_data_sources(bypass_cache: bool = False) -> dict:
 
 
 # Map of file extension → (content-type, inline?) for serving a data-source
-# file. Anything not listed is offered as a binary download.
-_DATA_SOURCE_MIME: dict[str, tuple[str, bool]] = {
-    ".tsv": ("text/tab-separated-values; charset=utf-8", True),
-    ".csv": ("text/csv; charset=utf-8", True),
-    ".json": ("application/json; charset=utf-8", True),
-    ".txt": ("text/plain; charset=utf-8", True),
-    ".text": ("text/plain; charset=utf-8", True),
-    ".md": ("text/markdown; charset=utf-8", True),
-    ".fasta": ("text/plain; charset=utf-8", True),
-    ".fa": ("text/plain; charset=utf-8", True),
-    ".fna": ("text/plain; charset=utf-8", True),
-    ".faa": ("text/plain; charset=utf-8", True),
-    ".yaml": ("text/yaml; charset=utf-8", True),
-    ".yml": ("text/yaml; charset=utf-8", True),
-}
+# file moved to lib.download_views (single source). Re-exported here for any
+# back-compat reference.
+_DATA_SOURCE_MIME = _download_views._DATA_SOURCE_MIME
 
 
 # _registry_modules_override, _modules_override_pkgs, _registry_imports_meta,
@@ -1099,9 +1088,10 @@ def compute_study_effective_status(
 
 
 def _iset_report_file(ws_root: Path, slug: str):
-    """Per-investigation report index.html (investigations/<slug>/reports/), or None."""
-    f = WorkspacePaths.load(ws_root).report_dir(slug) / "index.html"
-    return f if f.is_file() else None
+    """Per-investigation report index.html (investigations/<slug>/reports/), or None.
+
+    Thin shim — delegates to ``lib.download_views.resolve_iset_report``."""
+    return _download_views.resolve_iset_report(ws_root, slug)
 
 
 def _read_study_status(ws_root: Path, slug: str) -> tuple[str, bool]:
@@ -4002,16 +3992,10 @@ def _post_study_comparison_add_for_test(ws_root, body):
 
 
 def _study_export_zip(ws_root: Path, name: str) -> bytes:
-    """Zip studies/<name>/ to bytes and return the zip content."""
-    import io
-    import zipfile
-    src = ws_root / "studies" / name
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for path in src.rglob("*"):
-            if path.is_file():
-                zf.write(path, path.relative_to(src.parent))
-    return buf.getvalue()
+    """Zip studies/<name>/ to bytes and return the zip content.
+
+    Thin shim — delegates to ``lib.download_views.study_export_zip``."""
+    return _download_views.study_export_zip(ws_root, name)
 
 
 def _enrich_runs_with_meta(study_dir: Path, runs: list[dict]) -> list[dict]:
@@ -8191,23 +8175,20 @@ if __name__ == "__main__":
     def _get_investigation_state_tree(self):
         """GET /api/investigation-state-tree?investigation=<n>&composite=<c>
         Returns: {nodes: [{path, kind, type?, default?, address?, config?}]}
+
+        Thin shim — delegates to
+        :func:`lib.investigation_views.build_investigation_state_tree`.
         """
         import urllib.parse
         _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.composite_recipes import walk_state_tree
         qs = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(self.path).query))
         inv = qs.get('investigation', '').strip()
         comp = qs.get('composite', '').strip()
-        if not inv or not comp:
-            return self._json({"error": "investigation + composite required"}, 400)
-        composite_path = _study_dir(inv) / "composites" / f"{comp}.yaml"
-        if not composite_path.is_file():
-            return self._json({"error": f"composite document not found: {composite_path}"}, 404)
         try:
-            doc = yaml.safe_load(composite_path.read_text(encoding="utf-8")) or {}
-        except Exception as e:
-            return self._json({"error": f"failed to parse composite: {e}"}, 500)
-        return self._json({"nodes": walk_state_tree(doc)}, 200)
+            body = _inv_views.build_investigation_state_tree(WORKSPACE, inv, comp)
+        except _inv_views.InvViewError as exc:
+            return self._json(exc.body, exc.status)
+        return self._json(body, 200)
 
     # --- /api/study-bigraph-paths: walk a saved composite state snapshot --
     #
@@ -8474,33 +8455,12 @@ if __name__ == "__main__":
         import urllib.parse as _up
         q = _up.parse_qs(_up.urlparse(self.path).query)
         key = (q.get("key") or [None])[0]
-        if not key:
-            return self._json({"error": "missing ?key="}, 400)
-
-        payload = _enumerate_data_sources()
-        entry = next(
-            (s for s in payload.get("sources", []) if s.get("key") == key),
-            None,
-        )
-        if entry is None:
-            return self._json(
-                {"error": f"key not in data-source bundle: {key!r}"}, 404
-            )
-
-        path = Path(entry.get("path") or "")
-        if not path.is_file():
-            return self._json(
-                {"error": f"file for key {key!r} not found: {path}"}, 404
-            )
-
-        ext = path.suffix.lower()
-        mime, inline = _DATA_SOURCE_MIME.get(
-            ext, ("application/octet-stream", False)
-        )
         try:
-            data = path.read_bytes()
-        except OSError as e:
-            return self._json({"error": f"read failed: {e}"}, 500)
+            data, mime, inline, filename = _download_views.resolve_data_source_file(
+                WORKSPACE, key
+            )
+        except _download_views.DownloadError as exc:
+            return self._json(exc.body, exc.status)
 
         self.send_response(200)
         self.send_header("Content-Type", mime)
@@ -8509,7 +8469,7 @@ if __name__ == "__main__":
         if not inline:
             self.send_header(
                 "Content-Disposition",
-                f'attachment; filename="{path.name}"',
+                f'attachment; filename="{filename}"',
             )
         self.end_headers()
         self.wfile.write(data)
@@ -8551,24 +8511,18 @@ if __name__ == "__main__":
         import urllib.parse
         parsed = urllib.parse.urlparse(self.path)
         slug = parsed.path.split("/api/investigation-notebook/", 1)[-1].strip("/")
-        if not slug:
-            return self._json({"error": "investigation slug required"}, 400)
         fmt = (urllib.parse.parse_qs(parsed.query).get("format") or ["ipynb"])[0]
         try:
-            from vivarium_dashboard.lib.notebook_export import export_investigation_notebook
-            paths = export_investigation_notebook(WORKSPACE, slug)
-        except FileNotFoundError:
-            return self._json({"error": f"no investigation {slug!r}"}, 404)
-        except Exception as exc:  # noqa: BLE001 — surface, don't crash the server
-            return self._json({"error": f"notebook export failed: {exc}"}, 500)
-        path = paths["py"] if fmt == "py" else paths["ipynb"]
-        mime = "text/x-python" if fmt == "py" else "application/x-ipynb+json"
-        data = path.read_bytes()
+            data, mime, filename = _download_views.build_investigation_notebook(
+                WORKSPACE, slug, fmt
+            )
+        except _download_views.DownloadError as exc:
+            return self._json(exc.body, exc.status)
         self.send_response(200)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Disposition", f'attachment; filename="{path.name}"')
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.end_headers()
         self.wfile.write(data)
 
@@ -10838,15 +10792,13 @@ if __name__ == "__main__":
         qs = urlparse(self.path).query
         params = parse_qs(qs)
         name = (params.get("study", [""])[0] or "").strip()
-        if not name:
-            return self._json({"error": "missing study"}, 400)
-        src = workspace_paths().studies / name
-        if not src.is_dir():
-            return self._json({"error": "study not found"}, 404)
-        data = _study_export_zip(WORKSPACE, name)
+        try:
+            data, mime, filename = _download_views.build_study_export(WORKSPACE, name)
+        except _download_views.DownloadError as exc:
+            return self._json(exc.body, exc.status)
         self.send_response(200)
-        self.send_header("Content-Type", "application/zip")
-        self.send_header("Content-Disposition", f'attachment; filename="{name}.zip"')
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -12820,17 +12772,12 @@ if __name__ == "__main__":
         self.wfile.write(body)
 
     def _serve_guidance(self):
-        content_dir = workspace_paths().pbg / "server" / "content"
-        if not content_dir.exists():
+        latest = _download_views.resolve_guidance(WORKSPACE)
+        if latest is None:
             self.send_response(204)
             self.end_headers()
             return
-        files = sorted(content_dir.glob("*.html"), key=lambda p: p.stat().st_mtime, reverse=True)
-        if not files:
-            self.send_response(204)
-            self.end_headers()
-            return
-        return self._serve_file(files[0], "text/html")
+        return self._serve_file(latest, "text/html")
 
     def _serve_events_sse(self):
         self.send_response(200)

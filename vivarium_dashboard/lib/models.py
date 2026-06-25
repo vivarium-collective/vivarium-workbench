@@ -741,6 +741,26 @@ class InvestigationCompositeDocPayload(BaseModel):
     state: Any = None
 
 
+class InvestigationStateTree(BaseModel):
+    """``GET /api/investigation-state-tree`` payload.
+
+    Returns ``{nodes: [...]}`` — the flattened state tree of a composite YAML
+    document (each node carries ``path`` + ``kind`` plus kind-specific fields:
+    ``type``/``default`` for stores, ``address``/``config`` for processes).
+    The node shape is recipe-specific, so this is a pure pass-through
+    (``extra="allow"``, ``nodes`` typed ``Any``).
+
+    HTTP 400 when ``investigation`` or ``composite`` is missing; HTTP 404 when
+    the composite YAML file does not exist; HTTP 500 on YAML parse failure.
+
+    Source: ``lib.investigation_views.build_investigation_state_tree``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    nodes: list[Any] = []
+
+
 class InvestigationHypothesesPayload(BaseModel):
     """``GET /api/investigation-hypotheses`` payload.
 
