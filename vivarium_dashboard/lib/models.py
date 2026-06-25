@@ -1025,3 +1025,59 @@ class WorkspaceHome(BaseModel):
     """
 
     model_config = ConfigDict(extra="allow")
+
+
+# ---------------------------------------------------------------------------
+# Composite runs models  (GET /api/composite-runs, /api/composite-run/*)
+# ---------------------------------------------------------------------------
+
+class CompositeRunsList(BaseModel):
+    """``GET /api/composite-runs?spec_id=X`` payload.
+
+    Backed by ``lib.composite_run_views.build_composite_runs``.  Success shape:
+    ``{runs: [{run_id, spec_id, label, status, ...}, ...]}``.  Error / missing
+    spec_id shape (HTTP 400): ``{runs: [], error: "missing spec_id"}``.  Pure
+    pass-through (``extra="allow"``, no declared fields) — the builder dict
+    survives verbatim.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class CompositeRunTrajectory(BaseModel):
+    """``GET /api/composite-run/{run_id}`` payload.
+
+    Backed by ``lib.composite_run_views.build_composite_run``.  Success shape:
+    ``{run_id, trajectory: [{step, time, state}, ...]}``.  Error paths
+    (HTTP 404) are carried via :class:`fastapi.responses.JSONResponse`.  Pure
+    pass-through (``extra="allow"``, no declared fields).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class CompositeRunState(BaseModel):
+    """``GET /api/composite-run/{run_id}/state?step=N`` payload.
+
+    Backed by ``lib.composite_run_views.build_composite_run_state``.  Success
+    shape: ``{run_id, step, state: {...}}``.  Error paths (HTTP 400/404) are
+    carried via :class:`fastapi.responses.JSONResponse`.  Pure pass-through
+    (``extra="allow"``, no declared fields) — ``state`` is a composite-specific
+    dict of arbitrary depth.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class CompositeRunStatus(BaseModel):
+    """``GET /api/composite-run/{run_id}/status`` payload.
+
+    Backed by ``lib.composite_run_views.build_composite_run_status``.  Success
+    shape: ``{run_id, status, progress_step, n_steps, heartbeat_at}`` plus, for
+    terminal states, ``log_path`` + ``error`` (failed/orphaned) or ``viz_html``
+    (completed).  Error paths (HTTP 404) are carried via
+    :class:`fastapi.responses.JSONResponse`.  Pure pass-through
+    (``extra="allow"``, no declared fields) so all terminal-state fields survive.
+    """
+
+    model_config = ConfigDict(extra="allow")

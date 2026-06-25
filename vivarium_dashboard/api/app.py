@@ -36,6 +36,7 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
+from vivarium_dashboard.lib import composite_run_views as _cr_views
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
 from vivarium_dashboard.lib import data_sources as _data_sources
 from vivarium_dashboard.lib import explorer_data as _explorer_data
@@ -61,6 +62,10 @@ from vivarium_dashboard.lib.models import (
     CatalogPayload,
     CompositeRecord,
     CompositeResolvePayload,
+    CompositeRunsList,
+    CompositeRunTrajectory,
+    CompositeRunState,
+    CompositeRunStatus,
     CompositeState,
     CompositesPayload,
     DashConfig,
@@ -231,6 +236,15 @@ _OPENAPI_TAGS = [
             "readout validation against the real composite structure, and the "
             "deterministic linkage index/queries (AC→study gating, source↔study, "
             "finding-by-observable, study DAG, observable registry)."
+        ),
+    },
+    {
+        "name": "Composite runs",
+        "description": (
+            "File-backed composite-run read routes: list runs for a spec, fetch a "
+            "run's trajectory or a single-step state snapshot, and poll lightweight "
+            "status (progress, terminal-state error excerpt, completed viz_html). "
+            "All read from ``.pbg/composite-runs.db``."
         ),
     },
 ]
@@ -1602,6 +1616,120 @@ def create_app() -> FastAPI:
             return WorkspaceHome.model_validate(data)
         except ValidationError:
             return JSONResponse(status_code=200, content=data)
+
+    # -----------------------------------------------------------------------
+    # Composite runs routes  (file-backed SQLite reads, Phase A)
+    # -----------------------------------------------------------------------
+
+    @app.get(
+        "/api/composite-runs",
+        response_model=CompositeRunsList,
+        tags=["Composite runs"],
+        summary="List runs for one composite spec",
+    )
+    def composite_runs_list(
+        spec_id: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[CompositeRunsList, JSONResponse]:
+        """List runs for a composite spec (mirrors stdlib GET /api/composite-runs).
+
+        ``?spec_id=<id>`` — required; returns HTTP 400
+        ``{"runs": [], "error": "missing spec_id"}`` when absent.  Returns
+        ``{"runs": []}`` (HTTP 200) when ``.pbg/composite-runs.db`` does not
+        exist yet (no runs have been launched).
+
+        Library-backed via ``lib.composite_run_views.build_composite_runs``.
+        """
+        body, status = _cr_views.build_composite_runs(ws, spec_id)
+        if status == 200:
+            return CompositeRunsList.model_validate(body)
+        return JSONResponse(status_code=status, content=body)
+
+    @app.get(
+        "/api/composite-run/{run_id}/state",
+        response_model=CompositeRunState,
+        tags=["Composite runs"],
+        summary="Single state snapshot for a run at a given step",
+    )
+    def composite_run_state_route(
+        run_id: str,
+        step: str = "0",
+        ws: Path = Depends(get_workspace),
+    ) -> Union[CompositeRunState, JSONResponse]:
+        """Single composite-state snapshot at one step (mirrors stdlib
+        GET /api/composite-run/<run_id>/state?step=N).
+
+        ``?step=<int>`` (default 0); returns HTTP 400
+        ``{"error": "step must be int"}`` on non-integer input — mirroring the
+        legacy ``int(step_raw, ValueError→400)`` behaviour exactly.  Returns
+        HTTP 404 when the db is absent or the step is not in history.
+
+        Library-backed via ``lib.composite_run_views.build_composite_run_state``.
+        """
+        try:
+            step_int = int(step)
+        except ValueError:
+            return JSONResponse(
+                status_code=400, content={"error": "step must be int"}
+            )
+        body, status = _cr_views.build_composite_run_state(ws, run_id, step_int)
+        if status == 200:
+            return CompositeRunState.model_validate(body)
+        return JSONResponse(status_code=status, content=body)
+
+    @app.get(
+        "/api/composite-run/{run_id}/status",
+        response_model=CompositeRunStatus,
+        tags=["Composite runs"],
+        summary="Lightweight run status (progress, terminal-state error/viz_html)",
+    )
+    def composite_run_status_route(
+        run_id: str,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[CompositeRunStatus, JSONResponse]:
+        """Lightweight status for a composite run (mirrors stdlib
+        GET /api/composite-run/<run_id>/status).
+
+        Returns ``{run_id, status, progress_step, n_steps, heartbeat_at}`` plus
+        (for terminal states) ``log_path`` + ``error`` excerpt
+        (failed/orphaned) or ``viz_html`` (completed).
+
+        HTTP 404 when the db is absent or the run is not found.
+
+        Library-backed via ``lib.composite_run_views.build_composite_run_status``.
+        """
+        body, status = _cr_views.build_composite_run_status(ws, run_id)
+        if status == 200:
+            return CompositeRunStatus.model_validate(body)
+        return JSONResponse(status_code=status, content=body)
+
+    @app.get(
+        "/api/composite-run/{run_id}",
+        response_model=CompositeRunTrajectory,
+        tags=["Composite runs"],
+        summary="Return full trajectory for a composite run",
+    )
+    def composite_run_route(
+        run_id: str,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[CompositeRunTrajectory, JSONResponse]:
+        """Full trajectory for a composite run (mirrors stdlib
+        GET /api/composite-run/<run_id>).
+
+        Returns ``{run_id, trajectory: [{step, time, state}, ...]}`` on success.
+        HTTP 404 when the db is absent (``{"error": "no run database"}``) or the
+        trajectory is empty (``{"error": "run not found"}``).
+
+        Note: ``run_id`` values contain colons but no slashes so path
+        routing is unambiguous; the ``/state`` and ``/status`` sub-routes are
+        distinct paths and registered before this bare-id route.
+
+        Library-backed via ``lib.composite_run_views.build_composite_run``.
+        """
+        body, status = _cr_views.build_composite_run(ws, run_id)
+        if status == 200:
+            return CompositeRunTrajectory.model_validate(body)
+        return JSONResponse(status_code=status, content=body)
 
     return app
 

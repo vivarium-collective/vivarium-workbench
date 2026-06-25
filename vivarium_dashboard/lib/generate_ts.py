@@ -101,6 +101,11 @@ _MODELS: list[type[BaseModel]] = [
     _models.GithubRepo,
     _models.UiConfig,
     _models.WorkspaceHome,
+    # Composite runs models
+    _models.CompositeRunsList,
+    _models.CompositeRunTrajectory,
+    _models.CompositeRunState,
+    _models.CompositeRunStatus,
 ]
 
 OUTPUT_PATH = (
