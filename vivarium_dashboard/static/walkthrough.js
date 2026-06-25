@@ -8138,7 +8138,7 @@
       }
       var decisionHtml = '<div id="' + sid.decision + '" class="decision-box decision-' + decision.cls + '">'
         + '<div class="decision-header">'
-        +   '<h3 class="decision-title">Can we move to the next study?</h3>'
+        +   '<h3 class="decision-title">Pipeline-gate decision</h3>'
         +   '<span class="decision-status">' + _h(decision.label) + '</span>'
         + '</div>'
         + '<div class="decision-grid">'
@@ -8531,21 +8531,14 @@
       // ── CHARTS (visualisations from runs.db) ─────────────────────────
       var chartsHtml = charts.length
         ? '<div id="' + sid.charts + '">'
-          + '<h3 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
-          + '<span>Visualisations from the latest run</span>'
-          + '<button type="button" class="chart-refresh-btn" data-study="' + _h(s.name) + '"'
-          + ' onclick="window._refreshStudyViz(this)"'
-          + ' style="font-size:12px;padding:2px 10px;border-radius:6px;border:1px solid #cbd5e1;'
-          + 'background:#f8fafc;color:#334155;cursor:pointer;">↻ Refresh visualizations</button>'
-          + '<span class="chart-refresh-status muted small" style="margin-left:4px;"></span>'
-          + '</h3>'
+          + '<h3>Visualisations from the latest run</h3>'
           + _renderChartCardsHtml(charts, slug)
           + '</div>'
         : '';
 
       // ── WHAT DID/WILL WE MEASURE? (Readouts) ─────────────────────────
       var readoutsHtml = readouts.length
-        ? '<div id="' + sid.readouts + '"><h3>What did/will we measure? <span class="muted small">(' + readouts.length + ' readouts)</span></h3>'
+        ? '<div id="' + sid.readouts + '"><h3>Measurements <span class="muted small">(' + readouts.length + ' readouts)</span></h3>'
           + '<p class="muted small" style="margin:0 0 8px 0">Quantities we extract from each simulation run to evaluate the study\'s tests.</p>'
           + '<table class="readout-table"><thead><tr><th>Readout</th><th>Status</th><th>Path</th><th>Description</th></tr></thead><tbody>'
           + readouts.map(function(r) {
@@ -8605,7 +8598,7 @@
         if (_tc.SKIP) _tcParts.push(_tc.SKIP + ' ⏭ skipped');
         if (_tc.PENDING) _tcParts.push(_tc.PENDING + ' ⏳ pending');
         var _tcSummary = _tcParts.length ? (' — ' + _tcParts.join(' · ')) : '';
-        testsHtml = '<div id="' + sid.tests + '"><h3>How do we judge success? <span class="muted small">(' + tests.length + ' tests' + _tcSummary + ')</span></h3>'
+        testsHtml = '<div id="' + sid.tests + '"><h3>Success criteria <span class="muted small">(' + tests.length + ' tests' + _tcSummary + ')</span></h3>'
           + '<p class="muted small" style="margin:0 0 8px 0">Each test makes a specific scientific claim with a machine-checkable criterion (<code>measure</code> + <code>pass_if</code>). Tests are now <strong>evaluated by code against the run</strong> (the run/outcome spine: RunReader → evaluator): the pill shows the result, and the evidence line shows the <em>measured value</em>, whether it was computed by <em>code</em> or routed to an <em>agent</em>, and whether the code verdict <em>agrees</em> with the authored one (reconcile). <span class="muted">⏳ pending = the study hasn\'t run yet.</span> Technical assertion + the exact evaluator are under "Technical details".</p>'
           + tests.map(function(t) {
               var name = t.name || '(unnamed)';
@@ -8733,13 +8726,13 @@
           ? '<h4 style="margin:12px 0 4px 0">Key assumptions</h4>'
           + '<ul>' + assumptions.map(function(a){return '<li>' + _multiline(typeof a === 'string' ? a : (a.text || JSON.stringify(a))) + '</li>';}).join('') + '</ul>'
           : '';
-        buildHtml = '<div id="' + sid.build + '"><h3>What changes in the model?</h3>' + mcHtml + asmHtml + '</div>';
+        buildHtml = '<div id="' + sid.build + '"><h3>Model changes</h3>' + mcHtml + asmHtml + '</div>';
       }
 
       // ── WHAT NEEDS TO BE BUILT OR FIXED? (Implementation reqs) ───────
       var reqsHtml = '';
       if (reqs.length) {
-        reqsHtml = '<div id="' + sid.reqs + '"><h3>What needs to be built or fixed? <span class="muted small">(' + reqs.length + ')</span></h3>'
+        reqsHtml = '<div id="' + sid.reqs + '"><h3>Build / fix list <span class="muted small">(' + reqs.length + ')</span></h3>'
           + '<p class="muted small" style="margin:0 0 8px 0">Concrete engineering work to fully exercise this study.</p>'
           + reqs.map(function(r) {
               // Prose-form requirement (authored as a single `| ` block): render
@@ -9034,7 +9027,7 @@
         if (_bioProse) {
           bgsBits.push(
             '<div class="biology-summary-callout">'
-            + '<h3 class="biology-glance-label">Biology — what this study is about</h3>'
+            + '<h3 class="biology-glance-label">Biology</h3>'
             + '<p class="biology-prose">' + _multiline(_bioProse) + '</p>'
             + '</div>'
           );
