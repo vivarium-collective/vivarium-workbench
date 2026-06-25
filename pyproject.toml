@@ -55,6 +55,7 @@ files = [
     "vivarium_dashboard/lib/git_status.py",
     "vivarium_dashboard/lib/investigation_views.py",
     "vivarium_dashboard/lib/study_spec.py",
+    "vivarium_dashboard/lib/study_enrichment.py",
     "vivarium_dashboard/lib/rigor_views.py",
     "vivarium_dashboard/api/app.py",
 ]
