@@ -3387,3 +3387,130 @@ class TestEventsRoute:
     def test_events_in_openapi(self, client):
         paths = client.get("/openapi.json").json()["paths"]
         assert "/api/events" in paths
+
+
+# ---------------------------------------------------------------------------
+# Static + SPA-shell serving (Phase C, Batch 16)
+# ---------------------------------------------------------------------------
+
+class TestStaticRoutes:
+    def test_index_shell_renders_then_serves(self, client, tmp_path, monkeypatch):
+        """GET / re-renders (best-effort) then serves reports/index.html as
+        text/html + Cache-Control: no-store."""
+        import vivarium_dashboard.lib.report as _report
+        calls = []
+        monkeypatch.setattr(_report, "render_workspace_report", lambda ws: calls.append(ws))
+        (tmp_path / "reports").mkdir()
+        (tmp_path / "reports" / "index.html").write_text("<html>shell</html>")
+        r = client.get("/")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "text/html"
+        assert r.headers["cache-control"] == "no-store"
+        assert r.text == "<html>shell</html>"
+        assert calls, "render_workspace_report should have been called"
+
+    def test_index_shell_render_failure_is_nonblocking(self, client, tmp_path, monkeypatch):
+        """A render exception never blocks the load — the on-disk file still serves."""
+        import vivarium_dashboard.lib.report as _report
+
+        def _boom(ws):
+            raise RuntimeError("render kaboom")
+
+        monkeypatch.setattr(_report, "render_workspace_report", _boom)
+        (tmp_path / "reports").mkdir()
+        (tmp_path / "reports" / "index.html").write_text("ondisk")
+        r = client.get("/")
+        assert r.status_code == 200
+        assert r.text == "ondisk"
+
+    def test_index_shell_404_when_absent(self, client, tmp_path, monkeypatch):
+        import vivarium_dashboard.lib.report as _report
+        monkeypatch.setattr(_report, "render_workspace_report", lambda ws: None)
+        r = client.get("/")
+        assert r.status_code == 404
+
+    def test_catch_all_serves_reports_file(self, client, tmp_path):
+        """A reports/ file resolves via the catch-all with the guessed mime."""
+        (tmp_path / "reports").mkdir()
+        (tmp_path / "reports" / "foo.txt").write_text("hello")
+        r = client.get("/foo.txt")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "text/plain"
+        assert r.headers["cache-control"] == "no-store"
+        assert r.text == "hello"
+
+    def test_catch_all_serves_bundled_first(self, client, tmp_path, monkeypatch):
+        """A bundled STATIC_DIR file wins (step 1) and serves as application/javascript."""
+        static_dir = tmp_path / "bundled"
+        static_dir.mkdir()
+        (static_dir / "client.js").write_text("// bundled")
+        monkeypatch.setattr(api_app._static_serving, "STATIC_DIR", static_dir)
+        r = client.get("/client.js")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "application/javascript"
+        assert r.headers["cache-control"] == "no-store"
+        assert r.text == "// bundled"
+
+    def test_catch_all_missing_asset_404(self, client):
+        r = client.get("/definitely-not-here.txt")
+        assert r.status_code == 404
+
+    def test_catch_all_traversal_403(self, client):
+        # Percent-encode the dots so httpx doesn't normalize the dot-segments
+        # away before they reach the route; Starlette decodes them into a literal
+        # ".." segment in `rel`, which the route's guard rejects with 403.
+        r = client.get("/%2e%2e/etc/passwd")
+        assert r.status_code == 403
+
+    def test_bigraph_loom_traversal_403(self, client):
+        r = client.get("/bigraph-loom/%2e%2e/secret")
+        assert r.status_code == 403
+
+    def test_bigraph_loom_serves_asset(self, client, tmp_path, monkeypatch):
+        loom_dir = tmp_path / "loom"
+        loom_dir.mkdir()
+        (loom_dir / "index.html").write_text("<loom/>")
+        monkeypatch.setattr("bigraph_loom.asset_dir", lambda: loom_dir, raising=False)
+        r = client.get("/bigraph-loom/")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "text/html"
+        assert r.headers["cache-control"] == "no-store"
+        assert r.text == "<loom/>"
+
+    def test_parsimony_404_when_no_dir(self, client, monkeypatch):
+        monkeypatch.setattr(api_app._static_serving, "parsimony_viewer_dir", lambda: None)
+        r = client.get("/parsimony-viewer/")
+        assert r.status_code == 404
+
+    def test_parsimony_serves_when_present(self, client, tmp_path, monkeypatch):
+        pv = tmp_path / "pv"
+        pv.mkdir()
+        (pv / "index.html").write_text("<pv/>")
+        monkeypatch.setattr(api_app._static_serving, "parsimony_viewer_dir", lambda: pv)
+        r = client.get("/parsimony-viewer/")
+        assert r.status_code == 200
+        assert r.text == "<pv/>"
+        assert r.headers["cache-control"] == "no-store"
+
+    def test_catch_all_does_not_shadow_api_routes(self, client):
+        """CRITICAL: the catch-all (registered LAST) must not shadow /api/*.
+
+        GET /api/config still returns the typed config JSON (the specific route
+        wins), and an unknown /api/nope is a 404 (not a 200 catch-all body)."""
+        r = client.get("/api/config")
+        assert r.status_code == 200
+        assert r.json() == {"mode": "local-server", "basePath": None}
+        r2 = client.get("/api/nope")
+        assert r2.status_code == 404
+
+    def test_catch_all_registered_last(self):
+        """The catch-all '/{rel:path}' is the final registered GET route."""
+        app = create_app()
+        # Collect routes with a path; the catch-all must be the last GET route.
+        get_routes = [
+            r for r in app.router.routes
+            if getattr(r, "methods", None) and "GET" in r.methods
+        ]
+        assert get_routes[-1].path == "/{rel:path}", (
+            f"catch-all not last; last route is {get_routes[-1].path}"
+        )
