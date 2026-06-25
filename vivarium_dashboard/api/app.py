@@ -33,13 +33,14 @@ from typing import Optional, Union
 import subprocess
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError
 
 from vivarium_dashboard.lib import composite_run_views as _cr_views
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
 from vivarium_dashboard.lib import data_sources as _data_sources
 from vivarium_dashboard.lib import download_views as _download_views
+from vivarium_dashboard.lib import events as _events
 from vivarium_dashboard.lib import explorer_data as _explorer_data
 from vivarium_dashboard.lib import git_status as _git_status
 from vivarium_dashboard.lib import investigation_status
@@ -283,6 +284,15 @@ _OPENAPI_TAGS = [
             "Content-Type, inline-vs-attachment disposition, and status codes "
             "(incl. guidance 204 No Content). Error paths return ``{\"error\": "
             "...}`` JSON."
+        ),
+    },
+    {
+        "name": "Events",
+        "description": (
+            "Server-Sent Events stream: polls ``workspace.yaml`` and emits an "
+            "``event: state`` frame whenever the file changes.  First event fires "
+            "immediately if the file already exists.  Uses raw "
+            "``StreamingResponse`` (no sse-starlette dep)."
         ),
     },
 ]
@@ -2240,6 +2250,31 @@ def create_app() -> FastAPI:
                 "Cache-Control": "no-store",
                 "Content-Disposition": f'attachment; filename="{filename}"',
             },
+        )
+
+    # -----------------------------------------------------------------------
+    # Events (Phase C, Batch 15): SSE workspace-state stream
+    # -----------------------------------------------------------------------
+
+    @app.get("/api/events", tags=["Events"], summary="SSE workspace-state stream")
+    def events(ws: Path = Depends(get_workspace)) -> StreamingResponse:
+        """Server-Sent Events stream: polls ``workspace.yaml`` every 1 s.
+
+        Emits ``event: state\\ndata: <json>\\n\\n`` whenever the file changes.
+        First event fires immediately when the file already exists (no initial
+        delay).  On parse failure: ``data: {"_error": "yaml parse"}``.
+
+        Mirrors ``server.Handler._serve_events_sse`` exactly (byte-identical
+        SSE framing, same cadence, same Content-Type / Cache-Control headers).
+
+        Library-backed via ``lib.events.workspace_state_stream`` and
+        ``lib.events.workspace_state_payload`` — no dependency on the stdlib
+        server module.
+        """
+        return StreamingResponse(
+            _events.workspace_state_stream(ws),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-store"},
         )
 
     return app
