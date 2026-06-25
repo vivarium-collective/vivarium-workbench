@@ -825,3 +825,78 @@ class ExplorerProteinBreakdown(BaseModel):
     """
 
     model_config = ConfigDict(extra="allow")
+
+
+# ---------------------------------------------------------------------------
+# Reports & inputs models  (GET /api/report-lint, /api/needs-attention, etc.)
+# ---------------------------------------------------------------------------
+#
+# NOTE: GET /api/linkage-index is intentionally NOT ported in this batch (its
+# observable_registry/composite paths require server._observables_for_ref,
+# which isn't in lib yet).  No ``LinkageIndex`` model here — re-added with the
+# route in a later observables/composite-state batch.
+
+
+class ReportLint(BaseModel):
+    """``GET /api/report-lint`` payload (lib.report_views.build_report_lint).
+
+    Shape: ``{findings: [{study, check, severity, message, field_path}]}``,
+    in the linter's stable order (error→warning→info).  Always HTTP 200 —
+    degrades to ``{findings: []}`` when the linter is unavailable.
+
+    Pure pass-through (``extra="allow"``, no declared fields) so any linter
+    output key survives verbatim.
+
+    Source: ``lib.report_views.build_report_lint``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class NeedsAttention(BaseModel):
+    """``GET /api/needs-attention`` payload (lib.report_views.build_needs_attention).
+
+    Shape: ``{investigation, items: [...], summary: {by_severity, by_kind, total}}``.
+    Always HTTP 200 — degrades to empty lists/zeroes when the scan module is
+    unavailable.
+
+    Pure pass-through (``extra="allow"``, no declared fields) so summary
+    sub-dict shapes survive verbatim.
+
+    Source: ``lib.report_views.build_needs_attention``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class InputsPayload(BaseModel):
+    """``GET /api/inputs`` payload (lib.report_views.build_inputs).
+
+    Shape: ``{investigation: {...}, global: {...}, current: slug|null}``.
+    The investigation + global sub-dicts carry arbitrary keys (datasets,
+    references, expert_docs, etc.) so this is a pure pass-through.
+
+    Always HTTP 200.  Pure pass-through (``extra="allow"``, no declared
+    fields).
+
+    Source: ``lib.report_views.build_inputs`` — the single implementation the
+    stdlib ``server._inputs_payload`` now forwards to.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class IsetDetail(BaseModel):
+    """``GET /api/iset/{slug}`` payload (lib.report_views.build_iset_detail).
+
+    Full investigation-detail dict: name, title, description, studies list,
+    acceptance_criteria, computed_acceptance, executive, etc.  The shape is
+    complex and version-dependent, so this is a pure pass-through.
+
+    HTTP 404 ``{error}`` when investigation.yaml is absent (served as
+    JSONResponse, not through this model).
+
+    Source: ``lib.report_views.build_iset_detail``.
+    """
+
+    model_config = ConfigDict(extra="allow")

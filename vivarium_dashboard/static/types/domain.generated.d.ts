@@ -306,3 +306,15 @@ export interface ExplorerVector {
 
 export interface ExplorerProteinBreakdown {
 }
+
+export interface ReportLint {
+}
+
+export interface NeedsAttention {
+}
+
+export interface InputsPayload {
+}
+
+export interface IsetDetail {
+}

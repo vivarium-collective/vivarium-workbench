@@ -85,6 +85,11 @@ _MODELS: list[type[BaseModel]] = [
     _models.ExplorerFlux,
     _models.ExplorerVector,
     _models.ExplorerProteinBreakdown,
+    # Reports & inputs models
+    _models.ReportLint,
+    _models.NeedsAttention,
+    _models.InputsPayload,
+    _models.IsetDetail,
 ]
 
 OUTPUT_PATH = (

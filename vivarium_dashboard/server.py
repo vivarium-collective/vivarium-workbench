@@ -1315,86 +1315,11 @@ def _current_branch_slug(ws_root: Path) -> str | None:
 def _inputs_payload(ws_root: Path, slug: str | None = None) -> dict:
     """Pure seam backing ``GET /api/inputs``.
 
-    Returns the loaded investigation's owned inputs (the investigation whose
-    slug matches the current git branch), the repo-wide global inputs
-    (workspace.yaml ``datasets`` + parsed BibTeX references), and that current
-    slug. Mirrors the SimulationsDB current-investigation-first layout.
+    Thin shim — delegates to ``lib.report_views.build_inputs``.  Keeps the
+    name/signature so existing call-sites (``_get_inputs`` + tests) resolve.
     """
-    from vivarium_dashboard.lib.investigation_inputs import investigation_inputs
-    from vivarium_dashboard.lib.report import _parse_bib_entries, _enrich_with_file_info
-
-    current = slug or _current_branch_slug(ws_root)
-    if current:
-        investigation = investigation_inputs(ws_root, current, repo_fallback=False)
-    else:
-        investigation = {"datasets": [], "references": [],
-                         "expert_docs": [], "_repo_fallback": False}
-
-    # Repo-level (global) inputs: reuse the same data sources the global Inputs
-    # page builds from — workspace.yaml `datasets` (file-enriched) and the
-    # parsed BibTeX references.
-    try:
-        ws = yaml.safe_load((Path(ws_root) / "workspace.yaml").read_text(encoding="utf-8")) or {}
-    except Exception:
-        ws = {}
-    try:
-        global_datasets = _enrich_with_file_info(ws.get("datasets") or [], ws_root)
-    except Exception:
-        global_datasets = list(ws.get("datasets") or [])
-    try:
-        bib_entries = _parse_bib_entries(ws_root)
-    except Exception:
-        bib_entries = []
-    global_references = bib_entries
-    global_block = {"datasets": global_datasets, "references": global_references}
-
-    # Enrich the investigation block:
-    #  - references: the investigation's references are bare bib keys; join them
-    #    against the parsed BibTeX entries so the UI gets rich dicts (title,
-    #    author, year, journal, doi, url, bibtex). Unmatched keys are flagged.
-    #  - datasets / expert_docs: ensure each carries a workspace-relative
-    #    `path` (download href) and a `name`.
-    by_key = {e.get("key"): e for e in bib_entries if isinstance(e, dict) and e.get("key")}
-    # references_pdfs maps a bib key -> stored PDF path (drop-and-go uploads).
-    pdf_by_key = {}
-    for rp in (ws.get("references_pdfs") or []):
-        if isinstance(rp, dict) and rp.get("bib_key") and rp.get("path"):
-            pdf_by_key[rp["bib_key"]] = rp["path"]
-
-    def _enrich_ref(ref):
-        key = ref if isinstance(ref, str) else (
-            (ref or {}).get("key") or (ref or {}).get("bib_key") if isinstance(ref, dict) else None)
-        if isinstance(ref, dict) and not key:
-            # Already a rich dict without a recognizable key field; pass through.
-            out = dict(ref)
-        elif key and key in by_key:
-            out = dict(by_key[key])
-        elif key:
-            out = {"key": key, "title": key, "_unmatched": True}
-        else:
-            out = {"key": str(ref), "title": str(ref), "_unmatched": True}
-        k = out.get("key")
-        if k and k in pdf_by_key and not out.get("pdf_path"):
-            out["pdf_path"] = pdf_by_key[k]
-        return out
-
-    investigation["references"] = [_enrich_ref(r) for r in (investigation.get("references") or [])]
-
-    def _norm_input(item):
-        if isinstance(item, str):
-            return {"name": item.rsplit("/", 1)[-1], "path": item}
-        if isinstance(item, dict):
-            out = dict(item)
-            p = out.get("path") or out.get("url") or ""
-            if not out.get("name"):
-                out["name"] = (p.rsplit("/", 1)[-1] if p else "") or "(unnamed)"
-            return out
-        return {"name": str(item)}
-
-    investigation["datasets"] = [_norm_input(d) for d in (investigation.get("datasets") or [])]
-    investigation["expert_docs"] = [_norm_input(d) for d in (investigation.get("expert_docs") or [])]
-
-    return {"investigation": investigation, "global": global_block, "current": current}
+    from vivarium_dashboard.lib import report_views as _rv
+    return _rv.build_inputs(ws_root, slug)
 
 
 def _set_investigation_status(ws_root: Path, inv: str, status: str) -> dict:
@@ -5628,48 +5553,11 @@ def _study_observable_check(ws_root: Path, slug: str):
 def _report_lint(ws_root: Path):
     """GET /api/report-lint worker — ``(json_bytes, status)``.
 
-    Spine A3: runs the EXISTING deterministic linter
-    (``pbg_superpowers.report_linter.lint_workspace_report``) over the
-    workspace and returns its findings keyed by study so the dashboard can
-    render a per-study readiness panel. This wires three computed artifacts at
-    once: the SP2b-ii readout-migration findings (info/warning) and the SP2c
-    band-citation-gap warnings already emitted by the linter.
-
-    The dashboard adds NO AI — it only runs the deterministic linter and
-    renders the result. Tolerant: if the linter is unavailable (older
-    pbg_superpowers) or the workspace can't be scanned, returns 200 with an
-    empty findings list rather than a 500.
-
-    Shape: ``{"findings": [{study, check, severity, message, field_path}]}``,
-    in the linter's own stable order (error→warning→info).
+    Thin shim — delegates to ``lib.report_views.build_report_lint``.
     """
-    ws_root = Path(ws_root)
-    try:
-        from pbg_superpowers.report_linter import lint_workspace_report
-    except Exception:  # noqa: BLE001 — older pbg_superpowers lacks the linter
-        return _json_body({"findings": []}), 200
-    try:
-        raw = lint_workspace_report(ws_root)
-    except Exception as e:  # noqa: BLE001 — never 500 the readiness panel
-        return _json_body({"findings": [], "error": str(e)}), 200
-
-    findings = []
-    for f in raw:
-        d = f.to_dict() if hasattr(f, "to_dict") else dict(f)
-        findings.append({
-            "study":      d.get("study_slug") or d.get("study") or "<workspace>",
-            "check":      d.get("check", ""),
-            "severity":   d.get("level") or d.get("severity") or "info",
-            "message":    d.get("message", ""),
-            "field_path": d.get("field_path", ""),
-        })
-
-    # Composite-resolution lint — the linter works on specs and has no registry,
-    # but the dashboard DOES. For each study, flag declared composite refs that
-    # don't resolve against the live registry. This is what would have caught the
-    # autopoiesis studies 2–4 (numpy-only, no registered composite).
-    findings.extend(_composite_resolution_findings(ws_root))
-    return _json_body({"findings": findings}), 200
+    from vivarium_dashboard.lib import report_views as _rv
+    body, status = _rv.build_report_lint(ws_root)
+    return _json_body(body), status
 
 
 def _composite_resolution_findings(ws_root: Path) -> list[dict]:
@@ -5748,105 +5636,31 @@ def _linkage_index(ws_root: Path, *, investigation=None, source=None, observable
                    observable_registry=None, composite=None):
     """GET /api/linkage-index worker — ``(json_bytes, status)``.
 
-    SP4a: runs the deterministic linkage index/queries
-    (``pbg_superpowers.linkage_index``) over the workspace. Param-dispatch:
-
-    - ``source``               → ``{studies: [...]}`` (studies citing the bib_key)
-    - ``observable``           → ``{findings: [...]}`` (findings measuring the token)
-    - ``observable_registry``  → ``{studies, composites}`` emitting the token (SP4b)
-    - ``composite``            → ``{emits, used_by_studies}`` for that composite (SP4b)
-    - ``investigation``        → ``{ac_matrix, dag, nodes, edges}`` for that inv
-    - (none)                   → the full ``{nodes, edges}`` graph
-
-    The dashboard adds NO AI — it only runs the deterministic derive and returns
-    JSON. Tolerant: an older/absent pbg_superpowers, or an unscannable
-    workspace, returns 200 with an empty payload rather than a 500.
-
-    SP4b note: ``observable_registry``/``composite`` are the ONLY paths that
-    trigger a (cached) composite build, via the injected
-    ``_observables_for_ref`` callable. The other paths stay build-free.
+    Thin shim — delegates to ``lib.report_views.build_linkage_index``.
+    Injects ``_observables_for_ref`` (module-level, monkeypatchable by tests)
+    for the SP4b observable_registry / composite paths.
     """
-    ws_root = Path(ws_root)
-    try:
-        from pbg_superpowers import linkage_index as _li
-    except Exception:  # noqa: BLE001 — older pbg_superpowers lacks the module
-        return _json_body({"nodes": [], "edges": []}), 200
-
-    # SP4b: adapter over the (cached, real) composite build. ``_observables_for_ref``
-    # returns ``(json_bytes, status)`` for the HTTP path; the enrich callable wants
-    # the ``{"leaves", "catalogs"}`` dict — normalize both that and a direct dict
-    # (test-injected) shape. Looked up as a module global so tests can monkeypatch it.
-    def _obs_for_ref(ref):
-        res = _observables_for_ref(ws_root, ref)
-        if isinstance(res, dict):
-            return res
-        if isinstance(res, tuple) and res:
-            try:
-                return json.loads(res[0])
-            except Exception:  # noqa: BLE001
-                return {}
-        return {}
-
-    if observable_registry:
-        try:
-            return _json_body(_li.studies_for_observable(
-                ws_root, observable_registry, observables_for_ref=_obs_for_ref)), 200
-        except Exception:  # noqa: BLE001 — build/derive can fail; stay typed + 200
-            return _json_body({"studies": [], "composites": []}), 200
-    if composite:
-        try:
-            return _json_body(_li.composite_emits(
-                ws_root, composite, observables_for_ref=_obs_for_ref)), 200
-        except Exception:  # noqa: BLE001 — build/derive can fail; stay typed + 200
-            return _json_body({"emits": [], "used_by_studies": []}), 200
-
-    try:
-        if source:
-            return _json_body({"studies": _li.studies_for_source(ws_root, source)}), 200
-        if observable:
-            return _json_body({"findings": _li.findings_for_observable(ws_root, observable)}), 200
-        if investigation:
-            return _json_body({
-                "investigation": investigation,
-                "ac_matrix": _li.ac_gating_matrix(ws_root, investigation),
-                "dag": _li.study_dag(ws_root, investigation),
-            }), 200
-        index = _linkage_cached_index(ws_root) or {"nodes": [], "edges": []}
-        return _json_body(index), 200
-    except Exception as e:  # noqa: BLE001 — never 500 the navigate surface
-        return _json_body({"nodes": [], "edges": [], "error": str(e)}), 200
+    from vivarium_dashboard.lib import report_views as _rv
+    body, status = _rv.build_linkage_index(
+        ws_root,
+        investigation=investigation,
+        source=source,
+        observable=observable,
+        observable_registry=observable_registry,
+        composite=composite,
+        observables_for_ref_fn=_observables_for_ref,
+    )
+    return _json_body(body), status
 
 
 def _needs_attention(ws_root: Path, *, investigation=None):
     """GET /api/needs-attention worker — ``(json_bytes, status)``.
 
-    SP5: runs the deterministic ``pbg_superpowers.needs_attention.
-    scan_investigation`` over the workspace and returns its
-    ``{"investigation", "items": [...], "summary": {...}}`` payload so the
-    dashboard can render a "Needs attention" panel on the investigation-detail
-    page. ``items`` arrive pre-sorted high→medium→low.
-
-    Build-free by default: we do NOT pass ``observables_for_ref`` (the opt-in
-    that would trigger a composite build). The dashboard adds NO AI — it only
-    runs the deterministic scan and renders. Tolerant: an older/absent
-    pbg_superpowers, or an unscannable workspace, returns 200 with the
-    empty-typed payload rather than a 500.
+    Thin shim — delegates to ``lib.report_views.build_needs_attention``.
     """
-    ws_root = Path(ws_root)
-    _empty = {
-        "investigation": investigation,
-        "items": [],
-        "summary": {"by_severity": {"high": 0, "medium": 0, "low": 0},
-                    "by_kind": {}, "total": 0},
-    }
-    try:
-        from pbg_superpowers import needs_attention as _na
-    except Exception:  # noqa: BLE001 — older pbg_superpowers lacks the module
-        return _json_body(_empty), 200
-    try:
-        return _json_body(_na.scan_investigation(ws_root, investigation)), 200
-    except Exception:  # noqa: BLE001 — scan/derive can fail; stay typed + 200
-        return _json_body(_empty), 200
+    from vivarium_dashboard.lib import report_views as _rv
+    body, status = _rv.build_needs_attention(ws_root, investigation=investigation)
+    return _json_body(body), status
 
 
 def _framework_metrics(ws_root: Path):
@@ -11948,153 +11762,12 @@ if __name__ == "__main__":
     def _iset_detail_data(name: str) -> "dict | None":
         """Pure builder for investigation (iset) detail — no socket I/O.
 
+        Thin shim — delegates to ``lib.report_views.build_iset_detail``.
         Returns the dict that GET /api/iset/<name> sends, or ``None`` when
-        the investigation.yaml does not exist.  Extracted from
-        ``_get_iset_detail`` so publish.py can call it without a live server.
+        the investigation.yaml does not exist.
         """
-        spec_path = workspace_paths().investigations / name / "investigation.yaml"
-        if not spec_path.is_file():
-            return None
-        try:
-            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-        except Exception:
-            return None
-
-        _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
-        from vivarium_dashboard.lib.investigations import normalize_dag_edges
-
-        def _normalize_parents(study_spec: dict) -> list:
-            return normalize_dag_edges(study_spec)
-
-        studies_out: list[dict] = []
-        for slug in (spec.get("studies") or []):
-            try:
-                sp = workspace_paths().study_dir(slug) / "study.yaml"
-            except FileNotFoundError:
-                sp = workspace_paths().investigations / slug / "spec.yaml"
-            if not sp.is_file():
-                studies_out.append({"name": slug, "status": "missing", "error": "study.yaml not found"})
-                continue
-            try:
-                study_spec = load_spec(sp)
-            except InvestigationSpecError as e:
-                studies_out.append({"name": slug, "status": "invalid", "error": str(e)})
-                continue
-            sim_set = study_spec.get("simulation_set") or []
-            beh_tests = study_spec.get("behavior_tests") or study_spec.get("expected_behavior") or []
-            readouts = study_spec.get("readouts") or study_spec.get("observables") or []
-            purpose = study_spec.get("purpose") or {}
-            question = (purpose.get("question") if isinstance(purpose, dict) else None) or study_spec.get("question", "")
-            follow_ups = study_spec.get("follow_up_studies") or []
-            disc_impl = study_spec.get("discovery_implications") or {}
-            disc_followups = (disc_impl.get("followup_study_proposals")
-                              if isinstance(disc_impl, dict) else None) or []
-            findings = _enrich_findings_with_weight(study_spec)
-            n_runs_for_study = _count_runs_for_study(study_spec["name"], study_spec)
-            raw_status = study_spec.get("status", "planned")
-            studies_out.append({
-                "name":                  study_spec["name"],
-                "status":                raw_status,
-                "effective_status":      compute_study_effective_status(
-                    raw_status,
-                    has_runs=n_runs_for_study > 0,
-                    has_active_run=_has_active_run_for_study(study_spec["name"], study_spec)),
-                "phase":                 study_spec.get("phase"),
-                "title":                 study_spec.get("title"),
-                "question":              question,
-                "n_variants":            len(sim_set) if sim_set else len(study_spec.get("variants") or []),
-                "n_interventions":       len(study_spec.get("interventions") or []),
-                "n_runs":                n_runs_for_study,
-                "baseline_source":       _format_baseline_source(study_spec),
-                "parent_studies":        _normalize_parents(study_spec),
-                "n_behaviors":           len(beh_tests),
-                "n_readouts":            len(readouts),
-                "n_requirements":        len(_normalize_requirements(study_spec.get("implementation_requirements") or study_spec.get("gaps"))),
-                "n_followups":           len(disc_followups) or len(follow_ups),
-                "follow_up_studies":     follow_ups,
-                "discovery_implications": disc_impl,
-                "n_findings":            len(findings),
-                "findings":              findings,
-                "claim":                 study_spec.get("claim"),
-                "confidence":            study_spec.get("confidence"),
-                "design_status":         study_spec.get("design_status"),
-                "implementation_status": study_spec.get("implementation_status"),
-                "simulation_status":     study_spec.get("simulation_status"),
-                "evaluation_status":     study_spec.get("evaluation_status"),
-                "gate_status":           study_spec.get("gate_status"),
-                "expert_review_status":  study_spec.get("expert_review_status"),
-                # Spine A2: surface the PERSISTED coded gate_evaluator (carries
-                # result + diverges_from_authored) so the report's per-study
-                # verdict pill can render a code-vs-authored divergence chip.
-                # Read-only passthrough; no recompute here.
-                "computed_gate_verdict": (
-                    (study_spec.get("pipeline_gate") or {}).get("gate_evaluator")
-                    if isinstance((study_spec.get("pipeline_gate") or {}).get("gate_evaluator"), dict)
-                    else None
-                ),
-            })
-
-        member_statuses = [s.get("status", "planning") for s in studies_out]
-        member_has_runs = [(s.get("n_runs") or 0) > 0 for s in studies_out]
-        effective_status = compute_investigation_status(
-            member_statuses, has_runs=member_has_runs,
-        )
-
-        computed_acceptance: "dict | None" = None
-        try:
-            from pbg_superpowers.investigation_status import roll_up_acceptance
-            from pbg_superpowers import study_io as _sio
-            wp = workspace_paths()
-            studies_by_name: dict = {}
-            for _sd in wp.iter_study_dirs():
-                _syp = _sd / "study.yaml"
-                if _syp.exists():
-                    try:
-                        studies_by_name[_sd.name] = _sio.load_yaml_mapping(_syp)
-                    except Exception:
-                        pass
-            computed_acceptance = roll_up_acceptance(spec, studies_by_name)
-            # Spine A1: surface the PERSISTED divergence flag (written by the
-            # investigation acceptance evaluator) so the executive fold can
-            # render a code-vs-authored badge. The recompute above gives the
-            # per-criterion table + computed verdict_status; we do NOT recompute
-            # diverges_from_authored here — we read the spine-written flag.
-            persisted_acc = (spec.get("executive") or {}).get("computed_acceptance")
-            if isinstance(persisted_acc, dict) and isinstance(computed_acceptance, dict):
-                if "diverges_from_authored" in persisted_acc:
-                    computed_acceptance["diverges_from_authored"] = (
-                        persisted_acc.get("diverges_from_authored")
-                    )
-        except Exception:
-            pass
-
-        return {
-            "name":                spec.get("name", name),
-            "title":               spec.get("title", spec.get("name", name)),
-            "description":         spec.get("description", ""),
-            "lead":                spec.get("lead", ""),
-            "at_a_glance":         spec.get("at_a_glance") or [],
-            "how_to_read":         spec.get("how_to_read") or [],
-            "glossary":            spec.get("glossary") or [],
-            "biological_story":    spec.get("biological_story", ""),
-            "question":            spec.get("question", ""),
-            "hypothesis":          spec.get("hypothesis", ""),
-            # Wave 3a #1 — what the investigation primarily evaluates
-            # (method | model | hypothesis | composition-protocol). Renders as a
-            # chip in the report header. Absent → no chip.
-            "object_of_evaluation": spec.get("object_of_evaluation"),
-            "status":              spec.get("status", "planning"),
-            "effective_status":    effective_status,
-            "expert_docs":         _coerce_list_field(spec, "expert_docs", source=str(spec_path)),
-            "acceptance_criteria": _coerce_list_field(spec, "acceptance_criteria", source=str(spec_path)),
-            "computed_acceptance": computed_acceptance,
-            "executive":           spec.get("executive") or {},
-            "scientific_argument": spec.get("scientific_argument") or {},
-            "references":          (spec.get("inputs") or {}).get("references") or [],
-            "proposed_inputs":     spec.get("proposed_inputs") or {},
-            "studies":             studies_out,
-        }
+        from vivarium_dashboard.lib import report_views as _rv
+        return _rv.build_iset_detail(WORKSPACE, name)
 
     @staticmethod
     def _build_api_workspace_response():

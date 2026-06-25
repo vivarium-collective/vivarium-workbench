@@ -1974,3 +1974,193 @@ class TestStudyDetailServerShimParity:
         r = client.get(f"/api/study/{bad_slug}")
         assert r.status_code == legacy_status == 400
         assert r.json() == legacy_body
+
+
+# ---------------------------------------------------------------------------
+# /api/report-lint
+# ---------------------------------------------------------------------------
+
+def test_report_lint_200_empty_workspace(client):
+    """An empty workspace returns 200 with findings list (possibly empty)."""
+    r = client.get("/api/report-lint")
+    assert r.status_code == 200
+    body = r.json()
+    assert "findings" in body
+    assert isinstance(body["findings"], list)
+
+
+def test_report_lint_typed_passthrough(client, monkeypatch):
+    """Extra fields on findings survive the typed response (pass-through model)."""
+    import vivarium_dashboard.api.app as _app
+
+    monkeypatch.setattr(
+        _app._report_views, "build_report_lint",
+        lambda ws: (
+            {"findings": [
+                {"study": "s1", "check": "missing_readouts",
+                 "severity": "warning", "message": "no readouts",
+                 "field_path": "readouts", "extra_field": "kept"},
+            ]},
+            200,
+        ),
+    )
+    body = client.get("/api/report-lint").json()
+    assert body["findings"][0]["study"] == "s1"
+    assert body["findings"][0]["extra_field"] == "kept"  # pass-through preserved
+
+
+def test_report_lint_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/report-lint" in spec["paths"]
+    assert "ReportLint" in spec["components"]["schemas"]
+
+
+# NOTE: GET /api/linkage-index is intentionally NOT ported in this batch (see
+# api/app.py).  Its server worker is exercised by tests/test_linkage_index_endpoint.py
+# and the lib builder by tests/test_report_views_lib.py.  Route + LinkageIndex
+# model re-added in a later observables/composite-state batch.
+
+
+# ---------------------------------------------------------------------------
+# /api/needs-attention
+# ---------------------------------------------------------------------------
+
+def test_needs_attention_200_empty_workspace(client):
+    r = client.get("/api/needs-attention")
+    assert r.status_code == 200
+    body = r.json()
+    assert "items" in body
+    assert isinstance(body["items"], list)
+
+
+def test_needs_attention_investigation_param(client, monkeypatch):
+    """?investigation= param is forwarded to build_needs_attention."""
+    import vivarium_dashboard.api.app as _app
+    captured: dict = {}
+
+    def _spy(ws, *, investigation=None):
+        captured["investigation"] = investigation
+        return {"investigation": investigation, "items": [], "summary": {}}, 200
+
+    monkeypatch.setattr(_app._report_views, "build_needs_attention", _spy)
+    client.get("/api/needs-attention?investigation=my-inv")
+    assert captured["investigation"] == "my-inv"
+
+
+def test_needs_attention_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/needs-attention" in spec["paths"]
+    assert "NeedsAttention" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# /api/inputs
+# ---------------------------------------------------------------------------
+
+def test_inputs_200_empty_workspace(client):
+    r = client.get("/api/inputs")
+    assert r.status_code == 200
+    body = r.json()
+    assert "investigation" in body
+    assert "global" in body
+    assert "current" in body
+
+
+def test_inputs_investigation_param(client, monkeypatch):
+    """?investigation= slug is forwarded to lib.report_views.build_inputs."""
+    import vivarium_dashboard.api.app as _app
+    captured: list = []
+
+    def _spy(ws, slug=None):
+        captured.append(slug)
+        return {"investigation": {}, "global": {}, "current": slug}
+
+    monkeypatch.setattr(_app._report_views, "build_inputs", _spy)
+    client.get("/api/inputs?investigation=my-slug")
+    assert captured and captured[0] == "my-slug"
+
+
+def test_inputs_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/inputs" in spec["paths"]
+    assert "InputsPayload" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# /api/iset/{slug}
+# ---------------------------------------------------------------------------
+
+def _make_iset_workspace(tmp_path):
+    """Workspace with one investigation.yaml."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "workspace.yaml").write_text("name: ws\n")
+    inv = ws / "investigations" / "my-inv"
+    inv.mkdir(parents=True)
+    import yaml as _yaml
+    (inv / "investigation.yaml").write_text(_yaml.safe_dump({
+        "name": "my-inv",
+        "title": "My Investigation",
+        "description": "test",
+        "status": "planning",
+        "studies": [],
+    }))
+    return ws
+
+
+def test_iset_detail_200(tmp_path):
+    ws = _make_iset_workspace(tmp_path)
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: ws
+    from fastapi.testclient import TestClient as _TC
+    c = _TC(app)
+    r = c.get("/api/iset/my-inv")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["name"] == "my-inv"
+    assert body["title"] == "My Investigation"
+    assert isinstance(body["studies"], list)
+
+
+def test_iset_detail_404_unknown_slug(client):
+    """Unknown slug returns 404 with the legacy error body."""
+    r = client.get("/api/iset/no-such-investigation")
+    assert r.status_code == 404
+    body = r.json()
+    assert "error" in body
+    assert "no investigation.yaml" in body["error"]
+    assert "detail" not in body   # must NOT be FastAPI default {"detail":...}
+
+
+def test_iset_detail_404_body_matches_legacy(tmp_path, monkeypatch):
+    """Exact 404 body parity with the legacy _get_iset_detail handler.
+
+    The legacy handler maps ``_iset_detail_data(...) is None`` to the verbatim
+    body ``{"error": "no investigation.yaml for '<slug>'"}``; the FastAPI route
+    must emit the identical 404 body.
+    """
+    import vivarium_dashboard.server as srv
+
+    ws = _make_iset_workspace(tmp_path)
+    slug = "no-such"
+
+    # Legacy handler maps a None builder result to the verbatim 404 string.
+    monkeypatch.setattr(srv, "WORKSPACE", ws)
+    srv._WP_CACHE.clear()
+    assert srv.Handler._iset_detail_data(slug) is None
+    legacy_body = {"error": f"no investigation.yaml for {slug!r}"}
+
+    # FastAPI route 404 body must be byte-identical.
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: ws
+    from fastapi.testclient import TestClient as _TC
+    c = _TC(app)
+    r = c.get(f"/api/iset/{slug}")
+    assert r.status_code == 404
+    assert r.json() == legacy_body
+
+
+def test_iset_detail_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/iset/{slug}" in spec["paths"]
+    assert "IsetDetail" in spec["components"]["schemas"]
