@@ -66,6 +66,14 @@ _MODELS: list[type[BaseModel]] = [
     _models.BranchInfo,
     _models.BranchesPayload,
     _models.BranchDiff,
+    # Investigation detail models
+    _models.VizHtmlFile,
+    _models.InvestigationVizHtmlPayload,
+    _models.InvestigationCompositeEntry,
+    _models.InvestigationCompositesPayload,
+    _models.InvestigationRigorPayload,
+    _models.InvestigationCompositeDocPayload,
+    _models.InvestigationHypothesesPayload,
 ]
 
 OUTPUT_PATH = (

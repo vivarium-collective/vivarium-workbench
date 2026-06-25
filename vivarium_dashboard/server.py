@@ -48,6 +48,7 @@ import yaml
 from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 from vivarium_dashboard.lib.atomic_io import atomic_write_text
 from vivarium_dashboard.lib import git_status as _git_status_lib
+from vivarium_dashboard.lib import investigation_views as _inv_views
 from vivarium_dashboard.lib import investigation_status as _invstatus
 from vivarium_dashboard.lib import data_sources as _data_sources_lib
 from vivarium_dashboard.lib import saved_visualizations as _savedviz_lib
@@ -6473,90 +6474,11 @@ def _framework_metrics(ws_root: Path):
 def _investigation_hypotheses(ws_root: Path, name: str):
     """GET /api/investigation-hypotheses worker — ``(json_bytes, status)``.
 
-    Wave 3b #6/#16: return the investigation's competing ``hypotheses[]`` with a
-    COMPUTED ``support_log`` folded in via the deterministic
-    ``pbg_superpowers.hypotheses.rollup_support`` (falling back to
-    ``score_support`` per hypothesis). The authored ``statement`` / ``predictions``
-    pass through; the SPA just renders the trajectory (no JS recompute, no drift).
-
-    AI-free + tolerant: an absent/old pbg_superpowers, a missing investigation,
-    or a compute failure returns 200 with the authored hypotheses (un-enriched)
-    rather than a 500 so the report's "Competing hypotheses" panel degrades.
+    Thin delegating shim → ``lib.investigation_views.build_investigation_hypotheses``.
+    Always returns HTTP 200; result encoded as JSON bytes via ``_json_body``.
     """
-    ws_root = Path(ws_root)
-    wp = WorkspacePaths.load(ws_root)
-    base = {"hypotheses": [], "investigation": name}
-
-    inv_path = wp.investigations / name / "investigation.yaml"
-    if not inv_path.is_file():
-        return _json_body(base), 200
-    try:
-        inv_spec = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
-    except Exception:  # noqa: BLE001
-        return _json_body(base), 200
-    if not isinstance(inv_spec, dict):
-        return _json_body(base), 200
-
-    authored = inv_spec.get("hypotheses")
-    authored = authored if isinstance(authored, list) else []
-    base["hypotheses"] = authored
-    if not authored:
-        return _json_body(base), 200
-
-    # Member study specs (slug strings or {name: slug}).
-    study_specs = []
-    for s in (inv_spec.get("studies") or []):
-        slug = s.get("name") if isinstance(s, dict) else s
-        if not slug:
-            continue
-        f = wp.studies / str(slug) / "study.yaml"
-        if not f.is_file():
-            continue
-        try:
-            sp = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
-        except Exception:  # noqa: BLE001
-            continue
-        if isinstance(sp, dict):
-            study_specs.append(sp)
-
-    # 1) Preferred: rollup_support returns the enriched inv_spec (or list).
-    try:
-        from pbg_superpowers.hypotheses import rollup_support
-    except Exception:  # noqa: BLE001 — older/absent pbg_superpowers
-        rollup_support = None
-    if rollup_support is not None:
-        try:
-            enriched = rollup_support(inv_spec, study_specs)
-            if isinstance(enriched, dict):
-                hyps = enriched.get("hypotheses")
-                if isinstance(hyps, list):
-                    base["hypotheses"] = hyps
-                    return _json_body(base), 200
-            elif isinstance(enriched, list):
-                base["hypotheses"] = enriched
-                return _json_body(base), 200
-        except Exception:  # noqa: BLE001
-            pass
-
-    # 2) Fallback: score_support per hypothesis.
-    try:
-        from pbg_superpowers.hypotheses import score_support
-    except Exception:  # noqa: BLE001
-        return _json_body(base), 200
-    out = []
-    for h in authored:
-        if not isinstance(h, dict):
-            continue
-        h2 = dict(h)
-        try:
-            log = score_support(h, study_specs)
-            if isinstance(log, list):
-                h2["support_log"] = log
-        except Exception:  # noqa: BLE001
-            pass
-        out.append(h2)
-    base["hypotheses"] = out
-    return _json_body(base), 200
+    body = _inv_views.build_investigation_hypotheses(Path(ws_root), name)
+    return _json_body(body), 200
 
 
 # ---------------------------------------------------------------------------
@@ -9467,58 +9389,36 @@ if __name__ == "__main__":
         ``/api/investigation-run-one``; the run handler writes one HTML file
         per inlined ``Visualization`` step under
         ``investigations/<inv>/viz/<run_id>/<name>.html``.
+
+        Thin delegating shim → ``lib.investigation_views.build_investigation_viz_html``.
         """
         from urllib.parse import urlparse, parse_qs
 
         qs = parse_qs(urlparse(self.path).query)
         inv = (qs.get("investigation") or [""])[0].strip()
         run_id = (qs.get("run_id") or [""])[0].strip()
-        if not inv or not run_id:
-            return self._json(
-                {"error": "investigation and run_id are required",
-                 "viz_files": []}, 400,
-            )
-        viz_dir = _study_dir(inv) / "viz" / run_id
-        if not viz_dir.is_dir():
-            return self._json({"viz_files": []}, 200)
-        out = []
-        for html_file in sorted(viz_dir.glob("*.html")):
-            out.append({
-                "name": html_file.stem,
-                "html_path": str(html_file.relative_to(WORKSPACE)),
-            })
-        return self._json({"viz_files": out}, 200)
+        try:
+            body = _inv_views.build_investigation_viz_html(WORKSPACE, inv, run_id)
+            return self._json(body, 200)
+        except _inv_views.InvViewError as exc:
+            return self._json(exc.body, exc.status)
 
     def _get_investigation_composites(self):
         """GET /api/investigation-composites?investigation=<n>
         Returns: {composites: [{name, source, params}]}
         Reads the v3 ``baseline`` list; each entry is projected to
         {name, source (was composite), params}.
+
+        Thin delegating shim → ``lib.investigation_views.build_investigation_composites``.
         """
         import urllib.parse
-        _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
         qs = urllib.parse.urlparse(self.path).query
         name = urllib.parse.parse_qs(qs).get('investigation', [''])[0].strip()
-        if not name:
-            return self._json({"error": "investigation is required"}, 400)
-        spec_path = _study_spec_path(name)
-        if not spec_path.is_file():
-            return self._json({"error": f"investigation '{name}' not found"}, 404)
         try:
-            spec = load_spec(spec_path)
-        except InvestigationSpecError as e:
-            return self._json({"error": f"spec error: {e}"}, 400)
-        items = [
-            {
-                "name":   b.get("name", ""),
-                "source": b.get("composite", ""),
-                "params": b.get("params") or {},
-            }
-            for b in (spec.get("baseline") or [])
-            if isinstance(b, dict)
-        ]
-        return self._json({"composites": items}, 200)
+            body = _inv_views.build_investigation_composites(WORKSPACE, name)
+            return self._json(body, 200)
+        except _inv_views.InvViewError as exc:
+            return self._json(exc.body, exc.status)
 
     def _get_investigation_state_tree(self):
         """GET /api/investigation-state-tree?investigation=<n>&composite=<c>
@@ -9592,34 +9492,18 @@ if __name__ == "__main__":
     def _get_investigation_rigor(self):
         """GET /api/investigation-rigor?investigation=<slug> — rigor roll-up
         across the investigation's member studies + investigation-level
-        dimensions (adversarial coverage, traceable methodology)."""
+        dimensions (adversarial coverage, traceable methodology).
+
+        Thin delegating shim → ``lib.investigation_views.build_investigation_rigor``.
+        """
         import urllib.parse as _up
         q = _up.parse_qs(_up.urlparse(self.path).query)
-        slug = (q.get("investigation") or [None])[0]
-        if not slug:
-            return self._json({"error": "missing ?investigation="}, 400)
-        inv_path = workspace_paths().investigations / slug / "investigation.yaml"
-        if not inv_path.is_file():
-            return self._json({"error": "investigation not found"}, 404)
+        slug = (q.get("investigation") or [""])[0] or ""
         try:
-            inv_spec = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
-        except Exception as e:
-            return self._json({"error": f"unreadable investigation.yaml: {e}"}, 200)
-        member_specs = []
-        for s in (inv_spec.get("studies") or []):
-            slug_s = s if isinstance(s, str) else (
-                (s.get("slug") or s.get("study")) if isinstance(s, dict) else None)
-            if not slug_s:
-                continue
-            sp = _study_detail_spec(slug_s)
-            if sp:
-                member_specs.append(sp)
-        try:
-            from pbg_superpowers.rigor import investigation_rigor
-            return self._json(investigation_rigor(inv_spec, member_specs), 200)
-        except Exception as e:
-            return self._json({"error": f"{type(e).__name__}: {e}",
-                               "dimensions": [], "per_study": {}, "score": {}, "summary": ""}, 200)
+            body = _inv_views.build_investigation_rigor(WORKSPACE, slug)
+            return self._json(body, 200)
+        except _inv_views.InvViewError as exc:
+            return self._json(exc.body, exc.status)
 
     def _get_investigation_registry(self):
         """GET /api/investigation-registry — Pass C cross-worktree view.
@@ -10134,21 +10018,18 @@ if __name__ == "__main__":
         Used by the Composites tab's bigraph-loom iframe to fetch the
         composite document as JSON (the iframe can't parse YAML in-browser
         without bundling a parser).
+
+        Thin delegating shim → ``lib.investigation_views.build_investigation_composite_doc``.
         """
         import urllib.parse
         qs = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(self.path).query))
         inv = qs.get('investigation', '').strip()
         comp = qs.get('composite', '').strip()
-        if not (inv and comp):
-            return self._json({"error": "investigation + composite required"}, 400)
-        path = _study_dir(inv) / "composites" / f"{comp}.yaml"
-        if not path.is_file():
-            return self._json({"error": "composite document not found"}, 404)
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        except Exception as e:
-            return self._json({"error": f"parse failed: {e}"}, 500)
-        return self._json({"state": doc}, 200)
+            body = _inv_views.build_investigation_composite_doc(WORKSPACE, inv, comp)
+            return self._json(body, 200)
+        except _inv_views.InvViewError as exc:
+            return self._json(exc.body, exc.status)
 
     def _get_investigations(self):
         """GET /api/investigations — return summaries of all investigations.

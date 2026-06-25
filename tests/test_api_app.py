@@ -1012,3 +1012,290 @@ def test_branch_diff_in_openapi(client):
     spec = client.get("/openapi.json").json()
     assert "/api/branch-diff" in spec["paths"]
     assert "BranchDiff" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# /api/investigation-viz-html
+# ---------------------------------------------------------------------------
+
+def test_investigation_viz_html_200(client, monkeypatch):
+    """Happy path: returns typed viz_files list."""
+    import vivarium_dashboard.api.app as _app
+    monkeypatch.setattr(
+        _app._inv_views, "build_investigation_viz_html",
+        lambda ws, inv, run_id: {
+            "viz_files": [
+                {"name": "chart", "html_path": "studies/my-inv/viz/run-1/chart.html"},
+                {"name": "summary", "html_path": "studies/my-inv/viz/run-1/summary.html"},
+            ]
+        },
+    )
+    r = client.get("/api/investigation-viz-html?investigation=my-inv&run_id=run-1")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["viz_files"]) == 2
+    assert body["viz_files"][0]["name"] == "chart"
+    assert "html_path" in body["viz_files"][0]
+
+
+def test_investigation_viz_html_400_missing_params(client):
+    """Missing ?investigation= or ?run_id= → HTTP 400 with {error, viz_files: []}
+    (NOT FastAPI's default {"detail": ...})."""
+    r = client.get("/api/investigation-viz-html")
+    assert r.status_code == 400
+    body = r.json()
+    assert set(body) == {"error", "viz_files"}
+    assert body["viz_files"] == []
+
+
+def test_investigation_viz_html_400_body_is_not_detail(client):
+    """Error body must use 'error' key, not FastAPI's 'detail'."""
+    r = client.get("/api/investigation-viz-html?investigation=x")
+    assert r.status_code == 400
+    assert "detail" not in r.json()
+    assert "error" in r.json()
+
+
+def test_investigation_viz_html_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/investigation-viz-html" in spec["paths"]
+    for name in ("InvestigationVizHtmlPayload", "VizHtmlFile"):
+        assert name in spec["components"]["schemas"], f"{name} missing from OpenAPI schema"
+
+
+# ---------------------------------------------------------------------------
+# /api/investigation-composites
+# ---------------------------------------------------------------------------
+
+def test_investigation_composites_200(client, monkeypatch):
+    """Happy path: returns typed composites list."""
+    import vivarium_dashboard.api.app as _app
+    monkeypatch.setattr(
+        _app._inv_views, "build_investigation_composites",
+        lambda ws, inv: {
+            "composites": [
+                {"name": "baseline-v1", "source": "pbg_ws.composites.baseline", "params": {"n": 10}},
+            ]
+        },
+    )
+    r = client.get("/api/investigation-composites?investigation=my-inv")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["composites"]) == 1
+    c = body["composites"][0]
+    assert c["name"] == "baseline-v1"
+    assert c["source"] == "pbg_ws.composites.baseline"
+    assert c["params"] == {"n": 10}
+
+
+def test_investigation_composites_400_missing(client):
+    """Missing ?investigation= → HTTP 400, {"error": ...} body."""
+    r = client.get("/api/investigation-composites")
+    assert r.status_code == 400
+    assert "error" in r.json()
+    assert "detail" not in r.json()
+
+
+def test_investigation_composites_404_not_found(client, monkeypatch):
+    """Unknown investigation → HTTP 404, {"error": ...}."""
+    import vivarium_dashboard.api.app as _app
+    from vivarium_dashboard.lib.investigation_views import InvViewError
+
+    def _raise(ws, inv):
+        raise InvViewError({"error": f"investigation '{inv}' not found"}, 404)
+
+    monkeypatch.setattr(_app._inv_views, "build_investigation_composites", _raise)
+    r = client.get("/api/investigation-composites?investigation=missing")
+    assert r.status_code == 404
+    assert r.json()["error"].startswith("investigation")
+    assert "detail" not in r.json()
+
+
+def test_investigation_composites_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/investigation-composites" in spec["paths"]
+    for name in ("InvestigationCompositesPayload", "InvestigationCompositeEntry"):
+        assert name in spec["components"]["schemas"], f"{name} missing from OpenAPI schema"
+
+
+# ---------------------------------------------------------------------------
+# /api/investigation-rigor
+# ---------------------------------------------------------------------------
+
+def test_investigation_rigor_200(client, monkeypatch):
+    """Happy path: returns rigor payload (variable shape, extra='allow')."""
+    import vivarium_dashboard.api.app as _app
+    monkeypatch.setattr(
+        _app._inv_views, "build_investigation_rigor",
+        lambda ws, inv: {
+            "dimensions": [{"name": "replication", "score": 0.8}],
+            "per_study": {"s1": {"score": 0.8}},
+            "score": {"total": 0.8},
+            "summary": "Good rigor",
+            "extra_field": "preserved",
+        },
+    )
+    r = client.get("/api/investigation-rigor?investigation=my-inv")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["summary"] == "Good rigor"
+    assert body["extra_field"] == "preserved"     # extra="allow"
+
+
+def test_investigation_rigor_200_with_error_field(client, monkeypatch):
+    """YAML parse failure / pbg_superpowers absence → 200 with error key (not 500)."""
+    import vivarium_dashboard.api.app as _app
+    monkeypatch.setattr(
+        _app._inv_views, "build_investigation_rigor",
+        lambda ws, inv: {"error": "ImportError: ..."},
+    )
+    r = client.get("/api/investigation-rigor?investigation=my-inv")
+    assert r.status_code == 200
+    assert "error" in r.json()
+
+
+def test_investigation_rigor_400_missing(client):
+    """Missing ?investigation= → HTTP 400, {"error": ...}."""
+    r = client.get("/api/investigation-rigor")
+    assert r.status_code == 400
+    assert "error" in r.json()
+    assert "detail" not in r.json()
+
+
+def test_investigation_rigor_404_not_found(client, monkeypatch):
+    """Unknown investigation → HTTP 404."""
+    import vivarium_dashboard.api.app as _app
+    from vivarium_dashboard.lib.investigation_views import InvViewError
+
+    def _raise(ws, inv):
+        raise InvViewError({"error": "investigation not found"}, 404)
+
+    monkeypatch.setattr(_app._inv_views, "build_investigation_rigor", _raise)
+    r = client.get("/api/investigation-rigor?investigation=missing")
+    assert r.status_code == 404
+    assert r.json() == {"error": "investigation not found"}
+
+
+def test_investigation_rigor_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/investigation-rigor" in spec["paths"]
+    assert "InvestigationRigorPayload" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# /api/investigation-composite-doc
+# ---------------------------------------------------------------------------
+
+def test_investigation_composite_doc_200(client, monkeypatch):
+    """Happy path: returns {state: <parsed YAML>}."""
+    import vivarium_dashboard.api.app as _app
+    monkeypatch.setattr(
+        _app._inv_views, "build_investigation_composite_doc",
+        lambda ws, inv, comp: {"state": {"process": "MyProcess", "config": {"n": 10}}},
+    )
+    r = client.get("/api/investigation-composite-doc?investigation=my-inv&composite=my-comp")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["state"]["process"] == "MyProcess"
+    assert body["state"]["config"]["n"] == 10
+
+
+def test_investigation_composite_doc_400_missing(client):
+    """Missing ?investigation= or ?composite= → HTTP 400."""
+    r = client.get("/api/investigation-composite-doc")
+    assert r.status_code == 400
+    assert "error" in r.json()
+    assert "detail" not in r.json()
+
+
+def test_investigation_composite_doc_404_not_found(client, monkeypatch):
+    """Composite file absent → HTTP 404, {"error": "composite document not found"}."""
+    import vivarium_dashboard.api.app as _app
+    from vivarium_dashboard.lib.investigation_views import InvViewError
+
+    def _raise(ws, inv, comp):
+        raise InvViewError({"error": "composite document not found"}, 404)
+
+    monkeypatch.setattr(_app._inv_views, "build_investigation_composite_doc", _raise)
+    r = client.get("/api/investigation-composite-doc?investigation=x&composite=y")
+    assert r.status_code == 404
+    assert r.json() == {"error": "composite document not found"}
+
+
+def test_investigation_composite_doc_500_parse_failure(client, monkeypatch):
+    """YAML parse failure → HTTP 500, {"error": "parse failed: ..."}."""
+    import vivarium_dashboard.api.app as _app
+    from vivarium_dashboard.lib.investigation_views import InvViewError
+
+    def _raise(ws, inv, comp):
+        raise InvViewError({"error": "parse failed: unexpected char"}, 500)
+
+    monkeypatch.setattr(_app._inv_views, "build_investigation_composite_doc", _raise)
+    r = client.get("/api/investigation-composite-doc?investigation=x&composite=y")
+    assert r.status_code == 500
+    assert "parse failed" in r.json()["error"]
+    assert "detail" not in r.json()
+
+
+def test_investigation_composite_doc_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/investigation-composite-doc" in spec["paths"]
+    assert "InvestigationCompositeDocPayload" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# /api/investigation-hypotheses
+# ---------------------------------------------------------------------------
+
+def test_investigation_hypotheses_200(client, monkeypatch):
+    """Happy path: returns {hypotheses: [...], investigation: name}."""
+    import vivarium_dashboard.api.app as _app
+    monkeypatch.setattr(
+        _app._inv_views, "build_investigation_hypotheses",
+        lambda ws, name: {
+            "hypotheses": [
+                {"id": "H1", "statement": "X causes Y", "support_log": []},
+            ],
+            "investigation": "my-inv",
+        },
+    )
+    r = client.get("/api/investigation-hypotheses?investigation=my-inv")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["investigation"] == "my-inv"
+    assert len(body["hypotheses"]) == 1
+    assert body["hypotheses"][0]["id"] == "H1"
+
+
+def test_investigation_hypotheses_missing_returns_empty(client):
+    """Missing or unknown investigation → 200 with empty hypotheses (never 404)."""
+    r = client.get("/api/investigation-hypotheses")
+    assert r.status_code == 200
+    body = r.json()
+    assert "hypotheses" in body
+    assert body["hypotheses"] == []
+
+
+def test_investigation_hypotheses_extra_fields_preserved(client, monkeypatch):
+    """Extra fields on hypothesis entries survive extra='allow'."""
+    import vivarium_dashboard.api.app as _app
+    monkeypatch.setattr(
+        _app._inv_views, "build_investigation_hypotheses",
+        lambda ws, name: {
+            "hypotheses": [{"id": "H1", "statement": "S", "custom_field": "kept"}],
+            "investigation": "x",
+            "extra_top": "also_kept",
+        },
+    )
+    r = client.get("/api/investigation-hypotheses?investigation=x")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["extra_top"] == "also_kept"   # extra="allow" on payload
+    # hypothesis entries are list[Any] so arbitrary keys survive
+    assert body["hypotheses"][0]["custom_field"] == "kept"
+
+
+def test_investigation_hypotheses_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/investigation-hypotheses" in spec["paths"]
+    assert "InvestigationHypothesesPayload" in spec["components"]["schemas"]

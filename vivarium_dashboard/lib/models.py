@@ -590,6 +590,109 @@ class BranchDiff(BaseModel):
     diff_stat: str = ""
 
 
+# ---------------------------------------------------------------------------
+# Investigation detail models
+# ---------------------------------------------------------------------------
+
+class VizHtmlFile(BaseModel):
+    """One HTML viz file entry in the ``GET /api/investigation-viz-html`` payload."""
+
+    name: str        # stem of the .html filename (e.g. "time_series_plot")
+    html_path: str   # workspace-relative path served by the static-file handler
+
+
+class InvestigationVizHtmlPayload(BaseModel):
+    """``GET /api/investigation-viz-html`` payload.
+
+    HTTP 400 when ``investigation`` or ``run_id`` is missing; on the error path
+    the body is ``{error, viz_files: []}`` (not ``{detail}``) — preserved by
+    ``extra="allow"``.  The 200 path always has ``viz_files`` (empty when the
+    viz dir does not exist yet).
+
+    Source: ``lib.investigation_views.build_investigation_viz_html``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    viz_files: list[VizHtmlFile] = []
+    error: Optional[str] = None
+
+
+class InvestigationCompositeEntry(BaseModel):
+    """One composite entry in the ``GET /api/investigation-composites`` payload.
+
+    Projected from the investigation's v3 ``baseline[]`` list:
+    ``name`` / ``source`` (was ``composite``) / ``params``.
+    """
+
+    name: str = ""
+    source: str = ""
+    params: Optional[Any] = None
+
+
+class InvestigationCompositesPayload(BaseModel):
+    """``GET /api/investigation-composites`` payload.
+
+    HTTP 400 when ``?investigation=`` is missing or the spec is malformed;
+    HTTP 404 when the investigation is not found.
+
+    Source: ``lib.investigation_views.build_investigation_composites``.
+    """
+
+    composites: list[InvestigationCompositeEntry] = []
+
+
+class InvestigationRigorPayload(BaseModel):
+    """``GET /api/investigation-rigor`` payload.
+
+    The shape returned by ``pbg_superpowers.rigor.investigation_rigor`` is
+    variable (dimension objects, per-study breakdown, aggregate score).
+    ``extra="allow"`` passes all keys through without stripping.
+
+    HTTP 400 when ``?investigation=`` is missing; HTTP 404 when the
+    investigation.yaml does not exist.  YAML parse errors and
+    ``pbg_superpowers`` import failures return 200 with an ``error`` key
+    (degraded, not 500).
+
+    Source: ``lib.investigation_views.build_investigation_rigor``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    error: Optional[str] = None
+
+
+class InvestigationCompositeDocPayload(BaseModel):
+    """``GET /api/investigation-composite-doc`` payload.
+
+    Returns ``{state: <parsed composite YAML>}`` as JSON.  The YAML document
+    shape is composite-specific so ``state`` is typed ``Any``.
+
+    HTTP 400 when ``investigation`` or ``composite`` is missing; HTTP 404 when
+    the composite YAML file does not exist; HTTP 500 on YAML parse failure.
+
+    Source: ``lib.investigation_views.build_investigation_composite_doc``.
+    """
+
+    state: Any = None
+
+
+class InvestigationHypothesesPayload(BaseModel):
+    """``GET /api/investigation-hypotheses`` payload.
+
+    Returns ``{hypotheses: [...], investigation: name}``.  Each hypothesis
+    dict is arbitrary (author-authored YAML) so the list is typed
+    ``list[Any]``.  Always HTTP 200 — never raises (tolerant fallback).
+
+    Source: ``lib.investigation_views.build_investigation_hypotheses``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    hypotheses: list[Any] = []
+    investigation: str = ""
+
+
 class CompositeResolvePayload(BaseModel):
     """``GET /api/composite-resolve`` payload (lib.composite_resolve.resolve_composite).
 

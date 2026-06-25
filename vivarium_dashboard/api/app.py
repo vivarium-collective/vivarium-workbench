@@ -38,6 +38,7 @@ from fastapi.responses import JSONResponse
 from vivarium_dashboard.lib import data_sources as _data_sources
 from vivarium_dashboard.lib import git_status as _git_status
 from vivarium_dashboard.lib import investigation_status
+from vivarium_dashboard.lib import investigation_views as _inv_views
 from vivarium_dashboard.lib import saved_visualizations as _saved_viz
 from vivarium_dashboard.lib.composite_resolve import resolve_composite
 from vivarium_dashboard.lib.composites_query import composites_via_subprocess
@@ -58,7 +59,12 @@ from vivarium_dashboard.lib.models import (
     DirtyFile,
     DirtyStatus,
     GitStatus,
+    InvestigationCompositeDocPayload,
+    InvestigationCompositesPayload,
+    InvestigationHypothesesPayload,
+    InvestigationRigorPayload,
     InvestigationSummary,
+    InvestigationVizHtmlPayload,
     InvestigationsPayload,
     ReferencesBibPayload,
     RegistryPayload,
@@ -136,6 +142,14 @@ _OPENAPI_TAGS = [
             "Read-only git/branch status endpoints: live sync state, workstream "
             "activity, branch staleness, dirty-file list, stage-branch index, "
             "and branch diff summary."
+        ),
+    },
+    {
+        "name": "Investigations detail",
+        "description": (
+            "Per-investigation detail endpoints: viz HTML files, composite "
+            "baseline list, rigor roll-up, composite YAML document, and "
+            "competing hypotheses with support-log enrichment."
         ),
     },
 ]
@@ -580,6 +594,164 @@ def create_app() -> FastAPI:
         except ValueError:
             return JSONResponse(status_code=400, content={"error": "invalid branch name"})
         return BranchDiff.model_validate(payload)
+
+    # -----------------------------------------------------------------------
+    # Investigations detail routes
+    # -----------------------------------------------------------------------
+
+    @app.get(
+        "/api/investigation-viz-html",
+        response_model=InvestigationVizHtmlPayload,
+        tags=["Investigations detail"],
+        summary="Viz HTML files for one investigation run",
+    )
+    def investigation_viz_html_route(
+        investigation: Optional[str] = None,
+        run_id: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[InvestigationVizHtmlPayload, JSONResponse]:
+        """List persisted viz HTML files for one run of an investigation.
+
+        Returns ``{viz_files: [{name, html_path}]}``.  ``html_path`` is the
+        workspace-relative path the static-file handler serves.  Returns an
+        empty ``viz_files`` list when the viz directory does not exist yet
+        (run has no rendered files).
+
+        HTTP 400 when ``?investigation=`` or ``?run_id=`` is missing.  The 400
+        body is ``{error, viz_files: []}`` — byte-identical to the legacy
+        ``_get_investigation_viz_html``.
+
+        Library-backed via ``lib.investigation_views.build_investigation_viz_html``.
+        """
+        try:
+            body = _inv_views.build_investigation_viz_html(
+                ws, investigation or "", run_id or ""
+            )
+        except _inv_views.InvViewError as exc:
+            return JSONResponse(status_code=exc.status, content=exc.body)
+        return InvestigationVizHtmlPayload.model_validate(body)
+
+    @app.get(
+        "/api/investigation-composites",
+        response_model=InvestigationCompositesPayload,
+        tags=["Investigations detail"],
+        summary="Composite baseline entries for an investigation",
+    )
+    def investigation_composites_route(
+        investigation: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[InvestigationCompositesPayload, JSONResponse]:
+        """List the composite baseline entries from an investigation's spec.
+
+        Returns ``{composites: [{name, source, params}]}``, projected from
+        the v3 ``baseline[]`` list in the investigation's ``study.yaml`` /
+        ``spec.yaml``.
+
+        HTTP 400 when ``?investigation=`` is missing or the spec is malformed;
+        HTTP 404 when no spec file exists for the given investigation name.
+        Error bodies are ``{"error": <msg>}`` — byte-identical to the legacy
+        ``_get_investigation_composites``.
+
+        Library-backed via
+        ``lib.investigation_views.build_investigation_composites``.
+        """
+        try:
+            body = _inv_views.build_investigation_composites(
+                ws, investigation or ""
+            )
+        except _inv_views.InvViewError as exc:
+            return JSONResponse(status_code=exc.status, content=exc.body)
+        return InvestigationCompositesPayload.model_validate(body)
+
+    @app.get(
+        "/api/investigation-rigor",
+        response_model=InvestigationRigorPayload,
+        tags=["Investigations detail"],
+        summary="Rigor roll-up across an investigation's member studies",
+    )
+    def investigation_rigor_route(
+        investigation: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[InvestigationRigorPayload, JSONResponse]:
+        """Rigor roll-up across the investigation's member studies.
+
+        Returns a nested rigor dict from
+        ``pbg_superpowers.rigor.investigation_rigor``.  When
+        ``pbg_superpowers.rigor`` is unavailable or raises, returns 200 with
+        ``{error, dimensions, per_study, score, summary}`` (degraded — never
+        500).  A YAML parse failure on the investigation.yaml also returns
+        200 with an ``error`` field.
+
+        HTTP 400 when ``?investigation=`` is missing; HTTP 404 when
+        ``investigations/<slug>/investigation.yaml`` does not exist.  Error
+        bodies are ``{"error": <msg>}`` — byte-identical to the legacy
+        ``_get_investigation_rigor``.
+
+        Library-backed via
+        ``lib.investigation_views.build_investigation_rigor``.
+        """
+        try:
+            body = _inv_views.build_investigation_rigor(ws, investigation or "")
+        except _inv_views.InvViewError as exc:
+            return JSONResponse(status_code=exc.status, content=exc.body)
+        return InvestigationRigorPayload.model_validate(body)
+
+    @app.get(
+        "/api/investigation-composite-doc",
+        response_model=InvestigationCompositeDocPayload,
+        tags=["Investigations detail"],
+        summary="Parsed composite YAML document for the bigraph-loom iframe",
+    )
+    def investigation_composite_doc_route(
+        investigation: Optional[str] = None,
+        composite: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[InvestigationCompositeDocPayload, JSONResponse]:
+        """Return a composite YAML document as JSON for the bigraph-loom iframe.
+
+        The iframe can't parse YAML in-browser; this endpoint converts
+        ``investigations/<inv>/composites/<composite>.yaml`` (or
+        ``studies/<inv>/composites/<composite>.yaml``) to ``{state: <parsed>}``.
+
+        HTTP 400 when ``?investigation=`` or ``?composite=`` is missing;
+        HTTP 404 when the composite YAML file does not exist; HTTP 500 on YAML
+        parse failure.  Error bodies are ``{"error": <msg>}`` — byte-identical
+        to the legacy ``_get_investigation_composite_doc``.
+
+        Library-backed via
+        ``lib.investigation_views.build_investigation_composite_doc``.
+        """
+        try:
+            body = _inv_views.build_investigation_composite_doc(
+                ws, investigation or "", composite or ""
+            )
+        except _inv_views.InvViewError as exc:
+            return JSONResponse(status_code=exc.status, content=exc.body)
+        return InvestigationCompositeDocPayload.model_validate(body)
+
+    @app.get(
+        "/api/investigation-hypotheses",
+        response_model=InvestigationHypothesesPayload,
+        tags=["Investigations detail"],
+        summary="Competing hypotheses with computed support log",
+    )
+    def investigation_hypotheses_route(
+        investigation: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> InvestigationHypothesesPayload:
+        """Competing hypotheses for an investigation, with support-log enrichment.
+
+        Returns ``{hypotheses: [...], investigation: name}``.  Each hypothesis
+        carries a computed ``support_log`` (via
+        ``pbg_superpowers.hypotheses.rollup_support`` / ``score_support``).
+        Always HTTP 200 — missing investigations return an empty list rather
+        than 404; import / compute failures degrade to the authored hypotheses.
+
+        Library-backed via
+        ``lib.investigation_views.build_investigation_hypotheses``.
+        """
+        body = _inv_views.build_investigation_hypotheses(ws, investigation or "")
+        return InvestigationHypothesesPayload.model_validate(body)
 
     return app
 
