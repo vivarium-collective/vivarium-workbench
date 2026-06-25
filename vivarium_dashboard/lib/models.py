@@ -598,23 +598,20 @@ class PendingEntries(BaseModel):
     """``GET /api/pending`` payload (lib.work_views.build_pending).
 
     Panel-keyed dict of unmerged ``stage/*`` branch entries not yet on
-    ``main``'s ``workspace.yaml``.  Each panel is a list of
+    ``main``'s ``workspace.yaml``.  Each panel
+    (``observables`` / ``visualizations`` / ``phases`` / ``datasets`` /
+    ``references_pdfs`` / ``expert_docs`` / ``imports``) is a list of
     ``{entry: <dict>, branch: <str>}`` objects.
 
     HTTP 200 on success; HTTP 500 ``{error}`` on an unexpected exception.
-    ``extra="allow"`` preserves any future panel additions without breaking
-    the route.
+
+    Pure pass-through (``extra="allow"``, no declared fields) like
+    :class:`StudyDetail` / the explorer models: a non-git workspace returns
+    ``{}`` verbatim, while a populated workspace returns the 7-panel dict — no
+    default-injection so the builder dict survives byte-identically.
     """
 
     model_config = ConfigDict(extra="allow")
-
-    observables: list[Any] = []
-    visualizations: list[Any] = []
-    phases: list[Any] = []
-    datasets: list[Any] = []
-    references_pdfs: list[Any] = []
-    expert_docs: list[Any] = []
-    imports: list[Any] = []
 
 
 class GenerationSummary(BaseModel):

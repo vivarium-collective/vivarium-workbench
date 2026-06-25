@@ -162,34 +162,7 @@ class TestBuildGeneration:
             label = "test-label"
             runs = [1, 2, 3]  # len = 3
 
-        import vivarium_dashboard.lib.work_views as wv
-        # patch at the module level inside work_views
-        import importlib
-        import unittest.mock as mock
-
-        with mock.patch.dict("sys.modules", {}):
-            # Patch pbg_superpowers.generation in work_views' import scope
-            fake_gen_mod = mock.MagicMock()
-            fake_gen_mod.current_generation.return_value = _FakeGen()
-            with mock.patch("vivarium_dashboard.lib.work_views.build_generation") as _bg:
-                _bg.return_value = {
-                    "generation": {
-                        "generation_id": "gen-001",
-                        "git_sha": "abc123",
-                        "param_set_hash": "hashXYZ",
-                        "created_at": "2026-06-25T00:00:00",
-                        "label": "test-label",
-                        "n_runs": 3,
-                    }
-                }
-                result = wv.build_generation(git_ws)
-                # The mock was patched at the function level above, so call the real thing
-        # Simpler: monkeypatch the generation module
-        try:
-            import pbg_superpowers.generation as gen_mod
-        except ImportError:
-            pytest.skip("pbg_superpowers.generation not available")
-
+        import pbg_superpowers.generation as gen_mod
         monkeypatch.setattr(gen_mod, "current_generation",
                             lambda ws_root: _FakeGen())
         from vivarium_dashboard.lib.work_views import build_generation

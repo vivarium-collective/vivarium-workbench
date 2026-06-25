@@ -252,13 +252,6 @@ export interface BranchDiff {
 }
 
 export interface PendingEntries {
-  observables: any[];
-  visualizations: any[];
-  phases: any[];
-  datasets: any[];
-  references_pdfs: any[];
-  expert_docs: any[];
-  imports: any[];
 }
 
 export interface GenerationSummary {

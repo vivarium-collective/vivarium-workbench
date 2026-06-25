@@ -2900,13 +2900,14 @@ class TestPtoolsLaunchRoute:
 
 class TestPendingRoute:
     def test_pending_empty_workspace_returns_200(self, client):
-        """An empty tmp workspace (not a git repo) → 200 with empty dict body."""
+        """A non-git tmp workspace → 200 with EXACTLY {} (byte-identical to legacy).
+
+        PendingEntries is a pure pass-through (no declared fields), so the
+        builder's ``{}`` is NOT inflated into the 7-empty-panel structure.
+        """
         r = client.get("/api/pending")
-        # Non-git dir → {} from build_pending (inner git failures return {})
         assert r.status_code == 200
-        # Body may be {} or the 7-panel structure; either is valid
-        body = r.json()
-        assert isinstance(body, dict)
+        assert r.json() == {}
 
     def test_pending_typed_passthrough(self, client, monkeypatch):
         """A full pending payload validates through PendingEntries (extra='allow')."""
