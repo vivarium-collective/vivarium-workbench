@@ -12792,7 +12792,8 @@ if __name__ == "__main__":
                 if ws_file.exists():
                     text = ws_file.read_text(encoding="utf-8")
                     if text != last_state:
-                        payload = _events_lib.workspace_state_payload(WORKSPACE)
+                        # Derive payload from the SAME text we deduped on (single read).
+                        payload = _events_lib.payload_from_text(text)
                         self.wfile.write(b"event: state\ndata: ")
                         self.wfile.write(payload.encode())
                         self.wfile.write(b"\n\n")

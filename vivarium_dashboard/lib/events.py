@@ -16,20 +16,29 @@ from typing import AsyncGenerator
 import yaml
 
 
-def workspace_state_payload(ws_root: Path) -> str:
-    """Encode ``<ws_root>/workspace.yaml`` as a JSON string.
+def payload_from_text(text: str) -> str:
+    """Encode already-read ``workspace.yaml`` text as the SSE JSON payload.
 
-    Reads the file and returns ``json.dumps(yaml.safe_load(text))`` on success,
-    or ``json.dumps({"_error": "yaml parse"})`` when the YAML cannot be parsed.
-
-    Callers are responsible for checking that the file exists before calling;
-    ``FileNotFoundError`` propagates so the stream can skip a missing file.
+    Returns ``json.dumps(yaml.safe_load(text))`` on success, or
+    ``json.dumps({"_error": "yaml parse"})`` when the YAML cannot be parsed.
+    Split out so a caller that has already read the file (the dedup loop)
+    derives the payload from the SAME bytes it deduped on — no second read,
+    no read-vs-emit TOCTOU divergence.
     """
-    text = (ws_root / "workspace.yaml").read_text(encoding="utf-8")
     try:
         return json.dumps(yaml.safe_load(text))
     except Exception:  # noqa: BLE001
         return json.dumps({"_error": "yaml parse"})
+
+
+def workspace_state_payload(ws_root: Path) -> str:
+    """Encode ``<ws_root>/workspace.yaml`` as a JSON string.
+
+    Reads the file and delegates to :func:`payload_from_text`. Callers are
+    responsible for checking that the file exists before calling;
+    ``FileNotFoundError`` propagates so the stream can skip a missing file.
+    """
+    return payload_from_text((ws_root / "workspace.yaml").read_text(encoding="utf-8"))
 
 
 async def workspace_state_stream(
@@ -59,11 +68,17 @@ async def workspace_state_stream(
     ws_file = ws_root / "workspace.yaml"
     last_state: str | None = None
 
-    while True:
-        if ws_file.exists():
-            text = ws_file.read_text(encoding="utf-8")
-            if text != last_state:
-                payload = workspace_state_payload(ws_root)
-                yield b"event: state\ndata: " + payload.encode() + b"\n\n"
-                last_state = text
-        await asyncio.sleep(poll_interval)
+    try:
+        while True:
+            if ws_file.exists():
+                text = ws_file.read_text(encoding="utf-8")
+                if text != last_state:
+                    # Derive the payload from the SAME text we deduped on
+                    # (single read — no read-vs-emit divergence).
+                    yield b"event: state\ndata: " + payload_from_text(text).encode() + b"\n\n"
+                    last_state = text
+            await asyncio.sleep(poll_interval)
+    except asyncio.CancelledError:
+        # Client disconnected — Starlette cancels the generator. Return quietly,
+        # mirroring the legacy handler's BrokenPipeError/ConnectionResetError catch.
+        return

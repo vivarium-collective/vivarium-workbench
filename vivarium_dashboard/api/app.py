@@ -37,10 +37,10 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from pydantic import ValidationError
 
 from vivarium_dashboard.lib import composite_run_views as _cr_views
-from vivarium_dashboard.lib import events as _events
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
 from vivarium_dashboard.lib import data_sources as _data_sources
 from vivarium_dashboard.lib import download_views as _download_views
+from vivarium_dashboard.lib import events as _events
 from vivarium_dashboard.lib import explorer_data as _explorer_data
 from vivarium_dashboard.lib import git_status as _git_status
 from vivarium_dashboard.lib import investigation_status
