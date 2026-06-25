@@ -742,3 +742,99 @@ class CompositeResolvePayload(BaseModel):
     kind: Optional[str] = None
     module: Optional[str] = None
     default_n_steps: Optional[int] = None
+
+
+# ---------------------------------------------------------------------------
+# Data explorer models  (GET /api/explorer/*)
+# ---------------------------------------------------------------------------
+
+class ExplorerRuns(BaseModel):
+    """``GET /api/explorer/runs`` payload (lib.explorer_data.list_runs).
+
+    Returns the run-picker list for the Data Explorer card.  On error the body
+    carries ``error`` plus an empty ``runs`` list — still HTTP 200 (never-500
+    contract).  ``extra="allow"`` passes the ``error`` key through on the error
+    path and any future builder keys through intact.  No ``error`` field is
+    declared here so that the success path does NOT inject ``"error": null``
+    (that would break byte-identity with the legacy handler).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    runs: list[Any] = []
+
+
+class ExplorerObservables(BaseModel):
+    """``GET /api/explorer/observables`` payload (lib.explorer_data.list_observables).
+
+    Success shape: ``{categories: {<category>: [<observable>, …], …}}``.
+    Error/missing-db shape (still HTTP 200): ``{error, categories: {}}``.
+    ``extra="allow"`` passes ``error`` through on the error path without
+    injecting ``"error": null`` on the success path.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    categories: Any = None
+
+
+class ExplorerSeries(BaseModel):
+    """``GET /api/explorer/series`` payload (lib.explorer_data.get_series).
+
+    Success shape: ``{time: […], series: {<key>: […], …}}``.
+    Error/missing-db shape (still HTTP 200): ``{error, time: [], series: {}}``.
+    ``extra="allow"`` passes ``error`` through on the error path.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    time: list[Any] = []
+    series: Any = None
+
+
+class ExplorerFlux(BaseModel):
+    """``GET /api/explorer/flux`` payload (lib.explorer_data.get_flux_auto).
+
+    Success shape: ``{step, time, fluxes: {<bigg_id>: <float>}, coverage: {…}}``.
+    Error/missing-db shape (still HTTP 200): ``{error, fluxes: {}}``.
+    ``extra="allow"`` preserves ``step``, ``time``, ``coverage`` from the builder
+    and passes ``error`` through on the error path.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    fluxes: Any = None
+
+
+class ExplorerVector(BaseModel):
+    """``GET /api/explorer/vector`` payload (lib.explorer_data.get_vector).
+
+    Success shape: ``{ids: […], values: […], step: int, time: float|null}``.
+    Error/missing-db shape (still HTTP 200):
+    ``{error, ids: [], values: [], step: int, time: null}``.
+    ``extra="allow"`` passes ``error`` through on the error path.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    ids: list[Any] = []
+    values: list[Any] = []
+    step: int = 0
+    time: Any = None
+
+
+class ExplorerProteinBreakdown(BaseModel):
+    """``GET /api/explorer/protein-breakdown`` payload.
+
+    Backed by ``lib.explorer_data.get_protein_breakdown``.
+    Success shape: ``{breakdown: {<category>: <mass>}, step: int, time: float|null}``.
+    Error/missing-db shape (still HTTP 200):
+    ``{error, breakdown: {}, step: int, time: null}``.
+    ``extra="allow"`` passes ``error`` through on the error path.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    breakdown: Any = None
+    step: int = 0
+    time: Any = None

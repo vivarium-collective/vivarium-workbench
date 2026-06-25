@@ -78,6 +78,13 @@ _MODELS: list[type[BaseModel]] = [
     _models.InvestigationRigor,
     # Studies detail model
     _models.StudyDetail,
+    # Data explorer models
+    _models.ExplorerRuns,
+    _models.ExplorerObservables,
+    _models.ExplorerSeries,
+    _models.ExplorerFlux,
+    _models.ExplorerVector,
+    _models.ExplorerProteinBreakdown,
 ]
 
 OUTPUT_PATH = (
