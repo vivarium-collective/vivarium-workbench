@@ -51,6 +51,7 @@ from vivarium_dashboard.lib import study_spec as _study_spec
 from vivarium_dashboard.lib import study_viz_views as _study_viz
 from vivarium_dashboard.lib import system_info as _system_info
 from vivarium_dashboard.lib import work_views as _work_views
+from vivarium_dashboard.lib import workspace_deps_views as _workspace_deps
 from vivarium_dashboard.lib.composite_resolve import resolve_composite
 from vivarium_dashboard.lib.composites_query import composites_via_subprocess
 from vivarium_dashboard.lib.models import (
@@ -105,14 +106,17 @@ from vivarium_dashboard.lib.models import (
     PtoolsLaunch,
     SimRow,
     SimulationsPayload,
+    SourceBuilds,
     StudyBigraphPaths,
     StudyChartsPayload,
+    SystemDepsCheck,
     UiConfig,
     VisualizationClassesPayload,
     VisualizationInstances,
     VisualizationStatus,
     VizClass,
     WorkspaceHome,
+    WorkspacesList,
     WorkStatusActive,
     WorkStatusInactive,
     Generation,
@@ -147,6 +151,15 @@ _OPENAPI_TAGS = [
             "repo slug, UI feature flags, and workspace narrative metadata. "
             "All routes always return HTTP 200 (best-effort; errors degrade "
             "to empty-default bodies)."
+        ),
+    },
+    {
+        "name": "Workspace & source",
+        "description": (
+            "Workspace-switcher dropdown, remote sms-api build list, and "
+            "catalog system-dependency check.  source/builds and workspaces "
+            "always return HTTP 200 (best-effort); system-deps-check returns "
+            "400/404/200."
         ),
     },
     {
@@ -1938,6 +1951,79 @@ def create_app() -> FastAPI:
         if status == 200:
             return CompositeRunTrajectory.model_validate(body)
         return JSONResponse(status_code=status, content=body)
+
+    # Workspace & source routes  (Batch 13)
+    # -----------------------------------------------------------------------
+
+    @app.get(
+        "/api/source/builds",
+        response_model=SourceBuilds,
+        tags=["Workspace & source"],
+        summary="Remote sms-api simulator build list for the source dropdown",
+    )
+    def source_builds_route() -> SourceBuilds:
+        """Remote sms-api build list (mirrors the stdlib GET /api/source/builds).
+
+        Best-effort: returns ``{builds: [], error: <reason>}`` when the sms-api
+        tunnel is not reachable.  Always HTTP 200.  No workspace dependency — the
+        sms-api base URL is read from the ``SMS_API_BASE`` env var.
+
+        Library-backed via ``lib.workspace_deps_views.build_source_builds``.
+        """
+        return SourceBuilds.model_validate(_workspace_deps.build_source_builds())
+
+    @app.get(
+        "/api/workspaces",
+        response_model=WorkspacesList,
+        tags=["Workspace & source"],
+        summary="Workspace-switcher dropdown (catalog + live server status)",
+    )
+    def workspaces_route(ws: Path = Depends(get_workspace)) -> WorkspacesList:
+        """Workspace-switcher dropdown payload (mirrors the stdlib GET /api/workspaces).
+
+        Reads ``~/.pbg/workspaces.json`` (global catalog) and joins each entry
+        with ``~/.pbg/servers/<name>.json`` to determine live/stale/stopped
+        status.  Returns ``{current: {name, path}, workspaces: [...]}``.
+
+        Always HTTP 200 — falls back to current-workspace-only when the catalog
+        is missing or corrupt.
+
+        Library-backed via ``lib.workspace_deps_views.build_workspaces``.
+        """
+        return WorkspacesList.model_validate(_workspace_deps.build_workspaces(ws))
+
+    @app.get(
+        "/api/system-deps-check",
+        response_model=SystemDepsCheck,
+        tags=["Workspace & source"],
+        summary="Check whether a catalog module's system dependencies are satisfied",
+    )
+    def system_deps_check_route(
+        name: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[SystemDepsCheck, JSONResponse]:
+        """System-dependency check for a catalog module (mirrors the stdlib
+        GET /api/system-deps-check?name=<module>).
+
+        Runs each ``system_dependencies.checks[]`` entry's ``import_check``
+        snippet inside the workspace venv (``<ws>/.venv/bin/python3``) and
+        returns structured results:
+        ``{name, platform, ok, checks: [{name, description, ok, reason, install,
+        notes}]}``.
+
+        Error paths replicate the legacy handler's exact status codes + bodies
+        (``{"error": ...}`` via :class:`JSONResponse`):
+
+        - HTTP 400 ``{"error": "name required"}`` — ``?name=`` missing or empty.
+        - HTTP 404 ``{"error": "unknown module: <name>"}`` — not in registry.
+        - HTTP 200 — the full check payload (validated through SystemDepsCheck).
+
+        Library-backed via ``lib.workspace_deps_views.build_system_deps_check``.
+        """
+        body, status = _workspace_deps.build_system_deps_check(ws, name or "")
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return SystemDepsCheck.model_validate(body)
 
     return app
 

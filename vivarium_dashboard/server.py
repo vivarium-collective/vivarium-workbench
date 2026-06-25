@@ -11830,44 +11830,15 @@ if __name__ == "__main__":
 
         Returns: ``{name, platform, ok, checks: [{name, description, ok,
         reason, install: {manager, commands, notes}|null, notes}]}``.
+
+        Delegates to ``lib.workspace_deps_views.build_system_deps_check``.
         """
         import urllib.parse
+        from vivarium_dashboard.lib.workspace_deps_views import build_system_deps_check
         qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
         name = (qs.get("name", [""])[0]).strip()
-        if not name:
-            return self._json({"error": "name required"}, 400)
-
-        catalog = self._module_registry()
-        entry = next((m for m in catalog if m.get("name") == name), None)
-        if entry is None:
-            return self._json({"error": f"unknown module: {name}"}, 404)
-
-        sys_deps = (entry.get("system_dependencies") or {}).get("checks") or []
-        venv_py = WORKSPACE / ".venv" / "bin" / "python3"
-        plat = _platform_key()
-
-        results = []
-        all_ok = True
-        for check in sys_deps:
-            ok, reason = _check_system_dep(check, venv_py)
-            if not ok:
-                all_ok = False
-            install_block = check.get("install") if isinstance(check.get("install"), dict) else None
-            install_spec = install_block.get(plat) if install_block else None
-            results.append({
-                "name": check.get("name"),
-                "description": check.get("description", ""),
-                "ok": ok,
-                "reason": reason,
-                "install": install_spec,
-                "notes": check.get("notes"),
-            })
-        return self._json({
-            "name": name,
-            "platform": plat,
-            "ok": all_ok,
-            "checks": results,
-        }, 200)
+        body, status = build_system_deps_check(WORKSPACE, name)
+        return self._json(body, status)
 
     def _post_system_deps_install(self, body: dict):
         """POST /api/system-deps-install ``{name, check_names}`` — run install
@@ -12557,106 +12528,11 @@ if __name__ == "__main__":
         Reads ~/.pbg/workspaces.json (catalog) and joins each entry with
         ~/.pbg/servers/<name>.json to determine status. No HTTP probes.
         Falls back to current-workspace-only on missing/corrupt catalog.
+
+        Delegates to ``lib.workspace_deps_views.build_workspaces``.
         """
-        from pbg_superpowers import workspace_catalog
-
-        def _branch_label(name: str, branch: str, path: str) -> str:
-            """Disambiguate the many worktrees/clones of one repo by branch.
-
-            ``v2ecoli`` → ``v2ecoli:dnaa-biology`` etc. Falls back to the path
-            leaf when git can't resolve a branch; plain name on the default
-            branch or when the leaf adds nothing."""
-            variant = branch if branch and branch not in ("main", "master", "HEAD") else None
-            if variant is None:
-                leaf = Path(path).name
-                if leaf and leaf != name:
-                    variant = leaf
-            return f"{name}:{variant}" if variant else name
-
-        current_root = WORKSPACE
-        current_resolved = str(current_root.resolve())
-
-        current_name = self._read_workspace_name(current_root)
-        result = {
-            "current": {"name": current_name, "path": current_resolved},
-            "workspaces": [],
-        }
-
-        try:
-            catalog = workspace_catalog.list_workspaces()
-        except Exception:
-            catalog = []
-
-        if not any(e.get("path") == current_resolved for e in catalog):
-            catalog = [{
-                "name": current_name,
-                "path": current_resolved,
-                "package": None,
-                "added_at": None,
-            }] + list(catalog)
-
-        for entry in catalog:
-            path = entry.get("path", "")
-            name = entry.get("name") or Path(path).name
-            row = {"name": name, "path": path}
-            branch, commit = _git_branch_commit(path) if Path(path).is_dir() else ("", "")
-            row["repo"] = name
-            row["branch"] = branch
-            row["commit"] = commit
-            row["label"] = _branch_label(name, branch, path) if Path(path).is_dir() else name
-            if not Path(path).is_dir():
-                row["status"] = "missing"
-            elif path == current_resolved:
-                row["status"] = "current"
-                entry = workspace_catalog.find_entry(path)
-                if entry is not None:
-                    pid_val = int(entry.get("pid") or 0)
-                    if pid_val <= 0:
-                        alive = False
-                    else:
-                        try:
-                            os.kill(pid_val, 0)
-                            alive = True
-                        except ProcessLookupError:
-                            alive = False
-                        except PermissionError:
-                            alive = True  # PID exists but owned by another user
-                        except (OSError, ValueError):
-                            alive = False
-                    if alive:
-                        row["url"] = entry["url"]
-                        row["pid"] = entry["pid"]
-            else:
-                entry = workspace_catalog.find_entry(path)
-                if entry is None:
-                    row["status"] = "stopped"
-                else:
-                    pid_val = int(entry.get("pid") or 0)
-                    if pid_val <= 0:
-                        alive = False
-                    else:
-                        try:
-                            os.kill(pid_val, 0)
-                            alive = True
-                        except ProcessLookupError:
-                            alive = False
-                        except PermissionError:
-                            alive = True  # PID exists but owned by another user
-                        except (OSError, ValueError):
-                            alive = False
-                    if alive:
-                        row["status"] = "running"
-                        row["url"] = entry["url"]
-                        row["pid"] = entry["pid"]
-                    else:
-                        row["status"] = "stale"
-                        row["pid"] = entry.get("pid")
-            result["workspaces"].append(row)
-
-        order = {"current": 0, "running": 1, "stopped": 2, "stale": 3, "missing": 4}
-        result["workspaces"].sort(key=lambda r: (order.get(r["status"], 99), r["name"]))
-
-        self._json(result, 200)
+        from vivarium_dashboard.lib.workspace_deps_views import build_workspaces
+        self._json(build_workspaces(WORKSPACE), 200)
 
     def _post_workspaces_add(self, body: dict):
         """POST /api/workspaces/add — register an existing workspace in the catalog."""
@@ -12880,11 +12756,12 @@ if __name__ == "__main__":
 
     def _get_source_builds(self):
         """GET /api/source/builds — remote sms-api simulator builds for the
-        source dropdown. Best-effort; empty list + reason if sms-api is down."""
-        from vivarium_dashboard.lib import remote_build_source
-        from vivarium_dashboard.lib.sms_api_client import SmsApiClient
-        payload = remote_build_source.list_build_sources(SmsApiClient(_sms_api_base()))
-        return self._json(payload, 200)
+        source dropdown. Best-effort; empty list + reason if sms-api is down.
+
+        Delegates to ``lib.workspace_deps_views.build_source_builds``.
+        """
+        from vivarium_dashboard.lib.workspace_deps_views import build_source_builds
+        return self._json(build_source_builds(), 200)
 
     def _post_source_switch_build(self, body: dict):
         """POST /api/source/switch-build — materialize a build's workspace (once,

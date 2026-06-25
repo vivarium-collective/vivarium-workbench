@@ -403,3 +403,12 @@ export interface VisualizationInstances {
 
 export interface PtoolsLaunch {
 }
+
+export interface SourceBuilds {
+}
+
+export interface WorkspacesList {
+}
+
+export interface SystemDepsCheck {
+}

@@ -3051,3 +3051,111 @@ class TestWorkCompositeDiffRoute:
         assert "/api/work-composite-diff" in spec["paths"]
         for name in ("WorkCompositeDiff", "WorkCompositeDiffEntry"):
             assert name in spec["components"]["schemas"]
+
+# Workspace & source routes — Batch 13
+# ---------------------------------------------------------------------------
+
+class TestSourceBuildsRoute:
+    def test_always_200(self, client, monkeypatch):
+        """GET /api/source/builds always returns HTTP 200."""
+        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        monkeypatch.setattr(wdv, "build_source_builds", lambda: {"builds": [], "error": None})
+        r = client.get("/api/source/builds")
+        assert r.status_code == 200
+
+    def test_returns_builds_list_and_error(self, client, monkeypatch):
+        """Body carries builds[] and error (null or string)."""
+        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        monkeypatch.setattr(wdv, "build_source_builds", lambda: {"builds": [], "error": None})
+        body = client.get("/api/source/builds").json()
+        assert "builds" in body
+        assert isinstance(body["builds"], list)
+
+    def test_degraded_when_sms_api_down(self, client, monkeypatch):
+        """When sms-api is down, builds=[] and error carries a reason (still 200)."""
+        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        monkeypatch.setattr(
+            wdv, "build_source_builds",
+            lambda: {"builds": [], "error": "connection refused"},
+        )
+        r = client.get("/api/source/builds")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["builds"] == []
+        assert body["error"] == "connection refused"
+
+    def test_source_builds_in_openapi(self, client):
+        components = client.get("/openapi.json").json()["components"]["schemas"]
+        assert "SourceBuilds" in components
+
+
+class TestWorkspacesRoute:
+    def test_always_200(self, client, tmp_path, monkeypatch):
+        """GET /api/workspaces always returns HTTP 200."""
+        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        monkeypatch.setattr(
+            wdv, "build_workspaces",
+            lambda root: {"current": {"name": "ws", "path": str(root)}, "workspaces": []},
+        )
+        r = client.get("/api/workspaces")
+        assert r.status_code == 200
+
+    def test_body_shape(self, client, monkeypatch):
+        """Body has current{name,path} and workspaces[]."""
+        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        monkeypatch.setattr(
+            wdv, "build_workspaces",
+            lambda root: {
+                "current": {"name": "my-ws", "path": "/some/path"},
+                "workspaces": [
+                    {"name": "my-ws", "path": "/some/path", "repo": "my-ws",
+                     "branch": "main", "commit": "abc123", "label": "my-ws",
+                     "status": "current"},
+                ],
+            },
+        )
+        body = client.get("/api/workspaces").json()
+        assert "current" in body
+        assert "workspaces" in body
+        assert body["current"]["name"] == "my-ws"
+        assert isinstance(body["workspaces"], list)
+
+    def test_workspaces_in_openapi(self, client):
+        components = client.get("/openapi.json").json()["components"]["schemas"]
+        assert "WorkspacesList" in components
+
+
+class TestSystemDepsCheckRoute:
+    def test_400_missing_name(self, client, monkeypatch):
+        """GET /api/system-deps-check without ?name= → 400."""
+        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        monkeypatch.setattr(wdv, "module_registry", lambda root: [])
+        r = client.get("/api/system-deps-check")
+        assert r.status_code == 400
+        assert r.json() == {"error": "name required"}
+
+    def test_404_unknown_module(self, client, monkeypatch):
+        """GET /api/system-deps-check?name=ghost → 404."""
+        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        monkeypatch.setattr(wdv, "module_registry", lambda root: [])
+        r = client.get("/api/system-deps-check?name=ghost")
+        assert r.status_code == 404
+        assert "unknown module" in r.json()["error"]
+        assert "ghost" in r.json()["error"]
+
+    def test_200_ok_trivial(self, client, monkeypatch):
+        """GET /api/system-deps-check?name=pbg-trivial → 200 with ok=True."""
+        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        catalog = [{"name": "pbg-trivial", "system_dependencies": {"checks": []}}]
+        monkeypatch.setattr(wdv, "module_registry", lambda root: catalog)
+        r = client.get("/api/system-deps-check?name=pbg-trivial")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["name"] == "pbg-trivial"
+        assert body["ok"] is True
+        assert body["checks"] == []
+        assert "platform" in body
+
+    def test_system_deps_in_openapi(self, client):
+        components = client.get("/openapi.json").json()["components"]["schemas"]
+        assert "SystemDepsCheck" in components
