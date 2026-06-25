@@ -8531,14 +8531,7 @@
       // ── CHARTS (visualisations from runs.db) ─────────────────────────
       var chartsHtml = charts.length
         ? '<div id="' + sid.charts + '">'
-          + '<h3 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
-          + '<span>Visualisations from the latest run</span>'
-          + '<button type="button" class="chart-refresh-btn" data-study="' + _h(s.name) + '"'
-          + ' onclick="window._refreshStudyViz(this)"'
-          + ' style="font-size:12px;padding:2px 10px;border-radius:6px;border:1px solid #cbd5e1;'
-          + 'background:#f8fafc;color:#334155;cursor:pointer;">↻ Refresh visualizations</button>'
-          + '<span class="chart-refresh-status muted small" style="margin-left:4px;"></span>'
-          + '</h3>'
+          + '<h3>Visualisations from the latest run</h3>'
           + _renderChartCardsHtml(charts, slug)
           + '</div>'
         : '';
