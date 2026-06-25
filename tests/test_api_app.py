@@ -2472,6 +2472,21 @@ class TestUiConfigRoute:
         components = client.get("/openapi.json").json()["components"]["schemas"]
         assert "UiConfig" in components
 
+    def test_non_string_ui_field_degrades_to_raw_200(self, tmp_path):
+        """A non-string ui.composite_view (off-spec) must NOT 500 — the route
+        returns 200 with the raw builder dict (byte-identical to legacy)."""
+        import yaml as _yaml
+        (tmp_path / "workspace.yaml").write_text(_yaml.safe_dump({
+            "ui": {"composite_view": 42},
+        }))
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: tmp_path
+        from fastapi.testclient import TestClient
+        r = TestClient(app).get("/api/ui-config")
+        assert r.status_code == 200
+        # Raw value survives — UiConfig validation was bypassed via the fallback.
+        assert r.json()["composite_view"] == 42
+
 
 class TestWorkspaceHomeRoute:
     def test_empty_workspace_returns_200(self, client, tmp_path):

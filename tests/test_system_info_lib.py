@@ -144,7 +144,6 @@ class TestBuildGithubRepo:
     def test_detect_github_repo_overrides_yaml(self, ws: Path, monkeypatch) -> None:
         """Git remote (via _detect_github_repo) takes priority over workspace.yaml."""
         import vivarium_dashboard.lib.system_info as _si
-        monkeypatch.setattr(_si, "_detect_github_repo_import", None, raising=False)
         # Patch the import inside build_github_repo
         import vivarium_dashboard.lib.report as report_mod
         monkeypatch.setattr(report_mod, "_detect_github_repo",

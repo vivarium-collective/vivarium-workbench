@@ -20,7 +20,6 @@ FastAPI route and the legacy server.py handler share the same constant.
 from __future__ import annotations
 
 import re
-import subprocess
 import yaml
 from pathlib import Path
 

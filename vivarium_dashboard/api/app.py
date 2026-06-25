@@ -34,6 +34,7 @@ import subprocess
 
 from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
 from vivarium_dashboard.lib import data_sources as _data_sources
@@ -1497,7 +1498,9 @@ def create_app() -> FastAPI:
         tags=["System & workspace"],
         summary="Aggregated framework-self metrics across all studies + investigations",
     )
-    def framework_metrics_route(ws: Path = Depends(get_workspace)) -> FrameworkMetrics:
+    def framework_metrics_route(
+        ws: Path = Depends(get_workspace),
+    ) -> Union[FrameworkMetrics, JSONResponse]:
         """Framework-self metrics scorecard for GET /api/framework-metrics.
 
         Aggregates ``pbg_superpowers.rigor.framework_metrics`` over every
@@ -1505,13 +1508,17 @@ def create_app() -> FastAPI:
         ``{metrics: {…}, n_investigations: int, n_studies: int}``.
 
         Always HTTP 200 (best-effort): ``metrics`` degrades to ``{}`` when
-        pbg_superpowers is absent or the compute raises.
+        pbg_superpowers is absent or the compute raises.  If the builder dict
+        fails typed validation (forward-compat / off-spec shape) the raw dict is
+        returned at HTTP 200 — byte-identical to the legacy handler, never 500.
 
         Library-backed via ``lib.system_info.build_framework_metrics``.
         """
-        return FrameworkMetrics.model_validate(
-            _system_info.build_framework_metrics(ws)
-        )
+        data = _system_info.build_framework_metrics(ws)
+        try:
+            return FrameworkMetrics.model_validate(data)
+        except ValidationError:
+            return JSONResponse(status_code=200, content=data)
 
     @app.get(
         "/api/github-repo",
@@ -1519,18 +1526,26 @@ def create_app() -> FastAPI:
         tags=["System & workspace"],
         summary="Workspace GitHub repo slug (owner/name or null)",
     )
-    def github_repo_route(ws: Path = Depends(get_workspace)) -> GithubRepo:
+    def github_repo_route(
+        ws: Path = Depends(get_workspace),
+    ) -> Union[GithubRepo, JSONResponse]:
         """The workspace's GitHub repo slug for GET /api/github-repo.
 
         Resolution order (first hit wins):
           1. ``git remote get-url origin`` parsed for github.com.
           2. workspace.yaml ``dashboard.github_repo`` / ``dashboard.repository``.
 
-        Returns ``{repo: "owner/name"}`` or ``{repo: null}``.  Always 200.
+        Returns ``{repo: "owner/name"}`` or ``{repo: null}``.  Always 200; an
+        off-spec builder dict degrades to the raw dict at HTTP 200 (byte-identical
+        to the legacy handler, never 500).
 
         Library-backed via ``lib.system_info.build_github_repo``.
         """
-        return GithubRepo.model_validate(_system_info.build_github_repo(ws))
+        data = _system_info.build_github_repo(ws)
+        try:
+            return GithubRepo.model_validate(data)
+        except ValidationError:
+            return JSONResponse(status_code=200, content=data)
 
     @app.get(
         "/api/ui-config",
@@ -1538,7 +1553,9 @@ def create_app() -> FastAPI:
         tags=["System & workspace"],
         summary="UI feature flags from workspace.yaml",
     )
-    def ui_config_route(ws: Path = Depends(get_workspace)) -> UiConfig:
+    def ui_config_route(
+        ws: Path = Depends(get_workspace),
+    ) -> Union[UiConfig, JSONResponse]:
         """UI feature-flag config for GET /api/ui-config.
 
         Reads workspace.yaml's ``ui:`` block.  Missing/unreadable workspace →
@@ -1548,9 +1565,19 @@ def create_app() -> FastAPI:
         ``ptools_server_url`` (default ""),
         ``ptools_omics_url_template`` (default template string).
 
+        The legacy handler serializes whatever ``ui.get(...)`` returns at HTTP
+        200, even a non-string value (e.g. ``composite_view: 42``).  The typed
+        ``UiConfig`` declares ``str`` fields, so such a value would raise a
+        ``ValidationError`` → 500; the fallback returns the raw builder dict at
+        HTTP 200 instead, preserving never-500 + byte-identity.
+
         Library-backed via ``lib.system_info.build_ui_config``.
         """
-        return UiConfig.model_validate(_system_info.build_ui_config(ws))
+        data = _system_info.build_ui_config(ws)
+        try:
+            return UiConfig.model_validate(data)
+        except ValidationError:
+            return JSONResponse(status_code=200, content=data)
 
     @app.get(
         "/api/workspace",
@@ -1558,15 +1585,23 @@ def create_app() -> FastAPI:
         tags=["System & workspace"],
         summary="Workspace narrative metadata (name, description, investigations)",
     )
-    def workspace_home_route(ws: Path = Depends(get_workspace)) -> WorkspaceHome:
+    def workspace_home_route(
+        ws: Path = Depends(get_workspace),
+    ) -> Union[WorkspaceHome, JSONResponse]:
         """Workspace home metadata for GET /api/workspace.
 
         Reads workspace.yaml + enumerates investigation dirs.  Returns
-        ``{name, description, imports, investigations: [...]}``.  Always 200.
+        ``{name, description, imports, investigations: [...]}``.  Always 200; an
+        off-spec builder dict degrades to the raw dict at HTTP 200 (byte-identical
+        to the legacy handler, never 500).
 
         Library-backed via ``lib.system_info.build_workspace_home``.
         """
-        return WorkspaceHome.model_validate(_system_info.build_workspace_home(ws))
+        data = _system_info.build_workspace_home(ws)
+        try:
+            return WorkspaceHome.model_validate(data)
+        except ValidationError:
+            return JSONResponse(status_code=200, content=data)
 
     return app
 
