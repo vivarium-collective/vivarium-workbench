@@ -361,3 +361,15 @@ export interface CompositeRunState {
 
 export interface CompositeRunStatus {
 }
+
+export interface StudyBigraphPaths {
+}
+
+export interface VisualizationStatus {
+}
+
+export interface VisualizationInstances {
+}
+
+export interface PtoolsLaunch {
+}

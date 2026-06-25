@@ -58,6 +58,7 @@ from vivarium_dashboard.lib import registry as _registry_lib
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
 from vivarium_dashboard.lib import observables_views as _obs_views
 from vivarium_dashboard.lib import report_views as _report_views
+from vivarium_dashboard.lib import study_viz_views as _study_viz
 from vivarium_dashboard.lib import system_info as _system_info_lib
 from vivarium_dashboard.lib.investigations_index import (
     _conclusions_excerpt,
@@ -675,113 +676,12 @@ from vivarium_dashboard.lib.system_info import (  # noqa: E402
 )
 
 
-def _ptools_object_class(name: str) -> str:
-    """Infer the Pathway Tools object class from an analysis/TSV name.
-
-    The Omics Viewer needs to know whether the row IDs are genes, reactions,
-    proteins, or compounds.  v2ecoli's ptools analyses are named accordingly
-    (ptools_rna → genes, ptools_rxns → reactions, ptools_proteins → proteins).
-    """
-    n = name.lower()
-    if "rxn" in n or "reaction" in n:
-        return "reaction"
-    if "protein" in n:
-        return "protein"
-    if "metabolite" in n or "compound" in n:
-        return "compound"
-    return "gene"  # rna / default
-
-
-def _build_ptools_launch_url(
-    study_dir,
-    ws_root,
-    ptools_server_url: str,
-    ptools_omics_url_template: str,
-    public_base: str,
-    run_id: str | None = None,
-    analysis: str | None = None,
-    data_dir: str | None = None,
-) -> dict:
-    """Pure helper: discover ptools TSVs and build a Pathway Tools Omics Viewer URL.
-
-    Returns a dict with keys:
-      - ``url`` + ``tsv_url`` + ``available`` on success
-      - ``error`` + optional ``available`` on failure
-
-    Two data-delivery modes (the right one depends on the PTools build):
-      - **HTTP** (default): ``tsv_url`` is an absolute URL on the dashboard's
-        externally-reachable host; the PTools server fetches it over HTTP.
-      - **Filesystem** (``data_dir`` set): the workspace is mounted into the
-        PTools container at ``data_dir``, and ``tsv_url`` is the server-local
-        path ``<data_dir>/<rel>``. Required for builds (e.g. sms-ptools 0.8.2)
-        whose ``overview-expression-load-omics-from-server`` endpoint reads the
-        data file from disk and does **not** fetch remote URLs.
-    """
-    study_dir = Path(study_dir)
-    ws_root = Path(ws_root)
-
-    # Discover all ptools TSVs under the study directory.
-    all_tsvs = sorted(study_dir.glob("**/ptools/*.tsv"))
-
-    # Filter by analysis prefix when requested.
-    if analysis:
-        prefix = f"{analysis}__"
-        all_tsvs = [p for p in all_tsvs if p.name.startswith(prefix)]
-
-    # Build workspace-relative paths for the static handler + available list.
-    def _relpath(p):
-        try:
-            return p.relative_to(ws_root).as_posix()
-        except ValueError:
-            return p.as_posix()
-
-    available = [_relpath(p) for p in all_tsvs]
-
-    if not available:
-        return {"error": "no ptools TSVs found for this run", "available": []}
-
-    # Use the first available TSV (most useful when analysis is filtered).
-    chosen = all_tsvs[0]
-    rel = available[0]
-    # Filesystem mode: PTools reads the file from its own disk (workspace mounted
-    # at data_dir). Otherwise PTools fetches it over HTTP from the dashboard.
-    if data_dir:
-        tsv_url = f"{data_dir.rstrip('/')}/{rel}"
-    else:
-        tsv_url = f"{public_base.rstrip('/')}/{rel}"
-
-    # Object class for the overlay (gene/reaction/protein/compound).
-    cls = _ptools_object_class(analysis or chosen.name)
-
-    # Animate across every data column: count the timepoint columns from the
-    # first non-comment line (the ptools TSVs carry a ``$``-prefixed header row
-    # whose remaining fields are the timepoints).  ``column1=1-N`` animates.
-    columns = "1"
-    try:
-        for line in chosen.read_text(encoding="utf-8").splitlines():
-            if not line or line.startswith(("#", ";")):
-                continue
-            ncol = len(line.split("\t")) - 1  # minus the name/ID column
-            columns = f"1-{ncol}" if ncol > 1 else "1"
-            break
-    except Exception:
-        pass
-
-    # Percent-encode the TSV URL before embedding it as the {tsv_url} query
-    # parameter. Left raw, the nested "http://host:port/…" lands unencoded in
-    # the Omics-Viewer query string; strict URL parsers (WebKit/Safari
-    # window.open) reject it ("SyntaxError: The string did not match the
-    # expected pattern"). PTools decodes the param, so the fetched URL is
-    # unchanged.
-    from urllib.parse import quote
-    launch_url = ptools_omics_url_template.format(
-        server=ptools_server_url.rstrip("/"),
-        tsv_url=quote(tsv_url, safe=""),
-        orgid="ECOLI",
-        cls=cls,
-        columns=columns,
-    )
-    return {"url": launch_url, "tsv_url": tsv_url, "available": available}
+# ---------------------------------------------------------------------------
+# PTools helpers — single-sourced from lib.study_viz_views; re-exported here
+# so legacy call-sites (e.g. tests/test_ptools_launch.py) keep working.
+# ---------------------------------------------------------------------------
+_ptools_object_class = _study_viz.ptools_object_class
+_build_ptools_launch_url = _study_viz.build_ptools_launch_url
 
 
 _RUN_STORE_SUMMARY_CACHE: dict = {}
@@ -6573,43 +6473,15 @@ if __name__ == "__main__":
         }, 200)
 
     def _get_visualization_status(self):
-        """Return lifecycle status for a viz: described | requested | created | added | committed."""
+        """Return lifecycle status for a viz: described | requested | created | added | committed.
+
+        Thin shim — delegates to :func:`lib.study_viz_views.build_visualization_status`.
+        """
         from urllib.parse import urlparse, parse_qs
         qs = parse_qs(urlparse(self.path).query)
         name = (qs.get("name") or [""])[0]
-        if not name:
-            return self._json({"error": "missing name"}, 400)
-
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
-        viz = next((v for v in (ws_data.get("visualizations") or []) if v.get("name") == name), None)
-        if not viz:
-            return self._json({"status": "missing", "name": name}, 200)
-
-        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-        response_path = workspace_paths().pbg / "viz-responses" / f"{name}.py"
-        staged_path = workspace_paths().pbg / "visualizations-staged" / f"{name}.py"
-        committed_path = WORKSPACE / pkg / "visualizations" / f"{name}.py"
-        request_path = workspace_paths().pbg / "viz-requests" / f"{name}.md"
-
-        if committed_path.exists():
-            status = "committed"
-        elif staged_path.exists():
-            status = "added"
-        elif response_path.exists():
-            status = "created"
-        elif request_path.exists():
-            status = "requested"
-        else:
-            status = "described"
-
-        return self._json({
-            "status": status,
-            "name": name,
-            "has_request": request_path.exists(),
-            "has_response": response_path.exists(),
-            "has_staged": staged_path.exists(),
-            "has_committed": committed_path.exists(),
-        }, 200)
+        body, status = _study_viz.build_visualization_status(WORKSPACE, name)
+        return self._json(body, status)
 
     def _post_visualization_add_to_project(self, body: dict):
         """Copy .pbg/viz-responses/<name>.py to .pbg/visualizations-staged/<name>.py.
@@ -8787,6 +8659,8 @@ if __name__ == "__main__":
         """GET /api/study-bigraph-paths?study=<slug>[&baseline=<name>][&max_depth=<n>]
 
         Returns: {composite, source_file, max_depth, node_count, nodes:[{path,kind,...}]}
+
+        Thin shim — delegates to :func:`lib.study_viz_views.build_study_bigraph_paths`.
         """
         import urllib.parse
         qs = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(self.path).query))
@@ -8796,76 +8670,10 @@ if __name__ == "__main__":
             max_depth = int(qs.get("max_depth", "8"))
         except ValueError:
             max_depth = 8
-        if not slug:
-            return self._json({"error": "study slug required (?study=<slug>)"}, 400)
-
-        spec_path = _study_dir(slug) / "study.yaml"
-        if not spec_path.is_file():
-            spec_path = _study_dir(slug) / "spec.yaml"
-        if not spec_path.is_file():
-            return self._json({"error": f"no study.yaml or spec.yaml at {_study_dir(slug)}"}, 404)
-        try:
-            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-        except Exception as e:
-            return self._json({"error": f"failed to parse study spec: {e}"}, 500)
-
-        baselines = spec.get("baseline") or []
-        if not baselines:
-            return self._json({"error": "study has no baseline entries"}, 400)
-        if baseline_name:
-            chosen = next((b for b in baselines if b.get("name") == baseline_name), None)
-            if chosen is None:
-                return self._json(
-                    {"error": f"baseline {baseline_name!r} not found in study {slug!r}"}, 404,
-                )
-        else:
-            chosen = baselines[0]
-
-        composite_ref = chosen.get("composite") or ""
-        basename = composite_ref.rsplit(".", 1)[-1] if composite_ref else ""
-
-        candidates = [
-            WORKSPACE / "models" / f"{basename}.pbg",
-            WORKSPACE / "models" / f"{basename}.json",
-        ]
-        # v2ecoli legacy: the "baseline" composite is serialized as "partitioned".
-        if basename == "baseline":
-            candidates.append(WORKSPACE / "models" / "partitioned.pbg")
-        source_file = next((p for p in candidates if p.is_file()), None)
-        if source_file is None:
-            return self._json({
-                "error":     "no serialized composite state found",
-                "composite": composite_ref,
-                "looked_in": [str(p) for p in candidates],
-                "hint":      "run the baseline to populate <workspace>/models/<composite>.pbg, or commit a snapshot.",
-            }, 404)
-
-        mtime = source_file.stat().st_mtime
-        cache_key = (str(source_file), mtime, max_depth)
-        nodes = self._bigraph_path_cache.get(cache_key)
-        if nodes is None:
-            from vivarium_dashboard.lib.composite_recipes import walk_state_snapshot
-            try:
-                doc = json.loads(source_file.read_text(encoding="utf-8"))
-            except Exception as e:
-                return self._json({"error": f"failed to parse {source_file.name}: {e}"}, 500)
-            nodes = walk_state_snapshot(doc, max_depth=max_depth)
-            if len(self._bigraph_path_cache) > 8:
-                self._bigraph_path_cache.clear()
-            self._bigraph_path_cache[cache_key] = nodes
-
-        source_display = (
-            str(source_file.relative_to(WORKSPACE))
-            if str(source_file).startswith(str(WORKSPACE))
-            else str(source_file)
+        body, status = _study_viz.build_study_bigraph_paths(
+            WORKSPACE, slug, baseline_name=baseline_name, max_depth=max_depth,
         )
-        return self._json({
-            "composite":   composite_ref,
-            "source_file": source_display,
-            "max_depth":   max_depth,
-            "node_count":  len(nodes),
-            "nodes":       nodes,
-        }, 200)
+        return self._json(body, status)
 
     def _get_investigation_composite_doc(self):
         """GET /api/investigation-composite-doc?investigation=<n>&composite=<c>
@@ -9417,27 +9225,9 @@ if __name__ == "__main__":
         """GET /api/visualization-instances — list class-backed configured viz
         instances from workspace.yaml.visualizations (entries with a ``class:`` key).
 
-        Returns: [{name, class, address, config, description?}, ...]
+        Thin shim — delegates to :func:`lib.study_viz_views.build_visualization_instances`.
         """
-        try:
-            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
-        except Exception:
-            ws_data = {}
-        out = []
-        for entry in (ws_data.get("visualizations") or []):
-            if not isinstance(entry, dict):
-                continue
-            cls = (entry.get("class") or "").strip()
-            if not cls:
-                continue
-            out.append({
-                "name": entry.get("name"),
-                "class": cls,
-                "address": f"local:{cls}",
-                "config": entry.get("config") or {},
-                "description": entry.get("description") or "",
-            })
-        return self._json({"instances": out}, 200)
+        return self._json(_study_viz.build_visualization_instances(WORKSPACE), 200)
 
     # Synthetic demo states for the 5 built-in pbg-superpowers Visualization
     # classes. Each key is the class's short name; value is a state dict that
@@ -11150,11 +10940,10 @@ if __name__ == "__main__":
         Discovers per-run ptools TSV files and returns a Pathway Tools Omics
         Viewer launch URL.  Requires ``ui.ptools_server_url`` in workspace.yaml.
 
-        The Pathway Tools server fetches the data file over HTTP, so the TSV URL
-        must be reachable from the PTools server, not just the browser.  The
-        dashboard resolves its public base from (in priority order):
-          1. ``ui.dashboard_public_base_url`` in workspace.yaml
-          2. The HTTP ``Host`` header sent by the browser
+        Thin shim — delegates to :func:`lib.study_viz_views.build_ptools_launch`,
+        supplying ``public_base`` from (in priority order):
+          1. ``ui.dashboard_public_base_url`` in workspace.yaml (read inside lib)
+          2. The HTTP ``Host`` header sent by the browser (passed here)
         """
         from urllib.parse import urlparse, parse_qs
         qs = urlparse(self.path).query
@@ -11162,52 +10951,13 @@ if __name__ == "__main__":
         run_id = (params.get("run", [""])[0] or "").strip() or None
         analysis = (params.get("analysis", [""])[0] or "").strip() or None
 
-        try:
-            ws = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")) or {}
-        except Exception:
-            ws = {}
-        ui = ws.get("ui") or {}
+        host = self.headers.get("Host", "localhost")
+        public_base = f"http://{host}"
 
-        ptools_server_url = ui.get("ptools_server_url", "").strip()
-        if not ptools_server_url:
-            return self._json({"error": "ptools_server_url not configured"}, 400)
-
-        # Default template auto-loads the Omics Viewer; override via
-        # ui.ptools_omics_url_template if your PTools build differs.
-        ptools_omics_url_template = ui.get(
-            "ptools_omics_url_template",
-            _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
+        body, status = _study_viz.build_ptools_launch(
+            WORKSPACE, study, run=run_id, analysis=analysis, public_base=public_base,
         )
-
-        # Resolve the dashboard's public base URL so the PTools server can fetch
-        # the TSV over HTTP.  Priority: explicit config > Host header.
-        public_base = (ui.get("dashboard_public_base_url") or "").strip()
-        if not public_base:
-            host = self.headers.get("Host", "localhost")
-            public_base = f"http://{host}"
-
-        study_dir = _study_dir(study)
-        if not study_dir.is_dir():
-            return self._json({"error": f"study not found: {study}"}, 404)
-
-        # Filesystem mode: if the workspace is mounted into the PTools container,
-        # ui.ptools_data_dir is its container path; the launcher then passes a
-        # server-local file path instead of an HTTP URL (sms-ptools reads from disk).
-        data_dir = (ui.get("ptools_data_dir") or "").strip() or None
-
-        result = _build_ptools_launch_url(
-            study_dir=study_dir,
-            ws_root=WORKSPACE,
-            ptools_server_url=ptools_server_url,
-            ptools_omics_url_template=ptools_omics_url_template,
-            public_base=public_base,
-            run_id=run_id,
-            analysis=analysis,
-            data_dir=data_dir,
-        )
-        if "error" in result:
-            return self._json(result, 404)
-        return self._json(result, 200)
+        return self._json(body, status)
 
     def _send_html(self, body: str, code: int = 200):
         """Send an HTML response with the given body and status code."""
