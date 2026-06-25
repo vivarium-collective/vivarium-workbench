@@ -1265,3 +1265,107 @@ def test_investigation_hypotheses_in_openapi(client):
     spec = client.get("/openapi.json").json()
     assert "/api/investigation-hypotheses" in spec["paths"]
     assert "InvestigationHypothesesPayload" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# /api/study-rigor
+# ---------------------------------------------------------------------------
+
+def test_study_rigor_200(client, monkeypatch):
+    """Happy path: the rigor scorecard passes through untouched (extra='allow')."""
+    import vivarium_dashboard.api.app as _app
+    payload = {
+        "study_type": "perturbation", "mode": "hypothesis", "descriptive": False,
+        "dimensions": [{"id": "replication", "severity": "ok"}],
+        "score": {"gap": 0, "warn": 0, "ok": 1, "na": 0, "total": 1},
+        "summary": "1/1 rigor dimensions addressed",
+    }
+    monkeypatch.setattr(_app._rigor_views, "build_study_rigor", lambda ws, slug: payload)
+    r = client.get("/api/study-rigor?study=my-study")
+    assert r.status_code == 200
+    assert r.json() == payload   # nothing stripped or injected
+
+
+def test_study_rigor_400_missing(client):
+    """Missing ?study= → HTTP 400, {"error": ...} (not {"detail": ...})."""
+    r = client.get("/api/study-rigor")
+    assert r.status_code == 400
+    assert r.json() == {"error": "missing ?study="}
+    assert "detail" not in r.json()
+
+
+def test_study_rigor_404_not_found(client):
+    """Unknown study → HTTP 404, {"error": "study not found"}."""
+    r = client.get("/api/study-rigor?study=nope")
+    assert r.status_code == 404
+    assert r.json() == {"error": "study not found"}
+
+
+def test_study_rigor_investigation_alias(client, monkeypatch):
+    """Legacy ?investigation= alias selects the study when ?study= is absent."""
+    import vivarium_dashboard.api.app as _app
+    seen = {}
+
+    def _capture(ws, slug):
+        seen["slug"] = slug
+        return {"dimensions": [], "score": {}, "summary": ""}
+
+    monkeypatch.setattr(_app._rigor_views, "build_study_rigor", _capture)
+    client.get("/api/study-rigor?investigation=via-alias")
+    assert seen["slug"] == "via-alias"
+
+
+def test_study_rigor_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/study-rigor" in spec["paths"]
+    assert "StudyRigor" in spec["components"]["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# /api/investigation-rigor
+# ---------------------------------------------------------------------------
+
+def test_investigation_rigor_200(client, monkeypatch):
+    """Happy path: the roll-up passes through untouched (extra='allow')."""
+    import vivarium_dashboard.api.app as _app
+    payload = {
+        "dimensions": [{"id": "adversarial", "severity": "warn"}],
+        "per_study": {"my-study": {"summary": "ok"}},
+        "score": {"gap": 0, "warn": 1, "ok": 0, "na": 0, "total": 1},
+        "summary": "1 investigation dimension(s)",
+    }
+    monkeypatch.setattr(
+        _app._rigor_views, "build_investigation_rigor", lambda ws, slug: payload)
+    r = client.get("/api/investigation-rigor?investigation=my-inv")
+    assert r.status_code == 200
+    assert r.json() == payload
+
+
+def test_investigation_rigor_400_missing(client):
+    r = client.get("/api/investigation-rigor")
+    assert r.status_code == 400
+    assert r.json() == {"error": "missing ?investigation="}
+    assert "detail" not in r.json()
+
+
+def test_investigation_rigor_404_not_found(client):
+    r = client.get("/api/investigation-rigor?investigation=nope")
+    assert r.status_code == 404
+    assert r.json() == {"error": "investigation not found"}
+
+
+def test_investigation_rigor_200_with_error(client, monkeypatch):
+    """An unreadable investigation.yaml degrades to a 200 body carrying error."""
+    import vivarium_dashboard.api.app as _app
+    monkeypatch.setattr(
+        _app._rigor_views, "build_investigation_rigor",
+        lambda ws, slug: {"error": "unreadable investigation.yaml: bad"})
+    r = client.get("/api/investigation-rigor?investigation=x")
+    assert r.status_code == 200
+    assert r.json() == {"error": "unreadable investigation.yaml: bad"}
+
+
+def test_investigation_rigor_in_openapi(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/investigation-rigor" in spec["paths"]
+    assert "InvestigationRigor" in spec["components"]["schemas"]
