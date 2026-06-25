@@ -12900,14 +12900,10 @@ if __name__ == "__main__":
 
     @staticmethod
     def _guess_mime(rel: str) -> str:
-        if rel.endswith(".css"): return "text/css"
-        if rel.endswith(".js"): return "application/javascript"
-        if rel.endswith(".json"): return "application/json"
-        if rel.endswith(".png"): return "image/png"
-        if rel.endswith(".svg"): return "image/svg+xml"
-        if rel.endswith(".html"): return "text/html"
-        if rel.endswith(".tsv"): return "text/tab-separated-values"
-        return "text/plain"
+        # Single-sourced through lib.static_serving.guess_mime (the FastAPI seam
+        # uses the same table); the body lives once, in lib.
+        from vivarium_dashboard.lib.static_serving import guess_mime
+        return guess_mime(rel)
 
 
 # ---------------------------------------------------------------------------
