@@ -52,6 +52,119 @@ def _write_json(path: Path, data) -> None:
     )
 
 
+def _snapshot_explorer(api_dir: Path, ws_root: Path,
+                       snap_steps: int = 30, curated_per_class: int = 25) -> int:
+    """Pre-render the Data Explorer endpoints to static JSON so the read-only
+    (published) dashboard's Explorer card works without a live server.
+
+    Bounded snapshot (the Explorer is otherwise an unbounded live-query tool):
+      * per-step views (flux / pathways / allocation) are captured at <=``snap_steps``
+        evenly-spaced row indices; the frontend snaps slider values to these.
+      * timeseries is captured for every scalar (full time) + the top
+        ``curated_per_class`` vector elements per class (the rest stay
+        interactive-only).
+      * scatter uses the last snapshot step's vectors.
+    Only the first run is captured per-step (heavy); others get observables,
+    validation, and last-step vectors (enough for scatter). Returns file count.
+    """
+    from vivarium_dashboard.lib import explorer_data as E
+
+    base = api_dir / "explorer"
+
+    def _snap(s):
+        return re.sub(r"[^A-Za-z0-9]+", "-", "" if s is None else str(s))
+
+    def _w(rel, data):
+        p = base / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        _write_json(p, data)
+        return 1
+
+    try:
+        runs = [r for r in E.list_runs(Path(ws_root)) if r.get("db_path")]
+    except Exception:
+        return 0
+    if not runs:
+        return 0
+
+    idmap = E.load_flux_assets()[1]
+    n = 0
+    # richest run first (most emitted steps) so the published Explorer defaults to
+    # it and it's the one that gets the full per-step snapshot.
+    runs = sorted(runs, key=lambda r: -(int(r.get("n_steps") or 0)))
+    plan = []
+    for ri, r in enumerate(runs):
+        nsteps = int(r.get("n_steps") or 0)
+        idx = list(range(nsteps)) if nsteps > 0 else [0]
+        if len(idx) > snap_steps:
+            sel = sorted({round(i * (len(idx) - 1) / (snap_steps - 1)) for i in range(snap_steps)})
+            idx = [idx[i] for i in sel]
+        rr = dict(r); rr["snap_steps"] = idx
+        plan.append((rr, idx, ri == 0))
+    n += _w("runs.json", {"runs": [p[0] for p in plan]})
+
+    for rr, steps, primary in plan:
+        run, db = rr.get("run_id"), rr["db_path"]
+        sr, nsteps = _snap(run), int(rr.get("n_steps") or 0)
+        last = steps[-1] if steps else 0
+        try:
+            obs = E.list_observables(db, run, ws_root)
+        except Exception:
+            obs = {"categories": {}}
+        n += _w(f"observables/{sr}.json", obs)
+        for ds in ("schmidt", "wisniewski"):
+            try:
+                v = E.get_validation_scatter(db, ds, run, ws_root, n_steps=nsteps or None)
+            except Exception:
+                v = {"points": [], "n": 0, "pearson": None}
+            n += _w(f"validation/{sr}/{_snap(ds)}.json", v)
+
+        cats = obs.get("categories") or {}
+        vecs = [o for leaves in cats.values() for o in leaves if o.get("kind") == "vector"]
+        scalars = [o for leaves in cats.values() for o in leaves if o.get("kind") != "vector"]
+        protein_path = next((o["path"] for o in vecs if o.get("mclass") == "Protein"), None)
+
+        if primary:
+            for s in steps:
+                try: n += _w(f"flux/{sr}/{s}.json", E.get_flux_auto(db, s, idmap, run, ws_root))
+                except Exception: pass
+                try: n += _w(f"base-fluxes/{sr}/{s}.json", E.get_base_fluxes(db, s, run, ws_root))
+                except Exception: pass
+                if protein_path:
+                    try: n += _w(f"protein-breakdown/{sr}/{_snap(protein_path)}/{s}.json",
+                                 E.get_protein_breakdown(db, protein_path, s, run, ws_root))
+                    except Exception: pass
+            for o in vecs:  # step-0 ids for timeseries class expansion
+                try: n += _w(f"vector/{sr}/{_snap(o['path'])}/0.json",
+                             E.get_vector(db, o["path"], 0, run, ws_root))
+                except Exception: pass
+            for o in scalars:  # full-time series for every scalar
+                try: n += _w(f"series/{sr}/{_snap(o['path'])}.json",
+                             E.get_series(db, [(o["path"], None)], 400, run, ws_root))
+                except Exception: pass
+            for o in vecs:  # top curated vector elements per class
+                vec = E.get_vector(db, o["path"], last, run, ws_root)
+                vals = vec.get("values") or []
+                for i in sorted(range(len(vals)), key=lambda k: -abs(vals[k]))[:curated_per_class]:
+                    try: n += _w(f"series/{sr}/{_snap(o['path'] + '#' + str(i))}.json",
+                                 E.get_series(db, [(o["path"], i)], 400, run, ws_root))
+                    except Exception: pass
+
+        # scatter vectors at the last snapshot step (both dotted + __ path forms,
+        # since the scatter view hardcodes dotted while observables use __)
+        for path in ("listeners.monomer_counts", "listeners.rna_counts.mRNA_counts",
+                     "listeners.fba_results.base_reaction_fluxes",
+                     "listeners__monomer_counts", "listeners__rna_counts__mRNA_counts",
+                     "listeners__fba_results__base_reaction_fluxes"):
+            try:
+                vv = E.get_vector(db, path, last, run, ws_root)
+                if vv.get("ids"):
+                    n += _w(f"vector/{sr}/{_snap(path)}/{last}.json", vv)
+            except Exception:
+                pass
+    return n
+
+
 def _git_info(ws_root: Path) -> tuple:
     """Return ``(commit_sha, remote_url, branch_ref)``.  Tolerates non-git dirs
     (all three values become ``None``).
@@ -529,6 +642,13 @@ def _do_build(
             _m.pop("out_of_sync", None)
             _m.pop("out_of_sync_reason", None)
     _write_json(api_dir / "catalog.json", catalog)
+
+    # api/explorer/* — pre-render the Data Explorer so its card works read-only
+    try:
+        n_exp = _snapshot_explorer(api_dir, ws_root)
+        print(f"  explorer snapshot: {n_exp} files")
+    except Exception as exc:
+        print(f"  explorer snapshot skipped: {exc}")
 
     # api/composites.json — composite specs (GET /api/composites)
     # Written AFTER the composite-state loop so each entry can carry has_wiring.
