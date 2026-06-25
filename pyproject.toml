@@ -59,6 +59,7 @@ files = [
     "vivarium_dashboard/lib/rigor_views.py",
     "vivarium_dashboard/lib/observables_views.py",
     "vivarium_dashboard/lib/composite_state_views.py",
+    "vivarium_dashboard/lib/composite_run_views.py",
     "vivarium_dashboard/lib/report_views.py",
     "vivarium_dashboard/lib/system_info.py",
     "vivarium_dashboard/api/app.py",

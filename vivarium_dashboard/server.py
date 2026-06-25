@@ -8081,59 +8081,47 @@ if __name__ == "__main__":
             {"simulations": sims, "current": _current_branch_slug(WORKSPACE)}, 200)
 
     def _get_composite_runs(self):
-        """GET /api/composite-runs?spec_id=X — list runs for one composite spec."""
+        """GET /api/composite-runs?spec_id=X — list runs for one composite spec.
+
+        Thin shim → ``lib.composite_run_views.build_composite_runs``.
+        """
         from urllib.parse import urlparse, parse_qs
         _ws_add_to_sys_path()
-        from vivarium_dashboard.lib import composite_runs as cr
+        from vivarium_dashboard.lib.composite_run_views import build_composite_runs
 
         qs = parse_qs(urlparse(self.path).query)
         spec_id = (qs.get("spec_id") or [""])[0]
-        if not spec_id:
-            return self._json({"runs": [], "error": "missing spec_id"}, 400)
-
-        db_file = workspace_paths().pbg / "composite-runs.db"
-        if not db_file.is_file():
-            return self._json({"runs": []}, 200)
-        conn = cr.connect(db_file)
-        try:
-            runs = cr.query_runs(conn, spec_id=spec_id)
-        finally:
-            conn.close()
-        return self._json({"runs": runs}, 200)
+        body, status = build_composite_runs(WORKSPACE, spec_id or None)
+        return self._json(body, status)
 
     def _get_composite_run(self):
-        """GET /api/composite-run/<run_id> — return trajectory list."""
+        """GET /api/composite-run/<run_id> — return trajectory list.
+
+        Thin shim → ``lib.composite_run_views.build_composite_run``.
+        """
         _ws_add_to_sys_path()
-        from vivarium_dashboard.lib import composite_runs as cr
+        from vivarium_dashboard.lib.composite_run_views import build_composite_run
 
         path_only = self.path.split("?", 1)[0]
         rest = path_only[len("/api/composite-run/"):]
-        # Strip a trailing '/state' if a more specific route should handle it;
-        # this handler matches the bare /api/composite-run/<id> form.
+        # Guard: this handler matches the bare /api/composite-run/<id> form;
+        # /state and /status are dispatched before this handler reaches here.
         if "/" in rest:
             return self._json({"error": "use /state subpath"}, 400)
         run_id = rest
-
-        db_file = workspace_paths().pbg / "composite-runs.db"
-        if not db_file.is_file():
-            return self._json({"error": "no run database"}, 404)
-        conn = cr.connect(db_file)
-        try:
-            trajectory = cr.query_run(conn, run_id=run_id)
-        finally:
-            conn.close()
-        if not trajectory:
-            return self._json({"error": "run not found"}, 404)
-        return self._json({"run_id": run_id, "trajectory": trajectory}, 200)
+        body, status = build_composite_run(WORKSPACE, run_id)
+        return self._json(body, status)
 
     def _get_composite_run_state(self):
-        """GET /api/composite-run/<run_id>/state?step=N — single state snapshot."""
+        """GET /api/composite-run/<run_id>/state?step=N — single state snapshot.
+
+        Thin shim → ``lib.composite_run_views.build_composite_run_state``.
+        """
         from urllib.parse import urlparse, parse_qs
         _ws_add_to_sys_path()
-        from vivarium_dashboard.lib import composite_runs as cr
+        from vivarium_dashboard.lib.composite_run_views import build_composite_run_state
 
         u = urlparse(self.path)
-        # path: /api/composite-run/<run_id>/state
         path_only = u.path
         prefix = "/api/composite-run/"
         rest = path_only[len(prefix):]
@@ -8147,18 +8135,8 @@ if __name__ == "__main__":
         except ValueError:
             return self._json({"error": "step must be int"}, 400)
 
-        db_file = workspace_paths().pbg / "composite-runs.db"
-        if not db_file.is_file():
-            return self._json({"error": "no run database"}, 404)
-        conn = cr.connect(db_file)
-        try:
-            state = cr.query_run_state(conn, run_id=run_id, step=step)
-        finally:
-            conn.close()
-        if state is None:
-            return self._json({"error": "state not found for run+step"}, 404)
-        return self._json({"run_id": run_id, "step": step,
-                            "state": state}, 200)
+        body, status = build_composite_run_state(WORKSPACE, run_id, step)
+        return self._json(body, status)
 
     def _get_composite_run_status(self):
         """GET /api/composite-run/<run_id>/status — lightweight run status.
@@ -8166,9 +8144,11 @@ if __name__ == "__main__":
         Returns {status, progress_step, n_steps, heartbeat_at}. For terminal
         states it also returns an `error` excerpt (failed/orphaned, from the
         run log) or `viz_html` (completed, from the run's viz.json).
+
+        Thin shim → ``lib.composite_run_views.build_composite_run_status``.
         """
         _ws_add_to_sys_path()
-        from vivarium_dashboard.lib import composite_runs as cr
+        from vivarium_dashboard.lib.composite_run_views import build_composite_run_status
 
         path_only = self.path.split("?", 1)[0]
         prefix = "/api/composite-run/"
@@ -8177,39 +8157,8 @@ if __name__ == "__main__":
             return self._json({"error": "bad route"}, 400)
         run_id = rest[: -len("/status")]
 
-        db_file = workspace_paths().pbg / "composite-runs.db"
-        if not db_file.is_file():
-            return self._json({"error": "no run database"}, 404)
-        conn = cr.connect(db_file)
-        try:
-            meta = cr.query_run_meta(conn, run_id=run_id)
-        finally:
-            conn.close()
-        if meta is None:
-            return self._json({"error": "run not found"}, 404)
-
-        resp = {
-            "run_id": run_id,
-            "status": meta["status"],
-            "progress_step": meta.get("progress_step") or 0,
-            "n_steps": meta.get("n_steps"),
-            "heartbeat_at": meta.get("heartbeat_at"),
-        }
-        if meta["status"] in ("failed", "orphaned"):
-            log_rel = meta.get("log_path")
-            if log_rel:
-                resp["log_path"] = log_rel
-                log_full = WORKSPACE / log_rel
-                if log_full.is_file():
-                    resp["error"] = log_full.read_text(encoding="utf-8")[-2000:]
-        elif meta["status"] == "completed":
-            viz_file = workspace_paths().pbg / "runs" / run_id / "viz.json"
-            if viz_file.is_file():
-                try:
-                    resp["viz_html"] = json.loads(viz_file.read_text(encoding="utf-8"))
-                except json.JSONDecodeError:
-                    pass
-        return self._json(resp, 200)
+        body, status = build_composite_run_status(WORKSPACE, run_id)
+        return self._json(body, status)
 
     def _get_investigation_detail(self):
         """GET /api/investigation/<name> — full spec + viz file paths + runs summary."""

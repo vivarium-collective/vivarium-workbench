@@ -2514,3 +2514,198 @@ class TestWorkspaceHomeRoute:
     def test_workspace_home_in_openapi(self, client):
         components = client.get("/openapi.json").json()["components"]["schemas"]
         assert "WorkspaceHome" in components
+
+
+# ---------------------------------------------------------------------------
+# Composite runs routes (Batch 10)
+# ---------------------------------------------------------------------------
+
+import json as _json_cr  # noqa: E402
+
+from vivarium_dashboard.lib import composite_runs as _cr_lib  # noqa: E402
+
+
+def _make_cr_workspace(tmp_path: Path, *, seed_run: bool = False,
+                        run_id: str = "demo__1__aabbcc",
+                        spec_id: str = "demo.spec",
+                        status: str = "completed") -> Path:
+    """Minimal workspace with optional composite-runs.db fixture."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / ".pbg").mkdir()
+    if seed_run:
+        db = ws / ".pbg" / "composite-runs.db"
+        conn = _cr_lib.connect(db)
+        _cr_lib.save_metadata(
+            conn, spec_id=spec_id, run_id=run_id, params={}, label="lab",
+            started_at=1_000_000.0, n_steps=5,
+        )
+        _cr_lib.complete_metadata(conn, run_id=run_id, n_steps=5, status=status)
+        conn.close()
+    return ws
+
+
+def _cr_client(tmp_path: Path, *, seed_run: bool = False, **kw) -> "tuple":
+    from fastapi.testclient import TestClient
+    ws = _make_cr_workspace(tmp_path, seed_run=seed_run, **kw)
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: ws
+    return TestClient(app), ws
+
+
+class TestCompositeRunsRoute:
+    def test_missing_spec_id_returns_400(self, tmp_path):
+        c, _ = _cr_client(tmp_path)
+        r = c.get("/api/composite-runs")
+        assert r.status_code == 400
+        body = r.json()
+        assert body["runs"] == []
+        assert "missing spec_id" in body["error"]
+
+    def test_no_db_returns_200_empty(self, tmp_path):
+        c, _ = _cr_client(tmp_path)
+        r = c.get("/api/composite-runs?spec_id=demo.spec")
+        assert r.status_code == 200
+        assert r.json() == {"runs": []}
+
+    def test_seeded_run_returns_list(self, tmp_path):
+        c, _ = _cr_client(tmp_path, seed_run=True, spec_id="demo.spec",
+                           run_id="r1")
+        r = c.get("/api/composite-runs?spec_id=demo.spec")
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["runs"]) == 1
+        assert body["runs"][0]["run_id"] == "r1"
+
+    def test_composite_runs_in_openapi(self, client):
+        components = client.get("/openapi.json").json()["components"]["schemas"]
+        assert "CompositeRunsList" in components
+
+
+class TestCompositeRunRoute:
+    def test_no_db_returns_404(self, tmp_path):
+        c, _ = _cr_client(tmp_path)
+        r = c.get("/api/composite-run/r1")
+        assert r.status_code == 404
+        assert r.json() == {"error": "no run database"}
+
+    def test_no_history_returns_404(self, tmp_path):
+        # DB exists but no history rows → "run not found"
+        c, ws = _cr_client(tmp_path, seed_run=True, run_id="r1")
+        r = c.get("/api/composite-run/r1")
+        assert r.status_code == 404
+        assert r.json() == {"error": "run not found"}
+
+    def test_seeded_trajectory_returns_200(self, tmp_path):
+        import sqlite3 as _sq
+        c, ws = _cr_client(tmp_path, seed_run=True, run_id="r1")
+        # Seed a history row manually
+        db = ws / ".pbg" / "composite-runs.db"
+        raw = _sq.connect(str(db))
+        raw.execute(
+            "CREATE TABLE IF NOT EXISTS history "
+            "(simulation_id TEXT, step INTEGER, global_time REAL, "
+            "state TEXT, PRIMARY KEY (simulation_id, step))"
+        )
+        raw.execute(
+            "INSERT INTO history VALUES (?, ?, ?, ?)",
+            ("r1", 0, 0.0, _json_cr.dumps({"v": 99})),
+        )
+        raw.commit()
+        raw.close()
+        r = c.get("/api/composite-run/r1")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["run_id"] == "r1"
+        assert body["trajectory"][0]["state"] == {"v": 99}
+
+    def test_composite_run_in_openapi(self, client):
+        components = client.get("/openapi.json").json()["components"]["schemas"]
+        assert "CompositeRunTrajectory" in components
+
+
+class TestCompositeRunStateRoute:
+    def test_no_db_returns_404(self, tmp_path):
+        c, _ = _cr_client(tmp_path)
+        r = c.get("/api/composite-run/r1/state")
+        assert r.status_code == 404
+        assert r.json() == {"error": "no run database"}
+
+    def test_bad_step_returns_400(self, tmp_path):
+        c, _ = _cr_client(tmp_path, seed_run=True, run_id="r1")
+        r = c.get("/api/composite-run/r1/state?step=abc")
+        assert r.status_code == 400
+        assert r.json() == {"error": "step must be int"}
+
+    def test_step_not_found_returns_404(self, tmp_path):
+        c, _ = _cr_client(tmp_path, seed_run=True, run_id="r1")
+        r = c.get("/api/composite-run/r1/state?step=99")
+        assert r.status_code == 404
+        assert r.json() == {"error": "state not found for run+step"}
+
+    def test_seeded_step_returns_200(self, tmp_path):
+        import sqlite3 as _sq
+        c, ws = _cr_client(tmp_path, seed_run=True, run_id="r1")
+        db = ws / ".pbg" / "composite-runs.db"
+        raw = _sq.connect(str(db))
+        raw.execute(
+            "CREATE TABLE IF NOT EXISTS history "
+            "(simulation_id TEXT, step INTEGER, global_time REAL, "
+            "state TEXT, PRIMARY KEY (simulation_id, step))"
+        )
+        raw.execute(
+            "INSERT INTO history VALUES (?, ?, ?, ?)",
+            ("r1", 2, 2.0, _json_cr.dumps({"z": 3.14})),
+        )
+        raw.commit()
+        raw.close()
+        r = c.get("/api/composite-run/r1/state?step=2")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["run_id"] == "r1"
+        assert body["step"] == 2
+        assert body["state"] == {"z": 3.14}
+
+    def test_composite_run_state_in_openapi(self, client):
+        components = client.get("/openapi.json").json()["components"]["schemas"]
+        assert "CompositeRunState" in components
+
+
+class TestCompositeRunStatusRoute:
+    def test_no_db_returns_404(self, tmp_path):
+        c, _ = _cr_client(tmp_path)
+        r = c.get("/api/composite-run/r1/status")
+        assert r.status_code == 404
+        assert r.json() == {"error": "no run database"}
+
+    def test_unknown_run_returns_404(self, tmp_path):
+        c, _ = _cr_client(tmp_path, seed_run=True, run_id="r1")
+        r = c.get("/api/composite-run/no-such-run/status")
+        assert r.status_code == 404
+        assert r.json() == {"error": "run not found"}
+
+    def test_completed_run_returns_200(self, tmp_path):
+        c, _ = _cr_client(tmp_path, seed_run=True, run_id="r1",
+                           status="completed")
+        r = c.get("/api/composite-run/r1/status")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["run_id"] == "r1"
+        assert body["status"] == "completed"
+        assert body["n_steps"] == 5
+
+    def test_completed_run_with_viz_html(self, tmp_path):
+        c, ws = _cr_client(tmp_path, seed_run=True, run_id="r1",
+                            status="completed")
+        viz_dir = ws / ".pbg" / "runs" / "r1"
+        viz_dir.mkdir(parents=True)
+        (viz_dir / "viz.json").write_text(
+            _json_cr.dumps({"plot": "xy"}), encoding="utf-8"
+        )
+        r = c.get("/api/composite-run/r1/status")
+        assert r.status_code == 200
+        assert r.json()["viz_html"] == {"plot": "xy"}
+
+    def test_composite_run_status_in_openapi(self, client):
+        components = client.get("/openapi.json").json()["components"]["schemas"]
+        assert "CompositeRunStatus" in components

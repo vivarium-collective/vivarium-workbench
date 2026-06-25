@@ -349,3 +349,15 @@ export interface UiConfig {
 
 export interface WorkspaceHome {
 }
+
+export interface CompositeRunsList {
+}
+
+export interface CompositeRunTrajectory {
+}
+
+export interface CompositeRunState {
+}
+
+export interface CompositeRunStatus {
+}
