@@ -44,6 +44,18 @@ _LINKAGE_CACHE: dict[Any, Any] = {}
 _LINKAGE_TTL = 30.0  # seconds
 
 
+def clear_cache() -> None:
+    """Clear the linkage-index TTL cache.
+
+    Called from ``server._invalidate_workspace_caches`` on a workspace switch so
+    a re-pointed workspace never serves the previous workspace's cached linkage
+    index. Mirrors the ``clear_cache`` contract of the other lib view modules
+    (``observables_views``, ``composite_state_views``) — the source-switch hook
+    invokes all three.
+    """
+    _LINKAGE_CACHE.clear()
+
+
 # ---------------------------------------------------------------------------
 # Private pure helpers (copied / adapted from server.py)
 # ---------------------------------------------------------------------------

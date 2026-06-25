@@ -5,6 +5,7 @@ from vivarium_dashboard import server
 from vivarium_dashboard.lib import _root
 from vivarium_dashboard.lib import observables_views as _obs_views
 from vivarium_dashboard.lib import report_views as _report_views
+from vivarium_dashboard.lib import composite_state_views as _cs_views
 from vivarium_dashboard.lib.data_sources import _DATA_SOURCES_CACHE
 
 
@@ -32,7 +33,7 @@ def test_switch_active_workspace_repoints_and_invalidates(tmp_path):
     server._REGISTRY_CACHE["data"] = {"stale": True}
     _report_views._LINKAGE_CACHE["x"] = 1     # linkage cache moved to lib
     _obs_views._OBS_CACHE["x"] = 1            # observables build cache (lib)
-    server._COMPOSITE_STATE_CACHE["x"] = 1
+    _cs_views._COMPOSITE_STATE_CACHE["x"] = 1  # composite-state build cache (lib)
     server._RUN_STORE_SUMMARY_CACHE["x"] = 1
     server._WP_CACHE["x"] = 1
     _DATA_SOURCES_CACHE["x"] = 1
@@ -45,7 +46,7 @@ def test_switch_active_workspace_repoints_and_invalidates(tmp_path):
     assert server._REGISTRY_CACHE["ts"] == 0.0
     assert _report_views._LINKAGE_CACHE == {}
     assert _obs_views._OBS_CACHE == {}
-    assert server._COMPOSITE_STATE_CACHE == {}
+    assert _cs_views._COMPOSITE_STATE_CACHE == {}
     assert server._RUN_STORE_SUMMARY_CACHE == {}
     assert server._WP_CACHE == {}
     assert _DATA_SOURCES_CACHE == {}
