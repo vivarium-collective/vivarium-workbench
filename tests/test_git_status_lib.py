@@ -418,3 +418,65 @@ class TestServerShimParity:
         captured = self._invoke(monkeypatch, repo, "_get_branch_diff", "/api/branch-diff")
         assert captured["status"] == 400
         assert captured["body"] == {"error": "invalid branch name"}
+
+
+# ---------------------------------------------------------------------------
+# Cross-SERVER error-body parity: FastAPI route body == legacy handler body
+# ---------------------------------------------------------------------------
+
+class TestErrorBodyCrossServerParity:
+    """The FastAPI seam must emit the SAME error body shape as the legacy stdlib
+    handler — ``{"error": <msg>}``, not FastAPI's default ``{"detail": ...}`` —
+    so a flip from one server to the other doesn't silently change what the
+    frontend sees on the error paths.
+
+    Asserts the full JSON body (key name AND message) is equal across both
+    servers on the same fixture, for branch-diff 400 and branches 500.
+    """
+
+    @staticmethod
+    def _legacy_body(monkeypatch, ws_root: Path, method_name: str, path: str) -> dict:
+        import vivarium_dashboard.server as server
+
+        monkeypatch.setattr(server, "WORKSPACE", ws_root)
+        handler = server.Handler.__new__(server.Handler)
+        captured: dict = {}
+
+        def _fake_json(data, code):
+            captured["body"] = data
+            captured["status"] = code
+
+        handler._json = _fake_json          # type: ignore[method-assign]
+        handler.path = path
+        getattr(handler, method_name)()
+        return captured
+
+    @staticmethod
+    def _fastapi_client(ws_root: Path):
+        from fastapi.testclient import TestClient
+
+        from vivarium_dashboard.api.app import create_app, get_workspace
+
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: ws_root
+        return TestClient(app)
+
+    def test_branch_diff_400_body_matches(self, monkeypatch, repo: Path) -> None:
+        # Missing ?branch= on the same repo, both servers.
+        legacy = self._legacy_body(
+            monkeypatch, repo, "_get_branch_diff", "/api/branch-diff"
+        )
+        fastapi = self._fastapi_client(repo).get("/api/branch-diff")
+        assert legacy["status"] == fastapi.status_code == 400
+        assert legacy["body"] == fastapi.json() == {"error": "invalid branch name"}
+
+    def test_branches_500_body_matches(self, monkeypatch, tmp_path: Path) -> None:
+        # A non-git dir makes list_branches return an {"error": ...} dict → 500.
+        legacy = self._legacy_body(
+            monkeypatch, tmp_path, "_serve_branches", "/api/branches"
+        )
+        fastapi = self._fastapi_client(tmp_path).get("/api/branches")
+        assert legacy["status"] == fastapi.status_code == 500
+        # Same builder + same dir → identical git error string under "error".
+        assert legacy["body"] == fastapi.json()
+        assert set(fastapi.json()) == {"error"}

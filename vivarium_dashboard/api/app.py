@@ -32,7 +32,8 @@ from typing import Optional, Union
 
 import subprocess
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI
+from fastapi.responses import JSONResponse
 
 from vivarium_dashboard.lib import data_sources as _data_sources
 from vivarium_dashboard.lib import git_status as _git_status
@@ -468,21 +469,24 @@ def create_app() -> FastAPI:
         branch: Optional[str] = None,
         base: str = "main",
         ws: Path = Depends(get_workspace),
-    ) -> BranchStaleness:
+    ) -> Union[BranchStaleness, JSONResponse]:
         """Branch staleness check (commits behind base).
 
         ``?branch=<name>`` defaults to the workspace's current HEAD.
         ``?base=<name>`` defaults to ``main``.
 
         HTTP 400 when neither ``?branch=`` is given nor the current HEAD can
-        be determined (detached HEAD / not a git repo).
+        be determined (detached HEAD / not a git repo). The 400 body is
+        ``{"error": <msg>}`` — byte-identical to the legacy handler (not
+        FastAPI's default ``{"detail": ...}``).
 
         Library-backed via ``lib.git_status.build_branch_staleness``.
         """
         try:
             payload = _git_status.build_branch_staleness(ws, branch=branch, base=base)
         except _git_status.NoBranchError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            # Legacy emits the NoBranchError message verbatim under "error".
+            return JSONResponse(status_code=400, content={"error": str(exc)})
         return BranchStaleness.model_validate(payload)
 
     @app.get(
@@ -491,11 +495,14 @@ def create_app() -> FastAPI:
         tags=["Git & branches"],
         summary="Filtered list of uncommitted files in the workspace",
     )
-    def dirty_status_route(ws: Path = Depends(get_workspace)) -> DirtyStatus:
+    def dirty_status_route(
+        ws: Path = Depends(get_workspace),
+    ) -> Union[DirtyStatus, JSONResponse]:
         """Filtered list of uncommitted files (excludes reports/, out/, .pbg/).
 
         HTTP 500 when ``git status`` itself fails (not a git repo, corrupt
-        index, etc.).
+        index, etc.). The 500 body is ``{"error": "git status failed: ..."}`` —
+        byte-identical to the legacy handler.
 
         Library-backed via ``lib.git_status.build_dirty_status``.
         """
@@ -503,9 +510,9 @@ def create_app() -> FastAPI:
             payload = _git_status.build_dirty_status(ws)
         except subprocess.CalledProcessError as exc:
             stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-            raise HTTPException(
+            return JSONResponse(
                 status_code=500,
-                detail=f"git status failed: {stderr[:200]}",
+                content={"error": f"git status failed: {stderr[:200]}"},
             )
         files = [DirtyFile.model_validate(f) for f in payload["files"]]
         return DirtyStatus(count=payload["count"], files=files)
@@ -516,20 +523,23 @@ def create_app() -> FastAPI:
         tags=["Git & branches"],
         summary="stage/* branches with last-commit info",
     )
-    def branches_route(ws: Path = Depends(get_workspace)) -> BranchesPayload:
+    def branches_route(
+        ws: Path = Depends(get_workspace),
+    ) -> Union[BranchesPayload, JSONResponse]:
         """List ``stage/*`` branches with last-commit SHA/subject/date and
         commits-ahead-of-main count.
 
         Returns ``{branches: [], current: <HEAD>}`` when no stage branches
         exist. Per-branch errors are swallowed by the builder, but a top-level
-        git failure (the builder returns ``{"error": ...}``) maps to HTTP 500,
-        matching the legacy ``_serve_branches`` behaviour.
+        git failure (the builder returns ``{"error": ...}``) maps to HTTP 500
+        with that exact ``{"error": ...}`` body — byte-identical to the legacy
+        ``_serve_branches``.
 
         Library-backed via ``lib.git_status.list_branches``.
         """
         payload = _git_status.list_branches(ws)
         if "error" in payload:
-            raise HTTPException(status_code=500, detail=payload["error"])
+            return JSONResponse(status_code=500, content={"error": payload["error"]})
         raw_branches = payload.get("branches") or []
         branch_list = []
         for b in raw_branches:
@@ -553,20 +563,22 @@ def create_app() -> FastAPI:
     def branch_diff_route(
         branch: Optional[str] = None,
         ws: Path = Depends(get_workspace),
-    ) -> BranchDiff:
+    ) -> Union[BranchDiff, JSONResponse]:
         """Short log + diff-stat summary for ``?branch=<name>`` vs ``main``.
 
         HTTP 400 when ``?branch=`` is missing/empty or contains unsafe
         characters — matching the legacy ``_get_branch_diff``.  (``branch`` is
-        declared Optional so a missing query param yields a 400 from the
-        builder, not FastAPI's 422 "field required".)
+        declared Optional so a missing query param yields a 400, not FastAPI's
+        422 "field required".)  The 400 body is the legacy verbatim
+        ``{"error": "invalid branch name"}`` — NOT the builder's more detailed
+        ``ValueError`` text.
 
         Library-backed via ``lib.git_status.build_branch_diff``.
         """
         try:
             payload = _git_status.build_branch_diff(ws, branch or "")
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+        except ValueError:
+            return JSONResponse(status_code=400, content={"error": "invalid branch name"})
         return BranchDiff.model_validate(payload)
 
     return app

@@ -824,7 +824,8 @@ def test_branch_staleness_400_no_branch(client, monkeypatch):
     monkeypatch.setattr(_app._git_status, "build_branch_staleness", _raise)
     r = client.get("/api/branch-staleness")
     assert r.status_code == 400
-    assert "could not determine" in r.json()["detail"]
+    # Legacy shape: {"error": <msg>}, not FastAPI's default {"detail": ...}
+    assert r.json() == {"error": "could not determine current branch + no ?branch= given"}
 
 
 def test_branch_staleness_in_openapi(client):
@@ -882,7 +883,10 @@ def test_dirty_status_500_git_failure(client, monkeypatch):
     monkeypatch.setattr(_app._git_status, "build_dirty_status", _raise)
     r = client.get("/api/dirty-status")
     assert r.status_code == 500
-    assert "git status failed" in r.json()["detail"]
+    # Legacy shape: {"error": "git status failed: ..."}, not {"detail": ...}
+    body = r.json()
+    assert set(body) == {"error"}
+    assert body["error"].startswith("git status failed: not a git repo")
 
 
 def test_dirty_status_in_openapi(client):
@@ -947,7 +951,8 @@ def test_branches_500_on_git_error(client, monkeypatch):
     )
     r = client.get("/api/branches")
     assert r.status_code == 500
-    assert "not a git repository" in r.json()["detail"]
+    # Legacy shape: {"error": <msg>}, not FastAPI's default {"detail": ...}
+    assert r.json() == {"error": "fatal: not a git repository"}
 
 
 def test_branches_in_openapi(client):
@@ -988,7 +993,9 @@ def test_branch_diff_400_invalid_branch(client, monkeypatch):
     monkeypatch.setattr(_app._git_status, "build_branch_diff", _raise)
     r = client.get("/api/branch-diff?branch=../evil")
     assert r.status_code == 400
-    assert "invalid branch name" in r.json()["detail"]
+    # Legacy verbatim body: {"error": "invalid branch name"} — NOT the builder's
+    # detailed ValueError text, and NOT FastAPI's default {"detail": ...}.
+    assert r.json() == {"error": "invalid branch name"}
 
 
 def test_branch_diff_400_missing_param(client):
@@ -998,6 +1005,7 @@ def test_branch_diff_400_missing_param(client):
     the builder's name validation and surfaces as 400, matching legacy."""
     r = client.get("/api/branch-diff")
     assert r.status_code == 400
+    assert r.json() == {"error": "invalid branch name"}
 
 
 def test_branch_diff_in_openapi(client):
