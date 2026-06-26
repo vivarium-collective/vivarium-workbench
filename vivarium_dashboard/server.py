@@ -64,6 +64,7 @@ from vivarium_dashboard.lib import download_views as _download_views
 from vivarium_dashboard.lib import events as _events_lib
 from vivarium_dashboard.lib import metadata_mutations as _meta_mut
 from vivarium_dashboard.lib import study_crud_mutations as _study_crud_lib
+from vivarium_dashboard.lib import lifecycle_mutations as _lifecycle_mut
 from vivarium_dashboard.lib.investigations_index import (
     _conclusions_excerpt,
     _format_baseline_source,
@@ -1276,87 +1277,17 @@ def _append_investigation_input(ws_root: Path, inv: str, category: str, entry) -
 def _decide_proposed_input_for_test(
     ws_root: Path, inv: str, item_id: str, decision: str
 ) -> tuple[dict, int]:
-    """Pure function backing ``POST /api/proposed-input-decision``.
+    """Name-shim → lib.lifecycle_mutations.decide_proposed_input.
 
-    Resolves the ``proposed_inputs.items[]`` entry with ``id == item_id`` in
-    investigations/<inv>/investigation.yaml and applies the expert decision:
-
-      * ``accept``  → set ``status: accepted``. For ``kind: reference`` also
-        append the citation to ``inputs.references`` so it becomes a real
-        provided reference. For ``kind: mechanism`` only mark accepted (a
-        human integrates the mechanism).
-      * ``decline`` → set ``status: declined``.
-
-    Persists with ruamel (round-trip preserves comments/formatting), falling
-    back to safe_dump where ruamel is unavailable (e.g. the test venv).
-    Returns (response_dict, status_code).
+    Positional-arg signature kept for backward compatibility with test imports
+    (tests/test_proposed_input_decision.py calls this as
+    ``_decide_proposed_input_for_test(ws, inv, item_id, decision)``).
+    Reconstructs the body dict and delegates to the lib builder.
     """
-    if not inv:
-        return {"error": "investigation name required"}, 400
-    if not item_id:
-        return {"error": "item_id required"}, 400
-    if decision not in ("accept", "decline"):
-        return {"error": "decision must be 'accept' or 'decline'"}, 400
-
-    target = _investigation_yaml_path(ws_root, inv)
-    if target is None:
-        return {"error": f"no investigation.yaml for {inv!r}"}, 404
-
-    new_status = "accepted" if decision == "accept" else "declined"
-    result: dict = {}
-
-    def _mutate(spec: dict):
-        block = spec.get("proposed_inputs")
-        if not isinstance(block, dict):
-            return None, ("proposed_inputs block missing", 404)
-        items = block.get("items")
-        if not isinstance(items, list):
-            return None, ("proposed_inputs.items missing", 404)
-        match = None
-        for it in items:
-            if isinstance(it, dict) and str(it.get("id")) == str(item_id):
-                match = it
-                break
-        if match is None:
-            return None, (f"no proposed input with id {item_id!r}", 404)
-        match["status"] = new_status
-        kind = match.get("kind") or "reference"
-        result["kind"] = kind
-        result["status"] = new_status
-        # On accept, promote a reference into the real provided-references list.
-        if decision == "accept" and kind == "reference":
-            inputs = spec.get("inputs")
-            if not isinstance(inputs, dict):
-                inputs = {}
-                spec["inputs"] = inputs
-            refs = inputs.get("references")
-            if not isinstance(refs, list):
-                refs = []
-                inputs["references"] = refs
-            # Prefer a bib-key style id; fall back to the citation text.
-            ref_value = match.get("id") or match.get("citation")
-            if ref_value and ref_value not in refs:
-                refs.append(ref_value)
-                result["added_reference"] = ref_value
-        return spec, None
-
-    try:
-        from ruamel.yaml import YAML as _RYAML
-        _ry = _RYAML(); _ry.preserve_quotes = True; _ry.width = 4096
-        spec = _ry.load(target.read_text(encoding="utf-8")) or {}
-        mutated, err = _mutate(spec)
-        if err is not None:
-            return {"error": err[0]}, err[1]
-        with target.open("w", encoding="utf-8") as _fh:
-            _ry.dump(mutated, _fh)
-    except ImportError:
-        spec = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
-        mutated, err = _mutate(spec)
-        if err is not None:
-            return {"error": err[0]}, err[1]
-        target.write_text(yaml.safe_dump(mutated, sort_keys=False), encoding="utf-8")
-
-    return {"ok": True, "item_id": item_id, **result}, 200
+    return _lifecycle_mut.decide_proposed_input(
+        ws_root,
+        {"investigation": inv, "item_id": item_id, "decision": decision},
+    )
 
 
 def _build_iset_summary_for_test(ws_root: Path) -> list[dict]:
@@ -2184,203 +2115,38 @@ def _post_study_narrative_set_for_test(ws_root: Path, body: dict):
 
 
 def _post_study_seed_followup_for_test(ws_root: Path, body: dict):
-    """Seed a child study from a parent. Returns (response_dict, status_code).
+    """Name-shim → lib.lifecycle_mutations.study_seed_followup.
 
-    Routes the four unified followup field families through one entry:
-
-    - ``finding_id`` → delegates to the shared pbg-superpowers seed mechanism
-      (``resolve_seed_source`` + ``write_child_study``) via
-      ``seed_followup_study``; seeds STANDALONE from a ``finding.next_action``.
-    - ``followup_idx`` / ``proposal_id`` / ``proposal_idx`` → the existing
-      legacy / discovery_implications paths.
-
-    The pbg import is lazy + tolerant: if pbg-superpowers isn't installed the
-    finding path returns a 500 with a clear message rather than crashing the
-    server.
+    Kept for backward compatibility with test imports
+    (tests/test_study_seed_followup.py imports this symbol directly).
     """
-    from vivarium_dashboard.lib.study_seed import seed_followup_study
-
-    parent = body.get("parent")
-    finding_id = body.get("finding_id")
-    proposal_id = body.get("proposal_id")
-    proposal_idx = body.get("proposal_idx")
-    # Wave 3a #19 — optional study_type (e.g. 'diagnostic' when the parent
-    # failed) threaded to the pbg writer so the seeded child is typed.
-    study_type = body.get("study_type") or None
-    if proposal_idx is not None:
-        try:
-            proposal_idx = int(proposal_idx)
-        except (TypeError, ValueError):
-            return {"error": "proposal_idx must be an integer"}, 400
-    try:
-        if finding_id is not None and str(finding_id) != "":
-            # Finding family — delegate to the shared pbg seed mechanism.
-            new_name = seed_followup_study(
-                ws_root, parent, finding_id=finding_id, proposal_id=proposal_id,
-                study_type=study_type)
-        else:
-            new_name = seed_followup_study(
-                ws_root, parent,
-                int(body.get("followup_idx", -1)),
-                proposal_id=proposal_id,
-                proposal_idx=proposal_idx,
-                study_type=study_type,
-            )
-    except ImportError as e:
-        return {"error": f"finding-seed requires pbg-superpowers: {e}"}, 500
-    except FileNotFoundError as e:
-        return {"error": str(e)}, 404
-    except (ValueError, KeyError, IndexError) as e:
-        return {"error": str(e)}, 400
-    except Exception as e:
-        return {"error": f"seed failed: {e}"}, 500
-    return {"new_study_name": new_name, "new_slug": new_name}, 200
+    return _lifecycle_mut.study_seed_followup(ws_root, body)
 
 
 def _post_feedback_apply_action_for_test(ws_root: Path, body: dict):
-    """Apply a tracked feedback action via the pbg-superpowers primitive.
+    """Name-shim → lib.lifecycle_mutations.feedback_apply_action.
 
-    SP3b: the dashboard NEVER computes the action — it renders the
-    ``study_feedback_actions`` data + applies via this primitive (AI-free).
-    Lazy + tolerant pbg import: if pbg-superpowers isn't installed, return a
-    clear 500 rather than crashing the server. Body: ``{item_id}``.
-    Returns ``(response_dict, status_code)``.
+    Kept for backward compatibility with test imports
+    (tests/test_feedback_apply_action_api.py imports via Handler._feedback_apply_action_test).
     """
-    item_id = body.get("item_id")
-    if not item_id:
-        return {"error": "item_id required"}, 400
-    try:
-        from pbg_superpowers.feedback_actions import apply_feedback_action
-    except ImportError as e:
-        return {"error": f"feedback-apply requires pbg-superpowers: {e}"}, 500
-    try:
-        result = apply_feedback_action(ws_root, item_id)
-    except FileNotFoundError as e:
-        return {"error": str(e)}, 404
-    except Exception as e:  # noqa: BLE001
-        return {"error": f"apply failed: {e}"}, 500
-    # apply_feedback_action is best-effort: a not-found / bad-target case comes
-    # back as {"error": ...} without applied=True. Surface that as a 400.
-    if result.get("error") and not result.get("applied"):
-        return result, 400
-    return result, 200
+    return _lifecycle_mut.feedback_apply_action(ws_root, body)
 
 
 def _post_study_rename_for_test(ws_root: Path, body: dict):
-    """Rename a study directory and update name in study.yaml. Returns (response_dict, status_code)."""
-    name = (body.get("study") or "").strip()
-    new_name = (body.get("new_name") or "").strip()
-    if not name or not new_name:
-        return {"error": "missing study or new_name"}, 400
-    if not _SLUG_RE.match(new_name):
-        return {"error": "new_name must be lowercase + dashes"}, 400
-    src = ws_root / "studies" / name
-    dst = ws_root / "studies" / new_name
-    if not src.is_dir():
-        return {"error": "study not found"}, 404
-    if dst.exists():
-        return {"error": f"study {new_name!r} already exists"}, 409
-    src.rename(dst)
-    sf = dst / "study.yaml"
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
-    spec["name"] = new_name
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
-    return {"ok": True, "name": new_name}, 200
+    """Name-shim → lib.lifecycle_mutations.study_rename.
+
+    Kept for backward compatibility with test imports.
+    """
+    return _lifecycle_mut.study_rename(ws_root, body)
 
 
 def _post_study_create_from_run_for_test(ws_root, body):
-    """Create a new Study from a scratchpad run. Returns (response_dict, status_code)."""
-    import datetime
-    import json as _json
-    import tempfile
-    from vivarium_dashboard.lib.composite_runs import copy_run_to_new_db
+    """Name-shim → lib.lifecycle_mutations.study_create_from_run.
 
-    name = (body.get("name") or "").strip()
-    objective = body.get("objective") or ""
-    description = body.get("description") or ""
-    source_run_id = (body.get("source_run_id") or "").strip()
-
-    if not name or not source_run_id:
-        return {"error": "missing name or source_run_id"}, 400
-    if not _SLUG_RE.match(name):
-        return {"error": "name must be lowercase + dashes"}, 400
-
-    studies_root = Path(ws_root) / "studies"
-    studies_root.mkdir(parents=True, exist_ok=True)
-    dst = studies_root / name
-    if dst.exists():
-        return {"error": f"study {name!r} already exists"}, 409
-
-    scratch = Path(ws_root) / ".pbg" / "composite-runs.db"
-    if not scratch.is_file():
-        return {"error": "no scratchpad DB"}, 404
-
-    # Read the source run's metadata once to populate baseline.
-    import sqlite3 as _sqlite3
-    src = _sqlite3.connect(str(scratch))
-    src.row_factory = _sqlite3.Row
-    meta = src.execute(
-        "SELECT spec_id, params_json, n_steps FROM runs_meta WHERE run_id = ?",
-        (source_run_id,),
-    ).fetchone()
-    src.close()
-    if meta is None:
-        return {"error": "source_run_id not in scratchpad"}, 404
-
-    spec_id = meta["spec_id"]
-    try:
-        params = _json.loads(meta["params_json"] or "{}")
-    except (TypeError, ValueError):
-        params = {}
-    n_steps = int(meta["n_steps"] or 0)
-    if n_steps and "n_steps" not in params:
-        params["n_steps"] = n_steps
-
-    # Build the study atomically: write to a temp dir inside studies_root,
-    # then rename. Using studies_root as the temp parent ensures same filesystem.
-    tmp_dir = tempfile.mkdtemp(dir=str(studies_root))
-    tmp_path = Path(tmp_dir) / "build"
-    try:
-        tmp_path.mkdir()
-        (tmp_path / "composites").mkdir()
-        (tmp_path / "viz").mkdir()
-
-        # Copy the run history into the new DB.
-        copy_run_to_new_db(scratch, tmp_path / "runs.db", source_run_id)
-
-        spec = {
-            "schema_version": 3,
-            "name": name,
-            "created": datetime.date.today().isoformat(),
-            "status": "ran",
-            "objective": objective,
-            "description": description,
-            "baseline": {"composite": spec_id, "params": params},
-            "variants": [],
-            "runs": [{
-                "run_id": source_run_id,
-                "variant": None,
-                "label": "promoted from scratchpad",
-                "status": "completed",
-            }],
-            "visualizations": [],
-            "conclusion": None,
-            "parent_studies": [],
-        }
-        (tmp_path / "study.yaml").write_text(yaml.safe_dump(spec, sort_keys=False))
-
-        # Atomic rename: tmp/build → studies/<name>.
-        tmp_path.rename(dst)
-    except Exception:
-        import shutil
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise
-    else:
-        # Clean up the now-empty temp dir (build/ was renamed out).
-        import shutil
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-
-    return {"study": name, "url": f"/studies/{name}"}, 200
+    Kept for backward compatibility with test imports
+    (tests/test_study_create_from_run.py imports this symbol directly).
+    """
+    return _lifecycle_mut.study_create_from_run(ws_root, body)
 
 
 def _count_runs_for_study(name: str, spec: dict | None = None) -> int:
@@ -3525,23 +3291,12 @@ def _post_study_run_variant_for_test(ws_root, body):
 
 
 def _post_study_sync_runs_for_test(ws_root, body: dict):
-    """Reconcile a study's runs.db into study.yaml runs[]. Returns (response_dict, status_code).
+    """Name-shim → lib.lifecycle_mutations.study_sync_runs.
 
-    Body:
-      study: <slug>
+    Kept for backward compatibility with test imports
+    (tests/test_study_sync_runs_endpoint.py imports via server._post_study_sync_runs_for_test).
     """
-    from pbg_superpowers import study_outcomes
-    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
-    slug = (body or {}).get("study")
-    if not slug:
-        return {"error": "study slug required"}, 400
-    try:
-        study_dir = WorkspacePaths.load(Path(ws_root)).study_dir(slug)
-    except FileNotFoundError:
-        return {"error": f"study not found: {slug}"}, 404
-    summary = study_outcomes.sync(study_dir)  # record runs + compute outcomes
-    _sync_parent_investigation(ws_root, study_dir)  # SP1: roll up to investigation
-    return {"ok": True, "summary": summary}, 200
+    return _lifecycle_mut.study_sync_runs(ws_root, body)
 
 
 def _post_study_variant_add_for_test(ws_root, body):

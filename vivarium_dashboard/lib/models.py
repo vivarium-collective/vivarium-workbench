@@ -1495,3 +1495,67 @@ class StudyComparisonAddBody(BaseModel):
     study: Optional[str] = None
     investigation: Optional[str] = None
     run_ids: Optional[list] = None
+
+
+# ---------------------------------------------------------------------------
+# Batch 20: Study lifecycle + feedback mutation request-body models
+# ---------------------------------------------------------------------------
+
+
+class FeedbackApplyActionBody(BaseModel):
+    """POST /api/feedback-apply-action {item_id}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    item_id: Optional[str] = None
+
+
+class StudyCreateFromRunBody(BaseModel):
+    """POST /api/study-create-from-run {name, source_run_id, objective?, description?}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    source_run_id: Optional[str] = None
+    objective: Optional[str] = None
+    description: Optional[str] = None
+
+
+class StudyRenameBody(BaseModel):
+    """POST /api/study-rename {study, new_name}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    study: Optional[str] = None
+    new_name: Optional[str] = None
+
+
+class StudySyncRunsBody(BaseModel):
+    """POST /api/study-sync-runs {study}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    study: Optional[str] = None
+
+
+class ProposedInputDecisionBody(BaseModel):
+    """POST /api/proposed-input-decision {investigation, item_id, decision}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: Optional[str] = None
+    item_id: Optional[Any] = None
+    decision: Optional[str] = None
+
+
+class StudySeedFollowupBody(BaseModel):
+    """POST /api/study-seed-followup {parent, finding_id?, followup_idx?, proposal_id?, proposal_idx?, study_type?}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    parent: Optional[str] = None
+    finding_id: Optional[Any] = None
+    followup_idx: Optional[Any] = None
+    proposal_id: Optional[str] = None
+    proposal_idx: Optional[Any] = None
+    study_type: Optional[str] = None
