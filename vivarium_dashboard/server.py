@@ -2310,6 +2310,23 @@ def _resolve_study_baseline_state(pkg, spec_id, params):
             "(*.composite.{yaml,json}). Add an @composite_generator "
             "function or ship a composite YAML."
         )}
+    # Pass only parameters the generator actually declares. Study baselines also
+    # store run-time params (perturbations, single_daughters, max_generations, …)
+    # that are NOT composite-build parameters; the strict build_generator rejects
+    # unknown keys ("unknown parameter(s)"), which would surface as an error node
+    # in the composite explorer. Filter to the declared set for this static view.
+    declared = set((entry.parameters or {}).keys())
+    params = {k: v for k, v in (params or {}).items() if k in declared}
+    # Drop a cache_dir override whose ParCa cache is absent (e.g. a transient
+    # per-run cache that no longer exists on disk) so the static structural view
+    # falls back to the generator's default cache instead of FileNotFoundError.
+    cdir = params.get("cache_dir")
+    if cdir:
+        from pathlib import Path as _P
+        _root = WORKSPACE if ("WORKSPACE" in globals() and WORKSPACE) else _P(".")
+        if not (_P(_root) / cdir / "initial_state.json").exists() \
+           and not (_P(cdir) / "initial_state.json").exists():
+            params.pop("cache_dir", None)
     try:
         doc = build_generator(entry, overrides=params)
     except Exception as e:  # noqa: BLE001
