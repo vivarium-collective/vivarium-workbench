@@ -496,3 +496,7 @@ export interface FeedbackImportResponse {
   path: string;
   n_entries: number;
 }
+
+export interface VisualizationAcceptResponse {
+  ok: boolean;
+}

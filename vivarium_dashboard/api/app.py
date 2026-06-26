@@ -49,6 +49,7 @@ from vivarium_dashboard.lib import composite_run_views as _cr_views
 from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
 from vivarium_dashboard.lib import viz_write_mutations as _viz_write_mut
 from vivarium_dashboard.lib import viz_commit_mutations as _viz_commit_mut
+from vivarium_dashboard.lib import viz_accept_views as _viz_accept_views
 from vivarium_dashboard.lib import upload_mutations as _upload_mut
 from vivarium_dashboard.lib import reference_mutations as _reference_mut
 from vivarium_dashboard.lib import composite_mutations as _composite_mut
@@ -244,6 +245,9 @@ from vivarium_dashboard.lib.models import (
     # C-state-3h2: misc FS/render routes
     RenderResponse,
     FeedbackImportResponse,
+    # C-state-3i: visualization-accept finalize route
+    VisualizationAcceptBody,
+    VisualizationAcceptResponse,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -515,7 +519,16 @@ _OPENAPI_TAGS = [
             "batch).  Each route delegates to a pure lib builder in "
             "``lib.viz_commit_mutations``.  CSRF guard is deferred to the flip "
             "batch.  Errors carry ``{error: ...}`` at 400/404/409; success "
-            "returns ``{ok: true}`` or ``{ok: true, committed: [...]}``."
+            "returns ``{ok: true}`` or ``{ok: true, committed: [...]}``.\n\n"
+            "C-state-3i POST route — finalize a generated visualization "
+            "(/api/visualization-accept): invalidate the registry cache, "
+            "import-verify the generated file in-process, smoke-test the "
+            "workspace ``build_core()``, and confirm the class is discoverable.  "
+            "Like Batch 24 it is ``_active_branch_action``-wrapped in the live "
+            "server (a NO-OP commit); this FastAPI route runs the pre-wrapper "
+            "validation via ``lib.viz_accept_views`` and defers the commit to the "
+            "flip.  Errors carry ``{error: ...}`` at 400/404/500; success returns "
+            "``{ok: true}``."
         ),
     },
     {
@@ -3700,6 +3713,43 @@ def create_app() -> FastAPI:
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
+
+    @app.post(
+        "/api/visualization-accept",
+        response_model=VisualizationAcceptResponse,
+        tags=["Viz authoring"],
+        summary="Finalize a generated visualization file (no git commit on the FastAPI path)",
+    )
+    def visualization_accept(
+        req: VisualizationAcceptBody,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Finalize a generated visualization: invalidate the registry cache,
+        verify the generated file imports cleanly in-process, smoke-test the
+        workspace ``build_core()``, and confirm the class is discoverable.
+
+        Body: ``{name, class_name?}``.
+
+        Status codes (byte-identical to the legacy handler's pre-wrapper steps):
+          - 200  ``{"ok": True}``
+          - 400  ``{"error": "name is required"}``
+          - 404  ``{"error": "generated file not found at <rel>"}``
+          - 500  ``{"error": "generated file failed to import: ..."}``
+          - 500  ``{"error": "workspace build_core() failed after importing ..."}``
+          - 500  ``{"error": "class <name> not found in generated file after import; ..."}``
+
+        Note: the live server path commits the no-op via ``_active_branch_action``;
+        this FastAPI route defers that git commit to the flip and returns
+        ``{ok: true}`` on success.  The CSRF middleware already guards this POST.
+
+        Library-backed via the pure ``lib.viz_accept_views.visualization_accept``;
+        every path is wrapped in ``JSONResponse`` so the lib-returned status code
+        is preserved verbatim.
+        """
+        resp, status = _viz_accept_views.visualization_accept(
+            ws, req.model_dump(exclude_unset=True)
+        )
+        return JSONResponse(status_code=status, content=resp)
 
     # -----------------------------------------------------------------------
     # Batch 25: Upload / import (POST routes)
