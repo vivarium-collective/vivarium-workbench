@@ -1648,3 +1648,33 @@ class InvestigationGroupUpdateBody(BaseModel):
     investigation: Optional[str] = None
     name: Optional[str] = None
     fields_to_update: Optional[dict] = None
+
+
+# ---------------------------------------------------------------------------
+# Batch 23: Visualization file-write mutation request-body models
+# ---------------------------------------------------------------------------
+
+
+class VisualizationCreateBody(BaseModel):
+    """POST /api/visualization-create {name}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+
+
+class VisualizationAddToProjectBody(BaseModel):
+    """POST /api/visualization-add-to-project {name}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+
+
+class VisualizationGenerateBody(BaseModel):
+    """POST /api/visualization-generate {name, description}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    description: Optional[str] = None

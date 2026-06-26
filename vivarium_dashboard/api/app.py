@@ -38,6 +38,7 @@ from pydantic import ValidationError
 
 from vivarium_dashboard.lib import composite_run_views as _cr_views
 from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
+from vivarium_dashboard.lib import viz_write_mutations as _viz_write_mut
 from vivarium_dashboard.lib import lifecycle_mutations as _lifecycle_mut
 from vivarium_dashboard.lib import scaffold_mutations as _scaffold_mut
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
@@ -170,6 +171,10 @@ from vivarium_dashboard.lib.models import (
     InvestigationComparisonUpdateBody,
     InvestigationGroupAddBody,
     InvestigationGroupUpdateBody,
+    # Batch 23: request-body models for visualization file-write mutations
+    VisualizationCreateBody,
+    VisualizationAddToProjectBody,
+    VisualizationGenerateBody,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -399,6 +404,19 @@ _OPENAPI_TAGS = [
             "deferred to the flip batch; the live do_POST still enforces it via "
             "``_csrf_ok``.  Errors carry ``{error: ...}`` at 400/404/409; success "
             "returns ``{ok: true}``."
+        ),
+    },
+    {
+        "name": "Viz authoring",
+        "description": (
+            "Batch 23 POST routes — visualization file-write endpoints: write a "
+            "viz-request file (old-contract /api/visualization-create and "
+            "new-contract /api/visualization-generate) and stage a skill response "
+            "for commit (/api/visualization-add-to-project).  No git commit; "
+            "no _commit_or_run — the simplest POST shape.  Each route delegates "
+            "to a pure lib builder in ``lib.viz_write_mutations``.  CSRF guard is "
+            "deferred to the flip batch.  Errors carry ``{error: ...}`` at "
+            "400/404; success returns ``{ok: true, ...}``."
         ),
     },
     {
@@ -3210,6 +3228,87 @@ def create_app() -> FastAPI:
         FastAPI route calls the lib builder directly (commit deferred).
         """
         body, status = _compare_grp_mut.group_update(ws, req.model_dump(exclude_unset=True))
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    # -----------------------------------------------------------------------
+    # Batch 23: Visualization file-write (POST routes)
+    # NOTE: CSRF guard is deferred to the state/flip batch — same as batches 18-22.
+    # No git commit, no _commit_or_run — simplest POST shape (plain file writes).
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/visualization-create",
+        tags=["Viz authoring"],
+        summary="Write a viz-request .md file for /pbg-viz (old-contract)",
+    )
+    def visualization_create(
+        req: VisualizationCreateBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Write a ``.pbg/viz-requests/<name>.md`` file from workspace context.
+
+        Body: ``{name}``
+        The visualization must already be registered in ``workspace.yaml`` with
+        a non-empty ``description``. Writes the request file and returns
+        ``{ok, request_path, skill_command, instructions}``.
+        400 when name is invalid or the description is empty; 404 when the
+        visualization is not registered; 200 on success.
+
+        Note: no git commit — both source and dest are gitignored.
+        Delegates to ``lib.viz_write_mutations.visualization_create``.
+        """
+        body, status = _viz_write_mut.visualization_create(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/visualization-add-to-project",
+        tags=["Viz authoring"],
+        summary="Stage a skill viz response for commit",
+    )
+    def visualization_add_to_project(
+        req: VisualizationAddToProjectBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Copy ``.pbg/viz-responses/<name>.py`` to ``.pbg/visualizations-staged/<name>.py``.
+
+        Body: ``{name}``
+        Does NOT commit — both source and dest are gitignored.  The staged file
+        is picked up by ``/api/visualization-commit-batch`` in the next step.
+        400 when name is missing; 404 when no skill response exists yet; 200
+        ``{ok, staged_path}`` on success.
+
+        Delegates to ``lib.viz_write_mutations.visualization_add_to_project``.
+        """
+        body, status = _viz_write_mut.visualization_add_to_project(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/visualization-generate",
+        tags=["Viz authoring"],
+        summary="Write a new-contract viz-request file for /pbg-viz",
+    )
+    def visualization_generate(
+        req: VisualizationGenerateBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Write a new-contract ``.pbg/viz-requests/<name>.md`` request file.
+
+        Body: ``{name, description}``
+        The /pbg-viz skill reads the request and writes a ``@as_visualization``
+        decorated function to ``<pkg>/visualizations/<snake>.py``.
+        400 when name is invalid or description is empty; 200
+        ``{ok, request_path, target_file, skill_command, instructions}`` on
+        success.
+
+        Delegates to ``lib.viz_write_mutations.visualization_generate``.
+        """
+        body, status = _viz_write_mut.visualization_generate(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
