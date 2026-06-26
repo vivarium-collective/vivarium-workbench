@@ -9,6 +9,8 @@ import sqlite3
 import yaml
 import pytest
 
+from vivarium_dashboard.lib import study_runs
+
 
 @pytest.fixture
 def _multi_baseline_ws(tmp_path, monkeypatch):
@@ -57,7 +59,7 @@ def test_run_all_baselines_dispatches_every_entry(_multi_baseline_ws, monkeypatc
     def fake_per_entry(ws_root, body):
         calls.append(body)
         return ({"simulation_id": f"run-{body['composite']}"}, 200)
-    monkeypatch.setattr(srv, "_post_study_run_baseline_for_test", fake_per_entry)
+    monkeypatch.setattr(study_runs, "run_study_baseline", fake_per_entry)
 
     from vivarium_dashboard.server import _post_study_run_all_baselines_for_test
     resp, code = _post_study_run_all_baselines_for_test(
@@ -80,7 +82,7 @@ def test_run_all_baselines_partial_failure_returns_207(_multi_baseline_ws, monke
         if body["composite"] == "b":
             return ({"error": "boom"}, 500)
         return ({"simulation_id": f"run-{body['composite']}"}, 200)
-    monkeypatch.setattr(srv, "_post_study_run_baseline_for_test", fake_per_entry)
+    monkeypatch.setattr(study_runs, "run_study_baseline", fake_per_entry)
 
     from vivarium_dashboard.server import _post_study_run_all_baselines_for_test
     resp, code = _post_study_run_all_baselines_for_test(
@@ -96,7 +98,7 @@ def test_run_all_baselines_all_fail_propagates_first_error_code(_multi_baseline_
     """If no baseline succeeds, surface the first error's status code so
     the caller doesn't get a 207 for a fully-broken run."""
     import vivarium_dashboard.server as srv
-    monkeypatch.setattr(srv, "_post_study_run_baseline_for_test",
+    monkeypatch.setattr(study_runs, "run_study_baseline",
                         lambda ws, body: ({"error": "bad ref"}, 404))
 
     from vivarium_dashboard.server import _post_study_run_all_baselines_for_test
