@@ -43,6 +43,7 @@ from vivarium_dashboard.lib import download_views as _download_views
 from vivarium_dashboard.lib import events as _events
 from vivarium_dashboard.lib import explorer_data as _explorer_data
 from vivarium_dashboard.lib import metadata_mutations as _meta_mut
+from vivarium_dashboard.lib import study_crud_mutations as _study_crud_mut
 from vivarium_dashboard.lib import git_status as _git_status
 from vivarium_dashboard.lib import investigation_status
 from vivarium_dashboard.lib import investigation_views as _inv_views
@@ -138,6 +139,18 @@ from vivarium_dashboard.lib.models import (
     SetObjectiveBody,
     NarrativeSetBody,
     ExpertInputSetBody,
+    # Batch 19: request-body models for study CRUD
+    StudyVariantAddBody,
+    StudyVariantDeleteBody,
+    StudyVariantSetParamsBody,
+    StudyBaselineAddBody,
+    StudyBaselineRemoveBody,
+    StudyInterventionAddBody,
+    StudyInterventionUpdateBody,
+    StudyInterventionDeleteBody,
+    StudyRunDeleteBody,
+    StudyRunsClearBody,
+    StudyComparisonAddBody,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -316,6 +329,17 @@ _OPENAPI_TAGS = [
             "CSRF guard is deferred to the state/flip batch; the live do_POST "
             "still enforces it via ``_csrf_ok``.  Errors carry ``{error: ...}`` "
             "at 400/404/500; success returns ``{ok: true}`` or the mutated record."
+        ),
+    },
+    {
+        "name": "Study CRUD",
+        "description": (
+            "Batch 19 POST routes — variant/baseline/intervention/run/comparison "
+            "CRUD writers for v3 studies.  Each route delegates to a pure lib "
+            "builder in ``lib.study_crud_mutations``.  CSRF guard is deferred to "
+            "the flip batch; the live do_POST still enforces it via ``_csrf_ok``.  "
+            "Errors carry ``{error: ...}`` at 400/404/409; success returns "
+            "``{ok: true}`` or ``{ok: true, name: ...}``."
         ),
     },
     {
@@ -2606,6 +2630,210 @@ def create_app() -> FastAPI:
         body, status = _meta_mut.set_study_expert_input(
             ws, req.model_dump(exclude_unset=True)
         )
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    # -----------------------------------------------------------------------
+    # Batch 19: Study CRUD — variant / baseline / intervention / run / comparison
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/study-variant-add",
+        tags=["Study CRUD"],
+        summary="Add a variant entry to study.yaml",
+    )
+    def study_variant_add(
+        req: StudyVariantAddBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Append a new variant (base_composite + optional parameter_overrides).
+
+        Body: ``{study|investigation, name, base_composite, parameter_overrides?}``
+        """
+        body, status = _study_crud_mut.study_variant_add(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-variant-delete",
+        tags=["Study CRUD"],
+        summary="Remove a variant entry from study.yaml",
+    )
+    def study_variant_delete(
+        req: StudyVariantDeleteBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Delete a named variant.
+
+        Body: ``{name|study|investigation, variant}``
+        """
+        body, status = _study_crud_mut.study_variant_delete(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-variant-set-params",
+        tags=["Study CRUD"],
+        summary="Replace a variant's parameter_overrides in study.yaml",
+    )
+    def study_variant_set_params(
+        req: StudyVariantSetParamsBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Replace (not merge) a variant's parameter_overrides.
+
+        Body: ``{name|study|investigation, variant, parameter_overrides: dict}``
+        """
+        body, status = _study_crud_mut.study_variant_set_params(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-baseline-add",
+        tags=["Study CRUD"],
+        summary="Append a composite to study.yaml baseline[]",
+    )
+    def study_baseline_add(
+        req: StudyBaselineAddBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Add a named baseline entry (composite + optional params).
+
+        Body: ``{study|investigation, name, composite, params?}``
+        """
+        body, status = _study_crud_mut.study_baseline_add(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-baseline-remove",
+        tags=["Study CRUD"],
+        summary="Remove a baseline entry from study.yaml",
+    )
+    def study_baseline_remove(
+        req: StudyBaselineRemoveBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Remove a named baseline entry.
+
+        Body: ``{study|investigation, name}``
+        409 if any variant references this entry; 400 if removal would empty baseline.
+        """
+        body, status = _study_crud_mut.study_baseline_remove(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-intervention-add",
+        tags=["Study CRUD"],
+        summary="Append an intervention to study.yaml interventions[]",
+    )
+    def study_intervention_add(
+        req: StudyInterventionAddBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Add a named intervention (with optional description).
+
+        Body: ``{study|investigation, name, description?}``
+        """
+        body, status = _study_crud_mut.study_intervention_add(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-intervention-update",
+        tags=["Study CRUD"],
+        summary="Update an intervention's description in study.yaml",
+    )
+    def study_intervention_update(
+        req: StudyInterventionUpdateBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Replace an intervention's description field.
+
+        Body: ``{study|investigation, name, description}``
+        """
+        body, status = _study_crud_mut.study_intervention_update(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-intervention-delete",
+        tags=["Study CRUD"],
+        summary="Remove an intervention from study.yaml",
+    )
+    def study_intervention_delete(
+        req: StudyInterventionDeleteBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Delete a named intervention.
+
+        Body: ``{study|investigation, name}``
+        """
+        body, status = _study_crud_mut.study_intervention_delete(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-run-delete",
+        tags=["Study CRUD"],
+        summary="Delete one run from runs.db and study.yaml",
+    )
+    def study_run_delete(
+        req: StudyRunDeleteBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Remove a single run by run_id (from runs.db and spec.runs[]).
+
+        Body: ``{name|study|investigation, run_id}``
+        """
+        body, status = _study_crud_mut.study_run_delete(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-runs-clear",
+        tags=["Study CRUD"],
+        summary="Delete all runs from runs.db and study.yaml",
+    )
+    def study_runs_clear(
+        req: StudyRunsClearBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Remove all runs for a study (truncates runs.db and empties spec.runs[]).
+
+        Body: ``{name|study|investigation}``
+        """
+        body, status = _study_crud_mut.study_runs_clear(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-comparison-add",
+        tags=["Study CRUD"],
+        summary="Add a named comparison (run_ids set) to study.yaml",
+    )
+    def study_comparison_add(
+        req: StudyComparisonAddBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Append a named comparison grouping of run_ids.
+
+        Body: ``{name|study|investigation, run_ids: [str, ...], name?}``
+        At least 2 run_ids required.
+        """
+        body, status = _study_crud_mut.study_comparison_add(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body

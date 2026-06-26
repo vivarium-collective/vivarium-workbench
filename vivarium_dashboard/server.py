@@ -63,6 +63,7 @@ from vivarium_dashboard.lib import system_info as _system_info_lib
 from vivarium_dashboard.lib import download_views as _download_views
 from vivarium_dashboard.lib import events as _events_lib
 from vivarium_dashboard.lib import metadata_mutations as _meta_mut
+from vivarium_dashboard.lib import study_crud_mutations as _study_crud_lib
 from vivarium_dashboard.lib.investigations_index import (
     _conclusions_excerpt,
     _format_baseline_source,
@@ -3544,351 +3545,62 @@ def _post_study_sync_runs_for_test(ws_root, body: dict):
 
 
 def _post_study_variant_add_for_test(ws_root, body):
-    """Add a variant entry to study.yaml. Returns (response_dict, status_code).
+    """Name-shim: delegates to lib.study_crud_mutations.study_variant_add.
 
-    Body:
-      study or investigation:  <study name>
-      name:                    <variant name>
-      base_composite:          <baseline entry name> (required)
-      parameter_overrides:     <dict>  (optional; defaults to {})
+    Kept for backward compatibility with test imports
+    (tests/test_study_baseline_handlers.py etc. import this symbol directly).
     """
-    study = (body.get("study") or body.get("investigation") or "").strip()
-    variant_name = (body.get("name") or "").strip()
-    base_composite = (body.get("base_composite") or "").strip()
-    if not study or not variant_name:
-        return {"error": "missing study or variant name"}, 400
-    if not base_composite:
-        return {"error": "missing base_composite"}, 400
-    overrides = body.get("parameter_overrides")
-    if overrides is not None and not isinstance(overrides, dict):
-        return {"error": "parameter_overrides must be an object"}, 400
-
-    # Inline ws_root-based path resolution (matches Task 5/6 pattern).
-    studies_path = ws_root / "studies" / study
-    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
-    sf = _study_spec_file(study_dir)
-    if not sf.is_file():
-        return {"error": "study not found"}, 404
-
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
-    baseline = spec.get("baseline") or []
-    baseline_names = {b.get("name") for b in baseline if isinstance(b, dict)}
-    if base_composite not in baseline_names:
-        return {"error": f"base_composite {base_composite!r} not in baseline"}, 404
-
-    variants = spec.setdefault("variants", [])
-    if any(v.get("name") == variant_name for v in variants if isinstance(v, dict)):
-        return {"error": f"variant {variant_name!r} already exists"}, 409
-
-    variants.append({
-        "name": variant_name,
-        "base_composite": base_composite,
-        "parameter_overrides": overrides or {},
-    })
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
-    return {"ok": True, "name": variant_name}, 200
+    return _study_crud_lib.study_variant_add(ws_root, body)
 
 
 def _post_study_variant_delete_for_test(ws_root, body):
-    """Remove a variant entry from study.yaml. Returns (response_dict, status_code)."""
-    study = _study_name_from_body(body)
-    variant_name = (body.get("variant") or "").strip()
-    if not study or not variant_name:
-        return {"error": "missing study or variant"}, 400
-    sf = _study_spec_file(_study_dir(study))
-    if not sf.is_file():
-        return {"error": "study not found"}, 404
-
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
-    variants = spec.get("variants") or []
-    remaining = [v for v in variants if v.get("name") != variant_name]
-    if len(remaining) == len(variants):
-        return {"error": f"variant {variant_name!r} not found"}, 404
-    spec["variants"] = remaining
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
-    return {"ok": True}, 200
+    """Name-shim: delegates to lib.study_crud_mutations.study_variant_delete."""
+    return _study_crud_lib.study_variant_delete(ws_root, body)
 
 
 def _post_study_variant_set_params_for_test(ws_root, body):
-    """Replace a variant's parameter_overrides. Returns (response_dict, status_code).
-
-    Body:
-      study:                <name>
-      variant:              <variant name>
-      parameter_overrides:  <dict>  (replaces; does not merge)
-    """
-    study = _study_name_from_body(body)
-    variant_name = (body.get("variant") or "").strip()
-    overrides = body.get("parameter_overrides")
-    if not study or not variant_name:
-        return {"error": "missing study or variant"}, 400
-    if not isinstance(overrides, dict):
-        return {"error": "parameter_overrides must be an object"}, 400
-
-    # Inline ws_root-based path resolution (matches Task 5/6/7 pattern).
-    studies_path = ws_root / "studies" / study
-    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
-    sf = _study_spec_file(study_dir)
-    if not sf.is_file():
-        return {"error": "study not found"}, 404
-
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
-    variants = spec.get("variants") or []
-    for v in variants:
-        if isinstance(v, dict) and v.get("name") == variant_name:
-            v["parameter_overrides"] = dict(overrides)
-            spec["variants"] = variants
-            sf.write_text(yaml.safe_dump(spec, sort_keys=False))
-            return {"ok": True}, 200
-    return {"error": f"variant {variant_name!r} not found"}, 404
+    """Name-shim: delegates to lib.study_crud_mutations.study_variant_set_params."""
+    return _study_crud_lib.study_variant_set_params(ws_root, body)
 
 
 def _post_study_baseline_add_for_test(ws_root, body):
-    """Append a composite to study.yaml.baseline[]. Returns (response_dict, status_code).
-
-    Body:
-      study:     <name>
-      name:      <baseline entry name>  (unique within baseline)
-      composite: <pkg.composites.x>
-      params:    <dict>  (optional; defaults to {})
-    """
-    # Use body.get("study") directly — _study_name_from_body would pick up "name"
-    # (the baseline entry name field) and misidentify it as the study name.
-    study = (body.get("study") or body.get("investigation") or "").strip()
-    entry_name = (body.get("name") or "").strip()
-    composite = (body.get("composite") or "").strip()
-    params = body.get("params")
-    if not study:
-        return {"error": "missing study"}, 400
-    if not entry_name:
-        return {"error": "missing baseline entry name"}, 400
-    if not composite:
-        return {"error": "missing composite"}, 400
-    if params is not None and not isinstance(params, dict):
-        return {"error": "params must be an object"}, 400
-
-    # Inline ws_root-based path resolution (matches Task 5/6/7/8 pattern).
-    studies_path = ws_root / "studies" / study
-    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
-    sf = _study_spec_file(study_dir)
-    if not sf.is_file():
-        return {"error": "study not found"}, 404
-
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
-    baseline = spec.setdefault("baseline", [])
-    if any(b.get("name") == entry_name for b in baseline if isinstance(b, dict)):
-        return {"error": f"baseline entry {entry_name!r} already exists"}, 409
-    baseline.append({"name": entry_name, "composite": composite, "params": params or {}})
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
-    return {"ok": True, "name": entry_name}, 200
+    """Name-shim: delegates to lib.study_crud_mutations.study_baseline_add."""
+    return _study_crud_lib.study_baseline_add(ws_root, body)
 
 
 def _post_study_baseline_remove_for_test(ws_root, body):
-    """Remove a baseline entry by name. Returns (response_dict, status_code).
-
-    Body:
-      study: <name>
-      name:  <baseline entry name>
-
-    409 if any variant has base_composite == name.
-    400 if removal would leave baseline empty.
-    """
-    study = (body.get("study") or body.get("investigation") or "").strip()
-    entry_name = (body.get("name") or "").strip()
-    if not study or not entry_name:
-        return {"error": "missing study or baseline entry name"}, 400
-
-    # Inline ws_root-based path resolution.
-    studies_path = ws_root / "studies" / study
-    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
-    sf = _study_spec_file(study_dir)
-    if not sf.is_file():
-        return {"error": "study not found"}, 404
-
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
-    baseline = spec.get("baseline") or []
-    remaining = [b for b in baseline
-                 if not (isinstance(b, dict) and b.get("name") == entry_name)]
-    if len(remaining) == len(baseline):
-        return {"error": f"baseline entry {entry_name!r} not found"}, 404
-
-    # Check variant dependencies BEFORE checking empty — so a sole entry that is
-    # referenced by a variant returns 409 (dependency) rather than 400 (empty).
-    dependents = [v.get("name") for v in (spec.get("variants") or [])
-                  if isinstance(v, dict) and v.get("base_composite") == entry_name]
-    if dependents:
-        return {
-            "error": f"variants reference {entry_name!r}: {', '.join(dependents)}",
-            "dependents": dependents,
-        }, 409
-
-    if not remaining:
-        return {"error": "cannot leave baseline empty"}, 400
-
-    spec["baseline"] = remaining
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
-    return {"ok": True}, 200
+    """Name-shim: delegates to lib.study_crud_mutations.study_baseline_remove."""
+    return _study_crud_lib.study_baseline_remove(ws_root, body)
 
 
 def _post_study_intervention_add_for_test(ws_root, body):
-    """Append an intervention to study.yaml.interventions[]. Returns (response, code).
-
-    Body:
-      study:       <name>
-      name:        <intervention name>  (unique within interventions)
-      description: <freeform text>  (optional; defaults to "")
-    """
-    study = (body.get("study") or body.get("investigation") or "").strip()
-    name = (body.get("name") or "").strip()
-    description = body.get("description") or ""
-    if not study or not name:
-        return {"error": "missing study or intervention name"}, 400
-
-    # Inline ws_root-based path resolution.
-    studies_path = ws_root / "studies" / study
-    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
-    sf = _study_spec_file(study_dir)
-    if not sf.is_file():
-        return {"error": "study not found"}, 404
-
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
-    interventions = spec.setdefault("interventions", [])
-    if any(i.get("name") == name for i in interventions if isinstance(i, dict)):
-        return {"error": f"intervention {name!r} already exists"}, 409
-    interventions.append({"name": name, "description": description})
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
-    return {"ok": True, "name": name}, 200
+    """Name-shim: delegates to lib.study_crud_mutations.study_intervention_add."""
+    return _study_crud_lib.study_intervention_add(ws_root, body)
 
 
 def _post_study_intervention_update_for_test(ws_root, body):
-    """Update an intervention's description. Returns (response, code)."""
-    study = (body.get("study") or body.get("investigation") or "").strip()
-    name = (body.get("name") or "").strip()
-    description = body.get("description") or ""
-    if not study or not name:
-        return {"error": "missing study or intervention name"}, 400
-
-    # Inline ws_root-based path resolution.
-    studies_path = ws_root / "studies" / study
-    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
-    sf = _study_spec_file(study_dir)
-    if not sf.is_file():
-        return {"error": "study not found"}, 404
-
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
-    for i in spec.get("interventions") or []:
-        if isinstance(i, dict) and i.get("name") == name:
-            i["description"] = description
-            sf.write_text(yaml.safe_dump(spec, sort_keys=False))
-            return {"ok": True}, 200
-    return {"error": f"intervention {name!r} not found"}, 404
+    """Name-shim: delegates to lib.study_crud_mutations.study_intervention_update."""
+    return _study_crud_lib.study_intervention_update(ws_root, body)
 
 
 def _post_study_intervention_delete_for_test(ws_root, body):
-    """Remove an intervention by name. Returns (response, code)."""
-    study = (body.get("study") or body.get("investigation") or "").strip()
-    name = (body.get("name") or "").strip()
-    if not study or not name:
-        return {"error": "missing study or intervention name"}, 400
-
-    # Inline ws_root-based path resolution.
-    studies_path = ws_root / "studies" / study
-    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / study
-    sf = _study_spec_file(study_dir)
-    if not sf.is_file():
-        return {"error": "study not found"}, 404
-
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
-    interventions = spec.get("interventions") or []
-    remaining = [i for i in interventions
-                 if not (isinstance(i, dict) and i.get("name") == name)]
-    if len(remaining) == len(interventions):
-        return {"error": f"intervention {name!r} not found"}, 404
-    spec["interventions"] = remaining
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
-    return {"ok": True}, 200
+    """Name-shim: delegates to lib.study_crud_mutations.study_intervention_delete."""
+    return _study_crud_lib.study_intervention_delete(ws_root, body)
 
 
 def _post_study_run_delete_for_test(ws_root, body):
-    """Remove one run from runs.db + study.yaml. Returns (response_dict, status_code)."""
-    study = _study_name_from_body(body)
-    run_id = (body.get("run_id") or "").strip()
-    if not study or not run_id:
-        return {"error": "missing study or run_id"}, 400
-    study_dir = _study_dir(study)
-    sf = _study_spec_file(study_dir)
-    if not sf.is_file():
-        return {"error": "study not found"}, 404
-
-    db = study_dir / "runs.db"
-    if db.is_file():
-        conn = sqlite3.connect(str(db))
-        try:
-            conn.execute("DELETE FROM runs_meta WHERE run_id = ?", (run_id,))
-            has_history = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='history'"
-            ).fetchone()
-            if has_history:
-                conn.execute("DELETE FROM history WHERE simulation_id = ?", (run_id,))
-            conn.commit()
-        finally:
-            conn.close()
-
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
-    spec["runs"] = [r for r in (spec.get("runs") or []) if r.get("run_id") != run_id]
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
-    return {"ok": True}, 200
+    """Name-shim: delegates to lib.study_crud_mutations.study_run_delete."""
+    return _study_crud_lib.study_run_delete(ws_root, body)
 
 
 def _post_study_runs_clear_for_test(ws_root, body):
-    """Remove all runs from runs.db + study.yaml. Returns (response_dict, status_code)."""
-    study = _study_name_from_body(body)
-    if not study:
-        return {"error": "missing study"}, 400
-    study_dir = _study_dir(study)
-    sf = _study_spec_file(study_dir)
-    if not sf.is_file():
-        return {"error": "study not found"}, 404
-
-    db = study_dir / "runs.db"
-    if db.is_file():
-        conn = sqlite3.connect(str(db))
-        try:
-            conn.execute("DELETE FROM runs_meta")
-            has_history = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='history'"
-            ).fetchone()
-            if has_history:
-                conn.execute("DELETE FROM history")
-            conn.commit()
-        finally:
-            conn.close()
-
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
-    spec["runs"] = []
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
-    return {"ok": True}, 200
+    """Name-shim: delegates to lib.study_crud_mutations.study_runs_clear."""
+    return _study_crud_lib.study_runs_clear(ws_root, body)
 
 
 def _post_study_comparison_add_for_test(ws_root, body):
-    """Add a named comparison (set of run_ids) to study.yaml['comparisons'].
-    Returns (response_dict, status_code)."""
-    study = _study_name_from_body(body)
-    run_ids = body.get("run_ids") or []
-    if not study:
-        return {"error": "missing study"}, 400
-    if not isinstance(run_ids, list) or len(run_ids) < 2:
-        return {"error": "run_ids must be a list of at least 2 run ids"}, 400
-    sf = _study_spec_file(_study_dir(study))
-    if not sf.is_file():
-        return {"error": "study not found"}, 404
-
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
-    comparisons = spec.setdefault("comparisons", [])
-    name = (body.get("name") or "").strip() or f"comparison-{len(comparisons) + 1}"
-    comparisons.append({"name": name, "run_ids": list(run_ids)})
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
-    return {"ok": True, "name": name}, 200
+    """Name-shim: delegates to lib.study_crud_mutations.study_comparison_add."""
+    return _study_crud_lib.study_comparison_add(ws_root, body)
 
 
 def _study_export_zip(ws_root: Path, name: str) -> bytes:
