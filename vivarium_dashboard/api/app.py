@@ -39,6 +39,7 @@ from pydantic import ValidationError
 from vivarium_dashboard.lib import composite_run_views as _cr_views
 from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
 from vivarium_dashboard.lib import viz_write_mutations as _viz_write_mut
+from vivarium_dashboard.lib import viz_commit_mutations as _viz_commit_mut
 from vivarium_dashboard.lib import lifecycle_mutations as _lifecycle_mut
 from vivarium_dashboard.lib import scaffold_mutations as _scaffold_mut
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
@@ -175,6 +176,10 @@ from vivarium_dashboard.lib.models import (
     VisualizationCreateBody,
     VisualizationAddToProjectBody,
     VisualizationGenerateBody,
+    # Batch 24: request-body models for visualization commit mutations
+    ObservableAddBody,
+    VisualizationAddBody,
+    VisualizationCommitBatchBody,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -416,7 +421,17 @@ _OPENAPI_TAGS = [
             "no _commit_or_run — the simplest POST shape.  Each route delegates "
             "to a pure lib builder in ``lib.viz_write_mutations``.  CSRF guard is "
             "deferred to the flip batch.  Errors carry ``{error: ...}`` at "
-            "400/404; success returns ``{ok: true, ...}``."
+            "400/404; success returns ``{ok: true, ...}``.\n\n"
+            "Batch 24 POST routes — visualization commit endpoints: register an "
+            "observable (/api/observable), register a visualization "
+            "(/api/visualization), and move staged viz files to the workspace "
+            "package (/api/visualization-commit-batch).  All three are "
+            "``_active_branch_action``-wrapped in the live server; these FastAPI "
+            "routes call the lib builder directly (commit deferred to the flip "
+            "batch).  Each route delegates to a pure lib builder in "
+            "``lib.viz_commit_mutations``.  CSRF guard is deferred to the flip "
+            "batch.  Errors carry ``{error: ...}`` at 400/404/409; success "
+            "returns ``{ok: true}`` or ``{ok: true, committed: [...]}``."
         ),
     },
     {
@@ -3309,6 +3324,95 @@ def create_app() -> FastAPI:
         Delegates to ``lib.viz_write_mutations.visualization_generate``.
         """
         body, status = _viz_write_mut.visualization_generate(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    # -----------------------------------------------------------------------
+    # Batch 24: Visualization commit (POST routes)
+    # NOTE: CSRF guard is deferred to the state/flip batch — same as batches 18-23.
+    # The live server shim routes through _active_branch_action; these FastAPI
+    # routes call the lib builder directly (commit deferred to the flip batch).
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/observable",
+        tags=["Viz authoring"],
+        summary="Register an observable in workspace.yaml (no git commit on the FastAPI path)",
+    )
+    def observable_add(
+        req: ObservableAddBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Add an observable entry to ``workspace.yaml.observables``.
+
+        Body: ``{name, store_path, units?, description?}``
+        400 when name or store_path is missing; 409 when the observable name
+        already exists; 200 ``{ok: true}`` on success.
+
+        Note: the live server path commits via ``_active_branch_action``; this
+        FastAPI route calls the lib builder directly (git commit deferred to
+        the flip/state batch).
+
+        Delegates to ``lib.viz_commit_mutations.observable_add``.
+        """
+        body, status = _viz_commit_mut.observable_add(ws, req.model_dump(exclude_unset=True))
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/visualization",
+        tags=["Viz authoring"],
+        summary="Register a visualization in workspace.yaml (no git commit on the FastAPI path)",
+    )
+    def visualization_add(
+        req: VisualizationAddBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Add a visualization entry to ``workspace.yaml.visualizations``.
+
+        Body: ``{name, description?, class?, type?, observables?, config?, simulation?}``
+        400 when name is missing/invalid, class is unregistered, or type/observables
+        fail structured-path validation; 409 when the name already exists; 200
+        ``{ok: true}`` on success.
+
+        Note: the live server path commits via ``_active_branch_action``; this
+        FastAPI route calls the lib builder directly (git commit deferred to
+        the flip/state batch).
+
+        Delegates to ``lib.viz_commit_mutations.visualization_add``.
+        """
+        # Preserve alias so body.get("class") resolves correctly in the lib builder.
+        body = req.model_dump(by_alias=True, exclude_unset=True)
+        status_body, status = _viz_commit_mut.visualization_add(ws, body)
+        if status != 200:
+            return JSONResponse(status_code=status, content=status_body)
+        return status_body
+
+    @app.post(
+        "/api/visualization-commit-batch",
+        tags=["Viz authoring"],
+        summary="Move staged visualizations to the workspace package (no git commit on the FastAPI path)",
+    )
+    def visualization_commit_batch(
+        req: VisualizationCommitBatchBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Move all staged ``.pbg/visualizations-staged/*.py`` files into the
+        workspace package's ``visualizations/`` directory.
+
+        Body: ``{names?: list[str]}`` — if omitted, commits all staged files.
+        404 when no staged visualizations exist or none match the requested names;
+        200 ``{ok: true, committed: [names]}`` on success.
+
+        Note: the live server path commits via ``_active_branch_action``; this
+        FastAPI route calls the lib builder directly (git commit deferred to
+        the flip/state batch).
+
+        Delegates to ``lib.viz_commit_mutations.visualization_commit_batch``.
+        """
+        body, status = _viz_commit_mut.visualization_commit_batch(ws, req.model_dump(exclude_unset=True))
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body

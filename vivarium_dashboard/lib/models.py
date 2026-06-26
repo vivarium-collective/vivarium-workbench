@@ -1678,3 +1678,45 @@ class VisualizationGenerateBody(BaseModel):
 
     name: Optional[str] = None
     description: Optional[str] = None
+
+
+# Batch 24: Visualization commit mutation request-body models
+
+
+class ObservableAddBody(BaseModel):
+    """POST /api/observable {name, store_path, units?, description?}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    store_path: Optional[str] = None
+    units: Optional[str] = None
+    description: Optional[str] = None
+
+
+class VisualizationAddBody(BaseModel):
+    """POST /api/visualization {name, description?, class?, type?, observables?, config?, simulation?}
+
+    ``class`` is a reserved keyword in Python; model field uses ``class_`` with alias ``class``.
+    ``model_dump(exclude_unset=True)`` preserves the ``"key" in body`` semantics for
+    optional fields (``config``, ``observables``) so the lib builder sees absence vs empty.
+    """
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    name: Optional[str] = None
+    description: Optional[str] = None
+    # ``class`` is a Python keyword — expose via alias; lib reads body.get("class")
+    class_: Optional[str] = Field(default=None, alias="class")
+    type: Optional[str] = None
+    observables: Optional[list] = None
+    config: Optional[dict] = None
+    simulation: Optional[str] = None
+
+
+class VisualizationCommitBatchBody(BaseModel):
+    """POST /api/visualization-commit-batch {names?: list[str]}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    names: Optional[list] = None
