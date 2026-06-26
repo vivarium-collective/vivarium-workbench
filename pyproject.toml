@@ -75,6 +75,7 @@ files = [
     "vivarium_dashboard/lib/lifecycle_mutations.py",
     "vivarium_dashboard/lib/scaffold_mutations.py",
     "vivarium_dashboard/lib/compare_group_mutations.py",
+    "vivarium_dashboard/lib/viz_write_mutations.py",
 ]
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true
