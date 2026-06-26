@@ -2095,3 +2095,50 @@ class AuthPayload(BaseModel):
     """
 
     model_config = ConfigDict(extra="allow")
+
+
+class BranchPushRequest(BaseModel):
+    """POST /api/branch/push request body — ``{"message"?: <commit message>}``.
+
+    Optional; an empty/omitted ``message`` falls back to ``"dashboard commit"``
+    inside the route's lib builder.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    message: Optional[str] = None
+
+
+class BranchPushResponse(BaseModel):
+    """200-path payload for ``POST /api/branch/push``.
+
+    ``{"ok": True, "pushed": <bool>, "commit": <sha>, "branch": <name>}``.
+    The non-200 error paths (``{"error": ...}``, HTTP 409/500) are returned via
+    ``JSONResponse``, not this model.
+
+    Source: ``lib.git_commit_views.branch_push``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool = True
+    pushed: bool
+    commit: str
+    branch: str
+
+
+class DirtyCommitAllResponse(BaseModel):
+    """200-path payload for ``POST /api/dirty-commit-all``.
+
+    ``{"commit_sha": <sha[:7]>, "message": <auto-message>, "paths": [<rel path>, ...]}``.
+    The non-200 error paths (``{"error": ...}``, HTTP 409/500) are returned via
+    ``JSONResponse``, not this model.
+
+    Source: ``lib.git_commit_views.dirty_commit_all``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    commit_sha: str
+    message: str
+    paths: list[str]

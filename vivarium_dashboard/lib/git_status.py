@@ -165,6 +165,81 @@ def commits_behind(ws_root: Path, branch: str, base: str = "main") -> tuple[int,
     return 0, ""
 
 
+class NotAGitRepo(RuntimeError):
+    """Raised by :func:`remote_commit_and_push` when *ws_root* is not a git work tree.
+
+    Mirrors ``server._NotAGitRepo`` — the FastAPI route maps this to HTTP 409.
+    """
+
+
+def remote_commit_and_push(ws_root: Path, message: str) -> dict:
+    """Stage+commit *ws_root* changes (skip if clean), push current branch, return result.
+
+    Verbatim port of ``server._remote_commit_and_push`` parameterised on
+    ``ws_root`` (same ``git -C str(ws_root)`` command form): probes
+    ``rev-parse --is-inside-work-tree`` (raises :class:`NotAGitRepo` on a
+    non-zero exit or a non-``"true"`` stdout), ``git add -A``, reads the
+    porcelain status, commits with ``message or "dashboard commit"`` when dirty
+    (raising with the ``[-300:]`` stderr/stdout tail on failure), then resolves
+    the pushed SHA via :func:`remote_push_and_sha` and returns
+    ``{"ok", "pushed", "commit", "branch"}``.
+    """
+    inside = subprocess.run(
+        ["git", "-C", str(ws_root), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True, text=True,
+    )
+    if inside.returncode != 0 or inside.stdout.strip() != "true":
+        raise NotAGitRepo("active source is not a git workspace (no commit/push)")
+    subprocess.run(["git", "-C", str(ws_root), "add", "-A"], capture_output=True, text=True, timeout=30)
+    status = subprocess.run(
+        ["git", "-C", str(ws_root), "status", "--porcelain"], capture_output=True, text=True, timeout=10,
+    ).stdout.strip()
+    if status:
+        c = subprocess.run(
+            ["git", "-C", str(ws_root), "commit", "-m", message or "dashboard commit"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if c.returncode != 0:
+            raise RuntimeError(f"git commit failed: {(c.stderr or c.stdout)[-300:]}")
+    sha = remote_push_and_sha(ws_root)
+    return {"ok": True, "pushed": bool(status), "commit": sha,
+            "branch": subprocess.run(["git", "-C", str(ws_root), "rev-parse", "--abbrev-ref", "HEAD"],
+                                     capture_output=True, text=True).stdout.strip()}
+
+
+def suggest_dirty_commit_message(paths: list[str]) -> str:
+    """Auto-generate a conventional commit message from a list of dirty paths.
+
+    Uses the top-level directory of each path to pick a category prefix. When all
+    dirty files share one top-level directory we map it to a conventional scope
+    (chore(scripts), docs, chore(composites), ...). Otherwise falls back to a
+    generic ``chore:`` prefix.
+
+    Verbatim copy of the pure ``server._suggest_dirty_commit_message``.
+    """
+    if not paths:
+        return "chore: commit pending files"
+    top_dirs = sorted(set(p.split('/')[0] for p in paths if p))
+    n = len(paths)
+    suffix = f"commit {n} pending file{'s' if n != 1 else ''}"
+    if len(top_dirs) == 1:
+        cat = top_dirs[0]
+        # Map common top-level dirs to conventional categories
+        known = {
+            'scripts': 'chore(scripts)',
+            'composites': 'chore(composites)',
+            'investigations': 'chore(investigations)',
+            'docs': 'docs',
+            'tests': 'chore(tests)',
+            'reports': 'chore(reports)',
+            'pbg_chromosome_rep1': 'chore(pkg)',  # workspace package
+        }
+        # Generic fallback
+        prefix = known.get(cat, f'chore({cat})')
+        return f"{prefix}: {suffix}"
+    return f"chore: {suffix}"
+
+
 def dirty_workspace(ws_root: Path) -> str:
     """Return the porcelain status excluding generated reports + submodule pointers.
 

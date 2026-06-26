@@ -444,3 +444,16 @@ export interface RemoteRunStartResponse {
 
 export interface AuthPayload {
 }
+
+export interface BranchPushResponse {
+  ok: boolean;
+  pushed: boolean;
+  commit: string;
+  branch: string;
+}
+
+export interface DirtyCommitAllResponse {
+  commit_sha: string;
+  message: string;
+  paths: string[];
+}
