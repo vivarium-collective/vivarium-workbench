@@ -9948,7 +9948,13 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): set observables"
 
         def do_action():
-            _meta_mut.set_investigation_observables(WORKSPACE, body)
+            # The lib builder catches its own errors and RETURNS (dict, code)
+            # rather than raising; re-raise on a post-validation runtime failure
+            # so _commit_or_run surfaces it as a 500 (matching the legacy inline
+            # mutation, which raised) instead of swallowing it into a 200+note.
+            _resp, _code = _meta_mut.set_investigation_observables(WORKSPACE, body)
+            if _code != 200:
+                raise RuntimeError(_resp.get("error") or "mutation failed")
 
         try:
             return self._json(*_commit_or_run(commit_msg, do_action))
@@ -9979,7 +9985,9 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): set conclusions"
 
         def do_action():
-            _meta_mut.set_investigation_conclusions(WORKSPACE, body)
+            _resp, _code = _meta_mut.set_investigation_conclusions(WORKSPACE, body)
+            if _code != 200:
+                raise RuntimeError(_resp.get("error") or "mutation failed")
 
         try:
             return self._json(*_commit_or_run(commit_msg, do_action))
@@ -10016,7 +10024,9 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): set overview metadata"
 
         def do_action():
-            _meta_mut.set_investigation_overview(WORKSPACE, body)
+            _resp, _code = _meta_mut.set_investigation_overview(WORKSPACE, body)
+            if _code != 200:
+                raise RuntimeError(_resp.get("error") or "mutation failed")
 
         try:
             return self._json(*_commit_or_run(commit_msg, do_action))
