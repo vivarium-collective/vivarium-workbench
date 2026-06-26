@@ -66,6 +66,7 @@ from vivarium_dashboard.lib import metadata_mutations as _meta_mut
 from vivarium_dashboard.lib import study_crud_mutations as _study_crud_lib
 from vivarium_dashboard.lib import lifecycle_mutations as _lifecycle_mut
 from vivarium_dashboard.lib import scaffold_mutations as _scaffold_mut
+from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
 from vivarium_dashboard.lib.investigations_index import (
     _conclusions_excerpt,
     _format_baseline_source,
@@ -10104,18 +10105,14 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): add comparison {cmp_name}"
 
         def do_action():
-            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-            cmps = list(spec.get("comparisons") or [])
-            if any(c.get("name") == cmp_name for c in cmps):
-                raise ValueError(f"comparison {cmp_name!r} already exists")
-            cmps.append({
-                "name": cmp_name,
-                "description": description,
-                "variants": list(variants),
-                "observables": list(observables),
-            })
-            spec["comparisons"] = cmps
-            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+            # Delegate to the pure lib builder; re-raise on non-200 so
+            # _commit_or_run surfaces it as the correct error (409→ValueError
+            # for duplicate; other failures→RuntimeError→500).
+            _resp, _code = _compare_grp_mut.comparison_add(WORKSPACE, body)
+            if _code == 409:
+                raise ValueError(_resp.get("error") or "conflict")
+            if _code != 200:
+                raise RuntimeError(_resp.get("error") or "mutation failed")
 
         try:
             return self._json(*_commit_or_run(commit_msg, do_action))
@@ -10146,16 +10143,14 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): update comparison {cmp_name}"
 
         def do_action():
-            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-            cmps = spec.get("comparisons") or []
-            idx = next((i for i, c in enumerate(cmps) if c.get("name") == cmp_name), None)
-            if idx is None:
-                raise KeyError(f"comparison {cmp_name!r} not found")
-            for key in ("description", "variants", "observables"):
-                if key in fields:
-                    cmps[idx][key] = fields[key]
-            spec["comparisons"] = cmps
-            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+            # Delegate to the pure lib builder; re-raise on non-200 so
+            # _commit_or_run surfaces it as the correct error (404→KeyError
+            # for missing comparison; other failures→RuntimeError→500).
+            _resp, _code = _compare_grp_mut.comparison_update(WORKSPACE, body)
+            if _code == 404:
+                raise KeyError(_resp.get("error") or "not found")
+            if _code != 200:
+                raise RuntimeError(_resp.get("error") or "mutation failed")
 
         try:
             return self._json(*_commit_or_run(commit_msg, do_action))
@@ -10249,17 +10244,14 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): add group {grp_name}"
 
         def do_action():
-            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-            grps = list(spec.get("groups") or [])
-            if any(g.get("name") == grp_name for g in grps):
-                raise ValueError(f"group {grp_name!r} already exists")
-            grps.append({
-                "name": grp_name,
-                "description": description,
-                "variants": list(variants),
-            })
-            spec["groups"] = grps
-            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+            # Delegate to the pure lib builder; re-raise on non-200 so
+            # _commit_or_run surfaces it as the correct error (409→ValueError
+            # for duplicate; other failures→RuntimeError→500).
+            _resp, _code = _compare_grp_mut.group_add(WORKSPACE, body)
+            if _code == 409:
+                raise ValueError(_resp.get("error") or "conflict")
+            if _code != 200:
+                raise RuntimeError(_resp.get("error") or "mutation failed")
 
         try:
             return self._json(*_commit_or_run(commit_msg, do_action))
@@ -10307,16 +10299,14 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): update group {grp_name}"
 
         def do_action():
-            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-            grps = spec.get("groups") or []
-            idx = next((i for i, g in enumerate(grps) if g.get("name") == grp_name), None)
-            if idx is None:
-                raise KeyError(f"group {grp_name!r} not found")
-            for key in ("description", "variants"):
-                if key in fields:
-                    grps[idx][key] = fields[key]
-            spec["groups"] = grps
-            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+            # Delegate to the pure lib builder; re-raise on non-200 so
+            # _commit_or_run surfaces it as the correct error (404→KeyError
+            # for missing group; other failures→RuntimeError→500).
+            _resp, _code = _compare_grp_mut.group_update(WORKSPACE, body)
+            if _code == 404:
+                raise KeyError(_resp.get("error") or "not found")
+            if _code != 200:
+                raise RuntimeError(_resp.get("error") or "mutation failed")
 
         try:
             return self._json(*_commit_or_run(commit_msg, do_action))
