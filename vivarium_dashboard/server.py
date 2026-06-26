@@ -67,6 +67,7 @@ from vivarium_dashboard.lib import study_crud_mutations as _study_crud_lib
 from vivarium_dashboard.lib import lifecycle_mutations as _lifecycle_mut
 from vivarium_dashboard.lib import scaffold_mutations as _scaffold_mut
 from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
+from vivarium_dashboard.lib import viz_commit_mutations as _viz_commit_mut
 from vivarium_dashboard.lib.investigations_index import (
     _conclusions_excerpt,
     _format_baseline_source,
@@ -5465,24 +5466,9 @@ class Handler(BaseHTTPRequestHandler):
         commit_msg = f"feat(setup): add observable '{name}'"
 
         def action():
-            _ws_add_to_sys_path()
-            from vivarium_dashboard.lib.workspace_yaml import load_workspace, save_workspace
-            ws_file = WORKSPACE / "workspace.yaml"
-            ws = load_workspace(ws_file)
-            observables = ws.setdefault("observables", [])
-            if observables is None:
-                observables = []
-                ws["observables"] = observables
-            for existing in observables:
-                if isinstance(existing, dict) and existing.get("name") == name:
-                    raise ValueError(f"observable '{name}' already registered")
-            entry: dict = {"name": name, "store_path": store_path}
-            if units:
-                entry["units"] = units
-            if description:
-                entry["description"] = description
-            observables.append(entry)
-            save_workspace(ws_file, ws)
+            resp_lib, code_lib = _viz_commit_mut.observable_add(WORKSPACE, body)
+            if code_lib != 200:
+                raise RuntimeError(resp_lib.get("error") or "observable_add failed")
 
         return self._json(*_active_branch_action(commit_msg, action))
 
@@ -5532,58 +5518,9 @@ class Handler(BaseHTTPRequestHandler):
         commit_msg = f"feat(setup): add visualization '{name}'"
 
         def action():
-            _ws_add_to_sys_path()
-            from vivarium_dashboard.lib.workspace_yaml import load_workspace, save_workspace
-            ws_file = WORKSPACE / "workspace.yaml"
-            ws = load_workspace(ws_file)
-
-            # Only validate observable references when structured fields are provided.
-            if obs_list:
-                registered_obs = {
-                    o.get("name") for o in (ws.get("observables") or [])
-                    if isinstance(o, dict)
-                }
-                missing = [o for o in obs_list if o not in registered_obs]
-                if missing:
-                    raise ValueError(
-                        f"observables not registered: {missing}. "
-                        "Register them first via /api/observable."
-                    )
-
-            # Validate simulation reference if provided.
-            if simulation_name:
-                registered_sims = {
-                    s.get("name") for s in (ws.get("simulations") or [])
-                    if isinstance(s, dict)
-                }
-                if simulation_name not in registered_sims:
-                    raise ValueError(
-                        f"simulation '{simulation_name}' not registered. "
-                        "Register it first via /api/simulation."
-                    )
-
-            visualizations = ws.setdefault("visualizations", [])
-            if visualizations is None:
-                visualizations = []
-                ws["visualizations"] = visualizations
-            for existing in visualizations:
-                if isinstance(existing, dict) and existing.get("name") == name:
-                    raise ValueError(f"visualization '{name}' already registered")
-            entry: dict = {"name": name}
-            if viz_class:
-                entry["class"] = viz_class
-            if description:
-                entry["description"] = description
-            if viz_type:
-                entry["type"] = viz_type
-            if obs_list:
-                entry["observables"] = list(obs_list)
-            if config:
-                entry["config"] = config
-            if simulation_name:
-                entry["simulation"] = simulation_name
-            visualizations.append(entry)
-            save_workspace(ws_file, ws)
+            resp_lib, code_lib = _viz_commit_mut.visualization_add(WORKSPACE, body)
+            if code_lib != 200:
+                raise RuntimeError(resp_lib.get("error") or "visualization_add failed")
 
         return self._json(*_active_branch_action(commit_msg, action))
 
@@ -5640,23 +5577,12 @@ class Handler(BaseHTTPRequestHandler):
         if not names:
             return self._json({"error": "no staged visualizations match"}, 404)
 
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
-        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-        target_dir = WORKSPACE / pkg / "visualizations"
-
         moved_names = list(names)  # captured for closure
 
         def action():
-            target_dir.mkdir(parents=True, exist_ok=True)
-            # Ensure __init__.py exists
-            init = target_dir / "__init__.py"
-            if not init.exists():
-                init.write_text("")
-            for n in moved_names:
-                src = staged_dir / f"{n}.py"
-                dest = target_dir / f"{n}.py"
-                shutil.copy2(src, dest)
-                src.unlink()  # remove staged copy
+            resp_lib, code_lib = _viz_commit_mut.visualization_commit_batch(WORKSPACE, body)
+            if code_lib != 200:
+                raise RuntimeError(resp_lib.get("error") or "visualization_commit_batch failed")
 
         commit_msg = (
             f"feat(viz): commit {len(moved_names)} visualization(s): {', '.join(moved_names)}"
