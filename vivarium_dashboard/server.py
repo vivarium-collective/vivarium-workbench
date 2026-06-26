@@ -5577,10 +5577,6 @@ class Handler(BaseHTTPRequestHandler):
         if not names:
             return self._json({"error": "no staged visualizations match"}, 404)
 
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
-        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-        target_dir = WORKSPACE / pkg / "visualizations"
-
         moved_names = list(names)  # captured for closure
 
         def action():
