@@ -4032,3 +4032,146 @@ if a.json:
         paths = sc_client.get("/openapi.json").json()["paths"]
         assert "/api/investigation-delete" in paths
         assert "post" in paths["/api/investigation-delete"]
+
+
+class TestBatch26ReferenceRoutes:
+    """Route-level tests for Batch 26 reference POST endpoints
+    (/api/reference-pdf, /api/reference-bibtex, /api/reference)."""
+
+    _INV_SLUG = "dnaa-replication"
+
+    @pytest.fixture
+    def ws(self, tmp_path: Path, monkeypatch) -> Path:
+        import pbg_superpowers
+        schema_src = (Path(pbg_superpowers.__file__).parent / "schemas"
+                      / "workspace.schema.json")
+        w = tmp_path / "ws"
+        w.mkdir()
+        (w / "workspace.yaml").write_text(
+            "schema_version: 3\nname: testws\ncreated: '2026-01-01'\n"
+            "plugin_version: '0.14.0'\npackage_path: pbg_testws\n"
+            "datasets: []\nexpert_docs: []\nimports: {}\n",
+            encoding="utf-8",
+        )
+        schemas = w / ".pbg" / "schemas"
+        schemas.mkdir(parents=True)
+        (schemas / "workspace.schema.json").write_text(
+            schema_src.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        inv = w / "investigations" / self._INV_SLUG
+        (inv / "studies").mkdir(parents=True)
+        (inv / "investigation.yaml").write_text(
+            f"name: {self._INV_SLUG}\ntitle: {self._INV_SLUG}\nstudies: []\n",
+            encoding="utf-8",
+        )
+        # Register the root so load_workspace/save_workspace resolve the schema.
+        import vivarium_dashboard.lib._root as _root
+        monkeypatch.setattr(_root, "_WS_ROOT", w.resolve())
+        monkeypatch.setattr(_root, "_WS_PATHS", None)
+        return w
+
+    @pytest.fixture
+    def rc(self, ws: Path) -> TestClient:
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: ws
+        return TestClient(app)
+
+    @staticmethod
+    def _pdf() -> str:
+        import base64
+        return base64.b64encode(b"%PDF-1.4 not a real pdf").decode()
+
+    # -- /api/reference-pdf --------------------------------------------------
+
+    def test_reference_pdf_happy(self, rc: TestClient, ws: Path) -> None:
+        r = rc.post("/api/reference-pdf", json={
+            "pdf_b64": self._pdf(), "title": "T", "authors": "A B",
+            "year": 2021, "bib_key": "AB2021",
+        })
+        assert r.status_code == 200, r.json()
+        body = r.json()
+        assert body["ok"] is True
+        assert body["bib_key"] == "AB2021"
+        assert body["metadata_pending"] is False
+        assert "extracted" in body
+        assert (ws / "references" / "papers" / "AB2021.pdf").is_file()
+
+    def test_reference_pdf_400_missing_pdf(self, rc: TestClient) -> None:
+        r = rc.post("/api/reference-pdf", json={"title": "T"})
+        assert r.status_code == 400
+        assert "pdf_b64 is required" in r.json().get("error", "")
+
+    def test_reference_pdf_409_duplicate(self, rc: TestClient) -> None:
+        body = {"pdf_b64": self._pdf(), "title": "T", "authors": "A B",
+                "year": 2021, "bib_key": "Dup2021"}
+        assert rc.post("/api/reference-pdf", json=body).status_code == 200
+        r = rc.post("/api/reference-pdf", json=body)
+        assert r.status_code == 409
+        assert "already exists" in r.json().get("error", "")
+
+    def test_reference_pdf_404_investigation(self, rc: TestClient) -> None:
+        r = rc.post("/api/reference-pdf", json={
+            "pdf_b64": self._pdf(), "title": "T", "authors": "A B", "year": 2021,
+            "bib_key": "AB2021", "investigation": "ghost-inv",
+        })
+        assert r.status_code == 404
+
+    def test_reference_pdf_in_openapi(self, rc: TestClient) -> None:
+        paths = rc.get("/openapi.json").json()["paths"]
+        assert "/api/reference-pdf" in paths and "post" in paths["/api/reference-pdf"]
+
+    # -- /api/reference-bibtex + /api/reference (alias) ----------------------
+
+    def test_reference_bibtex_happy(self, rc: TestClient, ws: Path) -> None:
+        r = rc.post("/api/reference-bibtex", json={
+            "bibtex_text": "@article{Foo2020, year = {2020}}",
+        })
+        assert r.status_code == 200, r.json()
+        assert r.json()["ok"] is True
+        assert "Foo2020" in (ws / "references" / "papers.bib").read_text()
+
+    def test_reference_alias_happy(self, rc: TestClient, ws: Path) -> None:
+        r = rc.post("/api/reference", json={
+            "bibtex_text": "@article{Bar2021, year = {2021}}",
+        })
+        assert r.status_code == 200, r.json()
+        assert r.json()["ok"] is True
+        assert "Bar2021" in (ws / "references" / "papers.bib").read_text()
+
+    def test_reference_bibtex_and_alias_behave_identically(
+        self, rc: TestClient, ws: Path
+    ) -> None:
+        # Same key via both routes: first succeeds, the second (global, dup) 409s
+        # regardless of which path is hit — proving identical handling.
+        r1 = rc.post("/api/reference-bibtex", json={
+            "bibtex_text": "@article{Same2020, year = {2020}}",
+        })
+        assert r1.status_code == 200
+        r2 = rc.post("/api/reference", json={
+            "bibtex_text": "@article{Same2020, year = {2020}}",
+        })
+        assert r2.status_code == 409
+        # And the reverse ordering for a fresh key:
+        r3 = rc.post("/api/reference", json={
+            "bibtex_text": "@article{Other2020, year = {2020}}",
+        })
+        assert r3.status_code == 200
+        r4 = rc.post("/api/reference-bibtex", json={
+            "bibtex_text": "@article{Other2020, year = {2020}}",
+        })
+        assert r4.status_code == 409
+
+    def test_reference_bibtex_400_missing_text(self, rc: TestClient) -> None:
+        r = rc.post("/api/reference-bibtex", json={})
+        assert r.status_code == 400
+        assert "bibtex_text is required" in r.json().get("error", "")
+
+    def test_reference_bibtex_400_unparseable(self, rc: TestClient) -> None:
+        r = rc.post("/api/reference-bibtex", json={"bibtex_text": "no key"})
+        assert r.status_code == 400
+        assert "could not parse BibTeX key" in r.json().get("error", "")
+
+    def test_reference_routes_in_openapi(self, rc: TestClient) -> None:
+        paths = rc.get("/openapi.json").json()["paths"]
+        assert "/api/reference-bibtex" in paths and "post" in paths["/api/reference-bibtex"]
+        assert "/api/reference" in paths and "post" in paths["/api/reference"]
