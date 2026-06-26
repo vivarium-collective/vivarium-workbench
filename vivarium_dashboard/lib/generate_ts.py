@@ -144,6 +144,9 @@ _MODELS: list[type[BaseModel]] = [
     # C-state-3h1: workspace-registry routes
     _models.WorkspacesOkResponse,
     _models.WorkspaceEntry,
+    # C-state-3h2: misc FS/render routes
+    _models.RenderResponse,
+    _models.FeedbackImportResponse,
 ]
 
 OUTPUT_PATH = (

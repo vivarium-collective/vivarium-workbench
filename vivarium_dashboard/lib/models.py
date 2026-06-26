@@ -2309,3 +2309,34 @@ class WorkspaceEntry(BaseModel):
     """
 
     model_config = ConfigDict(extra="allow")
+
+
+class RenderResponse(BaseModel):
+    """200-path payload for ``POST /api/render`` — ``{"ok": True}``.
+
+    The error path (``{"error": str(e)}``, HTTP 500) is returned via
+    ``JSONResponse``, not this model.
+
+    Source: ``lib.misc_mutations.render_dashboard``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool = True
+
+
+class FeedbackImportResponse(BaseModel):
+    """200-path payload for ``POST /api/feedback-import``.
+
+    ``{"ok": True, "path": <ws-relative path>, "n_entries": <int>}``.  The error
+    paths (``{"error": ...}``, HTTP 400/500) are returned via ``JSONResponse``,
+    not this model.
+
+    Source: ``lib.misc_mutations.feedback_import``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool = True
+    path: str
+    n_entries: int

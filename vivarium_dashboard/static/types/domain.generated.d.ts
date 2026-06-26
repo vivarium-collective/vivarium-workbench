@@ -486,3 +486,13 @@ export interface WorkspacesOkResponse {
 
 export interface WorkspaceEntry {
 }
+
+export interface RenderResponse {
+  ok: boolean;
+}
+
+export interface FeedbackImportResponse {
+  ok: boolean;
+  path: string;
+  n_entries: number;
+}
