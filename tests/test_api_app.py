@@ -3635,3 +3635,253 @@ class TestStudyDetailPageRoute:
         assert r.status_code == 404
         # The study-page 404 has 'Study not found'; the catch-all 404 is empty.
         assert "Study not found" in r.text
+
+
+# ---------------------------------------------------------------------------
+# Batch 20: Study lifecycle POST routes
+# ---------------------------------------------------------------------------
+
+
+class TestBatch20LifecycleRoutes:
+    """Route-level tests for Batch 20 study lifecycle POST endpoints."""
+
+    @pytest.fixture
+    def ws(self, tmp_path: Path) -> Path:
+        w = tmp_path / "ws"
+        w.mkdir()
+        (w / "workspace.yaml").write_text(
+            "schema_version: 2\nname: ws\ncreated: '2026-01-01'\nplugin_version: 0.6.1\npackage_path: pkg\n"
+        )
+        (w / "studies").mkdir()
+        (w / "investigations").mkdir()
+        return w
+
+    @pytest.fixture
+    def lc_client(self, ws: Path) -> TestClient:
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: ws
+        return TestClient(app)
+
+    def _ws(self, lc_client: TestClient) -> Path:
+        return lc_client.app.dependency_overrides[get_workspace]()
+
+    # -----------------------------------------------------------------------
+    # /api/feedback-apply-action
+    # -----------------------------------------------------------------------
+
+    def test_feedback_apply_action_missing_item_id(self, lc_client: TestClient) -> None:
+        r = lc_client.post("/api/feedback-apply-action", json={})
+        assert r.status_code == 400
+        assert "error" in r.json()
+
+    def test_feedback_apply_action_unknown_item(self, lc_client: TestClient) -> None:
+        r = lc_client.post("/api/feedback-apply-action", json={"item_id": "deadbeef"})
+        assert r.status_code == 400
+        assert "error" in r.json()
+
+    def test_feedback_apply_action_in_openapi(self, lc_client: TestClient) -> None:
+        schema = lc_client.get("/openapi.json").json()
+        paths = schema["paths"]
+        assert "/api/feedback-apply-action" in paths
+        assert "post" in paths["/api/feedback-apply-action"]
+
+    # -----------------------------------------------------------------------
+    # /api/study-create-from-run
+    # -----------------------------------------------------------------------
+
+    def test_study_create_from_run_missing_fields(self, lc_client: TestClient) -> None:
+        r = lc_client.post("/api/study-create-from-run", json={"name": "x"})
+        assert r.status_code == 400
+
+    def test_study_create_from_run_no_scratch_db(self, lc_client: TestClient) -> None:
+        r = lc_client.post(
+            "/api/study-create-from-run",
+            json={"name": "test-study", "source_run_id": "rid1"},
+        )
+        assert r.status_code == 404
+        assert "error" in r.json()
+
+    def test_study_create_from_run_happy(self, lc_client: TestClient, ws: Path) -> None:
+        import sqlite3
+
+        pbg = ws / ".pbg"
+        pbg.mkdir()
+        db = pbg / "composite-runs.db"
+        conn = sqlite3.connect(str(db))
+        conn.executescript("""
+            CREATE TABLE runs_meta (
+                run_id TEXT PRIMARY KEY, spec_id TEXT NOT NULL, label TEXT,
+                params_json TEXT, started_at REAL NOT NULL, completed_at REAL,
+                n_steps INTEGER, status TEXT NOT NULL
+            );
+            CREATE TABLE history (
+                simulation_id TEXT NOT NULL, step INTEGER NOT NULL,
+                global_time REAL, state TEXT NOT NULL,
+                PRIMARY KEY (simulation_id, step)
+            );
+        """)
+        conn.execute(
+            "INSERT INTO runs_meta VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("rid1", "pkg.foo", "t", "{}", 1.0, 2.0, 5, "completed"),
+        )
+        conn.commit()
+        conn.close()
+        r = lc_client.post(
+            "/api/study-create-from-run",
+            json={"name": "created-study", "source_run_id": "rid1", "objective": "Q?"},
+        )
+        assert r.status_code == 200
+        assert r.json()["study"] == "created-study"
+
+    def test_study_create_from_run_in_openapi(self, lc_client: TestClient) -> None:
+        schema = lc_client.get("/openapi.json").json()
+        assert "/api/study-create-from-run" in schema["paths"]
+
+    # -----------------------------------------------------------------------
+    # /api/study-rename
+    # -----------------------------------------------------------------------
+
+    def test_study_rename_missing_fields(self, lc_client: TestClient) -> None:
+        r = lc_client.post("/api/study-rename", json={"study": "x"})
+        assert r.status_code == 400
+
+    def test_study_rename_not_found(self, lc_client: TestClient) -> None:
+        r = lc_client.post(
+            "/api/study-rename", json={"study": "nope", "new_name": "something"}
+        )
+        assert r.status_code == 404
+
+    def test_study_rename_happy(self, lc_client: TestClient, ws: Path) -> None:
+        import yaml
+
+        d = ws / "studies" / "old-study"
+        d.mkdir()
+        (d / "study.yaml").write_text(
+            yaml.safe_dump({"name": "old-study", "status": "active"}, sort_keys=False)
+        )
+        r = lc_client.post(
+            "/api/study-rename", json={"study": "old-study", "new_name": "new-study"}
+        )
+        assert r.status_code == 200
+        assert r.json()["name"] == "new-study"
+
+    # -----------------------------------------------------------------------
+    # /api/study-sync-runs
+    # -----------------------------------------------------------------------
+
+    def test_study_sync_runs_missing_slug(self, lc_client: TestClient) -> None:
+        r = lc_client.post("/api/study-sync-runs", json={})
+        assert r.status_code == 400
+
+    def test_study_sync_runs_unknown_study(self, lc_client: TestClient) -> None:
+        r = lc_client.post("/api/study-sync-runs", json={"study": "nope"})
+        assert r.status_code == 404
+
+    def test_study_sync_runs_happy(self, lc_client: TestClient, ws: Path) -> None:
+        from pbg_superpowers import run_registry, study_io
+
+        d = ws / "studies" / "sync-s"
+        d.mkdir()
+        study_io.save_yaml_atomic(d / "study.yaml", {"name": "sync-s", "runs": []})
+        run_registry.register_run(
+            d / "runs.db", "r1", spec_id="s1", status="completed",
+            started_at="2026-01-01T00:00:00Z", completed_at="2026-01-01T00:01:00Z",
+        )
+        r = lc_client.post("/api/study-sync-runs", json={"study": "sync-s"})
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+
+    def test_study_sync_runs_in_openapi(self, lc_client: TestClient) -> None:
+        schema = lc_client.get("/openapi.json").json()
+        assert "/api/study-sync-runs" in schema["paths"]
+
+    # -----------------------------------------------------------------------
+    # /api/proposed-input-decision
+    # -----------------------------------------------------------------------
+
+    _INV_YAML = """\
+name: test-inv
+proposed_inputs:
+  items:
+  - id: ref-a
+    kind: reference
+    citation: Smith 2024
+    status: pending
+inputs:
+  references: []
+"""
+
+    def test_proposed_input_decision_missing_inv(self, lc_client: TestClient) -> None:
+        r = lc_client.post(
+            "/api/proposed-input-decision",
+            json={"item_id": "ref-a", "decision": "accept"},
+        )
+        assert r.status_code == 400
+
+    def test_proposed_input_decision_bad_decision(
+        self, lc_client: TestClient, ws: Path
+    ) -> None:
+        inv = ws / "investigations" / "test-inv"
+        inv.mkdir(parents=True)
+        (inv / "investigation.yaml").write_text(self._INV_YAML)
+        r = lc_client.post(
+            "/api/proposed-input-decision",
+            json={"investigation": "test-inv", "item_id": "ref-a", "decision": "nope"},
+        )
+        assert r.status_code == 400
+
+    def test_proposed_input_decision_happy(self, lc_client: TestClient, ws: Path) -> None:
+        import yaml
+
+        inv = ws / "investigations" / "test-inv"
+        inv.mkdir(parents=True)
+        (inv / "investigation.yaml").write_text(self._INV_YAML)
+        r = lc_client.post(
+            "/api/proposed-input-decision",
+            json={"investigation": "test-inv", "item_id": "ref-a", "decision": "accept"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is True
+        assert body["status"] == "accepted"
+        spec = yaml.safe_load((inv / "investigation.yaml").read_text())
+        assert "ref-a" in spec["inputs"]["references"]
+
+    def test_proposed_input_decision_in_openapi(self, lc_client: TestClient) -> None:
+        schema = lc_client.get("/openapi.json").json()
+        assert "/api/proposed-input-decision" in schema["paths"]
+
+    # -----------------------------------------------------------------------
+    # /api/study-seed-followup
+    # -----------------------------------------------------------------------
+
+    def test_study_seed_followup_no_parent(self, lc_client: TestClient) -> None:
+        r = lc_client.post(
+            "/api/study-seed-followup",
+            json={"parent": "nope", "followup_idx": 0},
+        )
+        assert r.status_code in (400, 404)
+        assert "error" in r.json()
+
+    def test_study_seed_followup_happy(self, lc_client: TestClient, ws: Path) -> None:
+        import yaml
+
+        d = ws / "studies" / "parent"
+        d.mkdir()
+        (d / "study.yaml").write_text(yaml.safe_dump({
+            "schema_version": 4, "name": "parent", "status": "ran",
+            "baseline": [{"name": "b", "composite": "x"}],
+            "follow_up_studies": [{"title": "child", "kind": "new", "why": "w"}],
+        }, sort_keys=False))
+        r = lc_client.post(
+            "/api/study-seed-followup",
+            json={"parent": "parent", "followup_idx": 0},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["new_study_name"]
+        assert body["new_slug"] == body["new_study_name"]
+
+    def test_study_seed_followup_in_openapi(self, lc_client: TestClient) -> None:
+        schema = lc_client.get("/openapi.json").json()
+        assert "/api/study-seed-followup" in schema["paths"]

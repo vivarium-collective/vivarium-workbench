@@ -37,6 +37,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError
 
 from vivarium_dashboard.lib import composite_run_views as _cr_views
+from vivarium_dashboard.lib import lifecycle_mutations as _lifecycle_mut
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
 from vivarium_dashboard.lib import data_sources as _data_sources
 from vivarium_dashboard.lib import download_views as _download_views
@@ -151,6 +152,13 @@ from vivarium_dashboard.lib.models import (
     StudyRunDeleteBody,
     StudyRunsClearBody,
     StudyComparisonAddBody,
+    # Batch 20: request-body models for study lifecycle + feedback
+    FeedbackApplyActionBody,
+    StudyCreateFromRunBody,
+    StudyRenameBody,
+    StudySyncRunsBody,
+    ProposedInputDecisionBody,
+    StudySeedFollowupBody,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -340,6 +348,19 @@ _OPENAPI_TAGS = [
             "the flip batch; the live do_POST still enforces it via ``_csrf_ok``.  "
             "Errors carry ``{error: ...}`` at 400/404/409; success returns "
             "``{ok: true}`` or ``{ok: true, name: ...}``."
+        ),
+    },
+    {
+        "name": "Study lifecycle",
+        "description": (
+            "Batch 20 POST routes — study lifecycle writers and feedback actions: "
+            "seed a child study from a followup/finding, apply a tracked feedback "
+            "action, rename a study, create a study from a scratchpad run, sync "
+            "study runs from runs.db, and accept/decline a proposed input.  Each "
+            "route delegates to a pure lib builder in ``lib.lifecycle_mutations``.  "
+            "CSRF guard is deferred to the flip batch.  Errors carry "
+            "``{error: ...}`` at 400/404/409/500; success returns the respective "
+            "payload dict."
         ),
     },
     {
@@ -2834,6 +2855,137 @@ def create_app() -> FastAPI:
         At least 2 run_ids required.
         """
         body, status = _study_crud_mut.study_comparison_add(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    # -----------------------------------------------------------------------
+    # Batch 20: Study lifecycle + feedback (POST routes)
+    # NOTE: CSRF guard is deferred to the state/flip batch — same as batches 18/19.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/feedback-apply-action",
+        tags=["Study lifecycle"],
+        summary="Apply a tracked feedback action (SP3b, AI-free)",
+    )
+    def feedback_apply_action(
+        req: FeedbackApplyActionBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Apply a tracked SP3b feedback action via the pbg-superpowers primitive.
+
+        Body: ``{item_id}``
+        200 ``{applied: true, ...}`` on success; 400 when item_id is missing or
+        the action target is not found; 404 on FileNotFoundError; 500 when
+        pbg-superpowers is not installed.
+        """
+        body, status = _lifecycle_mut.feedback_apply_action(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-create-from-run",
+        tags=["Study lifecycle"],
+        summary="Create a new Study from a scratchpad composite run",
+    )
+    def study_create_from_run(
+        req: StudyCreateFromRunBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Promote a scratchpad composite run into a new named study.
+
+        Body: ``{name, source_run_id, objective?, description?}``
+        400 when name/source_run_id is missing or name is invalid; 404 when
+        source_run_id is not in the scratchpad DB; 409 when a study with that
+        name already exists; 200 ``{study, url}`` on success.
+        """
+        body, status = _lifecycle_mut.study_create_from_run(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-rename",
+        tags=["Study lifecycle"],
+        summary="Rename a study directory and update study.yaml",
+    )
+    def study_rename(
+        req: StudyRenameBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Rename a study directory and patch the name field in study.yaml.
+
+        Body: ``{study, new_name}``
+        400 when study/new_name is missing or new_name is not a valid slug; 404
+        when the study directory does not exist; 409 when new_name already exists;
+        200 ``{ok: true, name: new_name}`` on success.
+        """
+        body, status = _lifecycle_mut.study_rename(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-sync-runs",
+        tags=["Study lifecycle"],
+        summary="Reconcile a study's runs.db into study.yaml runs[]",
+    )
+    def study_sync_runs(
+        req: StudySyncRunsBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Sync a study's runs.db records into study.yaml runs[] and roll up outcomes.
+
+        Body: ``{study}``
+        400 when study slug is missing; 404 when the study directory is not found;
+        200 ``{ok: true, summary: {...}}`` on success.
+        """
+        body, status = _lifecycle_mut.study_sync_runs(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/proposed-input-decision",
+        tags=["Study lifecycle"],
+        summary="Accept or decline an agent-proposed input",
+    )
+    def proposed_input_decision(
+        req: ProposedInputDecisionBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Apply an expert accept/decline decision to a proposed_inputs item.
+
+        Body: ``{investigation, item_id, decision}``
+        On ``accept`` + ``kind: reference``, promotes the item into
+        ``inputs.references``.  400 when required fields are missing or decision
+        is invalid; 404 when the investigation.yaml or item is not found; 200
+        ``{ok: true, item_id, kind, status, ...}`` on success.
+        """
+        body, status = _lifecycle_mut.decide_proposed_input(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-seed-followup",
+        tags=["Study lifecycle"],
+        summary="Seed a child study from a parent's followup/finding",
+    )
+    def study_seed_followup(
+        req: StudySeedFollowupBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Seed a new child study from a parent study's followup or finding.
+
+        Body: ``{parent, finding_id?, followup_idx?, proposal_id?, proposal_idx?, study_type?}``
+        Routes through the four unified followup field families (finding_id wins).
+        400 on bad args; 404 when parent not found; 500 when pbg-superpowers
+        is unavailable; 200 ``{new_study_name, new_slug}`` on success.
+        """
+        body, status = _lifecycle_mut.study_seed_followup(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
