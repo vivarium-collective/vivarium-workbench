@@ -4938,3 +4938,182 @@ class TestRemoteRunStartRoute:
         assert "post" in paths["/api/remote-run-start"]
         schemas = client.get("/openapi.json").json()["components"]["schemas"]
         assert "RemoteRunStartResponse" in schemas
+
+
+# ===========================================================================
+# C-state-3e: GitHub device-flow auth (5 thin wrappers over lib.github_auth)
+# Every test monkeypatches the github_auth fns reached via the auth_views
+# module attribute — no test ever touches real GitHub.  The 2 POSTs pass CSRF
+# because the TestClient sends no Origin header.
+# ===========================================================================
+class TestAuthRoutes:
+    # -- POST /api/auth/github/start -----------------------------------------
+
+    def test_start_no_client_id_503(self, client, monkeypatch):
+        from vivarium_dashboard.lib import auth_views as av
+        monkeypatch.setattr(
+            av.github_auth, "start_device_flow",
+            lambda: {"error": "no_client_id", "hint": "set env"},
+        )
+        r = client.post("/api/auth/github/start", json={})
+        assert r.status_code == 503
+        assert r.json() == {"error": "no_client_id", "hint": "set env"}
+
+    def test_start_other_error_502(self, client, monkeypatch):
+        from vivarium_dashboard.lib import auth_views as av
+        monkeypatch.setattr(
+            av.github_auth, "start_device_flow",
+            lambda: {"error": "device_code_failed"},
+        )
+        r = client.post("/api/auth/github/start", json={})
+        assert r.status_code == 502
+        assert r.json() == {"error": "device_code_failed"}
+
+    def test_start_success_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import auth_views as av
+        payload = {
+            "flow_id": "abc", "user_code": "WXYZ-1234",
+            "verification_uri": "https://github.com/login/device",
+            "expires_in": 900, "interval": 5,
+        }
+        monkeypatch.setattr(av.github_auth, "start_device_flow", lambda: payload)
+        # no JSON body at all → permissive Body(default={}) is used
+        r = client.post("/api/auth/github/start")
+        assert r.status_code == 200
+        assert r.json() == payload
+
+    # -- GET /api/auth/github/poll -------------------------------------------
+
+    def test_poll_missing_flow_id_400(self, client):
+        r = client.get("/api/auth/github/poll")
+        assert r.status_code == 400
+        assert r.json() == {"status": "error", "detail": "missing_flow_id"}
+
+    def test_poll_pending_202(self, client, monkeypatch):
+        from vivarium_dashboard.lib import auth_views as av
+        monkeypatch.setattr(
+            av.github_auth, "poll_device_flow",
+            lambda fid: {"status": "pending", "interval": 5},
+        )
+        r = client.get("/api/auth/github/poll?flow_id=f1")
+        assert r.status_code == 202
+        assert r.json() == {"status": "pending", "interval": 5}
+
+    def test_poll_ok_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import auth_views as av
+        monkeypatch.setattr(
+            av.github_auth, "poll_device_flow",
+            lambda fid: {"status": "ok", "login": "octocat"},
+        )
+        r = client.get("/api/auth/github/poll?flow_id=f1")
+        assert r.status_code == 200
+        assert r.json() == {"status": "ok", "login": "octocat"}
+
+    def test_poll_expired_410(self, client, monkeypatch):
+        from vivarium_dashboard.lib import auth_views as av
+        monkeypatch.setattr(
+            av.github_auth, "poll_device_flow", lambda fid: {"status": "expired"},
+        )
+        r = client.get("/api/auth/github/poll?flow_id=f1")
+        assert r.status_code == 410
+
+    def test_poll_denied_403(self, client, monkeypatch):
+        from vivarium_dashboard.lib import auth_views as av
+        monkeypatch.setattr(
+            av.github_auth, "poll_device_flow", lambda fid: {"status": "denied"},
+        )
+        r = client.get("/api/auth/github/poll?flow_id=f1")
+        assert r.status_code == 403
+
+    def test_poll_error_400(self, client, monkeypatch):
+        from vivarium_dashboard.lib import auth_views as av
+        monkeypatch.setattr(
+            av.github_auth, "poll_device_flow",
+            lambda fid: {"status": "error", "detail": "unknown_flow"},
+        )
+        r = client.get("/api/auth/github/poll?flow_id=f1")
+        assert r.status_code == 400
+        assert r.json() == {"status": "error", "detail": "unknown_flow"}
+
+    # -- GET /api/auth/github/status -----------------------------------------
+
+    def test_status_unauthenticated_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import auth_views as av
+        monkeypatch.setattr(
+            av.github_auth, "status_payload", lambda: {"authenticated": False},
+        )
+        r = client.get("/api/auth/github/status")
+        assert r.status_code == 200
+        assert r.json() == {"authenticated": False}
+
+    def test_status_authenticated_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import auth_views as av
+        payload = {
+            "authenticated": True, "login": "octocat",
+            "source": "device_flow", "scopes": ["repo"],
+        }
+        monkeypatch.setattr(av.github_auth, "status_payload", lambda: payload)
+        r = client.get("/api/auth/github/status")
+        assert r.status_code == 200
+        assert r.json() == payload
+
+    # -- POST /api/auth/github/logout ----------------------------------------
+
+    def test_logout_200_calls_logout(self, client, monkeypatch):
+        from vivarium_dashboard.lib import auth_views as av
+        called = {"n": 0}
+        monkeypatch.setattr(
+            av.github_auth, "logout",
+            lambda: called.__setitem__("n", called["n"] + 1),
+        )
+        r = client.post("/api/auth/github/logout", json={})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True}
+        assert called["n"] == 1
+
+    # -- GET /api/auth/github/orgs -------------------------------------------
+
+    def test_orgs_unauthenticated_401(self, client, monkeypatch):
+        from vivarium_dashboard.lib import auth_views as av
+        monkeypatch.setattr(
+            av.github_auth, "list_orgs", lambda: {"error": "unauthenticated"},
+        )
+        r = client.get("/api/auth/github/orgs")
+        assert r.status_code == 401
+        assert r.json() == {"error": "unauthenticated"}
+
+    def test_orgs_other_error_502(self, client, monkeypatch):
+        from vivarium_dashboard.lib import auth_views as av
+        monkeypatch.setattr(
+            av.github_auth, "list_orgs",
+            lambda: {"error": "orgs_lookup_failed", "status": 500},
+        )
+        r = client.get("/api/auth/github/orgs")
+        assert r.status_code == 502
+        assert r.json()["error"] == "orgs_lookup_failed"
+
+    def test_orgs_success_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import auth_views as av
+        payload = {
+            "login": "octocat",
+            "orgs": [{"name": "octocat", "kind": "personal"}],
+        }
+        monkeypatch.setattr(av.github_auth, "list_orgs", lambda: payload)
+        r = client.get("/api/auth/github/orgs")
+        assert r.status_code == 200
+        assert r.json() == payload
+
+    # -- OpenAPI registration for all 5 --------------------------------------
+
+    def test_routes_in_openapi(self, client):
+        spec = client.get("/openapi.json").json()
+        paths = spec["paths"]
+        for p, method in (
+            ("/api/auth/github/start", "post"),
+            ("/api/auth/github/poll", "get"),
+            ("/api/auth/github/status", "get"),
+            ("/api/auth/github/logout", "post"),
+            ("/api/auth/github/orgs", "get"),
+        ):
+            assert p in paths and method in paths[p], (p, method)
+        assert "AuthPayload" in spec["components"]["schemas"]
