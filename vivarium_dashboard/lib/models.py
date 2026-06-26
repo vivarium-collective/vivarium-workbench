@@ -1595,3 +1595,56 @@ class InvestigationDeleteBody(BaseModel):
     name: Optional[str] = None
     study: Optional[str] = None
     investigation: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Batch 22: Investigation comparison & group mutation request-body models
+# ---------------------------------------------------------------------------
+
+
+class InvestigationComparisonAddBody(BaseModel):
+    """POST /api/investigation-comparison-add {investigation, name, variants[], observables[], description?}
+
+    ``study`` is also accepted as an alias for ``investigation`` (the legacy
+    handler checks both: ``body.get("investigation") or body.get("study")``).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: Optional[str] = None
+    study: Optional[str] = None  # legacy alias
+    name: Optional[str] = None
+    variants: Optional[list] = None
+    observables: Optional[list] = None
+    description: Optional[str] = None
+
+
+class InvestigationComparisonUpdateBody(BaseModel):
+    """POST /api/investigation-comparison-update {investigation, name, fields_to_update}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: Optional[str] = None
+    name: Optional[str] = None
+    fields_to_update: Optional[dict] = None
+
+
+class InvestigationGroupAddBody(BaseModel):
+    """POST /api/investigation-group-add {investigation, name, variants[], description?}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: Optional[str] = None
+    name: Optional[str] = None
+    variants: Optional[list] = None
+    description: Optional[str] = None
+
+
+class InvestigationGroupUpdateBody(BaseModel):
+    """POST /api/investigation-group-update {investigation, name, fields_to_update}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: Optional[str] = None
+    name: Optional[str] = None
+    fields_to_update: Optional[dict] = None

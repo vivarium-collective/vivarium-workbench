@@ -37,6 +37,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError
 
 from vivarium_dashboard.lib import composite_run_views as _cr_views
+from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
 from vivarium_dashboard.lib import lifecycle_mutations as _lifecycle_mut
 from vivarium_dashboard.lib import scaffold_mutations as _scaffold_mut
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
@@ -164,6 +165,11 @@ from vivarium_dashboard.lib.models import (
     IsetCreateBody,
     IsetCloneBody,
     InvestigationDeleteBody,
+    # Batch 22: request-body models for investigation comparison & group mutations
+    InvestigationComparisonAddBody,
+    InvestigationComparisonUpdateBody,
+    InvestigationGroupAddBody,
+    InvestigationGroupUpdateBody,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -381,6 +387,18 @@ _OPENAPI_TAGS = [
             "is deferred to the flip batch.  Errors carry ``{error: ...}`` at "
             "400/404/409/500/501; success returns the investigation detail dict "
             "or ``{ok: true, name: ...}``."
+        ),
+    },
+    {
+        "name": "Investigation comparisons & groups",
+        "description": (
+            "Batch 22 POST routes — comparison and group write endpoints for "
+            "investigations: add/update comparisons (name + variants + observables) "
+            "and add/update groups (name + variants).  Each route delegates to a "
+            "pure lib builder in ``lib.compare_group_mutations``.  CSRF guard is "
+            "deferred to the flip batch; the live do_POST still enforces it via "
+            "``_csrf_ok``.  Errors carry ``{error: ...}`` at 400/404/409; success "
+            "returns ``{ok: true}``."
         ),
     },
     {
@@ -3082,6 +3100,116 @@ def create_app() -> FastAPI:
         directly (git commit deferred to the flip/state batch).
         """
         body, status = _scaffold_mut.delete_investigation(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    # -----------------------------------------------------------------------
+    # Batch 22: Investigation comparisons & groups (POST routes)
+    # NOTE: CSRF guard is deferred to the state/flip batch — same as batches 18-21.
+    # The live server shim still routes through _commit_or_run; these FastAPI
+    # routes call the lib builder directly (commit deferred to the flip batch).
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/investigation-comparison-add",
+        tags=["Investigation comparisons & groups"],
+        summary="Append a comparison entry to an investigation's spec.yaml",
+    )
+    def investigation_comparison_add(
+        req: InvestigationComparisonAddBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Append a comparison entry to ``spec.yaml.comparisons``.
+
+        Body: ``{investigation, name, variants[], observables[], description?}``
+        (``study`` accepted as alias for ``investigation``.)
+        400 when required fields are missing/invalid; 404 when investigation
+        not found; 409 when the comparison name already exists; 200
+        ``{ok: true}`` on success.
+
+        Note: the live server path commits via ``_commit_or_run``; this
+        FastAPI route calls the lib builder directly (commit deferred).
+        """
+        body, status = _compare_grp_mut.comparison_add(ws, req.model_dump(exclude_unset=True))
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/investigation-comparison-update",
+        tags=["Investigation comparisons & groups"],
+        summary="Replace fields on an existing investigation comparison",
+    )
+    def investigation_comparison_update(
+        req: InvestigationComparisonUpdateBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Replace fields on an existing ``spec.yaml.comparisons`` entry.
+
+        Body: ``{investigation, name, fields_to_update}``
+        Only ``description``, ``variants``, and ``observables`` may be updated;
+        ``name`` is immutable.
+        400 when required fields are missing/invalid; 404 when investigation
+        or comparison not found; 200 ``{ok: true}`` on success.
+
+        Note: the live server path commits via ``_commit_or_run``; this
+        FastAPI route calls the lib builder directly (commit deferred).
+        """
+        body, status = _compare_grp_mut.comparison_update(ws, req.model_dump(exclude_unset=True))
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/investigation-group-add",
+        tags=["Investigation comparisons & groups"],
+        summary="Append a group entry to an investigation's spec.yaml",
+    )
+    def investigation_group_add(
+        req: InvestigationGroupAddBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Append a group entry to ``spec.yaml.groups``.
+
+        Body: ``{investigation, name, variants[], description?}``
+        Every entry in ``variants`` must reference a name declared in
+        ``spec.variants``; 400 with ``unknown variant(s)`` when not.
+        400 when required fields are missing/invalid; 404 when investigation
+        not found; 409 when the group name already exists; 200
+        ``{ok: true}`` on success.
+
+        Note: the live server path commits via ``_commit_or_run``; this
+        FastAPI route calls the lib builder directly (commit deferred).
+        """
+        body, status = _compare_grp_mut.group_add(ws, req.model_dump(exclude_unset=True))
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/investigation-group-update",
+        tags=["Investigation comparisons & groups"],
+        summary="Replace fields on an existing investigation group",
+    )
+    def investigation_group_update(
+        req: InvestigationGroupUpdateBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Replace fields on an existing ``spec.yaml.groups`` entry.
+
+        Body: ``{investigation, name, fields_to_update}``
+        Only ``description`` and ``variants`` may be updated; ``name`` is
+        immutable.  When replacing ``variants``, each entry must reference a
+        name declared in ``spec.variants``; 400 with ``unknown variant(s)``
+        when not; 400 when the replacement list is empty.
+        400 when required fields are missing/invalid; 404 when investigation
+        or group not found; 200 ``{ok: true}`` on success.
+
+        Note: the live server path commits via ``_commit_or_run``; this
+        FastAPI route calls the lib builder directly (commit deferred).
+        """
+        body, status = _compare_grp_mut.group_update(ws, req.model_dump(exclude_unset=True))
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
