@@ -472,6 +472,130 @@ class TestServerShimParity:
 
 
 # ---------------------------------------------------------------------------
+# 2b. Live commit-path preservation (the 3 _commit_or_run handlers)
+# ---------------------------------------------------------------------------
+
+
+class TestServerCommitPath:
+    """The 3 investigation set-* handlers that the legacy wrapped in
+    ``_commit_or_run`` MUST still route through it on the LIVE server path —
+    so they commit (or, with no workstream, return the ``note`` marker that
+    distinguishes ran-only from committed).  The FastAPI route, by contrast,
+    calls the lib builder directly and returns the plain ``{ok: True}`` with
+    NO ``note`` (commit/workstream deferred to the flip batch).
+
+    The ``ws`` fixture is a non-git workspace, so ``_commit_or_run`` takes the
+    no-workstream fallback: it runs the mutation directly and returns
+    ``{ok: True, note: ...}``.  Asserting ``note`` is present proves the shim
+    went through ``_commit_or_run`` rather than calling the lib builder
+    directly (which would return ``{ok: True}`` without ``note``).
+    """
+
+    def _make_handler(self, ws_root):
+        import vivarium_dashboard.server as srv
+        handler = object.__new__(srv.Handler)
+        handler._json_calls = []
+        original_ws = srv.WORKSPACE
+
+        def fake_json(body, code=200):
+            handler._json_calls.append((body, code))
+            return body, code
+
+        handler._json = fake_json
+        srv.WORKSPACE = ws_root
+        return handler, srv, original_ws
+
+    def test_observables_routes_through_commit_or_run(self, ws):
+        handler, srv, orig = self._make_handler(ws)
+        try:
+            handler._post_investigation_set_observables({
+                "investigation": "dnaa-test",
+                "paths": [["a", "b"]],
+            })
+        finally:
+            srv.WORKSPACE = orig
+        body, code = handler._json_calls[0]
+        assert code == 200
+        # `note` marker present → routed through _commit_or_run, not lib direct.
+        assert "note" in body, body
+        # The mutation still happened.
+        assert _read_inv_spec(ws)["observables"] == [{"path": ["a", "b"]}]
+
+    def test_conclusions_routes_through_commit_or_run(self, ws):
+        handler, srv, orig = self._make_handler(ws)
+        try:
+            handler._post_investigation_set_conclusions({
+                "investigation": "dnaa-test",
+                "markdown": "# Final",
+            })
+        finally:
+            srv.WORKSPACE = orig
+        body, code = handler._json_calls[0]
+        assert code == 200
+        assert "note" in body, body
+        assert _read_inv_spec(ws)["conclusions"] == "# Final"
+
+    def test_overview_routes_through_commit_or_run(self, ws):
+        handler, srv, orig = self._make_handler(ws)
+        try:
+            handler._post_investigation_set_overview({
+                "investigation": "dnaa-test",
+                "fields": {"question": "Q?"},
+            })
+        finally:
+            srv.WORKSPACE = orig
+        body, code = handler._json_calls[0]
+        assert code == 200
+        assert "note" in body, body
+        assert _read_inv_spec(ws)["question"] == "Q?"
+
+    def test_validation_400_returned_before_commit(self, ws):
+        """A bad body is rejected DIRECTLY (400, no `note`) — the dirty-tree
+        check inside _commit_or_run must NOT fire before the validation
+        rejection, exactly as legacy ordered it."""
+        handler, srv, orig = self._make_handler(ws)
+        try:
+            handler._post_investigation_set_observables({
+                "investigation": "dnaa-test",
+                "paths": "not-a-list",
+            })
+        finally:
+            srv.WORKSPACE = orig
+        body, code = handler._json_calls[0]
+        assert code == 400
+        assert "note" not in body
+        assert "paths must be a list" in body["error"]
+
+    def test_validation_404_returned_before_commit(self, ws):
+        handler, srv, orig = self._make_handler(ws)
+        try:
+            handler._post_investigation_set_conclusions({
+                "investigation": "no-such",
+                "markdown": "x",
+            })
+        finally:
+            srv.WORKSPACE = orig
+        body, code = handler._json_calls[0]
+        assert code == 404
+        assert "note" not in body
+
+    def test_fastapi_route_has_no_commit_note(self, ws):
+        """Counterpart: the FastAPI route calls the lib builder directly, so
+        its 200 response is the plain {ok:True} with NO `note` — the commit /
+        workstream concern is deferred to the flip batch."""
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: ws
+        client = TestClient(app)
+        r = client.post("/api/investigation-set-observables", json={
+            "investigation": "dnaa-test",
+            "paths": [["a", "b"]],
+        })
+        assert r.status_code == 200
+        assert r.json() == {"ok": True}
+        assert "note" not in r.json()
+
+
+# ---------------------------------------------------------------------------
 # 3. FastAPI route tests
 # ---------------------------------------------------------------------------
 

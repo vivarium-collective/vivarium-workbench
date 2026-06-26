@@ -9923,19 +9923,113 @@ if __name__ == "__main__":
             return self._json({"error": f"workstream error: {e}"}, 500)
 
     def _post_investigation_set_observables(self, body: dict):
-        """POST /api/investigation-set-observables — shim → lib.metadata_mutations."""
-        return self._json(*_meta_mut.set_investigation_observables(WORKSPACE, body))
+        """POST /api/investigation-set-observables {investigation, paths, emit_all}
+        Rewrites spec.yaml.observables. The orchestrator builds the emitter
+        step at run time.
+
+        Validation (400/404) stays in this LIVE shim so the dirty-tree check
+        never fires before a bad-body rejection; the inner mutation is
+        delegated to lib.metadata_mutations and run under the active
+        workstream via ``_commit_or_run`` (commit / 409-on-dirty / note),
+        byte-identical to the legacy handler. The FastAPI route calls the lib
+        builder directly (commit/workstream deferred to the flip batch).
+        """
+        inv_name = (body.get("investigation") or "").strip()
+        paths = body.get("paths")
+        if not inv_name:
+            return self._json({"error": "investigation required"}, 400)
+        if paths is None or not isinstance(paths, list):
+            return self._json({"error": "paths must be a list of arrays"}, 400)
+        inv_dir = _study_dir(inv_name)
+        spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
+        if not spec_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+
+        commit_msg = f"feat(investigations/{inv_name}): set observables"
+
+        def do_action():
+            _meta_mut.set_investigation_observables(WORKSPACE, body)
+
+        try:
+            return self._json(*_commit_or_run(commit_msg, do_action))
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
 
     def _post_investigation_set_conclusions(self, body: dict):
-        """POST /api/investigation-set-conclusions — shim → lib.metadata_mutations."""
-        return self._json(*_meta_mut.set_investigation_conclusions(WORKSPACE, body))
+        """POST /api/investigation-set-conclusions {investigation, markdown}
+        Writes spec.yaml.conclusions. Rejects bodies over 256KB.
+
+        Validation stays in this LIVE shim; inner mutation delegated to
+        lib.metadata_mutations and committed via ``_commit_or_run`` (see
+        ``_post_investigation_set_observables`` for the full rationale).
+        """
+        inv_name = _study_name_from_body(body)
+        markdown = body.get("markdown", "")
+        if not inv_name:
+            return self._json({"error": "investigation required"}, 400)
+        if not isinstance(markdown, str):
+            return self._json({"error": "markdown must be a string"}, 400)
+        if len(markdown.encode("utf-8")) > 256 * 1024:
+            return self._json({"error": "conclusions exceed 256KB limit"}, 400)
+        inv_dir = _study_dir(inv_name)
+        spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
+        if not spec_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+
+        commit_msg = f"feat(investigations/{inv_name}): set conclusions"
+
+        def do_action():
+            _meta_mut.set_investigation_conclusions(WORKSPACE, body)
+
+        try:
+            return self._json(*_commit_or_run(commit_msg, do_action))
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
 
     def _post_investigation_set_overview(self, body: dict):
-        """POST /api/investigation-set-overview — shim → lib.metadata_mutations."""
-        return self._json(*_meta_mut.set_investigation_overview(WORKSPACE, body))
+        """POST /api/investigation-set-overview {investigation, fields: {question?, hypothesis?, status?}}
+        Selectively updates the three Overview metadata fields on spec.yaml.
+
+        Validation stays in this LIVE shim; inner mutation delegated to
+        lib.metadata_mutations and committed via ``_commit_or_run`` (see
+        ``_post_investigation_set_observables`` for the full rationale).
+        """
+        inv_name = (body.get("investigation") or "").strip()
+        fields = body.get("fields") or {}
+        if not inv_name:
+            return self._json({"error": "investigation required"}, 400)
+        if not isinstance(fields, dict):
+            return self._json({"error": "fields must be a mapping"}, 400)
+        if "status" in fields and fields["status"] not in _VALID_OVERVIEW_STATUSES:
+            return self._json(
+                {"error": f"status must be one of {sorted(_VALID_OVERVIEW_STATUSES)}"},
+                400,
+            )
+        for key in ("question", "hypothesis", "topic"):
+            if key in fields and not isinstance(fields[key], str):
+                return self._json({"error": f"{key} must be a string"}, 400)
+        inv_dir = _study_dir(inv_name)
+        spec_path = (inv_dir / "study.yaml") if (inv_dir / "study.yaml").is_file() else (inv_dir / "spec.yaml")
+        if not spec_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+
+        commit_msg = f"feat(investigations/{inv_name}): set overview metadata"
+
+        def do_action():
+            _meta_mut.set_investigation_overview(WORKSPACE, body)
+
+        try:
+            return self._json(*_commit_or_run(commit_msg, do_action))
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
 
     def _post_investigation_set_status(self, body: dict):
-        """POST /api/investigation-set-status — shim → lib.metadata_mutations."""
+        """POST /api/investigation-set-status — shim → lib.metadata_mutations.
+
+        Legacy never wrapped this in ``_commit_or_run`` (it delegated to the
+        pure ``_set_investigation_status`` helper and returned its result
+        directly), so the shim stays a direct lib delegation.
+        """
         return self._json(*_meta_mut.set_investigation_status(WORKSPACE, body))
 
     def _post_proposed_input_decision(self, body: dict):
