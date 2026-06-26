@@ -32,7 +32,7 @@ from typing import Optional, Union
 
 import subprocess
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Body, Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError
 
@@ -44,6 +44,7 @@ from vivarium_dashboard.lib import job_status_views as _job_status_views
 from vivarium_dashboard.lib import run_jobs as _run_jobs
 from vivarium_dashboard.lib import remote_run_jobs as _remote_run_jobs
 from vivarium_dashboard.lib import remote_run_views as _remote_run_views
+from vivarium_dashboard.lib import auth_views as _auth_views
 from vivarium_dashboard.lib import composite_run_views as _cr_views
 from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
 from vivarium_dashboard.lib import viz_write_mutations as _viz_write_mut
@@ -219,6 +220,8 @@ from vivarium_dashboard.lib.models import (
     # C-state-3c: remote-run submit (manager.submit pipeline job)
     RemoteRunStartRequest,
     RemoteRunStartResponse,
+    # C-state-3e: GitHub device-flow auth (pass-through payload)
+    AuthPayload,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -583,6 +586,26 @@ _OPENAPI_TAGS = [
             "manager the ``GET /api/remote-run-status`` poller reads).  Guarded by "
             "the same-origin CSRF middleware.  Success returns HTTP 202 "
             "``{job_id}``; errors carry ``{error: ...}`` at 401/400/409/404."
+        ),
+    },
+    {
+        "name": "Auth",
+        "description": (
+            "GitHub OAuth Device-Flow auth — 5 routes (2 POST, 3 GET) that are "
+            "thin wrappers over ``lib.github_auth``: ``POST /api/auth/github/start`` "
+            "initiates a device flow, ``GET /api/auth/github/poll?flow_id=`` polls "
+            "the token endpoint, ``GET /api/auth/github/status`` reports the current "
+            "session (never the token), ``POST /api/auth/github/logout`` clears the "
+            "session + keyring entry, and ``GET /api/auth/github/orgs`` lists the "
+            "user's namespace + orgs.  The device-flow/session state lives in the "
+            "``lib.github_auth`` process-global singletons shared with the stdlib "
+            "server, so a FastAPI call mutates the SAME state.  The 2 POSTs are "
+            "guarded by the same-origin CSRF middleware.  Every path (success AND "
+            "error) is returned via ``JSONResponse`` so the lib-mapped status code "
+            "is preserved verbatim — start 503 (no_client_id) / 502 / 200; poll "
+            "400 (missing flow_id) / 202 (pending) / 410 (expired) / 403 (denied) / "
+            "400 (other) / 200 (ok); status 200; logout 200; orgs 401 "
+            "(unauthenticated) / 502 / 200.  Library-backed via ``lib.auth_views``."
         ),
     },
     {
@@ -4209,6 +4232,113 @@ def create_app() -> FastAPI:
         # contract (``bool(None)`` would otherwise flip the default to False).
         body, status = _remote_run_views.remote_run_start(ws, req.model_dump(exclude_none=True))
         return JSONResponse(status_code=status, content=body)
+
+    # -----------------------------------------------------------------------
+    # Auth — GitHub OAuth Device Flow (5 thin wrappers over lib.github_auth)
+    #
+    # The device-flow/session state lives in the lib.github_auth process-global
+    # singletons shared with the stdlib server, so these routes need no state
+    # extraction.  Every path (success AND error) is returned via JSONResponse
+    # so the lib-mapped status code (200/202/400/401/403/410/502/503) is
+    # preserved verbatim — a plain model return would force 200.  The 2 POSTs
+    # accept a permissive body they ignore (Body(default={})); the CSRF
+    # middleware already guards them.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/auth/github/start",
+        response_model=AuthPayload,
+        tags=["Auth"],
+        summary="Initiate a GitHub OAuth Device Flow",
+    )
+    def auth_github_start(body: dict = Body(default={})) -> JSONResponse:
+        """Initiate a GitHub Device Flow (mirrors the stdlib
+        ``POST /api/auth/github/start``).
+
+        Returns the ``user_code`` + ``verification_uri`` to display plus a
+        server-issued ``flow_id`` for ``/poll`` (the ``device_code`` is held
+        server-side, never returned).  The request body is accepted and ignored.
+
+        Status codes (byte-identical to the legacy handler): 503
+        (``{"error": "no_client_id"}`` — deployment not configured), 502
+        (other GitHub-side failure), 200 (success).  Library-backed via the pure
+        ``lib.auth_views.auth_start``.
+        """
+        resp, code = _auth_views.auth_start(body)
+        return JSONResponse(content=resp, status_code=code)
+
+    @app.get(
+        "/api/auth/github/poll",
+        response_model=AuthPayload,
+        tags=["Auth"],
+        summary="Poll the GitHub token endpoint for a pending device flow",
+    )
+    def auth_github_poll(flow_id: str = "") -> JSONResponse:
+        """Poll a pending device flow (mirrors the stdlib
+        ``GET /api/auth/github/poll?flow_id=<uuid>``).
+
+        A missing/blank ``flow_id`` returns HTTP 400
+        ``{"status": "error", "detail": "missing_flow_id"}``; otherwise the
+        ``poll_device_flow`` outcome maps to an HTTP code the client can use
+        without parsing JSON: 200 (ok), 202 (pending), 410 (expired), 403
+        (denied), 400 (any other/error status).  Library-backed via the pure
+        ``lib.auth_views.auth_poll``.
+        """
+        resp, code = _auth_views.auth_poll(flow_id)
+        return JSONResponse(content=resp, status_code=code)
+
+    @app.get(
+        "/api/auth/github/status",
+        response_model=AuthPayload,
+        tags=["Auth"],
+        summary="Current GitHub auth session (never the token)",
+    )
+    def auth_github_status() -> JSONResponse:
+        """Current auth session (mirrors the stdlib
+        ``GET /api/auth/github/status``).
+
+        Returns ``{authenticated: false}`` or ``{authenticated: true, login,
+        source, scopes}`` — never the token itself.  Always HTTP 200.
+        Library-backed via the pure ``lib.auth_views.auth_status``.
+        """
+        resp, code = _auth_views.auth_status()
+        return JSONResponse(content=resp, status_code=code)
+
+    @app.post(
+        "/api/auth/github/logout",
+        response_model=AuthPayload,
+        tags=["Auth"],
+        summary="Clear the GitHub auth session + keyring entry",
+    )
+    def auth_github_logout(body: dict = Body(default={})) -> JSONResponse:
+        """Clear the in-memory session + persisted keyring entry (mirrors the
+        stdlib ``POST /api/auth/github/logout``).
+
+        Always returns HTTP 200 ``{"ok": true}``.  The request body is accepted
+        and ignored.  The CSRF middleware already guards this POST.
+        Library-backed via the pure ``lib.auth_views.auth_logout``.
+        """
+        resp, code = _auth_views.auth_logout(body)
+        return JSONResponse(content=resp, status_code=code)
+
+    @app.get(
+        "/api/auth/github/orgs",
+        response_model=AuthPayload,
+        tags=["Auth"],
+        summary="The user's GitHub namespace + orgs",
+    )
+    def auth_github_orgs() -> JSONResponse:
+        """List the user's personal namespace + orgs (mirrors the stdlib
+        ``GET /api/auth/github/orgs``).
+
+        Returns ``{login, orgs: [{name, kind}, ...]}`` on success.  Status codes
+        (byte-identical to the legacy handler): 401
+        (``{"error": "unauthenticated"}`` — no session), 502 (orgs lookup
+        failed), 200 (success).  Library-backed via the pure
+        ``lib.auth_views.auth_orgs``.
+        """
+        resp, code = _auth_views.auth_orgs()
+        return JSONResponse(content=resp, status_code=code)
 
     # -----------------------------------------------------------------------
     # CATCH-ALL — MUST stay registered LAST (immediately before ``return app``)

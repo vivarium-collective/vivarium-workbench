@@ -87,6 +87,7 @@ files = [
     "vivarium_dashboard/lib/source_switch_views.py",
     "vivarium_dashboard/lib/source_build_views.py",
     "vivarium_dashboard/lib/remote_run_views.py",
+    "vivarium_dashboard/lib/auth_views.py",
 ]
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true
