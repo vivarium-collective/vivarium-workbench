@@ -71,6 +71,7 @@ from vivarium_dashboard.lib import viz_commit_mutations as _viz_commit_mut
 from vivarium_dashboard.lib import upload_mutations as _upload_mut
 from vivarium_dashboard.lib import reference_mutations as _reference_mut
 from vivarium_dashboard.lib import composite_mutations as _composite_mut
+from vivarium_dashboard.lib import investigation_viz_mutations as _inv_viz_mut
 from vivarium_dashboard.lib.investigations_index import (
     _conclusions_excerpt,
     _format_baseline_source,
@@ -7619,71 +7620,12 @@ class Handler(BaseHTTPRequestHandler):
     def _post_investigation_render_viz(self, body: dict):
         """POST /api/investigation-render-viz {name} — re-render visualizations
         against the investigation's existing emitter data. No simulation re-run.
+
+        No commit wrapper — a plain no-commit render. The whole handler logic
+        lives in ``lib.investigation_viz_mutations.render_viz``; this shim is a
+        thin lib delegate (FastAPI calls the lib builder directly).
         """
-        _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.investigations import (
-            load_spec, render_visualizations, InvestigationSpecError,
-        )
-
-        name = (body.get("name") or "").strip()
-        if not name:
-            return self._json({"error": "name is required"}, 400)
-        inv_dir = _study_dir(name)
-        spec_path = _study_spec_path(name)
-        if not spec_path.is_file():
-            return self._json({"error": f"investigation '{name}' not found"}, 404)
-        try:
-            spec = load_spec(spec_path)
-        except InvestigationSpecError as e:
-            return self._json({"error": f"spec error: {e}"}, 400)
-
-        # Discover workspace package + build core (mirror _post_investigation_run)
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
-        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-        sys.path.insert(0, str(WORKSPACE))
-        try:
-            core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
-            core = core_module.build_core()
-            registry = dict(core.link_registry)
-        except Exception as e:
-            return self._json({"error": f"failed to build core: {e}"}, 500)
-
-        try:
-            from pbg_superpowers.visualizations import (
-                TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap,
-            )
-            registry["TimeSeriesPlot"] = TimeSeriesPlot
-            registry["ParamVsObservable"] = ParamVsObservable
-            registry["Distribution"] = Distribution
-            registry["PhaseSpace"] = PhaseSpace
-            registry["Heatmap"] = Heatmap
-        except ImportError:
-            pass
-
-        from process_bigraph import Composite
-
-        def build_and_run(viz_doc, registry_arg):
-            composite = Composite({'state': viz_doc}, core=core)
-            composite.run(1)
-            state = composite.state
-            html = state.get('output_store')
-            if isinstance(html, dict):
-                html = html.get('value') or html.get('_value') or ''
-            return html if isinstance(html, str) else ''
-
-        try:
-            viz_paths = render_visualizations(
-                spec, inv_dir, name,
-                core_registry=registry, build_and_run=build_and_run,
-            )
-        except Exception as e:
-            return self._json({"error": f"render failed: {type(e).__name__}: {e}"}, 500)
-
-        return self._json({
-            "ok": True, "investigation": name,
-            "n_visualizations": len(viz_paths),
-            "viz_paths": [str(p) for p in viz_paths],
-        }, 200)
+        return self._json(*_inv_viz_mut.render_viz(WORKSPACE, body))
 
     def _post_investigation_add_viz(self, body: dict):
         """POST /api/investigation-add-viz {investigation, name, address, config}
@@ -7707,13 +7649,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": f"investigation '{inv}' not found"}, 404)
 
         def action():
-            spec = _y.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-            vizzes = spec.setdefault("visualizations", []) or []
-            if any(v.get("name") == viz_name for v in vizzes):
-                raise RuntimeError(f"visualization '{viz_name}' already exists in spec")
-            vizzes.append({"name": viz_name, "address": address, "config": viz_config})
-            spec["visualizations"] = vizzes
-            spec_path.write_text(_y.safe_dump(spec, sort_keys=False))
+            _inv_viz_mut._apply_add_viz(
+                WORKSPACE,
+                spec_path=spec_path,
+                viz_name=viz_name,
+                address=address,
+                viz_config=viz_config,
+            )
 
         commit_msg = f"feat(investigations/{inv}): add viz {viz_name} ({address})"
         resp, code = _active_branch_action(commit_msg, action)
@@ -8568,29 +8510,16 @@ class Handler(BaseHTTPRequestHandler):
         )
 
         def do_action():
-            composites_dir = inv_dir / "composites"
-            composites_dir.mkdir(parents=True, exist_ok=True)
-            sidecar = composites_dir / f"{composite_name}.yaml"
-            if is_generator:
-                sidecar.write_text(yaml.safe_dump(generator_doc, sort_keys=False))
-            else:
-                shutil.copy2(source_path, sidecar)
-
-            spec = {
-                "name": auto_name,
-                "baseline": composite_name,
-                "variants": [{
-                    "name": composite_name,
-                    "source": source_ref,
-                    "document": f"./composites/{composite_name}.yaml",
-                }],
-                "comparisons": [],
-                "conclusions": "",
-                "question": "",
-                "hypothesis": "",
-                "status": "draft",
-            }
-            (inv_dir / "spec.yaml").write_text(yaml.safe_dump(spec, sort_keys=False))
+            _composite_mut._apply_create_from_composite(
+                WORKSPACE,
+                inv_dir=inv_dir,
+                composite_name=composite_name,
+                is_generator=is_generator,
+                generator_doc=generator_doc,
+                source_path=source_path,
+                source_ref=source_ref,
+                auto_name=auto_name,
+            )
 
         try:
             resp, code = _commit_or_run(commit_msg, do_action)
