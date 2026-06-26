@@ -4175,3 +4175,163 @@ class TestBatch26ReferenceRoutes:
         paths = rc.get("/openapi.json").json()["paths"]
         assert "/api/reference-bibtex" in paths and "post" in paths["/api/reference-bibtex"]
         assert "/api/reference" in paths and "post" in paths["/api/reference"]
+
+
+class TestBatch27CompositeRoutes:
+    """Route-level tests for Batch 27 composite POST endpoints
+    (/api/investigation-composite-add, -perturb, -rebuild,
+    /api/composite-promote-to-catalog)."""
+
+    _INV = "demo"
+
+    @pytest.fixture
+    def ws(self, tmp_path: Path) -> Path:
+        import yaml as _yaml
+        w = tmp_path / "ws"
+        w.mkdir()
+        (w / "workspace.yaml").write_text(
+            "schema_version: 3\nname: testws\npackage_path: pbg_testws\n",
+            encoding="utf-8",
+        )
+        inv = w / "investigations" / self._INV
+        (inv / "composites").mkdir(parents=True)
+        (inv / "spec.yaml").write_text(
+            _yaml.safe_dump({"name": self._INV, "composites": [], "variants": []}),
+            encoding="utf-8",
+        )
+        # A real YAML composite source + a parent sidecar for perturb/rebuild.
+        cdir = w / "pbg_testws" / "composites"
+        cdir.mkdir(parents=True)
+        (cdir / "baseline.composite.yaml").write_text(
+            _yaml.safe_dump({"name": "baseline-doc", "state": {},
+                             "parameters": {"rate": {"default": 1.0}}}),
+            encoding="utf-8",
+        )
+        (inv / "composites" / "baseline.yaml").write_text(
+            _yaml.safe_dump({"name": "baseline-doc", "state": {},
+                             "parameters": {"rate": {"default": 1.0}}}),
+            encoding="utf-8",
+        )
+        return w
+
+    @pytest.fixture
+    def rc(self, ws: Path) -> TestClient:
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: ws
+        return TestClient(app)
+
+    # -- add -----------------------------------------------------------------
+
+    def test_add_happy(self, rc: TestClient, ws: Path) -> None:
+        r = rc.post("/api/investigation-composite-add", json={
+            "investigation": self._INV, "name": "base",
+            "source": "pbg_testws.composites.baseline",
+        })
+        assert r.status_code == 200, r.json()
+        assert r.json()["ok"] is True
+        assert (ws / "investigations" / self._INV / "composites" / "base.yaml").is_file()
+
+    def test_add_400_missing(self, rc: TestClient) -> None:
+        r = rc.post("/api/investigation-composite-add", json={"investigation": self._INV})
+        assert r.status_code == 400
+        assert "required" in r.json()["error"]
+
+    def test_add_404_unknown_source(self, rc: TestClient) -> None:
+        r = rc.post("/api/investigation-composite-add", json={
+            "investigation": self._INV, "name": "x",
+            "source": "pbg_testws.composites.nope",
+        })
+        assert r.status_code == 404
+
+    def test_add_409_duplicate(self, rc: TestClient) -> None:
+        body = {"investigation": self._INV, "name": "base",
+                "source": "pbg_testws.composites.baseline"}
+        assert rc.post("/api/investigation-composite-add", json=body).status_code == 200
+        r = rc.post("/api/investigation-composite-add", json=body)
+        assert r.status_code == 409
+
+    # -- perturb -------------------------------------------------------------
+
+    def test_perturb_happy(self, rc: TestClient, ws: Path) -> None:
+        r = rc.post("/api/investigation-composite-perturb", json={
+            "investigation": self._INV, "name": "fast", "extends": "baseline",
+            "parameter_overrides": {"rate": 2.0},
+        })
+        assert r.status_code == 200, r.json()
+        import yaml as _yaml
+        derived = ws / "investigations" / self._INV / "composites" / "fast.yaml"
+        assert _yaml.safe_load(derived.read_text())["parameters"]["rate"]["default"] == 2.0
+
+    def test_perturb_404_parent(self, rc: TestClient) -> None:
+        r = rc.post("/api/investigation-composite-perturb", json={
+            "investigation": self._INV, "name": "x", "extends": "nope",
+        })
+        assert r.status_code == 404
+
+    # -- promote -------------------------------------------------------------
+
+    def test_promote_happy_with_augmentation(self, rc: TestClient, ws: Path) -> None:
+        # Seed a variant sidecar + spec entry.
+        import yaml as _yaml
+        inv = ws / "investigations" / self._INV
+        (inv / "composites" / "myvar.yaml").write_text(
+            _yaml.safe_dump({"name": "myvar-doc", "state": {}}), encoding="utf-8")
+        (inv / "spec.yaml").write_text(
+            _yaml.safe_dump({"name": self._INV, "variants": [{"name": "myvar"}]}),
+            encoding="utf-8")
+        r = rc.post("/api/composite-promote-to-catalog", json={
+            "investigation": self._INV, "variant": "myvar", "target_name": "pp",
+        })
+        assert r.status_code == 200, r.json()
+        body = r.json()
+        assert body["name"] == "pp"
+        assert body["path"] == "pbg_testws/composites/pp.composite.yaml"
+        assert (ws / "pbg_testws" / "composites" / "pp.composite.yaml").is_file()
+
+    def test_promote_404_variant(self, rc: TestClient) -> None:
+        r = rc.post("/api/composite-promote-to-catalog", json={
+            "investigation": self._INV, "variant": "ghost",
+        })
+        assert r.status_code == 404
+
+    # -- rebuild -------------------------------------------------------------
+
+    def test_rebuild_happy(self, rc: TestClient, ws: Path) -> None:
+        import yaml as _yaml
+        inv = ws / "investigations" / self._INV
+        (inv / "spec.yaml").write_text(_yaml.safe_dump({
+            "name": self._INV, "composites": [
+                {"name": "d", "extends": "baseline",
+                 "parameter_overrides": {"rate": 7.0}},
+            ],
+        }), encoding="utf-8")
+        r = rc.post("/api/investigation-composite-rebuild", json={
+            "investigation": self._INV, "name": "d",
+        })
+        assert r.status_code == 200, r.json()
+        derived = inv / "composites" / "d.yaml"
+        assert _yaml.safe_load(derived.read_text())["parameters"]["rate"]["default"] == 7.0
+
+    def test_rebuild_400_not_derived(self, rc: TestClient, ws: Path) -> None:
+        import yaml as _yaml
+        inv = ws / "investigations" / self._INV
+        (inv / "spec.yaml").write_text(_yaml.safe_dump({
+            "name": self._INV, "composites": [{"name": "flat"}],
+        }), encoding="utf-8")
+        r = rc.post("/api/investigation-composite-rebuild", json={
+            "investigation": self._INV, "name": "flat",
+        })
+        assert r.status_code == 400
+        assert "is not derived" in r.json()["error"]
+
+    # -- openapi -------------------------------------------------------------
+
+    def test_routes_in_openapi(self, rc: TestClient) -> None:
+        paths = rc.get("/openapi.json").json()["paths"]
+        for p in (
+            "/api/investigation-composite-add",
+            "/api/investigation-composite-perturb",
+            "/api/composite-promote-to-catalog",
+            "/api/investigation-composite-rebuild",
+        ):
+            assert p in paths and "post" in paths[p], p

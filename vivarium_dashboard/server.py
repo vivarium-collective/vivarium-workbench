@@ -70,6 +70,7 @@ from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
 from vivarium_dashboard.lib import viz_commit_mutations as _viz_commit_mut
 from vivarium_dashboard.lib import upload_mutations as _upload_mut
 from vivarium_dashboard.lib import reference_mutations as _reference_mut
+from vivarium_dashboard.lib import composite_mutations as _composite_mut
 from vivarium_dashboard.lib.investigations_index import (
     _conclusions_excerpt,
     _format_baseline_source,
@@ -8653,19 +8654,15 @@ class Handler(BaseHTTPRequestHandler):
         commit_msg = f"feat(investigations/{inv_name}): add composite '{comp_name}'"
 
         def do_action():
-            import shutil
-            if source_path is not None:
-                shutil.copy2(source_path, sidecar)
-            else:
-                sidecar.write_text(yaml.safe_dump(generator_doc, sort_keys=False))
-            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-            composites = spec.setdefault('composites', [])
-            composites.append({
-                'name': comp_name,
-                'source': source,
-                'document': f'./composites/{comp_name}.yaml',
-            })
-            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+            _composite_mut._apply_add_investigation_composite(
+                WORKSPACE,
+                sidecar=sidecar,
+                source_path=source_path,
+                generator_doc=generator_doc,
+                spec_path=spec_path,
+                comp_name=comp_name,
+                source=source,
+            )
 
         try:
             return self._json(*_commit_or_run(commit_msg, do_action))
@@ -8726,32 +8723,15 @@ class Handler(BaseHTTPRequestHandler):
         commit_msg = f"feat(investigations/{inv_name}): derive composite '{comp_name}' from '{extends}'"
 
         def do_action():
-            derived.write_text(yaml.safe_dump(derived_doc, sort_keys=False))
-            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-            variants = spec.setdefault('variants', [])
-            entry = {'name': comp_name, 'extends': extends,
-                     'document': f'./composites/{comp_name}.yaml'}
-            intervention = {
-                'description': body.get('description') if body.get('description') is not None else '',
-            }
-            if body.get('parameter_overrides'):
-                intervention['parameter_overrides'] = body['parameter_overrides']
-            if body.get('process_overrides'):
-                intervention['process_overrides'] = body['process_overrides']
-            # Only attach the intervention block if at least one override was
-            # supplied; description-only on a derived variant would otherwise
-            # carry an empty recipe.
-            if intervention.get('parameter_overrides') or intervention.get('process_overrides'):
-                entry['intervention'] = intervention
-            existing_idx = next(
-                (i for i, v in enumerate(variants) if v.get('name') == comp_name),
-                None,
+            _composite_mut._apply_perturb_investigation_composite(
+                WORKSPACE,
+                derived=derived,
+                derived_doc=derived_doc,
+                spec_path=spec_path,
+                comp_name=comp_name,
+                extends=extends,
+                body=body,
             )
-            if existing_idx is not None:
-                variants[existing_idx] = entry  # full replace
-            else:
-                variants.append(entry)
-            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
 
         try:
             return self._json(*_commit_or_run(commit_msg, do_action))
@@ -8824,19 +8804,16 @@ class Handler(BaseHTTPRequestHandler):
         )
 
         def do_action():
-            catalog_dir.mkdir(parents=True, exist_ok=True)
-            doc = yaml.safe_load(sidecar.read_text(encoding="utf-8")) or {}
-            doc['name'] = target_name
-            if description is not None:
-                doc['description'] = description
-            target_path.write_text(yaml.safe_dump(doc, sort_keys=False))
-            # Mark variant promoted in spec.yaml
-            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-            for v in (spec.get('variants') or []):
-                if v.get('name') == variant_name:
-                    v['promoted'] = True
-                    break
-            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+            _composite_mut._apply_promote_composite_to_catalog(
+                WORKSPACE,
+                catalog_dir=catalog_dir,
+                sidecar=sidecar,
+                target_path=target_path,
+                target_name=target_name,
+                description=description,
+                spec_path=spec_path,
+                variant_name=variant_name,
+            )
 
         try:
             resp, code = _commit_or_run(commit_msg, do_action)
@@ -8895,8 +8872,12 @@ class Handler(BaseHTTPRequestHandler):
         commit_msg = f"chore(investigations/{inv_name}): rebuild composite '{comp_name}'"
 
         def do_action():
-            derived_path = inv_dir / "composites" / f"{comp_name}.yaml"
-            derived_path.write_text(yaml.safe_dump(derived_doc, sort_keys=False))
+            _composite_mut._apply_rebuild_investigation_composite(
+                WORKSPACE,
+                inv_dir=inv_dir,
+                derived_doc=derived_doc,
+                comp_name=comp_name,
+            )
 
         try:
             return self._json(*_commit_or_run(commit_msg, do_action))

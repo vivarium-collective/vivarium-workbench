@@ -42,6 +42,7 @@ from vivarium_dashboard.lib import viz_write_mutations as _viz_write_mut
 from vivarium_dashboard.lib import viz_commit_mutations as _viz_commit_mut
 from vivarium_dashboard.lib import upload_mutations as _upload_mut
 from vivarium_dashboard.lib import reference_mutations as _reference_mut
+from vivarium_dashboard.lib import composite_mutations as _composite_mut
 from vivarium_dashboard.lib import lifecycle_mutations as _lifecycle_mut
 from vivarium_dashboard.lib import scaffold_mutations as _scaffold_mut
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
@@ -189,6 +190,11 @@ from vivarium_dashboard.lib.models import (
     # Batch 26: request-body models for reference mutations
     ReferencePdf,
     ReferenceBibtex,
+    # Batch 27: request-body models for composite mutations
+    InvestigationCompositeAdd,
+    InvestigationCompositePerturb,
+    CompositePromoteToCatalog,
+    InvestigationCompositeRebuild,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -250,7 +256,18 @@ _OPENAPI_TAGS = [
     {
         "name": "Composites",
         "description": (
-            "Composite spec/generator discovery and single-composite resolution."
+            "Composite spec/generator discovery and single-composite resolution, "
+            "plus the Batch 27 investigation-composite POST writers: add a "
+            "composite from a workspace source/generator "
+            "(/api/investigation-composite-add), derive a variant by applying "
+            "overrides (/api/investigation-composite-perturb), promote a variant "
+            "into the workspace catalog (/api/composite-promote-to-catalog), and "
+            "rebuild a derived composite from its recipe "
+            "(/api/investigation-composite-rebuild).  All four are "
+            "``_commit_or_run``-wrapped in the live server; these FastAPI routes "
+            "call the lib builder directly (commit deferred to the flip batch).  "
+            "Each delegates to a pure builder in ``lib.composite_mutations``.  "
+            "Errors carry ``{error: ...}`` at 400/404/409."
         ),
     },
     {
@@ -3659,6 +3676,133 @@ def create_app() -> FastAPI:
         server; here both call ``lib.reference_mutations.register_reference``.
         """
         return _reference_bibtex(req, ws)
+
+    # -----------------------------------------------------------------------
+    # Batch 27: investigation-composite POST writers (Composites tag)
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/investigation-composite-add",
+        tags=["Composites"],
+        summary="Add a composite to a study from a workspace source/generator (no git commit on the FastAPI path)",
+    )
+    def investigation_composite_add(
+        req: InvestigationCompositeAdd,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Clone a registered workspace composite into a study.
+
+        Body: ``{investigation, name, source}``.  ``source`` resolves to a YAML
+        source path on disk OR a registered ``@composite_generator`` (the latter
+        is materialized to a concrete doc).  Writes
+        ``investigations/<inv>/composites/<name>.yaml`` and appends a spec
+        ``composites`` entry.
+
+        400 on missing fields / generator-not-serializable; 404 on unknown
+        source / investigation not found; 409 when the composite name already
+        exists; 200 ``{ok: true}`` on success.
+
+        Note: the live server path commits via ``_commit_or_run``; this FastAPI
+        route calls the lib builder directly (git commit deferred to the flip
+        batch).  Delegates to
+        ``lib.composite_mutations.add_investigation_composite``.
+        """
+        body, status = _composite_mut.add_investigation_composite(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/investigation-composite-perturb",
+        tags=["Composites"],
+        summary="Derive a composite variant by applying overrides (no git commit on the FastAPI path)",
+    )
+    def investigation_composite_perturb(
+        req: InvestigationCompositePerturb,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Derive a composite from an existing sidecar by applying overrides.
+
+        Body: ``{investigation|study, name, extends, description?,
+        parameter_overrides?, process_overrides?}``.  Deep-copies the parent
+        sidecar, applies the parameter/process overrides, writes the derived
+        sidecar, and upserts a v2 ``variants`` entry (replacing an existing
+        same-named variant in-place — no 409).
+
+        400 on missing fields / override KeyError; 404 when the investigation or
+        parent composite is not found; 500 on a non-KeyError override failure;
+        200 ``{ok: true}`` on success.
+
+        Note: the live server path commits via ``_commit_or_run``; this FastAPI
+        route calls the lib builder directly (git commit deferred to the flip
+        batch).  Delegates to
+        ``lib.composite_mutations.perturb_investigation_composite``.
+        """
+        body, status = _composite_mut.perturb_investigation_composite(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/composite-promote-to-catalog",
+        tags=["Composites"],
+        summary="Promote an investigation variant into the workspace catalog (no git commit on the FastAPI path)",
+    )
+    def composite_promote_to_catalog(
+        req: CompositePromoteToCatalog,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Promote a variant's sidecar into the workspace composite catalog.
+
+        Body: ``{investigation, variant, target_name?, description?}``.  Writes
+        ``<pkg>/composites/<target_name>.composite.yaml`` (with the doc's
+        ``name`` set to ``target_name`` and, if provided, ``description`` set)
+        and marks the variant ``promoted: true`` in the spec.  Non-destructive.
+
+        400 on missing fields; 404 when the investigation or variant sidecar is
+        not found; 409 when the catalog entry already exists; 500 if
+        ``workspace.yaml`` is unreadable; 200
+        ``{ok: true, name: <target>, path: <relative>}`` on success.
+
+        Note: the live server path commits via ``_commit_or_run``; this FastAPI
+        route calls the lib builder directly (git commit deferred to the flip
+        batch).  Delegates to
+        ``lib.composite_mutations.promote_composite_to_catalog``.
+        """
+        body, status = _composite_mut.promote_composite_to_catalog(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/investigation-composite-rebuild",
+        tags=["Composites"],
+        summary="Rebuild a derived composite from its recipe (no git commit on the FastAPI path)",
+    )
+    def investigation_composite_rebuild(
+        req: InvestigationCompositeRebuild,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Re-render a derived composite by re-applying its recipe overrides.
+
+        Body: ``{investigation, name}``.  Looks up the ``composites`` entry,
+        re-applies the recorded parameter/process overrides on the current
+        parent document, and rewrites the derived sidecar.
+
+        400 on missing fields / not-derived (no ``extends``) / override
+        KeyError; 404 when the investigation, composite, or parent document is
+        not found; 500 on a non-KeyError override failure; 200 ``{ok: true}`` on
+        success.
+
+        Note: the live server path commits via ``_commit_or_run``; this FastAPI
+        route calls the lib builder directly (git commit deferred to the flip
+        batch).  Delegates to
+        ``lib.composite_mutations.rebuild_investigation_composite``.
+        """
+        body, status = _composite_mut.rebuild_investigation_composite(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
 
     # -----------------------------------------------------------------------
     # CATCH-ALL — MUST stay registered LAST (immediately before ``return app``)
