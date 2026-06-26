@@ -1363,3 +1363,135 @@ class ExpertInputSetBody(BaseModel):
 
     study: str = ""
     name: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Batch 19: Study CRUD request-body models
+# ---------------------------------------------------------------------------
+
+
+class StudyVariantAddBody(BaseModel):
+    """POST /api/study-variant-add {study|investigation, name, base_composite, parameter_overrides?}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+    name: Optional[str] = None
+    base_composite: Optional[str] = None
+    parameter_overrides: Optional[dict] = None
+
+
+class StudyVariantDeleteBody(BaseModel):
+    """POST /api/study-variant-delete {name|study|investigation, variant}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+    variant: Optional[str] = None
+
+
+class StudyVariantSetParamsBody(BaseModel):
+    """POST /api/study-variant-set-params {name|study|investigation, variant, parameter_overrides}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+    variant: Optional[str] = None
+    parameter_overrides: Optional[dict] = None
+
+
+class StudyBaselineAddBody(BaseModel):
+    """POST /api/study-baseline-add {study|investigation, name, composite, params?}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+    name: Optional[str] = None
+    composite: Optional[str] = None
+    params: Optional[dict] = None
+
+
+class StudyBaselineRemoveBody(BaseModel):
+    """POST /api/study-baseline-remove {study|investigation, name}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+    name: Optional[str] = None
+
+
+class StudyInterventionAddBody(BaseModel):
+    """POST /api/study-intervention-add {study|investigation, name, description?}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class StudyInterventionUpdateBody(BaseModel):
+    """POST /api/study-intervention-update {study|investigation, name, description}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class StudyInterventionDeleteBody(BaseModel):
+    """POST /api/study-intervention-delete {study|investigation, name}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+    name: Optional[str] = None
+
+
+class StudyRunDeleteBody(BaseModel):
+    """POST /api/study-run-delete {name|study|investigation, run_id}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+    run_id: Optional[str] = None
+
+
+class StudyRunsClearBody(BaseModel):
+    """POST /api/study-runs-clear {name|study|investigation}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+
+
+class StudyComparisonAddBody(BaseModel):
+    """POST /api/study-comparison-add {name|study|investigation, run_ids, name?}
+
+    ``name`` serves dual purpose: it is checked first by _study_name_from_body
+    as a legacy study-id alias, AND it is used as the comparison name when
+    the client explicitly sends it.  In practice callers send ``study`` for the
+    study id and optionally ``name`` for the comparison label.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+    run_ids: Optional[list] = None
