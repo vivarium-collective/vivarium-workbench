@@ -1821,3 +1821,72 @@ class ReferenceBibtex(BaseModel):
     pdf_b64: Optional[str] = None
     investigation: Optional[str] = None
     claim_mappings: Optional[Any] = None
+
+
+# ---------------------------------------------------------------------------
+# Batch 27: Composite mutation request-body models
+# ---------------------------------------------------------------------------
+
+
+class InvestigationCompositeAdd(BaseModel):
+    """POST /api/investigation-composite-add {investigation, name, source}
+
+    Clone a registered workspace composite (YAML source or
+    ``@composite_generator``) into the study. The lib builder reads via
+    ``body.get(...)``; ``extra="allow"`` keeps forward-compatible keys.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: Optional[str] = None
+    name: Optional[str] = None
+    source: Optional[str] = None
+
+
+class InvestigationCompositePerturb(BaseModel):
+    """POST /api/investigation-composite-perturb {investigation|study, name,
+    extends, description?, parameter_overrides?, process_overrides?}
+
+    Derive a composite from an existing sidecar by applying overrides and upsert
+    a v2 ``variants`` entry. ``investigation`` and ``study`` are interchangeable
+    (the builder reads either). Overrides are intentionally loose mappings.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: Optional[str] = None
+    study: Optional[str] = None
+    name: Optional[str] = None
+    extends: Optional[str] = None
+    description: Optional[str] = None
+    parameter_overrides: Optional[Any] = None
+    process_overrides: Optional[Any] = None
+
+
+class CompositePromoteToCatalog(BaseModel):
+    """POST /api/composite-promote-to-catalog {investigation, variant,
+    target_name?, description?}
+
+    Promote an investigation variant's sidecar into the workspace composite
+    catalog. ``target_name`` defaults to ``variant`` when omitted.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: Optional[str] = None
+    variant: Optional[str] = None
+    target_name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class InvestigationCompositeRebuild(BaseModel):
+    """POST /api/investigation-composite-rebuild {investigation, name}
+
+    Re-render a derived composite by re-applying the recipe overrides on the
+    current parent document.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: Optional[str] = None
+    name: Optional[str] = None
