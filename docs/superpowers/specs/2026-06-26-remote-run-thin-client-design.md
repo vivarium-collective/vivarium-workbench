@@ -91,6 +91,38 @@ Drop the client-side async machinery and lean fully on sms-api:
 - The actual cutover of the remote-run UX should be **verified against a live sms-api tunnel** before
   merge (the tunnel setup is in memory: `ptools-proxy.sh -s smsvpctest -p 9000`, `SMS_API_BASE`).
 
+## Addendum (2026-06-26): the build↔run two-phase finding
+
+Closer reading of `run_remote_pipeline` (`lib/remote_run_jobs.py`) + `SmsApiClient.run_simulation`
+shows the pipeline is inherently **two-phase**, because sms-api separates build from run:
+
+1. `push` → git commit SHA.
+2. `build` → `upload_simulator({git_commit_hash, git_repo_url, git_branch})` → `simulator_id`, then
+   **poll `simulator_status` to terminal** (the first blocking 5s loop).
+3. `run` → `run_simulation(simulator_id=…, num_generations, num_seeds, run_parca, observables)` →
+   `simulation_id`. **This REQUIRES the build to be COMPLETE** (sms-api validates it).
+4. `poll` → poll `simulation_status` to terminal (the second blocking loop).
+5. `download` + 6. `land`.
+
+So a "submit once, return an id" thin client is not literally possible — `run` can't be issued
+until `build` is done. The thin model is therefore a **client-orchestrated two-phase flow**, with
+no server-side daemon thread or blocking poll:
+
+- **`POST /api/remote-run-start`** → push + `upload_simulator` → returns `{simulator_id, phase:"building"}`
+  immediately (NO build poll).
+- **`GET /api/remote-run-status?simulator_id&simulation_id`** → on demand: if no `simulation_id` yet,
+  return sms-api `simulator_status`; when the build is terminal-OK, the client issues…
+- **`POST /api/remote-run-submit`** (the run step) → `run_simulation(simulator_id, …)` → returns
+  `{simulation_id}`; thereafter `remote-run-status` returns sms-api `simulation_status`.
+- **`POST /api/remote-run-land`** → on demand once the sim is COMPLETED: `download_data` + `land_remote_run`.
+
+This is a **UX redesign** of the remote-run panel (the JS drives the two phases + the explicit land),
+NOT a mechanical refactor. It MUST be built + verified against a LIVE sms-api tunnel with the JS panel
+in the loop — it cannot be validated from a headless/sandboxed session. **Status: the Python builders
+can be drafted with mocked-sms-api tests, but merge is gated on the live UI verification (the user's).**
+Revised phases: R2a build-start → R2b run-submit → R3 on-demand status (build|sim) → R4 explicit land →
+R5 delete RemoteRunManager + the `_poll` loop + `run_remote_pipeline` + `PipelineCtx`.
+
 ## Risks / watch-items
 
 - **Status shape mapping:** the UI currently renders `RemoteRunJob.steps[]` (push/build/run/poll/
