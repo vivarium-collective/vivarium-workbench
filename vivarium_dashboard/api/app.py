@@ -66,6 +66,7 @@ from vivarium_dashboard.lib import git_status as _git_status
 from vivarium_dashboard.lib import git_commit_views as _git_commit_views
 from vivarium_dashboard.lib import work_mutations as _work_mutations
 from vivarium_dashboard.lib import workspaces_mutations as _workspaces_mut
+from vivarium_dashboard.lib import misc_mutations as _misc_mut
 from vivarium_dashboard.lib import investigation_status
 from vivarium_dashboard.lib import investigation_views as _inv_views
 from vivarium_dashboard.lib import observables_views as _obs_views
@@ -240,6 +241,9 @@ from vivarium_dashboard.lib.models import (
     WorkspacesPathRequest,
     WorkspacesOkResponse,
     WorkspaceEntry,
+    # C-state-3h2: misc FS/render routes
+    RenderResponse,
+    FeedbackImportResponse,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -667,6 +671,28 @@ _OPENAPI_TAGS = [
             "model's ``path`` is Optional so an omitted path hits the lib 400, not "
             "FastAPI's 422.  The 3 POSTs are guarded by the same-origin CSRF "
             "middleware."
+        ),
+    },
+    {
+        "name": "Misc",
+        "description": (
+            "Miscellaneous workspace-scoped WRITE routes — 3 POSTs ported from "
+            "the stdlib handlers that do only local FS work / an in-process "
+            "render (no subprocess, network, or in-memory manager).  "
+            "``POST /api/click`` appends the request body as a JSON line to "
+            "``<ws>/.pbg/server/state/events`` and returns a RAW empty "
+            "``204 No Content`` (no JSON body — byte-matching the legacy "
+            "``send_response(204)``).  ``POST /api/render`` re-renders the "
+            "workspace dashboard in-process (``{ok: true}`` 200 / ``{error}`` "
+            "500).  ``POST /api/feedback-import`` writes a report-widget "
+            "feedback payload via the shared ``pbg_superpowers`` writer "
+            "(``{ok, path, n_entries}`` 200 / ``{error}`` 400 on "
+            "``FeedbackImportError`` / 500 on any other error or when "
+            "pbg-superpowers is unavailable).  ``render`` + ``feedback-import`` "
+            "delegate to pure builders in ``lib.misc_mutations`` and wrap every "
+            "path in ``JSONResponse`` so the lib-returned status code is "
+            "preserved verbatim.  The 3 POSTs are guarded by the same-origin "
+            "CSRF middleware."
         ),
     },
     {
@@ -4718,6 +4744,95 @@ def create_app() -> FastAPI:
         """
         payload = req.model_dump() if req is not None else {}
         resp, status = _workspaces_mut.workspaces_cleanup_stale(payload)
+        return JSONResponse(status_code=status, content=resp)
+
+    # -----------------------------------------------------------------------
+    # C-state-3h2: misc FS/render POST routes
+    #   POST /api/click  /api/render  /api/feedback-import
+    # Workspace-scoped writes that do only local FS work / an in-process render.
+    # Each delegates to a pure builder in lib.misc_mutations.  /api/click returns
+    # a RAW empty 204 (no JSON body — byte-matching the legacy send_response(204));
+    # render + feedback-import wrap every path in JSONResponse so the lib-returned
+    # status code is preserved verbatim.  All accept a permissive body
+    # (Body(default={})); the CSRF middleware already guards them.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/click",
+        status_code=204,
+        tags=["Misc"],
+        summary="Append a UI click/telemetry event to the events log",
+    )
+    def click(
+        body: dict = Body(default={}),
+        ws: Path = Depends(get_workspace),
+    ) -> Response:
+        """Append the request body as a JSON line to the workspace events log.
+
+        Mirrors the stdlib ``POST /api/click``.  Appends ``json.dumps(body) +
+        "\\n"`` to ``<ws>/.pbg/server/state/events`` (under a module lock) and
+        returns a RAW empty ``204 No Content`` — NO JSON body, byte-matching the
+        legacy ``send_response(204)``.
+
+        Library-backed via the pure ``lib.misc_mutations.record_click``.
+        """
+        _misc_mut.record_click(ws, body)
+        return Response(status_code=204)
+
+    @app.post(
+        "/api/render",
+        response_model=RenderResponse,
+        tags=["Misc"],
+        summary="Re-render the workspace dashboard in-process",
+    )
+    def render(
+        body: dict = Body(default={}),
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Re-render the workspace dashboard report in-process.
+
+        Mirrors the stdlib ``POST /api/render``.  Calls
+        ``render_workspace_report(ws)``; the request body is accepted and ignored.
+
+        Status codes (byte-identical to the legacy handler):
+          - 200  ``{"ok": True}``
+          - 500  ``{"error": <str(e)>}`` (any render failure)
+
+        The CSRF middleware already guards this POST.  Library-backed via the
+        pure ``lib.misc_mutations.render_dashboard``; every path is wrapped in
+        ``JSONResponse`` so the lib-returned status code is preserved verbatim.
+        """
+        resp, status = _misc_mut.render_dashboard(ws)
+        return JSONResponse(status_code=status, content=resp)
+
+    @app.post(
+        "/api/feedback-import",
+        response_model=FeedbackImportResponse,
+        tags=["Misc"],
+        summary="Write a report-widget feedback payload to the investigation",
+    )
+    def feedback_import(
+        body: dict = Body(default={}),
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Ingest feedback submitted directly from the report widget.
+
+        Mirrors the stdlib ``POST /api/feedback-import``.  Writes the
+        ``{meta, annotations}`` payload to ``investigations/<inv>/feedback/
+        <ts>.yaml`` via the shared ``pbg_superpowers`` writer.
+
+        Status codes (byte-identical to the legacy handler):
+          - 200  ``{"ok": True, "path": <ws-relative>, "n_entries": <int>}``
+          - 400  ``{"error": <FeedbackImportError message>}``
+          - 500  ``{"error": "feedback import failed: <e>"}`` (other error) or
+                 ``{"error": "pbg-superpowers not available for feedback import"}``
+                 (pbg-superpowers unavailable)
+
+        The CSRF middleware already guards this POST.  Library-backed via the
+        pure ``lib.misc_mutations.feedback_import``; every path is wrapped in
+        ``JSONResponse`` so the lib-returned status code is preserved verbatim.
+        """
+        resp, status = _misc_mut.feedback_import(ws, body)
         return JSONResponse(status_code=status, content=resp)
 
     # -----------------------------------------------------------------------

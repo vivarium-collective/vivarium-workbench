@@ -5491,3 +5491,100 @@ class TestWorkspacesRegistryRoutes:
         schemas = spec["components"]["schemas"]
         for name in ("WorkspacesOkResponse", "WorkspaceEntry"):
             assert name in schemas, name
+
+
+# ===========================================================================
+# C-state-3h2: misc FS/render routes
+#   POST /api/click  /api/render  /api/feedback-import
+# /api/click returns a RAW empty 204 (no JSON body).  render + feedback-import
+# delegate to the pure lib.misc_mutations builders (monkeypatched via the app's
+# _misc_mut seam) and preserve the lib status code via JSONResponse.  The POSTs
+# pass CSRF (TestClient sends no Origin).
+# ===========================================================================
+class TestMiscFsRoutes:
+    # -- POST /api/click (raw empty 204) -------------------------------------
+
+    def test_click_returns_empty_204_and_writes_file(self, tmp_path):
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: tmp_path
+        c = TestClient(app)
+        r = c.post("/api/click", json={"event": "view", "study": "x"})
+        assert r.status_code == 204
+        assert r.content == b""            # RAW empty body — NOT a JSON payload
+        ev = tmp_path / ".pbg" / "server" / "state" / "events"
+        assert ev.is_file()
+        import json as _json
+        assert _json.loads(ev.read_text().splitlines()[0]) == {
+            "event": "view", "study": "x"}
+
+    def test_click_no_body_204(self, tmp_path):
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: tmp_path
+        c = TestClient(app)
+        r = c.post("/api/click")  # no body at all → Body(default={})
+        assert r.status_code == 204
+        assert r.content == b""
+
+    # -- POST /api/render ----------------------------------------------------
+
+    def test_render_happy_200(self, client, monkeypatch):
+        monkeypatch.setattr(api_app._misc_mut, "render_dashboard",
+                            lambda ws: ({"ok": True}, 200))
+        r = client.post("/api/render", json={})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True}
+
+    def test_render_failure_500(self, client, monkeypatch):
+        monkeypatch.setattr(api_app._misc_mut, "render_dashboard",
+                            lambda ws: ({"error": "boom"}, 500))
+        r = client.post("/api/render", json={})
+        assert r.status_code == 500
+        assert r.json() == {"error": "boom"}
+
+    # -- POST /api/feedback-import -------------------------------------------
+
+    def test_feedback_import_happy_200(self, client, monkeypatch):
+        seen = {}
+
+        def _fake(ws, body):
+            seen["ws"] = ws
+            seen["body"] = body
+            return {"ok": True, "path": "investigations/dnaa/feedback/t.yaml",
+                    "n_entries": 2}, 200
+
+        monkeypatch.setattr(api_app._misc_mut, "feedback_import", _fake)
+        r = client.post("/api/feedback-import",
+                        json={"annotations": {"s": [1, 2]}})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True,
+                            "path": "investigations/dnaa/feedback/t.yaml",
+                            "n_entries": 2}
+        assert seen["body"] == {"annotations": {"s": [1, 2]}}
+
+    def test_feedback_import_error_400(self, client, monkeypatch):
+        monkeypatch.setattr(api_app._misc_mut, "feedback_import",
+                            lambda ws, body: ({"error": "bad payload"}, 400))
+        r = client.post("/api/feedback-import", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "bad payload"}
+
+    def test_feedback_import_unavailable_500(self, client, monkeypatch):
+        monkeypatch.setattr(
+            api_app._misc_mut, "feedback_import",
+            lambda ws, body: (
+                {"error": "pbg-superpowers not available for feedback import"}, 500))
+        r = client.post("/api/feedback-import", json={})
+        assert r.status_code == 500
+        assert r.json() == {
+            "error": "pbg-superpowers not available for feedback import"}
+
+    # -- OpenAPI registration ------------------------------------------------
+
+    def test_routes_in_openapi(self, client):
+        spec = client.get("/openapi.json").json()
+        paths = spec["paths"]
+        for p in ("/api/click", "/api/render", "/api/feedback-import"):
+            assert p in paths and "post" in paths[p], p
+        schemas = spec["components"]["schemas"]
+        for name in ("RenderResponse", "FeedbackImportResponse"):
+            assert name in schemas, name
