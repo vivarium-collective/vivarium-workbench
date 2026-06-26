@@ -38,6 +38,7 @@ from pydantic import ValidationError
 
 from vivarium_dashboard.lib import composite_run_views as _cr_views
 from vivarium_dashboard.lib import lifecycle_mutations as _lifecycle_mut
+from vivarium_dashboard.lib import scaffold_mutations as _scaffold_mut
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
 from vivarium_dashboard.lib import data_sources as _data_sources
 from vivarium_dashboard.lib import download_views as _download_views
@@ -159,6 +160,10 @@ from vivarium_dashboard.lib.models import (
     StudySyncRunsBody,
     ProposedInputDecisionBody,
     StudySeedFollowupBody,
+    # Batch 21: request-body models for investigation scaffold mutations
+    IsetCreateBody,
+    IsetCloneBody,
+    InvestigationDeleteBody,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -361,6 +366,21 @@ _OPENAPI_TAGS = [
             "CSRF guard is deferred to the flip batch.  Errors carry "
             "``{error: ...}`` at 400/404/409/500; success returns the respective "
             "payload dict."
+        ),
+    },
+    {
+        "name": "Investigation scaffold",
+        "description": (
+            "Batch 21 POST routes — investigation scaffold writers: create a new "
+            "investigation.yaml, clone an existing investigation into a fresh "
+            "planning state, and delete an investigation directory.  iset-create "
+            "and iset-clone delegate to pure lib builders in "
+            "``lib.scaffold_mutations``; investigation-delete also delegates to "
+            "a pure lib builder (the git commit is deferred to the flip/state "
+            "batch via ``_active_branch_action`` in the live server).  CSRF guard "
+            "is deferred to the flip batch.  Errors carry ``{error: ...}`` at "
+            "400/404/409/500/501; success returns the investigation detail dict "
+            "or ``{ok: true, name: ...}``."
         ),
     },
     {
@@ -2986,6 +3006,82 @@ def create_app() -> FastAPI:
         is unavailable; 200 ``{new_study_name, new_slug}`` on success.
         """
         body, status = _lifecycle_mut.study_seed_followup(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    # -----------------------------------------------------------------------
+    # Batch 21: Investigation scaffold (POST routes)
+    # NOTE: CSRF guard is deferred to the state/flip batch — same as batches 18-20.
+    # investigation-delete calls the lib builder directly (no _active_branch_action
+    # here — the commit is deferred to the flip/state batch).
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/iset-create",
+        tags=["Investigation scaffold"],
+        summary="Scaffold a new investigation.yaml",
+    )
+    def iset_create(
+        req: IsetCreateBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Create a new ``investigation.yaml`` under ``investigations/<name>/``.
+
+        Body: ``{name, overview?, parent_studies?}``
+        Slug must match ``^[a-z0-9][a-z0-9-]*$``. Atomic write (tmp+rename).
+        400 when name is missing or invalid; 409 when the investigation already
+        exists; 200 returns the new investigation in the same shape as
+        ``GET /api/iset/<name>``.
+        """
+        body, status = _scaffold_mut.iset_create(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/iset-clone",
+        tags=["Investigation scaffold"],
+        summary="Clone an investigation into a fresh planning state",
+    )
+    def iset_clone(
+        req: IsetCloneBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Clone an existing investigation via the workspace's clone script.
+
+        Body: ``{source, target, source_prefix?, target_prefix?}``
+        Delegates to ``scripts/clone_investigation.py``; returns the new
+        investigation in the same shape as ``GET /api/iset/<target>`` with an
+        extra ``clone_summary`` field describing the study remap.
+        400 when slugs are missing or invalid; 404 when source not found;
+        409 when target already exists; 501 when clone script is absent.
+        """
+        body, status = _scaffold_mut.iset_clone(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/investigation-delete",
+        tags=["Investigation scaffold"],
+        summary="Delete an investigation directory (no git commit on the FastAPI path)",
+    )
+    def investigation_delete(
+        req: InvestigationDeleteBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Remove an investigation directory (pure rmtree, no git commit).
+
+        Body: ``{name}`` (also accepts ``study`` / ``investigation`` aliases).
+        400 when name is missing; 404 when the investigation directory does not
+        exist; 200 ``{ok: true, name: <slug>}`` on success.
+
+        Note: the live server path commits the deletion via
+        ``_active_branch_action``; this FastAPI route calls the lib builder
+        directly (git commit deferred to the flip/state batch).
+        """
+        body, status = _scaffold_mut.delete_investigation(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body

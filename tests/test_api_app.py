@@ -3885,3 +3885,150 @@ inputs:
     def test_study_seed_followup_in_openapi(self, lc_client: TestClient) -> None:
         schema = lc_client.get("/openapi.json").json()
         assert "/api/study-seed-followup" in schema["paths"]
+
+
+# ---------------------------------------------------------------------------
+# Batch 21: Investigation scaffold POST routes
+# ---------------------------------------------------------------------------
+
+
+class TestBatch21ScaffoldRoutes:
+    """Route-level tests for Batch 21 investigation scaffold POST endpoints."""
+
+    @pytest.fixture
+    def ws(self, tmp_path: Path) -> Path:
+        w = tmp_path / "ws"
+        w.mkdir()
+        (w / "workspace.yaml").write_text(
+            "schema_version: 2\nname: ws\ncreated: '2026-01-01'\nplugin_version: 0.6.1\npackage_path: pkg\n"
+        )
+        (w / "investigations").mkdir()
+        (w / "studies").mkdir()
+        return w
+
+    @pytest.fixture
+    def sc_client(self, ws: Path) -> TestClient:
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: ws
+        return TestClient(app)
+
+    # -----------------------------------------------------------------------
+    # /api/iset-create
+    # -----------------------------------------------------------------------
+
+    def test_iset_create_happy(self, sc_client: TestClient, ws: Path) -> None:
+        r = sc_client.post("/api/iset-create", json={"name": "new-inv", "overview": "Test"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["name"] == "new-inv"
+        assert body["status"] == "planning"
+        assert (ws / "investigations" / "new-inv" / "investigation.yaml").is_file()
+
+    def test_iset_create_missing_name(self, sc_client: TestClient) -> None:
+        r = sc_client.post("/api/iset-create", json={})
+        assert r.status_code == 400
+        assert "error" in r.json()
+
+    def test_iset_create_bad_slug(self, sc_client: TestClient) -> None:
+        r = sc_client.post("/api/iset-create", json={"name": "BadSlug"})
+        assert r.status_code == 400
+
+    def test_iset_create_conflict(self, sc_client: TestClient) -> None:
+        sc_client.post("/api/iset-create", json={"name": "dup"})
+        r = sc_client.post("/api/iset-create", json={"name": "dup"})
+        assert r.status_code == 409
+
+    def test_iset_create_in_openapi(self, sc_client: TestClient) -> None:
+        paths = sc_client.get("/openapi.json").json()["paths"]
+        assert "/api/iset-create" in paths
+        assert "post" in paths["/api/iset-create"]
+
+    # -----------------------------------------------------------------------
+    # /api/iset-clone
+    # -----------------------------------------------------------------------
+
+    _STUB_CLONE_SCRIPT = """\
+#!/usr/bin/env python3
+import argparse, json, sys, yaml
+from pathlib import Path
+
+p = argparse.ArgumentParser()
+p.add_argument('--source', required=True)
+p.add_argument('--target', required=True)
+p.add_argument('--source-root', required=True, type=Path)
+p.add_argument('--target-root', required=True, type=Path)
+p.add_argument('--source-prefix', default=None)
+p.add_argument('--target-prefix', default=None)
+p.add_argument('--json', action='store_true')
+a = p.parse_args()
+src = a.source_root / 'investigations' / a.source / 'investigation.yaml'
+dst_dir = a.target_root / 'investigations' / a.target
+dst_dir.mkdir(parents=True, exist_ok=False)
+spec = yaml.safe_load(src.read_text())
+spec['name'] = a.target
+(dst_dir / 'investigation.yaml').write_text(yaml.safe_dump(spec, sort_keys=False))
+if a.json:
+    print(json.dumps({'source': a.source, 'target': a.target, 'studies_remapped': {}}))
+"""
+
+    def _seed_src_inv(self, ws: Path) -> None:
+        (ws / "scripts").mkdir(exist_ok=True)
+        (ws / "scripts" / "clone_investigation.py").write_text(self._STUB_CLONE_SCRIPT)
+        inv_dir = ws / "investigations" / "src-inv"
+        inv_dir.mkdir(parents=True, exist_ok=True)
+        (inv_dir / "investigation.yaml").write_text(
+            "schema_version: 2\nname: src-inv\ntitle: src-inv\nstatus: planning\nstudies: []\n"
+        )
+
+    def test_iset_clone_missing_source_target(self, sc_client: TestClient) -> None:
+        r = sc_client.post("/api/iset-clone", json={"source": "x"})
+        assert r.status_code == 400
+        assert "error" in r.json()
+
+    def test_iset_clone_source_not_found(self, sc_client: TestClient) -> None:
+        r = sc_client.post("/api/iset-clone", json={"source": "nope", "target": "dst"})
+        assert r.status_code == 404
+
+    def test_iset_clone_happy(self, sc_client: TestClient, ws: Path) -> None:
+        self._seed_src_inv(ws)
+        r = sc_client.post("/api/iset-clone", json={"source": "src-inv", "target": "dst-inv"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["name"] == "dst-inv"
+        assert "clone_summary" in body
+
+    def test_iset_clone_in_openapi(self, sc_client: TestClient) -> None:
+        paths = sc_client.get("/openapi.json").json()["paths"]
+        assert "/api/iset-clone" in paths
+        assert "post" in paths["/api/iset-clone"]
+
+    # -----------------------------------------------------------------------
+    # /api/investigation-delete
+    # -----------------------------------------------------------------------
+
+    def test_investigation_delete_missing_name(self, sc_client: TestClient) -> None:
+        r = sc_client.post("/api/investigation-delete", json={})
+        assert r.status_code == 400
+        assert "error" in r.json()
+
+    def test_investigation_delete_not_found(self, sc_client: TestClient) -> None:
+        r = sc_client.post("/api/investigation-delete", json={"name": "ghost"})
+        assert r.status_code == 404
+
+    def test_investigation_delete_happy(self, sc_client: TestClient, ws: Path) -> None:
+        inv_dir = ws / "investigations" / "bye-inv"
+        inv_dir.mkdir(parents=True)
+        (inv_dir / "investigation.yaml").write_text(
+            "name: bye-inv\nstatus: planning\nstudies: []\n"
+        )
+        r = sc_client.post("/api/investigation-delete", json={"name": "bye-inv"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["name"] == "bye-inv"
+        assert not inv_dir.exists()
+
+    def test_investigation_delete_in_openapi(self, sc_client: TestClient) -> None:
+        paths = sc_client.get("/openapi.json").json()["paths"]
+        assert "/api/investigation-delete" in paths
+        assert "post" in paths["/api/investigation-delete"]

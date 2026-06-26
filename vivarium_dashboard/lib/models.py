@@ -1559,3 +1559,39 @@ class StudySeedFollowupBody(BaseModel):
     proposal_id: Optional[str] = None
     proposal_idx: Optional[Any] = None
     study_type: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Batch 21: Investigation scaffold mutation request-body models
+# ---------------------------------------------------------------------------
+
+
+class IsetCreateBody(BaseModel):
+    """POST /api/iset-create {name, overview?, parent_studies?}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    overview: Optional[str] = None
+    parent_studies: Optional[list] = None
+
+
+class IsetCloneBody(BaseModel):
+    """POST /api/iset-clone {source, target, source_prefix?, target_prefix?}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    source: Optional[str] = None
+    target: Optional[str] = None
+    source_prefix: Optional[str] = None
+    target_prefix: Optional[str] = None
+
+
+class InvestigationDeleteBody(BaseModel):
+    """POST /api/investigation-delete {name} (also accepts study / investigation aliases)"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    study: Optional[str] = None
+    investigation: Optional[str] = None

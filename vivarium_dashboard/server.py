@@ -65,6 +65,7 @@ from vivarium_dashboard.lib import events as _events_lib
 from vivarium_dashboard.lib import metadata_mutations as _meta_mut
 from vivarium_dashboard.lib import study_crud_mutations as _study_crud_lib
 from vivarium_dashboard.lib import lifecycle_mutations as _lifecycle_mut
+from vivarium_dashboard.lib import scaffold_mutations as _scaffold_mut
 from vivarium_dashboard.lib.investigations_index import (
     _conclusions_excerpt,
     _format_baseline_source,
@@ -1947,112 +1948,13 @@ def _build_iset_detail_for_test(ws_root: Path, name: str) -> tuple[dict, int]:
 
 
 def _post_iset_create_for_test(ws_root: Path, body: dict) -> tuple[dict, int]:
-    """Create a new investigation.yaml. Returns (response_dict, status_code).
-
-    Body:
-        name:           required, kebab-case slug (^[a-z0-9][a-z0-9-]*$).
-        overview:       optional, becomes the ``description:`` field.
-        parent_studies: optional list of study slugs.
-    """
-    import os
-    name = (body.get("name") or "").strip()
-    overview = body.get("overview") or ""
-    parent_studies = body.get("parent_studies") or []
-
-    if not name:
-        return {"error": "name is required"}, 400
-    if not _ISET_SLUG_RE.match(name):
-        return {"error": "name must be kebab-case (^[a-z0-9][a-z0-9-]*$)"}, 400
-
-    inv_dir = ws_root / "investigations" / name
-    target = inv_dir / "investigation.yaml"
-    if target.exists():
-        return {"error": f"investigation '{name}' already exists"}, 409
-
-    # Emit a v2-shape investigation.yaml with the narrative spine commented
-    # in as TODOs (executive / scientific_argument / biological_story /
-    # at_a_glance / glossary / guidelines). The user sees the target shape
-    # — the same shape dnaa-replication evolved through use — without having
-    # to read docs first. All v2 fields are optional, so the spec validates
-    # on day one and the user opts in by uncommenting sections.
-    from vivarium_dashboard.lib.scaffold_yaml import v2_investigation_scaffold
-    body_yaml = v2_investigation_scaffold(
-        name,
-        title=name,
-        overview=overview or None,
-        parent_studies=list(parent_studies) if parent_studies else None,
-    )
-
-    inv_dir.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(target, body_yaml)
-
-    detail, code = _build_iset_detail_for_test(ws_root, name)
-    return detail, code
+    """Name-shim for backward-compat test imports → lib.scaffold_mutations."""
+    return _scaffold_mut.iset_create(ws_root, body)
 
 
 def _post_iset_clone_for_test(ws_root: Path, body: dict) -> tuple[dict, int]:
-    """Clone an existing investigation into a fresh planning state.
-
-    Shells out to the workspace's ``scripts/clone_investigation.py`` so the
-    dashboard and the standalone CLI share a single source of truth. The
-    script lives in the workspace (not in this package) because clone rules
-    are workspace-specific (which subdirectories to strip, which planning
-    docs to keep, study-name conventions, etc.).
-
-    Body:
-        source:         required, slug of the source investigation.
-        target:         required, slug of the target investigation.
-        source_prefix:  optional, defaults to first dash-segment of source.
-        target_prefix:  optional, defaults to first dash-segment of target.
-    """
-    source = (body.get("source") or "").strip()
-    target = (body.get("target") or "").strip()
-    if not source or not target:
-        return {"error": "source and target are required"}, 400
-    if not _ISET_SLUG_RE.match(source) or not _ISET_SLUG_RE.match(target):
-        return {"error": "source and target must be kebab-case (^[a-z0-9][a-z0-9-]*$)"}, 400
-    if source == target:
-        return {"error": "source and target must differ"}, 400
-
-    src_dir = ws_root / "investigations" / source
-    if not src_dir.is_dir():
-        return {"error": f"source investigation '{source}' not found"}, 404
-    dst_dir = ws_root / "investigations" / target
-    if dst_dir.exists():
-        return {"error": f"target investigation '{target}' already exists"}, 409
-
-    script = ws_root / "scripts" / "clone_investigation.py"
-    if not script.is_file():
-        return {"error": "workspace is missing scripts/clone_investigation.py"}, 501
-
-    argv = [
-        sys.executable, str(script),
-        "--source", source,
-        "--target", target,
-        "--source-root", str(ws_root),
-        "--target-root", str(ws_root),
-        "--json",
-    ]
-    if body.get("source_prefix"):
-        argv += ["--source-prefix", str(body["source_prefix"])]
-    if body.get("target_prefix"):
-        argv += ["--target-prefix", str(body["target_prefix"])]
-
-    proc = subprocess.run(argv, capture_output=True, text=True, timeout=120)
-    if proc.returncode != 0:
-        return {
-            "error": "clone script failed",
-            "stderr": (proc.stderr or proc.stdout)[-2000:],
-        }, 500
-    try:
-        summary = json.loads(proc.stdout.strip().split("\n")[-1])
-    except (json.JSONDecodeError, IndexError):
-        summary = {"stdout_tail": proc.stdout[-500:]}
-
-    detail, code = _build_iset_detail_for_test(ws_root, target)
-    if code == 200:
-        detail["clone_summary"] = summary
-    return detail, code
+    """Name-shim for backward-compat test imports → lib.scaffold_mutations."""
+    return _scaffold_mut.iset_clone(ws_root, body)
 
 
 def _study_name_from_body(body: dict) -> str:
@@ -7924,7 +7826,6 @@ if __name__ == "__main__":
 
     def _post_investigation_delete(self, body: dict):
         """POST /api/investigation-delete {name} — remove investigation directory."""
-        import shutil
         name = _study_name_from_body(body)
         if not name:
             return self._json({"error": "name is required"}, 400)
@@ -7933,7 +7834,9 @@ if __name__ == "__main__":
             return self._json({"error": f"investigation '{name}' not found"}, 404)
 
         def action():
-            shutil.rmtree(inv_dir)
+            resp_lib, code_lib = _scaffold_mut.delete_investigation(WORKSPACE, body)
+            if code_lib != 200:
+                raise RuntimeError(resp_lib.get("error", "delete_investigation failed"))
 
         commit_msg = f"feat(investigations): delete {name}"
         resp, code = _active_branch_action(commit_msg, action)
