@@ -5364,3 +5364,130 @@ class TestWorkstreamRoutes:
         for name in ("WorkStartResponse", "WorkPushResponse", "WorkEndResponse",
                      "WorkAttachReportResponse"):
             assert name in schemas, name
+
+
+# ===========================================================================
+# C-state-3h1: workspace-registry routes
+#   POST /api/workspaces/add /api/workspaces/forget /api/workspaces/cleanup-stale
+# Tests monkeypatch the pure lib.workspaces_mutations builders reached via the
+# app's _workspaces_mut seam — asserting the route preserves the lib status
+# code via JSONResponse (a plain model return would force 200) and that an
+# omitted-path body reaches the lib's 400 (NOT FastAPI's 422).  No test touches
+# the real ~/.pbg catalog.  The POSTs pass CSRF (TestClient sends no Origin).
+# ===========================================================================
+class TestWorkspacesRegistryRoutes:
+    # -- POST /api/workspaces/add --------------------------------------------
+
+    def test_add_happy_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import workspaces_mutations as wm
+        seen = {}
+
+        def _fake(body):
+            seen["body"] = body
+            return {"name": "demo", "path": "/abs/ws"}, 200
+
+        monkeypatch.setattr(wm, "workspaces_add", _fake)
+        r = client.post("/api/workspaces/add", json={"path": "/abs/ws"})
+        assert r.status_code == 200
+        assert r.json() == {"name": "demo", "path": "/abs/ws"}
+        assert seen["body"] == {"path": "/abs/ws"}
+
+    def test_add_value_error_400(self, client, monkeypatch):
+        from vivarium_dashboard.lib import workspaces_mutations as wm
+        monkeypatch.setattr(wm, "workspaces_add",
+                            lambda body: ({"error": "not a workspace"}, 400))
+        r = client.post("/api/workspaces/add", json={"path": "/abs/ws"})
+        assert r.status_code == 400
+        assert r.json() == {"error": "not a workspace"}
+
+    def test_add_omitted_path_400_not_422(self, client, monkeypatch):
+        # No monkeypatch — exercise the real builder's own validation so an
+        # omitted path yields the legacy 400 (NOT FastAPI's 422).
+        from vivarium_dashboard.lib import workspaces_mutations as wm
+        monkeypatch.setattr(wm, "workspace_catalog", object())  # never reached
+        r = client.post("/api/workspaces/add", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "path must be an absolute string"}
+
+    def test_add_no_body_400_not_422(self, client, monkeypatch):
+        from vivarium_dashboard.lib import workspaces_mutations as wm
+        monkeypatch.setattr(wm, "workspace_catalog", object())
+        r = client.post("/api/workspaces/add")  # no body at all
+        assert r.status_code == 400
+        assert r.json() == {"error": "path must be an absolute string"}
+
+    # -- POST /api/workspaces/forget -----------------------------------------
+
+    def test_forget_happy_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import workspaces_mutations as wm
+        seen = {}
+
+        def _fake(body):
+            seen["body"] = body
+            return {"ok": True}, 200
+
+        monkeypatch.setattr(wm, "workspaces_forget", _fake)
+        r = client.post("/api/workspaces/forget", json={"path": "/abs/ws"})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True}
+        assert seen["body"] == {"path": "/abs/ws"}
+
+    def test_forget_running_409(self, client, monkeypatch):
+        from vivarium_dashboard.lib import workspaces_mutations as wm
+        monkeypatch.setattr(
+            wm, "workspaces_forget",
+            lambda body: ({"error": "stop the server before forgetting"}, 409))
+        r = client.post("/api/workspaces/forget", json={"path": "/abs/ws"})
+        assert r.status_code == 409
+        assert r.json() == {"error": "stop the server before forgetting"}
+
+    def test_forget_omitted_path_400_not_422(self, client, monkeypatch):
+        from vivarium_dashboard.lib import workspaces_mutations as wm
+        monkeypatch.setattr(wm, "workspace_catalog", object())
+        r = client.post("/api/workspaces/forget", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "path required"}
+
+    # -- POST /api/workspaces/cleanup-stale ----------------------------------
+
+    def test_cleanup_stale_happy_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import workspaces_mutations as wm
+        seen = {}
+
+        def _fake(body):
+            seen["body"] = body
+            return {"ok": True}, 200
+
+        monkeypatch.setattr(wm, "workspaces_cleanup_stale", _fake)
+        r = client.post("/api/workspaces/cleanup-stale", json={"path": "/abs/ws"})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True}
+        assert seen["body"] == {"path": "/abs/ws"}
+
+    def test_cleanup_stale_running_409(self, client, monkeypatch):
+        from vivarium_dashboard.lib import workspaces_mutations as wm
+        monkeypatch.setattr(
+            wm, "workspaces_cleanup_stale",
+            lambda body: ({"error": "server is still running"}, 409))
+        r = client.post("/api/workspaces/cleanup-stale", json={"path": "/abs/ws"})
+        assert r.status_code == 409
+        assert r.json() == {"error": "server is still running"}
+
+    def test_cleanup_stale_omitted_path_400_not_422(self, client, monkeypatch):
+        from vivarium_dashboard.lib import workspaces_mutations as wm
+        monkeypatch.setattr(wm, "workspace_catalog", object())
+        r = client.post("/api/workspaces/cleanup-stale", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "path required"}
+
+    # -- OpenAPI registration ------------------------------------------------
+
+    def test_routes_in_openapi(self, client):
+        spec = client.get("/openapi.json").json()
+        paths = spec["paths"]
+        for p in ("/api/workspaces/add", "/api/workspaces/forget",
+                  "/api/workspaces/cleanup-stale"):
+            assert p in paths and "post" in paths[p], p
+        schemas = spec["components"]["schemas"]
+        for name in ("WorkspacesOkResponse", "WorkspaceEntry"):
+            assert name in schemas, name

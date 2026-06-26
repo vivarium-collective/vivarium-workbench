@@ -2248,3 +2248,64 @@ class WorkAttachReportResponse(BaseModel):
     ok: bool = True
     path: str
     branch: str
+
+
+# ---------------------------------------------------------------------------
+# C-state-3h1: workspace-registry POST routes
+#   POST /api/workspaces/add /api/workspaces/forget /api/workspaces/cleanup-stale
+# All three edit the GLOBAL ~/.pbg workspace catalog via
+# pbg_superpowers.workspace_catalog (no ws_root) through the pure
+# lib.workspaces_mutations builders; every path (success AND error) is returned
+# via JSONResponse so the lib-returned status code is preserved verbatim.  The
+# request model's ``path`` is Optional so an omitted path reaches the lib
+# builder's own 400 validation (the legacy ``path must be an absolute string`` /
+# ``path required`` messages) rather than FastAPI's 422.
+# ---------------------------------------------------------------------------
+
+
+class WorkspacesPathRequest(BaseModel):
+    """Request body for the 3 workspace-registry POSTs — ``{"path"?: <abs path>}``.
+
+    Shared by ``POST /api/workspaces/add`` / ``/api/workspaces/forget`` /
+    ``/api/workspaces/cleanup-stale``.  ``path`` is Optional so a
+    missing/empty/relative value reaches the lib builder's own 400 validation
+    (``"path must be an absolute string"`` for add, ``"path required"`` for
+    forget/cleanup-stale) rather than FastAPI's 422.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    path: Optional[str] = None
+
+
+class WorkspacesOkResponse(BaseModel):
+    """200-path payload for ``POST /api/workspaces/forget`` and
+    ``/api/workspaces/cleanup-stale`` — ``{"ok": True}``.
+
+    The non-200 error paths (``{"error": ...}``, HTTP 400/409) are returned via
+    ``JSONResponse``, not this model.  ``POST /api/workspaces/add`` returns the
+    catalog ``entry`` dict (variable shape) instead, served as the pass-through
+    ``WorkspaceEntry``.
+
+    Source: ``lib.workspaces_mutations.workspaces_forget`` /
+    ``workspaces_cleanup_stale``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool = True
+
+
+class WorkspaceEntry(BaseModel):
+    """200-path payload for ``POST /api/workspaces/add`` — the catalog entry dict.
+
+    Pure pass-through (``extra="allow"``, no declared fields) — the
+    ``workspace_catalog.add`` entry shape is owned by ``pbg_superpowers`` and
+    carries variable keys (``name``, ``path``, status, ...).  The non-200 error
+    paths (``{"error": ...}``, HTTP 400) are returned via ``JSONResponse``, not
+    this model.
+
+    Source: ``lib.workspaces_mutations.workspaces_add``.
+    """
+
+    model_config = ConfigDict(extra="allow")
