@@ -275,6 +275,10 @@ def _invalidate_workspace_caches() -> None:
     # Each lib cache module (registry, report_views, observables_views,
     # composite_state_views, data_sources) registers its clear_cache() at import,
     # so this fires the identical set the old inline clears did.
+    # NB: registration happens at MODULE IMPORT — these 5 are imported at the top
+    # of server.py, so the registry is complete before any switch fires. If a
+    # cache module is ever made lazy-imported, register its clear_cache()
+    # explicitly or it will silently stop being invalidated on workspace switch.
     active_workspace.invalidate()
     # Server-local caches stay inline (server-internal; move/retire at the flip).
     _COMPOSITES_LIST_CACHE.clear()
