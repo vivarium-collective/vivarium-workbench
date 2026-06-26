@@ -37,6 +37,9 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError
 
 from vivarium_dashboard.lib import active_workspace
+from vivarium_dashboard.lib import job_status_views as _job_status_views
+from vivarium_dashboard.lib import run_jobs as _run_jobs
+from vivarium_dashboard.lib import remote_run_jobs as _remote_run_jobs
 from vivarium_dashboard.lib import composite_run_views as _cr_views
 from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
 from vivarium_dashboard.lib import viz_write_mutations as _viz_write_mut
@@ -107,6 +110,7 @@ from vivarium_dashboard.lib.models import (
     InvestigationCompositeDocPayload,
     InvestigationCompositesPayload,
     InvestigationStateTree,
+    JobStatusPayload,
     InvestigationHypothesesPayload,
     InvestigationSummary,
     InvestigationRigor,
@@ -525,6 +529,21 @@ _OPENAPI_TAGS = [
             "``lib.investigation_viz_mutations`` directly (commit deferred to "
             "the flip batch).  CSRF guard is deferred to the flip batch.  Errors "
             "carry ``{error: ...}`` at 400/404/409/500."
+        ),
+    },
+    {
+        "name": "Job status",
+        "description": (
+            "Read-only polling endpoints over the dashboard's in-memory "
+            "job-manager singletons (``lib.run_jobs.manager`` / "
+            "``lib.remote_run_jobs.manager``).  Both share one pure helper "
+            "(``lib.job_status_views.job_status``) parameterised by the manager: "
+            "no ``?job_id=`` returns ``{jobs: [...]}`` (recent jobs); a known "
+            "``?job_id=`` returns that job's ``to_dict()`` (variable shape — "
+            "``items[]`` for run jobs, ``steps[]`` for remote-run jobs, served "
+            "via the pass-through ``JobStatusPayload``); an unknown id returns "
+            "HTTP 404 ``{error: \"job not found\"}``.  Stateful but read-only — "
+            "no workspace, no commit wrapper."
         ),
     },
     {
@@ -3927,6 +3946,62 @@ def create_app() -> FastAPI:
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
+
+    # -----------------------------------------------------------------------
+    # Job status routes (read-only, in-memory manager singletons)
+    # -----------------------------------------------------------------------
+
+    @app.get(
+        "/api/investigation-run-unblocked-status",
+        response_model=JobStatusPayload,
+        tags=["Job status"],
+        summary="Status of an investigation-wide multi-variant run job",
+    )
+    def investigation_run_unblocked_status(
+        job_id: str = "",
+    ) -> Union[JobStatusPayload, JSONResponse]:
+        """Status of an investigation run-unblocked job (mirrors the stdlib
+        ``GET /api/investigation-run-unblocked-status?job_id=<id>``).
+
+        Reads the in-process ``lib.run_jobs.manager`` singleton.  No ``job_id``
+        returns ``{jobs: manager.list_recent(10)}``; a known id returns the
+        job's ``to_dict()`` (an ``items[]`` shape); an unknown id returns HTTP
+        404 ``{error: "job not found"}``.
+
+        The manager is read at call time via the module attribute
+        (``_run_jobs.manager``) so tests can monkeypatch it.  Library-backed via
+        the pure ``lib.job_status_views.job_status``.
+        """
+        body, status = _job_status_views.job_status(_run_jobs.manager, job_id)
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return JobStatusPayload.model_validate(body)
+
+    @app.get(
+        "/api/remote-run-status",
+        response_model=JobStatusPayload,
+        tags=["Job status"],
+        summary="Status of a remote (sms-api) run job",
+    )
+    def remote_run_status(
+        job_id: str = "",
+    ) -> Union[JobStatusPayload, JSONResponse]:
+        """Status of a remote-run job (mirrors the stdlib
+        ``GET /api/remote-run-status?job_id=<id>``).
+
+        Reads the in-process ``lib.remote_run_jobs.manager`` singleton.  No
+        ``job_id`` returns ``{jobs: manager.list_recent(10)}``; a known id
+        returns the job's ``to_dict()`` (a ``steps[]`` shape); an unknown id
+        returns HTTP 404 ``{error: "job not found"}``.
+
+        The manager is read at call time via the module attribute
+        (``_remote_run_jobs.manager``) so tests can monkeypatch it.
+        Library-backed via the pure ``lib.job_status_views.job_status``.
+        """
+        body, status = _job_status_views.job_status(_remote_run_jobs.manager, job_id)
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return JobStatusPayload.model_validate(body)
 
     # -----------------------------------------------------------------------
     # CATCH-ALL — MUST stay registered LAST (immediately before ``return app``)
