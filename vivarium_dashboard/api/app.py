@@ -42,6 +42,7 @@ from vivarium_dashboard.lib import data_sources as _data_sources
 from vivarium_dashboard.lib import download_views as _download_views
 from vivarium_dashboard.lib import events as _events
 from vivarium_dashboard.lib import explorer_data as _explorer_data
+from vivarium_dashboard.lib import metadata_mutations as _meta_mut
 from vivarium_dashboard.lib import git_status as _git_status
 from vivarium_dashboard.lib import investigation_status
 from vivarium_dashboard.lib import investigation_views as _inv_views
@@ -129,6 +130,14 @@ from vivarium_dashboard.lib.models import (
     PendingEntries,
     WorkCompositeDiff,
     WorkCompositeDiffEntry,
+    # Batch 18: request-body models for investigation & study mutations
+    SetObservablesBody,
+    SetConclusionsBody,
+    SetOverviewBody,
+    SetStatusBody,
+    SetObjectiveBody,
+    NarrativeSetBody,
+    ExpertInputSetBody,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -295,6 +304,18 @@ _OPENAPI_TAGS = [
             "``event: state`` frame whenever the file changes.  First event fires "
             "immediately if the file already exists.  Uses raw "
             "``StreamingResponse`` (no sse-starlette dep)."
+        ),
+    },
+    {
+        "name": "Investigation & study mutations",
+        "description": (
+            "Batch 18 POST routes — metadata writers for investigations and studies: "
+            "set observables, conclusions, overview, status, objective, "
+            "narrative-spine fields, and expert model-settings.  Each route "
+            "delegates to a pure lib builder in ``lib.metadata_mutations``.  "
+            "CSRF guard is deferred to the state/flip batch; the live do_POST "
+            "still enforces it via ``_csrf_ok``.  Errors carry ``{error: ...}`` "
+            "at 400/404/500; success returns ``{ok: true}`` or the mutated record."
         ),
     },
     {
@@ -2446,6 +2467,148 @@ def create_app() -> FastAPI:
         """
         html, status = _study_page.build_study_detail_page(ws, slug)
         return Response(content=html, status_code=status, media_type="text/html")
+
+    # -----------------------------------------------------------------------
+    # Batch 18: Investigation & study mutations (POST routes)
+    # NOTE: CSRF guard is deferred to the state/flip batch — the live do_POST
+    # still enforces _csrf_ok; the FastAPI POST routes are not live until the
+    # flip.  A shared Depends(csrf_guard) for all POST routes is added then.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/investigation-set-observables",
+        tags=["Investigation & study mutations"],
+        summary="Set investigation observable paths",
+    )
+    def investigation_set_observables(
+        req: SetObservablesBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Rewrite spec.yaml/study.yaml observables[].
+
+        Body: ``{investigation, paths: [[str,...]], emit_all?: bool}``
+        """
+        body, status = _meta_mut.set_investigation_observables(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/investigation-set-conclusions",
+        tags=["Investigation & study mutations"],
+        summary="Set investigation conclusions markdown",
+    )
+    def investigation_set_conclusions(
+        req: SetConclusionsBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Write spec.yaml/study.yaml conclusions (256 KB limit).
+
+        Body: ``{investigation|name|study, markdown: str}``
+        """
+        body, status = _meta_mut.set_investigation_conclusions(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/investigation-set-overview",
+        tags=["Investigation & study mutations"],
+        summary="Set investigation overview metadata fields",
+    )
+    def investigation_set_overview(
+        req: SetOverviewBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Selectively update question/hypothesis/status/topic on spec.yaml.
+
+        Body: ``{investigation, fields: {question?, hypothesis?, status?, topic?}}``
+        """
+        body, status = _meta_mut.set_investigation_overview(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/investigation-set-status",
+        tags=["Investigation & study mutations"],
+        summary="Set investigation status (archived / active / …)",
+    )
+    def investigation_set_status(
+        req: SetStatusBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Write the status field into investigations/<slug>/investigation.yaml.
+
+        Body: ``{investigation, status}``
+        Valid statuses: active, in-progress, planning, completed, archived, closed.
+        """
+        body, status = _meta_mut.set_investigation_status(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-set-objective",
+        tags=["Investigation & study mutations"],
+        summary="Set study objective text",
+    )
+    def study_set_objective(
+        req: SetObjectiveBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Write study.yaml objective field.
+
+        Body: ``{study, text?: str}``
+        """
+        body, status = _meta_mut.set_study_objective(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-narrative-set",
+        tags=["Investigation & study mutations"],
+        summary="Set a v4 narrative-spine field at a dotted path",
+    )
+    def study_narrative_set(
+        req: NarrativeSetBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Generic writer for v4 narrative-spine fields.
+
+        Body: ``{study, path: "dotted.path", value: any}``
+        ``value`` absence (not sent) is distinct from null — absence triggers
+        a 400; null clears the leaf.  Pass ``model_dump(exclude_unset=True)``
+        so the lib builder's ``"value" not in body`` check works correctly.
+        """
+        body, status = _meta_mut.set_study_narrative(
+            ws, req.model_dump(exclude_unset=True)
+        )
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-expert-input-set",
+        tags=["Investigation & study mutations"],
+        summary="Patch conditions.model_settings[i].current in study.yaml",
+    )
+    def study_expert_input_set(
+        req: ExpertInputSetBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Update one expert model-setting value.
+
+        Body: ``{study, name, current: any}``
+        ``current`` absence is distinct from null — absence triggers a 400.
+        """
+        body, status = _meta_mut.set_study_expert_input(
+            ws, req.model_dump(exclude_unset=True)
+        )
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
 
     # -----------------------------------------------------------------------
     # CATCH-ALL — MUST stay registered LAST (immediately before ``return app``)
