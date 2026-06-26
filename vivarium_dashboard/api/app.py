@@ -40,6 +40,7 @@ from vivarium_dashboard.lib import composite_run_views as _cr_views
 from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
 from vivarium_dashboard.lib import viz_write_mutations as _viz_write_mut
 from vivarium_dashboard.lib import viz_commit_mutations as _viz_commit_mut
+from vivarium_dashboard.lib import upload_mutations as _upload_mut
 from vivarium_dashboard.lib import lifecycle_mutations as _lifecycle_mut
 from vivarium_dashboard.lib import scaffold_mutations as _scaffold_mut
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
@@ -180,6 +181,10 @@ from vivarium_dashboard.lib.models import (
     ObservableAddBody,
     VisualizationAddBody,
     VisualizationCommitBatchBody,
+    # Batch 25: request-body models for upload / import mutations
+    DatasetUploadBody,
+    ExpertDocUploadBody,
+    ImportRegisterBody,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -432,6 +437,22 @@ _OPENAPI_TAGS = [
             "``lib.viz_commit_mutations``.  CSRF guard is deferred to the flip "
             "batch.  Errors carry ``{error: ...}`` at 400/404/409; success "
             "returns ``{ok: true}`` or ``{ok: true, committed: [...]}``."
+        ),
+    },
+    {
+        "name": "Uploads & imports",
+        "description": (
+            "Batch 25 POST routes — upload/import writers: register a dataset "
+            "(/api/dataset, file/path/url forms + SHA256), register an expert "
+            "document (/api/expert-doc, PDF/markdown), and register an import "
+            "(/api/import) in workspace.yaml.  All three are "
+            "``_active_branch_action``-wrapped in the live server; these FastAPI "
+            "routes call the lib builder directly (commit deferred to the flip "
+            "batch).  Each route delegates to a pure lib builder in "
+            "``lib.upload_mutations``.  CSRF guard is deferred to the flip "
+            "batch.  Errors carry ``{error: ...}`` at 400/404/409; success "
+            "returns ``{ok: true}`` (import also returns ``next_terminal_step`` "
+            "+ ``note``)."
         ),
     },
     {
@@ -3413,6 +3434,107 @@ def create_app() -> FastAPI:
         Delegates to ``lib.viz_commit_mutations.visualization_commit_batch``.
         """
         body, status = _viz_commit_mut.visualization_commit_batch(ws, req.model_dump(exclude_unset=True))
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    # -----------------------------------------------------------------------
+    # Batch 25: Upload / import (POST routes)
+    # NOTE: CSRF guard is deferred to the state/flip batch — same as batches 18-24.
+    # The live server shim routes through _active_branch_action; these FastAPI
+    # routes call the lib builder directly (commit deferred to the flip batch).
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/dataset",
+        tags=["Uploads & imports"],
+        summary="Register a dataset in workspace.yaml or an investigation (no git commit on the FastAPI path)",
+    )
+    def dataset_upload(
+        req: DatasetUploadBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Save a dataset (file/path/url forms) + register it.
+
+        Body: ``{name, claims?, file_b64?, filename?, path?, url?, sha256?, investigation?}``
+        For ``file_b64`` the file is written under ``datasets/<slug>/<filename>``
+        (or ``investigations/<inv>/inputs/datasets/<slug>/<filename>``) and its
+        SHA256 recorded; for ``path`` the SHA256 is computed when the file
+        exists; for ``url`` an optional ``sha256`` is stored.
+        400 on missing name / invalid investigation slug / missing filename /
+        no source; 404 when the investigation is not found; 409 when the dataset
+        name already exists; 200 ``{ok: true}`` on success.
+
+        Note: the live server path commits via ``_active_branch_action``; this
+        FastAPI route calls the lib builder directly (git commit deferred to
+        the flip/state batch).
+
+        Delegates to ``lib.upload_mutations.register_dataset``.
+        """
+        body, status = _upload_mut.register_dataset(ws, req.model_dump(exclude_unset=True))
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/expert-doc",
+        tags=["Uploads & imports"],
+        summary="Register an expert document in workspace.yaml or an investigation (no git commit on the FastAPI path)",
+    )
+    def expert_doc_upload(
+        req: ExpertDocUploadBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Save an expert document (PDF/markdown) + register it.
+
+        Body: ``{name, file_b64?, filename?, source_path?, description?,
+        contributor?, claims_supported?, investigation?}`` — one of
+        ``file_b64``+``filename`` or ``source_path`` is required.  The file is
+        written under ``references/expert/<slug><ext>`` (or
+        ``investigations/<inv>/inputs/expert/<slug><ext>``) and its SHA256
+        recorded.
+        400 on invalid investigation slug / missing name / no source / missing
+        filename / bad source_path; 404 when the investigation is not found;
+        409 when the expert doc name already exists; 200 ``{ok: true}`` on
+        success.
+
+        Note: the live server path commits via ``_active_branch_action``; this
+        FastAPI route calls the lib builder directly (git commit deferred to
+        the flip/state batch).
+
+        Delegates to ``lib.upload_mutations.register_expert_doc``.
+        """
+        body, status = _upload_mut.register_expert_doc(ws, req.model_dump(exclude_unset=True))
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/import",
+        tags=["Uploads & imports"],
+        summary="Register an import in workspace.yaml.imports (no git commit on the FastAPI path)",
+    )
+    def import_register(
+        req: ImportRegisterBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Register an import in ``workspace.yaml.imports``.
+
+        Body: ``{name, source, ref, mode, description?}`` — ``mode`` is one of
+        ``reference``, ``fork-source``, ``in-place``.  git submodule add is NOT
+        performed (requires terminal for network/auth); the response carries
+        ``next_terminal_step`` + ``note`` with the exact command to run.
+        400 on missing required fields / invalid mode / invalid name chars;
+        409 when the import name already exists; 200
+        ``{ok: true, next_terminal_step, note}`` on success.
+
+        Note: the live server path commits via ``_active_branch_action``; this
+        FastAPI route calls the lib builder directly (git commit deferred to
+        the flip/state batch).
+
+        Delegates to ``lib.upload_mutations.register_import_entry``.
+        """
+        body, status = _upload_mut.register_import_entry(ws, req.model_dump(exclude_unset=True))
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body

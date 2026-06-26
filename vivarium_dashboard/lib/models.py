@@ -1720,3 +1720,60 @@ class VisualizationCommitBatchBody(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     names: Optional[list] = None
+
+
+# ---------------------------------------------------------------------------
+# Batch 25: Upload / import mutation request-body models
+# ---------------------------------------------------------------------------
+
+
+class DatasetUploadBody(BaseModel):
+    """POST /api/dataset {name, claims?, file_b64?, filename?, path?, url?, sha256?, investigation?}
+
+    Three mutually exclusive source forms (file_b64+filename / path / url); the
+    lib builder dispatches on which is present. ``extra="allow"`` keeps any
+    forward-compatible keys; ``model_dump(exclude_unset=True)`` preserves the
+    ``"key" in body`` presence semantics the builder relies on.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    claims: Optional[Any] = None
+    file_b64: Optional[str] = None
+    filename: Optional[str] = None
+    path: Optional[str] = None
+    url: Optional[str] = None
+    sha256: Optional[str] = None
+    investigation: Optional[str] = None
+
+
+class ExpertDocUploadBody(BaseModel):
+    """POST /api/expert-doc {name, file_b64?, filename?, source_path?, description?, contributor?, claims_supported?, investigation?}
+
+    One of ``file_b64``+``filename`` or ``source_path`` is required; the lib
+    builder validates and dispatches.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    file_b64: Optional[str] = None
+    filename: Optional[str] = None
+    source_path: Optional[str] = None
+    description: Optional[str] = None
+    contributor: Optional[str] = None
+    claims_supported: Optional[Any] = None
+    investigation: Optional[str] = None
+
+
+class ImportRegisterBody(BaseModel):
+    """POST /api/import {name, source, ref, mode, description?}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    source: Optional[str] = None
+    ref: Optional[str] = None
+    mode: Optional[str] = None
+    description: Optional[str] = None

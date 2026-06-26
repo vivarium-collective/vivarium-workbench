@@ -68,6 +68,7 @@ from vivarium_dashboard.lib import lifecycle_mutations as _lifecycle_mut
 from vivarium_dashboard.lib import scaffold_mutations as _scaffold_mut
 from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
 from vivarium_dashboard.lib import viz_commit_mutations as _viz_commit_mut
+from vivarium_dashboard.lib import upload_mutations as _upload_mut
 from vivarium_dashboard.lib.investigations_index import (
     _conclusions_excerpt,
     _format_baseline_source,
@@ -5045,12 +5046,9 @@ class Handler(BaseHTTPRequestHandler):
         commit_msg = f"feat(0.5): register import '{name}' (mode={mode})"
 
         def action():
-            _ws_add_to_sys_path()
-            from vivarium_dashboard.lib.imports import register_import
-            register_import(
-                WORKSPACE, name=name, source=source, ref=ref, mode=mode,
-                description=description,
-            )
+            resp_lib, code_lib = _upload_mut.register_import_entry(WORKSPACE, body)
+            if code_lib != 200:
+                raise RuntimeError(resp_lib.get("error") or "register_import_entry failed")
 
         resp, code = _active_branch_action(commit_msg, action)
         if code == 200:
@@ -5110,41 +5108,9 @@ class Handler(BaseHTTPRequestHandler):
         commit_msg = f"feat(4): register dataset '{name}'"
 
         def action():
-            nonlocal entry
-            if file_b64:
-                dest = WORKSPACE / entry["path"]
-                sha = _save_upload(file_b64, dest)
-                entry["sha256"] = sha
-            elif path and not file_b64:
-                src = Path(path)
-                if not src.is_absolute():
-                    src = WORKSPACE / path
-                if src.exists() and src.is_file():
-                    import hashlib as _hashlib
-                    h = _hashlib.sha256()
-                    with src.open("rb") as f:
-                        for chunk in iter(lambda: f.read(65536), b""):
-                            h.update(chunk)
-                    entry["sha256"] = h.hexdigest()
-
-            _ws_add_to_sys_path()
-            if investigation:
-                # Investigation-scoped: append to investigations/<slug>/investigation.yaml.
-                if not _append_investigation_input(WORKSPACE, investigation, "datasets", entry):
-                    raise ValueError(f"investigation '{investigation}' not found")
-                return
-            from vivarium_dashboard.lib.workspace_yaml import load_workspace, save_workspace
-            ws_file = WORKSPACE / "workspace.yaml"
-            ws = load_workspace(ws_file)
-            datasets = ws.setdefault("datasets", [])
-            if datasets is None:
-                datasets = []
-                ws["datasets"] = datasets
-            for existing in datasets:
-                if isinstance(existing, dict) and existing.get("name") == name:
-                    raise ValueError(f"dataset '{name}' already registered")
-            datasets.append(entry)
-            save_workspace(ws_file, ws)
+            resp_lib, code_lib = _upload_mut.register_dataset(WORKSPACE, body)
+            if code_lib != 200:
+                raise RuntimeError(resp_lib.get("error") or "register_dataset failed")
 
         if investigation:
             commit_msg = f"feat(4): register dataset '{name}' for investigation '{investigation}'"
@@ -5408,45 +5374,9 @@ class Handler(BaseHTTPRequestHandler):
                       if investigation else f"feat(5): add expert document '{name}'")
 
         def action():
-            dest = WORKSPACE / dest_rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-
-            if file_b64:
-                sha = _save_upload(file_b64, dest)
-            else:
-                _shutil.copy2(str(source_path), str(dest))
-                import hashlib as _hashlib
-                h = _hashlib.sha256()
-                with dest.open("rb") as fh:
-                    for chunk in iter(lambda: fh.read(65536), b""):
-                        h.update(chunk)
-                sha = h.hexdigest()
-
-            _ws_add_to_sys_path()
-            entry: dict = {"name": name, "path": dest_rel, "sha256": sha}
-            if description:
-                entry["description"] = description
-            if contributor:
-                entry["contributor"] = contributor
-            if claims_supported:
-                entry["claims_supported"] = claims_supported
-
-            if investigation:
-                if not _append_investigation_input(WORKSPACE, investigation, "expert_docs", entry):
-                    raise ValueError(f"investigation '{investigation}' not found")
-                return
-            from vivarium_dashboard.lib.workspace_yaml import load_workspace, save_workspace
-            ws_file = WORKSPACE / "workspace.yaml"
-            ws = load_workspace(ws_file)
-            expert_docs = ws.setdefault("expert_docs", [])
-            if expert_docs is None:
-                expert_docs = []
-                ws["expert_docs"] = expert_docs
-            for existing in expert_docs:
-                if isinstance(existing, dict) and existing.get("name") == name:
-                    raise ValueError(f"expert doc '{name}' already registered")
-            expert_docs.append(entry)
-            save_workspace(ws_file, ws)
+            resp_lib, code_lib = _upload_mut.register_expert_doc(WORKSPACE, body)
+            if code_lib != 200:
+                raise RuntimeError(resp_lib.get("error") or "register_expert_doc failed")
 
         return self._json(*_active_branch_action(commit_msg, action))
 
