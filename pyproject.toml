@@ -70,6 +70,7 @@ files = [
     "vivarium_dashboard/lib/static_serving.py",
     "vivarium_dashboard/lib/study_page.py",
     "vivarium_dashboard/api/app.py",
+    "vivarium_dashboard/lib/metadata_mutations.py",
 ]
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true

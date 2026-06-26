@@ -1277,3 +1277,89 @@ class SystemDepsCheck(BaseModel):
     """
 
     model_config = ConfigDict(extra="allow")
+
+
+# ---------------------------------------------------------------------------
+# Batch 18: Investigation & study mutation request-body models
+# ---------------------------------------------------------------------------
+# These model the POST bodies for the set-* metadata writers.  extra="allow"
+# so unknown keys pass through to the lib builder unchanged (same contract as
+# the legacy dict).  Response models are plain dict/JSONResponse (the handlers
+# return {ok:True}/{error:...} — too generic to need a separate model).
+
+
+class SetObservablesBody(BaseModel):
+    """POST /api/investigation-set-observables {investigation, paths, emit_all?}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: str = ""
+    paths: Optional[list] = None
+    emit_all: Optional[bool] = None
+
+
+class SetConclusionsBody(BaseModel):
+    """POST /api/investigation-set-conclusions {investigation|name|study, markdown}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: Optional[str] = None
+    name: Optional[str] = None
+    study: Optional[str] = None
+    markdown: str = ""
+
+
+class SetOverviewBody(BaseModel):
+    """POST /api/investigation-set-overview {investigation, fields:{question?,hypothesis?,status?,topic?}}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: str = ""
+    fields: Optional[dict] = None
+
+
+class SetStatusBody(BaseModel):
+    """POST /api/investigation-set-status {investigation, status}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: str = ""
+    status: str = ""
+
+
+class SetObjectiveBody(BaseModel):
+    """POST /api/study-set-objective {study, text?}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    study: str = ""
+    text: Optional[str] = None
+
+
+class NarrativeSetBody(BaseModel):
+    """POST /api/study-narrative-set {study, path, value}
+
+    ``value`` is intentionally not declared as a model field — it may be any
+    type including null, and its *absence* (key not sent by client) is
+    semantically distinct from ``null``.  With extra="allow" it passes through
+    as an extra field so model_dump(exclude_unset=True) correctly omits it
+    when the client did not send it.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    study: str = ""
+    path: str = ""
+
+
+class ExpertInputSetBody(BaseModel):
+    """POST /api/study-expert-input-set {study, name, current}
+
+    ``current`` is intentionally not declared — same reasoning as
+    NarrativeSetBody.value (may be null; absence is distinct from null).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    study: str = ""
+    name: str = ""

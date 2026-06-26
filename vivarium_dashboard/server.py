@@ -62,6 +62,7 @@ from vivarium_dashboard.lib import study_viz_views as _study_viz
 from vivarium_dashboard.lib import system_info as _system_info_lib
 from vivarium_dashboard.lib import download_views as _download_views
 from vivarium_dashboard.lib import events as _events_lib
+from vivarium_dashboard.lib import metadata_mutations as _meta_mut
 from vivarium_dashboard.lib.investigations_index import (
     _conclusions_excerpt,
     _format_baseline_source,
@@ -2141,18 +2142,8 @@ def _study_name_from_body(body: dict) -> str:
 
 
 def _post_study_set_objective_for_test(ws_root: Path, body: dict):
-    """Set study.yaml objective field. Returns (response_dict, status_code)."""
-    name = (body.get("study") or "").strip()
-    text = body.get("text") or ""
-    if not name:
-        return {"error": "missing study"}, 400
-    sf = ws_root / "studies" / name / "study.yaml"
-    if not sf.is_file():
-        return {"error": "study not found"}, 404
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
-    spec["objective"] = text
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
-    return {"ok": True}, 200
+    """Name-shim for backward-compat test imports → lib.metadata_mutations."""
+    return _meta_mut.set_study_objective(ws_root, body)
 
 
 # ---------------------------------------------------------------------------
@@ -2187,99 +2178,8 @@ _NARRATIVE_ENUM_LEAVES: dict[str, frozenset[str]] = {
 
 
 def _post_study_narrative_set_for_test(ws_root: Path, body: dict):
-    """Set one v4 narrative-spine field on study.yaml at a dotted path.
-
-    Body shape:
-        {study: "<slug>", path: "<dotted-path>", value: <any>}
-
-    The dotted path's first segment must be one of the allowlisted v4
-    narrative-spine roots (report, study_card, biological_summary,
-    conclusion_verdicts, literature_anchors, design_pivot_required). Intermediate
-    dicts are created on demand. An empty-string or null value REMOVES the
-    leaf (and prunes empty parent dicts up the chain) so the YAML stays tidy
-    after a user clears a field.
-
-    Examples:
-        path="biological_summary"                                 value="DnaA cycles..."
-        path="study_card.goal"                                    value="Split DnaA species"
-        path="report.confidence"                                  value="high"
-        path="conclusion_verdicts.biological_validation.result"   value="MIXED"
-        path="conclusion_verdicts.biological_validation.basis"    value="atp_fraction = 0.997..."
-
-    The handler is intentionally generic — one route serves every scalar
-    narrative-spine field rather than 10+ /api/study-set-<field> endpoints.
-    Returns (response_dict, status_code).
-    """
-    import os
-
-    name = (body.get("study") or "").strip()
-    path = (body.get("path") or "").strip()
-    if not name:
-        return {"error": "missing study"}, 400
-    if not path:
-        return {"error": "missing path"}, 400
-    if "value" not in body:
-        return {"error": "missing value"}, 400
-    value = body["value"]
-
-    parts = path.split(".")
-    if not parts or not parts[0]:
-        return {"error": "empty path"}, 400
-    if parts[0] not in _NARRATIVE_ALLOWED_ROOTS:
-        return {
-            "error": f"path must start with one of "
-                     f"{sorted(_NARRATIVE_ALLOWED_ROOTS)}, got {parts[0]!r}",
-        }, 400
-
-    # Enum guard on the few leaves the schema strictly enums. Empty-string and
-    # null are allowed through (they trigger the remove-leaf branch below).
-    if value not in (None, "") and path in _NARRATIVE_ENUM_LEAVES:
-        allowed = _NARRATIVE_ENUM_LEAVES[path]
-        if value not in allowed:
-            return {
-                "error": f"{path}: value {value!r} not in allowed enum "
-                         f"{sorted(allowed)}",
-            }, 400
-
-    sf = ws_root / "studies" / name / "study.yaml"
-    if not sf.is_file():
-        return {"error": "study not found"}, 404
-
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
-    if not isinstance(spec, dict):
-        return {"error": "study.yaml is not a mapping"}, 500
-
-    # Walk parents, creating dicts as needed.
-    cur = spec
-    for p in parts[:-1]:
-        if p not in cur or not isinstance(cur[p], dict):
-            cur[p] = {}
-        cur = cur[p]
-    leaf = parts[-1]
-
-    if value in (None, ""):
-        # Clear-out path: pop the leaf, then prune empty parent dicts walking
-        # back up so a fully-cleared section disappears from the YAML.
-        cur.pop(leaf, None)
-        # Re-walk to prune empty parents (top-down detection of empties).
-        for i in range(len(parts) - 1, 0, -1):
-            ancestor_path = parts[:i]
-            ancestor = spec
-            for p in ancestor_path[:-1]:
-                ancestor = ancestor.get(p, {})
-                if not isinstance(ancestor, dict):
-                    break
-            else:
-                last = ancestor_path[-1]
-                if last in ancestor and ancestor[last] == {}:
-                    ancestor.pop(last, None)
-                    continue
-            break
-    else:
-        cur[leaf] = value
-
-    atomic_write_text(sf, yaml.safe_dump(spec, sort_keys=False, allow_unicode=True))
-    return {"ok": True}, 200
+    """Name-shim for backward-compat test imports → lib.metadata_mutations."""
+    return _meta_mut.set_study_narrative(ws_root, body)
 
 
 def _post_study_seed_followup_for_test(ws_root: Path, body: dict):
@@ -10026,10 +9926,16 @@ if __name__ == "__main__":
         """POST /api/investigation-set-observables {investigation, paths, emit_all}
         Rewrites spec.yaml.observables. The orchestrator builds the emitter
         step at run time.
+
+        Validation (400/404) stays in this LIVE shim so the dirty-tree check
+        never fires before a bad-body rejection; the inner mutation is
+        delegated to lib.metadata_mutations and run under the active
+        workstream via ``_commit_or_run`` (commit / 409-on-dirty / note),
+        byte-identical to the legacy handler. The FastAPI route calls the lib
+        builder directly (commit/workstream deferred to the flip batch).
         """
         inv_name = (body.get("investigation") or "").strip()
         paths = body.get("paths")
-        emit_all = bool(body.get("emit_all"))
         if not inv_name:
             return self._json({"error": "investigation required"}, 400)
         if paths is None or not isinstance(paths, list):
@@ -10042,12 +9948,13 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): set observables"
 
         def do_action():
-            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-            if emit_all:
-                spec['observables'] = [{'path': []}]
-            else:
-                spec['observables'] = [{'path': list(p)} for p in paths if p]
-            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+            # The lib builder catches its own errors and RETURNS (dict, code)
+            # rather than raising; re-raise on a post-validation runtime failure
+            # so _commit_or_run surfaces it as a 500 (matching the legacy inline
+            # mutation, which raised) instead of swallowing it into a 200+note.
+            _resp, _code = _meta_mut.set_investigation_observables(WORKSPACE, body)
+            if _code != 200:
+                raise RuntimeError(_resp.get("error") or "mutation failed")
 
         try:
             return self._json(*_commit_or_run(commit_msg, do_action))
@@ -10057,6 +9964,10 @@ if __name__ == "__main__":
     def _post_investigation_set_conclusions(self, body: dict):
         """POST /api/investigation-set-conclusions {investigation, markdown}
         Writes spec.yaml.conclusions. Rejects bodies over 256KB.
+
+        Validation stays in this LIVE shim; inner mutation delegated to
+        lib.metadata_mutations and committed via ``_commit_or_run`` (see
+        ``_post_investigation_set_observables`` for the full rationale).
         """
         inv_name = _study_name_from_body(body)
         markdown = body.get("markdown", "")
@@ -10074,9 +9985,9 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): set conclusions"
 
         def do_action():
-            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-            spec['conclusions'] = markdown
-            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+            _resp, _code = _meta_mut.set_investigation_conclusions(WORKSPACE, body)
+            if _code != 200:
+                raise RuntimeError(_resp.get("error") or "mutation failed")
 
         try:
             return self._json(*_commit_or_run(commit_msg, do_action))
@@ -10086,6 +9997,10 @@ if __name__ == "__main__":
     def _post_investigation_set_overview(self, body: dict):
         """POST /api/investigation-set-overview {investigation, fields: {question?, hypothesis?, status?}}
         Selectively updates the three Overview metadata fields on spec.yaml.
+
+        Validation stays in this LIVE shim; inner mutation delegated to
+        lib.metadata_mutations and committed via ``_commit_or_run`` (see
+        ``_post_investigation_set_observables`` for the full rationale).
         """
         inv_name = (body.get("investigation") or "").strip()
         fields = body.get("fields") or {}
@@ -10109,11 +10024,9 @@ if __name__ == "__main__":
         commit_msg = f"feat(investigations/{inv_name}): set overview metadata"
 
         def do_action():
-            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-            for key in ("question", "hypothesis", "status", "topic"):
-                if key in fields:
-                    spec[key] = fields[key]
-            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+            _resp, _code = _meta_mut.set_investigation_overview(WORKSPACE, body)
+            if _code != 200:
+                raise RuntimeError(_resp.get("error") or "mutation failed")
 
         try:
             return self._json(*_commit_or_run(commit_msg, do_action))
@@ -10121,15 +10034,13 @@ if __name__ == "__main__":
             return self._json({"error": f"workstream error: {e}"}, 500)
 
     def _post_investigation_set_status(self, body: dict):
-        """POST /api/investigation-set-status {investigation, status} — write the
-        `status` field into investigations/<slug>/investigation.yaml."""
-        result = _set_investigation_status(
-            WORKSPACE,
-            body.get("investigation") or "",
-            body.get("status") or "",
-        )
-        code = result.pop("_code", 200)
-        return self._json(result, code)
+        """POST /api/investigation-set-status — shim → lib.metadata_mutations.
+
+        Legacy never wrapped this in ``_commit_or_run`` (it delegated to the
+        pure ``_set_investigation_status`` helper and returned its result
+        directly), so the shim stays a direct lib delegation.
+        """
+        return self._json(*_meta_mut.set_investigation_status(WORKSPACE, body))
 
     def _post_proposed_input_decision(self, body: dict):
         """POST /api/proposed-input-decision {investigation, item_id, decision}.
@@ -10148,112 +10059,20 @@ if __name__ == "__main__":
         return self._json(response, code)
 
     # ------------------------------------------------------------------
-    # Study-specific POST handlers (thin wrappers around pure helpers)
+    # Study-specific POST handlers — shims → lib.metadata_mutations
     # ------------------------------------------------------------------
 
     def _post_study_set_objective(self, body: dict):
-        """POST /api/study-set-objective {study, text}"""
-        response, code = _post_study_set_objective_for_test(WORKSPACE, body)
-        return self._json(response, code)
+        """POST /api/study-set-objective — shim → lib.metadata_mutations."""
+        return self._json(*_meta_mut.set_study_objective(WORKSPACE, body))
 
     def _post_study_narrative_set(self, body: dict):
-        """POST /api/study-narrative-set {study, path, value}
-
-        Generic writer for v4 narrative-spine fields (report / study_card /
-        biological_summary / conclusion_verdicts / literature_anchors /
-        design_pivot_required). See ``_post_study_narrative_set_for_test``.
-        """
-        response, code = _post_study_narrative_set_for_test(WORKSPACE, body)
-        return self._json(response, code)
+        """POST /api/study-narrative-set — shim → lib.metadata_mutations."""
+        return self._json(*_meta_mut.set_study_narrative(WORKSPACE, body))
 
     def _post_study_expert_input_set(self, body: dict):
-        """POST /api/study-expert-input-set {study, name, current}
-
-        Patches one ``conditions.model_settings[i].current`` value in the
-        target study's yaml (legacy alias ``conditions.expert_inputs`` is
-        still accepted on read). The next ``pbg_runner`` invocation reads
-        the updated value. Round-trip preserves yaml comments via the
-        standard yaml.safe_dump output (comments not preserved by design —
-        the file is canonical, not a hand-edited doc).
-
-        Body: ``{"study": "<slug>", "name": "<setting-name>", "current": <value>}``
-        Where ``current`` can be a number, string, bool, or null (to reset
-        to "awaiting expert").
-
-        URL kept as ``/api/study-expert-input-set`` for back-compat; rename
-        the field internally without breaking deployed clients.
-        """
-        import yaml as _yaml
-        slug = (body or {}).get("study", "").strip()
-        name = (body or {}).get("name", "").strip()
-        if not slug or not name:
-            return self._json({"error": "study and name are required"}, 400)
-        if "current" not in (body or {}):
-            return self._json({"error": "current is required (may be null)"}, 400)
-        new_current = body["current"]
-
-        spec_path = _study_spec_path(slug)
-        if not spec_path or not spec_path.is_file():
-            return self._json({"error": f"study not found: {slug}"}, 404)
-        try:
-            spec = _yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-        except _yaml.YAMLError as e:
-            return self._json({"error": f"yaml parse failed: {e}"}, 500)
-
-        cond = spec.get("conditions")
-        if not isinstance(cond, dict):
-            return self._json(
-                {"error": "study has no v4 conditions block; cannot set model setting"},
-                400,
-            )
-        # Prefer the new key; fall back to the legacy alias.
-        eis_key = "model_settings" if "model_settings" in cond else "expert_inputs"
-        eis = cond.get(eis_key)
-        if not isinstance(eis, list):
-            return self._json(
-                {"error": f"conditions.{eis_key} is missing or not a list"},
-                400,
-            )
-
-        target = None
-        for ei in eis:
-            if isinstance(ei, dict) and ei.get("name") == name:
-                target = ei
-                break
-        if target is None:
-            return self._json(
-                {"error": f"model setting not found: {name}"},
-                404,
-            )
-
-        # Optional bounds check when range is declared.
-        rng = target.get("range")
-        if (
-            isinstance(rng, list) and len(rng) == 2
-            and isinstance(new_current, (int, float))
-            and not isinstance(new_current, bool)
-        ):
-            lo, hi = rng[0], rng[1]
-            if isinstance(lo, (int, float)) and isinstance(hi, (int, float)):
-                if new_current < lo or new_current > hi:
-                    return self._json(
-                        {"error": f"value {new_current} is outside declared range [{lo}, {hi}]"},
-                        400,
-                    )
-
-        target["current"] = new_current
-        try:
-            spec_path.write_text(
-                _yaml.safe_dump(spec, sort_keys=False, allow_unicode=True, width=100)
-            )
-        except OSError as e:
-            return self._json({"error": f"write failed: {e}"}, 500)
-
-        return self._json({
-            "study": slug,
-            "name": name,
-            "current": new_current,
-        }, 200)
+        """POST /api/study-expert-input-set — shim → lib.metadata_mutations."""
+        return self._json(*_meta_mut.set_study_expert_input(WORKSPACE, body))
 
     def _post_study_seed_followup(self, body: dict):
         """POST /api/study-seed-followup → seed a child study.
