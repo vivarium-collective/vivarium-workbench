@@ -93,6 +93,7 @@ files = [
     "vivarium_dashboard/lib/workspaces_mutations.py",
     "vivarium_dashboard/lib/misc_mutations.py",
     "vivarium_dashboard/lib/viz_accept_views.py",
+    "vivarium_dashboard/lib/composite_subprocess.py",
 ]
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true
