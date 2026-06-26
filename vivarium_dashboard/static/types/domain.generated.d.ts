@@ -441,3 +441,6 @@ export interface BuildRemoteResponse {
 export interface RemoteRunStartResponse {
   job_id: string;
 }
+
+export interface AuthPayload {
+}

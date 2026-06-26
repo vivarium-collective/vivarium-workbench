@@ -2071,3 +2071,27 @@ class RemoteRunStartResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     job_id: str
+
+
+class AuthPayload(BaseModel):
+    """Pass-through payload for the 5 GitHub device-flow auth routes.
+
+    Shared response schema for ``POST /api/auth/github/start``, ``GET
+    /api/auth/github/poll``, ``GET /api/auth/github/status``, ``POST
+    /api/auth/github/logout`` and ``GET /api/auth/github/orgs``.  The bodies are
+    genuinely variable per route AND per outcome — ``{flow_id, user_code,
+    verification_uri, ...}`` (start), ``{status, interval?}`` / ``{status,
+    login}`` (poll), ``{authenticated, login?, source?, scopes?}`` (status),
+    ``{ok: true}`` (logout), ``{login, orgs:[...]}`` (orgs), and every error
+    shape ``{error: ...}`` / ``{status: "error", detail: ...}``.
+
+    Pure pass-through (``extra="allow"``, **no declared fields**) — a declared
+    field would strip/coerce one of the shapes.  The route returns every path
+    (success AND error) via ``JSONResponse`` so the lib-returned status code is
+    preserved verbatim; this model exists only to document the surface in the
+    OpenAPI schema / generated TypeScript.
+
+    Source: ``lib.auth_views`` (5 builders over ``lib.github_auth``).
+    """
+
+    model_config = ConfigDict(extra="allow")
