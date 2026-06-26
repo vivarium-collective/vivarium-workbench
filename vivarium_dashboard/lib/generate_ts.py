@@ -127,6 +127,8 @@ _MODELS: list[type[BaseModel]] = [
     # Source-switch (in-process workspace re-point) response models
     _models.SourceSwitchSource,
     _models.SourceSwitchResponse,
+    # C-state-3b: source build-remote response (switch-build reuses SourceSwitchResponse)
+    _models.BuildRemoteResponse,
 ]
 
 OUTPUT_PATH = (

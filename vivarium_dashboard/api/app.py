@@ -39,6 +39,7 @@ from pydantic import ValidationError
 from vivarium_dashboard.lib import active_workspace
 from vivarium_dashboard.lib import csrf as _csrf
 from vivarium_dashboard.lib import source_switch_views as _source_switch_views
+from vivarium_dashboard.lib import source_build_views as _source_build_views
 from vivarium_dashboard.lib import job_status_views as _job_status_views
 from vivarium_dashboard.lib import run_jobs as _run_jobs
 from vivarium_dashboard.lib import remote_run_jobs as _remote_run_jobs
@@ -210,6 +211,10 @@ from vivarium_dashboard.lib.models import (
     # C-state-3a: source/switch (in-process workspace re-point)
     SourceSwitchRequest,
     SourceSwitchResponse,
+    # C-state-3b: source build-remote / switch-build (sms-api network routes)
+    BuildRemoteRequest,
+    BuildRemoteResponse,
+    SwitchBuildRequest,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -4074,6 +4079,70 @@ def create_app() -> FastAPI:
         ``lib.source_switch_views.source_switch``.
         """
         body, status = _source_switch_views.source_switch(req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return SourceSwitchResponse.model_validate(body)
+
+    @app.post(
+        "/api/source/build-remote",
+        response_model=BuildRemoteResponse,
+        tags=["Source"],
+        summary="Register a repo+branch HEAD as an sms-api build",
+    )
+    def source_build_remote(
+        req: BuildRemoteRequest,
+    ) -> Union[BuildRemoteResponse, JSONResponse]:
+        """Register a repo+branch's HEAD as an sms-api simulator build.
+
+        Mirrors the stdlib ``POST /api/source/build-remote``.  Body:
+        ``{"repo", "branch"}`` — resolves the branch HEAD via sms-api and
+        registers it, returning ``{ok, simulator_id, repo, branch, commit}``.
+
+        Status codes (byte-identical to the legacy handler):
+          - 400  missing repo/branch (``{"error": "repo and branch are required"}``)
+          - 502  unresolved HEAD (``{"error": "could not resolve branch HEAD via sms-api"}``)
+          - 502  ``{"error": "sms-api: <err>"}``
+          - 200  ``{ok, simulator_id, repo, branch, commit}``
+
+        The CSRF middleware already guards this POST.  Library-backed via
+        ``lib.source_build_views.build_remote`` (a network route — sms-api is
+        reached through the lib client).
+        """
+        body, status = _source_build_views.build_remote(req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return BuildRemoteResponse.model_validate(body)
+
+    @app.post(
+        "/api/source/switch-build",
+        response_model=SourceSwitchResponse,
+        tags=["Source"],
+        summary="Materialize a remote build's workspace and re-point in-process",
+    )
+    def source_switch_build(
+        req: SwitchBuildRequest,
+    ) -> Union[SourceSwitchResponse, JSONResponse]:
+        """Materialize a remote build's workspace (cached) and re-point to it.
+
+        Mirrors the stdlib ``POST /api/source/switch-build``.  Body:
+        ``{"simulator_id"}`` — looks the build up in the sms-api listing,
+        downloads+extracts its workspace once (cached per commit), stamps build
+        provenance into the cache dir (best-effort), then fires the lib-side
+        switch (``active_workspace.switch_workspace`` — sets ``lib._root`` +
+        invalidates the lib caches) and returns ``{ok, source}``.
+
+        Status codes (byte-identical to the legacy handler):
+          - 400  missing ``simulator_id`` (``{"error": "missing 'simulator_id'"}``)
+          - 502  sms-api unreachable (``{"error": "sms-api unavailable: <err>"}``)
+          - 404  build not found (``{"error": "build <id> not found"}``)
+          - 502  materialize failed (``{"error": "materialize failed: <err>"}``)
+          - 200  ``{ok: true, source: {path, name}}``
+
+        The CSRF middleware already guards this POST.  Library-backed via
+        ``lib.source_build_views.switch_build`` (a network route — sms-api is
+        reached through the lib client).
+        """
+        body, status = _source_build_views.switch_build(req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return SourceSwitchResponse.model_validate(body)

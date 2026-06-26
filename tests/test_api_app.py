@@ -4677,3 +4677,154 @@ class TestSourceSwitchRoute:
         assert "/api/source/switch" in paths and "post" in paths["/api/source/switch"]
         schemas = client.get("/openapi.json").json()["components"]["schemas"]
         assert "SourceSwitchResponse" in schemas
+
+
+# ===========================================================================
+# C-state-3b: POST /api/source/build-remote + /api/source/switch-build
+# (sms-api NETWORK routes — every test monkeypatches the lib sms-api names)
+# ===========================================================================
+class TestSourceBuildRemoteRoute:
+    def test_missing_repo_branch_400(self, client):
+        r = client.post("/api/source/build-remote", json={"repo": "x"})
+        assert r.status_code == 400
+        assert r.json() == {"error": "repo and branch are required"}
+
+    def test_no_commit_502(self, client, monkeypatch):
+        from vivarium_dashboard.lib import source_build_views as sbv
+
+        class _Client:
+            def __init__(self, base=None):
+                pass
+
+            def latest_simulator(self, repo, branch):
+                return {"git_commit_hash": ""}
+
+        monkeypatch.setattr(sbv, "SmsApiClient", _Client)
+        r = client.post("/api/source/build-remote", json={"repo": "r", "branch": "b"})
+        assert r.status_code == 502
+        assert r.json() == {"error": "could not resolve branch HEAD via sms-api"}
+
+    def test_sms_api_error_502(self, client, monkeypatch):
+        from vivarium_dashboard.lib import source_build_views as sbv
+        from vivarium_dashboard.lib.sms_api_client import SmsApiError
+
+        class _Client:
+            def __init__(self, base=None):
+                pass
+
+            def latest_simulator(self, repo, branch):
+                raise SmsApiError("boom")
+
+        monkeypatch.setattr(sbv, "SmsApiClient", _Client)
+        r = client.post("/api/source/build-remote", json={"repo": "r", "branch": "b"})
+        assert r.status_code == 502
+        assert r.json() == {"error": "sms-api: boom"}
+
+    def test_happy_path(self, client, monkeypatch):
+        from vivarium_dashboard.lib import source_build_views as sbv
+
+        class _Client:
+            def __init__(self, base=None):
+                pass
+
+            def latest_simulator(self, repo, branch):
+                return {"git_commit_hash": "c0ffee"}
+
+            def register_simulator(self, repo, branch, commit):
+                return {"database_id": 42}
+
+        monkeypatch.setattr(sbv, "SmsApiClient", _Client)
+        r = client.post(
+            "/api/source/build-remote",
+            json={"repo": "https://github.com/x/y.git", "branch": "main"},
+        )
+        assert r.status_code == 200
+        assert r.json() == {
+            "ok": True, "simulator_id": 42,
+            "repo": "https://github.com/x/y", "branch": "main", "commit": "c0ffee",
+        }
+
+    def test_route_in_openapi(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        assert "/api/source/build-remote" in paths
+        assert "post" in paths["/api/source/build-remote"]
+        schemas = client.get("/openapi.json").json()["components"]["schemas"]
+        assert "BuildRemoteResponse" in schemas
+
+
+class TestSourceSwitchBuildRoute:
+    @staticmethod
+    def _entry(sim_id=5):
+        return {
+            "simulator_id": sim_id, "repo": "y",
+            "repo_url": "https://github.com/x/y", "commit": "deadbeef",
+            "branch": "main", "label": "y @ deadbeef (build #5)",
+        }
+
+    def test_missing_sim_id_400(self, client):
+        r = client.post("/api/source/switch-build", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "missing 'simulator_id'"}
+
+    def test_listing_error_502(self, client, monkeypatch):
+        from vivarium_dashboard.lib import source_build_views as sbv
+        monkeypatch.setattr(sbv, "SmsApiClient", lambda base=None: object())
+        monkeypatch.setattr(
+            sbv, "list_build_sources",
+            lambda c: {"builds": [], "error": "tunnel down"},
+        )
+        r = client.post("/api/source/switch-build", json={"simulator_id": 5})
+        assert r.status_code == 502
+        assert r.json() == {"error": "sms-api unavailable: tunnel down"}
+
+    def test_not_found_404(self, client, monkeypatch):
+        from vivarium_dashboard.lib import source_build_views as sbv
+        monkeypatch.setattr(sbv, "SmsApiClient", lambda base=None: object())
+        monkeypatch.setattr(
+            sbv, "list_build_sources", lambda c: {"builds": [self._entry(99)]},
+        )
+        r = client.post("/api/source/switch-build", json={"simulator_id": 5})
+        assert r.status_code == 404
+        assert r.json() == {"error": "build 5 not found"}
+
+    def test_materialize_error_502(self, client, monkeypatch):
+        from vivarium_dashboard.lib import source_build_views as sbv
+        from vivarium_dashboard.lib.sms_api_client import SmsApiError
+        monkeypatch.setattr(sbv, "SmsApiClient", lambda base=None: object())
+        monkeypatch.setattr(
+            sbv, "list_build_sources", lambda c: {"builds": [self._entry(5)]},
+        )
+
+        def _boom(c, sim_id, commit):
+            raise SmsApiError("no tarball")
+
+        monkeypatch.setattr(sbv, "materialize_build", _boom)
+        r = client.post("/api/source/switch-build", json={"simulator_id": 5})
+        assert r.status_code == 502
+        assert r.json() == {"error": "materialize failed: no tarball"}
+
+    def test_happy_path_repoints(self, client, tmp_path, monkeypatch):
+        from vivarium_dashboard.lib import source_build_views as sbv
+        from vivarium_dashboard.lib import _root
+        cache = tmp_path / "cache"
+        cache.mkdir()
+        monkeypatch.setattr(sbv, "SmsApiClient", lambda base=None: object())
+        monkeypatch.setattr(
+            sbv, "list_build_sources", lambda c: {"builds": [self._entry(5)]},
+        )
+        monkeypatch.setattr(
+            sbv, "materialize_build", lambda c, sim_id, commit: cache,
+        )
+        r = client.post("/api/source/switch-build", json={"simulator_id": 5})
+        assert r.status_code == 200
+        assert r.json() == {
+            "ok": True,
+            "source": {"path": str(cache), "name": "y @ deadbeef (build #5)"},
+        }
+        # The route re-pointed the shared lib root (autouse fixture resets it).
+        assert _root.get_workspace_root() == cache.resolve()
+
+    def test_route_in_openapi(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        assert "/api/source/switch-build" in paths
+        assert "post" in paths["/api/source/switch-build"]

@@ -1997,3 +1997,47 @@ class SourceSwitchSource(BaseModel):
 
 
 SourceSwitchResponse.model_rebuild()
+
+
+class BuildRemoteRequest(BaseModel):
+    """POST /api/source/build-remote request body — ``{"repo", "branch"}``.
+
+    Registers a repo+branch HEAD as an sms-api build. Empty repo/branch are
+    rejected with HTTP 400 by the route's lib builder.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    repo: str = ""
+    branch: str = ""
+
+
+class BuildRemoteResponse(BaseModel):
+    """200-path payload for ``POST /api/source/build-remote``.
+
+    ``{"ok": True, "simulator_id": <id|null>, "repo", "branch", "commit"}``.
+    The non-200 error paths (``{"error": ...}``, HTTP 400/502) are returned via
+    ``JSONResponse``, not this model.
+
+    Source: ``lib.source_build_views.build_remote``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool = True
+    simulator_id: Optional[int] = None
+    repo: str
+    branch: str
+    commit: str
+
+
+class SwitchBuildRequest(BaseModel):
+    """POST /api/source/switch-build request body — ``{"simulator_id"}``.
+
+    Materializes a build's workspace (cached) + re-points in-process. A missing
+    ``simulator_id`` is rejected with HTTP 400 by the route's lib builder.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    simulator_id: Optional[int] = None
