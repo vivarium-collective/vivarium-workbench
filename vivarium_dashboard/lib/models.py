@@ -1890,3 +1890,48 @@ class InvestigationCompositeRebuild(BaseModel):
 
     investigation: Optional[str] = None
     name: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Batch 28: Investigation composite/viz mutation request-body models
+# ---------------------------------------------------------------------------
+
+
+class InvestigationCreateFromComposite(BaseModel):
+    """POST /api/investigation-create-from-composite {composite_name}
+
+    Clone a workspace-catalog composite into a fresh investigation. The lib
+    builder reads via ``body.get(...)``; ``extra="allow"`` keeps
+    forward-compatible keys.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    composite_name: Optional[str] = None
+
+
+class InvestigationAddViz(BaseModel):
+    """POST /api/investigation-add-viz {investigation, name, address, config}
+
+    Append a visualization entry to a study's ``spec.yaml``. ``config`` is an
+    arbitrary mapping passed through to the viz entry.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: Optional[str] = None
+    name: Optional[str] = None
+    address: Optional[str] = None
+    config: Optional[Any] = None
+
+
+class InvestigationRenderViz(BaseModel):
+    """POST /api/investigation-render-viz {name}
+
+    Re-render a study's declared visualizations against its existing emitter
+    data (no simulation re-run).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None

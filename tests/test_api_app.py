@@ -4335,3 +4335,131 @@ class TestBatch27CompositeRoutes:
             "/api/investigation-composite-rebuild",
         ):
             assert p in paths and "post" in paths[p], p
+
+
+class TestBatch28InvVizRoutes:
+    """Route-level tests for Batch 28 investigation composite/viz POST endpoints
+    (/api/investigation-create-from-composite, -add-viz, -render-viz)."""
+
+    _INV = "demo"
+
+    @pytest.fixture
+    def ws(self, tmp_path: Path) -> Path:
+        import yaml as _yaml
+        w = tmp_path / "ws"
+        w.mkdir()
+        (w / "workspace.yaml").write_text(
+            "schema_version: 3\nname: testws\npackage_path: pbg_testws\n",
+            encoding="utf-8",
+        )
+        inv = w / "investigations" / self._INV
+        inv.mkdir(parents=True)
+        (inv / "spec.yaml").write_text(
+            _yaml.safe_dump({"name": self._INV}), encoding="utf-8",
+        )
+        return w
+
+    @pytest.fixture
+    def rc(self, ws: Path, monkeypatch) -> TestClient:
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: ws
+        return TestClient(app)
+
+    # -- create-from-composite ----------------------------------------------
+
+    def test_create_happy(self, rc: TestClient, ws: Path, monkeypatch) -> None:
+        import types
+        import yaml as _yaml
+        from vivarium_dashboard.lib import composite_lookup as _clookup
+        from vivarium_dashboard.lib import investigation_migrate as _imig
+        from vivarium_dashboard.lib import composite_mutations as _cm
+
+        cdir = ws / "pbg_testws" / "composites"
+        cdir.mkdir(parents=True)
+        src = cdir / "chromo.composite.yaml"
+        src.write_text(_yaml.safe_dump({"name": "chromo-doc", "state": {}}), encoding="utf-8")
+        ref = "pbg_testws.composites.chromo"
+        monkeypatch.setattr(_clookup, "discover_all_composites", lambda root, pkg: {
+            ref: {"name": "chromo", "id": ref, "kind": "spec", "_path": str(src)},
+        })
+        monkeypatch.setattr(_imig, "_resolve_composite_source", lambda r, root: (src, "chromo"))
+        monkeypatch.setattr(_cm.uuid, "uuid4", lambda: types.SimpleNamespace(hex="abcdef000000"))
+
+        r = rc.post("/api/investigation-create-from-composite", json={"composite_name": "chromo"})
+        assert r.status_code == 200, r.json()
+        assert r.json() == {"name": "study-chromo-abcdef"}
+        assert (ws / "studies" / "study-chromo-abcdef" / "spec.yaml").is_file()
+
+    def test_create_400_blank(self, rc: TestClient) -> None:
+        r = rc.post("/api/investigation-create-from-composite", json={"composite_name": ""})
+        assert r.status_code == 400
+        assert r.json()["error"] == "composite_name required"
+
+    def test_create_404_not_in_catalog(self, rc: TestClient, monkeypatch) -> None:
+        from vivarium_dashboard.lib import composite_lookup as _clookup
+        monkeypatch.setattr(_clookup, "discover_all_composites", lambda root, pkg: {})
+        r = rc.post("/api/investigation-create-from-composite", json={"composite_name": "ghost"})
+        assert r.status_code == 404
+        assert "not in workspace catalog" in r.json()["error"]
+
+    # -- add-viz -------------------------------------------------------------
+
+    def test_add_viz_happy(self, rc: TestClient, ws: Path) -> None:
+        import yaml as _yaml
+        r = rc.post("/api/investigation-add-viz", json={
+            "investigation": self._INV, "name": "my-plot",
+            "address": "local:TimeSeriesPlot", "config": {"x": "time"},
+        })
+        assert r.status_code == 200, r.json()
+        body = r.json()
+        assert body == {"ok": True, "investigation": self._INV, "viz_name": "my-plot"}
+        spec = _yaml.safe_load((ws / "investigations" / self._INV / "spec.yaml").read_text())
+        assert spec["visualizations"][0]["name"] == "my-plot"
+
+    def test_add_viz_400_bad_name(self, rc: TestClient) -> None:
+        r = rc.post("/api/investigation-add-viz", json={
+            "investigation": self._INV, "name": "bad name!", "address": "local:X",
+        })
+        assert r.status_code == 400
+        assert r.json()["error"] == "viz name must match [a-zA-Z0-9_-]+"
+
+    def test_add_viz_404(self, rc: TestClient) -> None:
+        r = rc.post("/api/investigation-add-viz", json={
+            "investigation": "ghost", "name": "p", "address": "local:X",
+        })
+        assert r.status_code == 404
+
+    def test_add_viz_409_duplicate(self, rc: TestClient, ws: Path) -> None:
+        import yaml as _yaml
+        inv = ws / "investigations" / self._INV
+        (inv / "spec.yaml").write_text(_yaml.safe_dump({
+            "name": self._INV,
+            "visualizations": [{"name": "p", "address": "local:X", "config": {}}],
+        }), encoding="utf-8")
+        r = rc.post("/api/investigation-add-viz", json={
+            "investigation": self._INV, "name": "p", "address": "local:Y",
+        })
+        assert r.status_code == 409
+        assert "already exists in spec" in r.json()["error"]
+
+    # -- render-viz ----------------------------------------------------------
+
+    def test_render_viz_400_name_required(self, rc: TestClient) -> None:
+        r = rc.post("/api/investigation-render-viz", json={"name": ""})
+        assert r.status_code == 400
+        assert r.json()["error"] == "name is required"
+
+    def test_render_viz_404(self, rc: TestClient) -> None:
+        r = rc.post("/api/investigation-render-viz", json={"name": "ghost"})
+        assert r.status_code == 404
+
+    # -- openapi -------------------------------------------------------------
+
+    def test_routes_in_openapi(self, rc: TestClient) -> None:
+        paths = rc.get("/openapi.json").json()["paths"]
+        for p in (
+            "/api/investigation-create-from-composite",
+            "/api/investigation-add-viz",
+            "/api/investigation-render-viz",
+        ):
+            assert p in paths and "post" in paths[p], p
