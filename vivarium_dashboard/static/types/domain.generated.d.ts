@@ -429,3 +429,11 @@ export interface SourceSwitchResponse {
   ok: boolean;
   source: SourceSwitchSource;
 }
+
+export interface BuildRemoteResponse {
+  ok: boolean;
+  simulator_id: number | null;
+  repo: string;
+  branch: string;
+  commit: string;
+}
