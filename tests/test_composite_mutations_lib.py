@@ -25,9 +25,12 @@ from typing import Any
 import pytest
 import yaml
 
+import types
+
 from vivarium_dashboard.lib import composite_mutations as cm
 from vivarium_dashboard.lib import investigation_migrate as _imig
 from vivarium_dashboard.lib import composite_recipes as _recipes
+from vivarium_dashboard.lib import composite_lookup as _clookup
 
 
 _INV = "demo"
@@ -548,6 +551,196 @@ class TestPromoteCommitPath:
             "investigation": _INV, "variant": "myvar",
         })
         assert captured["code"] == 409
+
+
+# ---------------------------------------------------------------------------
+# create_from_composite (parity)
+# ---------------------------------------------------------------------------
+
+
+def _fixed_uuid(hex_value: str = "abcdef"):
+    return lambda: types.SimpleNamespace(hex=hex_value + "000000")
+
+
+def _stub_catalog(monkeypatch: Any, catalog: dict) -> None:
+    monkeypatch.setattr(_clookup, "discover_all_composites", lambda root, pkg: catalog)
+
+
+class TestCreateFromComposite:
+    def test_happy_yaml_source(self, ws: Path, monkeypatch: Any) -> None:
+        ref = _make_source(ws, "chromo", {"name": "chromo-doc", "state": {}})
+        src_path = ws / "pbg_testws" / "composites" / "chromo.composite.yaml"
+        _stub_catalog(monkeypatch, {
+            ref: {"name": "chromo", "id": ref, "kind": "spec", "_path": str(src_path)},
+        })
+        monkeypatch.setattr(
+            _imig, "_resolve_composite_source",
+            lambda r, root: (src_path, "chromo"),
+        )
+        monkeypatch.setattr(cm.uuid, "uuid4", _fixed_uuid("abcdef"))
+
+        resp, code = cm.create_from_composite(ws, {"composite_name": "chromo"})
+        assert code == 200, resp
+        assert resp == {"name": "study-chromo-abcdef"}
+        sdir = ws / "studies" / "study-chromo-abcdef"
+        spec = _read(sdir / "spec.yaml")
+        assert spec["name"] == "study-chromo-abcdef"
+        assert spec["baseline"] == "chromo"
+        assert spec["variants"] == [{
+            "name": "chromo", "source": ref,
+            "document": "./composites/chromo.yaml",
+        }]
+        assert spec["comparisons"] == []
+        assert spec["status"] == "draft"
+        sidecar = sdir / "composites" / "chromo.yaml"
+        assert _read(sidecar)["name"] == "chromo-doc"
+
+    def test_match_by_id_stem(self, ws: Path, monkeypatch: Any) -> None:
+        # Catalog record's YAML name differs; matched via the id-stem instead.
+        ref = _make_source(ws, "widget", {"name": "totally-different", "state": {}})
+        src_path = ws / "pbg_testws" / "composites" / "widget.composite.yaml"
+        _stub_catalog(monkeypatch, {
+            ref: {"name": "totally-different", "id": ref, "kind": "spec",
+                  "_path": str(src_path)},
+        })
+        monkeypatch.setattr(
+            _imig, "_resolve_composite_source",
+            lambda r, root: (src_path, "widget"),
+        )
+        monkeypatch.setattr(cm.uuid, "uuid4", _fixed_uuid("111111"))
+        resp, code = cm.create_from_composite(ws, {"composite_name": "widget"})
+        assert code == 200, resp
+        assert resp["name"] == "study-widget-111111"
+
+    def test_happy_generator_source(self, ws: Path, monkeypatch: Any) -> None:
+        ref = "pbg_testws.composites.gen"
+        _stub_catalog(monkeypatch, {
+            ref: {"name": "gen", "id": ref, "kind": "generator"},
+        })
+        import pbg_superpowers.composite_generator as _cg
+        monkeypatch.setattr(_cg, "_REGISTRY", {ref: object()}, raising=False)
+        monkeypatch.setattr(_cg, "build_generator",
+                            lambda entry: {"name": "gen", "state": {"x": 1}})
+        monkeypatch.setattr(cm.uuid, "uuid4", _fixed_uuid("222222"))
+        resp, code = cm.create_from_composite(ws, {"composite_name": "gen"})
+        assert code == 200, resp
+        sdir = ws / "studies" / "study-gen-222222"
+        assert _read(sdir / "composites" / "gen.yaml") == {"name": "gen", "state": {"x": 1}}
+
+    def test_400_blank(self, ws: Path) -> None:
+        resp, code = cm.create_from_composite(ws, {"composite_name": ""})
+        assert code == 400
+        assert resp["error"] == "composite_name required"
+
+    def test_404_not_in_catalog(self, ws: Path, monkeypatch: Any) -> None:
+        _stub_catalog(monkeypatch, {})
+        resp, code = cm.create_from_composite(ws, {"composite_name": "ghost"})
+        assert code == 404
+        assert "not in workspace catalog" in resp["error"]
+
+    def test_409_collision(self, ws: Path, monkeypatch: Any) -> None:
+        ref = _make_source(ws, "chromo", {"name": "chromo-doc", "state": {}})
+        src_path = ws / "pbg_testws" / "composites" / "chromo.composite.yaml"
+        _stub_catalog(monkeypatch, {
+            ref: {"name": "chromo", "id": ref, "kind": "spec", "_path": str(src_path)},
+        })
+        monkeypatch.setattr(
+            _imig, "_resolve_composite_source",
+            lambda r, root: (src_path, "chromo"),
+        )
+        monkeypatch.setattr(cm.uuid, "uuid4", _fixed_uuid("abcdef"))
+        (ws / "studies" / "study-chromo-abcdef").mkdir(parents=True)
+        resp, code = cm.create_from_composite(ws, {"composite_name": "chromo"})
+        assert code == 409
+        assert "already exists" in resp["error"]
+
+    def test_404_generator_build_failed(self, ws: Path, monkeypatch: Any) -> None:
+        ref = "pbg_testws.composites.gen"
+        _stub_catalog(monkeypatch, {ref: {"name": "gen", "id": ref, "kind": "generator"}})
+        import pbg_superpowers.composite_generator as _cg
+        monkeypatch.setattr(_cg, "_REGISTRY", {ref: object()}, raising=False)
+
+        def _boom(entry):
+            raise RuntimeError("nope")
+
+        monkeypatch.setattr(_cg, "build_generator", _boom)
+        monkeypatch.setattr(cm.uuid, "uuid4", _fixed_uuid("333333"))
+        resp, code = cm.create_from_composite(ws, {"composite_name": "gen"})
+        assert code == 400
+        assert "generator build failed" in resp["error"]
+
+
+# ---------------------------------------------------------------------------
+# create_from_composite (behavioral commit-path — drive real server shim)
+# ---------------------------------------------------------------------------
+
+
+class TestCreateFromCompositeCommitPath:
+    def _setup(self, ws: Path, monkeypatch: Any):
+        import vivarium_dashboard.server as _srv
+        monkeypatch.setattr(_srv, "WORKSPACE", ws)
+        ref = _make_source(ws, "chromo", {"name": "chromo-doc", "state": {}})
+        src_path = ws / "pbg_testws" / "composites" / "chromo.composite.yaml"
+        _stub_catalog(monkeypatch, {
+            ref: {"name": "chromo", "id": ref, "kind": "spec", "_path": str(src_path)},
+        })
+        monkeypatch.setattr(
+            _imig, "_resolve_composite_source",
+            lambda r, root: (src_path, "chromo"),
+        )
+        # uuid in BOTH the server module and the lib module namespaces.
+        monkeypatch.setattr(_srv.uuid, "uuid4", _fixed_uuid("abcdef"))
+        monkeypatch.setattr(cm.uuid, "uuid4", _fixed_uuid("abcdef"))
+        return _srv, ref
+
+    def test_commit_msg_and_post_wrapper(self, ws: Path, monkeypatch: Any) -> None:
+        _srv, ref = self._setup(ws, monkeypatch)
+        calls: dict[str, Any] = {}
+        monkeypatch.setattr(_srv, "_commit_or_run", _recorder_factory(calls))
+        handler, captured = _make_handler_and_capture()
+        handler._post_investigation_create_from_composite({"composite_name": "chromo"})
+        assert calls["commit_msg"] == (
+            "feat(investigations/study-chromo-abcdef): create from composite 'chromo'"
+        )
+        assert captured["code"] == 200
+        # Post-wrapper REPLACES resp with {"name": auto_name}.
+        assert captured["resp"] == {"name": "study-chromo-abcdef"}
+        assert (ws / "studies" / "study-chromo-abcdef" / "spec.yaml").is_file()
+
+    def test_400_before_wrapper(self, ws: Path, monkeypatch: Any) -> None:
+        import vivarium_dashboard.server as _srv
+        monkeypatch.setattr(_srv, "WORKSPACE", ws)
+
+        def _boom(commit_message, action_fn):
+            raise AssertionError("_commit_or_run must NOT be called on 400")
+
+        monkeypatch.setattr(_srv, "_commit_or_run", _boom)
+        handler, captured = _make_handler_and_capture()
+        handler._post_investigation_create_from_composite({"composite_name": ""})
+        assert captured["code"] == 400
+
+    def test_do_action_failure_is_500(self, ws: Path, monkeypatch: Any) -> None:
+        _srv, ref = self._setup(ws, monkeypatch)
+        captured_action: dict[str, Any] = {}
+
+        def _record_and_run(commit_message, action_fn):
+            try:
+                action_fn()
+            except Exception as exc:  # noqa: BLE001
+                captured_action["raised"] = exc
+                raise
+            return {"branch": "b"}, 200
+
+        def _apply_boom(*a, **k):
+            raise RuntimeError("disk full")
+
+        monkeypatch.setattr(_srv._composite_mut, "_apply_create_from_composite", _apply_boom)
+        monkeypatch.setattr(_srv, "_commit_or_run", _record_and_run)
+        handler, captured = _make_handler_and_capture()
+        handler._post_investigation_create_from_composite({"composite_name": "chromo"})
+        assert "raised" in captured_action
+        assert captured["code"] == 500
+        assert "workstream error" in captured["resp"]["error"]
 
 
 class TestRebuildCommitPath:
