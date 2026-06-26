@@ -9182,14 +9182,10 @@ class Handler(BaseHTTPRequestHandler):
         """GET /api/investigation-run-unblocked-status?job_id=<id>"""
         import urllib.parse
         from vivarium_dashboard.lib.run_jobs import manager
+        from vivarium_dashboard.lib import job_status_views as _job_status_views
         q = urllib.parse.parse_qs(self.path.split("?", 1)[-1] if "?" in self.path else "")
         job_id = (q.get("job_id") or [""])[0]
-        if not job_id:
-            return self._json({"jobs": manager.list_recent(10)}, 200)
-        job = manager.get(job_id)
-        if job is None:
-            return self._json({"error": "job not found"}, 404)
-        return self._json(job.to_dict(), 200)
+        return self._json(*_job_status_views.job_status(manager, job_id))
 
     def _render_investigation_comparative_visualisations(
         self, inv_slug: str, iset: dict, job
@@ -11454,15 +11450,11 @@ class Handler(BaseHTTPRequestHandler):
         from urllib.parse import parse_qs, urlparse
 
         from vivarium_dashboard.lib.remote_run_jobs import manager
+        from vivarium_dashboard.lib import job_status_views as _job_status_views
 
         qs = parse_qs(urlparse(self.path).query)
         job_id = (qs.get("job_id") or [""])[0]
-        if not job_id:
-            return self._json({"jobs": manager.list_recent(10)}, 200)
-        job = manager.get(job_id)
-        if job is None:
-            return self._json({"error": "job not found"}, 404)
-        return self._json(job.to_dict(), 200)
+        return self._json(*_job_status_views.job_status(manager, job_id))
 
     @staticmethod
     def _guess_mime(rel: str) -> str:
