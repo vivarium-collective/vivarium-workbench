@@ -479,3 +479,10 @@ export interface WorkAttachReportResponse {
   path: string;
   branch: string;
 }
+
+export interface WorkspacesOkResponse {
+  ok: boolean;
+}
+
+export interface WorkspaceEntry {
+}
