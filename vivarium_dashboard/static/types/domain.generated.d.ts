@@ -416,3 +416,6 @@ export interface WorkspacesList {
 
 export interface SystemDepsCheck {
 }
+
+export interface JobStatusPayload {
+}

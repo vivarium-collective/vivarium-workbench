@@ -1935,3 +1935,27 @@ class InvestigationRenderViz(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     name: Optional[str] = None
+
+
+class JobStatusPayload(BaseModel):
+    """200-path payload for the in-memory job-status GET routes.
+
+    Shared by ``GET /api/investigation-run-unblocked-status`` (reads
+    ``lib.run_jobs.manager``) and ``GET /api/remote-run-status`` (reads
+    ``lib.remote_run_jobs.manager``).  The 200 body is one of two variable
+    shapes:
+
+      * no ``job_id``    → ``{"jobs": [<job.to_dict()>, ...]}`` (recent jobs)
+      * known ``job_id`` → a single ``job.to_dict()`` dict
+
+    ``RunJob.to_dict()`` emits ``items[]`` while ``RemoteRunJob.to_dict()``
+    emits ``steps[]``, so the body is genuinely polymorphic.  Pure pass-through
+    (``extra="allow"``, **no declared fields**) — a declared field would
+    strip/coerce one of the two shapes.  The 404 (``{"error": "job not
+    found"}``) is a real non-200 path returned via ``JSONResponse``, not this
+    model.
+
+    Source: ``lib.job_status_views.job_status``.
+    """
+
+    model_config = ConfigDict(extra="allow")

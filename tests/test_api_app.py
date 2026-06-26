@@ -4495,3 +4495,88 @@ class TestBatch28InvVizRoutes:
             "/api/investigation-render-viz",
         ):
             assert p in paths and "post" in paths[p], p
+
+
+# ===========================================================================
+# Job status routes (in-memory manager singletons, read-only)
+# ===========================================================================
+
+class _FakeJob:
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    def to_dict(self) -> dict:
+        return dict(self._payload)
+
+
+class _FakeManager:
+    def __init__(self, jobs=None, recent=None) -> None:
+        self._jobs = jobs or {}
+        self._recent = recent if recent is not None else []
+
+    def list_recent(self, n: int = 20):
+        return list(self._recent)
+
+    def get(self, job_id: str):
+        return self._jobs.get(job_id)
+
+
+class TestJobStatusRoutes:
+    """The two FastAPI job-status GETs read the manager at call time via the
+    module attribute, so monkeypatching ``<module>.manager`` reroutes them to a
+    fake — no real background threads."""
+
+    # -- investigation-run-unblocked-status (lib.run_jobs.manager) -----------
+
+    def test_run_unblocked_jobs_list_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import run_jobs
+        monkeypatch.setattr(run_jobs, "manager", _FakeManager(recent=[{"job_id": "r1"}]))
+        r = client.get("/api/investigation-run-unblocked-status")
+        assert r.status_code == 200
+        assert r.json() == {"jobs": [{"job_id": "r1"}]}
+
+    def test_run_unblocked_single_job_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import run_jobs
+        job = _FakeJob({"job_id": "r9", "items": [{"status": "running"}]})
+        monkeypatch.setattr(run_jobs, "manager", _FakeManager(jobs={"r9": job}))
+        r = client.get("/api/investigation-run-unblocked-status?job_id=r9")
+        assert r.status_code == 200
+        assert r.json() == {"job_id": "r9", "items": [{"status": "running"}]}
+
+    def test_run_unblocked_missing_404(self, client, monkeypatch):
+        from vivarium_dashboard.lib import run_jobs
+        monkeypatch.setattr(run_jobs, "manager", _FakeManager(jobs={}))
+        r = client.get("/api/investigation-run-unblocked-status?job_id=ghost")
+        assert r.status_code == 404
+        assert r.json() == {"error": "job not found"}
+
+    # -- remote-run-status (lib.remote_run_jobs.manager) ---------------------
+
+    def test_remote_run_jobs_list_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import remote_run_jobs
+        monkeypatch.setattr(remote_run_jobs, "manager", _FakeManager(recent=[{"job_id": "rr1"}]))
+        r = client.get("/api/remote-run-status")
+        assert r.status_code == 200
+        assert r.json() == {"jobs": [{"job_id": "rr1"}]}
+
+    def test_remote_run_single_job_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import remote_run_jobs
+        job = _FakeJob({"job_id": "rr9", "steps": [{"name": "fetch", "status": "done"}]})
+        monkeypatch.setattr(remote_run_jobs, "manager", _FakeManager(jobs={"rr9": job}))
+        r = client.get("/api/remote-run-status?job_id=rr9")
+        assert r.status_code == 200
+        assert r.json() == {"job_id": "rr9", "steps": [{"name": "fetch", "status": "done"}]}
+
+    def test_remote_run_missing_404(self, client, monkeypatch):
+        from vivarium_dashboard.lib import remote_run_jobs
+        monkeypatch.setattr(remote_run_jobs, "manager", _FakeManager(jobs={}))
+        r = client.get("/api/remote-run-status?job_id=ghost")
+        assert r.status_code == 404
+        assert r.json() == {"error": "job not found"}
+
+    def test_routes_in_openapi(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        for p in ("/api/investigation-run-unblocked-status", "/api/remote-run-status"):
+            assert p in paths and "get" in paths[p], p
+        schemas = client.get("/openapi.json").json()["components"]["schemas"]
+        assert "JobStatusPayload" in schemas

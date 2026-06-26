@@ -122,6 +122,8 @@ _MODELS: list[type[BaseModel]] = [
     _models.SourceBuilds,
     _models.WorkspacesList,
     _models.SystemDepsCheck,
+    # Job status model (in-memory manager polling)
+    _models.JobStatusPayload,
 ]
 
 OUTPUT_PATH = (
