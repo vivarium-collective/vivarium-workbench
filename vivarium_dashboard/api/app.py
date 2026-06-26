@@ -43,6 +43,7 @@ from vivarium_dashboard.lib import viz_commit_mutations as _viz_commit_mut
 from vivarium_dashboard.lib import upload_mutations as _upload_mut
 from vivarium_dashboard.lib import reference_mutations as _reference_mut
 from vivarium_dashboard.lib import composite_mutations as _composite_mut
+from vivarium_dashboard.lib import investigation_viz_mutations as _inv_viz_mut
 from vivarium_dashboard.lib import lifecycle_mutations as _lifecycle_mut
 from vivarium_dashboard.lib import scaffold_mutations as _scaffold_mut
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
@@ -195,6 +196,10 @@ from vivarium_dashboard.lib.models import (
     InvestigationCompositePerturb,
     CompositePromoteToCatalog,
     InvestigationCompositeRebuild,
+    # Batch 28: request-body models for investigation composite/viz mutations
+    InvestigationCreateFromComposite,
+    InvestigationAddViz,
+    InvestigationRenderViz,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -490,6 +495,26 @@ _OPENAPI_TAGS = [
             "batch.  Errors carry ``{error: ...}`` at 400/404/409; reference-pdf "
             "success additionally returns ``bib_key`` / ``metadata_pending`` / "
             "``extracted``."
+        ),
+    },
+    {
+        "name": "Investigation viz",
+        "description": (
+            "Batch 28 POST routes — investigation composite/viz mutations: clone "
+            "a workspace-catalog composite into a fresh investigation "
+            "(/api/investigation-create-from-composite, uuid auto-named "
+            "``study-<slug>-<hex>`` → ``{name}``), append a viz entry to a "
+            "study's spec (/api/investigation-add-viz → ``{ok, investigation, "
+            "viz_name}``), and re-render a study's declared visualizations "
+            "against existing emitter data with NO sim re-run "
+            "(/api/investigation-render-viz → ``{ok, investigation, "
+            "n_visualizations, viz_paths}``).  The first two are "
+            "``_commit_or_run`` / ``_active_branch_action``-wrapped in the live "
+            "server; render-viz has no commit wrapper.  These FastAPI routes "
+            "call the lib builders in ``lib.composite_mutations`` / "
+            "``lib.investigation_viz_mutations`` directly (commit deferred to "
+            "the flip batch).  CSRF guard is deferred to the flip batch.  Errors "
+            "carry ``{error: ...}`` at 400/404/409/500."
         ),
     },
     {
@@ -3800,6 +3825,95 @@ def create_app() -> FastAPI:
         ``lib.composite_mutations.rebuild_investigation_composite``.
         """
         body, status = _composite_mut.rebuild_investigation_composite(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/investigation-create-from-composite",
+        tags=["Investigation viz"],
+        summary="Clone a workspace-catalog composite into a fresh investigation (no git commit on the FastAPI path)",
+    )
+    def investigation_create_from_composite(
+        req: InvestigationCreateFromComposite,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Clone a workspace-catalog composite into a fresh investigation.
+
+        Body: ``{composite_name}``.  Matched against the catalog record's
+        ``name`` first, then the dotted-id stem.  Creates ``studies/<auto>/``
+        with a v2-shape ``spec.yaml`` (uuid auto-named
+        ``study-<slug>-<6-hex>``) and copies the resolved source YAML to
+        ``./composites/<composite_name>.yaml``.
+
+        400 on missing ``composite_name`` / generator build failure; 404 when
+        the composite is not in the catalog / generator not registered / source
+        missing; 409 on an auto-name collision; 500 on lookup/catalog/workspace
+        failures; 200 ``{name: <auto>}`` on success.
+
+        Note: the live server path commits via ``_commit_or_run``; this FastAPI
+        route calls the lib builder directly (git commit deferred to the flip
+        batch).  Delegates to
+        ``lib.composite_mutations.create_from_composite``.
+        """
+        body, status = _composite_mut.create_from_composite(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/investigation-add-viz",
+        tags=["Investigation viz"],
+        summary="Append a visualization entry to a study's spec (no git commit on the FastAPI path)",
+    )
+    def investigation_add_viz(
+        req: InvestigationAddViz,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Append a visualization entry to a study's ``spec.yaml``.
+
+        Body: ``{investigation, name, address, config?}``.  Validates the
+        viz-name regex ``^[a-zA-Z0-9_-]+$`` and appends ``{name, address,
+        config}`` to the spec's ``visualizations`` list.
+
+        400 on missing fields / bad viz-name; 404 when the investigation is not
+        found; 409 when a visualization with that name already exists; 200
+        ``{ok: true, investigation, viz_name}`` on success.
+
+        Note: the live server path commits via ``_active_branch_action`` (a
+        duplicate raises → 500 there); this FastAPI route calls the lib builder
+        directly and returns the precise 409 (git commit deferred to the flip
+        batch).  Delegates to
+        ``lib.investigation_viz_mutations.add_viz``.
+        """
+        body, status = _inv_viz_mut.add_viz(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/investigation-render-viz",
+        tags=["Investigation viz"],
+        summary="Re-render a study's visualizations against existing emitter data (no sim re-run)",
+    )
+    def investigation_render_viz(
+        req: InvestigationRenderViz,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Re-render a study's declared visualizations. No simulation re-run.
+
+        Body: ``{name}``.  Builds the workspace ``<pkg>.core``, augments the
+        link registry with pbg_superpowers viz classes, and runs each viz doc
+        through a ``process_bigraph.Composite``.
+
+        400 on missing ``name`` / spec error; 404 when the investigation is not
+        found; 500 on build-core / render failure; 200 ``{ok: true,
+        investigation, n_visualizations, viz_paths}`` on success.
+
+        No commit wrapper in the live server — a plain no-commit render.
+        Delegates to ``lib.investigation_viz_mutations.render_viz``.
+        """
+        body, status = _inv_viz_mut.render_viz(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
