@@ -41,6 +41,7 @@ from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
 from vivarium_dashboard.lib import viz_write_mutations as _viz_write_mut
 from vivarium_dashboard.lib import viz_commit_mutations as _viz_commit_mut
 from vivarium_dashboard.lib import upload_mutations as _upload_mut
+from vivarium_dashboard.lib import reference_mutations as _reference_mut
 from vivarium_dashboard.lib import lifecycle_mutations as _lifecycle_mut
 from vivarium_dashboard.lib import scaffold_mutations as _scaffold_mut
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
@@ -185,6 +186,9 @@ from vivarium_dashboard.lib.models import (
     DatasetUploadBody,
     ExpertDocUploadBody,
     ImportRegisterBody,
+    # Batch 26: request-body models for reference mutations
+    ReferencePdf,
+    ReferenceBibtex,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -453,6 +457,22 @@ _OPENAPI_TAGS = [
             "batch.  Errors carry ``{error: ...}`` at 400/404/409; success "
             "returns ``{ok: true}`` (import also returns ``next_terminal_step`` "
             "+ ``note``)."
+        ),
+    },
+    {
+        "name": "References",
+        "description": (
+            "Batch 26 POST routes — paper-reference writers: drop-and-go PDF "
+            "(/api/reference-pdf, pypdf metadata extraction + bib append + "
+            "workspace.yaml references_pdfs + investigation register + claims) "
+            "and BibTeX paste (/api/reference-bibtex, also served at /api/reference). "
+            "Both are ``_active_branch_action``-wrapped in the live server; these "
+            "FastAPI routes call the lib builder directly (commit deferred to the "
+            "flip batch).  Each route delegates to a pure lib builder in "
+            "``lib.reference_mutations``.  CSRF guard is deferred to the flip "
+            "batch.  Errors carry ``{error: ...}`` at 400/404/409; reference-pdf "
+            "success additionally returns ``bib_key`` / ``metadata_pending`` / "
+            "``extracted``."
         ),
     },
     {
@@ -3538,6 +3558,107 @@ def create_app() -> FastAPI:
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
+
+    # -----------------------------------------------------------------------
+    # Batch 26: References (POST routes)
+    # NOTE: CSRF guard is deferred to the state/flip batch — same as batches 18-25.
+    # The live server shim routes through _active_branch_action; these FastAPI
+    # routes call the lib builder directly (commit deferred to the flip batch).
+    # The lib builder reads via ``body.get(...)``, so a plain ``model_dump()``
+    # (unset → None) is correct — no ``exclude_unset`` presence semantics here.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/reference-pdf",
+        tags=["References"],
+        summary="Add a paper reference from a PDF (drop-and-go; no git commit on the FastAPI path)",
+    )
+    def reference_pdf(
+        req: ReferencePdf,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Drop-and-go PDF reference flow.
+
+        Body: ``{pdf_b64, title?, authors?, year?, journal?, doi?, bib_key?,
+        investigation?, claim_mappings?}``.  pypdf extracts title/authors/year
+        from the PDF; the typed fields override it.  Saves the PDF under
+        ``references/papers/<bib_key>.pdf`` (or
+        ``investigations/<inv>/inputs/references/<bib_key>.pdf``), appends a
+        BibTeX entry to ``references/papers.bib``, registers the PDF in
+        ``workspace.yaml.references_pdfs`` (with ``_metadata_pending`` when the
+        metadata is incomplete), optionally registers the bare key in an
+        investigation, and merges claim mappings into ``claims.yaml``.
+
+        400 on missing ``pdf_b64`` / invalid investigation slug / invalid
+        ``bib_key``; 404 when the investigation is not found; 409 when the
+        BibTeX key already exists in papers.bib; 200
+        ``{ok: true, bib_key, metadata_pending, extracted}`` on success.
+
+        Note: the live server path commits via ``_active_branch_action``; this
+        FastAPI route calls the lib builder directly (git commit deferred to
+        the flip/state batch).
+
+        Delegates to ``lib.reference_mutations.register_reference_pdf``.
+        """
+        body, status = _reference_mut.register_reference_pdf(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    def _reference_bibtex(req: ReferenceBibtex, ws: Path) -> dict:
+        """Shared handler for /api/reference-bibtex and its /api/reference alias."""
+        body, status = _reference_mut.register_reference(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/reference-bibtex",
+        tags=["References"],
+        summary="Add a paper reference from pasted BibTeX (no git commit on the FastAPI path)",
+    )
+    def reference_bibtex(
+        req: ReferenceBibtex,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """BibTeX-paste reference flow.
+
+        Body: ``{bibtex_text, claim_mappings?, pdf_b64?, investigation?}``.
+        Parses the bib key from the pasted entry and appends it to
+        ``references/papers.bib`` (an investigation-scoped request MAY reuse an
+        existing key; the global flow treats a duplicate as a conflict),
+        optionally registers the bare key in an investigation, merges claim
+        mappings into ``claims.yaml``, and optionally saves a PDF + registers
+        it in ``workspace.yaml.references_pdfs``.
+
+        400 on missing ``bibtex_text`` / unparseable key / invalid investigation
+        slug; 404 when the investigation is not found; 409 when the BibTeX key
+        already exists in papers.bib (global flow only); 200 ``{ok: true}`` on
+        success.
+
+        Note: the live server path commits via ``_active_branch_action``; this
+        FastAPI route calls the lib builder directly (git commit deferred to
+        the flip/state batch).
+
+        Delegates to ``lib.reference_mutations.register_reference``.
+        """
+        return _reference_bibtex(req, ws)
+
+    @app.post(
+        "/api/reference",
+        tags=["References"],
+        summary="Add a paper reference from pasted BibTeX (legacy alias of /api/reference-bibtex)",
+    )
+    def reference(
+        req: ReferenceBibtex,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Legacy alias of ``POST /api/reference-bibtex`` — identical behaviour.
+
+        Both paths map to the same ``_post_reference`` handler in the live
+        server; here both call ``lib.reference_mutations.register_reference``.
+        """
+        return _reference_bibtex(req, ws)
 
     # -----------------------------------------------------------------------
     # CATCH-ALL — MUST stay registered LAST (immediately before ``return app``)

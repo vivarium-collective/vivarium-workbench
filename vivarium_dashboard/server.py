@@ -69,6 +69,7 @@ from vivarium_dashboard.lib import scaffold_mutations as _scaffold_mut
 from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
 from vivarium_dashboard.lib import viz_commit_mutations as _viz_commit_mut
 from vivarium_dashboard.lib import upload_mutations as _upload_mut
+from vivarium_dashboard.lib import reference_mutations as _reference_mut
 from vivarium_dashboard.lib.investigations_index import (
     _conclusions_excerpt,
     _format_baseline_source,
@@ -5172,61 +5173,19 @@ class Handler(BaseHTTPRequestHandler):
             commit_msg += " (metadata pending)"
 
         def action():
-            bib_file = workspace_paths().references / "papers.bib"
-            claims_file = workspace_paths().references / "claims.yaml"
-            if investigation:
-                pdf_dest_rel = f"investigations/{investigation}/inputs/references/{bib_key}.pdf"
-            else:
-                pdf_dest_rel = f"references/papers/{bib_key}.pdf"
-            pdf_dest = WORKSPACE / pdf_dest_rel
-
-            if bib_file.exists():
-                existing_text = bib_file.read_text(encoding="utf-8")
-                if re.search(rf"@\w+\{{{re.escape(bib_key)},", existing_text):
-                    raise ValueError(f"BibTeX key '{bib_key}' already exists in papers.bib")
-
-            sha = _save_upload(pdf_b64, pdf_dest)
-
-            bibtex_entry = build_bibtex(bib_key, title, authors, year, journal, doi)
-            bib_file.parent.mkdir(parents=True, exist_ok=True)
-            existing_bib = bib_file.read_text(encoding="utf-8") if bib_file.exists() else ""
-            with bib_file.open("a") as f:
-                if existing_bib and not existing_bib.endswith("\n"):
-                    f.write("\n")
-                f.write(bibtex_entry + "\n")
-
-            from vivarium_dashboard.lib.workspace_yaml import load_workspace, save_workspace
-            ws_file = WORKSPACE / "workspace.yaml"
-            ws = load_workspace(ws_file)
-            refs_pdfs = ws.setdefault("references_pdfs", [])
-            if refs_pdfs is None:
-                refs_pdfs = []
-                ws["references_pdfs"] = refs_pdfs
-            if not any(e.get("bib_key") == bib_key for e in refs_pdfs):
-                entry = {"bib_key": bib_key, "path": pdf_dest_rel, "sha256": sha}
-                if metadata_pending:
-                    entry["_metadata_pending"] = True
-                refs_pdfs.append(entry)
-            save_workspace(ws_file, ws)
-
-            if investigation:
-                if not _append_investigation_input(WORKSPACE, investigation, "references", bib_key):
-                    raise ValueError(f"investigation '{investigation}' not found")
-
-            if claim_ids:
-                import yaml as _yaml
-                existing_claims: dict = {}
-                if claims_file.exists():
-                    try:
-                        existing_claims = _yaml.safe_load(claims_file.read_text(encoding="utf-8")) or {}
-                    except Exception:
-                        existing_claims = {}
-                for claim_id in claim_ids:
-                    existing_claims.setdefault(claim_id, [])
-                    if bib_key not in existing_claims[claim_id]:
-                        existing_claims[claim_id].append(bib_key)
-                claims_file.parent.mkdir(parents=True, exist_ok=True)
-                claims_file.write_text(_yaml.safe_dump(existing_claims, sort_keys=False))
+            _reference_mut._apply_reference_pdf(
+                WORKSPACE,
+                bib_key=bib_key,
+                title=title,
+                authors=authors,
+                year=year,
+                journal=journal,
+                doi=doi,
+                investigation=investigation,
+                claim_ids=claim_ids,
+                metadata_pending=metadata_pending,
+                pdf_b64=pdf_b64,
+            )
 
         response, status = _active_branch_action(commit_msg, action)
         response["bib_key"] = bib_key
@@ -5265,60 +5224,14 @@ class Handler(BaseHTTPRequestHandler):
         commit_msg = f"feat(5): add reference '{bibkey}'"
 
         def action():
-            bib_file = workspace_paths().references / "papers.bib"
-            claims_file = workspace_paths().references / "claims.yaml"
-
-            already_in_bib = False
-            if bib_file.exists():
-                existing_text = bib_file.read_text(encoding="utf-8")
-                if f"{{{bibkey}," in existing_text or f"{{{bibkey} " in existing_text:
-                    already_in_bib = True
-                    # Investigation-scoped references may reuse an existing key
-                    # (just add the bare key to the investigation block); the
-                    # global flow still treats a duplicate as an error.
-                    if not investigation:
-                        raise ValueError(f"BibTeX key '{bibkey}' already exists in papers.bib")
-
-            if not already_in_bib:
-                bib_file.parent.mkdir(parents=True, exist_ok=True)
-                with bib_file.open("a") as f:
-                    f.write("\n" + bibtex_text + "\n")
-
-            if investigation:
-                if not _append_investigation_input(WORKSPACE, investigation, "references", bibkey):
-                    raise ValueError(f"investigation '{investigation}' not found")
-
-            if claim_mappings:
-                import yaml as _yaml
-                existing_claims: dict = {}
-                if claims_file.exists():
-                    try:
-                        existing_claims = _yaml.safe_load(claims_file.read_text(encoding="utf-8")) or {}
-                    except Exception:
-                        existing_claims = {}
-                for claim_id, bkey in claim_mappings.items():
-                    existing_claims.setdefault(claim_id, [])
-                    if bkey not in existing_claims[claim_id]:
-                        existing_claims[claim_id].append(bkey)
-                claims_file.parent.mkdir(parents=True, exist_ok=True)
-                claims_file.write_text(_yaml.safe_dump(existing_claims, sort_keys=False))
-
-            if pdf_b64:
-                pdf_dest_rel = f"references/papers/{bibkey}.pdf"
-                pdf_dest = WORKSPACE / pdf_dest_rel
-                sha = _save_upload(pdf_b64, pdf_dest)
-
-                _ws_add_to_sys_path()
-                from vivarium_dashboard.lib.workspace_yaml import load_workspace, save_workspace
-                ws_file = WORKSPACE / "workspace.yaml"
-                ws = load_workspace(ws_file)
-                refs_pdfs = ws.setdefault("references_pdfs", [])
-                if refs_pdfs is None:
-                    refs_pdfs = []
-                    ws["references_pdfs"] = refs_pdfs
-                if not any(e.get("bib_key") == bibkey for e in refs_pdfs):
-                    refs_pdfs.append({"bib_key": bibkey, "path": pdf_dest_rel, "sha256": sha})
-                save_workspace(ws_file, ws)
+            _reference_mut._apply_reference(
+                WORKSPACE,
+                bibkey=bibkey,
+                bibtex_text=bibtex_text,
+                investigation=investigation,
+                claim_mappings=claim_mappings,
+                pdf_b64=pdf_b64,
+            )
 
         return self._json(*_active_branch_action(commit_msg, action))
 
