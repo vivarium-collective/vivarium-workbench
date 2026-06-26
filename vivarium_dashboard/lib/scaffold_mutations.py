@@ -87,6 +87,10 @@ def iset_create(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
     inv_dir.mkdir(parents=True, exist_ok=True)
     atomic_write_text(target, body_yaml)
 
+    # build_iset_detail returns an additive SUPERSET of the legacy seam's
+    # minimal `_build_iset_detail_for_test` shape (every legacy key present with
+    # an equal value, plus richer fields). Verified additive-only by
+    # tests/test_scaffold_mutations_lib.py::TestIsetDetailAdditive.
     from vivarium_dashboard.lib.report_views import build_iset_detail as _bld
     detail = _bld(ws_root, name)
     if detail is None:
@@ -155,6 +159,8 @@ def iset_clone(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
     except (json.JSONDecodeError, IndexError):
         summary = {"stdout_tail": proc.stdout[-500:]}
 
+    # build_iset_detail returns an additive SUPERSET of the legacy seam's
+    # minimal shape (see iset_create) plus the clone_summary field below.
     from vivarium_dashboard.lib.report_views import build_iset_detail as _bld
     detail = _bld(ws_root, target)
     if detail is None:

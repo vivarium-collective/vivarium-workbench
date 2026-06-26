@@ -5,16 +5,19 @@ Covers:
   - iset_clone: happy path, validation errors (400), 404, 409, 501.
   - delete_investigation: happy path, 400 (missing name), 404 (not found).
 
-Also verifies:
-  - The server shim for investigation-delete still routes through
-    _active_branch_action (TestServerCommitPath).
-  - Validation 400/404 returns BEFORE the commit wrapper.
+Also verifies (behaviorally, by driving the real server handler):
+  - The server shim for investigation-delete routes the delete THROUGH
+    _active_branch_action with the exact commit_msg (TestServerCommitPath).
+  - Validation 400/404 returns BEFORE the commit wrapper is ever called.
+  - The inner action() delegates to lib.delete_investigation and re-raises on
+    a lib non-200 (batch-18 do_action lesson).
   - The FastAPI route returns the plain lib result.
+  - build_iset_detail's response is an additive superset of the legacy seam
+    (TestIsetDetailAdditive) — no key the legacy returned is dropped/changed.
 """
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
@@ -213,46 +216,166 @@ def test_delete_investigation_not_found(ws: Path) -> None:
 
 
 class TestServerCommitPath:
-    """Verify the server shim for investigation-delete stays commit-wrapped."""
+    """Behavioral tests of the live server ``_post_investigation_delete`` shim.
 
-    def _get_server_handler(self):
-        """Return a bare Handler-like object with _post_investigation_delete."""
+    These drive the real ``server.Handler._post_investigation_delete`` method
+    (not the lib builder) with ``_active_branch_action`` monkeypatched to a
+    recorder/raiser, so they actually PROVE the routing + ordering rather than
+    string-matching the source.  This is the exact live-commit path that
+    regressed in batch 18, so the proof must be behavioral.
+    """
+
+    def _handler(self):
+        """A bare Handler instance (no socket plumbing) + a _json capture.
+
+        ``_json`` is replaced with a recorder that captures ``(data, code)``
+        and returns the data dict so the method's return value is inspectable.
+        """
         from vivarium_dashboard.server import Handler  # type: ignore[attr-defined]
 
-        # Build a minimal mock: we only call the private mutation method,
-        # the HTTP plumbing is irrelevant.
         handler = object.__new__(Handler)
-        return handler
+        captured: dict = {}
 
-    def test_validation_400_before_commit_wrapper(self, ws: Path) -> None:
-        """400 (missing name) returns BEFORE _active_branch_action is called.
+        def _capture_json(data, code):
+            captured["data"] = data
+            captured["code"] = code
+            return data
 
-        The server shim validates name/dir BEFORE calling _active_branch_action.
-        The lib builder (which the action delegates to) also validates.
-        Either way, the 400 is surfaced without a git operation.
+        handler._json = _capture_json  # type: ignore[attr-defined]
+        return handler, captured
+
+    def test_shim_routes_through_active_branch_action(
+        self, ws: Path, monkeypatch
+    ) -> None:
+        """An existing investigation is deleted THROUGH _active_branch_action.
+
+        Proves: (a) _active_branch_action IS called, (b) with the exact
+        commit_msg, (c) the captured response is the wrapper's sentinel (so the
+        shim genuinely returns the wrapper result, not a bypass), and (d) the
+        inner action() actually invokes lib.scaffold_mutations.delete_investigation.
         """
-        # Direct lib call: 400 on empty body (validation path).
-        resp, code = delete_investigation(ws, {})
-        assert code == 400
-        assert "name is required" in resp["error"]
-
-    def test_validation_404_before_commit_wrapper(self, ws: Path) -> None:
-        """404 (not found) returns BEFORE _active_branch_action is called."""
-        resp, code = delete_investigation(ws, {"name": "ghost"})
-        assert code == 404
-
-    def test_server_shim_delegates_to_active_branch_action(self, ws: Path) -> None:
-        """The live server _post_investigation_delete calls _active_branch_action."""
         import vivarium_dashboard.server as _server
 
-        # Verify _active_branch_action is referenced in the shim body by
-        # checking the source contains the call (bytecode-level test).
-        import inspect
-        src = inspect.getsource(_server.Handler._post_investigation_delete)
-        assert "_active_branch_action" in src, (
-            "_post_investigation_delete no longer routes through _active_branch_action"
+        iset_create(ws, {"name": "del-me"})
+        inv_dir = ws / "investigations" / "del-me"
+        assert inv_dir.is_dir()
+
+        monkeypatch.setattr(_server, "WORKSPACE", ws)
+
+        calls: dict = {}
+        sentinel = {"branch": "feat/x", "commit": "abc1234", "message": "m"}
+
+        def _recorder(commit_message, action_fn):
+            calls["commit_msg"] = commit_message
+            calls["action"] = action_fn
+            # Run the action so the rmtree side-effect + lib delegation happen,
+            # mirroring the real wrapper (which calls action_fn() then commits).
+            action_fn()
+            return dict(sentinel), 200
+
+        monkeypatch.setattr(_server, "_active_branch_action", _recorder)
+
+        spy: dict = {"n": 0}
+        real_delete = _server._scaffold_mut.delete_investigation
+
+        def _spy_delete(ws_root, body):
+            spy["n"] += 1
+            spy["args"] = (ws_root, body)
+            return real_delete(ws_root, body)
+
+        monkeypatch.setattr(
+            _server._scaffold_mut, "delete_investigation", _spy_delete
         )
-        assert "commit_msg" in src
+
+        handler, captured = self._handler()
+        result = handler._post_investigation_delete({"name": "del-me"})
+
+        # (a) wrapper was called, (b) with the exact commit_msg
+        assert "commit_msg" in calls, "_active_branch_action was NOT called"
+        assert calls["commit_msg"] == "feat(investigations): delete del-me"
+        # (c) the shim returns the wrapper's sentinel (+ ok/name enrichment)
+        assert captured["code"] == 200
+        assert result["branch"] == "feat/x"
+        assert result["commit"] == "abc1234"
+        assert result["ok"] is True
+        assert result["name"] == "del-me"
+        # (d) inner action() delegated to the lib builder, which removed the dir
+        assert spy["n"] == 1, "action() did not call lib.delete_investigation"
+        assert spy["args"][0] == ws
+        assert not inv_dir.exists()
+
+    def test_missing_name_returns_400_before_wrapper(
+        self, ws: Path, monkeypatch
+    ) -> None:
+        """No name → 400 and _active_branch_action is NEVER called."""
+        import vivarium_dashboard.server as _server
+
+        monkeypatch.setattr(_server, "WORKSPACE", ws)
+
+        def _boom(commit_message, action_fn):
+            raise AssertionError("_active_branch_action must NOT be called on 400")
+
+        monkeypatch.setattr(_server, "_active_branch_action", _boom)
+
+        handler, captured = self._handler()
+        handler._post_investigation_delete({})
+        assert captured["code"] == 400
+        assert "name is required" in captured["data"]["error"]
+
+    def test_not_found_returns_404_before_wrapper(
+        self, ws: Path, monkeypatch
+    ) -> None:
+        """Unknown investigation → 404 and _active_branch_action is NEVER called."""
+        import vivarium_dashboard.server as _server
+
+        monkeypatch.setattr(_server, "WORKSPACE", ws)
+
+        def _boom(commit_message, action_fn):
+            raise AssertionError("_active_branch_action must NOT be called on 404")
+
+        monkeypatch.setattr(_server, "_active_branch_action", _boom)
+
+        handler, captured = self._handler()
+        handler._post_investigation_delete({"name": "ghost"})
+        assert captured["code"] == 404
+        assert "ghost" in captured["data"]["error"]
+
+    def test_action_reraises_on_lib_non_200(self, ws: Path, monkeypatch) -> None:
+        """The inner action() re-raises when the lib builder returns non-200.
+
+        Guards the batch-18 do_action lesson: a post-validation lib failure
+        must propagate (so the wrapper surfaces an error) rather than being
+        swallowed into a silent success.
+        """
+        import vivarium_dashboard.server as _server
+
+        iset_create(ws, {"name": "raise-me"})
+        monkeypatch.setattr(_server, "WORKSPACE", ws)
+
+        def _lib_fails(ws_root, body):
+            return {"error": "boom"}, 500
+
+        monkeypatch.setattr(
+            _server._scaffold_mut, "delete_investigation", _lib_fails
+        )
+
+        captured_action: dict = {}
+
+        def _record_and_run(commit_message, action_fn):
+            captured_action["fn"] = action_fn
+            try:
+                action_fn()
+            except Exception as exc:  # noqa: BLE001
+                captured_action["raised"] = exc
+                return {"error": str(exc)}, 500
+            return {"branch": "b", "commit": "c"}, 200
+
+        monkeypatch.setattr(_server, "_active_branch_action", _record_and_run)
+
+        handler, captured = self._handler()
+        handler._post_investigation_delete({"name": "raise-me"})
+        assert "raised" in captured_action, "action() swallowed the lib non-200"
+        assert captured["code"] == 500
 
     def test_fastapi_route_returns_plain_lib_result(self, ws: Path) -> None:
         """The FastAPI route returns delete_investigation's tuple directly."""
@@ -271,3 +394,62 @@ class TestServerCommitPath:
         # _active_branch_action-enriched response.
         assert "branch" not in r.json()
         assert "commit" not in r.json()
+
+
+# ---------------------------------------------------------------------------
+# Behavior-preservation: the iset-create/clone response is an additive
+# SUPERSET of the legacy minimal seam (_build_iset_detail_for_test) — no
+# legacy key dropped or changed.
+# ---------------------------------------------------------------------------
+
+
+class TestIsetDetailAdditive:
+    """build_iset_detail must not drop/alter any key the legacy seam returned."""
+
+    def _assert_superset(self, legacy: dict, new: dict, ctx: str) -> None:
+        for k, v in legacy.items():
+            assert k in new, f"{ctx}: legacy key {k!r} dropped from new response"
+            if k == "studies":
+                continue  # studies compared element-wise by the caller
+            assert new[k] == v, (
+                f"{ctx}: legacy key {k!r} changed value "
+                f"({v!r} -> {new[k]!r})"
+            )
+
+    def test_no_studies_response_is_superset(self, ws: Path) -> None:
+        from vivarium_dashboard.server import _build_iset_detail_for_test
+        from vivarium_dashboard.lib.report_views import build_iset_detail
+
+        iset_create(ws, {"name": "foo", "overview": "bar"})
+        legacy, code = _build_iset_detail_for_test(ws, "foo")
+        assert code == 200
+        new = build_iset_detail(ws, "foo")
+        assert new is not None
+        self._assert_superset(legacy, new, "top-level")
+
+    def test_with_study_response_is_superset(self, ws: Path) -> None:
+        from vivarium_dashboard.server import _build_iset_detail_for_test
+        from vivarium_dashboard.lib.report_views import build_iset_detail
+
+        inv = ws / "investigations" / "inv"
+        inv.mkdir()
+        (inv / "investigation.yaml").write_text(
+            "name: inv\ntitle: Inv\nstatus: planning\nstudies:\n  - s1\n"
+        )
+        sd = ws / "studies" / "s1"
+        sd.mkdir()
+        (sd / "study.yaml").write_text(yaml.safe_dump({
+            "schema_version": 3, "name": "s1", "status": "complete",
+            "baseline": [{"composite": "x", "name": "b"}],
+            "design_status": "approved", "gate_status": "passed",
+        }, sort_keys=False))
+
+        legacy, code = _build_iset_detail_for_test(ws, "inv")
+        assert code == 200
+        new = build_iset_detail(ws, "inv")
+        assert new is not None
+        self._assert_superset(legacy, new, "top-level")
+
+        legacy_study = legacy["studies"][0]
+        new_study = {s["name"]: s for s in new["studies"]}[legacy_study["name"]]
+        self._assert_superset(legacy_study, new_study, "study-level")
