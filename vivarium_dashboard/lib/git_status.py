@@ -74,6 +74,36 @@ def has_origin_remote(ws_root: Path) -> bool:
     return "origin" in (r.stdout or "").split()
 
 
+def diagnose_push_error(err: str) -> dict | None:
+    """Return a structured diagnosis for known push failure patterns, else None.
+
+    Verbatim copy of the pure ``server._diagnose_push_error`` (server keeps its
+    own copy; dedup at the flip). Used by ``lib.work_mutations.work_push`` to
+    attach a clickable diagnosis to a ``git push`` failure response.
+    """
+    if not err:
+        return None
+    if "does not appear to be a git repository" in err or "Could not read from remote repository" in err:
+        return {
+            "category": "no_origin",
+            "summary": "Push failed because no GitHub remote is configured.",
+            "suggestion": "Click `Create GitHub repo` in the workstream strip to create one and push in one step.",
+        }
+    if "Permission to" in err and "denied" in err:
+        return {
+            "category": "auth",
+            "summary": "Push denied — your git credential doesn't have write access.",
+            "suggestion": "Run `gh auth login` (or check your SSH key / token) and try again.",
+        }
+    if "rejected" in err and ("non-fast-forward" in err or "behind" in err):
+        return {
+            "category": "behind",
+            "summary": "Remote has commits your local branch doesn't.",
+            "suggestion": "Pull/rebase first: `git pull --rebase origin <branch>`, then push.",
+        }
+    return None
+
+
 def remote_repo_url(ws_root: Path) -> str | None:
     """Return origin's normalized remote URL, or ``None`` when unresolved.
 

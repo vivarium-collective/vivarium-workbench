@@ -457,3 +457,25 @@ export interface DirtyCommitAllResponse {
   message: string;
   paths: string[];
 }
+
+export interface WorkStartResponse {
+  ok: boolean;
+  branch: string;
+  base: string;
+}
+
+export interface WorkPushResponse {
+  ok: boolean;
+  branch: string;
+  log: string;
+}
+
+export interface WorkEndResponse {
+  ok: boolean;
+}
+
+export interface WorkAttachReportResponse {
+  ok: boolean;
+  path: string;
+  branch: string;
+}

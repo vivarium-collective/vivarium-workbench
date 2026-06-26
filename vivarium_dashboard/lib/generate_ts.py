@@ -136,6 +136,11 @@ _MODELS: list[type[BaseModel]] = [
     # C-state-3f: git-subprocess commit/push routes
     _models.BranchPushResponse,
     _models.DirtyCommitAllResponse,
+    # C-state-3f2: workstream-lifecycle routes
+    _models.WorkStartResponse,
+    _models.WorkPushResponse,
+    _models.WorkEndResponse,
+    _models.WorkAttachReportResponse,
 ]
 
 OUTPUT_PATH = (

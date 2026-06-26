@@ -584,3 +584,42 @@ class TestErrorBodyCrossServerParity:
         # Same builder + same dir → identical git error string under "error".
         assert legacy["body"] == fastapi.json()
         assert set(fastapi.json()) == {"error"}
+
+
+# ---------------------------------------------------------------------------
+# diagnose_push_error: parity vs the server copy (C-state-3f2 extraction)
+# ---------------------------------------------------------------------------
+
+class TestDiagnosePushError:
+    """``git_status.diagnose_push_error`` is a verbatim copy of the pure
+    ``server._diagnose_push_error``; assert byte-identical output across the
+    representative branches + the None tails."""
+
+    _CASES = [
+        "",
+        "fatal: 'origin' does not appear to be a git repository",
+        "fatal: Could not read from remote repository.",
+        "ERROR: Permission to owner/repo.git denied to user.",
+        "! [rejected]  feat -> feat (non-fast-forward)",
+        "! [rejected]  feat -> feat (fetch first, you are behind)",
+        "some unrelated error string with no known pattern",
+    ]
+
+    def test_parity_vs_server(self) -> None:
+        import vivarium_dashboard.server as server
+        for err in self._CASES:
+            assert gs.diagnose_push_error(err) == server._diagnose_push_error(err)
+
+    def test_no_origin_body(self) -> None:
+        d = gs.diagnose_push_error("fatal: Could not read from remote repository.")
+        assert d == {
+            "category": "no_origin",
+            "summary": "Push failed because no GitHub remote is configured.",
+            "suggestion": "Click `Create GitHub repo` in the workstream strip to create one and push in one step.",
+        }
+
+    def test_auth_and_behind_and_none(self) -> None:
+        assert gs.diagnose_push_error("Permission to x denied")["category"] == "auth"
+        assert gs.diagnose_push_error("[rejected] non-fast-forward")["category"] == "behind"
+        assert gs.diagnose_push_error("") is None
+        assert gs.diagnose_push_error("nope") is None
