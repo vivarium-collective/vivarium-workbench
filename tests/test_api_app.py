@@ -4580,3 +4580,100 @@ class TestJobStatusRoutes:
             assert p in paths and "get" in paths[p], p
         schemas = client.get("/openapi.json").json()["components"]["schemas"]
         assert "JobStatusPayload" in schemas
+
+
+# ===========================================================================
+# C-state-3a: CSRF same-origin middleware (whole POST/DELETE surface)
+# ===========================================================================
+class TestCsrfMiddleware:
+    """The @app.middleware('http') guard rejects cross-origin POST/DELETE and
+    never blocks GET. starlette's TestClient sends Host='testserver' and no
+    Origin by default (existing POST tests stay green)."""
+
+    def test_cross_origin_post_403(self, client):
+        # Existing POST route; cross-origin Origin → blocked BEFORE the route.
+        r = client.post(
+            "/api/source/switch",
+            json={"path": "/whatever"},
+            headers={"Origin": "http://evil.example.com"},
+        )
+        assert r.status_code == 403
+        assert r.json() == {"error": "cross-origin request forbidden"}
+
+    def test_same_origin_post_passes(self, client, monkeypatch):
+        # Origin host == Host ('testserver') → reaches the route (here a 400,
+        # not a 403 — it passed the guard).
+        from pbg_superpowers import workspace_catalog
+        monkeypatch.setattr(workspace_catalog, "list_workspaces", lambda: [])
+        r = client.post(
+            "/api/source/switch",
+            json={"path": "/nope"},
+            headers={"Origin": "http://testserver"},
+        )
+        assert r.status_code == 400
+        assert r.json()["error"].endswith("is not a registered workspace")
+
+    def test_no_origin_post_passes(self, client, monkeypatch):
+        from pbg_superpowers import workspace_catalog
+        monkeypatch.setattr(workspace_catalog, "list_workspaces", lambda: [])
+        r = client.post("/api/source/switch", json={"path": "/nope"})
+        assert r.status_code != 403
+        assert r.status_code == 400
+
+    def test_env_disabled_post_passes(self, client, monkeypatch):
+        monkeypatch.setenv("VIVARIUM_DASHBOARD_DISABLE_CSRF", "1")
+        from pbg_superpowers import workspace_catalog
+        monkeypatch.setattr(workspace_catalog, "list_workspaces", lambda: [])
+        r = client.post(
+            "/api/source/switch",
+            json={"path": "/nope"},
+            headers={"Origin": "http://evil.example.com"},
+        )
+        assert r.status_code != 403
+        assert r.status_code == 400
+
+    def test_get_never_blocked(self, client):
+        # A cross-origin GET is never blocked by the CSRF middleware.
+        r = client.get("/health", headers={"Origin": "http://evil.example.com"})
+        assert r.status_code == 200
+        assert r.json() == {"status": "ok"}
+
+
+# ===========================================================================
+# C-state-3a: POST /api/source/switch (in-process workspace re-point)
+# ===========================================================================
+class TestSourceSwitchRoute:
+    def test_missing_path_400(self, client):
+        r = client.post("/api/source/switch", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "missing 'path'"}
+
+    def test_unregistered_path_400(self, client, tmp_path, monkeypatch):
+        from pbg_superpowers import workspace_catalog
+        monkeypatch.setattr(workspace_catalog, "list_workspaces", lambda: [])
+        p = str(tmp_path / "nope")
+        r = client.post("/api/source/switch", json={"path": p})
+        assert r.status_code == 400
+        assert r.json() == {"error": f"{p!r} is not a registered workspace"}
+
+    def test_happy_path_repoints(self, client, tmp_path, monkeypatch):
+        from pbg_superpowers import workspace_catalog
+        from vivarium_dashboard.lib import _root
+        ws = tmp_path / "ws2"
+        ws.mkdir()
+        (ws / "workspace.yaml").write_text("name: w2\n")
+        monkeypatch.setattr(
+            workspace_catalog, "list_workspaces",
+            lambda: [{"path": str(ws), "name": "w2"}],
+        )
+        r = client.post("/api/source/switch", json={"path": str(ws)})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True, "source": {"path": str(ws), "name": "w2"}}
+        # The route re-pointed the shared lib root (autouse fixture resets it).
+        assert _root.get_workspace_root() == ws.resolve()
+
+    def test_route_in_openapi(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        assert "/api/source/switch" in paths and "post" in paths["/api/source/switch"]
+        schemas = client.get("/openapi.json").json()["components"]["schemas"]
+        assert "SourceSwitchResponse" in schemas

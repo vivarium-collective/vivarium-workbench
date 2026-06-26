@@ -38,6 +38,7 @@ from pydantic import ValidationError
 
 from vivarium_dashboard.lib import active_workspace
 from vivarium_dashboard.lib import csrf as _csrf
+from vivarium_dashboard.lib import source_switch_views as _source_switch_views
 from vivarium_dashboard.lib import job_status_views as _job_status_views
 from vivarium_dashboard.lib import run_jobs as _run_jobs
 from vivarium_dashboard.lib import remote_run_jobs as _remote_run_jobs
@@ -206,6 +207,9 @@ from vivarium_dashboard.lib.models import (
     InvestigationCreateFromComposite,
     InvestigationAddViz,
     InvestigationRenderViz,
+    # C-state-3a: source/switch (in-process workspace re-point)
+    SourceSwitchRequest,
+    SourceSwitchResponse,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -545,6 +549,18 @@ _OPENAPI_TAGS = [
             "via the pass-through ``JobStatusPayload``); an unknown id returns "
             "HTTP 404 ``{error: \"job not found\"}``.  Stateful but read-only — "
             "no workspace, no commit wrapper."
+        ),
+    },
+    {
+        "name": "Source",
+        "description": (
+            "In-process workspace re-pointing.  ``POST /api/source/switch`` "
+            "switches the active workspace to a registered catalog entry (sets "
+            "``lib._root`` + invalidates the lib caches via "
+            "``active_workspace.switch_workspace``).  The stdlib server "
+            "additionally updates its ``WORKSPACE`` global + server-local caches; "
+            "that half stays in ``server._switch_active_workspace``.  Guarded by "
+            "the same-origin CSRF middleware.  Errors carry ``{error: ...}`` at 400."
         ),
     },
     {
@@ -4026,6 +4042,41 @@ def create_app() -> FastAPI:
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return JobStatusPayload.model_validate(body)
+
+    # -----------------------------------------------------------------------
+    # Source — in-process workspace re-pointing (first stateful POST)
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/source/switch",
+        response_model=SourceSwitchResponse,
+        tags=["Source"],
+        summary="Re-point the active workspace in-process",
+    )
+    def source_switch(
+        req: SourceSwitchRequest,
+    ) -> Union[SourceSwitchResponse, JSONResponse]:
+        """Re-point the active workspace to a registered catalog entry.
+
+        Mirrors the stdlib ``POST /api/source/switch``.  Body: ``{"path": <dir>}``
+        — the path MUST resolve to a registered ``workspace_catalog`` entry (no
+        arbitrary paths).  On success the lib-side switch fires (sets
+        ``lib._root`` + invalidates the lib caches via
+        ``active_workspace.switch_workspace``) and returns ``{ok, source}``; the
+        client reloads.
+
+        Status codes (byte-identical to the legacy handler):
+          - 400  missing ``path`` (``{"error": "missing 'path'"}``)
+          - 400  unregistered path (``{"error": "<path> is not a registered workspace"}``)
+          - 200  ``{ok: true, source: {path, name}}``
+
+        The CSRF middleware already guards this POST.  Library-backed via
+        ``lib.source_switch_views.source_switch``.
+        """
+        body, status = _source_switch_views.source_switch(req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return SourceSwitchResponse.model_validate(body)
 
     # -----------------------------------------------------------------------
     # CATCH-ALL — MUST stay registered LAST (immediately before ``return app``)

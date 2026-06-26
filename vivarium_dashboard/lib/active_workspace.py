@@ -32,6 +32,18 @@ def set_workspace_root(path: Path | str) -> None:
     _root.set_workspace_root(path)
 
 
+def switch_workspace(new_root: Path | str) -> None:
+    """Re-point the active workspace (lib side): set the root + invalidate caches.
+
+    This is the lib-shareable half of a workspace switch — the part the FastAPI
+    app needs. The stdlib ``server._switch_active_workspace`` additionally
+    updates its own ``WORKSPACE`` global + server-local caches (stdlib-only),
+    so it is NOT refactored to call this; the dedup happens at the flip.
+    """
+    set_workspace_root(Path(new_root).resolve())
+    invalidate()
+
+
 # ---------------------------------------------------------------------------
 # Cache-invalidation callback registry
 # ---------------------------------------------------------------------------

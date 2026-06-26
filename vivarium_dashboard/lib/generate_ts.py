@@ -124,6 +124,9 @@ _MODELS: list[type[BaseModel]] = [
     _models.SystemDepsCheck,
     # Job status model (in-memory manager polling)
     _models.JobStatusPayload,
+    # Source-switch (in-process workspace re-point) response models
+    _models.SourceSwitchSource,
+    _models.SourceSwitchResponse,
 ]
 
 OUTPUT_PATH = (

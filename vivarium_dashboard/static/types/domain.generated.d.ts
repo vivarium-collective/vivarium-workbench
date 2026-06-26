@@ -419,3 +419,13 @@ export interface SystemDepsCheck {
 
 export interface JobStatusPayload {
 }
+
+export interface SourceSwitchSource {
+  path: string;
+  name: string | null;
+}
+
+export interface SourceSwitchResponse {
+  ok: boolean;
+  source: SourceSwitchSource;
+}

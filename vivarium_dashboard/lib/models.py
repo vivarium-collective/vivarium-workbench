@@ -1959,3 +1959,41 @@ class JobStatusPayload(BaseModel):
     """
 
     model_config = ConfigDict(extra="allow")
+
+
+class SourceSwitchRequest(BaseModel):
+    """POST /api/source/switch request body — ``{"path": <workspace dir>}``.
+
+    The path must resolve to a registered workspace-catalog entry; arbitrary
+    paths are rejected with HTTP 400 by the route's lib builder.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    path: str = ""
+
+
+class SourceSwitchResponse(BaseModel):
+    """200-path payload for ``POST /api/source/switch``.
+
+    ``{"ok": True, "source": {"path": <resolved>, "name": <catalog name|null>}}``.
+    The non-200 error paths (``{"error": ...}``, HTTP 400) are returned via
+    ``JSONResponse``, not this model.
+
+    Source: ``lib.source_switch_views.source_switch``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool = True
+    source: "SourceSwitchSource"
+
+
+class SourceSwitchSource(BaseModel):
+    """The ``source`` sub-object of :class:`SourceSwitchResponse`."""
+
+    path: str
+    name: Optional[str] = None
+
+
+SourceSwitchResponse.model_rebuild()
