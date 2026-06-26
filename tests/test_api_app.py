@@ -5117,3 +5117,139 @@ class TestAuthRoutes:
         ):
             assert p in paths and method in paths[p], (p, method)
         assert "AuthPayload" in spec["components"]["schemas"]
+
+
+# ===========================================================================
+# C-state-3f: git-subprocess commit/push routes
+#   POST /api/branch/push  +  POST /api/dirty-commit-all
+# Every test monkeypatches the lib seam (git_status / work_state / subprocess)
+# reached via the git_commit_views module — no test ever runs real git.  The 2
+# POSTs pass CSRF because the TestClient sends no Origin header.
+# ===========================================================================
+class TestGitCommitRoutes:
+    # -- POST /api/branch/push -----------------------------------------------
+
+    def test_branch_push_happy_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import git_commit_views as gcv
+        seen = {}
+
+        def _fake(ws_root, message):
+            seen["message"] = message
+            return {"ok": True, "pushed": True, "commit": "abc123", "branch": "feat/x"}
+
+        monkeypatch.setattr(gcv.git_status, "remote_commit_and_push", _fake)
+        r = client.post("/api/branch/push", json={"message": "my msg"})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True, "pushed": True, "commit": "abc123", "branch": "feat/x"}
+        assert seen["message"] == "my msg"
+
+    def test_branch_push_default_message_when_omitted(self, client, monkeypatch):
+        from vivarium_dashboard.lib import git_commit_views as gcv
+        seen = {}
+        monkeypatch.setattr(
+            gcv.git_status, "remote_commit_and_push",
+            lambda ws, msg: seen.setdefault("msg", msg)
+            or {"ok": True, "pushed": False, "commit": "x", "branch": "b"},
+        )
+        r = client.post("/api/branch/push")  # no body → BranchPushRequest defaults
+        assert r.status_code == 200
+        assert seen["msg"] == "dashboard commit"
+
+    def test_branch_push_not_a_git_repo_409(self, client, monkeypatch):
+        from vivarium_dashboard.lib import git_commit_views as gcv
+        from vivarium_dashboard.lib import git_status as gs
+
+        def _raise(ws, msg):
+            raise gs.NotAGitRepo("active source is not a git workspace (no commit/push)")
+
+        monkeypatch.setattr(gcv.git_status, "remote_commit_and_push", _raise)
+        r = client.post("/api/branch/push", json={"message": "m"})
+        assert r.status_code == 409
+        assert r.json() == {"error": "active source is not a git workspace (no commit/push)"}
+
+    def test_branch_push_error_500(self, client, monkeypatch):
+        from vivarium_dashboard.lib import git_commit_views as gcv
+
+        def _raise(ws, msg):
+            raise RuntimeError("git push failed: boom")
+
+        monkeypatch.setattr(gcv.git_status, "remote_commit_and_push", _raise)
+        r = client.post("/api/branch/push", json={})
+        assert r.status_code == 500
+        assert r.json() == {"error": "git push failed: boom"}
+
+    # -- POST /api/dirty-commit-all ------------------------------------------
+
+    def test_dirty_commit_all_no_workstream_409(self, client, monkeypatch):
+        from vivarium_dashboard.lib import git_commit_views as gcv
+        monkeypatch.setattr(gcv.work_state, "load_state_or_adopt_current", lambda: {})
+        r = client.post("/api/dirty-commit-all", json={})
+        assert r.status_code == 409
+        assert r.json() == {"error": "no active workstream"}
+
+    def test_dirty_commit_all_happy_200(self, client, monkeypatch):
+        import subprocess
+        from vivarium_dashboard.lib import git_commit_views as gcv
+
+        monkeypatch.setattr(
+            gcv.work_state, "load_state_or_adopt_current", lambda: {"active_branch": "feat/x"}
+        )
+        calls = []
+
+        def _fake_run(argv, *args, **kwargs):
+            calls.append(argv)
+            if "rev-parse" in argv and "--abbrev-ref" in argv:
+                return subprocess.CompletedProcess(argv, 0, stdout="feat/x", stderr="")
+            if argv[:3] == ["git", "rev-parse", "HEAD"]:
+                return subprocess.CompletedProcess(argv, 0, stdout="0123456789", stderr="")
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(gcv.subprocess, "run", _fake_run)
+        # staged-style porcelain ("M  path") survives the legacy ``.strip()``
+        monkeypatch.setattr(gcv.git_status, "dirty_workspace", lambda ws: "M  scripts/a.py")
+        monkeypatch.setattr(
+            gcv.git_status, "suggest_dirty_commit_message",
+            lambda paths: "chore(scripts): commit 1 pending file",
+        )
+        r = client.post("/api/dirty-commit-all", json={})
+        assert r.status_code == 200
+        assert r.json() == {
+            "commit_sha": "0123456",
+            "message": "chore(scripts): commit 1 pending file",
+            "paths": ["scripts/a.py"],
+        }
+        # the pbg-template identity flags + reports/ reset were used
+        assert any(a[:5] == ["git", "reset", "HEAD", "--", "reports/"] for a in calls)
+        commit_call = next(a for a in calls if "commit" in a)
+        assert commit_call == [
+            "git", "-c", "user.email=pbg-template@local",
+                  "-c", "user.name=pbg-template",
+                  "commit", "-m", "chore(scripts): commit 1 pending file",
+        ]
+
+    def test_dirty_commit_all_already_clean_409(self, client, monkeypatch):
+        import subprocess
+        from vivarium_dashboard.lib import git_commit_views as gcv
+
+        monkeypatch.setattr(
+            gcv.work_state, "load_state_or_adopt_current", lambda: {"active_branch": "feat/x"}
+        )
+        monkeypatch.setattr(
+            gcv.subprocess, "run",
+            lambda argv, *a, **k: subprocess.CompletedProcess(argv, 0, stdout="feat/x", stderr=""),
+        )
+        monkeypatch.setattr(gcv.git_status, "dirty_workspace", lambda ws: "")
+        r = client.post("/api/dirty-commit-all", json={})
+        assert r.status_code == 409
+        assert r.json() == {"error": "working tree is already clean"}
+
+    # -- OpenAPI registration ------------------------------------------------
+
+    def test_routes_in_openapi(self, client):
+        spec = client.get("/openapi.json").json()
+        paths = spec["paths"]
+        assert "/api/branch/push" in paths and "post" in paths["/api/branch/push"]
+        assert "/api/dirty-commit-all" in paths and "post" in paths["/api/dirty-commit-all"]
+        schemas = spec["components"]["schemas"]
+        assert "BranchPushResponse" in schemas
+        assert "DirtyCommitAllResponse" in schemas

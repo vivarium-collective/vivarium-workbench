@@ -63,6 +63,7 @@ from vivarium_dashboard.lib import explorer_data as _explorer_data
 from vivarium_dashboard.lib import metadata_mutations as _meta_mut
 from vivarium_dashboard.lib import study_crud_mutations as _study_crud_mut
 from vivarium_dashboard.lib import git_status as _git_status
+from vivarium_dashboard.lib import git_commit_views as _git_commit_views
 from vivarium_dashboard.lib import investigation_status
 from vivarium_dashboard.lib import investigation_views as _inv_views
 from vivarium_dashboard.lib import observables_views as _obs_views
@@ -222,6 +223,10 @@ from vivarium_dashboard.lib.models import (
     RemoteRunStartResponse,
     # C-state-3e: GitHub device-flow auth (pass-through payload)
     AuthPayload,
+    # C-state-3f: git-subprocess commit/push routes
+    BranchPushRequest,
+    BranchPushResponse,
+    DirtyCommitAllResponse,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -606,6 +611,25 @@ _OPENAPI_TAGS = [
             "400 (missing flow_id) / 202 (pending) / 410 (expired) / 403 (denied) / "
             "400 (other) / 200 (ok); status 200; logout 200; orgs 401 "
             "(unauthenticated) / 502 / 200.  Library-backed via ``lib.auth_views``."
+        ),
+    },
+    {
+        "name": "Git",
+        "description": (
+            "Git-subprocess commit/push WRITE routes for the active workspace — "
+            "2 POSTs ported from the stdlib handlers.  ``POST /api/branch/push`` "
+            "stages+commits any workspace changes (skipping when clean) and pushes "
+            "the current branch with the GitHub token, returning ``{ok, pushed, "
+            "commit, branch}``.  ``POST /api/dirty-commit-all`` checks out the "
+            "active workstream branch, stages all dirty files (minus reports/), "
+            "and commits them under the ``pbg-template`` identity, returning "
+            "``{commit_sha, message, paths}``.  Both shell out to ``git`` via the "
+            "pure ``lib.git_commit_views`` builders (which reuse "
+            "``lib.git_status``); every path (success AND error) is returned via "
+            "``JSONResponse`` so the lib-returned status code is preserved "
+            "verbatim — branch/push 409 (not a git workspace) / 500 / 200; "
+            "dirty-commit-all 409 (no workstream / already clean) / 500 / 200.  "
+            "The 2 POSTs are guarded by the same-origin CSRF middleware."
         ),
     },
     {
@@ -4339,6 +4363,80 @@ def create_app() -> FastAPI:
         """
         resp, code = _auth_views.auth_orgs()
         return JSONResponse(content=resp, status_code=code)
+
+    # -----------------------------------------------------------------------
+    # Git — subprocess commit/push WRITE routes (2 POSTs)
+    #
+    # Both shell out to git in the active workspace via the pure
+    # lib.git_commit_views builders (parameterised on ws_root, reusing
+    # lib.git_status).  Every path (success AND error) is returned via
+    # JSONResponse so the lib-returned status code is preserved verbatim — a
+    # plain model return would force 200.  The CSRF middleware already guards
+    # both POSTs.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/branch/push",
+        response_model=BranchPushResponse,
+        tags=["Git"],
+        summary="Commit workspace changes + push the current branch",
+    )
+    def branch_push(
+        req: Optional[BranchPushRequest] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Commit the workspace's changes (skip if clean) + push the current branch.
+
+        Mirrors the stdlib ``POST /api/branch/push``.  Body: ``{"message"?}`` —
+        an empty/omitted message falls back to ``"dashboard commit"``.  Stages
+        ``git add -A``, commits when dirty, then pushes ``-u origin <branch>``
+        with the GitHub token and returns the pushed HEAD SHA.
+
+        Status codes (byte-identical to the legacy handler):
+          - 409  not a git workspace (``{"error": "active source is not a git workspace (no commit/push)"}``)
+          - 500  ``{"error": <git/push failure>}``
+          - 200  ``{ok: true, pushed, commit, branch}``
+
+        The CSRF middleware already guards this POST.  Library-backed via the
+        pure ``lib.git_commit_views.branch_push``; every path is wrapped in
+        ``JSONResponse`` so the lib-returned status code is preserved verbatim.
+        """
+        payload = req.model_dump(exclude_none=True) if req is not None else {}
+        body, status = _git_commit_views.branch_push(ws, payload)
+        return JSONResponse(status_code=status, content=body)
+
+    @app.post(
+        "/api/dirty-commit-all",
+        response_model=DirtyCommitAllResponse,
+        tags=["Git"],
+        summary="Stage + commit all dirty files (minus reports/) on the active branch",
+    )
+    def dirty_commit_all(
+        body: dict = Body(default={}),
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Stage and commit all dirty files (minus reports/) under the active workstream.
+
+        Mirrors the stdlib ``POST /api/dirty-commit-all``.  Adopts the workspace's
+        current git HEAD as the workstream when none is active, checks it out if
+        HEAD differs, stages ``git add -A``, un-stages ``reports/``, then commits
+        under the ``pbg-template`` identity with an auto-generated conventional
+        message.  The request body is accepted and ignored.
+
+        Status codes (byte-identical to the legacy handler):
+          - 409  no active workstream (``{"error": "no active workstream"}``)
+          - 500  ``{"error": "git rev-parse failed: <stderr[:200]>"}``
+          - 500  ``{"error": "could not check out '<branch>': <stderr[:200]>"}``
+          - 409  already clean (``{"error": "working tree is already clean"}``)
+          - 500  ``{"error": "git operation failed: <stderr[:300]>"}``
+          - 200  ``{commit_sha: <sha[:7]>, message, paths}``
+
+        The CSRF middleware already guards this POST.  Library-backed via the
+        pure ``lib.git_commit_views.dirty_commit_all``; every path is wrapped in
+        ``JSONResponse`` so the lib-returned status code is preserved verbatim.
+        """
+        resp, status = _git_commit_views.dirty_commit_all(ws, body)
+        return JSONResponse(status_code=status, content=resp)
 
     # -----------------------------------------------------------------------
     # CATCH-ALL — MUST stay registered LAST (immediately before ``return app``)

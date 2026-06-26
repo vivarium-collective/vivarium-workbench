@@ -133,6 +133,9 @@ _MODELS: list[type[BaseModel]] = [
     _models.RemoteRunStartResponse,
     # C-state-3e: GitHub device-flow auth (5 routes, pass-through payload)
     _models.AuthPayload,
+    # C-state-3f: git-subprocess commit/push routes
+    _models.BranchPushResponse,
+    _models.DirtyCommitAllResponse,
 ]
 
 OUTPUT_PATH = (
