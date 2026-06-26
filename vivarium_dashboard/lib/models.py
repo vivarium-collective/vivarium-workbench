@@ -2041,3 +2041,33 @@ class SwitchBuildRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     simulator_id: Optional[int] = None
+
+
+class RemoteRunStartRequest(BaseModel):
+    """POST /api/remote-run-start request body.
+
+    ``{"study", "num_generations"?, "num_seeds"?, "run_parca"?}`` — submits a
+    remote sms-api pipeline job for the study.  An empty/missing ``study`` is
+    rejected with HTTP 400 by the route's lib builder.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    study: str = ""
+    num_generations: Optional[int] = None
+    num_seeds: Optional[int] = None
+    run_parca: Optional[bool] = None
+
+
+class RemoteRunStartResponse(BaseModel):
+    """202-path payload for ``POST /api/remote-run-start`` — ``{"job_id": <id>}``.
+
+    The non-202 error paths (``{"error": ...}``, HTTP 401/400/409/404) are
+    returned via ``JSONResponse``, not this model.
+
+    Source: ``lib.remote_run_views.remote_run_start``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    job_id: str

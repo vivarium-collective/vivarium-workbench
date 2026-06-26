@@ -129,6 +129,8 @@ _MODELS: list[type[BaseModel]] = [
     _models.SourceSwitchResponse,
     # C-state-3b: source build-remote response (switch-build reuses SourceSwitchResponse)
     _models.BuildRemoteResponse,
+    # C-state-3c: remote-run submit response
+    _models.RemoteRunStartResponse,
 ]
 
 OUTPUT_PATH = (

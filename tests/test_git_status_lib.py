@@ -119,6 +119,110 @@ class TestHelpers:
 
 
 # ---------------------------------------------------------------------------
+# remote_repo_url / remote_push_and_sha (C-state-3c extractions)
+#
+# subprocess is fully monkeypatched — these never shell out to a real git or
+# touch the network, only the lib's branching logic is exercised.
+# ---------------------------------------------------------------------------
+
+def _cp(returncode: int = 0, stdout: str = "", stderr: str = ""):
+    """Build a fake subprocess.CompletedProcess-like object."""
+    return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+class TestRemoteRepoUrl:
+    def test_non_zero_returns_none(self, monkeypatch, tmp_path: Path) -> None:
+        monkeypatch.setattr(gs.subprocess, "run", lambda *a, **k: _cp(returncode=128, stdout=""))
+        assert gs.remote_repo_url(tmp_path) is None
+
+    def test_empty_url_returns_none(self, monkeypatch, tmp_path: Path) -> None:
+        monkeypatch.setattr(gs.subprocess, "run", lambda *a, **k: _cp(returncode=0, stdout="   \n"))
+        assert gs.remote_repo_url(tmp_path) is None
+
+    def test_success_normalizes_url(self, monkeypatch, tmp_path: Path) -> None:
+        # The .git suffix is stripped by the reused lib _normalize_repo_url.
+        monkeypatch.setattr(
+            gs.subprocess, "run",
+            lambda *a, **k: _cp(returncode=0, stdout="https://github.com/x/y.git\n"),
+        )
+        assert gs.remote_repo_url(tmp_path) == "https://github.com/x/y"
+
+    def test_uses_lib_normalize_not_a_new_copy(self, monkeypatch, tmp_path: Path) -> None:
+        """remote_repo_url routes through lib.source_build_views._normalize_repo_url."""
+        from vivarium_dashboard.lib import source_build_views as sbv
+        monkeypatch.setattr(
+            gs.subprocess, "run",
+            lambda *a, **k: _cp(returncode=0, stdout="ssh://git@host/r.git"),
+        )
+        monkeypatch.setattr(sbv, "_normalize_repo_url", lambda u: "SENTINEL")
+        assert gs.remote_repo_url(tmp_path) == "SENTINEL"
+
+
+class TestRemotePushAndSha:
+    def test_success_returns_sha(self, monkeypatch, tmp_path: Path) -> None:
+        from vivarium_dashboard.lib import github_auth
+        monkeypatch.setattr(github_auth, "current_token_env", lambda: {})
+        calls = []
+
+        def _fake_run(args, **kwargs):
+            calls.append(args)
+            if args[:2] == ["git", "rev-parse"] and "--abbrev-ref" in args:
+                return _cp(stdout="feature/x\n")
+            if args[:2] == ["git", "push"]:
+                return _cp(returncode=0)
+            if args[:2] == ["git", "rev-parse"]:  # HEAD sha
+                return _cp(stdout="deadbeef\n")
+            raise AssertionError(f"unexpected git call: {args}")
+
+        monkeypatch.setattr(gs.subprocess, "run", _fake_run)
+        assert gs.remote_push_and_sha(tmp_path) == "deadbeef"
+        # Pushed -u origin <branch> with the resolved branch.
+        assert ["git", "push", "-u", "origin", "feature/x"] in calls
+
+    def test_detached_head_raises(self, monkeypatch, tmp_path: Path) -> None:
+        monkeypatch.setattr(gs.subprocess, "run", lambda *a, **k: _cp(stdout="HEAD\n"))
+        with pytest.raises(RuntimeError, match="not on a named branch"):
+            gs.remote_push_and_sha(tmp_path)
+
+    def test_empty_branch_raises(self, monkeypatch, tmp_path: Path) -> None:
+        monkeypatch.setattr(gs.subprocess, "run", lambda *a, **k: _cp(stdout="\n"))
+        with pytest.raises(RuntimeError, match="not on a named branch"):
+            gs.remote_push_and_sha(tmp_path)
+
+    def test_push_failure_raises_with_tail(self, monkeypatch, tmp_path: Path) -> None:
+        from vivarium_dashboard.lib import github_auth
+        monkeypatch.setattr(github_auth, "current_token_env", lambda: {})
+
+        def _fake_run(args, **kwargs):
+            if "--abbrev-ref" in args:
+                return _cp(stdout="feature/x\n")
+            if args[:2] == ["git", "push"]:
+                return _cp(returncode=1, stderr="remote: Permission denied\n")
+            raise AssertionError(f"unexpected git call: {args}")
+
+        monkeypatch.setattr(gs.subprocess, "run", _fake_run)
+        with pytest.raises(RuntimeError, match="git push failed:.*Permission denied"):
+            gs.remote_push_and_sha(tmp_path)
+
+    def test_empty_sha_raises(self, monkeypatch, tmp_path: Path) -> None:
+        from vivarium_dashboard.lib import github_auth
+        monkeypatch.setattr(github_auth, "current_token_env", lambda: {})
+
+        def _fake_run(args, **kwargs):
+            if "--abbrev-ref" in args:
+                return _cp(stdout="feature/x\n")
+            if args[:2] == ["git", "push"]:
+                return _cp(returncode=0)
+            if args[:2] == ["git", "rev-parse"]:
+                return _cp(stdout="\n")  # empty HEAD sha
+            raise AssertionError(f"unexpected git call: {args}")
+
+        monkeypatch.setattr(gs.subprocess, "run", _fake_run)
+        with pytest.raises(RuntimeError, match="could not resolve HEAD commit"):
+            gs.remote_push_and_sha(tmp_path)
+
+
+# ---------------------------------------------------------------------------
 # build_git_status
 # ---------------------------------------------------------------------------
 
