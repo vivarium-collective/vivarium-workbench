@@ -60,6 +60,11 @@ def dirty_commit_all(ws_root: Path, body: dict | None) -> tuple[dict, int]:
       * already clean         → ``({"error": "working tree is already clean"}, 409)``
       * git op failure        → ``({"error": f"git operation failed: {stderr[:300]}"}, 500)``
       * happy path            → ``({"commit_sha": sha[:7], "message", "paths"}, 200)``
+
+    The legacy handler's leading ``_ws_add_to_sys_path()`` is intentionally
+    omitted: ``work_state.load_state_or_adopt_current`` reads state via
+    ``lib._root`` (not workspace-local imports) and the git steps import
+    nothing from the workspace, so the sys.path mutation is unnecessary here.
     """
     state = work_state.load_state_or_adopt_current()
     branch = state.get("active_branch")
