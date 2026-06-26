@@ -36,7 +36,9 @@ Batch 27 of the FastAPI strangler-fig migration (POST phase, Phase C).
 from __future__ import annotations
 
 import copy
+import re
 import shutil
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +46,7 @@ import yaml
 
 from vivarium_dashboard.lib import study_spec as _study_spec
 from vivarium_dashboard.lib.upload_mutations import _ws_add_to_sys_path
+from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 
 
 def _spec_path_for(inv_dir: Path) -> Path:
@@ -437,3 +440,178 @@ def _apply_rebuild_investigation_composite(
     """File writes for the composite-rebuild flow (formerly the do_action() body)."""
     derived_path = inv_dir / "composites" / f"{comp_name}.yaml"
     derived_path.write_text(yaml.safe_dump(derived_doc, sort_keys=False))
+
+
+# ---------------------------------------------------------------------------
+# create_from_composite  (POST /api/investigation-create-from-composite)
+# ---------------------------------------------------------------------------
+#
+# Batch 28: clone a workspace-catalog composite into a fresh investigation.
+# The git-committing legacy server keeps its heavy pre-wrapper (catalog scan,
+# match-by-name-then-id-stem, generator-vs-file resolution, uuid auto-name and
+# 409 collision), its ``commit_msg``, its ``try/_commit_or_run/except`` and the
+# ``{"name": auto_name}`` post-wrapper VERBATIM — delegating ONLY the file
+# writes to ``_apply_create_from_composite`` (which receives the
+# already-computed values). The public ``create_from_composite`` re-does the
+# full validation+compute+_apply for the FastAPI path.
+
+
+def create_from_composite(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
+    """POST /api/investigation-create-from-composite {composite_name}.
+
+    Clone a workspace-catalog composite into a fresh investigation. The catalog
+    is the union of the workspace's own ``pbg_<slug>/composites/`` and every
+    installed ``pbg-*`` package's ``composites/`` directory. ``composite_name``
+    is matched against the catalog record's ``name`` first, then the dotted-id
+    stem (the bit after ``...composites.``).
+
+    Creates ``studies/<auto-name>/`` with a v2-shape ``spec.yaml`` and copies
+    the resolved source YAML to ``./composites/<composite_name>.yaml``.
+
+    Returns:
+      200  {name: <auto-name>}
+      400  validation / generator build failed
+      404  composite not in catalog / generator not registered / source missing
+      409  auto-named investigation already exists (uuid collision)
+      500  lookup unavailable / workspace.yaml read / catalog scan / generator dep
+    """
+    composite_name = (body.get("composite_name") or "").strip()
+    if not composite_name:
+        return {"error": "composite_name required"}, 400
+
+    _ws_add_to_sys_path(ws_root)
+    try:
+        from vivarium_dashboard.lib.composite_lookup import discover_all_composites
+        from vivarium_dashboard.lib.investigation_migrate import _resolve_composite_source
+    except ImportError as e:
+        return {"error": f"composite lookup unavailable: {e}"}, 500
+
+    # Resolve composite_name → dotted source ref via the workspace catalog.
+    try:
+        ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"failed to read workspace.yaml: {e}"}, 500
+    pkg = ws_data.get("package_path") or (
+        "pbg_" + (ws_data.get("name") or "").replace("-", "_")
+    )
+    try:
+        catalog = discover_all_composites(ws_root, pkg)
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"catalog scan failed: {e}"}, 500
+
+    # Match by YAML name first, then by id-stem (the bit after `.composites.`).
+    match_rec = None
+    for rec in catalog.values():
+        if rec.get("name") == composite_name:
+            match_rec = rec
+            break
+    if match_rec is None:
+        for rec_id, rec in catalog.items():
+            stem = rec_id.rsplit(".composites.", 1)[-1]
+            if stem == composite_name:
+                match_rec = rec
+                break
+    if match_rec is None:
+        return {"error": f"composite {composite_name!r} not in workspace catalog"}, 404
+
+    source_ref = match_rec["id"]  # e.g. pbg_testws.composites.foo
+    is_generator = match_rec.get("kind") == "generator"
+    generator_doc = None
+    source_path = None
+    if is_generator:
+        # Generator-kind: build the doc now and write it as a frozen YAML
+        # snapshot. The variant's `source` field still references the
+        # generator id (provenance); from the study's POV the sidecar is
+        # an ordinary spec.
+        try:
+            from pbg_superpowers.composite_generator import _REGISTRY, build_generator, discover_generators
+        except ImportError as e:
+            return {
+                "error": f"pbg-superpowers unavailable for generator resolution: {e}"
+            }, 500
+        if not _REGISTRY:
+            discover_generators()
+        entry = _REGISTRY.get(source_ref)
+        if entry is None:
+            return {
+                "error": f"generator {source_ref!r} not in registry — was it imported?"
+            }, 404
+        try:
+            generator_doc = build_generator(entry)
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"generator build failed: {e}"}, 400
+    else:
+        try:
+            source_path, _stem = _resolve_composite_source(source_ref, ws_root)
+        except (FileNotFoundError, ValueError) as e:
+            # Catalog has it but source file is gone (or installed package outside
+            # the workspace tree). Fall back to the catalog's recorded path.
+            recorded = match_rec.get("_path")
+            if recorded and Path(recorded).is_file():
+                source_path = Path(recorded)
+            else:
+                return {"error": str(e)}, 404
+
+    # Auto-name: study-<slug>-<6-char-hex>. Slugify: lowercase, replace
+    # any non-[a-z0-9_-] with '-', collapse repeats.
+    slug = re.sub(r"[^a-z0-9_-]+", "-", composite_name.lower()).strip("-") or "composite"
+    slug = re.sub(r"-+", "-", slug)
+    auto_name = f"study-{slug}-{uuid.uuid4().hex[:6]}"
+
+    wp = WorkspacePaths.load(ws_root)
+    inv_dir = wp.studies / auto_name
+    if inv_dir.exists() or (wp.investigations / auto_name).exists():
+        # Collision is astronomically unlikely with 24 bits of entropy, but
+        # if it happens (e.g. a test seeds uuid), surface it rather than
+        # silently overwriting.
+        return {"error": f"investigation {auto_name!r} already exists"}, 409
+
+    _apply_create_from_composite(
+        ws_root,
+        inv_dir=inv_dir,
+        composite_name=composite_name,
+        is_generator=is_generator,
+        generator_doc=generator_doc,
+        source_path=source_path,
+        source_ref=source_ref,
+        auto_name=auto_name,
+    )
+    return {"name": auto_name}, 200
+
+
+def _apply_create_from_composite(
+    ws_root: Path,
+    *,
+    inv_dir: Path,
+    composite_name: str,
+    is_generator: bool,
+    generator_doc: "dict | None",
+    source_path: "Path | None",
+    source_ref: str,
+    auto_name: str,
+) -> None:
+    """File writes for the create-from-composite flow (formerly do_action())."""
+    composites_dir = inv_dir / "composites"
+    composites_dir.mkdir(parents=True, exist_ok=True)
+    sidecar = composites_dir / f"{composite_name}.yaml"
+    if is_generator:
+        sidecar.write_text(yaml.safe_dump(generator_doc, sort_keys=False))
+    else:
+        assert source_path is not None  # non-generator → resolved source path
+        shutil.copy2(source_path, sidecar)
+
+    spec = {
+        "name": auto_name,
+        "baseline": composite_name,
+        "variants": [{
+            "name": composite_name,
+            "source": source_ref,
+            "document": f"./composites/{composite_name}.yaml",
+        }],
+        "comparisons": [],
+        "conclusions": "",
+        "question": "",
+        "hypothesis": "",
+        "status": "draft",
+    }
+    (inv_dir / "spec.yaml").write_text(yaml.safe_dump(spec, sort_keys=False))
