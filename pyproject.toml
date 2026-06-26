@@ -78,6 +78,7 @@ files = [
     "vivarium_dashboard/lib/viz_write_mutations.py",
     "vivarium_dashboard/lib/viz_commit_mutations.py",
     "vivarium_dashboard/lib/upload_mutations.py",
+    "vivarium_dashboard/lib/reference_mutations.py",
 ]
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true

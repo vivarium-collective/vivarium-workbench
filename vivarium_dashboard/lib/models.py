@@ -1777,3 +1777,47 @@ class ImportRegisterBody(BaseModel):
     ref: Optional[str] = None
     mode: Optional[str] = None
     description: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Batch 26: Reference mutation request-body models
+# ---------------------------------------------------------------------------
+
+
+class ReferencePdf(BaseModel):
+    """POST /api/reference-pdf {pdf_b64, title?, authors?, year?, journal?, doi?, bib_key?, investigation?, claim_mappings?}
+
+    Drop-and-go PDF reference flow: pypdf extracts metadata from the PDF and the
+    typed fields override it.  The lib builder reads via ``body.get(...)`` so a
+    plain ``model_dump()`` (unset → None) is fine; ``extra="allow"`` keeps any
+    forward-compatible keys.  ``year`` / ``claim_mappings`` are intentionally
+    loose (the builder coerces ``int(year)`` and accepts a str or list of claim
+    ids).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    pdf_b64: Optional[str] = None
+    title: Optional[str] = None
+    authors: Optional[str] = None
+    year: Optional[Any] = None
+    journal: Optional[str] = None
+    doi: Optional[str] = None
+    bib_key: Optional[str] = None
+    investigation: Optional[str] = None
+    claim_mappings: Optional[Any] = None
+
+
+class ReferenceBibtex(BaseModel):
+    """POST /api/reference-bibtex (alias /api/reference) {bibtex_text, pdf_b64?, investigation?, claim_mappings?}
+
+    BibTeX-paste reference flow.  ``claim_mappings`` accepts a ``"cid:bkey,..."``
+    string or a dict; the builder normalizes both.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    bibtex_text: Optional[str] = None
+    pdf_b64: Optional[str] = None
+    investigation: Optional[str] = None
+    claim_mappings: Optional[Any] = None
