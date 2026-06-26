@@ -58,6 +58,7 @@ from vivarium_dashboard.lib import registry as _registry_lib
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
 from vivarium_dashboard.lib import observables_views as _obs_views
 from vivarium_dashboard.lib import report_views as _report_views
+from vivarium_dashboard.lib import active_workspace
 from vivarium_dashboard.lib import study_viz_views as _study_viz
 from vivarium_dashboard.lib import system_info as _system_info_lib
 from vivarium_dashboard.lib import download_views as _download_views
@@ -270,18 +271,19 @@ _SWITCH_LOCK = Lock()
 def _invalidate_workspace_caches() -> None:
     """Clear every cache keyed to the active workspace. Called ONLY from
     _switch_active_workspace, so the invalidation surface is auditable."""
-    _REGISTRY_CACHE["data"] = None
-    _REGISTRY_CACHE["ts"] = 0.0
-    _report_views.clear_cache()       # SP4a linkage-index cache (lib)
-    _obs_views.clear_cache()          # observables build cache (lib)
-    _composite_state_views.clear_cache()  # composite-state build cache (lib)
+    # Clear every workspace-keyed LIB cache via the active-workspace registry.
+    # Each lib cache module (registry, report_views, observables_views,
+    # composite_state_views, data_sources) registers its clear_cache() at import,
+    # so this fires the identical set the old inline clears did.
+    # NB: registration happens at MODULE IMPORT — these 5 are imported at the top
+    # of server.py, so the registry is complete before any switch fires. If a
+    # cache module is ever made lazy-imported, register its clear_cache()
+    # explicitly or it will silently stop being invalidated on workspace switch.
+    active_workspace.invalidate()
+    # Server-local caches stay inline (server-internal; move/retire at the flip).
     _COMPOSITES_LIST_CACHE.clear()
     _RUN_STORE_SUMMARY_CACHE.clear()
     _WP_CACHE.clear()
-    # lib-level caches keyed by workspace (defensive — data_sources keys by
-    # ws_root, but clear so a re-point starts clean).
-    from vivarium_dashboard.lib.data_sources import _DATA_SOURCES_CACHE
-    _DATA_SOURCES_CACHE.clear()
 
 
 def _switch_active_workspace(new_root: Path) -> None:

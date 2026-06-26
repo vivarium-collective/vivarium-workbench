@@ -643,3 +643,21 @@ except Exception as e:
     _REGISTRY_CACHE["data"] = data
     _REGISTRY_CACHE["ts"] = now
     return data
+
+
+def clear_cache() -> None:
+    """Reset the registry cache (data + ts) on a workspace switch.
+
+    Mirrors the inline ``_REGISTRY_CACHE["data"]=None; ["ts"]=0.0`` that
+    ``server._invalidate_workspace_caches`` previously did, so the registry is
+    invalidated identically via active_workspace.invalidate(). Distinct from
+    :func:`clear_registry_cache` (data-only), kept for its other call sites.
+    """
+    _REGISTRY_CACHE["data"] = None
+    _REGISTRY_CACHE["ts"] = 0.0
+
+
+# Register this module's cache-clear with the active-workspace registry so a
+# workspace switch invalidates it via active_workspace.invalidate().
+from . import active_workspace as _aw  # noqa: E402
+_aw.register_clear_cb(clear_cache)

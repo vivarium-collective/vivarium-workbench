@@ -49,6 +49,7 @@ python_version = "3.11"
 # (server.py, the dict-building helpers) is intentionally not checked yet.
 files = [
     "vivarium_dashboard/lib/models.py",
+    "vivarium_dashboard/lib/active_workspace.py",
     "vivarium_dashboard/lib/investigation_status.py",
     "vivarium_dashboard/lib/saved_visualizations.py",
     "vivarium_dashboard/lib/data_sources.py",

@@ -7,6 +7,18 @@ from fastapi.testclient import TestClient
 
 from vivarium_dashboard.api import app as api_app
 from vivarium_dashboard.api.app import create_app, get_workspace
+from vivarium_dashboard.lib import active_workspace
+from vivarium_dashboard.lib import _root
+
+
+@pytest.fixture(autouse=True)
+def _reset_active_workspace():
+    """get_workspace() now reads the shared active-workspace root, so reset it
+    to None before/after each test to prevent cross-test state leakage."""
+    saved = _root.get_workspace_root()
+    _root._WS_ROOT = None
+    yield
+    _root._WS_ROOT = saved
 
 
 @pytest.fixture
@@ -176,11 +188,31 @@ def test_new_routes_in_openapi(client):
 
 
 def test_workspace_default_is_cwd(monkeypatch):
-    """get_workspace honors the env var and defaults to cwd."""
+    """get_workspace honors the env var and defaults to cwd (no root registered)."""
     monkeypatch.delenv("VIVARIUM_DASHBOARD_WORKSPACE", raising=False)
     assert get_workspace() == Path(".").resolve()
     monkeypatch.setenv("VIVARIUM_DASHBOARD_WORKSPACE", "/tmp/ws-xyz")
     assert get_workspace() == Path("/tmp/ws-xyz").resolve()
+
+
+def test_workspace_prefers_registered_root(tmp_path, monkeypatch):
+    """A root registered via active_workspace wins over the env var."""
+    monkeypatch.setenv("VIVARIUM_DASHBOARD_WORKSPACE", "/tmp/ws-env")
+    active_workspace.set_workspace_root(tmp_path)
+    assert get_workspace() == tmp_path.resolve()
+    # And both facade + _root see the SAME value (one _WS_ROOT).
+    assert _root.get_workspace_root() == tmp_path.resolve()
+
+
+def test_dependency_override_still_wins(tmp_path):
+    """dependency_overrides[get_workspace] takes precedence over a registered root."""
+    active_workspace.set_workspace_root(tmp_path / "registered")
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: tmp_path / "override"
+    client = TestClient(app)
+    # The override path is empty, so the simulations route returns its empty body.
+    resp = client.get("/api/simulations")
+    assert resp.status_code == 200
 
 
 def test_study_charts_empty_workspace(client):

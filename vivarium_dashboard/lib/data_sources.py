@@ -82,3 +82,14 @@ def enumerate_data_sources(ws_root: Path, bypass_cache: bool = False) -> dict:
 
     _DATA_SOURCES_CACHE[key] = {"data": data, "ts": now}
     return data
+
+
+def clear_cache() -> None:
+    """Clear the per-workspace data-sources cache (called on workspace switch)."""
+    _DATA_SOURCES_CACHE.clear()
+
+
+# Register this module's cache-clear with the active-workspace registry so a
+# workspace switch invalidates it via active_workspace.invalidate().
+from . import active_workspace as _aw  # noqa: E402
+_aw.register_clear_cb(clear_cache)

@@ -36,6 +36,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError
 
+from vivarium_dashboard.lib import active_workspace
 from vivarium_dashboard.lib import composite_run_views as _cr_views
 from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
 from vivarium_dashboard.lib import viz_write_mutations as _viz_write_mut
@@ -211,7 +212,16 @@ WORKSPACE_ENV = "VIVARIUM_DASHBOARD_WORKSPACE"
 
 
 def get_workspace() -> Path:
-    """Resolve the workspace root (overridable in tests via dependency_overrides)."""
+    """Resolve the workspace root (overridable in tests via dependency_overrides).
+
+    Prefers a root registered via ``active_workspace.set_workspace_root`` (the
+    single source of truth shared with the stdlib server). Falls back to the
+    ``VIVARIUM_DASHBOARD_WORKSPACE`` env var (default ``"."``) when none is set,
+    preserving the prior env-var + dependency_overrides behavior.
+    """
+    root = active_workspace.get_workspace_root()
+    if root is not None:
+        return root
     return Path(os.environ.get(WORKSPACE_ENV, ".")).resolve()
 
 

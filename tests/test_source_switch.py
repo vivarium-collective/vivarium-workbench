@@ -52,6 +52,41 @@ def test_switch_active_workspace_repoints_and_invalidates(tmp_path):
     assert _DATA_SOURCES_CACHE == {}
 
 
+def test_invalidate_clears_identical_cache_set_via_registry():
+    """Populate EVERY workspace-keyed cache, call _invalidate_workspace_caches,
+    and assert all are empty/reset — proving the registry-driven invalidation
+    clears the byte-identical set the old inline clears did.
+    """
+    from vivarium_dashboard.lib import active_workspace
+
+    # The 5 lib caches (cleared via the registry) ...
+    server._REGISTRY_CACHE["data"] = {"stale": True}
+    server._REGISTRY_CACHE["ts"] = 123.0
+    _report_views._LINKAGE_CACHE["x"] = 1
+    _obs_views._OBS_CACHE["x"] = 1
+    _cs_views._COMPOSITE_STATE_CACHE["x"] = 1
+    _DATA_SOURCES_CACHE["x"] = 1
+    # ... and the 3 server-local caches (cleared inline).
+    server._COMPOSITES_LIST_CACHE["x"] = 1
+    server._RUN_STORE_SUMMARY_CACHE["x"] = 1
+    server._WP_CACHE["x"] = 1
+
+    # The 5 lib clears must be reachable through the registry.
+    assert len(active_workspace._registered_cbs()) >= 5
+
+    server._invalidate_workspace_caches()
+
+    assert server._REGISTRY_CACHE["data"] is None
+    assert server._REGISTRY_CACHE["ts"] == 0.0
+    assert _report_views._LINKAGE_CACHE == {}
+    assert _obs_views._OBS_CACHE == {}
+    assert _cs_views._COMPOSITE_STATE_CACHE == {}
+    assert _DATA_SOURCES_CACHE == {}
+    assert server._COMPOSITES_LIST_CACHE == {}
+    assert server._RUN_STORE_SUMMARY_CACHE == {}
+    assert server._WP_CACHE == {}
+
+
 def test_source_switch_route_registered():
     assert server._POST_ROUTE_MAP.get("/api/source/switch") == "_post_source_switch"
 

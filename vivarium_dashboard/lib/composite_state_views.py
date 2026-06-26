@@ -223,3 +223,9 @@ def build_composite_state(
     from vivarium_dashboard.lib.process_docs import attach_process_docs
     attach_process_docs(doc)  # per-process docstrings for the inspector
     return {"state": doc, "kind": "spec"}, 200
+
+
+# Register this module's cache-clear with the active-workspace registry so a
+# workspace switch invalidates it via active_workspace.invalidate().
+from . import active_workspace as _aw  # noqa: E402
+_aw.register_clear_cb(clear_cache)
