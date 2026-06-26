@@ -5253,3 +5253,114 @@ class TestGitCommitRoutes:
         schemas = spec["components"]["schemas"]
         assert "BranchPushResponse" in schemas
         assert "DirtyCommitAllResponse" in schemas
+
+
+# ===========================================================================
+# C-state-3f2: workstream-lifecycle routes
+#   POST /api/work-start /api/work-push /api/work-end /api/work-attach-report
+# Tests monkeypatch the pure lib.work_mutations builders reached via the app's
+# _work_mutations seam — asserting the route preserves the lib status code via
+# JSONResponse (a plain model return would force 200).  No test runs real git.
+# The POSTs pass CSRF because the TestClient sends no Origin header.
+# ===========================================================================
+class TestWorkstreamRoutes:
+    # -- POST /api/work-start ------------------------------------------------
+
+    def test_work_start_happy_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import work_mutations as wm
+        seen = {}
+
+        def _fake(ws, body):
+            seen["body"] = body
+            return {"ok": True, "branch": "feat/x", "base": "main"}, 200
+
+        monkeypatch.setattr(wm, "work_start", _fake)
+        r = client.post("/api/work-start", json={"branch": "feat/x"})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True, "branch": "feat/x", "base": "main"}
+        assert seen["body"] == {"branch": "feat/x"}  # exclude_none drops base
+
+    def test_work_start_invalid_branch_400(self, client, monkeypatch):
+        from vivarium_dashboard.lib import work_mutations as wm
+        monkeypatch.setattr(wm, "work_start",
+                            lambda ws, body: ({"error": "invalid branch name"}, 400))
+        r = client.post("/api/work-start", json={"branch": ""})
+        assert r.status_code == 400
+        assert r.json() == {"error": "invalid branch name"}
+
+    # -- POST /api/work-push -------------------------------------------------
+
+    def test_work_push_happy_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import work_mutations as wm
+        monkeypatch.setattr(wm, "work_push",
+                            lambda ws, body: ({"ok": True, "branch": "feat/x", "log": "ok"}, 200))
+        r = client.post("/api/work-push", json={})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True, "branch": "feat/x", "log": "ok"}
+
+    def test_work_push_no_origin_409(self, client, monkeypatch):
+        from vivarium_dashboard.lib import work_mutations as wm
+        body = {
+            "error": "no GitHub remote configured",
+            "diagnosis": {"category": "no_origin", "summary": "s", "suggestion": "x"},
+        }
+        monkeypatch.setattr(wm, "work_push", lambda ws, b: (body, 409))
+        r = client.post("/api/work-push", json={})
+        assert r.status_code == 409
+        assert r.json() == body
+
+    # -- POST /api/work-end --------------------------------------------------
+
+    def test_work_end_happy_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import work_mutations as wm
+        monkeypatch.setattr(wm, "work_end", lambda ws, body: ({"ok": True}, 200))
+        r = client.post("/api/work-end", json={})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True}
+
+    def test_work_end_no_workstream_409(self, client, monkeypatch):
+        from vivarium_dashboard.lib import work_mutations as wm
+        monkeypatch.setattr(wm, "work_end",
+                            lambda ws, body: ({"error": "no active workstream"}, 409))
+        r = client.post("/api/work-end", json={})
+        assert r.status_code == 409
+        assert r.json() == {"error": "no active workstream"}
+
+    # -- POST /api/work-attach-report ----------------------------------------
+
+    def test_work_attach_report_happy_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import work_mutations as wm
+        seen = {}
+
+        def _fake(ws, body):
+            seen["body"] = body
+            return {"ok": True, "path": "reports/r.html", "branch": "feat/x",
+                    "commit_sha": "abc"}, 200
+
+        monkeypatch.setattr(wm, "work_attach_report", _fake)
+        r = client.post("/api/work-attach-report",
+                        json={"filename": "r.html", "html": "<x>"})
+        assert r.status_code == 200
+        assert r.json()["commit_sha"] == "abc"
+        assert seen["body"] == {"filename": "r.html", "html": "<x>"}
+
+    def test_work_attach_report_no_branch_409(self, client, monkeypatch):
+        from vivarium_dashboard.lib import work_mutations as wm
+        monkeypatch.setattr(wm, "work_attach_report",
+                            lambda ws, body: ({"error": "no active investigation branch"}, 409))
+        r = client.post("/api/work-attach-report", json={"filename": "r.html", "html": "<x>"})
+        assert r.status_code == 409
+        assert r.json() == {"error": "no active investigation branch"}
+
+    # -- OpenAPI registration ------------------------------------------------
+
+    def test_routes_in_openapi(self, client):
+        spec = client.get("/openapi.json").json()
+        paths = spec["paths"]
+        for p in ("/api/work-start", "/api/work-push", "/api/work-end",
+                  "/api/work-attach-report"):
+            assert p in paths and "post" in paths[p], p
+        schemas = spec["components"]["schemas"]
+        for name in ("WorkStartResponse", "WorkPushResponse", "WorkEndResponse",
+                     "WorkAttachReportResponse"):
+            assert name in schemas, name

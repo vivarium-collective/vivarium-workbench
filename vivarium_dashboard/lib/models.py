@@ -2142,3 +2142,109 @@ class DirtyCommitAllResponse(BaseModel):
     commit_sha: str
     message: str
     paths: list[str]
+
+
+# ---------------------------------------------------------------------------
+# C-state-3f2: workstream-lifecycle POST routes
+#   POST /api/work-start /api/work-push /api/work-end /api/work-attach-report
+# All four shell out to git in the active workspace via the pure
+# lib.work_mutations builders; every path (success AND error) is returned via
+# JSONResponse so the lib-returned status code is preserved verbatim — these
+# response models document only the 200-path surface in the OpenAPI schema /
+# generated TypeScript.  Request bodies use Optional fields so the lib's own
+# validation (not FastAPI's 422) produces the legacy 400 messages.
+# ---------------------------------------------------------------------------
+
+
+class WorkStartRequest(BaseModel):
+    """POST /api/work-start request body — ``{"branch", "base"?}``.
+
+    ``branch`` is Optional so an empty/omitted/invalid name reaches the lib
+    builder's ``invalid branch name`` 400 path (rather than FastAPI's 422);
+    ``base`` defaults to ``"main"`` inside the builder.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    branch: Optional[str] = None
+    base: Optional[str] = None
+
+
+class WorkStartResponse(BaseModel):
+    """200-path payload for ``POST /api/work-start``.
+
+    ``{"ok": True, "branch": <name>, "base": <name>}``.  The non-200 error
+    paths (``{"error": ...}``, HTTP 400/404/409/500) are returned via
+    ``JSONResponse``, not this model.
+
+    Source: ``lib.work_mutations.work_start``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool = True
+    branch: str
+    base: str
+
+
+class WorkPushResponse(BaseModel):
+    """200-path payload for ``POST /api/work-push``.
+
+    ``{"ok": True, "branch": <name>, "log": <push stdout tail>}``.  The non-200
+    error paths (``{"error", "diagnosis"?}``, HTTP 409/500) are returned via
+    ``JSONResponse``, not this model.
+
+    Source: ``lib.work_mutations.work_push``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool = True
+    branch: str
+    log: str
+
+
+class WorkEndResponse(BaseModel):
+    """200-path payload for ``POST /api/work-end`` — ``{"ok": True}``.
+
+    The non-200 error paths (``{"error": ...}``, HTTP 409) are returned via
+    ``JSONResponse``, not this model.
+
+    Source: ``lib.work_mutations.work_end``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool = True
+
+
+class WorkAttachReportRequest(BaseModel):
+    """POST /api/work-attach-report request body — ``{"filename", "html", "commit_message"?}``.
+
+    All fields Optional so missing ``filename``/``html`` reach the lib builder's
+    ``filename + html required`` 400 path (rather than FastAPI's 422).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    filename: Optional[str] = None
+    html: Optional[str] = None
+    commit_message: Optional[str] = None
+
+
+class WorkAttachReportResponse(BaseModel):
+    """200-path payload for ``POST /api/work-attach-report``.
+
+    Happy path ``{"ok": True, "path": <rel>, "branch": <name>, "commit_sha": <sha>}``;
+    the soft-success no-op path adds ``"unchanged": True`` (and omits
+    ``commit_sha``).  The non-200 error paths (``{"error": ...}``, HTTP
+    400/409/500) are returned via ``JSONResponse``, not this model.
+
+    Source: ``lib.work_mutations.work_attach_report``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool = True
+    path: str
+    branch: str

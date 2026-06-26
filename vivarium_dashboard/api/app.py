@@ -64,6 +64,7 @@ from vivarium_dashboard.lib import metadata_mutations as _meta_mut
 from vivarium_dashboard.lib import study_crud_mutations as _study_crud_mut
 from vivarium_dashboard.lib import git_status as _git_status
 from vivarium_dashboard.lib import git_commit_views as _git_commit_views
+from vivarium_dashboard.lib import work_mutations as _work_mutations
 from vivarium_dashboard.lib import investigation_status
 from vivarium_dashboard.lib import investigation_views as _inv_views
 from vivarium_dashboard.lib import observables_views as _obs_views
@@ -227,6 +228,13 @@ from vivarium_dashboard.lib.models import (
     BranchPushRequest,
     BranchPushResponse,
     DirtyCommitAllResponse,
+    # C-state-3f2: workstream-lifecycle routes
+    WorkStartRequest,
+    WorkStartResponse,
+    WorkPushResponse,
+    WorkEndResponse,
+    WorkAttachReportRequest,
+    WorkAttachReportResponse,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -4436,6 +4444,147 @@ def create_app() -> FastAPI:
         ``JSONResponse`` so the lib-returned status code is preserved verbatim.
         """
         resp, status = _git_commit_views.dirty_commit_all(ws, body)
+        return JSONResponse(status_code=status, content=resp)
+
+    # -----------------------------------------------------------------------
+    # Workstream — branch lifecycle + report-attach WRITE routes (4 POSTs)
+    #
+    # All four shell out to git in the active workspace via the pure
+    # lib.work_mutations builders (parameterised on ws_root, reusing
+    # lib.work_state + lib.git_status).  Every path (success AND error) is
+    # returned via JSONResponse so the lib-returned status code is preserved
+    # verbatim — a plain model return would force 200.  The CSRF middleware
+    # already guards all four POSTs.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/work-start",
+        response_model=WorkStartResponse,
+        tags=["Workstream"],
+        summary="Create a working branch from base + set it active",
+    )
+    def work_start(
+        req: Optional[WorkStartRequest] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Create a new working branch from ``base`` and mark it the active workstream.
+
+        Mirrors the stdlib ``POST /api/work-start``.  Body: ``{"branch", "base"?}``
+        — ``base`` defaults to ``"main"``.  Validates the branch name, refuses
+        when a workstream is already active or the tree is dirty, verifies the
+        base exists + the branch does not, then ``git checkout <base>`` +
+        ``git checkout -b <branch>`` and persists the workstream state.
+
+        Status codes (byte-identical to the legacy handler):
+          - 400  ``{"error": "invalid branch name"}``
+          - 409  ``{"error": "already on workstream '<b>'. End it first."}``
+          - 409  ``{"error": "working tree dirty — commit or stash first"}``
+          - 404  ``{"error": "base branch '<base>' not found"}``
+          - 409  ``{"error": "branch '<b>' already exists. ..."}``
+          - 500  ``{"error": "branch create failed: <stderr[:300]>"}``
+          - 200  ``{ok: true, branch, base}``
+
+        The CSRF middleware already guards this POST.  Library-backed via the
+        pure ``lib.work_mutations.work_start``; every path is wrapped in
+        ``JSONResponse`` so the lib-returned status code is preserved verbatim.
+        """
+        payload = req.model_dump(exclude_none=True) if req is not None else {}
+        resp, status = _work_mutations.work_start(ws, payload)
+        return JSONResponse(status_code=status, content=resp)
+
+    @app.post(
+        "/api/work-push",
+        response_model=WorkPushResponse,
+        tags=["Workstream"],
+        summary="Push the active workstream branch to origin",
+    )
+    def work_push(
+        body: dict = Body(default={}),
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Push the active workstream branch to ``origin`` with ``-u``.
+
+        Mirrors the stdlib ``POST /api/work-push``.  Adopts the workspace's
+        current git HEAD as the workstream when none is active.  Refuses cleanly
+        with a structured ``no_origin`` diagnosis when no origin remote exists,
+        attaches a ``diagnose_push_error`` diagnosis to push failures, and marks
+        the workstream ``pushed`` on success.  The request body is ignored.
+
+        Status codes (byte-identical to the legacy handler):
+          - 409  ``{"error": "no active workstream"}``
+          - 409  ``{"error": "no GitHub remote configured", "diagnosis": {...no_origin...}}``
+          - 500  ``{"error": "push failed: <err[:300]>", "diagnosis"?}``
+          - 200  ``{ok: true, branch, log}``
+
+        The CSRF middleware already guards this POST.  Library-backed via the
+        pure ``lib.work_mutations.work_push``; every path is wrapped in
+        ``JSONResponse`` so the lib-returned status code is preserved verbatim.
+        """
+        resp, status = _work_mutations.work_push(ws, body)
+        return JSONResponse(status_code=status, content=resp)
+
+    @app.post(
+        "/api/work-end",
+        response_model=WorkEndResponse,
+        tags=["Workstream"],
+        summary="Check out the base branch + clear the workstream",
+    )
+    def work_end(
+        body: dict = Body(default={}),
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """End the active workstream: check out the base branch + clear state.
+
+        Mirrors the stdlib ``POST /api/work-end``.  Refuses when no workstream is
+        active or the tree is dirty, then ``git checkout <base>`` (base from the
+        workstream state, default ``"main"``) and clears the workstream state.
+        The request body is ignored.
+
+        Status codes (byte-identical to the legacy handler):
+          - 409  ``{"error": "no active workstream"}``
+          - 409  ``{"error": "uncommitted changes — commit or stash before ending"}``
+          - 200  ``{ok: true}``
+
+        The CSRF middleware already guards this POST.  Library-backed via the
+        pure ``lib.work_mutations.work_end``; every path is wrapped in
+        ``JSONResponse`` so the lib-returned status code is preserved verbatim.
+        """
+        resp, status = _work_mutations.work_end(ws, body)
+        return JSONResponse(status_code=status, content=resp)
+
+    @app.post(
+        "/api/work-attach-report",
+        response_model=WorkAttachReportResponse,
+        tags=["Workstream"],
+        summary="Write a report file to reports/ + commit it on the active branch",
+    )
+    def work_attach_report(
+        req: Optional[WorkAttachReportRequest] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Write ``html`` to ``reports/<filename>`` and commit it on the active branch.
+
+        Mirrors the stdlib ``POST /api/work-attach-report``.  Body:
+        ``{"filename", "html", "commit_message"?}``.  Requires an active branch +
+        a bare ``filename`` and non-empty ``html`` string, writes the file under
+        the workspace's ``reports`` dir, then ``git add`` + ``git commit`` the
+        single file (a soft-success ``unchanged: true`` when nothing changed).
+
+        Status codes (byte-identical to the legacy handler):
+          - 409  ``{"error": "no active investigation branch"}``
+          - 400  ``{"error": "filename + html required"}``
+          - 400  ``{"error": "filename must be a bare name (no path / no leading .)"}``
+          - 500  ``{"error": "git add failed: <(stderr or stdout)[:300]>"}``
+          - 200  ``{ok: true, unchanged: true, path, branch}`` (nothing to commit)
+          - 500  ``{"error": "git commit failed: <stderr[:300]>"}``
+          - 200  ``{ok: true, path, branch, commit_sha}``
+
+        The CSRF middleware already guards this POST.  Library-backed via the
+        pure ``lib.work_mutations.work_attach_report``; every path is wrapped in
+        ``JSONResponse`` so the lib-returned status code is preserved verbatim.
+        """
+        payload = req.model_dump(exclude_none=True) if req is not None else {}
+        resp, status = _work_mutations.work_attach_report(ws, payload)
         return JSONResponse(status_code=status, content=resp)
 
     # -----------------------------------------------------------------------
