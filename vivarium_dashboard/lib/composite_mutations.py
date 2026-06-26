@@ -243,8 +243,8 @@ def _apply_perturb_investigation_composite(
     derived.write_text(yaml.safe_dump(derived_doc, sort_keys=False))
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
     variants = spec.setdefault('variants', [])
-    entry = {'name': comp_name, 'extends': extends,
-             'document': f'./composites/{comp_name}.yaml'}
+    entry: dict[str, Any] = {'name': comp_name, 'extends': extends,
+                             'document': f'./composites/{comp_name}.yaml'}
     intervention = {
         'description': body.get('description') if body.get('description') is not None else '',
     }
