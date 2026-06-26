@@ -4203,7 +4203,11 @@ def create_app() -> FastAPI:
         every path (incl. the 202 success) is wrapped in ``JSONResponse`` so the
         lib-returned status code is preserved verbatim.
         """
-        body, status = _remote_run_views.remote_run_start(ws, req.model_dump())
+        # exclude_none so an OMITTED optional field is absent (not present-as-None)
+        # — the lib builder's ``body.get("run_parca", True)`` must see the True
+        # default for a client that omits the key, matching the legacy raw-JSON
+        # contract (``bool(None)`` would otherwise flip the default to False).
+        body, status = _remote_run_views.remote_run_start(ws, req.model_dump(exclude_none=True))
         return JSONResponse(status_code=status, content=body)
 
     # -----------------------------------------------------------------------

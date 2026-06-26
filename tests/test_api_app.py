@@ -4887,6 +4887,51 @@ class TestRemoteRunStartRoute:
         assert captured["study"] == "study-a"
         assert callable(captured["worker"])
 
+    def _wire_happy(self, rrv, tmp_path, monkeypatch, captured):
+        """Monkeypatch every external for a happy submit; capture PipelineCtx kwargs."""
+        class _Job:
+            job_id = "JX"
+        monkeypatch.setattr(rrv.github_auth, "current_session", lambda: object())
+        monkeypatch.setattr(rrv.git_status, "has_origin_remote", lambda ws: True)
+        monkeypatch.setattr(rrv.git_status, "remote_repo_url", lambda ws: "https://github.com/x/y")
+        spec_file = tmp_path / "study.yaml"
+        spec_file.write_text("baseline: []\n")
+        monkeypatch.setattr(rrv.study_spec, "study_spec_path", lambda ws, name: spec_file)
+        monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
+        monkeypatch.setattr(rrv, "load_spec", lambda p: {"baseline": [], "readouts": []})
+        import subprocess as _sp
+        monkeypatch.setattr(
+            rrv.subprocess, "run",
+            lambda *a, **k: _sp.CompletedProcess(args=[], returncode=0, stdout="feature/x\n"),
+        )
+        monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: object())
+        monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
+
+        def _ctx(**kwargs):
+            captured.update(kwargs)
+            return object()
+        monkeypatch.setattr(rrv, "PipelineCtx", _ctx)
+        monkeypatch.setattr(rrv, "run_remote_pipeline", lambda j, ctx: None)
+        monkeypatch.setattr(rrv.manager, "submit", lambda study, worker_fn: _Job())
+
+    def test_run_parca_defaults_true_when_omitted(self, client, tmp_path, monkeypatch):
+        # Legacy raw-JSON contract: an OMITTED run_parca runs ParCa (.get(..., True)).
+        # The route must not let pydantic's None default flip it to False.
+        from vivarium_dashboard.lib import remote_run_views as rrv
+        captured = {}
+        self._wire_happy(rrv, tmp_path, monkeypatch, captured)
+        r = client.post("/api/remote-run-start", json={"study": "study-a"})
+        assert r.status_code == 202
+        assert captured["run_parca"] is True
+
+    def test_run_parca_explicit_false_preserved(self, client, tmp_path, monkeypatch):
+        from vivarium_dashboard.lib import remote_run_views as rrv
+        captured = {}
+        self._wire_happy(rrv, tmp_path, monkeypatch, captured)
+        r = client.post("/api/remote-run-start", json={"study": "study-a", "run_parca": False})
+        assert r.status_code == 202
+        assert captured["run_parca"] is False
+
     def test_route_in_openapi(self, client):
         paths = client.get("/openapi.json").json()["paths"]
         assert "/api/remote-run-start" in paths
