@@ -86,6 +86,7 @@ files = [
     "vivarium_dashboard/lib/csrf.py",
     "vivarium_dashboard/lib/source_switch_views.py",
     "vivarium_dashboard/lib/source_build_views.py",
+    "vivarium_dashboard/lib/remote_run_views.py",
 ]
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true

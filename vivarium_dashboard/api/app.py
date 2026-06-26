@@ -43,6 +43,7 @@ from vivarium_dashboard.lib import source_build_views as _source_build_views
 from vivarium_dashboard.lib import job_status_views as _job_status_views
 from vivarium_dashboard.lib import run_jobs as _run_jobs
 from vivarium_dashboard.lib import remote_run_jobs as _remote_run_jobs
+from vivarium_dashboard.lib import remote_run_views as _remote_run_views
 from vivarium_dashboard.lib import composite_run_views as _cr_views
 from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
 from vivarium_dashboard.lib import viz_write_mutations as _viz_write_mut
@@ -215,6 +216,9 @@ from vivarium_dashboard.lib.models import (
     BuildRemoteRequest,
     BuildRemoteResponse,
     SwitchBuildRequest,
+    # C-state-3c: remote-run submit (manager.submit pipeline job)
+    RemoteRunStartRequest,
+    RemoteRunStartResponse,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -566,6 +570,19 @@ _OPENAPI_TAGS = [
             "additionally updates its ``WORKSPACE`` global + server-local caches; "
             "that half stays in ``server._switch_active_workspace``.  Guarded by "
             "the same-origin CSRF middleware.  Errors carry ``{error: ...}`` at 400."
+        ),
+    },
+    {
+        "name": "Runs",
+        "description": (
+            "Remote (sms-api) simulation-run SUBMIT.  ``POST /api/remote-run-start`` "
+            "pushes the workspace branch, builds a simulator from the pushed "
+            "commit, runs it on smsvpctest, polls, downloads, and lands the native "
+            "store as a study run — orchestrated as one background pipeline job on "
+            "the in-process ``lib.remote_run_jobs.manager`` singleton (the same "
+            "manager the ``GET /api/remote-run-status`` poller reads).  Guarded by "
+            "the same-origin CSRF middleware.  Success returns HTTP 202 "
+            "``{job_id}``; errors carry ``{error: ...}`` at 401/400/409/404."
         ),
     },
     {
@@ -4146,6 +4163,48 @@ def create_app() -> FastAPI:
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return SourceSwitchResponse.model_validate(body)
+
+    # -----------------------------------------------------------------------
+    # Runs — remote (sms-api) simulation-run SUBMIT
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/remote-run-start",
+        response_model=RemoteRunStartResponse,
+        tags=["Runs"],
+        summary="Submit a remote (sms-api) simulation pipeline job for a study",
+        status_code=202,
+    )
+    def remote_run_start(
+        req: RemoteRunStartRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Submit a remote sms-api simulation pipeline job for a study.
+
+        Mirrors the stdlib ``POST /api/remote-run-start``.  Body:
+        ``{"study", "num_generations"?, "num_seeds"?, "run_parca"?}`` — pushes
+        the workspace branch, builds a simulator from the pushed commit, runs it
+        on smsvpctest, polls, downloads, and lands the native store as a study
+        run, all as one background pipeline job on the in-process
+        ``lib.remote_run_jobs.manager`` singleton (the SAME manager the
+        ``GET /api/remote-run-status`` poller reads, so the submit is visible to
+        the status GET).
+
+        Status codes (byte-identical to the legacy handler):
+          - 401  not authenticated (``{"error": "not authenticated"}``)
+          - 400  missing study (``{"error": "study is required"}``)
+          - 409  no origin remote (``{"error": "no GitHub remote configured"}``)
+          - 409  unresolved url (``{"error": "could not resolve origin remote url"}``)
+          - 404  spec missing (``{"error": "study <slug> not found"}``)
+          - 202  ``{"job_id": <id>}``
+
+        The CSRF middleware already guards this POST.  Library-backed via the
+        pure ``lib.remote_run_views.remote_run_start`` (ws_root-parameterised);
+        every path (incl. the 202 success) is wrapped in ``JSONResponse`` so the
+        lib-returned status code is preserved verbatim.
+        """
+        body, status = _remote_run_views.remote_run_start(ws, req.model_dump())
+        return JSONResponse(status_code=status, content=body)
 
     # -----------------------------------------------------------------------
     # CATCH-ALL — MUST stay registered LAST (immediately before ``return app``)

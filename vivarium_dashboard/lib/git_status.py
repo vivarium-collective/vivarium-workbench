@@ -74,6 +74,59 @@ def has_origin_remote(ws_root: Path) -> bool:
     return "origin" in (r.stdout or "").split()
 
 
+def remote_repo_url(ws_root: Path) -> str | None:
+    """Return origin's normalized remote URL, or ``None`` when unresolved.
+
+    Mirrors ``server._remote_repo_url`` parameterised on ``ws_root``: runs
+    ``git remote get-url origin`` in ``cwd=ws_root``, returns ``None`` on a
+    non-zero exit or empty URL, else the URL normalized via
+    :func:`lib.source_build_views._normalize_repo_url` (reused, not re-copied —
+    server keeps its own ``_normalize_repo_url``; dedup at the flip).
+    """
+    from vivarium_dashboard.lib.source_build_views import _normalize_repo_url
+
+    r = subprocess.run(
+        ["git", "remote", "get-url", "origin"], cwd=ws_root,
+        capture_output=True, text=True, timeout=5,
+    )
+    if r.returncode != 0:
+        return None
+    raw = r.stdout.strip()
+    return _normalize_repo_url(raw) if raw else None
+
+
+def remote_push_and_sha(ws_root: Path) -> str:
+    """Push the workspace's current branch to origin with the GH token, return HEAD SHA.
+
+    Mirrors ``server._remote_push_and_sha`` parameterised on ``ws_root``:
+    resolves the current branch (raises if detached/unnamed), pushes
+    ``-u origin <branch>`` with ``os.environ | github_auth.current_token_env()``
+    (raises with the stderr/stdout ``[-300:]`` tail on failure), then resolves
+    and returns the HEAD SHA (raising if empty).
+    """
+    from vivarium_dashboard.lib import github_auth
+
+    branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=ws_root,
+        capture_output=True, text=True, timeout=5,
+    ).stdout.strip()
+    if not branch or branch == "HEAD":
+        raise RuntimeError("workspace is not on a named branch")
+    env = os.environ | github_auth.current_token_env()
+    push = subprocess.run(
+        ["git", "push", "-u", "origin", branch], cwd=ws_root,
+        capture_output=True, text=True, timeout=120, env=env,
+    )
+    if push.returncode != 0:
+        raise RuntimeError(f"git push failed: {(push.stderr or push.stdout)[-300:]}")
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=ws_root, capture_output=True, text=True, timeout=5,
+    ).stdout.strip()
+    if not sha:
+        raise RuntimeError("could not resolve HEAD commit")
+    return sha
+
+
 def stale_branch_threshold() -> int:
     """Commits-behind-main threshold above which a branch is flagged stale.
 

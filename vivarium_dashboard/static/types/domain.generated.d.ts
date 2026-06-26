@@ -437,3 +437,7 @@ export interface BuildRemoteResponse {
   branch: string;
   commit: string;
 }
+
+export interface RemoteRunStartResponse {
+  job_id: string;
+}

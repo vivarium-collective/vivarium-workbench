@@ -49,6 +49,90 @@ SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$")
 
 
 # ---------------------------------------------------------------------------
+# Observable collection (pure — driven entirely off the spec dict)
+# ---------------------------------------------------------------------------
+
+def collect_study_observables(spec: dict) -> list[str]:
+    """Return slash-joined observable store paths declared by the study spec.
+
+    Pure copy of ``server._collect_study_observables`` (server keeps its own
+    copy, used by many study-run handlers; dedup at the flip). Sweeps the spec
+    for every observable-shaped path declaration so a run handler can wire
+    ``inject_emitter_for_paths`` automatically.
+
+    Recognised sources (tolerant — drives off whatever the study author
+    declared, in whatever shape):
+      - readouts[*].store_path
+      - behavior_tests[*].measure.path
+      - behavior_tests[*].measure.{series_x,series_y,x,y,series_a,series_b}.path
+      - simulation_set[*].observe   (list or str)
+      - tests[*].measure.{path,series_x,...}   (v4 studies)
+      - comparative_visualizations[*].observable_path   (v4 overlays)
+
+    Paths come dot-joined ('agents.0.listeners.foo') or slash-joined
+    ('agents/0/listeners/foo'); both normalise to slash-joined. Duplicates are
+    dropped while preserving declaration order.
+    """
+    def _norm(p: str) -> str | None:
+        if not isinstance(p, str) or not p.strip():
+            return None
+        # Accept either separator; output is slash-joined.
+        parts = [seg for seg in p.replace(".", "/").split("/") if seg]
+        return "/".join(parts) if parts else None
+
+    out: list[str] = []
+    seen: set[str] = set()
+    def _push(p):
+        n = _norm(p) if isinstance(p, str) else None
+        if n and n not in seen:
+            seen.add(n)
+            out.append(n)
+
+    for r in spec.get("readouts", []) or []:
+        if isinstance(r, dict):
+            _push(r.get("store_path"))
+
+    for bt in spec.get("behavior_tests", []) or []:
+        m = (bt or {}).get("measure") if isinstance(bt, dict) else None
+        if not isinstance(m, dict):
+            continue
+        _push(m.get("path"))
+        for nested_key in ("series_x", "series_y", "x", "y", "series_a", "series_b"):
+            n = m.get(nested_key)
+            if isinstance(n, dict):
+                _push(n.get("path"))
+
+    for sim in spec.get("simulation_set", []) or []:
+        if not isinstance(sim, dict):
+            continue
+        obs = sim.get("observe")
+        if isinstance(obs, list):
+            for p in obs:
+                _push(p)
+        elif isinstance(obs, str):
+            _push(obs)
+
+    # v4 studies declare their tests under `tests:` (not `behavior_tests:`)
+    # with the same {measure: {path, series_x, ...}} shape, and their overlay
+    # observables under `comparative_visualizations[].observable_path`.
+    for t in spec.get("tests", []) or []:
+        m = (t or {}).get("measure") if isinstance(t, dict) else None
+        if not isinstance(m, dict):
+            continue
+        _push(m.get("path"))
+        for nested_key in ("series_x", "series_y", "x", "y", "series_a", "series_b"):
+            n = m.get(nested_key)
+            if isinstance(n, dict):
+                _push(n.get("path"))
+
+    for cv in spec.get("comparative_visualizations", []) or []:
+        if isinstance(cv, dict):
+            _push(cv.get("observable_path"))
+
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Directory / spec-path resolution (ws_root-parameterised)
 # ---------------------------------------------------------------------------
 
