@@ -4828,3 +4828,68 @@ class TestSourceSwitchBuildRoute:
         paths = client.get("/openapi.json").json()["paths"]
         assert "/api/source/switch-build" in paths
         assert "post" in paths["/api/source/switch-build"]
+
+
+# ===========================================================================
+# C-state-3c: POST /api/remote-run-start (manager.submit pipeline job)
+# Every external (auth, git, sms-api, manager) is monkeypatched on the lib
+# builder — no real network/git/auth.
+# ===========================================================================
+class TestRemoteRunStartRoute:
+    def test_not_authenticated_401(self, client, monkeypatch):
+        from vivarium_dashboard.lib import remote_run_views as rrv
+        monkeypatch.setattr(rrv.github_auth, "current_session", lambda: None)
+        r = client.post("/api/remote-run-start", json={"study": "s"})
+        assert r.status_code == 401
+        assert r.json() == {"error": "not authenticated"}
+
+    def test_missing_study_400(self, client, monkeypatch):
+        from vivarium_dashboard.lib import remote_run_views as rrv
+        monkeypatch.setattr(rrv.github_auth, "current_session", lambda: object())
+        r = client.post("/api/remote-run-start", json={"study": "   "})
+        assert r.status_code == 400
+        assert r.json() == {"error": "study is required"}
+
+    def test_happy_path_202(self, client, tmp_path, monkeypatch):
+        from vivarium_dashboard.lib import remote_run_views as rrv
+
+        class _Job:
+            job_id = "JX"
+
+        captured = {}
+
+        monkeypatch.setattr(rrv.github_auth, "current_session", lambda: object())
+        monkeypatch.setattr(rrv.git_status, "has_origin_remote", lambda ws: True)
+        monkeypatch.setattr(rrv.git_status, "remote_repo_url", lambda ws: "https://github.com/x/y")
+        spec_file = tmp_path / "study.yaml"
+        spec_file.write_text("baseline: []\n")
+        monkeypatch.setattr(rrv.study_spec, "study_spec_path", lambda ws, name: spec_file)
+        monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
+        monkeypatch.setattr(rrv, "load_spec", lambda p: {"baseline": [], "readouts": []})
+        import subprocess as _sp
+        monkeypatch.setattr(
+            rrv.subprocess, "run",
+            lambda *a, **k: _sp.CompletedProcess(args=[], returncode=0, stdout="feature/x\n"),
+        )
+        monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: object())
+        monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
+
+        def _submit(study, worker_fn):
+            captured["study"] = study
+            captured["worker"] = worker_fn
+            return _Job()
+
+        monkeypatch.setattr(rrv.manager, "submit", _submit)
+
+        r = client.post("/api/remote-run-start", json={"study": "study-a"})
+        assert r.status_code == 202
+        assert r.json() == {"job_id": "JX"}
+        assert captured["study"] == "study-a"
+        assert callable(captured["worker"])
+
+    def test_route_in_openapi(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        assert "/api/remote-run-start" in paths
+        assert "post" in paths["/api/remote-run-start"]
+        schemas = client.get("/openapi.json").json()["components"]["schemas"]
+        assert "RemoteRunStartResponse" in schemas
