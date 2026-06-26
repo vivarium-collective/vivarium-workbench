@@ -4847,15 +4847,12 @@ class Handler(BaseHTTPRequestHandler):
         Returns True if the request may proceed. On rejection, emits a 403
         JSON error and returns False.
         """
-        if os.environ.get("VIVARIUM_DASHBOARD_DISABLE_CSRF") == "1":
-            return True
+        from vivarium_dashboard.lib import csrf as _csrf
         origin = self.headers.get("Origin")
-        if not origin:
-            return True
-        from urllib.parse import urlsplit
-        origin_netloc = urlsplit(origin).netloc
         host = self.headers.get("Host", "")
-        if origin_netloc and origin_netloc == host:
+        if _csrf.is_request_allowed(
+            origin, host, disabled=_csrf.is_disabled_via_env(os.environ)
+        ):
             return True
         self._json({"error": "cross-origin request forbidden"}, 403)
         return False

@@ -37,6 +37,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError
 
 from vivarium_dashboard.lib import active_workspace
+from vivarium_dashboard.lib import csrf as _csrf
 from vivarium_dashboard.lib import job_status_views as _job_status_views
 from vivarium_dashboard.lib import run_jobs as _run_jobs
 from vivarium_dashboard.lib import remote_run_jobs as _remote_run_jobs
@@ -576,6 +577,29 @@ def create_app() -> FastAPI:
         ),
         openapi_tags=_OPENAPI_TAGS,
     )
+
+    @app.middleware("http")
+    async def _csrf_mw(request: Request, call_next):
+        """Same-origin guard for the whole FastAPI POST/DELETE surface.
+
+        Mirrors the stdlib ``server.Handler._csrf_ok`` stateless decision (shared
+        via ``lib.csrf``): a state-mutating request with a cross-origin ``Origin``
+        header is rejected with HTTP 403 ``{"error": "cross-origin request
+        forbidden"}`` — emitted via ``JSONResponse`` (NOT ``HTTPException``, whose
+        body is ``{"detail": ...}``).  GET and other safe methods are never
+        blocked.  No ``Origin`` header (e.g. curl, local CLI, starlette's
+        ``TestClient``) → allowed; ``VIVARIUM_DASHBOARD_DISABLE_CSRF=1`` → allowed.
+        """
+        if request.method in ("POST", "DELETE"):
+            if not _csrf.is_request_allowed(
+                request.headers.get("origin"),
+                request.headers.get("host"),
+                disabled=_csrf.is_disabled_via_env(os.environ),
+            ):
+                return JSONResponse(
+                    {"error": "cross-origin request forbidden"}, status_code=403
+                )
+        return await call_next(request)
 
     @app.get("/health", tags=["System"], summary="Service liveness check")
     def health() -> dict[str, str]:

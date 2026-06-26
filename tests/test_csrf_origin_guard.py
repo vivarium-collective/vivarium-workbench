@@ -85,3 +85,65 @@ def test_post_no_origin_is_allowed(tmp_path, dashboard_client):
     code = _post(client.base_url, _PROBE_PATH, origin=None)
     assert code != 403
     assert code == 404
+
+
+# ---------------------------------------------------------------------------
+# Parity: the real ``Handler._csrf_ok`` must return the SAME verdicts as the
+# pure ``lib.csrf.is_request_allowed`` across the cases (single-sourcing check),
+# and emit the exact 403 JSON on deny.
+# ---------------------------------------------------------------------------
+
+_CSRF_CASES = [
+    # (origin, host) — None origin means header absent.
+    (None, "127.0.0.1:8080"),
+    ("http://127.0.0.1:8080", "127.0.0.1:8080"),   # same-origin
+    ("https://app.example.com", "app.example.com"),
+    ("http://evil.example.com", "127.0.0.1:8080"), # cross-origin
+    ("not-a-url", "127.0.0.1:8080"),               # empty netloc
+]
+
+
+class _FakeHeaders(dict):
+    """Case-insensitive-ish header map; _csrf_ok reads 'Origin' and 'Host'."""
+
+
+def _make_handler(origin, host):
+    from vivarium_dashboard import server
+
+    h = object.__new__(server.Handler)
+    hdrs = {}
+    if origin is not None:
+        hdrs["Origin"] = origin
+    hdrs["Host"] = host
+    h.headers = hdrs  # http.server's headers support .get()
+    captured = {}
+
+    def _json(obj, code):
+        captured.update(obj=obj, code=code)
+
+    h._json = _json  # type: ignore[attr-defined]
+    return h, captured
+
+
+@pytest.mark.parametrize("origin, host", _CSRF_CASES)
+def test_csrf_ok_matches_pure_predicate(origin, host, monkeypatch):
+    from vivarium_dashboard.lib import csrf
+
+    monkeypatch.delenv("VIVARIUM_DASHBOARD_DISABLE_CSRF", raising=False)
+    expected = csrf.is_request_allowed(origin, host, disabled=False)
+
+    h, captured = _make_handler(origin, host)
+    verdict = h._csrf_ok()
+    assert verdict is expected
+    if not expected:
+        # On deny the live path emits the exact 403 JSON and returns False.
+        assert captured["code"] == 403
+        assert captured["obj"] == {"error": "cross-origin request forbidden"}
+
+
+def test_csrf_ok_env_disable_bypasses(monkeypatch):
+    monkeypatch.setenv("VIVARIUM_DASHBOARD_DISABLE_CSRF", "1")
+    # Cross-origin would normally deny; env bypass allows.
+    h, captured = _make_handler("http://evil.example.com", "127.0.0.1:8080")
+    assert h._csrf_ok() is True
+    assert captured == {}

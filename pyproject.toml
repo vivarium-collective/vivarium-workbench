@@ -83,6 +83,7 @@ files = [
     "vivarium_dashboard/lib/composite_mutations.py",
     "vivarium_dashboard/lib/investigation_viz_mutations.py",
     "vivarium_dashboard/lib/job_status_views.py",
+    "vivarium_dashboard/lib/csrf.py",
 ]
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true
