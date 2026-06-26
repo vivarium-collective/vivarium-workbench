@@ -65,6 +65,7 @@ from vivarium_dashboard.lib import study_crud_mutations as _study_crud_mut
 from vivarium_dashboard.lib import git_status as _git_status
 from vivarium_dashboard.lib import git_commit_views as _git_commit_views
 from vivarium_dashboard.lib import work_mutations as _work_mutations
+from vivarium_dashboard.lib import workspaces_mutations as _workspaces_mut
 from vivarium_dashboard.lib import investigation_status
 from vivarium_dashboard.lib import investigation_views as _inv_views
 from vivarium_dashboard.lib import observables_views as _obs_views
@@ -235,6 +236,10 @@ from vivarium_dashboard.lib.models import (
     WorkEndResponse,
     WorkAttachReportRequest,
     WorkAttachReportResponse,
+    # C-state-3h1: workspace-registry routes
+    WorkspacesPathRequest,
+    WorkspacesOkResponse,
+    WorkspaceEntry,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -638,6 +643,30 @@ _OPENAPI_TAGS = [
             "verbatim — branch/push 409 (not a git workspace) / 500 / 200; "
             "dirty-commit-all 409 (no workstream / already clean) / 500 / 200.  "
             "The 2 POSTs are guarded by the same-origin CSRF middleware."
+        ),
+    },
+    {
+        "name": "Workspaces",
+        "description": (
+            "Workspace-registry WRITE routes — 3 POSTs that edit the GLOBAL "
+            "``~/.pbg`` workspace catalog via ``pbg_superpowers.workspace_catalog`` "
+            "(process-global, NOT server state; no workspace/ws_root).  "
+            "``POST /api/workspaces/add`` registers an existing workspace by "
+            "absolute path (returning the catalog entry), "
+            "``POST /api/workspaces/forget`` removes a catalog entry (refusing a "
+            "running workspace), and ``POST /api/workspaces/cleanup-stale`` "
+            "unregisters a stale running-registry entry plus best-effort unlinks "
+            "the orphan ``<path>/.pbg/server/{server-info,server.pid}`` files "
+            "(refusing if the PID is alive).  Each delegates to a pure builder in "
+            "``lib.workspaces_mutations``; every path (success AND error) is "
+            "returned via ``JSONResponse`` so the lib-returned status code is "
+            "preserved verbatim — add 400 (``path must be an absolute string`` / "
+            "``ValueError``) / 200; forget 400 (``path required``) / 409 (``stop "
+            "the server before forgetting``) / 200; cleanup-stale 400 (``path "
+            "required``) / 409 (``server is still running``) / 200.  The request "
+            "model's ``path`` is Optional so an omitted path hits the lib 400, not "
+            "FastAPI's 422.  The 3 POSTs are guarded by the same-origin CSRF "
+            "middleware."
         ),
     },
     {
@@ -4585,6 +4614,110 @@ def create_app() -> FastAPI:
         """
         payload = req.model_dump(exclude_none=True) if req is not None else {}
         resp, status = _work_mutations.work_attach_report(ws, payload)
+        return JSONResponse(status_code=status, content=resp)
+
+    # -----------------------------------------------------------------------
+    # Workspaces — global ~/.pbg catalog WRITE routes (3 POSTs)
+    #
+    # These 3 POSTs edit the GLOBAL ~/.pbg workspace catalog via
+    # pbg_superpowers.workspace_catalog (process-global, NOT server state; no
+    # workspace/ws_root).  All three call the pure lib.workspaces_mutations
+    # builders, which take ONLY the request body's ``path``.  Every path
+    # (success AND error) is returned via JSONResponse so the lib-returned
+    # status code is preserved verbatim — a plain model return would force 200.
+    # The request model's ``path`` is Optional so an omitted path reaches the
+    # lib builder's own 400 (not FastAPI's 422).  The CSRF middleware already
+    # guards all three POSTs.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/workspaces/add",
+        response_model=WorkspaceEntry,
+        tags=["Workspaces"],
+        summary="Register an existing workspace in the global ~/.pbg catalog",
+    )
+    def workspaces_add(
+        req: Optional[WorkspacesPathRequest] = None,
+    ) -> JSONResponse:
+        """Register an existing workspace by absolute path in the global catalog.
+
+        Mirrors the stdlib ``POST /api/workspaces/add``.  Body: ``{"path"}`` — an
+        absolute path string.  Adds the entry via
+        ``workspace_catalog.add(path)`` and returns it.
+
+        Status codes (byte-identical to the legacy handler):
+          - 400  ``{"error": "path must be an absolute string"}`` (missing /
+                 non-string / non-absolute path)
+          - 400  ``{"error": <ValueError message>}`` (``add`` rejected the path)
+          - 200  the catalog ``entry`` dict
+
+        The CSRF middleware already guards this POST.  Library-backed via the
+        pure ``lib.workspaces_mutations.workspaces_add``; every path is wrapped
+        in ``JSONResponse`` so the lib-returned status code is preserved verbatim.
+        """
+        payload = req.model_dump() if req is not None else {}
+        resp, status = _workspaces_mut.workspaces_add(payload)
+        return JSONResponse(status_code=status, content=resp)
+
+    @app.post(
+        "/api/workspaces/forget",
+        response_model=WorkspacesOkResponse,
+        tags=["Workspaces"],
+        summary="Remove a catalog entry (refuses a running workspace)",
+    )
+    def workspaces_forget(
+        req: Optional[WorkspacesPathRequest] = None,
+    ) -> JSONResponse:
+        """Remove a workspace's catalog entry; refuse a running workspace.
+
+        Mirrors the stdlib ``POST /api/workspaces/forget``.  Body: ``{"path"}``.
+        Refuses with 409 when ``workspace_catalog.find_running(path)`` is not
+        ``None`` (the caller must stop the server first), else forgets the entry.
+
+        Status codes (byte-identical to the legacy handler):
+          - 400  ``{"error": "path required"}`` (missing / non-string path)
+          - 409  ``{"error": "stop the server before forgetting"}``
+          - 200  ``{"ok": True}``
+
+        The CSRF middleware already guards this POST.  Library-backed via the
+        pure ``lib.workspaces_mutations.workspaces_forget``; every path is
+        wrapped in ``JSONResponse`` so the lib-returned status code is preserved
+        verbatim.
+        """
+        payload = req.model_dump() if req is not None else {}
+        resp, status = _workspaces_mut.workspaces_forget(payload)
+        return JSONResponse(status_code=status, content=resp)
+
+    @app.post(
+        "/api/workspaces/cleanup-stale",
+        response_model=WorkspacesOkResponse,
+        tags=["Workspaces"],
+        summary="Unregister a stale running entry + unlink orphan server files",
+    )
+    def workspaces_cleanup_stale(
+        req: Optional[WorkspacesPathRequest] = None,
+    ) -> JSONResponse:
+        """Unregister a stale running-registry entry + best-effort orphan cleanup.
+
+        Mirrors the stdlib ``POST /api/workspaces/cleanup-stale``.  Body:
+        ``{"path"}``.  Refuses with 409 when the PID is in fact alive
+        (``find_running(path)`` not ``None``), else
+        ``workspace_catalog.unregister_server(path)`` and best-effort unlinks the
+        orphan ``<path>/.pbg/server/server-info`` and ``server.pid`` files (each
+        ignoring ``FileNotFoundError``).
+
+        Status codes (byte-identical to the legacy handler):
+          - 400  ``{"error": "path required"}`` (missing / non-string path)
+          - 409  ``{"error": "server is still running"}``
+          - 200  ``{"ok": True}``
+
+        The CSRF middleware already guards this POST.  Library-backed via the
+        pure ``lib.workspaces_mutations.workspaces_cleanup_stale``; every path is
+        wrapped in ``JSONResponse`` so the lib-returned status code is preserved
+        verbatim.
+        """
+        payload = req.model_dump() if req is not None else {}
+        resp, status = _workspaces_mut.workspaces_cleanup_stale(payload)
         return JSONResponse(status_code=status, content=resp)
 
     # -----------------------------------------------------------------------
