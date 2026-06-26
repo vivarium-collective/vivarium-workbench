@@ -1722,6 +1722,20 @@ class VisualizationCommitBatchBody(BaseModel):
     names: Optional[list] = None
 
 
+class VisualizationAcceptBody(BaseModel):
+    """POST /api/visualization-accept {name, class_name?}
+
+    ``name`` is required (400 when missing/blank); ``class_name`` is optional —
+    when supplied, the generated module must expose a discoverable visualization
+    class of that name.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    class_name: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Batch 25: Upload / import mutation request-body models
 # ---------------------------------------------------------------------------
@@ -2318,6 +2332,22 @@ class RenderResponse(BaseModel):
     ``JSONResponse``, not this model.
 
     Source: ``lib.misc_mutations.render_dashboard``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool = True
+
+
+class VisualizationAcceptResponse(BaseModel):
+    """200-path payload for ``POST /api/visualization-accept`` — ``{"ok": True}``.
+
+    The live server commits via ``_active_branch_action``; the FastAPI path
+    defers that commit to the flip and returns ``{ok: True}`` on success.  The
+    error paths (``{"error": ...}``, HTTP 400/404/500) are returned via
+    ``JSONResponse``, not this model.
+
+    Source: ``lib.viz_accept_views.visualization_accept``.
     """
 
     model_config = ConfigDict(extra="allow")

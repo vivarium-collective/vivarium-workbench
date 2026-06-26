@@ -147,6 +147,8 @@ _MODELS: list[type[BaseModel]] = [
     # C-state-3h2: misc FS/render routes
     _models.RenderResponse,
     _models.FeedbackImportResponse,
+    # C-state-3i: visualization-accept finalize route
+    _models.VisualizationAcceptResponse,
 ]
 
 OUTPUT_PATH = (
