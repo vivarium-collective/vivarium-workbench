@@ -318,3 +318,9 @@ def observables_for_ref_payload(ws_root: Path, ref: str) -> dict:
     if not isinstance(payload, dict):
         return {}
     return {"leaves": payload.get("leaves", []), "catalogs": payload.get("catalogs", {})}
+
+
+# Register this module's cache-clear with the active-workspace registry so a
+# workspace switch invalidates it via active_workspace.invalidate().
+from . import active_workspace as _aw  # noqa: E402
+_aw.register_clear_cb(clear_cache)

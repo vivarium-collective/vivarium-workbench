@@ -625,3 +625,9 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         "proposed_inputs":     spec.get("proposed_inputs") or {},
         "studies":             studies_out,
     }
+
+
+# Register this module's cache-clear with the active-workspace registry so a
+# workspace switch invalidates it via active_workspace.invalidate().
+from . import active_workspace as _aw  # noqa: E402
+_aw.register_clear_cb(clear_cache)
