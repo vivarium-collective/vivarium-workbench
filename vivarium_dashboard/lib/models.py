@@ -2264,6 +2264,39 @@ class WorkAttachReportResponse(BaseModel):
     branch: str
 
 
+class WorkCreatePrRequest(BaseModel):
+    """POST /api/work-create-pr request body — ``{"title"?, "body"?, "draft"?}``.
+
+    All fields Optional: ``title``/``body`` default inside the lib builder
+    (investigation title / ``Workstream: <branch>``, and the canned PR body);
+    ``draft`` defaults to ``True`` (the builder reads ``body.get("draft", True)``)
+    so an omitted flag still produces a draft PR.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    title: Optional[str] = None
+    body: Optional[str] = None
+    draft: Optional[bool] = None
+
+
+class WorkCreatePrResponse(BaseModel):
+    """200-path payload for ``POST /api/work-create-pr``.
+
+    ``{"ok": True, "pr_url": <url>, "pr_number": <int|null>}``.  The non-200
+    error paths (``{"error", "pr_url"?, "manual_url"?}``, HTTP 409/500) are
+    returned via ``JSONResponse``, not this model.
+
+    Source: ``lib.work_pr_views.work_create_pr``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool = True
+    pr_url: str
+    pr_number: Optional[int] = None
+
+
 # ---------------------------------------------------------------------------
 # C-state-3h1: workspace-registry POST routes
 #   POST /api/workspaces/add /api/workspaces/forget /api/workspaces/cleanup-stale

@@ -141,6 +141,8 @@ _MODELS: list[type[BaseModel]] = [
     _models.WorkPushResponse,
     _models.WorkEndResponse,
     _models.WorkAttachReportResponse,
+    # C-state-3f3: workstream GitHub-PR-create route
+    _models.WorkCreatePrResponse,
     # C-state-3h1: workspace-registry routes
     _models.WorkspacesOkResponse,
     _models.WorkspaceEntry,
