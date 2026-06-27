@@ -2546,3 +2546,23 @@ class VisualizationPreviewRequest(BaseModel):
     address: str = ""
     config: Optional[dict] = None
     source: Optional[str] = None
+
+
+class VisualizationPreviewInstanceRequest(BaseModel):
+    """POST /api/visualization-preview-instance request body.
+
+    ``{"name", "source"?}`` — previews a ``workspace.yaml``-registered
+    visualization instance BY NAME. The instance's class + config are looked up
+    and the route delegates to ``lib.viz_preview_views.visualization_preview``;
+    a description-only entry (no ``class``) returns a stub instead. A missing
+    ``name`` is rejected with HTTP 400 and an unregistered instance with HTTP 404
+    by ``lib.viz_preview_instance_views.visualization_preview_instance``.
+    ``model_dump(exclude_none=True)`` keeps omitted optionals absent so the
+    builder's ``.get(...)`` defaults apply. The ``{ok, html, source_used, notes}``
+    (or delegated) body is returned via ``JSONResponse`` (no response model).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str = ""
+    source: Optional[str] = None
