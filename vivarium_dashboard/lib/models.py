@@ -2524,3 +2524,25 @@ class InvestigationRunUnblockedRequest(BaseModel):
 
     investigation: str = ""
     studies: Optional[Union[list[str], str]] = None
+
+
+class VisualizationPreviewRequest(BaseModel):
+    """POST /api/visualization-preview request body.
+
+    ``{"address", "config"?, "source"?}`` — renders a ``pbg_superpowers``
+    Visualization class IN-PROCESS against synthetic demo data (``source:
+    "demo"``, default) OR an existing investigation's emitter outputs
+    (``source: "investigation:<name>"``). A missing ``address`` is rejected with
+    HTTP 400 and an unregistered class with HTTP 404 by
+    ``lib.viz_preview_views.visualization_preview``; EVERY other path — including
+    a demo render that raises — returns 200. ``model_dump(exclude_none=True)``
+    keeps omitted optionals absent so the builder's ``.get(...)`` defaults apply.
+    The ``{ok, html, source_used, notes}`` body is returned via ``JSONResponse``
+    (no response model).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    address: str = ""
+    config: Optional[dict] = None
+    source: Optional[str] = None
