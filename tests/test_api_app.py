@@ -70,8 +70,11 @@ def test_openapi_includes_typed_models(client):
     components = schema["components"]["schemas"]
     assert "SimulationsPayload" in components
     assert "SimRow" in components
-    # SimRow.started_at typed as number (epoch float), not string:
-    assert components["SimRow"]["properties"]["started_at"]["type"] == "number"
+    # SimRow.started_at is a nullable epoch float (number | null), not a string:
+    started = components["SimRow"]["properties"]["started_at"]
+    started_types = {s.get("type") for s in started.get("anyOf", [started])}
+    assert "number" in started_types
+    assert "string" not in started_types
 
 
 def test_config_route(client):
@@ -117,7 +120,8 @@ def test_workspace_manifest_in_openapi(client):
 def test_iset_list_empty_workspace(client):
     r = client.get("/api/iset-list")
     assert r.status_code == 200
-    assert r.json() == []
+    # Wrapped object, not a bare array — the client reads j.investigations.
+    assert r.json() == {"investigations": []}
 
 
 def test_iset_list_typed_passthrough(client, monkeypatch):
@@ -136,7 +140,7 @@ def test_iset_list_typed_passthrough(client, monkeypatch):
         lambda ws, **kw: summaries,
     )
 
-    body = client.get("/api/iset-list").json()
+    body = client.get("/api/iset-list").json()["investigations"]
     assert body[0]["studies"] == ["s1", "s2"]
     assert body[0]["lifecycle"] == {"phase": "run", "extra": 1}   # Any field: not stripped
     assert body[0]["current"] is True
@@ -6748,3 +6752,128 @@ def test_installs_routes_in_openapi(client):
               "/api/catalog-uninstall"):
         assert p in paths and "post" in paths[p], p
         assert paths[p]["post"]["tags"] == ["Installs"], p
+
+
+# ---------------------------------------------------------------------------
+# Live-testing gap fills: investigation-registry / state / suggest-poll /
+# study-refresh-viz (4 stdlib routes that were never ported -> 404'd)
+# ---------------------------------------------------------------------------
+
+import yaml as _yaml
+
+
+def _hermetic_catalog(monkeypatch):
+    """Stub workspace_catalog so the registry never probes real peer servers."""
+    from pbg_superpowers import workspace_catalog
+    monkeypatch.setattr(workspace_catalog, "list_servers", lambda: [])
+    monkeypatch.setattr(workspace_catalog, "find_running", lambda ws: None)
+
+
+def test_investigation_registry_empty_workspace(client, monkeypatch):
+    _hermetic_catalog(monkeypatch)
+    r = client.get("/api/investigation-registry")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body.keys()) == {
+        "current", "local_siblings", "running_others", "dormant_others",
+    }
+    assert body["current"]["slug"] is None
+    assert body["running_others"] == []
+
+
+def test_investigation_registry_picks_current(client, tmp_path, monkeypatch):
+    _hermetic_catalog(monkeypatch)
+    d = tmp_path / "investigations" / "alpha"
+    d.mkdir(parents=True)
+    (d / "investigation.yaml").write_text(_yaml.safe_dump({
+        "schema_version": 1, "name": "alpha", "title": "Alpha",
+        "status": "planning", "studies": [], "acceptance_criteria": [],
+    }))
+    body = client.get("/api/investigation-registry").json()
+    assert body["current"]["slug"] == "alpha"
+    # current.url derived from the request Host header (no catalog record).
+    assert body["current"]["url"].startswith("http://")
+
+
+def test_investigation_registry_in_openapi(client):
+    assert "/api/investigation-registry" in client.get("/openapi.json").json()["paths"]
+
+
+def test_state_404_when_missing(client):
+    assert client.get("/api/state").status_code == 404
+
+
+def test_state_returns_workspace_yaml(client, tmp_path):
+    (tmp_path / "workspace.yaml").write_text(_yaml.safe_dump({"name": "demo-ws", "x": 1}))
+    r = client.get("/api/state")
+    assert r.status_code == 200
+    assert r.json() == {"name": "demo-ws", "x": 1}
+    assert r.headers["Cache-Control"] == "no-store"
+
+
+def test_state_in_openapi(client):
+    assert "/api/state" in client.get("/openapi.json").json()["paths"]
+
+
+def test_suggest_poll_missing_id(client):
+    r = client.get("/api/suggest-poll")
+    assert r.status_code == 400
+    assert r.json() == {"error": "missing id"}
+
+
+def test_suggest_poll_not_ready(client, monkeypatch):
+    import vivarium_dashboard.lib.suggest_requests as sr
+    monkeypatch.setattr(sr, "read_response", lambda ws, rid: None)
+    r = client.get("/api/suggest-poll", params={"id": "req-1"})
+    assert r.status_code == 200
+    assert r.json() == {"ready": False}
+
+
+def test_suggest_poll_ready(client, monkeypatch):
+    import vivarium_dashboard.lib.suggest_requests as sr
+    monkeypatch.setattr(
+        sr, "read_response",
+        lambda ws, rid: {"suggestion": "pbg-foo", "rationale": "because"},
+    )
+    r = client.get("/api/suggest-poll", params={"id": "req-1"})
+    assert r.status_code == 200
+    assert r.json() == {"ready": True, "suggestion": "pbg-foo", "rationale": "because"}
+
+
+def test_suggest_poll_in_openapi(client):
+    assert "/api/suggest-poll" in client.get("/openapi.json").json()["paths"]
+
+
+def test_study_refresh_viz_404_for_unknown_study(client):
+    r = client.post("/api/study-refresh-viz/no-such-study")
+    assert r.status_code == 404
+    body = r.json()
+    assert body["study"] == "no-such-study"
+    assert "not found" in body["error"]
+
+
+def test_study_refresh_viz_success(client, monkeypatch):
+    import vivarium_dashboard.api.app as _app
+    payload = {"study": "dnaa-1", "results": [{"name": "c1", "status": "ok"}]}
+    monkeypatch.setattr(_app._study_viz, "study_refresh_viz", lambda ws, name: payload)
+    r = client.post("/api/study-refresh-viz/dnaa-1")
+    assert r.status_code == 200
+    assert r.json() == payload
+
+
+def test_study_refresh_viz_unexpected_error_is_500(client, monkeypatch):
+    import vivarium_dashboard.api.app as _app
+
+    def _boom(ws, name):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(_app._study_viz, "study_refresh_viz", _boom)
+    r = client.post("/api/study-refresh-viz/dnaa-1")
+    assert r.status_code == 500
+    assert r.json() == {"error": "kaboom", "study": "dnaa-1"}
+
+
+def test_study_refresh_viz_in_openapi(client):
+    paths = client.get("/openapi.json").json()["paths"]
+    assert "/api/study-refresh-viz/{name}" in paths
+    assert "post" in paths["/api/study-refresh-viz/{name}"]

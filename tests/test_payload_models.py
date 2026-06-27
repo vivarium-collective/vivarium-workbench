@@ -46,6 +46,31 @@ def test_simrow_matches_local_row():
     assert isinstance(model.started_at, float)   # epoch seconds, not a string
 
 
+def test_simrow_accepts_spec_study_synthesised_shapes():
+    """Spec/study-synthesised index rows are looser than DB rows: ``spec_id`` and
+    ``db_path`` may be None, ``emitter`` may be a free-form spec string, and
+    ``studies`` may be bare slug strings. SimRow must validate them (so
+    /api/simulations never 500s on a real workspace) and round-trip unchanged."""
+    loose = {
+        "run_id": "r9",
+        "spec_id": None,
+        "status": "completed",
+        "started_at": 1.0,
+        "db_path": None,
+        "emitter": "unknown",            # not one of the EmitterKind literals
+        "studies": ["ketchup-exchange-comparison"],   # bare slug, not a StudyRef
+    }
+    m = SimRow.model_validate(loose)
+    assert m.spec_id is None
+    assert m.db_path is None
+    assert m.emitter == "unknown"
+    assert m.studies == ["ketchup-exchange-comparison"]   # bare string preserved
+    dumped = m.model_dump()
+    assert dumped["spec_id"] is None and dumped["db_path"] is None
+    assert dumped["emitter"] == "unknown"
+    assert dumped["studies"] == ["ketchup-exchange-comparison"]
+
+
 def test_row_to_dict_is_model_backed():
     """_row_to_dict now builds output via SimRow.model_dump() (load-bearing)."""
     out = _row_to_dict(_row(), "/ws/study-a/runs.db")
@@ -55,11 +80,13 @@ def test_row_to_dict_is_model_backed():
 
 
 def test_malformed_row_falls_back_with_warning(recwarn):
-    """A row that fails validation (started_at None) warns and returns the raw dict
-    rather than raising — the simulations index must not 500 on one bad row."""
-    out = _row_to_dict(_row(started_at=None), "/ws/study-a/runs.db")
+    """A row that fails validation (non-numeric started_at) warns and returns the
+    raw dict rather than raising — the simulations index must not 500 on one bad
+    row. (``started_at=None`` is now a *valid* synthesised-row shape, so use a
+    genuinely uncoercible value to exercise the fallback.)"""
+    out = _row_to_dict(_row(started_at="not-a-number"), "/ws/study-a/runs.db")
     assert out["run_id"] == "r1"            # legacy dict still served
-    assert out["started_at"] is None
+    assert out["started_at"] == "not-a-number"
     assert any("SimRow" in str(w.message) for w in recwarn.list)
 
 

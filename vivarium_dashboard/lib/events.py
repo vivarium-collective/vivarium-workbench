@@ -31,6 +31,19 @@ def payload_from_text(text: str) -> str:
         return json.dumps({"_error": "yaml parse"})
 
 
+def read_workspace_state(ws_root: Path) -> dict | None:
+    """Read ``<ws_root>/workspace.yaml`` and return its parsed mapping.
+
+    Backs ``GET /api/state`` (the one-shot state read, distinct from the SSE
+    stream). Returns ``None`` when the file does not exist so the caller maps
+    it to HTTP 404 — byte-identical to ``server.Handler._serve_state``.
+    """
+    ws_file = ws_root / "workspace.yaml"
+    if not ws_file.exists():
+        return None
+    return yaml.safe_load(ws_file.read_text(encoding="utf-8"))
+
+
 def workspace_state_payload(ws_root: Path) -> str:
     """Encode ``<ws_root>/workspace.yaml`` as a JSON string.
 

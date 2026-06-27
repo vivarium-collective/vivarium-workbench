@@ -46,6 +46,7 @@ _MODELS: list[type[BaseModel]] = [
     _models.StudyChartsPayload,
     _models.DashConfig,
     _models.InvestigationSummary,
+    _models.IsetListPayload,
     _models.DataSource,
     _models.DataSourcesPayload,
     _models.BibEntry,
@@ -191,10 +192,20 @@ def _ts_type(tp: object) -> str:
         ]
         return " | ".join(parts)
 
-    # list[X] -> "X[]".
+    # list[X] -> "X[]".  When the element type is itself a union (e.g.
+    # list[Union[StudyRef, str]] -> "StudyRef | string"), wrap it in parens so
+    # TS parses the array of the whole union — "(StudyRef | string)[]" — and not
+    # "StudyRef | (string[])", which the bare "StudyRef | string[]" means.
     if origin in (list, typing.List):
         (inner,) = typing.get_args(tp)
-        return f"{_ts_type(inner)}[]"
+        inner_ts = _ts_type(inner)
+        inner_origin = typing.get_origin(inner)
+        is_union = inner_origin is typing.Union or inner_origin is _pytypes.UnionType
+        # A Literal with >1 value (and no named alias) also renders as a union.
+        is_inline_literal = inner_origin is typing.Literal and " | " in inner_ts
+        if is_union or is_inline_literal:
+            inner_ts = f"({inner_ts})"
+        return f"{inner_ts}[]"
 
     # Primitives.
     if tp is str:

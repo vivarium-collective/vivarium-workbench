@@ -24,7 +24,12 @@ def test_generated_ts_has_expected_contract():
     assert "export interface SimRow {" in ts
     # nested-model references resolve by name, not inlined:
     assert "remote_origin: RemoteOrigin | null;" in ts
-    assert "studies: StudyRef[];" in ts
+    # SimRow.studies is a union list (StudyRef objects OR bare slug strings); the
+    # union must be parenthesised so it parses as an array of the whole union,
+    # not "StudyRef | (string[])".
+    assert "studies: (StudyRef | string)[];" in ts
     # the float/string distinction the hand-written overlay got wrong:
-    assert "started_at: number;" in ts          # SimRow: epoch float
-    assert "emitter: EmitterKind | null;" in ts  # named alias, not inlined union
+    assert "started_at: number | null;" in ts   # SimRow: nullable epoch float
+    # SimRow.emitter was loosened to a free-form str, so it is no longer the
+    # EmitterKind named alias; StudyRef.emitter (below) still uses the alias.
+    assert "emitter: string | null;" in ts

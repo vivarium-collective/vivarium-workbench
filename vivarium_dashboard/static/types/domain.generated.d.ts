@@ -20,18 +20,18 @@ export interface StudyRef {
 
 export interface SimRow {
   run_id: string;
-  spec_id: string;
+  spec_id: string | null;
   sim_name: string | null;
   label: string | null;
   status: string;
   n_steps: number | null;
   progress_step: number | null;
-  started_at: number;
+  started_at: number | null;
   completed_at: number | null;
-  db_path: string;
+  db_path: string | null;
   store_path: string | null;
-  emitter: EmitterKind | null;
-  studies: StudyRef[];
+  emitter: string | null;
+  studies: (StudyRef | string)[];
   study_slug: string | null;
   investigation_slug: string | null;
   remote_origin: RemoteOrigin | null;
@@ -101,6 +101,10 @@ export interface InvestigationSummary {
   lifecycle: any;
   current: boolean | null;
   error: string | null;
+}
+
+export interface IsetListPayload {
+  investigations: InvestigationSummary[];
 }
 
 export interface DataSource {

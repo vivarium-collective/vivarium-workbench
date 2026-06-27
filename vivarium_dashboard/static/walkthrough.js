@@ -1773,9 +1773,8 @@
           byKind[k].push(p);
         });
 
-        // Imported repositories (workspace.yaml::imports) + their contributed
-        // processes/steps — rendered above the kind tabs.
-        _renderImportedRepos(data.imports || [], processes, types);
+        // ("Imported repositories" panel removed — those repos live in the
+        // Modules tab; see _renderImportedRepos (now unused) for the old render.)
 
         // Render tabbed Registry browser (Registry page).
         _renderRegistryGrid('registry-processes-container', byKind.process);
@@ -11503,10 +11502,10 @@
       _openStudyInsideInvestigation(name);
       return;
     }
-    _switchPage('studies');
-    setTimeout(function() {
-      if (typeof _openStudyEmbedded === 'function') _openStudyEmbedded(name);
-    }, 80);
+    // Otherwise navigate straight to the study page. The old branch switched to a
+    // standalone "studies" page that no longer exists in the investigation-centric
+    // nav, so the sidebar study click landed nowhere. _studyHref → /studies/<name>.
+    window.location = _studyHref(name);
   }
   window._openStudyEmbeddedNewTab = _openStudyEmbeddedNewTab;
 
