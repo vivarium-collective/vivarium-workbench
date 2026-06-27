@@ -6068,3 +6068,72 @@ class TestVisualizationPreviewRoute:
         p = "/api/visualization-preview"
         assert p in paths and "post" in paths[p]
         assert paths[p]["post"]["tags"] == ["Viz authoring"]
+
+
+# ===========================================================================
+# Viz authoring: visualization-preview-instance POST route ("Viz authoring").
+# Thin wrapper over ``lib.viz_preview_instance_views.visualization_preview_
+# instance`` — every test monkeypatches that lib fn so NO real lookup/render
+# runs.  The route JSONResponses all paths, so the lib-returned (dict, status)
+# is preserved verbatim (200 stub / delegated, 400 missing-name, 404
+# not-registered).
+# ===========================================================================
+class TestVisualizationPreviewInstanceRoute:
+    def test_happy_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import viz_preview_instance_views
+        captured = {}
+
+        def _fake(ws, body):
+            captured["ws"], captured["body"] = ws, body
+            return {"ok": True, "html": "<b>stub</b>",
+                    "source_used": "stub", "notes": "n"}, 200
+
+        monkeypatch.setattr(
+            viz_preview_instance_views, "visualization_preview_instance", _fake)
+        r = client.post(
+            "/api/visualization-preview-instance",
+            json={"name": "viz1"},
+        )
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+        assert r.json()["source_used"] == "stub"
+        # exclude_none keeps name; omitted optionals absent.
+        assert captured["body"] == {"name": "viz1"}
+
+    def test_source_passed_through(self, client, monkeypatch):
+        from vivarium_dashboard.lib import viz_preview_instance_views
+        captured = {}
+        monkeypatch.setattr(
+            viz_preview_instance_views, "visualization_preview_instance",
+            lambda ws, body: (captured.update(body) or {"ok": True}, 200),
+        )
+        client.post("/api/visualization-preview-instance",
+                    json={"name": "viz1", "source": "investigation:abc"})
+        assert captured == {"name": "viz1", "source": "investigation:abc"}
+
+    def test_missing_name_400_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import viz_preview_instance_views
+        monkeypatch.setattr(
+            viz_preview_instance_views, "visualization_preview_instance",
+            lambda ws, body: ({"error": "name is required"}, 400),
+        )
+        r = client.post("/api/visualization-preview-instance", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "name is required"}
+
+    def test_not_registered_404_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import viz_preview_instance_views
+        monkeypatch.setattr(
+            viz_preview_instance_views, "visualization_preview_instance",
+            lambda ws, body: ({"error": "visualization 'x' not registered"}, 404),
+        )
+        r = client.post("/api/visualization-preview-instance",
+                        json={"name": "x"})
+        assert r.status_code == 404
+        assert r.json() == {"error": "visualization 'x' not registered"}
+
+    def test_route_in_openapi(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        p = "/api/visualization-preview-instance"
+        assert p in paths and "post" in paths[p]
+        assert paths[p]["post"]["tags"] == ["Viz authoring"]
