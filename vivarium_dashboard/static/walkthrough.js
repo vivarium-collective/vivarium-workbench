@@ -8410,22 +8410,10 @@
       }
       function _compositeCell(composite) {
         if (!composite) return '<span class="muted">—</span>';
-        // In the read-only snapshot a composite is navigable only if its wiring
-        // was exported at publish time (has_wiring). When we positively know it
-        // was NOT (e.g. a composite that can't resolve without the on-disk ParCa
-        // cache), render plain text — a pop-out would 404 in bigraph-loom.
-        var cfg = (typeof window !== 'undefined' && window.__DASH_CONFIG__) || {};
-        if (cfg.mode === 'snapshot') {
-          var known = (window._compositesById || {})[composite];
-          if (known && known.has_wiring === false) {
-            return '<code title="static wiring not available in the read-only snapshot">'
-              + _h(_short(composite)) + '</code>';
-          }
-        }
-        return '<a href="#" class="composite-loom-link" '
-          + 'title="Open a static view of this composite in bigraph-loom" '
-          + 'onclick="event.preventDefault(); ' + _loomStaticPopout(composite) + '">'
-          + '<code>' + _h(_short(composite)) + '</code> <span aria-hidden="true">↗</span></a>';
+        // Standalone reports: render the composite as plain text — no link out
+        // to the bigraph-loom explorer. Those live-only pop-outs are not worth
+        // maintaining and break a self-contained / shared report.
+        return '<code>' + _h(_short(composite)) + '</code>';
       }
       function _paramsCell(params) {
         if (!params || typeof params !== 'object' || !Object.keys(params).length)
@@ -8484,7 +8472,7 @@
             + '</tr>';
         }).join('');
         simsHtml = '<div id="' + sid.sims + '"><h3>What we ran <span class="muted small">(' + sims.length + ' simulation' + (sims.length === 1 ? '' : 's') + ')</span></h3>'
-          + '<p class="muted small" style="margin:0 0 8px 0">One row per concrete run: the model composite (click ↗ to open it in the bigraph-loom explorer), what changes vs the reference baseline, the condition / length, and its status.</p>'
+          + '<p class="muted small" style="margin:0 0 8px 0">One row per concrete run: the model composite, what changes vs the reference baseline, the condition / length, and its status.</p>'
           + '<table class="sim-table"><thead><tr><th>Simulation</th><th>Composite</th><th>Changes vs baseline</th><th>Run</th><th>Status</th></tr></thead>'
           + '<tbody>' + rows + '</tbody></table>'
           + '</div>';
@@ -8518,7 +8506,7 @@
               + '</tr>';
           }).join('');
           simsHtml = '<div id="' + sid.sims + '"><h3>What we ran <span class="muted small">(composite + parameters)</span></h3>'
-            + '<p class="muted small" style="margin:0 0 8px 0">The composite(s) and parameter settings actually simulated for this study (from its baseline). Click a composite ↗ to open it in the bigraph-loom explorer.</p>'
+            + '<p class="muted small" style="margin:0 0 8px 0">The composite(s) and parameter settings actually simulated for this study (from its baseline).</p>'
             + '<table class="sim-table"><thead><tr><th>Run</th><th>Composite</th><th>Parameters</th><th>Replication</th><th>Status</th></tr></thead>'
             + '<tbody>' + brows + '</tbody></table>'
             + '</div>';
@@ -8558,10 +8546,8 @@
             ? Object.keys(e.params).map(function(k) { return '<code>' + _h(k) + '=' + _h(JSON.stringify(e.params[k])) + '</code>'; }).join(' ')
             : '<span class="muted">default parameters</span>';
           var btn = e.composite
-            ? '<button class="model-explore-btn" onclick="' + _loomStaticPopout(e.composite) + '" '
-              + 'style="font-size:0.92em;font-weight:600;padding:5px 12px;border:1px solid #2563eb;background:#eff6ff;'
-              + 'color:#1e40af;border-radius:6px;cursor:pointer;white-space:nowrap">🧬 ' + _h(_short(e.composite))
-              + ' — explore in bigraph-loom ↗</button>'
+            ? '<span style="font-size:0.92em;font-weight:600;color:#1e40af;white-space:nowrap">🧬 <code>'
+              + _h(_short(e.composite)) + '</code></span>'
             : '<span class="muted">(no composite)</span>';
           return '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px">'
             + btn + '<span style="font-size:0.88em;color:#475569">' + params + '</span></div>';
@@ -8569,8 +8555,7 @@
         return '<div class="study-model-banner" style="margin:10px 0;padding:12px 16px;'
           + 'background:#f0f9ff;border:1px solid #bae6fd;border-left:5px solid #2563eb;border-radius:8px">'
           + '<div style="font-weight:700;color:#0c4a6e">Model</div>'
-          + '<div class="muted small" style="margin-top:2px">The composite(s) this study runs and their parameters — '
-          + 'click to open a static view in the bigraph-loom explorer.</div>'
+          + '<div class="muted small" style="margin-top:2px">The composite(s) this study runs and their parameters.</div>'
           + rows + '</div>';
       })();
 
