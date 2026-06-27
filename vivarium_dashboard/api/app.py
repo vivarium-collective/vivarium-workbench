@@ -80,6 +80,7 @@ from vivarium_dashboard.lib import saved_visualizations as _saved_viz
 from vivarium_dashboard.lib import static_serving as _static_serving
 from vivarium_dashboard.lib import study_page as _study_page
 from vivarium_dashboard.lib import study_runs as _study_runs
+from vivarium_dashboard.lib import run_unblocked_views as _run_unblocked_views
 from vivarium_dashboard.lib import test_run_views as _test_run_views
 from vivarium_dashboard.lib import study_spec as _study_spec
 from vivarium_dashboard.lib import study_viz_views as _study_viz
@@ -265,6 +266,8 @@ from vivarium_dashboard.lib.models import (
     InvestigationRunOneRequest,
     # P4: investigation-run (run all sims + render viz) POST request body
     InvestigationRunRequest,
+    # P5: investigation-run-unblocked (enumerate + submit run job) POST request body
+    InvestigationRunUnblockedRequest,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -4611,6 +4614,64 @@ def create_app() -> FastAPI:
           - 200  the run/render summary dict
         """
         body, status = _investigation_run_views.investigation_run(
+            ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
+
+    # -----------------------------------------------------------------------
+    # P5: investigation-run-unblocked — enumerate every member study's unblocked
+    # variants + SUBMIT one background run job (the FINAL sim-execution port).
+    #
+    # The "Run unblocked" flow: enumerate each member study's runnable/blocked
+    # variants (``lib.run_jobs.enumerate_unblocked``), then submit a single
+    # background job to the SAME in-process ``lib.run_jobs.manager`` singleton
+    # the already-ported ``GET /api/investigation-run-unblocked-status`` reads,
+    # so the submit is visible to the status GET.  The worker fires each queued
+    # item through the E4 study-run orchestrators
+    # (``study_runs.run_study_baseline`` / ``run_study_variant``) and renders the
+    # E5 comparative visualisations — all delegated to the pure lib builder
+    # ``lib.run_unblocked_views.investigation_run_unblocked``.  JSONResponse
+    # every path so the lib-returned status is preserved: 400 missing-inv /
+    # no-queued breakdown, 404 inv.yaml-missing, 500 yaml-parse, 202 success.
+    # ``model_dump(exclude_none=True)`` keeps an omitted ``studies`` absent so
+    # the builder's "all studies" default applies.  CSRF middleware guards it.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/investigation-run-unblocked",
+        tags=["Investigation runs"],
+        summary="Enumerate + run all of an investigation's unblocked variants",
+        status_code=202,
+    )
+    def investigation_run_unblocked(
+        req: InvestigationRunUnblockedRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Enumerate + submit a run job for an investigation's unblocked variants.
+
+        Mirrors the stdlib ``POST /api/investigation-run-unblocked``.  Body:
+        ``{"investigation", "studies"?}`` — enumerates every member study's
+        unblocked variants and runs them sequentially on a background thread
+        submitted to the in-process ``lib.run_jobs.manager`` singleton (the SAME
+        manager the ``GET /api/investigation-run-unblocked-status`` poller reads,
+        so the submit is visible to the status GET); returns a ``job_id``
+        immediately.  ``studies`` optionally narrows to a subset (a single slug
+        or a list).
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.run_unblocked_views.investigation_run_unblocked``):
+          - 400  missing investigation (``{"error": "investigation is required"}``)
+          - 404  investigation not found (``{"error": "investigation not found: <slug>"}``)
+          - 500  ``yaml.YAMLError`` (``{"error": "yaml parse failed: <e>"}``)
+          - 400  no variants to queue (the per-status breakdown + ``items[]``)
+          - 202  ``{"job_id": <id>, "items": [...]}``
+
+        The CSRF middleware already guards this POST.  Every path (incl. the 202
+        success and the no-queued 400) is wrapped in ``JSONResponse`` so the
+        lib-returned status code is preserved verbatim.  ``model_dump(
+        exclude_none=True)`` keeps an omitted ``studies`` absent so the builder's
+        "all studies" default applies.
+        """
+        body, status = _run_unblocked_views.investigation_run_unblocked(
             ws, req.model_dump(exclude_none=True))
         return JSONResponse(status_code=status, content=body)
 
