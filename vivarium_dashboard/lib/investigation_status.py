@@ -1,7 +1,7 @@
 """Investigation status derivation + iset-summary, as library code.
 
 Extracted from ``server.py`` so the FastAPI app (and tests) can build the
-``/api/iset-list`` payload without reaching into the 16.9k-line stdlib server.
+``/api/investigation-summaries`` payload without reaching into the 16.9k-line stdlib server.
 Everything here is parameterized by ``ws_root`` (no module-level WORKSPACE
 global) and the one workspace-coupled dependency — "does this study have any
 runs?" — is *injected* as ``study_has_runs`` so the server's runs.db reader
@@ -143,7 +143,7 @@ def read_study_status(
 def build_iset_summary(
     ws_root: Path, *, study_has_runs: StudyHasRuns
 ) -> list[dict]:
-    """Build the ``/api/iset-list`` payload: one summary dict per investigation,
+    """Build the ``/api/investigation-summaries`` payload: one summary dict per investigation,
     each carrying an ``effective_status`` derived from its member studies."""
     out: list[dict] = []
     current_slug = current_branch_slug(ws_root)
@@ -179,7 +179,7 @@ def build_iset_summary(
 def study_run_slugs(ws_root: Path) -> set[str]:
     """Study slugs with at least one recorded run, via the simulations index.
 
-    The library-native runs-presence signal for the FastAPI ``/api/iset-list``
+    The library-native runs-presence signal for the FastAPI ``/api/investigation-summaries``
     route, so it need not import the stdlib server's runs.db reader.
     """
     from vivarium_dashboard.lib.simulations_index import list_simulations

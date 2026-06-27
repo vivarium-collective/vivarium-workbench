@@ -603,15 +603,15 @@ def _do_build(
     # 2. Write per-resource API JSON files
     # ------------------------------------------------------------------
     api_dir = out_dir / "api"
-    (api_dir / "iset").mkdir(parents=True, exist_ok=True)
+    (api_dir / "investigation").mkdir(parents=True, exist_ok=True)
     (api_dir / "study").mkdir(parents=True, exist_ok=True)
     (api_dir / "inputs").mkdir(parents=True, exist_ok=True)
 
     # api/workspace.json
     _write_json(api_dir / "workspace.json", _workspace_home_data(ws_root))
 
-    # api/iset-list.json — investigations list (GET /api/iset-list)
-    _write_json(api_dir / "iset-list.json",
+    # api/investigation-summaries.json — investigations list (GET /api/investigation-summaries)
+    _write_json(api_dir / "investigation-summaries.json",
                 {"investigations": _build_iset_summary_for_test(ws_root)})
 
     # api/inputs/_global.json — global/shared inputs (GET /api/inputs with no slug)
@@ -770,7 +770,7 @@ def _do_build(
         investigations_flat = {"investigations": []}
     _write_json(api_dir / "investigations.json", investigations_flat)
 
-    # api/iset/<id>.json  (+ per-investigation runnable notebook export)
+    # api/investigation/<id>.json  (+ per-investigation runnable notebook export)
     # Each investigation also ships a self-contained Jupyter notebook + .py under
     # bundle/investigation-notebooks/ — the coder-facing complement to the HTML
     # report. Deterministic; guarded per investigation so one failure never
@@ -784,7 +784,7 @@ def _do_build(
             continue
         # iset JSON stays byte-parity with the live builder; notebook urls live
         # in the separate manifest (the SPA derives the snapshot url from slug).
-        _write_json(api_dir / "iset" / f"{inv_name}.json", data)
+        _write_json(api_dir / "investigation" / f"{inv_name}.json", data)
         try:
             paths = export_investigation_notebook(ws_root, inv_name, out_dir=nb_out_dir)
             notebook_manifest.append({

@@ -46,7 +46,7 @@ _MODELS: list[type[BaseModel]] = [
     _models.StudyChartsPayload,
     _models.DashConfig,
     _models.InvestigationSummary,
-    _models.IsetListPayload,
+    _models.InvestigationSummariesPayload,
     _models.DataSource,
     _models.DataSourcesPayload,
     _models.BibEntry,

@@ -169,7 +169,7 @@ class DashConfig(BaseModel):
 
 
 class InvestigationSummary(BaseModel):
-    """One entry of the ``GET /api/iset-list`` payload.
+    """One entry of the ``GET /api/investigation-summaries`` payload.
 
     Mirrors ``_build_iset_summary_for_test`` in server.py. A parse failure yields
     a minimal ``{name, error}`` entry, so every field but ``name`` is optional.
@@ -190,8 +190,8 @@ class InvestigationSummary(BaseModel):
     error: Optional[str] = None
 
 
-class IsetListPayload(BaseModel):
-    """``GET /api/iset-list`` payload.
+class InvestigationSummariesPayload(BaseModel):
+    """``GET /api/investigation-summaries`` payload.
 
     The stdlib handler returns ``{"investigations": [...]}`` (an object), and
     the client reads ``j.investigations`` — so the payload MUST be wrapped, not
@@ -1006,7 +1006,7 @@ class InputsPayload(BaseModel):
 
 
 class IsetDetail(BaseModel):
-    """``GET /api/iset/{slug}`` payload (lib.report_views.build_iset_detail).
+    """``GET /api/investigation/{slug}`` payload (lib.report_views.build_iset_detail).
 
     Full investigation-detail dict: name, title, description, studies list,
     acceptance_criteria, computed_acceptance, executive, etc.  The shape is
@@ -1598,7 +1598,7 @@ class IsetCreateBody(BaseModel):
 
 
 class IsetCloneBody(BaseModel):
-    """POST /api/iset-clone {source, target, source_prefix?, target_prefix?}"""
+    """POST /api/investigation-clone {source, target, source_prefix?, target_prefix?}"""
 
     model_config = ConfigDict(extra="allow")
 

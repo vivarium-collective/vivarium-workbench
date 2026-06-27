@@ -72,7 +72,7 @@ def test_data_source_js_is_served_and_defines_loaders():
     text = (server.STATIC_DIR / "data-source.js").read_text()
     for token in [
         "window.DataSource", "loadStudy", "loadInvestigation",
-        "/api/study/", "/api/iset/", "__DASH_CONFIG__",
+        "/api/study/", "/api/investigation/", "__DASH_CONFIG__",
     ]:
         assert token in text, f"data-source.js missing token: {token!r}"
 
@@ -106,7 +106,7 @@ def test_iset_page_walkthrough_references_data_source():
 
 def test_data_source_interface_is_stable():
     text = (server.STATIC_DIR / "data-source.js").read_text()
-    for route in ["/api/study/", "/api/iset/", "/api/workspace", "__DASH_CONFIG__"]:
+    for route in ["/api/study/", "/api/investigation/", "/api/workspace", "__DASH_CONFIG__"]:
         assert route in text, f"data-source.js missing route: {route!r}"
     assert server.Handler._build_api_study_response("does-not-exist")[1] == 404
 
@@ -277,7 +277,7 @@ def test_data_source_has_home_spa_loaders():
     for token in [
         "loadIsetList", "loadInputs", "loadCatalog", "loadComposites", "loadRegistry",
         '"snapshot"',
-        "/api/iset-list.json", "/api/inputs/", "/api/catalog.json",
+        "/api/investigation-summaries.json", "/api/inputs/", "/api/catalog.json",
         "/api/composites.json", "/api/registry.json",
     ]:
         assert token in text, f"data-source.js missing token: {token!r}"

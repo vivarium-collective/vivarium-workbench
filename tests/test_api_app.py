@@ -118,7 +118,7 @@ def test_workspace_manifest_in_openapi(client):
 
 
 def test_iset_list_empty_workspace(client):
-    r = client.get("/api/iset-list")
+    r = client.get("/api/investigation-summaries")
     assert r.status_code == 200
     # Wrapped object, not a bare array — the client reads j.investigations.
     assert r.json() == {"investigations": []}
@@ -140,7 +140,7 @@ def test_iset_list_typed_passthrough(client, monkeypatch):
         lambda ws, **kw: summaries,
     )
 
-    body = client.get("/api/iset-list").json()["investigations"]
+    body = client.get("/api/investigation-summaries").json()["investigations"]
     assert body[0]["studies"] == ["s1", "s2"]
     assert body[0]["lifecycle"] == {"phase": "run", "extra": 1}   # Any field: not stripped
     assert body[0]["current"] is True
@@ -2173,7 +2173,7 @@ def test_inputs_in_openapi(client):
 
 
 # ---------------------------------------------------------------------------
-# /api/iset/{slug}
+# /api/investigation/{slug}
 # ---------------------------------------------------------------------------
 
 def _make_iset_workspace(tmp_path):
@@ -2200,7 +2200,7 @@ def test_iset_detail_200(tmp_path):
     app.dependency_overrides[get_workspace] = lambda: ws
     from fastapi.testclient import TestClient as _TC
     c = _TC(app)
-    r = c.get("/api/iset/my-inv")
+    r = c.get("/api/investigation/my-inv")
     assert r.status_code == 200
     body = r.json()
     assert body["name"] == "my-inv"
@@ -2210,7 +2210,7 @@ def test_iset_detail_200(tmp_path):
 
 def test_iset_detail_404_unknown_slug(client):
     """Unknown slug returns 404 with the legacy error body."""
-    r = client.get("/api/iset/no-such-investigation")
+    r = client.get("/api/investigation/no-such-investigation")
     assert r.status_code == 404
     body = r.json()
     assert "error" in body
@@ -2241,14 +2241,14 @@ def test_iset_detail_404_body_matches_legacy(tmp_path, monkeypatch):
     app.dependency_overrides[get_workspace] = lambda: ws
     from fastapi.testclient import TestClient as _TC
     c = _TC(app)
-    r = c.get(f"/api/iset/{slug}")
+    r = c.get(f"/api/investigation/{slug}")
     assert r.status_code == 404
     assert r.json() == legacy_body
 
 
 def test_iset_detail_in_openapi(client):
     spec = client.get("/openapi.json").json()
-    assert "/api/iset/{slug}" in spec["paths"]
+    assert "/api/investigation/{slug}" in spec["paths"]
     assert "IsetDetail" in spec["components"]["schemas"]
 
 
@@ -3369,20 +3369,20 @@ class TestIsetReportRoute:
         rep = tmp_path / "investigations" / "inv-a" / "reports"
         rep.mkdir(parents=True)
         (rep / "index.html").write_text("<html>r</html>", encoding="utf-8")
-        r = client.get("/api/iset/inv-a/report")
+        r = client.get("/api/investigation/inv-a/report")
         assert r.status_code == 200
         assert r.headers["content-type"] == "text/html"
         assert r.headers["cache-control"] == "no-store"  # mirrors stdlib _serve_file
         assert r.text == "<html>r</html>"
 
     def test_404_no_report(self, client):
-        r = client.get("/api/iset/ghost/report")
+        r = client.get("/api/investigation/ghost/report")
         assert r.status_code == 404
         assert "ghost" in r.json()["error"]
 
     def test_in_openapi(self, client):
         paths = client.get("/openapi.json").json()["paths"]
-        assert "/api/iset/{slug}/report" in paths
+        assert "/api/investigation/{slug}/report" in paths
 
 
 class TestGuidanceRoute:
@@ -4030,7 +4030,7 @@ class TestBatch21ScaffoldRoutes:
         assert "post" in paths["/api/iset-create"]
 
     # -----------------------------------------------------------------------
-    # /api/iset-clone
+    # /api/investigation-clone
     # -----------------------------------------------------------------------
 
     _STUB_CLONE_SCRIPT = """\
@@ -4067,17 +4067,17 @@ if a.json:
         )
 
     def test_iset_clone_missing_source_target(self, sc_client: TestClient) -> None:
-        r = sc_client.post("/api/iset-clone", json={"source": "x"})
+        r = sc_client.post("/api/investigation-clone", json={"source": "x"})
         assert r.status_code == 400
         assert "error" in r.json()
 
     def test_iset_clone_source_not_found(self, sc_client: TestClient) -> None:
-        r = sc_client.post("/api/iset-clone", json={"source": "nope", "target": "dst"})
+        r = sc_client.post("/api/investigation-clone", json={"source": "nope", "target": "dst"})
         assert r.status_code == 404
 
     def test_iset_clone_happy(self, sc_client: TestClient, ws: Path) -> None:
         self._seed_src_inv(ws)
-        r = sc_client.post("/api/iset-clone", json={"source": "src-inv", "target": "dst-inv"})
+        r = sc_client.post("/api/investigation-clone", json={"source": "src-inv", "target": "dst-inv"})
         assert r.status_code == 200
         body = r.json()
         assert body["name"] == "dst-inv"
@@ -4085,8 +4085,8 @@ if a.json:
 
     def test_iset_clone_in_openapi(self, sc_client: TestClient) -> None:
         paths = sc_client.get("/openapi.json").json()["paths"]
-        assert "/api/iset-clone" in paths
-        assert "post" in paths["/api/iset-clone"]
+        assert "/api/investigation-clone" in paths
+        assert "post" in paths["/api/investigation-clone"]
 
     # -----------------------------------------------------------------------
     # /api/investigation-delete

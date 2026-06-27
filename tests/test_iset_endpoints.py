@@ -206,7 +206,7 @@ def test_iset_create_returns_detail_shape(_ws):
     body = {"name": "foo", "overview": "bar"}
     resp, code = _post_iset_create_for_test(_ws, body)
     assert code == 200, resp
-    # Should match the shape returned by GET /api/iset/<name>.
+    # Should match the shape returned by GET /api/investigation/<name>.
     assert resp["name"] == "foo"
     assert resp["status"] == "planning"
     assert resp["effective_status"] == "planning"
@@ -257,7 +257,7 @@ def test_iset_create_conflict_when_already_exists(_ws):
 
 
 # ---------------------------------------------------------------------------
-# Part 3: _post_iset_clone_for_test — POST /api/iset-clone handler
+# Part 3: _post_iset_clone_for_test — POST /api/investigation-clone handler
 # ---------------------------------------------------------------------------
 
 
@@ -599,7 +599,7 @@ def test_coerce_list_field_coerces_string_to_empty(capsys):
 
 def test_iset_detail_with_dict_acceptance_criteria_does_not_500(_ws, capsys):
     """End-to-end: a grouped (dict-shaped) acceptance_criteria field on an
-    investigation.yaml must NOT 500 the /api/iset/<name> endpoint. It must
+    investigation.yaml must NOT 500 the /api/investigation/<name> endpoint. It must
     return 200 with acceptance_criteria coerced to []."""
     _write_iset(
         _ws, "inv", status="planning", studies=[],

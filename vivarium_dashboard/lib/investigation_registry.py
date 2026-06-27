@@ -26,7 +26,7 @@ from vivarium_dashboard.lib.investigations_index import (
 )
 
 # Peer-probe cache: each running dashboard registers itself in
-# ~/.pbg/servers/*.json; we HTTP-probe each peer's /api/iset-list and cache the
+# ~/.pbg/servers/*.json; we HTTP-probe each peer's /api/investigation-summaries and cache the
 # result for a few seconds to avoid hammering peers on every sidebar render.
 _REGISTRY_TTL_S = 5.0
 _registry_cache: dict[str, tuple[float, dict]] = {}
@@ -41,9 +41,9 @@ _INVESTIGATION_STATUS_HIDDEN_FROM_SIDEBAR = frozenset({
 
 
 def peer_current_investigation(url: str) -> dict | None:
-    """Query a peer dashboard's /api/iset-list and pick a current Investigation.
+    """Query a peer dashboard's /api/investigation-summaries and pick a current Investigation.
 
-    Heuristic: peer-side ``/api/iset-list`` returns every Investigation in the
+    Heuristic: peer-side ``/api/investigation-summaries`` returns every Investigation in the
     peer's workspace. We pick the one whose ``effective_status`` is "running"
     if present; otherwise the first entry. Returns a slim
     ``{slug, title, effective_status}`` dict, or None if the peer has no
@@ -53,7 +53,7 @@ def peer_current_investigation(url: str) -> dict | None:
     now = time.time()
     if cached and now - cached[0] < _REGISTRY_TTL_S:
         return cached[1] or None
-    data = _http_get_json(url.rstrip("/") + "/api/iset-list")
+    data = _http_get_json(url.rstrip("/") + "/api/investigation-summaries")
     out: dict | None
     if not data or not isinstance(data.get("investigations"), list):
         out = None
@@ -205,7 +205,7 @@ def build_investigation_registry(
       - ``local_siblings``  — every OTHER investigation in THIS workspace.
       - ``running_others``  — peer dashboards' chosen Investigations
                               (one per live peer), via HTTP probe of
-                              each peer's ``/api/iset-list``.
+                              each peer's ``/api/investigation-summaries``.
       - ``dormant_others``  — open Investigations on OTHER worktrees
                               that do NOT have a running dashboard, read
                               directly off disk, deduplicated by slug.

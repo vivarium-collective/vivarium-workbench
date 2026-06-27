@@ -5,7 +5,7 @@ Verifies that:
 - computed_gate_verdict.result matches the server._condition_satisfied "tests-passed"
   predicate (fail==0 and pass>0)
 - investigation roll_up_acceptance returns the right verdict_status + criteria + unmet
-- GET /api/iset/<name> carries computed_acceptance
+- GET /api/investigation/<name> carries computed_acceptance
 """
 from __future__ import annotations
 
@@ -192,11 +192,11 @@ def test_roll_up_acceptance_criteria_fields():
 
 
 # ---------------------------------------------------------------------------
-# /api/iset/<name> carries computed_acceptance
+# /api/investigation/<name> carries computed_acceptance
 # ---------------------------------------------------------------------------
 
 def test_iset_detail_carries_computed_acceptance(tmp_path, dashboard_client):
-    """End-to-end: GET /api/iset/<name> must include computed_acceptance."""
+    """End-to-end: GET /api/investigation/<name> must include computed_acceptance."""
     ws = tmp_path / "ws"
     # Use nested investigation/studies layout for study_dir resolution
     inv_dir = ws / "investigations" / "my-inv"
@@ -221,7 +221,7 @@ def test_iset_detail_carries_computed_acceptance(tmp_path, dashboard_client):
     }))
 
     client = dashboard_client(ws)
-    resp = client.get("/api/iset/my-inv")
+    resp = client.get("/api/investigation/my-inv")
     assert resp.status_code == 200
     data = resp.json()
     assert "computed_acceptance" in data, (
