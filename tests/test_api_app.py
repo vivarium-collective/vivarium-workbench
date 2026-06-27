@@ -5734,3 +5734,80 @@ class TestStudyRunRoutes:
         ):
             assert p in paths and "post" in paths[p], p
             assert paths[p]["post"]["tags"] == ["Study runs"], p
+
+
+# ===========================================================================
+# P2: composite-test-run POST route (detached run launcher, "Composite runs"
+# tag).  Thin wrapper over ``lib.composite_test_run_views.composite_test_run`` —
+# every test monkeypatches that lib fn so NO real subprocess is spawned.  The
+# route JSONResponses all paths, so the lib-returned (dict, status) is preserved
+# verbatim (202 happy / 400 missing-id / 429 at-cap / 500 spawn-failure).
+# ===========================================================================
+class TestCompositeTestRunRoute:
+    def test_happy_202(self, client, monkeypatch):
+        from vivarium_dashboard.lib import composite_test_run_views
+        captured = {}
+
+        def _fake(ws, body):
+            captured["ws"], captured["body"] = ws, body
+            return {"run_id": "demo__1__abc", "status": "running"}, 202
+
+        monkeypatch.setattr(composite_test_run_views, "composite_test_run", _fake)
+        r = client.post(
+            "/api/composite-test-run",
+            json={"id": "demo.spec", "steps": 9},
+        )
+        assert r.status_code == 202
+        assert r.json() == {"run_id": "demo__1__abc", "status": "running"}
+        # exclude_none keeps steps; id passes through, omitted optionals absent.
+        assert captured["body"] == {"id": "demo.spec", "steps": 9}
+
+    def test_omitted_optionals_absent(self, client, monkeypatch):
+        from vivarium_dashboard.lib import composite_test_run_views
+        captured = {}
+        monkeypatch.setattr(
+            composite_test_run_views, "composite_test_run",
+            lambda ws, body: (captured.update(body=body) or ({"run_id": "r", "status": "running"}, 202)),
+        )
+        client.post("/api/composite-test-run", json={"id": "demo.spec"})
+        assert captured["body"] == {"id": "demo.spec"}
+        for k in ("steps", "overrides", "label", "emit_paths"):
+            assert k not in captured["body"]
+
+    def test_missing_id_400_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import composite_test_run_views
+        monkeypatch.setattr(
+            composite_test_run_views, "composite_test_run",
+            lambda ws, body: ({"error": "missing id"}, 400),
+        )
+        r = client.post("/api/composite-test-run", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "missing id"}
+
+    def test_at_cap_429_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import composite_test_run_views
+        monkeypatch.setattr(
+            composite_test_run_views, "composite_test_run",
+            lambda ws, body: (
+                {"error": "too many runs in progress — wait for one to finish"}, 429),
+        )
+        r = client.post("/api/composite-test-run", json={"id": "demo.spec"})
+        assert r.status_code == 429
+        assert r.json() == {
+            "error": "too many runs in progress — wait for one to finish"}
+
+    def test_spawn_failure_500_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import composite_test_run_views
+        monkeypatch.setattr(
+            composite_test_run_views, "composite_test_run",
+            lambda ws, body: ({"error": "spawn failed: boom", "run_id": "r"}, 500),
+        )
+        r = client.post("/api/composite-test-run", json={"id": "demo.spec"})
+        assert r.status_code == 500
+        assert r.json() == {"error": "spawn failed: boom", "run_id": "r"}
+
+    def test_route_in_openapi(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        p = "/api/composite-test-run"
+        assert p in paths and "post" in paths[p]
+        assert paths[p]["post"]["tags"] == ["Composite runs"]
