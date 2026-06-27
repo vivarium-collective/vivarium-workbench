@@ -26,7 +26,7 @@ export interface SimRow {
   status: string;
   n_steps: number | null;
   progress_step: number | null;
-  started_at: number;
+  started_at: number | null;
   completed_at: number | null;
   db_path: string | null;
   store_path: string | null;

@@ -70,8 +70,11 @@ def test_openapi_includes_typed_models(client):
     components = schema["components"]["schemas"]
     assert "SimulationsPayload" in components
     assert "SimRow" in components
-    # SimRow.started_at typed as number (epoch float), not string:
-    assert components["SimRow"]["properties"]["started_at"]["type"] == "number"
+    # SimRow.started_at is a nullable epoch float (number | null), not a string:
+    started = components["SimRow"]["properties"]["started_at"]
+    started_types = {s.get("type") for s in started.get("anyOf", [started])}
+    assert "number" in started_types
+    assert "string" not in started_types
 
 
 def test_config_route(client):

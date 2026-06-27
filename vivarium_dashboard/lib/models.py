@@ -73,7 +73,7 @@ class SimRow(BaseModel):
     status: str                # "completed" | "running" | "failed" | ...
     n_steps: Optional[int] = None
     progress_step: Optional[int] = None
-    started_at: float          # unix epoch seconds (REAL NOT NULL)
+    started_at: Optional[float] = None   # epoch seconds; None for synthesised rows lacking a timestamp
     completed_at: Optional[float] = None
     db_path: Optional[str] = None   # None when the row isn't backed by a runs.db
     store_path: Optional[str] = None   # native data store (zarr/parquet dir or s3 uri); None -> data lives in db_path

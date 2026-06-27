@@ -29,7 +29,7 @@ def test_generated_ts_has_expected_contract():
     # not "StudyRef | (string[])".
     assert "studies: (StudyRef | string)[];" in ts
     # the float/string distinction the hand-written overlay got wrong:
-    assert "started_at: number;" in ts          # SimRow: epoch float
+    assert "started_at: number | null;" in ts   # SimRow: nullable epoch float
     # SimRow.emitter was loosened to a free-form str, so it is no longer the
     # EmitterKind named alias; StudyRef.emitter (below) still uses the alias.
     assert "emitter: string | null;" in ts

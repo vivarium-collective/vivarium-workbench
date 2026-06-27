@@ -80,11 +80,13 @@ def test_row_to_dict_is_model_backed():
 
 
 def test_malformed_row_falls_back_with_warning(recwarn):
-    """A row that fails validation (started_at None) warns and returns the raw dict
-    rather than raising — the simulations index must not 500 on one bad row."""
-    out = _row_to_dict(_row(started_at=None), "/ws/study-a/runs.db")
+    """A row that fails validation (non-numeric started_at) warns and returns the
+    raw dict rather than raising — the simulations index must not 500 on one bad
+    row. (``started_at=None`` is now a *valid* synthesised-row shape, so use a
+    genuinely uncoercible value to exercise the fallback.)"""
+    out = _row_to_dict(_row(started_at="not-a-number"), "/ws/study-a/runs.db")
     assert out["run_id"] == "r1"            # legacy dict still served
-    assert out["started_at"] is None
+    assert out["started_at"] == "not-a-number"
     assert any("SimRow" in str(w.message) for w in recwarn.list)
 
 
