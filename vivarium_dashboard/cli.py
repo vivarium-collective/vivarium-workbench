@@ -196,6 +196,37 @@ def cmd_run_composite(args: argparse.Namespace) -> int:
     return execute(Path(args.request))
 
 
+def _load_manifest(source: str) -> dict:
+    """Load a manifest from a file path, file://, or http(s):// (a JSON manifest
+    or a dashboard base URL whose /api/source/manifest is fetched)."""
+    import json
+    import urllib.request
+
+    if source.startswith(("http://", "https://")):
+        url = source.rstrip("/")
+        if not url.endswith("/api/source/manifest"):
+            url = url + "/api/source/manifest"
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            return json.loads(resp.read().decode())
+    if source.startswith("file://"):
+        source = source[len("file://"):]
+    return json.loads(Path(source).read_text())
+
+
+def cmd_sync(args) -> int:
+    from vivarium_dashboard.lib.sync_workspace import sync_from_manifest
+
+    manifest = _load_manifest(args.manifest)
+    dest = Path(args.dest) if args.dest else Path.cwd() / (manifest.get("workspace") or "workspace")
+    body, status = sync_from_manifest(manifest, dest, run_post_sync=args.run_post_sync)
+    if status == 200:
+        print(f"synced {manifest.get('repo')}@{manifest.get('commit', '')[:7]} -> {body['path']}")
+        print(f"registered as workspace '{manifest.get('workspace')}'. Open it from the switcher.")
+        return 0
+    print(f"sync failed ({status}): {body.get('error', body)}")
+    return 1
+
+
 def cmd_prepare_investigation(args: argparse.Namespace) -> int:
     """CLI handler: prepare an investigation's coordinated generation."""
     from vivarium_dashboard.lib.prepare_investigation import prepare_investigation
@@ -269,6 +300,16 @@ def main(argv: list[str] | None = None) -> int:
     p_prep.add_argument("--dashboard-url", default=None,
                         help="Override dashboard URL (default: auto-detect)")
     p_prep.set_defaults(func=cmd_prepare_investigation)
+
+    p_sync = sub.add_parser(
+        "sync",
+        help="Materialize a remote dashboard's exact repo@commit workspace locally",
+    )
+    p_sync.add_argument("manifest", help="manifest JSON path/URL, or a dashboard base URL")
+    p_sync.add_argument("--dest", default=None, help="destination dir (default: ./<workspace>)")
+    p_sync.add_argument("--run-post-sync", action="store_true",
+                        help="run manifest-declared cache-rebuild commands (executes remote-authored commands)")
+    p_sync.set_defaults(func=cmd_sync)
 
     args = parser.parse_args(argv)
     return args.func(args)
