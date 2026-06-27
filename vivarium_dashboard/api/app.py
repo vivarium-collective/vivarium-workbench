@@ -47,6 +47,7 @@ from vivarium_dashboard.lib import remote_run_views as _remote_run_views
 from vivarium_dashboard.lib import auth_views as _auth_views
 from vivarium_dashboard.lib import composite_run_views as _cr_views
 from vivarium_dashboard.lib import composite_test_run_views as _composite_test_run_views
+from vivarium_dashboard.lib import investigation_create_views as _investigation_create_views
 from vivarium_dashboard.lib import investigation_run_one_views as _investigation_run_one_views
 from vivarium_dashboard.lib import investigation_run_views as _investigation_run_views
 from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
@@ -286,6 +287,8 @@ from vivarium_dashboard.lib.models import (
     InvestigationRunRequest,
     # P5: investigation-run-unblocked (enumerate + submit run job) POST request body
     InvestigationRunUnblockedRequest,
+    # Scaffold: investigation-create (scaffold new investigation dir) POST request body
+    InvestigationCreateRequest,
     # Viz authoring: visualization-preview (in-process viz render) POST request body
     VisualizationPreviewRequest,
     # Viz authoring: visualization-preview-instance (preview registered instance by name)
@@ -470,6 +473,21 @@ _OPENAPI_TAGS = [
             "embedded subprocess, persists rendered viz HTML, and appends to the "
             "investigation's ``runs.db``.  Validation failures are 400/404; a "
             "composite that fails to run returns 200 with ``{ok: false}``."
+        ),
+    },
+    {
+        "name": "Investigation scaffold",
+        "description": (
+            "Investigation scaffolding: ``POST /api/investigation-create`` creates "
+            "a new investigation directory (``data/.keep`` plus one of three "
+            "scaffold shapes keyed on the resolved ``source`` composite — a v4 "
+            "``study.yaml`` for a ``@composite_generator`` ref, a v2 ``spec.yaml`` "
+            "+ copied sidecar for a YAML source, or a blank ``spec.yaml`` stub).  "
+            "The live handler is ``_active_branch_action``-wrapped; this FastAPI "
+            "route calls the ``lib.investigation_create_views`` builder directly "
+            "with the commit deferred.  Errors carry ``{error: ...}`` at "
+            "400 (bad/missing name) / 404 (source not found) / 409 (already "
+            "exists) / 500 (scaffold failed)."
         ),
     },
     {
@@ -4738,6 +4756,52 @@ def create_app() -> FastAPI:
           - 200  the run/render summary dict
         """
         body, status = _investigation_run_views.investigation_run(
+            ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
+
+    # -----------------------------------------------------------------------
+    # Scaffold: investigation-create — scaffold a new investigation directory.
+    #
+    # Creates ``investigations/<name>/`` (keyed by the workspace ``studies/``
+    # dir) with a ``data/.keep`` plus one of three scaffold shapes keyed on the
+    # resolved ``source`` composite: a v4 ``study.yaml`` for a
+    # ``@composite_generator`` ref, a v2 ``spec.yaml`` + copied sidecar for a
+    # YAML source, or a blank ``spec.yaml`` stub.  The live stdlib handler
+    # commits the scaffold via ``_active_branch_action``; this FastAPI path runs
+    # the scaffold inline with the commit DEFERRED (like every other committer
+    # port) and returns ``{ok, name}`` verbatim.  JSONResponse every path so the
+    # lib-returned status is preserved: 400 bad/missing name, 404 source not
+    # found, 409 already exists, 500 scaffold failed, 200 success.
+    # ``model_dump(exclude_none=True)`` keeps omitted optionals absent so a
+    # missing ``name`` reaches the builder's 400 (not a 422).  CSRF middleware
+    # already guards it.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/investigation-create",
+        tags=["Investigation scaffold"],
+        summary="Scaffold a new investigation directory (deferred commit)",
+    )
+    def investigation_create(
+        req: InvestigationCreateRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Scaffold a new investigation directory.
+
+        Mirrors the stdlib ``POST /api/investigation-create``.  Body:
+        ``{"name", "source"?, "composite"?}``.
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.investigation_create_views.investigation_create``, modulo the
+        deferred commit):
+          - 400  missing ``name`` / name fails ``^[a-zA-Z0-9_-]+$``
+          - 404  ``source`` composite not resolvable
+          - 409  investigation already exists
+          - 500  scaffold ``action`` raised (``{"error": "action failed: …"}``)
+          - 200  ``{ok: true, name}``  (scaffold run inline; the live
+            ``_active_branch_action`` commit is deferred)
+        """
+        body, status = _investigation_create_views.investigation_create(
             ws, req.model_dump(exclude_none=True))
         return JSONResponse(status_code=status, content=body)
 
