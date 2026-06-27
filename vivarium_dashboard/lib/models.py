@@ -2626,3 +2626,28 @@ class CatalogInstallRequest(BaseModel):
 
     name: str = ""
     skip_system_deps_check: Optional[bool] = None
+
+
+class CatalogUninstallRequest(BaseModel):
+    """POST /api/catalog-uninstall request body — ``{"name"}``.
+
+    Removes a catalog module from the workspace, reversing catalog-install. A
+    missing ``name`` is rejected with HTTP 400 by
+    ``lib.catalog_uninstall_views.catalog_uninstall``. When the module is not
+    declared in ``workspace.yaml.imports`` the builder delegates to
+    ``uninstall_unmanaged_or_404`` (a venv-only "unmanaged" install: best-effort
+    uv/pip uninstall + untracked ``external/<name>/`` removal → 200, real-parent
+    409, or no-pip/uv 500). Otherwise it runs the pypi (remove dependency + pip
+    uninstall) or reference (remove dependency + uv source + git submodule
+    deinit/rm + pip uninstall) uninstall and pops the ``imports`` entry.
+    ``extra="allow"`` preserves any other body keys, and
+    ``model_dump(exclude_none=True)`` mirrors the legacy ``body.get`` access. The
+    ``{ok, module, install_mode, log}`` success body (the live ``_commit_or_run``
+    commit is deferred — the builder runs the uninstall + workspace.yaml mutation
+    inline) and every error path are returned via ``JSONResponse`` (no response
+    model).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str = ""
