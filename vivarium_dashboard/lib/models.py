@@ -2370,3 +2370,76 @@ class FeedbackImportResponse(BaseModel):
     ok: bool = True
     path: str
     n_entries: int
+
+
+# ---------------------------------------------------------------------------
+# P1: study-run / test-run POST request bodies (5 routes under "Study runs").
+#
+# All five routes return large, variable result dicts (or 400/404/409/500
+# error shapes), so the routes use ``JSONResponse`` on every path and declare
+# NO ``response_model`` — only these request models are needed.  ``extra="allow"``
+# keeps the legacy raw-JSON contract (e.g. ``_study_name_from_body`` also reads
+# ``name``/``investigation`` aliases, ``run_study_baseline`` reads ``composite``);
+# the routes pass ``model_dump(exclude_none=True)`` so an OMITTED optional stays
+# absent and the lib builders' ``.get(...)`` defaults apply.
+# ---------------------------------------------------------------------------
+class StudyRunBaselineRequest(BaseModel):
+    """POST /api/study-run-baseline request body — ``{"study", "steps"?}``.
+
+    Runs a study's baseline composite. A missing study is rejected with HTTP 400
+    by ``lib.study_runs.run_study_baseline``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    study: str = ""
+    steps: Optional[int] = None
+
+
+class StudyRunVariantRequest(BaseModel):
+    """POST /api/study-run-variant request body — ``{"study", "variant", "steps"?}``.
+
+    Runs a study variant (single run) or delegates an ensemble sweep. A missing
+    study/variant is rejected with HTTP 400 by ``lib.study_runs.run_study_variant``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    study: str = ""
+    variant: str = ""
+    steps: Optional[int] = None
+
+
+class StudyRunAllBaselinesRequest(BaseModel):
+    """POST /api/study-run-all-baselines request body — ``{"study", "steps"?}``.
+
+    Runs every ``baseline[]`` entry of a study and aggregates results. A missing
+    study is rejected with HTTP 400 by ``lib.study_runs.run_study_all_baselines``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    study: str = ""
+    steps: Optional[int] = None
+
+
+class StudyTestsRunRequest(BaseModel):
+    """POST /api/study-tests-run request body — ``{"study"}``.
+
+    Runs pytest against ``studies/<study>/tests/``. A missing study is rejected
+    with HTTP 400 by ``lib.test_run_views.study_tests_run``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    study: str = ""
+
+
+class RunTestsRequest(BaseModel):
+    """POST /api/run-tests request body — empty ``{}`` (v0.3.0: no model param).
+
+    Runs pytest for the whole workspace. Source:
+    ``lib.test_run_views.run_workspace_tests``.
+    """
+
+    model_config = ConfigDict(extra="allow")

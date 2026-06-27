@@ -5588,3 +5588,149 @@ class TestMiscFsRoutes:
         schemas = spec["components"]["schemas"]
         for name in ("RenderResponse", "FeedbackImportResponse"):
             assert name in schemas, name
+
+
+# ===========================================================================
+# P1: 5 study-run / test-run POST routes (under the "Study runs" tag).
+# Each route is a thin wrapper over a lib fn; every test monkeypatches that lib
+# fn so NO real sim / pytest / subprocess ever runs.  The routes JSONResponse
+# all paths, so the lib-returned (dict, status) is preserved verbatim.
+# ===========================================================================
+class TestStudyRunRoutes:
+    def test_study_run_baseline_passthrough(self, client, monkeypatch):
+        from vivarium_dashboard.lib import study_runs
+        captured = {}
+
+        def _fake(ws, body):
+            captured["ws"], captured["body"] = ws, body
+            return {"ran": "baseline", "run_id": "r1"}, 200
+
+        monkeypatch.setattr(study_runs, "run_study_baseline", _fake)
+        r = client.post("/api/study-run-baseline", json={"study": "s1", "steps": 7})
+        assert r.status_code == 200
+        assert r.json() == {"ran": "baseline", "run_id": "r1"}
+        # exclude_none keeps steps; study passes through.
+        assert captured["body"] == {"study": "s1", "steps": 7}
+
+    def test_study_run_baseline_omitted_steps_absent(self, client, monkeypatch):
+        from vivarium_dashboard.lib import study_runs
+        captured = {}
+        monkeypatch.setattr(
+            study_runs, "run_study_baseline",
+            lambda ws, body: (captured.update(body=body) or ({"ok": True}, 200)),
+        )
+        client.post("/api/study-run-baseline", json={"study": "s1"})
+        # An OMITTED optional must be ABSENT (not None) so the lib .get() default holds.
+        assert captured["body"] == {"study": "s1"}
+        assert "steps" not in captured["body"]
+
+    def test_study_run_baseline_error_status_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import study_runs
+        monkeypatch.setattr(
+            study_runs, "run_study_baseline",
+            lambda ws, body: ({"error": "study not found"}, 404),
+        )
+        r = client.post("/api/study-run-baseline", json={"study": "ghost"})
+        assert r.status_code == 404
+        assert r.json() == {"error": "study not found"}
+
+    def test_study_run_variant_passthrough(self, client, monkeypatch):
+        from vivarium_dashboard.lib import study_runs
+        captured = {}
+
+        def _fake(ws, body):
+            captured["body"] = body
+            return {"ran": "variant"}, 200
+
+        monkeypatch.setattr(study_runs, "run_study_variant", _fake)
+        r = client.post(
+            "/api/study-run-variant",
+            json={"study": "s1", "variant": "v1", "steps": 3},
+        )
+        assert r.status_code == 200
+        assert r.json() == {"ran": "variant"}
+        assert captured["body"] == {"study": "s1", "variant": "v1", "steps": 3}
+
+    def test_study_run_variant_422_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import study_runs
+        monkeypatch.setattr(
+            study_runs, "run_study_variant",
+            lambda ws, body: ({"error": "kind: seeds requires n_seeds >= 1"}, 422),
+        )
+        r = client.post("/api/study-run-variant", json={"study": "s1", "variant": "v1"})
+        assert r.status_code == 422
+        assert r.json() == {"error": "kind: seeds requires n_seeds >= 1"}
+
+    def test_study_run_all_baselines_passthrough(self, client, monkeypatch):
+        from vivarium_dashboard.lib import study_runs
+        captured = {}
+
+        def _fake(ws, body):
+            captured["body"] = body
+            return {"results": [{"name": "b0"}], "errors": []}, 200
+
+        monkeypatch.setattr(study_runs, "run_study_all_baselines", _fake)
+        r = client.post("/api/study-run-all-baselines", json={"study": "s1"})
+        assert r.status_code == 200
+        assert r.json() == {"results": [{"name": "b0"}], "errors": []}
+        assert captured["body"] == {"study": "s1"}
+
+    def test_study_tests_run_passthrough(self, client, monkeypatch):
+        from vivarium_dashboard.lib import test_run_views
+        captured = {}
+
+        def _fake(ws, body):
+            captured["ws"], captured["body"] = ws, body
+            return {"summary": {"passed": 1}, "tests": [], "note": None}, 200
+
+        monkeypatch.setattr(test_run_views, "study_tests_run", _fake)
+        r = client.post("/api/study-tests-run", json={"study": "s1"})
+        assert r.status_code == 200
+        assert r.json() == {"summary": {"passed": 1}, "tests": [], "note": None}
+        assert captured["body"] == {"study": "s1"}
+
+    def test_study_tests_run_409_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import test_run_views
+        monkeypatch.setattr(
+            test_run_views, "study_tests_run",
+            lambda ws, body: ({"error": "tests already running"}, 409),
+        )
+        r = client.post("/api/study-tests-run", json={"study": "s1"})
+        assert r.status_code == 409
+        assert r.json() == {"error": "tests already running"}
+
+    def test_run_tests_passthrough(self, client, monkeypatch):
+        from vivarium_dashboard.lib import test_run_views
+        captured = {}
+
+        def _fake(ws, body):
+            captured["ws"], captured["body"] = ws, body
+            return {"returncode": 0, "stdout": "ok", "stderr": ""}, 200
+
+        monkeypatch.setattr(test_run_views, "run_workspace_tests", _fake)
+        r = client.post("/api/run-tests", json={})
+        assert r.status_code == 200
+        assert r.json() == {"returncode": 0, "stdout": "ok", "stderr": ""}
+        assert captured["body"] == {}
+
+    def test_run_tests_timeout_500_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import test_run_views
+        monkeypatch.setattr(
+            test_run_views, "run_workspace_tests",
+            lambda ws, body: ({"error": "pytest timed out after 120s"}, 500),
+        )
+        r = client.post("/api/run-tests", json={})
+        assert r.status_code == 500
+        assert r.json() == {"error": "pytest timed out after 120s"}
+
+    def test_all_five_routes_in_openapi(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        for p in (
+            "/api/study-run-baseline",
+            "/api/study-run-variant",
+            "/api/study-run-all-baselines",
+            "/api/study-tests-run",
+            "/api/run-tests",
+        ):
+            assert p in paths and "post" in paths[p], p
+            assert paths[p]["post"]["tags"] == ["Study runs"], p

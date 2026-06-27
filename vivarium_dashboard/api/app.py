@@ -76,6 +76,8 @@ from vivarium_dashboard.lib import rigor_views as _rigor_views
 from vivarium_dashboard.lib import saved_visualizations as _saved_viz
 from vivarium_dashboard.lib import static_serving as _static_serving
 from vivarium_dashboard.lib import study_page as _study_page
+from vivarium_dashboard.lib import study_runs as _study_runs
+from vivarium_dashboard.lib import test_run_views as _test_run_views
 from vivarium_dashboard.lib import study_spec as _study_spec
 from vivarium_dashboard.lib import study_viz_views as _study_viz
 from vivarium_dashboard.lib import system_info as _system_info
@@ -248,6 +250,12 @@ from vivarium_dashboard.lib.models import (
     # C-state-3i: visualization-accept finalize route
     VisualizationAcceptBody,
     VisualizationAcceptResponse,
+    # P1: study-run / test-run POST request bodies (JSONResponse-only routes)
+    StudyRunBaselineRequest,
+    StudyRunVariantRequest,
+    StudyRunAllBaselinesRequest,
+    StudyTestsRunRequest,
+    RunTestsRequest,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -4323,6 +4331,144 @@ def create_app() -> FastAPI:
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return SourceSwitchResponse.model_validate(body)
+
+    # -----------------------------------------------------------------------
+    # Study runs — local study-run engine + workspace/study test runners
+    #
+    # The 3 study-run routes call the already-extracted study-run engine
+    # orchestrators (``lib.study_runs.run_study_*`` — phase E4) directly; the 2
+    # test routes call the P1 pure builders (``lib.test_run_views``).  Every
+    # route returns large, variable result dicts (and 400/404/409/422/500 error
+    # shapes), so every path is wrapped in ``JSONResponse`` to preserve the
+    # lib-returned status code verbatim (a declared response_model would force
+    # 200 / coerce the variable shapes).  The CSRF middleware already guards
+    # these POSTs.  The request models use ``model_dump(exclude_none=True)`` so
+    # an OMITTED optional (e.g. ``steps``) stays absent and the lib builders'
+    # ``.get(...)`` defaults apply.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/study-run-baseline",
+        tags=["Study runs"],
+        summary="Run a study's baseline composite (local engine)",
+    )
+    def study_run_baseline(
+        req: StudyRunBaselineRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Run a Study's baseline composite + post-run stages.
+
+        Mirrors the stdlib ``POST /api/study-run-baseline``.  Body:
+        ``{"study", "composite"?, "steps"?}`` — resolves the study, builds/runs
+        the baseline composite subprocess, fires post-run side-effects (viz,
+        post-run scripts, analyses, outcome sync), returns the run result dict.
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.study_runs.run_study_baseline``):
+          - 400  missing study / baseline entry has no composite
+          - 404  study not found / requested baseline composite not found
+          - 200  run-result dict
+        """
+        body, status = _study_runs.run_study_baseline(ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
+
+    @app.post(
+        "/api/study-run-variant",
+        tags=["Study runs"],
+        summary="Run a study variant (single run or ensemble sweep)",
+    )
+    def study_run_variant(
+        req: StudyRunVariantRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Run a study variant (single run) or delegate an ensemble sweep.
+
+        Mirrors the stdlib ``POST /api/study-run-variant``.  Body:
+        ``{"study", "variant", "steps"?}`` — runs the variant composite or, for
+        a ``kind: seeds`` / ``kind: sweep`` variant, delegates an ensemble sweep
+        to v2ecoli-workflow.
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.study_runs.run_study_variant``):
+          - 400  missing study/variant / baseline entry has no composite
+          - 404  study / variant / base_composite not found
+          - 422  ensemble misconfiguration (n_seeds / sweep_over / sweep target)
+          - 200  run-result dict
+        """
+        body, status = _study_runs.run_study_variant(ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
+
+    @app.post(
+        "/api/study-run-all-baselines",
+        tags=["Study runs"],
+        summary="Run every baseline composite of a study and aggregate results",
+    )
+    def study_run_all_baselines(
+        req: StudyRunAllBaselinesRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Run every ``baseline[]`` entry of a study and aggregate results.
+
+        Mirrors the stdlib ``POST /api/study-run-all-baselines``.  Body:
+        ``{"study", "steps"?}`` — runs each baseline composite in turn and
+        returns ``{"results": [...], "errors": [...]}``.
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.study_runs.run_study_all_baselines``):
+          - 400  missing study / study has no baseline composites
+          - 404  study not found
+          - 200  ``{results, errors}`` (status reflects the first error if any)
+        """
+        body, status = _study_runs.run_study_all_baselines(ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
+
+    @app.post(
+        "/api/study-tests-run",
+        tags=["Study runs"],
+        summary="Run pytest against a study's tests/ directory",
+    )
+    def study_tests_run(
+        req: StudyTestsRunRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Run pytest against ``studies/<study>/tests/``.
+
+        Mirrors the stdlib ``POST /api/study-tests-run``.  Body: ``{"study"}`` —
+        returns ``{"summary", "tests", "note"}``.
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.test_run_views.study_tests_run``):
+          - 400  missing ``study`` (``{"error": "missing 'study' in body"}``)
+          - 404  study not found (``{"error": "study not found: <slug>"}``)
+          - 409  tests already running (``StudyTestsConcurrentError``)
+          - 200  ``{summary, tests, note}``
+        """
+        body, status = _test_run_views.study_tests_run(ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
+
+    @app.post(
+        "/api/run-tests",
+        tags=["Study runs"],
+        summary="Run pytest for the whole workspace",
+    )
+    def run_tests(
+        req: RunTestsRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Run pytest for the workspace's ``tests/`` directory (v0.3.0: no model
+        param).
+
+        Mirrors the stdlib ``POST /api/run-tests``.  Returns ``{"returncode",
+        "stdout", "stderr"}`` (200) for a completed run.
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.test_run_views.run_workspace_tests``):
+          - 500  ``{"error": "pytest timed out after 120s"}`` (TimeoutExpired)
+          - 500  ``{"error": "<exc>"}`` (any other exception)
+          - 200  ``{returncode, stdout, stderr}``
+        """
+        body, status = _test_run_views.run_workspace_tests(ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
 
     # -----------------------------------------------------------------------
     # Runs — remote (sms-api) simulation-run SUBMIT
