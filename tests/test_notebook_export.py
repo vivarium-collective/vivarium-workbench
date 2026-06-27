@@ -210,6 +210,24 @@ def test_run_strategy_generic_vs_scripts(tmp_path: Path):
     assert "run_study(" in code2
 
 
+def test_repo_root_resolved_from_notebook_location(tmp_path):
+    """The notebook must locate its own repo root on any clone — by walking up
+    from the working dir for the workspace/+pyproject markers — rather than
+    depending on a hardcoded absolute path or a launch-from-root cwd."""
+    inv = _build_workspace(tmp_path)
+    out = export_investigation_notebook(tmp_path, inv)
+    code = _code_text(json.loads(out["ipynb"].read_text()))
+
+    # walk-up resolver is emitted and used
+    assert "def _find_repo_root(" in code
+    assert 'is_dir() and (_cand / "pyproject.toml").is_file()' in code
+    assert "_find_repo_root(Path.cwd().resolve())" in code
+    # $VIVARIUM_REPO still wins when set
+    assert 'os.environ.get("VIVARIUM_REPO")' in code
+    # the old fragile primary (bare hardcoded path with cwd fallback) is gone
+    assert 'REPO = Path(os.environ.get("VIVARIUM_REPO") or' not in code
+
+
 def test_viz_cells_use_iframe_isolation(tmp_path):
     """Viz HTML (which embeds Plotly scripts) is shown via an iframe srcdoc, so
     the scripts execute in JupyterLab instead of rendering blank."""
