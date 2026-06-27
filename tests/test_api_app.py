@@ -5811,3 +5811,74 @@ class TestCompositeTestRunRoute:
         p = "/api/composite-test-run"
         assert p in paths and "post" in paths[p]
         assert paths[p]["post"]["tags"] == ["Composite runs"]
+
+
+# ===========================================================================
+# P3: investigation-run-one POST route (ad-hoc "Duplicate run", "Investigation
+# runs" tag).  Thin wrapper over
+# ``lib.investigation_run_one_views.investigation_run_one`` — every test
+# monkeypatches that lib fn so NO real subprocess is spawned.  The route
+# JSONResponses all paths, so the lib-returned (dict, status) is preserved
+# verbatim (200 happy / 200 run-failure / 400 missing-inv / 404 not-found).
+# ===========================================================================
+class TestInvestigationRunOneRoute:
+    def test_happy_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import investigation_run_one_views
+        captured = {}
+
+        def _fake(ws, body):
+            captured["ws"], captured["body"] = ws, body
+            return {"ok": True, "run_id": "demo__1__abc",
+                    "investigation": "inv-x", "sim_name": "ad-hoc",
+                    "viz_html": {}}, 200
+
+        monkeypatch.setattr(
+            investigation_run_one_views, "investigation_run_one", _fake)
+        r = client.post(
+            "/api/investigation-run-one",
+            json={"investigation": "inv-x", "steps": 7},
+        )
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+        assert r.json()["run_id"] == "demo__1__abc"
+        # exclude_none keeps investigation + steps; omitted optionals absent.
+        assert captured["body"] == {"investigation": "inv-x", "steps": 7}
+
+    def test_run_failure_200_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import investigation_run_one_views
+        monkeypatch.setattr(
+            investigation_run_one_views, "investigation_run_one",
+            lambda ws, body: (
+                {"ok": False, "run_id": "r", "error": "boom"}, 200),
+        )
+        r = client.post("/api/investigation-run-one",
+                        json={"investigation": "inv-x"})
+        assert r.status_code == 200
+        assert r.json() == {"ok": False, "run_id": "r", "error": "boom"}
+
+    def test_missing_investigation_400_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import investigation_run_one_views
+        monkeypatch.setattr(
+            investigation_run_one_views, "investigation_run_one",
+            lambda ws, body: ({"error": "investigation required"}, 400),
+        )
+        r = client.post("/api/investigation-run-one", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "investigation required"}
+
+    def test_spec_not_found_404_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import investigation_run_one_views
+        monkeypatch.setattr(
+            investigation_run_one_views, "investigation_run_one",
+            lambda ws, body: ({"error": "spec.yaml not found"}, 404),
+        )
+        r = client.post("/api/investigation-run-one",
+                        json={"investigation": "inv-x"})
+        assert r.status_code == 404
+        assert r.json() == {"error": "spec.yaml not found"}
+
+    def test_route_in_openapi(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        p = "/api/investigation-run-one"
+        assert p in paths and "post" in paths[p]
+        assert paths[p]["post"]["tags"] == ["Investigation runs"]
