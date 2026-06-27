@@ -2602,3 +2602,27 @@ class ImportInstallRequest(BaseModel):
 
     name: str = ""
     target: Optional[str] = None
+
+
+class CatalogInstallRequest(BaseModel):
+    """POST /api/catalog-install request body — ``{"name", "skip_system_deps_check"?}``.
+
+    Installs a catalog module into the workspace venv — directly from PyPI when
+    the catalog entry carries a ``pypi_name``, otherwise via the legacy
+    git-submodule + editable-install path. A missing ``name`` is rejected with
+    HTTP 400 and an unknown module with HTTP 404 by
+    ``lib.catalog_install_views.catalog_install``. When the catalog declares
+    native system-dependency checks and any are unsatisfied, the install is
+    refused with HTTP 409 (structured ``missing`` info); ``skip_system_deps_check``
+    bypasses that gate. ``extra="allow"`` preserves any other body keys, and
+    ``model_dump(exclude_none=True)`` keeps an omitted ``skip_system_deps_check``
+    absent so the builder's default applies. The ``{ok, module, install_mode,
+    log}`` success body (the live ``_commit_or_run`` commit is deferred — the
+    builder runs the install + workspace.yaml mutation inline) and every error
+    path are returned via ``JSONResponse`` (no response model).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str = ""
+    skip_system_deps_check: Optional[bool] = None

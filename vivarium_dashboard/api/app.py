@@ -90,6 +90,7 @@ from vivarium_dashboard.lib import system_info as _system_info
 from vivarium_dashboard.lib import work_views as _work_views
 from vivarium_dashboard.lib import workspace_deps_views as _workspace_deps
 from vivarium_dashboard.lib import install_views as _install_views
+from vivarium_dashboard.lib import catalog_install_views as _catalog_install_views
 from vivarium_dashboard.lib.composite_resolve import resolve_composite
 from vivarium_dashboard.lib.composites_query import composites_via_subprocess
 from vivarium_dashboard.lib.models import (
@@ -275,9 +276,10 @@ from vivarium_dashboard.lib.models import (
     VisualizationPreviewRequest,
     # Viz authoring: visualization-preview-instance (preview registered instance by name)
     VisualizationPreviewInstanceRequest,
-    # Installs: system-deps-install + import-install POST request bodies (JSONResponse-only)
+    # Installs: system-deps-install + import-install + catalog-install POST request bodies (JSONResponse-only)
     SystemDepsInstallRequest,
     ImportInstallRequest,
+    CatalogInstallRequest,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -5410,6 +5412,39 @@ def create_app() -> FastAPI:
           - 200  ``{ok: true, log}``  (workspace.yaml mutation run inline)
         """
         body, status = _install_views.import_install(
+            ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
+
+    @app.post(
+        "/api/catalog-install",
+        tags=["Installs"],
+        summary="Install a catalog module (PyPI direct or git-submodule) into the venv",
+    )
+    def catalog_install(
+        req: CatalogInstallRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Install a catalog module into the workspace venv.
+
+        Mirrors the stdlib ``POST /api/catalog-install`` (the biggest handler in
+        the migration).  Body: ``{"name", "skip_system_deps_check"?}`` — installs
+        directly from PyPI when the catalog entry carries a ``pypi_name``, else
+        via the legacy git-submodule + editable-install path, gated on a
+        system-dependency check.
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.catalog_install_views.catalog_install``, modulo the deferred
+        commit):
+          - 400  missing ``name``
+          - 404  module not in catalog (``{"error": "module '…' not in catalog"}``)
+          - 409  unmet system dependencies (``{error, name, platform, missing,
+            hint}``; bypass with ``skip_system_deps_check=true``)
+          - 500  no installer available / install failure (``{"error":
+            "action failed: …", "log", "install_mode"[, "diagnosis"]}``)
+          - 200  ``{ok: true, module, install_mode, log}``  (install + workspace.yaml
+            mutation run inline; the live ``_commit_or_run`` commit is deferred)
+        """
+        body, status = _catalog_install_views.catalog_install(
             ws, req.model_dump(exclude_none=True))
         return JSONResponse(status_code=status, content=body)
 
