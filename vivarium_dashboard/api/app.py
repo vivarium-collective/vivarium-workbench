@@ -255,6 +255,9 @@ from vivarium_dashboard.lib.models import (
     # C-state-3f3: workstream GitHub-PR-create route
     WorkCreatePrRequest,
     WorkCreatePrResponse,
+    # C-state-3f4: workstream link-branch-to-upstream route
+    WorkLinkBranchRequest,
+    WorkLinkBranchResponse,
     # C-state-3h1: workspace-registry routes
     WorkspacesPathRequest,
     WorkspacesOkResponse,
@@ -5199,6 +5202,46 @@ def create_app() -> FastAPI:
         """
         payload = req.model_dump(exclude_none=True) if req is not None else {}
         resp, status = _work_pr_views.work_create_pr(ws, payload)
+        return JSONResponse(status_code=status, content=resp)
+
+    @app.post(
+        "/api/work-link-branch",
+        response_model=WorkLinkBranchResponse,
+        tags=["Workstream"],
+        summary="Link the active workstream to an upstream branch (branch or fork mode)",
+    )
+    def work_link_branch(
+        req: Optional[WorkLinkBranchRequest] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Link the workspace to an upstream branch via the ``gh``/``git`` CLIs.
+
+        Mirrors the stdlib ``POST /api/work-link-branch``.  Body:
+        ``{upstream_repo?, branch_name?, push?: bool=True, mode?: "branch"|"fork"}``.
+
+        ``mode="branch"`` (default) sets git ``origin`` to the upstream (refusing
+        to overwrite a divergent origin), pushes the active branch, and marks the
+        workstream pushed.  ``mode="fork"`` forks the upstream under the
+        authenticated gh user (``gh repo fork``), points ``origin`` at the fork +
+        adds an ``upstream`` remote, and pushes to the fork.  ``upstream_repo``
+        defaults to the auto-detected upstream; ``branch_name`` renames the active
+        branch first when it differs.
+
+        Status codes (byte-identical to the legacy handler):
+          - 409  ``{"error": "no active workstream — Start one first ..."}``
+          - 500  ``{"error": "gh CLI not installed. ..."}`` / ``"gh not authenticated. ..."``
+          - 400  bad ``mode`` / ``upstream_repo`` / branch name
+          - 500  branch rename / gh / git failure (``[:300]``/``[:500]`` slices)
+          - 409  ``{"error": "origin already configured to ...", "current_origin"}``
+          - 200  branch: ``{ok, upstream_repo, branch, branch_url}``;
+                 fork: ``{ok, fork, upstream, branch, branch_url}``
+
+        The CSRF middleware already guards this POST.  Library-backed via the
+        pure ``lib.work_pr_views.work_link_branch``; every path is wrapped in
+        ``JSONResponse`` so the lib-returned status code is preserved verbatim.
+        """
+        payload = req.model_dump(exclude_none=True) if req is not None else {}
+        resp, status = _work_pr_views.work_link_branch(ws, payload)
         return JSONResponse(status_code=status, content=resp)
 
     # -----------------------------------------------------------------------

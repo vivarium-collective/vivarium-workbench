@@ -486,6 +486,12 @@ export interface WorkCreatePrResponse {
   pr_number: number | null;
 }
 
+export interface WorkLinkBranchResponse {
+  ok: boolean;
+  branch: string;
+  branch_url: string;
+}
+
 export interface WorkspacesOkResponse {
   ok: boolean;
 }

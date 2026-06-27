@@ -309,3 +309,275 @@ def test_default_upstream_repo_empty_yaml_falls_through_to_fallback(tmp_path, mo
         wp.subprocess, "run",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("no subprocess")))
     assert wp.default_upstream_repo(tmp_path) == "vivarium-collective/v2ecoli"
+
+
+# ===========================================================================
+# work_link_branch — early refusals
+# ===========================================================================
+def test_link_no_active_workstream_409(monkeypatch):
+    _patch_state(monkeypatch, {})
+    resp, code = wp.work_link_branch(Path("/ws"), {})
+    assert (resp, code) == (
+        {"error": "no active workstream — Start one first so the push has a target"}, 409)
+
+
+def test_link_gh_not_installed_500(monkeypatch):
+    _patch_state(monkeypatch, {"active_branch": "feat/x"})
+    monkeypatch.setattr(wp.shutil, "which", lambda name: None)
+    resp, code = wp.work_link_branch(Path("/ws"), {})
+    assert (resp, code) == (
+        {"error": "gh CLI not installed. Install via `brew install gh` then `gh auth login`."}, 500)
+
+
+def test_link_gh_not_authenticated_500(monkeypatch):
+    _patch_state(monkeypatch, {"active_branch": "feat/x"})
+    monkeypatch.setattr(wp.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setattr(wp.subprocess, "run",
+                        lambda argv, *a, **k: _cp(1, stderr="not logged in"))
+    resp, code = wp.work_link_branch(Path("/ws"), {})
+    assert (resp, code) == ({"error": "gh not authenticated. Run `gh auth login`."}, 500)
+
+
+def test_link_bad_mode_400(monkeypatch):
+    _patch_state(monkeypatch, {"active_branch": "feat/x"})
+    monkeypatch.setattr(wp.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setattr(wp.subprocess, "run", lambda argv, *a, **k: _cp(0))
+    resp, code = wp.work_link_branch(Path("/ws"), {"mode": "Bogus"})
+    assert (resp, code) == ({"error": "mode must be 'branch' or 'fork'; got 'bogus'"}, 400)
+
+
+def test_link_bad_upstream_repo_400(monkeypatch):
+    _patch_state(monkeypatch, {"active_branch": "feat/x"})
+    monkeypatch.setattr(wp.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setattr(wp.subprocess, "run", lambda argv, *a, **k: _cp(0))
+    resp, code = wp.work_link_branch(Path("/ws"), {"upstream_repo": "not a repo!!"})
+    assert code == 400
+    assert resp == {"error": "upstream_repo must look like owner/name; got 'not a repo!!'"}
+
+
+def test_link_bad_branch_name_400(monkeypatch):
+    _patch_state(monkeypatch, {"active_branch": "feat/x"})
+    monkeypatch.setattr(wp.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setattr(wp.subprocess, "run", lambda argv, *a, **k: _cp(0))
+    resp, code = wp.work_link_branch(
+        Path("/ws"), {"upstream_repo": "o/r", "branch_name": "bad branch!"})
+    assert (resp, code) == ({"error": "invalid branch name"}, 400)
+
+
+def test_link_branch_rename_failure_500(monkeypatch):
+    _patch_state(monkeypatch, {"active_branch": "feat/x"})
+    monkeypatch.setattr(wp.shutil, "which", lambda name: "/usr/bin/gh")
+
+    def _run(argv, *a, **k):
+        if argv[:2] == ["gh", "auth"]:
+            return _cp(0)
+        if argv[:3] == ["git", "branch", "-m"]:
+            return _cp(1, stderr="rename boom")
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(wp.subprocess, "run", _run)
+    resp, code = wp.work_link_branch(
+        Path("/ws"), {"upstream_repo": "o/r", "branch_name": "feat/y"})
+    assert (resp, code) == ({"error": "branch rename failed: rename boom"}, 500)
+
+
+# ===========================================================================
+# work_link_branch — branch mode
+# ===========================================================================
+def test_link_branch_mode_happy_200(monkeypatch, tmp_path):
+    """Origin absent → add origin + push; pushed marked + saved; 200 payload."""
+    state = {"active_branch": "feat/x"}
+    saved = _patch_state(monkeypatch, state)
+    monkeypatch.setattr(wp.shutil, "which", lambda name: "/usr/bin/gh")
+    calls = []
+
+    def _run(argv, *a, **k):
+        calls.append(argv)
+        if argv[:2] == ["gh", "auth"]:
+            return _cp(0)
+        if argv == ["git", "remote", "get-url", "origin"]:
+            return _cp(1)  # origin absent
+        if argv[:3] == ["git", "remote", "add"]:
+            assert argv == ["git", "remote", "add", "origin",
+                            "https://github.com/o/r.git"]
+            return _cp(0)
+        if argv[:2] == ["git", "push"]:
+            assert argv == ["git", "push", "-u", "origin", "feat/x"]
+            return _cp(0)
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(wp.subprocess, "run", _run)
+    resp, code = wp.work_link_branch(tmp_path, {"upstream_repo": "o/r"})
+    assert code == 200
+    assert resp == {
+        "ok": True,
+        "upstream_repo": "o/r",
+        "branch": "feat/x",
+        "branch_url": "https://github.com/o/r/tree/feat/x",
+    }
+    assert state["pushed"] is True
+    assert saved[-1]["pushed"] is True
+
+
+def test_link_branch_mode_no_push(monkeypatch, tmp_path):
+    """push=False → no git push, but origin set + pushed marked + 200."""
+    _patch_state(monkeypatch, {"active_branch": "feat/x"})
+    monkeypatch.setattr(wp.shutil, "which", lambda name: "/usr/bin/gh")
+
+    def _run(argv, *a, **k):
+        if argv[:2] == ["gh", "auth"]:
+            return _cp(0)
+        if argv == ["git", "remote", "get-url", "origin"]:
+            return _cp(0, stdout="https://github.com/o/r.git\n")  # already correct
+        if argv[:2] == ["git", "push"]:
+            raise AssertionError("push must be skipped when push=False")
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(wp.subprocess, "run", _run)
+    resp, code = wp.work_link_branch(tmp_path, {"upstream_repo": "o/r", "push": False})
+    assert code == 200
+    assert resp["upstream_repo"] == "o/r"
+
+
+def test_link_branch_origin_mismatch_409(monkeypatch, tmp_path):
+    _patch_state(monkeypatch, {"active_branch": "feat/x"})
+    monkeypatch.setattr(wp.shutil, "which", lambda name: "/usr/bin/gh")
+
+    def _run(argv, *a, **k):
+        if argv[:2] == ["gh", "auth"]:
+            return _cp(0)
+        if argv == ["git", "remote", "get-url", "origin"]:
+            return _cp(0, stdout="https://github.com/someone/else.git\n")
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(wp.subprocess, "run", _run)
+    resp, code = wp.work_link_branch(tmp_path, {"upstream_repo": "o/r"})
+    assert code == 409
+    assert resp == {
+        "error": "origin already configured to https://github.com/someone/else.git; refusing to overwrite",
+        "current_origin": "https://github.com/someone/else.git",
+    }
+
+
+def test_link_branch_push_failure_500(monkeypatch, tmp_path):
+    _patch_state(monkeypatch, {"active_branch": "feat/x"})
+    monkeypatch.setattr(wp.shutil, "which", lambda name: "/usr/bin/gh")
+
+    def _run(argv, *a, **k):
+        if argv[:2] == ["gh", "auth"]:
+            return _cp(0)
+        if argv == ["git", "remote", "get-url", "origin"]:
+            return _cp(1)
+        if argv[:3] == ["git", "remote", "add"]:
+            return _cp(0)
+        if argv[:2] == ["git", "push"]:
+            return _cp(1, stderr="push rejected")
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(wp.subprocess, "run", _run)
+    resp, code = wp.work_link_branch(tmp_path, {"upstream_repo": "o/r"})
+    assert (resp, code) == ({"error": "git push failed: push rejected"}, 500)
+
+
+# ===========================================================================
+# work_link_branch — fork mode
+# ===========================================================================
+def test_link_fork_mode_happy_200(monkeypatch, tmp_path):
+    state = {"active_branch": "feat/x"}
+    saved = _patch_state(monkeypatch, state)
+    monkeypatch.setattr(wp.shutil, "which", lambda name: "/usr/bin/gh")
+    calls = []
+
+    def _run(argv, *a, **k):
+        calls.append(argv)
+        if argv[:2] == ["gh", "auth"]:
+            return _cp(0)
+        if argv[:3] == ["gh", "repo", "fork"]:
+            assert argv == ["gh", "repo", "fork", "o/r", "--remote=false", "--clone=false"]
+            return _cp(0)
+        if argv[:3] == ["gh", "api", "user"]:
+            assert argv == ["gh", "api", "user", "--jq", ".login"]
+            return _cp(0, stdout="me\n")
+        if argv == ["git", "remote", "get-url", "origin"]:
+            return _cp(1)  # absent → add
+        if argv == ["git", "remote", "add", "origin", "https://github.com/me/r.git"]:
+            return _cp(0)
+        if argv == ["git", "remote", "get-url", "upstream"]:
+            return _cp(1)  # absent → add
+        if argv == ["git", "remote", "add", "upstream", "https://github.com/o/r.git"]:
+            return _cp(0)
+        if argv[:2] == ["git", "push"]:
+            assert argv == ["git", "push", "-u", "origin", "feat/x"]
+            return _cp(0)
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(wp.subprocess, "run", _run)
+    resp, code = wp.work_link_branch(tmp_path, {"upstream_repo": "o/r", "mode": "fork"})
+    assert code == 200
+    assert resp == {
+        "ok": True,
+        "fork": "me/r",
+        "upstream": "o/r",
+        "branch": "feat/x",
+        "branch_url": "https://github.com/me/r/tree/feat/x",
+    }
+    assert state["pushed"] is True
+    assert saved[-1]["pushed"] is True
+
+
+def test_link_fork_gh_fork_failure_500(monkeypatch, tmp_path):
+    _patch_state(monkeypatch, {"active_branch": "feat/x"})
+    monkeypatch.setattr(wp.shutil, "which", lambda name: "/usr/bin/gh")
+
+    def _run(argv, *a, **k):
+        if argv[:2] == ["gh", "auth"]:
+            return _cp(0)
+        if argv[:3] == ["gh", "repo", "fork"]:
+            return _cp(1, stderr="fork denied")
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(wp.subprocess, "run", _run)
+    resp, code = wp.work_link_branch(tmp_path, {"upstream_repo": "o/r", "mode": "fork"})
+    assert (resp, code) == ({"error": "gh repo fork failed: fork denied"}, 500)
+
+
+def test_link_fork_login_resolve_failure_500(monkeypatch, tmp_path):
+    _patch_state(monkeypatch, {"active_branch": "feat/x"})
+    monkeypatch.setattr(wp.shutil, "which", lambda name: "/usr/bin/gh")
+
+    def _run(argv, *a, **k):
+        if argv[:2] == ["gh", "auth"]:
+            return _cp(0)
+        if argv[:3] == ["gh", "repo", "fork"]:
+            return _cp(0)
+        if argv[:3] == ["gh", "api", "user"]:
+            return _cp(1, stderr="api boom")
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(wp.subprocess, "run", _run)
+    resp, code = wp.work_link_branch(tmp_path, {"upstream_repo": "o/r", "mode": "fork"})
+    assert (resp, code) == ({"error": "could not resolve gh login: api boom"}, 500)
+
+
+def test_link_default_upstream_used_when_omitted(monkeypatch, tmp_path):
+    """No upstream_repo in body → default_upstream_repo(ws_root) fallback feeds the URL."""
+    _patch_state(monkeypatch, {"active_branch": "feat/x"})
+    monkeypatch.setattr(wp.shutil, "which", lambda name: "/usr/bin/gh")
+
+    def _run(argv, *a, **k):
+        if argv[:2] == ["gh", "auth"]:
+            return _cp(0)
+        if argv == ["git", "remote", "get-url", "origin"]:
+            return _cp(1)
+        if argv[:3] == ["git", "remote", "add"]:
+            assert argv == ["git", "remote", "add", "origin",
+                            "https://github.com/vivarium-collective/v2ecoli.git"]
+            return _cp(0)
+        if argv[:2] == ["git", "push"]:
+            return _cp(0)
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(wp.subprocess, "run", _run)
+    resp, code = wp.work_link_branch(tmp_path, {})  # tmp_path has no workspace.yaml/external
+    assert code == 200
+    assert resp["upstream_repo"] == "vivarium-collective/v2ecoli"
