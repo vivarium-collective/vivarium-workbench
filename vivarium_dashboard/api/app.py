@@ -46,6 +46,7 @@ from vivarium_dashboard.lib import remote_run_jobs as _remote_run_jobs
 from vivarium_dashboard.lib import remote_run_views as _remote_run_views
 from vivarium_dashboard.lib import auth_views as _auth_views
 from vivarium_dashboard.lib import composite_run_views as _cr_views
+from vivarium_dashboard.lib import composite_test_run_views as _composite_test_run_views
 from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
 from vivarium_dashboard.lib import viz_write_mutations as _viz_write_mut
 from vivarium_dashboard.lib import viz_commit_mutations as _viz_commit_mut
@@ -256,6 +257,8 @@ from vivarium_dashboard.lib.models import (
     StudyRunAllBaselinesRequest,
     StudyTestsRunRequest,
     RunTestsRequest,
+    # P2: composite-test-run (detached run launcher) POST request body
+    CompositeTestRunRequest,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -4468,6 +4471,46 @@ def create_app() -> FastAPI:
           - 200  ``{returncode, stdout, stderr}``
         """
         body, status = _test_run_views.run_workspace_tests(ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
+
+    # -----------------------------------------------------------------------
+    # P2: composite-test-run — start a DETACHED composite run
+    #
+    # Writes a run-request file + a runs_meta row, spawns the run-composite CLI
+    # detached via ``run_registry.spawn_detached``, and returns 202 {run_id}
+    # immediately (the browser then polls /api/composite-run/<id>/status).  Like
+    # the P1 routes it JSONResponses every path so the lib-returned status code
+    # (202 happy / 400 missing-id / 429 at-cap / 500 spawn-failure) is preserved
+    # verbatim.  ``model_dump(exclude_none=True)`` keeps omitted optionals absent
+    # so the builder's ``.get(...)`` defaults apply.  The CSRF middleware already
+    # guards this POST.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/composite-test-run",
+        tags=["Composite runs"],
+        summary="Start a detached composite run (returns 202 {run_id})",
+    )
+    def composite_test_run(
+        req: CompositeTestRunRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Start a detached composite run.
+
+        Mirrors the stdlib ``POST /api/composite-test-run``.  Body:
+        ``{"id", "overrides"?, "steps"?, "label"?, "emit_paths"?}`` — writes the
+        run-request file + runs_meta row, spawns the run-composite CLI detached,
+        and returns 202 ``{run_id, status: "running"}`` immediately.
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.composite_test_run_views.composite_test_run``):
+          - 400  missing ``id`` (``{"error": "missing id"}``)
+          - 429  at concurrency cap (``{"error": "too many runs in progress …"}``)
+          - 500  spawn failure (``{"error": "spawn failed: …", "run_id": …}``)
+          - 202  ``{run_id, status: "running"}``
+        """
+        body, status = _composite_test_run_views.composite_test_run(
+            ws, req.model_dump(exclude_none=True))
         return JSONResponse(status_code=status, content=body)
 
     # -----------------------------------------------------------------------
