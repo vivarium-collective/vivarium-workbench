@@ -595,7 +595,7 @@
     // Also load the investigation list so the panel can offer a picker when no
     // investigation is branch-current — the user chooses which investigation to
     // load sources INTO (its own sources, not the repo-wide shared sources).
-    var _pList = fetch('/api/iset-list')
+    var _pList = fetch('/api/investigation-summaries')
       .then(function(r) { return r.json(); })
       .then(function(d) { return (d && d.investigations) || []; })
       .catch(function() { return []; });
@@ -3352,7 +3352,7 @@
       : fetch('/api/investigations').then(function(r) { return r.json(); })
     ).catch(function() { return {investigations: []}; });
     var p2 = hasIsetUI
-      ? fetch('/api/iset-list').then(function(r) { return r.json(); }).catch(function() { return {investigations: []}; })
+      ? fetch('/api/investigation-summaries').then(function(r) { return r.json(); }).catch(function() { return {investigations: []}; })
       : Promise.resolve({investigations: []});
     Promise.all([p1, p2]).then(function(arr) {
       window._investigations = arr[0].investigations || [];
@@ -4587,7 +4587,7 @@
     if (list) list.innerHTML = '<p class="empty-state">Loading…</p>';
     var _p = window.DataSource
       ? window.DataSource.loadIsetList()
-      : fetch('/api/iset-list', {headers: {Accept: 'application/json'}})
+      : fetch('/api/investigation-summaries', {headers: {Accept: 'application/json'}})
           .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
     _p
       .then(function(j) {
@@ -4895,7 +4895,7 @@
     btn.textContent = 'Cloning…';
     errEl.style.display = 'none';
 
-    fetch('/api/iset-clone', {
+    fetch('/api/investigation-clone', {
       method: 'POST',
       headers: {'Content-Type': 'application/json', Accept: 'application/json'},
       body: JSON.stringify(body),
@@ -5134,13 +5134,13 @@
     document.getElementById('investigation-detail-title').textContent = name;
     document.getElementById('investigation-detail-description').textContent = 'Loading…';
 
-    // Route through DataSource so snapshot mode reads api/iset/<name>.json from
-    // the static bundle instead of hitting the live /api/iset/<name> endpoint
+    // Route through DataSource so snapshot mode reads api/investigation/<name>.json from
+    // the static bundle instead of hitting the live /api/investigation/<name> endpoint
     // (which would 404 in a hosted read-only bundle). Direct-fetch fallback keeps
     // local-server mode identical — the ternary branch only triggers under snapshot.
     var _isetDetailFetch = (window.DataSource && window.DataSource.loadInvestigation)
       ? window.DataSource.loadInvestigation(name)
-      : fetch('/api/iset/' + encodeURIComponent(name), {headers: {Accept: 'application/json'}})
+      : fetch('/api/investigation/' + encodeURIComponent(name), {headers: {Accept: 'application/json'}})
           .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
     _isetDetailFetch
       .then(function(d) {
@@ -5379,7 +5379,7 @@
                     + '<div class="inv-run-list">' + items + '</div>';
   }
 
-  // Manual refresh: re-fetch /api/iset/<current> + re-render. Use after editing
+  // Manual refresh: re-fetch /api/investigation/<current> + re-render. Use after editing
   // investigation.yaml / study.yaml files directly on disk (which the dashboard
   // has no other way to learn about — there's no file watcher or auto-poll).
   function _refreshInvestigationDetail() {
@@ -5945,7 +5945,7 @@
     // sub-project #1).  Falls back to a direct fetch so local mode is unchanged.
     var _isetFetch = (window.DataSource && window.DataSource.loadInvestigation)
       ? window.DataSource.loadInvestigation(name)
-      : fetch('/api/iset/' + encodeURIComponent(name), {headers: {Accept: 'application/json'}})
+      : fetch('/api/investigation/' + encodeURIComponent(name), {headers: {Accept: 'application/json'}})
           .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
     _isetFetch
       .then(function(iset) {
@@ -15016,7 +15016,7 @@
     // behaviour unchanged when DataSource is not available.
     var _isetFetch = (window.DataSource && window.DataSource.loadInvestigation)
       ? window.DataSource.loadInvestigation(name)
-      : fetch('/api/iset/' + encodeURIComponent(name)).then(function (r) { return r.json(); });
+      : fetch('/api/investigation/' + encodeURIComponent(name)).then(function (r) { return r.json(); });
     return _isetFetch.then(function (iset) {
         var studyFetches = (iset.studies || []).map(function (s) {
           return ((window.DataSource && window.DataSource.loadStudy)

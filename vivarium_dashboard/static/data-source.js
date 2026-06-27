@@ -8,7 +8,7 @@
 //
 // Sub-project #2 (narrative export): adds snapshot mode — when __DASH_CONFIG__.mode
 // is "snapshot", the URL helpers point at the static JSON files in the bundle
-// (api/study/<slug>.json, api/iset/<id>.json, api/workspace.json) instead of
+// (api/study/<slug>.json, api/investigation/<id>.json, api/workspace.json) instead of
 // the live /api/* endpoints.
 //
 // Usage:
@@ -75,8 +75,8 @@
 
   function _isetUrl(id) {
     return cfg().mode === "snapshot"
-      ? _base() + "/api/iset/" + encodeURIComponent(id) + ".json"
-      : "/api/iset/" + encodeURIComponent(id);
+      ? _base() + "/api/investigation/" + encodeURIComponent(id) + ".json"
+      : "/api/investigation/" + encodeURIComponent(id);
   }
 
   function _workspaceUrl() {
@@ -87,8 +87,8 @@
 
   function _isetListUrl() {
     return cfg().mode === "snapshot"
-      ? _base() + "/api/iset-list.json"
-      : "/api/iset-list";
+      ? _base() + "/api/investigation-summaries.json"
+      : "/api/investigation-summaries";
   }
 
   function _inputsUrl(slug) {
@@ -206,8 +206,8 @@
 
     /**
      * Load the investigation (iset) detail for the given id.
-     * Local mode:    fetches GET /api/iset/<id>
-     * Snapshot mode: fetches /api/iset/<id>.json from the static bundle
+     * Local mode:    fetches GET /api/investigation/<id>
+     * Snapshot mode: fetches /api/investigation/<id>.json from the static bundle
      * @param {string} id - the investigation id / slug.
      */
     async loadInvestigation(id) {
@@ -225,8 +225,8 @@
 
     /**
      * Load the investigations summary list.
-     * Local mode:    fetches GET /api/iset-list
-     * Snapshot mode: fetches /api/iset-list.json from the static bundle
+     * Local mode:    fetches GET /api/investigation-summaries
+     * Snapshot mode: fetches /api/investigation-summaries.json from the static bundle
      */
     async loadIsetList() {
       return _get(_isetListUrl());
