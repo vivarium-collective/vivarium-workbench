@@ -18,6 +18,8 @@ byte-identically:
   * core build fails             → ``({"error": "failed to build core: …"}, 500)``
   * ``InvestigationSpecError``   → ``({"error": "spec error: …"}, 400)``
   * ``FileNotFoundError``        → ``({"error": "<str(e)>"}, 404)``
+  * summary carries ``"error"``  → ``({"error": err}, 400 if "spec error" else 404)``
+                                   (e.g. the concurrent run-lock guard)
   * success                      → ``(summary, 200)``
 
 The ``run_one_composite`` + ``build_and_run`` closures are moved verbatim from
@@ -188,7 +190,15 @@ def investigation_run(ws_root: Path, body: dict) -> "tuple[dict, int]":
             build_and_run=build_and_run,
         )
     except InvestigationSpecError as e:
-        return {"error": f"spec error: {e}"}, 400
+        summary = {"error": f"spec error: {e}"}
     except FileNotFoundError as e:
-        return {"error": str(e)}, 404
+        summary = {"error": str(e)}
+    # The original handler routes ANY ``"error"``-keyed summary through the same
+    # 400/404 dispatch — this covers both the exception cases above AND a
+    # non-raising error ``run_investigation`` can RETURN (e.g. the concurrent
+    # run-lock guard ``{"error": "investigation is already running", ...}``,
+    # which must surface as 404, not a 200 with the raw summary).
+    if isinstance(summary, dict) and "error" in summary:
+        err = summary["error"]
+        return {"error": err}, 400 if "spec error" in err else 404
     return summary, 200

@@ -115,6 +115,23 @@ def test_file_not_found_404(tmp_path, monkeypatch, fake_registry):
     assert body == {"error": "composites/missing.yaml"}
 
 
+def test_returned_error_summary_maps_to_404(tmp_path, monkeypatch, fake_registry):
+    # run_investigation can RETURN (not raise) an error summary — e.g. the
+    # concurrent run-lock guard. The original handler routes any "error"-keyed
+    # summary through the 400/404 dispatch (here: 404, not a 200 with the raw
+    # summary).
+    ws = _make_ws(tmp_path)
+
+    def _already_running(*a, **k):
+        return {"name": "inv-x", "error": "investigation is already running",
+                "status": "running"}
+
+    monkeypatch.setattr(investigations, "run_investigation", _already_running)
+    body, status = views.investigation_run(ws, {"name": "inv-x"})
+    assert status == 404
+    assert body == {"error": "investigation is already running"}
+
+
 def test_name_resolved_from_study_and_investigation_keys(tmp_path, monkeypatch, fake_registry):
     ws = _make_ws(tmp_path)
     seen = {}
