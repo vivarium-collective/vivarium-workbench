@@ -117,15 +117,23 @@
     host.innerHTML = "";
     host.appendChild(_el("h3", "viv-bs-title", "Source"));
 
-    // Remote-only (read-only) mode: force remote scope, no Local source option.
+    // Read-only (remote-server) mode: the switchable sources are the workspaces
+    // checked out ON the server — these are the "local" workspace-catalog entries
+    // (path-based, switched in-process via /api/source/switch). The "remote"
+    // scope (sms-api repo@commit builds) is a separate capability that needs the
+    // sms-api tunnel; keep it available but do NOT force it (forcing remote routed
+    // the Switch button to the simulator_id path, which on-disk workspaces lack →
+    // the button silently did nothing). Labels are clarified for the remote client.
     var RO = !!((window._uiConfig || {}).readonly);
-    if (RO) state.scope = "remote";
 
     // Scope toggle
     var scopeRow = _el("div", "viv-bs-row");
     scopeRow.appendChild(_el("label", "viv-bs-key", "Scope"));
-    (RO ? ["remote"] : ["local", "remote"]).forEach(function (s) {
-      var b = _el("button", "viv-bs-toggle" + (state.scope === s ? " active" : ""), s === "local" ? "Local" : "Remote");
+    ["local", "remote"].forEach(function (s) {
+      var label = RO
+        ? (s === "local" ? "Workspaces" : "sms-api builds")
+        : (s === "local" ? "Local" : "Remote");
+      var b = _el("button", "viv-bs-toggle" + (state.scope === s ? " active" : ""), label);
       b.addEventListener("click", function () { state.scope = s; state.repo = null; state.branch = null; refresh(); });
       scopeRow.appendChild(b);
     });
@@ -178,8 +186,12 @@
     var switchBtn = _el("button", "viv-bs-action", "Switch"); switchBtn.id = "viv-bs-switch";
     switchBtn.addEventListener("click", function () {
       var s = state.selected || {};
-      if (state.scope === "local" && s.path) _switchLocal(s.path);
-      else if (state.scope === "remote" && s.simulator_id != null) _switchRemote(s.simulator_id, switchBtn);
+      // Prefer an on-disk path (workspace-catalog entry, in-process re-point);
+      // fall back to an sms-api build (simulator_id). Path-first so a misread
+      // scope can never leave the button doing nothing.
+      if (s.path) _switchLocal(s.path);
+      else if (s.simulator_id != null) _switchRemote(s.simulator_id, switchBtn);
+      else alert("Nothing to switch to — pick a repo/branch with a build or workspace.");
     });
     actions.appendChild(switchBtn);
 
@@ -229,6 +241,20 @@
         });
     });
     actions.appendChild(buildBtn);
+
+    var syncBtn = _el("button", "viv-bs-action", "Sync to local"); syncBtn.id = "viv-bs-sync";
+    syncBtn.title = "Materialize this exact repo@commit workspace on your machine";
+    syncBtn.addEventListener("click", function () {
+      fetch("/api/source/manifest").then(function (r) { return r.json(); }).then(function (m) {
+        var base = window.location.origin;
+        var cmd = "vivarium-dashboard sync " + base;
+        var note = "Reproduce " + (m.repo || "") + " @ " + String(m.commit || "").slice(0, 7) +
+                   "\n  " + cmd + "\n(verifies uv.lock " + (m.lockfile || "—") + ")";
+        window.prompt("Run this locally to sync + reproduce:", cmd);
+        console.log(note);
+      }).catch(function () { alert("Could not fetch manifest"); });
+    });
+    actions.appendChild(syncBtn);
 
     host.appendChild(actions);
 

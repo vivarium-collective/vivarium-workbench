@@ -1163,6 +1163,18 @@ class SourceBuilds(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class ProvenanceManifest(BaseModel):
+    """repo@commit + lockfile + result pointers — the portable round-trip unit."""
+    model_config = ConfigDict(extra="allow")
+    repo: str
+    commit: str
+    branch: str
+    workspace: str
+    lockfile: Optional[str] = None
+    results: dict[str, list[str]] = {}
+    simulator_id: Optional[int] = None
+
+
 class WorkspacesList(BaseModel):
     """``GET /api/workspaces`` payload (lib.workspace_deps_views.build_workspaces).
 
