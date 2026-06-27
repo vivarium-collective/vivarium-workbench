@@ -5932,3 +5932,69 @@ class TestInvestigationRunRoute:
         p = "/api/investigation-run"
         assert p in paths and "post" in paths[p]
         assert paths[p]["post"]["tags"] == ["Investigation runs"]
+
+
+# ===========================================================================
+# P5: investigation-run-unblocked POST route (enumerate + SUBMIT run job,
+# "Investigation runs" tag — the FINAL sim-execution port).  Thin wrapper over
+# ``lib.run_unblocked_views.investigation_run_unblocked`` — every test
+# monkeypatches that lib fn so NO real enumeration / sim runs.  The route
+# JSONResponses all paths, so the lib-returned (dict, status) is preserved
+# verbatim (202 happy / 400 missing-inv+no-queued / 404 not-found / 500 yaml).
+# ===========================================================================
+class TestInvestigationRunUnblockedRoute:
+    def test_happy_202(self, client, monkeypatch):
+        from vivarium_dashboard.lib import run_unblocked_views
+        captured = {}
+        items = [{"study": "s", "variant": "baseline", "kind": "baseline",
+                  "status": "queued"}]
+
+        def _fake(ws, body):
+            captured["ws"], captured["body"] = ws, body
+            return {"job_id": "JZ", "items": items}, 202
+
+        monkeypatch.setattr(
+            run_unblocked_views, "investigation_run_unblocked", _fake)
+        r = client.post("/api/investigation-run-unblocked",
+                        json={"investigation": "inv-x", "studies": ["s"]})
+        assert r.status_code == 202
+        assert r.json() == {"job_id": "JZ", "items": items}
+        # exclude_none keeps investigation + studies; omitted absent.
+        assert captured["body"] == {"investigation": "inv-x", "studies": ["s"]}
+
+    def test_missing_investigation_400_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import run_unblocked_views
+        monkeypatch.setattr(
+            run_unblocked_views, "investigation_run_unblocked",
+            lambda ws, body: ({"error": "investigation is required"}, 400))
+        r = client.post("/api/investigation-run-unblocked", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "investigation is required"}
+
+    def test_not_found_404_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import run_unblocked_views
+        monkeypatch.setattr(
+            run_unblocked_views, "investigation_run_unblocked",
+            lambda ws, body: ({"error": "investigation not found: inv-x"}, 404))
+        r = client.post("/api/investigation-run-unblocked",
+                        json={"investigation": "inv-x"})
+        assert r.status_code == 404
+        assert r.json() == {"error": "investigation not found: inv-x"}
+
+    def test_no_queued_breakdown_400_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import run_unblocked_views
+        items = [{"study": "s", "variant": "v", "status": "blocked"}]
+        monkeypatch.setattr(
+            run_unblocked_views, "investigation_run_unblocked",
+            lambda ws, body: ({"error": "no variants to queue (1 blocked). …",
+                               "items": items}, 400))
+        r = client.post("/api/investigation-run-unblocked",
+                        json={"investigation": "inv-x"})
+        assert r.status_code == 400
+        assert r.json()["items"] == items
+
+    def test_route_in_openapi(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        p = "/api/investigation-run-unblocked"
+        assert p in paths and "post" in paths[p]
+        assert paths[p]["post"]["tags"] == ["Investigation runs"]

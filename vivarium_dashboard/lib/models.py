@@ -15,7 +15,7 @@ handler too, or the JSON contract drifts.
 
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -2504,3 +2504,23 @@ class InvestigationRunRequest(BaseModel):
     name: Optional[str] = None
     study: Optional[str] = None
     investigation: Optional[str] = None
+
+
+class InvestigationRunUnblockedRequest(BaseModel):
+    """POST /api/investigation-run-unblocked request body.
+
+    ``{"investigation", "studies"?}`` — enumerates every member study's
+    unblocked variants and submits one background run job (the "Run unblocked"
+    flow); the client polls ``GET /api/investigation-run-unblocked-status``.
+    ``studies`` optionally narrows the run to a subset (a single slug or a list
+    of slugs). A missing/empty ``investigation`` is rejected with HTTP 400 by
+    ``lib.run_unblocked_views.investigation_run_unblocked``. ``model_dump(
+    exclude_none=True)`` keeps an omitted ``studies`` absent so the builder's
+    "all studies" default applies. The ``{job_id, items}`` 202 body and every
+    error path are returned via ``JSONResponse`` (no response model).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: str = ""
+    studies: Optional[Union[list[str], str]] = None
