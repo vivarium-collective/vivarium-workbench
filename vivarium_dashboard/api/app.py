@@ -79,6 +79,7 @@ from vivarium_dashboard.lib import workspaces_process_views as _workspaces_proc
 from vivarium_dashboard.lib import misc_mutations as _misc_mut
 from vivarium_dashboard.lib import misc_post_views as _misc_post_views
 from vivarium_dashboard.lib import investigation_status
+from vivarium_dashboard.lib import investigation_registry as _inv_registry
 from vivarium_dashboard.lib import investigation_views as _inv_views
 from vivarium_dashboard.lib import observables_views as _obs_views
 from vivarium_dashboard.lib import report_views as _report_views
@@ -940,6 +941,35 @@ def create_app() -> FastAPI:
 
         summaries = investigation_status.build_iset_summary(ws, study_has_runs=study_has_runs)
         return [InvestigationSummary.model_validate(d) for d in summaries]
+
+    @app.get(
+        "/api/investigation-registry",
+        tags=["Investigations"],
+        summary="Cross-worktree Investigation registry (current + peers)",
+    )
+    def investigation_registry(
+        request: Request, ws: Path = Depends(get_workspace)
+    ) -> JSONResponse:
+        """Cross-worktree Investigation view (mirrors the stdlib
+        /api/investigation-registry) — unblocks the Investigations page, which
+        groups studies by their investigation's ``current`` entry.
+
+        Returns ``{current, local_siblings, running_others, dormant_others}``:
+        this worktree's chosen Investigation, the workspace's other
+        investigations, every OTHER live dashboard's current Investigation
+        (HTTP-probed from each peer's /api/iset-list, cached ~5 s), and open
+        investigations on other worktrees with no live dashboard.
+
+        ``current.url`` is derived from the ~/.pbg/servers record
+        (``workspace_catalog.find_running``) when available, else from this
+        request's ``Host`` header — same precedence as the stdlib handler.
+        Pass-through JSON (the buckets carry untyped peer/disk data).
+        Library-backed via ``lib.investigation_registry`` — no stdlib
+        server dependency.
+        """
+        this_url = _inv_registry.derive_this_url(ws, request.headers.get("host"))
+        out = _inv_registry.build_investigation_registry(ws, this_url)
+        return JSONResponse(content=out, status_code=200)
 
     @app.get(
         "/api/data-sources",
@@ -2862,6 +2892,57 @@ def create_app() -> FastAPI:
             headers={"Cache-Control": "no-store"},
         )
 
+    @app.get(
+        "/api/state",
+        tags=["Events"],
+        summary="One-shot workspace.yaml state read",
+    )
+    def state(ws: Path = Depends(get_workspace)) -> JSONResponse:
+        """One-shot ``workspace.yaml`` state (mirrors the stdlib /api/state).
+
+        Returns the parsed ``workspace.yaml`` mapping with ``Cache-Control:
+        no-store``; 404 (empty body) when the file does not exist — byte-
+        identical to ``server.Handler._serve_state``.  Library-backed via
+        ``lib.events.read_workspace_state`` — no stdlib server dependency.
+        """
+        data = _events.read_workspace_state(ws)
+        if data is None:
+            return JSONResponse(content=None, status_code=404)
+        return JSONResponse(content=data, headers={"Cache-Control": "no-store"})
+
+    @app.get(
+        "/api/suggest-poll",
+        tags=["Events"],
+        summary="Poll for a pbg-suggest skill response",
+    )
+    def suggest_poll(
+        id: str = "", ws: Path = Depends(get_workspace)
+    ) -> JSONResponse:
+        """Poll for a ``/pbg-suggest`` skill response (mirrors the stdlib
+        /api/suggest-poll).
+
+        Query ``?id=<request-id>``. Returns ``{"ready": false}`` until the
+        skill writes its response, then ``{"ready": true, suggestion,
+        rationale}``. Missing ``id`` -> 400 ``{"error": "missing id"}``.
+        Library-backed via ``lib.suggest_requests.read_response`` — no stdlib
+        server dependency.
+        """
+        from vivarium_dashboard.lib.suggest_requests import read_response
+
+        if not id:
+            return JSONResponse(content={"error": "missing id"}, status_code=400)
+        resp = read_response(ws, id)
+        if not resp:
+            return JSONResponse(content={"ready": False}, status_code=200)
+        return JSONResponse(
+            content={
+                "ready": True,
+                "suggestion": resp.get("suggestion", ""),
+                "rationale": resp.get("rationale", ""),
+            },
+            status_code=200,
+        )
+
     # -----------------------------------------------------------------------
     # Static + SPA-shell serving (Phase C, Batch 16): the SPA index, the
     # standalone loom/parsimony viewer bundles, and a catch-all asset route.
@@ -3114,6 +3195,39 @@ def create_app() -> FastAPI:
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
+
+    @app.post(
+        "/api/study-refresh-viz/{name}",
+        tags=["Studies & visualizations"],
+        summary="Re-render a study's declared visualizations against its latest run",
+    )
+    def study_refresh_viz(
+        name: str, ws: Path = Depends(get_workspace)
+    ) -> JSONResponse:
+        """Re-render study ``name``'s ``visualizations[]`` against its latest
+        run, stamping provenance (mirrors the stdlib /api/study-refresh-viz).
+
+        Tolerant by design: per-chart render failures come back as
+        ``status="error"`` entries inside ``results`` (never a 500); an
+        unexpected exception -> 500 ``{error, study}``; a missing study -> 404
+        ``{error, study}``; a blank name -> 400.  Library-backed via
+        ``lib.study_viz_views.study_refresh_viz`` — no stdlib server dependency.
+        """
+        if not name.strip():
+            return JSONResponse(
+                content={"error": "missing study name"}, status_code=400
+            )
+        try:
+            payload = _study_viz.study_refresh_viz(ws, name)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(
+                content={"error": str(e), "study": name}, status_code=500
+            )
+        if payload.get("not_found"):
+            return JSONResponse(
+                content={"error": payload["error"], "study": name}, status_code=404
+            )
+        return JSONResponse(content=payload, status_code=200)
 
     @app.post(
         "/api/study-narrative-set",
