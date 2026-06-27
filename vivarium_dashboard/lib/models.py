@@ -2443,3 +2443,22 @@ class RunTestsRequest(BaseModel):
     """
 
     model_config = ConfigDict(extra="allow")
+
+
+class CompositeTestRunRequest(BaseModel):
+    """POST /api/composite-test-run request body.
+
+    ``{"id", "overrides"?, "steps"?, "label"?, "emit_paths"?}`` — starts a
+    detached composite run. A missing ``id`` is rejected with HTTP 400 by
+    ``lib.composite_test_run_views.composite_test_run``. ``model_dump(
+    exclude_none=True)`` keeps omitted optionals absent so the builder's
+    ``.get(...)`` defaults apply.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str = ""
+    overrides: Optional[dict] = None
+    steps: Optional[int] = None
+    label: Optional[str] = None
+    emit_paths: Optional[list] = None
