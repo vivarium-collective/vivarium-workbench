@@ -2462,3 +2462,26 @@ class CompositeTestRunRequest(BaseModel):
     steps: Optional[int] = None
     label: Optional[str] = None
     emit_paths: Optional[list] = None
+
+
+class InvestigationRunOneRequest(BaseModel):
+    """POST /api/investigation-run-one request body.
+
+    ``{"investigation"|"study"|"name", "sim_name"?, "overrides"?, "steps"?,
+    "label"?}`` — runs a single ad-hoc composite execution (the "Duplicate run"
+    flow) and appends to the investigation's ``runs.db``. A missing investigation
+    is rejected with HTTP 400 by
+    ``lib.investigation_run_one_views.investigation_run_one``. ``model_dump(
+    exclude_none=True)`` keeps omitted optionals absent so the builder's
+    ``.get(...)`` defaults apply.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: Optional[str] = None
+    study: Optional[str] = None
+    name: Optional[str] = None
+    sim_name: Optional[str] = None
+    overrides: Optional[dict] = None
+    steps: Optional[int] = None
+    label: Optional[str] = None

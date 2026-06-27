@@ -47,6 +47,7 @@ from vivarium_dashboard.lib import remote_run_views as _remote_run_views
 from vivarium_dashboard.lib import auth_views as _auth_views
 from vivarium_dashboard.lib import composite_run_views as _cr_views
 from vivarium_dashboard.lib import composite_test_run_views as _composite_test_run_views
+from vivarium_dashboard.lib import investigation_run_one_views as _investigation_run_one_views
 from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
 from vivarium_dashboard.lib import viz_write_mutations as _viz_write_mut
 from vivarium_dashboard.lib import viz_commit_mutations as _viz_commit_mut
@@ -259,6 +260,8 @@ from vivarium_dashboard.lib.models import (
     RunTestsRequest,
     # P2: composite-test-run (detached run launcher) POST request body
     CompositeTestRunRequest,
+    # P3: investigation-run-one (ad-hoc "Duplicate run") POST request body
+    InvestigationRunOneRequest,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -424,6 +427,16 @@ _OPENAPI_TAGS = [
             "run's trajectory or a single-step state snapshot, and poll lightweight "
             "status (progress, terminal-state error excerpt, completed viz_html). "
             "All read from ``.pbg/composite-runs.db``."
+        ),
+    },
+    {
+        "name": "Investigation runs",
+        "description": (
+            "Ad-hoc investigation run launcher: ``POST /api/investigation-run-one`` "
+            "runs a single composite execution (the \"Duplicate run\" flow) in an "
+            "embedded subprocess, persists rendered viz HTML, and appends to the "
+            "investigation's ``runs.db``.  Validation failures are 400/404; a "
+            "composite that fails to run returns 200 with ``{ok: false}``."
         ),
     },
     {
@@ -4510,6 +4523,48 @@ def create_app() -> FastAPI:
           - 202  ``{run_id, status: "running"}``
         """
         body, status = _composite_test_run_views.composite_test_run(
+            ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
+
+    # -----------------------------------------------------------------------
+    # P3: investigation-run-one — ad-hoc single composite execution
+    #
+    # The "Duplicate run" flow: resolve the investigation's baseline composite
+    # (v2 ``variants[]`` sidecar OR a legacy top-level ``composite``), substitute
+    # params, inject a SQLiteEmitter, run it once in an embedded subprocess,
+    # persist the rendered viz HTML, and append to the investigation's runs.db.
+    # JSONResponses every path so the lib-returned status is preserved verbatim:
+    # 400 missing-inv / spec-error, 404 spec-or-composite-not-found, and 200 for
+    # BOTH the run success (``{ok: true, …}``) AND the run failure
+    # (``{ok: false, run_id, error}``) — only validation is non-200.
+    # ``model_dump(exclude_none=True)`` keeps omitted optionals absent so the
+    # builder's ``.get(...)`` defaults apply.  CSRF middleware already guards it.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/investigation-run-one",
+        tags=["Investigation runs"],
+        summary="Run a single ad-hoc composite (the 'Duplicate run' flow)",
+    )
+    def investigation_run_one(
+        req: InvestigationRunOneRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Run a single ad-hoc composite execution for an investigation.
+
+        Mirrors the stdlib ``POST /api/investigation-run-one``.  Body:
+        ``{"investigation"|"study"|"name", "sim_name"?, "overrides"?, "steps"?,
+        "label"?}`` — appends the result as a one-off run to the investigation's
+        ``runs.db``.
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.investigation_run_one_views.investigation_run_one``):
+          - 400  missing investigation / spec parse error / shape-less spec
+          - 404  spec.yaml or composite (sidecar / registry) not found
+          - 200  run succeeded (``{ok: true, run_id, investigation, sim_name,
+            viz_html}``) OR run failed (``{ok: false, run_id, error}``)
+        """
+        body, status = _investigation_run_one_views.investigation_run_one(
             ws, req.model_dump(exclude_none=True))
         return JSONResponse(status_code=status, content=body)
 
