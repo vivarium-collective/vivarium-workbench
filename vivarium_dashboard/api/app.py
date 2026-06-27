@@ -73,6 +73,7 @@ from vivarium_dashboard.lib import git_commit_views as _git_commit_views
 from vivarium_dashboard.lib import work_mutations as _work_mutations
 from vivarium_dashboard.lib import workspaces_mutations as _workspaces_mut
 from vivarium_dashboard.lib import misc_mutations as _misc_mut
+from vivarium_dashboard.lib import misc_post_views as _misc_post_views
 from vivarium_dashboard.lib import investigation_status
 from vivarium_dashboard.lib import investigation_views as _inv_views
 from vivarium_dashboard.lib import observables_views as _obs_views
@@ -264,6 +265,10 @@ from vivarium_dashboard.lib.models import (
     StudyRunAllBaselinesRequest,
     StudyTestsRunRequest,
     RunTestsRequest,
+    # Misc POST request bodies
+    SuggestRequest,
+    StudyReportSingleRequest,
+    OpenWindowRequest,
     # P2: composite-test-run (detached run launcher) POST request body
     CompositeTestRunRequest,
     # P3: investigation-run-one (ad-hoc "Duplicate run") POST request body
@@ -5344,6 +5349,95 @@ def create_app() -> FastAPI:
         """
         resp, status = _misc_mut.feedback_import(ws, body)
         return JSONResponse(status_code=status, content=resp)
+
+    # -----------------------------------------------------------------------
+    # Misc POST routes (cont.): suggest + study-report-single + open-window
+    #   POST /api/suggest  /api/study-report-single  /api/open-window
+    # Workspace-scoped writes that do local FS work + a short subprocess.run
+    # (git-log / browser open — NEVER spawned in tests; the lib fn is
+    # monkeypatched).  Each delegates to a pure builder in lib.misc_post_views
+    # and wraps every path (success AND error) in JSONResponse so the
+    # lib-returned status code is preserved verbatim.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/suggest",
+        tags=["Misc"],
+        summary="Write a Claude-suggestion request file",
+    )
+    def suggest(
+        req: SuggestRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Write a Claude-suggestion request file. Body: ``{kind, context_extras?}``.
+
+        Mirrors the stdlib ``POST /api/suggest``.  Builds the request context
+        (workspace name/description, active branch, capped ``main..<branch>``
+        git-log commits) and persists it via ``suggest_requests.write_request``.
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.misc_post_views.suggest``):
+          - 400  ``{"error": "invalid kind (must be one of …)"}``
+          - 200  ``{ok, id, skill_command, instructions}``
+        """
+        body, status = _misc_post_views.suggest(ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
+
+    @app.post(
+        "/api/study-report-single",
+        tags=["Misc"],
+        summary="Render a standalone one-study HTML report",
+    )
+    def study_report_single(
+        req: StudyReportSingleRequest,
+        ws: Path = Depends(get_workspace),
+        skeptic: Optional[str] = None,
+    ) -> JSONResponse:
+        """Render a standalone HTML report for ONE study (the investigation's
+        ``focus_study`` or an explicit ``study`` override).
+
+        Mirrors the stdlib ``POST /api/study-report-single``.  The ``?skeptic=``
+        QUERY param is honored as an alternative to the body flag: if present and
+        ``"skeptic"`` is not already in the body, ``body["skeptic"]`` is set to
+        ``skeptic not in ("0", "false", "")`` before the builder runs (matching
+        the legacy ``_post_study_report_single`` URL handling).
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.misc_post_views.study_report_single``):
+          - 400/404  bad input / missing files (builder error shapes)
+          - 500  ``{"error": <str(e)>}`` (any exception)
+          - 200  ``{html_path, size_bytes, study, investigation?}``
+        """
+        body = req.model_dump(exclude_none=True)
+        if skeptic is not None and "skeptic" not in body:
+            body["skeptic"] = skeptic not in ("0", "false", "")
+        resp, status = _misc_post_views.study_report_single(ws, body)
+        return JSONResponse(status_code=status, content=resp)
+
+    @app.post(
+        "/api/open-window",
+        tags=["Misc"],
+        summary="Open a dashboard URL in the user's browser",
+    )
+    def open_window(
+        req: OpenWindowRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Open a dashboard URL in the user's browser. Body: ``{route?}``.
+
+        Mirrors the stdlib ``POST /api/open-window``.  Reads the base URL from
+        ``<ws>/.pbg/server/server-info`` and dispatches the platform-appropriate
+        open command via a 5s-timeout ``subprocess.run``.
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.misc_post_views.open_window``):
+          - 503  server-info file not found
+          - 501  unsupported platform
+          - 500  server-info parse failed / open failed
+          - 200  ``{ok: True, url}``
+        """
+        body, status = _misc_post_views.open_window(ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
 
     # -----------------------------------------------------------------------
     # Installs: system-deps-install + import-install — venv / system installs
