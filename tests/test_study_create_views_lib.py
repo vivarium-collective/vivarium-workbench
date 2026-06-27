@@ -1,7 +1,7 @@
-"""Tests for ``lib.investigation_create_views.investigation_create``.
+"""Tests for ``lib.study_create_views.study_create``.
 
-Behaviour-preserving port of ``server.Handler._post_investigation_create``
-(scaffold a new investigation directory) with the ``_active_branch_action``
+Behaviour-preserving port of ``server.Handler._post_study_create``
+(scaffold a new study directory) with the ``_active_branch_action``
 commit DEFERRED — the builder runs the scaffold inline and returns
 ``{ok, name}`` directly.
 
@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vivarium_dashboard.lib import investigation_create_views as views
+from vivarium_dashboard.lib import study_create_views as views
 from vivarium_dashboard.lib import investigation_migrate
 from vivarium_dashboard.lib import scaffold_yaml
 
@@ -33,21 +33,21 @@ def _make_ws(tmp_path: Path, *, name: str = "demo-ws") -> Path:
 
 def test_missing_name_400(tmp_path):
     ws = _make_ws(tmp_path)
-    body, status = views.investigation_create(ws, {})
+    body, status = views.study_create(ws, {})
     assert status == 400
     assert body == {"error": "name is required"}
 
 
 def test_blank_name_400(tmp_path):
     ws = _make_ws(tmp_path)
-    body, status = views.investigation_create(ws, {"name": "   "})
+    body, status = views.study_create(ws, {"name": "   "})
     assert status == 400
     assert body == {"error": "name is required"}
 
 
 def test_bad_name_regex_400(tmp_path):
     ws = _make_ws(tmp_path)
-    body, status = views.investigation_create(ws, {"name": "bad name!"})
+    body, status = views.study_create(ws, {"name": "bad name!"})
     assert status == 400
     assert body == {"error": "name must match [a-zA-Z0-9_-]+"}
 
@@ -55,7 +55,7 @@ def test_bad_name_regex_400(tmp_path):
 def test_already_exists_studies_dir_409(tmp_path):
     ws = _make_ws(tmp_path)
     (ws / "studies" / "dup").mkdir(parents=True)
-    body, status = views.investigation_create(ws, {"name": "dup"})
+    body, status = views.study_create(ws, {"name": "dup"})
     assert status == 409
     assert body == {"error": "investigation 'dup' already exists"}
 
@@ -63,7 +63,7 @@ def test_already_exists_studies_dir_409(tmp_path):
 def test_already_exists_investigations_dir_409(tmp_path):
     ws = _make_ws(tmp_path)
     (ws / "investigations" / "dup2").mkdir(parents=True)
-    body, status = views.investigation_create(ws, {"name": "dup2"})
+    body, status = views.study_create(ws, {"name": "dup2"})
     assert status == 409
     assert body == {"error": "investigation 'dup2' already exists"}
 
@@ -80,7 +80,7 @@ def test_source_not_found_404(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         investigation_migrate, "_resolve_composite_source_or_generate", _boom)
-    body, status = views.investigation_create(
+    body, status = views.study_create(
         ws, {"name": "inv-x", "source": "pkg.composites.missing"})
     assert status == 404
     assert body == {"error": "source composite not found: nope"}
@@ -94,7 +94,7 @@ def test_source_value_error_404(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         investigation_migrate, "_resolve_composite_source_or_generate", _boom)
-    body, status = views.investigation_create(
+    body, status = views.study_create(
         ws, {"name": "inv-y", "source": "garbage"})
     assert status == 404
     assert body == {"error": "source composite not found: bad ref"}
@@ -121,7 +121,7 @@ def test_generator_shape_writes_study_yaml(tmp_path, monkeypatch):
         investigation_migrate, "_resolve_composite_source_or_generate", _gen)
     monkeypatch.setattr(scaffold_yaml, "v4_study_scaffold", _scaffold)
 
-    body, status = views.investigation_create(
+    body, status = views.study_create(
         ws, {"name": "inv-gen", "source": "pkg.composites.base"})
     assert status == 200
     assert body == {"ok": True, "name": "inv-gen"}
@@ -145,7 +145,7 @@ def test_source_path_shape_copies_sidecar_and_writes_spec_yaml(tmp_path, monkeyp
     monkeypatch.setattr(
         investigation_migrate, "_resolve_composite_source_or_generate", _yaml_src)
 
-    body, status = views.investigation_create(
+    body, status = views.study_create(
         ws, {"name": "inv-src", "source": "pkg.composites.base"})
     assert status == 200
     assert body == {"ok": True, "name": "inv-src"}
@@ -185,7 +185,7 @@ def test_source_path_shape_copies_sidecar_and_writes_spec_yaml(tmp_path, monkeyp
 
 def test_blank_shape_writes_stub_spec_yaml(tmp_path):
     ws = _make_ws(tmp_path)
-    body, status = views.investigation_create(ws, {"name": "inv-blank"})
+    body, status = views.study_create(ws, {"name": "inv-blank"})
     assert status == 200
     assert body == {"ok": True, "name": "inv-blank"}
 
@@ -226,7 +226,7 @@ def test_action_failure_500(tmp_path, monkeypatch):
         investigation_migrate, "_resolve_composite_source_or_generate", _gen)
     monkeypatch.setattr(scaffold_yaml, "v4_study_scaffold", _boom)
 
-    body, status = views.investigation_create(
+    body, status = views.study_create(
         ws, {"name": "inv-fail", "source": "pkg.composites.base"})
     assert status == 500
     assert body == {"error": "action failed: scaffold boom"}
@@ -235,6 +235,6 @@ def test_action_failure_500(tmp_path, monkeypatch):
 def test_no_real_git_no_commit(tmp_path):
     """The deferred-commit port must NOT create a git repo / commit."""
     ws = _make_ws(tmp_path)
-    body, status = views.investigation_create(ws, {"name": "inv-nogit"})
+    body, status = views.study_create(ws, {"name": "inv-nogit"})
     assert status == 200
     assert not (ws / ".git").exists()

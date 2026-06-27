@@ -2,7 +2,7 @@
 
 Covers the dual-lookup behaviour: legacy YAML composite documents AND
 @composite_generator-registered functions both have to be resolvable
-through the same call site so the investigation-create / composite-add
+through the same call site so the study-create / composite-add
 handlers can accept either kind of source.
 """
 from __future__ import annotations
