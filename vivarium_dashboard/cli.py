@@ -119,9 +119,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print("   (bound on all interfaces — reachable from outside this host)")
     print("   (Ctrl-C to stop)\n")
 
-    # Boot the HTTP server.
-    from vivarium_dashboard.server import serve as serve_dashboard
-    return serve_dashboard(workspace=workspace, port=port, host=host)
+    # Boot the FastAPI app under uvicorn (the migration's typed seam is now the
+    # served entrypoint; the legacy stdlib server.serve path is retired).
+    from vivarium_dashboard.lib.startup import serve_fastapi
+    return serve_fastapi(workspace=workspace, port=port, host=host)
 
 
 def migrate_investigations_to_studies(ws_root: Path, dry_run: bool = False) -> dict:
