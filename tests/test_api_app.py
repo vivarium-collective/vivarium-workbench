@@ -352,9 +352,13 @@ def test_visualization_classes_in_openapi(client):
 # ---------------------------------------------------------------------------
 
 def test_composite_resolve_missing_returns_null(client):
-    """A ref that doesn't match any spec/generator returns 200 with null body
-    (empty workspace has no workspace.yaml → resolver returns None immediately)."""
-    r = client.get("/api/composite-resolve?ref=missing")
+    """An id that doesn't match any spec/generator returns 200 with null body
+    (empty workspace has no workspace.yaml → resolver returns None immediately).
+
+    The real client (Composite Explorer) sends the spec under ``id`` (not
+    ``ref``), so the route's query param is ``id`` — a regression test for the
+    422 the old ``ref`` param produced against every live call."""
+    r = client.get("/api/composite-resolve?id=missing")
     assert r.status_code == 200
     assert r.json() is None
 
@@ -375,14 +379,26 @@ def test_composite_resolve_typed_passthrough(client, monkeypatch):
         "default_n_steps": None,
         "extra_field": "preserved",
     }
-    monkeypatch.setattr(_app, "resolve_composite", lambda ws, ref: payload)
-    r = client.get("/api/composite-resolve?ref=pbg_ws.composites.my_comp")
+    captured = {}
+
+    def _fake_resolve(ws, spec_id, overrides):
+        captured["spec_id"] = spec_id
+        captured["overrides"] = overrides
+        return payload
+
+    monkeypatch.setattr(_app, "resolve_composite", _fake_resolve)
+    r = client.get(
+        "/api/composite-resolve?id=pbg_ws.composites.my_comp&overrides=%7B%22n%22%3A5%7D"
+    )
     assert r.status_code == 200
     body = r.json()
     assert body["id"] == "pbg_ws.composites.my_comp"
     assert body["name"] == "My Composite"
     assert body["kind"] == "spec"
     assert body["extra_field"] == "preserved"   # extra="allow" works
+    # the route forwards ``id`` + parsed ``overrides`` to the resolver
+    assert captured["spec_id"] == "pbg_ws.composites.my_comp"
+    assert captured["overrides"] == {"n": 5}
 
 
 def test_composite_resolve_in_openapi(client):

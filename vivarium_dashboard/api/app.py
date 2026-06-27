@@ -30,6 +30,7 @@ import os
 from pathlib import Path
 from typing import Optional, Union
 
+import json
 import subprocess
 
 from fastapi import Body, Depends, FastAPI, Request
@@ -1210,20 +1211,30 @@ def create_app() -> FastAPI:
         summary="Resolve a single composite spec or generator by ID",
     )
     def composite_resolve(
-        ref: str, ws: Path = Depends(get_workspace)
+        id: str,
+        overrides: str = "{}",
+        ws: Path = Depends(get_workspace),
     ) -> Optional[CompositeResolvePayload]:
         """Resolve a single composite spec or generator by ID.
 
-        Mirrors ``GET /api/composite-resolve?ref=<spec_id>`` from the stdlib
-        server.  Returns the composite payload when found, or ``null`` (200 with
-        null body) when ``ref`` doesn't match any spec or generator — identical
-        miss-behaviour to the legacy handler.
+        Mirrors ``GET /api/composite-resolve?id=<spec_id>&overrides=<json>`` from
+        the stdlib server — the real client (the Composite Explorer) sends the
+        spec under ``id`` (not ``ref``) plus an ``overrides`` JSON blob.  Returns
+        the composite payload when found, or ``null`` (200 with null body) when
+        ``id`` doesn't match any spec or generator.
 
         Library-backed via ``lib.composite_resolve.resolve_composite`` — the
         single implementation the stdlib ``_composite_resolve_data`` now forwards
-        to.
+        to.  (``svg`` is ``None`` from the seam; the interactive loom viewer
+        renders the wiring from ``state``.)
         """
-        result = resolve_composite(ws, ref)
+        try:
+            ov = json.loads(overrides) if overrides else {}
+        except (json.JSONDecodeError, TypeError):
+            ov = {}
+        if not isinstance(ov, dict):
+            ov = {}
+        result = resolve_composite(ws, id, ov)
         if result is None:
             return None
         return CompositeResolvePayload.model_validate(result)
