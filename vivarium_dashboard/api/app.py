@@ -387,8 +387,9 @@ _READONLY_ALLOWED_MUTATIONS = {
     "/api/investigation-run", "/api/investigation-run-one", "/api/investigation-run-unblocked",
     "/api/study-run-baseline", "/api/study-run-variant", "/api/composite-test-run",
     "/api/remote-run-start",
-    # remote-build flow (the core of remote-only)
-    "/api/source/build-remote", "/api/source/switch-build",
+    # switch which committed workspace this server serves (in-process re-point)
+    # + the remote-build flow (the core of remote-only)
+    "/api/source/switch", "/api/source/build-remote", "/api/source/switch-build",
     # GitHub auth (needed to reach the remote / private content)
     "/api/auth/github/start", "/api/auth/github/logout",
     # benign UI telemetry
