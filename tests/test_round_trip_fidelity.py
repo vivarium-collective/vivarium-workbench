@@ -63,8 +63,11 @@ def test_manifest_carries_build_inputs(tmp_path):
     """The manifest exposes repo+branch+commit — the inputs build-via-sms-api needs.
     Guards the 'one manifest, both directions' invariant."""
     origin = tmp_path / "origin"
-    _make_origin(origin)
+    sha = _make_origin(origin)
     m = build_manifest(origin)
-    # build-remote consumes repo+branch; switch-build pins commit. All present:
+    # build-remote consumes repo+branch; switch-build pins commit. Assert exact values:
+    assert m["repo"] == "https://github.com/vivarium-collective/demo"  # .git stripped
+    assert m["commit"] == sha                                           # exact full SHA
+    assert m["branch"] in ("main", "master")
+    # All three keys present and truthy (belt-and-suspenders after value checks):
     assert m["repo"] and m["branch"] and m["commit"]
-    assert set(["repo", "branch", "commit"]).issubset(m.keys())
