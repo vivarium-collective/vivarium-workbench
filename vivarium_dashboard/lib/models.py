@@ -2485,3 +2485,22 @@ class InvestigationRunOneRequest(BaseModel):
     overrides: Optional[dict] = None
     steps: Optional[int] = None
     label: Optional[str] = None
+
+
+class InvestigationRunRequest(BaseModel):
+    """POST /api/investigation-run request body.
+
+    ``{"name"|"study"|"investigation"}`` — runs ALL of an investigation's
+    simulations and renders its visualizations (the "Run investigation" flow).
+    A missing name is rejected with HTTP 400 by
+    ``lib.investigation_run_views.investigation_run``. ``model_dump(
+    exclude_none=True)`` keeps omitted optionals absent so the builder's
+    ``_study_name_from_body`` name resolution applies. The variable summary
+    dict is returned via ``JSONResponse`` (no response model).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    study: Optional[str] = None
+    investigation: Optional[str] = None

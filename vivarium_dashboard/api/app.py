@@ -48,6 +48,7 @@ from vivarium_dashboard.lib import auth_views as _auth_views
 from vivarium_dashboard.lib import composite_run_views as _cr_views
 from vivarium_dashboard.lib import composite_test_run_views as _composite_test_run_views
 from vivarium_dashboard.lib import investigation_run_one_views as _investigation_run_one_views
+from vivarium_dashboard.lib import investigation_run_views as _investigation_run_views
 from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
 from vivarium_dashboard.lib import viz_write_mutations as _viz_write_mut
 from vivarium_dashboard.lib import viz_commit_mutations as _viz_commit_mut
@@ -262,6 +263,8 @@ from vivarium_dashboard.lib.models import (
     CompositeTestRunRequest,
     # P3: investigation-run-one (ad-hoc "Duplicate run") POST request body
     InvestigationRunOneRequest,
+    # P4: investigation-run (run all sims + render viz) POST request body
+    InvestigationRunRequest,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -4565,6 +4568,49 @@ def create_app() -> FastAPI:
             viz_html}``) OR run failed (``{ok: false, run_id, error}``)
         """
         body, status = _investigation_run_one_views.investigation_run_one(
+            ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
+
+    # -----------------------------------------------------------------------
+    # P4: investigation-run — run ALL of an investigation's simulations + viz
+    #
+    # The "Run investigation" flow: build the workspace core in-process for the
+    # visualization registry, run each composite once in an embedded subprocess,
+    # render every viz, and delegate orchestration to
+    # ``lib.investigations.run_investigation``.  The live stdlib handler commits
+    # the rendered viz via ``_active_branch_action``; this FastAPI path runs the
+    # action inline with the commit DEFERRED (like every other committer port)
+    # and returns the summary verbatim.  JSONResponses every path so the
+    # lib-returned status is preserved: 400 missing-name / spec-error, 404
+    # file-not-found, 500 core-build-failed, 200 success.
+    # ``model_dump(exclude_none=True)`` keeps omitted optionals absent so the
+    # builder's ``_study_name_from_body`` name resolution applies.  CSRF
+    # middleware already guards it.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/investigation-run",
+        tags=["Investigation runs"],
+        summary="Run all of an investigation's simulations + render its visualizations",
+    )
+    def investigation_run(
+        req: InvestigationRunRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Run every simulation of an investigation + render its visualizations.
+
+        Mirrors the stdlib ``POST /api/investigation-run``.  Body:
+        ``{"name"|"study"|"investigation"}``.
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.investigation_run_views.investigation_run``, modulo the deferred
+        commit):
+          - 400  missing name / ``InvestigationSpecError`` (spec error)
+          - 404  ``FileNotFoundError`` (composite/spec file missing)
+          - 500  workspace core build failed
+          - 200  the run/render summary dict
+        """
+        body, status = _investigation_run_views.investigation_run(
             ws, req.model_dump(exclude_none=True))
         return JSONResponse(status_code=status, content=body)
 
