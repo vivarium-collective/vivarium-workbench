@@ -85,13 +85,13 @@ def test_build_bundle_structure_and_parity(tmp_workspace, tmp_path):
 
 
 def test_build_bundle_investigation_json(tmp_workspace, tmp_path):
-    """build_bundle writes api/iset/<name>.json with the same data as _iset_detail_data."""
+    """build_bundle writes api/investigation/<name>.json with the same data as _iset_detail_data."""
     from vivarium_dashboard import publish
 
     out = tmp_path / "bundle"
     publish.build_bundle(server.WORKSPACE, out)
 
-    iset_file = out / "api" / "iset" / "main-inv.json"
+    iset_file = out / "api" / "investigation" / "main-inv.json"
     assert iset_file.is_file(), "iset JSON missing"
     iset_data = json.loads(iset_file.read_text())
     assert "studies" in iset_data
@@ -252,31 +252,31 @@ def test_bundle_uses_committed_composite_state_override(tmp_workspace, tmp_path,
 # ---------------------------------------------------------------------------
 
 def test_bundle_exports_full_read_surface(tmp_workspace, tmp_path):
-    """build_bundle writes api/{iset-list,catalog,composites,registry}.json
-    and api/inputs/<inv>.json per investigation; iset-list parity."""
+    """build_bundle writes api/{investigation-summaries,catalog,composites,registry}.json
+    and api/inputs/<inv>.json per investigation; investigation-summaries parity."""
     from vivarium_dashboard import publish
 
     out = tmp_path / "bundle"
     publish.build_bundle(server.WORKSPACE, out)
 
-    assert (out / "api" / "iset-list.json").is_file(), "iset-list.json missing"
+    assert (out / "api" / "investigation-summaries.json").is_file(), "investigation-summaries.json missing"
     assert (out / "api" / "catalog.json").is_file(), "catalog.json missing"
     assert (out / "api" / "composites.json").is_file(), "composites.json missing"
     assert (out / "api" / "registry.json").is_file(), "registry.json missing"
 
     # inputs per investigation
-    isets = json.loads((out / "api" / "iset-list.json").read_text())["investigations"]
+    isets = json.loads((out / "api" / "investigation-summaries.json").read_text())["investigations"]
     if isets:
         inv = isets[0]["name"]
         assert (out / "api" / "inputs" / f"{inv}.json").is_file(), \
             f"inputs/{inv}.json missing"
 
-    # parity for iset-list
-    assert json.loads((out / "api" / "iset-list.json").read_text()) == \
+    # parity for investigation-summaries
+    assert json.loads((out / "api" / "investigation-summaries.json").read_text()) == \
         json.loads(json.dumps(
             {"investigations": server._build_iset_summary_for_test(server.WORKSPACE)},
             default=server._json_default,
-        )), "iset-list.json parity failed"
+        )), "investigation-summaries.json parity failed"
 
 
 def test_bundle_exports_kept_tab_reads(tmp_workspace, tmp_path):
@@ -555,7 +555,7 @@ def test_golden_v2e_invest(tmp_path):
     assert commit and len(commit) >= 7, f"config.commit is not a sha: {commit!r}"
 
     # Task 4 (read-only viewer): new API resources present + snapshot-readonly.css
-    assert (out / "api" / "iset-list.json").is_file(), "iset-list.json missing"
+    assert (out / "api" / "investigation-summaries.json").is_file(), "investigation-summaries.json missing"
     assert (out / "api" / "catalog.json").is_file(), "catalog.json missing"
     assert (out / "api" / "composites.json").is_file(), "composites.json missing"
     assert (out / "api" / "registry.json").is_file(), "registry.json missing"
@@ -563,14 +563,14 @@ def test_golden_v2e_invest(tmp_path):
         "snapshot-readonly.css not in bundle"
 
     # inputs/<inv>.json present for each investigation
-    isets = json.loads((out / "api" / "iset-list.json").read_text())["investigations"]
-    assert len(isets) >= 1, "iset-list.json is empty for v2e-invest"
+    isets = json.loads((out / "api" / "investigation-summaries.json").read_text())["investigations"]
+    assert len(isets) >= 1, "investigation-summaries.json is empty for v2e-invest"
     for inv in isets:
         inv_name = inv["name"]
         assert (out / "api" / "inputs" / f"{inv_name}.json").is_file(), \
             f"api/inputs/{inv_name}.json missing"
 
-    # iset-list parity
+    # investigation-summaries parity
     orig_ws = server.WORKSPACE
     server.WORKSPACE = _V2E_INVEST
     server._WP_CACHE.clear()
@@ -582,8 +582,8 @@ def test_golden_v2e_invest(tmp_path):
     finally:
         server.WORKSPACE = orig_ws
         server._WP_CACHE.clear()
-    assert json.loads((out / "api" / "iset-list.json").read_text()) == expected_isets, \
-        "iset-list.json parity failed for v2e-invest"
+    assert json.loads((out / "api" / "investigation-summaries.json").read_text()) == expected_isets, \
+        "investigation-summaries.json parity failed for v2e-invest"
 
     # ── Full-surface golden (Tasks 1-5) ─────────────────────────────────────────
     # Simulations DB + Visualizations/Analyses exports
@@ -822,5 +822,5 @@ def test_build_bundle_exports_investigation_notebooks(tmp_workspace, tmp_path):
         assert by_slug[inv_name]["py"] == f"investigation-notebooks/{inv_name}.py"
 
     # the published iset JSON stays byte-parity with the live builder (no mutation)
-    iset = json.loads((out / "api" / "iset" / "main-inv.json").read_text())
+    iset = json.loads((out / "api" / "investigation" / "main-inv.json").read_text())
     assert "notebook" not in iset

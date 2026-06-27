@@ -2,7 +2,7 @@
 
 The endpoint aggregates this server's current Investigation plus every OTHER
 live dashboard's current Investigation (queried over HTTP from each peer's
-/api/iset-list). We test the pure helper with both server-listing and HTTP
+/api/investigation-summaries). We test the pure helper with both server-listing and HTTP
 fetch injected to keep tests hermetic.
 """
 from __future__ import annotations

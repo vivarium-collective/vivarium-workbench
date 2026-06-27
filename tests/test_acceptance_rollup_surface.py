@@ -1,7 +1,7 @@
 """Thread-A / Task 2 (A1): surface the investigation acceptance roll-up.
 
 ``roll_up_acceptance`` is computed for the investigation and reaches the
-``/api/iset/<inv>`` response as ``computed_acceptance`` (per-criterion
+``/api/investigation/<inv>`` response as ``computed_acceptance`` (per-criterion
 study → behavior → result). When the spine has persisted
 ``executive.computed_acceptance.diverges_from_authored`` (written by the
 investigation acceptance evaluator), that flag is surfaced too so the
@@ -30,7 +30,7 @@ def _v3_study(name, tests, runs):
 
 
 def test_iset_response_carries_computed_acceptance(tmp_path, dashboard_client):
-    """GET /api/iset/<inv> carries computed_acceptance with per-criterion entries."""
+    """GET /api/investigation/<inv> carries computed_acceptance with per-criterion entries."""
     ws = tmp_path / "ws"
     inv_dir = ws / "investigations" / "my-inv"
     study_dir = inv_dir / "studies" / "s1"
@@ -46,7 +46,7 @@ def test_iset_response_carries_computed_acceptance(tmp_path, dashboard_client):
     }))
 
     client = dashboard_client(ws)
-    resp = client.get("/api/iset/my-inv")
+    resp = client.get("/api/investigation/my-inv")
     assert resp.status_code == 200
     data = resp.json()
     ca = data.get("computed_acceptance")
@@ -85,7 +85,7 @@ def test_iset_response_surfaces_persisted_divergence(tmp_path, dashboard_client)
     }))
 
     client = dashboard_client(ws)
-    data = client.get("/api/iset/div-inv").json()
+    data = client.get("/api/investigation/div-inv").json()
     ca = data.get("computed_acceptance")
     assert ca is not None
     assert ca.get("diverges_from_authored") is True
