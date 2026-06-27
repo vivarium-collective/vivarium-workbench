@@ -30,6 +30,7 @@ import os
 from pathlib import Path
 from typing import Optional, Union
 
+import json
 import subprocess
 
 from fastapi import Body, Depends, FastAPI, Request
@@ -47,6 +48,7 @@ from vivarium_dashboard.lib import remote_run_views as _remote_run_views
 from vivarium_dashboard.lib import auth_views as _auth_views
 from vivarium_dashboard.lib import composite_run_views as _cr_views
 from vivarium_dashboard.lib import composite_test_run_views as _composite_test_run_views
+from vivarium_dashboard.lib import investigation_create_views as _investigation_create_views
 from vivarium_dashboard.lib import investigation_run_one_views as _investigation_run_one_views
 from vivarium_dashboard.lib import investigation_run_views as _investigation_run_views
 from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
@@ -92,6 +94,7 @@ from vivarium_dashboard.lib import study_viz_views as _study_viz
 from vivarium_dashboard.lib import system_info as _system_info
 from vivarium_dashboard.lib import work_views as _work_views
 from vivarium_dashboard.lib import workspace_deps_views as _workspace_deps
+from vivarium_dashboard.lib import workspace_manifest_views as _workspace_manifest_views
 from vivarium_dashboard.lib import install_views as _install_views
 from vivarium_dashboard.lib import catalog_install_views as _catalog_install_views
 from vivarium_dashboard.lib import catalog_uninstall_views as _catalog_uninstall_views
@@ -286,6 +289,8 @@ from vivarium_dashboard.lib.models import (
     InvestigationRunRequest,
     # P5: investigation-run-unblocked (enumerate + submit run job) POST request body
     InvestigationRunUnblockedRequest,
+    # Scaffold: investigation-create (scaffold new investigation dir) POST request body
+    InvestigationCreateRequest,
     # Viz authoring: visualization-preview (in-process viz render) POST request body
     VisualizationPreviewRequest,
     # Viz authoring: visualization-preview-instance (preview registered instance by name)
@@ -470,6 +475,21 @@ _OPENAPI_TAGS = [
             "embedded subprocess, persists rendered viz HTML, and appends to the "
             "investigation's ``runs.db``.  Validation failures are 400/404; a "
             "composite that fails to run returns 200 with ``{ok: false}``."
+        ),
+    },
+    {
+        "name": "Investigation scaffold",
+        "description": (
+            "Investigation scaffolding: ``POST /api/investigation-create`` creates "
+            "a new investigation directory (``data/.keep`` plus one of three "
+            "scaffold shapes keyed on the resolved ``source`` composite — a v4 "
+            "``study.yaml`` for a ``@composite_generator`` ref, a v2 ``spec.yaml`` "
+            "+ copied sidecar for a YAML source, or a blank ``spec.yaml`` stub).  "
+            "The live handler is ``_active_branch_action``-wrapped; this FastAPI "
+            "route calls the ``lib.investigation_create_views`` builder directly "
+            "with the commit deferred.  Errors carry ``{error: ...}`` at "
+            "400 (bad/missing name) / 404 (source not found) / 409 (already "
+            "exists) / 500 (scaffold failed)."
         ),
     },
     {
@@ -877,6 +897,27 @@ def create_app() -> FastAPI:
         return DashConfig(mode="local-server")
 
     @app.get(
+        "/api/workspace-manifest",
+        tags=["System"],
+        summary="One-call workspace situational-awareness snapshot for agents",
+    )
+    def workspace_manifest(ws: Path = Depends(get_workspace)) -> JSONResponse:
+        """One-call situational awareness (mirrors the stdlib /api/workspace-manifest).
+
+        Aggregates six best-effort sections into a single snapshot so an agent
+        does not have to stitch together ten separate API calls: workspace
+        identity + git state (``workspace``), composites (``composites``),
+        studies (``studies``), registry summary (``registry``), dirty-tree
+        health (``health``), and installed pbg-* skills (``skills``).
+
+        Always returns HTTP 200 — each section degrades to an empty default
+        rather than failing the whole manifest.  Library-backed via
+        ``lib.workspace_manifest_views.workspace_manifest``.
+        """
+        out, status = _workspace_manifest_views.workspace_manifest(ws)
+        return JSONResponse(content=out, status_code=status)
+
+    @app.get(
         "/api/iset-list",
         response_model=list[InvestigationSummary],
         tags=["Investigations"],
@@ -1170,20 +1211,30 @@ def create_app() -> FastAPI:
         summary="Resolve a single composite spec or generator by ID",
     )
     def composite_resolve(
-        ref: str, ws: Path = Depends(get_workspace)
+        id: str,
+        overrides: str = "{}",
+        ws: Path = Depends(get_workspace),
     ) -> Optional[CompositeResolvePayload]:
         """Resolve a single composite spec or generator by ID.
 
-        Mirrors ``GET /api/composite-resolve?ref=<spec_id>`` from the stdlib
-        server.  Returns the composite payload when found, or ``null`` (200 with
-        null body) when ``ref`` doesn't match any spec or generator — identical
-        miss-behaviour to the legacy handler.
+        Mirrors ``GET /api/composite-resolve?id=<spec_id>&overrides=<json>`` from
+        the stdlib server — the real client (the Composite Explorer) sends the
+        spec under ``id`` (not ``ref``) plus an ``overrides`` JSON blob.  Returns
+        the composite payload when found, or ``null`` (200 with null body) when
+        ``id`` doesn't match any spec or generator.
 
         Library-backed via ``lib.composite_resolve.resolve_composite`` — the
         single implementation the stdlib ``_composite_resolve_data`` now forwards
-        to.
+        to.  (``svg`` is ``None`` from the seam; the interactive loom viewer
+        renders the wiring from ``state``.)
         """
-        result = resolve_composite(ws, ref)
+        try:
+            ov = json.loads(overrides) if overrides else {}
+        except (json.JSONDecodeError, TypeError):
+            ov = {}
+        if not isinstance(ov, dict):
+            ov = {}
+        result = resolve_composite(ws, id, ov)
         if result is None:
             return None
         return CompositeResolvePayload.model_validate(result)
@@ -4738,6 +4789,52 @@ def create_app() -> FastAPI:
           - 200  the run/render summary dict
         """
         body, status = _investigation_run_views.investigation_run(
+            ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
+
+    # -----------------------------------------------------------------------
+    # Scaffold: investigation-create — scaffold a new investigation directory.
+    #
+    # Creates ``investigations/<name>/`` (keyed by the workspace ``studies/``
+    # dir) with a ``data/.keep`` plus one of three scaffold shapes keyed on the
+    # resolved ``source`` composite: a v4 ``study.yaml`` for a
+    # ``@composite_generator`` ref, a v2 ``spec.yaml`` + copied sidecar for a
+    # YAML source, or a blank ``spec.yaml`` stub.  The live stdlib handler
+    # commits the scaffold via ``_active_branch_action``; this FastAPI path runs
+    # the scaffold inline with the commit DEFERRED (like every other committer
+    # port) and returns ``{ok, name}`` verbatim.  JSONResponse every path so the
+    # lib-returned status is preserved: 400 bad/missing name, 404 source not
+    # found, 409 already exists, 500 scaffold failed, 200 success.
+    # ``model_dump(exclude_none=True)`` keeps omitted optionals absent so a
+    # missing ``name`` reaches the builder's 400 (not a 422).  CSRF middleware
+    # already guards it.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/investigation-create",
+        tags=["Investigation scaffold"],
+        summary="Scaffold a new investigation directory (deferred commit)",
+    )
+    def investigation_create(
+        req: InvestigationCreateRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Scaffold a new investigation directory.
+
+        Mirrors the stdlib ``POST /api/investigation-create``.  Body:
+        ``{"name", "source"?, "composite"?}``.
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.investigation_create_views.investigation_create``, modulo the
+        deferred commit):
+          - 400  missing ``name`` / name fails ``^[a-zA-Z0-9_-]+$``
+          - 404  ``source`` composite not resolvable
+          - 409  investigation already exists
+          - 500  scaffold ``action`` raised (``{"error": "action failed: …"}``)
+          - 200  ``{ok: true, name}``  (scaffold run inline; the live
+            ``_active_branch_action`` commit is deferred)
+        """
+        body, status = _investigation_create_views.investigation_create(
             ws, req.model_dump(exclude_none=True))
         return JSONResponse(status_code=status, content=body)
 

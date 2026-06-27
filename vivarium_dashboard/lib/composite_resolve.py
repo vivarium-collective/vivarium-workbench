@@ -21,7 +21,9 @@ def _ws_add_to_sys_path(ws_root: Path) -> None:
         sys.path.insert(0, ws)
 
 
-def resolve_composite(ws_root: Path, spec_id: str) -> "dict | None":
+def resolve_composite(
+    ws_root: Path, spec_id: str, overrides: "dict | None" = None
+) -> "dict | None":
     """Return the resolve payload dict for a single composite, or ``None`` on miss.
 
     Mirrors the data returned by ``GET /api/composite-resolve``.  The expensive
@@ -35,6 +37,10 @@ def resolve_composite(ws_root: Path, spec_id: str) -> "dict | None":
         Workspace root directory (must contain ``workspace.yaml``).
     spec_id:
         Dotted composite identifier (e.g. ``pbg_my_ws.composites.my_composite``).
+    overrides:
+        Optional parameter overrides applied when building a generator or
+        substituting spec parameters (matches the live handler's ``overrides=``
+        query arg).  ``None`` is treated as ``{}``.
 
     Returns
     -------
@@ -44,6 +50,7 @@ def resolve_composite(ws_root: Path, spec_id: str) -> "dict | None":
     """
     import yaml
 
+    ov = overrides or {}
     _ws_add_to_sys_path(ws_root)
     try:
         from vivarium_dashboard.lib.composite_lookup import (
@@ -70,7 +77,7 @@ def resolve_composite(ws_root: Path, spec_id: str) -> "dict | None":
 
         if entry is not None:
             try:
-                doc = build_generator(entry, overrides={})
+                doc = build_generator(entry, overrides=ov)
             except Exception:
                 return None
             if isinstance(doc, dict) and "state" in doc and isinstance(doc["state"], dict):
@@ -107,7 +114,7 @@ def resolve_composite(ws_root: Path, spec_id: str) -> "dict | None":
         state = substitute_parameters(
             spec.get("state") or {},
             spec.get("parameters") or {},
-            {},
+            ov,
         )
         try:
             from vivarium_dashboard.lib.composite_lookup import _derive_module_from_spec_id

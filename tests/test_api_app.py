@@ -80,6 +80,40 @@ def test_config_route(client):
     assert r.json() == {"mode": "local-server", "basePath": None}
 
 
+def test_workspace_manifest_route_returns_six_sections(client, monkeypatch):
+    """GET /api/workspace-manifest returns 200 with the six top-level sections.
+
+    We patch the lib aggregator so the route is deterministic and never shells
+    out to git / builds the process registry."""
+    canned = {
+        "workspace": {"name": "ws", "branch": "main", "has_origin": True,
+                      "description": "", "package_path": "pbg_ws"},
+        "composites": [],
+        "studies": [],
+        "registry": {"process_count": 0, "step_count": 0, "emitter_count": 0,
+                     "visualization_count": 0, "type_count": 0},
+        "health": {"dirty_count": 0, "dirty_files": [], "venv_present": False,
+                   "python_version": "3.12.0"},
+        "skills": [],
+    }
+    monkeypatch.setattr(
+        api_app._workspace_manifest_views, "workspace_manifest",
+        lambda ws: (canned, 200),
+    )
+    r = client.get("/api/workspace-manifest")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body) == {"workspace", "composites", "studies",
+                         "registry", "health", "skills"}
+    assert body["workspace"]["name"] == "ws"
+
+
+def test_workspace_manifest_in_openapi(client):
+    """The /api/workspace-manifest route appears in the OpenAPI schema."""
+    spec = client.get("/openapi.json").json()
+    assert "/api/workspace-manifest" in spec["paths"]
+
+
 def test_iset_list_empty_workspace(client):
     r = client.get("/api/iset-list")
     assert r.status_code == 200
@@ -318,9 +352,13 @@ def test_visualization_classes_in_openapi(client):
 # ---------------------------------------------------------------------------
 
 def test_composite_resolve_missing_returns_null(client):
-    """A ref that doesn't match any spec/generator returns 200 with null body
-    (empty workspace has no workspace.yaml → resolver returns None immediately)."""
-    r = client.get("/api/composite-resolve?ref=missing")
+    """An id that doesn't match any spec/generator returns 200 with null body
+    (empty workspace has no workspace.yaml → resolver returns None immediately).
+
+    The real client (Composite Explorer) sends the spec under ``id`` (not
+    ``ref``), so the route's query param is ``id`` — a regression test for the
+    422 the old ``ref`` param produced against every live call."""
+    r = client.get("/api/composite-resolve?id=missing")
     assert r.status_code == 200
     assert r.json() is None
 
@@ -341,14 +379,26 @@ def test_composite_resolve_typed_passthrough(client, monkeypatch):
         "default_n_steps": None,
         "extra_field": "preserved",
     }
-    monkeypatch.setattr(_app, "resolve_composite", lambda ws, ref: payload)
-    r = client.get("/api/composite-resolve?ref=pbg_ws.composites.my_comp")
+    captured = {}
+
+    def _fake_resolve(ws, spec_id, overrides):
+        captured["spec_id"] = spec_id
+        captured["overrides"] = overrides
+        return payload
+
+    monkeypatch.setattr(_app, "resolve_composite", _fake_resolve)
+    r = client.get(
+        "/api/composite-resolve?id=pbg_ws.composites.my_comp&overrides=%7B%22n%22%3A5%7D"
+    )
     assert r.status_code == 200
     body = r.json()
     assert body["id"] == "pbg_ws.composites.my_comp"
     assert body["name"] == "My Composite"
     assert body["kind"] == "spec"
     assert body["extra_field"] == "preserved"   # extra="allow" works
+    # the route forwards ``id`` + parsed ``overrides`` to the resolver
+    assert captured["spec_id"] == "pbg_ws.composites.my_comp"
+    assert captured["overrides"] == {"n": 5}
 
 
 def test_composite_resolve_in_openapi(client):
@@ -4064,6 +4114,53 @@ if a.json:
         paths = sc_client.get("/openapi.json").json()["paths"]
         assert "/api/investigation-delete" in paths
         assert "post" in paths["/api/investigation-delete"]
+
+
+class TestInvestigationCreateRoute:
+    """Route-level tests for POST /api/investigation-create (deferred commit)."""
+
+    @pytest.fixture
+    def ws(self, tmp_path: Path) -> Path:
+        w = tmp_path / "ws"
+        w.mkdir()
+        (w / "workspace.yaml").write_text("name: ws\n")
+        (w / "investigations").mkdir()
+        (w / "studies").mkdir()
+        return w
+
+    @pytest.fixture
+    def ic_client(self, ws: Path) -> TestClient:
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: ws
+        return TestClient(app)
+
+    def test_create_happy_blank(self, ic_client: TestClient, ws: Path) -> None:
+        r = ic_client.post("/api/investigation-create", json={"name": "inv-blank"})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True, "name": "inv-blank"}
+        assert (ws / "studies" / "inv-blank" / "spec.yaml").is_file()
+        assert (ws / "studies" / "inv-blank" / "data" / ".keep").is_file()
+
+    def test_create_missing_name(self, ic_client: TestClient) -> None:
+        r = ic_client.post("/api/investigation-create", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "name is required"}
+
+    def test_create_bad_name_regex(self, ic_client: TestClient) -> None:
+        r = ic_client.post("/api/investigation-create", json={"name": "bad name!"})
+        assert r.status_code == 400
+        assert r.json() == {"error": "name must match [a-zA-Z0-9_-]+"}
+
+    def test_create_conflict(self, ic_client: TestClient) -> None:
+        ic_client.post("/api/investigation-create", json={"name": "dup"})
+        r = ic_client.post("/api/investigation-create", json={"name": "dup"})
+        assert r.status_code == 409
+        assert r.json() == {"error": "investigation 'dup' already exists"}
+
+    def test_create_in_openapi(self, ic_client: TestClient) -> None:
+        paths = ic_client.get("/openapi.json").json()["paths"]
+        assert "/api/investigation-create" in paths
+        assert "post" in paths["/api/investigation-create"]
 
 
 class TestBatch26ReferenceRoutes:

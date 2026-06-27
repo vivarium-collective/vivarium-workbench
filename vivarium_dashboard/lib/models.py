@@ -2628,6 +2628,32 @@ class InvestigationRunRequest(BaseModel):
     investigation: Optional[str] = None
 
 
+class InvestigationCreateRequest(BaseModel):
+    """POST /api/investigation-create request body.
+
+    ``{"name", "source"?, "composite"?}`` — scaffolds a new investigation
+    directory (``data/.keep`` plus one of three scaffold shapes keyed on the
+    resolved ``source`` composite). ``source`` is an optional composite ref that
+    seeds a baseline composite; the legacy ``composite`` field is accepted but
+    ignored when ``source`` is provided. A missing/blank ``name`` (or one that
+    fails the ``^[a-zA-Z0-9_-]+$`` regex) is rejected with HTTP 400, an existing
+    investigation with HTTP 409, and an unresolvable ``source`` with HTTP 404 by
+    ``lib.investigation_create_views.investigation_create``. ``extra="allow"``
+    preserves any other body keys, and ``model_dump(exclude_none=True)`` keeps
+    omitted optionals absent so the builder's ``.get(...)`` defaults apply (and
+    so a missing ``name`` reaches the builder's 400 rather than a 422). The
+    ``{ok, name}`` success body (the live ``_active_branch_action`` commit is
+    deferred — the builder runs the scaffold inline) and every error path are
+    returned via ``JSONResponse`` (no response model).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    source: Optional[str] = None
+    composite: Optional[str] = None
+
+
 class InvestigationRunUnblockedRequest(BaseModel):
     """POST /api/investigation-run-unblocked request body.
 
