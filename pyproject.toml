@@ -97,6 +97,7 @@ files = [
     "vivarium_dashboard/lib/study_run_state.py",
     "vivarium_dashboard/lib/study_run_post.py",
     "vivarium_dashboard/lib/study_runs.py",
+    "vivarium_dashboard/lib/comparative_runs.py",
 ]
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true
