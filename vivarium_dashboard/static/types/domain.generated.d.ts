@@ -337,6 +337,7 @@ export interface GithubRepo {
 }
 
 export interface UiConfig {
+  readonly: boolean;
   composite_view: string;
   ptools_server_url: string;
   ptools_omics_url_template: string;

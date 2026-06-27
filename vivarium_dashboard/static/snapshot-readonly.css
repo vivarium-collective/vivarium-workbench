@@ -83,8 +83,16 @@ body.snapshot #ce-post-run-bar {
 }
 
 /* ── Generic JS-authoring tag (applied by JS at render time) ─────────── */
-body.snapshot .js-authoring {
+/* Hidden in both static snapshot mode and live read-only (remote-only) mode. */
+body.snapshot .js-authoring,
+body.readonly .js-authoring {
   display: none !important;
+}
+
+/* Remote-only (read-only) client: the workspace status dot is purple (remote),
+   not the local green. */
+body.readonly .viv-workspace-switcher-glyph {
+  color: #7c3aed !important;
 }
 
 /* ── Sources add-* modals ────────────────────────────────────────────── */

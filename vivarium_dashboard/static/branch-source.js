@@ -117,10 +117,14 @@
     host.innerHTML = "";
     host.appendChild(_el("h3", "viv-bs-title", "Source"));
 
+    // Remote-only (read-only) mode: force remote scope, no Local source option.
+    var RO = !!((window._uiConfig || {}).readonly);
+    if (RO) state.scope = "remote";
+
     // Scope toggle
     var scopeRow = _el("div", "viv-bs-row");
     scopeRow.appendChild(_el("label", "viv-bs-key", "Scope"));
-    ["local", "remote"].forEach(function (s) {
+    (RO ? ["remote"] : ["local", "remote"]).forEach(function (s) {
       var b = _el("button", "viv-bs-toggle" + (state.scope === s ? " active" : ""), s === "local" ? "Local" : "Remote");
       b.addEventListener("click", function () { state.scope = s; state.repo = null; state.branch = null; refresh(); });
       scopeRow.appendChild(b);
@@ -181,6 +185,7 @@
 
     var pushBtn = _el("button", "viv-bs-action", "Commit + Push"); pushBtn.id = "viv-bs-push";
     pushBtn.disabled = state.scope !== "local";
+    if (RO) pushBtn.style.display = "none";   // local git write — gone in remote-only
     pushBtn.addEventListener("click", function () {
       if (pushBtn.disabled) return;
       var msg = window.prompt("Commit message for push:", "dashboard commit");

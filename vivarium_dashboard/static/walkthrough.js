@@ -326,6 +326,9 @@
   window._uiConfig = null;
   fetch('/api/ui-config').then(function(r) { return r.json(); }).then(function(cfg) {
     window._uiConfig = cfg || {};
+    // Read-only / remote-only mode: hide authoring controls (.js-authoring) via
+    // CSS; the Source panel reads this flag at render time to go remote-only.
+    if (window._uiConfig.readonly) document.body.classList.add('readonly');
     _applyCompositeViewMode();
   });
 
@@ -3480,6 +3483,20 @@
   }
   window._vivOpenInvestigationFromRail = _vivOpenInvestigationFromRail;
 
+  // Open an investigation's DETAIL view (summary + DAG) from the rail, from any
+  // page. Activates the Investigations page directly rather than via
+  // _switchPage('investigations') — that path calls _loadInvestigationSets(),
+  // which async-re-renders the LIST over the detail we just opened.
+  window._railOpenInvestigationDetail = function (name) {
+    document.querySelectorAll('.page').forEach(function (s) { s.classList.remove('active'); });
+    document.querySelectorAll('.menu-link').forEach(function (a) { a.classList.remove('active'); });
+    var page = document.getElementById('page-investigations');
+    var link = document.querySelector('.menu-link[data-page="investigations"]');
+    if (page) page.classList.add('active');
+    if (link) link.classList.add('active');
+    if (typeof _openInvestigationDetail === 'function') _openInvestigationDetail(name);
+  };
+
   // -------------------------------------------------------------------------
   // Internal helpers
   // -------------------------------------------------------------------------
@@ -4129,6 +4146,9 @@
       p = fetch(url).then(function(r) { return r.json(); });
     }
     p.then(function(data) {
+        // Guard: a null/empty response (e.g. an unexpected miss) is treated as
+        // unresolved instead of crashing on ``data.unresolved``.
+        data = data || { unresolved: true, ref: id };
         if (data.unresolved) {
           // Honest degrade: the ref doesn't resolve to a registered composite.
           // Don't render a bare "error composite" node — explain it plainly.
@@ -4694,9 +4714,15 @@
         intentLine +
         '<div class="muted" style="font-size:0.78em;font-family:monospace;margin-bottom:6px">' + _esc(iset.name) + '</div>' +
         (desc ? '<p style="margin:0 0 8px 0;font-size:0.9em;color:#475569">' + _esc(desc) + (iset.description.length > 240 ? '…' : '') + '</p>' : '') +
-        '<div style="display:flex;align-items:center;gap:10px;font-size:0.85em;color:#64748b">' +
+        '<div style="display:flex;align-items:center;gap:12px;font-size:0.85em;color:#64748b">' +
           '<span style="flex:1"><strong>' + iset.n_studies + '</strong> stud' + (iset.n_studies === 1 ? 'y' : 'ies') +
           ' &nbsp;·&nbsp; click to open DAG</span>' +
+          '<a href="#" title="Download the rendered HTML report for this investigation" ' +
+            'onclick="window._vivReportFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
+            'style="color:#3b82f6;text-decoration:none;white-space:nowrap">↓ report</a>' +
+          '<a href="#" title="Download the runnable notebook for this investigation" ' +
+            'onclick="window._vivNotebookFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
+            'style="color:#3b82f6;text-decoration:none;white-space:nowrap">↓ notebook</a>' +
           actionBtn +
         '</div>' +
       '</div>';
@@ -6070,6 +6096,27 @@
       });
   }
   window._generateInvestigationReport = _generateInvestigationReport;
+
+  // Per-card actions on the Investigations LIST (don't require opening the
+  // investigation). _generateInvestigationReport captures the name synchronously
+  // from _currentIset, so we set/restore it around the call.
+  window._vivReportFromCard = function (ev, name) {
+    if (ev) ev.stopPropagation();
+    var prev = window._currentIset;
+    window._currentIset = name;
+    try { _generateInvestigationReport(); } finally { window._currentIset = prev; }
+  };
+  window._vivNotebookFromCard = function (ev, name) {
+    if (ev) ev.stopPropagation();
+    var c = window.__DASH_CONFIG__ || {};
+    var base = c.basePath || '';
+    var url = (c.mode === 'snapshot')
+      ? base + '/investigation-notebooks/' + encodeURIComponent(name) + '.ipynb'
+      : '/api/investigation-notebook/' + encodeURIComponent(name);
+    var a = document.createElement('a');
+    a.href = url; a.download = name + '.ipynb';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  };
 
   // Download the coder-facing notebook for the current investigation. In a
   // published (snapshot) bundle this is a static file under
@@ -8363,22 +8410,10 @@
       }
       function _compositeCell(composite) {
         if (!composite) return '<span class="muted">—</span>';
-        // In the read-only snapshot a composite is navigable only if its wiring
-        // was exported at publish time (has_wiring). When we positively know it
-        // was NOT (e.g. a composite that can't resolve without the on-disk ParCa
-        // cache), render plain text — a pop-out would 404 in bigraph-loom.
-        var cfg = (typeof window !== 'undefined' && window.__DASH_CONFIG__) || {};
-        if (cfg.mode === 'snapshot') {
-          var known = (window._compositesById || {})[composite];
-          if (known && known.has_wiring === false) {
-            return '<code title="static wiring not available in the read-only snapshot">'
-              + _h(_short(composite)) + '</code>';
-          }
-        }
-        return '<a href="#" class="composite-loom-link" '
-          + 'title="Open a static view of this composite in bigraph-loom" '
-          + 'onclick="event.preventDefault(); ' + _loomStaticPopout(composite) + '">'
-          + '<code>' + _h(_short(composite)) + '</code> <span aria-hidden="true">↗</span></a>';
+        // Standalone reports: render the composite as plain text — no link out
+        // to the bigraph-loom explorer. Those live-only pop-outs are not worth
+        // maintaining and break a self-contained / shared report.
+        return '<code>' + _h(_short(composite)) + '</code>';
       }
       function _paramsCell(params) {
         if (!params || typeof params !== 'object' || !Object.keys(params).length)
@@ -8437,7 +8472,7 @@
             + '</tr>';
         }).join('');
         simsHtml = '<div id="' + sid.sims + '"><h3>What we ran <span class="muted small">(' + sims.length + ' simulation' + (sims.length === 1 ? '' : 's') + ')</span></h3>'
-          + '<p class="muted small" style="margin:0 0 8px 0">One row per concrete run: the model composite (click ↗ to open it in the bigraph-loom explorer), what changes vs the reference baseline, the condition / length, and its status.</p>'
+          + '<p class="muted small" style="margin:0 0 8px 0">One row per concrete run: the model composite, what changes vs the reference baseline, the condition / length, and its status.</p>'
           + '<table class="sim-table"><thead><tr><th>Simulation</th><th>Composite</th><th>Changes vs baseline</th><th>Run</th><th>Status</th></tr></thead>'
           + '<tbody>' + rows + '</tbody></table>'
           + '</div>';
@@ -8471,7 +8506,7 @@
               + '</tr>';
           }).join('');
           simsHtml = '<div id="' + sid.sims + '"><h3>What we ran <span class="muted small">(composite + parameters)</span></h3>'
-            + '<p class="muted small" style="margin:0 0 8px 0">The composite(s) and parameter settings actually simulated for this study (from its baseline). Click a composite ↗ to open it in the bigraph-loom explorer.</p>'
+            + '<p class="muted small" style="margin:0 0 8px 0">The composite(s) and parameter settings actually simulated for this study (from its baseline).</p>'
             + '<table class="sim-table"><thead><tr><th>Run</th><th>Composite</th><th>Parameters</th><th>Replication</th><th>Status</th></tr></thead>'
             + '<tbody>' + brows + '</tbody></table>'
             + '</div>';
@@ -8511,10 +8546,8 @@
             ? Object.keys(e.params).map(function(k) { return '<code>' + _h(k) + '=' + _h(JSON.stringify(e.params[k])) + '</code>'; }).join(' ')
             : '<span class="muted">default parameters</span>';
           var btn = e.composite
-            ? '<button class="model-explore-btn" onclick="' + _loomStaticPopout(e.composite) + '" '
-              + 'style="font-size:0.92em;font-weight:600;padding:5px 12px;border:1px solid #2563eb;background:#eff6ff;'
-              + 'color:#1e40af;border-radius:6px;cursor:pointer;white-space:nowrap">🧬 ' + _h(_short(e.composite))
-              + ' — explore in bigraph-loom ↗</button>'
+            ? '<span style="font-size:0.92em;font-weight:600;color:#1e40af;white-space:nowrap">🧬 <code>'
+              + _h(_short(e.composite)) + '</code></span>'
             : '<span class="muted">(no composite)</span>';
           return '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px">'
             + btn + '<span style="font-size:0.88em;color:#475569">' + params + '</span></div>';
@@ -8522,8 +8555,7 @@
         return '<div class="study-model-banner" style="margin:10px 0;padding:12px 16px;'
           + 'background:#f0f9ff;border:1px solid #bae6fd;border-left:5px solid #2563eb;border-radius:8px">'
           + '<div style="font-weight:700;color:#0c4a6e">Model</div>'
-          + '<div class="muted small" style="margin-top:2px">The composite(s) this study runs and their parameters — '
-          + 'click to open a static view in the bigraph-loom explorer.</div>'
+          + '<div class="muted small" style="margin-top:2px">The composite(s) this study runs and their parameters.</div>'
           + rows + '</div>';
       })();
 
@@ -11497,14 +11529,17 @@
 
   // Back-compat shim for any old callers (sidebar groups still use this).
   function _openStudyEmbeddedNewTab(name) {
-    // If we're inside the Investigations tab, use the in-place embed.
-    if (window._currentIset) {
+    // Use the in-place embed ONLY when the investigation detail view is actually
+    // on screen. ``_currentIset`` stays set after you leave the investigation
+    // tab, so keying on it alone made rail study clicks from other tabs (e.g.
+    // Analyses) try to embed into a hidden panel and appear to do nothing.
+    var detail = document.getElementById('investigation-detail-view');
+    var onInvestigationView = window._currentIset && detail && detail.offsetParent !== null;
+    if (onInvestigationView) {
       _openStudyInsideInvestigation(name);
       return;
     }
-    // Otherwise navigate straight to the study page. The old branch switched to a
-    // standalone "studies" page that no longer exists in the investigation-centric
-    // nav, so the sidebar study click landed nowhere. _studyHref → /studies/<name>.
+    // Otherwise navigate straight to the study page (works from any tab).
     window.location = _studyHref(name);
   }
   window._openStudyEmbeddedNewTab = _openStudyEmbeddedNewTab;
@@ -11621,7 +11656,9 @@
     if (groups.length === 1 && groups[0].name !== '__ungrouped__') {
       var g = groups[0];
       var _iset = (window._isetIndex || []).filter(function(i){ return i.name === g.name; })[0] || {};
-      host.innerHTML = '<div class="rail-iset-name" title="' + _esc(_iset.title || g.name) + '">'
+      host.innerHTML = '<div class="rail-iset-name" title="' + _esc(_iset.title || g.name) + '"'
+        + ' onclick="window._railOpenInvestigationDetail(\'' + _esc(g.name) + '\');"'
+        + ' style="cursor:pointer;">'
         + _esc(_iset.title || g.name) + '</div>'
         + g.studies.map(function(s) { return _railStudyItem(s); }).join('');
       return;

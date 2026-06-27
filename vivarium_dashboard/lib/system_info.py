@@ -168,7 +168,11 @@ def build_ui_config(ws_root: Path) -> dict:
     except Exception:  # noqa: BLE001
         ws = {}
     ui = ws.get("ui") or {}
+    import os
+    readonly = os.environ.get("VIVARIUM_DASHBOARD_READONLY", "").strip().lower() \
+        not in ("", "0", "false", "no")
     return {
+        "readonly": readonly,
         "composite_view": ui.get("composite_view", "bigraph-loom"),
         "ptools_server_url": ui.get("ptools_server_url", ""),
         "ptools_omics_url_template": ui.get(
