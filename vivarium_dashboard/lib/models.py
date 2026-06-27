@@ -53,16 +53,21 @@ class StudyRef(BaseModel):
 class SimRow(BaseModel):
     """One row of the Simulations DB.
 
-    Mirrors ``_row_to_dict`` in ``lib/simulations_index.py``. ``emitter`` is
-    store-derived for remote runs (``None`` -> caller falls back to the SQLite
-    ``db_path`` label).
+    Mirrors the row shapes emitted by ``lib/simulations_index.py``. The primary
+    builder is ``_row_to_dict`` (runs_meta SQLite rows), but the index also
+    synthesises rows for spec/study-declared runs, and those are looser than a
+    DB row: ``spec_id``/``db_path`` can be ``None``, ``emitter`` can be a
+    spec-declared free string (e.g. ``"unknown"``), and ``studies`` can be a
+    list of bare study-slug strings (the DB path fills in ``StudyRef`` objects
+    via ``_annotate_studies``). The field types accept that union so the typed
+    seam never 500s on a real workspace; the JSON output is unchanged.
     """
 
     # Types/nullability copied from the runs_meta schema (lib/composite_runs.py):
     # started_at/completed_at are REAL epoch seconds; sim_name/label/n_steps/
     # progress_step are nullable (some are ALTER-added columns).
     run_id: str
-    spec_id: str
+    spec_id: Optional[str] = None   # None for spec/study-synthesised rows
     sim_name: Optional[str] = None
     label: Optional[str] = None
     status: str                # "completed" | "running" | "failed" | ...
@@ -70,10 +75,14 @@ class SimRow(BaseModel):
     progress_step: Optional[int] = None
     started_at: float          # unix epoch seconds (REAL NOT NULL)
     completed_at: Optional[float] = None
-    db_path: str
+    db_path: Optional[str] = None   # None when the row isn't backed by a runs.db
     store_path: Optional[str] = None   # native data store (zarr/parquet dir or s3 uri); None -> data lives in db_path
-    emitter: Optional[EmitterKind] = None
-    studies: list[StudyRef] = []
+    # Canonically "xarray" | "parquet" | "sqlite" (``EmitterKind``), but a
+    # spec may declare a free-form emitter (e.g. "unknown"), so accept any str.
+    emitter: Optional[str] = None
+    # DB-path rows carry ``StudyRef`` objects; spec/study-synthesised rows carry
+    # bare study-slug strings — accept either.
+    studies: list[Union[StudyRef, str]] = []
     study_slug: Optional[str] = None
     investigation_slug: Optional[str] = None
     remote_origin: Optional[RemoteOrigin] = None

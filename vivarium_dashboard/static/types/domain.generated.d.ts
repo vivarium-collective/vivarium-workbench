@@ -20,7 +20,7 @@ export interface StudyRef {
 
 export interface SimRow {
   run_id: string;
-  spec_id: string;
+  spec_id: string | null;
   sim_name: string | null;
   label: string | null;
   status: string;
@@ -28,10 +28,10 @@ export interface SimRow {
   progress_step: number | null;
   started_at: number;
   completed_at: number | null;
-  db_path: string;
+  db_path: string | null;
   store_path: string | null;
-  emitter: EmitterKind | null;
-  studies: StudyRef[];
+  emitter: string | null;
+  studies: (StudyRef | string)[];
   study_slug: string | null;
   investigation_slug: string | null;
   remote_origin: RemoteOrigin | null;
