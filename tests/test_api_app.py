@@ -5882,3 +5882,53 @@ class TestInvestigationRunOneRoute:
         p = "/api/investigation-run-one"
         assert p in paths and "post" in paths[p]
         assert paths[p]["post"]["tags"] == ["Investigation runs"]
+
+
+# ===========================================================================
+# P4: investigation-run POST route (run ALL sims + render viz, "Investigation
+# runs" tag).  Thin wrapper over
+# ``lib.investigation_run_views.investigation_run`` — every test monkeypatches
+# that lib fn so NO real core build / subprocess runs.  The route JSONResponses
+# all paths, so the lib-returned (dict, status) is preserved verbatim (200
+# summary / 400 missing-name+spec-error / 404 file-not-found / 500 core-build).
+# ===========================================================================
+class TestInvestigationRunRoute:
+    def test_happy_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import investigation_run_views
+        captured = {}
+
+        def _fake(ws, body):
+            captured["ws"], captured["body"] = ws, body
+            return {"ran": 2, "rendered": 1}, 200
+
+        monkeypatch.setattr(
+            investigation_run_views, "investigation_run", _fake)
+        r = client.post("/api/investigation-run", json={"name": "inv-x"})
+        assert r.status_code == 200
+        assert r.json() == {"ran": 2, "rendered": 1}
+        # exclude_none keeps only the provided key.
+        assert captured["body"] == {"name": "inv-x"}
+
+    def test_missing_name_400_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import investigation_run_views
+        monkeypatch.setattr(
+            investigation_run_views, "investigation_run",
+            lambda ws, body: ({"error": "name is required"}, 400))
+        r = client.post("/api/investigation-run", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "name is required"}
+
+    def test_core_build_500_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import investigation_run_views
+        monkeypatch.setattr(
+            investigation_run_views, "investigation_run",
+            lambda ws, body: ({"error": "failed to build core: boom"}, 500))
+        r = client.post("/api/investigation-run", json={"name": "inv-x"})
+        assert r.status_code == 500
+        assert r.json() == {"error": "failed to build core: boom"}
+
+    def test_route_in_openapi(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        p = "/api/investigation-run"
+        assert p in paths and "post" in paths[p]
+        assert paths[p]["post"]["tags"] == ["Investigation runs"]
