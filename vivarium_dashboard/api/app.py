@@ -93,6 +93,7 @@ from vivarium_dashboard.lib import study_viz_views as _study_viz
 from vivarium_dashboard.lib import system_info as _system_info
 from vivarium_dashboard.lib import work_views as _work_views
 from vivarium_dashboard.lib import workspace_deps_views as _workspace_deps
+from vivarium_dashboard.lib import workspace_manifest_views as _workspace_manifest_views
 from vivarium_dashboard.lib import install_views as _install_views
 from vivarium_dashboard.lib import catalog_install_views as _catalog_install_views
 from vivarium_dashboard.lib import catalog_uninstall_views as _catalog_uninstall_views
@@ -893,6 +894,27 @@ def create_app() -> FastAPI:
     def config() -> DashConfig:
         """Client data-source selector (mirrors the stdlib /api/config)."""
         return DashConfig(mode="local-server")
+
+    @app.get(
+        "/api/workspace-manifest",
+        tags=["System"],
+        summary="One-call workspace situational-awareness snapshot for agents",
+    )
+    def workspace_manifest(ws: Path = Depends(get_workspace)) -> JSONResponse:
+        """One-call situational awareness (mirrors the stdlib /api/workspace-manifest).
+
+        Aggregates six best-effort sections into a single snapshot so an agent
+        does not have to stitch together ten separate API calls: workspace
+        identity + git state (``workspace``), composites (``composites``),
+        studies (``studies``), registry summary (``registry``), dirty-tree
+        health (``health``), and installed pbg-* skills (``skills``).
+
+        Always returns HTTP 200 — each section degrades to an empty default
+        rather than failing the whole manifest.  Library-backed via
+        ``lib.workspace_manifest_views.workspace_manifest``.
+        """
+        out, status = _workspace_manifest_views.workspace_manifest(ws)
+        return JSONResponse(content=out, status_code=status)
 
     @app.get(
         "/api/iset-list",

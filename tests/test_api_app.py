@@ -80,6 +80,40 @@ def test_config_route(client):
     assert r.json() == {"mode": "local-server", "basePath": None}
 
 
+def test_workspace_manifest_route_returns_six_sections(client, monkeypatch):
+    """GET /api/workspace-manifest returns 200 with the six top-level sections.
+
+    We patch the lib aggregator so the route is deterministic and never shells
+    out to git / builds the process registry."""
+    canned = {
+        "workspace": {"name": "ws", "branch": "main", "has_origin": True,
+                      "description": "", "package_path": "pbg_ws"},
+        "composites": [],
+        "studies": [],
+        "registry": {"process_count": 0, "step_count": 0, "emitter_count": 0,
+                     "visualization_count": 0, "type_count": 0},
+        "health": {"dirty_count": 0, "dirty_files": [], "venv_present": False,
+                   "python_version": "3.12.0"},
+        "skills": [],
+    }
+    monkeypatch.setattr(
+        api_app._workspace_manifest_views, "workspace_manifest",
+        lambda ws: (canned, 200),
+    )
+    r = client.get("/api/workspace-manifest")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body) == {"workspace", "composites", "studies",
+                         "registry", "health", "skills"}
+    assert body["workspace"]["name"] == "ws"
+
+
+def test_workspace_manifest_in_openapi(client):
+    """The /api/workspace-manifest route appears in the OpenAPI schema."""
+    spec = client.get("/openapi.json").json()
+    assert "/api/workspace-manifest" in spec["paths"]
+
+
 def test_iset_list_empty_workspace(client):
     r = client.get("/api/iset-list")
     assert r.status_code == 200
