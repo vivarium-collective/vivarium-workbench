@@ -16,6 +16,7 @@ import yaml
 import pytest
 
 import vivarium_dashboard.server as server
+from vivarium_dashboard.lib import composite_subprocess, study_run_state
 
 
 def _ok():
@@ -75,7 +76,7 @@ def tmp_other_study(tmp_path, monkeypatch):
 def test_sweep_variant_delegates_to_workflow(tmp_v2ecoli_study, monkeypatch):
     invoked = {}
     monkeypatch.setattr(
-        server, "_invoke_v2ecoli_workflow",
+        composite_subprocess, "invoke_v2ecoli_workflow",
         lambda cfg_path, out_dir, ws_root, timeout_s:
             invoked.update(cfg=str(cfg_path), out=str(out_dir)) or _ok())
     resp, code = server._post_study_run_variant_for_test(
@@ -100,13 +101,13 @@ def test_plain_variant_unchanged(tmp_path, monkeypatch):
     ])
     monkeypatch.setattr(server, "WORKSPACE", ws)
     # Make the single-run path reachable (skip real composite resolution).
-    monkeypatch.setattr(server, "_resolve_study_baseline_state",
+    monkeypatch.setattr(study_run_state, "resolve_study_baseline_state",
                         lambda *a, **k: ({}, None))
     calls = []
-    monkeypatch.setattr(server, "_run_composite_subprocess",
+    monkeypatch.setattr(composite_subprocess, "run_composite_subprocess",
                         lambda *a, **k: calls.append(1) or _ok())
     # Guard: delegation must NOT fire for a plain variant.
-    monkeypatch.setattr(server, "_invoke_v2ecoli_workflow",
+    monkeypatch.setattr(composite_subprocess, "invoke_v2ecoli_workflow",
                         lambda *a, **k: (_ for _ in ()).throw(
                             AssertionError("delegation fired for a plain variant")))
     resp, code = server._post_study_run_variant_for_test(
@@ -130,13 +131,13 @@ def test_sweep_without_v2ecoli_errors_clearly(tmp_other_study):
 
 def _guard_single_run(monkeypatch):
     """Make both run paths explode so a 422 must be returned BEFORE either."""
-    monkeypatch.setattr(server, "_resolve_study_baseline_state",
+    monkeypatch.setattr(study_run_state, "resolve_study_baseline_state",
                         lambda *a, **k: (_ for _ in ()).throw(
                             AssertionError("single-run path reached")))
-    monkeypatch.setattr(server, "_run_composite_subprocess",
+    monkeypatch.setattr(composite_subprocess, "run_composite_subprocess",
                         lambda *a, **k: (_ for _ in ()).throw(
                             AssertionError("_run_composite_subprocess called")))
-    monkeypatch.setattr(server, "_invoke_v2ecoli_workflow",
+    monkeypatch.setattr(composite_subprocess, "invoke_v2ecoli_workflow",
                         lambda *a, **k: (_ for _ in ()).throw(
                             AssertionError("delegation fired")))
 
@@ -244,7 +245,7 @@ def test_ensemble_records_one_run(tmp_v2ecoli_study, monkeypatch):
         (hive / "data.parquet").write_bytes(b"PAR1")
         return ({"simulation_id": run_id, "ensemble": True}, 200)
 
-    monkeypatch.setattr(server, "_invoke_v2ecoli_workflow", _stub_invoke)
+    monkeypatch.setattr(composite_subprocess, "invoke_v2ecoli_workflow", _stub_invoke)
     resp, code = server._post_study_run_variant_for_test(
         tmp_v2ecoli_study, {"study": "s1", "variant": "ens"})
     assert code == 200, resp
