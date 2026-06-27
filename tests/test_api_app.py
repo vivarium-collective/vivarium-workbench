@@ -6008,7 +6008,7 @@ class TestStudyRunRoutes:
             "/api/run-tests",
         ):
             assert p in paths and "post" in paths[p], p
-            assert paths[p]["post"]["tags"] == ["Study runs"], p
+            assert paths[p]["post"]["tags"] == ["Studies"], p
 
 
 # ===========================================================================
@@ -6139,7 +6139,7 @@ class TestMiscPostRoutes:
         paths = spec["paths"]
         for p in ("/api/suggest", "/api/study-report-single", "/api/open-window"):
             assert p in paths and "post" in paths[p], p
-            assert paths[p]["post"]["tags"] == ["Misc"], p
+            assert paths[p]["post"]["tags"] == ["Rigor & jobs"], p
 
 
 # ===========================================================================
@@ -6216,7 +6216,7 @@ class TestCompositeTestRunRoute:
         paths = client.get("/openapi.json").json()["paths"]
         p = "/api/composite-test-run"
         assert p in paths and "post" in paths[p]
-        assert paths[p]["post"]["tags"] == ["Composite runs"]
+        assert paths[p]["post"]["tags"] == ["Composites"]
 
 
 # ===========================================================================
@@ -6287,7 +6287,7 @@ class TestInvestigationRunOneRoute:
         paths = client.get("/openapi.json").json()["paths"]
         p = "/api/investigation-run-one"
         assert p in paths and "post" in paths[p]
-        assert paths[p]["post"]["tags"] == ["Investigation runs"]
+        assert paths[p]["post"]["tags"] == ["Investigations"]
 
 
 # ===========================================================================
@@ -6337,7 +6337,7 @@ class TestInvestigationRunRoute:
         paths = client.get("/openapi.json").json()["paths"]
         p = "/api/investigation-run"
         assert p in paths and "post" in paths[p]
-        assert paths[p]["post"]["tags"] == ["Investigation runs"]
+        assert paths[p]["post"]["tags"] == ["Investigations"]
 
 
 # ===========================================================================
@@ -6403,7 +6403,7 @@ class TestInvestigationRunUnblockedRoute:
         paths = client.get("/openapi.json").json()["paths"]
         p = "/api/investigation-run-unblocked"
         assert p in paths and "post" in paths[p]
-        assert paths[p]["post"]["tags"] == ["Investigation runs"]
+        assert paths[p]["post"]["tags"] == ["Investigations"]
 
 
 # ===========================================================================
@@ -6473,7 +6473,7 @@ class TestVisualizationPreviewRoute:
         paths = client.get("/openapi.json").json()["paths"]
         p = "/api/visualization-preview"
         assert p in paths and "post" in paths[p]
-        assert paths[p]["post"]["tags"] == ["Viz authoring"]
+        assert paths[p]["post"]["tags"] == ["Visualizations"]
 
 
 # ===========================================================================
@@ -6542,7 +6542,7 @@ class TestVisualizationPreviewInstanceRoute:
         paths = client.get("/openapi.json").json()["paths"]
         p = "/api/visualization-preview-instance"
         assert p in paths and "post" in paths[p]
-        assert paths[p]["post"]["tags"] == ["Viz authoring"]
+        assert paths[p]["post"]["tags"] == ["Visualizations"]
 
 
 # ===========================================================================
@@ -6751,7 +6751,7 @@ def test_installs_routes_in_openapi(client):
     for p in ("/api/system-deps-install", "/api/import-install", "/api/catalog-install",
               "/api/catalog-uninstall"):
         assert p in paths and "post" in paths[p], p
-        assert paths[p]["post"]["tags"] == ["Installs"], p
+        assert paths[p]["post"]["tags"] == ["Registry & catalog"], p
 
 
 # ---------------------------------------------------------------------------

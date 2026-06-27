@@ -328,504 +328,56 @@ def get_workspace() -> Path:
 
 _OPENAPI_TAGS = [
     {
-        "name": "System",
-        "description": "Service health and client-configuration endpoints.",
-    },
-    {
-        "name": "System & workspace",
-        "description": (
-            "Workspace-level read-only info: framework-self metrics, GitHub "
-            "repo slug, UI feature flags, and workspace narrative metadata. "
-            "All routes always return HTTP 200 (best-effort; errors degrade "
-            "to empty-default bodies)."
-        ),
-    },
-    {
-        "name": "Workspace & source",
-        "description": (
-            "Workspace-switcher dropdown, remote sms-api build list, and "
-            "catalog system-dependency check.  source/builds and workspaces "
-            "always return HTTP 200 (best-effort); system-deps-check returns "
-            "400/404/200."
-        ),
-    },
-    {
-        "name": "Simulations",
-        "description": (
-            "Workspace-wide simulation run index — all runs across all studies."
-        ),
-    },
-    {
         "name": "Investigations",
-        "description": (
-            "Investigation and study metadata: sidebar summary list and full "
-            "per-study index."
-        ),
+        "description": "Top-level investigations \u2014 the DAG of studies, detail, scaffold, comparisons, viz, runs, and metadata mutations.",
     },
     {
-        "name": "Studies & visualizations",
-        "description": (
-            "Per-study charts (live + static), saved 3D/report-card "
-            "visualizations, and registered visualization classes."
-        ),
-    },
-    {
-        "name": "Composites",
-        "description": (
-            "Composite spec/generator discovery and single-composite resolution, "
-            "plus the Batch 27 investigation-composite POST writers: add a "
-            "composite from a workspace source/generator "
-            "(/api/investigation-composite-add), derive a variant by applying "
-            "overrides (/api/investigation-composite-perturb), promote a variant "
-            "into the workspace catalog (/api/composite-promote-to-catalog), and "
-            "rebuild a derived composite from its recipe "
-            "(/api/investigation-composite-rebuild).  All four are "
-            "``_commit_or_run``-wrapped in the live server; these FastAPI routes "
-            "call the lib builder directly (commit deferred to the flip batch).  "
-            "Each delegates to a pure builder in ``lib.composite_mutations``.  "
-            "Errors carry ``{error: ...}`` at 400/404/409."
-        ),
-    },
-    {
-        "name": "Registry & catalog",
-        "description": (
-            "Process/type/emitter registry and pbg package catalog for the "
-            "active workspace."
-        ),
-    },
-    {
-        "name": "References & data",
-        "description": (
-            "BibTeX reference entries (with DOI enrichment) and workspace "
-            "data-source bundle."
-        ),
-    },
-    {
-        "name": "Git & branches",
-        "description": (
-            "Read-only git/branch status endpoints: live sync state, workstream "
-            "activity, branch staleness, dirty-file list, stage-branch index, "
-            "and branch diff summary."
-        ),
-    },
-    {
-        "name": "Investigations detail",
-        "description": (
-            "Per-investigation detail endpoints: viz HTML files, composite "
-            "baseline list, rigor roll-up, composite YAML document, and "
-            "competing hypotheses with support-log enrichment."
-        ),
-    },
-    {
-        "name": "Rigor",
-        "description": (
-            "Deterministic evidence/rigor scorecards computed by "
-            "pbg_superpowers.rigor over the run-merged study spec: per-study "
-            "and per-investigation roll-up."
-        ),
-    },
-    {
-        "name": "Studies detail",
-        "description": (
-            "Full per-study run-merged detail spec (the same payload the SPA "
-            "study-detail page consumes): runs, simulation_set, param_enforcement, "
-            "expert_feedback, spine_acceptance, and all lifecycle-derived keys."
-        ),
-    },
-    {
-        "name": "Data explorer",
-        "description": (
-            "Analyses Data Explorer endpoints: run-picker list, observable "
-            "discovery, time-series, flux map, vector snapshots, and protein "
-            "breakdown.  All routes always return HTTP 200 — errors are carried "
-            "in the body under an ``error`` key with empty-default data fields."
-        ),
-    },
-    {
-        "name": "Reports & inputs",
-        "description": (
-            "Report-readiness linter, linkage-index graph, needs-attention "
-            "scan, investigation inputs, and iset detail.  All routes except "
-            "``/api/investigation/{slug}`` always return HTTP 200 — errors degrade "
-            "gracefully to empty payloads rather than 500."
-        ),
-    },
-    {
-        "name": "Observables",
-        "description": (
-            "Never-fabricate observable guard + SP4a/SP4b navigate surface: the "
-            "in-process composite build's emittable observables, per-study "
-            "readout validation against the real composite structure, and the "
-            "deterministic linkage index/queries (AC→study gating, source↔study, "
-            "finding-by-observable, study DAG, observable registry)."
-        ),
-    },
-    {
-        "name": "Composite runs",
-        "description": (
-            "File-backed composite-run read routes: list runs for a spec, fetch a "
-            "run's trajectory or a single-step state snapshot, and poll lightweight "
-            "status (progress, terminal-state error excerpt, completed viz_html). "
-            "All read from ``.pbg/composite-runs.db``."
-        ),
-    },
-    {
-        "name": "Investigation runs",
-        "description": (
-            "Ad-hoc investigation run launcher: ``POST /api/investigation-run-one`` "
-            "runs a single composite execution (the \"Duplicate run\" flow) in an "
-            "embedded subprocess, persists rendered viz HTML, and appends to the "
-            "investigation's ``runs.db``.  Validation failures are 400/404; a "
-            "composite that fails to run returns 200 with ``{ok: false}``."
-        ),
-    },
-    {
-        "name": "Investigation scaffold",
-        "description": (
-            "Investigation scaffolding: ``POST /api/investigation-create`` creates "
-            "a new investigation directory (``data/.keep`` plus one of three "
-            "scaffold shapes keyed on the resolved ``source`` composite — a v4 "
-            "``study.yaml`` for a ``@composite_generator`` ref, a v2 ``spec.yaml`` "
-            "+ copied sidecar for a YAML source, or a blank ``spec.yaml`` stub).  "
-            "The live handler is ``_active_branch_action``-wrapped; this FastAPI "
-            "route calls the ``lib.investigation_create_views`` builder directly "
-            "with the commit deferred.  Errors carry ``{error: ...}`` at "
-            "400 (bad/missing name) / 404 (source not found) / 409 (already "
-            "exists) / 500 (scaffold failed)."
-        ),
-    },
-    {
-        "name": "Downloads",
-        "description": (
-            "Binary / HTML file-download routes (FileResponse / Response, not a "
-            "JSON model): study-export zip, single data-source bundle file, "
-            "per-investigation HTML report, latest guidance HTML, and the "
-            "investigation notebook/script export.  Each reproduces the legacy "
-            "Content-Type, inline-vs-attachment disposition, and status codes "
-            "(incl. guidance 204 No Content). Error paths return ``{\"error\": "
-            "...}`` JSON."
-        ),
-    },
-    {
-        "name": "Events",
-        "description": (
-            "Server-Sent Events stream: polls ``workspace.yaml`` and emits an "
-            "``event: state`` frame whenever the file changes.  First event fires "
-            "immediately if the file already exists.  Uses raw "
-            "``StreamingResponse`` (no sse-starlette dep)."
-        ),
-    },
-    {
-        "name": "Investigation & study mutations",
-        "description": (
-            "Batch 18 POST routes — metadata writers for investigations and studies: "
-            "set observables, conclusions, overview, status, objective, "
-            "narrative-spine fields, and expert model-settings.  Each route "
-            "delegates to a pure lib builder in ``lib.metadata_mutations``.  "
-            "CSRF guard is deferred to the state/flip batch; the live do_POST "
-            "still enforces it via ``_csrf_ok``.  Errors carry ``{error: ...}`` "
-            "at 400/404/500; success returns ``{ok: true}`` or the mutated record."
-        ),
-    },
-    {
-        "name": "Study CRUD",
-        "description": (
-            "Batch 19 POST routes — variant/baseline/intervention/run/comparison "
-            "CRUD writers for v3 studies.  Each route delegates to a pure lib "
-            "builder in ``lib.study_crud_mutations``.  CSRF guard is deferred to "
-            "the flip batch; the live do_POST still enforces it via ``_csrf_ok``.  "
-            "Errors carry ``{error: ...}`` at 400/404/409; success returns "
-            "``{ok: true}`` or ``{ok: true, name: ...}``."
-        ),
-    },
-    {
-        "name": "Study lifecycle",
-        "description": (
-            "Batch 20 POST routes — study lifecycle writers and feedback actions: "
-            "seed a child study from a followup/finding, apply a tracked feedback "
-            "action, rename a study, create a study from a scratchpad run, sync "
-            "study runs from runs.db, and accept/decline a proposed input.  Each "
-            "route delegates to a pure lib builder in ``lib.lifecycle_mutations``.  "
-            "CSRF guard is deferred to the flip batch.  Errors carry "
-            "``{error: ...}`` at 400/404/409/500; success returns the respective "
-            "payload dict."
-        ),
-    },
-    {
-        "name": "Investigation scaffold",
-        "description": (
-            "Batch 21 POST routes — investigation scaffold writers: create a new "
-            "investigation.yaml, clone an existing investigation into a fresh "
-            "planning state, and delete an investigation directory.  iset-create "
-            "and iset-clone delegate to pure lib builders in "
-            "``lib.scaffold_mutations``; investigation-delete also delegates to "
-            "a pure lib builder (the git commit is deferred to the flip/state "
-            "batch via ``_active_branch_action`` in the live server).  CSRF guard "
-            "is deferred to the flip batch.  Errors carry ``{error: ...}`` at "
-            "400/404/409/500/501; success returns the investigation detail dict "
-            "or ``{ok: true, name: ...}``."
-        ),
-    },
-    {
-        "name": "Investigation comparisons & groups",
-        "description": (
-            "Batch 22 POST routes — comparison and group write endpoints for "
-            "investigations: add/update comparisons (name + variants + observables) "
-            "and add/update groups (name + variants).  Each route delegates to a "
-            "pure lib builder in ``lib.compare_group_mutations``.  CSRF guard is "
-            "deferred to the flip batch; the live do_POST still enforces it via "
-            "``_csrf_ok``.  Errors carry ``{error: ...}`` at 400/404/409; success "
-            "returns ``{ok: true}``."
-        ),
-    },
-    {
-        "name": "Viz authoring",
-        "description": (
-            "Batch 23 POST routes — visualization file-write endpoints: write a "
-            "viz-request file (old-contract /api/visualization-create and "
-            "new-contract /api/visualization-generate) and stage a skill response "
-            "for commit (/api/visualization-add-to-project).  No git commit; "
-            "no _commit_or_run — the simplest POST shape.  Each route delegates "
-            "to a pure lib builder in ``lib.viz_write_mutations``.  CSRF guard is "
-            "deferred to the flip batch.  Errors carry ``{error: ...}`` at "
-            "400/404; success returns ``{ok: true, ...}``.\n\n"
-            "Batch 24 POST routes — visualization commit endpoints: register an "
-            "observable (/api/observable), register a visualization "
-            "(/api/visualization), and move staged viz files to the workspace "
-            "package (/api/visualization-commit-batch).  All three are "
-            "``_active_branch_action``-wrapped in the live server; these FastAPI "
-            "routes call the lib builder directly (commit deferred to the flip "
-            "batch).  Each route delegates to a pure lib builder in "
-            "``lib.viz_commit_mutations``.  CSRF guard is deferred to the flip "
-            "batch.  Errors carry ``{error: ...}`` at 400/404/409; success "
-            "returns ``{ok: true}`` or ``{ok: true, committed: [...]}``.\n\n"
-            "C-state-3i POST route — finalize a generated visualization "
-            "(/api/visualization-accept): invalidate the registry cache, "
-            "import-verify the generated file in-process, smoke-test the "
-            "workspace ``build_core()``, and confirm the class is discoverable.  "
-            "Like Batch 24 it is ``_active_branch_action``-wrapped in the live "
-            "server (a NO-OP commit); this FastAPI route runs the pre-wrapper "
-            "validation via ``lib.viz_accept_views`` and defers the commit to the "
-            "flip.  Errors carry ``{error: ...}`` at 400/404/500; success returns "
-            "``{ok: true}``."
-        ),
-    },
-    {
-        "name": "Uploads & imports",
-        "description": (
-            "Batch 25 POST routes — upload/import writers: register a dataset "
-            "(/api/dataset, file/path/url forms + SHA256), register an expert "
-            "document (/api/expert-doc, PDF/markdown), and register an import "
-            "(/api/import) in workspace.yaml.  All three are "
-            "``_active_branch_action``-wrapped in the live server; these FastAPI "
-            "routes call the lib builder directly (commit deferred to the flip "
-            "batch).  Each route delegates to a pure lib builder in "
-            "``lib.upload_mutations``.  CSRF guard is deferred to the flip "
-            "batch.  Errors carry ``{error: ...}`` at 400/404/409; success "
-            "returns ``{ok: true}`` (import also returns ``next_terminal_step`` "
-            "+ ``note``)."
-        ),
-    },
-    {
-        "name": "References",
-        "description": (
-            "Batch 26 POST routes — paper-reference writers: drop-and-go PDF "
-            "(/api/reference-pdf, pypdf metadata extraction + bib append + "
-            "workspace.yaml references_pdfs + investigation register + claims) "
-            "and BibTeX paste (/api/reference-bibtex, also served at /api/reference). "
-            "Both are ``_active_branch_action``-wrapped in the live server; these "
-            "FastAPI routes call the lib builder directly (commit deferred to the "
-            "flip batch).  Each route delegates to a pure lib builder in "
-            "``lib.reference_mutations``.  CSRF guard is deferred to the flip "
-            "batch.  Errors carry ``{error: ...}`` at 400/404/409; reference-pdf "
-            "success additionally returns ``bib_key`` / ``metadata_pending`` / "
-            "``extracted``."
-        ),
-    },
-    {
-        "name": "Investigation viz",
-        "description": (
-            "Batch 28 POST routes — investigation composite/viz mutations: clone "
-            "a workspace-catalog composite into a fresh investigation "
-            "(/api/investigation-create-from-composite, uuid auto-named "
-            "``study-<slug>-<hex>`` → ``{name}``), append a viz entry to a "
-            "study's spec (/api/investigation-add-viz → ``{ok, investigation, "
-            "viz_name}``), and re-render a study's declared visualizations "
-            "against existing emitter data with NO sim re-run "
-            "(/api/investigation-render-viz → ``{ok, investigation, "
-            "n_visualizations, viz_paths}``).  The first two are "
-            "``_commit_or_run`` / ``_active_branch_action``-wrapped in the live "
-            "server; render-viz has no commit wrapper.  These FastAPI routes "
-            "call the lib builders in ``lib.composite_mutations`` / "
-            "``lib.investigation_viz_mutations`` directly (commit deferred to "
-            "the flip batch).  CSRF guard is deferred to the flip batch.  Errors "
-            "carry ``{error: ...}`` at 400/404/409/500."
-        ),
-    },
-    {
-        "name": "Job status",
-        "description": (
-            "Read-only polling endpoints over the dashboard's in-memory "
-            "job-manager singletons (``lib.run_jobs.manager`` / "
-            "``lib.remote_run_jobs.manager``).  Both share one pure helper "
-            "(``lib.job_status_views.job_status``) parameterised by the manager: "
-            "no ``?job_id=`` returns ``{jobs: [...]}`` (recent jobs); a known "
-            "``?job_id=`` returns that job's ``to_dict()`` (variable shape — "
-            "``items[]`` for run jobs, ``steps[]`` for remote-run jobs, served "
-            "via the pass-through ``JobStatusPayload``); an unknown id returns "
-            "HTTP 404 ``{error: \"job not found\"}``.  Stateful but read-only — "
-            "no workspace, no commit wrapper."
-        ),
-    },
-    {
-        "name": "Source",
-        "description": (
-            "In-process workspace re-pointing.  ``POST /api/source/switch`` "
-            "switches the active workspace to a registered catalog entry (sets "
-            "``lib._root`` + invalidates the lib caches via "
-            "``active_workspace.switch_workspace``).  The stdlib server "
-            "additionally updates its ``WORKSPACE`` global + server-local caches; "
-            "that half stays in ``server._switch_active_workspace``.  Guarded by "
-            "the same-origin CSRF middleware.  Errors carry ``{error: ...}`` at 400."
-        ),
+        "name": "Studies",
+        "description": "Studies within an investigation \u2014 CRUD, lifecycle, variants, runs, and per-study visualizations.",
     },
     {
         "name": "Runs",
-        "description": (
-            "Remote (sms-api) simulation-run SUBMIT.  ``POST /api/remote-run-start`` "
-            "pushes the workspace branch, builds a simulator from the pushed "
-            "commit, runs it on smsvpctest, polls, downloads, and lands the native "
-            "store as a study run — orchestrated as one background pipeline job on "
-            "the in-process ``lib.remote_run_jobs.manager`` singleton (the same "
-            "manager the ``GET /api/remote-run-status`` poller reads).  Guarded by "
-            "the same-origin CSRF middleware.  Success returns HTTP 202 "
-            "``{job_id}``; errors carry ``{error: ...}`` at 401/400/409/404."
-        ),
+        "description": "Simulation runs and the workspace-wide runs index, including remote (sms-api) run submission.",
+    },
+    {
+        "name": "Composites",
+        "description": "Composite spec/generator discovery, variants, and file-backed composite runs.",
+    },
+    {
+        "name": "Visualizations",
+        "description": "Visualization authoring, generation, and registration.",
+    },
+    {
+        "name": "Data, inputs & references",
+        "description": "Data explorer, observables, BibTeX references, reports, inputs, and uploads/imports.",
+    },
+    {
+        "name": "Workspaces & sources",
+        "description": "Workspace switching, the global workspace registry, and remote build sources.",
+    },
+    {
+        "name": "Registry & catalog",
+        "description": "Process/type/emitter registry, the pbg package catalog, and venv/system installs.",
+    },
+    {
+        "name": "Git & workstream",
+        "description": "Git/branch status, commit/push writes, and workstream activity.",
+    },
+    {
+        "name": "Downloads",
+        "description": "Binary / HTML file-download routes (exports, bundles, reports, notebooks).",
+    },
+    {
+        "name": "Rigor & jobs",
+        "description": "Evidence/rigor scorecards, job-status polling, and miscellaneous workspace writes.",
     },
     {
         "name": "Auth",
-        "description": (
-            "GitHub OAuth Device-Flow auth — 5 routes (2 POST, 3 GET) that are "
-            "thin wrappers over ``lib.github_auth``: ``POST /api/auth/github/start`` "
-            "initiates a device flow, ``GET /api/auth/github/poll?flow_id=`` polls "
-            "the token endpoint, ``GET /api/auth/github/status`` reports the current "
-            "session (never the token), ``POST /api/auth/github/logout`` clears the "
-            "session + keyring entry, and ``GET /api/auth/github/orgs`` lists the "
-            "user's namespace + orgs.  The device-flow/session state lives in the "
-            "``lib.github_auth`` process-global singletons shared with the stdlib "
-            "server, so a FastAPI call mutates the SAME state.  The 2 POSTs are "
-            "guarded by the same-origin CSRF middleware.  Every path (success AND "
-            "error) is returned via ``JSONResponse`` so the lib-mapped status code "
-            "is preserved verbatim — start 503 (no_client_id) / 502 / 200; poll "
-            "400 (missing flow_id) / 202 (pending) / 410 (expired) / 403 (denied) / "
-            "400 (other) / 200 (ok); status 200; logout 200; orgs 401 "
-            "(unauthenticated) / 502 / 200.  Library-backed via ``lib.auth_views``."
-        ),
+        "description": "GitHub OAuth device-flow authentication.",
     },
     {
-        "name": "Git",
-        "description": (
-            "Git-subprocess commit/push WRITE routes for the active workspace — "
-            "2 POSTs ported from the stdlib handlers.  ``POST /api/branch/push`` "
-            "stages+commits any workspace changes (skipping when clean) and pushes "
-            "the current branch with the GitHub token, returning ``{ok, pushed, "
-            "commit, branch}``.  ``POST /api/dirty-commit-all`` checks out the "
-            "active workstream branch, stages all dirty files (minus reports/), "
-            "and commits them under the ``pbg-template`` identity, returning "
-            "``{commit_sha, message, paths}``.  Both shell out to ``git`` via the "
-            "pure ``lib.git_commit_views`` builders (which reuse "
-            "``lib.git_status``); every path (success AND error) is returned via "
-            "``JSONResponse`` so the lib-returned status code is preserved "
-            "verbatim — branch/push 409 (not a git workspace) / 500 / 200; "
-            "dirty-commit-all 409 (no workstream / already clean) / 500 / 200.  "
-            "The 2 POSTs are guarded by the same-origin CSRF middleware."
-        ),
-    },
-    {
-        "name": "Workspaces",
-        "description": (
-            "Workspace-registry WRITE routes — 3 POSTs that edit the GLOBAL "
-            "``~/.pbg`` workspace catalog via ``pbg_superpowers.workspace_catalog`` "
-            "(process-global, NOT server state; no workspace/ws_root).  "
-            "``POST /api/workspaces/add`` registers an existing workspace by "
-            "absolute path (returning the catalog entry), "
-            "``POST /api/workspaces/forget`` removes a catalog entry (refusing a "
-            "running workspace), and ``POST /api/workspaces/cleanup-stale`` "
-            "unregisters a stale running-registry entry plus best-effort unlinks "
-            "the orphan ``<path>/.pbg/server/{server-info,server.pid}`` files "
-            "(refusing if the PID is alive).  Each delegates to a pure builder in "
-            "``lib.workspaces_mutations``; every path (success AND error) is "
-            "returned via ``JSONResponse`` so the lib-returned status code is "
-            "preserved verbatim — add 400 (``path must be an absolute string`` / "
-            "``ValueError``) / 200; forget 400 (``path required``) / 409 (``stop "
-            "the server before forgetting``) / 200; cleanup-stale 400 (``path "
-            "required``) / 409 (``server is still running``) / 200.  The request "
-            "model's ``path`` is Optional so an omitted path hits the lib 400, not "
-            "FastAPI's 422.  The 3 POSTs are guarded by the same-origin CSRF "
-            "middleware."
-        ),
-    },
-    {
-        "name": "Misc",
-        "description": (
-            "Miscellaneous workspace-scoped WRITE routes — 3 POSTs ported from "
-            "the stdlib handlers that do only local FS work / an in-process "
-            "render (no subprocess, network, or in-memory manager).  "
-            "``POST /api/click`` appends the request body as a JSON line to "
-            "``<ws>/.pbg/server/state/events`` and returns a RAW empty "
-            "``204 No Content`` (no JSON body — byte-matching the legacy "
-            "``send_response(204)``).  ``POST /api/render`` re-renders the "
-            "workspace dashboard in-process (``{ok: true}`` 200 / ``{error}`` "
-            "500).  ``POST /api/feedback-import`` writes a report-widget "
-            "feedback payload via the shared ``pbg_superpowers`` writer "
-            "(``{ok, path, n_entries}`` 200 / ``{error}`` 400 on "
-            "``FeedbackImportError`` / 500 on any other error or when "
-            "pbg-superpowers is unavailable).  ``render`` + ``feedback-import`` "
-            "delegate to pure builders in ``lib.misc_mutations`` and wrap every "
-            "path in ``JSONResponse`` so the lib-returned status code is "
-            "preserved verbatim.  The 3 POSTs are guarded by the same-origin "
-            "CSRF middleware."
-        ),
-    },
-    {
-        "name": "Installs",
-        "description": (
-            "venv / system-install WRITE routes — 2 POSTs ported from the stdlib "
-            "handlers that run install commands via subprocess.  "
-            "``POST /api/system-deps-install`` runs the install commands for a "
-            "catalog module's named system-dependency checks (``shell=True`` per "
-            "command, 600s timeout), appends each outcome to ``log`` "
-            "(success / non-zero / timeout / unknown-check / no-install-spec), "
-            "then re-checks every dep — returning ``{ok, log, recheck}``.  "
-            "``POST /api/import-install`` pip-installs a ``workspace.yaml``-"
-            "registered import into the workspace venv (venv ``pip`` preferred, "
-            "system ``uv`` fallback, 120s timeout); on success it marks the import "
-            "``installed=True`` (+ ``install_path``) in workspace.yaml and "
-            "invalidates the registry cache.  Like the other committer ports the "
-            "live ``_active_branch_action`` git commit is DEFERRED — this FastAPI "
-            "route runs the workspace.yaml mutation inline and returns the success "
-            "``{ok, log}`` 200 directly.  Each delegates to a pure builder in "
-            "``lib.install_views``; every path (success AND error) is returned via "
-            "``JSONResponse`` so the lib-returned status code is preserved verbatim "
-            "— system-deps-install 400 (``name + check_names required``) / 404 "
-            "(``unknown module: …``) / 200; import-install 400 (missing name / no "
-            "target) / 404 (not registered / path missing) / 500 (no installer / "
-            "timeout / install error / non-zero returncode with optional "
-            "diagnosis) / 200.  The 2 POSTs are guarded by the same-origin CSRF "
-            "middleware."
-        ),
-    },
-    {
-        "name": "Static & shell",
-        "description": (
-            "Static-asset + SPA-shell serving (FileResponse, not a JSON model): "
-            "the ``/`` index shell (best-effort re-render then serve "
-            "``reports/index.html``), the standalone ``bigraph-loom`` and "
-            "``pbg_parsimony`` viewer bundles, and a catch-all asset route. The "
-            "catch-all is registered LAST so every specific route (all "
-            "``/api/*``, ``/``, the viewers, ``/docs``) matches first. All served "
-            "files carry ``Cache-Control: no-store`` with the legacy bare mime."
-        ),
+        "name": "System",
+        "description": "Service health, client configuration, workspace info, and the event stream.",
     },
 ]
 
@@ -876,7 +428,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/simulations",
         response_model=SimulationsPayload,
-        tags=["Simulations"],
+        tags=["Runs"],
         summary="Workspace-wide simulations index (all runs)",
     )
     def simulations(ws: Path = Depends(get_workspace)) -> SimulationsPayload:
@@ -981,7 +533,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/data-sources",
         response_model=DataSourcesPayload,
-        tags=["References & data"],
+        tags=["Data, inputs & references"],
         summary="Workspace data-source bundle (from workspace.yaml)",
     )
     def data_sources(ws: Path = Depends(get_workspace)) -> DataSourcesPayload:
@@ -992,7 +544,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/references-bib",
         response_model=ReferencesBibPayload,
-        tags=["References & data"],
+        tags=["Data, inputs & references"],
         summary="Parsed BibTeX entries with DOI enrichment cache",
     )
     def references_bib(ws: Path = Depends(get_workspace)) -> ReferencesBibPayload:
@@ -1014,7 +566,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/saved-visualizations",
         response_model=SavedVisualizationsPayload,
-        tags=["Studies & visualizations"],
+        tags=["Studies"],
         summary="Saved 3D packs, report cards, and PTools TSVs",
     )
     def saved_visualizations(ws: Path = Depends(get_workspace)) -> SavedVisualizationsPayload:
@@ -1026,7 +578,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/study-charts/{slug}",
         response_model=StudyChartsPayload,
-        tags=["Studies & visualizations"],
+        tags=["Studies"],
         summary="Per-study charts (live SVG + static images)",
     )
     def study_charts(slug: str, ws: Path = Depends(get_workspace)) -> StudyChartsPayload:
@@ -1042,7 +594,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/visualization-classes",
         response_model=VisualizationClassesPayload,
-        tags=["Studies & visualizations"],
+        tags=["Studies"],
         summary="Registered Visualization and Analysis classes",
     )
     def visualization_classes(ws: Path = Depends(get_workspace)) -> VisualizationClassesPayload:
@@ -1070,7 +622,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/study-bigraph-paths",
         response_model=StudyBigraphPaths,
-        tags=["Studies & visualizations"],
+        tags=["Studies"],
         summary="Bigraph node paths for a study's baseline composite",
     )
     def study_bigraph_paths(
@@ -1106,7 +658,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/visualization-status",
         response_model=VisualizationStatus,
-        tags=["Studies & visualizations"],
+        tags=["Studies"],
         summary="Lifecycle status for a named visualization",
     )
     def visualization_status(
@@ -1132,7 +684,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/visualization-instances",
         response_model=VisualizationInstances,
-        tags=["Studies & visualizations"],
+        tags=["Studies"],
         summary="Class-backed visualization instances from workspace.yaml",
     )
     def visualization_instances(
@@ -1152,7 +704,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/ptools-launch/{study}",
         response_model=PtoolsLaunch,
-        tags=["Studies & visualizations"],
+        tags=["Studies"],
         summary="Pathway Tools Omics Viewer launch URL for a study",
     )
     def ptools_launch(
@@ -1393,7 +945,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/git-status",
         response_model=GitStatus,
-        tags=["Git & branches"],
+        tags=["Git & workstream"],
         summary="Live git sync state for the workspace",
     )
     def git_status_route(ws: Path = Depends(get_workspace)) -> GitStatus:
@@ -1410,7 +962,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/work-status",
         response_model=Union[WorkStatusInactive, WorkStatusActive],
-        tags=["Git & branches"],
+        tags=["Git & workstream"],
         summary="Active workstream status (branch + ahead/behind counts)",
     )
     def work_status_route(
@@ -1436,7 +988,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/branch-staleness",
         response_model=BranchStaleness,
-        tags=["Git & branches"],
+        tags=["Git & workstream"],
         summary="How many commits is a branch behind its base?",
     )
     def branch_staleness_route(
@@ -1466,7 +1018,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/dirty-status",
         response_model=DirtyStatus,
-        tags=["Git & branches"],
+        tags=["Git & workstream"],
         summary="Filtered list of uncommitted files in the workspace",
     )
     def dirty_status_route(
@@ -1494,7 +1046,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/branches",
         response_model=BranchesPayload,
-        tags=["Git & branches"],
+        tags=["Git & workstream"],
         summary="stage/* branches with last-commit info",
     )
     def branches_route(
@@ -1531,7 +1083,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/branch-diff",
         response_model=BranchDiff,
-        tags=["Git & branches"],
+        tags=["Git & workstream"],
         summary="Short diff summary for a branch vs main",
     )
     def branch_diff_route(
@@ -1558,7 +1110,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/pending",
         response_model=PendingEntries,
-        tags=["Git & branches"],
+        tags=["Git & workstream"],
         summary="Pending entries from unmerged stage/* branches",
     )
     def pending_route(
@@ -1585,7 +1137,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/generation",
         response_model=Generation,
-        tags=["Git & branches"],
+        tags=["Git & workstream"],
         summary="Workspace coordinated-generation provenance banner",
     )
     def generation_route(
@@ -1605,7 +1157,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/work-composite-diff",
         response_model=WorkCompositeDiff,
-        tags=["Git & branches"],
+        tags=["Git & workstream"],
         summary="Model-code changes on the active branch vs its merge-base",
     )
     def work_composite_diff_route(
@@ -1634,7 +1186,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/investigation-viz-html",
         response_model=InvestigationVizHtmlPayload,
-        tags=["Investigations detail"],
+        tags=["Investigations"],
         summary="Viz HTML files for one investigation run",
     )
     def investigation_viz_html_route(
@@ -1666,7 +1218,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/investigation-composites",
         response_model=InvestigationCompositesPayload,
-        tags=["Investigations detail"],
+        tags=["Investigations"],
         summary="Composite baseline entries for an investigation",
     )
     def investigation_composites_route(
@@ -1701,7 +1253,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/investigation-composite-doc",
         response_model=InvestigationCompositeDocPayload,
-        tags=["Investigations detail"],
+        tags=["Investigations"],
         summary="Parsed composite YAML document for the bigraph-loom iframe",
     )
     def investigation_composite_doc_route(
@@ -1734,7 +1286,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/investigation-state-tree",
         response_model=InvestigationStateTree,
-        tags=["Investigations detail"],
+        tags=["Investigations"],
         summary="Flattened state tree of an investigation's composite document",
     )
     def investigation_state_tree_route(
@@ -1768,7 +1320,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/investigation-hypotheses",
         response_model=InvestigationHypothesesPayload,
-        tags=["Investigations detail"],
+        tags=["Investigations"],
         summary="Competing hypotheses with computed support log",
     )
     def investigation_hypotheses_route(
@@ -1803,7 +1355,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/study-rigor",
         response_model=StudyRigor,
-        tags=["Rigor"],
+        tags=["Rigor & jobs"],
         summary="Per-study evidence & rigor scorecard",
     )
     def study_rigor_route(
@@ -1837,7 +1389,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/investigation-rigor",
         response_model=InvestigationRigor,
-        tags=["Rigor"],
+        tags=["Rigor & jobs"],
         summary="Investigation-level rigor roll-up across member studies",
     )
     def investigation_rigor_route(
@@ -1871,7 +1423,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/study/{slug}",
         response_model=StudyDetail,
-        tags=["Studies detail"],
+        tags=["Studies"],
         summary="Full run-merged study detail spec",
     )
     def study_detail_route(
@@ -1942,7 +1494,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/explorer/runs",
         response_model=ExplorerRuns,
-        tags=["Data explorer"],
+        tags=["Data, inputs & references"],
         summary="Run-picker list for the Data Explorer card",
     )
     def explorer_runs(ws: Path = Depends(get_workspace)) -> ExplorerRuns:
@@ -1963,7 +1515,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/explorer/observables",
         response_model=ExplorerObservables,
-        tags=["Data explorer"],
+        tags=["Data, inputs & references"],
         summary="Observable discovery for one run store",
     )
     def explorer_observables(
@@ -1997,7 +1549,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/explorer/series",
         response_model=ExplorerSeries,
-        tags=["Data explorer"],
+        tags=["Data, inputs & references"],
         summary="Aligned time-series for one or more observables",
     )
     def explorer_series(
@@ -2051,7 +1603,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/explorer/flux",
         response_model=ExplorerFlux,
-        tags=["Data explorer"],
+        tags=["Data, inputs & references"],
         summary="Flux map snapshot at one time-step",
     )
     def explorer_flux(
@@ -2089,7 +1641,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/explorer/vector",
         response_model=ExplorerVector,
-        tags=["Data explorer"],
+        tags=["Data, inputs & references"],
         summary="Per-entity vector snapshot at one time-step",
     )
     def explorer_vector(
@@ -2133,7 +1685,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/explorer/protein-breakdown",
         response_model=ExplorerProteinBreakdown,
-        tags=["Data explorer"],
+        tags=["Data, inputs & references"],
         summary="Protein mass by functional category at one time-step",
     )
     def explorer_protein_breakdown(
@@ -2182,7 +1734,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/report-lint",
         response_model=ReportLint,
-        tags=["Reports & inputs"],
+        tags=["Data, inputs & references"],
         summary="Per-study report-readiness linter findings",
     )
     def report_lint(ws: Path = Depends(get_workspace)) -> ReportLint:
@@ -2203,7 +1755,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/needs-attention",
         response_model=NeedsAttention,
-        tags=["Reports & inputs"],
+        tags=["Data, inputs & references"],
         summary="Investigation needs-attention scan",
     )
     def needs_attention(
@@ -2224,7 +1776,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/inputs",
         response_model=InputsPayload,
-        tags=["Reports & inputs"],
+        tags=["Data, inputs & references"],
         summary="Investigation inputs + global inputs for the Inputs tab",
     )
     def inputs(
@@ -2247,7 +1799,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/investigation/{slug}",
         response_model=IsetDetail,
-        tags=["Reports & inputs"],
+        tags=["Data, inputs & references"],
         summary="Full investigation detail (one investigation.yaml + resolved studies)",
     )
     def investigation_detail(
@@ -2282,7 +1834,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/observables",
         response_model=ObservablesPayload,
-        tags=["Observables"],
+        tags=["Data, inputs & references"],
         summary="Emittable observables of a composite (never-fabricate source)",
     )
     def observables(
@@ -2317,7 +1869,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/study-observable-check",
         response_model=StudyObservableCheck,
-        tags=["Observables"],
+        tags=["Data, inputs & references"],
         summary="Validate a study's readouts against its composite structure",
     )
     def study_observable_check(
@@ -2357,7 +1909,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/linkage-index",
         response_model=LinkageIndex,
-        tags=["Observables"],
+        tags=["Data, inputs & references"],
         summary="Deterministic linkage index / navigate queries (always 200)",
     )
     def linkage_index(
@@ -2409,7 +1961,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/framework-metrics",
         response_model=FrameworkMetrics,
-        tags=["System & workspace"],
+        tags=["System"],
         summary="Aggregated framework-self metrics across all studies + investigations",
     )
     def framework_metrics_route(
@@ -2437,7 +1989,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/github-repo",
         response_model=GithubRepo,
-        tags=["System & workspace"],
+        tags=["System"],
         summary="Workspace GitHub repo slug (owner/name or null)",
     )
     def github_repo_route(
@@ -2464,7 +2016,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/ui-config",
         response_model=UiConfig,
-        tags=["System & workspace"],
+        tags=["System"],
         summary="UI feature flags from workspace.yaml",
     )
     def ui_config_route(
@@ -2496,7 +2048,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/workspace",
         response_model=WorkspaceHome,
-        tags=["System & workspace"],
+        tags=["System"],
         summary="Workspace narrative metadata (name, description, investigations)",
     )
     def workspace_home_route(
@@ -2524,7 +2076,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/composite-runs",
         response_model=CompositeRunsList,
-        tags=["Composite runs"],
+        tags=["Composites"],
         summary="List runs for one composite spec",
     )
     def composite_runs_list(
@@ -2548,7 +2100,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/composite-run/{run_id}/state",
         response_model=CompositeRunState,
-        tags=["Composite runs"],
+        tags=["Composites"],
         summary="Single state snapshot for a run at a given step",
     )
     def composite_run_state_route(
@@ -2580,7 +2132,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/composite-run/{run_id}/status",
         response_model=CompositeRunStatus,
-        tags=["Composite runs"],
+        tags=["Composites"],
         summary="Lightweight run status (progress, terminal-state error/viz_html)",
     )
     def composite_run_status_route(
@@ -2606,7 +2158,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/composite-run/{run_id}",
         response_model=CompositeRunTrajectory,
-        tags=["Composite runs"],
+        tags=["Composites"],
         summary="Return full trajectory for a composite run",
     )
     def composite_run_route(
@@ -2637,7 +2189,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/source/builds",
         response_model=SourceBuilds,
-        tags=["Workspace & source"],
+        tags=["Workspaces & sources"],
         summary="Remote sms-api simulator build list for the source dropdown",
     )
     def source_builds_route() -> SourceBuilds:
@@ -2654,7 +2206,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/workspaces",
         response_model=WorkspacesList,
-        tags=["Workspace & source"],
+        tags=["Workspaces & sources"],
         summary="Workspace-switcher dropdown (catalog + live server status)",
     )
     def workspaces_route(ws: Path = Depends(get_workspace)) -> WorkspacesList:
@@ -2674,7 +2226,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/system-deps-check",
         response_model=SystemDepsCheck,
-        tags=["Workspace & source"],
+        tags=["Workspaces & sources"],
         summary="Check whether a catalog module's system dependencies are satisfied",
     )
     def system_deps_check_route(
@@ -2878,7 +2430,7 @@ def create_app() -> FastAPI:
     # Events (Phase C, Batch 15): SSE workspace-state stream
     # -----------------------------------------------------------------------
 
-    @app.get("/api/events", tags=["Events"], summary="SSE workspace-state stream")
+    @app.get("/api/events", tags=["System"], summary="SSE workspace-state stream")
     def events(ws: Path = Depends(get_workspace)) -> StreamingResponse:
         """Server-Sent Events stream: polls ``workspace.yaml`` every 1 s.
 
@@ -2901,7 +2453,7 @@ def create_app() -> FastAPI:
 
     @app.get(
         "/api/state",
-        tags=["Events"],
+        tags=["System"],
         summary="One-shot workspace.yaml state read",
     )
     def state(ws: Path = Depends(get_workspace)) -> JSONResponse:
@@ -2919,7 +2471,7 @@ def create_app() -> FastAPI:
 
     @app.get(
         "/api/suggest-poll",
-        tags=["Events"],
+        tags=["System"],
         summary="Poll for a pbg-suggest skill response",
     )
     def suggest_poll(
@@ -3114,7 +2666,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/investigation-set-observables",
-        tags=["Investigation & study mutations"],
+        tags=["Investigations"],
         summary="Set investigation observable paths",
     )
     def investigation_set_observables(
@@ -3132,7 +2684,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/investigation-set-conclusions",
-        tags=["Investigation & study mutations"],
+        tags=["Investigations"],
         summary="Set investigation conclusions markdown",
     )
     def investigation_set_conclusions(
@@ -3150,7 +2702,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/investigation-set-overview",
-        tags=["Investigation & study mutations"],
+        tags=["Investigations"],
         summary="Set investigation overview metadata fields",
     )
     def investigation_set_overview(
@@ -3168,7 +2720,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/investigation-set-status",
-        tags=["Investigation & study mutations"],
+        tags=["Investigations"],
         summary="Set investigation status (archived / active / …)",
     )
     def investigation_set_status(
@@ -3187,7 +2739,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-set-objective",
-        tags=["Investigation & study mutations"],
+        tags=["Investigations"],
         summary="Set study objective text",
     )
     def study_set_objective(
@@ -3205,7 +2757,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-refresh-viz/{name}",
-        tags=["Studies & visualizations"],
+        tags=["Studies"],
         summary="Re-render a study's declared visualizations against its latest run",
     )
     def study_refresh_viz(
@@ -3238,7 +2790,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-narrative-set",
-        tags=["Investigation & study mutations"],
+        tags=["Investigations"],
         summary="Set a v4 narrative-spine field at a dotted path",
     )
     def study_narrative_set(
@@ -3261,7 +2813,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-expert-input-set",
-        tags=["Investigation & study mutations"],
+        tags=["Investigations"],
         summary="Patch conditions.model_settings[i].current in study.yaml",
     )
     def study_expert_input_set(
@@ -3286,7 +2838,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-variant-add",
-        tags=["Study CRUD"],
+        tags=["Studies"],
         summary="Add a variant entry to study.yaml",
     )
     def study_variant_add(
@@ -3304,7 +2856,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-variant-delete",
-        tags=["Study CRUD"],
+        tags=["Studies"],
         summary="Remove a variant entry from study.yaml",
     )
     def study_variant_delete(
@@ -3322,7 +2874,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-variant-set-params",
-        tags=["Study CRUD"],
+        tags=["Studies"],
         summary="Replace a variant's parameter_overrides in study.yaml",
     )
     def study_variant_set_params(
@@ -3340,7 +2892,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-baseline-add",
-        tags=["Study CRUD"],
+        tags=["Studies"],
         summary="Append a composite to study.yaml baseline[]",
     )
     def study_baseline_add(
@@ -3358,7 +2910,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-baseline-remove",
-        tags=["Study CRUD"],
+        tags=["Studies"],
         summary="Remove a baseline entry from study.yaml",
     )
     def study_baseline_remove(
@@ -3377,7 +2929,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-intervention-add",
-        tags=["Study CRUD"],
+        tags=["Studies"],
         summary="Append an intervention to study.yaml interventions[]",
     )
     def study_intervention_add(
@@ -3395,7 +2947,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-intervention-update",
-        tags=["Study CRUD"],
+        tags=["Studies"],
         summary="Update an intervention's description in study.yaml",
     )
     def study_intervention_update(
@@ -3413,7 +2965,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-intervention-delete",
-        tags=["Study CRUD"],
+        tags=["Studies"],
         summary="Remove an intervention from study.yaml",
     )
     def study_intervention_delete(
@@ -3431,7 +2983,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-run-delete",
-        tags=["Study CRUD"],
+        tags=["Studies"],
         summary="Delete one run from runs.db and study.yaml",
     )
     def study_run_delete(
@@ -3449,7 +3001,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-runs-clear",
-        tags=["Study CRUD"],
+        tags=["Studies"],
         summary="Delete all runs from runs.db and study.yaml",
     )
     def study_runs_clear(
@@ -3467,7 +3019,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-comparison-add",
-        tags=["Study CRUD"],
+        tags=["Studies"],
         summary="Add a named comparison (run_ids set) to study.yaml",
     )
     def study_comparison_add(
@@ -3491,7 +3043,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/feedback-apply-action",
-        tags=["Study lifecycle"],
+        tags=["Studies"],
         summary="Apply a tracked feedback action (SP3b, AI-free)",
     )
     def feedback_apply_action(
@@ -3512,7 +3064,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-create-from-run",
-        tags=["Study lifecycle"],
+        tags=["Studies"],
         summary="Create a new Study from a scratchpad composite run",
     )
     def study_create_from_run(
@@ -3533,7 +3085,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-rename",
-        tags=["Study lifecycle"],
+        tags=["Studies"],
         summary="Rename a study directory and update study.yaml",
     )
     def study_rename(
@@ -3554,7 +3106,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-sync-runs",
-        tags=["Study lifecycle"],
+        tags=["Studies"],
         summary="Reconcile a study's runs.db into study.yaml runs[]",
     )
     def study_sync_runs(
@@ -3574,7 +3126,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/proposed-input-decision",
-        tags=["Study lifecycle"],
+        tags=["Studies"],
         summary="Accept or decline an agent-proposed input",
     )
     def proposed_input_decision(
@@ -3596,7 +3148,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-seed-followup",
-        tags=["Study lifecycle"],
+        tags=["Studies"],
         summary="Seed a child study from a parent's followup/finding",
     )
     def study_seed_followup(
@@ -3624,7 +3176,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/iset-create",
-        tags=["Investigation scaffold"],
+        tags=["Investigations"],
         summary="Scaffold a new investigation.yaml",
     )
     def iset_create(
@@ -3646,7 +3198,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/investigation-clone",
-        tags=["Investigation scaffold"],
+        tags=["Investigations"],
         summary="Clone an investigation into a fresh planning state",
     )
     def investigation_clone(
@@ -3669,7 +3221,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/investigation-delete",
-        tags=["Investigation scaffold"],
+        tags=["Investigations"],
         summary="Delete an investigation directory (no git commit on the FastAPI path)",
     )
     def investigation_delete(
@@ -3700,7 +3252,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/investigation-comparison-add",
-        tags=["Investigation comparisons & groups"],
+        tags=["Investigations"],
         summary="Append a comparison entry to an investigation's spec.yaml",
     )
     def investigation_comparison_add(
@@ -3725,7 +3277,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/investigation-comparison-update",
-        tags=["Investigation comparisons & groups"],
+        tags=["Investigations"],
         summary="Replace fields on an existing investigation comparison",
     )
     def investigation_comparison_update(
@@ -3750,7 +3302,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/investigation-group-add",
-        tags=["Investigation comparisons & groups"],
+        tags=["Investigations"],
         summary="Append a group entry to an investigation's spec.yaml",
     )
     def investigation_group_add(
@@ -3776,7 +3328,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/investigation-group-update",
-        tags=["Investigation comparisons & groups"],
+        tags=["Investigations"],
         summary="Replace fields on an existing investigation group",
     )
     def investigation_group_update(
@@ -3809,7 +3361,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/visualization-create",
-        tags=["Viz authoring"],
+        tags=["Visualizations"],
         summary="Write a viz-request .md file for /pbg-viz (old-contract)",
     )
     def visualization_create(
@@ -3835,7 +3387,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/visualization-add-to-project",
-        tags=["Viz authoring"],
+        tags=["Visualizations"],
         summary="Stage a skill viz response for commit",
     )
     def visualization_add_to_project(
@@ -3859,7 +3411,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/visualization-generate",
-        tags=["Viz authoring"],
+        tags=["Visualizations"],
         summary="Write a new-contract viz-request file for /pbg-viz",
     )
     def visualization_generate(
@@ -3891,7 +3443,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/observable",
-        tags=["Viz authoring"],
+        tags=["Visualizations"],
         summary="Register an observable in workspace.yaml (no git commit on the FastAPI path)",
     )
     def observable_add(
@@ -3917,7 +3469,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/visualization",
-        tags=["Viz authoring"],
+        tags=["Visualizations"],
         summary="Register a visualization in workspace.yaml (no git commit on the FastAPI path)",
     )
     def visualization_add(
@@ -3946,7 +3498,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/visualization-commit-batch",
-        tags=["Viz authoring"],
+        tags=["Visualizations"],
         summary="Move staged visualizations to the workspace package (no git commit on the FastAPI path)",
     )
     def visualization_commit_batch(
@@ -3974,7 +3526,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/visualization-accept",
         response_model=VisualizationAcceptResponse,
-        tags=["Viz authoring"],
+        tags=["Visualizations"],
         summary="Finalize a generated visualization file (no git commit on the FastAPI path)",
     )
     def visualization_accept(
@@ -4010,7 +3562,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/visualization-preview",
-        tags=["Viz authoring"],
+        tags=["Visualizations"],
         summary="Render a visualization class in-process against demo or investigation data",
     )
     def visualization_preview(
@@ -4045,7 +3597,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/visualization-preview-instance",
-        tags=["Viz authoring"],
+        tags=["Visualizations"],
         summary="Preview a workspace.yaml-registered visualization instance by name",
     )
     def visualization_preview_instance(
@@ -4086,7 +3638,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/dataset",
-        tags=["Uploads & imports"],
+        tags=["Data, inputs & references"],
         summary="Register a dataset in workspace.yaml or an investigation (no git commit on the FastAPI path)",
     )
     def dataset_upload(
@@ -4117,7 +3669,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/expert-doc",
-        tags=["Uploads & imports"],
+        tags=["Data, inputs & references"],
         summary="Register an expert document in workspace.yaml or an investigation (no git commit on the FastAPI path)",
     )
     def expert_doc_upload(
@@ -4150,7 +3702,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/import",
-        tags=["Uploads & imports"],
+        tags=["Data, inputs & references"],
         summary="Register an import in workspace.yaml.imports (no git commit on the FastAPI path)",
     )
     def import_register(
@@ -4189,7 +3741,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/reference-pdf",
-        tags=["References"],
+        tags=["Data, inputs & references"],
         summary="Add a paper reference from a PDF (drop-and-go; no git commit on the FastAPI path)",
     )
     def reference_pdf(
@@ -4233,7 +3785,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/reference-bibtex",
-        tags=["References"],
+        tags=["Data, inputs & references"],
         summary="Add a paper reference from pasted BibTeX (no git commit on the FastAPI path)",
     )
     def reference_bibtex(
@@ -4265,7 +3817,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/reference",
-        tags=["References"],
+        tags=["Data, inputs & references"],
         summary="Add a paper reference from pasted BibTeX (legacy alias of /api/reference-bibtex)",
     )
     def reference(
@@ -4408,7 +3960,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/investigation-create-from-composite",
-        tags=["Investigation viz"],
+        tags=["Investigations"],
         summary="Clone a workspace-catalog composite into a fresh investigation (no git commit on the FastAPI path)",
     )
     def investigation_create_from_composite(
@@ -4440,7 +3992,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/investigation-add-viz",
-        tags=["Investigation viz"],
+        tags=["Investigations"],
         summary="Append a visualization entry to a study's spec (no git commit on the FastAPI path)",
     )
     def investigation_add_viz(
@@ -4470,7 +4022,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/investigation-render-viz",
-        tags=["Investigation viz"],
+        tags=["Investigations"],
         summary="Re-render a study's visualizations against existing emitter data (no sim re-run)",
     )
     def investigation_render_viz(
@@ -4502,7 +4054,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/investigation-run-unblocked-status",
         response_model=JobStatusPayload,
-        tags=["Job status"],
+        tags=["Rigor & jobs"],
         summary="Status of an investigation-wide multi-variant run job",
     )
     def investigation_run_unblocked_status(
@@ -4528,7 +4080,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/api/remote-run-status",
         response_model=JobStatusPayload,
-        tags=["Job status"],
+        tags=["Rigor & jobs"],
         summary="Status of a remote (sms-api) run job",
     )
     def remote_run_status(
@@ -4558,7 +4110,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/source/switch",
         response_model=SourceSwitchResponse,
-        tags=["Source"],
+        tags=["Workspaces & sources"],
         summary="Re-point the active workspace in-process",
     )
     def source_switch(
@@ -4589,7 +4141,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/source/build-remote",
         response_model=BuildRemoteResponse,
-        tags=["Source"],
+        tags=["Workspaces & sources"],
         summary="Register a repo+branch HEAD as an sms-api build",
     )
     def source_build_remote(
@@ -4619,7 +4171,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/source/switch-build",
         response_model=SourceSwitchResponse,
-        tags=["Source"],
+        tags=["Workspaces & sources"],
         summary="Materialize a remote build's workspace and re-point in-process",
     )
     def source_switch_build(
@@ -4667,7 +4219,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-run-baseline",
-        tags=["Study runs"],
+        tags=["Studies"],
         summary="Run a study's baseline composite (local engine)",
     )
     def study_run_baseline(
@@ -4692,7 +4244,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-run-variant",
-        tags=["Study runs"],
+        tags=["Studies"],
         summary="Run a study variant (single run or ensemble sweep)",
     )
     def study_run_variant(
@@ -4718,7 +4270,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-run-all-baselines",
-        tags=["Study runs"],
+        tags=["Studies"],
         summary="Run every baseline composite of a study and aggregate results",
     )
     def study_run_all_baselines(
@@ -4742,7 +4294,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-tests-run",
-        tags=["Study runs"],
+        tags=["Studies"],
         summary="Run pytest against a study's tests/ directory",
     )
     def study_tests_run(
@@ -4766,7 +4318,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/run-tests",
-        tags=["Study runs"],
+        tags=["Studies"],
         summary="Run pytest for the whole workspace",
     )
     def run_tests(
@@ -4803,7 +4355,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/composite-test-run",
-        tags=["Composite runs"],
+        tags=["Composites"],
         summary="Start a detached composite run (returns 202 {run_id})",
     )
     def composite_test_run(
@@ -4845,7 +4397,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/investigation-run-one",
-        tags=["Investigation runs"],
+        tags=["Investigations"],
         summary="Run a single ad-hoc composite (the 'Duplicate run' flow)",
     )
     def investigation_run_one(
@@ -4889,7 +4441,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/investigation-run",
-        tags=["Investigation runs"],
+        tags=["Investigations"],
         summary="Run all of an investigation's simulations + render its visualizations",
     )
     def investigation_run(
@@ -4933,7 +4485,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/investigation-create",
-        tags=["Investigation scaffold"],
+        tags=["Investigations"],
         summary="Scaffold a new investigation directory (deferred commit)",
     )
     def investigation_create(
@@ -4980,7 +4532,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/investigation-run-unblocked",
-        tags=["Investigation runs"],
+        tags=["Investigations"],
         summary="Enumerate + run all of an investigation's unblocked variants",
         status_code=202,
     )
@@ -5184,7 +4736,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/branch/push",
         response_model=BranchPushResponse,
-        tags=["Git"],
+        tags=["Git & workstream"],
         summary="Commit workspace changes + push the current branch",
     )
     def branch_push(
@@ -5214,7 +4766,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/dirty-commit-all",
         response_model=DirtyCommitAllResponse,
-        tags=["Git"],
+        tags=["Git & workstream"],
         summary="Stage + commit all dirty files (minus reports/) on the active branch",
     )
     def dirty_commit_all(
@@ -5258,7 +4810,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/work-start",
         response_model=WorkStartResponse,
-        tags=["Workstream"],
+        tags=["Git & workstream"],
         summary="Create a working branch from base + set it active",
     )
     def work_start(
@@ -5293,7 +4845,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/work-push",
         response_model=WorkPushResponse,
-        tags=["Workstream"],
+        tags=["Git & workstream"],
         summary="Push the active workstream branch to origin",
     )
     def work_push(
@@ -5324,7 +4876,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/work-end",
         response_model=WorkEndResponse,
-        tags=["Workstream"],
+        tags=["Git & workstream"],
         summary="Check out the base branch + clear the workstream",
     )
     def work_end(
@@ -5353,7 +4905,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/work-attach-report",
         response_model=WorkAttachReportResponse,
-        tags=["Workstream"],
+        tags=["Git & workstream"],
         summary="Write a report file to reports/ + commit it on the active branch",
     )
     def work_attach_report(
@@ -5388,7 +4940,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/work-create-pr",
         response_model=WorkCreatePrResponse,
-        tags=["Workstream"],
+        tags=["Git & workstream"],
         summary="Create a GitHub PR for the active workstream via the gh CLI",
     )
     def work_create_pr(
@@ -5425,7 +4977,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/work-link-branch",
         response_model=WorkLinkBranchResponse,
-        tags=["Workstream"],
+        tags=["Git & workstream"],
         summary="Link the active workstream to an upstream branch (branch or fork mode)",
     )
     def work_link_branch(
@@ -5479,7 +5031,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/workspaces/add",
         response_model=WorkspaceEntry,
-        tags=["Workspaces"],
+        tags=["Workspaces & sources"],
         summary="Register an existing workspace in the global ~/.pbg catalog",
     )
     def workspaces_add(
@@ -5508,7 +5060,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/workspaces/forget",
         response_model=WorkspacesOkResponse,
-        tags=["Workspaces"],
+        tags=["Workspaces & sources"],
         summary="Remove a catalog entry (refuses a running workspace)",
     )
     def workspaces_forget(
@@ -5537,7 +5089,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/workspaces/cleanup-stale",
         response_model=WorkspacesOkResponse,
-        tags=["Workspaces"],
+        tags=["Workspaces & sources"],
         summary="Unregister a stale running entry + unlink orphan server files",
     )
     def workspaces_cleanup_stale(
@@ -5582,7 +5134,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/workspaces/start",
         response_model=WorkspaceEntry,
-        tags=["Workspaces"],
+        tags=["Workspaces & sources"],
         summary="Spawn `vivarium-dashboard serve` for a stopped workspace",
     )
     def workspaces_start(
@@ -5616,7 +5168,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/workspaces/stop",
         response_model=WorkspacesOkResponse,
-        tags=["Workspaces"],
+        tags=["Workspaces & sources"],
         summary="SIGTERM a running workspace's dashboard (refuses self-stop)",
     )
     def workspaces_stop(
@@ -5662,7 +5214,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/click",
         status_code=204,
-        tags=["Misc"],
+        tags=["Rigor & jobs"],
         summary="Append a UI click/telemetry event to the events log",
     )
     def click(
@@ -5684,7 +5236,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/render",
         response_model=RenderResponse,
-        tags=["Misc"],
+        tags=["Rigor & jobs"],
         summary="Re-render the workspace dashboard in-process",
     )
     def render(
@@ -5710,7 +5262,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/feedback-import",
         response_model=FeedbackImportResponse,
-        tags=["Misc"],
+        tags=["Rigor & jobs"],
         summary="Write a report-widget feedback payload to the investigation",
     )
     def feedback_import(
@@ -5749,7 +5301,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/suggest",
-        tags=["Misc"],
+        tags=["Rigor & jobs"],
         summary="Write a Claude-suggestion request file",
     )
     def suggest(
@@ -5772,7 +5324,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/study-report-single",
-        tags=["Misc"],
+        tags=["Rigor & jobs"],
         summary="Render a standalone one-study HTML report",
     )
     def study_report_single(
@@ -5803,7 +5355,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/open-window",
-        tags=["Misc"],
+        tags=["Rigor & jobs"],
         summary="Open a dashboard URL in the user's browser",
     )
     def open_window(
@@ -5844,7 +5396,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/system-deps-install",
-        tags=["Installs"],
+        tags=["Registry & catalog"],
         summary="Run install commands for a catalog module's system-dep checks",
     )
     def system_deps_install(
@@ -5869,7 +5421,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/import-install",
-        tags=["Installs"],
+        tags=["Registry & catalog"],
         summary="Pip-install a registered import into the workspace venv",
     )
     def import_install(
@@ -5898,7 +5450,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/catalog-install",
-        tags=["Installs"],
+        tags=["Registry & catalog"],
         summary="Install a catalog module (PyPI direct or git-submodule) into the venv",
     )
     def catalog_install(
@@ -5931,7 +5483,7 @@ def create_app() -> FastAPI:
 
     @app.post(
         "/api/catalog-uninstall",
-        tags=["Installs"],
+        tags=["Registry & catalog"],
         summary="Uninstall a catalog module (PyPI or git-submodule) from the workspace",
     )
     def catalog_uninstall(
