@@ -18,9 +18,9 @@ def _init(ws: Path):
 
 
 def test_manifest_contract_for_ui(tmp_path):
-    """The Sync-to-local button needs repo+commit+workspace to render its command."""
+    """The Sync-to-local button needs repo+commit+lockfile to render its command."""
     ws = tmp_path / "ws"; _init(ws)
     app = create_app()
     app.dependency_overrides[get_workspace] = lambda: ws
     body = TestClient(app).get("/api/source/manifest").json()
-    assert body["repo"] and body["commit"] and body["workspace"]
+    assert body["repo"] and body["commit"] and body["lockfile"]
