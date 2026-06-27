@@ -52,6 +52,7 @@ from vivarium_dashboard.lib import composite_subprocess as _composite_subprocess
 from vivarium_dashboard.lib import study_run_state as _study_run_state
 from vivarium_dashboard.lib import study_run_post as _study_run_post
 from vivarium_dashboard.lib import study_runs as _study_runs
+from vivarium_dashboard.lib import comparative_runs as _comparative_runs
 from vivarium_dashboard.lib import investigation_views as _inv_views
 from vivarium_dashboard.lib import study_spec as _study_spec_lib
 from vivarium_dashboard.lib import rigor_views as _rigor_views
@@ -7821,104 +7822,8 @@ class Handler(BaseHTTPRequestHandler):
     def _render_investigation_comparative_visualisations(
         self, inv_slug: str, iset: dict, job
     ) -> None:
-        """Walk each member study + render its ``comparative_visualizations``.
-
-        Comparative viz now lives in the **study** yaml, not the
-        investigation yaml — each comparison is between the study's own
-        baseline + variants. Single ``studies/<slug>/runs.db`` is queried
-        once per trace (filtered by simulation name), and output lands
-        in ``studies/<slug>/viz/comparative_<name>.html`` so the
-        per-study viz auto-discovery + the downloadable report's
-        per-study section pick it up.
-
-        Schema (optional, in each study.yaml):
-
-            comparative_visualizations:
-              - name: dnaa-atp-count-vs-time
-                title: DnaA-ATP count over time (baseline vs variants)
-                observable_path: listeners.itv2.dnaa_atp_count
-                y_label: DnaA-ATP count
-                runs:
-                  - {sim_name: dnaa-05-itv2-comparison-baseline, label: Baseline (ITv2)}
-                  - {sim_name: v2ecoli-baseline-default,         label: v2ecoli default}
-                  - {sim_name: v2ecoli-with-fxj-params,          label: v2ecoli + FXJ}
-
-        ``sim_name`` matches the ``simulations.name`` column in the
-        study's runs.db — the value pbg_runner writes as the run's
-        label. For baselines this is typically ``<study-slug>-baseline``;
-        for variants it's the variant's own name.
-        """
-        import yaml as _yaml
-        from vivarium_dashboard.lib.comparative_viz import (
-            render_comparative_time_series,
-        )
-        for member in (iset.get("studies") or []):
-            study_slug = member if isinstance(member, str) else (member or {}).get("study")
-            if not study_slug:
-                continue
-            spec_path = workspace_paths().studies / study_slug / "study.yaml"
-            if not spec_path.is_file():
-                continue
-            try:
-                study_spec = _yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-            except _yaml.YAMLError:
-                continue
-            specs = study_spec.get("comparative_visualizations") or []
-            if not specs:
-                continue
-            viz_dir = workspace_paths().studies / study_slug / "viz"
-            viz_dir.mkdir(parents=True, exist_ok=True)
-            study_db = workspace_paths().studies / study_slug / "runs.db"
-            if not study_db.is_file():
-                continue
-            for cv in specs:
-                if not isinstance(cv, dict) or not cv.get("name"):
-                    continue
-                runs = []
-                for r in cv.get("runs") or []:
-                    if not isinstance(r, dict):
-                        continue
-                    sim_name = r.get("sim_name") or r.get("variant") or r.get("name")
-                    label = r.get("label") or sim_name or "?"
-                    # XArrayEmitter runs write per-run zarr stores alongside
-                    # the SQLite db (one zarr dir per run_id). When the sim's
-                    # most-recent completed run has a zarr store, point
-                    # comparative_viz at it via zarr_path; the zarr-read
-                    # adapter (PR #87) extracts the observable across
-                    # generations. Falls back to SQLite db_path otherwise
-                    # (legacy single-generation runs).
-                    zarr_path = _zarr_store_for_sim(study_db, sim_name)
-                    if zarr_path is not None:
-                        runs.append({
-                            "label": label,
-                            "zarr_path": zarr_path,
-                            "sim_name": sim_name,
-                        })
-                    else:
-                        runs.append({
-                            "label": label,
-                            "db_path": study_db,
-                            "sim_name": sim_name,
-                        })
-                if not runs:
-                    continue
-                out_path = viz_dir / f"comparative_{cv['name']}.html"
-                try:
-                    render_comparative_time_series(
-                        runs=runs,
-                        observable_path=cv.get("observable_path", ""),
-                        title=cv.get("title", cv["name"]),
-                        y_label=cv.get("y_label", ""),
-                        output_path=out_path,
-                        observable_index=cv.get("observable_index"),
-                        target_band=cv.get("target_band"),
-                        target_band_label=cv.get("target_band_label"),
-                    )
-                except Exception as e:  # noqa: BLE001
-                    job.update_item(
-                        len(job.items) - 1,
-                        comparative_viz_warning=f"{study_slug}/{cv['name']}: {e}",
-                    )
+        return _comparative_runs.render_investigation_comparative_visualisations(
+            WORKSPACE, inv_slug, iset, job)
 
     def _post_study_variant_add(self, body: dict):
         """POST /api/study-variant-add {study, name, description?,
