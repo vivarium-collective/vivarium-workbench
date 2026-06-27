@@ -4132,6 +4132,9 @@
       p = fetch(url).then(function(r) { return r.json(); });
     }
     p.then(function(data) {
+        // Guard: a null/empty response (e.g. an unexpected miss) is treated as
+        // unresolved instead of crashing on ``data.unresolved``.
+        data = data || { unresolved: true, ref: id };
         if (data.unresolved) {
           // Honest degrade: the ref doesn't resolve to a registered composite.
           // Don't render a bare "error composite" node — explain it plainly.

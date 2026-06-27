@@ -848,7 +848,18 @@ def create_app() -> FastAPI:
             ov = {}
         result = resolve_composite(ws, id, ov)
         if result is None:
-            return None
+            # Miss → the stdlib's honest-degrade shape (404 with ``unresolved``),
+            # NOT a bare 200 ``null`` (which makes the explorer crash on
+            # ``data.unresolved``). The Composite Explorer keys on ``unresolved``.
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": (f"composite not found: {id} — not a registered "
+                              "composite (this study may not declare a real composite)"),
+                    "unresolved": True,
+                    "ref": id,
+                },
+            )
         return CompositeResolvePayload.model_validate(result)
 
     def _composite_state_response(

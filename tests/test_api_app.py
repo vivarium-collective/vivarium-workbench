@@ -349,16 +349,17 @@ def test_visualization_classes_in_openapi(client):
 # /api/composite-resolve
 # ---------------------------------------------------------------------------
 
-def test_composite_resolve_missing_returns_null(client):
-    """An id that doesn't match any spec/generator returns 200 with null body
-    (empty workspace has no workspace.yaml → resolver returns None immediately).
-
-    The real client (Composite Explorer) sends the spec under ``id`` (not
-    ``ref``), so the route's query param is ``id`` — a regression test for the
-    422 the old ``ref`` param produced against every live call."""
+def test_composite_resolve_missing_returns_unresolved(client):
+    """An id that doesn't match any spec/generator returns 404 with the
+    honest-degrade ``{error, unresolved, ref}`` shape — NOT a bare 200 null
+    (which made the Composite Explorer crash on ``data.unresolved``). The real
+    client sends the spec under ``id`` (regression test for the old ``ref``
+    422), and keys on ``unresolved``."""
     r = client.get("/api/composite-resolve?id=missing")
-    assert r.status_code == 200
-    assert r.json() is None
+    assert r.status_code == 404
+    body = r.json()
+    assert body["unresolved"] is True
+    assert body["ref"] == "missing"
 
 
 def test_composite_resolve_typed_passthrough(client, monkeypatch):
