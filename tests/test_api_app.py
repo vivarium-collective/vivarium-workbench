@@ -5494,6 +5494,119 @@ class TestWorkspacesRegistryRoutes:
 
 
 # ===========================================================================
+# Workspace process-management POST routes
+#   POST /api/workspaces/start  +  POST /api/workspaces/stop
+# Tests monkeypatch the pure lib.workspaces_process_views builders reached via
+# the app's _workspaces_proc seam — asserting the route preserves the lib status
+# code via JSONResponse (a plain model return would force 200) and that an
+# omitted-path body reaches the lib's 400 (NOT FastAPI's 422).  No test spawns
+# or kills a real process.  The POSTs pass CSRF (TestClient sends no Origin).
+# ===========================================================================
+class TestWorkspacesProcessRoutes:
+    # -- POST /api/workspaces/start ------------------------------------------
+
+    def test_start_happy_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import workspaces_process_views as wp
+        seen = {}
+
+        def _fake(ws_root, body):
+            seen["ws_root"] = ws_root
+            seen["body"] = body
+            return {"url": "http://127.0.0.1:9001", "pid": 777}, 200
+
+        monkeypatch.setattr(wp, "workspaces_start", _fake)
+        r = client.post("/api/workspaces/start", json={"path": "/abs/ws"})
+        assert r.status_code == 200
+        assert r.json() == {"url": "http://127.0.0.1:9001", "pid": 777}
+        assert seen["body"] == {"path": "/abs/ws"}
+
+    def test_start_not_in_catalog_400(self, client, monkeypatch):
+        from vivarium_dashboard.lib import workspaces_process_views as wp
+        monkeypatch.setattr(
+            wp, "workspaces_start",
+            lambda ws_root, body: ({"error": "workspace not in catalog — Add it first"}, 400))
+        r = client.post("/api/workspaces/start", json={"path": "/abs/ws"})
+        assert r.status_code == 400
+        assert r.json() == {"error": "workspace not in catalog — Add it first"}
+
+    def test_start_timeout_504(self, client, monkeypatch):
+        from vivarium_dashboard.lib import workspaces_process_views as wp
+        monkeypatch.setattr(
+            wp, "workspaces_start",
+            lambda ws_root, body: (
+                {"error": "start_timeout", "log_path": "/x", "hint": "tail /x"}, 504))
+        r = client.post("/api/workspaces/start", json={"path": "/abs/ws"})
+        assert r.status_code == 504
+        assert r.json()["error"] == "start_timeout"
+
+    def test_start_omitted_path_400_not_422(self, client, monkeypatch):
+        # No monkeypatch of the builder — exercise the real builder's own
+        # validation so an omitted path yields the legacy 400 (NOT 422).
+        from vivarium_dashboard.lib import workspaces_process_views as wp
+        monkeypatch.setattr(wp, "workspace_catalog", object())  # never reached
+        r = client.post("/api/workspaces/start", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "path must be an absolute string"}
+
+    def test_start_no_body_400_not_422(self, client, monkeypatch):
+        from vivarium_dashboard.lib import workspaces_process_views as wp
+        monkeypatch.setattr(wp, "workspace_catalog", object())
+        r = client.post("/api/workspaces/start")  # no body at all
+        assert r.status_code == 400
+        assert r.json() == {"error": "path must be an absolute string"}
+
+    # -- POST /api/workspaces/stop -------------------------------------------
+
+    def test_stop_happy_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import workspaces_process_views as wp
+        seen = {}
+
+        def _fake(ws_root, body):
+            seen["body"] = body
+            return {"ok": True}, 200
+
+        monkeypatch.setattr(wp, "workspaces_stop", _fake)
+        r = client.post("/api/workspaces/stop", json={"path": "/abs/ws"})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True}
+        assert seen["body"] == {"path": "/abs/ws"}
+
+    def test_stop_self_stop_400(self, client, monkeypatch):
+        from vivarium_dashboard.lib import workspaces_process_views as wp
+        monkeypatch.setattr(
+            wp, "workspaces_stop",
+            lambda ws_root, body: (
+                {"error": "refusing to stop self — use the terminal: kill 5"}, 400))
+        r = client.post("/api/workspaces/stop", json={"path": "/abs/ws"})
+        assert r.status_code == 400
+        assert r.json() == {"error": "refusing to stop self — use the terminal: kill 5"}
+
+    def test_stop_not_running_400(self, client, monkeypatch):
+        from vivarium_dashboard.lib import workspaces_process_views as wp
+        monkeypatch.setattr(
+            wp, "workspaces_stop",
+            lambda ws_root, body: ({"error": "not running"}, 400))
+        r = client.post("/api/workspaces/stop", json={"path": "/abs/ws"})
+        assert r.status_code == 400
+        assert r.json() == {"error": "not running"}
+
+    def test_stop_omitted_path_400_not_422(self, client, monkeypatch):
+        from vivarium_dashboard.lib import workspaces_process_views as wp
+        monkeypatch.setattr(wp, "workspace_catalog", object())
+        r = client.post("/api/workspaces/stop", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "path must be an absolute string"}
+
+    # -- OpenAPI registration ------------------------------------------------
+
+    def test_routes_in_openapi(self, client):
+        spec = client.get("/openapi.json").json()
+        paths = spec["paths"]
+        for p in ("/api/workspaces/start", "/api/workspaces/stop"):
+            assert p in paths and "post" in paths[p], p
+
+
+# ===========================================================================
 # C-state-3h2: misc FS/render routes
 #   POST /api/click  /api/render  /api/feedback-import
 # /api/click returns a RAW empty 204 (no JSON body).  render + feedback-import
