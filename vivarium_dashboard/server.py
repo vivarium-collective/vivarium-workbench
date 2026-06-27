@@ -295,7 +295,6 @@ _POST_STUDY_ALIASES: dict[str, str] = {
 # and inspectable by tests without instantiating the handler.
 _POST_ROUTE_MAP: dict[str, str] = {
     "/api/click":              "_post_click",
-    "/api/feedback-import":    "_post_feedback_import",
     # GitHub auth (Phase B-bis, cherry-picked from #65). Lets users sign in
     # via the dashboard UI instead of a terminal — no AI agent required.
     "/api/auth/github/start":  "_post_auth_github_start",
@@ -364,7 +363,6 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/investigation-run-unblocked": "_post_investigation_run_unblocked",
     "/api/study-create-from-run":       "_post_study_create_from_run",
     "/api/study-run-baseline":          "_post_study_run_baseline",
-    "/api/study-run-all-baselines":     "_post_study_run_all_baselines",
     "/api/study-run-variant":           "_post_study_run_variant",
     "/api/study-variant-add":           "_post_study_variant_add",
     "/api/study-variant-delete":        "_post_study_variant_delete",
@@ -2134,10 +2132,6 @@ def _render_study_visualizations(study_dir, spec, spec_id):
         WORKSPACE, study_dir, spec, spec_id)
 
 
-def _post_study_run_all_baselines_for_test(ws_root, body):
-    return _study_runs.run_study_all_baselines(ws_root, body)
-
-
 def _post_study_run_variant_for_test(ws_root, body):
     return _study_runs.run_study_variant(ws_root, body)
 
@@ -3083,8 +3077,6 @@ class Handler(BaseHTTPRequestHandler):
             # Delegate entirely to the pure builder (slug validation + lookup
             # both live there so the live path and the tested builder are identical).
             return self._send_json_bytes(*Handler._build_api_study_response(_slug))
-        if _path_only_pre == "/api/config":
-            return self._send_json_bytes(*Handler._build_api_config_response())
         if _path_only_pre == "/api/workspace":
             return self._send_json_bytes(*Handler._build_api_workspace_response())
         # SP2b-i never-fabricate observable guard. Handled here (before the
@@ -3180,12 +3172,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_events_sse()
         if self.path.startswith("/api/guidance"):
             return self._serve_guidance()
-        if self.path.startswith("/api/branches"):
-            return self._serve_branches()
-        if self.path.startswith("/api/branch-diff"):
-            return self._get_branch_diff()
-        if self.path.startswith("/api/pending"):
-            return self._serve_pending()
         if self.path.startswith("/api/registry"):
             return self._get_registry()
         if self.path.startswith("/api/composite-run/") and self.path.split("?", 1)[0].endswith("/state"):
@@ -3242,8 +3228,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_investigation_registry()
         if self.path.startswith("/api/study-charts/"):
             return self._get_study_charts()
-        if self.path.startswith("/api/study-rigor"):
-            return self._get_study_rigor()
         if self.path.startswith("/api/investigation-rigor"):
             return self._get_investigation_rigor()
         if self.path.startswith("/api/framework-metrics"):
@@ -3279,8 +3263,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_workspace_manifest()
         if self.path.startswith("/api/work-status"):
             return self._get_work_status()
-        if self.path.startswith("/api/branch-staleness"):
-            return self._get_branch_staleness()
         if self.path.startswith("/api/dirty-status"):
             return self._get_dirty_status()
         if self.path.startswith("/api/suggest-poll"):
@@ -3457,37 +3439,6 @@ class Handler(BaseHTTPRequestHandler):
         if payload.get("not_found"):
             return self._json({"error": payload["error"], "study": name}, 404)
         return self._json(payload, 200)
-
-    def _post_feedback_import(self, body: dict):
-        """POST /api/feedback-import — ingest feedback submitted directly from
-        the report widget (expert-feedback B.2).
-
-        Body is the same ``{meta, annotations}`` payload the widget builds for
-        its YAML download. Writes it to investigations/<inv>/feedback/<ts>.yaml
-        via the shared pbg_superpowers writer, so direct submit and the
-        pbg-feedback-import CLI land identically. Eliminates the
-        download→email→CLI round-trip when the report is viewed live.
-        """
-        try:
-            from pbg_superpowers.feedback_import import (
-                write_feedback_payload, FeedbackImportError,
-            )
-        except ImportError:
-            return self._json(
-                {"error": "pbg-superpowers not available for feedback import"}, 500)
-        try:
-            target = write_feedback_payload(WORKSPACE, body)
-        except FeedbackImportError as e:
-            return self._json({"error": str(e)}, 400)
-        except Exception as e:  # noqa: BLE001
-            return self._json({"error": f"feedback import failed: {e}"}, 500)
-        anns = body.get("annotations") or {}
-        n_entries = sum(len(v or []) for v in anns.values() if isinstance(v, list))
-        return self._json({
-            "ok": True,
-            "path": str(target.relative_to(WORKSPACE)),
-            "n_entries": n_entries,
-        }, 200)
 
     # ------------------------------------------------------------------
     # GitHub auth (cherry-picked from #65, Phase B-bis).
@@ -4880,34 +4831,6 @@ class Handler(BaseHTTPRequestHandler):
         """
         return self._json(_git_status_lib.build_work_status(WORKSPACE), 200)
 
-    def _get_branch_staleness(self):
-        """Generic helper: how many commits is <branch> behind <base>?
-
-        Query string: ?branch=<name>&base=<name>. Both optional —
-        branch defaults to the workspace's current HEAD; base defaults
-        to 'main'. Probes origin/<base> first (so the answer matches
-        what a merge from upstream would have to fast-forward over),
-        falls back to local <base>.
-
-        Surfaces friction note 2026-05-27 #5: long-running investigation
-        branches drift, and when framework migrations land on main, the
-        eventual merge produces "trivial but tedious" conflicts. A skill
-        or UI calls this endpoint to warn the user before the drift gets
-        painful.
-        """
-        from urllib.parse import urlparse, parse_qs
-        qs = parse_qs(urlparse(self.path).query)
-        branch = (qs.get("branch") or [None])[0]
-        base = (qs.get("base") or ["main"])[0]
-
-        # Single-source shim: query parsing + status-code mapping stay here;
-        # the staleness computation lives in lib.git_status.build_branch_staleness.
-        try:
-            body = _git_status_lib.build_branch_staleness(WORKSPACE, branch, base)
-        except _git_status_lib.NoBranchError as e:
-            return self._json({"error": str(e)}, 400)
-        return self._json(body, 200)
-
     def _post_work_end(self, body: dict):
         _ws_add_to_sys_path()
         from vivarium_dashboard.lib.work_state import load_state, clear_state
@@ -5052,43 +4975,6 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     # GET handlers
     # ------------------------------------------------------------------
-
-    def _serve_branches(self):
-        """Return list of stage/* branches with last-commit info.
-
-        Single-source shim over lib.git_status.list_branches; the builder
-        returns ``{"error": ...}`` on a top-level git failure, which this
-        handler maps to HTTP 500 (matching the legacy behaviour).
-        """
-        body = _git_status_lib.list_branches(WORKSPACE)
-        if "error" in body:
-            return self._json(body, 500)
-        return self._json(body, 200)
-
-    def _serve_pending(self):
-        """Return pending entries from unmerged stage/* branches.
-
-        Single-source shim over lib.work_views.build_pending; WORKSPACE passes
-        the ws_root so the builder is git-cwd-agnostic.
-        """
-        from vivarium_dashboard.lib.work_views import build_pending
-        body, status = build_pending(WORKSPACE)
-        return self._json(body, status)
-
-    def _get_branch_diff(self):
-        """Return a short diff summary for ?branch=<name>.
-
-        Single-source shim over lib.git_status.build_branch_diff; an invalid /
-        missing branch name maps to HTTP 400 (matching the legacy behaviour).
-        """
-        from urllib.parse import urlparse, parse_qs
-        qs = parse_qs(urlparse(self.path).query)
-        branch = (qs.get("branch") or [""])[0]
-        try:
-            body = _git_status_lib.build_branch_diff(WORKSPACE, branch)
-        except ValueError:
-            return self._json({"error": "invalid branch name"}, 400)
-        return self._json(body, 200)
 
     def _get_registry(self):
         """GET /api/registry — live introspection of build_core(); cached 30s.
@@ -5526,22 +5412,6 @@ class Handler(BaseHTTPRequestHandler):
         """
         out = _build_iset_summary_for_test(WORKSPACE)
         return self._json({"investigations": out}, 200)
-
-    def _get_study_rigor(self):
-        """GET /api/study-rigor?study=<slug> — evidence & rigor scorecard.
-
-        Deterministic feedback (replication, negative controls, alternative
-        hypotheses, claim discipline, falsifiability, engineered-vs-emergent)
-        computed by pbg_superpowers.rigor from the study's declared fields.
-        """
-        import urllib.parse as _up
-        q = _up.parse_qs(_up.urlparse(self.path).query)
-        slug = (q.get("study") or q.get("investigation") or [None])[0]
-        try:
-            body = _rigor_views.build_study_rigor(WORKSPACE, slug)
-        except _rigor_views.RigorViewError as e:
-            return self._json(e.body, e.status)
-        return self._json(body, 200)
 
     def _get_investigation_rigor(self):
         """GET /api/investigation-rigor?investigation=<slug> — rigor roll-up
@@ -7430,17 +7300,6 @@ class Handler(BaseHTTPRequestHandler):
         response, code = _post_study_run_baseline_for_test(WORKSPACE, body)
         return self._json(response, code)
 
-    def _post_study_run_all_baselines(self, body: dict):
-        """POST /api/study-run-all-baselines {study, steps?}
-
-        Runs every entry in the study's `baseline:` list sequentially. The
-        UI uses this for multi-baseline Studies (architecture comparisons)
-        where firing one button is friendlier than clicking N per-entry
-        Run buttons in order.
-        """
-        response, code = _post_study_run_all_baselines_for_test(WORKSPACE, body)
-        return self._json(response, code)
-
     def _post_study_run_variant(self, body: dict):
         """POST /api/study-run-variant {study, variant, steps?}"""
         response, code = _post_study_run_variant_for_test(WORKSPACE, body)
@@ -7757,14 +7616,6 @@ class Handler(BaseHTTPRequestHandler):
             }), 500
 
     @staticmethod
-    def _build_api_config_response():
-        """Pure builder for GET /api/config — returns the source-config object.
-
-        Returns (json_bytes, http_status).  Default: local-server mode.
-        """
-        return _json_body({"mode": "local-server"}), 200
-
-    @staticmethod
     def _observables_for_ref_test(ws_root, ref):
         """Test seam for GET /api/observables — calls the module worker with an
         explicit ws_root so unit tests don't need the WORKSPACE global patched.
@@ -7828,7 +7679,7 @@ class Handler(BaseHTTPRequestHandler):
     def _build_api_workspace_response():
         """Pure builder for GET /api/workspace — returns workspace home data.
 
-        Returns (json_bytes, http_status).  Mirrors _build_api_config_response.
+        Returns (json_bytes, http_status).
         """
         return _json_body(_workspace_home_data(WORKSPACE)), 200
 
