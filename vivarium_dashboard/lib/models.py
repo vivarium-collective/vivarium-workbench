@@ -1587,8 +1587,8 @@ class StudySeedFollowupBody(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class IsetCreateBody(BaseModel):
-    """POST /api/iset-create {name, overview?, parent_studies?}"""
+class InvestigationCreateRequest(BaseModel):
+    """POST /api/investigation-create {name, overview?, parent_studies?}"""
 
     model_config = ConfigDict(extra="allow")
 
@@ -1932,10 +1932,10 @@ class InvestigationCompositeRebuild(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class InvestigationCreateFromComposite(BaseModel):
-    """POST /api/investigation-create-from-composite {composite_name}
+class StudyCreateFromComposite(BaseModel):
+    """POST /api/study-create-from-composite {composite_name}
 
-    Clone a workspace-catalog composite into a fresh investigation. The lib
+    Clone a workspace-catalog composite into a fresh study. The lib
     builder reads via ``body.get(...)``; ``extra="allow"`` keeps
     forward-compatible keys.
     """
@@ -2649,8 +2649,8 @@ class InvestigationRunRequest(BaseModel):
     investigation: Optional[str] = None
 
 
-class InvestigationCreateRequest(BaseModel):
-    """POST /api/investigation-create request body.
+class StudyCreateRequest(BaseModel):
+    """POST /api/study-create request body.
 
     ``{"name", "source"?, "composite"?}`` — scaffolds a new investigation
     directory (``data/.keep`` plus one of three scaffold shapes keyed on the
@@ -2659,7 +2659,7 @@ class InvestigationCreateRequest(BaseModel):
     ignored when ``source`` is provided. A missing/blank ``name`` (or one that
     fails the ``^[a-zA-Z0-9_-]+$`` regex) is rejected with HTTP 400, an existing
     investigation with HTTP 409, and an unresolvable ``source`` with HTTP 404 by
-    ``lib.investigation_create_views.investigation_create``. ``extra="allow"``
+    ``lib.study_create_views.study_create``. ``extra="allow"``
     preserves any other body keys, and ``model_dump(exclude_none=True)`` keeps
     omitted optionals absent so the builder's ``.get(...)`` defaults apply (and
     so a missing ``name`` reaches the builder's 400 rather than a 422). The

@@ -1,8 +1,8 @@
-"""Pure builder for the ``POST /api/investigation-create`` route.
+"""Pure builder for the ``POST /api/study-create`` route.
 
 Behaviour-preserving port of the stdlib handler
-``server.Handler._post_investigation_create`` — the "scaffold a new
-investigation" flow: it creates ``investigations/<name>/`` (well, the workspace's
+``server.Handler._post_study_create`` — the "scaffold a new
+study" flow: it creates ``investigations/<name>/`` (well, the workspace's
 ``studies/`` dir keyed by the canonical name) with a ``data/.keep`` plus one of
 three scaffold shapes depending on the resolved ``source`` composite:
 
@@ -56,8 +56,8 @@ def _ws_add_to_sys_path(ws_root: Path) -> None:
         sys.path.insert(0, ws)
 
 
-def investigation_create(ws_root: Path, body: dict) -> "tuple[dict, int]":
-    """Scaffold a new investigation directory.
+def study_create(ws_root: Path, body: dict) -> "tuple[dict, int]":
+    """Scaffold a new study directory.
 
     Pure file-side-effect builder — no HTTP, no git.  ``source`` is an optional
     composite ref (e.g. ``pkg.composites.foo``) that seeds the investigation

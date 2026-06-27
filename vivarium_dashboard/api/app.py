@@ -48,7 +48,7 @@ from vivarium_dashboard.lib import remote_run_views as _remote_run_views
 from vivarium_dashboard.lib import auth_views as _auth_views
 from vivarium_dashboard.lib import composite_run_views as _cr_views
 from vivarium_dashboard.lib import composite_test_run_views as _composite_test_run_views
-from vivarium_dashboard.lib import investigation_create_views as _investigation_create_views
+from vivarium_dashboard.lib import study_create_views as _study_create_views
 from vivarium_dashboard.lib import investigation_run_one_views as _investigation_run_one_views
 from vivarium_dashboard.lib import investigation_run_views as _investigation_run_views
 from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
@@ -202,7 +202,7 @@ from vivarium_dashboard.lib.models import (
     ProposedInputDecisionBody,
     StudySeedFollowupBody,
     # Batch 21: request-body models for investigation scaffold mutations
-    IsetCreateBody,
+    InvestigationCreateRequest,
     IsetCloneBody,
     InvestigationDeleteBody,
     # Batch 22: request-body models for investigation comparison & group mutations
@@ -231,7 +231,7 @@ from vivarium_dashboard.lib.models import (
     CompositePromoteToCatalog,
     InvestigationCompositeRebuild,
     # Batch 28: request-body models for investigation composite/viz mutations
-    InvestigationCreateFromComposite,
+    StudyCreateFromComposite,
     InvestigationAddViz,
     InvestigationRenderViz,
     # C-state-3a: source/switch (in-process workspace re-point)
@@ -291,8 +291,8 @@ from vivarium_dashboard.lib.models import (
     InvestigationRunRequest,
     # P5: investigation-run-unblocked (enumerate + submit run job) POST request body
     InvestigationRunUnblockedRequest,
-    # Scaffold: investigation-create (scaffold new investigation dir) POST request body
-    InvestigationCreateRequest,
+    # Scaffold: study-create (scaffold new study dir) POST request body
+    StudyCreateRequest,
     # Viz authoring: visualization-preview (in-process viz render) POST request body
     VisualizationPreviewRequest,
     # Viz authoring: visualization-preview-instance (preview registered instance by name)
@@ -3175,12 +3175,12 @@ def create_app() -> FastAPI:
     # -----------------------------------------------------------------------
 
     @app.post(
-        "/api/iset-create",
+        "/api/investigation-create",
         tags=["Investigations"],
         summary="Scaffold a new investigation.yaml",
     )
-    def iset_create(
-        req: IsetCreateBody,
+    def investigation_create(
+        req: InvestigationCreateRequest,
         ws: Path = Depends(get_workspace),
     ) -> dict:
         """Create a new ``investigation.yaml`` under ``investigations/<name>/``.
@@ -3191,7 +3191,7 @@ def create_app() -> FastAPI:
         exists; 200 returns the new investigation in the same shape as
         ``GET /api/investigation/<name>``.
         """
-        body, status = _scaffold_mut.iset_create(ws, req.model_dump())
+        body, status = _scaffold_mut.investigation_create(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
@@ -3959,15 +3959,15 @@ def create_app() -> FastAPI:
         return body
 
     @app.post(
-        "/api/investigation-create-from-composite",
-        tags=["Investigations"],
-        summary="Clone a workspace-catalog composite into a fresh investigation (no git commit on the FastAPI path)",
+        "/api/study-create-from-composite",
+        tags=["Studies"],
+        summary="Clone a workspace-catalog composite into a fresh study (no git commit on the FastAPI path)",
     )
-    def investigation_create_from_composite(
-        req: InvestigationCreateFromComposite,
+    def study_create_from_composite(
+        req: StudyCreateFromComposite,
         ws: Path = Depends(get_workspace),
     ) -> dict:
-        """Clone a workspace-catalog composite into a fresh investigation.
+        """Clone a workspace-catalog composite into a fresh study.
 
         Body: ``{composite_name}``.  Matched against the catalog record's
         ``name`` first, then the dotted-id stem.  Creates ``studies/<auto>/``
@@ -4466,7 +4466,7 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=status, content=body)
 
     # -----------------------------------------------------------------------
-    # Scaffold: investigation-create — scaffold a new investigation directory.
+    # Scaffold: study-create — scaffold a new study directory.
     #
     # Creates ``investigations/<name>/`` (keyed by the workspace ``studies/``
     # dir) with a ``data/.keep`` plus one of three scaffold shapes keyed on the
@@ -4484,21 +4484,21 @@ def create_app() -> FastAPI:
     # -----------------------------------------------------------------------
 
     @app.post(
-        "/api/investigation-create",
-        tags=["Investigations"],
-        summary="Scaffold a new investigation directory (deferred commit)",
+        "/api/study-create",
+        tags=["Studies"],
+        summary="Scaffold a new study directory (deferred commit)",
     )
-    def investigation_create(
-        req: InvestigationCreateRequest,
+    def study_create(
+        req: StudyCreateRequest,
         ws: Path = Depends(get_workspace),
     ) -> JSONResponse:
-        """Scaffold a new investigation directory.
+        """Scaffold a new study directory.
 
-        Mirrors the stdlib ``POST /api/investigation-create``.  Body:
+        Mirrors the stdlib ``POST /api/study-create``.  Body:
         ``{"name", "source"?, "composite"?}``.
 
         Status codes (byte-identical to the legacy handler, via
-        ``lib.investigation_create_views.investigation_create``, modulo the
+        ``lib.study_create_views.study_create``, modulo the
         deferred commit):
           - 400  missing ``name`` / name fails ``^[a-zA-Z0-9_-]+$``
           - 404  ``source`` composite not resolvable
@@ -4507,7 +4507,7 @@ def create_app() -> FastAPI:
           - 200  ``{ok: true, name}``  (scaffold run inline; the live
             ``_active_branch_action`` commit is deferred)
         """
-        body, status = _investigation_create_views.investigation_create(
+        body, status = _study_create_views.study_create(
             ws, req.model_dump(exclude_none=True))
         return JSONResponse(status_code=status, content=body)
 
