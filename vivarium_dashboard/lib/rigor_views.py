@@ -1,7 +1,7 @@
 """Rigor scorecard view builders extracted from server.py.
 
-The two ``ws_root``-parameterised builders for the rigor GET routes ported in
-Phase A, Batch 3.  Both read the **run-merged** per-study spec via
+The ``ws_root``-parameterised builder for the rigor GET route ported in
+Phase A, Batch 3.  It reads the **run-merged** per-study spec via
 ``lib.study_spec.load_study_detail_spec`` — this is the whole reason the loader
 was extracted first: ``pbg_superpowers.rigor`` reads ``spec["runs"]`` for the
 replication (dim 1) and run-persistence (dim 13) dimensions, so the runs.db
@@ -9,12 +9,11 @@ merge must already be applied or the scores drift from the legacy handler.
 
 Builders
 --------
-build_study_rigor          → GET /api/study-rigor?study=
 build_investigation_rigor  → GET /api/investigation-rigor?investigation=
 
-Both return a JSON-serialisable dict on every 200 path (including the
-"200 with error" fallbacks the legacy handlers emit when rigor computation or
-an investigation.yaml read fails).  They raise :class:`RigorViewError` only for
+Returns a JSON-serialisable dict on every 200 path (including the
+"200 with error" fallbacks the legacy handler emits when rigor computation or
+an investigation.yaml read fails).  Raises :class:`RigorViewError` only for
 the genuine non-200 paths (400 missing param, 404 not found).
 """
 
@@ -55,35 +54,6 @@ class RigorViewError(Exception):
 # ---------------------------------------------------------------------------
 # Public builders
 # ---------------------------------------------------------------------------
-
-def build_study_rigor(ws_root: Path, study: Optional[str]) -> dict:
-    """Build the GET /api/study-rigor payload for *ws_root*.
-
-    Returns the per-study rigor scorecard from ``pbg_superpowers.rigor`` —
-    deterministic evidence dimensions (replication, negative controls,
-    alternative hypotheses, claim discipline, falsifiability, …) computed from
-    the run-merged study spec.
-
-    Raises ``RigorViewError``:
-    - 400 when ``study`` is empty/None (body ``{"error": "missing ?study="}``).
-    - 404 when no spec file exists for the study (``{"error": "study not found"}``).
-
-    On a rigor-computation / import failure returns a 200-shaped error dict
-    ``{"error": "...", "dimensions": [], "score": {}, "summary": ""}`` — matching
-    the legacy ``server._get_study_rigor``.
-    """
-    if not study:
-        raise RigorViewError({"error": "missing ?study="}, 400)
-    spec = load_study_detail_spec(ws_root, study)
-    if spec is None:
-        raise RigorViewError({"error": "study not found"}, 404)
-    try:
-        from pbg_superpowers.rigor import study_rigor
-        return study_rigor(spec)
-    except Exception as e:  # noqa: BLE001
-        return {"error": f"{type(e).__name__}: {e}",
-                "dimensions": [], "score": {}, "summary": ""}
-
 
 def build_investigation_rigor(ws_root: Path, investigation: Optional[str]) -> dict:
     """Build the GET /api/investigation-rigor payload for *ws_root*.
