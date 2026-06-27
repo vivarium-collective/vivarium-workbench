@@ -190,6 +190,18 @@ class InvestigationSummary(BaseModel):
     error: Optional[str] = None
 
 
+class IsetListPayload(BaseModel):
+    """``GET /api/iset-list`` payload.
+
+    The stdlib handler returns ``{"investigations": [...]}`` (an object), and
+    the client reads ``j.investigations`` — so the payload MUST be wrapped, not
+    a bare array. (The first FastAPI port returned a bare list, which made the
+    Investigations page render "No investigations declared".)
+    """
+
+    investigations: list[InvestigationSummary] = []
+
+
 class DataSource(BaseModel):
     """One entry of the ``GET /api/data-sources`` ``sources`` list."""
 

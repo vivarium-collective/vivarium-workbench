@@ -103,6 +103,10 @@ export interface InvestigationSummary {
   error: string | null;
 }
 
+export interface IsetListPayload {
+  investigations: InvestigationSummary[];
+}
+
 export interface DataSource {
   key: string;
   path: string;

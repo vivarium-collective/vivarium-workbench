@@ -141,6 +141,7 @@ from vivarium_dashboard.lib.models import (
     JobStatusPayload,
     InvestigationHypothesesPayload,
     InvestigationSummary,
+    IsetListPayload,
     InvestigationRigor,
     InvestigationVizHtmlPayload,
     InvestigationsPayload,
@@ -920,17 +921,21 @@ def create_app() -> FastAPI:
 
     @app.get(
         "/api/iset-list",
-        response_model=list[InvestigationSummary],
+        response_model=IsetListPayload,
         tags=["Investigations"],
         summary="Investigation summary list for the sidebar",
     )
-    def iset_list(ws: Path = Depends(get_workspace)) -> list[InvestigationSummary]:
+    def iset_list(ws: Path = Depends(get_workspace)) -> IsetListPayload:
         """Investigations summary list (mirrors the stdlib /api/iset-list).
 
         Fully library-backed: builds the payload via
         ``lib.investigation_status.build_iset_summary`` and supplies the
         runs-presence signal from the simulations index — no dependency on the
         stdlib server module.
+
+        The payload is wrapped as ``{"investigations": [...]}`` (NOT a bare
+        array) — the client reads ``j.investigations``; a bare list renders the
+        Investigations page as "No investigations declared".
         """
         run_slugs = investigation_status.study_run_slugs(ws)
 
@@ -940,7 +945,9 @@ def create_app() -> FastAPI:
             return slug in run_slugs or bool((spec or {}).get("runs"))
 
         summaries = investigation_status.build_iset_summary(ws, study_has_runs=study_has_runs)
-        return [InvestigationSummary.model_validate(d) for d in summaries]
+        return IsetListPayload(
+            investigations=[InvestigationSummary.model_validate(d) for d in summaries]
+        )
 
     @app.get(
         "/api/investigation-registry",

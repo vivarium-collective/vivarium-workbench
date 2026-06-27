@@ -120,7 +120,8 @@ def test_workspace_manifest_in_openapi(client):
 def test_iset_list_empty_workspace(client):
     r = client.get("/api/iset-list")
     assert r.status_code == 200
-    assert r.json() == []
+    # Wrapped object, not a bare array — the client reads j.investigations.
+    assert r.json() == {"investigations": []}
 
 
 def test_iset_list_typed_passthrough(client, monkeypatch):
@@ -139,7 +140,7 @@ def test_iset_list_typed_passthrough(client, monkeypatch):
         lambda ws, **kw: summaries,
     )
 
-    body = client.get("/api/iset-list").json()
+    body = client.get("/api/iset-list").json()["investigations"]
     assert body[0]["studies"] == ["s1", "s2"]
     assert body[0]["lifecycle"] == {"phase": "run", "extra": 1}   # Any field: not stripped
     assert body[0]["current"] is True
