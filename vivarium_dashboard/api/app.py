@@ -71,6 +71,7 @@ from vivarium_dashboard.lib import study_crud_mutations as _study_crud_mut
 from vivarium_dashboard.lib import git_status as _git_status
 from vivarium_dashboard.lib import git_commit_views as _git_commit_views
 from vivarium_dashboard.lib import work_mutations as _work_mutations
+from vivarium_dashboard.lib import work_pr_views as _work_pr_views
 from vivarium_dashboard.lib import workspaces_mutations as _workspaces_mut
 from vivarium_dashboard.lib import workspaces_process_views as _workspaces_proc
 from vivarium_dashboard.lib import misc_mutations as _misc_mut
@@ -251,6 +252,9 @@ from vivarium_dashboard.lib.models import (
     WorkEndResponse,
     WorkAttachReportRequest,
     WorkAttachReportResponse,
+    # C-state-3f3: workstream GitHub-PR-create route
+    WorkCreatePrRequest,
+    WorkCreatePrResponse,
     # C-state-3h1: workspace-registry routes
     WorkspacesPathRequest,
     WorkspacesOkResponse,
@@ -5158,6 +5162,43 @@ def create_app() -> FastAPI:
         """
         payload = req.model_dump(exclude_none=True) if req is not None else {}
         resp, status = _work_mutations.work_attach_report(ws, payload)
+        return JSONResponse(status_code=status, content=resp)
+
+    @app.post(
+        "/api/work-create-pr",
+        response_model=WorkCreatePrResponse,
+        tags=["Workstream"],
+        summary="Create a GitHub PR for the active workstream via the gh CLI",
+    )
+    def work_create_pr(
+        req: Optional[WorkCreatePrRequest] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Create a GitHub pull request for the active workstream branch.
+
+        Mirrors the stdlib ``POST /api/work-create-pr``.  Body:
+        ``{"title"?, "body"?, "draft"?}`` (``draft`` defaults to ``True``).
+        Adopts the workspace's current git HEAD as the workstream when none is
+        active, opportunistically marks the branch ``pushed`` when local matches
+        ``origin/<branch>``, defaults the PR title to the matching
+        investigation's ``title:`` (else ``Workstream: <branch>``), prepends
+        ``investigation: `` when the branch touches ``investigations/``, then
+        shells out to ``gh pr create`` and records the resulting PR url/number.
+
+        Status codes (byte-identical to the legacy handler):
+          - 409  ``{"error": "no active workstream"}``
+          - 409  ``{"error": "branch not yet pushed. ..."}`` (the long UI message)
+          - 409  ``{"error": "PR already exists: <url>", "pr_url"}``
+          - 500  ``{"error": "gh CLI not installed. Open manually:", "manual_url"}``
+          - 500  ``{"error": "gh pr create failed: <err[:300]>"}``
+          - 200  ``{ok: true, pr_url, pr_number}``
+
+        The CSRF middleware already guards this POST.  Library-backed via the
+        pure ``lib.work_pr_views.work_create_pr``; every path is wrapped in
+        ``JSONResponse`` so the lib-returned status code is preserved verbatim.
+        """
+        payload = req.model_dump(exclude_none=True) if req is not None else {}
+        resp, status = _work_pr_views.work_create_pr(ws, payload)
         return JSONResponse(status_code=status, content=resp)
 
     # -----------------------------------------------------------------------
