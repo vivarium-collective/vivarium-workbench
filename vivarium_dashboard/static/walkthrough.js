@@ -326,6 +326,9 @@
   window._uiConfig = null;
   fetch('/api/ui-config').then(function(r) { return r.json(); }).then(function(cfg) {
     window._uiConfig = cfg || {};
+    // Read-only / remote-only mode: hide authoring controls (.js-authoring) via
+    // CSS; the Source panel reads this flag at render time to go remote-only.
+    if (window._uiConfig.readonly) document.body.classList.add('readonly');
     _applyCompositeViewMode();
   });
 
