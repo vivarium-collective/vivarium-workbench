@@ -72,6 +72,7 @@ from vivarium_dashboard.lib import git_status as _git_status
 from vivarium_dashboard.lib import git_commit_views as _git_commit_views
 from vivarium_dashboard.lib import work_mutations as _work_mutations
 from vivarium_dashboard.lib import workspaces_mutations as _workspaces_mut
+from vivarium_dashboard.lib import workspaces_process_views as _workspaces_proc
 from vivarium_dashboard.lib import misc_mutations as _misc_mut
 from vivarium_dashboard.lib import misc_post_views as _misc_post_views
 from vivarium_dashboard.lib import investigation_status
@@ -5261,6 +5262,88 @@ def create_app() -> FastAPI:
         """
         payload = req.model_dump() if req is not None else {}
         resp, status = _workspaces_mut.workspaces_cleanup_stale(payload)
+        return JSONResponse(status_code=status, content=resp)
+
+    # -----------------------------------------------------------------------
+    # Workspace process-management WRITE routes (2 POSTs)
+    #   POST /api/workspaces/start  /api/workspaces/stop
+    # Spawn (subprocess.Popen) / SIGTERM (os.kill) a `vivarium-dashboard serve`
+    # child for a catalogued workspace.  Each delegates to a pure builder in
+    # lib.workspaces_process_views (parameterised on ws_root — start ignores it,
+    # stop uses it for the self-stop guard).  The request model's ``path`` is
+    # Optional so an omitted path reaches the lib builder's own 400 (not
+    # FastAPI's 422).  Every path (success AND error) is returned via
+    # JSONResponse so the lib-returned status code is preserved verbatim.  The
+    # CSRF middleware already guards both POSTs.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/workspaces/start",
+        response_model=WorkspaceEntry,
+        tags=["Workspaces"],
+        summary="Spawn `vivarium-dashboard serve` for a stopped workspace",
+    )
+    def workspaces_start(
+        req: Optional[WorkspacesPathRequest] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Spawn ``vivarium-dashboard serve`` for a stopped catalogued workspace.
+
+        Mirrors the stdlib ``POST /api/workspaces/start``.  Body: ``{"path"}`` —
+        an absolute path string for a workspace registered in the global
+        catalog.  Idempotent: returns the existing URL if a live entry already
+        exists; otherwise spawns the child via ``subprocess.Popen`` and polls
+        the catalog (8 s) until it registers.
+
+        Status codes (byte-identical to the legacy handler):
+          - 400  ``{"error": "path must be an absolute string"}``
+          - 400  ``{"error": "not a workspace (no workspace.yaml)"}``
+          - 400  ``{"error": "workspace not in catalog — Add it first"}``
+          - 200  ``{"url": ..., "pid": ...}`` (idempotent-live OR spawned)
+          - 504  ``{"error": "start_timeout", "log_path": ..., "hint": ...}``
+
+        The CSRF middleware already guards this POST.  Library-backed via the
+        pure ``lib.workspaces_process_views.workspaces_start``; every path is
+        wrapped in ``JSONResponse`` so the lib-returned status code is preserved
+        verbatim.
+        """
+        payload = req.model_dump(exclude_none=True) if req is not None else {}
+        resp, status = _workspaces_proc.workspaces_start(ws, payload)
+        return JSONResponse(status_code=status, content=resp)
+
+    @app.post(
+        "/api/workspaces/stop",
+        response_model=WorkspacesOkResponse,
+        tags=["Workspaces"],
+        summary="SIGTERM a running workspace's dashboard (refuses self-stop)",
+    )
+    def workspaces_stop(
+        req: Optional[WorkspacesPathRequest] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """SIGTERM a running workspace's dashboard child; refuse self-stop.
+
+        Mirrors the stdlib ``POST /api/workspaces/stop``.  Body: ``{"path"}``.
+        Refuses to stop the dashboard's own bound workspace (``ws_root``) and
+        uncatalogued paths.  SIGTERMs the running child and polls (3 s) for its
+        atexit hook to remove the global registry entry.  Does NOT escalate to
+        SIGKILL on timeout.
+
+        Status codes (byte-identical to the legacy handler):
+          - 400  ``{"error": "path must be an absolute string"}``
+          - 400  ``{"error": "workspace not in catalog"}``
+          - 400  ``{"error": "refusing to stop self — use the terminal: kill <pid>"}``
+          - 400  ``{"error": "not running"}``
+          - 200  ``{"ok": True}`` (deregistered OR already-dead ProcessLookupError)
+          - 504  ``{"error": "stop_timeout", "hint": ...}``
+
+        The CSRF middleware already guards this POST.  Library-backed via the
+        pure ``lib.workspaces_process_views.workspaces_stop``; every path is
+        wrapped in ``JSONResponse`` so the lib-returned status code is preserved
+        verbatim.
+        """
+        payload = req.model_dump(exclude_none=True) if req is not None else {}
+        resp, status = _workspaces_proc.workspaces_stop(ws, payload)
         return JSONResponse(status_code=status, content=resp)
 
     # -----------------------------------------------------------------------
