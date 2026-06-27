@@ -270,7 +270,6 @@ _GET_STUDY_ALIASES: list[tuple[str, str]] = [
 # POST routes use a dict keyed on the exact path.  Each entry maps an
 # existing investigation route to its study alias.
 _POST_STUDY_ALIASES: dict[str, str] = {
-    "/api/investigation-create":             "/api/study-create",
     "/api/investigation-delete":             "/api/study-delete",
     # /api/study-run-baseline is now a v3-native route (not an alias), so it
     # intentionally maps to _post_study_run_baseline, not _post_investigation_run.
@@ -335,9 +334,9 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/open-window":        "_post_open_window",
     "/api/suggest":            "_post_suggest",
     "/api/composite-test-run": "_post_composite_test_run",
-    "/api/iset-create":         "_post_iset_create",
+    "/api/investigation-create":         "_post_investigation_create",
     "/api/investigation-clone":          "_post_iset_clone",
-    "/api/investigation-create":      "_post_investigation_create",
+    "/api/study-create":      "_post_study_create",
     "/api/investigation-delete":      "_post_investigation_delete",
     "/api/investigation-run":         "_post_investigation_run",
     "/api/investigation-render-viz":  "_post_investigation_render_viz",
@@ -345,7 +344,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/investigation-run-delete":  "_post_investigation_run_delete",
     "/api/investigation-runs-clear":  "_post_investigation_runs_clear",
     "/api/investigation-run-one":     "_post_investigation_run_one",
-    "/api/investigation-create-from-composite":  "_post_investigation_create_from_composite",
+    "/api/study-create-from-composite":  "_post_study_create_from_composite",
     "/api/investigation-composite-add":          "_post_investigation_composite_add",
     "/api/investigation-composite-perturb":      "_post_investigation_composite_perturb",
     "/api/investigation-composite-rebuild":      "_post_investigation_composite_rebuild",
@@ -926,7 +925,7 @@ def _iter_iset_dirs(ws_root: Path | None = None):
 # Investigation status derivation
 # ---------------------------------------------------------------------------
 
-# Slug pattern used by /api/iset-create — kebab-case only (no underscores).
+# Slug pattern used by /api/investigation-create — kebab-case only (no underscores).
 # Tighter than _SLUG_RE (which allows underscores for legacy auto-generated
 # study names): investigations are user-named in the dashboard UI and we
 # want them to look like URL-safe slugs.
@@ -1836,7 +1835,7 @@ def _build_iset_detail_for_test(ws_root: Path, name: str) -> tuple[dict, int]:
 
 def _post_iset_create_for_test(ws_root: Path, body: dict) -> tuple[dict, int]:
     """Name-shim for backward-compat test imports → lib.scaffold_mutations."""
-    return _scaffold_mut.iset_create(ws_root, body)
+    return _scaffold_mut.investigation_create(ws_root, body)
 
 
 def _post_iset_clone_for_test(ws_root: Path, body: dict) -> tuple[dict, int]:
@@ -5603,8 +5602,8 @@ class Handler(BaseHTTPRequestHandler):
         out = _build_investigation_registry_for_test(WORKSPACE, this_url)
         return self._json(out, 200)
 
-    def _post_iset_create(self, body: dict):
-        """POST /api/iset-create — scaffold a new investigation.yaml.
+    def _post_investigation_create(self, body: dict):
+        """POST /api/investigation-create — scaffold a new investigation.yaml.
 
         Body: ``{name: str, overview?: str, parent_studies?: list[str]}``.
         Slug must match ``^[a-z0-9][a-z0-9-]*$``. Atomic write (tmp+rename).
@@ -5843,8 +5842,8 @@ class Handler(BaseHTTPRequestHandler):
         """
         return self._json(_investigations_data(WORKSPACE), 200)
 
-    def _post_investigation_create(self, body: dict):
-        """POST /api/investigation-create {name, source?} — scaffold a new investigation.
+    def _post_study_create(self, body: dict):
+        """POST /api/study-create {name, source?} — scaffold a new study.
 
         ``source`` is an optional composite ref (e.g. ``pkg.composites.foo``) that seeds the
         investigation with a baseline composite.  If omitted an empty study is created.
@@ -6791,8 +6790,8 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             conn.close()
 
-    def _post_investigation_create_from_composite(self, body: dict):
-        """POST /api/investigation-create-from-composite {composite_name}
+    def _post_study_create_from_composite(self, body: dict):
+        """POST /api/study-create-from-composite {composite_name}
 
         Clone a workspace-catalog composite into a fresh investigation. The
         catalog is the union of the workspace's own ``pbg_<slug>/composites/``
@@ -7103,7 +7102,7 @@ class Handler(BaseHTTPRequestHandler):
             )
 
         # Resolve workspace package path using the same pattern as other
-        # handlers (e.g. _post_investigation_create_from_composite).
+        # handlers (e.g. _post_study_create_from_composite).
         try:
             ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")) or {}
         except Exception as e:

@@ -443,10 +443,10 @@ def _apply_rebuild_investigation_composite(
 
 
 # ---------------------------------------------------------------------------
-# create_from_composite  (POST /api/investigation-create-from-composite)
+# create_from_composite  (POST /api/study-create-from-composite)
 # ---------------------------------------------------------------------------
 #
-# Batch 28: clone a workspace-catalog composite into a fresh investigation.
+# Batch 28: clone a workspace-catalog composite into a fresh study.
 # The git-committing legacy server keeps its heavy pre-wrapper (catalog scan,
 # match-by-name-then-id-stem, generator-vs-file resolution, uuid auto-name and
 # 409 collision), its ``commit_msg``, its ``try/_commit_or_run/except`` and the
@@ -457,9 +457,9 @@ def _apply_rebuild_investigation_composite(
 
 
 def create_from_composite(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
-    """POST /api/investigation-create-from-composite {composite_name}.
+    """POST /api/study-create-from-composite {composite_name}.
 
-    Clone a workspace-catalog composite into a fresh investigation. The catalog
+    Clone a workspace-catalog composite into a fresh study. The catalog
     is the union of the workspace's own ``pbg_<slug>/composites/`` and every
     installed ``pbg-*`` package's ``composites/`` directory. ``composite_name``
     is matched against the catalog record's ``name`` first, then the dotted-id

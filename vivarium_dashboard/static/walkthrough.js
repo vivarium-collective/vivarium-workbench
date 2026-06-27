@@ -3721,7 +3721,7 @@
     var name = id.indexOf('.') >= 0 ? id.split('.').pop() : id;
     var btn = document.getElementById('ce-begin-study-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Starting study…'; }
-    fetch('/api/investigation-create-from-composite', {
+    fetch('/api/study-create-from-composite', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({composite_name: name}),
@@ -4815,7 +4815,7 @@
     btn.textContent = 'Creating…';
     errEl.style.display = 'none';
 
-    fetch('/api/iset-create', {
+    fetch('/api/investigation-create', {
       method: 'POST',
       headers: {'Content-Type': 'application/json', Accept: 'application/json'},
       body: JSON.stringify(body),
@@ -11930,7 +11930,7 @@
   function _submitInvestigationCreate(form) {
     var data = new FormData(form);
     var payload = { name: data.get('name'), composite: data.get('composite'), source: data.get('source') || '' };
-    fetch('/api/investigation-create', {
+    fetch('/api/study-create', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload),
     }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })

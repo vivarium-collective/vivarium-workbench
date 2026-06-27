@@ -1,7 +1,7 @@
 """Tests for lib.scaffold_mutations — investigation scaffold pure builders.
 
 Covers:
-  - iset_create: happy path, validation errors (400), conflict (409).
+  - investigation_create: happy path, validation errors (400), conflict (409).
   - iset_clone: happy path, validation errors (400), 404, 409, 501.
   - delete_investigation: happy path, 400 (missing name), 404 (not found).
 
@@ -24,7 +24,7 @@ import yaml
 
 from vivarium_dashboard.lib.scaffold_mutations import (
     delete_investigation,
-    iset_create,
+    investigation_create,
     iset_clone,
 )
 
@@ -50,12 +50,12 @@ def ws(tmp_path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# iset_create
+# investigation_create
 # ---------------------------------------------------------------------------
 
 
-def test_iset_create_happy(ws: Path) -> None:
-    resp, code = iset_create(ws, {"name": "my-inv", "overview": "Why"})
+def test_investigation_create_happy(ws: Path) -> None:
+    resp, code = investigation_create(ws, {"name": "my-inv", "overview": "Why"})
     assert code == 200, resp
     yaml_path = ws / "investigations" / "my-inv" / "investigation.yaml"
     assert yaml_path.is_file()
@@ -64,8 +64,8 @@ def test_iset_create_happy(ws: Path) -> None:
     assert spec["status"] == "planning"
 
 
-def test_iset_create_returns_detail_shape(ws: Path) -> None:
-    resp, code = iset_create(ws, {"name": "foo"})
+def test_investigation_create_returns_detail_shape(ws: Path) -> None:
+    resp, code = investigation_create(ws, {"name": "foo"})
     assert code == 200, resp
     assert resp["name"] == "foo"
     assert resp["status"] == "planning"
@@ -73,21 +73,21 @@ def test_iset_create_returns_detail_shape(ws: Path) -> None:
     assert resp["studies"] == []
 
 
-def test_iset_create_missing_name(ws: Path) -> None:
-    resp, code = iset_create(ws, {})
+def test_investigation_create_missing_name(ws: Path) -> None:
+    resp, code = investigation_create(ws, {})
     assert code == 400
     assert "error" in resp
 
 
-def test_iset_create_bad_slug(ws: Path) -> None:
-    resp, code = iset_create(ws, {"name": "BadName"})
+def test_investigation_create_bad_slug(ws: Path) -> None:
+    resp, code = investigation_create(ws, {"name": "BadName"})
     assert code == 400
     assert "kebab-case" in resp["error"]
 
 
-def test_iset_create_conflict(ws: Path) -> None:
-    iset_create(ws, {"name": "dup"})
-    resp, code = iset_create(ws, {"name": "dup"})
+def test_investigation_create_conflict(ws: Path) -> None:
+    investigation_create(ws, {"name": "dup"})
+    resp, code = investigation_create(ws, {"name": "dup"})
     assert code == 409
     assert "exists" in resp["error"]
 
@@ -125,7 +125,7 @@ def _seed_clone_env(ws: Path) -> None:
     """Write a stub clone script + source investigation into ws."""
     (ws / "scripts").mkdir(exist_ok=True)
     (ws / "scripts" / "clone_investigation.py").write_text(_STUB_CLONE_SCRIPT)
-    iset_create(ws, {"name": "src-inv", "overview": "source"})
+    investigation_create(ws, {"name": "src-inv", "overview": "source"})
 
 
 def test_iset_clone_happy(ws: Path) -> None:
@@ -169,13 +169,13 @@ def test_iset_clone_source_not_found(ws: Path) -> None:
 
 def test_iset_clone_target_already_exists(ws: Path) -> None:
     _seed_clone_env(ws)
-    iset_create(ws, {"name": "dst-inv"})
+    investigation_create(ws, {"name": "dst-inv"})
     resp, code = iset_clone(ws, {"source": "src-inv", "target": "dst-inv"})
     assert code == 409
 
 
 def test_iset_clone_missing_script(ws: Path) -> None:
-    iset_create(ws, {"name": "src-inv"})
+    investigation_create(ws, {"name": "src-inv"})
     resp, code = iset_clone(ws, {"source": "src-inv", "target": "dst-inv"})
     assert code == 501
     assert "clone_investigation.py" in resp["error"]
@@ -187,7 +187,7 @@ def test_iset_clone_missing_script(ws: Path) -> None:
 
 
 def test_delete_investigation_happy(ws: Path) -> None:
-    iset_create(ws, {"name": "to-delete"})
+    investigation_create(ws, {"name": "to-delete"})
     inv_dir = ws / "investigations" / "to-delete"
     assert inv_dir.is_dir()
     resp, code = delete_investigation(ws, {"name": "to-delete"})
@@ -256,7 +256,7 @@ class TestServerCommitPath:
         """
         import vivarium_dashboard.server as _server
 
-        iset_create(ws, {"name": "del-me"})
+        investigation_create(ws, {"name": "del-me"})
         inv_dir = ws / "investigations" / "del-me"
         assert inv_dir.is_dir()
 
@@ -349,7 +349,7 @@ class TestServerCommitPath:
         """
         import vivarium_dashboard.server as _server
 
-        iset_create(ws, {"name": "raise-me"})
+        investigation_create(ws, {"name": "raise-me"})
         monkeypatch.setattr(_server, "WORKSPACE", ws)
 
         def _lib_fails(ws_root, body):
@@ -382,7 +382,7 @@ class TestServerCommitPath:
         from fastapi.testclient import TestClient
         from vivarium_dashboard.api.app import create_app, get_workspace
 
-        iset_create(ws, {"name": "to-nuke"})
+        investigation_create(ws, {"name": "to-nuke"})
         app = create_app()
         app.dependency_overrides[get_workspace] = lambda: ws
         client = TestClient(app)
@@ -397,7 +397,7 @@ class TestServerCommitPath:
 
 
 # ---------------------------------------------------------------------------
-# Behavior-preservation: the iset-create/clone response is an additive
+# Behavior-preservation: the investigation-create/clone response is an additive
 # SUPERSET of the legacy minimal seam (_build_iset_detail_for_test) — no
 # legacy key dropped or changed.
 # ---------------------------------------------------------------------------
@@ -420,7 +420,7 @@ class TestIsetDetailAdditive:
         from vivarium_dashboard.server import _build_iset_detail_for_test
         from vivarium_dashboard.lib.report_views import build_iset_detail
 
-        iset_create(ws, {"name": "foo", "overview": "bar"})
+        investigation_create(ws, {"name": "foo", "overview": "bar"})
         legacy, code = _build_iset_detail_for_test(ws, "foo")
         assert code == 200
         new = build_iset_detail(ws, "foo")

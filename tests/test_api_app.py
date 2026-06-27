@@ -3999,11 +3999,11 @@ class TestBatch21ScaffoldRoutes:
         return TestClient(app)
 
     # -----------------------------------------------------------------------
-    # /api/iset-create
+    # /api/investigation-create
     # -----------------------------------------------------------------------
 
     def test_iset_create_happy(self, sc_client: TestClient, ws: Path) -> None:
-        r = sc_client.post("/api/iset-create", json={"name": "new-inv", "overview": "Test"})
+        r = sc_client.post("/api/investigation-create", json={"name": "new-inv", "overview": "Test"})
         assert r.status_code == 200
         body = r.json()
         assert body["name"] == "new-inv"
@@ -4011,23 +4011,23 @@ class TestBatch21ScaffoldRoutes:
         assert (ws / "investigations" / "new-inv" / "investigation.yaml").is_file()
 
     def test_iset_create_missing_name(self, sc_client: TestClient) -> None:
-        r = sc_client.post("/api/iset-create", json={})
+        r = sc_client.post("/api/investigation-create", json={})
         assert r.status_code == 400
         assert "error" in r.json()
 
     def test_iset_create_bad_slug(self, sc_client: TestClient) -> None:
-        r = sc_client.post("/api/iset-create", json={"name": "BadSlug"})
+        r = sc_client.post("/api/investigation-create", json={"name": "BadSlug"})
         assert r.status_code == 400
 
     def test_iset_create_conflict(self, sc_client: TestClient) -> None:
-        sc_client.post("/api/iset-create", json={"name": "dup"})
-        r = sc_client.post("/api/iset-create", json={"name": "dup"})
+        sc_client.post("/api/investigation-create", json={"name": "dup"})
+        r = sc_client.post("/api/investigation-create", json={"name": "dup"})
         assert r.status_code == 409
 
     def test_iset_create_in_openapi(self, sc_client: TestClient) -> None:
         paths = sc_client.get("/openapi.json").json()["paths"]
-        assert "/api/iset-create" in paths
-        assert "post" in paths["/api/iset-create"]
+        assert "/api/investigation-create" in paths
+        assert "post" in paths["/api/investigation-create"]
 
     # -----------------------------------------------------------------------
     # /api/investigation-clone
@@ -4121,7 +4121,7 @@ if a.json:
 
 
 class TestInvestigationCreateRoute:
-    """Route-level tests for POST /api/investigation-create (deferred commit)."""
+    """Route-level tests for POST /api/study-create (deferred commit)."""
 
     @pytest.fixture
     def ws(self, tmp_path: Path) -> Path:
@@ -4139,32 +4139,32 @@ class TestInvestigationCreateRoute:
         return TestClient(app)
 
     def test_create_happy_blank(self, ic_client: TestClient, ws: Path) -> None:
-        r = ic_client.post("/api/investigation-create", json={"name": "inv-blank"})
+        r = ic_client.post("/api/study-create", json={"name": "inv-blank"})
         assert r.status_code == 200
         assert r.json() == {"ok": True, "name": "inv-blank"}
         assert (ws / "studies" / "inv-blank" / "spec.yaml").is_file()
         assert (ws / "studies" / "inv-blank" / "data" / ".keep").is_file()
 
     def test_create_missing_name(self, ic_client: TestClient) -> None:
-        r = ic_client.post("/api/investigation-create", json={})
+        r = ic_client.post("/api/study-create", json={})
         assert r.status_code == 400
         assert r.json() == {"error": "name is required"}
 
     def test_create_bad_name_regex(self, ic_client: TestClient) -> None:
-        r = ic_client.post("/api/investigation-create", json={"name": "bad name!"})
+        r = ic_client.post("/api/study-create", json={"name": "bad name!"})
         assert r.status_code == 400
         assert r.json() == {"error": "name must match [a-zA-Z0-9_-]+"}
 
     def test_create_conflict(self, ic_client: TestClient) -> None:
-        ic_client.post("/api/investigation-create", json={"name": "dup"})
-        r = ic_client.post("/api/investigation-create", json={"name": "dup"})
+        ic_client.post("/api/study-create", json={"name": "dup"})
+        r = ic_client.post("/api/study-create", json={"name": "dup"})
         assert r.status_code == 409
         assert r.json() == {"error": "investigation 'dup' already exists"}
 
     def test_create_in_openapi(self, ic_client: TestClient) -> None:
         paths = ic_client.get("/openapi.json").json()["paths"]
-        assert "/api/investigation-create" in paths
-        assert "post" in paths["/api/investigation-create"]
+        assert "/api/study-create" in paths
+        assert "post" in paths["/api/study-create"]
 
 
 class TestBatch26ReferenceRoutes:
@@ -4472,7 +4472,7 @@ class TestBatch27CompositeRoutes:
 
 class TestBatch28InvVizRoutes:
     """Route-level tests for Batch 28 investigation composite/viz POST endpoints
-    (/api/investigation-create-from-composite, -add-viz, -render-viz)."""
+    (/api/study-create-from-composite, -add-viz, -render-viz)."""
 
     _INV = "demo"
 
@@ -4518,20 +4518,20 @@ class TestBatch28InvVizRoutes:
         monkeypatch.setattr(_imig, "_resolve_composite_source", lambda r, root: (src, "chromo"))
         monkeypatch.setattr(_cm.uuid, "uuid4", lambda: types.SimpleNamespace(hex="abcdef000000"))
 
-        r = rc.post("/api/investigation-create-from-composite", json={"composite_name": "chromo"})
+        r = rc.post("/api/study-create-from-composite", json={"composite_name": "chromo"})
         assert r.status_code == 200, r.json()
         assert r.json() == {"name": "study-chromo-abcdef"}
         assert (ws / "studies" / "study-chromo-abcdef" / "spec.yaml").is_file()
 
     def test_create_400_blank(self, rc: TestClient) -> None:
-        r = rc.post("/api/investigation-create-from-composite", json={"composite_name": ""})
+        r = rc.post("/api/study-create-from-composite", json={"composite_name": ""})
         assert r.status_code == 400
         assert r.json()["error"] == "composite_name required"
 
     def test_create_404_not_in_catalog(self, rc: TestClient, monkeypatch) -> None:
         from vivarium_dashboard.lib import composite_lookup as _clookup
         monkeypatch.setattr(_clookup, "discover_all_composites", lambda root, pkg: {})
-        r = rc.post("/api/investigation-create-from-composite", json={"composite_name": "ghost"})
+        r = rc.post("/api/study-create-from-composite", json={"composite_name": "ghost"})
         assert r.status_code == 404
         assert "not in workspace catalog" in r.json()["error"]
 
@@ -4591,7 +4591,7 @@ class TestBatch28InvVizRoutes:
     def test_routes_in_openapi(self, rc: TestClient) -> None:
         paths = rc.get("/openapi.json").json()["paths"]
         for p in (
-            "/api/investigation-create-from-composite",
+            "/api/study-create-from-composite",
             "/api/investigation-add-viz",
             "/api/investigation-render-viz",
         ):

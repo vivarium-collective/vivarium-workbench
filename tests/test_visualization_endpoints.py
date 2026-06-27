@@ -1115,7 +1115,7 @@ def test_post_create_from_composite_creates_v2_spec(workspace_server):
     }))
 
     code, j = _post(
-        workspace_server.url + '/api/investigation-create-from-composite',
+        workspace_server.url + '/api/study-create-from-composite',
         {'composite_name': 'chromosome-partition'},
     )
     assert code == 200, j
@@ -1155,7 +1155,7 @@ def test_post_create_from_composite_creates_v2_spec(workspace_server):
 def test_post_create_from_composite_unknown_returns_404(workspace_server):
     """Unknown composite_name yields a 404."""
     code, j = _post(
-        workspace_server.url + '/api/investigation-create-from-composite',
+        workspace_server.url + '/api/study-create-from-composite',
         {'composite_name': 'does-not-exist'},
     )
     assert code == 404, j
@@ -1164,7 +1164,7 @@ def test_post_create_from_composite_unknown_returns_404(workspace_server):
 def test_post_create_from_composite_blank_returns_400(workspace_server):
     """Empty composite_name yields a 400."""
     code, j = _post(
-        workspace_server.url + '/api/investigation-create-from-composite',
+        workspace_server.url + '/api/study-create-from-composite',
         {'composite_name': ''},
     )
     assert code == 400, j

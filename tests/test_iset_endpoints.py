@@ -2,7 +2,7 @@
 
 Covers:
 - compute_investigation_status: pure status-derivation function.
-- _post_iset_create_for_test: POST /api/iset-create body handler.
+- _post_iset_create_for_test: POST /api/investigation-create body handler.
 - _build_iset_summary_for_test / _build_iset_detail_for_test: GET handlers
   pulled out to functions that don't require an HTTP handler instance.
 """
@@ -163,7 +163,7 @@ def test_study_effective_failed_beats_runs():
 
 
 # ---------------------------------------------------------------------------
-# Part 2: _post_iset_create_for_test — POST /api/iset-create handler
+# Part 2: _post_iset_create_for_test — POST /api/investigation-create handler
 # ---------------------------------------------------------------------------
 
 

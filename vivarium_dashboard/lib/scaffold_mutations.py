@@ -41,8 +41,8 @@ def _extract_name(body: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def iset_create(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
-    """POST /api/iset-create — scaffold a new investigation.yaml.
+def investigation_create(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
+    """POST /api/investigation-create — scaffold a new investigation.yaml.
 
     Moved verbatim from ``server._post_iset_create_for_test``.  Returns the
     new investigation in the same shape as ``GET /api/investigation/<name>``.
@@ -160,7 +160,7 @@ def iset_clone(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
         summary = {"stdout_tail": proc.stdout[-500:]}
 
     # build_iset_detail returns an additive SUPERSET of the legacy seam's
-    # minimal shape (see iset_create) plus the clone_summary field below.
+    # minimal shape (see investigation_create) plus the clone_summary field below.
     from vivarium_dashboard.lib.report_views import build_iset_detail as _bld
     detail = _bld(ws_root, target)
     if detail is None:

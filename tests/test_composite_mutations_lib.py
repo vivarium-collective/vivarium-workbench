@@ -698,7 +698,7 @@ class TestCreateFromCompositeCommitPath:
         calls: dict[str, Any] = {}
         monkeypatch.setattr(_srv, "_commit_or_run", _recorder_factory(calls))
         handler, captured = _make_handler_and_capture()
-        handler._post_investigation_create_from_composite({"composite_name": "chromo"})
+        handler._post_study_create_from_composite({"composite_name": "chromo"})
         assert calls["commit_msg"] == (
             "feat(investigations/study-chromo-abcdef): create from composite 'chromo'"
         )
@@ -716,7 +716,7 @@ class TestCreateFromCompositeCommitPath:
 
         monkeypatch.setattr(_srv, "_commit_or_run", _boom)
         handler, captured = _make_handler_and_capture()
-        handler._post_investigation_create_from_composite({"composite_name": ""})
+        handler._post_study_create_from_composite({"composite_name": ""})
         assert captured["code"] == 400
 
     def test_do_action_failure_is_500(self, ws: Path, monkeypatch: Any) -> None:
@@ -737,7 +737,7 @@ class TestCreateFromCompositeCommitPath:
         monkeypatch.setattr(_srv._composite_mut, "_apply_create_from_composite", _apply_boom)
         monkeypatch.setattr(_srv, "_commit_or_run", _record_and_run)
         handler, captured = _make_handler_and_capture()
-        handler._post_investigation_create_from_composite({"composite_name": "chromo"})
+        handler._post_study_create_from_composite({"composite_name": "chromo"})
         assert "raised" in captured_action
         assert captured["code"] == 500
         assert "workstream error" in captured["resp"]["error"]
