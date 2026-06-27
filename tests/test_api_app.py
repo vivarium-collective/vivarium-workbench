@@ -5737,6 +5737,137 @@ class TestStudyRunRoutes:
 
 
 # ===========================================================================
+# Misc POST routes (cont.): suggest + study-report-single + open-window (under
+# the "Misc" tag).  Each route is a thin wrapper over a lib.misc_post_views fn;
+# every test monkeypatches that lib fn (via the app's _misc_post_views seam) so
+# NO real git runs and NO real window opens.  The routes JSONResponse all paths,
+# so the lib-returned (dict, status) is preserved verbatim.  The
+# study-report-single route additionally merges the ``?skeptic=`` query param
+# into the body before calling the builder.
+# ===========================================================================
+class TestMiscPostRoutes:
+    # -- POST /api/suggest ---------------------------------------------------
+
+    def test_suggest_passthrough(self, client, monkeypatch):
+        captured = {}
+
+        def _fake(ws, body):
+            captured["ws"], captured["body"] = ws, body
+            return {"ok": True, "id": "repo-name-1", "skill_command": "/x",
+                    "instructions": "go"}, 200
+
+        monkeypatch.setattr(api_app._misc_post_views, "suggest", _fake)
+        r = client.post("/api/suggest",
+                        json={"kind": "repo-name", "context_extras": {"a": 1}})
+        assert r.status_code == 200
+        assert r.json()["id"] == "repo-name-1"
+        assert captured["body"] == {"kind": "repo-name", "context_extras": {"a": 1}}
+
+    def test_suggest_invalid_kind_400_preserved(self, client, monkeypatch):
+        monkeypatch.setattr(
+            api_app._misc_post_views, "suggest",
+            lambda ws, body: ({"error": "invalid kind (must be one of ...)"}, 400))
+        r = client.post("/api/suggest", json={"kind": "bogus"})
+        assert r.status_code == 400
+        assert r.json() == {"error": "invalid kind (must be one of ...)"}
+
+    def test_suggest_omitted_extras_absent(self, client, monkeypatch):
+        captured = {}
+        monkeypatch.setattr(
+            api_app._misc_post_views, "suggest",
+            lambda ws, body: (captured.update(body=body) or ({"ok": True}, 200)))
+        client.post("/api/suggest", json={"kind": "pr-title"})
+        # exclude_none keeps an OMITTED optional ABSENT.
+        assert captured["body"] == {"kind": "pr-title"}
+        assert "context_extras" not in captured["body"]
+
+    # -- POST /api/study-report-single --------------------------------------
+
+    def test_study_report_single_passthrough(self, client, monkeypatch):
+        captured = {}
+
+        def _fake(ws, body):
+            captured["body"] = body
+            return {"html_path": "reports/s1.html", "size_bytes": 9,
+                    "study": "s1"}, 200
+
+        monkeypatch.setattr(api_app._misc_post_views, "study_report_single", _fake)
+        r = client.post("/api/study-report-single", json={"study": "s1"})
+        assert r.status_code == 200
+        assert r.json()["html_path"] == "reports/s1.html"
+        assert captured["body"] == {"study": "s1"}
+        assert "skeptic" not in captured["body"]
+
+    def test_study_report_single_skeptic_query_true(self, client, monkeypatch):
+        captured = {}
+        monkeypatch.setattr(
+            api_app._misc_post_views, "study_report_single",
+            lambda ws, body: (captured.update(body=body) or ({"ok": True}, 200)))
+        client.post("/api/study-report-single?skeptic=1", json={"study": "s1"})
+        assert captured["body"]["skeptic"] is True
+
+    def test_study_report_single_skeptic_query_false(self, client, monkeypatch):
+        captured = {}
+        monkeypatch.setattr(
+            api_app._misc_post_views, "study_report_single",
+            lambda ws, body: (captured.update(body=body) or ({"ok": True}, 200)))
+        client.post("/api/study-report-single?skeptic=0", json={"study": "s1"})
+        assert captured["body"]["skeptic"] is False
+
+    def test_study_report_single_body_skeptic_wins_over_query(self, client, monkeypatch):
+        captured = {}
+        monkeypatch.setattr(
+            api_app._misc_post_views, "study_report_single",
+            lambda ws, body: (captured.update(body=body) or ({"ok": True}, 200)))
+        # body already has skeptic → query must NOT override it.
+        client.post("/api/study-report-single?skeptic=1",
+                    json={"study": "s1", "skeptic": False})
+        assert captured["body"]["skeptic"] is False
+
+    def test_study_report_single_error_500_preserved(self, client, monkeypatch):
+        monkeypatch.setattr(
+            api_app._misc_post_views, "study_report_single",
+            lambda ws, body: ({"error": "boom"}, 500))
+        r = client.post("/api/study-report-single", json={"study": "s1"})
+        assert r.status_code == 500
+        assert r.json() == {"error": "boom"}
+
+    # -- POST /api/open-window ----------------------------------------------
+
+    def test_open_window_passthrough(self, client, monkeypatch):
+        captured = {}
+
+        def _fake(ws, body):
+            captured["body"] = body
+            return {"ok": True, "url": "http://h/x"}, 200
+
+        monkeypatch.setattr(api_app._misc_post_views, "open_window", _fake)
+        r = client.post("/api/open-window", json={"route": "/x"})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True, "url": "http://h/x"}
+        assert captured["body"] == {"route": "/x"}
+
+    def test_open_window_no_server_info_503_preserved(self, client, monkeypatch):
+        monkeypatch.setattr(
+            api_app._misc_post_views, "open_window",
+            lambda ws, body: (
+                {"error": "server-info file not found - is the dashboard "
+                          "running?"}, 503))
+        r = client.post("/api/open-window", json={})
+        assert r.status_code == 503
+        assert "server-info file not found" in r.json()["error"]
+
+    # -- OpenAPI registration ------------------------------------------------
+
+    def test_routes_in_openapi(self, client):
+        spec = client.get("/openapi.json").json()
+        paths = spec["paths"]
+        for p in ("/api/suggest", "/api/study-report-single", "/api/open-window"):
+            assert p in paths and "post" in paths[p], p
+            assert paths[p]["post"]["tags"] == ["Misc"], p
+
+
+# ===========================================================================
 # P2: composite-test-run POST route (detached run launcher, "Composite runs"
 # tag).  Thin wrapper over ``lib.composite_test_run_views.composite_test_run`` —
 # every test monkeypatches that lib fn so NO real subprocess is spawned.  The
