@@ -11502,10 +11502,10 @@
       _openStudyInsideInvestigation(name);
       return;
     }
-    _switchPage('studies');
-    setTimeout(function() {
-      if (typeof _openStudyEmbedded === 'function') _openStudyEmbedded(name);
-    }, 80);
+    // Otherwise navigate straight to the study page. The old branch switched to a
+    // standalone "studies" page that no longer exists in the investigation-centric
+    // nav, so the sidebar study click landed nowhere. _studyHref → /studies/<name>.
+    window.location = _studyHref(name);
   }
   window._openStudyEmbeddedNewTab = _openStudyEmbeddedNewTab;
 
