@@ -36,7 +36,7 @@
           <button type="button" class="viv-ws-modal-close" aria-label="Close">✕</button>
         </div>
         <ul class="viv-ws-modal-list"></ul>
-        <div class="viv-ws-modal-footer">
+        <div class="viv-ws-modal-footer js-authoring">
           <button type="button" class="viv-ws-modal-add">+ Add existing workspace…</button>
           <div class="viv-workspace-switcher-actions">
             <button type="button" class="viv-ws-action-start-workstream">+ Start workstream</button>
@@ -123,8 +123,8 @@
     const name = document.createElement('span');
     name.className = 'viv-ws-name';
     name.innerHTML = `<strong>${escapeHtml(ws.name)}</strong>${
-      ws.status === 'current' ? ' <small>(this)</small>' : ''
-    }`;
+      ws.branch ? ` <small style="color:#94a3b8;font-weight:400">@ ${escapeHtml(ws.branch)}</small>` : ''
+    }${ws.status === 'current' ? ' <small>(this)</small>' : ''}`;
     line1.appendChild(name);
 
     const btn = renderActionButton(ws, li);
@@ -149,6 +149,16 @@
 
   function renderActionButton(ws, li) {
     if (ws.status === 'current') return null;
+    // Remote read-only client: no start/stop/forget management — the whole row
+    // is a "switch to this workspace" action. Show a quiet Switch affordance.
+    if (document.body.classList.contains('readonly')) {
+      const sb = document.createElement('button');
+      sb.type = 'button';
+      sb.className = 'viv-ws-action';
+      sb.textContent = 'Switch →';
+      sb.addEventListener('click', () => _switchInPlace(ws, li));
+      return sb;
+    }
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'viv-ws-action';
@@ -175,6 +185,12 @@
   }
 
   function doPrimary(ws, li) {
+    // Remote read-only client: one server re-points its active workspace
+    // in-process (no per-workspace servers to spawn/navigate to).
+    if (document.body.classList.contains('readonly')) {
+      _switchInPlace(ws, li);
+      return;
+    }
     if (ws.status === 'running') {
       window.location.href = ws.url;
     } else if (ws.status === 'stopped') {
@@ -183,6 +199,15 @@
       doCleanup(ws, null, li);
     } else if (ws.status === 'missing') {
       doForget(ws, null, li);
+    }
+  }
+
+  async function _switchInPlace(ws, li) {
+    try {
+      await postJson('/api/source/switch', { path: ws.path });
+      window.location.reload();
+    } catch (e) {
+      rowError(li, 'Switch failed: ' + (e && e.message ? e.message : e));
     }
   }
 
