@@ -5352,17 +5352,78 @@ class TestWorkstreamRoutes:
         assert r.status_code == 409
         assert r.json() == {"error": "no active investigation branch"}
 
+    # -- POST /api/work-create-pr --------------------------------------------
+
+    def test_work_create_pr_happy_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import work_pr_views as wp
+        seen = {}
+
+        def _fake(ws, body):
+            seen["body"] = body
+            return {"ok": True, "pr_url": "https://github.com/o/r/pull/5", "pr_number": 5}, 200
+
+        monkeypatch.setattr(wp, "work_create_pr", _fake)
+        r = client.post("/api/work-create-pr", json={"title": "T", "draft": True})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True, "pr_url": "https://github.com/o/r/pull/5", "pr_number": 5}
+        assert seen["body"] == {"title": "T", "draft": True}  # exclude_none drops body
+
+    def test_work_create_pr_no_workstream_409(self, client, monkeypatch):
+        from vivarium_dashboard.lib import work_pr_views as wp
+        monkeypatch.setattr(wp, "work_create_pr",
+                            lambda ws, body: ({"error": "no active workstream"}, 409))
+        r = client.post("/api/work-create-pr", json={})
+        assert r.status_code == 409
+        assert r.json() == {"error": "no active workstream"}
+
+    # -- POST /api/work-link-branch ------------------------------------------
+
+    def test_work_link_branch_happy_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import work_pr_views as wp
+        seen = {}
+
+        def _fake(ws, body):
+            seen["body"] = body
+            return ({"ok": True, "upstream_repo": "o/r", "branch": "feat/x",
+                     "branch_url": "https://github.com/o/r/tree/feat/x"}, 200)
+
+        monkeypatch.setattr(wp, "work_link_branch", _fake)
+        r = client.post("/api/work-link-branch",
+                        json={"upstream_repo": "o/r", "mode": "branch"})
+        assert r.status_code == 200
+        assert r.json()["branch_url"] == "https://github.com/o/r/tree/feat/x"
+        # exclude_none drops branch_name/push; passes the set fields verbatim
+        assert seen["body"] == {"upstream_repo": "o/r", "mode": "branch"}
+
+    def test_work_link_branch_bad_mode_400(self, client, monkeypatch):
+        from vivarium_dashboard.lib import work_pr_views as wp
+        monkeypatch.setattr(wp, "work_link_branch",
+                            lambda ws, body: ({"error": "mode must be 'branch' or 'fork'; got 'x'"}, 400))
+        r = client.post("/api/work-link-branch", json={"mode": "x"})
+        assert r.status_code == 400
+        assert r.json() == {"error": "mode must be 'branch' or 'fork'; got 'x'"}
+
+    def test_work_link_branch_no_workstream_409(self, client, monkeypatch):
+        from vivarium_dashboard.lib import work_pr_views as wp
+        monkeypatch.setattr(wp, "work_link_branch",
+                            lambda ws, body: ({"error": "no active workstream — Start one first so the push has a target"}, 409))
+        r = client.post("/api/work-link-branch", json={})
+        assert r.status_code == 409
+        assert "no active workstream" in r.json()["error"]
+
     # -- OpenAPI registration ------------------------------------------------
 
     def test_routes_in_openapi(self, client):
         spec = client.get("/openapi.json").json()
         paths = spec["paths"]
         for p in ("/api/work-start", "/api/work-push", "/api/work-end",
-                  "/api/work-attach-report"):
+                  "/api/work-attach-report", "/api/work-create-pr",
+                  "/api/work-link-branch"):
             assert p in paths and "post" in paths[p], p
         schemas = spec["components"]["schemas"]
         for name in ("WorkStartResponse", "WorkPushResponse", "WorkEndResponse",
-                     "WorkAttachReportResponse"):
+                     "WorkAttachReportResponse", "WorkCreatePrResponse",
+                     "WorkLinkBranchResponse"):
             assert name in schemas, name
 
 

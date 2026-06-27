@@ -480,6 +480,18 @@ export interface WorkAttachReportResponse {
   branch: string;
 }
 
+export interface WorkCreatePrResponse {
+  ok: boolean;
+  pr_url: string;
+  pr_number: number | null;
+}
+
+export interface WorkLinkBranchResponse {
+  ok: boolean;
+  branch: string;
+  branch_url: string;
+}
+
 export interface WorkspacesOkResponse {
   ok: boolean;
 }

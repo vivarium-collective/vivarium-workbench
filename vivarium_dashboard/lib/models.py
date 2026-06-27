@@ -2264,6 +2264,78 @@ class WorkAttachReportResponse(BaseModel):
     branch: str
 
 
+class WorkCreatePrRequest(BaseModel):
+    """POST /api/work-create-pr request body — ``{"title"?, "body"?, "draft"?}``.
+
+    All fields Optional: ``title``/``body`` default inside the lib builder
+    (investigation title / ``Workstream: <branch>``, and the canned PR body);
+    ``draft`` defaults to ``True`` (the builder reads ``body.get("draft", True)``)
+    so an omitted flag still produces a draft PR.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    title: Optional[str] = None
+    body: Optional[str] = None
+    draft: Optional[bool] = None
+
+
+class WorkCreatePrResponse(BaseModel):
+    """200-path payload for ``POST /api/work-create-pr``.
+
+    ``{"ok": True, "pr_url": <url>, "pr_number": <int|null>}``.  The non-200
+    error paths (``{"error", "pr_url"?, "manual_url"?}``, HTTP 409/500) are
+    returned via ``JSONResponse``, not this model.
+
+    Source: ``lib.work_pr_views.work_create_pr``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool = True
+    pr_url: str
+    pr_number: Optional[int] = None
+
+
+class WorkLinkBranchRequest(BaseModel):
+    """POST /api/work-link-branch request body.
+
+    ``{upstream_repo?, branch_name?, push?: bool, mode?: "branch"|"fork"}`` —
+    all Optional.  ``upstream_repo`` defaults inside the lib builder to the
+    auto-detected upstream (workspace.yaml / external remote / fallback);
+    ``branch_name`` defaults to the active workstream branch; ``push`` defaults
+    to ``True`` (``body.get("push", True)``); ``mode`` defaults to ``"branch"``.
+    The route uses ``model_dump(exclude_none=True)`` so omitted fields stay
+    absent and the builder applies its own defaults.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    upstream_repo: Optional[str] = None
+    branch_name: Optional[str] = None
+    push: Optional[bool] = None
+    mode: Optional[str] = None
+
+
+class WorkLinkBranchResponse(BaseModel):
+    """200-path payload for ``POST /api/work-link-branch``.
+
+    Branch mode → ``{ok, upstream_repo, branch, branch_url}``; fork mode →
+    ``{ok, fork, upstream, branch, branch_url}`` (``extra="allow"`` carries the
+    mode-specific keys).  The non-200 error paths (HTTP 400/409/500,
+    ``{"error", "current_origin"?}``) are returned via ``JSONResponse``, not
+    this model.
+
+    Source: ``lib.work_pr_views.work_link_branch``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool = True
+    branch: str
+    branch_url: str
+
+
 # ---------------------------------------------------------------------------
 # C-state-3h1: workspace-registry POST routes
 #   POST /api/workspaces/add /api/workspaces/forget /api/workspaces/cleanup-stale
