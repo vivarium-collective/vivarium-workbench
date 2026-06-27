@@ -72,6 +72,12 @@ def build_manifest(ws_root: Path) -> dict:
             build_meta = None
 
     if isinstance(build_meta, dict):
+        # Build workspace: repo/commit/branch come from the recorded build metadata.
+        # NOTE: `lockfile` below is always taken from the on-disk uv.lock (see
+        # lockfile_hash call), not from the lockfile at repo@commit.  For a
+        # freshly materialized build these are identical.  If the on-disk lock
+        # is later re-synced (e.g. `uv lock --upgrade`) it can diverge and
+        # cause a false 409 on a subsequent `vivarium-dashboard sync`.
         repo = build_meta.get("repo_url") or build_meta.get("repo") or ""
         commit = build_meta.get("commit") or ""
         branch = build_meta.get("branch") or ""

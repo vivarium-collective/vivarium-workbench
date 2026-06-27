@@ -18,7 +18,11 @@ and promote it back — all keyed on one **provenance manifest**.
 ```
 
 Code + deps are pinned (`commit` + `lockfile`); result data is *referenced*,
-fetched lazily on view. The manifest drives both directions below.
+fetched lazily on view. The manifest drives both directions below. For
+build-derived manifests (workspace created from a remote build), `lockfile` is
+the hash of the *on-disk* `uv.lock`; this is assumed to match the lockfile at
+`repo@commit` — true for a freshly materialized build, but a locally re-synced
+build workspace could diverge and cause a false 409 on a subsequent sync.
 
 ## Pull — reproduce locally
 
@@ -28,9 +32,12 @@ fetched lazily on view. The manifest drives both directions below.
 2. Run it locally. `sync` does: clone `repo@commit` → **verify the cloned
    uv.lock hash equals the manifest's** (fidelity gate; aborts on mismatch) →
    `uv sync` → register in the workspace catalog. Optional `--run-post-sync`
-   runs manifest-declared cache-rebuild commands (e.g. `python
-   scripts/build_cache.py`); off by default because it executes remote-authored
-   commands.
+   runs cache-rebuild commands declared in a `post_sync` list — **but
+   `GET /api/source/manifest` never emits a `post_sync` field by design**, so
+   syncing from a dashboard URL is always a no-op for this flag. `post_sync`
+   only takes effect when syncing from a *hand-authored* manifest file you
+   control. This is intentional: it prevents a remote dashboard from injecting
+   shell commands. The flag stays default-off.
 3. Open the synced workspace from the switcher and run it. Same commit + same
    lockfile ⇒ same behavior.
 
