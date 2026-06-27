@@ -91,6 +91,7 @@ from vivarium_dashboard.lib import work_views as _work_views
 from vivarium_dashboard.lib import workspace_deps_views as _workspace_deps
 from vivarium_dashboard.lib import install_views as _install_views
 from vivarium_dashboard.lib import catalog_install_views as _catalog_install_views
+from vivarium_dashboard.lib import catalog_uninstall_views as _catalog_uninstall_views
 from vivarium_dashboard.lib.composite_resolve import resolve_composite
 from vivarium_dashboard.lib.composites_query import composites_via_subprocess
 from vivarium_dashboard.lib.models import (
@@ -276,10 +277,11 @@ from vivarium_dashboard.lib.models import (
     VisualizationPreviewRequest,
     # Viz authoring: visualization-preview-instance (preview registered instance by name)
     VisualizationPreviewInstanceRequest,
-    # Installs: system-deps-install + import-install + catalog-install POST request bodies (JSONResponse-only)
+    # Installs: system-deps-install + import-install + catalog-install/uninstall POST request bodies (JSONResponse-only)
     SystemDepsInstallRequest,
     ImportInstallRequest,
     CatalogInstallRequest,
+    CatalogUninstallRequest,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -5445,6 +5447,39 @@ def create_app() -> FastAPI:
             mutation run inline; the live ``_commit_or_run`` commit is deferred)
         """
         body, status = _catalog_install_views.catalog_install(
+            ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
+
+    @app.post(
+        "/api/catalog-uninstall",
+        tags=["Installs"],
+        summary="Uninstall a catalog module (PyPI or git-submodule) from the workspace",
+    )
+    def catalog_uninstall(
+        req: CatalogUninstallRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Remove a catalog module from the workspace venv (the last catalog committer).
+
+        Mirrors the stdlib ``POST /api/catalog-uninstall``.  Body: ``{"name"}`` —
+        reverses catalog-install (pypi: remove dependency + pip uninstall;
+        reference: remove dependency + uv source + git submodule deinit/rm + pip
+        uninstall; both: pop ``workspace.yaml`` imports entry).  A module not
+        declared in ``workspace.yaml.imports`` is delegated to the "unmanaged"
+        path (venv-only uninstall + untracked ``external/<name>/`` removal).
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.catalog_uninstall_views.catalog_uninstall``, modulo the deferred
+        commit):
+          - 400  missing ``name``
+          - 200  unmanaged already-uninstalled (``{ok, already_uninstalled}``)
+          - 409  unmanaged module still required by a parent
+          - 500  no installer available / uninstall ``action`` failure
+          - 200  ``{ok: true, module, install_mode, log}``  (uninstall +
+            workspace.yaml mutation run inline; the live ``_commit_or_run``
+            commit is deferred)
+        """
+        body, status = _catalog_uninstall_views.catalog_uninstall(
             ws, req.model_dump(exclude_none=True))
         return JSONResponse(status_code=status, content=body)
 

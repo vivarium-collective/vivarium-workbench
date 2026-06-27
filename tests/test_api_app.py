@@ -6299,8 +6299,50 @@ class TestCatalogInstallRoute:
         assert r.json() == body409
 
 
+class TestCatalogUninstallRoute:
+    def test_happy_passthrough(self, client, monkeypatch):
+        from vivarium_dashboard.lib import catalog_uninstall_views
+        captured = {}
+
+        def _fake(ws, body):
+            captured["ws"], captured["body"] = ws, body
+            return {"ok": True, "module": "foo", "install_mode": "pypi", "log": "ok"}, 200
+
+        monkeypatch.setattr(catalog_uninstall_views, "catalog_uninstall", _fake)
+        r = client.post("/api/catalog-uninstall", json={"name": "foo"})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True, "module": "foo", "install_mode": "pypi", "log": "ok"}
+        assert captured["body"] == {"name": "foo"}
+
+    def test_missing_name_400_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import catalog_uninstall_views
+        monkeypatch.setattr(
+            catalog_uninstall_views, "catalog_uninstall",
+            lambda ws, body: ({"error": "missing name"}, 400),
+        )
+        r = client.post("/api/catalog-uninstall", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "missing name"}
+
+    def test_unmanaged_409_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import catalog_uninstall_views
+        body409 = {
+            "error": "foo is required by bar — uninstall the parent(s) first",
+            "transitive_via": ["bar"],
+            "module": "foo",
+        }
+        monkeypatch.setattr(
+            catalog_uninstall_views, "catalog_uninstall",
+            lambda ws, body: (body409, 409),
+        )
+        r = client.post("/api/catalog-uninstall", json={"name": "foo"})
+        assert r.status_code == 409
+        assert r.json() == body409
+
+
 def test_installs_routes_in_openapi(client):
     paths = client.get("/openapi.json").json()["paths"]
-    for p in ("/api/system-deps-install", "/api/import-install", "/api/catalog-install"):
+    for p in ("/api/system-deps-install", "/api/import-install", "/api/catalog-install",
+              "/api/catalog-uninstall"):
         assert p in paths and "post" in paths[p], p
         assert paths[p]["post"]["tags"] == ["Installs"], p
