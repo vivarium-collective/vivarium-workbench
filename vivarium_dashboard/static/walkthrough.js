@@ -3483,6 +3483,20 @@
   }
   window._vivOpenInvestigationFromRail = _vivOpenInvestigationFromRail;
 
+  // Open an investigation's DETAIL view (summary + DAG) from the rail, from any
+  // page. Activates the Investigations page directly rather than via
+  // _switchPage('investigations') — that path calls _loadInvestigationSets(),
+  // which async-re-renders the LIST over the detail we just opened.
+  window._railOpenInvestigationDetail = function (name) {
+    document.querySelectorAll('.page').forEach(function (s) { s.classList.remove('active'); });
+    document.querySelectorAll('.menu-link').forEach(function (a) { a.classList.remove('active'); });
+    var page = document.getElementById('page-investigations');
+    var link = document.querySelector('.menu-link[data-page="investigations"]');
+    if (page) page.classList.add('active');
+    if (link) link.classList.add('active');
+    if (typeof _openInvestigationDetail === 'function') _openInvestigationDetail(name);
+  };
+
   // -------------------------------------------------------------------------
   // Internal helpers
   // -------------------------------------------------------------------------
@@ -11658,7 +11672,7 @@
       var g = groups[0];
       var _iset = (window._isetIndex || []).filter(function(i){ return i.name === g.name; })[0] || {};
       host.innerHTML = '<div class="rail-iset-name" title="' + _esc(_iset.title || g.name) + '"'
-        + ' onclick="_vivOpenInvestigationFromRail(\'' + _esc(g.name) + '\');"'
+        + ' onclick="window._railOpenInvestigationDetail(\'' + _esc(g.name) + '\');"'
         + ' style="cursor:pointer;">'
         + _esc(_iset.title || g.name) + '</div>'
         + g.studies.map(function(s) { return _railStudyItem(s); }).join('');
