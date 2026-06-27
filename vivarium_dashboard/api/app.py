@@ -89,6 +89,7 @@ from vivarium_dashboard.lib import study_viz_views as _study_viz
 from vivarium_dashboard.lib import system_info as _system_info
 from vivarium_dashboard.lib import work_views as _work_views
 from vivarium_dashboard.lib import workspace_deps_views as _workspace_deps
+from vivarium_dashboard.lib import install_views as _install_views
 from vivarium_dashboard.lib.composite_resolve import resolve_composite
 from vivarium_dashboard.lib.composites_query import composites_via_subprocess
 from vivarium_dashboard.lib.models import (
@@ -274,6 +275,9 @@ from vivarium_dashboard.lib.models import (
     VisualizationPreviewRequest,
     # Viz authoring: visualization-preview-instance (preview registered instance by name)
     VisualizationPreviewInstanceRequest,
+    # Installs: system-deps-install + import-install POST request bodies (JSONResponse-only)
+    SystemDepsInstallRequest,
+    ImportInstallRequest,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -742,6 +746,34 @@ _OPENAPI_TAGS = [
             "path in ``JSONResponse`` so the lib-returned status code is "
             "preserved verbatim.  The 3 POSTs are guarded by the same-origin "
             "CSRF middleware."
+        ),
+    },
+    {
+        "name": "Installs",
+        "description": (
+            "venv / system-install WRITE routes — 2 POSTs ported from the stdlib "
+            "handlers that run install commands via subprocess.  "
+            "``POST /api/system-deps-install`` runs the install commands for a "
+            "catalog module's named system-dependency checks (``shell=True`` per "
+            "command, 600s timeout), appends each outcome to ``log`` "
+            "(success / non-zero / timeout / unknown-check / no-install-spec), "
+            "then re-checks every dep — returning ``{ok, log, recheck}``.  "
+            "``POST /api/import-install`` pip-installs a ``workspace.yaml``-"
+            "registered import into the workspace venv (venv ``pip`` preferred, "
+            "system ``uv`` fallback, 120s timeout); on success it marks the import "
+            "``installed=True`` (+ ``install_path``) in workspace.yaml and "
+            "invalidates the registry cache.  Like the other committer ports the "
+            "live ``_active_branch_action`` git commit is DEFERRED — this FastAPI "
+            "route runs the workspace.yaml mutation inline and returns the success "
+            "``{ok, log}`` 200 directly.  Each delegates to a pure builder in "
+            "``lib.install_views``; every path (success AND error) is returned via "
+            "``JSONResponse`` so the lib-returned status code is preserved verbatim "
+            "— system-deps-install 400 (``name + check_names required``) / 404 "
+            "(``unknown module: …``) / 200; import-install 400 (missing name / no "
+            "target) / 404 (not registered / path missing) / 500 (no installer / "
+            "timeout / install error / non-zero returncode with optional "
+            "diagnosis) / 200.  The 2 POSTs are guarded by the same-origin CSRF "
+            "middleware."
         ),
     },
     {
@@ -5310,6 +5342,76 @@ def create_app() -> FastAPI:
         """
         resp, status = _misc_mut.feedback_import(ws, body)
         return JSONResponse(status_code=status, content=resp)
+
+    # -----------------------------------------------------------------------
+    # Installs: system-deps-install + import-install — venv / system installs
+    #
+    # Two POSTs that run install commands via subprocess (NEVER spawned in
+    # tests — the lib fn is monkeypatched).  ``system-deps-install`` runs a
+    # catalog module's per-check install commands and re-checks; ``import-install``
+    # pip-installs a registered import into the venv.  ``import-install`` is an
+    # ``_active_branch_action`` committer in the live server; this FastAPI path
+    # runs the workspace.yaml ``installed=True`` mutation inline with the commit
+    # DEFERRED (like every other committer port) and returns the success body
+    # verbatim.  Both JSONResponse every path so the lib-returned (dict, status)
+    # is preserved.  ``model_dump(exclude_none=True)`` keeps omitted optionals
+    # absent so the builder's ``.get(...)`` defaults apply.  CSRF middleware
+    # already guards both.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/system-deps-install",
+        tags=["Installs"],
+        summary="Run install commands for a catalog module's system-dep checks",
+    )
+    def system_deps_install(
+        req: SystemDepsInstallRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Run install commands for the named checks of a catalog module.
+
+        Mirrors the stdlib ``POST /api/system-deps-install``.  Body:
+        ``{"name", "check_names"}`` — runs each check's platform install commands
+        (``shell=True``, 600s timeout), then re-checks every requested dep.
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.install_views.system_deps_install``):
+          - 400  missing ``name`` / empty ``check_names``
+          - 404  unknown module (``{"error": "unknown module: …"}``)
+          - 200  ``{ok, log, recheck}``
+        """
+        body, status = _install_views.system_deps_install(
+            ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
+
+    @app.post(
+        "/api/import-install",
+        tags=["Installs"],
+        summary="Pip-install a registered import into the workspace venv",
+    )
+    def import_install(
+        req: ImportInstallRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Pip-install a ``workspace.yaml``-registered import into the venv.
+
+        Mirrors the stdlib ``POST /api/import-install``.  Body:
+        ``{"name", "target"?}`` — installs editable (venv ``pip`` preferred,
+        system ``uv`` fallback, 120s timeout); on success it marks the import
+        ``installed=True`` (+ ``install_path``) in workspace.yaml and invalidates
+        the registry cache.
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.install_views.import_install``, modulo the deferred commit):
+          - 400  missing name / no install target
+          - 404  import not registered / target path missing
+          - 500  no installer / install timeout / install error / non-zero
+            returncode (``{"error": "install failed", "log": …[, "diagnosis"]}``)
+          - 200  ``{ok: true, log}``  (workspace.yaml mutation run inline)
+        """
+        body, status = _install_views.import_install(
+            ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
 
     # -----------------------------------------------------------------------
     # CATCH-ALL — MUST stay registered LAST (immediately before ``return app``)

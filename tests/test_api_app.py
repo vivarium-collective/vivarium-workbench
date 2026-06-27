@@ -6137,3 +6137,106 @@ class TestVisualizationPreviewInstanceRoute:
         p = "/api/visualization-preview-instance"
         assert p in paths and "post" in paths[p]
         assert paths[p]["post"]["tags"] == ["Viz authoring"]
+
+
+# ===========================================================================
+# Installs: system-deps-install + import-install POST routes ("Installs" tag).
+# Thin wrappers over ``lib.install_views`` — every test monkeypatches that lib
+# fn so NO real install subprocess is spawned.  Both JSONResponse all paths, so
+# the lib-returned (dict, status) is preserved verbatim.  ``model_dump(
+# exclude_none=True)`` keeps omitted optionals absent.
+# ===========================================================================
+class TestSystemDepsInstallRoute:
+    def test_happy_passthrough(self, client, monkeypatch):
+        from vivarium_dashboard.lib import install_views
+        captured = {}
+
+        def _fake(ws, body):
+            captured["ws"], captured["body"] = ws, body
+            return {"ok": True, "log": [], "recheck": []}, 200
+
+        monkeypatch.setattr(install_views, "system_deps_install", _fake)
+        r = client.post(
+            "/api/system-deps-install",
+            json={"name": "mod", "check_names": ["c1"]},
+        )
+        assert r.status_code == 200
+        assert r.json() == {"ok": True, "log": [], "recheck": []}
+        assert captured["body"] == {"name": "mod", "check_names": ["c1"]}
+
+    def test_missing_400_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import install_views
+        monkeypatch.setattr(
+            install_views, "system_deps_install",
+            lambda ws, body: ({"error": "name + check_names required"}, 400),
+        )
+        r = client.post("/api/system-deps-install", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "name + check_names required"}
+
+    def test_unknown_module_404_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import install_views
+        monkeypatch.setattr(
+            install_views, "system_deps_install",
+            lambda ws, body: ({"error": "unknown module: mod"}, 404),
+        )
+        r = client.post(
+            "/api/system-deps-install",
+            json={"name": "mod", "check_names": ["c1"]},
+        )
+        assert r.status_code == 404
+        assert r.json() == {"error": "unknown module: mod"}
+
+
+class TestImportInstallRoute:
+    def test_happy_passthrough(self, client, monkeypatch):
+        from vivarium_dashboard.lib import install_views
+        captured = {}
+
+        def _fake(ws, body):
+            captured["ws"], captured["body"] = ws, body
+            return {"ok": True, "log": "installed ok"}, 200
+
+        monkeypatch.setattr(install_views, "import_install", _fake)
+        r = client.post("/api/import-install", json={"name": "foo"})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True, "log": "installed ok"}
+        # exclude_none keeps name; omitted target absent.
+        assert captured["body"] == {"name": "foo"}
+
+    def test_target_passed_through(self, client, monkeypatch):
+        from vivarium_dashboard.lib import install_views
+        captured = {}
+        monkeypatch.setattr(
+            install_views, "import_install",
+            lambda ws, body: (captured.update(body) or {"ok": True, "log": ""}, 200),
+        )
+        client.post("/api/import-install", json={"name": "foo", "target": "pkg"})
+        assert captured == {"name": "foo", "target": "pkg"}
+
+    def test_missing_name_400_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import install_views
+        monkeypatch.setattr(
+            install_views, "import_install",
+            lambda ws, body: ({"error": "missing name"}, 400),
+        )
+        r = client.post("/api/import-install", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "missing name"}
+
+    def test_install_failed_500_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import install_views
+        monkeypatch.setattr(
+            install_views, "import_install",
+            lambda ws, body: ({"error": "install failed", "log": "x"}, 500),
+        )
+        r = client.post("/api/import-install", json={"name": "foo"})
+        assert r.status_code == 500
+        assert r.json() == {"error": "install failed", "log": "x"}
+
+
+def test_installs_routes_in_openapi(client):
+    paths = client.get("/openapi.json").json()["paths"]
+    for p in ("/api/system-deps-install", "/api/import-install"):
+        assert p in paths and "post" in paths[p], p
+        assert paths[p]["post"]["tags"] == ["Installs"], p

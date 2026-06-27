@@ -2566,3 +2566,39 @@ class VisualizationPreviewInstanceRequest(BaseModel):
 
     name: str = ""
     source: Optional[str] = None
+
+
+class SystemDepsInstallRequest(BaseModel):
+    """POST /api/system-deps-install request body — ``{"name", "check_names"}``.
+
+    Runs the install commands for the named catalog module's system-dependency
+    checks. A missing ``name`` or empty ``check_names`` is rejected with HTTP 400
+    by ``lib.install_views.system_deps_install``; an unknown module with HTTP
+    404. ``model_dump(exclude_none=True)`` keeps both fields present (they are
+    never ``None``) so the builder's validation applies. The ``{ok, log, recheck}``
+    body is returned via ``JSONResponse`` (no response model).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str = ""
+    check_names: list = []
+
+
+class ImportInstallRequest(BaseModel):
+    """POST /api/import-install request body — ``{"name", "target"?}``.
+
+    Pip-installs a ``workspace.yaml``-registered import into the workspace venv
+    (``target`` overrides the default ``imports[name].path``). A missing ``name``
+    is rejected with HTTP 400 and an unregistered import with HTTP 404 by
+    ``lib.install_views.import_install``. ``model_dump(exclude_none=True)`` keeps
+    an omitted ``target`` absent so the builder's path fallback applies. The
+    ``{ok, log}`` success body (the live ``_active_branch_action`` commit is
+    deferred — the builder runs the workspace.yaml mutation inline) and every
+    error path are returned via ``JSONResponse`` (no response model).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str = ""
+    target: Optional[str] = None
