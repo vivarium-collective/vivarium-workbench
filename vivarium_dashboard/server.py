@@ -139,42 +139,11 @@ def _structured_array_to_json(o):
     return records
 
 
-def _json_default(o):
-    """JSON serialization fallback for objects json.dumps can't handle natively.
-
-    Handles numpy arrays (which @composite_generator state docs often contain
-    for spatial / field-based composites), numpy scalars, Path objects, sets,
-    and anything with .tolist(). Falls back to repr() so a bad object still
-    surfaces a string rather than killing the whole response.
-    """
-    # NumPy STRUCTURED array (a dtype with named fields, e.g. a bulk-molecule
-    # array `(id, count, …submasses)` or a unique-molecule array `(unique_index,
-    # domain_index, …)`). A plain `.tolist()` degrades each row to a positional
-    # tuple, dropping the field names — which is why viewers render these stores
-    # as meaningless 0,1,2,… indices. Preserve the field names so any consumer
-    # shows real labels: an array with an `id` field becomes an {id: count} (or
-    # {id: record}) map; otherwise a list of field-keyed records.
-    structured = _structured_array_to_json(o)
-    if structured is not None:
-        return structured
-
-    # numpy duck-typing without importing numpy (cheaper boot)
-    tolist = getattr(o, "tolist", None)
-    if callable(tolist):
-        try:
-            return tolist()
-        except Exception:
-            pass
-    if hasattr(o, "item") and callable(o.item):
-        try:
-            return o.item()  # numpy scalar → python scalar
-        except Exception:
-            pass
-    if isinstance(o, (set, frozenset)):
-        return sorted(o, key=str)
-    if isinstance(o, Path):
-        return str(o)
-    return repr(o)
+# ``_json_default`` (the json.dumps default-fallback) moved to
+# ``lib.json_serialize`` so the FastAPI-ported lib builders can serialise
+# composite state into a ``python -c`` child script without ``import server``.
+# Name-shim keeps every existing call-site here byte-identical.
+from vivarium_dashboard.lib.json_serialize import _json_default  # noqa: E402,F401
 
 
 def _json_sanitize(obj):
