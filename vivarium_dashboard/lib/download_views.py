@@ -16,7 +16,7 @@ Builders
 --------
 build_study_export          → GET /api/study-export
 resolve_data_source_file    → GET /api/data-source-file
-resolve_iset_report         → GET /api/iset/{slug}/report
+resolve_iset_report         → GET /api/investigation/{slug}/report
 resolve_guidance            → GET /api/guidance
 build_investigation_notebook→ GET /api/investigation-notebook/{slug}
 """

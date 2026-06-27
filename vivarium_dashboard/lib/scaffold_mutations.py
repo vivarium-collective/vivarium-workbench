@@ -45,7 +45,7 @@ def iset_create(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
     """POST /api/iset-create — scaffold a new investigation.yaml.
 
     Moved verbatim from ``server._post_iset_create_for_test``.  Returns the
-    new investigation in the same shape as ``GET /api/iset/<name>``.
+    new investigation in the same shape as ``GET /api/investigation/<name>``.
 
     Body:
         name:           required, kebab-case slug (^[a-z0-9][a-z0-9-]*$).
@@ -99,12 +99,12 @@ def iset_create(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
 
 
 def iset_clone(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
-    """POST /api/iset-clone — clone an investigation into a fresh planning state.
+    """POST /api/investigation-clone — clone an investigation into a fresh planning state.
 
     Moved verbatim from ``server._post_iset_clone_for_test``.  Shells out to
     the workspace's ``scripts/clone_investigation.py`` so the dashboard and the
     standalone CLI share a single source of truth.  Returns the new
-    investigation in the same shape as ``GET /api/iset/<target>`` with an extra
+    investigation in the same shape as ``GET /api/investigation/<target>`` with an extra
     ``clone_summary`` field.
 
     Body:

@@ -103,7 +103,7 @@ export interface InvestigationSummary {
   error: string | null;
 }
 
-export interface IsetListPayload {
+export interface InvestigationSummariesPayload {
   investigations: InvestigationSummary[];
 }
 

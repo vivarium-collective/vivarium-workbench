@@ -10,7 +10,7 @@ Phase A Batch 7 — five routes:
   GET /api/linkage-index       → build_linkage_index
   GET /api/needs-attention     → build_needs_attention
   GET /api/inputs              → _inputs_payload lives in server.py (already ws_root-parameterized)
-  GET /api/iset/{slug}         → build_iset_detail
+  GET /api/investigation/{slug}         → build_iset_detail
 """
 
 from __future__ import annotations
@@ -458,7 +458,7 @@ def build_inputs(ws_root: Path, slug: Optional[str] = None) -> dict:
 
 
 def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
-    """GET /api/iset/<name> builder.
+    """GET /api/investigation/<name> builder.
 
     Returns the full investigation-detail dict, or ``None`` when the
     ``investigation.yaml`` does not exist.

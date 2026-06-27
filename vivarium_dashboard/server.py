@@ -336,7 +336,7 @@ _POST_ROUTE_MAP: dict[str, str] = {
     "/api/suggest":            "_post_suggest",
     "/api/composite-test-run": "_post_composite_test_run",
     "/api/iset-create":         "_post_iset_create",
-    "/api/iset-clone":          "_post_iset_clone",
+    "/api/investigation-clone":          "_post_iset_clone",
     "/api/investigation-create":      "_post_investigation_create",
     "/api/investigation-delete":      "_post_investigation_delete",
     "/api/investigation-run":         "_post_investigation_run",
@@ -1181,7 +1181,7 @@ def _decide_proposed_input_for_test(
 def _build_iset_summary_for_test(ws_root: Path) -> list[dict]:
     """Back-compat shim — delegates to lib.investigation_status.build_iset_summary,
     injecting the server's runs.db-backed runs-presence check. (Name retained for
-    the stdlib /api/iset-list handler + existing tests.)"""
+    the stdlib /api/investigation-summaries handler + existing tests.)"""
     return _invstatus.build_iset_summary(
         ws_root,
         study_has_runs=lambda s, spec: _count_runs_for_study(s, spec) > 0,
@@ -1391,7 +1391,7 @@ def _investigations_data(ws_root: Path) -> dict:
 #
 #   • "current"         — this server's active Investigation summary
 #   • "running_others"  — every OTHER live server's current Investigation,
-#                         queried over HTTP from each peer's /api/iset-list.
+#                         queried over HTTP from each peer's /api/investigation-summaries.
 #
 # Peers that don't respond within a short timeout are silently skipped.
 # The HTTP probe results are cached for _REGISTRY_TTL_S to avoid hammering
@@ -1403,9 +1403,9 @@ _registry_cache: dict[str, tuple[float, dict]] = {}
 
 
 def _peer_current_investigation(url: str) -> dict | None:
-    """Query a peer dashboard's /api/iset-list and pick a current Investigation.
+    """Query a peer dashboard's /api/investigation-summaries and pick a current Investigation.
 
-    Heuristic: peer-side `/api/iset-list` returns every Investigation in the
+    Heuristic: peer-side `/api/investigation-summaries` returns every Investigation in the
     peer's workspace. We pick the one whose `effective_status` is "running"
     if present; otherwise the first entry. Returns a slim
     ``{slug, title, effective_status}`` dict, or None if the peer has no
@@ -1415,7 +1415,7 @@ def _peer_current_investigation(url: str) -> dict | None:
     now = time.time()
     if cached and now - cached[0] < _REGISTRY_TTL_S:
         return cached[1] or None
-    data = _http_get_json(url.rstrip("/") + "/api/iset-list")
+    data = _http_get_json(url.rstrip("/") + "/api/investigation-summaries")
     out: dict | None
     if not data or not isinstance(data.get("investigations"), list):
         out = None
@@ -1560,7 +1560,7 @@ def _build_investigation_registry_for_test(
                               one onto its own worktree.
       - ``running_others``  — peer dashboards' chosen Investigations
                               (one per live peer), via HTTP probe of
-                              each peer's ``/api/iset-list``.
+                              each peer's ``/api/investigation-summaries``.
       - ``dormant_others``  — open Investigations on OTHER worktrees
                               that do NOT have a running dashboard.
                               Read directly off disk via
@@ -1781,7 +1781,7 @@ def _coerce_list_field(spec: dict, field: str, *, source: str = "<unknown>") -> 
 
 
 def _build_iset_detail_for_test(ws_root: Path, name: str) -> tuple[dict, int]:
-    """Pure function backing ``GET /api/iset/<name>`` — returns
+    """Pure function backing ``GET /api/investigation/<name>`` — returns
     (response_dict, status_code). Used by the HTTP handler and unit tests.
     """
     if not name:
@@ -3229,11 +3229,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_data_sources()
         if path_only == "/api/data-source-file":
             return self._get_data_source_file()
-        if self.path.startswith("/api/iset-list"):
+        if self.path.startswith("/api/investigation-summaries"):
             return self._get_iset_list()
-        if self.path.startswith("/api/iset/") and self.path.split("?", 1)[0].rstrip("/").endswith("/report"):
+        if self.path.startswith("/api/investigation/") and self.path.split("?", 1)[0].rstrip("/").endswith("/report"):
             return self._get_iset_report()
-        if self.path.startswith("/api/iset/"):
+        if self.path.startswith("/api/investigation/"):
             return self._get_iset_detail()
         if self.path.startswith("/api/investigation-notebook/"):
             return self._get_investigation_notebook()
@@ -5510,7 +5510,7 @@ class Handler(BaseHTTPRequestHandler):
     # entries with type hints.
     _bigraph_path_cache = {}  # {(path, mtime, max_depth): [nodes]}
 
-    # --- /api/iset-list, /api/iset/<name>: investigation-set endpoints ---
+    # --- /api/investigation-summaries, /api/investigation/<name>: investigation-set endpoints ---
     #
     # An investigation-set (iset) is a named collection of studies with
     # explicit ordering + cross-study dependencies. UI surface: the
@@ -5519,7 +5519,7 @@ class Handler(BaseHTTPRequestHandler):
     # distinct and walked separately by _iter_study_dirs.
 
     def _get_iset_list(self):
-        """GET /api/iset-list — return summaries of every investigation.
+        """GET /api/investigation-summaries — return summaries of every investigation.
 
         Each item includes ``status`` (author-declared, from YAML) and
         ``effective_status`` (computed from the member studies). See
@@ -5562,7 +5562,7 @@ class Handler(BaseHTTPRequestHandler):
 
         Returns the current worktree's active Investigation plus every
         OTHER live dashboard's current Investigation, queried over HTTP
-        from each peer's /api/iset-list and cached for ~5s.
+        from each peer's /api/investigation-summaries and cached for ~5s.
 
         Shape::
 
@@ -5608,17 +5608,17 @@ class Handler(BaseHTTPRequestHandler):
 
         Body: ``{name: str, overview?: str, parent_studies?: list[str]}``.
         Slug must match ``^[a-z0-9][a-z0-9-]*$``. Atomic write (tmp+rename).
-        Returns the new investigation in the same shape as GET /api/iset/<name>.
+        Returns the new investigation in the same shape as GET /api/investigation/<name>.
         """
         resp, code = _post_iset_create_for_test(WORKSPACE, body)
         return self._json(resp, code)
 
     def _post_iset_clone(self, body: dict):
-        """POST /api/iset-clone — clone an investigation into a fresh planning state.
+        """POST /api/investigation-clone — clone an investigation into a fresh planning state.
 
         Body: ``{source, target, source_prefix?, target_prefix?}``.
         Delegates to the workspace's ``scripts/clone_investigation.py``; returns
-        the new investigation in the same shape as GET /api/iset/<target>,
+        the new investigation in the same shape as GET /api/investigation/<target>,
         with an extra ``clone_summary`` field describing the study remap.
         """
         resp, code = _post_iset_clone_for_test(WORKSPACE, body)
@@ -5745,24 +5745,24 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _get_iset_report(self):
-        """GET /api/iset/<slug>/report — serve the per-investigation report."""
+        """GET /api/investigation/<slug>/report — serve the per-investigation report."""
         import urllib.parse as _up
         _path = _up.urlparse(self.path).path
-        _slug = _path[len("/api/iset/"):].rsplit("/report", 1)[0].strip("/")
+        _slug = _path[len("/api/investigation/"):].rsplit("/report", 1)[0].strip("/")
         _f = _iset_report_file(WORKSPACE, _slug)
         if _f is None:
             return self._json({"error": f"no report for investigation {_slug!r}"}, 404)
         return self._serve_file(_f, "text/html")
 
     def _get_iset_detail(self):
-        """GET /api/iset/<name> — return one investigation + its resolved studies.
+        """GET /api/investigation/<name> — return one investigation + its resolved studies.
 
         Delegates to the pure builder ``_iset_detail_data`` so the export CLI
         (publish.py) and the live handler share identical logic.
         """
         import urllib.parse
         path = urllib.parse.urlparse(self.path).path
-        name = path.split("/api/iset/", 1)[-1].strip("/")
+        name = path.split("/api/investigation/", 1)[-1].strip("/")
         if not name:
             return self._json({"error": "investigation name required"}, 400)
         result = Handler._iset_detail_data(name)
@@ -7819,7 +7819,7 @@ class Handler(BaseHTTPRequestHandler):
         """Pure builder for investigation (iset) detail — no socket I/O.
 
         Thin shim — delegates to ``lib.report_views.build_iset_detail``.
-        Returns the dict that GET /api/iset/<name> sends, or ``None`` when
+        Returns the dict that GET /api/investigation/<name> sends, or ``None`` when
         the investigation.yaml does not exist.
         """
         from vivarium_dashboard.lib import report_views as _rv

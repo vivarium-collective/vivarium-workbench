@@ -141,7 +141,7 @@ from vivarium_dashboard.lib.models import (
     JobStatusPayload,
     InvestigationHypothesesPayload,
     InvestigationSummary,
-    IsetListPayload,
+    InvestigationSummariesPayload,
     InvestigationRigor,
     InvestigationVizHtmlPayload,
     InvestigationsPayload,
@@ -446,7 +446,7 @@ _OPENAPI_TAGS = [
         "description": (
             "Report-readiness linter, linkage-index graph, needs-attention "
             "scan, investigation inputs, and iset detail.  All routes except "
-            "``/api/iset/{slug}`` always return HTTP 200 — errors degrade "
+            "``/api/investigation/{slug}`` always return HTTP 200 — errors degrade "
             "gracefully to empty payloads rather than 500."
         ),
     },
@@ -920,13 +920,13 @@ def create_app() -> FastAPI:
         return JSONResponse(content=out, status_code=status)
 
     @app.get(
-        "/api/iset-list",
-        response_model=IsetListPayload,
+        "/api/investigation-summaries",
+        response_model=InvestigationSummariesPayload,
         tags=["Investigations"],
         summary="Investigation summary list for the sidebar",
     )
-    def iset_list(ws: Path = Depends(get_workspace)) -> IsetListPayload:
-        """Investigations summary list (mirrors the stdlib /api/iset-list).
+    def investigation_summaries(ws: Path = Depends(get_workspace)) -> InvestigationSummariesPayload:
+        """Investigations summary list (mirrors the stdlib /api/investigation-summaries).
 
         Fully library-backed: builds the payload via
         ``lib.investigation_status.build_iset_summary`` and supplies the
@@ -945,7 +945,7 @@ def create_app() -> FastAPI:
             return slug in run_slugs or bool((spec or {}).get("runs"))
 
         summaries = investigation_status.build_iset_summary(ws, study_has_runs=study_has_runs)
-        return IsetListPayload(
+        return InvestigationSummariesPayload(
             investigations=[InvestigationSummary.model_validate(d) for d in summaries]
         )
 
@@ -964,7 +964,7 @@ def create_app() -> FastAPI:
         Returns ``{current, local_siblings, running_others, dormant_others}``:
         this worktree's chosen Investigation, the workspace's other
         investigations, every OTHER live dashboard's current Investigation
-        (HTTP-probed from each peer's /api/iset-list, cached ~5 s), and open
+        (HTTP-probed from each peer's /api/investigation-summaries, cached ~5 s), and open
         investigations on other worktrees with no live dashboard.
 
         ``current.url`` is derived from the ~/.pbg/servers record
@@ -2245,12 +2245,12 @@ def create_app() -> FastAPI:
         return InputsPayload.model_validate(body)
 
     @app.get(
-        "/api/iset/{slug}",
+        "/api/investigation/{slug}",
         response_model=IsetDetail,
         tags=["Reports & inputs"],
         summary="Full investigation detail (one investigation.yaml + resolved studies)",
     )
-    def iset_detail(
+    def investigation_detail(
         slug: str,
         ws: Path = Depends(get_workspace),
     ) -> Union[IsetDetail, JSONResponse]:
@@ -2777,17 +2777,17 @@ def create_app() -> FastAPI:
         return Response(content=data, media_type=mime, headers=headers)
 
     @app.get(
-        "/api/iset/{slug}/report",
+        "/api/investigation/{slug}/report",
         tags=["Downloads"],
         summary="Per-investigation HTML report file",
         response_class=Response,
     )
-    def iset_report_route(
+    def investigation_report_route(
         slug: str,
         ws: Path = Depends(get_workspace),
     ) -> Response:
         """Serve the per-investigation report ``index.html`` as ``text/html``
-        (mirrors the stdlib GET /api/iset/<slug>/report).
+        (mirrors the stdlib GET /api/investigation/<slug>/report).
 
         HTTP 404 ``{"error": "no report for investigation '<slug>'"}`` when no
         report file exists.
@@ -3637,7 +3637,7 @@ def create_app() -> FastAPI:
         Slug must match ``^[a-z0-9][a-z0-9-]*$``. Atomic write (tmp+rename).
         400 when name is missing or invalid; 409 when the investigation already
         exists; 200 returns the new investigation in the same shape as
-        ``GET /api/iset/<name>``.
+        ``GET /api/investigation/<name>``.
         """
         body, status = _scaffold_mut.iset_create(ws, req.model_dump())
         if status != 200:
@@ -3645,11 +3645,11 @@ def create_app() -> FastAPI:
         return body
 
     @app.post(
-        "/api/iset-clone",
+        "/api/investigation-clone",
         tags=["Investigation scaffold"],
         summary="Clone an investigation into a fresh planning state",
     )
-    def iset_clone(
+    def investigation_clone(
         req: IsetCloneBody,
         ws: Path = Depends(get_workspace),
     ) -> dict:
@@ -3657,7 +3657,7 @@ def create_app() -> FastAPI:
 
         Body: ``{source, target, source_prefix?, target_prefix?}``
         Delegates to ``scripts/clone_investigation.py``; returns the new
-        investigation in the same shape as ``GET /api/iset/<target>`` with an
+        investigation in the same shape as ``GET /api/investigation/<target>`` with an
         extra ``clone_summary`` field describing the study remap.
         400 when slugs are missing or invalid; 404 when source not found;
         409 when target already exists; 501 when clone script is absent.
