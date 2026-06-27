@@ -242,6 +242,20 @@
     });
     actions.appendChild(buildBtn);
 
+    var syncBtn = _el("button", "viv-bs-action", "Sync to local"); syncBtn.id = "viv-bs-sync";
+    syncBtn.title = "Materialize this exact repo@commit workspace on your machine";
+    syncBtn.addEventListener("click", function () {
+      fetch("/api/source/manifest").then(function (r) { return r.json(); }).then(function (m) {
+        var base = window.location.origin;
+        var cmd = "vivarium-dashboard sync " + base;
+        var note = "Reproduce " + (m.repo || "") + " @ " + String(m.commit || "").slice(0, 7) +
+                   "\n  " + cmd + "\n(verifies uv.lock " + (m.lockfile || "—") + ")";
+        window.prompt("Run this locally to sync + reproduce:", cmd);
+        console.log(note);
+      }).catch(function () { alert("Could not fetch manifest"); });
+    });
+    actions.appendChild(syncBtn);
+
     host.appendChild(actions);
 
     if (state.error) {
