@@ -103,11 +103,6 @@ from vivarium_dashboard.lib.composite_resolve import resolve_composite
 from vivarium_dashboard.lib.composites_query import composites_via_subprocess
 from vivarium_dashboard.lib.models import (
     BibEntry,
-    BranchDiff,
-    BranchesPayload,
-    BranchInfo,
-    BranchCommit,
-    BranchStaleness,
     CatalogModule,
     CatalogPayload,
     CompositeRecord,
@@ -118,7 +113,6 @@ from vivarium_dashboard.lib.models import (
     CompositeRunStatus,
     CompositeState,
     CompositesPayload,
-    DashConfig,
     DataSourcesPayload,
     DirtyFile,
     DirtyStatus,
@@ -150,7 +144,6 @@ from vivarium_dashboard.lib.models import (
     ReferencesBibPayload,
     StudyObservableCheck,
     StudyDetail,
-    StudyRigor,
     RegistryPayload,
     SavedVisualizationsPayload,
     PtoolsLaunch,
@@ -171,7 +164,6 @@ from vivarium_dashboard.lib.models import (
     WorkStatusInactive,
     Generation,
     GenerationSummary,
-    PendingEntries,
     WorkCompositeDiff,
     WorkCompositeDiffEntry,
     # Batch 18: request-body models for investigation & study mutations
@@ -269,14 +261,12 @@ from vivarium_dashboard.lib.models import (
     WorkspaceEntry,
     # C-state-3h2: misc FS/render routes
     RenderResponse,
-    FeedbackImportResponse,
     # C-state-3i: visualization-accept finalize route
     VisualizationAcceptBody,
     VisualizationAcceptResponse,
     # P1: study-run / test-run POST request bodies (JSONResponse-only routes)
     StudyRunBaselineRequest,
     StudyRunVariantRequest,
-    StudyRunAllBaselinesRequest,
     StudyTestsRunRequest,
     RunTestsRequest,
     # Misc POST request bodies
@@ -439,16 +429,6 @@ def create_app() -> FastAPI:
         """
         rows = [SimRow.model_validate(r) for r in list_simulations(ws)]
         return SimulationsPayload(simulations=rows, current=None)
-
-    @app.get(
-        "/api/config",
-        response_model=DashConfig,
-        tags=["System"],
-        summary="Client data-source mode selector",
-    )
-    def config() -> DashConfig:
-        """Client data-source selector (mirrors the stdlib /api/config)."""
-        return DashConfig(mode="local-server")
 
     @app.get(
         "/api/workspace-manifest",
@@ -986,36 +966,6 @@ def create_app() -> FastAPI:
         return WorkStatusInactive.model_validate(payload)
 
     @app.get(
-        "/api/branch-staleness",
-        response_model=BranchStaleness,
-        tags=["Git & workstream"],
-        summary="How many commits is a branch behind its base?",
-    )
-    def branch_staleness_route(
-        branch: Optional[str] = None,
-        base: str = "main",
-        ws: Path = Depends(get_workspace),
-    ) -> Union[BranchStaleness, JSONResponse]:
-        """Branch staleness check (commits behind base).
-
-        ``?branch=<name>`` defaults to the workspace's current HEAD.
-        ``?base=<name>`` defaults to ``main``.
-
-        HTTP 400 when neither ``?branch=`` is given nor the current HEAD can
-        be determined (detached HEAD / not a git repo). The 400 body is
-        ``{"error": <msg>}`` — byte-identical to the legacy handler (not
-        FastAPI's default ``{"detail": ...}``).
-
-        Library-backed via ``lib.git_status.build_branch_staleness``.
-        """
-        try:
-            payload = _git_status.build_branch_staleness(ws, branch=branch, base=base)
-        except _git_status.NoBranchError as exc:
-            # Legacy emits the NoBranchError message verbatim under "error".
-            return JSONResponse(status_code=400, content={"error": str(exc)})
-        return BranchStaleness.model_validate(payload)
-
-    @app.get(
         "/api/dirty-status",
         response_model=DirtyStatus,
         tags=["Git & workstream"],
@@ -1042,97 +992,6 @@ def create_app() -> FastAPI:
             )
         files = [DirtyFile.model_validate(f) for f in payload["files"]]
         return DirtyStatus(count=payload["count"], files=files)
-
-    @app.get(
-        "/api/branches",
-        response_model=BranchesPayload,
-        tags=["Git & workstream"],
-        summary="stage/* branches with last-commit info",
-    )
-    def branches_route(
-        ws: Path = Depends(get_workspace),
-    ) -> Union[BranchesPayload, JSONResponse]:
-        """List ``stage/*`` branches with last-commit SHA/subject/date and
-        commits-ahead-of-main count.
-
-        Returns ``{branches: [], current: <HEAD>}`` when no stage branches
-        exist. Per-branch errors are swallowed by the builder, but a top-level
-        git failure (the builder returns ``{"error": ...}``) maps to HTTP 500
-        with that exact ``{"error": ...}`` body — byte-identical to the legacy
-        ``_serve_branches``.
-
-        Library-backed via ``lib.git_status.list_branches``.
-        """
-        payload = _git_status.list_branches(ws)
-        if "error" in payload:
-            return JSONResponse(status_code=500, content={"error": payload["error"]})
-        raw_branches = payload.get("branches") or []
-        branch_list = []
-        for b in raw_branches:
-            lc = b.get("last_commit") or {}
-            branch_list.append(BranchInfo(
-                name=b["name"],
-                last_commit=BranchCommit.model_validate(lc),
-                ahead_of_main=b.get("ahead_of_main", 0),
-            ))
-        return BranchesPayload(
-            branches=branch_list,
-            current=payload.get("current"),
-        )
-
-    @app.get(
-        "/api/branch-diff",
-        response_model=BranchDiff,
-        tags=["Git & workstream"],
-        summary="Short diff summary for a branch vs main",
-    )
-    def branch_diff_route(
-        branch: Optional[str] = None,
-        ws: Path = Depends(get_workspace),
-    ) -> Union[BranchDiff, JSONResponse]:
-        """Short log + diff-stat summary for ``?branch=<name>`` vs ``main``.
-
-        HTTP 400 when ``?branch=`` is missing/empty or contains unsafe
-        characters — matching the legacy ``_get_branch_diff``.  (``branch`` is
-        declared Optional so a missing query param yields a 400, not FastAPI's
-        422 "field required".)  The 400 body is the legacy verbatim
-        ``{"error": "invalid branch name"}`` — NOT the builder's more detailed
-        ``ValueError`` text.
-
-        Library-backed via ``lib.git_status.build_branch_diff``.
-        """
-        try:
-            payload = _git_status.build_branch_diff(ws, branch or "")
-        except ValueError:
-            return JSONResponse(status_code=400, content={"error": "invalid branch name"})
-        return BranchDiff.model_validate(payload)
-
-    @app.get(
-        "/api/pending",
-        response_model=PendingEntries,
-        tags=["Git & workstream"],
-        summary="Pending entries from unmerged stage/* branches",
-    )
-    def pending_route(
-        ws: Path = Depends(get_workspace),
-    ) -> Union[PendingEntries, JSONResponse]:
-        """Unmerged ``stage/*`` branch entries not yet on ``main``'s ``workspace.yaml``.
-
-        Returns ``{observables, visualizations, phases, datasets,
-        references_pdfs, expert_docs, imports}`` — each a list of
-        ``{entry, branch}`` objects for entries new relative to ``main``.
-        Returns ``{}`` (empty lists) when there are no stage branches or the
-        workspace is not a git repo.
-
-        HTTP 200 on success; HTTP 500 ``{error}`` when an unexpected exception
-        escapes the inner git walk.
-
-        Library-backed via ``lib.work_views.build_pending``.
-        """
-        body, status = _work_views.build_pending(ws)
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return PendingEntries.model_validate(body)
 
     @app.get(
         "/api/generation",
@@ -1351,40 +1210,6 @@ def create_app() -> FastAPI:
     # -----------------------------------------------------------------------
     # Rigor routes
     # -----------------------------------------------------------------------
-
-    @app.get(
-        "/api/study-rigor",
-        response_model=StudyRigor,
-        tags=["Rigor & jobs"],
-        summary="Per-study evidence & rigor scorecard",
-    )
-    def study_rigor_route(
-        study: Optional[str] = None,
-        investigation: Optional[str] = None,
-        ws: Path = Depends(get_workspace),
-    ) -> Union[StudyRigor, JSONResponse]:
-        """Per-study rigor scorecard (mirrors the stdlib /api/study-rigor).
-
-        Deterministic dimensions (replication, negative controls, alternative
-        hypotheses, claim discipline, falsifiability, …) from
-        ``pbg_superpowers.rigor`` over the **run-merged** study spec — the
-        runs.db merge feeds the replication + run-persistence dimensions.
-
-        ``?study=`` selects the study (legacy ``?investigation=`` alias also
-        accepted). HTTP 400 when neither is given; HTTP 404 when the study has
-        no spec file. Error bodies are ``{"error": <msg>}`` — byte-identical to
-        the legacy ``_get_study_rigor`` (not FastAPI's ``{"detail": ...}``).  A
-        rigor-computation failure degrades to a 200 body carrying ``error`` plus
-        empty ``dimensions``/``score``/``summary``.
-
-        Library-backed via ``lib.rigor_views.build_study_rigor``.
-        """
-        slug = study or investigation
-        try:
-            body = _rigor_views.build_study_rigor(ws, slug)
-        except _rigor_views.RigorViewError as exc:
-            return JSONResponse(status_code=exc.status, content=exc.body)
-        return StudyRigor.model_validate(body)
 
     @app.get(
         "/api/investigation-rigor",
@@ -4269,30 +4094,6 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=status, content=body)
 
     @app.post(
-        "/api/study-run-all-baselines",
-        tags=["Studies"],
-        summary="Run every baseline composite of a study and aggregate results",
-    )
-    def study_run_all_baselines(
-        req: StudyRunAllBaselinesRequest,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Run every ``baseline[]`` entry of a study and aggregate results.
-
-        Mirrors the stdlib ``POST /api/study-run-all-baselines``.  Body:
-        ``{"study", "steps"?}`` — runs each baseline composite in turn and
-        returns ``{"results": [...], "errors": [...]}``.
-
-        Status codes (byte-identical to the legacy handler, via
-        ``lib.study_runs.run_study_all_baselines``):
-          - 400  missing study / study has no baseline composites
-          - 404  study not found
-          - 200  ``{results, errors}`` (status reflects the first error if any)
-        """
-        body, status = _study_runs.run_study_all_baselines(ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
-
-    @app.post(
         "/api/study-tests-run",
         tags=["Studies"],
         summary="Run pytest against a study's tests/ directory",
@@ -5257,36 +5058,6 @@ def create_app() -> FastAPI:
         ``JSONResponse`` so the lib-returned status code is preserved verbatim.
         """
         resp, status = _misc_mut.render_dashboard(ws)
-        return JSONResponse(status_code=status, content=resp)
-
-    @app.post(
-        "/api/feedback-import",
-        response_model=FeedbackImportResponse,
-        tags=["Rigor & jobs"],
-        summary="Write a report-widget feedback payload to the investigation",
-    )
-    def feedback_import(
-        body: dict = Body(default={}),
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Ingest feedback submitted directly from the report widget.
-
-        Mirrors the stdlib ``POST /api/feedback-import``.  Writes the
-        ``{meta, annotations}`` payload to ``investigations/<inv>/feedback/
-        <ts>.yaml`` via the shared ``pbg_superpowers`` writer.
-
-        Status codes (byte-identical to the legacy handler):
-          - 200  ``{"ok": True, "path": <ws-relative>, "n_entries": <int>}``
-          - 400  ``{"error": <FeedbackImportError message>}``
-          - 500  ``{"error": "feedback import failed: <e>"}`` (other error) or
-                 ``{"error": "pbg-superpowers not available for feedback import"}``
-                 (pbg-superpowers unavailable)
-
-        The CSRF middleware already guards this POST.  Library-backed via the
-        pure ``lib.misc_mutations.feedback_import``; every path is wrapped in
-        ``JSONResponse`` so the lib-returned status code is preserved verbatim.
-        """
-        resp, status = _misc_mut.feedback_import(ws, body)
         return JSONResponse(status_code=status, content=resp)
 
     # -----------------------------------------------------------------------

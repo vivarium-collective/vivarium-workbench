@@ -158,16 +158,6 @@ class StudyChartsPayload(BaseModel):
     live_count: int
 
 
-class DashConfig(BaseModel):
-    """``GET /api/config`` payload (server.py ``Handler._build_api_config_response``).
-
-    Selects the client data source; local mode returns ``{"mode": "local-server"}``.
-    """
-
-    mode: str = "local-server"
-    basePath: Optional[str] = None
-
-
 class InvestigationSummary(BaseModel):
     """One entry of the ``GET /api/investigation-summaries`` payload.
 
@@ -537,21 +527,6 @@ class WorkStatusActive(BaseModel):
     pr_url: Optional[str] = None
 
 
-class BranchStaleness(BaseModel):
-    """``GET /api/branch-staleness`` payload (lib.git_status.build_branch_staleness).
-
-    HTTP 400 when the branch cannot be determined (no ``?branch=`` and HEAD is
-    detached / not on a named branch).
-    """
-
-    branch: str
-    base: str = "main"
-    behind_ref: str = ""
-    commits_behind: int = 0
-    stale_threshold: int = 20
-    stale: bool = False
-
-
 class DirtyFile(BaseModel):
     """One entry in the ``DirtyStatus.files`` list."""
 
@@ -569,71 +544,9 @@ class DirtyStatus(BaseModel):
     files: list[DirtyFile] = []
 
 
-class BranchCommit(BaseModel):
-    """Last-commit summary for a stage branch."""
-
-    model_config = ConfigDict(extra="allow")
-
-    sha: str = ""
-    subject: str = ""
-    date: str = ""
-
-
-class BranchInfo(BaseModel):
-    """One branch entry in the ``GET /api/branches`` payload."""
-
-    name: str
-    last_commit: BranchCommit = BranchCommit()
-    ahead_of_main: int = 0
-
-
-class BranchesPayload(BaseModel):
-    """``GET /api/branches`` payload (lib.git_status.list_branches).
-
-    Returns all ``stage/*`` branches with last-commit info.  ``extra="allow"``
-    preserves an ``error`` key returned on subprocess failure.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    branches: list[BranchInfo] = []
-    current: Optional[str] = None
-
-
-class BranchDiff(BaseModel):
-    """``GET /api/branch-diff`` payload (lib.git_status.build_branch_diff).
-
-    HTTP 400 when ``?branch=`` is missing or contains unsafe characters.
-    """
-
-    branch: str
-    log: str = ""
-    diff_stat: str = ""
-
-
 # ---------------------------------------------------------------------------
-# Work & branches models (pending entries, generation, composite diff)
+# Work & branches models (generation, composite diff)
 # ---------------------------------------------------------------------------
-
-class PendingEntries(BaseModel):
-    """``GET /api/pending`` payload (lib.work_views.build_pending).
-
-    Panel-keyed dict of unmerged ``stage/*`` branch entries not yet on
-    ``main``'s ``workspace.yaml``.  Each panel
-    (``observables`` / ``visualizations`` / ``phases`` / ``datasets`` /
-    ``references_pdfs`` / ``expert_docs`` / ``imports``) is a list of
-    ``{entry: <dict>, branch: <str>}`` objects.
-
-    HTTP 200 on success; HTTP 500 ``{error}`` on an unexpected exception.
-
-    Pure pass-through (``extra="allow"``, no declared fields) like
-    :class:`StudyDetail` / the explorer models: a non-git workspace returns
-    ``{}`` verbatim, while a populated workspace returns the 7-panel dict — no
-    default-injection so the builder dict survives byte-identically.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
 
 class GenerationSummary(BaseModel):
     """The inner ``generation`` object inside ``GET /api/generation``.
@@ -796,21 +709,6 @@ class InvestigationHypothesesPayload(BaseModel):
 
     hypotheses: list[Any] = []
     investigation: str = ""
-
-
-class StudyRigor(BaseModel):
-    """``GET /api/study-rigor`` payload (lib.rigor_views.build_study_rigor).
-
-    The per-study rigor scorecard from ``pbg_superpowers.rigor.study_rigor``:
-    ``study_type`` / ``mode`` / ``descriptive`` / ``dimensions`` / ``score`` /
-    ``summary`` on the success path, or ``{error, dimensions, score, summary}``
-    on the 200-shaped failure fallback.  The dimension/score shapes are nested
-    and vary by study type, so this is a pure pass-through model — no declared
-    fields, ``extra="allow"`` so every key the builder emits survives verbatim
-    (and none are injected).
-    """
-
-    model_config = ConfigDict(extra="allow")
 
 
 class InvestigationRigor(BaseModel):
@@ -2448,27 +2346,10 @@ class VisualizationAcceptResponse(BaseModel):
     ok: bool = True
 
 
-class FeedbackImportResponse(BaseModel):
-    """200-path payload for ``POST /api/feedback-import``.
-
-    ``{"ok": True, "path": <ws-relative path>, "n_entries": <int>}``.  The error
-    paths (``{"error": ...}``, HTTP 400/500) are returned via ``JSONResponse``,
-    not this model.
-
-    Source: ``lib.misc_mutations.feedback_import``.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    ok: bool = True
-    path: str
-    n_entries: int
-
-
 # ---------------------------------------------------------------------------
-# P1: study-run / test-run POST request bodies (5 routes under "Study runs").
+# P1: study-run / test-run POST request bodies (4 routes under "Study runs").
 #
-# All five routes return large, variable result dicts (or 400/404/409/500
+# All four routes return large, variable result dicts (or 400/404/409/500
 # error shapes), so the routes use ``JSONResponse`` on every path and declare
 # NO ``response_model`` — only these request models are needed.  ``extra="allow"``
 # keeps the legacy raw-JSON contract (e.g. ``_study_name_from_body`` also reads
@@ -2500,19 +2381,6 @@ class StudyRunVariantRequest(BaseModel):
 
     study: str = ""
     variant: str = ""
-    steps: Optional[int] = None
-
-
-class StudyRunAllBaselinesRequest(BaseModel):
-    """POST /api/study-run-all-baselines request body — ``{"study", "steps"?}``.
-
-    Runs every ``baseline[]`` entry of a study and aggregates results. A missing
-    study is rejected with HTTP 400 by ``lib.study_runs.run_study_all_baselines``.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    study: str = ""
     steps: Optional[int] = None
 
 
