@@ -1171,7 +1171,7 @@ class ProvenanceManifest(BaseModel):
     branch: str
     workspace: str
     lockfile: Optional[str] = None
-    results: dict = {}
+    results: dict[str, list[str]] = {}
     simulator_id: Optional[int] = None
 
 

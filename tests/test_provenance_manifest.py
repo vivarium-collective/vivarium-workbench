@@ -2,6 +2,9 @@ import json
 import subprocess
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
+from vivarium_dashboard.api.app import create_app, get_workspace
 from vivarium_dashboard.lib import provenance_manifest as pm
 
 
@@ -48,8 +51,13 @@ def test_build_manifest_prefers_viv_build_json(tmp_path):
     assert m["simulator_id"] == 42
 
 
-from fastapi.testclient import TestClient
-from vivarium_dashboard.api.app import create_app, get_workspace
+def test_build_manifest_ignores_non_dict_viv_build_json(tmp_path):
+    ws = tmp_path / "ws"
+    sha = _init_git_repo(ws, "https://github.com/vivarium-collective/demo.git")
+    (ws / ".viv-build.json").write_text(json.dumps([1, 2, 3]))
+    m = pm.build_manifest(ws)
+    assert m["commit"] == sha            # fell back to git, not crashed
+    assert m["simulator_id"] is None
 
 
 def test_manifest_route(tmp_path):

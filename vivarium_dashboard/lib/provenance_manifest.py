@@ -71,7 +71,7 @@ def build_manifest(ws_root: Path) -> dict:
         except Exception:
             build_meta = None
 
-    if build_meta:
+    if isinstance(build_meta, dict):
         repo = build_meta.get("repo_url") or build_meta.get("repo") or ""
         commit = build_meta.get("commit") or ""
         branch = build_meta.get("branch") or ""
@@ -93,5 +93,5 @@ def build_manifest(ws_root: Path) -> dict:
         "workspace": name,
         "lockfile": lockfile_hash(ws_root),
         "results": _result_pointers(ws_root),
-        "simulator_id": (build_meta or {}).get("simulator_id"),
+        "simulator_id": build_meta.get("simulator_id") if isinstance(build_meta, dict) else None,
     }
