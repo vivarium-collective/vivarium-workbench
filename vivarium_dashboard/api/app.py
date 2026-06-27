@@ -54,6 +54,7 @@ from vivarium_dashboard.lib import viz_write_mutations as _viz_write_mut
 from vivarium_dashboard.lib import viz_commit_mutations as _viz_commit_mut
 from vivarium_dashboard.lib import viz_accept_views as _viz_accept_views
 from vivarium_dashboard.lib import viz_preview_views as _viz_preview_views
+from vivarium_dashboard.lib import viz_preview_instance_views as _viz_preview_instance_views
 from vivarium_dashboard.lib import upload_mutations as _upload_mut
 from vivarium_dashboard.lib import reference_mutations as _reference_mut
 from vivarium_dashboard.lib import composite_mutations as _composite_mut
@@ -271,6 +272,8 @@ from vivarium_dashboard.lib.models import (
     InvestigationRunUnblockedRequest,
     # Viz authoring: visualization-preview (in-process viz render) POST request body
     VisualizationPreviewRequest,
+    # Viz authoring: visualization-preview-instance (preview registered instance by name)
+    VisualizationPreviewInstanceRequest,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -3815,6 +3818,40 @@ def create_app() -> FastAPI:
         lib-returned status code is preserved verbatim.
         """
         resp, status = _viz_preview_views.visualization_preview(
+            ws, req.model_dump(exclude_none=True)
+        )
+        return JSONResponse(status_code=status, content=resp)
+
+    @app.post(
+        "/api/visualization-preview-instance",
+        tags=["Viz authoring"],
+        summary="Preview a workspace.yaml-registered visualization instance by name",
+    )
+    def visualization_preview_instance(
+        req: VisualizationPreviewInstanceRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Preview a ``workspace.yaml``-registered visualization instance BY NAME.
+
+        Body: ``{"name", "source"?}``.  Looks up the instance entry and either
+        returns a description-only **stub** (entry has no ``class``) or delegates
+        to ``lib.viz_preview_views.visualization_preview`` with ``{"address":
+        f"local:{cls}", "config": …, "source": …}`` (entry has a class).  NO
+        network, NO subprocess.
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.viz_preview_instance_views.visualization_preview_instance``):
+          - 400  ``{"error": "name is required"}``
+          - 404  ``{"error": "visualization '<name>' not registered"}``
+          - 200  description-only stub (``{ok: true, source_used: "stub", …}``)
+            OR whatever the delegated ``visualization_preview`` returns.
+
+        ``model_dump(exclude_none=True)`` keeps omitted optionals absent so the
+        builder's ``.get(...)`` defaults apply.  The CSRF middleware already
+        guards this POST.  Every path is wrapped in ``JSONResponse`` so the
+        lib-returned status code is preserved verbatim.
+        """
+        resp, status = _viz_preview_instance_views.visualization_preview_instance(
             ws, req.model_dump(exclude_none=True)
         )
         return JSONResponse(status_code=status, content=resp)
