@@ -16,6 +16,7 @@ from pathlib import Path
 import yaml
 
 from vivarium_dashboard.server import _study_refresh_viz
+from vivarium_dashboard.lib.study_viz_views import study_refresh_viz as _lib_study_refresh_viz
 
 
 def _write_runs_db(study_dir: Path, run_id: str, completed_at: float) -> None:
@@ -83,3 +84,25 @@ def test_refresh_missing_study_flagged_not_found(tmp_path: Path):
     (ws / "studies").mkdir(parents=True)
     out = _study_refresh_viz(ws, "nope")
     assert out.get("not_found") is True
+
+
+def test_lib_seam_matches_server_for_render(tmp_path: Path):
+    """The pure ``lib.study_viz_views.study_refresh_viz`` (used by the FastAPI
+    route) renders + stamps identically to the stdlib ``_study_refresh_viz``."""
+    ws, name = _build_study(tmp_path, latest_run_id="run-7")
+    out = _lib_study_refresh_viz(ws, name)
+    assert out["study"] == name
+    assert out["results"][0]["status"] == "rendered"
+    chart = ws / "studies" / name / "charts" / "c.svg"
+    meta = json.loads(
+        (chart.with_suffix(chart.suffix + ".meta.json")).read_text(encoding="utf-8")
+    )
+    assert meta["source_run_id"] == "run-7"
+
+
+def test_lib_seam_missing_study_flagged_not_found(tmp_path: Path):
+    ws = tmp_path / "ws"
+    (ws / "studies").mkdir(parents=True)
+    out = _lib_study_refresh_viz(ws, "nope")
+    assert out.get("not_found") is True
+    assert "not found" in out["error"]

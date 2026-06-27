@@ -34,6 +34,44 @@ from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 from vivarium_dashboard.lib.system_info import _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE
 
 # ---------------------------------------------------------------------------
+# study_refresh_viz — re-render a study's declared visualizations
+# ---------------------------------------------------------------------------
+
+def study_refresh_viz(ws_root: Path, name: str) -> dict:
+    """Re-render every ``visualizations[]`` entry of study ``name`` against its
+    latest run, stamping provenance (pure, unit-testable seam).
+
+    Mirrors ``server._study_refresh_viz``: resolves the study dir
+    (layout-aware), loads ``study.yaml``, finds the latest run row, and
+    delegates to the vendored :func:`refresh_study_viz` (which swallows
+    per-chart render errors and returns ``status="error"`` entries, so this
+    never raises on a bad render).
+
+    Returns ``{"study": name, "results": [...]}`` or
+    ``{"error": ..., "not_found": True}`` when the study does not exist (the
+    HTTP wrapper maps that to 404).
+    """
+    from vivarium_dashboard.lib.refresh_viz import refresh_study_viz
+    from vivarium_dashboard.lib.study_charts import latest_run_row
+
+    study_dir = WorkspacePaths.load(ws_root).studies / name
+    if not study_dir.is_dir():
+        return {"error": f"study {name!r} not found", "not_found": True}
+    spec_path = study_dir / "study.yaml"
+    spec: dict = {}
+    if spec_path.is_file():
+        try:
+            loaded = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                spec = loaded
+        except Exception:
+            spec = {}
+    latest = latest_run_row(study_dir / "runs.db")
+    results = refresh_study_viz(study_dir, spec, latest)
+    return {"study": name, "results": results}
+
+
+# ---------------------------------------------------------------------------
 # Bigraph path cache (keyed by (abs_source_file, mtime, max_depth))
 # ---------------------------------------------------------------------------
 _BIGRAPH_PATH_CACHE: dict = {}

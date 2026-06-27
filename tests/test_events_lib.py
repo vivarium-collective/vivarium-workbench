@@ -38,6 +38,20 @@ def test_payload_missing_file_raises(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# read_workspace_state (backs GET /api/state)
+# ---------------------------------------------------------------------------
+
+def test_read_workspace_state_returns_dict(tmp_path):
+    (tmp_path / "workspace.yaml").write_text("name: my-ws\nversion: 1\n")
+    assert events.read_workspace_state(tmp_path) == {"name": "my-ws", "version": 1}
+
+
+def test_read_workspace_state_missing_returns_none(tmp_path):
+    """Missing workspace.yaml -> None (the route maps that to HTTP 404)."""
+    assert events.read_workspace_state(tmp_path) is None
+
+
+# ---------------------------------------------------------------------------
 # workspace_state_stream
 # ---------------------------------------------------------------------------
 
