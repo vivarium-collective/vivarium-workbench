@@ -11503,14 +11503,17 @@
 
   // Back-compat shim for any old callers (sidebar groups still use this).
   function _openStudyEmbeddedNewTab(name) {
-    // If we're inside the Investigations tab, use the in-place embed.
-    if (window._currentIset) {
+    // Use the in-place embed ONLY when the investigation detail view is actually
+    // on screen. ``_currentIset`` stays set after you leave the investigation
+    // tab, so keying on it alone made rail study clicks from other tabs (e.g.
+    // Analyses) try to embed into a hidden panel and appear to do nothing.
+    var detail = document.getElementById('investigation-detail-view');
+    var onInvestigationView = window._currentIset && detail && detail.offsetParent !== null;
+    if (onInvestigationView) {
       _openStudyInsideInvestigation(name);
       return;
     }
-    // Otherwise navigate straight to the study page. The old branch switched to a
-    // standalone "studies" page that no longer exists in the investigation-centric
-    // nav, so the sidebar study click landed nowhere. _studyHref → /studies/<name>.
+    // Otherwise navigate straight to the study page (works from any tab).
     window.location = _studyHref(name);
   }
   window._openStudyEmbeddedNewTab = _openStudyEmbeddedNewTab;
@@ -11627,7 +11630,9 @@
     if (groups.length === 1 && groups[0].name !== '__ungrouped__') {
       var g = groups[0];
       var _iset = (window._isetIndex || []).filter(function(i){ return i.name === g.name; })[0] || {};
-      host.innerHTML = '<div class="rail-iset-name" title="' + _esc(_iset.title || g.name) + '">'
+      host.innerHTML = '<div class="rail-iset-name" title="' + _esc(_iset.title || g.name) + '"'
+        + ' onclick="_switchPage(\'investigations\');_openInvestigationDetail(\'' + _esc(g.name) + '\');"'
+        + ' style="cursor:pointer;">'
         + _esc(_iset.title || g.name) + '</div>'
         + g.studies.map(function(s) { return _railStudyItem(s); }).join('');
       return;
