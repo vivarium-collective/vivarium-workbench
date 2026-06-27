@@ -89,6 +89,12 @@ body.readonly .js-authoring {
   display: none !important;
 }
 
+/* Remote-only (read-only) client: the workspace status dot is purple (remote),
+   not the local green. */
+body.readonly .viv-workspace-switcher-glyph {
+  color: #7c3aed !important;
+}
+
 /* ── Sources add-* modals ────────────────────────────────────────────── */
 body.snapshot #modal-dataset,
 body.snapshot #modal-reference,
