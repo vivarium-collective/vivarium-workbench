@@ -2464,6 +2464,56 @@ class CompositeTestRunRequest(BaseModel):
     emit_paths: Optional[list] = None
 
 
+# ---------------------------------------------------------------------------
+# Misc POST request bodies (3 routes under the "Misc" tag).
+#
+# All three routes return variable result dicts (or error shapes), so the routes
+# use ``JSONResponse`` on every path and declare NO ``response_model`` — only
+# these request models are needed.  ``extra="allow"`` keeps the legacy raw-JSON
+# contract; the routes pass ``model_dump(exclude_none=True)`` so an OMITTED
+# optional stays absent and the lib builders' ``.get(...)`` defaults apply.
+# ---------------------------------------------------------------------------
+class SuggestRequest(BaseModel):
+    """POST /api/suggest request body — ``{"kind", "context_extras"?}``.
+
+    Writes a Claude-suggestion request file. An invalid ``kind`` is rejected with
+    HTTP 400 by ``lib.misc_post_views.suggest``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    kind: str = ""
+    context_extras: Optional[dict] = None
+
+
+class StudyReportSingleRequest(BaseModel):
+    """POST /api/study-report-single request body.
+
+    ``{"investigation"?, "study"?, "skeptic"?}`` — renders a standalone one-study
+    HTML report. The ``?skeptic=`` query param is merged into the body at the
+    route. Either ``study`` or ``investigation`` is required (enforced by
+    ``lib.single_study_report.build_single_study_report_for_test``, HTTP 400).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: Optional[str] = None
+    study: Optional[str] = None
+    skeptic: Optional[bool] = None
+
+
+class OpenWindowRequest(BaseModel):
+    """POST /api/open-window request body — ``{"route"?}``.
+
+    Opens a dashboard URL in the user's browser. Source:
+    ``lib.misc_post_views.open_window``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    route: Optional[str] = None
+
+
 class InvestigationRunOneRequest(BaseModel):
     """POST /api/investigation-run-one request body.
 

@@ -97,6 +97,7 @@ files = [
     "vivarium_dashboard/lib/work_mutations.py",
     "vivarium_dashboard/lib/workspaces_mutations.py",
     "vivarium_dashboard/lib/misc_mutations.py",
+    "vivarium_dashboard/lib/misc_post_views.py",
     "vivarium_dashboard/lib/viz_accept_views.py",
     "vivarium_dashboard/lib/composite_subprocess.py",
     "vivarium_dashboard/lib/study_run_state.py",
