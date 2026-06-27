@@ -1,11 +1,11 @@
 """Unit + parity tests for vivarium_dashboard.lib.rigor_views.
 
-Covers the two rigor builders ported in Phase A, Batch 3 (both backed by the
+Covers the rigor builder ported in Phase A, Batch 3 (backed by the
 run-merging ``lib.study_spec.load_study_detail_spec``):
 
-- ``build_study_rigor`` / ``build_investigation_rigor`` happy + error paths,
-- ``TestServerShimParity`` — the legacy stdlib rigor handlers delegate to these
-  builders and must produce byte-identical bodies + status codes.
+- ``build_investigation_rigor`` happy + error paths,
+- ``TestServerShimParity`` — the legacy stdlib rigor handler delegates to this
+  builder and must produce byte-identical bodies + status codes.
 """
 
 from __future__ import annotations
@@ -68,32 +68,6 @@ def _make_workspace(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return tmp_path
-
-
-# ---------------------------------------------------------------------------
-# build_study_rigor
-# ---------------------------------------------------------------------------
-
-class TestBuildStudyRigor:
-    def test_happy_path(self, tmp_path: Path) -> None:
-        ws = _make_workspace(tmp_path)
-        out = rigor_views.build_study_rigor(ws, "my-study")
-        assert isinstance(out, dict)
-        # success shape from pbg_superpowers.rigor.study_rigor
-        assert "dimensions" in out and "score" in out and "summary" in out
-        assert "error" not in out
-
-    def test_missing_study_raises_400(self, tmp_path: Path) -> None:
-        with pytest.raises(rigor_views.RigorViewError) as exc:
-            rigor_views.build_study_rigor(tmp_path, None)
-        assert exc.value.status == 400
-        assert exc.value.body == {"error": "missing ?study="}
-
-    def test_not_found_raises_404(self, tmp_path: Path) -> None:
-        with pytest.raises(rigor_views.RigorViewError) as exc:
-            rigor_views.build_study_rigor(tmp_path, "nope")
-        assert exc.value.status == 404
-        assert exc.value.body == {"error": "study not found"}
 
 
 # ---------------------------------------------------------------------------
@@ -162,28 +136,6 @@ class TestServerShimParity:
         handler.path = path
         getattr(handler, method_name)()
         return captured
-
-    # --- study-rigor ---
-
-    def test_study_rigor_200_parity(self, monkeypatch: Any, tmp_path: Path) -> None:
-        ws = _make_workspace(tmp_path)
-        captured = self._invoke(
-            monkeypatch, ws, "_get_study_rigor", "/api/study-rigor?study=my-study")
-        lib_body = rigor_views.build_study_rigor(ws, "my-study")
-        assert captured["status"] == 200
-        assert captured["body"] == lib_body
-
-    def test_study_rigor_400_parity(self, monkeypatch: Any, tmp_path: Path) -> None:
-        captured = self._invoke(
-            monkeypatch, tmp_path, "_get_study_rigor", "/api/study-rigor")
-        assert captured["status"] == 400
-        assert captured["body"] == {"error": "missing ?study="}
-
-    def test_study_rigor_404_parity(self, monkeypatch: Any, tmp_path: Path) -> None:
-        captured = self._invoke(
-            monkeypatch, tmp_path, "_get_study_rigor", "/api/study-rigor?study=nope")
-        assert captured["status"] == 404
-        assert captured["body"] == {"error": "study not found"}
 
     # --- investigation-rigor ---
 

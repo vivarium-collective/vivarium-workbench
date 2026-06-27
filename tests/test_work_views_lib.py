@@ -1,8 +1,6 @@
 """Tests for lib.work_views builders + server.py shim parity.
 
 Covers:
-  - build_pending:             empty-dict on non-git dir; panel keys present; 200
-                                shim parity vs _serve_pending
   - build_generation:          null when pbg_superpowers absent / not active; 200
                                 shim parity vs _get_generation
   - build_work_composite_diff: {base, branch, changes:[]} + error on merge-base
@@ -56,74 +54,6 @@ def git_ws(tmp_path: Path) -> Path:
     subprocess.run(["git", "commit", "-m", "initial"], cwd=ws, check=True,
                    capture_output=True)
     return ws
-
-
-@pytest.fixture
-def git_ws_with_stage(git_ws: Path) -> Path:
-    """A git_ws that also has a stage/add-obs-b branch with a new observable."""
-    ws = git_ws
-    subprocess.run(["git", "checkout", "-b", "stage/add-obs-b"], cwd=ws,
-                   check=True, capture_output=True)
-    new_ws = {
-        "name": "test-ws",
-        "observables": [{"name": "obs-a"}, {"name": "obs-b"}],
-    }
-    (ws / "workspace.yaml").write_text(yaml.safe_dump(new_ws))
-    subprocess.run(["git", "add", "workspace.yaml"], cwd=ws, check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "add obs-b"], cwd=ws, check=True,
-                   capture_output=True)
-    subprocess.run(["git", "checkout", "main"], cwd=ws, check=True,
-                   capture_output=True)
-    return ws
-
-
-# ---------------------------------------------------------------------------
-# build_pending
-# ---------------------------------------------------------------------------
-
-class TestBuildPending:
-    def test_non_git_dir_returns_empty_dict_200(self, tmp_path: Path) -> None:
-        """A non-git directory returns ({}, 200) — no exception / no 500."""
-        from vivarium_dashboard.lib.work_views import build_pending
-        body, status = build_pending(tmp_path)
-        assert status == 200
-        assert body == {}
-
-    def test_git_repo_no_stage_branches_returns_empty_lists(
-        self, git_ws: Path
-    ) -> None:
-        """A git repo with no stage/* branches returns the 7-panel empty dict."""
-        from vivarium_dashboard.lib.work_views import build_pending
-        body, status = build_pending(git_ws)
-        assert status == 200
-        assert set(body.keys()) == {
-            "observables", "visualizations", "phases", "datasets",
-            "references_pdfs", "expert_docs", "imports",
-        }
-        for panel in body.values():
-            assert panel == []
-
-    def test_stage_branch_new_observable_appears(
-        self, git_ws_with_stage: Path
-    ) -> None:
-        """A stage branch's new observable appears in the pending list."""
-        from vivarium_dashboard.lib.work_views import build_pending
-        body, status = build_pending(git_ws_with_stage)
-        assert status == 200
-        obs = body["observables"]
-        assert len(obs) == 1
-        assert obs[0]["entry"]["name"] == "obs-b"
-        assert obs[0]["branch"] == "stage/add-obs-b"
-
-    def test_existing_items_not_in_pending(
-        self, git_ws_with_stage: Path
-    ) -> None:
-        """Items already on main (obs-a) are NOT included in pending."""
-        from vivarium_dashboard.lib.work_views import build_pending
-        body, _ = build_pending(git_ws_with_stage)
-        obs_names = [e["entry"]["name"] for e in body["observables"]]
-        assert "obs-a" not in obs_names
 
 
 # ---------------------------------------------------------------------------
@@ -243,16 +173,6 @@ class TestServerShimParity:
         handler.path = "/"
         getattr(handler, method_name)()
         return captured
-
-    def test_serve_pending_parity(
-        self, monkeypatch, git_ws: Path
-    ) -> None:
-        """_serve_pending returns the same body as build_pending."""
-        from vivarium_dashboard.lib.work_views import build_pending
-        captured = self._invoke_handler(monkeypatch, git_ws, "_serve_pending")
-        lib_body, lib_status = build_pending(git_ws)
-        assert captured["status"] == lib_status
-        assert captured["body"] == lib_body
 
     def test_get_generation_parity(
         self, monkeypatch, git_ws: Path
