@@ -4700,9 +4700,15 @@
         intentLine +
         '<div class="muted" style="font-size:0.78em;font-family:monospace;margin-bottom:6px">' + _esc(iset.name) + '</div>' +
         (desc ? '<p style="margin:0 0 8px 0;font-size:0.9em;color:#475569">' + _esc(desc) + (iset.description.length > 240 ? '…' : '') + '</p>' : '') +
-        '<div style="display:flex;align-items:center;gap:10px;font-size:0.85em;color:#64748b">' +
+        '<div style="display:flex;align-items:center;gap:12px;font-size:0.85em;color:#64748b">' +
           '<span style="flex:1"><strong>' + iset.n_studies + '</strong> stud' + (iset.n_studies === 1 ? 'y' : 'ies') +
           ' &nbsp;·&nbsp; click to open DAG</span>' +
+          '<a href="#" title="Download the rendered HTML report for this investigation" ' +
+            'onclick="window._vivReportFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
+            'style="color:#3b82f6;text-decoration:none;white-space:nowrap">↓ report</a>' +
+          '<a href="#" title="Download the runnable notebook for this investigation" ' +
+            'onclick="window._vivNotebookFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
+            'style="color:#3b82f6;text-decoration:none;white-space:nowrap">↓ notebook</a>' +
           actionBtn +
         '</div>' +
       '</div>';
@@ -6076,6 +6082,27 @@
       });
   }
   window._generateInvestigationReport = _generateInvestigationReport;
+
+  // Per-card actions on the Investigations LIST (don't require opening the
+  // investigation). _generateInvestigationReport captures the name synchronously
+  // from _currentIset, so we set/restore it around the call.
+  window._vivReportFromCard = function (ev, name) {
+    if (ev) ev.stopPropagation();
+    var prev = window._currentIset;
+    window._currentIset = name;
+    try { _generateInvestigationReport(); } finally { window._currentIset = prev; }
+  };
+  window._vivNotebookFromCard = function (ev, name) {
+    if (ev) ev.stopPropagation();
+    var c = window.__DASH_CONFIG__ || {};
+    var base = c.basePath || '';
+    var url = (c.mode === 'snapshot')
+      ? base + '/investigation-notebooks/' + encodeURIComponent(name) + '.ipynb'
+      : '/api/investigation-notebook/' + encodeURIComponent(name);
+    var a = document.createElement('a');
+    a.href = url; a.download = name + '.ipynb';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  };
 
   // Download the coder-facing notebook for the current investigation. In a
   // published (snapshot) bundle this is a static file under
@@ -11631,7 +11658,7 @@
       var g = groups[0];
       var _iset = (window._isetIndex || []).filter(function(i){ return i.name === g.name; })[0] || {};
       host.innerHTML = '<div class="rail-iset-name" title="' + _esc(_iset.title || g.name) + '"'
-        + ' onclick="_switchPage(\'investigations\');_openInvestigationDetail(\'' + _esc(g.name) + '\');"'
+        + ' onclick="_vivOpenInvestigationFromRail(\'' + _esc(g.name) + '\');"'
         + ' style="cursor:pointer;">'
         + _esc(_iset.title || g.name) + '</div>'
         + g.studies.map(function(s) { return _railStudyItem(s); }).join('');
