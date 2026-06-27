@@ -53,6 +53,7 @@ from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
 from vivarium_dashboard.lib import viz_write_mutations as _viz_write_mut
 from vivarium_dashboard.lib import viz_commit_mutations as _viz_commit_mut
 from vivarium_dashboard.lib import viz_accept_views as _viz_accept_views
+from vivarium_dashboard.lib import viz_preview_views as _viz_preview_views
 from vivarium_dashboard.lib import upload_mutations as _upload_mut
 from vivarium_dashboard.lib import reference_mutations as _reference_mut
 from vivarium_dashboard.lib import composite_mutations as _composite_mut
@@ -268,6 +269,8 @@ from vivarium_dashboard.lib.models import (
     InvestigationRunRequest,
     # P5: investigation-run-unblocked (enumerate + submit run job) POST request body
     InvestigationRunUnblockedRequest,
+    # Viz authoring: visualization-preview (in-process viz render) POST request body
+    VisualizationPreviewRequest,
 )
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
@@ -3778,6 +3781,41 @@ def create_app() -> FastAPI:
         """
         resp, status = _viz_accept_views.visualization_accept(
             ws, req.model_dump(exclude_unset=True)
+        )
+        return JSONResponse(status_code=status, content=resp)
+
+    @app.post(
+        "/api/visualization-preview",
+        tags=["Viz authoring"],
+        summary="Render a visualization class in-process against demo or investigation data",
+    )
+    def visualization_preview(
+        req: VisualizationPreviewRequest,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Render a ``pbg_superpowers`` Visualization class IN-PROCESS (instantiate
+        + call ``.update()``; NO subprocess) against synthetic demo data or an
+        existing investigation's emitter outputs.
+
+        Body: ``{"address", "config"?, "source"?}`` — ``source`` is ``"demo"``
+        (default) or ``"investigation:<name>"``.  Returns ``{ok, html,
+        source_used, notes}``.
+
+        Status codes (byte-identical to the legacy handler, via
+        ``lib.viz_preview_views.visualization_preview``):
+          - 400  ``{"error": "address is required"}``
+          - 404  ``{"error": "class not registered: <address>"}``
+          - 200  demo / investigation render success (``{ok: true, …}``) OR a
+            demo render that RAISES (``{ok: false, html: "<…demo render
+            failed…>", …}``) — only validation is non-200.
+
+        ``model_dump(exclude_none=True)`` keeps omitted optionals absent so the
+        builder's ``.get(...)`` defaults apply.  The CSRF middleware already
+        guards this POST.  Every path is wrapped in ``JSONResponse`` so the
+        lib-returned status code is preserved verbatim.
+        """
+        resp, status = _viz_preview_views.visualization_preview(
+            ws, req.model_dump(exclude_none=True)
         )
         return JSONResponse(status_code=status, content=resp)
 

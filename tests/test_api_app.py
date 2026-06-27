@@ -5998,3 +5998,73 @@ class TestInvestigationRunUnblockedRoute:
         p = "/api/investigation-run-unblocked"
         assert p in paths and "post" in paths[p]
         assert paths[p]["post"]["tags"] == ["Investigation runs"]
+
+
+# ===========================================================================
+# Viz authoring: visualization-preview POST route ("Viz authoring" tag).
+# Thin wrapper over ``lib.viz_preview_views.visualization_preview`` — every test
+# monkeypatches that lib fn so NO real viz render runs.  The route JSONResponses
+# all paths, so the lib-returned (dict, status) is preserved verbatim (200 demo
+# happy / 200 demo-render-failure / 400 missing-address / 404 not-registered).
+# ===========================================================================
+class TestVisualizationPreviewRoute:
+    def test_happy_200(self, client, monkeypatch):
+        from vivarium_dashboard.lib import viz_preview_views
+        captured = {}
+
+        def _fake(ws, body):
+            captured["ws"], captured["body"] = ws, body
+            return {"ok": True, "html": "<b>x</b>",
+                    "source_used": "demo", "notes": ""}, 200
+
+        monkeypatch.setattr(
+            viz_preview_views, "visualization_preview", _fake)
+        r = client.post(
+            "/api/visualization-preview",
+            json={"address": "local:FakeViz"},
+        )
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+        assert r.json()["html"] == "<b>x</b>"
+        # exclude_none keeps address; omitted optionals absent.
+        assert captured["body"] == {"address": "local:FakeViz"}
+
+    def test_demo_render_failure_200_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import viz_preview_views
+        monkeypatch.setattr(
+            viz_preview_views, "visualization_preview",
+            lambda ws, body: (
+                {"ok": False, "html": "<p>demo render failed: ValueError: boom</p>",
+                 "source_used": "demo", "notes": ""}, 200),
+        )
+        r = client.post("/api/visualization-preview",
+                        json={"address": "local:FakeViz"})
+        assert r.status_code == 200  # render failure still 200
+        assert r.json()["ok"] is False
+
+    def test_missing_address_400_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import viz_preview_views
+        monkeypatch.setattr(
+            viz_preview_views, "visualization_preview",
+            lambda ws, body: ({"error": "address is required"}, 400),
+        )
+        r = client.post("/api/visualization-preview", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "address is required"}
+
+    def test_class_not_registered_404_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import viz_preview_views
+        monkeypatch.setattr(
+            viz_preview_views, "visualization_preview",
+            lambda ws, body: ({"error": "class not registered: local:Nope"}, 404),
+        )
+        r = client.post("/api/visualization-preview",
+                        json={"address": "local:Nope"})
+        assert r.status_code == 404
+        assert r.json() == {"error": "class not registered: local:Nope"}
+
+    def test_route_in_openapi(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        p = "/api/visualization-preview"
+        assert p in paths and "post" in paths[p]
+        assert paths[p]["post"]["tags"] == ["Viz authoring"]
