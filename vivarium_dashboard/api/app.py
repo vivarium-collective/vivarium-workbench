@@ -149,6 +149,7 @@ from vivarium_dashboard.lib.models import (
     PtoolsLaunch,
     SimRow,
     SimulationsPayload,
+    ProvenanceManifest,
     SourceBuilds,
     StudyBigraphPaths,
     StudyChartsPayload,
@@ -2082,6 +2083,16 @@ def create_app() -> FastAPI:
         Library-backed via ``lib.workspace_deps_views.build_source_builds``.
         """
         return SourceBuilds.model_validate(_workspace_deps.build_source_builds())
+
+    @app.get(
+        "/api/source/manifest",
+        response_model=ProvenanceManifest,
+        tags=["source"],
+        summary="Provenance manifest for the active workspace (repo@commit + lockfile + results)",
+    )
+    def source_manifest(ws: Path = Depends(get_workspace)) -> ProvenanceManifest:
+        from vivarium_dashboard.lib.provenance_manifest import build_manifest
+        return ProvenanceManifest(**build_manifest(ws))
 
     @app.get(
         "/api/workspaces",
