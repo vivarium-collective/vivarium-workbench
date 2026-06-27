@@ -372,6 +372,49 @@ _OPENAPI_TAGS = [
 ]
 
 
+# Read-only mode --------------------------------------------------------------
+# When ``VIVARIUM_DASHBOARD_READONLY`` is set, the app serves a read-only
+# surface: every GET (reads/display/sync) stays, but mutating routes are
+# dropped EXCEPT a small whitelist of *actions* the client legitimately
+# triggers — run launches, the remote-build flow, and GitHub auth. The dropped
+# authoring/local-management endpoints simply 404 (no route registered), which
+# is exactly the "reader/displayer of git-committed content, remote-only
+# server" model. Reversible: unset the flag to restore the full surface.
+READONLY_ENV = "VIVARIUM_DASHBOARD_READONLY"
+
+_READONLY_ALLOWED_MUTATIONS = {
+    # run triggers (local or remote execution)
+    "/api/investigation-run", "/api/investigation-run-one", "/api/investigation-run-unblocked",
+    "/api/study-run-baseline", "/api/study-run-variant", "/api/composite-test-run",
+    "/api/remote-run-start",
+    # remote-build flow (the core of remote-only)
+    "/api/source/build-remote", "/api/source/switch-build",
+    # GitHub auth (needed to reach the remote / private content)
+    "/api/auth/github/start", "/api/auth/github/logout",
+    # benign UI telemetry
+    "/api/click",
+}
+
+
+def _readonly_enabled() -> bool:
+    return os.environ.get(READONLY_ENV, "").strip().lower() not in ("", "0", "false", "no")
+
+
+def _apply_readonly_filter(app: FastAPI) -> None:
+    """Drop every mutating route except the whitelisted actions (in place)."""
+    kept = []
+    for r in app.router.routes:
+        methods = getattr(r, "methods", None)
+        if not methods:                                   # Mounts / non-HTTP routes
+            kept.append(r); continue
+        if methods <= {"GET", "HEAD", "OPTIONS"}:         # pure read
+            kept.append(r)
+        elif getattr(r, "path", "") in _READONLY_ALLOWED_MUTATIONS:
+            kept.append(r)
+        # else: an un-whitelisted mutation route -> dropped
+    app.router.routes[:] = kept
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="vivarium-dashboard API",
@@ -5315,6 +5358,9 @@ def create_app() -> FastAPI:
             return Response(status_code=403)
         target = _static_serving.resolve_asset(ws, rel)
         return _serve_static_file(target, rel)
+
+    if _readonly_enabled():
+        _apply_readonly_filter(app)
 
     return app
 
