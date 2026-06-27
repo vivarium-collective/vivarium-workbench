@@ -6235,8 +6235,72 @@ class TestImportInstallRoute:
         assert r.json() == {"error": "install failed", "log": "x"}
 
 
+class TestCatalogInstallRoute:
+    def test_happy_passthrough(self, client, monkeypatch):
+        from vivarium_dashboard.lib import catalog_install_views
+        captured = {}
+
+        def _fake(ws, body):
+            captured["ws"], captured["body"] = ws, body
+            return {"ok": True, "module": "foo", "install_mode": "pypi", "log": "ok"}, 200
+
+        monkeypatch.setattr(catalog_install_views, "catalog_install", _fake)
+        r = client.post("/api/catalog-install", json={"name": "foo"})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True, "module": "foo", "install_mode": "pypi", "log": "ok"}
+        # exclude_none keeps name; omitted skip_system_deps_check absent.
+        assert captured["body"] == {"name": "foo"}
+
+    def test_skip_flag_passed_through(self, client, monkeypatch):
+        from vivarium_dashboard.lib import catalog_install_views
+        captured = {}
+        monkeypatch.setattr(
+            catalog_install_views, "catalog_install",
+            lambda ws, body: (captured.update(body) or {"ok": True}, 200),
+        )
+        client.post("/api/catalog-install", json={"name": "foo", "skip_system_deps_check": True})
+        assert captured == {"name": "foo", "skip_system_deps_check": True}
+
+    def test_missing_name_400_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import catalog_install_views
+        monkeypatch.setattr(
+            catalog_install_views, "catalog_install",
+            lambda ws, body: ({"error": "missing name"}, 400),
+        )
+        r = client.post("/api/catalog-install", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "missing name"}
+
+    def test_not_in_catalog_404_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import catalog_install_views
+        monkeypatch.setattr(
+            catalog_install_views, "catalog_install",
+            lambda ws, body: ({"error": "module 'foo' not in catalog"}, 404),
+        )
+        r = client.post("/api/catalog-install", json={"name": "foo"})
+        assert r.status_code == 404
+        assert r.json() == {"error": "module 'foo' not in catalog"}
+
+    def test_system_deps_409_preserved(self, client, monkeypatch):
+        from vivarium_dashboard.lib import catalog_install_views
+        body409 = {
+            "error": "unmet system dependencies",
+            "name": "foo",
+            "platform": "darwin",
+            "missing": [{"name": "ipopt", "reason": "not found"}],
+            "hint": "POST again with skip_system_deps_check=true to proceed anyway, or call /api/system-deps-install first.",
+        }
+        monkeypatch.setattr(
+            catalog_install_views, "catalog_install",
+            lambda ws, body: (body409, 409),
+        )
+        r = client.post("/api/catalog-install", json={"name": "foo"})
+        assert r.status_code == 409
+        assert r.json() == body409
+
+
 def test_installs_routes_in_openapi(client):
     paths = client.get("/openapi.json").json()["paths"]
-    for p in ("/api/system-deps-install", "/api/import-install"):
+    for p in ("/api/system-deps-install", "/api/import-install", "/api/catalog-install"):
         assert p in paths and "post" in paths[p], p
         assert paths[p]["post"]["tags"] == ["Installs"], p

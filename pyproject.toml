@@ -109,6 +109,7 @@ files = [
     "vivarium_dashboard/lib/viz_preview_views.py",
     "vivarium_dashboard/lib/viz_preview_instance_views.py",
     "vivarium_dashboard/lib/install_views.py",
+    "vivarium_dashboard/lib/catalog_install_views.py",
 ]
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true
