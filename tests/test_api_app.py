@@ -4066,6 +4066,53 @@ if a.json:
         assert "post" in paths["/api/investigation-delete"]
 
 
+class TestInvestigationCreateRoute:
+    """Route-level tests for POST /api/investigation-create (deferred commit)."""
+
+    @pytest.fixture
+    def ws(self, tmp_path: Path) -> Path:
+        w = tmp_path / "ws"
+        w.mkdir()
+        (w / "workspace.yaml").write_text("name: ws\n")
+        (w / "investigations").mkdir()
+        (w / "studies").mkdir()
+        return w
+
+    @pytest.fixture
+    def ic_client(self, ws: Path) -> TestClient:
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: ws
+        return TestClient(app)
+
+    def test_create_happy_blank(self, ic_client: TestClient, ws: Path) -> None:
+        r = ic_client.post("/api/investigation-create", json={"name": "inv-blank"})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True, "name": "inv-blank"}
+        assert (ws / "studies" / "inv-blank" / "spec.yaml").is_file()
+        assert (ws / "studies" / "inv-blank" / "data" / ".keep").is_file()
+
+    def test_create_missing_name(self, ic_client: TestClient) -> None:
+        r = ic_client.post("/api/investigation-create", json={})
+        assert r.status_code == 400
+        assert r.json() == {"error": "name is required"}
+
+    def test_create_bad_name_regex(self, ic_client: TestClient) -> None:
+        r = ic_client.post("/api/investigation-create", json={"name": "bad name!"})
+        assert r.status_code == 400
+        assert r.json() == {"error": "name must match [a-zA-Z0-9_-]+"}
+
+    def test_create_conflict(self, ic_client: TestClient) -> None:
+        ic_client.post("/api/investigation-create", json={"name": "dup"})
+        r = ic_client.post("/api/investigation-create", json={"name": "dup"})
+        assert r.status_code == 409
+        assert r.json() == {"error": "investigation 'dup' already exists"}
+
+    def test_create_in_openapi(self, ic_client: TestClient) -> None:
+        paths = ic_client.get("/openapi.json").json()["paths"]
+        assert "/api/investigation-create" in paths
+        assert "post" in paths["/api/investigation-create"]
+
+
 class TestBatch26ReferenceRoutes:
     """Route-level tests for Batch 26 reference POST endpoints
     (/api/reference-pdf, /api/reference-bibtex, /api/reference)."""
