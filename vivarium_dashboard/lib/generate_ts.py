@@ -44,7 +44,6 @@ _MODELS: list[type[BaseModel]] = [
     _models.RemoteRunJob,
     _models.ChartPayload,
     _models.StudyChartsPayload,
-    _models.DashConfig,
     _models.InvestigationSummary,
     _models.InvestigationSummariesPayload,
     _models.DataSource,
@@ -60,15 +59,9 @@ _MODELS: list[type[BaseModel]] = [
     _models.GitStatus,
     _models.WorkStatusInactive,
     _models.WorkStatusActive,
-    _models.BranchStaleness,
     _models.DirtyFile,
     _models.DirtyStatus,
-    _models.BranchCommit,
-    _models.BranchInfo,
-    _models.BranchesPayload,
-    _models.BranchDiff,
-    # Work & branches models (pending entries, generation, composite diff)
-    _models.PendingEntries,
+    # Work & branches models (generation, composite diff)
     _models.GenerationSummary,
     _models.Generation,
     _models.WorkCompositeDiffEntry,
@@ -82,7 +75,6 @@ _MODELS: list[type[BaseModel]] = [
     _models.InvestigationStateTree,
     _models.InvestigationHypothesesPayload,
     # Rigor models
-    _models.StudyRigor,
     _models.InvestigationRigor,
     # Studies detail model
     _models.StudyDetail,
@@ -151,7 +143,6 @@ _MODELS: list[type[BaseModel]] = [
     _models.WorkspaceEntry,
     # C-state-3h2: misc FS/render routes
     _models.RenderResponse,
-    _models.FeedbackImportResponse,
     # C-state-3i: visualization-accept finalize route
     _models.VisualizationAcceptResponse,
 ]

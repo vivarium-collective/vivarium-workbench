@@ -222,67 +222,6 @@ def test_run_study_variant_unknown_variant_404(tmp_path, hermetic_engine):
 
 
 # ---------------------------------------------------------------------------
-# run_study_all_baselines
-# ---------------------------------------------------------------------------
-
-def test_run_study_all_baselines_aggregates(tmp_path, monkeypatch):
-    ws = tmp_path / "ws"
-    _write_workspace(ws)
-    _write_study(ws, "s1", [
-        {"name": "a", "composite": "demo_pkg.composites.cell", "params": {}},
-        {"name": "b", "composite": "demo_pkg.composites.cell", "params": {}},
-        {"name": "c", "composite": "demo_pkg.composites.cell", "params": {}},
-    ])
-
-    seen = []
-
-    def fake_baseline(ws_root, body):
-        seen.append(body["composite"])
-        return ({"simulation_id": f"run-{body['composite']}"}, 200)
-
-    monkeypatch.setattr(study_runs, "run_study_baseline", fake_baseline)
-
-    resp, code = study_runs.run_study_all_baselines(ws, {"study": "s1", "steps": 4})
-
-    assert code == 200, resp
-    assert seen == ["a", "b", "c"]
-    assert [r["composite"] for r in resp["results"]] == ["a", "b", "c"]
-    assert resp["errors"] == []
-
-
-def test_run_study_all_baselines_partial_207(tmp_path, monkeypatch):
-    ws = tmp_path / "ws"
-    _write_workspace(ws)
-    _write_study(ws, "s1", [
-        {"name": "a", "composite": "demo_pkg.composites.cell", "params": {}},
-        {"name": "b", "composite": "demo_pkg.composites.cell", "params": {}},
-    ])
-
-    def fake_baseline(ws_root, body):
-        if body["composite"] == "b":
-            return ({"error": "boom"}, 500)
-        return ({"simulation_id": "ok"}, 200)
-
-    monkeypatch.setattr(study_runs, "run_study_baseline", fake_baseline)
-    resp, code = study_runs.run_study_all_baselines(ws, {"study": "s1"})
-    assert code == 207
-    assert [e["composite"] for e in resp["errors"]] == ["b"]
-
-
-def test_run_study_all_baselines_all_fail_propagates_code(tmp_path, monkeypatch):
-    ws = tmp_path / "ws"
-    _write_workspace(ws)
-    _write_study(ws, "s1", [
-        {"name": "a", "composite": "demo_pkg.composites.cell", "params": {}},
-    ])
-    monkeypatch.setattr(study_runs, "run_study_baseline",
-                        lambda ws_root, body: ({"error": "nope"}, 404))
-    resp, code = study_runs.run_study_all_baselines(ws, {"study": "s1"})
-    assert code == 404
-    assert resp["results"] == []
-
-
-# ---------------------------------------------------------------------------
 # Server-shim ↔ lib parity
 # ---------------------------------------------------------------------------
 
@@ -307,7 +246,3 @@ def test_server_shims_match_lib(tmp_path, hermetic_engine, monkeypatch):
     var_body = {"study": "s1", "variant": "fast"}
     assert (server._post_study_run_variant_for_test(ws, dict(var_body))
             == study_runs.run_study_variant(ws, dict(var_body)))
-
-    all_body = {"study": "s1"}
-    assert (server._post_study_run_all_baselines_for_test(ws, dict(all_body))
-            == study_runs.run_study_all_baselines(ws, dict(all_body)))

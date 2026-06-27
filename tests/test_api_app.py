@@ -77,12 +77,6 @@ def test_openapi_includes_typed_models(client):
     assert "string" not in started_types
 
 
-def test_config_route(client):
-    r = client.get("/api/config")
-    assert r.status_code == 200
-    assert r.json() == {"mode": "local-server", "basePath": None}
-
-
 def test_workspace_manifest_route_returns_six_sections(client, monkeypatch):
     """GET /api/workspace-manifest returns 200 with the six top-level sections.
 
@@ -219,7 +213,7 @@ def test_saved_visualizations_typed(client, monkeypatch):
 
 def test_new_routes_in_openapi(client):
     components = client.get("/openapi.json").json()["components"]["schemas"]
-    for name in ("DashConfig", "InvestigationSummary", "DataSourcesPayload",
+    for name in ("InvestigationSummary", "DataSourcesPayload",
                  "DataSource", "BibEntry", "ReferencesBibPayload",
                  "SavedVisualizationsPayload", "SavedViz", "ReportCard"):
         assert name in components
@@ -876,51 +870,6 @@ def test_work_status_in_openapi(client):
 
 
 # ---------------------------------------------------------------------------
-# /api/branch-staleness
-# ---------------------------------------------------------------------------
-
-def test_branch_staleness_with_branch(client, monkeypatch):
-    """Happy path: explicit ?branch= param."""
-    import vivarium_dashboard.api.app as _app
-
-    payload = {
-        "branch": "feat/x", "base": "main", "behind_ref": "origin/main",
-        "commits_behind": 3, "stale_threshold": 20, "stale": False,
-    }
-    monkeypatch.setattr(
-        _app._git_status, "build_branch_staleness",
-        lambda ws, branch, base: payload,
-    )
-    r = client.get("/api/branch-staleness?branch=feat%2Fx")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["branch"] == "feat/x"
-    assert body["commits_behind"] == 3
-
-
-def test_branch_staleness_400_no_branch(client, monkeypatch):
-    """No ?branch= and HEAD can't be resolved → HTTP 400."""
-    import vivarium_dashboard.api.app as _app
-
-    from vivarium_dashboard.lib.git_status import NoBranchError
-
-    def _raise(ws, branch, base):
-        raise NoBranchError("could not determine current branch + no ?branch= given")
-
-    monkeypatch.setattr(_app._git_status, "build_branch_staleness", _raise)
-    r = client.get("/api/branch-staleness")
-    assert r.status_code == 400
-    # Legacy shape: {"error": <msg>}, not FastAPI's default {"detail": ...}
-    assert r.json() == {"error": "could not determine current branch + no ?branch= given"}
-
-
-def test_branch_staleness_in_openapi(client):
-    spec = client.get("/openapi.json").json()
-    assert "/api/branch-staleness" in spec["paths"]
-    assert "BranchStaleness" in spec["components"]["schemas"]
-
-
-# ---------------------------------------------------------------------------
 # /api/dirty-status
 # ---------------------------------------------------------------------------
 
@@ -980,124 +929,6 @@ def test_dirty_status_in_openapi(client):
     assert "/api/dirty-status" in spec["paths"]
     for name in ("DirtyStatus", "DirtyFile"):
         assert name in spec["components"]["schemas"], f"{name} missing"
-
-
-# ---------------------------------------------------------------------------
-# /api/branches
-# ---------------------------------------------------------------------------
-
-def test_branches_empty(client, monkeypatch):
-    """No stage/* branches → empty list, not a 500."""
-    import vivarium_dashboard.api.app as _app
-
-    monkeypatch.setattr(
-        _app._git_status, "list_branches",
-        lambda ws: {"branches": [], "current": "main"},
-    )
-    r = client.get("/api/branches")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["branches"] == []
-    assert body["current"] == "main"
-
-
-def test_branches_with_data(client, monkeypatch):
-    """Stage branches are typed through BranchInfo + BranchCommit."""
-    import vivarium_dashboard.api.app as _app
-
-    payload = {
-        "branches": [
-            {
-                "name": "stage/feat-a",
-                "last_commit": {"sha": "abc1234", "subject": "add feat", "date": "2024-01-01"},
-                "ahead_of_main": 2,
-            }
-        ],
-        "current": "main",
-    }
-    monkeypatch.setattr(_app._git_status, "list_branches", lambda ws: payload)
-    r = client.get("/api/branches")
-    assert r.status_code == 200
-    body = r.json()
-    assert len(body["branches"]) == 1
-    b = body["branches"][0]
-    assert b["name"] == "stage/feat-a"
-    assert b["last_commit"]["sha"] == "abc1234"
-    assert b["ahead_of_main"] == 2
-
-
-def test_branches_500_on_git_error(client, monkeypatch):
-    """A top-level git failure (builder returns {error}) → HTTP 500, matching
-    the legacy _serve_branches — not a swallowed 200."""
-    import vivarium_dashboard.api.app as _app
-
-    monkeypatch.setattr(
-        _app._git_status, "list_branches",
-        lambda ws: {"error": "fatal: not a git repository"},
-    )
-    r = client.get("/api/branches")
-    assert r.status_code == 500
-    # Legacy shape: {"error": <msg>}, not FastAPI's default {"detail": ...}
-    assert r.json() == {"error": "fatal: not a git repository"}
-
-
-def test_branches_in_openapi(client):
-    spec = client.get("/openapi.json").json()
-    assert "/api/branches" in spec["paths"]
-    for name in ("BranchesPayload", "BranchInfo", "BranchCommit"):
-        assert name in spec["components"]["schemas"], f"{name} missing"
-
-
-# ---------------------------------------------------------------------------
-# /api/branch-diff
-# ---------------------------------------------------------------------------
-
-def test_branch_diff_valid(client, monkeypatch):
-    """Happy path: ?branch= returns log + diff_stat."""
-    import vivarium_dashboard.api.app as _app
-
-    payload = {
-        "branch": "stage/feat-a",
-        "log": "abc1234 add feat\n",
-        "diff_stat": " src/foo.py | 1 +\n 1 file changed\n",
-    }
-    monkeypatch.setattr(_app._git_status, "build_branch_diff", lambda ws, branch: payload)
-    r = client.get("/api/branch-diff?branch=stage%2Ffeat-a")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["branch"] == "stage/feat-a"
-    assert "add feat" in body["log"]
-
-
-def test_branch_diff_400_invalid_branch(client, monkeypatch):
-    """Invalid branch name → HTTP 400."""
-    import vivarium_dashboard.api.app as _app
-
-    def _raise(ws, branch):
-        raise ValueError(f"invalid branch name: {branch!r}")
-
-    monkeypatch.setattr(_app._git_status, "build_branch_diff", _raise)
-    r = client.get("/api/branch-diff?branch=../evil")
-    assert r.status_code == 400
-    # Legacy verbatim body: {"error": "invalid branch name"} — NOT the builder's
-    # detailed ValueError text, and NOT FastAPI's default {"detail": ...}.
-    assert r.json() == {"error": "invalid branch name"}
-
-
-def test_branch_diff_400_missing_param(client):
-    """Missing ?branch= → HTTP 400 (NOT FastAPI's 422 'field required').
-
-    Hits the real builder on the empty tmp workspace; the empty branch fails
-    the builder's name validation and surfaces as 400, matching legacy."""
-    r = client.get("/api/branch-diff")
-    assert r.status_code == 400
-    assert r.json() == {"error": "invalid branch name"}
-
-
-def test_branch_diff_in_openapi(client):
-    spec = client.get("/openapi.json").json()
-    assert "/api/branch-diff" in spec["paths"]
-    assert "BranchDiff" in spec["components"]["schemas"]
 
 
 # ---------------------------------------------------------------------------
@@ -1351,60 +1182,6 @@ def test_investigation_hypotheses_in_openapi(client):
     spec = client.get("/openapi.json").json()
     assert "/api/investigation-hypotheses" in spec["paths"]
     assert "InvestigationHypothesesPayload" in spec["components"]["schemas"]
-
-
-# ---------------------------------------------------------------------------
-# /api/study-rigor
-# ---------------------------------------------------------------------------
-
-def test_study_rigor_200(client, monkeypatch):
-    """Happy path: the rigor scorecard passes through untouched (extra='allow')."""
-    import vivarium_dashboard.api.app as _app
-    payload = {
-        "study_type": "perturbation", "mode": "hypothesis", "descriptive": False,
-        "dimensions": [{"id": "replication", "severity": "ok"}],
-        "score": {"gap": 0, "warn": 0, "ok": 1, "na": 0, "total": 1},
-        "summary": "1/1 rigor dimensions addressed",
-    }
-    monkeypatch.setattr(_app._rigor_views, "build_study_rigor", lambda ws, slug: payload)
-    r = client.get("/api/study-rigor?study=my-study")
-    assert r.status_code == 200
-    assert r.json() == payload   # nothing stripped or injected
-
-
-def test_study_rigor_400_missing(client):
-    """Missing ?study= → HTTP 400, {"error": ...} (not {"detail": ...})."""
-    r = client.get("/api/study-rigor")
-    assert r.status_code == 400
-    assert r.json() == {"error": "missing ?study="}
-    assert "detail" not in r.json()
-
-
-def test_study_rigor_404_not_found(client):
-    """Unknown study → HTTP 404, {"error": "study not found"}."""
-    r = client.get("/api/study-rigor?study=nope")
-    assert r.status_code == 404
-    assert r.json() == {"error": "study not found"}
-
-
-def test_study_rigor_investigation_alias(client, monkeypatch):
-    """Legacy ?investigation= alias selects the study when ?study= is absent."""
-    import vivarium_dashboard.api.app as _app
-    seen = {}
-
-    def _capture(ws, slug):
-        seen["slug"] = slug
-        return {"dimensions": [], "score": {}, "summary": ""}
-
-    monkeypatch.setattr(_app._rigor_views, "build_study_rigor", _capture)
-    client.get("/api/study-rigor?investigation=via-alias")
-    assert seen["slug"] == "via-alias"
-
-
-def test_study_rigor_in_openapi(client):
-    spec = client.get("/openapi.json").json()
-    assert "/api/study-rigor" in spec["paths"]
-    assert "StudyRigor" in spec["components"]["schemas"]
 
 
 # ---------------------------------------------------------------------------
@@ -2981,57 +2758,6 @@ class TestPtoolsLaunchRoute:
         assert "/api/ptools-launch/{study}" in spec["paths"]
         assert "PtoolsLaunch" in spec["components"]["schemas"]
 
-# /api/pending
-# ---------------------------------------------------------------------------
-
-class TestPendingRoute:
-    def test_pending_empty_workspace_returns_200(self, client):
-        """A non-git tmp workspace → 200 with EXACTLY {} (byte-identical to legacy).
-
-        PendingEntries is a pure pass-through (no declared fields), so the
-        builder's ``{}`` is NOT inflated into the 7-empty-panel structure.
-        """
-        r = client.get("/api/pending")
-        assert r.status_code == 200
-        assert r.json() == {}
-
-    def test_pending_typed_passthrough(self, client, monkeypatch):
-        """A full pending payload validates through PendingEntries (extra='allow')."""
-        import vivarium_dashboard.api.app as _app
-
-        payload = {
-            "observables": [{"entry": {"name": "obs-b"}, "branch": "stage/obs-b"}],
-            "visualizations": [],
-            "phases": [],
-            "datasets": [],
-            "references_pdfs": [],
-            "expert_docs": [],
-            "imports": [],
-        }
-        monkeypatch.setattr(_app._work_views, "build_pending",
-                            lambda ws: (payload, 200))
-        r = client.get("/api/pending")
-        assert r.status_code == 200
-        body = r.json()
-        assert body["observables"][0]["entry"]["name"] == "obs-b"
-        assert body["observables"][0]["branch"] == "stage/obs-b"
-
-    def test_pending_500_on_exception(self, client, monkeypatch):
-        """An unexpected exception in build_pending → HTTP 500 with {error}."""
-        import vivarium_dashboard.api.app as _app
-
-        monkeypatch.setattr(_app._work_views, "build_pending",
-                            lambda ws: ({"error": "boom"}, 500))
-        r = client.get("/api/pending")
-        assert r.status_code == 500
-        assert r.json()["error"] == "boom"
-
-    def test_pending_in_openapi(self, client):
-        spec = client.get("/openapi.json").json()
-        assert "/api/pending" in spec["paths"]
-        for name in ("PendingEntries",):
-            assert name in spec["components"]["schemas"]
-
 
 # ---------------------------------------------------------------------------
 # /api/generation
@@ -3588,11 +3314,11 @@ class TestStaticRoutes:
     def test_catch_all_does_not_shadow_api_routes(self, client):
         """CRITICAL: the catch-all (registered LAST) must not shadow /api/*.
 
-        GET /api/config still returns the typed config JSON (the specific route
+        GET /api/workspace-manifest still returns its JSON (the specific route
         wins), and an unknown /api/nope is a 404 (not a 200 catch-all body)."""
-        r = client.get("/api/config")
+        r = client.get("/api/workspace-manifest")
         assert r.status_code == 200
-        assert r.json() == {"mode": "local-server", "basePath": None}
+        assert isinstance(r.json(), dict)
         r2 = client.get("/api/nope")
         assert r2.status_code == 404
 
@@ -5770,11 +5496,11 @@ class TestWorkspacesProcessRoutes:
 
 # ===========================================================================
 # C-state-3h2: misc FS/render routes
-#   POST /api/click  /api/render  /api/feedback-import
-# /api/click returns a RAW empty 204 (no JSON body).  render + feedback-import
-# delegate to the pure lib.misc_mutations builders (monkeypatched via the app's
-# _misc_mut seam) and preserve the lib status code via JSONResponse.  The POSTs
-# pass CSRF (TestClient sends no Origin).
+#   POST /api/click  /api/render
+# /api/click returns a RAW empty 204 (no JSON body).  render delegates to the
+# pure lib.misc_mutations builders (monkeypatched via the app's _misc_mut seam)
+# and preserves the lib status code via JSONResponse.  The POSTs pass CSRF
+# (TestClient sends no Origin).
 # ===========================================================================
 class TestMiscFsRoutes:
     # -- POST /api/click (raw empty 204) -------------------------------------
@@ -5816,57 +5542,20 @@ class TestMiscFsRoutes:
         assert r.status_code == 500
         assert r.json() == {"error": "boom"}
 
-    # -- POST /api/feedback-import -------------------------------------------
-
-    def test_feedback_import_happy_200(self, client, monkeypatch):
-        seen = {}
-
-        def _fake(ws, body):
-            seen["ws"] = ws
-            seen["body"] = body
-            return {"ok": True, "path": "investigations/dnaa/feedback/t.yaml",
-                    "n_entries": 2}, 200
-
-        monkeypatch.setattr(api_app._misc_mut, "feedback_import", _fake)
-        r = client.post("/api/feedback-import",
-                        json={"annotations": {"s": [1, 2]}})
-        assert r.status_code == 200
-        assert r.json() == {"ok": True,
-                            "path": "investigations/dnaa/feedback/t.yaml",
-                            "n_entries": 2}
-        assert seen["body"] == {"annotations": {"s": [1, 2]}}
-
-    def test_feedback_import_error_400(self, client, monkeypatch):
-        monkeypatch.setattr(api_app._misc_mut, "feedback_import",
-                            lambda ws, body: ({"error": "bad payload"}, 400))
-        r = client.post("/api/feedback-import", json={})
-        assert r.status_code == 400
-        assert r.json() == {"error": "bad payload"}
-
-    def test_feedback_import_unavailable_500(self, client, monkeypatch):
-        monkeypatch.setattr(
-            api_app._misc_mut, "feedback_import",
-            lambda ws, body: (
-                {"error": "pbg-superpowers not available for feedback import"}, 500))
-        r = client.post("/api/feedback-import", json={})
-        assert r.status_code == 500
-        assert r.json() == {
-            "error": "pbg-superpowers not available for feedback import"}
-
     # -- OpenAPI registration ------------------------------------------------
 
     def test_routes_in_openapi(self, client):
         spec = client.get("/openapi.json").json()
         paths = spec["paths"]
-        for p in ("/api/click", "/api/render", "/api/feedback-import"):
+        for p in ("/api/click", "/api/render"):
             assert p in paths and "post" in paths[p], p
         schemas = spec["components"]["schemas"]
-        for name in ("RenderResponse", "FeedbackImportResponse"):
+        for name in ("RenderResponse",):
             assert name in schemas, name
 
 
 # ===========================================================================
-# P1: 5 study-run / test-run POST routes (under the "Study runs" tag).
+# P1: 4 study-run / test-run POST routes (under the "Study runs" tag).
 # Each route is a thin wrapper over a lib fn; every test monkeypatches that lib
 # fn so NO real sim / pytest / subprocess ever runs.  The routes JSONResponse
 # all paths, so the lib-returned (dict, status) is preserved verbatim.
@@ -5936,20 +5625,6 @@ class TestStudyRunRoutes:
         assert r.status_code == 422
         assert r.json() == {"error": "kind: seeds requires n_seeds >= 1"}
 
-    def test_study_run_all_baselines_passthrough(self, client, monkeypatch):
-        from vivarium_dashboard.lib import study_runs
-        captured = {}
-
-        def _fake(ws, body):
-            captured["body"] = body
-            return {"results": [{"name": "b0"}], "errors": []}, 200
-
-        monkeypatch.setattr(study_runs, "run_study_all_baselines", _fake)
-        r = client.post("/api/study-run-all-baselines", json={"study": "s1"})
-        assert r.status_code == 200
-        assert r.json() == {"results": [{"name": "b0"}], "errors": []}
-        assert captured["body"] == {"study": "s1"}
-
     def test_study_tests_run_passthrough(self, client, monkeypatch):
         from vivarium_dashboard.lib import test_run_views
         captured = {}
@@ -5998,12 +5673,11 @@ class TestStudyRunRoutes:
         assert r.status_code == 500
         assert r.json() == {"error": "pytest timed out after 120s"}
 
-    def test_all_five_routes_in_openapi(self, client):
+    def test_all_routes_in_openapi(self, client):
         paths = client.get("/openapi.json").json()["paths"]
         for p in (
             "/api/study-run-baseline",
             "/api/study-run-variant",
-            "/api/study-run-all-baselines",
             "/api/study-tests-run",
             "/api/run-tests",
         ):

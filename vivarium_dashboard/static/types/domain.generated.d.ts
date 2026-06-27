@@ -83,11 +83,6 @@ export interface StudyChartsPayload {
   live_count: number;
 }
 
-export interface DashConfig {
-  mode: string;
-  basePath: string | null;
-}
-
 export interface InvestigationSummary {
   name: string;
   title: string | null;
@@ -213,15 +208,6 @@ export interface WorkStatusActive {
   pr_url: string | null;
 }
 
-export interface BranchStaleness {
-  branch: string;
-  base: string;
-  behind_ref: string;
-  commits_behind: number;
-  stale_threshold: number;
-  stale: boolean;
-}
-
 export interface DirtyFile {
   status: string;
   path: string;
@@ -230,32 +216,6 @@ export interface DirtyFile {
 export interface DirtyStatus {
   count: number;
   files: DirtyFile[];
-}
-
-export interface BranchCommit {
-  sha: string;
-  subject: string;
-  date: string;
-}
-
-export interface BranchInfo {
-  name: string;
-  last_commit: BranchCommit;
-  ahead_of_main: number;
-}
-
-export interface BranchesPayload {
-  branches: BranchInfo[];
-  current: string | null;
-}
-
-export interface BranchDiff {
-  branch: string;
-  log: string;
-  diff_stat: string;
-}
-
-export interface PendingEntries {
 }
 
 export interface GenerationSummary {
@@ -316,9 +276,6 @@ export interface InvestigationStateTree {
 export interface InvestigationHypothesesPayload {
   hypotheses: any[];
   investigation: string;
-}
-
-export interface StudyRigor {
 }
 
 export interface InvestigationRigor {
@@ -505,12 +462,6 @@ export interface WorkspaceEntry {
 
 export interface RenderResponse {
   ok: boolean;
-}
-
-export interface FeedbackImportResponse {
-  ok: boolean;
-  path: string;
-  n_entries: number;
 }
 
 export interface VisualizationAcceptResponse {

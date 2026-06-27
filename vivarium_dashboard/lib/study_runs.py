@@ -22,7 +22,6 @@ so the module stays importable standalone and flip-ready.
 Functions
 ---------
 run_study_baseline       → run a study's baseline composite + post-run stages
-run_study_all_baselines  → run every spec.baseline[] entry, aggregate results
 run_study_variant        → run a variant (single-run) or delegate an ensemble sweep
 """
 
@@ -203,87 +202,6 @@ def run_study_baseline(ws_root, body):
             print(f"[auto_evaluate] failed: {exc}", file=sys.stderr)
         lifecycle_mutations._sync_parent_investigation(ws_root, study_dir)  # SP1: roll up to investigation
     return response, code
-
-
-def run_study_all_baselines(ws_root, body):
-    """Run every entry in spec.baseline[] sequentially. Returns
-    ``({results: [...], errors: [...]}, status_code)``.
-
-    Sugar for multi-baseline Studies (e.g. architecture comparisons) where
-    the UI wants a single "run all" affordance instead of clicking through
-    N per-baseline buttons. Each per-entry run is dispatched through the
-    existing :func:`_post_study_run_baseline_for_test` so the persistence,
-    canonical-viz rendering, and run-record bookkeeping all stay identical
-    — this function only sequences the calls and aggregates the responses.
-
-    Body:
-      study: <name>             # required
-      steps: <int>              # optional; passed through to each run
-
-    Response (status 200 when every baseline succeeds; 207 multi-status
-    when at least one fails but others succeeded; 4xx/5xx propagated when
-    none can be run, e.g. the study itself doesn't exist):
-
-      {
-        "results": [
-          {"composite": <entry-name>, "status": "completed", "run_id": ..., "viz_files": [...]},
-          ...
-        ],
-        "errors": [
-          {"composite": <entry-name>, "status": <http-code>, "error": "..."},
-          ...
-        ],
-      }
-    """
-    name = _study_name_from_body(body)
-    if not name:
-        return {"error": "missing study"}, 400
-    studies_path = ws_root / "studies" / name
-    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / name
-    sf = study_spec.study_spec_file(study_dir)
-    if not sf.is_file():
-        return {"error": "study not found"}, 404
-
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
-    from vivarium_dashboard.lib.spec_migration import migrate_v2_to_v3
-    spec = migrate_v2_to_v3(spec)
-    # v4-redesign projection: synthesises legacy fields (baseline list,
-    # variants list, behavior_tests, simulation_set) from a v4 conditions
-    # block. Idempotent on v3 (no-op when conditions is absent).
-    if spec.get("schema_version") == 4 and isinstance(spec.get("conditions"), dict):
-        from vivarium_dashboard.lib.investigations import _project_v4_redesign_to_legacy_view
-        spec = _project_v4_redesign_to_legacy_view(spec)
-    baseline = spec.get("baseline") or []
-    if not isinstance(baseline, list) or not baseline:
-        return {"error": "study has no baseline composites"}, 400
-
-    steps = body.get("steps")
-    results: list = []
-    errors: list = []
-    for entry in baseline:
-        if not isinstance(entry, dict) or not entry.get("name"):
-            continue
-        sub_body = {"study": name, "composite": entry["name"]}
-        if steps is not None:
-            sub_body["steps"] = steps
-        sub_response, sub_code = run_study_baseline(ws_root, sub_body)
-        if sub_code == 200:
-            results.append({
-                "composite": entry["name"],
-                **sub_response,
-            })
-        else:
-            errors.append({
-                "composite": entry["name"],
-                "status": sub_code,
-                "error": sub_response.get("error") if isinstance(sub_response, dict) else str(sub_response),
-            })
-
-    if not results and errors:
-        # Nothing ran — propagate the first error's status as the overall code.
-        return {"results": results, "errors": errors}, errors[0]["status"]
-    code = 207 if errors else 200
-    return {"results": results, "errors": errors}, code
 
 
 def run_study_variant(ws_root, body):

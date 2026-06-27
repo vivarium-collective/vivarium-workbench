@@ -55,16 +55,6 @@ def test_api_study_returns_404_for_missing(tmp_workspace):
 
 
 # ---------------------------------------------------------------------------
-# Task 2: GET /api/config
-# ---------------------------------------------------------------------------
-
-def test_api_config_defaults_to_local_server():
-    body, code = server.Handler._build_api_config_response()
-    assert code == 200
-    assert json.loads(body) == {"mode": "local-server"}
-
-
-# ---------------------------------------------------------------------------
 # Task 3: data-source.js structural check
 # ---------------------------------------------------------------------------
 

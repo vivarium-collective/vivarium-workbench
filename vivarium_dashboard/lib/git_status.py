@@ -1,6 +1,6 @@
 """Git/branch status helpers extracted from server.py for the FastAPI seam.
 
-These are the ``ws_root``-parameterized public builders for the 6 git-related
+These are the ``ws_root``-parameterized public builders for the git-related
 read-only routes.  The legacy server.py module-level helpers (``_has_origin_remote``,
 ``_stale_branch_threshold``, ``_commits_behind``, ``_dirty_workspace``) now
 delegate to the corresponding functions here, keeping their existing call-sites
@@ -10,10 +10,7 @@ Builders
 --------
 build_git_status     → GET /api/git-status
 build_work_status    → GET /api/work-status
-build_branch_staleness → GET /api/branch-staleness
 build_dirty_status   → GET /api/dirty-status
-list_branches        → GET /api/branches
-build_branch_diff    → GET /api/branch-diff
 """
 
 from __future__ import annotations
@@ -496,46 +493,6 @@ def build_work_status(ws_root: Path) -> dict:
     }
 
 
-class NoBranchError(ValueError):
-    """Raised by build_branch_staleness when no branch can be determined."""
-
-
-def build_branch_staleness(
-    ws_root: Path,
-    branch: str | None = None,
-    base: str = "main",
-) -> dict:
-    """Build the GET /api/branch-staleness payload for *ws_root*.
-
-    Probes ``origin/<base>`` first, falls back to local ``<base>``.
-
-    Raises ``NoBranchError`` (a ``ValueError`` subclass) when ``branch`` is
-    ``None`` AND the workspace's current HEAD cannot be determined — the
-    FastAPI route maps this to HTTP 400.
-
-    Mirrors ``server._get_branch_staleness``.
-    """
-    if not branch:
-        r = subprocess.run(
-            ["git", "branch", "--show-current"],
-            cwd=ws_root, capture_output=True, text=True,
-        )
-        branch = r.stdout.strip() if r.returncode == 0 else ""
-    if not branch:
-        raise NoBranchError("could not determine current branch + no ?branch= given")
-
-    cb, behind_ref = commits_behind(ws_root, branch, base)
-    threshold = stale_branch_threshold()
-    return {
-        "branch": branch,
-        "base": base,
-        "behind_ref": behind_ref,
-        "commits_behind": cb,
-        "stale_threshold": threshold,
-        "stale": cb >= threshold,
-    }
-
-
 def build_dirty_status(ws_root: Path) -> dict:
     """Build the GET /api/dirty-status payload for *ws_root*.
 
@@ -553,89 +510,3 @@ def build_dirty_status(ws_root: Path) -> dict:
             continue
         files.append({"status": raw[:2].strip(), "path": raw[3:]})
     return {"count": len(files), "files": files}
-
-
-def list_branches(ws_root: Path) -> dict:
-    """Build the GET /api/branches payload for *ws_root*.
-
-    Returns ``{branches: [{name, last_commit: {sha, subject, date}, ahead_of_main}], current}``.
-
-    Never raises — errors per-branch are swallowed (branch entry gets empty
-    last_commit). A top-level git failure returns ``{error: "..."}``.
-
-    Mirrors ``server._serve_branches``.
-    """
-    try:
-        raw = subprocess.run(
-            ["git", "branch", "--list", "stage/*"],
-            cwd=ws_root, capture_output=True, text=True, check=True,
-        ).stdout
-        stage_branches = [
-            b.strip().lstrip("* ")
-            for b in raw.splitlines()
-            if b.strip()
-        ]
-
-        current = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=ws_root, capture_output=True, text=True, check=True,
-        ).stdout.strip()
-
-        branches = []
-        for bname in stage_branches:
-            try:
-                log = subprocess.run(
-                    ["git", "log", "-1", "--format=%H|%s|%ci", bname],
-                    cwd=ws_root, capture_output=True, text=True, check=True,
-                ).stdout.strip()
-                parts = log.split("|", 2)
-                sha = parts[0] if parts else ""
-                subject = parts[1] if len(parts) > 1 else ""
-                date_str = parts[2] if len(parts) > 2 else ""
-
-                ahead_raw = subprocess.run(
-                    ["git", "rev-list", "--count", f"main..{bname}"],
-                    cwd=ws_root, capture_output=True, text=True,
-                ).stdout.strip()
-                ahead = int(ahead_raw) if ahead_raw.isdigit() else 0
-
-                branches.append({
-                    "name": bname,
-                    "last_commit": {
-                        "sha": sha[:7],
-                        "subject": subject,
-                        "date": date_str,
-                    },
-                    "ahead_of_main": ahead,
-                })
-            except Exception:
-                branches.append({"name": bname, "last_commit": {}, "ahead_of_main": 0})
-
-        return {"branches": branches, "current": current}
-    except Exception as e:
-        return {"error": str(e)}
-
-
-def build_branch_diff(ws_root: Path, branch: str) -> dict:
-    """Build the GET /api/branch-diff payload for *ws_root*.
-
-    Returns ``{branch, log, diff_stat}``. Validates *branch* against a safe
-    pattern; raises ``ValueError`` on an invalid name.
-
-    Mirrors ``server._get_branch_diff``.
-    """
-    if not branch or not re.match(r"^[A-Za-z0-9./_-]+$", branch) or ".." in branch:
-        raise ValueError(f"invalid branch name: {branch!r}")
-    log = subprocess.run(
-        ["git", "log", "--oneline", f"main..{branch}"],
-        cwd=ws_root, capture_output=True, text=True, check=False,
-    )
-    diff_stat = subprocess.run(
-        ["git", "diff", "--stat", f"main...{branch}"],
-        cwd=ws_root, capture_output=True, text=True, check=False,
-    )
-    return {
-        "branch": branch,
-        "log": log.stdout,
-        "diff_stat": diff_stat.stdout,
-    }
