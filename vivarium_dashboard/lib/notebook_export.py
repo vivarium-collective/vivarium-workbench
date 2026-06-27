@@ -442,11 +442,29 @@ import os
 import sys
 from pathlib import Path
 
-# The repository this notebook was generated for. Falls back to $VIVARIUM_REPO
-# or the current directory, so a downloaded notebook still works when the repo
-# is cloned at a different path than the one it was generated on.
-REPO = Path(os.environ.get("VIVARIUM_REPO") or {repo!r})
-if not REPO.is_dir():
+# Resolve the repository root robustly so this notebook runs from a fresh clone
+# at ANY path with no setup (no env var, no path editing). Priority:
+#   1. $VIVARIUM_REPO, if it points at a real directory;
+#   2. walk up from the notebook's working directory for the repo markers
+#      (a directory holding both 'workspace/' and 'pyproject.toml') — Jupyter
+#      starts in the notebook's dir, so a committed notebook finds its own root;
+#   3. the absolute path it was generated for (back-compat for old layouts);
+#   4. the current working directory (last resort).
+def _find_repo_root(_start):
+    for _cand in (_start, *_start.parents):
+        if (_cand / "workspace").is_dir() and (_cand / "pyproject.toml").is_file():
+            return _cand
+    return None
+
+REPO = None
+_env = os.environ.get("VIVARIUM_REPO")
+if _env and Path(_env).is_dir():
+    REPO = Path(_env)
+if REPO is None:
+    REPO = _find_repo_root(Path.cwd().resolve())
+if REPO is None and Path({repo!r}).is_dir():
+    REPO = Path({repo!r})
+if REPO is None:
     REPO = Path.cwd()
 sys.path.insert(0, str(REPO))
 # Composite specs use repo-root-relative paths (datasets, caches), and the
