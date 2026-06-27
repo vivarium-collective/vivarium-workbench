@@ -73,6 +73,7 @@ files = [
     "vivarium_dashboard/lib/study_viz_views.py",
     "vivarium_dashboard/lib/work_views.py",
     "vivarium_dashboard/lib/workspace_deps_views.py",
+    "vivarium_dashboard/lib/workspace_manifest_views.py",
     "vivarium_dashboard/lib/events.py",
     "vivarium_dashboard/lib/static_serving.py",
     "vivarium_dashboard/lib/study_page.py",

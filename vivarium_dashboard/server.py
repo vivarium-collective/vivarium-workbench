@@ -61,6 +61,7 @@ from vivarium_dashboard.lib import investigation_status as _invstatus
 from vivarium_dashboard.lib import data_sources as _data_sources_lib
 from vivarium_dashboard.lib import saved_visualizations as _savedviz_lib
 from vivarium_dashboard.lib import registry as _registry_lib
+from vivarium_dashboard.lib import workspace_manifest_views as _workspace_manifest_views
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
 from vivarium_dashboard.lib import observables_views as _obs_views
 from vivarium_dashboard.lib import report_views as _report_views
@@ -469,65 +470,18 @@ _DATA_SOURCE_MIME = _download_views._DATA_SOURCE_MIME
 # _dedupe_alias_composites — moved to lib/composite_lookup.py (imported above).
 
 
-def _composite_top_pkg(rec: dict) -> str:
-    """Derive a composite record's top-level package (normalized).
-
-    A composite record carries ``module`` (its dotted Python path, e.g.
-    ``v2ecoli.composites.foo`` or ``spatio_flux.composites.metabolism``) and
-    sometimes ``source`` (a workspace-relative or absolute path, e.g.
-    ``v2ecoli/composites/foo.composite.yaml``). The package is the first dotted
-    segment of ``module``; when ``module`` is empty, fall back to the first
-    path segment of ``source``. Dashes are normalized to underscores so
-    ``pbg-bioreactordesign`` ↔ ``pbg_bioreactordesign`` matches the allow-list.
-
-    Returns ``""`` when neither field yields a usable package root.
-    """
-    mod = str(rec.get("module") or "").strip()
-    if mod:
-        return mod.split(".")[0].replace("-", "_")
-    src = str(rec.get("source") or "").strip()
-    if src:
-        segs = [s for s in src.replace("\\", "/").split("/") if s.strip()]
-        # Installed-package sources are absolute paths whose package dir is the
-        # segment immediately before ``composites/`` (e.g.
-        # ``/…/site-packages/spatio_flux/composites/x.yaml`` → ``spatio_flux``).
-        # Workspace-relative sources start at the package dir itself
-        # (``v2ecoli/composites/foo.yaml`` → ``v2ecoli``). Prefer the
-        # before-``composites`` segment; otherwise fall back to the first.
-        for i, seg in enumerate(segs):
-            if seg == "composites" and i > 0:
-                return segs[i - 1].split(".")[0].replace("-", "_")
-        return segs[0].split(".")[0].replace("-", "_") if segs else ""
-    return ""
+# _composite_top_pkg — moved to lib/workspace_manifest_views.py (imported above).
 
 
 def _filter_composites(records: list, ws_data: dict | None) -> list:
     """Apply the per-workspace registry allow-list to a list of composite dicts.
 
-    Keeps a record when EITHER it is flagged ``workspace_local: True`` (the
-    workspace's own composites are always shown) OR its top-level package (see
-    :func:`_composite_top_pkg`) is in the normalized
-    ``dashboard.registry.{include,modules}`` allow-list. Reuses
-    :func:`_registry_include_pkgs` so dash/underscore normalization matches the
-    process-registry and catalog filters.
-
-    No-op when no allow-list is configured (``None``) → returns ``records``
-    unchanged, preserving the historical "show every installed package" view.
+    Thin shim — delegates to
+    ``lib.workspace_manifest_views.filter_composites`` (moved there for the
+    FastAPI workspace-manifest seam); kept as a name-shim so existing call-sites
+    in this module continue to work unchanged.
     """
-    if not isinstance(records, list):
-        return records
-    include = _registry_include_pkgs(ws_data)
-    if include is None:
-        return records
-
-    def _keep(rec: dict) -> bool:
-        if not isinstance(rec, dict):
-            return False
-        if rec.get("workspace_local") is True:
-            return True
-        return _composite_top_pkg(rec) in include
-
-    return [r for r in records if _keep(r)]
+    return _workspace_manifest_views.filter_composites(records, ws_data)
 
 
 # _build_override_catalog, _build_reexport_origin_modules — moved to lib/catalog.py.
@@ -2588,29 +2542,8 @@ def _run_composite_subprocess(*, pkg, state, steps, db_file, run_id, spec_id,
         study_max_generations=study_max_generations, study_single_daughters=study_single_daughters)
 
 
-def _count_viz_steps_in_state(state: dict) -> int:
-    """Best-effort count of Visualization-Step entries in a composite state.
-
-    Heuristic: a Visualization Step is any ``_type: step`` entry whose
-    address matches a known Visualization class. We don't have core access
-    here, so we use a name-based heuristic: address contains ``Viz`` /
-    ``Plot`` / ``Heatmap`` / ``Animation`` / ``Snapshots`` /
-    ``Distribution``. Best-effort - undercounts are fine; this just powers
-    the manifest dashboard glance.
-    """
-    if not isinstance(state, dict):
-        return 0
-    count = 0
-    for v in state.values():
-        if not isinstance(v, dict):
-            continue
-        if v.get("_type") != "step":
-            continue
-        addr = v.get("address") or ""
-        if re.search(r"(Viz|Plot|Heatmap|Animation|Snapshots|Distribution)",
-                     addr, re.I):
-            count += 1
-    return count
+# _count_viz_steps_in_state — moved to lib/workspace_manifest_views.py
+# (imported above as _workspace_manifest_views.count_viz_steps_in_state).
 
 
 def _dirty_workspace() -> str:
@@ -8497,179 +8430,34 @@ class Handler(BaseHTTPRequestHandler):
         }
         return self._json(out, 200)
 
+    # The six section bodies moved to lib/workspace_manifest_views.py for the
+    # FastAPI workspace-manifest seam; kept as instance-method name-shims so
+    # ``_get_workspace_manifest`` (above) is unchanged.
+
     def _manifest_workspace_section(self):
         """name, branch, commits ahead, package_path, has_origin."""
-        _ws_add_to_sys_path()
-        ws = {}
-        ws_path = WORKSPACE / "workspace.yaml"
-        try:
-            from vivarium_dashboard.lib.workspace_yaml import load_workspace
-            ws = load_workspace(ws_path)
-        except Exception:
-            # Fall back to raw yaml.safe_load when validation fails so the
-            # manifest still surfaces basic identity for partially-formed
-            # workspaces (test fixtures, migrations in progress, ...).
-            try:
-                ws = yaml.safe_load(ws_path.read_text(encoding="utf-8")) or {}
-            except Exception:
-                ws = {}
-        try:
-            branch = subprocess.run(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                cwd=WORKSPACE, capture_output=True, text=True,
-            ).stdout.strip() or "unknown"
-        except Exception:
-            branch = "unknown"
-        try:
-            has_origin = _has_origin_remote()
-        except Exception:
-            has_origin = False
-        return {
-            "name":         ws.get("name", ""),
-            "description":  ws.get("description", ""),
-            "package_path": ws.get("package_path", ""),
-            "branch":       branch,
-            "has_origin":   has_origin,
-        }
+        return _workspace_manifest_views.manifest_workspace_section(WORKSPACE)
 
     def _manifest_composites_section(self):
         """One-line summary per composite: id, name, kind, module, description, viz_step_count."""
-        _ws_add_to_sys_path()
-        all_comps = {}
-        try:
-            from vivarium_dashboard.lib.composite_lookup import discover_all_composites
-            try:
-                from vivarium_dashboard.lib.workspace_yaml import load_workspace
-                ws = load_workspace(WORKSPACE / "workspace.yaml")
-            except Exception:
-                ws = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")) or {}
-            pkg = ws.get("package_path") or (
-                "pbg_" + (ws.get("name") or "").replace("-", "_")
-            )
-            all_comps = discover_all_composites(WORKSPACE, pkg)
-        except Exception:
-            all_comps = {}
-        # Per-workspace registry allow-list (same as /api/composites): hide
-        # composites from non-allow-listed packages from the manifest summary.
-        # The workspace's own package is always in the include set, so its
-        # composites survive the package-root check. No-op when unset.
-        ws_for_filter = None
-        try:
-            ws_for_filter = yaml.safe_load(
-                (WORKSPACE / "workspace.yaml").read_text(encoding="utf-8")
-            ) or {}
-        except Exception:
-            ws_for_filter = None
-        if ws_for_filter is not None:
-            kept = _filter_composites(list(all_comps.values()), ws_for_filter)
-            kept_ids = {c.get("id") for c in kept if isinstance(c, dict)}
-            all_comps = {cid: c for cid, c in all_comps.items() if cid in kept_ids}
-        out = []
-        for cid, c in sorted(all_comps.items()):
-            viz_count = _count_viz_steps_in_state(c.get("state") or {})
-            out.append({
-                "id":              cid,
-                "name":            c.get("name", ""),
-                "kind":            c.get("kind", "spec"),
-                "module":          c.get("module", ""),
-                "description":     (c.get("description") or "")[:200],
-                "viz_step_count":  viz_count,
-            })
-        return out
+        return _workspace_manifest_views.manifest_composites_section(WORKSPACE)
 
     def _manifest_studies_section(self):
         """List of studies (v3) with name, topic, status, baseline_names, n_baseline,
         n_variants, n_groups, n_interventions, n_runs, n_comparisons, conclusions_len."""
-        _ws_add_to_sys_path()
-        try:
-            from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
-        except Exception:
-            return []
-        out = []
-        for d in _iter_study_dirs():
-            spec_path = d / "study.yaml" if (d / "study.yaml").is_file() else d / "spec.yaml"
-            if not spec_path.is_file():
-                continue
-            try:
-                spec = load_spec(spec_path)
-            except (InvestigationSpecError, Exception):
-                continue
-            n_runs = _count_runs_for_study(spec.get("name", d.name), spec)  # F2
-            entry = {
-                "name":             spec.get("name", d.name),
-                "topic":            spec.get("topic", ""),
-                "status":           spec.get("status", "draft"),
-                "baseline_names":   [b.get("name", "")
-                                     for b in (spec.get("baseline") or [])
-                                     if isinstance(b, dict)],
-                "n_baseline":       len(spec.get("baseline") or []),
-                "n_variants":       len(spec.get("variants") or []),
-                "n_groups":         len(spec.get("groups") or []),
-                "n_interventions":  len(spec.get("interventions") or []),
-                "n_runs":           n_runs,
-                "n_comparisons":    len(spec.get("comparisons") or []),
-                "conclusions_len":  len(spec.get("conclusions") or ""),
-            }
-            out.append(entry)
-        return out
+        return _workspace_manifest_views.manifest_studies_section(WORKSPACE)
 
     def _manifest_registry_section(self):
         """Summary of registered kinds: count per (process|step|emitter|visualization|type)."""
-        try:
-            data = _get_registry_data()
-            processes = data.get("processes") or []
-            by_kind = {"process": 0, "step": 0, "emitter": 0,
-                       "visualization": 0, "other": 0}
-            for p in processes:
-                k = p.get("kind") or "other"
-                by_kind[k] = by_kind.get(k, 0) + 1
-            return {
-                "process_count":       by_kind["process"],
-                "step_count":          by_kind["step"],
-                "emitter_count":       by_kind["emitter"],
-                "visualization_count": by_kind["visualization"],
-                "type_count":          len(data.get("types") or []),
-            }
-        except Exception:
-            return {"process_count": 0, "step_count": 0, "emitter_count": 0,
-                    "visualization_count": 0, "type_count": 0}
+        return _workspace_manifest_views.manifest_registry_section(WORKSPACE)
 
     def _manifest_health_section(self):
         """dirty_count + dirty file list + venv presence + python version."""
-        try:
-            dirty = _dirty_workspace()
-        except Exception:
-            dirty = ""
-        dirty_files = [line[3:] for line in dirty.splitlines() if len(line) >= 4]
-        venv_py = WORKSPACE / ".venv" / "bin" / "python3"
-        return {
-            "dirty_count":      len(dirty_files),
-            "dirty_files":      dirty_files[:10],  # cap
-            "venv_present":     venv_py.is_file(),
-            "python_version":   sys.version.split()[0],
-        }
+        return _workspace_manifest_views.manifest_health_section(WORKSPACE)
 
     def _manifest_skills_section(self):
         """List installed pbg-* skills the agent can invoke. Reads ~/.claude/skills/."""
-        skills_dir = Path.home() / ".claude" / "skills"
-        if not skills_dir.is_dir():
-            return []
-        out = []
-        for d in sorted(skills_dir.iterdir()):
-            if not d.is_dir() or not d.name.startswith("pbg-"):
-                continue
-            skill_md = d / "SKILL.md"
-            description = ""
-            if skill_md.is_file():
-                try:
-                    text = skill_md.read_text(encoding="utf-8")
-                except Exception:
-                    text = ""
-                m = re.search(r"^description:\s*(.+?)$", text, re.MULTILINE)
-                if m:
-                    description = m.group(1).strip()
-            out.append({"name": d.name, "description": description})
-        return out
+        return _workspace_manifest_views.manifest_skills_section(WORKSPACE)
 
     # ------------------------------------------------------------------
     # Open-window — let agents demonstrate work visually via the browser
