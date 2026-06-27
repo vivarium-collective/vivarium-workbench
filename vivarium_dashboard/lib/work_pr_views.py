@@ -172,3 +172,40 @@ def work_create_pr(ws_root: Path, body: dict | None) -> tuple[dict, int]:
         state["pr_number"] = int(m.group(1))
         work_state.save_state(state)
     return {"ok": True, "pr_url": pr_url, "pr_number": state.get("pr_number")}, 200
+
+
+def default_upstream_repo(ws_root: Path) -> str:
+    """Auto-detect upstream repo from workspace.yaml or external/v2ecoli/.git/config.
+
+    Behaviour-preserving extraction of the stdlib instance method
+    ``server.Handler._default_upstream_repo`` (``WORKSPACE`` → ``ws_root``):
+
+      * ``ws_root/workspace.yaml`` ``upstream_repo:`` when set,
+      * else ``ws_root/external/v2ecoli`` git ``remote get-url origin`` parsed
+        through ``github\\.com[:/]([\\w.-]+/[\\w.-]+?)(?:\\.git)?$``,
+      * else the ``vivarium-collective/v2ecoli`` fallback.
+
+    ``subprocess`` is referenced module-level so tests monkeypatch
+    ``work_pr_views.subprocess.run`` and never touch real git.
+    """
+    ws_path = ws_root / "workspace.yaml"
+    if ws_path.exists():
+        try:
+            ws_data = yaml.safe_load(ws_path.read_text(encoding="utf-8")) or {}
+            ur = (ws_data.get("upstream_repo") or "").strip()
+            if ur:
+                return ur
+        except yaml.YAMLError:
+            pass
+    # Try external/v2ecoli's origin.
+    external = ws_root / "external" / "v2ecoli"
+    if external.is_dir():
+        r = subprocess.run(["git", "remote", "get-url", "origin"],
+                           cwd=external, capture_output=True, text=True)
+        if r.returncode == 0:
+            url = r.stdout.strip()
+            # https://github.com/owner/name.git or git@github.com:owner/name.git
+            m = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?$", url)
+            if m:
+                return m.group(1)
+    return "vivarium-collective/v2ecoli"

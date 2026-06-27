@@ -4759,28 +4759,12 @@ class Handler(BaseHTTPRequestHandler):
         """Auto-detect upstream repo from workspace.yaml or external/v2ecoli/.git/config.
 
         Falls back to ``vivarium-collective/v2ecoli`` if nothing else is configured.
+
+        Instance shim over the pure :func:`lib.work_pr_views.default_upstream_repo`
+        builder (extracted for the FastAPI port); behaviour unchanged.
         """
-        ws_path = WORKSPACE / "workspace.yaml"
-        if ws_path.exists():
-            try:
-                ws_data = yaml.safe_load(ws_path.read_text(encoding="utf-8")) or {}
-                ur = (ws_data.get("upstream_repo") or "").strip()
-                if ur:
-                    return ur
-            except yaml.YAMLError:
-                pass
-        # Try external/v2ecoli's origin.
-        external = WORKSPACE / "external" / "v2ecoli"
-        if external.is_dir():
-            r = subprocess.run(["git", "remote", "get-url", "origin"],
-                               cwd=external, capture_output=True, text=True)
-            if r.returncode == 0:
-                url = r.stdout.strip()
-                # https://github.com/owner/name.git or git@github.com:owner/name.git
-                m = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?$", url)
-                if m:
-                    return m.group(1)
-        return "vivarium-collective/v2ecoli"
+        from vivarium_dashboard.lib import work_pr_views as _work_pr_views
+        return _work_pr_views.default_upstream_repo(WORKSPACE)
 
     def _post_work_create_pr(self, body: dict):
         _ws_add_to_sys_path()

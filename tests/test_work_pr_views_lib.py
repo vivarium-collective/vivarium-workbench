@@ -257,3 +257,55 @@ def test_default_body_when_omitted(monkeypatch, tmp_path):
     wp.work_create_pr(tmp_path, {"title": "T"})
     bi = captured["cmd"].index("--body")
     assert captured["cmd"][bi + 1] == "Created via pbg-template dashboard."
+
+
+# ===========================================================================
+# default_upstream_repo
+# ===========================================================================
+def test_default_upstream_repo_from_workspace_yaml(tmp_path, monkeypatch):
+    (tmp_path / "workspace.yaml").write_text(
+        "upstream_repo: my-org/my-repo\n", encoding="utf-8")
+
+    def _no_subprocess(*a, **k):  # workspace.yaml short-circuits before any git
+        raise AssertionError("subprocess should not run when workspace.yaml set")
+
+    monkeypatch.setattr(wp.subprocess, "run", _no_subprocess)
+    assert wp.default_upstream_repo(tmp_path) == "my-org/my-repo"
+
+
+def test_default_upstream_repo_from_external_remote(tmp_path, monkeypatch):
+    # No workspace.yaml; external/v2ecoli exists with a git@ origin URL.
+    (tmp_path / "external" / "v2ecoli").mkdir(parents=True)
+
+    def _run(argv, *a, **k):
+        assert argv == ["git", "remote", "get-url", "origin"]
+        assert k.get("cwd") == tmp_path / "external" / "v2ecoli"
+        return _cp(0, stdout="git@github.com:owner-x/name-y.git\n")
+
+    monkeypatch.setattr(wp.subprocess, "run", _run)
+    assert wp.default_upstream_repo(tmp_path) == "owner-x/name-y"
+
+
+def test_default_upstream_repo_from_external_remote_https(tmp_path, monkeypatch):
+    (tmp_path / "external" / "v2ecoli").mkdir(parents=True)
+    monkeypatch.setattr(
+        wp.subprocess, "run",
+        lambda *a, **k: _cp(0, stdout="https://github.com/o2/n2.git\n"))
+    assert wp.default_upstream_repo(tmp_path) == "o2/n2"
+
+
+def test_default_upstream_repo_fallback(tmp_path, monkeypatch):
+    # Neither workspace.yaml nor external/ dir → hard-coded fallback, no subprocess.
+    monkeypatch.setattr(
+        wp.subprocess, "run",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no subprocess")))
+    assert wp.default_upstream_repo(tmp_path) == "vivarium-collective/v2ecoli"
+
+
+def test_default_upstream_repo_empty_yaml_falls_through_to_fallback(tmp_path, monkeypatch):
+    (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")  # no upstream_repo
+    # external/ absent → fallback (subprocess never reached)
+    monkeypatch.setattr(
+        wp.subprocess, "run",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no subprocess")))
+    assert wp.default_upstream_repo(tmp_path) == "vivarium-collective/v2ecoli"
