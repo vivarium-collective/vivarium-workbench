@@ -101,6 +101,7 @@ from vivarium_dashboard.lib import catalog_install_views as _catalog_install_vie
 from vivarium_dashboard.lib import catalog_uninstall_views as _catalog_uninstall_views
 from vivarium_dashboard.lib import finding_views as _finding_views
 from vivarium_dashboard.lib import chain_views as _chain_views
+from vivarium_dashboard.lib import study_variants as _study_variants
 from vivarium_dashboard.lib.composite_resolve import resolve_composite
 from vivarium_dashboard.lib.composites_query import composites_via_subprocess
 from vivarium_dashboard.lib.models import (
@@ -227,6 +228,8 @@ from vivarium_dashboard.lib.models import (
     StudyCreateFromComposite,
     InvestigationAddViz,
     InvestigationRenderViz,
+    # SP-C: Configure & Run widget request-body models
+    SaveRunAsVariantRequest,
     # C-state-3a: source/switch (in-process workspace re-point)
     SourceSwitchRequest,
     SourceSwitchResponse,
@@ -391,6 +394,8 @@ _READONLY_ALLOWED_MUTATIONS = {
     "/api/remote-run-start",
     # remote-run thin client (WS1, two-phase)
     "/api/remote-run-build", "/api/remote-run-submit", "/api/remote-run-land",
+    # SP-C: save a completed run as a named study variant
+    "/api/save-run-as-variant",
     # switch which committed workspace this server serves (in-process re-point)
     # + the remote-build flow (the core of remote-only)
     "/api/source/switch", "/api/source/build-remote", "/api/source/switch-build",
@@ -4149,6 +4154,24 @@ def create_app() -> FastAPI:
           - 200  run-result dict
         """
         body, status = _study_runs.run_study_variant(ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
+
+    @app.post("/api/save-run-as-variant", tags=["Runs"],
+              summary="Save a run (composite+config) as a named study variant")
+    def save_run_as_variant(req: SaveRunAsVariantRequest,
+                            ws: Path = Depends(get_workspace)) -> JSONResponse:
+        """Persist a completed composite run as a named variant in ``study.yaml``.
+
+        Body: ``{"run_id", "study", "variant_name", "source_db"?}`` —
+        ``source_db`` defaults to ``<workspace>/.pbg/composite-runs.db``.
+
+        Status codes (byte-identical to the lib builder):
+          - 404  run or study not found
+          - 200  ``{composite, variant_name, study, parameter_overrides}``
+        """
+        src = req.source_db or str(ws / ".pbg" / "composite-runs.db")
+        body, status = _study_variants.save_run_as_variant(
+            ws, run_id=req.run_id, source_db=src, study=req.study, variant_name=req.variant_name)
         return JSONResponse(status_code=status, content=body)
 
     @app.post(
