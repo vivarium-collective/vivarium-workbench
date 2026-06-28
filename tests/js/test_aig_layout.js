@@ -39,6 +39,8 @@ out.edges.forEach(e => ['x1', 'y1', 'x2', 'y2'].forEach(
   k => assert(typeof e[k] === 'number', 'edge coord ' + k)));
 assert(out.violations.length === 1 && out.violations[0].study === 's2',
   'violation surfaced + tagged with study');
+assert(typeof out.canvasW === 'number' && out.canvasW > 0, 'canvasW computed');
+assert(typeof out.canvasH === 'number' && out.canvasH >= 180, 'canvasH has a floor of 180');
 
 // dangling edge dropped
 const dangling = _aigLayout({

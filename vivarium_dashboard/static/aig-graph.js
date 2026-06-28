@@ -87,7 +87,15 @@
                           message: v.message, study: slug });
       });
     });
-    return { nodes: nodes, edges: edges, violations: violations };
+    var maxX = 0, maxY = 0;
+    nodes.forEach(function (n) {
+      if (typeof n.x === 'number' && n.x > maxX) maxX = n.x;
+      if (typeof n.y === 'number' && n.y > maxY) maxY = n.y;
+    });
+    var canvasW = maxX + 320;
+    var canvasH = Math.max(maxY + 80, 180);
+    return { nodes: nodes, edges: edges, violations: violations,
+             canvasW: canvasW, canvasH: canvasH };
   }
 
   function _esc(s) {
@@ -111,15 +119,9 @@
     }
     var layout = _aigLayout(graph);
 
-    // Size the canvas to fit all positioned nodes (mirrors the legacy renderer,
-    // which sets these explicitly; the SVG/host don't auto-grow otherwise).
-    var maxX = 0, maxY = 0;
-    layout.nodes.forEach(function (n) {
-      if (n.x > maxX) maxX = n.x;
-      if (n.y > maxY) maxY = n.y;
-    });
-    var canvasW = maxX + 320;            // room for the widest label + lifecycle badge
-    var canvasH = Math.max(maxY + 80, 180);
+    // Size the canvas to fit all positioned nodes (bounds computed in _aigLayout;
+    // mirrors the legacy renderer — the SVG/host don't auto-grow otherwise).
+    var canvasW = layout.canvasW, canvasH = layout.canvasH;
     nodesHost.style.position = 'relative';  // anchor the absolutely-positioned cards
     nodesHost.style.width = canvasW + 'px';
     nodesHost.style.height = canvasH + 'px';
