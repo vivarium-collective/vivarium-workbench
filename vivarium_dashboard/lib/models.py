@@ -978,7 +978,9 @@ class ReadoutRow(BaseModel):
     annotation. ``emit_status``: ``emitted`` (a real emitter path) / ``derived``
     (authored derived-needed|aspirational metric, exempt from the emit-plan
     check) / ``not_in_emit_plan`` (authored ``available`` readout whose
-    ``store_path`` is missing or not an emitted leaf — the never-fabricate flag).
+    ``store_path`` is missing or not an emitted leaf — the never-fabricate flag)
+    / ``unverified`` (the emit plan could not be built — e.g. a remote build with
+    no local ParCa cache — so the authored row was not checked either way).
     """
 
     store_path: str
@@ -988,7 +990,7 @@ class ReadoutRow(BaseModel):
     index_by: Optional[dict] = None
     notes: str = ""
     annotated: bool
-    emit_status: Literal["emitted", "not_in_emit_plan", "derived"]
+    emit_status: Literal["emitted", "not_in_emit_plan", "derived", "unverified"]
 
 
 class StudyReadouts(BaseModel):
@@ -1003,6 +1005,11 @@ class StudyReadouts(BaseModel):
     composite: str
     rows: list[ReadoutRow]
     note: str = ""
+    # The emit plan could not be built (rows are authored-only, ``unverified``).
+    # ``remote_build`` marks the EXPECTED case (a materialized repo@commit with no
+    # local ParCa cache) so the UI can show a soft notice instead of a hard error.
+    degraded: bool = False
+    remote_build: bool = False
 
 
 class LinkageIndex(BaseModel):
