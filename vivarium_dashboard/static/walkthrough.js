@@ -2262,6 +2262,13 @@
       return true;
     });
 
+    // Registry shows only what is IN this workspace — the workspace's own
+    // package plus installed modules. The browse-everything "Available to
+    // install" catalog is intentionally not shown.
+    modules = modules.filter(function (m) {
+      return m.kind === 'workspace' || m.installed;
+    });
+
     // Sort: workspace package first (anchor), then installed modules
     // (alphabetical), then everything else (alphabetical). This is the
     // visible expression of "what's in your workspace surfaces first;
