@@ -1742,116 +1742,168 @@
   })();
 
   // ---- Remote run (smsvpctest) -------------------------------------------
+  // Remote-run thin client (WS1, two-phase): build → poll → submit → poll → land.
+  // Each step is one stateless sms-api call via /api/remote-run-{build,submit,
+  // land,poll}; the JS drives the phases (sms-api owns async/state).
   var _remoteRunTimer = null;
+  var _remoteRunState = {};
+
+  function _rrProg() { return document.getElementById('remote-run-progress'); }
+  function _rrBtn() { return document.getElementById('remote-run-btn'); }
+  function _rrResetBtn() { var b = _rrBtn(); if (b) { b.disabled = false; b.textContent = '▶ Run on remote'; } }
+  function _rrErr(msg) { var p = _rrProg(); if (p) { p.hidden = false; p.innerHTML = '<div class="inv-run-err">' + msg + '</div>'; } _rrResetBtn(); }
+
+  function _renderRemoteRunProgress(opts) {
+    var p = _rrProg(); if (!p) return;
+    p.hidden = false;
+    var icon = {pending: '⋯', running: '▶', queued: '⋯', built: '✓', done: '✓', failed: '✗', unreachable: '⚠'};
+    function row(name, st, detail) {
+      return '<div class="inv-run-item inv-run-' + (st || 'pending') + '">'
+        + '<span class="inv-run-icon">' + (icon[st] || '⋯') + '</span> '
+        + '<code>' + name + '</code>'
+        + (detail ? ' <span class="muted">' + escapeHtmlForTests(detail) + '</span>' : '') + '</div>';
+    }
+    var land = opts.landBtn
+      ? '<button type="button" class="btn-mini" id="remote-run-land-btn" onclick="_landRemoteRun()">⬇ Land results locally</button>' : '';
+    var landed = opts.landed
+      ? '<div class="inv-run-progress-banner"><strong>✓ Landed</strong> <code>' + escapeHtmlForTests(opts.landed) + '</code> — refresh to see it.</div>' : '';
+    p.innerHTML = (opts.note ? '<div class="inv-run-progress-banner">' + opts.note + '</div>' : '')
+      + '<div class="inv-run-list">' + row('build', opts.build, opts.buildDetail) + row('run', opts.run, opts.runDetail) + '</div>'
+      + land + landed;
+  }
 
   function _submitRemoteRun(ev) {
     ev.preventDefault();
     var form = ev.target;
-    var btn = document.getElementById('remote-run-btn');
-    var prog = document.getElementById('remote-run-progress');
-    var body = {
+    var btn = _rrBtn();
+    _remoteRunState = {
       study: studyName(),
-      num_generations: parseInt(form.num_generations.value, 10) || 1,
-      num_seeds: parseInt(form.num_seeds.value, 10) || 1,
-      run_parca: !!form.run_parca.checked,
+      runOpts: {
+        num_generations: parseInt(form.num_generations.value, 10) || 1,
+        num_seeds: parseInt(form.num_seeds.value, 10) || 1,
+        run_parca: !!form.run_parca.checked,
+      },
     };
-    if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
-    fetch('/api/remote-run-start', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
-    }).then(function(r) {
-      return r.json().then(function(j) { return {status: r.status, body: j}; });
-    }).then(function(res) {
-      if (res.status === 401) {
-        if (prog) { prog.hidden = false; prog.innerHTML =
-          '<div class="inv-run-err">Log in with GitHub (top-right on the main dashboard) to run remotely.</div>'; }
-        if (btn) { btn.disabled = false; btn.textContent = '▶ Run on remote'; }
-        return;
-      }
-      if (res.status !== 202 || !res.body.job_id) {
-        if (prog) { prog.hidden = false; prog.innerHTML =
-          '<div class="inv-run-err">Could not start: ' + escapeHtmlForTests((res.body && res.body.error) || res.status) + '</div>'; }
-        if (btn) { btn.disabled = false; btn.textContent = '▶ Run on remote'; }
-        return;
-      }
-      _pollRemoteRun(res.body.job_id);
-    }).catch(function(err) {
-      var prog = document.getElementById('remote-run-progress');
-      var btn = document.getElementById('remote-run-btn');
-      if (prog) { prog.hidden = false; prog.innerHTML = '<div class="inv-run-err">Network error: ' + escapeHtmlForTests(String(err)) + '</div>'; }
-      if (btn) { btn.disabled = false; btn.textContent = '▶ Run on remote'; }
-    });
+    if (btn) { btn.disabled = true; btn.textContent = 'Starting build…'; }
+    fetch('/api/remote-run-build', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({study: _remoteRunState.study}),
+    }).then(function(r) { return r.json().then(function(j) { return {status: r.status, body: j}; }); })
+      .then(function(res) {
+        if (res.status === 401) { _rrErr('Log in with GitHub (top-right on the main dashboard) to run remotely.'); return; }
+        if (res.status !== 202 || !res.body.simulator_id) {
+          _rrErr('Could not start build: ' + escapeHtmlForTests((res.body && res.body.error) || res.status)); return;
+        }
+        _remoteRunState.simulator_id = res.body.simulator_id;
+        _remoteRunState.commit = res.body.commit;
+        _renderRemoteRunProgress({build: 'running', run: 'pending',
+          note: '<strong>Building simulator…</strong> <span class="muted">'
+            + escapeHtmlForTests((res.body.branch || '') + ' @ ' + String(res.body.commit || '').slice(0, 12)) + '</span>'});
+        _pollBuild();
+      }).catch(function(err) { _rrErr('Network error: ' + escapeHtmlForTests(String(err))); });
     return false;
   }
 
-  function _pollRemoteRun(jobId) {
+  function _pollPhase(query, onPoll) {
     if (_remoteRunTimer) clearTimeout(_remoteRunTimer);
-    var pollBtn = document.getElementById('remote-run-btn');
-    if (pollBtn) { pollBtn.textContent = 'Running…'; }  // a poll is in flight, not just "Starting…"
-    var consecutiveErrors = 0;  // tolerate transient tunnel blips before giving up
-    function _stop(msg) {
-      var prog = document.getElementById('remote-run-progress');
-      var btn = document.getElementById('remote-run-btn');
-      if (prog && msg) { prog.hidden = false; prog.innerHTML = '<div class="inv-run-err">' + msg + '</div>'; }
-      if (btn) { btn.disabled = false; btn.textContent = '▶ Run on remote'; }
-    }
+    var consecutiveErrors = 0;
     function tick() {
-      fetch('/api/remote-run-status?job_id=' + encodeURIComponent(jobId))
+      fetch('/api/remote-run-poll?' + query)
         .then(function(r) { return r.json().then(function(j) { return {status: r.status, body: j}; }); })
         .then(function(res) {
+          if (res.status === 502 || (res.body && res.body.reachable === false)) {
+            _renderRemoteRunProgress({build: _remoteRunState._buildPhase || 'running', run: _remoteRunState._runPhase || 'pending',
+              note: '<strong class="inv-run-err">⚠ ' + escapeHtmlForTests((res.body && res.body.reason) || 'sms-api unreachable') + '</strong> <span class="muted">retrying…</span>'});
+            _remoteRunTimer = setTimeout(tick, 4000); return;
+          }
           if (res.status !== 200) {
-            _stop('Poll error ' + escapeHtmlForTests(res.status)
-              + (res.body && res.body.error ? ': ' + escapeHtmlForTests(res.body.error) : ''));
-            return;
+            consecutiveErrors += 1;
+            if (consecutiveErrors < 3) { _remoteRunTimer = setTimeout(tick, 3000); return; }
+            _rrErr('Poll error ' + escapeHtmlForTests(res.status)); return;
           }
-          consecutiveErrors = 0;  // a good response resets the transient-error budget
-          _renderRemoteRunProgress(res.body);
-          if (res.body.status === 'done' || res.body.status === 'failed') {
-            var btn = document.getElementById('remote-run-btn');
-            if (btn) { btn.disabled = false; btn.textContent = '▶ Run on remote'; }
-            return;
-          }
-          _remoteRunTimer = setTimeout(tick, 2000);
+          consecutiveErrors = 0;
+          onPoll(res.body, function() { _remoteRunTimer = setTimeout(tick, 2500); });
         }).catch(function(err) {
           consecutiveErrors += 1;
-          if (consecutiveErrors < 3) {
-            _remoteRunTimer = setTimeout(tick, 2000);  // retry; the tunnel may have blipped
-            return;
-          }
-          _stop('Network error while polling (gave up after 3 tries): ' + escapeHtmlForTests(String(err)));
+          if (consecutiveErrors < 4) { _remoteRunTimer = setTimeout(tick, 3000); return; }  // tolerate tunnel blips
+          _rrErr('Network error while polling: ' + escapeHtmlForTests(String(err)));
         });
     }
     tick();
   }
 
-  function _renderRemoteRunProgress(job) {
-    var prog = document.getElementById('remote-run-progress');
-    if (!prog) return;
-    prog.hidden = false;
-    var icon = {pending: '⋯', running: '▶', done: '✓', failed: '✗'};
-    var steps = (job.steps || []).map(function(s) {
-      var msg = s.message ? ' <span class="muted">' + escapeHtmlForTests(s.message) + '</span>' : '';
-      return '<div class="inv-run-item inv-run-' + (s.status || 'pending') + '">'
-        + '<span class="inv-run-icon">' + (icon[s.status] || '?') + '</span> '
-        + '<code>' + escapeHtmlForTests(s.name) + '</code>' + msg + '</div>';
-    }).join('');
-    var simRef = job.simulation_id ? ' <span class="muted">(sim ' + escapeHtmlForTests(job.simulation_id) + ')</span>' : '';
-    var head;
-    if (job.status === 'done') {
-      head = '<strong>✓ Done.</strong> Landed run <code>' + escapeHtmlForTests(job.run_id || '') + '</code>' + simRef + ' — refresh to see it.';
-    } else if (job.status === 'failed') {
-      head = '<strong class="inv-run-err">✗ Failed.</strong> ' + escapeHtmlForTests(job.error || '') + simRef;
-    } else if (job.status === 'queued') {
-      head = '<strong>Queued…</strong>';
-    } else {
-      head = '<strong>Running…</strong>' + simRef;
-    }
-    prog.innerHTML = '<div class="inv-run-progress-banner">' + head + '</div>'
-                   + '<div class="inv-run-list">' + steps + '</div>';
+  function _pollBuild() {
+    _pollPhase('simulator_id=' + encodeURIComponent(_remoteRunState.simulator_id), function(body, again) {
+      _remoteRunState._buildPhase = body.phase;
+      if (body.phase === 'failed') {
+        _renderRemoteRunProgress({build: 'failed', run: 'pending',
+          note: '<strong class="inv-run-err">✗ Build failed.</strong> ' + escapeHtmlForTests(body.error || body.raw_status || '')});
+        _rrResetBtn(); return;
+      }
+      if (body.phase === 'built') {
+        _renderRemoteRunProgress({build: 'done', run: 'running', note: '<strong>Build done. Submitting run…</strong>'});
+        _submitRun(); return;
+      }
+      _renderRemoteRunProgress({build: 'running', run: 'pending',
+        note: '<strong>Building simulator…</strong> <span class="muted">' + escapeHtmlForTests(body.raw_status || '') + '</span>'});
+      again();
+    });
+  }
+
+  function _submitRun() {
+    var b = Object.assign({study: _remoteRunState.study, simulator_id: _remoteRunState.simulator_id}, _remoteRunState.runOpts);
+    fetch('/api/remote-run-submit', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(b),
+    }).then(function(r) { return r.json().then(function(j) { return {status: r.status, body: j}; }); })
+      .then(function(res) {
+        if (res.status !== 202 || !res.body.simulation_id) {
+          _renderRemoteRunProgress({build: 'done', run: 'failed',
+            note: '<strong class="inv-run-err">✗ Could not submit run:</strong> ' + escapeHtmlForTests((res.body && res.body.error) || res.status)});
+          _rrResetBtn(); return;
+        }
+        _remoteRunState.simulation_id = res.body.simulation_id;
+        _pollRun();
+      }).catch(function(err) { _rrErr('Network error submitting run: ' + escapeHtmlForTests(String(err))); });
+  }
+
+  function _pollRun() {
+    _pollPhase('simulation_id=' + encodeURIComponent(_remoteRunState.simulation_id), function(body, again) {
+      _remoteRunState._runPhase = body.phase;
+      var simRef = 'sim ' + _remoteRunState.simulation_id;
+      if (body.phase === 'failed') {
+        _renderRemoteRunProgress({build: 'done', run: 'failed',
+          note: '<strong class="inv-run-err">✗ Run failed.</strong> ' + escapeHtmlForTests(body.error || body.raw_status || '') + ' <span class="muted">(' + simRef + ')</span>'});
+        _rrResetBtn(); return;
+      }
+      if (body.phase === 'done') {
+        _renderRemoteRunProgress({build: 'done', run: 'done', landBtn: true,
+          note: '<strong>✓ Run complete</strong> <span class="muted">(' + simRef + ')</span> — land the results to view them.'});
+        _rrResetBtn(); return;
+      }
+      var label = body.phase === 'queued' ? 'Queued on AWS Batch…' : 'Running…';
+      _renderRemoteRunProgress({build: 'done', run: 'running', runDetail: body.raw_status,
+        note: '<strong>' + label + '</strong> <span class="muted">(' + simRef + ')</span>'});
+      again();
+    });
+  }
+
+  function _landRemoteRun() {
+    var lb = document.getElementById('remote-run-land-btn');
+    if (lb) { lb.disabled = true; lb.textContent = 'Landing…'; }
+    fetch('/api/remote-run-land', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({study: _remoteRunState.study, simulation_id: _remoteRunState.simulation_id, commit: _remoteRunState.commit}),
+    }).then(function(r) { return r.json().then(function(j) { return {status: r.status, body: j}; }); })
+      .then(function(res) {
+        if (res.status !== 200 || !res.body.run_id) {
+          _rrErr('Land failed: ' + escapeHtmlForTests((res.body && res.body.error) || res.status)); return;
+        }
+        _renderRemoteRunProgress({build: 'done', run: 'done', landed: res.body.run_id});
+      }).catch(function(err) { _rrErr('Network error landing: ' + escapeHtmlForTests(String(err))); });
   }
 
   window._submitRemoteRun = _submitRemoteRun;
+  window._landRemoteRun = _landRemoteRun;
 
   // --- URL hash → Runs tab + scroll to run row ---
   // Links from the Simulations DB (walkthrough.js) land at
