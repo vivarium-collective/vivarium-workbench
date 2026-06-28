@@ -38,7 +38,7 @@ against running code & a live tunnel**, not assumed:
 | Committed static figures off sms-api | ✅ works | 24 figures in showcase-2 (in the tarball) |
 | Run **metadata** landed from sms-api | ✅ works | run row + provenance |
 | **Sim DB deployment runs** (remote_origin) | ✅ **works when `.viv-build.json` present** | sim 199 surfaced as `deployment: smsvpctest` after stamping |
-| **Live charts from run data** | ❌ **0 rendered — local AND remote** | `live_count: 0` on both 8013 and 8011 |
+| **Live charts from run data** | ✅ **reader works; render is a config-gating gap** | `_extract_paths_from_zarr` extracts real series from the landed zarr-v3 store; `live_count: 0` on showcase-2 is because it declares no `runtime.default_emitter` (so the renderer never reads zarr) — see WS2 |
 | `materialize_build` download | ⚠️ works only with a raised timeout | build #66 took **224 s**; client default is **30 s** |
 
 **Key correction during the PoC:** the Sim-DB "deployment runs invisible" symptom was **not** a
@@ -67,15 +67,27 @@ What WS1 still must add for the chosen reliability bar:
 - **Per-operation timeouts.** The streaming downloads (`download_workspace`, `download_data`) need a
   much larger timeout than status polls; today everything shares one 30 s default. (See WS3.)
 
-### WS2 — Live charts must render the XArray-emitter store *(the real blocker)*
-A landed remote run shows **zero** live-rendered charts; the figures visible are committed static
-PNGs that rode along in the repo tarball, **not** the simulation's data. Root cause, isolated (fails
-**identically** on the local dashboard, so it is a render/layout incompatibility, not a remote-source
-bug): the sms-api **XArray (Ray) emitter** writes a **zarr v3** store laid out
-`experiment_id=…/variant=…/lineage_seed=…/<observable>/generation=N/…` (bare leaf names, `zarr.json`
-metadata), whereas the dashboard's live chart reader expects the older
-`…/generation=N/…/id_<leaf>` layout (v2-style). The reader must learn the XArray-emitter v3 layout
-(or landing must normalize it). Without WS2, "results off sms-api" is hollow.
+### WS2 — Per-run live charts should honor the run's own store format *(corrected 2026-06-28)*
+**The original premise (a zarr-v3 reader incompatibility) was disproven by direct test.**
+`_extract_paths_from_zarr` opens the sms-api XArray-emitter store
+(`experiment_id/variant/lineage_seed/<leaf>/generation=N`, zarr v3) cleanly and returns real series
+(verified: `growth`, `cell_mass`, `volume`, `protein_mass` from the landed sim-199 store); and
+`render_v4_test_charts` renders a live SVG from it when given a study that opts into xarray.
+
+The real gap is **config gating**: `render_v4_test_charts` reads zarr **only** when the study's
+`runtime.default_emitter == "xarray"` (a deliberate "no silent disk-probe" rule). A landed remote run
+is **always** a zarr store, but the renderer keys off the *study's declared* emitter, not the run's
+actual format. So landing a remote run into a study that isn't xarray-configured (e.g.
+showcase-2 declares no `default_emitter` → framework default sqlite) leaves the run's data on disk but
+**silently unrendered**. (showcase-2 also defines its tests with expression paths and ships curated
+static figures, so it was never a live-chart study.)
+
+Fix (per-run view): when rendering charts for a **specific run** whose store format is known — a
+landed remote run carries `remote_origin` + a `store_path` ending in `.zarr` — read from that store's
+actual format regardless of the study's declared default. This overlaps the known per-run-viewer TODO.
+Scope is small (a format-detect branch keyed on the selected run), **not** a reader rewrite.
+The previously-claimed "static figures are hollow" framing is withdrawn: studies that declare
+`runtime.default_emitter: xarray` already live-render landed remote runs today.
 
 ### WS3 — Materialize robustness + standalone-launch activation
 - **Download timeout / progress.** `materialize_build` uses the client's 30 s default; a real
@@ -146,15 +158,18 @@ sms-api wiring (config-only, later, per three-plane non-goals); multi-seed landi
 reconnect sweep" robustness design is **dropped** — superseded by WS1's thin client.
 
 ## 8. Open questions (resolve in planning)
-1. **WS2:** fix in the *reader* (teach it the v3/XArray layout) or in *landing* (normalize the store
-   to the legacy layout on land)? Reader-side is more general (works for deployment-S3 reads too,
-   not just landed copies) and is the lean default — confirm during planning.
+1. **WS2 (re-scoped):** the reader is fine; the gap is config-gating. Fix by making per-run chart
+   rendering detect the *selected run's* store format (zarr/parquet/sqlite) and read accordingly, OR
+   accept that only `runtime.default_emitter: xarray` studies live-render landed runs (a docs/config
+   convention, no dashboard code). Per-run-format detection is the more useful fix and overlaps the
+   per-run-viewer TODO — confirm scope with the user before building.
 2. **WS1 status shape:** sms-api exposes build-status + run-status separately; does the UI keep a
    multi-step strip or collapse to two states? (Same open item as the thin-client spec's risk list.)
 3. **WS3 stamp:** stamp inside `materialize_build` unconditionally, or only when invoked for a
    remote-sourced launch? (Unconditional is simpler and harmless — the marker is just provenance.)
 
 ## 9. Sequencing
-WS3 (small, unblocks reliable bring-up) → WS2 (the results blocker) → WS1 (thin-client robustness,
-larger; coordinate with the already-planned thin-client work) → WS4 (polish, anytime). WS2 and WS3
-are independent of WS1 and can land first.
+WS3 (small, unblocks reliable bring-up; **shipped**) → WS2 (per-run store-format detection; smaller
+than first thought — reader already works) → WS1 (thin-client robustness, larger; coordinate with the
+already-planned thin-client work) → WS4 (polish, anytime). WS2 and WS3 are independent of WS1 and can
+land first.
