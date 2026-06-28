@@ -120,6 +120,7 @@ def test_build_study_readouts_honors_nested_workspace_layout(tmp_path):
 
     body, status = build_study_readouts(tmp_path, "demo")
     assert status != 404, body
+    assert status == 422, body  # found via layout, but no baseline composite
     assert body.get("error") != "study not found: demo"
 
 
@@ -139,5 +140,8 @@ def test_build_study_readouts_extracts_v4_conditions_baseline(tmp_path):
         "readouts": [],
     }))
     body, status = build_study_readouts(tmp_path, "v4demo")
-    # The composite ref won't build here, but baseline extraction must succeed:
+    # Baseline extraction must succeed (not 400 parse / not "no baseline"); the
+    # ref then fails to build in a bare tmp workspace -> 422 with a note.
     assert body.get("error") != "study has no baseline composite", body
+    assert status == 422, body
+    assert body.get("composite") == "some.composite.ref", body

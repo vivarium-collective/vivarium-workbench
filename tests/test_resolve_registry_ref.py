@@ -20,6 +20,9 @@ def test_short_ref_resolves_to_canonical_shortest():
 
 def test_short_ref_does_not_falsely_match_other_composite():
     assert _resolve_registry_ref("baseline_millard", KEYS) == "v2ecoli.composites.baseline_millard.baseline_millard"
+    # And "baseline" must NOT cross-resolve to the millard composite.
+    assert _resolve_registry_ref("baseline", KEYS) == "v2ecoli.composites.baseline"
+    assert _resolve_registry_ref("baseline", KEYS) != "v2ecoli.composites.baseline_millard.baseline_millard"
 
 
 def test_unknown_ref_returns_none():
