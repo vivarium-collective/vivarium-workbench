@@ -1377,20 +1377,6 @@
 <section class="study-tab-panel" data-kind="runs" id="panel-runs">
   <!-- Configure & Run widget (SP-C) — native run launcher for this study -->
   <div id="study-configure-run" style="margin-bottom:18px"></div>
-  <script>
-  (function() {
-    var el = document.getElementById("study-configure-run");
-    if (el && window.ConfigureRun) {
-      var slug = window._studyName || "{{ name }}";
-      {% if study.baseline and study.baseline[0].composite %}
-      var compositeRef = "{{ study.baseline[0].composite }}";
-      {% else %}
-      var compositeRef = null;
-      {% endif %}
-      ConfigureRun.mount(el, { composite: compositeRef, target: "study", study: slug });
-    }
-  })();
-  </script>
   <div class="panel" style="margin-bottom:18px">
     <h3 style="margin-top:0">Run on remote (smsvpctest)</h3>
     <p class="muted" style="font-size:0.9em">
@@ -2147,6 +2133,19 @@ window._seedFollowupProposal = _seedFollowupProposal;
 // investigation view prefers staying in place over a full navigation.
 window._seedFollowupStudy = _seedFollowupStudy;
 window._seedFollowupProposal = _seedFollowupProposal;
+</script>
+<script>
+(function () {
+  var el = document.getElementById("study-configure-run");
+  if (!el || !window.ConfigureRun) return;
+  {% if study and study.baseline and study.baseline[0].composite %}
+  var compositeRef = {{ study.baseline[0].composite | tojson }};
+  {% else %}
+  var compositeRef = null;
+  {% endif %}
+  var slug = window._studyName || "{{ name }}";
+  ConfigureRun.mount(el, { composite: compositeRef, target: "study", study: slug });
+})();
 </script>
 </body>
 </html>
