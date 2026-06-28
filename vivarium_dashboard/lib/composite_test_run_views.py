@@ -89,7 +89,13 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
             429,
         )
 
-    run_id = cr.generate_run_id(spec_id, overrides)
+    from vivarium_dashboard.lib import run_core
+    try:
+        plan = run_core.invoke_run(ws_root, spec_id=spec_id, config=overrides,
+                                   db_path=db_file, label=label, n_steps=0)
+    except run_core.RunTargetUnavailable as e:
+        return {"error": str(e)}, 409
+    run_id = plan.run_id
     run_dir = WorkspacePaths.load(ws_root).pbg / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     log_rel = str((run_dir / "run.log").relative_to(ws_root))
