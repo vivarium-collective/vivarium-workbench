@@ -45,3 +45,24 @@ def test_save_run_as_variant_missing_run_404(tmp_path):
     body, status = study_variants.save_run_as_variant(
         tmp_path, run_id="noexist", source_db=src, study="demo", variant_name="v")
     assert status == 404
+
+
+def test_save_run_as_variant_v4_writes_conditions_variants(tmp_path):
+    import time, yaml
+    from vivarium_dashboard.lib import composite_runs as cr
+    from vivarium_dashboard.lib import study_variants
+    src = tmp_path / "r.db"; conn = cr.connect(src)
+    cr.save_metadata(conn, spec_id="pkg.composites.cell", run_id="r1",
+                     params={"k": 5}, label="fast", started_at=time.time(), n_steps=3)
+    sd = tmp_path / "studies" / "demo"; sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "schema_version": 4, "name": "demo",
+        "conditions": {"baseline": {"composite": "pkg.composites.cell"}, "variants": []},
+    }))
+    body, status = study_variants.save_run_as_variant(
+        tmp_path, run_id="r1", source_db=src, study="demo", variant_name="fast")
+    assert status == 200
+    spec = yaml.safe_load((sd / "study.yaml").read_text())
+    assert "variants" not in spec  # NOT written to the ignored top-level
+    var = [v for v in spec["conditions"]["variants"] if v["name"] == "fast"][0]
+    assert var["composite"] == "pkg.composites.cell" and var["parameter_overrides"] == {"k": 5}
