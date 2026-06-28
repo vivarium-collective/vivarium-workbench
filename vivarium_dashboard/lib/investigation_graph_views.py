@@ -82,9 +82,10 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
         # normalize_dag_edges injects a "tests-passed" default condition; the
         # payload contract treats an unspecified gate as "" (no explicit gate),
         # so read explicit conditions from the raw prerequisites.
-        pg = study_spec.get("pipeline_gate") or {}
+        pg = study_spec.get("pipeline_gate")
+        prereqs = pg.get("prerequisites") if isinstance(pg, dict) else None
         explicit = {pr["study"]: pr["condition"]
-                    for pr in (pg.get("prerequisites") or [])
+                    for pr in (prereqs or [])
                     if isinstance(pr, dict) and pr.get("study") and "condition" in pr}
         for pre in normalize_dag_edges(study_spec):
             study_edges.append({"source": f"study/{pre['study']}", "target": f"study/{slug}",

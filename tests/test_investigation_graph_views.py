@@ -88,3 +88,15 @@ def test_invalid_study_skipped_not_fatal(tmp_path):
     body, status = build_investigation_graph(ws, "demo-inv")
     assert status == 200
     assert {s["id"] for s in body["studies"]} == {"study/s2"}  # s1 skipped
+
+
+def test_non_mapping_pipeline_gate_tolerated_not_500(tmp_path):
+    ws = _ws(tmp_path)
+    (ws / "studies" / "s2" / "study.yaml").write_text(yaml.safe_dump(
+        {"schema_version": 4, "name": "s2", "title": "Second",
+         "status": "planned", "pipeline_gate": "garbage"}))
+    body, status = build_investigation_graph(ws, "demo-inv")
+    assert status == 200
+    # s2 still appears (no edges from a malformed gate), no crash
+    assert "study/s2" in {s["id"] for s in body["studies"]}
+    assert all(e["target"] != "study/s2" for e in body["study_edges"])
