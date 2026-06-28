@@ -7,6 +7,37 @@
   var state = { scope: "local", repo: null, branch: null, entries: [], current: null };
   var pollTimer = null;
 
+  // Snapshot (published static bundle): no live backend. The Source panel
+  // becomes a navigator across the SIBLING published workspaces listed in a
+  // static manifest (default ../workspaces.json), and "Switch" navigates to the
+  // chosen bundle instead of an in-process re-point.
+  var SNAP = (window.__DASH_CONFIG__ || {}).mode === "snapshot";
+  function _manifestUrl() {
+    var cfg = window.__DASH_CONFIG__ || {};
+    return cfg.workspacesManifest || "../workspaces.json";
+  }
+  function _currentRepoName() {
+    var bp = (window.__DASH_CONFIG__ || {}).basePath || "";
+    var parts = bp.replace(/\/+$/, "").split("/");
+    return parts[parts.length - 1] || "";
+  }
+  async function _loadSnapshotEntries() {
+    state.error = null;
+    var cur = _currentRepoName();
+    try {
+      var r = await fetch(_manifestUrl());
+      var d = r.ok ? await r.json() : [];
+      var list = Array.isArray(d) ? d : (d.workspaces || []);
+      state.entries = list.map(function (w) {
+        var name = w.name || w.repo;
+        return { repo: name, branch: w.branch || "", commit: w.commit || "",
+                 label: name + (w.branch ? " @ " + w.branch : ""),
+                 url: w.url, current: name === cur };
+      });
+      state.current = state.entries.filter(function (e) { return e.current; })[0] || null;
+    } catch (e) { state.entries = []; }
+  }
+
   function _el(tag, cls, text) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -336,6 +367,76 @@
     return row;
   }
 
+  // Published (snapshot) Source panel: a navigator across the sibling published
+  // workspaces. No scope toggle, no push/build/PR, no live in-process switch —
+  // "Switch" navigates to the chosen bundle. "Sync to local" is kept (it's the
+  // round-trip: clone this exact repo@commit locally via `vivarium-dashboard sync`).
+  function _renderSnapshot() {
+    var host = document.getElementById("viv-branch-source");
+    if (!host) return;
+    host.innerHTML = "";
+    host.appendChild(_el("h3", "viv-bs-title", "Source"));
+
+    var entries = state.entries || [];
+    var names = entries.map(function (e) { return e.repo; });
+    if (!state.selected || names.indexOf(state.selected.repo) < 0) {
+      state.selected = state.current || entries[0] || null;
+    }
+    if (!entries.length) {
+      host.appendChild(_el("p", "viv-bs-note", "No other published workspaces found."));
+      return;
+    }
+    host.appendChild(_selectRow("Repo", "viv-bs-repo", names,
+      state.selected ? state.selected.repo : null, function (v) {
+        state.selected = entries.filter(function (e) { return e.repo === v; })[0] || null;
+        _renderSnapshot();
+      }));
+
+    var sel = state.selected || {};
+    var brRow = _el("div", "viv-bs-row");
+    brRow.appendChild(_el("label", "viv-bs-key", "Branch"));
+    brRow.appendChild(_el("span", "viv-bs-commit", sel.branch || "—"));
+    host.appendChild(brRow);
+    var cRow = _el("div", "viv-bs-row");
+    cRow.appendChild(_el("label", "viv-bs-key", "Commit"));
+    cRow.appendChild(_el("span", "viv-bs-commit", sel.commit ? _short(sel.commit) : "—"));
+    if (sel.current) cRow.appendChild(_el("span", "viv-bs-current", "current ✓"));
+    host.appendChild(cRow);
+
+    var actions = _el("div", "viv-bs-actions");
+    var switchBtn = _el("button", "viv-bs-action", "Switch"); switchBtn.id = "viv-bs-switch";
+    switchBtn.disabled = !!sel.current;
+    switchBtn.title = sel.current ? "Already viewing this workspace" : "Open this workspace";
+    switchBtn.addEventListener("click", function () {
+      if (!sel.current && sel.url) window.location.href = sel.url;
+    });
+    actions.appendChild(switchBtn);
+
+    var syncBtn = _el("button", "viv-bs-action", "Sync to local"); syncBtn.id = "viv-bs-sync";
+    syncBtn.title = "Reproduce this exact repo@commit on your machine";
+    syncBtn.addEventListener("click", function () {
+      var dir = (window.location.origin + window.location.pathname).replace(/[^/]*$/, "");
+      var cmd = "vivarium-dashboard sync " + dir.replace(/\/$/, "");
+      window.prompt("Run this locally to clone + reproduce this workspace:", cmd);
+    });
+    actions.appendChild(syncBtn);
+    host.appendChild(actions);
+
+    var list = _el("ul", "viv-bs-list");
+    entries.forEach(function (e) {
+      var li = _el("li", "viv-bs-list-row" + (e.current ? " current" : ""));
+      var lbl = _el("span", "viv-bs-list-label", e.label + (e.current ? "  (this)" : ""));
+      if (!e.current && e.url) {
+        lbl.style.cursor = "pointer";
+        lbl.title = "Open this workspace";
+        lbl.addEventListener("click", function () { window.location.href = e.url; });
+      }
+      li.appendChild(lbl);
+      list.appendChild(li);
+    });
+    host.appendChild(list);
+  }
+
   function _stopBuildsPoll() {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   }
@@ -357,6 +458,7 @@
   async function refresh() {
     var host = document.getElementById("viv-branch-source");
     if (!host) return;
+    if (SNAP) { await _loadSnapshotEntries(); _renderSnapshot(); return; }
     _stopBuildsPoll();
     var r = await fetch("/api/workspaces").catch(function () { return null; });
     var cur = (r && r.ok) ? ((await r.json()).current || null) : null;

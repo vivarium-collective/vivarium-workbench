@@ -456,7 +456,10 @@
     // composite-explore needs live composite resolution (build_core) which is
     // unavailable in a static bundle → redirect to simulation-setup (composites list).
     if (document.body.classList.contains('snapshot')) {
-      if (pageId === 'github' || pageId === 'studies') {
+      // 'github' (Source page) IS available in snapshot now — it's the published
+      // workspace switcher (repo navigator + Sync-to-local). Only 'studies'
+      // (the legacy flat list) redirects to the investigations view.
+      if (pageId === 'studies') {
         pageId = 'investigations';
       }
     }
@@ -527,7 +530,7 @@
     if (focus) {
       var _snapshot = document.body.classList.contains('snapshot');
       var validPages = _snapshot
-        ? ['workspace-inputs', 'simulation-setup', 'registry', 'investigations', 'simulations', 'visualizations', 'composite-explore']
+        ? ['workspace-inputs', 'simulation-setup', 'registry', 'investigations', 'simulations', 'visualizations', 'composite-explore', 'github']
         : ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'investigations', 'studies', 'simulations', 'composite-explore', 'github'];
       if (validPages.indexOf(focus) >= 0) {
         document.body.classList.add('focus-mode', 'focus-' + focus);
@@ -545,7 +548,7 @@
         var h = (window.location.hash || '').replace(/^#/, '');
         var _snap = document.body.classList.contains('snapshot');
         var validPages = _snap
-          ? ['workspace-inputs', 'registry', 'simulation-setup', 'investigations', 'simulations', 'visualizations', 'composite-explore']
+          ? ['workspace-inputs', 'registry', 'simulation-setup', 'investigations', 'simulations', 'visualizations', 'composite-explore', 'github']
           : ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'investigations', 'studies', 'simulations', 'composite-explore', 'github'];
         _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
       }
@@ -1390,14 +1393,22 @@
         var cards = [];
         // Comparison report cards lead the gallery (no viewer dependency).
         cards = cards.concat(reportCards.map(_renderReportCardCard));
-        cards.push(_renderPtoolsCard(ptools));
-        cards.push(_renderExplorerCard());
+        // Pathway Tools (E. coli metabolic map) and the Data Explorer
+        // (timeseries / allocation / flux maps) are E. coli / metabolic-model
+        // analyses. Only show them for workspaces set up as such — detected via
+        // ui.ptools_server_url being configured (currently v2ecoli). They don't
+        // apply to e.g. agent-based colony workspaces (viva-munk).
+        var _ecoliAnalyses = !!(ptools && (ptools.configured || (ptools.studies || []).length));
+        if (_ecoliAnalyses) {
+          cards.push(_renderPtoolsCard(ptools));
+          cards.push(_renderExplorerCard());
+        }
         if (!cards.length) {
           container.innerHTML = '<p class="empty-state">No saved visualizations yet. Run a parsimony packing composite or a PTools analysis to populate this gallery.</p>';
         } else {
           container.innerHTML = cards.join('');
         }
-        if (window.Explorer) {
+        if (_ecoliAnalyses && window.Explorer) {
           var _em = document.getElementById('explorer-mount');
           if (_em) window.Explorer.mount(_em, {
             basePath: (window.DataSource && window.DataSource.basePath) ? window.DataSource.basePath() : '',
@@ -2260,6 +2271,13 @@
         if (!match) return false;
       }
       return true;
+    });
+
+    // Registry shows only what is IN this workspace — the workspace's own
+    // package plus installed modules. The browse-everything "Available to
+    // install" catalog is intentionally not shown.
+    modules = modules.filter(function (m) {
+      return m.kind === 'workspace' || m.installed;
     });
 
     // Sort: workspace package first (anchor), then installed modules

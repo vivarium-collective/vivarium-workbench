@@ -104,6 +104,16 @@ body.snapshot #modal-visualization {
   display: none !important;
 }
 
+/* Published Source page (#github): keep the Source switcher (#viv-branch-source,
+   which in snapshot becomes a navigator across published workspaces + Sync-to-
+   local), but hide the live GitHub authoring section — account identity
+   ("Signed in as"), default org, workspace-repo details, push state, PR. None
+   of that applies to a static published site. */
+body.snapshot #page-github > h2.page-title,
+body.snapshot #page-github .github-settings {
+  display: none !important;
+}
+
 /* ── GitHub / branch authoring modals + PR button ───────────────────── */
 body.snapshot #modal-link-branch,
 body.snapshot #modal-create-pr,
