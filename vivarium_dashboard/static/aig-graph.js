@@ -57,7 +57,8 @@
       var sid = 'study/' + slug;
       var anchor = pos[sid] || { x: X0, y: Y0 };
       var cn = (chains[slug].nodes || []).slice().sort(function (a, b) {
-        var da = TYPE_ORDER[a.type] || 9, db = TYPE_ORDER[b.type] || 9;
+        var da = TYPE_ORDER[a.type] !== undefined ? TYPE_ORDER[a.type] : 9;
+        var db = TYPE_ORDER[b.type] !== undefined ? TYPE_ORDER[b.type] : 9;
         return da !== db ? da - db : (a.id < b.id ? -1 : 1);
       });
       cn.forEach(function (n, i) {

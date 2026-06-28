@@ -32,6 +32,8 @@ assert(s1 && s2, 'both studies positioned');
 assert(s2.y > s1.y, 's2 (depth 1) below s1 (depth 0)');
 const e1 = out.nodes.find(n => n.id === 'evidence/e1');
 assert(e1 && typeof e1.x === 'number' && typeof e1.y === 'number', 'evidence positioned');
+const f1 = out.nodes.find(n => n.id === 'finding/f1');
+assert(f1 && f1.y < e1.y, 'finding (type 0) sorts above evidence (type 1) in the chain cluster');
 assert(out.edges.length === 3, 'study edge + 2 chain edges resolved to coords');
 out.edges.forEach(e => ['x1', 'y1', 'x2', 'y2'].forEach(
   k => assert(typeof e[k] === 'number', 'edge coord ' + k)));
