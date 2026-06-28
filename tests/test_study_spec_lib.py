@@ -184,6 +184,38 @@ class TestLoadStudyDetailSpec:
         # a completed run flips the authored 'ready' status to 'completed':
         assert base.get("status") == "completed"
 
+    def test_report_card_urls_nested_investigation_layout(self, tmp_path: Path) -> None:
+        """report_card_urls must resolve cards in the NESTED
+        investigations/<inv>/studies/<slug>/ layout (e.g. the v2ecoli↔vEcoli
+        comparison), not only the flat studies/<slug>/ path — the flat-only
+        scan left report_card_urls empty so the generated report had no cards."""
+        import json
+        # Nested layout is declared by workspace.yaml's layout: map (as the
+        # real v2ecoli workspace does).
+        (tmp_path / "workspace.yaml").write_text(
+            "layout:\n  investigations: workspace/investigations\n"
+            "  studies: workspace/studies\n", encoding="utf-8")
+        inv = tmp_path / "workspace" / "investigations" / "cmp"
+        sd = inv / "studies" / "basal"
+        rc = sd / "viz" / "report_card"
+        rc.mkdir(parents=True)
+        (inv / "investigation.yaml").write_text(
+            "name: cmp\nstudies: [basal]\n", encoding="utf-8")
+        (sd / "study.yaml").write_text(
+            "name: basal\ninvestigation: cmp\ncomposite: pbg_ws.composites.baseline\n",
+            encoding="utf-8")
+        (rc / "standard.html").write_text(
+            "<html><body>card</body></html>", encoding="utf-8")
+        (rc / "standard.verdict.json").write_text(
+            json.dumps({"overall": "drift"}), encoding="utf-8")
+        spec = study_spec.load_study_detail_spec(tmp_path, "basal")
+        assert spec is not None
+        rcu = spec.get("report_card_urls") or {}
+        assert "standard" in rcu, f"nested report card not found: {rcu}"
+        assert rcu["standard"]["verdict"] == "drift"
+        assert rcu["standard"]["url"].endswith(
+            "investigations/cmp/studies/basal/viz/report_card/standard.html")
+
 
 # ---------------------------------------------------------------------------
 # TestServerShimParity: legacy handler body == lib-builder body

@@ -679,7 +679,10 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         # Per-study report-card artifacts (viz/report_card/<card>.{html,verdict.json})
         # surfaced so the SPA Tests section can embed a `kind: report_card` module
         # without cross-referencing the global saved-visualizations endpoint.
-        rc_dir = Path(ws_root) / "studies" / name / "viz" / "report_card"
+        # Resolve via study_dir() so NESTED investigations/<inv>/studies/<slug>/
+        # layouts (e.g. the v2ecoli↔vEcoli comparison) are found too — the flat
+        # ws_root/studies/<name> path misses them and left report_card_urls empty.
+        rc_dir = study_dir(ws_root, name) / "viz" / "report_card"
         rc_urls: dict = {}
         if rc_dir.is_dir():
             for html in sorted(rc_dir.glob("*.html")):
