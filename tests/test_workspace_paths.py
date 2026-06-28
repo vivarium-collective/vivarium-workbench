@@ -106,3 +106,55 @@ def test_dir_by_name_and_rel(tmp_path):
     wp = WorkspacePaths.from_config(tmp_path, {"name": "ws"})
     assert wp.dir("studies") == tmp_path / "studies"
     assert wp.rel("pbg") == ".pbg"
+
+
+def _make_flat_study(tmp_path, slug, study_yaml="name: s\n"):
+    d = tmp_path / "studies" / slug
+    d.mkdir(parents=True)
+    (d / "study.yaml").write_text(study_yaml, encoding="utf-8")
+    return d
+
+
+def _make_investigation(tmp_path, slug, studies):
+    d = tmp_path / "investigations" / slug
+    d.mkdir(parents=True)
+    items = "\n".join(f"  - {s}" for s in studies)
+    (d / "investigation.yaml").write_text(f"name: {slug}\nstudies:\n{items}\n", encoding="utf-8")
+    return d
+
+
+def test_study_owner_back_ref(tmp_path):
+    """study.yaml's explicit ``investigation:`` back-ref wins."""
+    _make_flat_study(tmp_path, "s1", "name: s1\ninvestigation: inv-a\n")
+    wp = WorkspacePaths.from_config(tmp_path, {"name": "ws"})
+    assert wp.study_owner("s1") == "inv-a"
+
+
+def test_study_owner_forward_list_fallback(tmp_path):
+    """Flat study with no back-ref, owned only via the investigation's forward
+    ``studies:`` list — the common v2ecoli case. Regression: previously returned
+    None, leaving the run's Investigation column blank and un-scopable."""
+    _make_flat_study(tmp_path, "mbp-06", "name: mbp-06\n")  # no investigation: key
+    _make_investigation(tmp_path, "multiscale-bioprocess",
+                        ["mbp-05", "mbp-06", "mbp-07"])
+    wp = WorkspacePaths.from_config(tmp_path, {"name": "ws"})
+    assert wp.study_owner("mbp-06") == "multiscale-bioprocess"
+
+
+def test_study_owner_forward_list_dict_items(tmp_path):
+    """Forward list items given as ``{study: ...}`` dicts also resolve."""
+    _make_flat_study(tmp_path, "s2", "name: s2\n")
+    d = tmp_path / "investigations" / "inv-b"
+    d.mkdir(parents=True)
+    (d / "investigation.yaml").write_text(
+        "name: inv-b\nstudies:\n  - {study: s2}\n", encoding="utf-8")
+    wp = WorkspacePaths.from_config(tmp_path, {"name": "ws"})
+    assert wp.study_owner("s2") == "inv-b"
+
+
+def test_study_owner_unowned_is_none(tmp_path):
+    """A study no investigation lists stays None (workspace-wide run)."""
+    _make_flat_study(tmp_path, "orphan", "name: orphan\n")
+    _make_investigation(tmp_path, "inv-c", ["something-else"])
+    wp = WorkspacePaths.from_config(tmp_path, {"name": "ws"})
+    assert wp.study_owner("orphan") is None

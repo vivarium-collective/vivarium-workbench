@@ -181,12 +181,17 @@ class WorkspacePaths:
         return self.dir("investigations") / inv_slug / "reports"
 
     def study_owner(self, slug: str):
-        """Owning investigation slug for a study (nested layout), else the
-        study.yaml investigation: back-ref, else None."""
+        """Owning investigation slug for a study: nested layout, else the
+        study.yaml ``investigation:`` back-ref, else the investigation whose
+        forward ``studies:`` list names this study, else None.
+
+        The forward-list fallback matters for the common flat layout
+        (``studies/<slug>/``) where ownership is declared only on the
+        investigation side and the study.yaml carries no back-ref."""
         try:
             d = self.study_dir(slug)
         except FileNotFoundError:
-            return None
+            return self._forward_study_owner(slug)
         try:
             parts = d.relative_to(self.dir("investigations")).parts
             if len(parts) >= 3 and parts[1] == "studies":
@@ -196,6 +201,29 @@ class WorkspacePaths:
         sy = d / "study.yaml"
         if sy.is_file():
             data = yaml.safe_load(sy.read_text(encoding="utf-8")) or {}
-            return data.get("investigation")
+            owner = data.get("investigation")
+            if owner:
+                return owner
+        return self._forward_study_owner(slug)
+
+    def _forward_study_owner(self, slug: str):
+        """Scan each ``investigations/<inv>/investigation.yaml`` for one whose
+        ``studies:`` list names ``slug``; return that investigation slug or None.
+        Tolerates list items given as bare slugs or ``{study|slug: ...}`` dicts."""
+        inv_root = self.dir("investigations")
+        if not inv_root.is_dir():
+            return None
+        for inv_dir in sorted(inv_root.iterdir()):
+            iy = inv_dir / "investigation.yaml"
+            if not iy.is_file():
+                continue
+            try:
+                data = yaml.safe_load(iy.read_text(encoding="utf-8")) or {}
+            except Exception:
+                continue
+            for st in (data.get("studies") or []):
+                st_slug = st if isinstance(st, str) else (st or {}).get("study") or (st or {}).get("slug")
+                if st_slug == slug:
+                    return inv_dir.name
         return None
 
