@@ -11,6 +11,7 @@ import yaml
 
 from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 from vivarium_dashboard.lib.node_store import load_study_nodes
+from vivarium_dashboard.lib.investigations import normalize_dag_edges
 from investigation_contracts import validate_chain
 
 
@@ -61,13 +62,9 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
     except Exception:  # noqa: BLE001
         return {"error": f"unreadable investigation.yaml for {inv_slug!r}"}, 404
 
-    from vivarium_dashboard.lib.investigations import normalize_dag_edges
-
     studies_out: list[dict] = []
     study_edges: list[dict] = []
     chains: dict[str, dict] = {}
-    # Build a map of (pre_study, target_study) -> explicit condition
-    explicit_conditions: dict[tuple[str, str], str] = {}
     for slug in (spec.get("studies") or []):
         try:
             sp = wp.study_dir(slug) / "study.yaml"
@@ -79,22 +76,21 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
             study_spec = yaml.safe_load(sp.read_text(encoding="utf-8")) or {}
         except Exception:  # noqa: BLE001 — skip invalid/unloadable study, never fatal
             continue
-        name = study_spec.get("name", slug)
-        # Extract explicit conditions from pipeline_gate before normalize_dag_edges adds defaults
-        pg = study_spec.get("pipeline_gate") or {}
-        for prereq in pg.get("prerequisites", []) or []:
-            pre_study = prereq.get("study", "")
-            if "condition" in prereq:
-                explicit_conditions[(pre_study, name)] = prereq["condition"]
-        studies_out.append({"id": f"study/{name}", "slug": name, "type": "study",
-                            "label": study_spec.get("title") or name,
+        studies_out.append({"id": f"study/{slug}", "slug": slug, "type": "study",
+                            "label": study_spec.get("title") or study_spec.get("name") or slug,
                             "status": study_spec.get("status", "planned")})
+        # normalize_dag_edges injects a "tests-passed" default condition; the
+        # payload contract treats an unspecified gate as "" (no explicit gate),
+        # so read explicit conditions from the raw prerequisites.
+        pg = study_spec.get("pipeline_gate") or {}
+        explicit = {pr["study"]: pr["condition"]
+                    for pr in (pg.get("prerequisites") or [])
+                    if isinstance(pr, dict) and pr.get("study") and "condition" in pr}
         for pre in normalize_dag_edges(study_spec):
-            # Use explicit condition if present, otherwise empty string
-            cond = explicit_conditions.get((pre['study'], name), "")
-            study_edges.append({"source": f"study/{pre['study']}", "target": f"study/{name}",
-                               "rel": "prerequisite", "condition": cond})
-        chains[name] = _build_chain(name, load_study_nodes(ws_root, name))
+            study_edges.append({"source": f"study/{pre['study']}", "target": f"study/{slug}",
+                               "rel": "prerequisite",
+                               "condition": explicit.get(pre["study"], "")})
+        chains[slug] = _build_chain(slug, load_study_nodes(ws_root, slug))
 
     return {"investigation": inv_slug, "studies": studies_out,
             "study_edges": study_edges, "chains": chains}, 200

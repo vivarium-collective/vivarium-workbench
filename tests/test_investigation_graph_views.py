@@ -74,6 +74,7 @@ def test_unsound_chain_surfaces_violations(tmp_path):
     body, _ = build_investigation_graph(ws, "demo-inv")
     assert any(v["node_id"] == "conclusion/c1"
                for v in body["chains"]["s2"]["violations"])
+    assert all(e["target"] != "evidence/missing" for e in body["chains"]["s2"]["edges"])
 
 
 def test_unknown_investigation_404(tmp_path):
