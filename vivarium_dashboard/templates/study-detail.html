@@ -1520,7 +1520,7 @@
     </div>
   </div>
 
-  {% set _bt = study.behavior_tests or study.expected_behavior %}
+  {% set _bt = study.behavior_tests or study.expected_behavior or study.tests %}
   {# Aggregate the latest test outcomes from study.runs[].outcomes so each
      row below can show PASS/FAIL/skip instead of a stale "pending" pill. #}
   {% set _outcomes = {} %}
@@ -1543,10 +1543,19 @@
     {% set _pill_fg = '#065f46' if _res == 'PASS' else ('#991b1b' if _res == 'FAIL' else ('#92400e' if _res == 'SKIP' else ('#92400e' if _res == 'PARTIAL' else '#475569'))) %}
     {% set _pill_text = ('✓ PASS' if _res == 'PASS' else ('✗ FAIL' if _res == 'FAIL' else ('⏭ SKIP' if _res == 'SKIP' else ('◐ partial' if _res == 'PARTIAL' else '⏳ pending')))) %}
     <li class="expected-behavior-item" id="bt-{{ b.name or loop.index0 }}"
+        data-test-kind="{{ b.kind or 'behavioral' }}"
+        {% if (b.kind or 'behavioral') == 'report_card' %}data-card="{{ b.card }}"{% endif %}
         data-pytest-node="{{ b.name or '' }}"
         data-classification="{{ _cls }}"
         data-result="{{ _res or 'pending' }}"
         style="margin: 0 0 10px 0; padding: 10px 12px; border-left: 4px solid {{ _border }}; background: #f8fafc; border-radius: 4px;">
+      {% if (b.kind or 'behavioral') == 'report_card' %}
+        <div class="bt-head"><code>{{ b.name }}</code>
+          <span class="bt-result report-card-verdict" style="font-size:0.75em;font-family:monospace;padding:2px 8px;border-radius:9999px;background:#e2e8f0;color:#334155">report card</span>
+        </div>
+        <div class="report-card-mount" data-card="{{ b.card }}"></div>
+      {% else %}
+        {# --- existing behavioral rendering, UNCHANGED, kept verbatim below --- #}
       <div style="display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;">
         <span class="bt-result" style="font-size: 0.75em; font-family: monospace; padding: 2px 8px; border-radius: 9999px; background: {{ _pill_bg }}; color: {{ _pill_fg }}">{{ _pill_text }}</span>
         <span class="classification-pill classification-{{ _cls }}">{{ _cls }}</span>
@@ -1582,6 +1591,7 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
       {% endif %}
       {% if b.notes %}
       <p class="muted" style="margin: 6px 0 0 0; font-size: 0.8em;">Note: {{ b.notes }}</p>
+      {% endif %}
       {% endif %}
     </li>
     {% endfor %}
