@@ -130,7 +130,12 @@
           }
           return;
         }
-        var live = d.charts.filter(function(c) { return (c.source || 'live') === 'live'; });
+        // Render every pre-rendered chart — 'live' (runs.db), 'declared'
+        // (study.yaml-registered viz, the common snapshot case), or unset —
+        // except the checked-in 'static' charts, which get their own labeled
+        // section below. (Previously only 'live'/unset rendered, so 'declared'
+        // charts silently vanished in the published snapshot.)
+        var live = d.charts.filter(function(c) { return c.source !== 'static'; });
         var stat = d.charts.filter(function(c) { return c.source === 'static'; });
         var html = '';
         if (live.length) {
