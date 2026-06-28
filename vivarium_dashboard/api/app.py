@@ -294,7 +294,7 @@ from vivarium_dashboard.lib.models import (
     CatalogInstallRequest,
     CatalogUninstallRequest,
 )
-from investigation_contracts import FindingCreateBody, EvidenceCreateBody
+from investigation_contracts import FindingCreateBody, EvidenceCreateBody, DecisionCreateBody
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
 from vivarium_dashboard.lib.visualization_classes import list_visualization_classes
@@ -2964,6 +2964,14 @@ def create_app() -> FastAPI:
               summary="Link Evidence (findings -> hypotheses) and emit EvidenceLinked")
     def create_evidence(req: EvidenceCreateBody, ws: Path = Depends(get_workspace)):
         body, status = _chain_views.create_evidence(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post("/api/decision", tags=["Studies"],
+              summary="Record a Decision on Evidence and emit DecisionRecorded")
+    def create_decision(req: DecisionCreateBody, ws: Path = Depends(get_workspace)):
+        body, status = _chain_views.create_decision(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body

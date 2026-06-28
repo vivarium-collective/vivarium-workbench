@@ -10,9 +10,9 @@ import yaml
 
 from vivarium_dashboard.lib.atomic_io import atomic_write_text
 from vivarium_dashboard.lib.event_log import emit_event
-from vivarium_dashboard.lib.node_store import study_dir
+from vivarium_dashboard.lib.node_store import load_study_nodes, study_dir
 from investigation_contracts import make_core
-from investigation_contracts.lifecycle import initial_state
+from investigation_contracts.lifecycle import check_transition, initial_state
 
 
 def _prov(actor: str, agent_id: str, srcs: list[str], why: str, tool: str) -> dict:
@@ -53,3 +53,37 @@ def create_evidence(ws_root: Path, body: dict) -> tuple[dict, int]:
                           actor="agentic", provenance=prov,
                           payload={"study": slug, "evidence_id": eid})
     return {"evidence_id": eid, "event_id": event_id}, 200
+
+
+def create_decision(ws_root: Path, body: dict) -> tuple[dict, int]:
+    slug = (body.get("study") or "").strip()
+    outcome = body.get("outcome")
+    evidence_refs = body.get("evidence") or []
+    sdir = study_dir(ws_root, slug)
+    if sdir is None:
+        return {"error": f"study not found: {slug}"}, 404
+    if outcome not in ("accept", "reject", "defer"):
+        return {"error": "outcome must be accept|reject|defer"}, 400
+    did = "d" + uuid.uuid4().hex[:10]
+    prov = _prov("human", body.get("decided_by", "unknown"), evidence_refs,
+                 "decision recorded via /api/decision", "api/decision")
+    node = {"id": f"decision/{did}", "type": "decision", "lifecycle_state": "recorded",
+            "owner": "human", "provenance": prov, "validation_status": "ok",
+            "evidence": list(evidence_refs), "outcome": outcome,
+            "rationale": body.get("rationale", ""), "decided_by": body.get("decided_by", "")}
+    if not make_core().check("decision", node):
+        return {"error": "constructed decision node failed contract validation"}, 500
+    _write_node(sdir, "decisions", did, node)
+    # The decision is the single act that moves its evidence.
+    target = {"accept": "accepted", "reject": "rejected"}.get(outcome)
+    if target:
+        nodes = load_study_nodes(ws_root, slug)
+        for eref in evidence_refs:
+            ev = nodes.get(eref)
+            if ev and check_transition("evidence", ev.get("lifecycle_state", ""), target):
+                ev["lifecycle_state"] = target
+                _write_node(sdir, "evidence", eref.split("/", 1)[-1], ev)
+    event_id = emit_event(ws_root, type="DecisionRecorded", subject=f"decision/{did}",
+                          transition={"from": "", "to": "recorded"}, actor="human",
+                          provenance=prov, payload={"study": slug, "decision_id": did, "outcome": outcome})
+    return {"decision_id": did, "event_id": event_id}, 200
