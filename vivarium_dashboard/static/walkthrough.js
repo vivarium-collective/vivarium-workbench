@@ -5246,17 +5246,17 @@
             storyBox.style.display = 'none';
           }
         }
-        // Phase B4: render the typed AIG (study DAG + evidence chains). Falls
-        // back to the legacy study-only renderer on any failure (graceful).
+        // Phase B4: render today's study graph (unchanged), then layer each
+        // study's typed evidence chain into its card. Falls back to the plain
+        // study graph on any fetch failure (graceful — identical to before).
         (function () {
           var slug = d.slug || d.name || name;
-          if (typeof window._renderAigGraph !== 'function' || !slug) {
-            _renderInvestigationDag(d.studies || []);
-            return;
-          }
+          if (!slug) { _renderInvestigationDag(d.studies || []); return; }
           fetch('/api/investigation-graph?investigation=' + encodeURIComponent(slug))
             .then(function (r) { if (!r.ok) throw new Error('graph ' + r.status); return r.json(); })
-            .then(function (graph) { window._renderAigGraph(graph); })
+            .then(function (graph) {
+              _renderInvestigationDag(d.studies || [], (graph && graph.chains) || {});
+            })
             .catch(function () { _renderInvestigationDag(d.studies || []); });
         })();
         // SP5: needs-attention panel (deterministic scan, code-computed, AI-free).
@@ -5519,7 +5519,7 @@
   // Layout + render the DAG of study nodes for the active investigation.
   // VERTICAL flow: y = topological depth (top = roots), x = within-depth slot.
   // Cards as absolute-positioned <div>s; edges as SVG cubic-Bezier paths.
-  function _renderInvestigationDag(studies) {
+  function _renderInvestigationDag(studies, chainsBySlug) {
     var nodesHost = document.getElementById('investigation-dag-nodes');
     var edgesSvg  = document.getElementById('investigation-dag-edges');
     nodesHost.innerHTML = '';
@@ -5661,7 +5661,9 @@
           (claim ? _esc(claim) : '<em style="color:#94a3b8">pending evidence</em>') +
         '</div>' +
         (moreN ? '<div style="font-size:0.72em;margin-top:2px;color:#94a3b8">+' + moreN + ' more</div>' : '') +
-        followUpsChip;
+        followUpsChip +
+        ((chainsBySlug && typeof window._chainBlockHtml === 'function')
+          ? window._chainBlockHtml(chainsBySlug[s.name]) : '');
       node._followUps = followUps;
       nodesHost.appendChild(node);
       pos[s.name] = { x: x, node: node, depth: depth[s.name] };
