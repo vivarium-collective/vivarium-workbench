@@ -971,6 +971,40 @@ class StudyObservableCheck(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class ReadoutRow(BaseModel):
+    """One row of ``GET /api/study-readouts`` (lib.readouts_views.build_study_readouts).
+
+    A merged view of one emit-plan leaf and any authored ``study.yaml`` readout
+    annotation. ``emit_status``: ``emitted`` (a real emitter path) / ``derived``
+    (authored derived-needed|aspirational metric, exempt from the emit-plan
+    check) / ``not_in_emit_plan`` (authored ``available`` readout whose
+    ``store_path`` is missing or not an emitted leaf — the never-fabricate flag).
+    """
+
+    store_path: str
+    name: str
+    description: str = ""
+    units: str = ""
+    index_by: Optional[dict] = None
+    notes: str = ""
+    annotated: bool
+    emit_status: Literal["emitted", "not_in_emit_plan", "derived"]
+
+
+class StudyReadouts(BaseModel):
+    """``GET /api/study-readouts?study=<slug>`` payload.
+
+    Backed by ``lib.readouts_views.build_study_readouts``. ``rows`` is the union
+    of the composite's emit-plan leaves and authored readouts; ``note`` carries a
+    human explanation when the composite could not be built (rows then come from
+    authored readouts only, unverified).
+    """
+
+    composite: str
+    rows: list[ReadoutRow]
+    note: str = ""
+
+
 class LinkageIndex(BaseModel):
     """``GET /api/linkage-index`` payload (lib.report_views.build_linkage_index).
 
