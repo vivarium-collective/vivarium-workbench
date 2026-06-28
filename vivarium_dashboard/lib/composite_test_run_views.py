@@ -108,7 +108,8 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
 
     conn = cr.connect(db_file)
     try:
-        cr.prune_runs(conn, spec_id=spec_id, keep=cr.PRUNE_KEEP)
+        # SP-B: runs are durable — no prune-to-20 eviction. Deletion is an
+        # explicit Sim-DB action (composite_runs.delete_run), not auto-eviction.
         cr.save_metadata(conn, spec_id=spec_id, run_id=run_id,
                          params=overrides, label=label,
                          started_at=time.time(), n_steps=steps,
