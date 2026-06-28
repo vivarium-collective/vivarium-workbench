@@ -1,9 +1,11 @@
 # Phase B4 — Render the Typed AIG (replace the investigation graph)
 
 **Date:** 2026-06-28
-**Status:** Design — approved decisions, pending spec review
+**Status:** Implemented (with a post-review design revision — see below)
 **Implements:** RFC-0002 Phase B — "render nodes + transitions in the dashboard"
 **Repos touched:** `vivarium-dashboard` (backend endpoint + frontend graph renderer)
+
+> **Design revision (post final-review, 2026-06-28).** The frontend was implemented as a self-contained renderer that *replaced* the legacy study-DAG (`_renderAigGraph` + `_aigLayout`). The whole-branch review caught that this regressed every chain-less investigation (all of them today) — it dropped the legacy status/verdict badges, the legend, follow-up popovers, and click-through, violating the "renders identically to today" guarantee. The user chose the **true-superset** fix: keep the legacy `_renderInvestigationDag` rendering exactly as-is and **inject each study's typed evidence chain into its study card** via a pure `_chainBlockHtml(chain)` (in `static/aig-graph.js`). Because the chain block is part of the card's measured `innerHTML`, it stacks correctly and never collides; an absent/empty chain yields `''`, so a chain-less card is byte-identical to today. The backend endpoint/builder below are unchanged; only the frontend section (Component ②) was superseded by this card-injection approach. The `GET /api/investigation-graph` payload contract is the same.
 
 ## Goal
 
