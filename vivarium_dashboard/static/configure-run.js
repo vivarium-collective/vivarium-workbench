@@ -138,15 +138,15 @@
     var study = ctxState.study || window.prompt("Save into which study (slug)?"); if (!study) return;
     _post("/api/save-run-as-variant", { run_id: el._lastRunId, study: study, variant_name: name }).then(function (res) {
       _status(el, res.status === 200 ? '<strong>✓ Saved as variant</strong> ' + esc(name) : '<span class="inv-run-err">' + esc((res.body && res.body.error) || res.status) + '</span>');
-    });
+    }).catch(function (e) { _status(el, '<span class="inv-run-err">' + esc(String(e)) + '</span>'); });
   }
 
   function _deleteRun(el) {
     if (!window.confirm("Delete this run?")) return;
-    var db = ctxState.dbPath || "";  // adhoc → .pbg/composite-runs.db resolved server-side if blank
-    _post("/api/run-delete", { run_id: el._lastRunId, db_path: db || (ctxState.composite ? "" : "") }).then(function () {
-      _status(el, "Deleted.");
-    });
+    var db = ctxState.dbPath || "";
+    _post("/api/run-delete", { run_id: el._lastRunId, db_path: db }).then(function (res) {
+      _status(el, res.status === 200 ? "Deleted." : '<span class="inv-run-err">' + esc((res.body && res.body.error) || res.status) + '</span>');
+    }).catch(function (e) { _status(el, '<span class="inv-run-err">' + esc(String(e)) + '</span>'); });
   }
 
   // expose for _wireRun call in mount() + tests
