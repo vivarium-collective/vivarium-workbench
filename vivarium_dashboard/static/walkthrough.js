@@ -4168,7 +4168,24 @@
       // Live mode: fetch resolve endpoint with overrides.
       var url = '/api/composite-resolve?id=' + encodeURIComponent(id) +
         '&overrides=' + encodeURIComponent(JSON.stringify(window._ceCurrent.overrides));
-      p = fetch(url).then(function(r) { return r.json(); });
+      // Parse defensively: an unguarded r.json() on a non-2xx / non-JSON
+      // response throws "SyntaxError: The string did not match the expected
+      // pattern" (Safari) → a useless "Network error". A remote build can't
+      // resolve generator composites (no local ParCa cache to run build_core)
+      // and unregistered refs 404 — turn both into the {error}/{unresolved}
+      // shapes the loader below already renders gracefully.
+      p = fetch(url).then(function(r) {
+        return r.text().then(function(t) {
+          var d = null;
+          try { d = t ? JSON.parse(t) : null; } catch (e) { d = null; }
+          if (r.ok && d) return d;
+          if (r.status === 404) return { unresolved: true, ref: id };
+          var msg = (d && (d.error || d.detail)) ? (d.error || d.detail)
+            : ('HTTP ' + r.status + ' — could not resolve this composite. A remote '
+               + 'build cannot build generator composites (no local ParCa cache).');
+          return { error: msg };
+        });
+      });
     }
     p.then(function(data) {
         // Guard: a null/empty response (e.g. an unexpected miss) is treated as
