@@ -99,3 +99,25 @@ def test_duplicate_store_path_neither_flagged_not_in_emit_plan():
         f"Expected no not_in_emit_plan rows for dup store_path covered by emit leaf, "
         f"got: {orphans}"
     )
+
+
+def test_build_study_readouts_honors_nested_workspace_layout(tmp_path):
+    """A workspace.yaml that nests studies under workspace/studies (v2ecoli
+    layout) must still resolve the study — not 404 'study not found'."""
+    import yaml as _yaml
+    from vivarium_dashboard.lib.readouts_views import build_study_readouts
+
+    (tmp_path / "workspace.yaml").write_text(_yaml.safe_dump({
+        "name": "ws",
+        "layout": {"studies": "workspace/studies",
+                   "investigations": "workspace/investigations"},
+    }))
+    sd = tmp_path / "workspace" / "studies" / "demo"
+    sd.mkdir(parents=True)
+    # No baseline -> the worker returns 422 (found, but no composite), proving
+    # the study was RESOLVED via the layout rather than 404'd.
+    (sd / "study.yaml").write_text(_yaml.safe_dump({"name": "demo", "readouts": []}))
+
+    body, status = build_study_readouts(tmp_path, "demo")
+    assert status != 404, body
+    assert body.get("error") != "study not found: demo"

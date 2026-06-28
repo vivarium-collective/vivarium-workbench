@@ -125,9 +125,19 @@ def build_study_readouts(ws_root: Path, slug: str) -> tuple[dict, int]:
     if not SLUG_RE.match(slug or ""):
         return {"error": "invalid slug"}, 400
 
-    study_dir = ws_root / "studies" / slug
-    if not study_dir.is_dir():
-        study_dir = ws_root / "investigations" / slug
+    # Resolve the study dir honoring the workspace layout (workspace.yaml may
+    # nest studies under e.g. workspace/studies — v2ecoli). Fall back to the
+    # flat root layout if WorkspacePaths can't load.
+    try:
+        from .workspace_paths import WorkspacePaths
+        wp = WorkspacePaths.load(ws_root)
+        study_dir = wp.studies / slug
+        if not study_dir.is_dir():
+            study_dir = wp.investigations / slug
+    except Exception:  # noqa: BLE001
+        study_dir = ws_root / "studies" / slug
+        if not study_dir.is_dir():
+            study_dir = ws_root / "investigations" / slug
     sf = study_spec_file(study_dir)
     if not sf.is_file():
         return {"error": f"study not found: {slug}"}, 404
