@@ -679,7 +679,6 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
         # Per-study report-card artifacts (viz/report_card/<card>.{html,verdict.json})
         # surfaced so the SPA Tests section can embed a `kind: report_card` module
         # without cross-referencing the global saved-visualizations endpoint.
-        import json as _json
         rc_dir = Path(ws_root) / "studies" / name / "viz" / "report_card"
         rc_urls: dict = {}
         if rc_dir.is_dir():
