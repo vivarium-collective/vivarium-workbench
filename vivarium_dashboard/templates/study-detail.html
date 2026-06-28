@@ -1890,12 +1890,16 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
       {% for v in (study.visualizations or []) %}
       <div class="viz-config">{{ v.name }} <code class="muted">{{ v.address or '' }}</code>
         {% if v.description %}<div class="muted small" style="margin-top:2px">{{ v.description }}</div>{% endif %}
+        {% if v.address and v.address.startswith('gif:') %}
+        <img src="./{{ v.address[4:] }}" alt="{{ v.name }}" loading="lazy"
+             style="display:block;max-width:100%;margin-top:8px;border:1px solid #e5e7eb;border-radius:6px;background:#fff">
+        {% endif %}
       </div>
       {% else %}
       <p class="muted" style="margin:0">No registered viz modules. The composite's default workflow + topology visualizations apply automatically when running.</p>
       {% endfor %}
     </div>
-    <button class="btn-add-viz" style="margin-top:8px">+ Add visualization</button>
+    <button class="btn-add-viz js-authoring" style="margin-top:8px">+ Add visualization</button>
   </div>
 </section>
 

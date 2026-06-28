@@ -262,6 +262,36 @@ def _stage_embed_visualizations(spec, ws_root: Path, out_dir: Path,
             embed["url"] = base_path + url
 
 
+def _stage_gif_visualizations(spec: dict, ws_root: Path, out_dir: Path, slug: str) -> None:
+    """Stage a study's ``gif:`` visualization artifacts into the bundle.
+
+    A study viz declared as ``address: gif:<file>`` references an animated GIF in
+    the study's source dir. Copy it next to the study shell
+    (``studies/<slug>/<file>``) so the shell renders it inline via a relative URL
+    (no base-path needed — the shell sits in the same dir). Temporary local
+    artifact hosting until sms-api serves these.
+    """
+    try:
+        from vivarium_dashboard.lib import study_spec as _ss
+        sdir = _ss.study_dir(ws_root, slug)
+    except Exception:
+        return
+    if not sdir or not Path(sdir).is_dir():
+        return
+    for v in (spec.get("visualizations") or []):
+        addr = (v.get("address") or "") if isinstance(v, dict) else ""
+        if not addr.startswith("gif:"):
+            continue
+        fname = addr[len("gif:"):].lstrip("/")
+        if not fname or "/" in fname or ".." in fname:
+            continue  # only a bare filename living in the study dir
+        src = Path(sdir) / fname
+        if src.is_file():
+            dst = out_dir / "studies" / slug / fname
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+
+
 def _rewrite_pack_mesh_urls(obj, pack_dir_rel: str, base_no_slash: str) -> None:
     """Recursively rewrite mesh ``url`` strings in a parsimony pack (in place).
 
@@ -474,9 +504,20 @@ def _render_home_html(ws_root: Path) -> str:
     except Exception:
         _repo_slug = None
 
+    # Current branch — shown in the rail repo+branch chip (published site).
+    try:
+        import subprocess
+        _branch = subprocess.run(
+            ["git", "-C", str(ws_root), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+    except Exception:
+        _branch = ""
+
     tpl = env.get_template("index.html.j2")
     return tpl.render(
         workspace_name=ws.get("name", ws_root.name),
+        workspace_branch=_branch,
         repo_url=(f"https://github.com/{_repo_slug}" if _repo_slug else ""),
         dashboard_name=dash_cfg.get("name", ""),
         dashboard_logo="assets/vivarium-logo.png",
@@ -809,6 +850,7 @@ def _do_build(
             continue
         if data is not None:
             _stage_embed_visualizations(data, ws_root, out_dir, base_path)
+            _stage_gif_visualizations(data, ws_root, out_dir, slug)
             _write_json(api_dir / "study" / f"{slug}.json", data)
 
     # api/study-charts/<slug>.json — the Visualizations-tab charts payload,
