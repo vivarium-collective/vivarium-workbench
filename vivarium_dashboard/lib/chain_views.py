@@ -55,6 +55,38 @@ def create_evidence(ws_root: Path, body: dict) -> tuple[dict, int]:
     return {"evidence_id": eid, "event_id": event_id}, 200
 
 
+def create_conclusion(ws_root: Path, body: dict) -> tuple[dict, int]:
+    from investigation_contracts import validate_chain
+    slug = (body.get("study") or "").strip()
+    sdir = study_dir(ws_root, slug)
+    if sdir is None:
+        return {"error": f"study not found: {slug}"}, 404
+    cid = "c" + uuid.uuid4().hex[:10]
+    prov = _prov("human", body.get("decided_by", "unknown"),
+                 list(body.get("evidence") or []) + list(body.get("decisions") or []),
+                 "conclusion published via /api/conclusion", "api/conclusion")
+    node = {"id": f"conclusion/{cid}", "type": "conclusion", "lifecycle_state": "draft",
+            "owner": "human", "provenance": prov, "validation_status": "ok",
+            "evidence": list(body.get("evidence") or []),
+            "decisions": list(body.get("decisions") or []),
+            "hypotheses": list(body.get("hypotheses") or []),
+            "statement": body.get("statement", "")}
+    if not make_core().check("conclusion", node):
+        return {"error": "constructed conclusion node failed contract validation"}, 500
+    # HARD GATE: the chain must be sound for THIS conclusion before publishing.
+    nodes = load_study_nodes(ws_root, slug)
+    nodes[node["id"]] = node
+    violations = [v for v in validate_chain(nodes) if v["node_id"] == node["id"]]
+    if violations:
+        return {"error": "conclusion chain is unsound", "violations": violations}, 422
+    node["lifecycle_state"] = "published"
+    _write_node(sdir, "conclusions", cid, node)
+    event_id = emit_event(ws_root, type="ConclusionPublished", subject=f"conclusion/{cid}",
+                          transition={"from": "draft", "to": "published"}, actor="human",
+                          provenance=prov, payload={"study": slug, "conclusion_id": cid})
+    return {"conclusion_id": cid, "event_id": event_id}, 200
+
+
 def create_decision(ws_root: Path, body: dict) -> tuple[dict, int]:
     slug = (body.get("study") or "").strip()
     outcome = body.get("outcome")
