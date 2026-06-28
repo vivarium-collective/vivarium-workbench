@@ -750,6 +750,41 @@
 
   // ----- Tests tab -----
 
+  // Verdict -> pill colour (matches the behavioral pill palette).
+  var _RC_PILL = {
+    within_tol: ['#16a34a', '#fff', 'within tol'],
+    drift:      ['#d97706', '#fff', 'drift'],
+    mismatch:   ['#dc2626', '#fff', 'mismatch'],
+    ungraded:   ['#64748b', '#fff', 'ungraded']
+  };
+
+  // Fill each `kind: report_card` test's mount with the embedded card + verdict.
+  function _fillReportCardModules(spec) {
+    var urls = (spec && spec.report_card_urls) || {};
+    var mounts = document.querySelectorAll('.report-card-mount');
+    Array.prototype.forEach.call(mounts, function(mount) {
+      if (mount.dataset.filled) return;          // idempotent
+      var card = mount.getAttribute('data-card');
+      var rc = urls[card];
+      if (!rc || !rc.url) {
+        mount.innerHTML = '<div class="muted" style="padding:8px">report card '
+          + escapeHtmlForTests(String(card)) + ' not generated yet — run the comparison.</div>';
+        mount.dataset.filled = '1';
+        return;
+      }
+      mount.innerHTML =
+        '<iframe class="viz-embed" src="' + escapeHtmlForTests(rc.url) + '" loading="lazy" '
+        + 'style="width:100%;height:520px;border:1px solid #2a313c;border-radius:8px"></iframe>';
+      // recolour this test's verdict pill
+      var li = mount.closest('.expected-behavior-item');
+      var pill = li && li.querySelector('.report-card-verdict');
+      var v = (rc.verdict || 'ungraded');
+      var p = _RC_PILL[v] || _RC_PILL.ungraded;
+      if (pill) { pill.style.background = p[0]; pill.style.color = p[1]; pill.textContent = p[2]; }
+      mount.dataset.filled = '1';
+    });
+  }
+
   function loadTestsTab(spec) {
     var cfg = (spec && spec.tests) || {};
     var autoEl = document.getElementById('tests-auto-discover');
@@ -874,6 +909,7 @@
           _renderComputedOutcomeRow(tname, perTest[tname], passIf));
       });
     }
+    _fillReportCardModules(spec);
   }
 
   // Render one test's code-computed outcome as a styled row: the measured
