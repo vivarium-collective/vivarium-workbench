@@ -252,12 +252,22 @@ def _readout_emit_plan_findings(ws_root: Path) -> list[dict]:
     feeding the readiness gaps. ``derived`` / ``emitted`` rows are clean.
     """
     out: list[dict] = []
-    for slug, _spec in _iter_study_slugs(ws_root):
+    for slug, spec in _iter_study_slugs(ws_root):
+        # Fix 2 (perf): skip composite build for studies with no authored readouts —
+        # they can never produce not_in_emit_plan findings.
+        if not (spec.get("readouts") or spec.get("observables")):
+            continue
         try:
             body, status = _readouts_views.build_study_readouts(ws_root, slug)
         except Exception:  # noqa: BLE001
             continue
         if status not in (200, 422):
+            continue
+        # Fix 1: composite build-failure (422 + non-empty note) → skip per-row
+        # fabrication findings.  The rows were built from an EMPTY emit plan, so
+        # every authored available readout would show not_in_emit_plan — which is
+        # a false positive, not a real authoring error.
+        if status == 422 and body.get("note"):
             continue
         for row in body.get("rows", []) or []:
             if row.get("emit_status") != "not_in_emit_plan":

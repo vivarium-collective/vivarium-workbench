@@ -16,7 +16,6 @@ from __future__ import annotations
 import re
 import time as _time
 from pathlib import Path
-from typing import Any
 
 import yaml
 
@@ -57,7 +56,8 @@ def _merge_readouts(spec: dict, available: dict) -> list[dict]:
     """
     leaves = list(available.get("leaves") or [])
     # Index authored readouts by lineage-stripped store_path for overlay match.
-    authored = [r for r in (spec.get("readouts") or []) if isinstance(r, dict)]
+    # Fix 3: honour the legacy ``observables:`` key as an annotation source.
+    authored = [r for r in (spec.get("readouts") or spec.get("observables") or []) if isinstance(r, dict)]
     overlay: dict[str, dict] = {}
     for r in authored:
         sp = r.get("store_path")
@@ -83,10 +83,18 @@ def _merge_readouts(spec: dict, available: dict) -> list[dict]:
             "emit_status": "emitted",
         })
 
+    # Fix 4: for orphan detection, build a set of all stripped leaf keys so that
+    # a duplicate authored store_path (last-wins in overlay) doesn't false-flag
+    # the earlier authored entry as not_in_emit_plan — it IS covered by a leaf row.
+    leaf_keys: set[str] = {_strip_lineage(l) for l in leaves}
+
     # Authored readouts that did not match any emit leaf.
     for r in authored:
         if id(r) in matched_ids:
             continue
+        sp_raw = r.get("store_path")
+        if isinstance(sp_raw, str) and sp_raw.strip() and _strip_lineage(sp_raw.strip()) in leaf_keys:
+            continue  # covered by a leaf row (duplicate store_path — overlay last-wins)
         status = (r.get("status") or "").strip()
         derived = status in ("derived-needed", "aspirational")
         rows.append({

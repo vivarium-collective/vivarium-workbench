@@ -68,3 +68,34 @@ def test_available_authored_without_store_path_flagged():
     r = next(r for r in rows if r["name"] == "needs_path")
     assert r["emit_status"] == "not_in_emit_plan"
     assert r["store_path"] == ""
+
+
+def test_legacy_observables_key_overlays(monkeypatch):
+    """Fix 3: authored annotations under ``observables:`` still match emit leaves."""
+    spec = {"observables": [{
+        "name": "cm",
+        "status": "available",
+        "store_path": "listeners.mass.cell_mass",
+    }]}
+    rows = _merge_readouts(spec, AVAIL)
+    r = _row_by_path(rows, "agents.0.listeners.mass.cell_mass")
+    assert r["annotated"] is True
+    assert r["name"] == "cm"
+    assert r["emit_status"] == "emitted"
+
+
+def test_duplicate_store_path_neither_flagged_not_in_emit_plan():
+    """Fix 4: two authored readouts sharing a store_path that IS an emit leaf →
+    neither should appear as not_in_emit_plan."""
+    spec = {"readouts": [
+        {"name": "cm_first", "status": "available",
+         "store_path": "listeners.mass.cell_mass"},
+        {"name": "cm_second", "status": "available",
+         "store_path": "listeners.mass.cell_mass"},
+    ]}
+    rows = _merge_readouts(spec, AVAIL)
+    orphans = [r for r in rows if r["emit_status"] == "not_in_emit_plan"]
+    assert orphans == [], (
+        f"Expected no not_in_emit_plan rows for dup store_path covered by emit leaf, "
+        f"got: {orphans}"
+    )
