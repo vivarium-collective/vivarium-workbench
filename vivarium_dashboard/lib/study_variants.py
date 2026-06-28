@@ -25,7 +25,10 @@ def save_run_as_variant(workspace, *, run_id, source_db, study, variant_name):
     if sf is None:
         return {"error": f"study not found: {study}"}, 404
     conn = composite_runs.connect(source_db)
-    meta = composite_runs.query_run_meta(conn, run_id=run_id)
+    try:
+        meta = composite_runs.query_run_meta(conn, run_id=run_id)
+    finally:
+        conn.close()
     if meta is None:
         return {"error": f"run not found: {run_id}"}, 404
     composite = meta.get("spec_id")
