@@ -26,6 +26,8 @@ def log_path(ws_root: Path) -> Path:
 
 
 def _next_event_id(ws_root: Path) -> str:
+    # n increments before append validates the envelope; a rejected envelope
+    # leaves a harmless gap in event_ids — ids remain strictly monotonic.
     seq = _pbg_dir(ws_root) / "events.seq"
     n = 0
     if seq.is_file():

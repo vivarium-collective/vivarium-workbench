@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -36,7 +37,7 @@ def create_finding(ws_root: Path, body: dict) -> tuple[dict, int]:
 
     fid = "f" + uuid.uuid4().hex[:10]
     prov = {"actor": "agentic", "agent_id": body.get("agent_id", "unknown"),
-            "timestamp": "", "source_objects": list(runs),
+            "timestamp": datetime.now(timezone.utc).isoformat(), "source_objects": list(runs),
             "justification": "finding proposed via /api/finding", "tool": "api/finding", "commit": ""}
     node = {
         "id": f"finding/{fid}", "type": "finding",
@@ -44,6 +45,9 @@ def create_finding(ws_root: Path, body: dict) -> tuple[dict, int]:
         "provenance": prov, "validation_status": "ok",
         "statement": statement, "runs": list(runs),
     }
+    from investigation_contracts import make_core
+    if not make_core().check("finding", node):
+        return {"error": "constructed finding node failed contract validation"}, 500
     # 1) commit the state write (atomic)
     fdir = sdir / "findings"
     fdir.mkdir(parents=True, exist_ok=True)

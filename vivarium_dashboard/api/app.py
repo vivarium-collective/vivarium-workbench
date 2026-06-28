@@ -2332,7 +2332,8 @@ def create_app() -> FastAPI:
                     cur = ev["event_id"]
                 time.sleep(1.0)
 
-        return StreamingResponse(gen(), media_type="text/event-stream")
+        return StreamingResponse(gen(), media_type="text/event-stream",
+                                headers={"Cache-Control": "no-store"})
 
     @app.get(
         "/api/state",
