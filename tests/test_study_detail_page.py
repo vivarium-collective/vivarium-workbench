@@ -217,13 +217,16 @@ def test_runs_panel_has_runs_table(_ws):
 
 
 def test_visualizations_panel_present(_ws):
-    """Visualizations tab panel contains viz-list and add-viz button."""
+    """Visualizations tab panel is present; the manual registered-viz list +
+    add-viz button were retired (auto latest-run charts only)."""
     from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
     spec = _study_detail_spec("study-monod_kinetics-096184")
     html = _render_study_detail_html("study-monod_kinetics-096184", spec)
     assert 'id="panel-visualizations"' in html
-    assert 'id="viz-list"' in html
-    assert 'btn-add-viz' in html
+    # Registered-visualization-modules section + "+ Add visualization" removed.
+    assert 'id="viz-list"' not in html
+    assert 'btn-add-viz' not in html
+    assert 'Registered visualization modules' not in html
 
 
 @pytest.fixture
@@ -295,9 +298,10 @@ def test_full_study_renders_all_tabs(_rich_ws):
     # Runs: both runs render in the runs-table
     assert 'data-run-id="r1"' in html
     assert 'data-run-id="r2"' in html
-    # The viz (growth-curve) renders in the Visualizations tab's viz-list, NOT
-    # in the Runs tab — verified by anchoring after the panel-visualizations id.
-    assert "growth-curve" in html
+    # The manual registered-visualization-modules list was retired, so an
+    # authored `visualizations:` entry (growth-curve) no longer renders as a
+    # static module; the Visualizations tab now shows auto latest-run charts.
+    assert 'id="viz-list"' not in html
 
     # Conclusions panel is present. The legacy four-field free-text editor was
     # retired (item 7); the non-v3 branch now renders a read-only synthesis
