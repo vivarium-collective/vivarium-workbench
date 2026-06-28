@@ -6094,13 +6094,44 @@
               return {name: spec && spec.name, embeds: results.filter(Boolean)};
             });
           });
-          return Promise.all(embedFetches).then(function(embedResults) {
+          // Parallel to the embeds: fetch each study's report-card modules
+          // (viz/report_card/<card>.html, surfaced as spec.report_card_urls)
+          // and inline their HTML so the downloaded report shows them offline
+          // as <iframe srcdoc>. The live study-detail view uses <iframe src=url>
+          // (server-backed); the exported report must inline, like the embeds.
+          var reportCardFetches = specs.map(function(spec) {
+            var rcUrls = (spec && spec.report_card_urls) || {};
+            var perStudy = Object.keys(rcUrls).map(function(card) {
+              var rc = rcUrls[card];
+              if (!rc || !rc.url) return Promise.resolve(null);
+              return fetch(rc.url, {headers: {Accept: 'text/html'}})
+                .then(function(r) { return r.ok ? r.text() : null; })
+                .then(function(text) {
+                  return text ? {
+                    card: card,
+                    verdict: rc.verdict || 'ungraded',
+                    html: text,
+                  } : null;
+                })
+                .catch(function() { return null; });
+            });
+            return Promise.all(perStudy).then(function(results) {
+              return {name: spec && spec.name, cards: results.filter(Boolean)};
+            });
+          });
+          return Promise.all([Promise.all(embedFetches),
+                              Promise.all(reportCardFetches)]).then(function(both) {
             var embedsByStudy = {};
-            embedResults.forEach(function(e) {
+            both[0].forEach(function(e) {
               if (e && e.name) embedsByStudy[e.name] = e.embeds;
+            });
+            var reportCardsByStudy = {};
+            both[1].forEach(function(e) {
+              if (e && e.name) reportCardsByStudy[e.name] = e.cards;
             });
             return {iset: iset, specs: specs, bibEntries: arr[1],
                     chartsByStudy: chartsByStudy, embedsByStudy: embedsByStudy,
+                    reportCardsByStudy: reportCardsByStudy,
                     generation: generation, ghRepo: ghRepo, rigor: rigor,
                     frameworkMetrics: frameworkMetrics, hypotheses: hypotheses};
           });
@@ -6111,7 +6142,8 @@
                                                   bundle.bibEntries, bundle.chartsByStudy,
                                                   bundle.embedsByStudy, bundle.generation,
                                                   bundle.ghRepo, bundle.rigor,
-                                                  bundle.frameworkMetrics, bundle.hypotheses);
+                                                  bundle.frameworkMetrics, bundle.hypotheses,
+                                                  bundle.reportCardsByStudy);
         var dateStr = new Date().toISOString().slice(0, 10);
         var filename = 'investigation-' + name + '-' + dateStr + '.html';
         _triggerDownload(filename, html, 'text/html');
@@ -7065,10 +7097,11 @@
     return html;
   }
 
-  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy, generation, ghRepo, rigor, frameworkMetrics, hypotheses) {
+  function _buildInvestigationReportHtml(iset, specs, bibEntries, chartsByStudy, embedsByStudy, generation, ghRepo, rigor, frameworkMetrics, hypotheses, reportCardsByStudy) {
     bibEntries = bibEntries || [];
     chartsByStudy = chartsByStudy || {};
     embedsByStudy = embedsByStudy || {};
+    reportCardsByStudy = reportCardsByStudy || {};
     generation = generation || null;
     ghRepo = ghRepo || null;
     // Wave 3b #6/#16 — prefer the report-data-path enriched hypotheses (with the
@@ -9279,6 +9312,40 @@
           + '</div>';
       }
 
+      // ── REPORT CARDS (modular `kind: report_card` test modules) ───────
+      // Each study renders its report cards inline, one self-contained card
+      // per module with its graded verdict pill — the offline-export analogue
+      // of the live study-detail _fillReportCardModules path. For the
+      // comparison investigation (whose "tests" ARE report cards) this is the
+      // study's primary visual; for others it appends to whatever embeds exist.
+      var reportCardsHtml = '';
+      var studyCards = reportCardsByStudy[s.name] || [];
+      if (studyCards.length) {
+        var _rcPill = {
+          within_tol: ['#16a34a', 'within tol'], drift: ['#d97706', 'drift'],
+          mismatch: ['#dc2626', 'mismatch'], ungraded: ['#64748b', 'ungraded'],
+        };
+        reportCardsHtml = '<div class="study-report-cards" id="study-' + slug + '-report-cards">'
+          + '<h3>Report cards</h3>'
+          + studyCards.map(function(rc) {
+              var escaped = (rc.html || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+              var p = _rcPill[rc.verdict] || _rcPill.ungraded;
+              var pill = '<span style="display:inline-block;padding:2px 10px;border-radius:10px;'
+                + 'font-size:12px;font-weight:600;background:' + p[0] + ';color:#fff">' + _h(p[1]) + '</span>';
+              var iframe = '<iframe srcdoc="' + escaped + '" class="embed-frame" '
+                + 'onload="_wireEmbed(this)" scrolling="no" '
+                + 'style="width:100%;min-height:560px;border:0;display:block;overflow:hidden" '
+                + 'title="' + _h(rc.card) + ' report card"></iframe>';
+              return '<div class="study-report-card" style="margin:12px 0;border:1px solid #e2e8f0;border-radius:6px;background:#fff;overflow:hidden">'
+                + '<div style="padding:8px 12px;border-bottom:1px solid #e5e7eb;background:#f9fafb;display:flex;justify-content:space-between;align-items:center;gap:8px">'
+                +   '<strong>' + _h(rc.card) + ' report card</strong>' + pill
+                + '</div>'
+                + iframe
+                + '</div>';
+            }).join('')
+          + '</div>';
+      }
+
       // ── CONDITIONS (v4: baseline + variants + model_settings) ─────────
       // Renders the actual parameter table the evaluator wants: each
       // variant's overrides + every model_setting's current/default/range.
@@ -9427,6 +9494,7 @@
           +   _rv(representationHtml)   // Representation claims (C-MODELCARD)
           +   chartsWithBaselineNoticeHtml  // Baseline charts with BASELINE label
           +   embedsHtml          // Embedded preview HTMLs
+          +   reportCardsHtml     // Modular report-card test modules
           +   readoutsHtml        // What we'll measure
           +   _rv(buildHtml)           // Model change (collapsed-ish, technical)
           +   '<details class="study-technical-fold"><summary>Technical context (model changes · implementation tasks · follow-ups · limitations · refs)</summary>'
@@ -9462,6 +9530,7 @@
         +   mechanismNarrativeHtml  // 0a. Mechanism narrative (7 framework fields)
         +   summaryHtml         // 1. Plain-English summary (explanation leads, before charts)
         +   embedsHtml          // 1a. Embedded visualizations (after the explanation)
+        +   reportCardsHtml     // 1b. Modular report-card test modules (e.g. comparison cards)
         +   _rv(expertReviewHtml)    // 2b. Pre-run expert review
         +   takeawaysHtml       // 3 + 4. Detailed findings
         +   _rv(verdictsHtml)        // Derived 3-track conclusion verdicts (computed)
