@@ -8079,7 +8079,10 @@
         }, []);
       })(s.implementation_requirements || s.gaps);
       var readouts = s.readouts || [];
-      var tests = s.behavior_tests || s.expected_behavior || [];
+      // Prefer the modular `tests:` list (which carries `kind: report_card`
+      // modules) over the legacy behavior_tests/expected_behavior, so report
+      // cards render as test modules in the test section below.
+      var tests = _studyTests(s);
       var decide = s.conclusion_logic || {};
       var limitations = s.limitations || [];
       // Tolerate a string (authors sometimes write limitations as prose, not a list).
@@ -8688,10 +8691,45 @@
         if (_tc.SKIP) _tcParts.push(_tc.SKIP + ' ⏭ skipped');
         if (_tc.PENDING) _tcParts.push(_tc.PENDING + ' ⏳ pending');
         var _tcSummary = _tcParts.length ? (' — ' + _tcParts.join(' · ')) : '';
+        // Report-card test modules: a `kind: report_card` test renders its
+        // inlined card + graded verdict pill (the offline analogue of the live
+        // study-detail _fillReportCardModules path). Look the card HTML up by
+        // its `card` name from this study's fetched report cards.
+        var _rcPill = {
+          within_tol: ['#16a34a', 'within tol'], drift: ['#d97706', 'drift'],
+          mismatch: ['#dc2626', 'mismatch'], ungraded: ['#64748b', 'ungraded'],
+        };
+        var _cardByName = {};
+        (reportCardsByStudy[s.name] || []).forEach(function(rc) { _cardByName[rc.card] = rc; });
         testsHtml = '<div id="' + sid.tests + '"><h3>Success criteria <span class="muted small">(' + tests.length + ' tests' + _tcSummary + ')</span></h3>'
           + '<p class="muted small" style="margin:0 0 8px 0">Each test makes a specific scientific claim with a machine-checkable criterion (<code>measure</code> + <code>pass_if</code>). Tests are now <strong>evaluated by code against the run</strong> (the run/outcome spine: RunReader → evaluator): the pill shows the result, and the evidence line shows the <em>measured value</em>, whether it was computed by <em>code</em> or routed to an <em>agent</em>, and whether the code verdict <em>agrees</em> with the authored one (reconcile). <span class="muted">⏳ pending = the study hasn\'t run yet.</span> Technical assertion + the exact evaluator are under "Technical details".</p>'
           + tests.map(function(t) {
               var name = t.name || '(unnamed)';
+              // ── REPORT-CARD TEST MODULE ──────────────────────────────────
+              // A modular `kind: report_card` test renders the card itself
+              // (inlined, self-contained) with its graded verdict pill, in
+              // place of the behavioral claim/evidence layout.
+              if ((t.kind || 'behavioral') === 'report_card') {
+                var rc = _cardByName[t.card];
+                var vp = _rcPill[(rc && rc.verdict) || 'ungraded'] || _rcPill.ungraded;
+                var rcPill = '<span style="display:inline-block;padding:2px 10px;border-radius:9999px;'
+                  + 'font-size:0.78em;font-weight:600;background:' + vp[0] + ';color:#fff">' + _h(vp[1]) + '</span>';
+                var rcBody = (rc && rc.html)
+                  ? '<iframe srcdoc="' + (rc.html || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '" '
+                    + 'class="embed-frame" onload="_wireEmbed(this)" scrolling="no" '
+                    + 'style="width:100%;min-height:560px;border:0;display:block;overflow:hidden;margin-top:8px" '
+                    + 'title="' + _h(t.card) + ' report card"></iframe>'
+                  : '<div class="muted small" style="padding:8px">report card <code>' + _h(t.card)
+                    + '</code> not generated yet — run the comparison.</div>';
+                return '<div class="test-card test-report-card" id="test-' + _h(name) + '">'
+                     +   '<div class="test-header" style="display:flex;align-items:center;gap:8px">'
+                     +     rcPill
+                     +     '<strong>' + _h(t.card) + ' report card</strong>'
+                     +     '<span class="test-id muted small" style="margin-left:auto">' + _h(name) + '</span>'
+                     +   '</div>'
+                     +   rcBody
+                     + '</div>';
+              }
               var cls = t.classification || 'unclassified';
               var out = outcomeByTest[name];
               var result = (out && out.result) || t.result || _testStatusToResult(t.status) || (t.status === 'gated' ? 'GATED' : 'PENDING');
@@ -9312,39 +9350,9 @@
           + '</div>';
       }
 
-      // ── REPORT CARDS (modular `kind: report_card` test modules) ───────
-      // Each study renders its report cards inline, one self-contained card
-      // per module with its graded verdict pill — the offline-export analogue
-      // of the live study-detail _fillReportCardModules path. For the
-      // comparison investigation (whose "tests" ARE report cards) this is the
-      // study's primary visual; for others it appends to whatever embeds exist.
-      var reportCardsHtml = '';
-      var studyCards = reportCardsByStudy[s.name] || [];
-      if (studyCards.length) {
-        var _rcPill = {
-          within_tol: ['#16a34a', 'within tol'], drift: ['#d97706', 'drift'],
-          mismatch: ['#dc2626', 'mismatch'], ungraded: ['#64748b', 'ungraded'],
-        };
-        reportCardsHtml = '<div class="study-report-cards" id="study-' + slug + '-report-cards">'
-          + '<h3>Report cards</h3>'
-          + studyCards.map(function(rc) {
-              var escaped = (rc.html || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
-              var p = _rcPill[rc.verdict] || _rcPill.ungraded;
-              var pill = '<span style="display:inline-block;padding:2px 10px;border-radius:10px;'
-                + 'font-size:12px;font-weight:600;background:' + p[0] + ';color:#fff">' + _h(p[1]) + '</span>';
-              var iframe = '<iframe srcdoc="' + escaped + '" class="embed-frame" '
-                + 'onload="_wireEmbed(this)" scrolling="no" '
-                + 'style="width:100%;min-height:560px;border:0;display:block;overflow:hidden" '
-                + 'title="' + _h(rc.card) + ' report card"></iframe>';
-              return '<div class="study-report-card" style="margin:12px 0;border:1px solid #e2e8f0;border-radius:6px;background:#fff;overflow:hidden">'
-                + '<div style="padding:8px 12px;border-bottom:1px solid #e5e7eb;background:#f9fafb;display:flex;justify-content:space-between;align-items:center;gap:8px">'
-                +   '<strong>' + _h(rc.card) + ' report card</strong>' + pill
-                + '</div>'
-                + iframe
-                + '</div>';
-            }).join('')
-          + '</div>';
-      }
+      // (Report cards now render as modules INSIDE the test section — see
+      // `kind: report_card` handling in testsHtml above — not as a separate
+      // block here.)
 
       // ── CONDITIONS (v4: baseline + variants + model_settings) ─────────
       // Renders the actual parameter table the evaluator wants: each
@@ -9494,7 +9502,6 @@
           +   _rv(representationHtml)   // Representation claims (C-MODELCARD)
           +   chartsWithBaselineNoticeHtml  // Baseline charts with BASELINE label
           +   embedsHtml          // Embedded preview HTMLs
-          +   reportCardsHtml     // Modular report-card test modules
           +   readoutsHtml        // What we'll measure
           +   _rv(buildHtml)           // Model change (collapsed-ish, technical)
           +   '<details class="study-technical-fold"><summary>Technical context (model changes · implementation tasks · follow-ups · limitations · refs)</summary>'
@@ -9530,7 +9537,6 @@
         +   mechanismNarrativeHtml  // 0a. Mechanism narrative (7 framework fields)
         +   summaryHtml         // 1. Plain-English summary (explanation leads, before charts)
         +   embedsHtml          // 1a. Embedded visualizations (after the explanation)
-        +   reportCardsHtml     // 1b. Modular report-card test modules (e.g. comparison cards)
         +   _rv(expertReviewHtml)    // 2b. Pre-run expert review
         +   takeawaysHtml       // 3 + 4. Detailed findings
         +   _rv(verdictsHtml)        // Derived 3-track conclusion verdicts (computed)
