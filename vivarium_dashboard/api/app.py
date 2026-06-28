@@ -99,6 +99,7 @@ from vivarium_dashboard.lib import workspace_manifest_views as _workspace_manife
 from vivarium_dashboard.lib import install_views as _install_views
 from vivarium_dashboard.lib import catalog_install_views as _catalog_install_views
 from vivarium_dashboard.lib import catalog_uninstall_views as _catalog_uninstall_views
+from vivarium_dashboard.lib import finding_views as _finding_views
 from vivarium_dashboard.lib.composite_resolve import resolve_composite
 from vivarium_dashboard.lib.composites_query import composites_via_subprocess
 from vivarium_dashboard.lib.models import (
@@ -292,6 +293,7 @@ from vivarium_dashboard.lib.models import (
     CatalogInstallRequest,
     CatalogUninstallRequest,
 )
+from investigation_contracts import FindingCreateBody
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
 from vivarium_dashboard.lib.visualization_classes import list_visualization_classes
@@ -2301,6 +2303,38 @@ def create_app() -> FastAPI:
             headers={"Cache-Control": "no-store"},
         )
 
+    @app.get("/api/events/log", tags=["System"],
+             summary="SSE typed-event stream (RFC-0002 Phase A)")
+    def events_log(request: Request, since: str = "", type: str = "",
+                   once: str = "", ws: Path = Depends(get_workspace)) -> StreamingResponse:
+        """Tail workspace/.pbg/events.jsonl as SSE. ?since=<event_id> replay,
+        Last-Event-ID header resume (wins over ?since), ?type filter. ?once=1 is a
+        test-only bounded mode that replays history and closes."""
+        from investigation_contracts import read_log
+        from vivarium_dashboard.lib.event_log import log_path
+        cursor = request.headers.get("Last-Event-ID") or (since or None)
+        types = [type] if type else None
+        bounded = bool(once)
+
+        def gen():
+            cur = cursor
+            for ev in read_log(log_path(ws), cur, types):
+                yield (f"id: {ev['event_id']}\nevent: {ev['type']}\n"
+                       f"data: {json.dumps(ev, separators=(',', ':'))}\n\n").encode()
+                cur = ev["event_id"]
+            if bounded:
+                return
+            import time
+            while True:
+                for ev in read_log(log_path(ws), cur, types):
+                    yield (f"id: {ev['event_id']}\nevent: {ev['type']}\n"
+                           f"data: {json.dumps(ev, separators=(',', ':'))}\n\n").encode()
+                    cur = ev["event_id"]
+                time.sleep(1.0)
+
+        return StreamingResponse(gen(), media_type="text/event-stream",
+                                headers={"Cache-Control": "no-store"})
+
     @app.get(
         "/api/state",
         tags=["System"],
@@ -2910,6 +2944,17 @@ def create_app() -> FastAPI:
         name already exists; 200 ``{study, url}`` on success.
         """
         body, status = _lifecycle_mut.study_create_from_run(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post("/api/finding", tags=["Studies"],
+              summary="Create a Finding node and emit FindingCreated")
+    def create_finding(req: FindingCreateBody, ws: Path = Depends(get_workspace)):
+        """Write a minimal Finding node into the study, then emit FindingCreated
+        (RFC-0002 Phase A). 200 ``{finding_id, event_id}``; 400 invalid; 404 study
+        not found."""
+        body, status = _finding_views.create_finding(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
