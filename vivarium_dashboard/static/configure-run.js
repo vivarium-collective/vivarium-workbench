@@ -67,7 +67,8 @@
           '<div class="cfg-actions"><button type="button" class="btn-mini cfg-run-btn">▶ Run</button></div>' +
           '<div class="cfg-status" hidden></div>';
         ConfigureRun._wireRun(el, d);   // defined in Task 5
-      });
+      })
+      .catch(function(e) { var box = el.querySelector(".cfg-run"); if (box) box.innerHTML = '<div class="inv-run-err">Network error: ' + esc(String(e)) + "</div>"; });
   }
 
   window.ConfigureRun = {
@@ -83,14 +84,27 @@
 
   function _poll(el, statusUrl) {
     var tries = 0;
+    var ticks = 0;
+    var MAX_TICKS = 240;
+    function _reenableBtn() { var b = el.querySelector(".cfg-run-btn"); if (b) b.disabled = false; }
     function tick() {
+      if (ticks >= MAX_TICKS) {
+        _status(el, '<span class="inv-run-err">still running — check the Simulations DB</span>');
+        _reenableBtn();
+        return;
+      }
+      ticks += 1;
       fetch(statusUrl).then(function (r) { return r.json(); }).then(function (d) {
         var phase = String((d && (d.status || d.phase)) || "").toLowerCase();
         if (phase === "completed" || phase === "done") { _onDone(el); return; }
-        if (phase === "failed" || phase === "error") { _status(el, '<span class="inv-run-err">✗ Failed</span>'); return; }
+        if (phase === "failed" || phase === "error" || phase === "orphaned" || phase === "cancelled") {
+          _status(el, '<span class="inv-run-err">✗ Failed (' + esc(phase) + ')</span>');
+          _reenableBtn();
+          return;
+        }
         _status(el, "Running… (" + esc(phase || "queued") + ")");
         setTimeout(tick, 2500);
-      }).catch(function () { tries += 1; if (tries < 4) setTimeout(tick, 3000); else _status(el, '<span class="inv-run-err">poll error</span>'); });
+      }).catch(function () { tries += 1; if (tries < 4) setTimeout(tick, 3000); else { _status(el, '<span class="inv-run-err">poll error</span>'); _reenableBtn(); } });
     }
     tick();
   }
@@ -111,26 +125,28 @@
       var overrides = _collectOverrides(el.querySelector(".cfg-form"), resolved.parameters);
       var steps = parseInt(el.querySelector(".cfg-steps").value, 10) || 5;
       btn.disabled = true; _status(el, "Starting…");
-      if (ctxState.target === "study") _runStudy(el, overrides);
+      if (ctxState.target === "study") _runStudy(el, overrides, steps);
       else _runAdhoc(el, resolved.id || ctxState.composite, overrides, steps);
     };
   }
 
   function _runAdhoc(el, id, overrides, steps) {
+    function _reenableBtn() { var b = el.querySelector(".cfg-run-btn"); if (b) b.disabled = false; }
     _post("/api/composite-test-run", { id: id, overrides: overrides, steps: steps }).then(function (res) {
-      if (res.status !== 202 || !res.body.run_id) { _status(el, '<span class="inv-run-err">' + esc((res.body && res.body.error) || res.status) + '</span>'); return; }
+      if (res.status !== 202 || !res.body.run_id) { _status(el, '<span class="inv-run-err">' + esc((res.body && res.body.error) || res.status) + '</span>'); _reenableBtn(); return; }
       el._lastRunId = res.body.run_id;
       _poll(el, "/api/composite-run/" + encodeURIComponent(res.body.run_id) + "/status");
-    }).catch(function (e) { _status(el, '<span class="inv-run-err">' + esc(String(e)) + '</span>'); });
+    }).catch(function (e) { _status(el, '<span class="inv-run-err">' + esc(String(e)) + '</span>'); _reenableBtn(); });
   }
 
-  function _runStudy(el, overrides) {
+  function _runStudy(el, overrides, steps) {
     // Study context: the study's baseline composite + this config = the variant run.
     // (Local pipeline runs sync; reload the Runs tab on done.)
-    _post("/api/study-run-baseline", { study: ctxState.study, overrides: overrides }).then(function (res) {
-      if (res.status !== 200) { _status(el, '<span class="inv-run-err">' + esc((res.body && res.body.error) || res.status) + '</span>'); return; }
+    function _reenableBtn() { var b = el.querySelector(".cfg-run-btn"); if (b) b.disabled = false; }
+    _post("/api/study-run-baseline", { study: ctxState.study, overrides: overrides, steps: steps }).then(function (res) {
+      if (res.status !== 200) { _status(el, '<span class="inv-run-err">' + esc((res.body && res.body.error) || res.status) + '</span>'); _reenableBtn(); return; }
       _status(el, '<strong>✓ Run complete</strong> — refresh the Runs tab.');
-    }).catch(function (e) { _status(el, '<span class="inv-run-err">' + esc(String(e)) + '</span>'); });
+    }).catch(function (e) { _status(el, '<span class="inv-run-err">' + esc(String(e)) + '</span>'); _reenableBtn(); });
   }
 
   function _saveAsVariant(el) {

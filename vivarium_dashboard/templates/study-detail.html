@@ -2140,6 +2140,8 @@ window._seedFollowupProposal = _seedFollowupProposal;
   if (!el || !window.ConfigureRun) return;
   {% if study and study.baseline and study.baseline[0].composite %}
   var compositeRef = {{ study.baseline[0].composite | tojson }};
+  {% elif study and study.conditions and study.conditions.baseline and study.conditions.baseline.composite %}
+  var compositeRef = {{ study.conditions.baseline.composite | tojson }};
   {% else %}
   var compositeRef = null;
   {% endif %}

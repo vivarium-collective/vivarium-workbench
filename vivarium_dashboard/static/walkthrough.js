@@ -501,7 +501,7 @@
 
     // Initialize composite explorer when switching to that page.
     if (pageId === 'composite-explore') {
-      _initCompositeExplorer();
+      window._initCompositeExplorer();
     }
     if (pageId === 'simulations') {
       _wireSimulationsUiOnce();
@@ -2033,7 +2033,8 @@
         prevC = c;
         var exploreBtn = (_isSnapshot && !c.has_wiring)
           ? ''
-          : '<button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Explore</button>';
+          : '<button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Explore</button>' +
+            '<button class="btn-mini" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Configure &amp; Run</button>';
         return divider + '<div class="composite-list-row">' +
           '<span class="name">' + _esc(c.name) + ' ' + _wsTag(c) + '</span>' +
           '<span class="desc">' + tagPills + ' ' + _esc(c.description || '(no description)') +
@@ -2071,7 +2072,8 @@
         prevG = c;
         var exploreBtn = (_isSnapshot && !c.has_wiring)
           ? ''
-          : '<button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Explore</button>';
+          : '<button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Explore</button>' +
+            '<button class="btn-mini" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Configure &amp; Run</button>';
         return divider + '<div class="module-card' + (c.workspace_local ? ' module-card-workspace' : '') + '">' +
           '<div class="module-card-header"><strong>' + _esc(c.name) + '</strong> ' + _wsTag(c) + '</div>' +
           '<p class="module-desc">' + _esc(c.description || '(no description)') + '</p>' +

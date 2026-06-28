@@ -16,3 +16,11 @@ def test_widget_script_loaded_and_mounted():
     sd = _read("templates/study-detail.html")
     assert "ConfigureRun.mount" in sd                      # study Runs tab
     assert 'target: "study"' in sd or "target:'study'" in sd
+
+
+def test_composites_list_has_configure_and_run_action():
+    """I3: both grid and list views in walkthrough.js carry a 'Configure & Run' button."""
+    wt = _read("static/walkthrough.js")
+    assert "Configure &amp; Run" in wt, (
+        "walkthrough.js composite cards must render a 'Configure & Run' button"
+    )
