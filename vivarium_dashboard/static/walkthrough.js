@@ -5246,7 +5246,19 @@
             storyBox.style.display = 'none';
           }
         }
-        _renderInvestigationDag(d.studies || []);
+        // Phase B4: render the typed AIG (study DAG + evidence chains). Falls
+        // back to the legacy study-only renderer on any failure (graceful).
+        (function () {
+          var slug = d.slug || d.name || name;
+          if (typeof window._renderAigGraph !== 'function' || !slug) {
+            _renderInvestigationDag(d.studies || []);
+            return;
+          }
+          fetch('/api/investigation-graph?investigation=' + encodeURIComponent(slug))
+            .then(function (r) { if (!r.ok) throw new Error('graph ' + r.status); return r.json(); })
+            .then(function (graph) { window._renderAigGraph(graph); })
+            .catch(function () { _renderInvestigationDag(d.studies || []); });
+        })();
         // SP5: needs-attention panel (deterministic scan, code-computed, AI-free).
         _renderInvNeedsAttention(name);
       })
