@@ -125,14 +125,23 @@
                  label: w.label || w.name, path: w.path, current: w.status === "current" };
       });
     } else {
-      var rb = await fetch("/api/source/builds");
-      var db = rb.ok ? await rb.json() : { builds: [], error: "unreachable" };
-      state.error = db.error || null;
-      state.entries = (db.builds || []).map(function (b) {
-        return { repo: b.repo, repo_url: b.repo_url, branch: b.branch || "", commit: b.commit || "",
-                 created_at: b.created_at || "", label: b.label, simulator_id: b.simulator_id,
-                 current: b.simulator_id === state.currentSimId };
-      });
+      var rb = await fetch("/api/source/builds").catch(function () { return null; });
+      var db = (rb && rb.ok)
+        ? await rb.json().catch(function () { return { error: "bad response" }; })
+        : { error: "unreachable" };
+      if (db.error) {
+        // Transient outage (the sms-api tunnel reconnecting): ride it out. Keep
+        // the last-known builds on screen instead of blanking the panel —
+        // _render shows a quiet "reconnecting" chip, not the raw error.
+        state.error = db.error;
+      } else {
+        state.error = null;
+        state.entries = (db.builds || []).map(function (b) {
+          return { repo: b.repo, repo_url: b.repo_url, branch: b.branch || "", commit: b.commit || "",
+                   created_at: b.created_at || "", label: b.label, simulator_id: b.simulator_id,
+                   current: b.simulator_id === state.currentSimId };
+        });
+      }
     }
   }
 
@@ -290,19 +299,27 @@
     host.appendChild(actions);
 
     if (state.error) {
-      var errNote = _el("div", "viv-bs-note", "sms-api: " + state.error);
-      var retryBtn = _el("button", "viv-bs-toggle", "Retry");
-      retryBtn.style.marginLeft = "8px";
-      retryBtn.title = "Re-check sms-api now";
-      retryBtn.addEventListener("click", function () { _stopBuildsPoll(); refresh(); });
-      errNote.appendChild(retryBtn);
-      if (state.scope === "remote") {
-        var hint = _el("span", "viv-bs-retry-hint", " · auto-retrying every 5s…");
-        hint.style.opacity = "0.7";
-        errNote.appendChild(hint);
-        _ensureBuildsPoll();   // recover automatically when the tunnel comes back
+      if (state.scope === "remote") _ensureBuildsPoll();  // keep recovering in the background
+      var haveBuilds = state.entries && state.entries.length;
+      if (haveBuilds) {
+        // Builds already on screen → a transient blip (tunnel reconnecting).
+        // Quiet indicator only; the selectors/list above keep the last-known
+        // builds, and this clears itself the moment a poll succeeds.
+        var chip = _el("div", "viv-bs-note", "⟳ sms-api reconnecting… showing last-known builds");
+        chip.style.cssText = "color:#92740e;font-size:0.82em;opacity:0.8;margin-top:6px";
+        host.appendChild(chip);
+      } else {
+        // No builds yet (first-load failure): a calm, actionable message — not
+        // the raw urlopen error.
+        var errNote = _el("div", "viv-bs-note", "sms-api not reachable — is the tunnel up?"
+          + (state.scope === "remote" ? " Auto-retrying every 5s…" : ""));
+        var retryBtn = _el("button", "viv-bs-toggle", "Retry");
+        retryBtn.style.marginLeft = "8px";
+        retryBtn.title = "Re-check sms-api now";
+        retryBtn.addEventListener("click", function () { _stopBuildsPoll(); refresh(); });
+        errNote.appendChild(retryBtn);
+        host.appendChild(errNote);
       }
-      host.appendChild(errNote);
     } else {
       _stopBuildsPoll();
     }
