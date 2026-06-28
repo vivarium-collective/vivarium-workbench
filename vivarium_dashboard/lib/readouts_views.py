@@ -143,6 +143,14 @@ def build_study_readouts(ws_root: Path, slug: str) -> tuple[dict, int]:
         return {"error": f"study not found: {slug}"}, 404
     try:
         spec = migrate_v2_to_v3(yaml.safe_load(sf.read_text(encoding="utf-8")) or {})
+        # v4 studies carry the baseline composite under conditions.baseline;
+        # project it onto the legacy v3 baseline-list shape this worker reads
+        # (mirrors study_runs.py / investigations.py).
+        if spec.get("schema_version") == 4 and isinstance(spec.get("conditions"), dict):
+            from vivarium_dashboard.lib.investigations import (
+                _project_v4_redesign_to_legacy_view,
+            )
+            spec = _project_v4_redesign_to_legacy_view(spec)
     except Exception as e:  # noqa: BLE001
         return {"error": f"study spec parse failed: {e}"}, 400
 

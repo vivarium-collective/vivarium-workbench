@@ -121,3 +121,23 @@ def test_build_study_readouts_honors_nested_workspace_layout(tmp_path):
     body, status = build_study_readouts(tmp_path, "demo")
     assert status != 404, body
     assert body.get("error") != "study not found: demo"
+
+
+def test_build_study_readouts_extracts_v4_conditions_baseline(tmp_path):
+    """A schema_version 4 study carries its baseline composite under
+    conditions.baseline.composite — the worker must project it (not 422 with
+    'study has no baseline composite')."""
+    import yaml as _yaml
+    from vivarium_dashboard.lib.readouts_views import build_study_readouts
+
+    sd = tmp_path / "studies" / "v4demo"
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(_yaml.safe_dump({
+        "schema_version": 4,
+        "name": "v4demo",
+        "conditions": {"baseline": {"composite": "some.composite.ref"}},
+        "readouts": [],
+    }))
+    body, status = build_study_readouts(tmp_path, "v4demo")
+    # The composite ref won't build here, but baseline extraction must succeed:
+    assert body.get("error") != "study has no baseline composite", body
