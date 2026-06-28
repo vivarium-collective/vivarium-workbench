@@ -5172,6 +5172,10 @@
 
   function _openInvestigationDetail(name) {
     window._currentIset = name;
+    // Opening an investigation is an explicit context switch → re-scope the
+    // Simulations DB to it. Clearing the sticky manual pick lets the next visit
+    // default to this investigation (see _populateSimFilters / _simCurrent).
+    window._simInvChosen = false;
     // Sync the left-rail STUDIES section to the selected investigation
     // (the top-left now switches repos, so selection drives the sidebar).
     if (window._currentIsetSlug !== name) {
@@ -14432,9 +14436,12 @@
           return;
         }
         window._simRows = data.simulations || [];
-        // Scope target: the git-branch investigation slug, else whatever
-        // investigation the dashboard is currently focused on. Null → All.
-        window._simCurrent = data.current || window._currentInvestigation || null;
+        // Scope target, most-specific first: the investigation currently open
+        // in the detail view (_currentIsetSlug, set by _openInvestigationDetail),
+        // else the git-branch investigation slug, else whatever investigation the
+        // dashboard is focused on. Null → All.
+        window._simCurrent = window._currentIsetSlug || data.current ||
+          window._currentInvestigation || null;
         if (loading) loading.style.display = 'none';
         _populateSimFilters();
         _applySimFilter();
