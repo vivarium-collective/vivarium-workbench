@@ -109,7 +109,7 @@
    (e.g. immediately after seeding from a follow-up). #}
 {% set _is_v3 = study.purpose is defined
                 or study.pipeline_gate is defined
-                or study.simulation_set is defined
+                or (study.simulation_set is defined and study.simulation_set is not none)
                 or study.behavior_tests is defined
                 or study.follow_up_studies is defined
                 or study.conclusion_logic is defined %}
@@ -148,7 +148,6 @@
   <button class="study-tab"        data-kind="observables"   onclick="_setStudyTab('observables')">Observables</button>
   <button class="study-tab"        data-kind="variants"      onclick="_setStudyTab('variants')">Variants</button>
   <button class="study-tab"        data-kind="interventions" onclick="_setStudyTab('interventions')">Interventions</button>
-  <button class="study-tab"        data-kind="observables"   onclick="_setStudyTab('observables')">Observables</button>
   {% endif %}
   <button class="study-tab"        data-kind="runs"          onclick="_setStudyTab('runs')">Runs</button>
   <button class="study-tab"        data-kind="tests"         onclick="_setStudyTab('tests')">Tests</button>
@@ -1399,7 +1398,6 @@
     <table id="runs-table">
       <thead>
         <tr>
-          <th></th>
           <th>Variant / Baseline</th>
           <th>Composite</th>
           <th>Steps</th>
@@ -1420,7 +1418,6 @@
             data-spec-id="{{ r.meta_spec_id or r.spec_id or '' }}"
             data-store-path="{{ _params.store_path or '' }}"
             data-started-at="{{ r.meta_started_at or r.started_at or '' }}">
-          <td><input type="checkbox" class="run-compare-checkbox" value="{{ r.run_id }}"></td>
           <td>
             {{ r.variant or r.composite or 'baseline' }}
             {% if r.label and r.label != (r.variant or r.composite) %}
@@ -1492,7 +1489,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="10" class="empty-message">No runs yet.</td></tr>
+        <tr><td colspan="9" class="empty-message">No runs yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -1816,7 +1813,6 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
     </div>
   </div>
 
-  {% set _is_v3 = study.conclusion_logic or study.follow_up_studies %}
   {% if _is_v3 %}
   <div class="decide-v3">
     <h2 style="margin:0 0 4px 0">Decide</h2>

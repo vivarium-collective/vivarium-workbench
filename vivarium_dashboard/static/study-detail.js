@@ -21,9 +21,7 @@
     if (kind === 'tests') {
       loadTestsTab(window._study);
     }
-    if (kind === 'conclusions') {
-      _loadConclusionsTab(window._study);
-    }
+
     if (kind === 'visualizations') {
       _loadCharts('viz-charts-panel');
     }
@@ -279,61 +277,6 @@
     return Promise.resolve();
   }
 
-  // --- Conclusions tab: split/join helpers + load/save ---
-  function _splitConclusion(md) {
-    var sections = { Claims: '', Evidence: '', Limitations: '', 'Next steps': '' };
-    if (!md) return sections;
-    var parts = md.split(/(?:^|\n)##\s+/);
-    if (parts.length === 1) {
-      sections.Claims = parts[0].trim();
-      return sections;
-    }
-    var preamble = parts.shift();
-    if (preamble && preamble.trim()) sections.Claims = preamble.trim();
-    parts.forEach(function(chunk) {
-      var nl = chunk.indexOf('\n');
-      var header = (nl === -1 ? chunk : chunk.slice(0, nl)).trim();
-      var body = (nl === -1 ? '' : chunk.slice(nl + 1)).trim();
-      if (header in sections) {
-        if (sections[header]) sections[header] += '\n\n' + body;
-        else sections[header] = body;
-      }
-    });
-    return sections;
-  }
-
-  function _joinConclusion(sections) {
-    var labels = ['Claims', 'Evidence', 'Limitations', 'Next steps'];
-    var parts = labels.map(function(label) {
-      var body = (sections[label] || '').trim();
-      return '## ' + label + (body ? '\n\n' + body : '');
-    });
-    return parts.join('\n\n') + '\n';
-  }
-
-  function _loadConclusionsTab(study) {
-    var s = _splitConclusion((study && study.conclusion) || '');
-    var ids = { Claims: 'conclusion-claims', Evidence: 'conclusion-evidence',
-                Limitations: 'conclusion-limitations', 'Next steps': 'conclusion-next-steps' };
-    Object.keys(ids).forEach(function(label) {
-      var el = document.getElementById(ids[label]);
-      if (el) el.value = s[label] || '';
-    });
-  }
-
-  function _saveConclusion() {
-    var sections = {
-      Claims:       (document.getElementById('conclusion-claims') || {}).value || '',
-      Evidence:     (document.getElementById('conclusion-evidence') || {}).value || '',
-      Limitations:  (document.getElementById('conclusion-limitations') || {}).value || '',
-      'Next steps': (document.getElementById('conclusion-next-steps') || {}).value || '',
-    };
-    return fetch('/api/study-set-conclusion', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({study: studyName(), text: _joinConclusion(sections)}),
-    });
-  }
 
   function makeEditable(el) {
     if (!el) return;
@@ -407,10 +350,6 @@
     });
   }
 
-  ['conclusion-claims', 'conclusion-evidence', 'conclusion-limitations', 'conclusion-next-steps'].forEach(function(id) {
-    var el = document.getElementById(id);
-    if (el) el.addEventListener('blur', _saveConclusion);
-  });
 
   // --- Helpers: attach a click handler to every button matching a CSS class ---
   function bindAll(selector, handler) {
@@ -808,14 +747,6 @@
 
   // --- Viz ---
 
-  // --- Conclusion ---
-  // study-set-conclusion → _post_investigation_set_conclusions, key "investigation"
-  // but also aliased to set-conclusion which uses "investigation" key.
-  bindAll('.btn-mark-complete', function() {
-    api('POST', '/api/study-set-conclusion', {
-      investigation: studyName(), study: studyName(), mark_complete: true,
-    }).then(function() { location.reload(); });
-  });
 
   // ----- Tests tab -----
 
@@ -1292,7 +1223,7 @@
 
   // ── DataSource bootstrap (client-fetch seam, sub-project #1) ─────────────
   // Populate window._study via a fetch when the Jinja embed is absent.
-  // The renderers (loadTestsTab, _loadConclusionsTab, _renderFeedbackTrackedPanel,
+  // The renderers (loadTestsTab, _renderFeedbackTrackedPanel,
   // etc.) are unchanged — they still read window._study.  Only acquisition changes.
 
   function _showStudyLoadError(e) {
@@ -1321,7 +1252,6 @@
     _renderReadinessPanel();
     _renderSpineSummary();
     _populateConclusionVerdictBadges();
-    _autoReadouts();
   }
 
   // ── C2 — derive the 3-track conclusion verdicts (read-only, computed) ───
@@ -1383,54 +1313,6 @@
     });
   }
 
-  // Auto-derive the Readouts tab from the composite's bigraph state when the
-  // study declares no readouts/observables — so the tab is never empty and is
-  // connected to the actual simulation. Lists the composite's scalar/array
-  // stores (the quantities a readout can target) with their paths + current
-  // values, fetched from /api/composite-state?ref=<baseline composite>.
-  function _autoReadouts() {
-    var host = document.getElementById('auto-readouts');
-    if (!host) return;
-    var composite = host.getAttribute('data-composite') || '';
-    if (!composite) return;
-    var e = escapeHtmlForTests;
-    api('GET', '/api/composite-state?ref=' + encodeURIComponent(composite)).then(function (res) {
-      if (!res || res.status !== 200 || !res.body || !res.body.state) return;
-      var st = res.body.state;
-      // The endpoint returns the composite DOCUMENT; the bigraph state
-      // (the actual stores) is nested under its `state` field.
-      if (st && st.state && typeof st.state === 'object') st = st.state;
-      var rows = [];
-      Object.keys(st).forEach(function (k) {
-        var v = st[k];
-        // Skip process/step nodes (objects with _type/address/config); keep the
-        // scalar/array stores — those are the observable quantities.
-        if (v && typeof v === 'object' && (v._type || v.address || v.config || v.inputs || v.outputs)) return;
-        var kind = (typeof v === 'number') ? 'scalar'
-                 : (Array.isArray(v) ? ('array (' + v.length + ')') : typeof v);
-        var preview = (typeof v === 'number') ? String(Math.round(v * 1000) / 1000)
-                    : (Array.isArray(v) ? '' : (typeof v === 'string' ? v : ''));
-        rows.push('<tr style="border-bottom:1px solid #f1f5f9">'
-          + '<td style="padding:6px"><code>' + e(k) + '</code></td>'
-          + '<td style="padding:6px"><code style="font-size:0.85em">' + e(k) + '</code></td>'
-          + '<td style="padding:6px" class="muted small">' + e(kind) + '</td>'
-          + '<td style="padding:6px" class="muted small">' + e(preview) + '</td></tr>');
-      });
-      if (!rows.length) return;
-      host.innerHTML =
-        '<p class="muted" style="font-size:0.88em">Auto-derived from the composite’s bigraph state '
-        + '(<code>' + e(composite) + '</code>) — the stores this study can read out. Declare them under '
-        + '<code>readouts:</code> in study.yaml to pin units, descriptions, and pass/fail bands.</p>'
-        + '<table class="observables-table" style="width:100%;border-collapse:collapse">'
-        + '<thead><tr>'
-        + '<th style="text-align:left;padding:6px;border-bottom:1px solid #e2e8f0">Store</th>'
-        + '<th style="text-align:left;padding:6px;border-bottom:1px solid #e2e8f0">Path</th>'
-        + '<th style="text-align:left;padding:6px;border-bottom:1px solid #e2e8f0">Kind</th>'
-        + '<th style="text-align:left;padding:6px;border-bottom:1px solid #e2e8f0">Current value</th>'
-        + '</tr></thead><tbody>' + rows.join('') + '</tbody></table>';
-    }).catch(function () {});
-  }
-  window._autoReadouts = _autoReadouts;
 
   // Memoized GET /api/report-lint — shared by the readiness panel AND the
   // spine-summary panel so the deterministic linter is fetched once.
