@@ -166,12 +166,10 @@ body.snapshot #modal-viz-preview {
   display: none !important;
 }
 
-/* ── Studies rail section: legacy flat-list Studies page unreachable in
-   snapshot (redirected to Investigations). Hide the rail section so users
-   go to the Investigations tab instead.  ─────────────────────────────────── */
-body.snapshot #viv-rail-studies-section {
-  display: none !important;
-}
+/* ── Studies rail section: SHOWN in snapshot. Opening an investigation syncs
+   its studies into this rail section (they open embedded on click). Only the
+   legacy flat Studies PAGE is redirected to Investigations (see _switchPage);
+   the per-investigation studies rail is useful and now visible. ───────────── */
 
 /* ── Investigation-detail Composites sub-tab: fetches /api/investigation-composites
    which is not exported in snapshot. Hide the tab + its panel.  ─────────── */
