@@ -82,6 +82,7 @@ from vivarium_dashboard.lib import investigation_status
 from vivarium_dashboard.lib import investigation_registry as _inv_registry
 from vivarium_dashboard.lib import investigation_views as _inv_views
 from vivarium_dashboard.lib import observables_views as _obs_views
+from vivarium_dashboard.lib import readouts_views as _readouts_views
 from vivarium_dashboard.lib import report_views as _report_views
 from vivarium_dashboard.lib import rigor_views as _rigor_views
 from vivarium_dashboard.lib import saved_visualizations as _saved_viz
@@ -143,6 +144,7 @@ from vivarium_dashboard.lib.models import (
     ObservablesPayload,
     ReferencesBibPayload,
     StudyObservableCheck,
+    StudyReadouts,
     StudyDetail,
     RegistryPayload,
     SavedVisualizationsPayload,
@@ -151,7 +153,6 @@ from vivarium_dashboard.lib.models import (
     SimulationsPayload,
     ProvenanceManifest,
     SourceBuilds,
-    StudyBigraphPaths,
     StudyChartsPayload,
     SystemDepsCheck,
     UiConfig,
@@ -641,44 +642,8 @@ def create_app() -> FastAPI:
         )
 
     # -----------------------------------------------------------------------
-    # Batch 11: study-bigraph-paths, visualization-status/instances, ptools-launch
+    # Batch 11: visualization-status/instances, ptools-launch
     # -----------------------------------------------------------------------
-
-    @app.get(
-        "/api/study-bigraph-paths",
-        response_model=StudyBigraphPaths,
-        tags=["Studies"],
-        summary="Bigraph node paths for a study's baseline composite",
-    )
-    def study_bigraph_paths(
-        study: Optional[str] = None,
-        baseline: Optional[str] = None,
-        max_depth: str = "8",
-        ws: Path = Depends(get_workspace),
-    ) -> Union[StudyBigraphPaths, JSONResponse]:
-        """Bigraph node paths extracted from a study's serialized composite state.
-
-        Mirrors ``GET /api/study-bigraph-paths?study=<slug>[&baseline=<name>][&max_depth=<n>]``
-        from the stdlib server.
-
-        Status codes:
-          - 400  missing ``?study=`` / study has no baseline entries
-          - 404  no study.yaml or spec.yaml / baseline not found / no serialized state
-          - 500  spec parse failure
-          - 200  ``{composite, source_file, max_depth, node_count, nodes:[...]}``
-
-        Library-backed via ``lib.study_viz_views.build_study_bigraph_paths``.
-        """
-        try:
-            depth = int(max_depth)
-        except (ValueError, TypeError):
-            depth = 8
-        body, status = _study_viz.build_study_bigraph_paths(
-            ws, study or "", baseline_name=baseline or "", max_depth=depth,
-        )
-        if status == 200:
-            return StudyBigraphPaths.model_validate(body)
-        return JSONResponse(status_code=status, content=body)
 
     @app.get(
         "/api/visualization-status",
@@ -1785,6 +1750,32 @@ def create_app() -> FastAPI:
         body, status = _obs_views.build_study_observable_check(ws, slug)
         if status == 200:
             return StudyObservableCheck.model_validate(body)
+        return JSONResponse(status_code=status, content=body)
+
+    @app.get(
+        "/api/study-readouts",
+        response_model=StudyReadouts,
+        tags=["Data, inputs & references"],
+        summary="Auto-listed readouts (emit plan + authored annotations)",
+    )
+    def study_readouts(
+        study: str = "",
+        ws: Path = Depends(get_workspace),
+    ) -> Union[StudyReadouts, JSONResponse]:
+        """Readouts table for a study: every emitter leaf the composite exposes,
+        overlaid with authored ``study.yaml readouts:`` annotations.
+
+        Library-backed via ``lib.readouts_views.build_study_readouts``:
+        - 200 — ``{composite, rows, note}`` (validated through ``StudyReadouts``).
+        - 400 — invalid slug / spec parse failure.
+        - 404 — study not found.
+        - 422 — no baseline composite, or composite could not be built
+          (authored-only rows + ``note``).
+        - 501 — ``readout_validation`` validator absent.
+        """
+        body, status = _readouts_views.build_study_readouts(ws, (study or "").strip())
+        if status == 200:
+            return StudyReadouts.model_validate(body)
         return JSONResponse(status_code=status, content=body)
 
     @app.get(

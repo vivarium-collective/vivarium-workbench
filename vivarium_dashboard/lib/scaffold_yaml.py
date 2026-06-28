@@ -221,10 +221,10 @@ phase: Design
 #     status: pending
 #     cites: [bib_key]
 #
-# ★ readouts:                       # observable extraction plan
+# ★ readouts:                       # annotations layered onto the emit-plan table
 #   - name: kebab-readout-name
+#     store_path: agents.0.listeners.x.y   # REQUIRED for status: available — must be an emitter leaf
 #     description: ""
-#     store_path: agents.0.listeners.x.y
 #     units: ""
 #     status: derived-needed        # available | derived-needed | aspirational
 #

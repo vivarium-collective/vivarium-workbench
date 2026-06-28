@@ -28,63 +28,69 @@
       _loadCharts('viz-charts-panel');
     }
     if (kind === 'observables') {
-      _loadReadoutValidation();
+      _loadReadouts();
     }
   }
   window._setStudyTab = _setStudyTab;
 
-  // ── Spine B2: readout validation badges ──────────────────────────────────
-  // Fetch /api/study-observable-check (SP2b-i, the never-fabricate guard) and
-  // badge each readout row with the COMPUTED validation status
-  // (ok / unresolved / not_in_structure / aspirational) BESIDE the authored
-  // status, labeled "validated against the composite", so a phantom readout
-  // (not_in_structure) is visible at the source. Tolerates the endpoint failing
-  // or being absent (no badge, no error) — the composite must build (~3s).
-  // not_in_structure links to the re-author guidance (/api/observables).
-  var _readoutValidationLoaded = false;
-  function _loadReadoutValidation() {
-    if (_readoutValidationLoaded) return;
-    _readoutValidationLoaded = true;
-    var slug = studyName();
+  // ── Readouts table (emit plan + authored annotations) ───────────────────────
+  // Fetch /api/study-readouts and render the table async (the composite build is
+  // ~3s, TTL-cached). Tolerates failure (leaves the loading message).
+  var _readoutsLoaded = false;
+  function _loadReadouts() {
+    if (_readoutsLoaded) return;
+    _readoutsLoaded = true;
+    var host = document.getElementById('readouts-table');
+    if (!host) return;
+    var slug = host.getAttribute('data-study') || studyName();
     if (!slug) return;
-    fetch('/api/study-observable-check?study=' + encodeURIComponent(slug),
+    fetch('/api/study-readouts?study=' + encodeURIComponent(slug),
           {headers: {Accept: 'application/json'}})
-      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(r) { return r.ok || r.status === 422 ? r.json() : null; })
       .then(function(j) {
-        if (!j || !Array.isArray(j.readouts)) return;  // tolerate failure
-        var byName = {};
-        j.readouts.forEach(function(o) { if (o && o.name) byName[o.name] = o; });
-        document.querySelectorAll('.readout-validation').forEach(function(el) {
-          var o = byName[el.getAttribute('data-readout')];
-          if (!o) return;
-          el.innerHTML = _readoutValidationBadge(o.status, o.detail);
-        });
+        if (!j || !Array.isArray(j.rows)) {
+          host.innerHTML = '<p class="empty-message">Readouts unavailable.</p>';
+          return;
+        }
+        host.innerHTML = _renderReadoutsTable(j);
       })
-      .catch(function() { /* tolerate — no badge */ });
+      .catch(function() {
+        host.innerHTML = '<p class="empty-message">Readouts unavailable.</p>';
+      });
   }
 
-  function _readoutValidationBadge(status, detail) {
+  function _emitStatusBadge(status) {
     var e = escapeHtmlForTests;
     var styles = {
-      ok:              {bg: '#d1fae5', fg: '#065f46', bd: '#6ee7b7', glyph: '✓', label: 'ok'},
-      unresolved:      {bg: '#fef3c7', fg: '#92400e', bd: '#fcd34d', glyph: '⚠', label: 'unresolved'},
-      not_in_structure:{bg: '#fee2e2', fg: '#991b1b', bd: '#fca5a5', glyph: '✗', label: 'not_in_structure'},
-      aspirational:    {bg: '#f1f5f9', fg: '#475569', bd: '#cbd5e1', glyph: '⏳', label: 'aspirational'},
+      emitted:          {bg: '#d1fae5', fg: '#065f46', bd: '#6ee7b7', glyph: '✓', label: 'emitted'},
+      not_in_emit_plan: {bg: '#fee2e2', fg: '#991b1b', bd: '#fca5a5', glyph: '✗', label: 'not in emit plan'},
+      derived:          {bg: '#f1f5f9', fg: '#475569', bd: '#cbd5e1', glyph: '⏳', label: 'derived'},
     };
-    var s = styles[status] || {bg: '#f1f5f9', fg: '#475569', bd: '#cbd5e1', glyph: '•', label: status || '—'};
-    var badge =
-      '<span class="readout-validation-badge" title="' + e(detail || '') + '" ' +
-      'style="display:inline-block;padding:2px 8px;border-radius:9999px;background:' + s.bg +
-      ';color:' + s.fg + ';border:1px solid ' + s.bd + '">' + s.glyph + ' ' + e(s.label) + '</span>';
-    if (status === 'not_in_structure') {
-      // Re-author guidance: the in-page bigraph picker resolves real paths;
-      // /api/observables backs it. Point the reader at the picker to fix the
-      // phantom readout at the source.
-      badge += ' <a href="#bigraph-picker-details" ' +
-        'onclick="var d=document.getElementById(\'bigraph-picker-details\');if(d)d.open=true;" ' +
-        'class="muted" style="font-size:0.9em" title="re-author against /api/observables">re-author →</a>';
-    }
-    return badge;
+    var s = styles[status] || styles.derived;
+    return '<span style="display:inline-block;padding:2px 8px;border-radius:9999px;background:'
+      + s.bg + ';color:' + s.fg + ';border:1px solid ' + s.bd + '">' + s.glyph + ' ' + e(s.label) + '</span>';
+  }
+
+  function _renderReadoutsTable(j) {
+    var e = escapeHtmlForTests;
+    var note = j.note ? '<p class="muted" style="color:#92400e">' + e(j.note) + '</p>' : '';
+    var head = '<table class="observables-table" style="width:100%; border-collapse: collapse;"><thead><tr>'
+      + ['Name', 'Store path', 'Emitted?', 'Indexed by', 'Units', 'Description'].map(function(h) {
+          return '<th style="text-align:left; padding:6px; border-bottom:1px solid #e2e8f0;">' + h + '</th>';
+        }).join('') + '</tr></thead><tbody>';
+    var body = (j.rows || []).map(function(o) {
+      var idx = o.index_by ? '<code style="font-size:0.85em;">' + e(o.index_by.type) + '=' + e(o.index_by.value) + '</code>'
+                           : '<span class="muted">—</span>';
+      return '<tr style="border-bottom:1px solid #f1f5f9;" data-readout="' + e(o.name) + '">'
+        + '<td style="padding:6px; vertical-align:top;"><code>' + e(o.name) + '</code></td>'
+        + '<td style="padding:6px; vertical-align:top;"><code style="font-size:0.85em;">' + e(o.store_path || '') + '</code></td>'
+        + '<td style="padding:6px; vertical-align:top; font-size:0.75em;">' + _emitStatusBadge(o.emit_status) + '</td>'
+        + '<td style="padding:6px; vertical-align:top;">' + idx + '</td>'
+        + '<td style="padding:6px; vertical-align:top; font-size:0.9em;">' + e(o.units || '') + '</td>'
+        + '<td style="padding:6px; vertical-align:top; max-width:380px; font-size:0.9em;">' + e(o.description || '') + '</td>'
+        + '</tr>';
+    }).join('');
+    return note + head + body + '</tbody></table>';
   }
 
   // ── Charts panel: inline SVGs from /api/study-charts ─────────────────────
@@ -800,35 +806,7 @@
     }).then(function() { location.reload(); });
   });
 
-  // study-runs-clear → _post_investigation_runs_clear
-  bindAll('.btn-clear-runs', function() {
-    if (!confirm('Clear ALL runs in this study?')) return;
-    api('POST', '/api/study-runs-clear', {
-      study: studyName(),
-    }).then(function() { location.reload(); });
-  });
-
-  // study-comparison-add → _post_investigation_comparison_add
-  bindAll('.btn-compare-selected', function() {
-    var ids = [];
-    document.querySelectorAll('.run-compare-checkbox:checked').forEach(function(c) {
-      ids.push(c.value);
-    });
-    if (ids.length < 2) return alert('Select at least two runs.');
-    api('POST', '/api/study-comparison-add', {
-      study: studyName(), run_ids: ids,
-    }).then(function(res) {
-      if (res.status === 200) location.reload();
-      else alert(res.body.error || 'Compare failed');
-    });
-  });
-
   // --- Viz ---
-  // .btn-view-run now opens the per-run Data Explorer (see handler above).
-  bindAll('.btn-add-viz', function() {
-    // The add-viz modal lives on the main dashboard page. Take the user there.
-    location.href = '/#composite-explore?study=' + encodeURIComponent(studyName());
-  });
 
   // --- Conclusion ---
   // study-set-conclusion → _post_investigation_set_conclusions, key "investigation"

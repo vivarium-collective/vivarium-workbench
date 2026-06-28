@@ -35,6 +35,7 @@ from vivarium_dashboard.lib.investigations_index import (
 )
 from vivarium_dashboard.lib.spec_norm import normalize_requirements as _normalize_requirements
 from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_dashboard.lib import readouts_views as _readouts_views
 
 # ---------------------------------------------------------------------------
 # Module-level TTL cache for the linkage index (mirrors server._LINKAGE_CACHE)
@@ -213,6 +214,76 @@ def _composite_resolution_findings(ws_root: Path) -> list[dict]:
     return out
 
 
+def _iter_study_slugs(ws_root: Path):
+    """Yield ``(slug, spec)`` for every parseable study in the workspace.
+
+    Mirrors the enumeration pattern used by ``_composite_resolution_findings``.
+    Tolerant: skips non-directories, missing/unparseable study.yaml files, and
+    any structural failure.
+    """
+    try:
+        wp = WorkspacePaths.load(ws_root)
+        studies_root = wp.studies
+    except Exception:  # noqa: BLE001
+        return
+    if not studies_root.is_dir():
+        return
+    for d in sorted(studies_root.iterdir()):
+        if not d.is_dir():
+            continue
+        f = d / "study.yaml"
+        if not f.is_file():
+            continue
+        try:
+            spec = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+        except Exception:  # noqa: BLE001
+            continue
+        if not isinstance(spec, dict):
+            continue
+        yield d.name, spec
+
+
+def _readout_emit_plan_findings(ws_root: Path) -> list[dict]:
+    """Findings for authored readouts whose store_path isn't an emit-plan leaf.
+
+    Reuses ``readouts_views.build_study_readouts`` — any row with
+    ``emit_status == 'not_in_emit_plan'`` (authored ``available`` readout that is
+    missing a store_path or points off the emit plan) becomes an error finding
+    feeding the readiness gaps. ``derived`` / ``emitted`` rows are clean.
+    """
+    out: list[dict] = []
+    for slug, spec in _iter_study_slugs(ws_root):
+        # Fix 2 (perf): skip composite build for studies with no authored readouts —
+        # they can never produce not_in_emit_plan findings.
+        if not (spec.get("readouts") or spec.get("observables")):
+            continue
+        try:
+            body, status = _readouts_views.build_study_readouts(ws_root, slug)
+        except Exception:  # noqa: BLE001
+            continue
+        if status not in (200, 422):
+            continue
+        # Fix 1: composite build-failure (422 + non-empty note) → skip per-row
+        # fabrication findings.  The rows were built from an EMPTY emit plan, so
+        # every authored available readout would show not_in_emit_plan — which is
+        # a false positive, not a real authoring error.
+        if status == 422 and body.get("note"):
+            continue
+        for row in body.get("rows", []) or []:
+            if row.get("emit_status") != "not_in_emit_plan":
+                continue
+            sp = row.get("store_path") or "(missing)"
+            out.append({
+                "study": slug,
+                "check": "readout-store-path",
+                "severity": "error",
+                "message": (f"readout {row.get('name')!r} store_path {sp} is not an "
+                            f"emittable leaf of the composite (never-fabricate)."),
+                "field_path": f"readouts.{row.get('name')}.store_path",
+            })
+    return out
+
+
 def _linkage_cached_index(ws_root: Path) -> Optional[dict]:
     """Return the cached linkage index for ``ws_root`` (TTL-cached), or build
     and cache it.  Returns ``None`` when the index module is unavailable or
@@ -265,6 +336,7 @@ def build_report_lint(ws_root: Path) -> tuple[dict, int]:
         })
 
     findings.extend(_composite_resolution_findings(ws_root))
+    findings.extend(_readout_emit_plan_findings(ws_root))
     return {"findings": findings}, 200
 
 

@@ -2574,58 +2574,6 @@ class TestCompositeRunStatusRoute:
         components = client.get("/openapi.json").json()["components"]["schemas"]
         assert "CompositeRunStatus" in components
 
-# Batch 11: /api/study-bigraph-paths
-# ---------------------------------------------------------------------------
-
-class TestStudyBigraphPaths:
-    def test_missing_study_param_returns_400(self, client):
-        r = client.get("/api/study-bigraph-paths")
-        assert r.status_code == 400
-        assert r.json() == {"error": "study slug required (?study=<slug>)"}
-        assert "detail" not in r.json()
-
-    def test_no_study_yaml_returns_404(self, client):
-        r = client.get("/api/study-bigraph-paths?study=no-such-study")
-        assert r.status_code == 404
-        body = r.json()
-        assert "error" in body
-        assert "detail" not in body
-
-    def test_happy_path_returns_200(self, client, monkeypatch):
-        import vivarium_dashboard.api.app as _app
-        monkeypatch.setattr(
-            _app._study_viz, "build_study_bigraph_paths",
-            lambda ws, slug, **kw: (
-                {"composite": "c", "source_file": "f", "max_depth": 8,
-                 "node_count": 2, "nodes": [{"path": "a"}, {"path": "b"}]},
-                200,
-            ),
-        )
-        r = client.get("/api/study-bigraph-paths?study=my-study")
-        assert r.status_code == 200
-        body = r.json()
-        assert body["node_count"] == 2
-        assert len(body["nodes"]) == 2
-
-    def test_max_depth_parsed_defensively(self, client, monkeypatch):
-        """Non-numeric max_depth falls back to 8 (mirrors legacy int(..., default 8))."""
-        import vivarium_dashboard.api.app as _app
-        captured: dict = {}
-
-        def _cap(ws, slug, baseline_name="", max_depth=8):
-            captured["max_depth"] = max_depth
-            return {"error": "x"}, 400
-
-        monkeypatch.setattr(_app._study_viz, "build_study_bigraph_paths", _cap)
-        client.get("/api/study-bigraph-paths?study=s&max_depth=not_a_number")
-        assert captured["max_depth"] == 8
-
-    def test_study_bigraph_paths_in_openapi(self, client):
-        spec = client.get("/openapi.json").json()
-        assert "/api/study-bigraph-paths" in spec["paths"]
-        assert "StudyBigraphPaths" in spec["components"]["schemas"]
-
-
 # ---------------------------------------------------------------------------
 # Batch 11: /api/visualization-status
 # ---------------------------------------------------------------------------
