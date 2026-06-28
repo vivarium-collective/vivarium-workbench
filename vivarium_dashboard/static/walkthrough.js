@@ -220,7 +220,14 @@
   // in local mode, leaving the URL unchanged.
   function _studyHref(name) {
     var base = (window.__DASH_CONFIG__ && window.__DASH_CONFIG__.basePath) || "";
-    return base + '/studies/' + encodeURIComponent(name);
+    var href = base + '/studies/' + encodeURIComponent(name);
+    // Static snapshot bundles are served by object storage (e.g. Cloudflare R2)
+    // that does NOT auto-serve index.html for a directory path — so a bare
+    // '/studies/<name>' 404s there. Address the shell file explicitly in snapshot
+    // mode. (The live server's /studies/<name> route is unaffected: mode is not
+    // 'snapshot' there.)
+    if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot') href += '/index.html';
+    return href;
   }
   window._studyHref = _studyHref;
 

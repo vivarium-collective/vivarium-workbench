@@ -474,9 +474,20 @@ def _render_home_html(ws_root: Path) -> str:
     except Exception:
         _repo_slug = None
 
+    # Current branch — shown in the rail repo+branch chip (published site).
+    try:
+        import subprocess
+        _branch = subprocess.run(
+            ["git", "-C", str(ws_root), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+    except Exception:
+        _branch = ""
+
     tpl = env.get_template("index.html.j2")
     return tpl.render(
         workspace_name=ws.get("name", ws_root.name),
+        workspace_branch=_branch,
         repo_url=(f"https://github.com/{_repo_slug}" if _repo_slug else ""),
         dashboard_name=dash_cfg.get("name", ""),
         dashboard_logo="assets/vivarium-logo.png",
