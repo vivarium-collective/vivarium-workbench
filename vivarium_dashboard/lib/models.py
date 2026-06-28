@@ -1947,6 +1947,21 @@ class SaveRunAsVariantRequest(BaseModel):
     variant_name: str = ""
 
 
+class RunDeleteRequest(BaseModel):
+    """POST /api/run-delete {run_id, db_path?}
+
+    Delete a composite run row from the SQLite store and remove its artifact
+    directory (``<workspace>/.pbg/runs/<run_id>/``) if present.
+    ``db_path`` defaults to ``<workspace>/.pbg/composite-runs.db`` when omitted.
+    Only ``run_id`` is required (400 if missing).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    run_id: str = ""
+    db_path: str = ""
+
+
 class JobStatusPayload(BaseModel):
     """200-path payload for the in-memory job-status GET routes.
 

@@ -102,6 +102,7 @@ from vivarium_dashboard.lib import catalog_uninstall_views as _catalog_uninstall
 from vivarium_dashboard.lib import finding_views as _finding_views
 from vivarium_dashboard.lib import chain_views as _chain_views
 from vivarium_dashboard.lib import study_variants as _study_variants
+from vivarium_dashboard.lib import composite_runs as _composite_runs
 from vivarium_dashboard.lib.composite_resolve import resolve_composite
 from vivarium_dashboard.lib.composites_query import composites_via_subprocess
 from vivarium_dashboard.lib.models import (
@@ -230,6 +231,7 @@ from vivarium_dashboard.lib.models import (
     InvestigationRenderViz,
     # SP-C: Configure & Run widget request-body models
     SaveRunAsVariantRequest,
+    RunDeleteRequest,
     # C-state-3a: source/switch (in-process workspace re-point)
     SourceSwitchRequest,
     SourceSwitchResponse,
@@ -394,8 +396,9 @@ _READONLY_ALLOWED_MUTATIONS = {
     "/api/remote-run-start",
     # remote-run thin client (WS1, two-phase)
     "/api/remote-run-build", "/api/remote-run-submit", "/api/remote-run-land",
-    # SP-C: save a completed run as a named study variant
+    # SP-C: save a completed run as a named study variant / delete a run
     "/api/save-run-as-variant",
+    "/api/run-delete",
     # switch which committed workspace this server serves (in-process re-point)
     # + the remote-build flow (the core of remote-only)
     "/api/source/switch", "/api/source/build-remote", "/api/source/switch-build",
@@ -4173,6 +4176,32 @@ def create_app() -> FastAPI:
         body, status = _study_variants.save_run_as_variant(
             ws, run_id=req.run_id, source_db=src, study=req.study, variant_name=req.variant_name)
         return JSONResponse(status_code=status, content=body)
+
+    @app.post("/api/run-delete", tags=["Runs"], summary="Delete a run (row + artifacts)")
+    def run_delete(req: RunDeleteRequest, ws: Path = Depends(get_workspace)) -> JSONResponse:
+        """Delete a composite run row from the SQLite store and remove its artifacts.
+
+        Body: ``{"run_id", "db_path"?}`` —
+        ``db_path`` defaults to ``<workspace>/.pbg/composite-runs.db`` when omitted.
+        Only ``run_id`` is required; returns 400 if missing.
+
+        Status codes:
+          - 400  ``run_id`` not provided
+          - 200  ``{"deleted": bool}``
+        """
+        import shutil
+        if not req.run_id:
+            return JSONResponse(status_code=400, content={"error": "run_id required"})
+        db_path = req.db_path or str(ws / ".pbg" / "composite-runs.db")
+        conn = _composite_runs.connect(db_path)
+        try:
+            deleted = _composite_runs.delete_run(conn, run_id=req.run_id)
+        finally:
+            conn.close()
+        art = ws / ".pbg" / "runs" / req.run_id
+        if art.is_dir():
+            shutil.rmtree(art, ignore_errors=True)
+        return JSONResponse(status_code=200, content={"deleted": deleted})
 
     @app.post(
         "/api/study-tests-run",
