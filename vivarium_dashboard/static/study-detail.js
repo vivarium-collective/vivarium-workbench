@@ -806,35 +806,7 @@
     }).then(function() { location.reload(); });
   });
 
-  // study-runs-clear → _post_investigation_runs_clear
-  bindAll('.btn-clear-runs', function() {
-    if (!confirm('Clear ALL runs in this study?')) return;
-    api('POST', '/api/study-runs-clear', {
-      study: studyName(),
-    }).then(function() { location.reload(); });
-  });
-
-  // study-comparison-add → _post_investigation_comparison_add
-  bindAll('.btn-compare-selected', function() {
-    var ids = [];
-    document.querySelectorAll('.run-compare-checkbox:checked').forEach(function(c) {
-      ids.push(c.value);
-    });
-    if (ids.length < 2) return alert('Select at least two runs.');
-    api('POST', '/api/study-comparison-add', {
-      study: studyName(), run_ids: ids,
-    }).then(function(res) {
-      if (res.status === 200) location.reload();
-      else alert(res.body.error || 'Compare failed');
-    });
-  });
-
   // --- Viz ---
-  // .btn-view-run now opens the per-run Data Explorer (see handler above).
-  bindAll('.btn-add-viz', function() {
-    // The add-viz modal lives on the main dashboard page. Take the user there.
-    location.href = '/#composite-explore?study=' + encodeURIComponent(studyName());
-  });
 
   // --- Conclusion ---
   // study-set-conclusion → _post_investigation_set_conclusions, key "investigation"
