@@ -107,6 +107,7 @@ def test_skips_empty_claim_and_tolerates_non_list():
          "conclusion_verdicts": [{"claim": "  ", "verdict": "supported"},
                                  {"claim": "real", "verdict": "supported", "basis": "b"}]}, "s1")
     assert set(k.split("-cv")[-1] for k in nodes) == {"0"}  # only cv index 0 (the real one)
+    assert validate_chain(nodes) == []
 
 
 def test_deterministic():
