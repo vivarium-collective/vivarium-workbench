@@ -3527,36 +3527,6 @@ class TestBatch20LifecycleRoutes:
         assert r.json()["name"] == "new-study"
 
     # -----------------------------------------------------------------------
-    # /api/study-sync-runs
-    # -----------------------------------------------------------------------
-
-    def test_study_sync_runs_missing_slug(self, lc_client: TestClient) -> None:
-        r = lc_client.post("/api/study-sync-runs", json={})
-        assert r.status_code == 400
-
-    def test_study_sync_runs_unknown_study(self, lc_client: TestClient) -> None:
-        r = lc_client.post("/api/study-sync-runs", json={"study": "nope"})
-        assert r.status_code == 404
-
-    def test_study_sync_runs_happy(self, lc_client: TestClient, ws: Path) -> None:
-        from pbg_superpowers import run_registry, study_io
-
-        d = ws / "studies" / "sync-s"
-        d.mkdir()
-        study_io.save_yaml_atomic(d / "study.yaml", {"name": "sync-s", "runs": []})
-        run_registry.register_run(
-            d / "runs.db", "r1", spec_id="s1", status="completed",
-            started_at="2026-01-01T00:00:00Z", completed_at="2026-01-01T00:01:00Z",
-        )
-        r = lc_client.post("/api/study-sync-runs", json={"study": "sync-s"})
-        assert r.status_code == 200
-        assert r.json()["ok"] is True
-
-    def test_study_sync_runs_in_openapi(self, lc_client: TestClient) -> None:
-        schema = lc_client.get("/openapi.json").json()
-        assert "/api/study-sync-runs" in schema["paths"]
-
-    # -----------------------------------------------------------------------
     # /api/proposed-input-decision
     # -----------------------------------------------------------------------
 
@@ -6385,41 +6355,6 @@ def test_installs_routes_in_openapi(client):
 import yaml as _yaml
 
 
-def _hermetic_catalog(monkeypatch):
-    """Stub workspace_catalog so the registry never probes real peer servers."""
-    from pbg_superpowers import workspace_catalog
-    monkeypatch.setattr(workspace_catalog, "list_servers", lambda: [])
-    monkeypatch.setattr(workspace_catalog, "find_running", lambda ws: None)
-
-
-def test_investigation_registry_empty_workspace(client, monkeypatch):
-    _hermetic_catalog(monkeypatch)
-    r = client.get("/api/investigation-registry")
-    assert r.status_code == 200
-    body = r.json()
-    assert set(body.keys()) == {
-        "current", "local_siblings", "running_others", "dormant_others",
-    }
-    assert body["current"]["slug"] is None
-    assert body["running_others"] == []
-
-
-def test_investigation_registry_picks_current(client, tmp_path, monkeypatch):
-    _hermetic_catalog(monkeypatch)
-    d = tmp_path / "investigations" / "alpha"
-    d.mkdir(parents=True)
-    (d / "investigation.yaml").write_text(_yaml.safe_dump({
-        "schema_version": 1, "name": "alpha", "title": "Alpha",
-        "status": "planning", "studies": [], "acceptance_criteria": [],
-    }))
-    body = client.get("/api/investigation-registry").json()
-    assert body["current"]["slug"] == "alpha"
-    # current.url derived from the request Host header (no catalog record).
-    assert body["current"]["url"].startswith("http://")
-
-
-def test_investigation_registry_in_openapi(client):
-    assert "/api/investigation-registry" in client.get("/openapi.json").json()["paths"]
 
 
 def test_state_404_when_missing(client):

@@ -79,7 +79,6 @@ from vivarium_dashboard.lib import workspaces_process_views as _workspaces_proc
 from vivarium_dashboard.lib import misc_mutations as _misc_mut
 from vivarium_dashboard.lib import misc_post_views as _misc_post_views
 from vivarium_dashboard.lib import investigation_status
-from vivarium_dashboard.lib import investigation_registry as _inv_registry
 from vivarium_dashboard.lib import investigation_views as _inv_views
 from vivarium_dashboard.lib import observables_views as _obs_views
 from vivarium_dashboard.lib import readouts_views as _readouts_views
@@ -187,12 +186,10 @@ from vivarium_dashboard.lib.models import (
     StudyInterventionDeleteBody,
     StudyRunDeleteBody,
     StudyRunsClearBody,
-    StudyComparisonAddBody,
     # Batch 20: request-body models for study lifecycle + feedback
     FeedbackApplyActionBody,
     StudyCreateFromRunBody,
     StudyRenameBody,
-    StudySyncRunsBody,
     ProposedInputDecisionBody,
     StudySeedFollowupBody,
     # Batch 21: request-body models for investigation scaffold mutations
@@ -526,35 +523,6 @@ def create_app() -> FastAPI:
         return InvestigationSummariesPayload(
             investigations=[InvestigationSummary.model_validate(d) for d in summaries]
         )
-
-    @app.get(
-        "/api/investigation-registry",
-        tags=["Investigations"],
-        summary="Cross-worktree Investigation registry (current + peers)",
-    )
-    def investigation_registry(
-        request: Request, ws: Path = Depends(get_workspace)
-    ) -> JSONResponse:
-        """Cross-worktree Investigation view (mirrors the stdlib
-        /api/investigation-registry) — unblocks the Investigations page, which
-        groups studies by their investigation's ``current`` entry.
-
-        Returns ``{current, local_siblings, running_others, dormant_others}``:
-        this worktree's chosen Investigation, the workspace's other
-        investigations, every OTHER live dashboard's current Investigation
-        (HTTP-probed from each peer's /api/investigation-summaries, cached ~5 s), and open
-        investigations on other worktrees with no live dashboard.
-
-        ``current.url`` is derived from the ~/.pbg/servers record
-        (``workspace_catalog.find_running``) when available, else from this
-        request's ``Host`` header — same precedence as the stdlib handler.
-        Pass-through JSON (the buckets carry untyped peer/disk data).
-        Library-backed via ``lib.investigation_registry`` — no stdlib
-        server dependency.
-        """
-        this_url = _inv_registry.derive_this_url(ws, request.headers.get("host"))
-        out = _inv_registry.build_investigation_registry(ws, this_url)
-        return JSONResponse(content=out, status_code=200)
 
     @app.get(
         "/api/data-sources",
@@ -2899,25 +2867,6 @@ def create_app() -> FastAPI:
             return JSONResponse(status_code=status, content=body)
         return body
 
-    @app.post(
-        "/api/study-comparison-add",
-        tags=["Studies"],
-        summary="Add a named comparison (run_ids set) to study.yaml",
-    )
-    def study_comparison_add(
-        req: StudyComparisonAddBody,
-        ws: Path = Depends(get_workspace),
-    ) -> dict:
-        """Append a named comparison grouping of run_ids.
-
-        Body: ``{name|study|investigation, run_ids: [str, ...], name?}``
-        At least 2 run_ids required.
-        """
-        body, status = _study_crud_mut.study_comparison_add(ws, req.model_dump())
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return body
-
     # -----------------------------------------------------------------------
     # Batch 20: Study lifecycle + feedback (POST routes)
     # NOTE: CSRF guard is deferred to the state/flip batch — same as batches 18/19.
@@ -2982,26 +2931,6 @@ def create_app() -> FastAPI:
         200 ``{ok: true, name: new_name}`` on success.
         """
         body, status = _lifecycle_mut.study_rename(ws, req.model_dump())
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return body
-
-    @app.post(
-        "/api/study-sync-runs",
-        tags=["Studies"],
-        summary="Reconcile a study's runs.db into study.yaml runs[]",
-    )
-    def study_sync_runs(
-        req: StudySyncRunsBody,
-        ws: Path = Depends(get_workspace),
-    ) -> dict:
-        """Sync a study's runs.db records into study.yaml runs[] and roll up outcomes.
-
-        Body: ``{study}``
-        400 when study slug is missing; 404 when the study directory is not found;
-        200 ``{ok: true, summary: {...}}`` on success.
-        """
-        body, status = _lifecycle_mut.study_sync_runs(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body

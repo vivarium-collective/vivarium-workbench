@@ -1529,26 +1529,6 @@ window.addEventListener('pageshow', function (e) {
   </div>
 </div>
 
-<!-- Phase plan modal -->
-<div id="modal-phase-plan" class="modal-overlay">
-  <div class="modal-box" style="max-width:640px">
-    <button class="modal-close" onclick="closeModal('modal-phase-plan')">&times;</button>
-    <h3>Add phase plan</h3>
-    <p style="font-size:0.85em;color:#555">
-      Enter phases as JSON. Each phase needs <code>n</code> (integer) and <code>name</code> (string).
-      Optional: <code>objective</code>, <code>prereq_phases</code>, <code>acceptance_tests</code>.
-    </p>
-    <label>Phases JSON *
-      <textarea id="phase-plan-json" style="width:100%;min-height:180px;font-family:monospace;font-size:0.88em;border:1px solid #ccc;border-radius:4px;padding:8px;box-sizing:border-box"
-        placeholder='[{"n": 1, "name": "Baseline", "objective": "Establish replication initiation baseline"}, {"n": 2, "name": "DnaA accumulation", "objective": "Add DnaA binding dynamics"}]'></textarea>
-    </label>
-    <div class="form-error" id="phase-plan-error"></div>
-    <div style="margin-top:10px;display:flex;gap:8px">
-      <button class="action-btn" style="background:#1976d2;color:#fff;border-color:#1976d2" onclick="submitPhasePlan()">Submit phase plan</button>
-      <button class="action-btn" onclick="closeModal('modal-phase-plan')">Cancel</button>
-    </div>
-  </div>
-</div>
 
 <!-- Modal: Link to upstream branch -->
 <div id="modal-link-branch" class="modal-overlay">
@@ -1818,78 +1798,6 @@ function _submitVisualization(form) {
   });
 }
 
-// Phase plan submission.
-function submitPhasePlan() {
-  var errEl = document.getElementById("phase-plan-error");
-  if (errEl) errEl.textContent = "";
-  var raw = document.getElementById("phase-plan-json").value.trim();
-  var phases;
-  try {
-    phases = JSON.parse(raw);
-  } catch (e) {
-    if (errEl) errEl.textContent = "Invalid JSON: " + e.message;
-    return;
-  }
-  if (!Array.isArray(phases) || !phases.length) {
-    if (errEl) errEl.textContent = "phases must be a non-empty JSON array";
-    return;
-  }
-  fetch("/api/phase-plan", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ phases: phases }),
-  })
-    .then(function(res) { return res.json().then(function(j) { return { ok: res.ok, json: j }; }); })
-    .then(function(r) {
-      if (!r.ok) {
-        if (errEl) errEl.textContent = "Error: " + (r.json.error || "unknown");
-        return;
-      }
-      fetch("/api/render", { method: "POST" }).finally(function() {
-        alert("Phase plan created!\nBranch: " + (r.json.branch || "") + "\nMerge it to make phases appear on main.");
-        location.reload();
-      });
-    })
-    .catch(function(err) {
-      if (errEl) errEl.textContent = "Network error: " + String(err);
-    });
-}
-
-// Phase start.
-function phaseStart(n) {
-  fetch("/api/phase-start", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ n: n }),
-  })
-    .then(function(res) { return res.json().then(function(j) { return { ok: res.ok, json: j }; }); })
-    .then(function(r) {
-      if (!r.ok) { alert("Error: " + (r.json.error || "unknown")); return; }
-      fetch("/api/render", { method: "POST" }).finally(function() {
-        alert("Phase " + n + " started!\nBranch: " + (r.json.branch || ""));
-        location.reload();
-      });
-    })
-    .catch(function(err) { alert("Network error: " + err); });
-}
-
-// Phase gate.
-function phaseGate(n) {
-  fetch("/api/phase-gate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ n: n }),
-  })
-    .then(function(res) { return res.json().then(function(j) { return { ok: res.ok, json: j }; }); })
-    .then(function(r) {
-      if (!r.ok) { alert("Error: " + (r.json.error || "unknown")); return; }
-      fetch("/api/render", { method: "POST" }).finally(function() {
-        alert("Gate evaluated for phase " + n + ": " + (r.json.gate_status || "?") + "\nBranch: " + (r.json.branch || ""));
-        location.reload();
-      });
-    })
-    .catch(function(err) { alert("Network error: " + err); });
-}
 
 // Run tests.
 function runTests() {

@@ -623,24 +623,3 @@ class TestStudyRunsClearRoute:
     def test_in_openapi(self, client):
         schema = client.get("/openapi.json").json()
         assert "/api/study-runs-clear" in schema["paths"]
-
-
-class TestStudyComparisonAddRoute:
-    def test_200_adds_comparison(self, client, ws):
-        r = client.post("/api/study-comparison-add", json={
-            "study": "s1", "run_ids": ["r1", "r2"],
-        })
-        assert r.status_code == 200
-        assert "name" in r.json()
-        spec = _read_spec(ws)
-        assert len(spec["comparisons"]) == 1
-
-    def test_400_too_few_runs(self, client):
-        r = client.post("/api/study-comparison-add", json={
-            "study": "s1", "run_ids": ["only-one"],
-        })
-        assert r.status_code == 400
-
-    def test_in_openapi(self, client):
-        schema = client.get("/openapi.json").json()
-        assert "/api/study-comparison-add" in schema["paths"]

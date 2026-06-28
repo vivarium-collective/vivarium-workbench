@@ -7470,9 +7470,6 @@
     var hasDag = specs.some(function(s) {
       return (s.parent_studies || []).length > 0;
     });
-    var hasAssumptions = specs.some(function(s) {
-      return ((s.key_assumptions || s.assumptions) || []).length > 0;
-    });
 
     // --- v3-shape per-study section ----------------------------------
     // Render a sweep table (e.g. {1x: {dnaA_median: 115}, ...}) as a small
