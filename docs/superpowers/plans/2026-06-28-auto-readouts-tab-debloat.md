@@ -406,25 +406,37 @@ git commit -m "feat(readouts): emit-plan + authored merge worker"
 
 ```python
 # tests/test_study_readouts_route.py
+import pytest
 from fastapi.testclient import TestClient
-from vivarium_dashboard.api.app import create_app
+
+from vivarium_dashboard.api.app import create_app, get_workspace
+from vivarium_dashboard.lib import active_workspace
 
 
-def _client(tmp_path):
-    return TestClient(create_app(workspace=tmp_path))
+@pytest.fixture(autouse=True)
+def _reset_active_workspace():
+    saved = active_workspace.get_workspace_root()
+    active_workspace._WS_ROOT = None
+    yield
+    active_workspace._WS_ROOT = saved
 
 
-def test_study_readouts_invalid_slug_400(tmp_path):
-    r = _client(tmp_path).get("/api/study-readouts?study=Bad Slug!")
-    assert r.status_code == 400
+@pytest.fixture
+def client(tmp_path) -> TestClient:
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: tmp_path
+    return TestClient(app)
 
 
-def test_study_readouts_missing_study_404(tmp_path):
-    r = _client(tmp_path).get("/api/study-readouts?study=nope")
-    assert r.status_code == 404
+def test_study_readouts_invalid_slug_400(client):
+    assert client.get("/api/study-readouts?study=Bad Slug!").status_code == 400
+
+
+def test_study_readouts_missing_study_404(client):
+    assert client.get("/api/study-readouts?study=nope").status_code == 404
 ```
 
-> Note: confirm the app factory name/signature — grep `def create_app` in `vivarium_dashboard/api/app.py` and match the existing route tests' client setup (e.g. `tests/test_*_route.py`). If the factory differs, copy the exact pattern those tests use.
+> This mirrors `tests/test_api_app.py` verbatim (the `create_app()` + `dependency_overrides[get_workspace]` + autouse `_reset_active_workspace` fixtures, which save/restore `active_workspace._WS_ROOT`).
 
 - [ ] **Step 2: Run test to verify it fails**
 
