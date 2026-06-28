@@ -165,5 +165,21 @@ def test_emitter_choice_accepts_parquet_from_workspace(tmp_path: Path):
     assert _emitter_choice({}, runs_db) == "parquet"
 
 
+def test_emitter_choice_finds_workspace_yaml_in_nested_layout(tmp_path: Path):
+    # v2ecoli-style nested layout: <ws>/workspace/studies/<slug>/runs.db, with
+    # the workspace.yaml at the repo root <ws>/. The old fixed
+    # `.parent.parent.parent` math looked at <ws>/workspace/workspace.yaml
+    # (which doesn't exist) and fell back to sqlite, silently ignoring the
+    # declared xarray emitter — so zarr runs (incl. landed remote runs) never
+    # rendered. Resolution must walk up to the nearest ancestor workspace.yaml.
+    ws = tmp_path / "ws"
+    studies = ws / "workspace" / "studies" / "demo"
+    studies.mkdir(parents=True)
+    runs_db = studies / "runs.db"
+    runs_db.touch()
+    (ws / "workspace.yaml").write_text("runtime:\n  default_emitter: xarray\n")
+    assert _emitter_choice({}, runs_db) == "xarray"
+
+
 def test_emitter_choice_default_still_sqlite():
     assert _emitter_choice({}, None) == "sqlite"
