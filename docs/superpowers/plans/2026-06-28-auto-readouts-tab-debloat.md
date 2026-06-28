@@ -507,12 +507,9 @@ def test_readouts_panel_has_async_shell_not_authored_loop():
     # New shell present, old authored {% for o in _obs %} table gone.
     assert 'id="readouts-table"' in TPL
     assert "{% for o in _obs %}" not in TPL
-
-
-def test_add_observable_picker_removed():
-    assert "Add observable from bigraph state" not in TPL
-    assert "bigraph-picker-details" not in TPL
 ```
+
+> The picker-removal assertion lives in Task 5 (where the picker is deleted), so Task 4's suite stays green at its review gate.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -626,10 +623,20 @@ git commit -m "feat(readouts): render table async from /api/study-readouts"
 - Modify: `vivarium_dashboard/api/app.py` (remove the `/api/study-bigraph-paths` route, ~608-636 in the legacy numbering — grep `study-bigraph-paths`)
 - Modify: `vivarium_dashboard/lib/study_viz_views.py` (remove `build_study_bigraph_paths`, ~90-173)
 - Modify: `vivarium_dashboard/lib/models.py` (remove `StudyBigraphPaths` if now unused)
-- Test: `tests/test_study_detail_template.py` (the `test_add_observable_picker_removed` from Task 4)
+- Test: `tests/test_study_detail_template.py` (add `test_add_observable_picker_removed`)
 
 **Interfaces:**
 - Removes: `GET /api/study-bigraph-paths`, `build_study_bigraph_paths`, `StudyBigraphPaths`.
+
+- [ ] **Step 0: Add the removal test**
+
+Add to `tests/test_study_detail_template.py`:
+
+```python
+def test_add_observable_picker_removed():
+    assert "Add observable from bigraph state" not in TPL
+    assert "bigraph-picker-details" not in TPL
+```
 
 - [ ] **Step 1: Confirm no other consumer**
 
