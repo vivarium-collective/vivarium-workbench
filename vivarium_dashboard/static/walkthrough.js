@@ -456,7 +456,10 @@
     // composite-explore needs live composite resolution (build_core) which is
     // unavailable in a static bundle → redirect to simulation-setup (composites list).
     if (document.body.classList.contains('snapshot')) {
-      if (pageId === 'github' || pageId === 'studies') {
+      // 'github' (Source page) IS available in snapshot now — it's the published
+      // workspace switcher (repo navigator + Sync-to-local). Only 'studies'
+      // (the legacy flat list) redirects to the investigations view.
+      if (pageId === 'studies') {
         pageId = 'investigations';
       }
     }
