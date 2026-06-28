@@ -111,6 +111,25 @@
     }
     var layout = _aigLayout(graph);
 
+    // Size the canvas to fit all positioned nodes (mirrors the legacy renderer,
+    // which sets these explicitly; the SVG/host don't auto-grow otherwise).
+    var maxX = 0, maxY = 0;
+    layout.nodes.forEach(function (n) {
+      if (n.x > maxX) maxX = n.x;
+      if (n.y > maxY) maxY = n.y;
+    });
+    var canvasW = maxX + 320;            // room for the widest label + lifecycle badge
+    var canvasH = Math.max(maxY + 80, 180);
+    nodesHost.style.position = 'relative';  // anchor the absolutely-positioned cards
+    nodesHost.style.width = canvasW + 'px';
+    nodesHost.style.height = canvasH + 'px';
+    edgesSvg.setAttribute('width', canvasW);
+    edgesSvg.setAttribute('height', canvasH);
+    edgesSvg.style.width = canvasW + 'px';
+    edgesSvg.style.height = canvasH + 'px';
+    var shell = document.getElementById('investigation-dag-shell');
+    if (shell) shell.style.height = canvasH + 'px';
+
     if (layout.violations.length) {
       var banner = document.createElement('div');
       banner.style.cssText =
