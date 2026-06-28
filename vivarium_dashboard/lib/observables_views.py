@@ -48,6 +48,29 @@ def clear_cache() -> None:
     _OBS_CACHE.clear()
 
 
+def _resolve_registry_ref(ref: str, keys) -> str | None:
+    """Resolve a (possibly short) composite ``ref`` to a canonical registry key.
+
+    The generator registry is keyed by FQN (``v2ecoli.composites.baseline``) but
+    studies author short refs (``baseline``). Mirror the alias rule the rest of
+    the dashboard uses (``composite_lookup._ref_resolves``): match on the
+    trailing ``.composites.<slug>`` segment, else the last dotted segment. When
+    several keys match, prefer the shortest (the canonical module-path id, e.g.
+    ``…composites.baseline`` over ``…composites.baseline.baseline``). Returns the
+    canonical key, or ``None`` if nothing matches.
+    """
+    keys = list(keys)
+    if ref in keys:
+        return ref
+    tail = ref.rsplit(".composites.", 1)[-1]
+    matches = [k for k in keys if k.rsplit(".composites.", 1)[-1] == tail]
+    if not matches:
+        matches = [k for k in keys if k.rsplit(".", 1)[-1] == ref]
+    if not matches:
+        return None
+    return min(matches, key=lambda k: (len(k), k))
+
+
 def build_composite_state_for_observables(ws_root: Path, ref: str) -> tuple[Any, Any, Any]:
     """Build a composite by ``ref`` and return ``(core, state, schema)``.
 
@@ -99,6 +122,12 @@ def build_composite_state_for_observables(ws_root: Path, ref: str) -> tuple[Any,
             except Exception:
                 pass
         entry = _REGISTRY.get(ref)
+        if entry is None:
+            # Short study refs (``baseline``) miss the FQN-keyed registry;
+            # resolve via the canonical-alias rule before falling through.
+            canon = _resolve_registry_ref(ref, _REGISTRY.keys())
+            if canon is not None:
+                entry = _REGISTRY.get(canon)
     except ImportError:
         entry = None
 
