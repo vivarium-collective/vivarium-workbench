@@ -49,10 +49,16 @@ def _short_name(leaf: str) -> str:
     return last
 
 
-def _merge_readouts(spec: dict, available: dict) -> list[dict]:
+def _merge_readouts(spec: dict, available: dict, *, plan_available: bool = True) -> list[dict]:
     """Pure merge of emit-plan leaves + authored readouts → ordered row dicts.
 
     Headless-friendly (no composite build): pass ``available={"leaves": [...]}``.
+
+    ``plan_available`` distinguishes "the emit plan was built and this authored
+    path is genuinely absent" (→ ``not_in_emit_plan``) from "we could not build
+    the emit plan, so nothing is verified" (→ ``unverified``). The latter happens
+    on a remote build (no local ParCa cache); flagging those rows
+    ``not_in_emit_plan`` would falsely imply they were checked and found missing.
     """
     leaves = list(available.get("leaves") or [])
     # Index authored readouts by lineage-stripped store_path for overlay match.
@@ -105,7 +111,10 @@ def _merge_readouts(spec: dict, available: dict) -> list[dict]:
             "index_by": r.get("index_by"),
             "notes": r.get("notes", "") or "",
             "annotated": True,
-            "emit_status": "derived" if derived else "not_in_emit_plan",
+            "emit_status": (
+                "derived" if derived
+                else ("not_in_emit_plan" if plan_available else "unverified")
+            ),
         })
 
     return rows
@@ -175,8 +184,16 @@ def build_study_readouts(ws_root: Path, slug: str) -> tuple[dict, int]:
         core, state, schema = build_composite_state_for_observables(ws_root, ref)
         available = available_observables(core, state, schema)
     except Exception as e:  # noqa: BLE001
-        rows = _merge_readouts(spec, {"leaves": []})
-        return {"composite": ref, "rows": rows,
+        rows = _merge_readouts(spec, {"leaves": []}, plan_available=False)
+        # On a remote build (a materialized repo@commit, marked by .viv-build.json)
+        # the composite CANNOT build — the workspace has no local ParCa cache, by
+        # design. That's expected, not an error: degrade softly (200) with a clear
+        # note instead of a 422 + a raw filesystem traceback.
+        if (ws_root / ".viv-build.json").is_file():
+            return {"composite": ref, "rows": rows, "degraded": True, "remote_build": True,
+                    "note": "Emit-plan verification is unavailable on a remote build "
+                            "(no local ParCa cache); showing authored readouts."}, 200
+        return {"composite": ref, "rows": rows, "degraded": True,
                 "note": f"composite {ref!r} could not be built — rows unverified: {e}"}, 422
 
     payload = {"composite": ref, "rows": _merge_readouts(spec, available), "note": ""}
