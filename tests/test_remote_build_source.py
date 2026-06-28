@@ -56,6 +56,26 @@ def test_download_workspace_streams_to_file(monkeypatch, tmp_path):
     assert seen["url"] == "http://x/api/v1/simulations/workspace?simulator_id=45"
 
 
+def test_download_workspace_honors_per_call_timeout(monkeypatch, tmp_path):
+    seen = {}
+    def fake_urlopen(req, timeout=None):
+        seen["timeout"] = timeout
+        return _Resp(b"X")
+    monkeypatch.setattr(sac, "urlopen", fake_urlopen)
+    sac.SmsApiClient("http://x", timeout=30).download_workspace(45, tmp_path, timeout=600)
+    assert seen["timeout"] == 600
+
+
+def test_download_workspace_defaults_to_client_timeout(monkeypatch, tmp_path):
+    seen = {}
+    def fake_urlopen(req, timeout=None):
+        seen["timeout"] = timeout
+        return _Resp(b"X")
+    monkeypatch.setattr(sac, "urlopen", fake_urlopen)
+    sac.SmsApiClient("http://x", timeout=30).download_workspace(45, tmp_path)
+    assert seen["timeout"] == 30
+
+
 def _make_tarball(path, top="org-repo-abc1234"):
     """A GitHub-style tarball: one top-level dir containing workspace.yaml."""
     with tarfile.open(path, "w:gz") as tar:

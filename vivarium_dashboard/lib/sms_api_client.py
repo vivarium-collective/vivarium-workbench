@@ -61,7 +61,7 @@ class SmsApiClient:
         Returns the raw list of simulation records."""
         return self._get("/api/v1/simulations", {"simulator_id": simulator_id})
 
-    def download_workspace(self, simulator_id: int, dest_dir: Path) -> Path:
+    def download_workspace(self, simulator_id: int, dest_dir: Path, timeout: float | None = None) -> Path:
         """Stream a build's repo@commit workspace tarball (SP1's endpoint) to
         dest_dir/workspace.tar.gz."""
         dest_dir = Path(dest_dir)
@@ -69,8 +69,9 @@ class SmsApiClient:
         out_path = dest_dir / "workspace.tar.gz"
         url = f"{self.base_url}/api/v1/simulations/workspace?simulator_id={simulator_id}"
         req = Request(url, method="GET", headers={"Accept": "application/gzip"})
+        to = timeout if timeout is not None else self.timeout
         try:
-            with urlopen(req, timeout=self.timeout) as r, open(out_path, "wb") as f:  # noqa: S310
+            with urlopen(req, timeout=to) as r, open(out_path, "wb") as f:  # noqa: S310
                 shutil.copyfileobj(r, f)
         except HTTPError as e:
             raise SmsApiError(f"GET {url} -> {e.code}") from e
@@ -137,15 +138,16 @@ class SmsApiClient:
             params["observables"] = observables  # list → repeated key via doseq
         return self._post("/api/v1/simulations", params=params)
 
-    def download_data(self, simulation_id: int, dest_dir: Path) -> Path:
+    def download_data(self, simulation_id: int, dest_dir: Path, timeout: float | None = None) -> Path:
         """Stream the run's native-store tar.gz (POST /data) to dest_dir/sim_<id>.tar.gz."""
         dest_dir = Path(dest_dir)
         dest_dir.mkdir(parents=True, exist_ok=True)
         out_path = dest_dir / f"sim_{simulation_id}.tar.gz"
         url = f"{self.base_url}/api/v1/simulations/{simulation_id}/data"
         req = Request(url, data=b"", method="POST", headers={"Accept": "application/gzip"})
+        to = timeout if timeout is not None else self.timeout
         try:
-            with urlopen(req, timeout=self.timeout) as r, open(out_path, "wb") as f:  # noqa: S310
+            with urlopen(req, timeout=to) as r, open(out_path, "wb") as f:  # noqa: S310
                 shutil.copyfileobj(r, f)
         except HTTPError as e:
             raise SmsApiError(f"POST {url} -> {e.code}") from e
