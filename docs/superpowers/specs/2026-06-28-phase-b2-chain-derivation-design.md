@@ -124,6 +124,7 @@ Tolerant, never raises (mirrors the rest of the builder):
 
 ## Out of scope (later cycles)
 
+- **v4 3-track-dict `conclusion_verdicts`** — the dashboard's narrative-spine persists `conclusion_verdicts` as a dict of three computed tracks (`regression_compatibility`/`biological_validation`/`explanatory_gain`) whose `result` is computed read-only at render (only `basis` is saved). B2 lifts the authored **list** form (`{claim, verdict, basis}`), which is what every study with conclusions in the current corpus uses (15/23; 0 persist the dict form). The deriver is graceful (returns `{}`) on the dict form. Handling it requires the computed-result path (`single_study_report._derive_conclusion_verdicts`) and is a deliberate follow-up — a natural fit for **B2b** (schema-version consolidation). Decided 2026-06-28 (final-review triage: ship B2 on the list form, defer the dict form).
 - **B2a** — typed Study/Investigation container nodes (id/lifecycle/provenance/validation_status + invariants).
 - **B2b** — collapse the v2/v3/v4 schema-version migration layers.
 - **B2c (agentic)** — extracting findings/evidence from free prose (Phase C).
