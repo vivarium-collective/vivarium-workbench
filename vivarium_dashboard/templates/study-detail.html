@@ -1262,59 +1262,13 @@
 
 <section class="study-tab-panel" data-kind="observables" id="panel-observables" hidden>
   <div class="observables-section">
-    <h3 class="section-title">{{ "Readouts" if study.readouts else "Observables" }}</h3>
-    <p class="muted">{{ "Quantities collected from each simulation run. Each readout resolves to a `store_path` (and optional `index_by` when the underlying store is indexed by ID)." if study.readouts else "Experimental measurements selected from the composite's bigraph state. Each observable resolves to a `store_path` (and optional `index_by` when the underlying store is indexed by ID)." | safe }}</p>
-    {% set _obs = study.readouts or study.observables %}
-    {% if _obs %}
-    <table class="observables-table" style="width:100%; border-collapse: collapse;">
-      <thead>
-        <tr>
-          <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Name</th>
-          <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Status <span class="muted" style="font-weight:400">(authored)</span></th>
-          <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Validated against composite</th>
-          <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Store path</th>
-          <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Indexed by</th>
-          <th style="text-align:left; padding:6px; border-bottom: 1px solid #e2e8f0;">Description</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for o in _obs %}
-        <tr style="border-bottom: 1px solid #f1f5f9;" data-readout="{{ o.name }}">
-          <td style="padding:6px; vertical-align: top;"><code>{{ o.name }}</code></td>
-          <td style="padding:6px; vertical-align: top;">
-            <span style="font-size: 0.75em; color: #475569;">
-              {% if o.status == 'available' %}✓ available
-              {% elif o.status == 'derived-needed' %}🛠 needs listener
-              {% elif o.status == 'aspirational' %}⏳ aspirational
-              {% else %}{{ o.status or '—' }}{% endif %}
-            </span>
-          </td>
-          {# Spine B2: COMPUTED validation status, fetched from
-             /api/study-observable-check and injected by JS — kept BESIDE the
-             authored status so a phantom readout (not_in_structure) is visible
-             at the source. Empty until the fetch resolves; tolerates failure. #}
-          <td style="padding:6px; vertical-align: top;">
-            <span class="readout-validation" data-readout="{{ o.name }}"
-                  style="font-size:0.75em"></span>
-          </td>
-          <td style="padding:6px; vertical-align: top;"><code style="font-size: 0.85em;">{{ o.store_path or '' }}</code></td>
-          <td style="padding:6px; vertical-align: top;">
-            {% if o.index_by %}
-            <code style="font-size: 0.85em;">{{ o.index_by.type }}={{ o.index_by.value }}</code>
-            {% else %}<span class="muted">—</span>{% endif %}
-          </td>
-          <td style="padding:6px; vertical-align: top; max-width: 380px; font-size: 0.9em;">{{ o.description or '' }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    {# Auto-derive readouts from the composite's bigraph state so the tab is
-       never empty — study-detail.js fills this from /api/composite-state. #}
-    <div id="auto-readouts" data-composite="{{ (study.baseline[0].composite if study.baseline else '') }}">
-      <p class="empty-message">No readouts declared — deriving the available stores from the composite…</p>
+    <h3 class="section-title">Readouts</h3>
+    <p class="muted">Quantities collected from each simulation run. Each row is an emitter <code>store_path</code> the composite will save; authored entries in <code>study.yaml</code> add names, descriptions, and units on top.</p>
+    <div id="readouts-table" data-study="{{ name }}">
+      <p class="empty-message">Loading readouts from the composite emit plan…</p>
     </div>
-    {% endif %}
+  </div>
+</section>
 
     <details class="observables-add-form" style="margin-top: 1.2em;" id="bigraph-picker-details">
       <summary class="btn-baseline-add">+ Add observable from bigraph state</summary>
