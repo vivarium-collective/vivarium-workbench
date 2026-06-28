@@ -100,6 +100,7 @@ from vivarium_dashboard.lib import install_views as _install_views
 from vivarium_dashboard.lib import catalog_install_views as _catalog_install_views
 from vivarium_dashboard.lib import catalog_uninstall_views as _catalog_uninstall_views
 from vivarium_dashboard.lib import finding_views as _finding_views
+from vivarium_dashboard.lib import chain_views as _chain_views
 from vivarium_dashboard.lib.composite_resolve import resolve_composite
 from vivarium_dashboard.lib.composites_query import composites_via_subprocess
 from vivarium_dashboard.lib.models import (
@@ -293,7 +294,7 @@ from vivarium_dashboard.lib.models import (
     CatalogInstallRequest,
     CatalogUninstallRequest,
 )
-from investigation_contracts import FindingCreateBody
+from investigation_contracts import FindingCreateBody, EvidenceCreateBody
 from vivarium_dashboard.lib.catalog import build_catalog
 from vivarium_dashboard.lib.registry import build_registry
 from vivarium_dashboard.lib.visualization_classes import list_visualization_classes
@@ -2955,6 +2956,14 @@ def create_app() -> FastAPI:
         (RFC-0002 Phase A). 200 ``{finding_id, event_id}``; 400 invalid; 404 study
         not found."""
         body, status = _finding_views.create_finding(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post("/api/evidence", tags=["Studies"],
+              summary="Link Evidence (findings -> hypotheses) and emit EvidenceLinked")
+    def create_evidence(req: EvidenceCreateBody, ws: Path = Depends(get_workspace)):
+        body, status = _chain_views.create_evidence(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
