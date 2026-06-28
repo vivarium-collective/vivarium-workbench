@@ -962,12 +962,32 @@ def main(argv=None):
             "correctly.  Default '' keeps root-absolute (domain-root) behavior."
         ),
     )
+    parser.add_argument(
+        "--workspaces-index", default="",
+        dest="workspaces_index",
+        help=(
+            "URL of a workspaces index/picker page. When set, the snapshot "
+            "repo label becomes a 'switch workspace' control linking here, so "
+            "a published bundle can jump to sibling published workspaces. "
+            "Relative URLs (e.g. ../index.html) resolve against the bundle URL."
+        ),
+    )
     args = parser.parse_args(argv)
     summary = build_bundle(
         Path(args.workspace), Path(args.out),
         interactive_url=args.interactive_url,
         base_path=args.base_path,
     )
+    # Snapshot repo-label → workspace switcher: inject workspacesIndex into the
+    # __DASH_CONFIG__ of every rendered shell (post-build, single spot — avoids
+    # threading the value through build_bundle/_do_build).
+    if args.workspaces_index:
+        token = 'window.__DASH_CONFIG__ = { mode: "snapshot"'
+        inject = token + ', workspacesIndex: ' + json.dumps(args.workspaces_index)
+        for html_path in Path(args.out).rglob("index.html"):
+            text = html_path.read_text(encoding="utf-8")
+            if token in text and "workspacesIndex" not in text:
+                html_path.write_text(text.replace(token, inject), encoding="utf-8")
     print(json.dumps(summary, indent=2))
 
 

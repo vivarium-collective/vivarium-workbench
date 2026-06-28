@@ -15438,4 +15438,29 @@
   // additionally bakes + invokes this from its own render-completion (below).
   document.addEventListener('DOMContentLoaded', _populateReadinessPanels);
 
+  // Snapshot mode workspace switcher: a published bundle has no live switcher,
+  // but if it was published with a workspaces index (--workspaces-index), turn
+  // the static repo label into a "switch workspace" control linking there.
+  document.addEventListener('DOMContentLoaded', function () {
+    var cfg = window.__DASH_CONFIG__ || {};
+    if (cfg.mode !== 'snapshot' || !cfg.workspacesIndex) return;
+    var label = document.getElementById('snapshot-repo-label');
+    if (!label) return;
+    label.title = 'Switch workspace';
+    var sw = document.createElement('a');
+    sw.href = cfg.workspacesIndex;
+    sw.className = 'viv-ws-switch-link';
+    sw.textContent = '⇄';
+    sw.title = 'Switch workspace';
+    sw.setAttribute('aria-label', 'Switch workspace');
+    sw.style.cssText = 'margin-left:8px;text-decoration:none;color:#2563eb;font-weight:700;font-size:1.05em;';
+    label.appendChild(sw);
+    // Clicking the label itself (but not the GitHub repo link) also switches.
+    label.style.cursor = 'pointer';
+    label.addEventListener('click', function (e) {
+      if (e.target.closest('a.viv-ws-repo-link') || e.target.closest('a.viv-ws-switch-link')) return;
+      window.location.href = cfg.workspacesIndex;
+    });
+  });
+
 })();
