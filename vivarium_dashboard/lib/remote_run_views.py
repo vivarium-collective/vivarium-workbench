@@ -20,6 +20,7 @@ real network / git / auth service.  ``_sms_api_base`` is REUSED from
 from __future__ import annotations
 
 import subprocess
+import tempfile
 from pathlib import Path
 
 from vivarium_dashboard.lib import git_status
@@ -99,3 +100,111 @@ def remote_run_start(ws_root: Path, body: dict) -> tuple[dict, int]:
     )
     job = manager.submit(study, lambda j: run_remote_pipeline(j, ctx))
     return {"job_id": job.job_id}, 202
+
+
+# ---------------------------------------------------------------------------
+# WS1 — thin-client two-phase builders (ADDITIVE; the legacy pipeline above
+# stays until the JS panel cuts over and R5 deletes it). sms-api separates
+# build from run, so the flow is: build-start -> (JS polls status) -> submit
+# -> (JS polls status) -> land. Each builder is one stateless sms-api call;
+# durability lives in sms-api's Postgres, not an in-process manager.
+# ---------------------------------------------------------------------------
+
+def _resolve_repo_branch(ws_root: Path, body: dict) -> tuple[dict, int] | tuple[str, str]:
+    """Shared guard ladder: auth/study/remote. Returns (error_body, status) on
+    failure, or (repo_url, branch) on success."""
+    if github_auth.current_session() is None:
+        return {"error": "not authenticated"}, 401
+    study = (body.get("study") or "").strip()
+    if not study:
+        return {"error": "study is required"}, 400
+    if not git_status.has_origin_remote(ws_root):
+        return {"error": "no GitHub remote configured"}, 409
+    repo_url = git_status.remote_repo_url(ws_root)
+    if not repo_url:
+        return {"error": "could not resolve origin remote url"}, 409
+    spec_path = study_spec.study_spec_path(ws_root, study)
+    if spec_path is None or not spec_path.is_file():
+        return {"error": f"study {study!r} not found"}, 404
+    branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=ws_root,
+        capture_output=True, text=True, timeout=5,
+    ).stdout.strip()
+    return repo_url, branch
+
+
+def remote_run_build_start(ws_root: Path, body: dict) -> tuple[dict, int]:
+    """Phase 1: push the workspace commit and register the simulator build with
+    sms-api. Returns ``({simulator_id, phase:"building", branch, commit}, 202)``
+    WITHOUT polling the build — the JS panel polls ``remote-run-status``."""
+    body = body or {}
+    resolved = _resolve_repo_branch(ws_root, body)
+    if isinstance(resolved[0], dict):  # error tuple
+        return resolved  # type: ignore[return-value]
+    repo_url, branch = resolved  # type: ignore[misc]
+    commit = git_status.remote_push_and_sha(ws_root)
+    client = SmsApiClient(_sms_api_base())
+    uploaded = client.upload_simulator(
+        {"git_commit_hash": commit, "git_repo_url": repo_url, "git_branch": branch}
+    )
+    return {"simulator_id": uploaded["database_id"], "phase": "building",
+            "branch": branch, "commit": commit}, 202
+
+
+def remote_run_submit(ws_root: Path, body: dict) -> tuple[dict, int]:
+    """Phase 2: issue the run for a COMPLETED build. Returns
+    ``({simulation_id, phase:"running"}, 202)``."""
+    body = body or {}
+    if github_auth.current_session() is None:
+        return {"error": "not authenticated"}, 401
+    study = (body.get("study") or "").strip()
+    if not study:
+        return {"error": "study is required"}, 400
+    sim_id = body.get("simulator_id")
+    if not sim_id:
+        return {"error": "simulator_id is required"}, 400
+    spec_path = study_spec.study_spec_path(ws_root, study)
+    if spec_path is None or not spec_path.is_file():
+        return {"error": f"study {study!r} not found"}, 404
+    spec = load_spec(spec_path)
+    observables = study_spec.collect_study_observables(spec)
+    client = SmsApiClient(_sms_api_base())
+    sim = client.run_simulation(
+        simulator_id=int(sim_id),
+        num_generations=int(body.get("num_generations") or 1),
+        num_seeds=int(body.get("num_seeds") or 1),
+        run_parca=bool(body.get("run_parca", True)),
+        observables=observables,
+    )
+    return {"simulation_id": sim["database_id"], "phase": "running"}, 202
+
+
+def remote_run_land(ws_root: Path, body: dict) -> tuple[dict, int]:
+    """Phase 3 (on demand): download a COMPLETED sim's store and land it as a
+    study run. Returns ``({run_id}, 200)``."""
+    body = body or {}
+    if github_auth.current_session() is None:
+        return {"error": "not authenticated"}, 401
+    study = (body.get("study") or "").strip()
+    sim_id = body.get("simulation_id")
+    if not study or not sim_id:
+        return {"error": "study and simulation_id are required"}, 400
+    spec_path = study_spec.study_spec_path(ws_root, study)
+    if spec_path is None or not spec_path.is_file():
+        return {"error": f"study {study!r} not found"}, 404
+    spec = load_spec(spec_path)
+    _baseline = spec.get("baseline") or []
+    spec_id = (_baseline[0].get("composite") if _baseline else None) or study
+    client = SmsApiClient(_sms_api_base())
+    with tempfile.TemporaryDirectory() as td:
+        tar_path = client.download_data(int(sim_id), Path(td))
+        run_id = land_remote_run(
+            study_spec.study_dir(ws_root, study),
+            spec_id=spec_id,
+            simulation_id=int(sim_id),
+            experiment_id=body.get("experiment_id") or f"sim-{sim_id}-{study}",
+            commit=body.get("commit") or "",
+            tar_path=tar_path,
+            s3_uri=body.get("s3_uri"),
+        )
+    return {"run_id": run_id}, 200

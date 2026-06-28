@@ -181,3 +181,107 @@ class TestHappyPath:
         assert ctx.num_generations == 1          # body defaults
         assert ctx.num_seeds == 1
         assert ctx.run_parca is True
+
+
+# ---------------------------------------------------------------------------
+# WS1 — thin-client two-phase builders (additive)
+# ---------------------------------------------------------------------------
+
+class _FakeThinClient:
+    def __init__(self, base=None) -> None:
+        self.base = base
+        self.uploaded = None
+        self.ran = None
+        self.downloaded = None
+
+    def upload_simulator(self, simulator, force=False):
+        self.uploaded = simulator
+        return {"database_id": 66}
+
+    def run_simulation(self, **kwargs):
+        self.ran = kwargs
+        return {"database_id": 199}
+
+    def download_data(self, simulation_id, dest_dir, timeout=None):
+        self.downloaded = simulation_id
+        p = Path(dest_dir) / f"sim_{simulation_id}.tar.gz"
+        p.write_bytes(b"TAR")
+        return p
+
+
+def _wire_thin(monkeypatch, tmp_path, *, authed=True, study_exists=True):
+    monkeypatch.setattr(rrv.github_auth, "current_session", lambda: (object() if authed else None))
+    monkeypatch.setattr(rrv.git_status, "has_origin_remote", lambda ws: True)
+    monkeypatch.setattr(rrv.git_status, "remote_repo_url", lambda ws: "https://github.com/x/y")
+    monkeypatch.setattr(rrv.git_status, "remote_push_and_sha", lambda ws: "abc123def456")
+    spec_file = tmp_path / "study.yaml"
+    spec_file.write_text("baseline: [{composite: my-comp}]\n")
+    monkeypatch.setattr(rrv.study_spec, "study_spec_path",
+                        lambda ws, name: (spec_file if study_exists else None))
+    monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
+    monkeypatch.setattr(rrv.study_spec, "collect_study_observables", lambda spec: ["cell_mass"])
+    monkeypatch.setattr(rrv, "load_spec", lambda p: {"baseline": [{"composite": "my-comp"}]})
+    monkeypatch.setattr(
+        rrv.subprocess, "run",
+        lambda *a, **k: subprocess.CompletedProcess(args=[], returncode=0, stdout="feature/x\n"),
+    )
+    monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
+    captured = {"land": None}
+    monkeypatch.setattr(rrv, "land_remote_run",
+                        lambda study_dir, **kw: captured.__setitem__("land", (study_dir, kw)) or "run-xyz")
+    return captured
+
+
+def test_build_start_returns_simulator_id_and_building_phase(monkeypatch, tmp_path):
+    _wire_thin(monkeypatch, tmp_path)
+    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    body, status = rrv.remote_run_build_start(tmp_path, {"study": "s"})
+    assert status == 202
+    assert body["simulator_id"] == 66
+    assert body["phase"] == "building"
+    assert body["commit"] == "abc123def456"
+
+
+def test_build_start_unauthenticated_401(monkeypatch, tmp_path):
+    _wire_thin(monkeypatch, tmp_path, authed=False)
+    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    assert rrv.remote_run_build_start(tmp_path, {"study": "s"})[1] == 401
+
+
+def test_build_start_missing_study_400(monkeypatch, tmp_path):
+    _wire_thin(monkeypatch, tmp_path)
+    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    assert rrv.remote_run_build_start(tmp_path, {})[1] == 400
+
+
+def test_submit_issues_run_and_returns_simulation_id(monkeypatch, tmp_path):
+    _wire_thin(monkeypatch, tmp_path)
+    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    body, status = rrv.remote_run_submit(tmp_path, {"simulator_id": 66, "study": "s"})
+    assert status == 202
+    assert body["simulation_id"] == 199
+    assert body["phase"] == "running"
+
+
+def test_submit_missing_simulator_id_400(monkeypatch, tmp_path):
+    _wire_thin(monkeypatch, tmp_path)
+    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    assert rrv.remote_run_submit(tmp_path, {"study": "s"})[1] == 400
+
+
+def test_land_downloads_and_lands(monkeypatch, tmp_path):
+    captured = _wire_thin(monkeypatch, tmp_path)
+    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    body, status = rrv.remote_run_land(tmp_path, {"study": "s", "simulation_id": 199})
+    assert status == 200
+    assert body["run_id"] == "run-xyz"
+    assert captured["land"] is not None
+    _study_dir, kw = captured["land"]
+    assert kw["simulation_id"] == 199
+    assert kw["spec_id"] == "my-comp"
+
+
+def test_land_missing_simulation_id_400(monkeypatch, tmp_path):
+    _wire_thin(monkeypatch, tmp_path)
+    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    assert rrv.remote_run_land(tmp_path, {"study": "s"})[1] == 400
