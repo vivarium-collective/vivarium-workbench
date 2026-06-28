@@ -145,6 +145,7 @@ Exported from `__init__`. Pydantic mirror: `EvidenceCreateBody`, `DecisionCreate
 - **B4:** dashboard rendering of the chain + transitions.
 - Typed Hypothesis / Question nodes + their endpoints (the agentic-owned upstream).
 - Agentic reactions to the new events (Phase C scheduler).
+- **Transitive chain soundness:** the `/api/conclusion` gate enforces only *conclusion-level* invariants (its evidence is accepted via a referenced decision). The `finding→≥1 run` and `evidence→≥1 finding/hypothesis` invariants are computed by `validate_chain` but are advisory at write time — no endpoint rejects on an evidence- or finding-level violation. Gating evidence soundness (at `/api/evidence` or transitively at publish) is a B-series follow-up.
 
 ## Rollout notes
 

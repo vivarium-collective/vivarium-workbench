@@ -29,7 +29,7 @@ def _write_node(sdir: Path, subdir: str, fid: str, node: dict) -> None:
 
 def create_evidence(ws_root: Path, body: dict) -> tuple[dict, int]:
     slug = (body.get("study") or "").strip()
-    findings = body.get("findings") or []
+    findings = [f for f in (body.get("findings") or []) if str(f).strip()]
     hyps = [h for h in (body.get("hypotheses") or []) if str(h).strip()]
     sdir = study_dir(ws_root, slug)
     if sdir is None:
