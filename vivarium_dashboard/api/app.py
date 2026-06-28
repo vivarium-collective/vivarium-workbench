@@ -2303,6 +2303,37 @@ def create_app() -> FastAPI:
             headers={"Cache-Control": "no-store"},
         )
 
+    @app.get("/api/events/log", tags=["System"],
+             summary="SSE typed-event stream (RFC-0002 Phase A)")
+    def events_log(request: Request, since: str = "", type: str = "",
+                   once: str = "", ws: Path = Depends(get_workspace)) -> StreamingResponse:
+        """Tail workspace/.pbg/events.jsonl as SSE. ?since=<event_id> replay,
+        Last-Event-ID header resume (wins over ?since), ?type filter. ?once=1 is a
+        test-only bounded mode that replays history and closes."""
+        from investigation_contracts import read_log
+        from vivarium_dashboard.lib.event_log import log_path
+        cursor = request.headers.get("Last-Event-ID") or (since or None)
+        types = [type] if type else None
+        bounded = bool(once)
+
+        def gen():
+            cur = cursor
+            for ev in read_log(log_path(ws), cur, types):
+                yield (f"id: {ev['event_id']}\nevent: {ev['type']}\n"
+                       f"data: {json.dumps(ev, separators=(',', ':'))}\n\n").encode()
+                cur = ev["event_id"]
+            if bounded:
+                return
+            import time
+            while True:
+                for ev in read_log(log_path(ws), cur, types):
+                    yield (f"id: {ev['event_id']}\nevent: {ev['type']}\n"
+                           f"data: {json.dumps(ev, separators=(',', ':'))}\n\n").encode()
+                    cur = ev["event_id"]
+                time.sleep(1.0)
+
+        return StreamingResponse(gen(), media_type="text/event-stream")
+
     @app.get(
         "/api/state",
         tags=["System"],
