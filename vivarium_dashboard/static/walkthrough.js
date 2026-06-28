@@ -527,7 +527,7 @@
     if (focus) {
       var _snapshot = document.body.classList.contains('snapshot');
       var validPages = _snapshot
-        ? ['workspace-inputs', 'simulation-setup', 'registry', 'investigations', 'simulations', 'visualizations', 'composite-explore']
+        ? ['workspace-inputs', 'simulation-setup', 'registry', 'investigations', 'simulations', 'visualizations', 'composite-explore', 'github']
         : ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'investigations', 'studies', 'simulations', 'composite-explore', 'github'];
       if (validPages.indexOf(focus) >= 0) {
         document.body.classList.add('focus-mode', 'focus-' + focus);
@@ -545,7 +545,7 @@
         var h = (window.location.hash || '').replace(/^#/, '');
         var _snap = document.body.classList.contains('snapshot');
         var validPages = _snap
-          ? ['workspace-inputs', 'registry', 'simulation-setup', 'investigations', 'simulations', 'visualizations', 'composite-explore']
+          ? ['workspace-inputs', 'registry', 'simulation-setup', 'investigations', 'simulations', 'visualizations', 'composite-explore', 'github']
           : ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'investigations', 'studies', 'simulations', 'composite-explore', 'github'];
         _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
       }
@@ -1390,14 +1390,22 @@
         var cards = [];
         // Comparison report cards lead the gallery (no viewer dependency).
         cards = cards.concat(reportCards.map(_renderReportCardCard));
-        cards.push(_renderPtoolsCard(ptools));
-        cards.push(_renderExplorerCard());
+        // Pathway Tools (E. coli metabolic map) and the Data Explorer
+        // (timeseries / allocation / flux maps) are E. coli / metabolic-model
+        // analyses. Only show them for workspaces set up as such — detected via
+        // ui.ptools_server_url being configured (currently v2ecoli). They don't
+        // apply to e.g. agent-based colony workspaces (viva-munk).
+        var _ecoliAnalyses = !!(ptools && (ptools.configured || (ptools.studies || []).length));
+        if (_ecoliAnalyses) {
+          cards.push(_renderPtoolsCard(ptools));
+          cards.push(_renderExplorerCard());
+        }
         if (!cards.length) {
           container.innerHTML = '<p class="empty-state">No saved visualizations yet. Run a parsimony packing composite or a PTools analysis to populate this gallery.</p>';
         } else {
           container.innerHTML = cards.join('');
         }
-        if (window.Explorer) {
+        if (_ecoliAnalyses && window.Explorer) {
           var _em = document.getElementById('explorer-mount');
           if (_em) window.Explorer.mount(_em, {
             basePath: (window.DataSource && window.DataSource.basePath) ? window.DataSource.basePath() : '',
@@ -15437,30 +15445,5 @@
   // populated on load. The investigation report renders its panels async, so it
   // additionally bakes + invokes this from its own render-completion (below).
   document.addEventListener('DOMContentLoaded', _populateReadinessPanels);
-
-  // Snapshot mode workspace switcher: a published bundle has no live switcher,
-  // but if it was published with a workspaces index (--workspaces-index), turn
-  // the static repo label into a "switch workspace" control linking there.
-  document.addEventListener('DOMContentLoaded', function () {
-    var cfg = window.__DASH_CONFIG__ || {};
-    if (cfg.mode !== 'snapshot' || !cfg.workspacesIndex) return;
-    var label = document.getElementById('snapshot-repo-label');
-    if (!label) return;
-    label.title = 'Switch workspace';
-    var sw = document.createElement('a');
-    sw.href = cfg.workspacesIndex;
-    sw.className = 'viv-ws-switch-link';
-    sw.textContent = '⇄';
-    sw.title = 'Switch workspace';
-    sw.setAttribute('aria-label', 'Switch workspace');
-    sw.style.cssText = 'margin-left:8px;text-decoration:none;color:#2563eb;font-weight:700;font-size:1.05em;';
-    label.appendChild(sw);
-    // Clicking the label itself (but not the GitHub repo link) also switches.
-    label.style.cursor = 'pointer';
-    label.addEventListener('click', function (e) {
-      if (e.target.closest('a.viv-ws-repo-link') || e.target.closest('a.viv-ws-switch-link')) return;
-      window.location.href = cfg.workspacesIndex;
-    });
-  });
 
 })();

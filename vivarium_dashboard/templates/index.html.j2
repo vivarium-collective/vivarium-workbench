@@ -420,14 +420,17 @@ window.addEventListener('pageshow', function (e) {
       </div>
     </div>
     <!-- Snapshot mode: static repo label replaces the switcher dropdown. -->
-    <div class="viv-repo-label" id="snapshot-repo-label" style="display:none">
+    <div class="viv-repo-label" id="snapshot-repo-label" style="display:none;cursor:pointer"
+         role="button" tabindex="0"
+         title="Open Source — switch workspace"
+         onclick="window.location.hash='#github'; if(window._switchPage)_switchPage('github');"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault(); window.location.hash='#github'; if(window._switchPage)_switchPage('github');}">
       <span class="viv-workspace-switcher-glyph">●</span>
+      <strong>{{ workspace_name }}</strong>
       {% if repo_url %}
       <a class="viv-ws-repo-link" href="{{ repo_url }}" target="_blank" rel="noopener"
-         title="Open {{ workspace_name }} on GitHub"><strong>{{ workspace_name }}</strong>
+         title="Open {{ workspace_name }} on GitHub" onclick="event.stopPropagation()">
         <svg class="viv-ws-gh-mark" width="12" height="12"><use href="#viv-gh-mark"/></svg></a>
-      {% else %}
-      <strong>{{ workspace_name }}</strong>
       {% endif %}
     </div>
 
