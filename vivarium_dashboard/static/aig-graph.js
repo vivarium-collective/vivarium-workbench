@@ -46,7 +46,9 @@
       : '';
     return '<div style="margin-top:8px;padding-top:7px;border-top:1px dashed #e5e7eb;' +
       'font-size:0.7em;line-height:1.5">' +
-      '<div style="font-weight:600;color:#475569;margin-bottom:2px">Evidence chain</div>' +
+      '<div style="font-weight:600;color:#475569;margin-bottom:2px">Evidence chain' +
+        (chain.derived ? '<span style="font-weight:400;color:#94a3b8"> · derived</span>' : '') +
+      '</div>' +
       rows + viol + '</div>';
   }
 
