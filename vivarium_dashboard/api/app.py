@@ -389,6 +389,8 @@ _READONLY_ALLOWED_MUTATIONS = {
     "/api/investigation-run", "/api/investigation-run-one", "/api/investigation-run-unblocked",
     "/api/study-run-baseline", "/api/study-run-variant", "/api/composite-test-run",
     "/api/remote-run-start",
+    # remote-run thin client (WS1, two-phase)
+    "/api/remote-run-build", "/api/remote-run-submit", "/api/remote-run-land",
     # switch which committed workspace this server serves (in-process re-point)
     # + the remote-build flow (the core of remote-only)
     "/api/source/switch", "/api/source/build-remote", "/api/source/switch-build",
@@ -4471,6 +4473,53 @@ def create_app() -> FastAPI:
         # default for a client that omits the key, matching the legacy raw-JSON
         # contract (``bool(None)`` would otherwise flip the default to False).
         body, status = _remote_run_views.remote_run_start(ws, req.model_dump(exclude_none=True))
+        return JSONResponse(status_code=status, content=body)
+
+    # -----------------------------------------------------------------------
+    # Remote-run THIN CLIENT (WS1, two-phase) — additive, alongside the legacy
+    # pipeline above. sms-api owns async/state; these routes are stateless maps
+    # over one sms-api call each. The JS panel drives build → poll → submit →
+    # poll → land. R5 removes the legacy pipeline once the panel cuts over.
+    # -----------------------------------------------------------------------
+    @app.post("/api/remote-run-build", tags=["Runs"], status_code=202,
+              summary="Thin-client phase 1: push + register the simulator build")
+    def remote_run_build(
+        req: Union[dict, None] = Body(default=None),
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        body, status = _remote_run_views.remote_run_build_start(ws, req or {})
+        return JSONResponse(status_code=status, content=body)
+
+    @app.post("/api/remote-run-submit", tags=["Runs"], status_code=202,
+              summary="Thin-client phase 2: issue the run for a completed build")
+    def remote_run_submit(
+        req: Union[dict, None] = Body(default=None),
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        body, status = _remote_run_views.remote_run_submit(ws, req or {})
+        return JSONResponse(status_code=status, content=body)
+
+    @app.post("/api/remote-run-land", tags=["Runs"], status_code=200,
+              summary="Thin-client phase 3: download + land a completed run")
+    def remote_run_land(
+        req: Union[dict, None] = Body(default=None),
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        body, status = _remote_run_views.remote_run_land(ws, req or {})
+        return JSONResponse(status_code=status, content=body)
+
+    @app.get("/api/remote-run-poll", tags=["Runs"],
+             summary="Thin-client on-demand status (build or run phase)")
+    def remote_run_poll(
+        simulator_id: int = 0,
+        simulation_id: int = 0,
+    ) -> JSONResponse:
+        params: dict = {}
+        if simulation_id:
+            params["simulation_id"] = simulation_id
+        if simulator_id:
+            params["simulator_id"] = simulator_id
+        body, status = _remote_run_views.remote_run_status(params)
         return JSONResponse(status_code=status, content=body)
 
     # -----------------------------------------------------------------------

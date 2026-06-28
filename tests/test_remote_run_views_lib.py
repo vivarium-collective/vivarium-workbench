@@ -285,3 +285,59 @@ def test_land_missing_simulation_id_400(monkeypatch, tmp_path):
     _wire_thin(monkeypatch, tmp_path)
     monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
     assert rrv.remote_run_land(tmp_path, {"study": "s"})[1] == 400
+
+
+class _StatusClient:
+    """Fake for remote_run_status: returns canned status dicts (or raises)."""
+    def __init__(self, base=None, *, sim_status=None, build_status=None, raise_err=None):
+        self._sim = sim_status
+        self._build = build_status
+        self._raise = raise_err
+
+    def simulation_status(self, sid):
+        if self._raise:
+            raise self._raise
+        return self._sim
+
+    def simulator_status(self, sid):
+        if self._raise:
+            raise self._raise
+        return self._build
+
+
+def _bind_status_client(monkeypatch, **kw):
+    monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
+    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: _StatusClient(base, **kw))
+
+
+def test_status_run_completed_maps_to_done(monkeypatch):
+    _bind_status_client(monkeypatch, sim_status={"status": "completed"})
+    body, status = rrv.remote_run_status({"simulation_id": 199})
+    assert status == 200 and body["kind"] == "run" and body["phase"] == "done"
+
+
+def test_status_run_running_maps_to_running(monkeypatch):
+    _bind_status_client(monkeypatch, sim_status={"status": "running"})
+    assert rrv.remote_run_status({"simulation_id": 199})[0]["phase"] == "running"
+
+
+def test_status_run_queued_maps_to_queued(monkeypatch):
+    _bind_status_client(monkeypatch, sim_status={"status": "queued"})
+    assert rrv.remote_run_status({"simulation_id": 199})[0]["phase"] == "queued"
+
+
+def test_status_build_completed_maps_to_built(monkeypatch):
+    _bind_status_client(monkeypatch, build_status={"status": "completed"})
+    body, status = rrv.remote_run_status({"simulator_id": 66})
+    assert status == 200 and body["kind"] == "build" and body["phase"] == "built"
+
+
+def test_status_requires_an_id(monkeypatch):
+    _bind_status_client(monkeypatch)
+    assert rrv.remote_run_status({})[1] == 400
+
+
+def test_status_sms_api_unreachable_is_502_not_crash(monkeypatch):
+    _bind_status_client(monkeypatch, raise_err=rrv.SmsApiError("tunnel down"))
+    body, status = rrv.remote_run_status({"simulation_id": 199})
+    assert status == 502 and body["reachable"] is False and "unreachable" in body["reason"]

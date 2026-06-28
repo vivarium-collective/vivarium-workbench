@@ -33,8 +33,13 @@ from vivarium_dashboard.lib.remote_run_jobs import (
     run_remote_pipeline,
 )
 from vivarium_dashboard.lib.remote_run_landing import land_remote_run
-from vivarium_dashboard.lib.sms_api_client import SmsApiClient
+from vivarium_dashboard.lib.sms_api_client import SmsApiClient, SmsApiError
 from vivarium_dashboard.lib.workspace_deps_views import _sms_api_base
+
+# sms-api JobStatus terminal sets (relocated here from remote_run_jobs, which R5
+# deletes). The thin client maps a raw sms-api status into a UI phase.
+_TERMINAL_OK = {"completed", "done", "succeeded"}
+_TERMINAL_BAD = {"failed", "cancelled", "error"}
 
 
 def remote_run_start(ws_root: Path, body: dict) -> tuple[dict, int]:
@@ -208,3 +213,37 @@ def remote_run_land(ws_root: Path, body: dict) -> tuple[dict, int]:
             s3_uri=body.get("s3_uri"),
         )
     return {"run_id": run_id}, 200
+
+
+def remote_run_status(params: dict) -> tuple[dict, int]:
+    """On-demand status read from sms-api (NO in-process state). The JS panel
+    polls this per phase. Pass ``simulation_id`` (run phase) or ``simulator_id``
+    (build phase). Maps the raw sms-api status into a UI ``phase``."""
+    params = params or {}
+    sim_id = params.get("simulation_id")
+    sm_id = params.get("simulator_id")
+    if not sim_id and not sm_id:
+        return {"error": "simulator_id or simulation_id required"}, 400
+    client = SmsApiClient(_sms_api_base())
+    try:
+        if sim_id:
+            st = client.simulation_status(int(sim_id))
+            raw = str(st.get("status", "")).lower()
+            phase = ("done" if raw in _TERMINAL_OK
+                     else "failed" if raw in _TERMINAL_BAD
+                     else "queued" if raw == "queued" else "running")
+            return {"kind": "run", "phase": phase, "raw_status": raw,
+                    "error": st.get("error_message"), "simulation_id": int(sim_id)}, 200
+        st = client.simulator_status(int(sm_id))
+        raw = str(st.get("status", "")).lower()
+        phase = ("built" if raw in _TERMINAL_OK
+                 else "failed" if raw in _TERMINAL_BAD else "building")
+        return {"kind": "build", "phase": phase, "raw_status": raw,
+                "error": st.get("error_message"), "simulator_id": int(sm_id)}, 200
+    except SmsApiError as e:
+        # Tunnel down / SSO expired / sms-api error — surface a reachable=false
+        # status so the panel shows it without the whole poll crashing.
+        reason = "auth expired (re-run aws sso login)" if getattr(e, "status", None) == 401 \
+            else "sms-api unreachable (is the tunnel up?)"
+        return {"phase": "unreachable", "reachable": False, "reason": reason,
+                "status": getattr(e, "status", None), "error": str(e)}, 502
