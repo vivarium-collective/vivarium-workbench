@@ -109,6 +109,61 @@ def test_reader_for_unknown_raises():
 
 
 # ---------------------------------------------------------------------------
+# Per-operation reader dispatch tables (FU3 broker-widening): the broker owns
+# the kind -> reader SELECTION for list_observables / get_vector /
+# get_flux_auto / get_base_fluxes; each table returns the EXISTING
+# explorer_data reader (``is`` identity) and ``None`` for an unsupported kind.
+# ---------------------------------------------------------------------------
+
+def test_observable_reader_for_dispatch():
+    from vivarium_dashboard.lib import explorer_data as ed
+    assert emitters.observable_reader_for("zarr") is ed._zarr_observables
+    assert emitters.observable_reader_for("parquet") is ed._parquet_observables
+    assert emitters.observable_reader_for("sqlite") is ed._sqlite_observables
+
+
+def test_observable_reader_for_unknown_is_none():
+    assert emitters.observable_reader_for("rabbit") is None
+    assert emitters.observable_reader_for(None) is None
+
+
+def test_vector_reader_for_dispatch():
+    from vivarium_dashboard.lib import explorer_data as ed
+    assert emitters.vector_reader_for("zarr") is ed._zarr_get_vector
+    assert emitters.vector_reader_for("parquet") is ed._parquet_get_vector
+    assert emitters.vector_reader_for("sqlite") is ed._sqlite_get_vector
+
+
+def test_vector_reader_for_unknown_is_none():
+    assert emitters.vector_reader_for("rabbit") is None
+    assert emitters.vector_reader_for(None) is None
+
+
+def test_flux_auto_reader_for_dispatch():
+    from vivarium_dashboard.lib import explorer_data as ed
+    assert emitters.flux_auto_reader_for("zarr") is ed._zarr_get_flux_auto
+    assert emitters.flux_auto_reader_for("parquet") is ed._parquet_get_flux_auto
+    assert emitters.flux_auto_reader_for("sqlite") is ed._sqlite_get_flux_auto
+
+
+def test_flux_auto_reader_for_unknown_is_none():
+    assert emitters.flux_auto_reader_for("rabbit") is None
+    assert emitters.flux_auto_reader_for(None) is None
+
+
+def test_base_flux_reader_for_dispatch():
+    from vivarium_dashboard.lib import explorer_data as ed
+    assert emitters.base_flux_reader_for("zarr") is ed._zarr_get_base_fluxes
+    assert emitters.base_flux_reader_for("parquet") is ed._parquet_get_base_fluxes
+    assert emitters.base_flux_reader_for("sqlite") is ed._sqlite_get_base_fluxes
+
+
+def test_base_flux_reader_for_unknown_is_none():
+    assert emitters.base_flux_reader_for("rabbit") is None
+    assert emitters.base_flux_reader_for(None) is None
+
+
+# ---------------------------------------------------------------------------
 # default_emitter — ports study_charts._emitter_choice; fallback == DEFAULT
 # ---------------------------------------------------------------------------
 
