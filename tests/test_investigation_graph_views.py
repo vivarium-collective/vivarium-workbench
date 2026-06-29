@@ -142,3 +142,15 @@ def test_study_without_verdicts_has_empty_non_derived_chain(tmp_path):
     body, _ = build_investigation_graph(ws, "demo-inv")
     chain = body["chains"]["s1"]
     assert chain["nodes"] == [] and chain.get("derived") is False
+
+
+def test_chain_nodes_enriched_with_statement_outcome_source(tmp_path):
+    ws = _ws(tmp_path)
+    _seed_full_chain(ws)  # authored finding/evidence/decision/conclusion on s2
+    body, _ = build_investigation_graph(ws, "demo-inv")
+    nodes = {n["id"]: n for n in body["chains"]["s2"]["nodes"]}
+    f = nodes["finding/f1"]
+    assert f["statement"] == "X rises with Y"          # full statement, not just label
+    assert "source" in f                                # provenance justification (may be "")
+    d = nodes["decision/d1"]
+    assert d.get("outcome") == "accept"                 # decision carries its outcome

@@ -522,6 +522,9 @@
       }
     }
     if (pageId === 'investigations') {
+      // Clicking the Investigations tab always returns to the top-level list,
+      // even when an investigation detail is currently open.
+      if (typeof _closeInvestigationDetail === 'function') _closeInvestigationDetail();
       _loadInvestigationSets();
     }
     if (pageId === 'workspace-inputs') {
@@ -5646,7 +5649,10 @@
 
       var node = document.createElement('div');
       node.className = 'iset-dag-node';
-      node.onclick = function() { _openStudyInsideInvestigation(s.name); };
+      node.onclick = function() {
+        if (window._openInvestigationDrawer) window._openInvestigationDrawer('study', s);
+        else _openStudyInsideInvestigation(s.name);
+      };
       node.title = s.name + ' — ' + confidence + (claim ? '\n\nFinds: ' + claim : '');
       var x = PAD_X + depth[s.name] * (CARD_W + X_GAP);
       node.style.cssText =
@@ -5685,6 +5691,18 @@
           ? window._chainBlockHtml(chainsBySlug[s.name]) : '');
       node._followUps = followUps;
       nodesHost.appendChild(node);
+      if (chainsBySlug && window._groupClaims && window._openInvestigationDrawer) {
+        (function (study, chain) {
+          var claims = window._groupClaims(chain);
+          node.querySelectorAll('.aig-claim-row').forEach(function (row) {
+            row.addEventListener('click', function (ev) {
+              ev.stopPropagation();
+              var idx = parseInt(row.getAttribute('data-claim-index'), 10);
+              if (claims[idx]) window._openInvestigationDrawer('claim', { claim: claims[idx], study: study });
+            });
+          });
+        })(s, chainsBySlug[s.name]);
+      }
       pos[s.name] = { x: x, node: node, depth: depth[s.name] };
     });
 
@@ -5972,6 +5990,54 @@
       });
   }
   window._seedFollowupProposal = _seedFollowupProposal;
+
+  function _drawerStudyHtml(s) {
+    var q = (s.question || '').replace(/\s+/g, ' ').trim();
+    return '<div style="font-weight:700;color:#0f172a">' + _esc(s.title || s.name) + '</div>' +
+      '<div style="font-size:0.78em;color:#64748b;margin:2px 0 8px">' + _esc(s.effective_status || s.status || '') + '</div>' +
+      (q ? '<div style="margin:6px 0"><span style="font-weight:600;color:#475569">Asks: </span>' + _esc(q) + '</div>' : '') +
+      '<button class="drawer-open-study" data-study="' + _esc(s.name) + '" style="margin-top:10px;cursor:pointer">Open full study →</button>';
+  }
+
+  function _drawerBlock(label, node, extra) {
+    if (!node) return '';
+    return '<div style="margin:9px 0;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px">' +
+      '<div style="font-size:0.72em;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#64748b">' +
+      label + (node.lifecycle_state ? ' · ' + _esc(node.lifecycle_state) : '') + (extra || '') + '</div>' +
+      '<div style="margin-top:3px;color:#1e293b">' + _esc(node.statement || node.label || '') + '</div></div>';
+  }
+
+  function _drawerClaimHtml(claim, study) {
+    var P = claim.parts || {};
+    var dec = P.decision ? _drawerBlock('▣ Decision', P.decision, P.decision.outcome ? ' · ' + _esc(P.decision.outcome) : '') : '';
+    var prov = claim.source
+      ? 'Derived from ' + _esc(study ? study.name : '') + ' · ' + _esc(claim.source)
+      : 'Authored' + (study ? ' in ' + _esc(study.name) : '');
+    return '<div style="font-weight:700;color:#0f172a;line-height:1.3">' + _esc(claim.claimText) + '</div>' +
+      '<div style="font-size:0.8em;color:#64748b;margin:2px 0 8px">' + _esc(claim.status) + '</div>' +
+      _drawerBlock('● Finding', P.finding) +
+      _drawerBlock('◆ Evidence', P.evidence) +
+      dec +
+      _drawerBlock('★ Conclusion', P.conclusion) +
+      '<div style="margin-top:10px;font-size:0.74em;color:#94a3b8">' + prov + '</div>' +
+      (study ? '<button class="drawer-open-study" data-study="' + _esc(study.name) + '" style="margin-top:10px;cursor:pointer">Open full study →</button>' : '');
+  }
+
+  function _openInvestigationDrawer(kind, data) {
+    var drawer = document.getElementById('investigation-detail-drawer');
+    var body = document.getElementById('investigation-detail-drawer-body');
+    if (!drawer || !body) return;
+    if (kind === 'claim') body.innerHTML = _drawerClaimHtml(data.claim, data.study);
+    else if (kind === 'study') body.innerHTML = _drawerStudyHtml(data);
+    else return;
+    drawer.style.display = 'block';
+    var btn = body.querySelector('.drawer-open-study');
+    if (btn) btn.addEventListener('click', function () {
+      drawer.style.display = 'none';
+      _openStudyInsideInvestigation(btn.getAttribute('data-study'));
+    });
+  }
+  window._openInvestigationDrawer = _openInvestigationDrawer;
 
   // Click a DAG node → load the full study in an in-page iframe BELOW the
   // DAG (no jump to the legacy Studies tab). The iframe is the same
