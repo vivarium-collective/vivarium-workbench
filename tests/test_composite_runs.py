@@ -3,7 +3,7 @@ from vivarium_dashboard.lib.composite_runs import (
     connect, save_metadata, complete_metadata, query_runs, query_run,
     query_run_meta, update_progress, set_pid, mark_orphaned, prune_runs,
     inject_sqlite_emitter, auto_label, inject_emitter_for_paths,
-    all_store_paths, collect_emit_paths_from_spec,
+    all_store_paths, collect_emit_paths_from_spec, delete_run,
 )
 
 
@@ -535,3 +535,13 @@ def test_collect_emit_paths_store_path_regression():
 
 def test_collect_emit_paths_empty_spec():
     assert collect_emit_paths_from_spec({}) == []
+
+
+def test_delete_run_removes_row(tmp_path):
+    import time
+    conn = connect(tmp_path / "r.db")
+    save_metadata(conn, spec_id="s", run_id="s__1__a", params={}, label="L",
+                  started_at=time.time(), n_steps=1)
+    assert delete_run(conn, run_id="s__1__a") is True
+    assert query_run_meta(conn, run_id="s__1__a") is None
+    assert delete_run(conn, run_id="nope") is False

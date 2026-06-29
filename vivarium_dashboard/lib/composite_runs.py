@@ -150,6 +150,15 @@ def complete_metadata(conn: sqlite3.Connection, *, run_id: str,
     conn.commit()
 
 
+def delete_run(conn: sqlite3.Connection, *, run_id: str) -> bool:
+    """Explicitly delete a run's metadata row. Returns True if a row was removed.
+    (Store artifacts under .pbg/runs/<run_id>/ are removed by the caller that
+    knows the workspace root.)"""
+    cur = conn.execute("DELETE FROM runs_meta WHERE run_id=?", (run_id,))
+    conn.commit()
+    return cur.rowcount > 0
+
+
 def query_run_meta(conn: sqlite3.Connection, *, run_id: str) -> dict | None:
     """Return the runs_meta row for one run as a dict, or None if absent."""
     row = conn.execute(

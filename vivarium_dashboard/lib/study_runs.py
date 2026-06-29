@@ -34,6 +34,7 @@ import yaml
 
 from vivarium_dashboard.lib import composite_subprocess
 from vivarium_dashboard.lib import lifecycle_mutations
+from vivarium_dashboard.lib import run_core
 from vivarium_dashboard.lib import study_run_post
 from vivarium_dashboard.lib import study_run_state
 from vivarium_dashboard.lib import study_spec
@@ -92,6 +93,20 @@ def run_study_baseline(ws_root, body):
     params_n_steps = params.pop("n_steps", None)
     generator_overrides = params
 
+    # Compute full_params / db_file / label early so the remote-build guard
+    # can fire before the expensive workspace.yaml read + state resolution.
+    full_params = dict(generator_overrides)
+    if params_n_steps is not None:
+        full_params["n_steps"] = params_n_steps
+    db_file = str(study_dir / "runs.db")
+    label = entry.get("name") or "baseline"
+    try:
+        plan = run_core.invoke_run(ws_root, spec_id=spec_id, config=full_params,
+                                   db_path=db_file, label=label, n_steps=params_n_steps)
+    except run_core.RunTargetUnavailable as e:
+        return {"error": str(e)}, 409
+    run_id = plan.run_id
+
     ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8"))
     pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
     # XArrayEmitter buffers ~hundreds of ticks before flushing, so the legacy
@@ -106,14 +121,6 @@ def run_study_baseline(ws_root, body):
     state, err = study_run_state.resolve_study_baseline_state(ws_root, pkg, spec_id, generator_overrides)
     if err is not None:
         return err, 400
-
-    full_params = dict(generator_overrides)
-    if params_n_steps is not None:
-        full_params["n_steps"] = params_n_steps
-
-    db_file = str(study_dir / "runs.db")
-    run_id = cr.generate_run_id(spec_id, full_params)
-    label = entry.get("name") or "baseline"
     # v2ecoli friction #6: subprocess timeout from study yaml so a 3600-step
     # baseline isn't killed by the 120s default. Per-study override.
     runtime_cfg = (spec.get("runtime") or {}) if isinstance(spec.get("runtime"), dict) else {}
@@ -319,7 +326,13 @@ def run_study_variant(ws_root, body):
         full_params = dict(generator_overrides)
         if params_n_steps is not None:
             full_params["n_steps"] = params_n_steps
-        run_id = cr.generate_run_id(spec_id, full_params)
+        try:
+            plan = run_core.invoke_run(ws_root, spec_id=spec_id, config=full_params,
+                                       db_path=study_dir / "runs.db", label=variant_name,
+                                       n_steps=params_n_steps)
+        except run_core.RunTargetUnavailable as e:
+            return {"error": str(e)}, 409
+        run_id = plan.run_id
         runtime_cfg = (spec.get("runtime") or {}) if isinstance(spec.get("runtime"), dict) else {}
         timeout_s = int(runtime_cfg.get("subprocess_timeout_s") or 1800)
         out_dir = study_dir / "out" / run_id
@@ -340,7 +353,12 @@ def run_study_variant(ws_root, body):
             full_params["n_steps"] = params_n_steps
 
         db_file = str(study_dir / "runs.db")
-        run_id = cr.generate_run_id(spec_id, full_params)
+        try:
+            plan = run_core.invoke_run(ws_root, spec_id=spec_id, config=full_params,
+                                       db_path=db_file, label=variant_name, n_steps=params_n_steps)
+        except run_core.RunTargetUnavailable as e:
+            return {"error": str(e)}, 409
+        run_id = plan.run_id
         # v2ecoli friction #6: per-study subprocess timeout.
         runtime_cfg = (spec.get("runtime") or {}) if isinstance(spec.get("runtime"), dict) else {}
         timeout_s = int(runtime_cfg.get("subprocess_timeout_s") or 1800)

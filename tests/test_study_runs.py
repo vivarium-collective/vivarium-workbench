@@ -4,6 +4,23 @@ import yaml
 import pytest
 
 
+# ---------------------------------------------------------------------------
+# SP-A: remote-build workspace → 409 guard
+# ---------------------------------------------------------------------------
+
+def test_study_run_baseline_on_remote_build_409(tmp_path, monkeypatch):
+    """A workspace stamped with .viv-build.json is a remote build; study runs
+    must return 409 (RunTargetUnavailable) rather than attempting a local
+    subprocess. This test exercises the invoke_run seam added in SP-A."""
+    from vivarium_dashboard.lib import study_runs
+    # minimal study with a baseline composite under a remote-build workspace
+    (tmp_path / ".viv-build.json").write_text("{}")
+    sd = tmp_path / "studies" / "demo"; sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text("name: demo\nbaseline:\n  - {name: core, composite: pkg.composites.cell}\n")
+    body, status = study_runs.run_study_baseline(tmp_path, {"study": "demo"})
+    assert status == 409
+
+
 @pytest.fixture
 def _study_ws(tmp_path, monkeypatch):
     """Workspace with one v3 study whose baseline is a real viva-munk composite."""
