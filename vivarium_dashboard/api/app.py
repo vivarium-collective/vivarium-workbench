@@ -100,6 +100,7 @@ from vivarium_dashboard.lib import install_views as _install_views
 from vivarium_dashboard.lib import catalog_install_views as _catalog_install_views
 from vivarium_dashboard.lib import catalog_uninstall_views as _catalog_uninstall_views
 from vivarium_dashboard.lib import finding_views as _finding_views
+from vivarium_dashboard.lib import investigation_graph_views as _ig_views
 from vivarium_dashboard.lib import chain_views as _chain_views
 from vivarium_dashboard.lib import study_variants as _study_variants
 from vivarium_dashboard.lib import composite_runs as _composite_runs
@@ -1653,6 +1654,21 @@ def create_app() -> FastAPI:
                 content={"error": f"no investigation.yaml for {slug!r}"},
             )
         return IsetDetail.model_validate(result)
+
+    @app.get(
+        "/api/investigation-graph",
+        tags=["Data, inputs & references"],
+        summary="Typed AIG: study DAG + per-study evidence-chain nodes/edges/violations",
+    )
+    def investigation_graph(investigation: str = "", ws: Path = Depends(get_workspace)):
+        """Typed Actionable Investigation Graph for one investigation (RFC-0002
+        Phase B4). Study nodes + pipeline_gate study->study edges, plus each
+        study's chain nodes/edges and validate_chain violations. The payload is
+        dynamic/nested, so it returns a passthrough JSONResponse (matching other
+        dynamic endpoints) rather than a typed response_model. 404 when the
+        investigation.yaml is absent."""
+        body, status = _ig_views.build_investigation_graph(ws, investigation)
+        return JSONResponse(status_code=status, content=body)
 
     # -----------------------------------------------------------------------
     # Observables / never-fabricate guard + linkage-index routes
