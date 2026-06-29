@@ -31,7 +31,10 @@ def _build_chain(slug: str, nodes: dict[str, dict]) -> dict:
     for nid, n in nodes.items():
         t = n.get("type")
         out_nodes.append({"id": nid, "type": t, "label": _label(n),
-                          "lifecycle_state": n.get("lifecycle_state", "")})
+                          "lifecycle_state": n.get("lifecycle_state", ""),
+                          "statement": str(n.get("statement", "")),
+                          "outcome": n.get("outcome"),
+                          "source": (n.get("provenance") or {}).get("justification", "")})
         if t == "finding":
             out_edges.append({"source": f"study/{slug}", "target": nid, "rel": "contains"})
         elif t == "evidence":
