@@ -574,14 +574,10 @@ wheels = [
 [[package]]
 name = "investigation-contracts"
 version = "0.2.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/vivarium-collective/investigation-contracts.git?branch=main#65c793fd231d952e49a9cfe4244797dadde1bedc" }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "pydantic" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/1a/95/49648459105d7acb0cf5424c0b58d73697add0e7e4ef9f7cd64a69d23575/investigation_contracts-0.2.0.tar.gz", hash = "sha256:9977d9ef56422b033fec22648e73ffe2a3155b81d69ac3609d5b4322dc19a810", size = 6752, upload-time = "2026-06-29T12:48:06.634Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8d/07/4f3a5ba84d31745bf86593ada7d4df2fcf13987461c95c80b6df745fec94/investigation_contracts-0.2.0-py3-none-any.whl", hash = "sha256:34182d159e261e15f77935a8e1c5e1702e0fce7c2c1efc0468a7dde96342c41c", size = 6224, upload-time = "2026-06-29T12:48:05.563Z" },
 ]
 
 [[package]]
@@ -2335,6 +2331,7 @@ dependencies = [
     { name = "jsonschema", extra = ["format-nongpl"] },
     { name = "numpy" },
     { name = "pbg-basic-processes" },
+    { name = "pbg-emitters" },
     { name = "pbg-superpowers" },
     { name = "process-bigraph" },
     { name = "pydantic" },
@@ -2371,7 +2368,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "imageio", marker = "extra == 'viz'" },
-    { name = "investigation-contracts" },
+    { name = "investigation-contracts", git = "https://github.com/vivarium-collective/investigation-contracts.git?branch=main" },
     { name = "jinja2" },
     { name = "jsonschema", extras = ["format-nongpl"], specifier = ">=4.21" },
     { name = "matplotlib", marker = "extra == 'viz'" },
@@ -2379,6 +2376,7 @@ requires-dist = [
     { name = "numpy" },
     { name = "numpy", marker = "extra == 'viz'" },
     { name = "pbg-basic-processes", git = "https://github.com/vivarium-collective/pbg-basic-processes.git?branch=main" },
+    { name = "pbg-emitters", extras = ["sqlite"] },
     { name = "pbg-superpowers", specifier = ">=0.14.0" },
     { name = "polars", marker = "extra == 'test'" },
     { name = "process-bigraph" },

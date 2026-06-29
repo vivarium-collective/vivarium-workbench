@@ -190,7 +190,10 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
             try:
                 from {pkg}.core import build_core
                 from process_bigraph import Composite, gather_emitter_results
-                from process_bigraph.emitter import SQLiteEmitter
+                try:
+                    from pbg_emitters.sqlite_emitter import SQLiteEmitter
+                except ImportError:  # process-bigraph < 1.4.17 (legacy location)
+                    from process_bigraph.emitter import SQLiteEmitter
                 from pbg_superpowers.composite_generator import (
                     _REGISTRY, build_generator, discover_generators,
                     apply_core_extensions,
@@ -310,7 +313,10 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
             try:
                 from {pkg}.core import build_core
                 from process_bigraph import Composite, gather_emitter_results
-                from process_bigraph.emitter import SQLiteEmitter
+                try:
+                    from pbg_emitters.sqlite_emitter import SQLiteEmitter
+                except ImportError:  # process-bigraph < 1.4.17 (legacy location)
+                    from process_bigraph.emitter import SQLiteEmitter
                 from bigraph_schema.json_codec import bigraph_json_hook
                 from vivarium_dashboard.lib import composite_runs as cr
                 core = build_core()

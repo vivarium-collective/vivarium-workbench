@@ -336,7 +336,10 @@ def execute(request_path: Path) -> int:
                 state = cr.inject_emitter_for_paths(state, emit_paths)
             state = cr.inject_sqlite_emitter(state, run_id=req.run_id,
                                              db_file=req.db_file)
-            from process_bigraph.emitter import SQLiteEmitter
+            try:
+                from pbg_emitters.sqlite_emitter import SQLiteEmitter
+            except ImportError:  # process-bigraph < 1.4.17 (legacy location)
+                from process_bigraph.emitter import SQLiteEmitter
             core.register_link("SQLiteEmitter", SQLiteEmitter)
 
         composite = Composite({"state": state}, core=core)

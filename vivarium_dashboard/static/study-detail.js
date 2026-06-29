@@ -11,25 +11,47 @@
   }
 
   // --- Tab navigation ---
+
+  // Map a panel kind -> its pillar by reading the member button's data-pillar
+  // (DOM is the source of truth, so v3/v4 conditional tab sets are always correct).
+  function _pillarForKind(kind) {
+    var btn = document.querySelector('.study-tab[data-kind="' + kind + '"]');
+    return btn ? (btn.dataset.pillar || '') : '';
+  }
+
+  function _showPillarSubnav(pillar) {
+    // pillar buttons
+    document.querySelectorAll('.study-pillar').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.pillar === pillar);
+    });
+    // member buttons: only the active pillar's are visible
+    document.querySelectorAll('#study-subnav .study-tab').forEach(function (b) {
+      b.style.display = (b.dataset.pillar === pillar) ? '' : 'none';
+    });
+  }
+
   function _setStudyTab(kind) {
-    document.querySelectorAll('.study-tab').forEach(function(b) {
+    var pillar = _pillarForKind(kind);
+    if (pillar) _showPillarSubnav(pillar);
+    document.querySelectorAll('.study-tab').forEach(function (b) {
       b.classList.toggle('active', b.dataset.kind === kind);
     });
-    document.querySelectorAll('.study-tab-panel').forEach(function(p) {
+    document.querySelectorAll('.study-tab-panel').forEach(function (p) {
       p.classList.toggle('active', p.dataset.kind === kind);
     });
-    if (kind === 'tests') {
-      loadTestsTab(window._study);
-    }
-
-    if (kind === 'visualizations') {
-      _loadCharts('viz-charts-panel');
-    }
-    if (kind === 'observables') {
-      _loadReadouts();
-    }
+    if (kind === 'tests') { loadTestsTab(window._study); }
+    if (kind === 'visualizations') { _loadCharts('viz-charts-panel'); }
+    if (kind === 'observables') { _loadReadouts(); }
   }
   window._setStudyTab = _setStudyTab;
+
+  // Click a pillar -> reveal its member sub-nav and open its first member panel.
+  function _setStudyPillar(pillar) {
+    _showPillarSubnav(pillar);
+    var first = document.querySelector('#study-subnav .study-tab[data-pillar="' + pillar + '"]');
+    if (first) _setStudyTab(first.dataset.kind);
+  }
+  window._setStudyPillar = _setStudyPillar;
 
   // ── Readouts table (emit plan + authored annotations) ───────────────────────
   // Fetch /api/study-readouts and render the table async (the composite build is
@@ -1268,6 +1290,8 @@
     _renderReadinessPanel();
     _renderSpineSummary();
     _populateConclusionVerdictBadges();
+    // Open Understand/Overview and show only Understand's sub-nav on load.
+    _setStudyTab('overview');
   }
 
   // ── C2 — conclusion verdicts: read precomputed block from window._study.derived ─

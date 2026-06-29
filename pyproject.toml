@@ -18,6 +18,12 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "process-bigraph",
+    # SQLiteEmitter (and ParquetEmitter) were extracted from process-bigraph at
+    # 1.4.17 into the focused pbg-emitters library; pb's `process_bigraph.emitter`
+    # only re-exports SQLiteEmitter when pbg-emitters is installed. The dashboard
+    # imports SQLiteEmitter (lazily, in several run paths), so depend on it
+    # directly. The `[sqlite]` extra is stdlib-only (no extra deps).
+    "pbg-emitters[sqlite]",
     "bigraph-schema>=1.4.1",
     "pbg-superpowers>=0.14.0",
     # pbg-superpowers 0.14+ requires pbg-basic-processes, which is not yet on
@@ -52,6 +58,10 @@ vivarium-dashboard-publish = "vivarium_dashboard.publish:main"
 # requirement from pbg-superpowers.
 [tool.uv.sources]
 pbg-basic-processes = { git = "https://github.com/vivarium-collective/pbg-basic-processes.git", branch = "main" }
+# investigation-contracts is declared bare in [project.dependencies] (kept out
+# of published metadata) and is not on PyPI; supply its git URL here so `uv
+# sync`/`uv lock` can resolve it (the editable-install gap that was failing CI).
+investigation-contracts = { git = "https://github.com/vivarium-collective/investigation-contracts.git", branch = "main" }
 
 # bigraph-loom is a PEP 508 direct git URL (not on PyPI), so the wheel build
 # backend must opt into direct references — without this, hatchling refuses the

@@ -5664,7 +5664,14 @@
         if (window._openInvestigationDrawer) window._openInvestigationDrawer('study', s);
         else _openStudyInsideInvestigation(s.name);
       };
-      node.title = s.name + ' — ' + confidence + (claim ? '\n\nFinds: ' + claim : '');
+      // Double-click opens the full study directly (dismisses the quick-look drawer).
+      node.ondblclick = function() {
+        var _drawer = document.getElementById('investigation-detail-drawer');
+        if (_drawer) _drawer.style.display = 'none';
+        _openStudyInsideInvestigation(s.name);
+      };
+      node.title = s.name + ' — ' + confidence + (claim ? '\n\nFinds: ' + claim : '') +
+        '\n\nClick for a quick look · double-click to open the study';
       var x = PAD_X + depth[s.name] * (CARD_W + X_GAP);
       node.style.cssText =
         'position:absolute;left:' + x + 'px;top:0px;' +
