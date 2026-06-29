@@ -147,14 +147,7 @@
     <button class="study-tab active" data-kind="overview" data-pillar="understand" onclick="_setStudyTab('overview')">Overview</button>
     <button class="study-tab"        data-kind="tests"        data-pillar="inquire"  onclick="_setStudyTab('tests')">Tests</button>
     <button class="study-tab"        data-kind="conclusions"  data-pillar="inquire"  onclick="_setStudyTab('conclusions')">{{ "Decide" if _is_v3 else "Conclusions" }}</button>
-    {% if _is_v3 or study.model_change or study.implementation_requirements %}
-    <button class="study-tab"        data-kind="build"        data-pillar="compose"  onclick="_setStudyTab('build')">Build</button>
-    {% endif %}
-    {% if not _is_v3 %}
-    <button class="study-tab"        data-kind="baseline"      data-pillar="compose"  onclick="_setStudyTab('baseline')">Baseline</button>
-    <button class="study-tab"        data-kind="variants"      data-pillar="compose"  onclick="_setStudyTab('variants')">Variants</button>
-    <button class="study-tab"        data-kind="interventions" data-pillar="compose"  onclick="_setStudyTab('interventions')">Interventions</button>
-    {% endif %}
+    <button class="study-tab" data-kind="compose" data-pillar="compose" onclick="_setStudyTab('compose')">Compose</button>
     {% if _is_v3 %}
     <button class="study-tab"        data-kind="simulations"   data-pillar="simulate" onclick="_setStudyTab('simulations')">Simulations</button>
     {% endif %}
@@ -685,9 +678,11 @@
 </section>
 
 
-{# ─── Build tab: model (composite) + conditions + model_change + impl reqs ── #}
-{% if study.model_change or study.implementation_requirements or study.conditions or study.baseline %}
-<section class="study-tab-panel" data-kind="build" id="panel-build" hidden>
+{# ─── Compose tab: Build + Baseline + Variants + Interventions ── #}
+<section class="study-tab-panel" data-kind="compose" id="panel-compose" hidden>
+  <h2 class="overview-label" style="margin-bottom:8px">Model composition</h2>
+  {% set _has_build = _is_v3 or study.model_change or study.implementation_requirements %}
+  {% if _has_build %}
 
   {# Model — every study runs at least one composite. Auto-shown from the
      study's baseline (composite + parameters) so the Build tab is never empty,
@@ -906,8 +901,137 @@
     {% endfor %}
   </div>
   {% endif %}
+  {% endif %}
+  {% if not _is_v3 %}
+  <div class="baseline-list">
+    {% for b in (study.baseline or []) %}
+    <article class="baseline-entry" data-baseline-name="{{ b.name }}">
+      <header class="baseline-entry-header">
+        <h3 class="baseline-entry-name">{{ b.name }}</h3>
+        <code class="baseline-entry-fqn">{{ b.composite }}</code>
+      </header>
+      {% if b.params %}
+      <table class="baseline-params">
+        <thead><tr><th>Parameter</th><th>Value</th></tr></thead>
+        <tbody>
+          {% for k, v in b.params.items() %}
+          <tr><td><code>{{ k }}</code></td><td><code>{{ v }}</code></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      <div class="baseline-entry-actions">
+        <button class="btn-run-baseline" data-baseline-name="{{ b.name }}">Run</button>
+        <button class="btn-baseline-remove" data-baseline-name="{{ b.name }}">Remove</button>
+      </div>
+    </article>
+    {% else %}
+    <p class="empty-message">No baseline composites yet. Add one to begin.</p>
+    {% endfor %}
+  </div>
+
+  <details class="baseline-add-form">
+    <summary class="btn-baseline-add">+ Add composite</summary>
+    <form id="baseline-add-form" onsubmit="return _submitBaselineAdd(event)">
+      <label>Name (short, unique): <input name="name" required pattern="[a-zA-Z0-9_-]+"></label>
+      <label>Composite ID: <input name="composite" required placeholder="pkg.composites.foo"></label>
+      <label>Params (JSON, optional): <textarea name="params" placeholder="{}"></textarea></label>
+      <button type="submit">Add</button>
+    </form>
+  </details>
+  <div class="variants-list">
+    {% for v in (study.variants or []) %}
+    <article class="variant-row" data-variant-name="{{ v.name }}"
+             data-base-composite="{{ v.base_composite or '' }}">
+      <header class="variant-row-header">
+        <h3 class="variant-name">{{ v.name }}</h3>
+        <span class="variant-base">based on <code>{{ v.base_composite or '(none)' }}</code></span>
+        <span class="variant-overrides-count muted">{{ (v.parameter_overrides or {})|length }} override(s)</span>
+      </header>
+      {% if v.parameter_overrides %}
+      <details class="variant-overrides-detail">
+        <summary>Parameter overrides</summary>
+        <table class="variant-overrides-table">
+          <tbody>
+          {% for k, val in v.parameter_overrides.items() %}
+          <tr><td><code>{{ k }}</code></td><td><code>{{ val }}</code></td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </details>
+      {% endif %}
+      <div class="variant-row-actions">
+        <button class="btn-variant-edit" data-variant-name="{{ v.name }}">Edit params</button>
+        <button class="btn-variant-delete" data-variant-name="{{ v.name }}">Delete</button>
+        <button class="btn-variant-run" data-variant-name="{{ v.name }}">Run</button>
+      </div>
+    </article>
+    {% else %}
+    <p class="empty-message">No variants yet. Add one to perturb a baseline composite's parameters.</p>
+    {% endfor %}
+  </div>
+
+  <details class="variant-add-form-wrapper">
+    <summary class="btn-variant-new">+ New variant</summary>
+    <form id="variant-new-form" onsubmit="return _submitVariantAdd(event)">
+      <label>Name: <input name="name" required pattern="[a-zA-Z0-9_-]+"></label>
+      <label>Base composite:
+        <select name="base_composite" required onchange="_onBaseCompositeChange(this)">
+          <option value="">— pick a baseline composite —</option>
+          {% for b in (study.baseline or []) %}
+          <option value="{{ b.name }}" data-composite-id="{{ b.composite }}">{{ b.name }} ({{ b.composite }})</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div id="variant-new-params" class="param-form">
+        <p class="muted">Pick a base composite to see its parameters.</p>
+      </div>
+      <button type="submit">Save variant</button>
+    </form>
+  </details>
+
+  <!-- Hidden edit form, populated dynamically when "Edit params" is clicked -->
+  <dialog id="variant-edit-dialog">
+    <form id="variant-edit-form" onsubmit="return _submitVariantEdit(event)" method="dialog">
+      <h3>Edit parameter overrides for <code id="variant-edit-name"></code></h3>
+      <div id="variant-edit-params" class="param-form"></div>
+      <menu>
+        <button type="button" onclick="document.getElementById('variant-edit-dialog').close()">Cancel</button>
+        <button type="submit">Save</button>
+      </menu>
+    </form>
+  </dialog>
+  <div class="interventions-list">
+    {% for i in (study.interventions or []) %}
+    <article class="intervention-row" data-intervention-name="{{ i.name }}">
+      <header class="intervention-row-header">
+        <h3 class="intervention-name">{{ i.name }}</h3>
+      </header>
+      <p class="intervention-description"
+         id="intervention-description-{{ i.name }}"
+         data-editable-intervention="{{ i.name }}">{{ i.description or '' }}</p>
+      <div class="intervention-row-actions">
+        <button class="btn-intervention-delete" data-intervention-name="{{ i.name }}">Delete</button>
+      </div>
+    </article>
+    {% else %}
+    <p class="empty-message">No interventions yet. Add one to record an experimental condition.</p>
+    {% endfor %}
+  </div>
+
+  <details class="intervention-add-form-wrapper">
+    <summary class="btn-intervention-new">+ New intervention</summary>
+    <form id="intervention-new-form" onsubmit="return _submitInterventionAdd(event)">
+      <label>Name: <input name="name" required pattern="[a-zA-Z0-9_-]+"></label>
+      <label>Description: <textarea name="description" placeholder="Describe the experimental condition"></textarea></label>
+      <button type="submit">Add</button>
+    </form>
+  </details>
+  {% endif %}
+  {% if not _has_build and _is_v3 %}
+  <p class="empty-message">Nothing to compose yet.</p>
+  {% endif %}
 </section>
-{% endif %}
 
 
 {# ─── Simulations tab: what we ran (auto-derived) + simulation_set ───── #}
@@ -1137,45 +1261,6 @@
 </section>
 {% endif %}
 
-<section class="study-tab-panel" data-kind="baseline" id="panel-baseline">
-  <div class="baseline-list">
-    {% for b in (study.baseline or []) %}
-    <article class="baseline-entry" data-baseline-name="{{ b.name }}">
-      <header class="baseline-entry-header">
-        <h3 class="baseline-entry-name">{{ b.name }}</h3>
-        <code class="baseline-entry-fqn">{{ b.composite }}</code>
-      </header>
-      {% if b.params %}
-      <table class="baseline-params">
-        <thead><tr><th>Parameter</th><th>Value</th></tr></thead>
-        <tbody>
-          {% for k, v in b.params.items() %}
-          <tr><td><code>{{ k }}</code></td><td><code>{{ v }}</code></td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% endif %}
-      <div class="baseline-entry-actions">
-        <button class="btn-run-baseline" data-baseline-name="{{ b.name }}">Run</button>
-        <button class="btn-baseline-remove" data-baseline-name="{{ b.name }}">Remove</button>
-      </div>
-    </article>
-    {% else %}
-    <p class="empty-message">No baseline composites yet. Add one to begin.</p>
-    {% endfor %}
-  </div>
-
-  <details class="baseline-add-form">
-    <summary class="btn-baseline-add">+ Add composite</summary>
-    <form id="baseline-add-form" onsubmit="return _submitBaselineAdd(event)">
-      <label>Name (short, unique): <input name="name" required pattern="[a-zA-Z0-9_-]+"></label>
-      <label>Composite ID: <input name="composite" required placeholder="pkg.composites.foo"></label>
-      <label>Params (JSON, optional): <textarea name="params" placeholder="{}"></textarea></label>
-      <button type="submit">Add</button>
-    </form>
-  </details>
-</section>
-
 <section class="study-tab-panel" data-kind="observables" id="panel-observables" hidden>
   <div class="observables-section">
     <h3 class="section-title">Readouts</h3>
@@ -1195,100 +1280,6 @@
     </details>
     {% endif %}
   </div>
-</section>
-
-<section class="study-tab-panel" data-kind="variants" id="panel-variants">
-  <div class="variants-list">
-    {% for v in (study.variants or []) %}
-    <article class="variant-row" data-variant-name="{{ v.name }}"
-             data-base-composite="{{ v.base_composite or '' }}">
-      <header class="variant-row-header">
-        <h3 class="variant-name">{{ v.name }}</h3>
-        <span class="variant-base">based on <code>{{ v.base_composite or '(none)' }}</code></span>
-        <span class="variant-overrides-count muted">{{ (v.parameter_overrides or {})|length }} override(s)</span>
-      </header>
-      {% if v.parameter_overrides %}
-      <details class="variant-overrides-detail">
-        <summary>Parameter overrides</summary>
-        <table class="variant-overrides-table">
-          <tbody>
-          {% for k, val in v.parameter_overrides.items() %}
-          <tr><td><code>{{ k }}</code></td><td><code>{{ val }}</code></td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </details>
-      {% endif %}
-      <div class="variant-row-actions">
-        <button class="btn-variant-edit" data-variant-name="{{ v.name }}">Edit params</button>
-        <button class="btn-variant-delete" data-variant-name="{{ v.name }}">Delete</button>
-        <button class="btn-variant-run" data-variant-name="{{ v.name }}">Run</button>
-      </div>
-    </article>
-    {% else %}
-    <p class="empty-message">No variants yet. Add one to perturb a baseline composite's parameters.</p>
-    {% endfor %}
-  </div>
-
-  <details class="variant-add-form-wrapper">
-    <summary class="btn-variant-new">+ New variant</summary>
-    <form id="variant-new-form" onsubmit="return _submitVariantAdd(event)">
-      <label>Name: <input name="name" required pattern="[a-zA-Z0-9_-]+"></label>
-      <label>Base composite:
-        <select name="base_composite" required onchange="_onBaseCompositeChange(this)">
-          <option value="">— pick a baseline composite —</option>
-          {% for b in (study.baseline or []) %}
-          <option value="{{ b.name }}" data-composite-id="{{ b.composite }}">{{ b.name }} ({{ b.composite }})</option>
-          {% endfor %}
-        </select>
-      </label>
-      <div id="variant-new-params" class="param-form">
-        <p class="muted">Pick a base composite to see its parameters.</p>
-      </div>
-      <button type="submit">Save variant</button>
-    </form>
-  </details>
-
-  <!-- Hidden edit form, populated dynamically when "Edit params" is clicked -->
-  <dialog id="variant-edit-dialog">
-    <form id="variant-edit-form" onsubmit="return _submitVariantEdit(event)" method="dialog">
-      <h3>Edit parameter overrides for <code id="variant-edit-name"></code></h3>
-      <div id="variant-edit-params" class="param-form"></div>
-      <menu>
-        <button type="button" onclick="document.getElementById('variant-edit-dialog').close()">Cancel</button>
-        <button type="submit">Save</button>
-      </menu>
-    </form>
-  </dialog>
-</section>
-
-<section class="study-tab-panel" data-kind="interventions" id="panel-interventions">
-  <div class="interventions-list">
-    {% for i in (study.interventions or []) %}
-    <article class="intervention-row" data-intervention-name="{{ i.name }}">
-      <header class="intervention-row-header">
-        <h3 class="intervention-name">{{ i.name }}</h3>
-      </header>
-      <p class="intervention-description"
-         id="intervention-description-{{ i.name }}"
-         data-editable-intervention="{{ i.name }}">{{ i.description or '' }}</p>
-      <div class="intervention-row-actions">
-        <button class="btn-intervention-delete" data-intervention-name="{{ i.name }}">Delete</button>
-      </div>
-    </article>
-    {% else %}
-    <p class="empty-message">No interventions yet. Add one to record an experimental condition.</p>
-    {% endfor %}
-  </div>
-
-  <details class="intervention-add-form-wrapper">
-    <summary class="btn-intervention-new">+ New intervention</summary>
-    <form id="intervention-new-form" onsubmit="return _submitInterventionAdd(event)">
-      <label>Name: <input name="name" required pattern="[a-zA-Z0-9_-]+"></label>
-      <label>Description: <textarea name="description" placeholder="Describe the experimental condition"></textarea></label>
-      <button type="submit">Add</button>
-    </form>
-  </details>
 </section>
 
 <section class="study-tab-panel" data-kind="runs" id="panel-runs">
