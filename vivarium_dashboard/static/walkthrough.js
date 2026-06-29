@@ -4728,9 +4728,8 @@
       list.innerHTML = '<p class="empty-state">No investigations declared. Author one at <code>investigations/&lt;name&gt;/investigation.yaml</code>.</p>';
       return;
     }
-    // Closed/archived investigations sink to the bottom; the baseline
-    // investigation floats to the top (it's the reference the others build on).
-    // Otherwise stable (declaration) order.
+    // Closed/archived sink to the bottom; baseline floats to the top; else
+    // declaration order. The Active/Closed grouping below makes the split visual.
     var ordered = (window._isetIndex || []).map(function(it, idx) { return [it, idx]; });
     ordered.sort(function(a, b) {
       var ac = (a[0].status === 'archived' || a[0].status === 'closed') ? 1 : 0;
@@ -4741,58 +4740,106 @@
       if (ab !== bb) return ab - bb;
       return a[1] - b[1];
     });
-    list.innerHTML = ordered.map(function(pair) {
-      var iset = pair[0];
+
+    function _isetCardHtml(iset) {
       var closed = (iset.status === 'archived' || iset.status === 'closed');
       var desc = (iset.description || '').split('\n')[0].slice(0, 240);
-      // Prefer the server-computed effective_status (derived from member
-      // studies' live statuses). Fall back to the author-declared yaml
-      // status only if the server didn't send effective_status (e.g. an
-      // older backend). When the two diverge, surface the author intent
-      // as a small subtitle.
+      // Prefer server effective_status; fall back to author status. Intent
+      // divergence goes into the status-pill tooltip (not a separate line).
       var effStatus  = iset.effective_status || iset.status || 'planning';
       var authStatus = iset.status || 'planning';
       var pillClass  = effStatus.replace(/[^a-z_]/g, '_');
-      var intentLine = (authStatus && authStatus !== effStatus)
-        ? '<div class="muted" style="font-size:0.72em; margin-top:-2px; margin-bottom:6px;">intent: ' + _esc(authStatus) + '</div>'
-        : '';
+      var pillTip = (authStatus && authStatus !== effStatus)
+        ? 'effective: ' + effStatus + '  ·  intent: ' + authStatus
+        : 'status: ' + effStatus;
       var currentPill = iset.current
         ? '<span class="status-pill" style="font-size:0.72em;background:#dcfce7;color:#166534;border:1px solid #86efac">● current branch</span>'
         : '';
-      // Closed/archived: show a gray "Closed" pill INSTEAD of effective-status.
       var statusPill = closed
         ? '<span class="status-pill" style="font-size:0.78em;background:#e5e7eb;color:#4b5563;border:1px solid #d1d5db">Closed</span>'
-        : '<span class="status-pill ' + pillClass + '" style="font-size:0.78em">' + _esc(effStatus) + '</span>';
+        : '<span class="status-pill ' + pillClass + '" style="font-size:0.78em" title="' + _esc(pillTip) + '">' + _esc(effStatus) + '</span>';
       var cardStyle = 'background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;cursor:pointer;transition:box-shadow 0.1s,border-color 0.1s;' +
         (closed ? 'opacity:0.6;' : '');
-      // Close/Reopen is intentionally NOT offered from the dashboard — an
-      // investigation's lifecycle is managed via its branch/PR, not the UI.
-      // The status pill (incl. a gray "Closed") still displays above.
-      var actionBtn = '';
+      var filterStatus = (closed ? 'closed' : effStatus);
       return '<div class="investigation-set-card" onclick="_openInvestigationDetail(\'' + _esc(iset.name) + '\')" ' +
+             'title="' + _esc(iset.name) + '" ' +
+             'data-iset-title="' + _esc(String(iset.title || iset.name).toLowerCase()) + '" ' +
+             'data-iset-slug="' + _esc(String(iset.name).toLowerCase()) + '" ' +
+             'data-iset-status="' + _esc(String(filterStatus).toLowerCase()) + '" ' +
              'style="' + cardStyle + '">' +
         '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px;">' +
           '<strong style="font-size:1.05em;flex:1">' + _esc(iset.title || iset.name) + '</strong>' +
           currentPill +
           statusPill +
         '</div>' +
-        intentLine +
-        '<div class="muted" style="font-size:0.78em;font-family:monospace;margin-bottom:6px">' + _esc(iset.name) + '</div>' +
         (desc ? '<p style="margin:0 0 8px 0;font-size:0.9em;color:#475569">' + _esc(desc) + (iset.description.length > 240 ? '…' : '') + '</p>' : '') +
         '<div style="display:flex;align-items:center;gap:12px;font-size:0.85em;color:#64748b">' +
-          '<span style="flex:1"><strong>' + iset.n_studies + '</strong> stud' + (iset.n_studies === 1 ? 'y' : 'ies') +
-          ' &nbsp;·&nbsp; click to open DAG</span>' +
+          '<span style="flex:1"><strong>' + iset.n_studies + '</strong> stud' + (iset.n_studies === 1 ? 'y' : 'ies') + '</span>' +
           '<a href="#" title="Download the rendered HTML report for this investigation" ' +
             'onclick="window._vivReportFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
             'style="color:#3b82f6;text-decoration:none;white-space:nowrap">↓ report</a>' +
           '<a href="#" title="Download the runnable notebook for this investigation" ' +
             'onclick="window._vivNotebookFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
             'style="color:#3b82f6;text-decoration:none;white-space:nowrap">↓ notebook</a>' +
-          actionBtn +
         '</div>' +
       '</div>';
-    }).join('');
+    }
+
+    var GRID = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:12px;margin:6px 0 14px';
+    function _groupHtml(label, items) {
+      if (!items.length) return '';
+      return '<div class="iset-group" data-group-label="' + label + '">' +
+        '<h3 class="iset-group-head" style="font-size:0.9em;color:#475569;font-weight:700;margin:10px 0 2px;text-transform:uppercase;letter-spacing:0.04em">' +
+          label + ' <span class="iset-group-count" style="color:#94a3b8;font-weight:600">(' + items.length + ')</span></h3>' +
+        '<div class="investigations-grid" style="' + GRID + '">' +
+          items.map(_isetCardHtml).join('') +
+        '</div>' +
+      '</div>';
+    }
+
+    var active = [], closedItems = [];
+    ordered.forEach(function(pair) {
+      var iset = pair[0];
+      if (iset.status === 'archived' || iset.status === 'closed') closedItems.push(iset);
+      else active.push(iset);
+    });
+
+    list.innerHTML =
+      _groupHtml('Active', active) +
+      _groupHtml('Closed', closedItems) +
+      '<p id="investigations-empty" class="empty-state" style="display:none">No investigations match the filter.</p>';
+
+    _filterInvestigations();
   }
+
+  // Client-side filter for the landing list: matches the query against each
+  // card's title + slug + status (data-attrs), updates per-group counts, hides
+  // empty groups, and toggles the "no matches" line. No re-fetch, no re-render.
+  function _filterInvestigations() {
+    var input = document.getElementById('investigations-filter');
+    var q = ((input && input.value) || '').trim().toLowerCase();
+    var anyVisible = false;
+    document.querySelectorAll('#investigations-list .investigation-set-card').forEach(function(card) {
+      var hay = (card.getAttribute('data-iset-title') || '') + ' ' +
+                (card.getAttribute('data-iset-slug') || '') + ' ' +
+                (card.getAttribute('data-iset-status') || '');
+      var show = !q || hay.indexOf(q) !== -1;
+      card.style.display = show ? '' : 'none';
+      if (show) anyVisible = true;
+    });
+    document.querySelectorAll('#investigations-list .iset-group').forEach(function(group) {
+      var n = 0;
+      group.querySelectorAll('.investigation-set-card').forEach(function(c) {
+        if (c.style.display !== 'none') n++;
+      });
+      var countEl = group.querySelector('.iset-group-count');
+      if (countEl) countEl.textContent = '(' + n + ')';
+      group.style.display = n ? '' : 'none';
+    });
+    var empty = document.getElementById('investigations-empty');
+    if (empty) empty.style.display = anyVisible ? 'none' : '';
+  }
+  window._filterInvestigations = _filterInvestigations;
 
   // Close/Reopen an investigation: POST the new status, then reload the list.
   // Resilient — never throws; surfaces a brief inline error on the button.
