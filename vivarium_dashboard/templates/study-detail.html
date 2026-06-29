@@ -310,14 +310,6 @@
                     placeholder="Multi-sentence: what the runs + tests demonstrated.">{{ _report.conclusion or '' }}</textarea>
         </label>
       </div>
-      {# W24 — skeptical-reader report view. Opens the single-study report
-         reordered for a skeptic (audit trail → rigor → controls →
-         alternatives → limitations → open debts → verdicts/biology/viz). #}
-      <div style="margin-top:10px">
-        <button type="button" class="btn-view-skeptic action-btn"
-                style="font-size:0.85em" data-study="{{ name }}">🕵 View as skeptic</button>
-        <span class="muted small" style="margin-left:8px">opens the report reordered for a skeptical reviewer</span>
-      </div>
     </div>
 
     {# Always-render biological_summary: empty-state textarea encourages
