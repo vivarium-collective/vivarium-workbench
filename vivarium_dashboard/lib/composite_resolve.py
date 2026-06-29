@@ -99,7 +99,10 @@ def resolve_composite(
                 "wiring_status": "unavailable",
                 "notice": f"composite file could not be parsed: {e}",
             }
-    state = spec.default_state(base_dir=_artifact_base_dir(ws_root, spec))
+    try:
+        state = spec.default_state(base_dir=_artifact_base_dir(ws_root, spec))
+    except Exception:
+        state = None
     wiring_status = "ready" if state is not None else "unavailable"
     notice = None
     if wiring_status == "unavailable":

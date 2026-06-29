@@ -90,3 +90,22 @@ def test_resolve_static_no_state_notice_not_generator(tmp_path, monkeypatch):
     # If your default_state treats {} as ready, assert ready; the key check is the
     # notice (when unavailable) does NOT say "generator" for a static spec.
     assert out["kind"] == "spec"
+
+
+def test_resolve_generator_with_corrupt_artifact_degrades(tmp_path, monkeypatch):
+    from process_bigraph import composite_spec as cs
+    from vivarium_dashboard.lib import composite_resolve as cr
+    cs.clear_registry()
+    # generator whose default_state() raises (corrupt artifact)
+    spec = cs.CompositeSpec(id="m.boom", name="boom",
+                            builder=lambda core=None: {"state": {}},
+                            default_state_ref="boom.default-state.json")
+    cs.register(spec)
+    def _raise(*a, **k):
+        raise ValueError("corrupt artifact")
+    monkeypatch.setattr(spec, "default_state", _raise)
+    monkeypatch.setattr(cr, "_prime_registry", lambda: None)
+    out = cr.resolve_composite(tmp_path, "m.boom")
+    assert out is not None and out["wiring_status"] == "unavailable"
+    assert out["state"] is None
+    assert "not generated yet" in out["notice"]
