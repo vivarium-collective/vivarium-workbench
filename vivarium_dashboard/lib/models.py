@@ -1926,6 +1926,42 @@ class InvestigationRenderViz(BaseModel):
     name: Optional[str] = None
 
 
+# ---------------------------------------------------------------------------
+# SP-C: Configure & Run widget request-body models
+# ---------------------------------------------------------------------------
+
+
+class SaveRunAsVariantRequest(BaseModel):
+    """POST /api/save-run-as-variant {run_id, source_db?, study, variant_name}
+
+    Persist a completed composite run (identified by ``run_id`` in
+    ``source_db``) as a named study variant inside ``studies/<study>/study.yaml``.
+    ``source_db`` defaults to ``<workspace>/.pbg/composite-runs.db`` when omitted.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    run_id: str = ""
+    source_db: Optional[str] = None
+    study: str = ""
+    variant_name: str = ""
+
+
+class RunDeleteRequest(BaseModel):
+    """POST /api/run-delete {run_id, db_path?}
+
+    Delete a composite run row from the SQLite store and remove its artifact
+    directory (``<workspace>/.pbg/runs/<run_id>/``) if present.
+    ``db_path`` defaults to ``<workspace>/.pbg/composite-runs.db`` when omitted.
+    Only ``run_id`` is required (400 if missing).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    run_id: str = ""
+    db_path: str = ""
+
+
 class JobStatusPayload(BaseModel):
     """200-path payload for the in-memory job-status GET routes.
 

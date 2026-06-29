@@ -34,7 +34,10 @@ def save_run_as_variant(workspace, *, run_id, source_db, study, variant_name):
     composite = meta.get("spec_id")
     config = meta.get("params") or {}
     spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
-    variants = spec.setdefault("variants", [])
+    if spec.get("schema_version") == 4 and isinstance(spec.get("conditions"), dict):
+        variants = spec["conditions"].setdefault("variants", [])
+    else:
+        variants = spec.setdefault("variants", [])
     entry = {"name": variant_name, "composite": composite, "parameter_overrides": config}
     for i, v in enumerate(variants):
         if isinstance(v, dict) and v.get("name") == variant_name:

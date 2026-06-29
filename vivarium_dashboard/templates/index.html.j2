@@ -1314,6 +1314,9 @@ window.addEventListener('pageshow', function (e) {
       <button id="save-as-study-btn" class="action-btn" onclick="_ceOpenSaveAsStudyModal()" style="background:#16a34a;border-color:#16a34a">Save as Study</button>
     </div>
 
+    <!-- Configure & Run widget (SP-C) — mounts when a composite is resolved -->
+    <div id="ce-configure-run"></div>
+
   </div>
 </section>
 
@@ -1659,6 +1662,24 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
      for CLI tooling. -->
 <script src="assets/investigation-switcher.js"></script>
 <script src="assets/branch-source.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
+<script src="/configure-run.js"></script>
+<script>
+// Configure & Run widget integration for Composite Explorer.
+// Wraps _initCompositeExplorer (defined in walkthrough.js) to mount the widget
+// once a composite is resolved and the explorer page is shown.
+(function() {
+  var _origInit = window._initCompositeExplorer;
+  window._initCompositeExplorer = function() {
+    if (_origInit) _origInit.apply(this, arguments);
+    var params = new URLSearchParams(window.location.search);
+    var id = params.get('id');
+    var el = document.getElementById("ce-configure-run");
+    if (el && window.ConfigureRun && id) {
+      ConfigureRun.mount(el, { composite: id, target: "adhoc" });
+    }
+  };
+})();
+</script>
 <script>
 // Initialize drop zones once walkthrough.js is loaded.
 document.addEventListener("DOMContentLoaded", function() {

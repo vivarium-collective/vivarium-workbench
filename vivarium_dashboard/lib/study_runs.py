@@ -93,6 +93,13 @@ def run_study_baseline(ws_root, body):
     params_n_steps = params.pop("n_steps", None)
     generator_overrides = params
 
+    # I1: overlay request-body overrides on top of baseline params so the
+    # form config (Configure & Run widget) is honored end-to-end.
+    generator_overrides.update(body.get("overrides") or {})
+    # Also honor body steps for the run_id and full_params.
+    if body.get("steps"):
+        params_n_steps = int(body["steps"])
+
     # Compute full_params / db_file / label early so the remote-build guard
     # can fire before the expensive workspace.yaml read + state resolution.
     full_params = dict(generator_overrides)
