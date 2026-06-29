@@ -109,7 +109,7 @@ def _apply_add_viz(
         raise RuntimeError(f"visualization '{viz_name}' already exists in spec")
     vizzes.append({"name": viz_name, "address": address, "config": viz_config})
     spec["visualizations"] = vizzes
-    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

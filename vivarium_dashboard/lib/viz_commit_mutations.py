@@ -231,7 +231,7 @@ def visualization_commit_batch(ws_root: Path, body: dict[str, Any]) -> "tuple[di
     # Ensure __init__.py exists
     init = target_dir / "__init__.py"
     if not init.exists():
-        init.write_text("")
+        init.write_text("", encoding="utf-8")
     for n in names:
         src = staged_dir / f"{n}.py"
         dest = target_dir / f"{n}.py"

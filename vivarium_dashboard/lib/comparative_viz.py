@@ -397,5 +397,5 @@ def render_comparative_time_series(
         + ', {responsive: true, displayModeBar: false});'
         + '</script></body></html>'
     )
-    output_path.write_text(html)
+    output_path.write_text(html, encoding="utf-8")
     return output_path

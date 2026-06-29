@@ -38,7 +38,7 @@ def _study_lock(workspace: Path, slug: str):
     lockfile = lockdir / f"{slug}.lock"
     if lockfile.exists():
         raise StudyTestsConcurrentError(f"tests already running for study {slug!r}")
-    lockfile.write_text(str(os.getpid()))
+    lockfile.write_text(str(os.getpid()), encoding="utf-8")
     try:
         yield lockfile
     finally:
@@ -238,5 +238,5 @@ def _write_last_results(spec_path: Path, result: StudyTestsResult) -> None:
     else:
         spec["last_test_run"] = meta
     tmp = spec_path.with_suffix(spec_path.suffix + ".tmp")
-    tmp.write_text(yaml.safe_dump(spec, sort_keys=False))
+    tmp.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     os.replace(tmp, spec_path)

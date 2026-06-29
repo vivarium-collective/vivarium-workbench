@@ -97,7 +97,7 @@ def set_investigation_observables(ws_root: Path, body: dict) -> tuple[dict, int]
         spec["observables"] = [{"path": []}]
     else:
         spec["observables"] = [{"path": list(p)} for p in paths if p]
-    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True}, 200
 
 
@@ -119,7 +119,7 @@ def set_investigation_conclusions(ws_root: Path, body: dict) -> tuple[dict, int]
         return {"error": "investigation not found"}, 404
     spec: dict = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
     spec["conclusions"] = markdown
-    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True}, 200
 
 
@@ -148,7 +148,7 @@ def set_investigation_overview(ws_root: Path, body: dict) -> tuple[dict, int]:
     for key in ("question", "hypothesis", "status", "topic"):
         if key in fields:
             spec[key] = fields[key]
-    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True}, 200
 
 
@@ -220,7 +220,7 @@ def set_study_objective(ws_root: Path, body: dict) -> tuple[dict, int]:
         return {"error": "study not found"}, 404
     spec: dict = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     spec["objective"] = text
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True}, 200
 
 
@@ -371,7 +371,7 @@ def set_study_expert_input(ws_root: Path, body: dict) -> tuple[dict, int]:
     try:
         spec_path.write_text(
             yaml.safe_dump(spec, sort_keys=False, allow_unicode=True, width=100)
-        )
+        , encoding="utf-8")
     except OSError as e:
         return {"error": f"write failed: {e}"}, 500
 

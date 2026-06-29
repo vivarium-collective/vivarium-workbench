@@ -4459,7 +4459,7 @@ class Handler(BaseHTTPRequestHandler):
         reports_dir = workspace_paths().reports
         reports_dir.mkdir(parents=True, exist_ok=True)
         out_path = reports_dir / filename
-        out_path.write_text(html)
+        out_path.write_text(html, encoding="utf-8")
 
         # Stage + commit. Allow the commit to fail cleanly when the file
         # hasn't actually changed (caller still gets a success response with
@@ -5755,7 +5755,7 @@ class Handler(BaseHTTPRequestHandler):
             import shutil as _shutil
             inv_dir.mkdir(parents=True, exist_ok=False)
             (inv_dir / "data").mkdir()
-            (inv_dir / "data" / ".keep").write_text("")
+            (inv_dir / "data" / ".keep").write_text("", encoding="utf-8")
 
             if is_generator and baseline_name:
                 # v4-shape scaffold: dotted ref lives in `baseline:` (no
@@ -5773,7 +5773,7 @@ class Handler(BaseHTTPRequestHandler):
                     composite=source,
                     baseline_name=baseline_name,
                 )
-                (inv_dir / "study.yaml").write_text(body_yaml)
+                (inv_dir / "study.yaml").write_text(body_yaml, encoding="utf-8")
             elif source_path and baseline_name:
                 # Legacy v2-shape spec: seed with a baseline composite entry.
                 composites_dir = inv_dir / "composites"
@@ -5803,7 +5803,7 @@ class Handler(BaseHTTPRequestHandler):
                     "visualizations": [],
                     "status": "planned",
                 }
-                (inv_dir / "spec.yaml").write_text(yaml.safe_dump(spec, sort_keys=False))
+                (inv_dir / "spec.yaml").write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
             else:
                 # Blank study — no composite yet
                 stub = (
@@ -5820,7 +5820,7 @@ class Handler(BaseHTTPRequestHandler):
                     f"\n"
                     f"status: planned\n"
                 )
-                (inv_dir / "spec.yaml").write_text(stub)
+                (inv_dir / "spec.yaml").write_text(stub, encoding="utf-8")
 
         commit_msg = f"feat(investigations): scaffold {name}"
         resp, code = _active_branch_action(commit_msg, action)
@@ -6641,7 +6641,7 @@ class Handler(BaseHTTPRequestHandler):
                             html_str = viz_payload
                         out_path = viz_dir / f"{safe}.html"
                         try:
-                            out_path.write_text(html_str if isinstance(html_str, str) else str(html_str))
+                            out_path.write_text(html_str if isinstance(html_str, str) else str(html_str), encoding="utf-8")
                             rel_path = out_path.relative_to(WORKSPACE)
                             viz_html_resp[safe] = {
                                 "html": html_str if isinstance(html_str, str) else "",
@@ -7752,7 +7752,7 @@ class Handler(BaseHTTPRequestHandler):
                 doc_path.unlink()
             spec['composites'] = [c for c in (spec.get('composites') or [])
                                    if c.get('name') != comp_name]
-            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
 
         try:
             return self._json(*_commit_or_run(commit_msg, do_action))
@@ -7877,7 +7877,7 @@ class Handler(BaseHTTPRequestHandler):
             data["comparisons"] = [
                 c for c in (data.get("comparisons") or []) if c.get("name") != cmp_name
             ]
-            spec_path.write_text(yaml.safe_dump(data, sort_keys=False))
+            spec_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
         try:
             return self._json(*_commit_or_run(commit_msg, do_action))
@@ -8022,7 +8022,7 @@ class Handler(BaseHTTPRequestHandler):
             data["groups"] = [
                 g for g in (data.get("groups") or []) if g.get("name") != grp_name
             ]
-            spec_path.write_text(yaml.safe_dump(data, sort_keys=False))
+            spec_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
         try:
             return self._json(*_commit_or_run(commit_msg, do_action))
@@ -8180,7 +8180,7 @@ class Handler(BaseHTTPRequestHandler):
             "emit_paths": emit_paths,
             "db_file": db_file,
             "log_path": log_rel,
-        }))
+        }), encoding="utf-8")
 
         conn = cr.connect(db_file)
         try:
@@ -8612,7 +8612,7 @@ class Handler(BaseHTTPRequestHandler):
                     log_dir.mkdir(parents=True, exist_ok=True)
                     (log_dir / "catalog-install.log").write_text(
                         f"pyproject edit failed for {name}: {e}\n"
-                    )
+                    , encoding="utf-8")
 
             else:
                 # ---- Git-submodule fallback path ----
@@ -8692,7 +8692,7 @@ class Handler(BaseHTTPRequestHandler):
                     log_dir.mkdir(parents=True, exist_ok=True)
                     (log_dir / "catalog-install.log").write_text(
                         f"pyproject edit failed for {name}: {e}\n"
-                    )
+                    , encoding="utf-8")
 
         commit_msg = f"feat(catalog): install {name}"
         # _commit_or_run falls back to running the install action directly
@@ -9167,7 +9167,7 @@ class Handler(BaseHTTPRequestHandler):
                 "simulator_id": sim_id, "repo": entry.get("repo", ""),
                 "branch": entry.get("branch", ""), "commit": entry.get("commit", ""),
                 "repo_url": entry.get("repo_url", ""),
-            }))
+            }), encoding="utf-8")
         except Exception:
             pass  # provenance stamp is best-effort, never block the switch
         _switch_active_workspace(cache_dir)
@@ -9477,7 +9477,7 @@ def serve(workspace: Path, port: int, host: str = "127.0.0.1") -> int:
         "pid": os.getpid(),
         "screen_dir": str(info_dir / "content"),
         "state_dir": str(info_dir / "state"),
-    }))
+    }), encoding="utf-8")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

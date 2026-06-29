@@ -119,9 +119,9 @@ def save_cache(ws_root: Path, cache: dict[str, EnrichmentRecord]) -> None:
     # the workspace's root .gitignore doesn't know about us.
     gi = p.parent / ".gitignore"
     if not gi.exists():
-        gi.write_text(f"{_CACHE_FILENAME}\n")
+        gi.write_text(f"{_CACHE_FILENAME}\n", encoding="utf-8")
     serializable = {k: asdict(v) for k, v in cache.items()}
-    p.write_text(json.dumps(serializable, indent=2, sort_keys=True) + "\n")
+    p.write_text(json.dumps(serializable, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def enrich_entries(entries: list[dict], cache: dict[str, EnrichmentRecord]) -> list[dict]:

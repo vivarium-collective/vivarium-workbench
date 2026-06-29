@@ -66,7 +66,7 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1") -> int:
             "pid": os.getpid(),
             "screen_dir": str(info_dir / "content"),
             "state_dir": str(info_dir / "state"),
-        }))
+        }), encoding="utf-8")
     except Exception as e:  # noqa: BLE001
         print(f"warning: writing server-info failed: {e}", file=sys.stderr)
 

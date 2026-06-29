@@ -219,7 +219,7 @@ def _apply_reference_pdf(
             if bib_key not in existing_claims[claim_id]:
                 existing_claims[claim_id].append(bib_key)
         claims_file.parent.mkdir(parents=True, exist_ok=True)
-        claims_file.write_text(yaml.safe_dump(existing_claims, sort_keys=False))
+        claims_file.write_text(yaml.safe_dump(existing_claims, sort_keys=False), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +337,7 @@ def _apply_reference(
             if bkey not in existing_claims[claim_id]:
                 existing_claims[claim_id].append(bkey)
         claims_file.parent.mkdir(parents=True, exist_ok=True)
-        claims_file.write_text(yaml.safe_dump(existing_claims, sort_keys=False))
+        claims_file.write_text(yaml.safe_dump(existing_claims, sort_keys=False), encoding="utf-8")
 
     if pdf_b64:
         pdf_dest_rel = f"references/papers/{bibkey}.pdf"

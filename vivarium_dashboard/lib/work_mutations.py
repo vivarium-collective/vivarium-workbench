@@ -175,7 +175,7 @@ def work_attach_report(ws_root: Path, body: dict | None) -> tuple[dict, int]:
     reports_dir = WorkspacePaths.load(ws_root).reports
     reports_dir.mkdir(parents=True, exist_ok=True)
     out_path = reports_dir / filename
-    out_path.write_text(html)
+    out_path.write_text(html, encoding="utf-8")
 
     # Stage + commit. Allow the commit to fail cleanly when the file
     # hasn't actually changed (caller still gets a success response with

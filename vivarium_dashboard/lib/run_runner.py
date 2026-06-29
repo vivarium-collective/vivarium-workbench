@@ -179,7 +179,7 @@ def _render_viz(composite, run_dir: Path, *,
             traceback.print_exc()
 
     try:
-        (run_dir / "viz.json").write_text(json.dumps(viz_html, default=str))
+        (run_dir / "viz.json").write_text(json.dumps(viz_html, default=str), encoding="utf-8")
     except Exception:
         traceback.print_exc()
 

@@ -102,7 +102,7 @@ def study_create(ws_root: Path, body: dict) -> "tuple[dict, int]":
         import shutil as _shutil
         inv_dir.mkdir(parents=True, exist_ok=False)
         (inv_dir / "data").mkdir()
-        (inv_dir / "data" / ".keep").write_text("")
+        (inv_dir / "data" / ".keep").write_text("", encoding="utf-8")
 
         if is_generator and baseline_name:
             # v4-shape scaffold: dotted ref lives in `baseline:` (no
@@ -120,7 +120,7 @@ def study_create(ws_root: Path, body: dict) -> "tuple[dict, int]":
                 composite=source,
                 baseline_name=baseline_name,
             )
-            (inv_dir / "study.yaml").write_text(body_yaml)
+            (inv_dir / "study.yaml").write_text(body_yaml, encoding="utf-8")
         elif source_path and baseline_name:
             # Legacy v2-shape spec: seed with a baseline composite entry.
             composites_dir = inv_dir / "composites"
@@ -150,7 +150,7 @@ def study_create(ws_root: Path, body: dict) -> "tuple[dict, int]":
                 "visualizations": [],
                 "status": "planned",
             }
-            (inv_dir / "spec.yaml").write_text(yaml.safe_dump(spec, sort_keys=False))
+            (inv_dir / "spec.yaml").write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
         else:
             # Blank study — no composite yet
             stub = (
@@ -167,7 +167,7 @@ def study_create(ws_root: Path, body: dict) -> "tuple[dict, int]":
                 f"\n"
                 f"status: planned\n"
             )
-            (inv_dir / "spec.yaml").write_text(stub)
+            (inv_dir / "spec.yaml").write_text(stub, encoding="utf-8")
 
     # Deferred commit: the live handler wraps ``action`` in
     # ``_active_branch_action(commit_msg, action)`` (commit-on-active-branch).

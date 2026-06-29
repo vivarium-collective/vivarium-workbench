@@ -263,7 +263,7 @@ def study_rename(ws_root: Path, body: dict) -> "tuple[dict, int]":
     sf = dst / "study.yaml"
     spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     spec["name"] = new_name
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True, "name": new_name}, 200
 
 
@@ -350,7 +350,7 @@ def study_create_from_run(ws_root: Path, body: dict) -> "tuple[dict, int]":
             "conclusion": None,
             "parent_studies": [],
         }
-        (tmp_path / "study.yaml").write_text(yaml.safe_dump(spec, sort_keys=False))
+        (tmp_path / "study.yaml").write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
 
         # Atomic rename: tmp/build → studies/<name>.
         tmp_path.rename(dst)

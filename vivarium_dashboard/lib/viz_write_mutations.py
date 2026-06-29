@@ -128,7 +128,7 @@ if __name__ == "__main__":
     sys.stdout.write(_demo())
 ```
 """
-    req_path.write_text(content)
+    req_path.write_text(content, encoding="utf-8")
 
     return {
         "ok": True,
@@ -262,7 +262,7 @@ def visualization_generate(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, 
     req_dir = wp.pbg / "viz-requests"
     req_dir.mkdir(parents=True, exist_ok=True)
     req_path = req_dir / f"{name}.md"
-    req_path.write_text(body_md)
+    req_path.write_text(body_md, encoding="utf-8")
     return {
         "ok": True,
         "request_path": str(req_path),

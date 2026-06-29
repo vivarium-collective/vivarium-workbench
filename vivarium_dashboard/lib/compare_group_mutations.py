@@ -92,7 +92,7 @@ def comparison_add(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
         "observables": list(observables),
     })
     spec["comparisons"] = cmps
-    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True}, 200
 
 
@@ -135,7 +135,7 @@ def comparison_update(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]"
         if key in fields:
             cmps[idx][key] = fields[key]
     spec["comparisons"] = cmps
-    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True}, 200
 
 
@@ -195,7 +195,7 @@ def group_add(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
         "variants": list(variants),
     })
     spec["groups"] = grps
-    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True}, 200
 
 
@@ -256,5 +256,5 @@ def group_update(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
         if key in fields:
             grps[idx][key] = fields[key]
     spec["groups"] = grps
-    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True}, 200

@@ -110,7 +110,7 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
         "emit_paths": emit_paths,
         "db_file": db_file,
         "log_path": log_rel,
-    }))
+    }), encoding="utf-8")
 
     conn = cr.connect(db_file)
     try:

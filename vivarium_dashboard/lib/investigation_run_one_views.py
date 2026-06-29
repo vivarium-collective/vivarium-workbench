@@ -235,7 +235,7 @@ def investigation_run_one(ws_root: Path, body: dict) -> tuple[dict, int]:
                         html_str = viz_payload
                     out_path = viz_dir / f"{safe}.html"
                     try:
-                        out_path.write_text(html_str if isinstance(html_str, str) else str(html_str))
+                        out_path.write_text(html_str if isinstance(html_str, str) else str(html_str), encoding="utf-8")
                         rel_path = out_path.relative_to(ws_root)
                         viz_html_resp[safe] = {
                             "html": html_str if isinstance(html_str, str) else "",

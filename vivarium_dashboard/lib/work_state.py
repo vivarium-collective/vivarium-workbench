@@ -35,7 +35,7 @@ def load_state() -> dict:
 def save_state(state: dict) -> None:
     p = _state_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(state, indent=2) + "\n")
+    p.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
 
 
 def clear_state() -> None:

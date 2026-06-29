@@ -1492,7 +1492,7 @@ def update_spec_status(ws_root: Path, name: str, *, status: str,
     spec["status"] = status
     if last_run is not None:
         spec["last_run"] = last_run
-    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
 
 
 def _lock_path(ws_root: Path, name: str) -> Path:
@@ -1805,6 +1805,6 @@ def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
                 f'<code>{viz_spec.get("name", "?")}</code>: '
                 f'<code>{type(e).__name__}: {e}</code></p>'
             )
-        target.write_text(html)
+        target.write_text(html, encoding="utf-8")
         paths.append(target)
     return paths

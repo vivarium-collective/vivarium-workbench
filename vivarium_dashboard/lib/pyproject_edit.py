@@ -96,7 +96,7 @@ def add_dependency(pyproject_path: Path, package: str, *, version_spec: str | No
             new_body = body.rstrip() + f',\n    "{new_dep}",\n'
         text = text[:body_start] + new_body + text[body_end:]
 
-    pyproject_path.write_text(text)
+    pyproject_path.write_text(text, encoding="utf-8")
     return True
 
 
@@ -135,7 +135,7 @@ def remove_dependency(pyproject_path: Path, package: str) -> bool:
         return False
 
     text = text[:body_start] + new_body + text[body_end:]
-    pyproject_path.write_text(text)
+    pyproject_path.write_text(text, encoding="utf-8")
     return True
 
 
@@ -163,7 +163,7 @@ def remove_uv_source(pyproject_path: Path, package: str) -> bool:
     if n_subs == 0:
         return False
 
-    pyproject_path.write_text(new_text)
+    pyproject_path.write_text(new_text, encoding="utf-8")
     return True
 
 
@@ -219,5 +219,5 @@ def add_uv_source(
             f"{package} = {entry}\n"
         )
 
-    pyproject_path.write_text(text)
+    pyproject_path.write_text(text, encoding="utf-8")
     return True
