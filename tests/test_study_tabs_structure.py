@@ -32,3 +32,11 @@ def test_panels_unchanged_all_eleven_present():
 def test_deep_link_onclicks_preserved():
     assert "_setStudyTab('tests')" in HTML or "_setStudyTab(\\'tests\\'" in HTML
     assert "_setStudyTab('conclusions')" in HTML or "_setStudyTab(\\'conclusions\\'" in HTML
+
+
+def test_js_has_pillar_switcher():
+    js = (ROOT / "vivarium_dashboard/static/study-detail.js").read_text()
+    assert "function _setStudyPillar" in js
+    assert "window._setStudyPillar" in js
+    assert "dataset.pillar" in js or "data-pillar" in js
+    assert "study-pillar" in js          # toggles the pillar buttons
