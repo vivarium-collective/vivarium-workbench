@@ -27,6 +27,7 @@ from typing import Optional
 import yaml
 
 from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_dashboard.lib import study_derivations as _D
 
 
 # ---------------------------------------------------------------------------
@@ -422,127 +423,6 @@ def _render_viz_embeds(viz_entries: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Derivation — when a study has no authored ``report:`` block, build the
-# standard report fields from the study's REAL content (gate evaluator, run
-# outcomes, findings, objective). A MINIMAL but valid study then still renders
-# the standard report structure instead of a near-empty page.
-# ---------------------------------------------------------------------------
-
-_GATE_TO_VERDICT = {
-    "passed": "passing", "failed": "failing-bio",
-    "needs_calibration": "calibrating", "blocked": "blocked",
-    "not_started": "not-started",
-}
-
-
-def _derive_verdict(spec: dict) -> str:
-    ge = (spec.get("pipeline_gate") or {}).get("gate_evaluator") or {}
-    return _GATE_TO_VERDICT.get(ge.get("result") or spec.get("gate_status"), "")
-
-
-def _latest_outcomes(spec: dict) -> dict:
-    for r in reversed(spec.get("runs") or []):
-        if isinstance(r, dict) and r.get("outcomes"):
-            return r["outcomes"]
-    return {}
-
-
-def _derive_key_metrics(spec: dict) -> list[dict]:
-    """Behavior-test outcomes as metric chips (PASS/FAIL + the observed value)."""
-    metrics = []
-    for name, o in _latest_outcomes(spec).items():
-        if not isinstance(o, dict):
-            continue
-        res = str(o.get("result", "")).upper()
-        observed = o.get("observed")
-        metrics.append({
-            "label": name,
-            "value": observed if observed is not None else res,
-            "status": "pass" if res == "PASS" else ("fail" if res == "FAIL" else "warn"),
-        })
-    return metrics
-
-
-def _derive_insight(spec: dict) -> str:
-    """Headline insight: the first finding's statement/summary."""
-    for f in (spec.get("findings") or []):
-        if isinstance(f, dict):
-            s = f.get("statement") or f.get("summary")
-            if s:
-                return s
-    return ""
-
-
-# ---------------------------------------------------------------------------
-# C2 — derived 3-track conclusion verdicts.
-# The `result` of each track is COMPUTED (read-only) from canonical fields;
-# the `basis` free-text is author/agent-supplied. These three rules are kept
-# IDENTICAL in static/walkthrough.js (_deriveConclusionVerdicts) and
-# static/study-detail.js so every surface shows the same badge.
-# ---------------------------------------------------------------------------
-
-_GATE_RESULT_NORM = {
-    "pass": "PASS", "passed": "PASS", "ok": "PASS",
-    "fail": "FAIL", "failed": "FAIL",
-    "partial": "PARTIAL", "mixed": "PARTIAL", "needs_calibration": "PARTIAL",
-}
-
-_RUN_ERRORED = {"error", "errored", "failed", "crashed", "fail"}
-_RUN_COMPLETED = {"completed", "complete", "success", "succeeded", "ok", "done", "finished"}
-
-
-def _norm_gate_result(val) -> str:
-    return _GATE_RESULT_NORM.get(str(val or "").strip().lower(), "PENDING")
-
-
-def _derive_conclusion_verdicts(spec: dict) -> dict:
-    """Compute the three verdict-track results from canonical fields.
-
-    Rules (canonical — mirrored in walkthrough.js + study-detail.js):
-      * ``biological_validation``   ← ``pipeline_gate.gate_evaluator.result``
-      * ``regression_compatibility``← PASS if all runs completed without error,
-        FAIL if any errored, PARTIAL if mixed/unknown, PENDING if no runs.
-      * ``explanatory_gain``        ← PASS if >=1 finding has
-        ``tier=='interpretation'`` (or any ``mechanism_origin`` set);
-        PARTIAL if findings but none qualify; GAP if there are no findings.
-    The authored ``basis`` free-text is carried through per track.
-    """
-    authored = spec.get("conclusion_verdicts") or {}
-
-    ge = (spec.get("pipeline_gate") or {}).get("gate_evaluator") or {}
-    bio = _norm_gate_result(ge.get("result") or spec.get("gate_status"))
-
-    runs = [r for r in (spec.get("runs") or []) if isinstance(r, dict)]
-    if not runs:
-        reg = "PENDING"
-    else:
-        statuses = [str(r.get("status", "")).strip().lower() for r in runs]
-        if any(s in _RUN_ERRORED for s in statuses):
-            reg = "FAIL"
-        elif all(s in _RUN_COMPLETED for s in statuses):
-            reg = "PASS"
-        else:
-            reg = "PARTIAL"
-
-    findings = [f for f in (spec.get("findings") or []) if isinstance(f, dict)]
-    if not findings:
-        exp = "GAP"
-    elif any((f.get("tier") == "interpretation") or f.get("mechanism_origin") for f in findings):
-        exp = "PASS"
-    else:
-        exp = "PARTIAL"
-
-    def _basis(track):
-        t = authored.get(track)
-        return (t.get("basis", "") if isinstance(t, dict) else "")
-
-    return {
-        "biological_validation":    {"result": bio, "basis": _basis("biological_validation")},
-        "regression_compatibility": {"result": reg, "basis": _basis("regression_compatibility")},
-        "explanatory_gain":         {"result": exp, "basis": _basis("explanatory_gain")},
-    }
-
-
 _TRACK_COLORS = {
     "PASS": ("#dcfce7", "#166534"),
     "PARTIAL": ("#fef3c7", "#92400e"),
@@ -554,7 +434,7 @@ _TRACK_COLORS = {
 
 def _render_conclusion_verdicts(spec: dict) -> str:
     """Render the derived 3-track verdict block (read-only computed badges)."""
-    cv = _derive_conclusion_verdicts(spec)
+    cv = _D.conclusion_verdicts(spec)
     tracks = [
         ("biological_validation", "Biological validation", "from gate evaluator"),
         ("regression_compatibility", "Regression compatibility", "from run status"),
@@ -1970,15 +1850,15 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
     # Authored ``report:`` fields win; absent ones are DERIVED from real study
     # content so minimal studies still render the standard structure.
     title = rep.get("title") or study_spec.get("title") or study_spec.get("name", "study")
-    verdict = rep.get("verdict") or _derive_verdict(study_spec)
+    verdict = rep.get("verdict") or _D.verdict(study_spec)
     confidence = rep.get("confidence") or ""
     evidence_quality = rep.get("evidence_quality") or ""
     objective = rep.get("objective") or study_spec.get("objective") or ""
     conclusion = rep.get("conclusion") or ""
-    main_insight = rep.get("main_insight") or _derive_insight(study_spec)
+    main_insight = rep.get("main_insight") or _D.insight(study_spec)
     caveat = rep.get("caveat") or ""
     lit_match = rep.get("lit_match") or ""
-    key_metrics = rep.get("key_metrics") or _derive_key_metrics(study_spec)
+    key_metrics = rep.get("key_metrics") or _D.key_metrics(study_spec)
 
     badge = _render_verdict_badge(verdict)
     study_type_badge = _render_study_type_badge(study_spec)   # critique #10
