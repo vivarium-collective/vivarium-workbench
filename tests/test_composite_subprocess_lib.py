@@ -319,6 +319,145 @@ def test_run_duplicate_run_id_returns_500(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# v2ecoli applicability gate (review CRITICAL 2)
+#
+# Task 6 flipped the GLOBAL default emitter to "xarray". The xarray study-run
+# write path in the child script is wired ONLY for v2ecoli (its multigen loop in
+# v2ecoli.library.xarray_run); the generic flat-Step xarray study-run loop is the
+# deferred Task 3. So a study run on a NON-v2ecoli workspace whose default
+# resolves to "xarray" must NOT hit the v2ecoli import — it must fall back to the
+# single-generation sqlite path and SUCCEED. These tests lock that seam (it had
+# no coverage: the e2e tests exercise run_with_emitter directly, never
+# composite_subprocess).
+# ---------------------------------------------------------------------------
+
+# A minimal, real, registered @composite_generator workspace package. Imported in
+# the parent (so the parent takes the generator path) and `from genpkg.core import
+# build_core`'d in the child (which registers the spec + Counter in the child's
+# core). No v2ecoli anywhere.
+_GENPKG_CORE_SRC = '''
+from bigraph_schema import allocate_core
+from process_bigraph.composite import Process
+from pbg_superpowers.composite_generator import composite_generator
+
+
+class Counter(Process):
+    config_schema = {}
+    def inputs(self): return {"value": "float"}
+    def outputs(self): return {"value": "float"}
+    def update(self, state, interval): return {"value": 1.0}
+
+
+def build_core():
+    core = allocate_core()
+    core.register_link("Counter", Counter)
+    return core
+
+
+@composite_generator(name="counter-seam", parameters={})
+def make_counter(core=None):
+    return {
+        "counter": {"_type": "process", "address": "local:Counter", "config": {},
+                    "inputs": {"value": ["counter_store", "value"]},
+                    "outputs": {"value": ["counter_store", "value"]},
+                    "interval": 1.0},
+        "counter_store": {"value": 0.0},
+    }
+'''
+
+
+def _make_genpkg_ws(tmp_path, *, default_emitter="xarray"):
+    """A non-v2ecoli workspace whose runtime.default_emitter resolves to xarray,
+    carrying a real registered composite generator (``genpkg``)."""
+    ws = tmp_path / "ws"
+    (ws / "genpkg").mkdir(parents=True, exist_ok=True)
+    (ws / "genpkg" / "__init__.py").write_text("", encoding="utf-8")
+    (ws / "genpkg" / "core.py").write_text(_GENPKG_CORE_SRC, encoding="utf-8")
+    import yaml
+    (ws / "workspace.yaml").write_text(
+        yaml.safe_dump({"runtime": {"default_emitter": default_emitter}}),
+        encoding="utf-8")
+    return ws
+
+
+def _register_genpkg(ws):
+    """Import the real generator package in ws into the PARENT so the parent
+    takes the generator path; return (spec_id, cleanup)."""
+    sys.path.insert(0, str(ws))
+    import genpkg.core  # noqa: F401
+    spec_id = next(k for k in cg._REGISTRY if k.endswith("counter-seam"))
+
+    def _cleanup():
+        try:
+            sys.path.remove(str(ws))
+        except ValueError:
+            pass
+        sys.modules.pop("genpkg.core", None)
+        sys.modules.pop("genpkg", None)
+    return spec_id, _cleanup
+
+
+def test_xarray_default_child_script_gates_on_v2ecoli(tmp_path, monkeypatch):
+    """For an xarray-default workspace the generated child script must gate the
+    v2ecoli xarray (and multigen-sqlite) branches on v2ecoli being importable —
+    NOT on default_emitter alone — so a non-v2ecoli workspace can fall back."""
+    ws = _make_genpkg_ws(tmp_path, default_emitter="xarray")
+    db = ws / "runs.db"
+    spec_id, _cleanup = _register_genpkg(ws)
+    fake = FakeRun(stdout=_ok_stdout())
+    monkeypatch.setattr(cs.subprocess, "run", fake)
+    try:
+        cs.run_composite_subprocess(
+            ws, pkg="genpkg", state={}, steps=4, db_file=str(db),
+            run_id="g1", spec_id=spec_id, label="g")
+    finally:
+        _cleanup()
+
+    script = fake.script
+    # The xarray decision is gated on v2ecoli importability, not just the name.
+    assert "import v2ecoli as _v2ecoli" in script
+    assert "_payload.get('default_emitter') == 'xarray' and _v2ecoli_available" in script
+    # The defensive submodule-import guard is present.
+    assert "from v2ecoli.library.xarray_run import" in script
+    # The multigen-sqlite branch (also v2ecoli-only) is gated too.
+    assert "_mg > 1 and _v2ecoli_available" in script
+
+
+def test_xarray_default_nonv2ecoli_run_falls_back_to_sqlite(tmp_path, monkeypatch):
+    """The real seam: a non-v2ecoli, xarray-default workspace study run actually
+    executes (no subprocess mock) and resolves to the sqlite path — it does not
+    raise and does not require v2ecoli. Pre-fix this hit an unconditional
+    ``from v2ecoli.library.xarray_run import ...`` → ImportError → 502."""
+    import importlib.util
+    if importlib.util.find_spec("v2ecoli") is not None:
+        pytest.skip("v2ecoli is importable here; this test covers its ABSENCE")
+
+    ws = _make_genpkg_ws(tmp_path, default_emitter="xarray")
+    db = ws / "runs.db"
+    spec_id, _cleanup = _register_genpkg(ws)
+    try:
+        # Default emitter genuinely resolves to xarray for this workspace (so the
+        # test is exercising the regressing path, not a sqlite shortcut).
+        from vivarium_dashboard.lib import emitters as _em
+        assert _em.default_emitter({"runtime": {"default_emitter": "xarray"}}, None) == "xarray"
+
+        resp, code = cs.run_composite_subprocess(
+            ws, pkg="genpkg", state={}, steps=4, db_file=str(db),
+            run_id="seam1", spec_id=spec_id, label="seam",
+            emit_paths=["counter_store"])
+    finally:
+        _cleanup()
+
+    # A generic study run SUCCEEDS (writing sqlite), it does not error.
+    assert code == 200, resp
+    # It resolved to sqlite: the runs.db exists, and the v2ecoli-only zarr store
+    # was NOT created.
+    assert db.exists()
+    zarr = Path(str(db.with_suffix("")) + ".seam1.zarr")
+    assert not zarr.exists(), "xarray branch fired on a non-v2ecoli workspace"
+
+
+# ---------------------------------------------------------------------------
 # invoke_v2ecoli_workflow — all 4 status paths
 # ---------------------------------------------------------------------------
 

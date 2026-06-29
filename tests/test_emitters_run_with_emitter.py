@@ -171,6 +171,36 @@ def test_run_with_emitter_xarray_writes_zarr(tmp_path):
     assert isinstance(times, list) and isinstance(values, list)
 
 
+def test_run_with_emitter_zarr_fallback_uses_fresh_state(tmp_path):
+    """MINOR 3: the empty-STORE fall-back drives a Composite from `state` once
+    (xarray) then re-drives a NEW Composite from the same `state` (sqlite). Assert
+    (a) the caller's `state` is left pristine for the fresh re-run, and (b) the
+    progress heartbeat double-counts (the documented, harmless re-count: the
+    re-drive replays 1..steps so the max-runtime guard stays armed)."""
+    pytest.importorskip("xarray")
+    pytest.importorskip("zarr")
+    db_file = str(tmp_path / "runs.db")
+    state = _doc()
+    seen = []
+    # steps=1 deterministically under-fills the flat-Step buffer → empty store →
+    # the zarr branch (which already drove `steps` ticks) falls back to sqlite.
+    prov = emitters.run_with_emitter(
+        "xarray", state=state, run_id="r-fresh", emit_paths=["counter_store"],
+        out_dir=str(tmp_path), core=_core(), steps=1, db_file=db_file,
+        progress_cb=seen.append)
+
+    assert prov["output_kind"] == "sqlite"
+    # The caller's state dict is untouched, so the sqlite re-run starts clean.
+    assert state["counter_store"]["value"] == 0.0
+    # Documented harmless double-count: progress fired for the zarr drive AND the
+    # sqlite re-drive (1 tick each).
+    assert seen == [1, 1]
+    # The fall-back sqlite store holds the run's (clean) data.
+    import pbg_emitters
+    rows = pbg_emitters.load_history(db_file, "r-fresh")
+    assert len(rows) >= 1
+
+
 def test_run_with_emitter_xarray_empty_paths_falls_back_to_sqlite(tmp_path):
     pytest.importorskip("xarray")
 

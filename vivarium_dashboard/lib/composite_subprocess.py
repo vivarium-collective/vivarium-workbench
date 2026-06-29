@@ -153,8 +153,13 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
             _runtime = (_ws_data.get("runtime") or {}) if isinstance(_ws_data, dict) else {}
             # Emitter NAME selection is centralized in the broker (Task 4/5):
             # resolve runtime.default_emitter through emitters.default_emitter so
-            # every write path agrees on the default (still "sqlite" until Task
-            # 6). max_generations / single_daughters stay local — they drive the
+            # every write path agrees on the default. Task 6 shipped: the global
+            # default is now "xarray", so a workspace lacking
+            # runtime.default_emitter resolves to "xarray" here. The child script
+            # gates that xarray write path on v2ecoli being importable (review
+            # CRITICAL 2) — the generic flat-Step xarray study-run loop is the
+            # deferred Task 3 — so a non-v2ecoli workspace falls back to sqlite.
+            # max_generations / single_daughters stay local — they drive the
             # v2ecoli colony/lineage run loop the broker does not own.
             from vivarium_dashboard.lib import emitters as _emitters
             _default_emitter = _emitters.default_emitter({"runtime": _runtime}, None)
@@ -219,7 +224,28 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
                 state = doc.get('state', doc) if isinstance(doc, dict) else doc
                 if _payload.get('emit_paths'):
                     state = cr.inject_emitter_for_declared_paths(state, _payload['emit_paths'])
-                _use_xarray = _payload.get('default_emitter') == 'xarray'
+                # v2ecoli applicability gate (review CRITICAL 2): the xarray
+                # study-run write path is wired ONLY for v2ecoli (its
+                # colony/multigen loop in v2ecoli.library.xarray_run). Wiring
+                # the generic flat-Step xarray emitter into composite_subprocess
+                # is the DEFERRED Task 3 (it needs a division-aware drive loop).
+                # So gate xarray on v2ecoli being importable, NOT on
+                # default_emitter alone — otherwise a study run on a non-v2ecoli
+                # workspace whose GLOBAL default is now "xarray" (Task 6) hits an
+                # unconditional v2ecoli import and the subprocess ImportErrors.
+                # A generic run instead falls through to the single-generation
+                # sqlite branch below (writes sqlite, SUCCEEDS).
+                try:
+                    import v2ecoli as _v2ecoli  # noqa: F401
+                    _v2ecoli_available = True
+                except ImportError:
+                    _v2ecoli_available = False
+                _use_xarray = (
+                    _payload.get('default_emitter') == 'xarray' and _v2ecoli_available)
+                if _payload.get('default_emitter') == 'xarray' and not _v2ecoli_available:
+                    print('[xarray-run] generic xarray study-runs await Task 3; '
+                          'falling back to sqlite (v2ecoli not importable in '
+                          'this workspace).', file=sys.stderr)
                 _view = []
                 if _use_xarray:
                     # Auto-view from the study's declared observables. v0 of
@@ -229,10 +255,20 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
                     # (e.g. dnaa-01 emits only listeners.monomer_counts), the
                     # auto-view is empty and the XArrayEmitter constructor
                     # would crash. In that case, fall back to SQLite for this
-                    # run so the study isn't blocked.
-                    from v2ecoli.library.xarray_run import (
-                        run_multigen_xarray, view_from_emit_paths,
-                    )
+                    # run so the study isn't blocked. Defense-in-depth: even
+                    # with v2ecoli importable, guard the specific submodule
+                    # import so a packaging gap can't crash the run.
+                    try:
+                        from v2ecoli.library.xarray_run import (
+                            run_multigen_xarray, view_from_emit_paths,
+                        )
+                    except ImportError:
+                        print('[xarray-run] generic xarray study-runs await '
+                              'Task 3; falling back to sqlite '
+                              '(v2ecoli.library.xarray_run unavailable).',
+                              file=sys.stderr)
+                        _use_xarray = False
+                if _use_xarray:
                     _view = view_from_emit_paths(_payload.get('emit_paths') or [])
                     if not _view:
                         print('[xarray-run] auto-view is empty (all declared '
@@ -266,7 +302,7 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
                                'steps': _xarr['steps']}}
                 else:
                     _mg = int(_payload.get('max_generations') or 1)
-                    if _mg > 1:
+                    if _mg > 1 and _v2ecoli_available:
                         # Multi-gen: workspace-side runner drives the
                         # SQLiteEmitter externally (mirrors how the
                         # xarray branch drives XArrayEmitter). The

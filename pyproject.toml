@@ -67,6 +67,12 @@ vivarium-dashboard-publish = "vivarium_dashboard.publish:main"
 # the URL OUT of the published metadata so it never conflicts with the bare
 # requirement from pbg-superpowers.
 [tool.uv.sources]
+# TEMPORARY: pin to the emitter-framework branch until pbg-emitters PR #11 merges
+# + a release is cut, then flip to the released version. The dashboard hard-imports
+# Task-1 `contract_for` and Task-2 `view_from_emit_paths`/`emit_root`/`strategy`,
+# which PyPI 0.1.0 lacks — without this pin `uv lock` resolves the registry 0.1.0
+# and CI fails on import.
+pbg-emitters = { git = "https://github.com/vivarium-collective/pbg-emitters.git", branch = "feat/interchangeable-emitter-framework" }
 pbg-basic-processes = { git = "https://github.com/vivarium-collective/pbg-basic-processes.git", branch = "main" }
 # investigation-contracts is declared bare in [project.dependencies] (kept out
 # of published metadata) and is not on PyPI; supply its git URL here so `uv

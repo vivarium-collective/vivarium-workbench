@@ -1284,15 +1284,11 @@ dependencies = [
 [[package]]
 name = "pbg-emitters"
 version = "0.1.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/vivarium-collective/pbg-emitters.git?branch=feat%2Finterchangeable-emitter-framework#d927e24a202622fa12e1c90973965cf17928d9b6" }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "numpy" },
     { name = "process-bigraph" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/0c/1c/1063f6960ff3e8370f80377435fb8cbdaf3c6d3839982318a68235f2091c/pbg_emitters-0.1.0.tar.gz", hash = "sha256:66467794014e18164e86670bdcfa2d3f1a623da16edf04965705181cf2f2e320", size = 83884, upload-time = "2026-06-12T19:38:03.633Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c3/70/ed636028647867cf7734c997ff253f51cbd6eb7bdcd0fbdd0c5d0386f2d4/pbg_emitters-0.1.0-py3-none-any.whl", hash = "sha256:bf715f3c14a12ef2e1d3d22655b5a89e9f28da2e800bd776cec45f13bf24ddaf", size = 75983, upload-time = "2026-06-12T19:38:02.304Z" },
 ]
 
 [package.optional-dependencies]
@@ -2392,7 +2388,7 @@ requires-dist = [
     { name = "numpy" },
     { name = "numpy", marker = "extra == 'viz'" },
     { name = "pbg-basic-processes", git = "https://github.com/vivarium-collective/pbg-basic-processes.git?branch=main" },
-    { name = "pbg-emitters", extras = ["sqlite", "xarray"] },
+    { name = "pbg-emitters", extras = ["sqlite", "xarray"], git = "https://github.com/vivarium-collective/pbg-emitters.git?branch=feat%2Finterchangeable-emitter-framework" },
     { name = "pbg-superpowers", specifier = ">=0.14.0" },
     { name = "polars", marker = "extra == 'test'" },
     { name = "process-bigraph" },

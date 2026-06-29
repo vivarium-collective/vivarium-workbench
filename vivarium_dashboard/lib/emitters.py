@@ -18,6 +18,7 @@ imported by the very modules it dispatches into without an import cycle.
 """
 from __future__ import annotations
 
+import copy
 import traceback
 from pathlib import Path
 from typing import Callable
@@ -543,6 +544,10 @@ def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
 
     kind = output_kind(name)
     fallback_warning = None
+    # Did we fall back from the zarr path AFTER it already drove a Composite for
+    # `steps` ticks? (MINOR 3) Only the empty-STORE sentinel implies a real drive
+    # happened; the empty-VIEW fallback (`prov is None`) returns before any drive.
+    zarr_drove_already = False
 
     if kind == "zarr":
         prov = _run_xarray(
@@ -556,11 +561,20 @@ def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
         # fall-back provenance so the empty result is DIAGNOSABLE (not silent).
         if isinstance(prov, dict):
             fallback_warning = prov.get("warning")
+            zarr_drove_already = True  # the empty-store path drove `steps` ticks
         kind = "sqlite"
 
     if kind == "sqlite":
         from vivarium_dashboard.lib import composite_runs as cr
         st = state
+        # MINOR 3 guard: when we fall back from the zarr path that ALREADY drove
+        # a Composite built from this same `state`, deep-copy so the sqlite re-run
+        # starts from a PRISTINE state — independent of whether `Composite(...)`
+        # (or the inject_* helpers) ever mutate the input tree in place. (The
+        # current process-bigraph builds its own copy, so this is belt-and-braces,
+        # but it makes the fall-back robust to that not holding.)
+        if zarr_drove_already:
+            st = copy.deepcopy(st)
         if emit_paths:
             st = cr.inject_emitter_for_paths(st, list(emit_paths))
         st = cr.inject_sqlite_emitter(st, run_id=run_id, db_file=db_file)
@@ -570,6 +584,14 @@ def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
             from process_bigraph.emitter import SQLiteEmitter
         core.register_link("SQLiteEmitter", SQLiteEmitter)
         composite = Composite({"state": st}, core=core)
+        # MINOR 3: on a zarr→sqlite fall-back the empty-store path already called
+        # `progress_cb(1..steps)` once, and this re-drive calls it again — so the
+        # heartbeat re-counts 1..steps. That double-count is HARMLESS: run_runner's
+        # `_progress` is a liveness heartbeat (latest step + a wall-clock-based
+        # max-runtime guard), NOT a cumulative counter, so the timeout still
+        # measures real elapsed time and the run finalises at `steps`. We keep
+        # calling progress_cb (rather than suppressing it) precisely so the
+        # max-runtime guard stays armed during the sqlite re-run.
         _drive(composite, steps, progress_cb)
         result = {"output_kind": "sqlite",
                   "store_path": str(db_file) if db_file is not None else None,
