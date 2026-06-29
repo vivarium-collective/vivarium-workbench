@@ -1284,7 +1284,7 @@ dependencies = [
 [[package]]
 name = "pbg-emitters"
 version = "0.1.0"
-source = { git = "https://github.com/vivarium-collective/pbg-emitters.git?branch=feat%2Finterchangeable-emitter-framework#d927e24a202622fa12e1c90973965cf17928d9b6" }
+source = { git = "https://github.com/vivarium-collective/pbg-emitters.git?branch=main#bc2bf0da5a6f67f13b7616d19a95aef736f2412c" }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "numpy" },
@@ -2388,7 +2388,7 @@ requires-dist = [
     { name = "numpy" },
     { name = "numpy", marker = "extra == 'viz'" },
     { name = "pbg-basic-processes", git = "https://github.com/vivarium-collective/pbg-basic-processes.git?branch=main" },
-    { name = "pbg-emitters", extras = ["sqlite", "xarray"], git = "https://github.com/vivarium-collective/pbg-emitters.git?branch=feat%2Finterchangeable-emitter-framework" },
+    { name = "pbg-emitters", extras = ["sqlite", "xarray"], git = "https://github.com/vivarium-collective/pbg-emitters.git?branch=main" },
     { name = "pbg-superpowers", specifier = ">=0.14.0" },
     { name = "polars", marker = "extra == 'test'" },
     { name = "process-bigraph" },
