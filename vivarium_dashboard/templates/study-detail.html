@@ -148,12 +148,8 @@
     <button class="study-tab"        data-kind="tests"        data-pillar="inquire"  onclick="_setStudyTab('tests')">Tests</button>
     <button class="study-tab"        data-kind="conclusions"  data-pillar="inquire"  onclick="_setStudyTab('conclusions')">{{ "Decide" if _is_v3 else "Conclusions" }}</button>
     <button class="study-tab" data-kind="compose" data-pillar="compose" onclick="_setStudyTab('compose')">Compose</button>
-    {% if _is_v3 %}
-    <button class="study-tab"        data-kind="simulations"   data-pillar="simulate" onclick="_setStudyTab('simulations')">Simulations</button>
-    {% endif %}
-    <button class="study-tab"        data-kind="runs"          data-pillar="simulate" onclick="_setStudyTab('runs')">Runs</button>
-    <button class="study-tab"        data-kind="observables"   data-pillar="visualize" onclick="_setStudyTab('observables')">Readouts</button>
-    <button class="study-tab"        data-kind="visualizations" data-pillar="visualize" onclick="_setStudyTab('visualizations')">Visualizations</button>
+    <button class="study-tab" data-kind="simulate" data-pillar="simulate" onclick="_setStudyTab('simulate')">Simulate</button>
+    <button class="study-tab" data-kind="visualize" data-pillar="visualize" onclick="_setStudyTab('visualize')">Visualize</button>
   </div>
 </nav>
 <style>
@@ -1035,9 +1031,9 @@
 </section>
 
 
-{# ─── Simulations tab: what we ran (auto-derived) + simulation_set ───── #}
+{# ─── Simulate tab: Simulations + Runs ─────────────────────────────── #}
+<section class="study-tab-panel" data-kind="simulate" id="panel-simulate" hidden>
 {% if study.simulation_set or study.baseline or study.runs %}
-<section class="study-tab-panel" data-kind="simulations" id="panel-simulations" hidden>
 
   {# Auto-derived from baseline (composite + params) + runs + robustness, so the
      tab is never empty for studies that record runs via the baseline rather than
@@ -1259,31 +1255,7 @@
   {% endif %}
   {% endfor %}
   {% endif %}
-</section>
 {% endif %}
-
-<section class="study-tab-panel" data-kind="observables" id="panel-observables" hidden>
-  <div class="observables-section">
-    <h3 class="section-title">Readouts</h3>
-    <p class="muted">Quantities collected from each simulation run. Each row is an emitter <code>store_path</code> the composite will save; authored entries in <code>study.yaml</code> add names, descriptions, and units on top.</p>
-    <div id="readouts-table" data-study="{{ name }}">
-      <p class="empty-message">Loading readouts from the composite emit plan…</p>
-    </div>
-
-    {% if study.expected_behavior %}
-    <details style="margin-top: 1.4em;">
-      <summary class="muted">How observables tie to Expected Behavior</summary>
-      <p style="font-size: 0.9em;">Observables can be referenced by name in an
-      <code>expected_behavior[i].measure</code> block (e.g. <code>kind: bulk_count, id:
-      "MONOMER0-160[c]"</code>). When the dashboard validates a study, it cross-checks
-      that every <code>measure</code> resolves to a declared observable, or to a
-      built-in helper.</p>
-    </details>
-    {% endif %}
-  </div>
-</section>
-
-<section class="study-tab-panel" data-kind="runs" id="panel-runs">
   <!-- Configure & Run widget (SP-C) — native run launcher for this study -->
   <div id="study-configure-run" style="margin-bottom:18px"></div>
   <div class="panel" style="margin-bottom:18px">
@@ -1304,7 +1276,7 @@
     <h3 class="section-title">Runs</h3>
     <p class="muted" style="margin:0 0 10px 0;font-size:0.88em">
       Per-run record of what was executed. Visualizations live in the
-      <a href="#" onclick="_setStudyTab('visualizations');return false">Visualizations</a> tab.
+      <a href="#" onclick="_setStudyTab('visualize');return false">Visualize</a> tab.
     </p>
     <table id="runs-table">
       <thead>
@@ -1406,6 +1378,69 @@
     </table>
   </div>
 
+</section>
+
+<section class="study-tab-panel" data-kind="visualize" id="panel-visualize" hidden>
+  <div class="observables-section">
+    <h3 class="section-title">Readouts</h3>
+    <p class="muted">Quantities collected from each simulation run. Each row is an emitter <code>store_path</code> the composite will save; authored entries in <code>study.yaml</code> add names, descriptions, and units on top.</p>
+    <div id="readouts-table" data-study="{{ name }}">
+      <p class="empty-message">Loading readouts from the composite emit plan…</p>
+    </div>
+
+    {% if study.expected_behavior %}
+    <details style="margin-top: 1.4em;">
+      <summary class="muted">How observables tie to Expected Behavior</summary>
+      <p style="font-size: 0.9em;">Observables can be referenced by name in an
+      <code>expected_behavior[i].measure</code> block (e.g. <code>kind: bulk_count, id:
+      "MONOMER0-160[c]"</code>). When the dashboard validates a study, it cross-checks
+      that every <code>measure</code> resolves to a declared observable, or to a
+      built-in helper.</p>
+    </details>
+    {% endif %}
+  </div>
+
+  <div class="viz-section">
+
+    {# ─── Embedded HTML visualizations (e.g. pre-execution preview pages
+         produced by a runner script). study.embed_visualizations is a list of
+         {name, url, description} entries; each renders as an inline iframe at
+         the top of the Visualizations tab so a biologist gets immediate
+         payoff without waiting for runs.db / Visualization-class plumbing.
+    #}
+    {% if study.embed_visualizations %}
+    <div class="embed-viz-section" style="margin-bottom:24px">
+      <h3 class="section-title">Embedded visualizations</h3>
+      <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
+        Self-contained HTML pages produced by the study's runner. Each iframe
+        below is a standalone artefact you can also open in a separate tab.
+      </p>
+      {% for v in study.embed_visualizations %}
+      <div class="embed-viz-card" style="border:1px solid #e2e8f0;border-radius:6px;margin-bottom:14px;background:#fff">
+        <div style="display:flex;align-items:center;gap:12px;padding:8px 12px;border-bottom:1px solid #e5e7eb;background:#f9fafb">
+          <strong style="flex:1">{{ v.name }}</strong>
+          <a href="{{ v.url }}" target="_blank" class="btn-mini">Open in new tab ↗</a>
+        </div>
+        {% if v.description %}
+        <p class="muted" style="margin:6px 12px;font-size:0.88em">{{ v.description }}</p>
+        {% endif %}
+        <iframe src="{{ v.url }}"
+                style="width:100%;min-height:200px;border:0;display:block"
+                loading="lazy" title="{{ v.name }}"
+                onload="(function(f){try{var d=f.contentDocument;if(!d)return;var b=d.body,e=d.documentElement;var bStyle=b&&d.defaultView&&d.defaultView.getComputedStyle?d.defaultView.getComputedStyle(b):null;var pinnedH=0;if(bStyle&&(bStyle.overflow||'').indexOf('hidden')>=0){var hm=(bStyle.height||'').match(/^(\d+(?:\.\d+)?)px$/);if(hm)pinnedH=Math.round(parseFloat(hm[1]));}var h=pinnedH>0?pinnedH:Math.max(e?e.scrollHeight:0,b?b.scrollHeight:0);if(h>0)f.style.height=(h+24)+'px';}catch(e){}})(this)"
+                ></iframe>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <h3 class="section-title">Latest-run visualizations (auto-generated from <code>runs.db</code>)</h3>
+    <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
+      These charts re-render each time the page loads, against the most recent simulation in the study's <code>runs.db</code>.
+      They are also embedded into the downloadable investigation HTML report.
+    </p>
+    <div id="viz-charts-panel" class="charts-panel"></div>
+  </div>
 </section>
 
 <section class="study-tab-panel" data-kind="tests" id="panel-tests" hidden>
@@ -1512,50 +1547,6 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
       the auto-generated assertions.</li>
   </ul>
   {% endif %}
-</section>
-
-<section class="study-tab-panel" data-kind="visualizations" id="panel-visualizations" hidden>
-  <div class="viz-section">
-
-    {# ─── Embedded HTML visualizations (e.g. pre-execution preview pages
-         produced by a runner script). study.embed_visualizations is a list of
-         {name, url, description} entries; each renders as an inline iframe at
-         the top of the Visualizations tab so a biologist gets immediate
-         payoff without waiting for runs.db / Visualization-class plumbing.
-    #}
-    {% if study.embed_visualizations %}
-    <div class="embed-viz-section" style="margin-bottom:24px">
-      <h3 class="section-title">Embedded visualizations</h3>
-      <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
-        Self-contained HTML pages produced by the study's runner. Each iframe
-        below is a standalone artefact you can also open in a separate tab.
-      </p>
-      {% for v in study.embed_visualizations %}
-      <div class="embed-viz-card" style="border:1px solid #e2e8f0;border-radius:6px;margin-bottom:14px;background:#fff">
-        <div style="display:flex;align-items:center;gap:12px;padding:8px 12px;border-bottom:1px solid #e5e7eb;background:#f9fafb">
-          <strong style="flex:1">{{ v.name }}</strong>
-          <a href="{{ v.url }}" target="_blank" class="btn-mini">Open in new tab ↗</a>
-        </div>
-        {% if v.description %}
-        <p class="muted" style="margin:6px 12px;font-size:0.88em">{{ v.description }}</p>
-        {% endif %}
-        <iframe src="{{ v.url }}"
-                style="width:100%;min-height:200px;border:0;display:block"
-                loading="lazy" title="{{ v.name }}"
-                onload="(function(f){try{var d=f.contentDocument;if(!d)return;var b=d.body,e=d.documentElement;var bStyle=b&&d.defaultView&&d.defaultView.getComputedStyle?d.defaultView.getComputedStyle(b):null;var pinnedH=0;if(bStyle&&(bStyle.overflow||'').indexOf('hidden')>=0){var hm=(bStyle.height||'').match(/^(\d+(?:\.\d+)?)px$/);if(hm)pinnedH=Math.round(parseFloat(hm[1]));}var h=pinnedH>0?pinnedH:Math.max(e?e.scrollHeight:0,b?b.scrollHeight:0);if(h>0)f.style.height=(h+24)+'px';}catch(e){}})(this)"
-                ></iframe>
-      </div>
-      {% endfor %}
-    </div>
-    {% endif %}
-
-    <h3 class="section-title">Latest-run visualizations (auto-generated from <code>runs.db</code>)</h3>
-    <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
-      These charts re-render each time the page loads, against the most recent simulation in the study's <code>runs.db</code>.
-      They are also embedded into the downloadable investigation HTML report.
-    </p>
-    <div id="viz-charts-panel" class="charts-panel"></div>
-  </div>
 </section>
 
 <section class="study-tab-panel" data-kind="conclusions" id="panel-conclusions" hidden>
