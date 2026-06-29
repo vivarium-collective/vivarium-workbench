@@ -40,6 +40,16 @@ def test_other_panels_untouched():
         assert f'id="panel-{k}"' in HTML, f"unrelated panel disturbed: panel-{k}"
 
 
+def test_subnav_hidden_for_single_member_pillar():
+    js = (ROOT / "vivarium_dashboard/static/study-detail.js").read_text()
+    # _showPillarSubnav hides the sub-nav row when the pillar has <= 1 member
+    i = js.index("function _showPillarSubnav")
+    block = js[i:i + 700]
+    assert "study-subnav" in block
+    # a count of the pillar's members + a conditional hide of the container
+    assert ("<= 1" in block) or ("< 2" in block) or ("=== 1" in block) or (".length" in block and "display" in block)
+
+
 def test_build_guard_preserves_conditions_and_baseline():
     # Regression: the merged build-block guard must mirror the pre-merge
     # panel-build guard so a non-v3 study with conditions/baseline (but no

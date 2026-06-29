@@ -25,9 +25,15 @@
       b.classList.toggle('active', b.dataset.pillar === pillar);
     });
     // member buttons: only the active pillar's are visible
+    var members = 0;
     document.querySelectorAll('#study-subnav .study-tab').forEach(function (b) {
-      b.style.display = (b.dataset.pillar === pillar) ? '' : 'none';
+      var mine = b.dataset.pillar === pillar;
+      b.style.display = mine ? '' : 'none';
+      if (mine) members++;
     });
+    // Single-member pillar (e.g. Compose) → hide the sub-nav row.
+    var subnav = document.getElementById('study-subnav');
+    if (subnav) subnav.style.display = (members <= 1) ? 'none' : '';
   }
 
   function _setStudyTab(kind) {
