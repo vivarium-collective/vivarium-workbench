@@ -53,12 +53,20 @@
     el.innerHTML = '<div class="cfg-run"><div class="cfg-loading">Loading composite…</div></div>';
     var id = ctxState.composite;
     if (!id) { el.querySelector(".cfg-run").innerHTML = '<p class="muted">Pick a composite to configure.</p>'; return; }
-    fetch("/api/composite-resolve?id=" + encodeURIComponent(id) + "&overrides=%7B%7D")
-      .then(function (r) { return r.text().then(function (t) { try { return JSON.parse(t); } catch (e) { return { error: "HTTP " + r.status }; } }); })
-      .then(function (d) {
+    // Read-only (published) bundle has no live backend — resolve the composite's
+    // parameters from the static snapshot and render a DISABLED preview, instead
+    // of hitting the live /api/composite-resolve (which 404s in a static bundle).
+    var isSnapshot = document.body.classList.contains("snapshot");
+    var p = (isSnapshot && window.DataSource && window.DataSource.loadCompositeResolve)
+      ? window.DataSource.loadCompositeResolve(id)
+      : fetch("/api/composite-resolve?id=" + encodeURIComponent(id) + "&overrides=%7B%7D")
+          .then(function (r) { return r.text().then(function (t) { try { return JSON.parse(t); } catch (e) { return { error: "HTTP " + r.status }; } }); });
+    p.then(function (d) {
         var box = el.querySelector(".cfg-run");
         if (!d || d.error || d.unresolved) {
-          box.innerHTML = '<div class="inv-run-err">' + esc((d && (d.error || "composite not found")) ) + "</div>";
+          box.innerHTML = isSnapshot
+            ? '<p class="muted">Configure &amp; Run is a live action — open this composite on a running dashboard to set parameters and run it. (No preview is available for this composite in the read-only bundle.)</p>'
+            : '<div class="inv-run-err">' + esc((d && (d.error || "composite not found")) ) + "</div>";
           return;
         }
         box.innerHTML =
@@ -66,9 +74,18 @@
           '<form class="cfg-form">' + _buildConfigForm(d.parameters) + '</form>' +
           '<label class="cfg-row"><span class="cfg-name">steps</span>' +
           '<input type="number" class="cfg-steps" value="' + esc(d.default_n_steps != null ? d.default_n_steps : 5) + '"></label>' +
-          '<div class="cfg-actions"><button type="button" class="btn-mini cfg-run-btn">▶ Run</button></div>' +
-          '<div class="cfg-status" hidden></div>';
-        ConfigureRun._wireRun(el, d);   // defined in Task 5
+          (isSnapshot
+            ? '<div class="cfg-actions"><button type="button" class="btn-mini" disabled title="Run on a live dashboard">▶ Run</button>' +
+              ' <span class="muted">read-only preview — open this composite on a live dashboard to configure &amp; run</span></div>'
+            : '<div class="cfg-actions"><button type="button" class="btn-mini cfg-run-btn">▶ Run</button></div>' +
+              '<div class="cfg-status" hidden></div>');
+        if (isSnapshot) {
+          // make it a clear, non-interactive preview
+          var inputs = box.querySelectorAll("input, select, textarea");
+          for (var i = 0; i < inputs.length; i++) inputs[i].disabled = true;
+        } else {
+          ConfigureRun._wireRun(el, d);   // defined in Task 5
+        }
       })
       .catch(function(e) { var box = el.querySelector(".cfg-run"); if (box) box.innerHTML = '<div class="inv-run-err">Network error: ' + esc(String(e)) + "</div>"; });
   }

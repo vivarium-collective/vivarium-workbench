@@ -2037,7 +2037,7 @@
         var exploreBtn = (_isSnapshot && !c.has_wiring)
           ? ''
           : '<button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Explore</button>' +
-            '<button class="btn-mini" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Configure &amp; Run</button>';
+            '<button class="action-btn" onclick="_openCompositeConfigureRun(\'' + _esc(c.id) + '\')">Configure &amp; Run</button>';
         return divider + '<div class="composite-list-row">' +
           '<span class="name">' + _esc(c.name) + ' ' + _wsTag(c) + '</span>' +
           '<span class="desc">' + tagPills + ' ' + _esc(c.description || '(no description)') +
@@ -2076,7 +2076,7 @@
         var exploreBtn = (_isSnapshot && !c.has_wiring)
           ? ''
           : '<button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Explore</button>' +
-            '<button class="btn-mini" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Configure &amp; Run</button>';
+            '<button class="action-btn" onclick="_openCompositeConfigureRun(\'' + _esc(c.id) + '\')">Configure &amp; Run</button>';
         return divider + '<div class="module-card' + (c.workspace_local ? ' module-card-workspace' : '') + '">' +
           '<div class="module-card-header"><strong>' + _esc(c.name) + '</strong> ' + _wsTag(c) + '</div>' +
           '<p class="module-desc">' + _esc(c.description || '(no description)') + '</p>' +
@@ -3724,6 +3724,14 @@
     _switchPage('composite-explore');
   }
   window._openCompositeExplorer = _openCompositeExplorer;
+
+  // Configure & Run button: same destination as Explore (the explorer hosts the
+  // Configure & Run widget), but flag it so the explorer scrolls to that widget.
+  function _openCompositeConfigureRun(id) {
+    window._ceScrollToConfigure = true;
+    _openCompositeExplorer(id);
+  }
+  window._openCompositeConfigureRun = _openCompositeConfigureRun;
 
   function _initCompositeExplorer() {
     // Called when the explorer page is activated. Parses ?id=<spec_id> from
