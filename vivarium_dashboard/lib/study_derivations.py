@@ -76,7 +76,14 @@ def conclusion_verdicts(spec: dict) -> dict:
     biological_validation ← gate_evaluator.result / gate_status;
     regression_compatibility ← run statuses; explanatory_gain ← finding tiers.
     The authored `basis` free-text is carried through per track."""
-    authored = spec.get("conclusion_verdicts") or {}
+    # `conclusion_verdicts` has two authoring forms: the 3-track dict
+    # {track: {basis}} (the per-track basis source) and a free-form list
+    # [{claim, verdict, basis}] (e.g. param-uq/showcase studies). Only the dict
+    # form carries per-track basis; a list (or anything non-dict) yields no
+    # per-track basis. Guarding here keeps `_basis` from calling .get on a list.
+    authored = spec.get("conclusion_verdicts")
+    if not isinstance(authored, dict):
+        authored = {}
     ge = (spec.get("pipeline_gate") or {}).get("gate_evaluator") or {}
     bio = norm_gate_result(ge.get("result") or spec.get("gate_status"))
 
