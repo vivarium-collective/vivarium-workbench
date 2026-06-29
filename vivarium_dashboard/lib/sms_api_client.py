@@ -61,6 +61,20 @@ class SmsApiClient:
         Returns the raw list of simulation records."""
         return self._get("/api/v1/simulations", {"simulator_id": simulator_id})
 
+    def composite_resolve(self, simulator_id: int, composite_ref: str,
+                          overrides: dict | None = None, timeout: float | None = None) -> dict:
+        """Resolve a composite IN a build's environment, on the deployment.
+
+        POST /core/v1/simulator/{id}/composite-resolve — sms-api runs build_core
+        for ``composite_ref`` (with ``overrides``) inside build ``simulator_id``'s
+        image and returns the resolved-composite JSON (shape-compatible with the
+        dashboard's local /api/composite-resolve). Raises SmsApiError on failure.
+        """
+        return self._post(
+            f"/core/v1/simulator/{simulator_id}/composite-resolve",
+            json_body={"composite_ref": composite_ref, "overrides": overrides or {}},
+        )
+
     def download_workspace(self, simulator_id: int, dest_dir: Path, timeout: float | None = None) -> Path:
         """Stream a build's repo@commit workspace tarball (SP1's endpoint) to
         dest_dir/workspace.tar.gz."""

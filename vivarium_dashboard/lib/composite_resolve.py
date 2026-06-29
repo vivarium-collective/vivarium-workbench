@@ -13,6 +13,9 @@ import json
 import sys
 from pathlib import Path
 
+from vivarium_dashboard.lib.sms_api_client import SmsApiClient
+from vivarium_dashboard.lib.workspace_deps_views import _sms_api_base
+
 
 def _ws_add_to_sys_path(ws_root: Path) -> None:
     """Ensure the workspace root is on ``sys.path`` so its package is importable."""
@@ -139,3 +142,22 @@ def resolve_composite(
         }
     except Exception:
         return None
+
+
+def resolve_composite_for_request(
+    ws_root: "Path | str", spec_id: str, overrides: "dict | None" = None
+) -> "dict | None":
+    """Resolve a composite for a UI request, routing by source: a remote build
+    (.viv-build.json) resolves on the deployment via sms-api; a local workspace
+    resolves locally. Returns the resolve payload dict (or None on a local miss)."""
+    from vivarium_dashboard.lib.run_core import run_target_for
+    from vivarium_dashboard.lib.remote_simulations import _read_build_meta
+
+    ws_root = Path(ws_root)
+    if run_target_for(ws_root) == "deployment":
+        meta = _read_build_meta(ws_root) or {}
+        sim_id = meta.get("simulator_id")
+        if sim_id is None:
+            return {"error": "remote build has no simulator_id stamp"}
+        return SmsApiClient(_sms_api_base()).composite_resolve(int(sim_id), spec_id, overrides or {})
+    return resolve_composite(ws_root, spec_id, overrides)
