@@ -928,6 +928,11 @@ window.addEventListener('pageshow', function (e) {
       <div id="investigation-dag-nodes" style="position:relative; top:0; left:0;"></div>
     </div>
 
+    <div id="investigation-detail-drawer" style="display:none; position:fixed; top:96px; right:16px; width:360px; max-height:78vh; overflow:auto; background:#fff; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 8px 30px rgba(0,0,0,0.12); padding:14px 16px; z-index:50; font-size:0.92em">
+      <button onclick="document.getElementById('investigation-detail-drawer').style.display='none'" style="float:right;border:none;background:none;cursor:pointer;font-size:1.15em;color:#94a3b8" title="Close">✕</button>
+      <div id="investigation-detail-drawer-body"></div>
+    </div>
+
     <!-- In-place study embed: when a DAG node is clicked, the full study
          loads below in an iframe (same /studies/<name> route the Studies
          page uses). Pop-out button breaks it into a separate window. -->
