@@ -40,3 +40,8 @@ def test_js_has_pillar_switcher():
     assert "window._setStudyPillar" in js
     assert "dataset.pillar" in js or "data-pillar" in js
     assert "study-pillar" in js          # toggles the pillar buttons
+
+
+def test_css_styles_pillars():
+    css = (ROOT / "vivarium_dashboard/static/style.css").read_text()
+    assert ".study-pillar" in css and ".study-subnav" in css

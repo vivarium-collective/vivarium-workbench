@@ -2310,3 +2310,20 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 .al-crumb { font-size:0.85em; color:#cfd6df; margin-bottom:6px; }
 .al-bc { cursor:pointer; color:#9db4d6; }
 .al-bc:hover { color:#fff; text-decoration:underline; }
+
+/* Two-level study nav: 5 pillars over a per-pillar sub-nav (tab consolidation). */
+.study-pillars { display: flex; gap: 4px; flex-wrap: wrap; margin: 0 0 2px; }
+.study-pillar {
+  border: 0; background: none; cursor: pointer; padding: 8px 14px;
+  font-weight: 700; font-size: 0.95rem; color: #64748b; border-bottom: 3px solid transparent;
+}
+.study-pillar:hover { color: #334155; }
+.study-pillar.active { color: #1e293b; border-bottom-color: #2563eb; }
+.study-subnav { display: flex; gap: 2px; flex-wrap: wrap; margin: 0 0 10px; padding: 4px 0 0; }
+.study-subnav .study-tab {
+  border: 0; background: none; cursor: pointer; padding: 4px 11px; border-radius: 9999px;
+  font-size: 0.85rem; color: #64748b;
+}
+.study-subnav .study-tab:hover { background: #f1f5f9; color: #334155; }
+.study-subnav .study-tab.active { background: #e0e7ff; color: #1e40af; font-weight: 600; }
+/* When a pillar has a single visible member, the pill row reads as a label, not a choice. */

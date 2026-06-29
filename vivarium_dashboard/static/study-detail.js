@@ -1290,6 +1290,8 @@
     _renderReadinessPanel();
     _renderSpineSummary();
     _populateConclusionVerdictBadges();
+    // Open Understand/Overview and show only Understand's sub-nav on load.
+    _setStudyTab('overview');
   }
 
   // ── C2 — conclusion verdicts: read precomputed block from window._study.derived ─
