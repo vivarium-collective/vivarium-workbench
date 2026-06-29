@@ -423,11 +423,13 @@ def test_xarray_default_child_script_gates_on_v2ecoli(tmp_path, monkeypatch):
     assert "_mg > 1 and _v2ecoli_available" in script
 
 
-def test_xarray_default_nonv2ecoli_run_falls_back_to_sqlite(tmp_path, monkeypatch):
-    """The real seam: a non-v2ecoli, xarray-default workspace study run actually
-    executes (no subprocess mock) and resolves to the sqlite path — it does not
-    raise and does not require v2ecoli. Pre-fix this hit an unconditional
-    ``from v2ecoli.library.xarray_run import ...`` → ImportError → 502."""
+def test_xarray_default_nonv2ecoli_multigen_falls_back_to_sqlite(tmp_path, monkeypatch):
+    """The documented boundary (FU2b): a non-v2ecoli, xarray-default,
+    MULTI-generation study run still resolves to sqlite — there is NO generic
+    division-aware xarray drive, so multi-gen non-v2ecoli runs keep the sqlite
+    path. (Single-gen now writes zarr — see the test below.) Pre-FU2b this whole
+    case hit an unconditional ``from v2ecoli.library.xarray_run import ...`` →
+    ImportError → 502."""
     import importlib.util
     if importlib.util.find_spec("v2ecoli") is not None:
         pytest.skip("v2ecoli is importable here; this test covers its ABSENCE")
@@ -437,24 +439,88 @@ def test_xarray_default_nonv2ecoli_run_falls_back_to_sqlite(tmp_path, monkeypatc
     spec_id, _cleanup = _register_genpkg(ws)
     try:
         # Default emitter genuinely resolves to xarray for this workspace (so the
-        # test is exercising the regressing path, not a sqlite shortcut).
+        # test is exercising the boundary path, not a sqlite shortcut).
         from vivarium_dashboard.lib import emitters as _em
         assert _em.default_emitter({"runtime": {"default_emitter": "xarray"}}, None) == "xarray"
 
         resp, code = cs.run_composite_subprocess(
             ws, pkg="genpkg", state={}, steps=4, db_file=str(db),
             run_id="seam1", spec_id=spec_id, label="seam",
-            emit_paths=["counter_store"])
+            emit_paths=["counter_store"], study_max_generations=2)
     finally:
         _cleanup()
 
-    # A generic study run SUCCEEDS (writing sqlite), it does not error.
+    # A generic multi-gen study run SUCCEEDS (writing sqlite), it does not error.
     assert code == 200, resp
-    # It resolved to sqlite: the runs.db exists, and the v2ecoli-only zarr store
-    # was NOT created.
+    # It resolved to sqlite: the runs.db exists, and NO zarr store (neither the
+    # v2ecoli ``<db_stem>.<run_id>.zarr`` nor the generic ``<db_dir>/<run_id>.zarr``
+    # name) was created.
     assert db.exists()
-    zarr = Path(str(db.with_suffix("")) + ".seam1.zarr")
-    assert not zarr.exists(), "xarray branch fired on a non-v2ecoli workspace"
+    assert not Path(str(db.with_suffix("")) + ".seam1.zarr").exists(), \
+        "v2ecoli xarray branch fired on a non-v2ecoli workspace"
+    assert not (ws / "seam1.zarr").exists(), \
+        "generic xarray fired on a MULTI-gen non-v2ecoli run (no division-aware drive yet)"
+
+
+def test_xarray_default_nonv2ecoli_single_gen_writes_zarr(tmp_path, monkeypatch):
+    """FU2b seam: a non-v2ecoli, xarray-default, SINGLE-generation study run now
+    routes through the generic flat-Step XArray write path
+    (``emitters.run_with_emitter``) and produces a real ZARR store at the STUDY
+    convention (``runs.<run_id>.zarr`` next to runs.db), so the dashboard's study
+    read-path actually finds it. Asserts BOTH that the store lands at the study
+    path AND that ``study_run_state.zarr_store_for_sim`` resolves it (returns the
+    store, not None) — the regression that the old hardcoded-path assertion
+    masked. Also round-trips the data through the read broker (``read_source`` /
+    ``reader_for``). Runs for real (no subprocess mock); skips when v2ecoli is
+    importable or xarray/zarr are absent."""
+    import importlib.util
+    if importlib.util.find_spec("v2ecoli") is not None:
+        pytest.skip("v2ecoli is importable here; this test covers its ABSENCE")
+    pytest.importorskip("xarray")
+    pytest.importorskip("zarr")
+
+    ws = _make_genpkg_ws(tmp_path, default_emitter="xarray")
+    db = ws / "runs.db"
+    spec_id, _cleanup = _register_genpkg(ws)
+    try:
+        # 6 steps > the flat-Step buffer (size 3) so the run flushes real data
+        # (a sub-buffer run would empty-store→sqlite-fall-back inside the broker).
+        # Pass sim_name so runs_meta carries it and the study resolver can map
+        # sim_name → run_id → zarr path.
+        resp, code = cs.run_composite_subprocess(
+            ws, pkg="genpkg", state={}, steps=6, db_file=str(db),
+            run_id="zarr1", spec_id=spec_id, label="z", sim_name="z-sim",
+            emit_paths=["counter_store"], study_max_generations=1)
+    finally:
+        _cleanup()
+
+    assert code == 200, resp
+    # (1) The store lands at the STUDY convention ``runs.<run_id>.zarr``
+    # (== ``<db_stem>.<run_id>.zarr`` next to runs.db) — NOT the old generic
+    # ``<out_dir>/<run_id>.zarr`` name, which the study resolver can't find.
+    study_store = ws / "runs.zarr1.zarr"
+    assert study_store.exists(), \
+        f"generic single-gen xarray did not write the study-convention store: {resp}"
+    assert not (ws / "zarr1.zarr").exists(), \
+        "store still written at the generic <run_id>.zarr name (resolver-blind)"
+
+    # (2) The dashboard's study read-path RESOLVES it: zarr_store_for_sim maps
+    # sim_name → latest completed run_id → the on-disk zarr store. This is the
+    # exact resolver the study UI uses; a None here is the original Critical.
+    from vivarium_dashboard.lib import study_run_state
+    resolved_study = study_run_state.zarr_store_for_sim(db, "z-sim")
+    assert resolved_study is not None, \
+        "study read-path could not resolve the written zarr store (regression)"
+    assert Path(resolved_study) == study_store
+
+    # (3) Data round-trips through the read broker (read_source / reader_for).
+    from vivarium_dashboard.lib import emitters as _em
+    kind, resolved = _em.read_source(str(study_store))
+    assert kind == "zarr"
+    assert Path(resolved) == study_store
+    reader = _em.reader_for("zarr")
+    times, values = reader(Path(resolved), "counter_store/value")
+    assert isinstance(times, list) and isinstance(values, list)
 
 
 # ---------------------------------------------------------------------------

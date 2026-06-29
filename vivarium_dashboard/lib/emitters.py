@@ -510,7 +510,7 @@ def _inject_xarray_step(composite, core, config: dict, inputs: dict) -> None:
 
 
 def _run_xarray(*, state, run_id, emit_paths, out_dir, core, steps,
-                progress_cb, emitter_config) -> "dict | None":
+                progress_cb, emitter_config, store_path=None) -> "dict | None":
     """Inject XArrayEmitter as a flat Step, run, flush. Returns provenance.
 
     Returns ``None`` when the auto-derived view is empty (no ``emit_paths`` /
@@ -518,6 +518,12 @@ def _run_xarray(*, state, run_id, emit_paths, out_dir, core, steps,
     sentinel ``{"output_kind": None, "warning": ...}`` when the run DID emit but
     wrote an EMPTY store (the buffer never filled — see the guard below); the
     caller treats that as a fall-back too but propagates the warning.
+
+    ``store_path`` (optional) overrides the default ``<out_dir>/<run_id>.zarr``
+    store location. The study-run subprocess passes the study-convention path
+    (``<study>/runs.<run_id>.zarr``) so the written store lands exactly where
+    the study read-path (``study_run_state.zarr_store_for_sim`` /
+    ``study_charts``'s ``runs.*.zarr`` glob) looks for it.
     """
     if not emit_paths:
         return None  # no selection → empty view → fall back to sqlite
@@ -547,7 +553,7 @@ def _run_xarray(*, state, run_id, emit_paths, out_dir, core, steps,
     if not emit_ports:
         return None  # nothing present → empty view → fall back to sqlite
 
-    store = str(Path(out_dir) / f"{run_id}.zarr")
+    store = store_path or str(Path(out_dir) / f"{run_id}.zarr")
     view = view_from_emit_paths(emit_ports, dtype="<f8")
     config = _xarray_emitter_config(store, view, emitter_config)
     config["metadata"] = {**(config.get("metadata") or {}), "experiment_id": run_id}
@@ -596,7 +602,7 @@ def _run_xarray(*, state, run_id, emit_paths, out_dir, core, steps,
 
 def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
                      db_file=None, progress_cb=None, spec=None,
-                     emitter_config=None) -> dict:
+                     emitter_config=None, store_path=None) -> dict:
     """Inject the named emitter as a Step, build a Composite, run ``steps`` ticks
     (calling ``progress_cb(step)`` each tick), flush/close, and return provenance.
 
@@ -611,6 +617,13 @@ def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
       ``emit_root=()``, a view auto-derived from ``emit_paths``). A colony
       ``emitter_config`` (``strategy``/``emit_root``) is passed through. An EMPTY
       view (no ``emit_paths`` / none present) auto-falls-back to sqlite.
+
+    ``store_path`` (optional, xarray only) overrides the default
+    ``<out_dir>/<run_id>.zarr`` store location — callers that need the store to
+    land at a specific path (e.g. the study-run subprocess writing the
+    study-convention ``runs.<run_id>.zarr`` next to ``runs.db``) pass it here.
+    When ``None`` the historical ``<out_dir>/<run_id>.zarr`` naming is used, so
+    existing callers (``run_runner.execute``) are unaffected.
 
     Returns ``{"output_kind", "store_path", "steps", "run_id"}`` plus the live
     ``"composite"`` (so callers can render visualizations off the finished run).
@@ -628,7 +641,7 @@ def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
         prov = _run_xarray(
             state=state, run_id=run_id, emit_paths=emit_paths, out_dir=out_dir,
             core=core, steps=steps, progress_cb=progress_cb,
-            emitter_config=emitter_config)
+            emitter_config=emitter_config, store_path=store_path)
         if prov is not None and prov.get("output_kind") == "zarr":
             return prov
         # Empty view (prov is None) OR empty store (sentinel with a warning) →
