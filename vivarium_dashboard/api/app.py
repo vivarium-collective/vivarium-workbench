@@ -103,7 +103,7 @@ from vivarium_dashboard.lib import finding_views as _finding_views
 from vivarium_dashboard.lib import chain_views as _chain_views
 from vivarium_dashboard.lib import study_variants as _study_variants
 from vivarium_dashboard.lib import composite_runs as _composite_runs
-from vivarium_dashboard.lib.composite_resolve import resolve_composite
+from vivarium_dashboard.lib.composite_resolve import resolve_composite_for_request
 from vivarium_dashboard.lib.composites_query import composites_via_subprocess
 from vivarium_dashboard.lib.models import (
     BibEntry,
@@ -794,7 +794,7 @@ def create_app() -> FastAPI:
             ov = {}
         if not isinstance(ov, dict):
             ov = {}
-        result = resolve_composite(ws, id, ov)
+        result = resolve_composite_for_request(ws, id, ov)
         if result is None:
             # Miss → the stdlib's honest-degrade shape (404 with ``unresolved``),
             # NOT a bare 200 ``null`` (which makes the explorer crash on

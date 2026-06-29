@@ -385,7 +385,7 @@ def test_composite_resolve_typed_passthrough(client, monkeypatch):
         captured["overrides"] = overrides
         return payload
 
-    monkeypatch.setattr(_app, "resolve_composite", _fake_resolve)
+    monkeypatch.setattr(_app, "resolve_composite_for_request", _fake_resolve)
     r = client.get(
         "/api/composite-resolve?id=pbg_ws.composites.my_comp&overrides=%7B%22n%22%3A5%7D"
     )
