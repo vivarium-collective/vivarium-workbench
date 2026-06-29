@@ -36,6 +36,7 @@ from vivarium_dashboard.lib.investigations_index import (
 from vivarium_dashboard.lib.spec_norm import normalize_requirements as _normalize_requirements
 from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 from vivarium_dashboard.lib import readouts_views as _readouts_views
+from vivarium_dashboard.lib import study_derivations as _study_derivations
 
 # ---------------------------------------------------------------------------
 # Module-level TTL cache for the linkage index (mirrors server._LINKAGE_CACHE)
@@ -644,6 +645,7 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
                 )
                 else None
             ),
+            "derived": _study_derivations.derived_block(study_spec),
         })
 
     member_statuses = [s.get("status", "planning") for s in studies_out]
