@@ -1,50 +1,76 @@
 // tests/js/test_chain_block.js — run with: node tests/js/test_chain_block.js
 const assert = require('assert');
-const { _chainBlockHtml } = require('../../vivarium_dashboard/static/aig-graph.js');
+const { _chainBlockHtml, _groupClaims } = require('../../vivarium_dashboard/static/aig-graph.js');
 
-// graceful: no chain -> empty string (card identical to today)
+// graceful: no chain -> '' (card identical to today)
 assert.strictEqual(_chainBlockHtml(undefined), '', 'undefined chain -> empty');
 assert.strictEqual(_chainBlockHtml({ nodes: [], edges: [], violations: [] }), '', 'empty chain -> empty');
+assert.deepStrictEqual(_groupClaims({ nodes: [], edges: [] }), [], 'empty -> no claims');
 
-// full chain -> lists all four node types in finding->evidence->decision->conclusion order
-const chain = {
-  nodes: [
-    { id: 'conclusion/c1', type: 'conclusion', label: 'C', lifecycle_state: 'published' },
-    { id: 'finding/f1', type: 'finding', label: 'F', lifecycle_state: 'asserted' },
-    { id: 'evidence/e1', type: 'evidence', label: 'E', lifecycle_state: 'accepted' },
-    { id: 'decision/d1', type: 'decision', label: 'D', lifecycle_state: 'recorded' },
-  ],
-  edges: [], violations: [],
-};
-const html = _chainBlockHtml(chain);
-assert(html.indexOf('Evidence chain') !== -1, 'has header');
-['finding', 'evidence', 'decision', 'conclusion'].forEach(function (t) {
-  assert(html.indexOf(t) !== -1, 'lists ' + t);
-});
-assert(html.indexOf('finding') < html.indexOf('evidence'), 'finding before evidence');
-assert(html.indexOf('evidence') < html.indexOf('decision'), 'evidence before decision');
-assert(html.indexOf('decision') < html.indexOf('conclusion'), 'decision before conclusion');
-assert(html.indexOf('accepted') !== -1 && html.indexOf('published') !== -1, 'lifecycle badges rendered');
-assert(html.indexOf('chain gap') === -1, 'no violation marker when clean');
+function fullClaim(cv, statement, opts) {
+  opts = opts || {};
+  const f = 'finding/d-' + cv, e = 'evidence/d-' + cv, d = 'decision/d-' + cv, c = 'conclusion/d-' + cv;
+  const nodes = [
+    { id: f, type: 'finding', lifecycle_state: 'asserted', statement: statement, source: 'derived from study.yaml conclusion_verdicts[' + cv + ']' },
+    { id: e, type: 'evidence', lifecycle_state: opts.evState || 'accepted', statement: 'the basis' },
+  ];
+  const edges = [
+    { source: 'study/s', target: f, rel: 'contains' },
+    { source: e, target: f, rel: 'cites' },
+  ];
+  if (opts.decision) {
+    nodes.push({ id: d, type: 'decision', lifecycle_state: 'recorded', outcome: opts.decision });
+    edges.push({ source: d, target: e, rel: 'decides' });
+  }
+  if (opts.conclusion) {
+    nodes.push({ id: c, type: 'conclusion', lifecycle_state: 'published', statement: statement });
+    edges.push({ source: c, target: e, rel: 'concludes' });
+    edges.push({ source: c, target: d, rel: 'via' });
+  }
+  return { nodes, edges };
+}
 
-// violations -> marker present
-const bad = {
-  nodes: [{ id: 'evidence/e1', type: 'evidence', label: 'E', lifecycle_state: 'proposed' }],
-  edges: [], violations: [{ node_id: 'evidence/e1', invariant: 'x', message: 'y' }],
-};
-assert(_chainBlockHtml(bad).indexOf('chain gap') !== -1, 'violation marker present');
+// one published claim -> one claim, all stages, status published, claim text present
+const pub = fullClaim('cv0', 'basal elongation dominates', { evState: 'accepted', decision: 'accept', conclusion: true });
+pub.derived = true; pub.violations = [];
+const g = _groupClaims(pub);
+assert(g.length === 1, 'one component');
+assert(g[0].claimText === 'basal elongation dominates', 'claim text from finding statement');
+assert(g[0].status === 'published', 'status published');
+assert(g[0].stages.finding && g[0].stages.evidence && g[0].stages.decision && g[0].stages.conclusion, 'all stages');
+assert(g[0].source.indexOf('conclusion_verdicts[cv0]') !== -1, 'source carried');
 
-// derived hint
-const derivedChain = {
-  nodes: [{ id: 'finding/derived-s1-cv0', type: 'finding', label: 'F', lifecycle_state: 'asserted' }],
-  edges: [], violations: [], derived: true,
-};
-assert(_chainBlockHtml(derivedChain).indexOf('derived') !== -1, 'derived hint shown when derived');
+const htmlPub = _chainBlockHtml(pub);
+assert(htmlPub.indexOf('basal elongation dominates') !== -1, 'renders the claim text');
+assert(htmlPub.indexOf('published') !== -1, 'renders status word');
+assert(htmlPub.indexOf('· derived') !== -1, 'derived hint');
+assert((htmlPub.match(/aig-claim-row/g) || []).length === 1, 'one clickable claim row');
+assert(htmlPub.indexOf('data-claim-index="0"') !== -1, 'row carries index');
 
-const authoredChain = {
-  nodes: [{ id: 'finding/f1', type: 'finding', label: 'F', lifecycle_state: 'asserted' }],
-  edges: [], violations: [], derived: false,
-};
-assert(_chainBlockHtml(authoredChain).indexOf('· derived') === -1, 'no derived hint when authored');
+// pending: finding+evidence(proposed), no decision/conclusion
+const pend = fullClaim('cv0', 'needs more samples', { evState: 'proposed' });
+pend.violations = [];
+const gp = _groupClaims(pend);
+assert(gp.length === 1 && gp[0].status === 'pending', 'pending status');
+assert(gp[0].stages.finding && gp[0].stages.evidence && !gp[0].stages.decision, 'two stages');
+
+// refuted
+const ref = fullClaim('cv0', 'claim X', { evState: 'rejected', decision: 'reject' });
+ref.violations = [];
+assert(_groupClaims(ref)[0].status === 'refuted', 'refuted status');
+
+// two claims -> two components, two rows
+const a = fullClaim('cv0', 'claim A', { decision: 'accept', conclusion: true });
+const b = fullClaim('cv1', 'claim B', { decision: 'accept', conclusion: true });
+const two = { nodes: a.nodes.concat(b.nodes), edges: a.edges.concat(b.edges), derived: true, violations: [] };
+assert(_groupClaims(two).length === 2, 'two claims');
+assert(_chainBlockHtml(two).indexOf('(2 claims)') !== -1, 'count shown');
+assert((_chainBlockHtml(two).match(/aig-claim-row/g) || []).length === 2, 'two rows');
+
+// singleton findings.entries finding (no intra edges)
+const single = { nodes: [{ id: 'finding/d-fe0', type: 'finding', lifecycle_state: 'asserted', statement: 'a gap' }],
+                edges: [{ source: 'study/s', target: 'finding/d-fe0', rel: 'contains' }], violations: [] };
+const gs = _groupClaims(single);
+assert(gs.length === 1 && gs[0].claimText === 'a gap' && gs[0].status === 'pending', 'singleton finding claim');
 
 console.log('ok');
