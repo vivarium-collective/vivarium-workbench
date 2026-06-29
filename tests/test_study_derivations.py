@@ -59,3 +59,14 @@ def test_findings_dict_entries_form_honored():
 def test_derived_block_has_four_keys():
     b = D.derived_block({"gate_status": "passed"})
     assert set(b) == {"conclusion_verdicts", "verdict", "insight", "key_metrics"}
+
+
+def test_list_form_conclusion_verdicts_does_not_crash():
+    # param-uq/showcase studies author conclusion_verdicts as a LIST, not the
+    # 3-track dict. derived_block must not crash (regression: study page 500).
+    spec = {"gate_status": "passed", "runs": [{"status": "completed"}],
+            "conclusion_verdicts": [{"claim": "X dominates", "verdict": "supported", "basis": "Sobol 0.97"}]}
+    cv = D.conclusion_verdicts(spec)
+    assert cv["biological_validation"]["result"] == "PASS"
+    assert cv["biological_validation"]["basis"] == ""   # no per-track basis from list form
+    assert set(D.derived_block(spec)) == {"conclusion_verdicts", "verdict", "insight", "key_metrics"}
