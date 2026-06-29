@@ -45,6 +45,17 @@ def test_verdict_insight_key_metrics():
     assert km == [{"label": "t1", "value": 1.2, "status": "pass"}]
 
 
+def test_findings_dict_entries_form_honored():
+    # {entries:[...]} authoring form (e.g. mbp-06) — explanatory_gain must not be GAP
+    spec = {"findings": {"entries": [{"statement": "a gap", "axis": "A"}]}}
+    cv = D.conclusion_verdicts(spec)
+    assert cv["explanatory_gain"]["result"] == "PARTIAL"   # findings exist, none interpretation-tier
+    assert D.insight(spec) == "a gap"
+    # interpretation-tier entry -> PASS
+    spec2 = {"findings": {"entries": [{"statement": "x", "tier": "interpretation"}]}}
+    assert D.conclusion_verdicts(spec2)["explanatory_gain"]["result"] == "PASS"
+
+
 def test_derived_block_has_four_keys():
     b = D.derived_block({"gate_status": "passed"})
     assert set(b) == {"conclusion_verdicts", "verdict", "insight", "key_metrics"}

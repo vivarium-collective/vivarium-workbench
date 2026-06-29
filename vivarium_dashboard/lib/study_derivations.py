@@ -22,6 +22,17 @@ def norm_gate_result(val) -> str:
     return GATE_RESULT_NORM.get(str(val or "").strip().lower(), "PENDING")
 
 
+def as_findings(v):
+    """Normalize the findings field across authoring forms: a list as-is; a
+    dict's `entries` list, else its values; anything else -> []."""
+    if isinstance(v, list):
+        return v
+    if isinstance(v, dict):
+        entries = v.get("entries")
+        return entries if isinstance(entries, list) else list(v.values())
+    return []
+
+
 def verdict(spec: dict) -> str:
     ge = (spec.get("pipeline_gate") or {}).get("gate_evaluator") or {}
     return GATE_TO_VERDICT.get(ge.get("result") or spec.get("gate_status"), "")
@@ -52,7 +63,7 @@ def key_metrics(spec: dict) -> list[dict]:
 
 def insight(spec: dict) -> str:
     """Headline insight: the first finding's statement/summary."""
-    for f in (spec.get("findings") or []):
+    for f in as_findings(spec.get("findings")):
         if isinstance(f, dict):
             s = f.get("statement") or f.get("summary")
             if s:
@@ -81,7 +92,7 @@ def conclusion_verdicts(spec: dict) -> dict:
         else:
             reg = "PARTIAL"
 
-    findings = [f for f in (spec.get("findings") or []) if isinstance(f, dict)]
+    findings = [f for f in as_findings(spec.get("findings")) if isinstance(f, dict)]
     if not findings:
         exp = "GAP"
     elif any((f.get("tier") == "interpretation") or f.get("mechanism_origin") for f in findings):
