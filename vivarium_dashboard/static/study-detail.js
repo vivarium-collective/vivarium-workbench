@@ -1372,7 +1372,7 @@
       _row('Verdict',
         '<strong>' + e(cgv.result) + '</strong> '
         + '<span class="spine-label">code-computed</span> ' + chip + preregChip,
-        '<a href="#" onclick="_setStudyTab(\'overview\');return false">details →</a>');
+        '<a href="#" onclick="_setStudyTab(\'conclusions\');return false">details →</a>');
     }
 
     // ── Why — the primary finding statement + its divergence_factor ────────
@@ -1419,8 +1419,7 @@
                 : 'ℹ ' + fs.length + ' note' + (fs.length === 1 ? '' : 's'));
       _row('Readiness',
         e(head) + ' <span class="spine-label">code-computed by the report linter</span>',
-        '<a href="#" onclick="_setStudyTab(\'overview\');'
-        + 'var el=document.getElementById(\'readiness-panel\');'
+        '<a href="#" onclick="var el=document.getElementById(\'readiness-panel\');'
         + 'if(el)el.scrollIntoView({behavior:\'smooth\',block:\'start\'});return false">readiness →</a>');
       _flush();
     });
