@@ -52,6 +52,10 @@ vivarium-dashboard-publish = "vivarium_dashboard.publish:main"
 # requirement from pbg-superpowers.
 [tool.uv.sources]
 pbg-basic-processes = { git = "https://github.com/vivarium-collective/pbg-basic-processes.git", branch = "main" }
+# investigation-contracts is declared bare in [project.dependencies] (kept out
+# of published metadata) and is not on PyPI; supply its git URL here so `uv
+# sync`/`uv lock` can resolve it (the editable-install gap that was failing CI).
+investigation-contracts = { git = "https://github.com/vivarium-collective/investigation-contracts.git", branch = "main" }
 
 # bigraph-loom is a PEP 508 direct git URL (not on PyPI), so the wheel build
 # backend must opt into direct references — without this, hatchling refuses the
