@@ -113,6 +113,81 @@ def reader_for(kind: str) -> Callable:
 
 
 # ---------------------------------------------------------------------------
+# Per-operation reader dispatch (observable-list / vector / flux)
+# ---------------------------------------------------------------------------
+#
+# ``reader_for`` above centralizes the TRACE reader; these four tables do the
+# same for the OTHER explorer operations whose per-kind reader was still
+# selected with inline ``if kind ==`` branches in ``explorer_data``. Each maps a
+# store ``kind`` to the EXISTING explorer_data reader for that operation — the
+# broker owns the SELECTION; the reader BODIES keep their store-FORMAT
+# data-layout logic (parquet ``__``-flattened columns, sqlite SQL, zarr datatree
+# walks, positional-vs-real steps) where they live. An unsupported/unresolved
+# kind returns ``None`` (NOT a raise — unlike ``reader_for``) so each caller
+# reproduces its prior empty-result behavior for a store that didn't resolve.
+
+def observable_reader_for(kind: str) -> "Callable | None":
+    """Reader for ``explorer_data.list_observables`` by store kind, or ``None``.
+
+    Signature of every returned reader: ``(resolved, run_id) ->
+    {"categories": {...}}``.
+    """
+    from vivarium_dashboard.lib import explorer_data as ed
+    table = {
+        "zarr": ed._zarr_observables,
+        "parquet": ed._parquet_observables,
+        "sqlite": ed._sqlite_observables,
+    }
+    return table.get(kind)
+
+
+def vector_reader_for(kind: str) -> "Callable | None":
+    """Reader for ``explorer_data.get_vector`` by store kind, or ``None``.
+
+    Signature of every returned reader: ``(resolved, path, step, run_id) ->
+    {"ids", "values", "step", "time"}``.
+    """
+    from vivarium_dashboard.lib import explorer_data as ed
+    table = {
+        "zarr": ed._zarr_get_vector,
+        "parquet": ed._parquet_get_vector,
+        "sqlite": ed._sqlite_get_vector,
+    }
+    return table.get(kind)
+
+
+def flux_auto_reader_for(kind: str) -> "Callable | None":
+    """Reader for ``explorer_data.get_flux_auto`` by store kind, or ``None``.
+
+    Signature of every returned reader: ``(resolved, db_path, step, id_map,
+    run_id) -> (fluxes, total, time_val)`` (BiGG-remapped fluxes for the Escher
+    map; the caller then merges environment exchange fluxes).
+    """
+    from vivarium_dashboard.lib import explorer_data as ed
+    table = {
+        "zarr": ed._zarr_get_flux_auto,
+        "parquet": ed._parquet_get_flux_auto,
+        "sqlite": ed._sqlite_get_flux_auto,
+    }
+    return table.get(kind)
+
+
+def base_flux_reader_for(kind: str) -> "Callable | None":
+    """Reader for ``explorer_data.get_base_fluxes`` by store kind, or ``None``.
+
+    Signature of every returned reader: ``(resolved, db_path, step, run_id) ->
+    (ids, vals, time_val)`` (native EcoCyc base-reaction ids + flux vector).
+    """
+    from vivarium_dashboard.lib import explorer_data as ed
+    table = {
+        "zarr": ed._zarr_get_base_fluxes,
+        "parquet": ed._parquet_get_base_fluxes,
+        "sqlite": ed._sqlite_get_base_fluxes,
+    }
+    return table.get(kind)
+
+
+# ---------------------------------------------------------------------------
 # Emitter-choice + label ports (behavior-identical to the originals)
 # ---------------------------------------------------------------------------
 

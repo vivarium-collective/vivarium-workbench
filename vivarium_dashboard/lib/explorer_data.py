@@ -216,8 +216,13 @@ def _parquet_config_meta(part_dir):
         return {}
 
 
-def _parquet_observables(part_dir):
-    """Build the {categories: {...}} observable map from a parquet partition."""
+def _parquet_observables(part_dir, run_id=None):
+    """Build the {categories: {...}} observable map from a parquet partition.
+
+    ``run_id`` is accepted for a uniform broker reader signature
+    (``observable_reader_for``) and ignored — a parquet partition's schema is
+    run-scoped already.
+    """
     try:
         import pyarrow as pa
         import pyarrow.parquet as pq
@@ -274,7 +279,10 @@ def _categorize_leaves(leaves):
     return {c: sorted(out[c], key=lambda o: o["path"]) for c in order if c in out}
 
 
-def _zarr_observables(store):
+def _zarr_observables(store, run_id=None):
+    """Observable map from a zarr store. ``run_id`` is accepted for a uniform
+    broker reader signature (``observable_reader_for``) and ignored — a zarr
+    store is already a single run."""
     try:
         import xarray as xr
     except ImportError:
@@ -295,14 +303,13 @@ def _zarr_observables(store):
     return {"categories": _categorize_leaves(leaves)}
 
 
-def list_observables(db_path: str, run_id: str | None = None, workspace=None) -> dict:
-    kind, resolved = emitters.read_source(db_path, workspace)
-    if kind == "zarr":
-        return _zarr_observables(resolved)
-    if kind == "parquet":
-        return _parquet_observables(resolved)
-    if kind != "sqlite":
-        return {"categories": {}}
+def _sqlite_observables(resolved, run_id):
+    """Observable map from a sqlite history store's first emitted state.
+
+    The sqlite reader body for ``list_observables`` — store-FORMAT layout
+    (json state walk) lives here; the broker (``observable_reader_for``) owns
+    only the kind -> reader SELECTION.
+    """
     state = _first_state(resolved, run_id)
     if not state:
         return {"categories": {}}
@@ -321,6 +328,14 @@ def list_observables(db_path: str, run_id: str | None = None, workspace=None) ->
     order = [f for _, f in _CATEGORY_MAP] + ["Other"]
     return {"categories": {c: sorted(categories[c], key=lambda o: o["path"])
                            for c in order if c in categories}}
+
+
+def list_observables(db_path: str, run_id: str | None = None, workspace=None) -> dict:
+    kind, resolved = emitters.read_source(db_path, workspace)
+    reader = emitters.observable_reader_for(kind)
+    if reader is None:
+        return {"categories": {}}
+    return reader(resolved, run_id)
 
 
 def _series_key(path: str, index: int | None) -> str:
@@ -763,48 +778,63 @@ def _zarr_vector(store, leaf, step):
     return [], []
 
 
+def _zarr_get_vector(resolved, path, step, run_id):
+    """get_vector zarr reader body — ids from the id_<leaf> coord."""
+    leaf = path.split(".")[-1].split("[")[0]
+    ids, vals = _zarr_vector(resolved, leaf, step)
+    return {"ids": ids, "values": vals, "step": step, "time": None}
+
+
+def _parquet_get_vector(resolved, path, step, run_id):
+    """get_vector parquet reader body — ``__``-flattened columns; ids from
+    config_meta (output_metadata__<col>), or bulk__id for bulk."""
+    try:
+        col = _parquet_col(path)
+        tbl = _parquet_table(resolved, columns=["global_time", col])
+        if tbl is None:
+            return {"ids": [], "values": [], "step": step, "time": None}
+        nrows = len(tbl)
+        si = min(max(0, step), nrows - 1)
+        time_val = tbl.column("global_time")[si].as_py()
+        row_val = tbl.column(col)[si].as_py()
+        if row_val is None:
+            return {"ids": [], "values": [], "step": step, "time": time_val}
+        values = [float(v) for v in row_val]
+        if col == "bulk__count":
+            bulk_tbl = _parquet_table(resolved, columns=["global_time", "bulk__id"])
+            if bulk_tbl is not None:
+                ids = bulk_tbl.column("bulk__id")[si].as_py() or []
+            else:
+                ids = [str(i) for i in range(len(values))]
+        else:
+            meta = _parquet_config_meta(resolved)
+            ids = meta.get(col, [str(i) for i in range(len(values))])
+        return {"ids": ids, "values": values, "step": step, "time": time_val}
+    except Exception:
+        return {"ids": [], "values": [], "step": step, "time": None}
+
+
+def _sqlite_get_vector(resolved, path, step, run_id):
+    """get_vector sqlite reader body — positional index ids."""
+    time, state = _state_at_step(resolved, step, run_id)
+    vec = _dig(_unwrap_agent(state), path) if state is not None else None
+    if isinstance(vec, list) and all(isinstance(x, _NUM) for x in vec):
+        return {"ids": [str(i) for i in range(len(vec))],
+                "values": [float(x) for x in vec], "step": step, "time": time}
+    return {"ids": [], "values": [], "step": step, "time": time}
+
+
 def get_vector(db_path, path, step, run_id=None, workspace=None):
     """One vector observable's per-entity (ids, values) at a timepoint.
     zarr: ids from the id_<leaf> coord. sqlite: positional index ids.
-    parquet: ids from config_meta (output_metadata__<col>), or bulk__id for bulk."""
+    parquet: ids from config_meta (output_metadata__<col>), or bulk__id for bulk.
+    The kind -> reader SELECTION lives in the broker (``vector_reader_for``);
+    each reader body keeps its store-FORMAT layout."""
     kind, resolved = emitters.read_source(db_path, workspace)
-    if kind == "zarr":
-        leaf = path.split(".")[-1].split("[")[0]
-        ids, vals = _zarr_vector(resolved, leaf, step)
-        return {"ids": ids, "values": vals, "step": step, "time": None}
-    if kind == "parquet":
-        try:
-            col = _parquet_col(path)
-            tbl = _parquet_table(resolved, columns=["global_time", col])
-            if tbl is None:
-                return {"ids": [], "values": [], "step": step, "time": None}
-            nrows = len(tbl)
-            si = min(max(0, step), nrows - 1)
-            time_val = tbl.column("global_time")[si].as_py()
-            row_val = tbl.column(col)[si].as_py()
-            if row_val is None:
-                return {"ids": [], "values": [], "step": step, "time": time_val}
-            values = [float(v) for v in row_val]
-            if col == "bulk__count":
-                bulk_tbl = _parquet_table(resolved, columns=["global_time", "bulk__id"])
-                if bulk_tbl is not None:
-                    ids = bulk_tbl.column("bulk__id")[si].as_py() or []
-                else:
-                    ids = [str(i) for i in range(len(values))]
-            else:
-                meta = _parquet_config_meta(resolved)
-                ids = meta.get(col, [str(i) for i in range(len(values))])
-            return {"ids": ids, "values": values, "step": step, "time": time_val}
-        except Exception:
-            return {"ids": [], "values": [], "step": step, "time": None}
-    if kind == "sqlite":
-        time, state = _state_at_step(resolved, step, run_id)
-        vec = _dig(_unwrap_agent(state), path) if state is not None else None
-        if isinstance(vec, list) and all(isinstance(x, _NUM) for x in vec):
-            return {"ids": [str(i) for i in range(len(vec))],
-                    "values": [float(x) for x in vec], "step": step, "time": time}
-        return {"ids": [], "values": [], "step": step, "time": time}
-    return {"ids": [], "values": [], "step": step, "time": None}
+    reader = emitters.vector_reader_for(kind)
+    if reader is None:
+        return {"ids": [], "values": [], "step": step, "time": None}
+    return reader(resolved, path, step, run_id)
 
 
 _exchange_assets_cache = None
@@ -866,52 +896,108 @@ def _exchange_bigg_fluxes(kind, resolved, db_path, step, run_id):
     return out
 
 
+def _zarr_get_flux_auto(resolved, db_path, step, id_map, run_id):
+    """get_flux_auto zarr reader body — reads ids+vector from the store and
+    BiGG-remaps via ``id_map``. Returns ``(fluxes, total, time_val)``."""
+    fluxes, time_val = {}, None
+    ids, vals = _zarr_flux(resolved, step)
+    total = len(ids)
+    for i, rid in enumerate(ids):
+        if i >= len(vals):
+            break
+        bigg = id_map.get(rid)
+        if bigg is not None:
+            fluxes[bigg] = fluxes.get(bigg, 0.0) + float(vals[i])
+    return fluxes, total, time_val
+
+
+def _parquet_get_flux_auto(resolved, db_path, step, id_map, run_id):
+    """get_flux_auto parquet reader body — reads the FBA vector + config ids and
+    BiGG-remaps via ``id_map``. Returns ``(fluxes, total, time_val)``."""
+    fluxes, total, time_val = {}, 0, None
+    flux_col = "listeners__fba_results__base_reaction_fluxes"
+    tbl = _parquet_table(resolved, columns=["global_time", flux_col])
+    if tbl is not None:
+        si = min(max(0, step), len(tbl) - 1)
+        time_val = tbl.column("global_time")[si].as_py()
+        vals = tbl.column(flux_col)[si].as_py() or []
+        ids = _parquet_config_meta(resolved).get(flux_col, []) or load_flux_assets()[0]
+        total = len(ids)
+        for i, rid in enumerate(ids):
+            if i >= len(vals):
+                break
+            bigg = id_map.get(rid)
+            if bigg is not None:
+                fluxes[bigg] = fluxes.get(bigg, 0.0) + float(vals[i])
+    return fluxes, total, time_val
+
+
+def _sqlite_get_flux_auto(resolved, db_path, step, id_map, run_id):
+    """get_flux_auto sqlite reader body — uses get_flux with asset/run base_ids.
+    Returns ``(fluxes, total, time_val)``."""
+    base_ids, _ = load_flux_assets()
+    if not base_ids:
+        base_ids = base_ids_from_run(resolved, run_id)
+    r = get_flux(resolved, step, base_ids, id_map, run_id)
+    return r["fluxes"], r["coverage"]["total"], r.get("time")
+
+
 def get_flux_auto(db_path, step, id_map, run_id=None, workspace=None):
     """Emitter-aware flux for the Escher map. zarr reads ids+vector from the
     store; sqlite uses get_flux with asset/run base_ids; parquet reads the FBA
     vector + config ids. Environment exchange fluxes (external_exchange_fluxes)
-    are merged onto the map's EX_ reactions when the run emits them."""
+    are merged onto the map's EX_ reactions when the run emits them.
+    The kind -> reader SELECTION lives in the broker (``flux_auto_reader_for``);
+    each reader body keeps its store-FORMAT layout."""
     kind, resolved = emitters.read_source(db_path, workspace)
     fluxes, total, time_val = {}, 0, None
-    try:
-        if kind == "zarr":
-            ids, vals = _zarr_flux(resolved, step)
-            total = len(ids)
-            for i, rid in enumerate(ids):
-                if i >= len(vals):
-                    break
-                bigg = id_map.get(rid)
-                if bigg is not None:
-                    fluxes[bigg] = fluxes.get(bigg, 0.0) + float(vals[i])
-        elif kind == "parquet":
-            flux_col = "listeners__fba_results__base_reaction_fluxes"
-            tbl = _parquet_table(resolved, columns=["global_time", flux_col])
-            if tbl is not None:
-                si = min(max(0, step), len(tbl) - 1)
-                time_val = tbl.column("global_time")[si].as_py()
-                vals = tbl.column(flux_col)[si].as_py() or []
-                ids = _parquet_config_meta(resolved).get(flux_col, []) or load_flux_assets()[0]
-                total = len(ids)
-                for i, rid in enumerate(ids):
-                    if i >= len(vals):
-                        break
-                    bigg = id_map.get(rid)
-                    if bigg is not None:
-                        fluxes[bigg] = fluxes.get(bigg, 0.0) + float(vals[i])
-        else:  # sqlite
-            base_ids, _ = load_flux_assets()
-            if not base_ids:
-                base_ids = base_ids_from_run(resolved if kind == "sqlite" else db_path, run_id)
-            r = get_flux(resolved if kind == "sqlite" else db_path, step, base_ids, id_map, run_id)
-            fluxes, total, time_val = r["fluxes"], r["coverage"]["total"], r.get("time")
-    except Exception:
-        return {"step": step, "time": None, "fluxes": {},
-                "coverage": {"mapped": 0, "total": 0, "exchange": 0}}
+    reader = emitters.flux_auto_reader_for(kind)
+    if reader is not None:
+        try:
+            fluxes, total, time_val = reader(resolved, db_path, step, id_map, run_id)
+        except Exception:
+            return {"step": step, "time": None, "fluxes": {},
+                    "coverage": {"mapped": 0, "total": 0, "exchange": 0}}
     # merge environment exchange fluxes onto the map's EX_ reactions
     ex = _exchange_bigg_fluxes(kind, resolved, db_path, step, run_id)
     fluxes.update(ex)
     return {"step": step, "time": time_val, "fluxes": fluxes,
             "coverage": {"mapped": len(fluxes), "total": total, "exchange": len(ex)}}
+
+
+def _zarr_get_base_fluxes(resolved, db_path, step, run_id):
+    """get_base_fluxes zarr reader body. Returns ``(ids, vals, time_val)``."""
+    ids, vals = _zarr_flux(resolved, step)
+    return ids, vals, None
+
+
+def _parquet_get_base_fluxes(resolved, db_path, step, run_id):
+    """get_base_fluxes parquet reader body. Returns ``(ids, vals, time_val)``."""
+    ids, vals, time_val = [], [], None
+    flux_col = "listeners__fba_results__base_reaction_fluxes"
+    tbl = _parquet_table(resolved, columns=["global_time", flux_col])
+    if tbl is not None:
+        nrows = len(tbl)
+        si = min(max(0, step), nrows - 1)
+        time_val = tbl.column("global_time")[si].as_py()
+        vals = tbl.column(flux_col)[si].as_py() or []
+        meta = _parquet_config_meta(resolved)
+        ids = meta.get(flux_col, []) or load_flux_assets()[0]
+    return ids, vals, time_val
+
+
+def _sqlite_get_base_fluxes(resolved, db_path, step, run_id):
+    """get_base_fluxes sqlite reader body. Returns ``(ids, vals, time_val)``."""
+    ids, vals, time_val = [], [], None
+    time_val, state = _state_at_step(resolved, step, run_id)
+    if state is not None:
+        vec = _dig(_unwrap_agent(state), _FLUX_PATH)
+        if isinstance(vec, list):
+            vals = vec
+    ids = load_flux_assets()[0]
+    if not ids:
+        ids = base_ids_from_run(resolved, run_id)
+    return ids, vals, time_val
 
 
 def get_base_fluxes(db_path, step, run_id=None, workspace=None):
@@ -921,31 +1007,15 @@ def get_base_fluxes(db_path, step, run_id=None, workspace=None):
     every reaction without a BiGG cross-reference), this returns ALL emitted
     reactions under their native EcoCyc ids — the full metabolism, suitable for
     grouping by EcoCyc pathway. Returns {step, time, fluxes: {base_id: flux}}.
+    The kind -> reader SELECTION lives in the broker (``base_flux_reader_for``);
+    each reader body keeps its store-FORMAT layout.
     """
     kind, resolved = emitters.read_source(db_path, workspace)
-    ids, vals, time_val = [], [], None
-    if kind == "zarr":
-        ids, vals = _zarr_flux(resolved, step)
-    elif kind == "parquet":
-        flux_col = "listeners__fba_results__base_reaction_fluxes"
-        tbl = _parquet_table(resolved, columns=["global_time", flux_col])
-        if tbl is not None:
-            nrows = len(tbl)
-            si = min(max(0, step), nrows - 1)
-            time_val = tbl.column("global_time")[si].as_py()
-            vals = tbl.column(flux_col)[si].as_py() or []
-            meta = _parquet_config_meta(resolved)
-            ids = meta.get(flux_col, []) or load_flux_assets()[0]
-    else:  # sqlite
-        time_val, state = _state_at_step(
-            resolved if kind == "sqlite" else db_path, step, run_id)
-        if state is not None:
-            vec = _dig(_unwrap_agent(state), _FLUX_PATH)
-            if isinstance(vec, list):
-                vals = vec
-        ids = load_flux_assets()[0]
-        if not ids:
-            ids = base_ids_from_run(resolved if kind == "sqlite" else db_path, run_id)
+    reader = emitters.base_flux_reader_for(kind)
+    if reader is None:
+        ids, vals, time_val = [], [], None
+    else:
+        ids, vals, time_val = reader(resolved, db_path, step, run_id)
     fluxes = {}
     for i, rid in enumerate(ids):
         if i >= len(vals):
