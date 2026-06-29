@@ -879,45 +879,47 @@ window.addEventListener('pageshow', function (e) {
     <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
       <h3 id="investigation-detail-title" style="margin:0; flex:1"></h3>
       <span id="investigation-detail-status" class="status-pill planned" style="font-size:0.85em"></span>
-      <span class="viv-info-chip" data-tooltip="Refresh &mdash; re-fetch the investigation from disk. Use after editing YAML files directly.&#10;&#10;Generate report &mdash; self-contained HTML report you can email.&#10;&#10;Download notebook &mdash; a self-contained Jupyter notebook (+ matching .py) that re-runs the studies and renders their figures.">?</span>
-      <button class="btn-mini" id="investigation-detail-refresh" onclick="_refreshInvestigationDetail()" title="Re-fetch the investigation + its studies from disk. Use after editing YAML files directly (which the dashboard can't see otherwise).">↻ Refresh</button>
-      <button class="btn-mini" onclick="_generateInvestigationReport()" title="Generate a shareable HTML report (self-contained, attach to email)">Generate report 📄</button>
-      <button class="btn-mini" onclick="_downloadInvestigationNotebook()" title="Download a self-contained Jupyter notebook (+ matching .py) that re-runs this investigation's studies via the process-bigraph protocol and renders their figures. The coder-facing complement to the HTML report.">Download notebook 📓</button>
+      <span class="inv-export-actions" style="display:inline-flex; gap:6px">
+        <button class="btn-mini" onclick="_generateInvestigationReport()" title="Generate a shareable HTML report (self-contained, attach to email)">Report 📄</button>
+        <button class="btn-mini" onclick="_downloadInvestigationNotebook()" title="Download a self-contained Jupyter notebook (+ matching .py) that re-runs this investigation's studies via the process-bigraph protocol and renders their figures. The coder-facing complement to the HTML report.">Notebook 📓</button>
+      </span>
+      <button class="btn-mini" id="investigation-detail-refresh" onclick="_refreshInvestigationDetail()" title="Re-fetch the investigation + its studies from disk. Use after editing YAML files directly (which the dashboard can't see otherwise).">↻</button>
+      <span class="viv-info-chip" data-tooltip="Report &mdash; self-contained HTML report you can email.&#10;&#10;Notebook &mdash; a self-contained Jupyter notebook (+ matching .py) that re-runs the studies and renders their figures.&#10;&#10;Refresh (↻) &mdash; re-fetch the investigation from disk after editing YAML directly.">?</span>
     </div>
     <!-- Run-progress panel: rendered while a run-unblocked job is active. -->
     <div id="investigation-run-progress" class="inv-run-progress" style="display:none"></div>
 
+    <!-- Needs-attention elevated: a distinct, actionable banner directly below the
+         header. Populated by JS from /api/needs-attention; renders nothing when empty. -->
+    <div id="investigation-needs-attention"></div>
+
     <div id="investigation-intro" class="inv-intro" style="margin: 0 0 16px 0;">
-      <!-- Lead paragraph (the abstract). Auto-styled as serif body type for readability. -->
-      <details id="investigation-intro-details" class="inv-lead-details">
+      <!-- Single "About" disclosure (open by default): the lead/abstract, then any
+           supplementary context as labeled sub-blocks. Each sub-block keeps its id +
+           inner <ol>/<dl> so the existing render functions populate it unchanged; JS
+           toggles their display, so they stay hidden when the yaml omits them. -->
+      <details id="investigation-intro-details" class="inv-lead-details" open>
         <summary>About this investigation</summary>
         <div id="investigation-detail-description" class="inv-lead" style="margin-top:6px"></div>
+        <div id="investigation-how-to-read" class="inv-how-to-read" style="display:none; margin-top:12px">
+          <h4 class="inv-subhead">How to read this</h4>
+          <ol></ol>
+        </div>
+        <div id="investigation-glossary" class="inv-glossary" style="display:none; margin-top:12px">
+          <h4 class="inv-subhead">Glossary</h4>
+          <dl></dl>
+        </div>
+        <div id="investigation-biology-story" class="inv-bio-story" style="display:none; margin-top:12px">
+          <h4 class="inv-subhead inv-bio-story-label">Biology — the mechanism this investigation models</h4>
+          <div id="investigation-biology-story-text" class="inv-bio-story-text"></div>
+        </div>
       </details>
-      <!-- At-a-glance grid: one tile per study with a one-line role. Populated by JS. -->
-      <div id="investigation-at-a-glance" class="inv-at-a-glance" style="display:none"></div>
-      <!-- How to read this: ordered list of usage tips for the evaluator. -->
-      <details id="investigation-how-to-read" class="inv-how-to-read" style="display:none">
-        <summary>How to read this</summary>
-        <ol></ol>
-      </details>
-      <!-- Glossary: collapsible. -->
-      <details id="investigation-glossary" class="inv-glossary" style="display:none">
-        <summary>Glossary</summary>
-        <dl></dl>
-      </details>
-      <!-- Biology story (free-form prose). Hidden if the yaml omits it. -->
-      <details id="investigation-biology-story" class="inv-bio-story" style="display:none">
-        <summary class="inv-bio-story-label">Biology — the mechanism this investigation models</summary>
-        <div id="investigation-biology-story-text" class="inv-bio-story-text"></div>
-      </details>
-      <!-- SP5: Needs-attention panel. Populated by JS from /api/needs-attention. -->
-      <div id="investigation-needs-attention"></div>
     </div>
     <!-- Discourse-graph framing: studies as knowledge-producing operations. -->
     <div id="investigation-dag-lead" style="margin: 4px 0 8px; font-size: 0.88em; color: #475569; line-height: 1.4;">
-      <strong>Investigation graph</strong> — each study is a knowledge-producing operation that
-      builds understanding of the mechanism. Each node shows the <em>question</em> it asks and
-      the <em>evidence</em> it produced; edges show what a result leads to.
+      <strong>Investigation graph</strong>
+      <span class="viv-info-chip" data-tooltip="Each study is a knowledge-producing operation that builds understanding of the mechanism. Each node shows the question it asks and the evidence it produced; edges show what a result leads to.">?</span>
+      — nodes are studies; edges show what each result leads to.
     </div>
     <div id="investigation-dag-shell"
          style="position: relative; border: 1px solid #e2e8f0; border-radius: 6px; background: #fafafa;
