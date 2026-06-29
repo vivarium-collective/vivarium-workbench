@@ -1,6 +1,15 @@
 schema_version: 2
 name: ws_increase_demo
 package_path: pbg_ws_increase_demo
+# This fixture's run/read tests (test_run_runner, test_composite_explorer_api,
+# test_open_run_in_explorer) persist a composite run and read its trajectory back
+# from the SQLite composite-runs.db — they exercise run/read mechanics, not
+# emitter selection. Task 6 flipped the framework default to xarray (which writes
+# a zarr store the SQLite trajectory reader can't see), so pin this sqlite-shaped
+# fixture to the sqlite opt-out to preserve that historical, readable behavior.
+# The xarray default is covered separately by tests/test_emitters_e2e.py.
+runtime:
+  default_emitter: sqlite
 phases: []
 observables: []
 visualizations: []

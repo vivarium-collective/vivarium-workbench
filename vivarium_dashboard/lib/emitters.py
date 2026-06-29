@@ -8,9 +8,10 @@ This broker centralizes that dispatch: it resolves each emitter's CONTRACT from
 reader / label / chart-source functions — never reimplementing a reader body or
 changing any output.
 
-ZERO behavior change is the contract of Task 4. The default emitter STAYS
-``"sqlite"`` here; the flip to ``"xarray"`` (and its runtime deps) is Task 6.
-``reader_for`` is the ONLY place a ``kind → reader`` mapping may live.
+Task 4 was zero-behavior-change. Task 6 then flipped the default emitter to
+``"xarray"`` (made its runtime deps mandatory) — a workspace/study opts back to
+sqlite via ``runtime.default_emitter: sqlite``. ``reader_for`` is the ONLY place
+a ``kind → reader`` mapping may live.
 
 All cross-``lib`` imports are lazy (inside functions) so this module can be
 imported by the very modules it dispatches into without an import cycle.
@@ -21,9 +22,13 @@ import traceback
 from pathlib import Path
 from typing import Callable
 
-# The framework default. Task 6 flips this to "xarray" — keep "sqlite" here so
-# the read/label/chart paths produce byte-identical output to pre-broker code.
-DEFAULT_EMITTER = "sqlite"
+# The framework default. Task 6 flipped this from "sqlite" to "xarray": the
+# dashboard now prefers the XArray/zarr emitter for new runs and read-source
+# selection. A workspace/study opts back out with ``runtime.default_emitter:
+# sqlite`` (still honored below), and the broker's empty-view auto-fallback to
+# sqlite still fires when a composite declares no emit_paths. xarray's runtime
+# deps (xarray + zarr) are mandatory as of Task 6 (see pyproject.toml).
+DEFAULT_EMITTER = "xarray"
 
 # The workspace/runtime emitter NAME is "xarray"; the store kind it writes is
 # "zarr". Every other accepted name already equals its output_kind.
@@ -120,8 +125,10 @@ def default_emitter(spec: "dict | None", runs_db: "Path | None") -> str:
     silently flip read sources (that hides drift).
     """
     spec_rt = (spec or {}).get("runtime") or {}
-    if isinstance(spec_rt, dict) and spec_rt.get("default_emitter") in _ACCEPTED_EMITTERS:
-        return spec_rt["default_emitter"]
+    if isinstance(spec_rt, dict):
+        declared = normalize_emitter_name(spec_rt.get("default_emitter"))
+        if declared in _ACCEPTED_EMITTERS:
+            return declared
     if runs_db is not None:
         # Studies layouts vary (flat <ws>/studies/<slug>/runs.db or nested
         # <ws>/workspace/studies/<slug>/runs.db) — walk up to the nearest
@@ -134,8 +141,10 @@ def default_emitter(spec: "dict | None", runs_db: "Path | None") -> str:
                 import yaml as _yaml
                 ws = _yaml.safe_load(ws_yaml.read_text(encoding="utf-8")) or {}
                 ws_rt = ws.get("runtime") or {}
-                if isinstance(ws_rt, dict) and ws_rt.get("default_emitter") in _ACCEPTED_EMITTERS:
-                    return ws_rt["default_emitter"]
+                if isinstance(ws_rt, dict):
+                    ws_declared = normalize_emitter_name(ws_rt.get("default_emitter"))
+                    if ws_declared in _ACCEPTED_EMITTERS:
+                        return ws_declared
             except (OSError, Exception):  # noqa: BLE001 — read-fail = default
                 pass
             break  # nearest workspace.yaml is the workspace root; don't climb past it
@@ -314,7 +323,19 @@ def _xarray_emitter_config(store: str, view: list, emitter_config: "dict | None"
         "emit_root": [],
         "transducer": {
             "predicate": [[{"subsample": {"interval": 1}}]],
-            "buffer": {"size": 100},
+            # Small flush buffer (3 = the transducer minimum). The XArrayEmitter
+            # only persists a buffer when it FILLS during the run; its final
+            # close-flush asserts ``not include_static``, which holds only once
+            # at least one full-buffer write has happened (num_writes > 0). With
+            # the old size-100 buffer a sub-100-step run — the common Composite
+            # Explorer "Run" case, and run_runner.execute is the ONLY caller of
+            # run_with_emitter — never filled, so the close-flush AssertionError
+            # was swallowed and the zarr store left EMPTY. Now that Task 6 makes
+            # xarray the DEFAULT emitter, that empty-store path would be the
+            # default for short runs; a minimal buffer makes every short run
+            # flush real data. Trade-off: more, smaller zarr chunks (fine for
+            # interactive Explorer runs). Runs of <~4 emit-ticks still under-fill.
+            "buffer": {"size": 3},
         },
         "view": view,
         "writer": {

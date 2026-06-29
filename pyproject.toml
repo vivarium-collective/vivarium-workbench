@@ -23,7 +23,14 @@ dependencies = [
     # only re-exports SQLiteEmitter when pbg-emitters is installed. The dashboard
     # imports SQLiteEmitter (lazily, in several run paths), so depend on it
     # directly. The `[sqlite]` extra is stdlib-only (no extra deps).
-    "pbg-emitters[sqlite]",
+    #
+    # Task 6 flipped the default emitter to xarray (see lib/emitters.py
+    # DEFAULT_EMITTER), so its runtime deps are now MANDATORY, not test-only:
+    # pull the pbg-emitters `[xarray]` extra and pin xarray + zarr at the same
+    # specifiers the `[test]` extra below uses (kept consistent).
+    "pbg-emitters[sqlite,xarray]",
+    "xarray>=2026.04",
+    "zarr~=3.1.6",
     "bigraph-schema>=1.4.1",
     "pbg-superpowers>=0.14.0",
     # pbg-superpowers 0.14+ requires pbg-basic-processes, which is not yet on

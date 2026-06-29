@@ -73,14 +73,17 @@ def test_run_with_emitter_sqlite_writes_history(tmp_path):
     assert len(rows) >= steps
 
 
-def test_run_with_emitter_default_name_is_sqlite(tmp_path):
-    """The framework DEFAULT stays sqlite (Task 6 flips it)."""
+def test_run_with_emitter_default_name_is_xarray(tmp_path):
+    """The framework DEFAULT is xarray as of Task 6 — a default run with a
+    non-empty selection writes a zarr store (``output_kind == "zarr"``)."""
+    pytest.importorskip("xarray")
+    pytest.importorskip("zarr")
     db_file = str(tmp_path / "runs.db")
     prov = emitters.run_with_emitter(
         emitters.DEFAULT_EMITTER, state=_doc(), run_id="r-def",
         emit_paths=["counter_store"], out_dir=str(tmp_path), core=_core(),
-        steps=2, db_file=db_file)
-    assert prov["output_kind"] == "sqlite"
+        steps=6, db_file=db_file)
+    assert prov["output_kind"] == "zarr"
 
 
 # ---------------------------------------------------------------------------
