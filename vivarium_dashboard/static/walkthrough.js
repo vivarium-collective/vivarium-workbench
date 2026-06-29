@@ -522,6 +522,9 @@
       }
     }
     if (pageId === 'investigations') {
+      // Clicking the Investigations tab always returns to the top-level list,
+      // even when an investigation detail is currently open.
+      if (typeof _closeInvestigationDetail === 'function') _closeInvestigationDetail();
       _loadInvestigationSets();
     }
     if (pageId === 'workspace-inputs') {

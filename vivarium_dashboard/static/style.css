@@ -2007,6 +2007,24 @@ details.inv-bio-story > summary { color: #075985; }
 details.inv-how-to-read > summary { color: #78350f; }
 details.inv-how-to-read[open] > summary, details.inv-bio-story[open] > summary { margin-bottom: 8px; }
 
+/* Uniform investigation-intro collapsibles — one consistent disclosure style
+   for About / How to read / Glossary / Biology, overriding the per-card
+   bespoke colors (blue biology banner, amber how-to-read) so the top of the
+   investigation reads as a tidy, uniform stack. The needs-attention alert
+   below is intentionally left as the one distinct (functional) banner. */
+#investigation-intro > details { margin: 4px 0; border: 0; background: none; padding: 0; }
+#investigation-intro > details > summary {
+  cursor: pointer; list-style: none; padding: 5px 0; background: none; border: 0;
+  color: #475569; font-size: 0.9rem; font-weight: 600; font-family: inherit;
+}
+#investigation-intro > details > summary::-webkit-details-marker { display: none; }
+#investigation-intro > details > summary::before {
+  content: '▸'; color: #94a3b8; margin-right: 7px; display: inline-block;
+  transition: transform .12s ease;
+}
+#investigation-intro > details[open] > summary::before { transform: rotate(90deg); }
+#investigation-intro > details[open] > summary { margin-bottom: 6px; }
+
 /* Foldable overview sections (study detail): hide secondary detail */
 details.overview-section > summary{ cursor:pointer; list-style-position:outside; }
 details.overview-section > summary.overview-label{ margin-bottom:0; }
