@@ -197,7 +197,7 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
             "zarr_store": _zarr_store,
         }
         script = textwrap.dedent(f"""
-            import json, sys, traceback
+            import json, os, sys, traceback
             try:
                 from {pkg}.core import build_core
                 from process_bigraph import Composite, gather_emitter_results
@@ -240,12 +240,27 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
                     _v2ecoli_available = True
                 except ImportError:
                     _v2ecoli_available = False
+                _mg = int(_payload.get('max_generations') or 1)
                 _use_xarray = (
                     _payload.get('default_emitter') == 'xarray' and _v2ecoli_available)
-                if _payload.get('default_emitter') == 'xarray' and not _v2ecoli_available:
-                    print('[xarray-run] generic xarray study-runs await Task 3; '
-                          'falling back to sqlite (v2ecoli not importable in '
-                          'this workspace).', file=sys.stderr)
+                # FU2b: generic SINGLE-generation xarray. A non-v2ecoli workspace
+                # whose default resolves to xarray now writes a real zarr store
+                # via the broker's flat-Step XArrayEmitter
+                # (emitters.run_with_emitter), instead of silently falling back to
+                # sqlite. SCOPE: single generation only (max_generations <= 1).
+                # Multi-generation non-v2ecoli runs still take the sqlite path
+                # below — there is NO generic division-aware xarray drive yet, so
+                # retiring the gated v2ecoli xarray branch fully would need that
+                # drive loop (a separate, larger feature).
+                _use_generic_xarray = (
+                    _payload.get('default_emitter') == 'xarray'
+                    and not _v2ecoli_available and _mg <= 1)
+                if (_payload.get('default_emitter') == 'xarray'
+                        and not _v2ecoli_available and not _use_generic_xarray):
+                    print('[xarray-run] multi-generation generic xarray awaits a '
+                          'division-aware drive; falling back to sqlite '
+                          '(v2ecoli not importable in this workspace).',
+                          file=sys.stderr)
                 _view = []
                 if _use_xarray:
                     # Auto-view from the study's declared observables. v0 of
@@ -300,8 +315,38 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
                     results = {{'zarr_store': _xarr['store'],
                                'generations': _xarr['generations'],
                                'steps': _xarr['steps']}}
+                elif _use_generic_xarray:
+                    # FU2b: generic single-generation flat-Step XArray write.
+                    # Mirror run_runner.execute's run_with_emitter call, building
+                    # from the already-built state/core/emit_paths. The broker
+                    # injects XArrayEmitter as a flat Step, drives the composite,
+                    # writes a partitioned zarr store under out_dir, and
+                    # AUTO-FALLS-BACK to sqlite for an empty view (a composite
+                    # with no emittable observable) — so this NEVER blocks a run.
+                    from vivarium_dashboard.lib import emitters as _emitters
+                    _out_dir = os.path.dirname(os.path.abspath(_payload['db_file']))
+                    # CRITICAL: pin the store to the STUDY convention
+                    # (<study>/runs.<run_id>.zarr == _payload['zarr_store']) so the
+                    # study read-path can find it. study_run_state.zarr_store_for_sim
+                    # resolves <db_stem>.<run_id>.zarr and study_charts globs
+                    # runs.*.zarr; the default <out_dir>/<run_id>.zarr name would
+                    # be unresolvable (None) → empty charts. store_path overrides it.
+                    _prov = _emitters.run_with_emitter(
+                        'xarray', state=state, run_id=_payload['run_id'],
+                        emit_paths=_payload.get('emit_paths') or [],
+                        out_dir=_out_dir, core=core, steps=_payload['steps'],
+                        db_file=_payload['db_file'], spec=None,
+                        store_path=_payload['zarr_store'])
+                    composite = _prov.get('composite')
+                    if _prov.get('output_kind') == 'zarr':
+                        results = {{'zarr_store': _prov.get('store_path'),
+                                   'output_kind': 'zarr',
+                                   'steps': _prov.get('steps')}}
+                    else:
+                        # Empty-view (or under-filled-buffer) auto-fall-back to
+                        # sqlite inside the broker — read the sqlite history.
+                        results = gather_emitter_results(composite)
                 else:
-                    _mg = int(_payload.get('max_generations') or 1)
                     if _mg > 1 and _v2ecoli_available:
                         # Multi-gen: workspace-side runner drives the
                         # SQLiteEmitter externally (mirrors how the
