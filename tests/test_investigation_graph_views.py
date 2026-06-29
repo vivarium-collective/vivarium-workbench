@@ -100,3 +100,45 @@ def test_non_mapping_pipeline_gate_tolerated_not_500(tmp_path):
     # s2 still appears (no edges from a malformed gate), no crash
     assert "study/s2" in {s["id"] for s in body["studies"]}
     assert all(e["target"] != "study/s2" for e in body["study_edges"])
+
+
+def test_derives_chain_when_no_authored_nodes(tmp_path):
+    ws = _ws(tmp_path)
+    # give s2 a conclusion_verdicts field and a passed gate; NO authored node files
+    sp = ws / "studies" / "s2" / "study.yaml"
+    spec = yaml.safe_load(sp.read_text())
+    spec["gate_status"] = "passed"
+    spec["conclusion_verdicts"] = [{"claim": "derived claim", "verdict": "supported",
+                                    "basis": "the basis"}]
+    sp.write_text(yaml.safe_dump(spec))
+    body, status = build_investigation_graph(ws, "demo-inv")
+    chain = body["chains"]["s2"]
+    assert chain["derived"] is True
+    types = {n["type"] for n in chain["nodes"]}
+    assert types == {"finding", "evidence", "decision", "conclusion"}
+    assert chain["violations"] == []
+
+
+def test_authored_nodes_suppress_derivation(tmp_path):
+    ws = _ws(tmp_path)
+    _seed_full_chain(ws)  # writes authored node files into s2
+    sp = ws / "studies" / "s2" / "study.yaml"
+    spec = yaml.safe_load(sp.read_text())
+    spec["gate_status"] = "passed"
+    spec["conclusion_verdicts"] = [{"claim": "should be ignored", "verdict": "supported",
+                                    "basis": "b"}]
+    sp.write_text(yaml.safe_dump(spec))
+    body, _ = build_investigation_graph(ws, "demo-inv")
+    chain = body["chains"]["s2"]
+    assert chain.get("derived") is False
+    # authored ids present, derived ids absent
+    ids = {n["id"] for n in chain["nodes"]}
+    assert "finding/f1" in ids
+    assert not any(i.startswith("finding/derived-") for i in ids)
+
+
+def test_study_without_verdicts_has_empty_non_derived_chain(tmp_path):
+    ws = _ws(tmp_path)  # s1 has no conclusion_verdicts, no authored nodes
+    body, _ = build_investigation_graph(ws, "demo-inv")
+    chain = body["chains"]["s1"]
+    assert chain["nodes"] == [] and chain.get("derived") is False

@@ -12,6 +12,7 @@ import yaml
 from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 from vivarium_dashboard.lib.node_store import load_study_nodes
 from vivarium_dashboard.lib.investigations import normalize_dag_edges
+from vivarium_dashboard.lib.chain_derivation import derive_chain_nodes
 from investigation_contracts import validate_chain
 
 
@@ -91,7 +92,14 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
             study_edges.append({"source": f"study/{pre['study']}", "target": f"study/{slug}",
                                "rel": "prerequisite",
                                "condition": explicit.get(pre["study"], "")})
-        chains[slug] = _build_chain(slug, load_study_nodes(ws_root, slug))
+        nodes = load_study_nodes(ws_root, slug)
+        derived = False
+        if not nodes:
+            nodes = derive_chain_nodes(study_spec, slug)
+            derived = bool(nodes)
+        chain = _build_chain(slug, nodes)
+        chain["derived"] = derived
+        chains[slug] = chain
 
     return {"investigation": inv_slug, "studies": studies_out,
             "study_edges": study_edges, "chains": chains}, 200

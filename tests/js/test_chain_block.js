@@ -34,4 +34,17 @@ const bad = {
 };
 assert(_chainBlockHtml(bad).indexOf('chain gap') !== -1, 'violation marker present');
 
+// derived hint
+const derivedChain = {
+  nodes: [{ id: 'finding/derived-s1-cv0', type: 'finding', label: 'F', lifecycle_state: 'asserted' }],
+  edges: [], violations: [], derived: true,
+};
+assert(_chainBlockHtml(derivedChain).indexOf('derived') !== -1, 'derived hint shown when derived');
+
+const authoredChain = {
+  nodes: [{ id: 'finding/f1', type: 'finding', label: 'F', lifecycle_state: 'asserted' }],
+  edges: [], violations: [], derived: false,
+};
+assert(_chainBlockHtml(authoredChain).indexOf('· derived') === -1, 'no derived hint when authored');
+
 console.log('ok');
