@@ -129,7 +129,10 @@ def investigation_run(ws_root: Path, body: dict) -> "tuple[dict, int]":
             try:
                 from {pkg}.core import build_core
                 from process_bigraph import Composite
-                from process_bigraph.emitter import SQLiteEmitter
+                try:
+                    from pbg_emitters.sqlite_emitter import SQLiteEmitter
+                except ImportError:  # process-bigraph < 1.4.17 (legacy location)
+                    from process_bigraph.emitter import SQLiteEmitter
                 core = build_core()
                 core.register_link('SQLiteEmitter', SQLiteEmitter)
                 composite = Composite({{'state': __import__('json').loads({json.dumps(json.dumps(_state_to_run, default=_json_default))})}}, core=core)
