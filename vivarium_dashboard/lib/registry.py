@@ -21,6 +21,8 @@ import textwrap
 import time
 from pathlib import Path
 
+from vivarium_dashboard.lib import emitters
+
 
 # ---------------------------------------------------------------------------
 # Module-level registry cache (shared by server.py thin wrapper + FastAPI route)
@@ -235,7 +237,11 @@ def _mark_default_emitter(data: dict, ws_data: dict | None) -> None:
     if isinstance(ws_data, dict):
         rt = ws_data.get("runtime") or {}
         if isinstance(rt, dict):
-            default_emitter = str(rt.get("default_emitter") or "").strip().lower()
+            # Normalize the declared emitter NAME via the broker (lowercase +
+            # strip). Deliberately the name, NOT its output_kind — the badge
+            # matches against class names (ParquetEmitter), so aliasing
+            # xarray→zarr here would break the XArrayEmitter match.
+            default_emitter = emitters.normalize_emitter_name(rt.get("default_emitter"))
     needle = default_emitter
     for p in processes:
         if not isinstance(p, dict):
