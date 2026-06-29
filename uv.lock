@@ -572,6 +572,15 @@ wheels = [
 ]
 
 [[package]]
+name = "investigation-contracts"
+version = "0.2.0"
+source = { git = "https://github.com/vivarium-collective/investigation-contracts.git?branch=main#a8db16d54e7a4944d44d29b4eeffced9519d0865" }
+dependencies = [
+    { name = "bigraph-schema" },
+    { name = "pydantic" },
+]
+
+[[package]]
 name = "isoduration"
 version = "20.11.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1264,7 +1273,7 @@ wheels = [
 [[package]]
 name = "pbg-basic-processes"
 version = "0.1.0"
-source = { git = "https://github.com/vivarium-collective/pbg-basic-processes.git?rev=main#cbd10e73b79e4e8c7dd9e33bf84614881b559072" }
+source = { git = "https://github.com/vivarium-collective/pbg-basic-processes.git?branch=main#af83ccc834a84af4e4b3bb5d114aca79713cf401" }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "numpy" },
@@ -2317,6 +2326,7 @@ dependencies = [
     { name = "bigraph-loom" },
     { name = "bigraph-schema" },
     { name = "fastapi" },
+    { name = "investigation-contracts" },
     { name = "jinja2" },
     { name = "jsonschema", extra = ["format-nongpl"] },
     { name = "numpy" },
@@ -2326,6 +2336,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pypdf" },
     { name = "pyyaml" },
+    { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
@@ -2335,7 +2346,6 @@ dev = [
     { name = "pytest" },
     { name = "pytest-json-report" },
     { name = "pytest-timeout" },
-    { name = "uvicorn" },
 ]
 test = [
     { name = "polars" },
@@ -2357,13 +2367,14 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "imageio", marker = "extra == 'viz'" },
+    { name = "investigation-contracts", git = "https://github.com/vivarium-collective/investigation-contracts.git?branch=main" },
     { name = "jinja2" },
     { name = "jsonschema", extras = ["format-nongpl"], specifier = ">=4.21" },
     { name = "matplotlib", marker = "extra == 'viz'" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8" },
     { name = "numpy" },
     { name = "numpy", marker = "extra == 'viz'" },
-    { name = "pbg-basic-processes", git = "https://github.com/vivarium-collective/pbg-basic-processes.git?rev=main" },
+    { name = "pbg-basic-processes", git = "https://github.com/vivarium-collective/pbg-basic-processes.git?branch=main" },
     { name = "pbg-superpowers", specifier = ">=0.14.0" },
     { name = "polars", marker = "extra == 'test'" },
     { name = "process-bigraph" },
@@ -2374,7 +2385,7 @@ requires-dist = [
     { name = "pytest-json-report", marker = "extra == 'dev'", specifier = ">=1.5" },
     { name = "pytest-timeout", marker = "extra == 'dev'" },
     { name = "pyyaml" },
-    { name = "uvicorn", marker = "extra == 'dev'", specifier = ">=0.29" },
+    { name = "uvicorn", specifier = ">=0.29" },
     { name = "xarray", marker = "extra == 'test'" },
     { name = "zarr", marker = "extra == 'test'" },
 ]
