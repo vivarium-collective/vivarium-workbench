@@ -234,12 +234,14 @@ def remote_run_status(params: dict) -> tuple[dict, int]:
                      else "queued" if raw == "queued" else "running")
             return {"kind": "run", "phase": phase, "raw_status": raw,
                     "error": st.get("error_message"), "simulation_id": int(sim_id)}, 200
-        st = client.simulator_status(int(sm_id))
-        raw = str(st.get("status", "")).lower()
-        phase = ("built" if raw in _TERMINAL_OK
-                 else "failed" if raw in _TERMINAL_BAD else "building")
-        return {"kind": "build", "phase": phase, "raw_status": raw,
-                "error": st.get("error_message"), "simulator_id": int(sm_id)}, 200
+        if sm_id:
+            st = client.simulator_status(int(sm_id))
+            raw = str(st.get("status", "")).lower()
+            phase = ("built" if raw in _TERMINAL_OK
+                     else "failed" if raw in _TERMINAL_BAD else "building")
+            return {"kind": "build", "phase": phase, "raw_status": raw,
+                    "error": st.get("error_message"), "simulator_id": int(sm_id)}, 200
+        return {"error": "simulator_id or simulation_id required"}, 400
     except SmsApiError as e:
         # Tunnel down / SSO expired / sms-api error — surface a reachable=false
         # status so the panel shows it without the whole poll crashing.
