@@ -18,6 +18,12 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "process-bigraph",
+    # SQLiteEmitter (and ParquetEmitter) were extracted from process-bigraph at
+    # 1.4.17 into the focused pbg-emitters library; pb's `process_bigraph.emitter`
+    # only re-exports SQLiteEmitter when pbg-emitters is installed. The dashboard
+    # imports SQLiteEmitter (lazily, in several run paths), so depend on it
+    # directly. The `[sqlite]` extra is stdlib-only (no extra deps).
+    "pbg-emitters[sqlite]",
     "bigraph-schema>=1.4.1",
     "pbg-superpowers>=0.14.0",
     # pbg-superpowers 0.14+ requires pbg-basic-processes, which is not yet on
