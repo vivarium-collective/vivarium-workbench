@@ -1922,10 +1922,13 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
 
   </div>
 
-  {# ── Group 4: Limitations & provenance (collapsed) ────────────────────────── #}
+  {# ── Group 4: Limitations & provenance (collapsed) ─────────────────────────
+     Only rendered for non-v3 studies — its body (synthesis Limitations + Next
+     steps) is not-v3-only, so wrapping the whole <details> avoids an empty
+     collapsed shell for v3 studies. #}
+  {% if not _is_v3 %}
   <details class="overview-section"><summary class="overview-label">Limitations &amp; provenance</summary>
 
-    {% if not _is_v3 %}
     {# ── Read-only synthesis: Limitations + Next steps (C3) ──────────────────
        The four buckets are DERIVED from the canonical structured fields rather
        than hand-entered free text (the old textareas saved to study.conclusion,
@@ -1955,9 +1958,9 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
         {% else %}<p class="muted">No follow-up proposals recorded yet.</p>{% endif %}
       </div>
     </div>
-    {% endif %}
 
   </details>
+  {% endif %}
 
 </section>
 
