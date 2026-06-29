@@ -180,7 +180,7 @@ def _remember_login(login: str) -> None:
     try:
         p = _last_login_path()
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(login.strip() + "\n")
+        p.write_text(login.strip() + "\n", encoding="utf-8")
     except OSError:
         pass
 

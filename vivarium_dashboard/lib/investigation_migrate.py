@@ -224,5 +224,5 @@ def migrate_investigation(spec_path: Path, workspace_root: Path) -> dict:
     if 'last_run' in spec:
         new_spec['last_run'] = spec['last_run']
 
-    spec_path.write_text(yaml.safe_dump(new_spec, sort_keys=False))
+    spec_path.write_text(yaml.safe_dump(new_spec, sort_keys=False), encoding="utf-8")
     return new_spec

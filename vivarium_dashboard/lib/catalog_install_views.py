@@ -194,7 +194,7 @@ def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
                 log_dir.mkdir(parents=True, exist_ok=True)
                 (log_dir / "catalog-install.log").write_text(
                     f"pyproject edit failed for {name}: {e}\n"
-                )
+                , encoding="utf-8")
 
         else:
             # ---- Git-submodule fallback path ----
@@ -272,7 +272,7 @@ def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
                 log_dir.mkdir(parents=True, exist_ok=True)
                 (log_dir / "catalog-install.log").write_text(
                     f"pyproject edit failed for {name}: {e}\n"
-                )
+                , encoding="utf-8")
 
     # The live handler wraps ``action`` in ``_commit_or_run`` (commit-on-active-
     # branch). Here the commit is DEFERRED — run ``action`` directly. A raised

@@ -113,7 +113,7 @@ def switch_build(body: dict) -> tuple[dict, int]:
             "simulator_id": sim_id, "repo": entry.get("repo", ""),
             "branch": entry.get("branch", ""), "commit": entry.get("commit", ""),
             "repo_url": entry.get("repo_url", ""),
-        }))
+        }), encoding="utf-8")
     except Exception:
         pass  # provenance stamp is best-effort, never block the switch
     active_workspace.switch_workspace(cache_dir)

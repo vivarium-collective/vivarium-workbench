@@ -31,7 +31,7 @@ def write_request(ws_root: Path, kind: str, context: dict) -> str:
         "kind": kind,
         "timestamp": ts,
         "context": context,
-    }, indent=2, default=str))
+    }, indent=2, default=str), encoding="utf-8")
     return req_id
 
 

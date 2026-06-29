@@ -40,7 +40,7 @@ def _stamp_build_meta(cache: Path, simulator_id: int, commit: str) -> None:
     if meta.exists():
         return
     try:
-        meta.write_text(json.dumps({"simulator_id": simulator_id, "commit": commit}))
+        meta.write_text(json.dumps({"simulator_id": simulator_id, "commit": commit}), encoding="utf-8")
     except OSError:
         pass  # provenance stamp is best-effort, never block materialize
 

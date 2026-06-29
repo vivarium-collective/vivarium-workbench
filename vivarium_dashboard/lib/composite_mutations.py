@@ -153,7 +153,7 @@ def _apply_add_investigation_composite(
     if source_path is not None:
         shutil.copy2(source_path, sidecar)
     else:
-        sidecar.write_text(yaml.safe_dump(generator_doc, sort_keys=False))
+        sidecar.write_text(yaml.safe_dump(generator_doc, sort_keys=False), encoding="utf-8")
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
     composites = spec.setdefault('composites', [])
     composites.append({
@@ -161,7 +161,7 @@ def _apply_add_investigation_composite(
         'source': source,
         'document': f'./composites/{comp_name}.yaml',
     })
-    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +243,7 @@ def _apply_perturb_investigation_composite(
     body: dict[str, Any],
 ) -> None:
     """File writes for the composite-perturb flow (formerly the do_action() body)."""
-    derived.write_text(yaml.safe_dump(derived_doc, sort_keys=False))
+    derived.write_text(yaml.safe_dump(derived_doc, sort_keys=False), encoding="utf-8")
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
     variants = spec.setdefault('variants', [])
     entry: dict[str, Any] = {'name': comp_name, 'extends': extends,
@@ -268,7 +268,7 @@ def _apply_perturb_investigation_composite(
         variants[existing_idx] = entry  # full replace
     else:
         variants.append(entry)
-    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -358,14 +358,14 @@ def _apply_promote_composite_to_catalog(
     doc['name'] = target_name
     if description is not None:
         doc['description'] = description
-    target_path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    target_path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
     # Mark variant promoted in spec.yaml
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
     for v in (spec.get('variants') or []):
         if v.get('name') == variant_name:
             v['promoted'] = True
             break
-    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -439,7 +439,7 @@ def _apply_rebuild_investigation_composite(
 ) -> None:
     """File writes for the composite-rebuild flow (formerly the do_action() body)."""
     derived_path = inv_dir / "composites" / f"{comp_name}.yaml"
-    derived_path.write_text(yaml.safe_dump(derived_doc, sort_keys=False))
+    derived_path.write_text(yaml.safe_dump(derived_doc, sort_keys=False), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -595,7 +595,7 @@ def _apply_create_from_composite(
     composites_dir.mkdir(parents=True, exist_ok=True)
     sidecar = composites_dir / f"{composite_name}.yaml"
     if is_generator:
-        sidecar.write_text(yaml.safe_dump(generator_doc, sort_keys=False))
+        sidecar.write_text(yaml.safe_dump(generator_doc, sort_keys=False), encoding="utf-8")
     else:
         assert source_path is not None  # non-generator → resolved source path
         shutil.copy2(source_path, sidecar)
@@ -614,4 +614,4 @@ def _apply_create_from_composite(
         "hypothesis": "",
         "status": "draft",
     }
-    (inv_dir / "spec.yaml").write_text(yaml.safe_dump(spec, sort_keys=False))
+    (inv_dir / "spec.yaml").write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")

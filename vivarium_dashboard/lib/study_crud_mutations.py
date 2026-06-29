@@ -92,7 +92,7 @@ def study_variant_add(ws_root: Path, body: dict) -> tuple[dict, int]:
         "base_composite": base_composite,
         "parameter_overrides": overrides or {},
     })
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True, "name": variant_name}, 200
 
 
@@ -113,7 +113,7 @@ def study_variant_delete(ws_root: Path, body: dict) -> tuple[dict, int]:
     if len(remaining) == len(variants):
         return {"error": f"variant {variant_name!r} not found"}, 404
     spec["variants"] = remaining
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True}, 200
 
 
@@ -146,7 +146,7 @@ def study_variant_set_params(ws_root: Path, body: dict) -> tuple[dict, int]:
         if isinstance(v, dict) and v.get("name") == variant_name:
             v["parameter_overrides"] = dict(overrides)
             spec["variants"] = variants
-            sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+            sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
             return {"ok": True}, 200
     return {"error": f"variant {variant_name!r} not found"}, 404
 
@@ -191,7 +191,7 @@ def study_baseline_add(ws_root: Path, body: dict) -> tuple[dict, int]:
     if any(b.get("name") == entry_name for b in baseline if isinstance(b, dict)):
         return {"error": f"baseline entry {entry_name!r} already exists"}, 409
     baseline.append({"name": entry_name, "composite": composite, "params": params or {}})
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True, "name": entry_name}, 200
 
 
@@ -240,7 +240,7 @@ def study_baseline_remove(ws_root: Path, body: dict) -> tuple[dict, int]:
         return {"error": "cannot leave baseline empty"}, 400
 
     spec["baseline"] = remaining
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True}, 200
 
 
@@ -274,7 +274,7 @@ def study_intervention_add(ws_root: Path, body: dict) -> tuple[dict, int]:
     if any(i.get("name") == name for i in interventions if isinstance(i, dict)):
         return {"error": f"intervention {name!r} already exists"}, 409
     interventions.append({"name": name, "description": description})
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True, "name": name}, 200
 
 
@@ -297,7 +297,7 @@ def study_intervention_update(ws_root: Path, body: dict) -> tuple[dict, int]:
     for i in spec.get("interventions") or []:
         if isinstance(i, dict) and i.get("name") == name:
             i["description"] = description
-            sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+            sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
             return {"ok": True}, 200
     return {"error": f"intervention {name!r} not found"}, 404
 
@@ -323,7 +323,7 @@ def study_intervention_delete(ws_root: Path, body: dict) -> tuple[dict, int]:
     if len(remaining) == len(interventions):
         return {"error": f"intervention {name!r} not found"}, 404
     spec["interventions"] = remaining
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True}, 200
 
 
@@ -358,7 +358,7 @@ def study_run_delete(ws_root: Path, body: dict) -> tuple[dict, int]:
 
     spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     spec["runs"] = [r for r in (spec.get("runs") or []) if r.get("run_id") != run_id]
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True}, 200
 
 
@@ -388,7 +388,7 @@ def study_runs_clear(ws_root: Path, body: dict) -> tuple[dict, int]:
 
     spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     spec["runs"] = []
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True}, 200
 
 
@@ -413,5 +413,5 @@ def study_comparison_add(ws_root: Path, body: dict) -> tuple[dict, int]:
     comparisons = spec.setdefault("comparisons", [])
     name = (body.get("name") or "").strip() or f"comparison-{len(comparisons) + 1}"
     comparisons.append({"name": name, "run_ids": list(run_ids)})
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False))
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True, "name": name}, 200
