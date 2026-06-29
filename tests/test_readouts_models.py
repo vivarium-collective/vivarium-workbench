@@ -13,6 +13,13 @@ def test_readout_row_defaults_and_dump():
     assert d["emit_status"] == "emitted"
 
 
+def test_readout_row_accepts_unverified_status():
+    # 'unverified' is emitted on a remote build (no ParCa cache → emit plan not
+    # built); the payload model must accept it or the route 500s on validation.
+    r = ReadoutRow(store_path="a.b", name="b", annotated=True, emit_status="unverified")
+    assert r.model_dump()["emit_status"] == "unverified"
+
+
 def test_study_readouts_wraps_rows():
     sr = StudyReadouts(composite="ecoli", rows=[
         ReadoutRow(store_path="a.b", name="b", annotated=False, emit_status="emitted"),

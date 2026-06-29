@@ -9,6 +9,7 @@ dir and serves the build as a full local workspace.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -25,6 +26,23 @@ from vivarium_dashboard.lib.sms_api_client import SmsApiError
 # traversal) or an empty ref into cache_dir_for. Raising SmsApiError routes
 # through the handler's existing 502 path (active workspace left unchanged).
 _COMMIT_RE = re.compile(r"\A[0-9a-fA-F]{4,40}\Z")
+
+# A real workspace tarball is ~50MB and takes minutes over the SSM tunnel
+# (measured ~224s); the client's 30s default would hard-fail the switch.
+_DOWNLOAD_TIMEOUT_S = 600.0
+
+
+def _stamp_build_meta(cache: Path, simulator_id: int, commit: str) -> None:
+    """Mark a materialized cache as a remote build so the Simulations DB merges
+    the deployment's runs (lib/remote_simulations.py reads this). No-clobber:
+    switch-build writes a richer stamp (repo/branch/repo_url); never overwrite it."""
+    meta = cache / ".viv-build.json"
+    if meta.exists():
+        return
+    try:
+        meta.write_text(json.dumps({"simulator_id": simulator_id, "commit": commit}))
+    except OSError:
+        pass  # provenance stamp is best-effort, never block materialize
 
 
 def build_cache_root() -> Path:
@@ -53,13 +71,14 @@ def materialize_build(client: Any, simulator_id: int, commit: str, *, force: boo
     commit = _safe_commit(commit)
     cache = cache_dir_for(simulator_id, commit)
     if cache.exists() and not force:
+        _stamp_build_meta(cache, simulator_id, commit)
         return cache
 
     root = build_cache_root()
     root.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".staging-sim{simulator_id}-", dir=root))
     try:
-        tar_path = client.download_workspace(simulator_id, staging)
+        tar_path = client.download_workspace(simulator_id, staging, timeout=_DOWNLOAD_TIMEOUT_S)
         extract_root = staging / "extract"
         extract_root.mkdir()
         with tarfile.open(tar_path, "r:gz") as tar:
@@ -76,6 +95,7 @@ def materialize_build(client: Any, simulator_id: int, commit: str, *, force: boo
         os.replace(str(src), str(cache))  # same-filesystem atomic move
     finally:
         shutil.rmtree(staging, ignore_errors=True)
+    _stamp_build_meta(cache, simulator_id, commit)
     return cache
 
 

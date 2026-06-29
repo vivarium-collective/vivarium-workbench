@@ -624,9 +624,17 @@ def _emitter_choice(spec: dict, runs_db: Path | None) -> str:
     if isinstance(spec_rt, dict) and spec_rt.get("default_emitter") in _ACCEPTED:
         return spec_rt["default_emitter"]
     if runs_db is not None:
-        # runs_db lives at <ws>/studies/<slug>/runs.db
-        ws_yaml = runs_db.parent.parent.parent / "workspace.yaml"
-        if ws_yaml.is_file():
+        # Find the nearest ancestor workspace.yaml. The studies layout varies —
+        # flat (<ws>/studies/<slug>/runs.db) or nested (<ws>/workspace/studies/
+        # <slug>/runs.db) — so walk up rather than assuming a fixed depth. A
+        # fixed `.parent.parent.parent` looked at <ws>/workspace/workspace.yaml
+        # in the nested layout (which doesn't exist) and silently fell back to
+        # sqlite, so a declared xarray emitter never took effect and zarr runs
+        # (incl. landed remote runs) never rendered.
+        for ancestor in runs_db.parents:
+            ws_yaml = ancestor / "workspace.yaml"
+            if not ws_yaml.is_file():
+                continue
             try:
                 import yaml as _yaml
                 ws = _yaml.safe_load(ws_yaml.read_text(encoding="utf-8")) or {}
@@ -635,6 +643,7 @@ def _emitter_choice(spec: dict, runs_db: Path | None) -> str:
                     return ws_rt["default_emitter"]
             except (OSError, Exception):  # noqa: BLE001 — read-fail = default
                 pass
+            break  # nearest workspace.yaml is the workspace root; don't climb past it
     return "sqlite"
 
 

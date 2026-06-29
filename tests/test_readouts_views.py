@@ -145,3 +145,54 @@ def test_build_study_readouts_extracts_v4_conditions_baseline(tmp_path):
     assert body.get("error") != "study has no baseline composite", body
     assert status == 422, body
     assert body.get("composite") == "some.composite.ref", body
+
+
+def test_readouts_remote_build_degrades_softly(tmp_path, monkeypatch):
+    """On a remote build (.viv-build.json present), a composite-build failure is
+    EXPECTED (no local ParCa cache) → soft 200 degrade with authored rows tagged
+    'unverified', not a 422 error with the misleading 'not_in_emit_plan' tag."""
+    import yaml as _yaml
+    from vivarium_dashboard.lib import readouts_views as rv
+
+    sd = tmp_path / "studies" / "rdemo"
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(_yaml.safe_dump({
+        "name": "rdemo",
+        "baseline": [{"composite": "nonexistent.composite"}],
+        "readouts": [{"name": "panel-x", "store_path": "listeners.foo.bar"}],
+    }))
+    (tmp_path / ".viv-build.json").write_text('{"simulator_id": 66, "commit": "abc"}')
+    monkeypatch.setattr(
+        rv, "build_composite_state_for_observables",
+        lambda ws, ref: (_ for _ in ()).throw(FileNotFoundError("out/cache/initial_state.json")),
+    )
+    body, status = rv.build_study_readouts(tmp_path, "rdemo")
+    assert status == 200, body
+    assert body.get("remote_build") is True
+    assert "remote build" in (body.get("note") or "").lower()
+    panel = next(r for r in body["rows"] if r["name"] == "panel-x")
+    assert panel["emit_status"] == "unverified"
+
+
+def test_readouts_local_build_failure_still_422_but_unverified(tmp_path, monkeypatch):
+    """A LOCAL workspace (no .viv-build.json) where the composite fails to build
+    keeps the hard 422 (a real problem to fix), but the authored row is tagged
+    'unverified' (it wasn't checked) rather than the misleading 'not_in_emit_plan'."""
+    import yaml as _yaml
+    from vivarium_dashboard.lib import readouts_views as rv
+
+    sd = tmp_path / "studies" / "ldemo"
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(_yaml.safe_dump({
+        "name": "ldemo",
+        "baseline": [{"composite": "nonexistent.composite"}],
+        "readouts": [{"name": "panel-y", "store_path": "listeners.foo.baz"}],
+    }))
+    monkeypatch.setattr(
+        rv, "build_composite_state_for_observables",
+        lambda ws, ref: (_ for _ in ()).throw(FileNotFoundError("out/cache/initial_state.json")),
+    )
+    body, status = rv.build_study_readouts(tmp_path, "ldemo")
+    assert status == 422, body
+    panel = next(r for r in body["rows"] if r["name"] == "panel-y")
+    assert panel["emit_status"] == "unverified"

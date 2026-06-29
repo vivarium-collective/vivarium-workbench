@@ -28,22 +28,32 @@ def _js_text():
 
 def test_js_has_remote_run_handlers_and_endpoints():
     js = _js_text()
+    # WS1 two-phase thin-client handlers (build → poll → submit → poll → land)
     assert "_submitRemoteRun" in js
-    assert "_pollRemoteRun" in js
+    assert "_pollBuild" in js
+    assert "_pollRun" in js
+    assert "_submitRun" in js
+    assert "_landRemoteRun" in js
     assert "_renderRemoteRunProgress" in js
-    assert "/api/remote-run-start" in js
-    assert "/api/remote-run-status" in js
-    assert "window._submitRemoteRun" in js  # exposed for the inline onsubmit
-    # login gate: a 401 from start must be handled explicitly
+    # the four thin-client endpoints
+    assert "/api/remote-run-build" in js
+    assert "/api/remote-run-submit" in js
+    assert "/api/remote-run-land" in js
+    assert "/api/remote-run-poll" in js
+    # exposed for inline onsubmit/onclick
+    assert "window._submitRemoteRun" in js
+    assert "window._landRemoteRun" in js
+    # login gate + network handling
     assert "401" in js
-    # poll cadence + terminal stop
-    assert "2000" in js
+    assert ".catch(" in js
+    # phase transitions: build 'built' → submit; run 'done' → land; 'failed' stops
+    assert "'built'" in js or '"built"' in js
     assert "'done'" in js or '"done"' in js
-    assert ".catch(" in js  # network-error handling on submit + poll
-    assert "'failed'" in js or '"failed"' in js  # poll stops on failed
-    # polish: transient-error retry, queued/running labels, sim-id surfaced
+    assert "'failed'" in js or '"failed"' in js
+    # transient-tunnel tolerance + queued label + reachable=false handling + sim surfaced
     assert "consecutiveErrors" in js
     assert "Queued" in js
+    assert "reachable" in js
     assert "simulation_id" in js
 
 

@@ -56,6 +56,26 @@ def test_download_workspace_streams_to_file(monkeypatch, tmp_path):
     assert seen["url"] == "http://x/api/v1/simulations/workspace?simulator_id=45"
 
 
+def test_download_workspace_honors_per_call_timeout(monkeypatch, tmp_path):
+    seen = {}
+    def fake_urlopen(req, timeout=None):
+        seen["timeout"] = timeout
+        return _Resp(b"X")
+    monkeypatch.setattr(sac, "urlopen", fake_urlopen)
+    sac.SmsApiClient("http://x", timeout=30).download_workspace(45, tmp_path, timeout=600)
+    assert seen["timeout"] == 600
+
+
+def test_download_workspace_defaults_to_client_timeout(monkeypatch, tmp_path):
+    seen = {}
+    def fake_urlopen(req, timeout=None):
+        seen["timeout"] = timeout
+        return _Resp(b"X")
+    monkeypatch.setattr(sac, "urlopen", fake_urlopen)
+    sac.SmsApiClient("http://x", timeout=30).download_workspace(45, tmp_path)
+    assert seen["timeout"] == 30
+
+
 def _make_tarball(path, top="org-repo-abc1234"):
     """A GitHub-style tarball: one top-level dir containing workspace.yaml."""
     with tarfile.open(path, "w:gz") as tar:
@@ -69,10 +89,12 @@ class _FakeClient:
     def __init__(self, tarball_src):
         self._src = tarball_src
         self.downloads = 0
+        self.timeout_seen = None
 
-    def download_workspace(self, simulator_id, dest_dir):
+    def download_workspace(self, simulator_id, dest_dir, timeout=None):
         import shutil
         self.downloads += 1
+        self.timeout_seen = timeout
         dest = Path(dest_dir) / "workspace.tar.gz"
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(self._src, dest)
@@ -105,6 +127,31 @@ def test_materialize_reuses_cache(_cache, tmp_path):
     rbs.materialize_build(client, 45, "32b901")
     rbs.materialize_build(client, 45, "32b901")   # second call
     assert client.downloads == 1                  # reused, not re-downloaded
+
+
+def test_materialize_uses_long_download_timeout(_cache, tmp_path):
+    tb = tmp_path / "src.tar.gz"; _make_tarball(tb)
+    client = _FakeClient(tb)
+    rbs.materialize_build(client, 45, "32b901")
+    assert client.timeout_seen is not None and client.timeout_seen >= 300
+
+
+def test_materialize_stamps_viv_build_json(_cache, tmp_path):
+    tb = tmp_path / "src.tar.gz"; _make_tarball(tb)
+    cache = rbs.materialize_build(_FakeClient(tb), 45, "32b901")
+    meta = json.loads((cache / ".viv-build.json").read_text())
+    assert meta["simulator_id"] == 45
+    assert meta["commit"] == "32b901"
+
+
+def test_materialize_does_not_clobber_existing_stamp(_cache, tmp_path):
+    tb = tmp_path / "src.tar.gz"; _make_tarball(tb)
+    cache = rbs.materialize_build(_FakeClient(tb), 45, "32b901")
+    # simulate switch-build's richer stamp, then re-materialize (reuse path)
+    (cache / ".viv-build.json").write_text('{"simulator_id": 45, "branch": "main", "rich": true}')
+    rbs.materialize_build(_FakeClient(tb), 45, "32b901")
+    meta = json.loads((cache / ".viv-build.json").read_text())
+    assert meta.get("rich") is True
 
 
 def test_materialize_rejects_unsafe_commit(_cache, tmp_path):
