@@ -691,6 +691,33 @@ def test_build_bundle_shell_embeds_are_staged_and_prefixed(tmp_workspace, tmp_pa
     assert 'src="/reports/figures/alpha/f1.html"' not in shell
 
 
+def test_stage_report_cards_copies_and_prefixes(tmp_path):
+    """A study's report_card_urls source HTML must be copied into the bundle at
+    its workspace-relative path AND its URL base-path-prefixed in place.
+    Regression for report-card studies showing no visualizations in the
+    published snapshot (the /workspace/... card URLs 404'd — never staged)."""
+    from vivarium_dashboard import publish
+
+    ws_root = tmp_path / "ws"
+    rel = "workspace/investigations/inv/studies/s/viz/report_card/standard.html"
+    src = ws_root / rel
+    src.parent.mkdir(parents=True)
+    src.write_text("<html><body>card</body></html>")
+
+    out = tmp_path / "bundle"
+    out.mkdir()
+    spec = {"report_card_urls": {
+        "standard": {"url": "/" + rel, "verdict": "drift"},
+        # non-local / api URLs are skipped, not copied
+        "external": {"url": "/api/whatever", "verdict": "ungraded"},
+    }}
+    publish._stage_report_cards(spec, ws_root, out, base_path="/v2ecoli")
+
+    assert (out / rel).is_file()                      # copied into the bundle
+    assert spec["report_card_urls"]["standard"]["url"] == "/v2ecoli/" + rel
+    assert spec["report_card_urls"]["external"]["url"] == "/api/whatever"  # untouched
+
+
 # ---------------------------------------------------------------------------
 # Analyses-tab saved-visualizations export (parsimony 3D gallery)
 # ---------------------------------------------------------------------------
