@@ -253,14 +253,11 @@
 <section class="study-tab-panel active" data-kind="overview" id="panel-overview">
   <div class="study-overview">
 
-    {# ─── Biology-at-a-glance (planning-phase, biologist-first) ──────────
-       Renders when a study.yaml declares biological_summary or study_card
-       or literature_anchors. Designed for pre-execution evaluation:
-       a biologist should be able to understand the study's purpose and
-       expectations without scrolling into implementation details.
-    #}
+    {# ─── Group 1: Summary ─────────────────────────────────────────────── #}
+    <h2 class="overview-label">Summary</h2>
+
     {# v4 narrative-spine: executive `report` card + always-rendered
-       biological_summary + study_card. The report card is the at-a-glance
+       biological_summary. The report card is the at-a-glance
        verdict panel the dnaa investigation evolved (verdict, confidence,
        evidence_quality, main_insight, caveat). Each field is editable
        in-place via /api/study-narrative-set. Empty-state placeholders
@@ -270,13 +267,7 @@
       <h2 class="overview-label">📋 Report — executive summary
         <span class="narrative-card-hint">(top-of-page panel for reviewers)</span>
       </h2>
-      <p class="muted" style="margin:0 0 10px 0;font-size:0.85em">
-        Verdict + main insight are <strong>computed</strong> from canonical
-        fields (gate evaluator · findings) and shown read-only; the report
-        also derives <code>title</code>, <code>objective</code>, and
-        <code>key_metrics</code> from canonical content. Author only the
-        reviewer-facing notes below (confidence · evidence quality · caveat).
-      </p>
+      <p class="muted" style="margin:0 0 10px 0;font-size:0.85em">Author the reviewer-facing notes below; Verdict and main insight are computed from the gate evaluator and findings.</p>
       <div class="narrative-grid">
         {% set _f0 = (study.findings or [])[0] if study.findings else None %}
         <label class="narrative-row">
@@ -329,141 +320,64 @@
       </div>
     </div>
 
-    {# W15 — Open epistemic debts. Server-computed by the deterministic
-       pbg_superpowers.needs_attention.open_epistemic_debts collector (derived
-       from rigor + freshness signals so it can't drift). Rendered read-only;
-       absent when the collector is unavailable or there are no debts. #}
-    {% if epistemic_debts %}
-    <div class="overview-section" id="epistemic-debts-panel">
-      <h2 class="overview-label">🧾 Open epistemic debts
-        <span class="narrative-card-hint">(negative knowledge — what this study has not yet established)</span>
+    {# Always-render biological_summary: empty-state textarea encourages
+       the user to start writing immediately. #}
+    <div class="overview-section biology-summary-callout">
+      <h2 class="biology-glance-label">Biology — what this study is about
+        <span class="narrative-card-hint">(optional override — derived from findings when blank)</span>
       </h2>
-      <p class="muted" style="margin:0 0 8px 0;font-size:0.85em">
-        Untested claims, absent controls, uncalibrated metrics, un-excluded
-        alternatives, unexplored regions, and stale visuals — harvested from the
-        rigor scorecard + freshness signals.
-      </p>
-      <div style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden">
-        {% for d in epistemic_debts %}
-        {% set _sev = (d.severity or 'low')|string %}
-        {% set _bg = '#fee2e2' if _sev == 'high' else ('#fef9c3' if _sev == 'medium' else '#f1f5f9') %}
-        {% set _fg = '#991b1b' if _sev == 'high' else ('#854d0e' if _sev == 'medium' else '#475569') %}
-        <div style="display:flex;gap:10px;align-items:flex-start;padding:8px 12px;border-top:1px solid #f1f5f9">
-          <span style="padding:1px 8px;border-radius:9999px;background:{{ _bg }};color:{{ _fg }};font-weight:600;font-size:0.72em;white-space:nowrap">{{ _sev }}</span>
-          <div>
-            <strong style="color:#1e293b">{{ d.kind }}</strong>
-            {% if d.ref %}<code style="font-size:0.82em">{{ d.ref }}</code>{% endif %}
-            <div style="color:#475569;font-size:0.9em;margin-top:1px">{{ d.note }}</div>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-    {% endif %}
-
-    <div class="biology-glance">
-      {# Always-render biological_summary: empty-state textarea encourages
-         the user to start writing immediately. #}
-      <div class="biology-summary-callout">
-        <h2 class="biology-glance-label">Biology — what this study is about
-          <span class="narrative-card-hint">(optional override — derived from findings when blank)</span>
-        </h2>
-        <textarea class="biology-prose narrative-input narrative-textarea" rows="4"
-                  data-narrative-path="biological_summary"
-                  placeholder="Multi-paragraph plain-English mechanism narrative — the 'textbook write-up' a non-modeler would read.">{{ study.biological_summary or '' }}</textarea>
-        {% if not study.biological_summary and study.findings %}
-        <div class="biology-derived-preview muted small" style="margin-top:6px;padding:8px 12px;background:#f8fafc;border-left:3px solid #cbd5e1;border-radius:4px">
-          <em>Derived from findings (shown in the report when no override is set):</em>
-          {% for _bf in study.findings %}{% if _bf.statement or _bf.summary %}<p style="margin:4px 0 0">{{ _bf.statement or _bf.summary }}</p>{% endif %}{% endfor %}
-        </div>
-        {% endif %}
-      </div>
-
-      {# study_card is DEMOTED (no longer ★author-first): every slot is
-         DERIVED from canonical fields when its override is blank
-         (goal←objective, mechanism←biological_summary/findings,
-         expected_result←hypothesis, main_expert_question←expert_questions[0],
-         why_before_next←pipeline_gate.proceed_condition). The inputs author an
-         optional override; the canonical value shows as the placeholder so the
-         card renders without duplicating the source. #}
-      {% set _sc = study.study_card or {} %}
-      {% set _sc_f0 = (study.findings or [])[0] if study.findings else None %}
-      {% set _sc_eq = (study.expert_questions or [])[0] if study.expert_questions else None %}
-      {% set _sc_goal = study.objective %}
-      {% set _sc_mech = study.biological_summary or (_sc_f0.statement if _sc_f0 else None) %}
-      {% set _sc_exp = study.hypothesis %}
-      {% set _sc_why = (study.pipeline_gate or {}).proceed_condition %}
-      <div class="study-card">
-        <h2 class="biology-glance-label">Study card
-          <span class="narrative-card-hint">(derived from canonical fields when a slot is blank)</span>
-        </h2>
-        <table class="study-card-table">
-          <tr><th>Goal</th><td>
-            <input type="text" class="narrative-input narrative-card-input"
-                   data-narrative-path="study_card.goal"
-                   value="{{ _sc.goal or '' }}"
-                   placeholder="{{ _sc_goal or 'One sentence — the single most important thing this study does.' }}">
-          </td></tr>
-          <tr><th>Mechanism</th><td>
-            <input type="text" class="narrative-input narrative-card-input"
-                   data-narrative-path="study_card.mechanism"
-                   value="{{ _sc.mechanism or '' }}"
-                   placeholder="{{ _sc_mech or 'One paragraph — how the biology gets the result.' }}">
-          </td></tr>
-          <tr><th>Why before next</th><td>
-            <input type="text" class="narrative-input narrative-card-input"
-                   data-narrative-path="study_card.why_before_next"
-                   value="{{ _sc.why_before_next or '' }}"
-                   placeholder="{{ _sc_why or 'Why this study must finish before the next one in the DAG.' }}">
-          </td></tr>
-          <tr><th>Expected result</th><td>
-            <input type="text" class="narrative-input narrative-card-input"
-                   data-narrative-path="study_card.expected_result"
-                   value="{{ _sc.expected_result or '' }}"
-                   placeholder="{{ _sc_exp or 'Literature-stated success criterion.' }}">
-          </td></tr>
-          <tr><th>Main expert question</th><td>
-            <input type="text" class="narrative-input narrative-card-input"
-                   data-narrative-path="study_card.main_expert_question"
-                   value="{{ _sc.main_expert_question or '' }}"
-                   placeholder="{{ _sc_eq or 'The one question this study most wants an expert to answer.' }}">
-          </td></tr>
-        </table>
-      </div>
-
-      {# Legacy literature_anchors render — kept read-only here; editing
-         these is /pbg-study add-literature-anchor for now (list-based UI
-         is a follow-up). #}
-
-      {% if study.literature_anchors %}
-      <div class="literature-anchors">
-        <h2 class="biology-glance-label">Literature anchors</h2>
-        <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
-          The biological expectations this study tests, mapped to the
-          model observable that will measure each one. Full citations
-          live in the Tests tab.
-        </p>
-        <ul class="literature-anchor-list">
-        {% for anchor in study.literature_anchors %}
-          <li class="literature-anchor-card">
-            <div class="anchor-expectation">{{ anchor.expectation }}</div>
-            <div class="anchor-observable">
-              <em>Model observable:</em> <code>{{ anchor.model_observable }}</code>
-            </div>
-            {% if anchor.source %}
-            <div class="anchor-source"><em>Source:</em> {{ anchor.source }}</div>
-            {% endif %}
-            {% if anchor.status_in_v2ecoli %}
-            <div class="anchor-status">
-              <em>Current status:</em> {{ anchor.status_in_v2ecoli }}
-            </div>
-            {% endif %}
-          </li>
-        {% endfor %}
-        </ul>
+      <textarea class="biology-prose narrative-input narrative-textarea" rows="4"
+                data-narrative-path="biological_summary"
+                placeholder="Multi-paragraph plain-English mechanism narrative — the 'textbook write-up' a non-modeler would read.">{{ study.biological_summary or '' }}</textarea>
+      {% if not study.biological_summary and study.findings %}
+      <div class="biology-derived-preview muted small" style="margin-top:6px;padding:8px 12px;background:#f8fafc;border-left:3px solid #cbd5e1;border-radius:4px">
+        <em>Derived from findings (shown in the report when no override is set):</em>
+        {% for _bf in study.findings %}{% if _bf.statement or _bf.summary %}<p style="margin:4px 0 0">{{ _bf.statement or _bf.summary }}</p>{% endif %}{% endfor %}
       </div>
       {% endif %}
     </div>
+
+    {# ─── Group 2: Question & approach ────────────────────────────────── #}
+    <h2 class="overview-label">Question &amp; approach</h2>
+
+    {% if study.purpose %}
+    {# Spine C1c: purpose is spine-critical — promoted to a visible block. #}
+    <div class="overview-section">
+      {% if study.purpose.question %}
+      <div class="purpose-callout" style="background:#eff6ff;border-left:4px solid #3b82f6">
+        <strong>Question.</strong> {{ study.purpose.question }}
+      </div>
+      {% endif %}
+      {% if study.purpose.expected_outcome %}
+      <div class="purpose-callout" style="background:#f0fdf4;border-left:4px solid #10b981">
+        <strong>Hypothesis / Expected outcome.</strong> {{ study.purpose.expected_outcome }}
+      </div>
+      {% endif %}
+      {% if study.purpose.mechanism %}
+      <div class="purpose-callout" style="background:#fefce8;border-left:4px solid #facc15">
+        <strong>Mechanism / Model change.</strong> {{ study.purpose.mechanism }}
+      </div>
+      {% endif %}
+    </div>
+    {% else %}
+    {# Fallback: old narrative fields — each rendered exactly once #}
+    <div class="overview-section">
+      <div id="question-text" class="overview-prose" data-editable="true"
+           data-field="question"
+           data-placeholder="(what research question is this study asking?)">{{ study.question or '' }}</div>
+    </div>
+    <div class="overview-section">
+      <div id="hypothesis-text" class="overview-prose" data-editable="true"
+           data-field="hypothesis"
+           data-placeholder="(predicted outcome)">{{ study.hypothesis or '' }}</div>
+    </div>
+    <div class="overview-section">
+      <div id="objective-text" class="overview-prose" data-editable="true" data-field="objective">{{ study.objective or '' }}</div>
+    </div>
+    {% endif %}
+
+    {# ─── Group 3: Findings & open debts ─────────────────────────────── #}
+    <h2 class="overview-label">Findings &amp; open debts</h2>
 
     {% if study.findings %}
     <div class="overview-section findings-section">
@@ -531,234 +445,236 @@
     </div>
     {% endif %}
 
-    {% if study.purpose %}
-    {# Spine C1c: purpose is spine-critical — promoted to a visible block (was
-       collapsed-by-default). #}
-    <div class="overview-section">
-      <h2 class="overview-label">Purpose</h2>
-      {% if study.purpose.question %}
-      <div class="purpose-callout" style="background:#eff6ff;border-left:4px solid #3b82f6">
-        <strong>Question.</strong> {{ study.purpose.question }}
-      </div>
-      {% endif %}
-      {% if study.purpose.mechanism %}
-      <div class="purpose-callout" style="background:#fefce8;border-left:4px solid #facc15">
-        <strong>Mechanism / Model change.</strong> {{ study.purpose.mechanism }}
-      </div>
-      {% endif %}
-      {% if study.purpose.expected_outcome %}
-      <div class="purpose-callout" style="background:#f0fdf4;border-left:4px solid #10b981">
-        <strong>Expected outcome.</strong> {{ study.purpose.expected_outcome }}
-      </div>
-      {% endif %}
-    </div>
-    {% else %}
-    {# Fallback: old narrative fields #}
-    {% if study.question %}
-    <div class="overview-section">
-      <h2 class="overview-label">Question</h2>
-      <div id="question-text" class="overview-prose" data-editable="true" data-field="question">{{ study.question }}</div>
-    </div>
-    {% endif %}
-    {% if study.hypothesis %}
-    <div class="overview-section">
-      <h2 class="overview-label">Hypothesis</h2>
-      <div id="hypothesis-text" class="overview-prose" data-editable="true" data-field="hypothesis">{{ study.hypothesis }}</div>
-    </div>
-    {% endif %}
-    {% if study.objective %}
-    <div class="overview-section">
-      <h2 class="overview-label">Question</h2>
-      <div id="question-text" class="overview-prose" data-editable="true"
-           data-field="question"
-           data-placeholder="(what research question is this study asking?)">{{ study.question or '' }}</div>
-    </div>
-
-    <div class="overview-section">
-      <h2 class="overview-label">Hypothesis</h2>
-      <div id="hypothesis-text" class="overview-prose" data-editable="true"
-           data-field="hypothesis"
-           data-placeholder="(predicted outcome)">{{ study.hypothesis or '' }}</div>
-    </div>
-
-    <div class="overview-section">
-      <h2 class="overview-label">Status</h2>
-      <select id="status-select" data-field="status" class="overview-status-select">
-        <option value="planned"     {% if study.status == 'planned'     %}selected{% endif %}>planned</option>
-        <option value="draft"       {% if study.status == 'draft'       %}selected{% endif %}>draft</option>
-        <option value="in-progress" {% if study.status == 'in-progress' %}selected{% endif %}>in-progress</option>
-        <option value="running"     {% if study.status == 'running'     %}selected{% endif %}>running</option>
-        <option value="ran"         {% if study.status == 'ran'         %}selected{% endif %}>ran</option>
-        <option value="completed"   {% if study.status == 'completed'   %}selected{% endif %}>completed</option>
-        <option value="complete"    {% if study.status == 'complete'    %}selected{% endif %}>complete</option>
-        <option value="archived"    {% if study.status == 'archived'    %}selected{% endif %}>archived</option>
-      </select>
-    </div>
-
-    <div class="overview-section">
-      <h2 class="overview-label">Objective</h2>
-      <div id="objective-text" class="overview-prose" data-editable="true" data-field="objective">{{ study.objective }}</div>
-    </div>
-    {% endif %}
-    {% endif %}
-
-    {% if study.pipeline_gate %}
-    <details class="overview-section">
-      <summary class="overview-label">Pipeline gate</summary>
-      <p class="muted" style="margin: 0 0 8px 0;font-size:0.88em">
-        Each study is a model-building gate: it answers <em>"Can we safely build the next layer?"</em>
+    {# W15 — Open epistemic debts. Server-computed by the deterministic
+       pbg_superpowers.needs_attention.open_epistemic_debts collector (derived
+       from rigor + freshness signals so it can't drift). Rendered read-only;
+       absent when the collector is unavailable or there are no debts. #}
+    {% if epistemic_debts %}
+    <div class="overview-section" id="epistemic-debts-panel">
+      <h2 class="overview-label">🧾 Open epistemic debts
+        <span class="narrative-card-hint">(negative knowledge — what this study has not yet established)</span>
+      </h2>
+      <p class="muted" style="margin:0 0 8px 0;font-size:0.85em">
+        Untested claims, absent controls, uncalibrated metrics, un-excluded
+        alternatives, unexplored regions, and stale visuals — harvested from the
+        rigor scorecard + freshness signals.
       </p>
-      {% if study.pipeline_gate.prerequisites %}
-      <div style="margin-bottom:6px"><strong>Prerequisites:</strong>
-        {% for p in study.pipeline_gate.prerequisites %}<code>{{ p }}</code>{% if not loop.last %} · {% endif %}{% endfor %}
-      </div>
-      {% else %}
-      <div style="margin-bottom:6px"><strong>Prerequisites:</strong> <em class="muted">none (root study)</em></div>
-      {% endif %}
-      {% if study.pipeline_gate.enables %}
-      <div style="margin-bottom:6px"><strong>Enables:</strong>
-        {% for p in study.pipeline_gate.enables %}<code>{{ p }}</code>{% if not loop.last %} · {% endif %}{% endfor %}
-      </div>
-      {% endif %}
-      {% if study.pipeline_gate.proceed_condition %}
-      <div><strong>Proceed when:</strong> <span class="muted">{{ study.pipeline_gate.proceed_condition }}</span></div>
-      {% endif %}
-    </details>
-    {% endif %}
-
-    {% if study.key_assumptions %}
-    <details class="overview-section">
-      <summary class="overview-label">Key assumptions</summary>
-      <ul style="margin:0 0 0 18px;padding:0;font-size:0.93em">
-        {% for a in study.key_assumptions %}<li style="margin:2px 0">{{ a }}</li>{% endfor %}
-      </ul>
-    </details>
-    {% endif %}
-
-    {% if study.behavior_tests or study.expected_behavior %}
-    {# Spine C1c: the behavioral-tests summary is spine-critical — visible block. #}
-    <div class="overview-section">
-      <h2 class="overview-label">Behavioral tests</h2>
-      {% set _eb = study.behavior_tests or study.expected_behavior %}
-      {% set _primary = _eb | selectattr('classification', 'equalto', 'primary') | list | length %}
-      {% set _supporting = _eb | selectattr('classification', 'equalto', 'supporting') | list | length %}
-      {% set _diagnostic = _eb | selectattr('classification', 'equalto', 'diagnostic') | list | length %}
-      {% set _regression = _eb | selectattr('classification', 'equalto', 'regression') | list | length %}
-      <p style="margin:0">
-        <strong>{{ _eb|length }}</strong> tests defined{% if _primary %} —
-          <span class="classification-pill classification-primary">{{ _primary }} primary</span>{% endif %}{% if _supporting %}
-          <span class="classification-pill classification-supporting">{{ _supporting }} supporting</span>{% endif %}{% if _diagnostic %}
-          <span class="classification-pill classification-diagnostic">{{ _diagnostic }} diagnostic</span>{% endif %}{% if _regression %}
-          <span class="classification-pill classification-regression">{{ _regression }} regression</span>{% endif %}
-        <a onclick="_setStudyTab('tests')" style="cursor:pointer;color:#3b82f6;text-decoration:underline;margin-left:6px">View on Tests tab →</a>
-      </p>
-    </div>
-    {% endif %}
-
-    {% if study.expert_decisions_needed is sequence and study.expert_decisions_needed is not string and study.expert_decisions_needed %}
-    <details class="overview-section pre-run-expert-review">
-      <summary class="overview-label">Pre-run expert review</summary>
-      <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
-        Open biological questions the planning is contingent on. A "wrong" answer here
-        means a primary test threshold needs to change <em>before</em> the simulation
-        is run, not after. Each question lists alternatives + the impact of the wrong
-        choice + what downstream work it blocks.
-      </p>
-      <div class="expert-question-list">
-        {% for q in study.expert_decisions_needed %}
-        <div class="expert-question-card status-{{ q.status or 'open' }}">
-          <div class="expert-question-header">
-            <span class="expert-question-id">{{ q.id }}</span>
-            <span class="expert-question-status">{{ q.status or 'open' }}</span>
-            {% if q.asked_to %}<span class="expert-question-asked-to">asked to: {{ q.asked_to }}</span>{% endif %}
+      <div style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden">
+        {% for d in epistemic_debts %}
+        {% set _sev = (d.severity or 'low')|string %}
+        {% set _bg = '#fee2e2' if _sev == 'high' else ('#fef9c3' if _sev == 'medium' else '#f1f5f9') %}
+        {% set _fg = '#991b1b' if _sev == 'high' else ('#854d0e' if _sev == 'medium' else '#475569') %}
+        <div style="display:flex;gap:10px;align-items:flex-start;padding:8px 12px;border-top:1px solid #f1f5f9">
+          <span style="padding:1px 8px;border-radius:9999px;background:{{ _bg }};color:{{ _fg }};font-weight:600;font-size:0.72em;white-space:nowrap">{{ _sev }}</span>
+          <div>
+            <strong style="color:#1e293b">{{ d.kind }}</strong>
+            {% if d.ref %}<code style="font-size:0.82em">{{ d.ref }}</code>{% endif %}
+            <div style="color:#475569;font-size:0.9em;margin-top:1px">{{ d.note }}</div>
           </div>
-          <div class="expert-question-text"><strong>Q.</strong> {{ q.question }}</div>
-          {% if q.alternatives %}
-          <div class="expert-question-alternatives">
-            <em>Alternatives:</em>
-            <ul>{% for a in q.alternatives %}<li>{{ a }}</li>{% endfor %}</ul>
-          </div>
-          {% endif %}
-          {% if q.impact_if_wrong %}
-          <div class="expert-question-impact">
-            <em>Impact if wrong:</em> {{ q.impact_if_wrong }}
-          </div>
-          {% endif %}
-          {% if q.blocks %}
-          <details class="expert-question-blocks">
-            <summary>What this blocks ({{ q.blocks|length }} items)</summary>
-            <ul>{% for b in q.blocks %}<li>{{ b }}</li>{% endfor %}</ul>
-          </details>
-          {% endif %}
-          {% if q.requested_response %}
-          <details class="expert-question-response">
-            <summary>Requested response format</summary>
-            <p>{{ q.requested_response }}</p>
-          </details>
-          {% endif %}
         </div>
         {% endfor %}
       </div>
-    </details>
-    {% endif %}
-
-    {% if study.limitations %}
-    <div class="overview-section">
-      <h2 class="overview-label">Limitations</h2>
-      <p class="muted" style="margin:0 0 6px 0;font-size:0.85em">What this study explicitly does NOT validate (prevents overclaim).</p>
-      <ul style="margin:0 0 0 18px;padding:0;font-size:0.93em">
-        {% for l in study.limitations %}<li style="margin:2px 0">{{ l }}</li>{% endfor %}
-      </ul>
     </div>
     {% endif %}
 
-    {# Spine C1b: de-dup — follow-ups appeared in 3 places. The canonical
-       surface is the Decide/Conclusions tab (a Decide-phase output); the
-       Overview occurrence is a short link to it, not a triplicated card list. #}
-    {% if study.follow_up_studies %}
-    <div class="overview-section">
-      <h2 class="overview-label">Follow-up studies</h2>
-      <p class="muted" style="margin:0;font-size:0.9em">
-        <strong>{{ study.follow_up_studies | length }}</strong>
-        follow-up{{ '' if study.follow_up_studies|length == 1 else 's' }} derived from this study's runs —
-        the canonical surface is the {{ "Decide" if _is_v3 else "Conclusions" }} tab.
-        <a onclick="_setStudyTab('conclusions')" style="cursor:pointer;color:#3b82f6;text-decoration:underline;margin-left:4px">View follow-ups on the {{ "Decide" if _is_v3 else "Conclusions" }} tab →</a>
-      </p>
-    </div>
-    {% endif %}
+    {# ─── Group 4: Plan & provenance (collapsed) ─────────────────────── #}
+    <details class="overview-section">
+      <summary class="overview-label">Plan &amp; provenance</summary>
 
-    <div class="overview-section">
-      <h2 class="overview-label">Status</h2>
-      <select id="status-select" data-field="status" class="overview-status-select">
-        <option value="planned"     {% if study.status == 'planned'     %}selected{% endif %}>planned</option>
-        <option value="running"     {% if study.status == 'running'     %}selected{% endif %}>running</option>
-        <option value="ran"         {% if study.status == 'ran'         %}selected{% endif %}>ran</option>
-        <option value="complete"    {% if study.status == 'complete'    %}selected{% endif %}>complete</option>
-        <option value="failed"      {% if study.status == 'failed'      %}selected{% endif %}>failed</option>
-      </select>
-      {% if study.phase %}
-      <p class="muted" style="margin:6px 0 0 0;font-size:0.85em">Lifecycle phase: <strong>{{ study.phase }}</strong> (Design → Build → Simulate → Evaluate → Decide).</p>
+      {% if study.pipeline_gate %}
+      <div class="overview-section">
+        <h3 class="overview-label">Pipeline gate</h3>
+        <p class="muted" style="margin: 0 0 8px 0;font-size:0.88em">
+          Each study is a model-building gate: it answers <em>"Can we safely build the next layer?"</em>
+        </p>
+        {% if study.pipeline_gate.prerequisites %}
+        <div style="margin-bottom:6px"><strong>Prerequisites:</strong>
+          {% for p in study.pipeline_gate.prerequisites %}<code>{{ p }}</code>{% if not loop.last %} · {% endif %}{% endfor %}
+        </div>
+        {% else %}
+        <div style="margin-bottom:6px"><strong>Prerequisites:</strong> <em class="muted">none (root study)</em></div>
+        {% endif %}
+        {% if study.pipeline_gate.enables %}
+        <div style="margin-bottom:6px"><strong>Enables:</strong>
+          {% for p in study.pipeline_gate.enables %}<code>{{ p }}</code>{% if not loop.last %} · {% endif %}{% endfor %}
+        </div>
+        {% endif %}
+        {% if study.pipeline_gate.proceed_condition %}
+        <div><strong>Proceed when:</strong> <span class="muted">{{ study.pipeline_gate.proceed_condition }}</span></div>
+        {% endif %}
+      </div>
       {% endif %}
-    </div>
 
-    <div class="study-counts-strip">
-      <div class="count-cell">
-        <strong>{{ (study.simulation_set or study.variants or [])|length }}</strong>
-        <span class="count-label">{{ "simulations" if study.simulation_set else "variants" }}</span>
+      {% if study.key_assumptions %}
+      <div class="overview-section">
+        <h3 class="overview-label">Key assumptions</h3>
+        <ul style="margin:0 0 0 18px;padding:0;font-size:0.93em">
+          {% for a in study.key_assumptions %}<li style="margin:2px 0">{{ a }}</li>{% endfor %}
+        </ul>
       </div>
-      <div class="count-cell">
-        <strong>{{ (study.readouts or study.observables or [])|length }}</strong>
-        <span class="count-label">readouts</span>
+      {% endif %}
+
+      {% if study.behavior_tests or study.expected_behavior %}
+      {# Spine C1c: the behavioral-tests summary is spine-critical — visible block. #}
+      <div class="overview-section">
+        <h2 class="overview-label">Behavioral tests</h2>
+        {% set _eb = study.behavior_tests or study.expected_behavior %}
+        {% set _primary = _eb | selectattr('classification', 'equalto', 'primary') | list | length %}
+        {% set _supporting = _eb | selectattr('classification', 'equalto', 'supporting') | list | length %}
+        {% set _diagnostic = _eb | selectattr('classification', 'equalto', 'diagnostic') | list | length %}
+        {% set _regression = _eb | selectattr('classification', 'equalto', 'regression') | list | length %}
+        <p style="margin:0">
+          <strong>{{ _eb|length }}</strong> tests defined{% if _primary %} —
+            <span class="classification-pill classification-primary">{{ _primary }} primary</span>{% endif %}{% if _supporting %}
+            <span class="classification-pill classification-supporting">{{ _supporting }} supporting</span>{% endif %}{% if _diagnostic %}
+            <span class="classification-pill classification-diagnostic">{{ _diagnostic }} diagnostic</span>{% endif %}{% if _regression %}
+            <span class="classification-pill classification-regression">{{ _regression }} regression</span>{% endif %}
+          <a onclick="_setStudyTab('tests')" style="cursor:pointer;color:#3b82f6;text-decoration:underline;margin-left:6px">View on Tests tab →</a>
+        </p>
       </div>
-      <div class="count-cell">
-        <strong>{{ (study.implementation_requirements or study.gaps or [])|length }}</strong>
-        <span class="count-label">requirements</span>
+      {% endif %}
+
+      {% if study.expert_decisions_needed is sequence and study.expert_decisions_needed is not string and study.expert_decisions_needed %}
+      <div class="overview-section pre-run-expert-review">
+        <h3 class="overview-label">Pre-run expert review</h3>
+        <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
+          Open biological questions the planning is contingent on. A "wrong" answer here
+          means a primary test threshold needs to change <em>before</em> the simulation
+          is run, not after. Each question lists alternatives + the impact of the wrong
+          choice + what downstream work it blocks.
+        </p>
+        <div class="expert-question-list">
+          {% for q in study.expert_decisions_needed %}
+          <div class="expert-question-card status-{{ q.status or 'open' }}">
+            <div class="expert-question-header">
+              <span class="expert-question-id">{{ q.id }}</span>
+              <span class="expert-question-status">{{ q.status or 'open' }}</span>
+              {% if q.asked_to %}<span class="expert-question-asked-to">asked to: {{ q.asked_to }}</span>{% endif %}
+            </div>
+            <div class="expert-question-text"><strong>Q.</strong> {{ q.question }}</div>
+            {% if q.alternatives %}
+            <div class="expert-question-alternatives">
+              <em>Alternatives:</em>
+              <ul>{% for a in q.alternatives %}<li>{{ a }}</li>{% endfor %}</ul>
+            </div>
+            {% endif %}
+            {% if q.impact_if_wrong %}
+            <div class="expert-question-impact">
+              <em>Impact if wrong:</em> {{ q.impact_if_wrong }}
+            </div>
+            {% endif %}
+            {% if q.blocks %}
+            <div class="expert-question-blocks">
+              <strong>What this blocks ({{ q.blocks|length }} items)</strong>
+              <ul>{% for b in q.blocks %}<li>{{ b }}</li>{% endfor %}</ul>
+            </div>
+            {% endif %}
+            {% if q.requested_response %}
+            <div class="expert-question-response">
+              <strong>Requested response format</strong>
+              <p>{{ q.requested_response }}</p>
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
       </div>
-      <div class="count-cell">
-        <strong>{{ (study.runs or [])|length }}</strong>
-        <span class="count-label">runs</span>
+      {% endif %}
+
+      {% if study.limitations %}
+      <div class="overview-section">
+        <h2 class="overview-label">Limitations</h2>
+        <p class="muted" style="margin:0 0 6px 0;font-size:0.85em">What this study explicitly does NOT validate (prevents overclaim).</p>
+        <ul style="margin:0 0 0 18px;padding:0;font-size:0.93em">
+          {% for l in study.limitations %}<li style="margin:2px 0">{{ l }}</li>{% endfor %}
+        </ul>
       </div>
-    </div>
+      {% endif %}
+
+      {# Spine C1b: de-dup — follow-ups appeared in 3 places. The canonical
+         surface is the Decide/Conclusions tab (a Decide-phase output); the
+         Overview occurrence is a short link to it, not a triplicated card list. #}
+      {% if study.follow_up_studies %}
+      <div class="overview-section">
+        <h2 class="overview-label">Follow-up studies</h2>
+        <p class="muted" style="margin:0;font-size:0.9em">
+          <strong>{{ study.follow_up_studies | length }}</strong>
+          follow-up{{ '' if study.follow_up_studies|length == 1 else 's' }} derived from this study's runs —
+          the canonical surface is the {{ "Decide" if _is_v3 else "Conclusions" }} tab.
+          <a onclick="_setStudyTab('conclusions')" style="cursor:pointer;color:#3b82f6;text-decoration:underline;margin-left:4px">View follow-ups on the {{ "Decide" if _is_v3 else "Conclusions" }} tab →</a>
+        </p>
+      </div>
+      {% endif %}
+
+      {# Legacy literature_anchors render — kept read-only here; editing
+         these is /pbg-study add-literature-anchor for now (list-based UI
+         is a follow-up). #}
+      {% if study.literature_anchors %}
+      <div class="overview-section literature-anchors">
+        <h3 class="overview-label">Literature anchors</h3>
+        <p class="muted" style="margin:0 0 8px 0;font-size:0.88em">
+          The biological expectations this study tests, mapped to the
+          model observable that will measure each one. Full citations
+          live in the Tests tab.
+        </p>
+        <ul class="literature-anchor-list">
+        {% for anchor in study.literature_anchors %}
+          <li class="literature-anchor-card">
+            <div class="anchor-expectation">{{ anchor.expectation }}</div>
+            <div class="anchor-observable">
+              <em>Model observable:</em> <code>{{ anchor.model_observable }}</code>
+            </div>
+            {% if anchor.source %}
+            <div class="anchor-source"><em>Source:</em> {{ anchor.source }}</div>
+            {% endif %}
+            {% if anchor.status_in_v2ecoli %}
+            <div class="anchor-status">
+              <em>Current status:</em> {{ anchor.status_in_v2ecoli }}
+            </div>
+            {% endif %}
+          </li>
+        {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      <div class="overview-section">
+        <h3 class="overview-label">Status</h3>
+        <select id="status-select" data-field="status" class="overview-status-select">
+          <option value="planned"     {% if study.status == 'planned'     %}selected{% endif %}>planned</option>
+          <option value="draft"       {% if study.status == 'draft'       %}selected{% endif %}>draft</option>
+          <option value="in-progress" {% if study.status == 'in-progress' %}selected{% endif %}>in-progress</option>
+          <option value="running"     {% if study.status == 'running'     %}selected{% endif %}>running</option>
+          <option value="ran"         {% if study.status == 'ran'         %}selected{% endif %}>ran</option>
+          <option value="completed"   {% if study.status == 'completed'   %}selected{% endif %}>completed</option>
+          <option value="complete"    {% if study.status == 'complete'    %}selected{% endif %}>complete</option>
+          <option value="archived"    {% if study.status == 'archived'    %}selected{% endif %}>archived</option>
+        </select>
+        {% if study.phase %}
+        <p class="muted" style="margin:6px 0 0 0;font-size:0.85em">Lifecycle phase: <strong>{{ study.phase }}</strong> (Design → Build → Simulate → Evaluate → Decide).</p>
+        {% endif %}
+      </div>
+
+      <div class="study-counts-strip">
+        <div class="count-cell">
+          <strong>{{ (study.simulation_set or study.variants or [])|length }}</strong>
+          <span class="count-label">{{ "simulations" if study.simulation_set else "variants" }}</span>
+        </div>
+        <div class="count-cell">
+          <strong>{{ (study.readouts or study.observables or [])|length }}</strong>
+          <span class="count-label">readouts</span>
+        </div>
+        <div class="count-cell">
+          <strong>{{ (study.implementation_requirements or study.gaps or [])|length }}</strong>
+          <span class="count-label">requirements</span>
+        </div>
+        <div class="count-cell">
+          <strong>{{ (study.runs or [])|length }}</strong>
+          <span class="count-label">runs</span>
+        </div>
+      </div>
+
+    </details>
 
     {# Stage-3c: feedback panel — populated by JS from window._study.feedback_tracked.
        Rendered nothing when there is no feedback (JS checks items.length). #}
