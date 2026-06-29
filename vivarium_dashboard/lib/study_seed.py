@@ -304,7 +304,8 @@ def seed_followup_study(workspace: Path, parent_name: str,
         "# as the study matures. See NEXT_STEPS.md for the full pattern.\n\n"
     )
     new_yaml.write_text(header + yaml.safe_dump(
-        child_spec, sort_keys=False, default_flow_style=False, allow_unicode=True))
+        child_spec, sort_keys=False, default_flow_style=False, allow_unicode=True),
+        encoding="utf-8")
 
     # Add the new study to every investigation.yaml that references the
     # parent — otherwise the seeded study is orphaned (on disk but invisible
@@ -447,7 +448,8 @@ def _seed_from_proposal(workspace: Path, parent_name: str, parent_spec: dict,
         "# schema v4 — fill the placeholder fields as the study matures.\n\n"
     )
     new_yaml.write_text(header + yaml.safe_dump(
-        child_spec, sort_keys=False, default_flow_style=False, allow_unicode=True))
+        child_spec, sort_keys=False, default_flow_style=False, allow_unicode=True),
+        encoding="utf-8")
 
     _add_to_parent_investigations(workspace, parent_name, new_name)
     return new_name
@@ -499,6 +501,6 @@ def _add_to_parent_investigations(workspace: Path, parent_name: str,
                     # bail rather than insert in the wrong section
                     in_studies = False
         if inserted:
-            inv_yaml.write_text("".join(out_lines))
+            inv_yaml.write_text("".join(out_lines), encoding="utf-8")
             updated.append(inv_yaml)
     return updated

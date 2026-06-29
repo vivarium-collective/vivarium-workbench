@@ -1,9 +1,38 @@
 """Tests for the single-source atomic text write (lib/atomic_io.py)."""
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
 import pytest
 
 from vivarium_dashboard.lib.atomic_io import atomic_write_text
+
+
+def test_writes_utf8_under_ascii_locale(tmp_path):
+    """Dashboard YAML carries non-ASCII (em dashes in titles/scaffolds). The
+    write must be UTF-8 regardless of the process locale — under LC_ALL=C the
+    locale default is ASCII, and a bare ``write_text`` raised UnicodeEncodeError
+    (the order-dependent test_api_app.py failures traced here). Mirrors the
+    read-side regression in test_workspace_paths.
+    """
+    target = tmp_path / "doc.yaml"
+    code = (
+        "from pathlib import Path;"
+        "from vivarium_dashboard.lib.atomic_io import atomic_write_text;"
+        f"atomic_write_text(Path(r'{target}'), 'title: Colony — HPC readiness\\n')"
+    )
+    env = {
+        **os.environ,
+        "LC_ALL": "C", "LANG": "C", "LC_CTYPE": "C",
+        "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0",
+    }
+    proc = subprocess.run(
+        [sys.executable, "-c", code], env=env, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, f"atomic_write_text crashed under ASCII locale:\n{proc.stderr}"
+    assert target.read_text(encoding="utf-8") == "title: Colony — HPC readiness\n"
 
 
 def test_writes_new_file(tmp_path):
