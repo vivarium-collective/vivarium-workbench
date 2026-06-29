@@ -264,19 +264,26 @@ def _drive(composite, steps: int, progress_cb: "Callable | None") -> None:
             progress_cb(step)
 
 
-def _flush_step_emitters(composite) -> int:
+def _flush_step_emitters(composite) -> "tuple[int, list[tuple[object, BaseException]]]":
     """Close every buffering Step emitter in a composite so its trailing batch
-    lands on disk. Returns the number closed.
+    lands on disk. Returns ``(closed, errors)``.
 
     Generalises ``run_runner._flush_parquet_emitters``: targets any node
     ``instance`` exposing a callable ``close`` that buffers to a store — keyed
     off the emitter's own ``out_uri`` (ParquetEmitter, the tyssue
     DataFrameParquetEmitter, …) OR a ``writer.out_uri`` (XArrayEmitter, whose
     store handle lives on its writer). Skips already-closed emitters and never
-    raises (a failed close is logged, not propagated), so callers needn't import
+    raises (a failed close must not sink the run), so callers needn't import
     workspace-specific emitter classes.
+
+    A close that raises (notably the flat-Step XArrayEmitter's close-time
+    AssertionError when its buffer never filled → an EMPTY store) is COLLECTED
+    into ``errors`` and returned rather than swallowed via ``traceback`` — so the
+    caller's guard can SEE the failure and act on it (see ``_run_xarray``). The
+    traceback is still printed for diagnosability.
     """
     closed = 0
+    errors: list[tuple[object, BaseException]] = []
 
     def _buffers(inst) -> bool:
         if not callable(getattr(inst, "close", None)):
@@ -295,13 +302,59 @@ def _flush_step_emitters(composite) -> int:
                 try:
                     inst.close(success=True)
                     closed += 1
-                except Exception:  # noqa: BLE001 — a failed flush must not sink the run
+                except Exception as exc:  # noqa: BLE001 — surface, don't sink the run
+                    errors.append((inst, exc))
                     traceback.print_exc()
             for v in node.values():
                 _walk(v)
 
     _walk(getattr(composite, "state", None) or {})
-    return closed
+    return closed, errors
+
+
+def _zarr_store_has_observable_data(store) -> bool:
+    """True iff the zarr store at ``store`` holds at least one non-empty OBSERVABLE
+    leaf array.
+
+    The flat-Step XArrayEmitter's async writer only persists a complete buffer:
+    a run shorter than the buffer (size 3) writes the hive PARTITION coordinates
+    (``time_gen`` etc. under ``experiment_id=…/variant=…/lineage_seed=…``) but —
+    deterministically for a 1-tick run, and NON-deterministically for a 2-tick
+    run (an executor race) — omits the observable leaf groups entirely, leaving
+    a store with no actual data. ``num_writes`` does NOT distinguish these (a
+    2-tick run reports ``num_writes==1`` whether or not the leaf landed), so the
+    only reliable empty-detection is to look for real observable data.
+
+    An OBSERVABLE leaf group is one whose path has a non-hive segment (a segment
+    without ``=`` — i.e. a store path like ``…/counter_store/value``, not a
+    ``key=value`` partition segment). A real run always has such a group with a
+    non-empty data array; an empty short-run store has only the partition root.
+    Sizes are read from zarr metadata (lazy — no data load), and the scan
+    short-circuits on the first hit, so this is cheap even on large stores.
+    """
+    p = Path(store)
+    if not p.exists():
+        return False
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            import xarray as xr
+            dt = xr.open_datatree(str(p), engine="zarr")
+        except Exception:  # noqa: BLE001 — unreadable/partial store counts as empty
+            return False
+        for group in dt.groups:
+            segs = [s for s in group.strip("/").split("/") if s]
+            if not any("=" not in s for s in segs):
+                continue  # only hive partition segments → not an observable leaf
+            ds = dt[group].ds
+            for var in ds.data_vars:
+                try:
+                    if int(ds[var].size) > 0:
+                        return True
+                except Exception:  # noqa: BLE001
+                    continue
+    return False
 
 
 def _normalize_emit_path(p: str) -> str:
@@ -382,9 +435,13 @@ def _inject_xarray_step(composite, core, config: dict, inputs: dict) -> None:
 
 def _run_xarray(*, state, run_id, emit_paths, out_dir, core, steps,
                 progress_cb, emitter_config) -> "dict | None":
-    """Inject XArrayEmitter as a flat Step, run, flush. Returns provenance, or
-    ``None`` when the auto-derived view is empty (signalling the caller to fall
-    back to sqlite).
+    """Inject XArrayEmitter as a flat Step, run, flush. Returns provenance.
+
+    Returns ``None`` when the auto-derived view is empty (no ``emit_paths`` /
+    none present), signalling the caller to fall back to sqlite. Returns a
+    sentinel ``{"output_kind": None, "warning": ...}`` when the run DID emit but
+    wrote an EMPTY store (the buffer never filled — see the guard below); the
+    caller treats that as a fall-back too but propagates the warning.
     """
     if not emit_paths:
         return None  # no selection → empty view → fall back to sqlite
@@ -425,7 +482,38 @@ def _run_xarray(*, state, run_id, emit_paths, out_dir, core, steps,
 
     _inject_xarray_step(composite, core, config, inputs)
     _drive(composite, steps, progress_cb)
-    _flush_step_emitters(composite)
+    _, close_errors = _flush_step_emitters(composite)
+
+    # GUARD (Finding 1): the flat-Step XArrayEmitter's async writer only persists
+    # a COMPLETE buffer; a run shorter than the buffer (size 3) writes the hive
+    # partition coordinates but omits the observable leaf data — deterministically
+    # for a 1-tick run (its close-time final flush asserts ``not include_static``,
+    # an AssertionError that ``_flush_step_emitters`` now SURFACES via
+    # ``close_errors`` instead of swallowing) and NON-deterministically for a
+    # 2-tick run (an executor race). Either way the ``.zarr`` charts empty. Since
+    # xarray is the DEFAULT emitter (Task 6) and ``run_runner.execute`` resolves
+    # the Run tab through ``default_emitter``, that empty store would be the
+    # DEFAULT outcome for short interactive runs. Detect the empty store by its
+    # actual content (``num_writes`` does NOT distinguish the flaky 2-tick case)
+    # and fall back to sqlite so the default path NEVER silently yields nothing.
+    if close_errors or not _zarr_store_has_observable_data(store):
+        warning = (
+            f"xarray run {run_id!r}: the zarr store has no observable data after "
+            f"{steps} emit-tick(s) (the flat-Step buffer of 3 under-filled) — "
+            f"falling back to sqlite so the run yields readable data."
+        )
+        if close_errors:
+            warning += " close error(s): " + "; ".join(
+                repr(exc) for _i, exc in close_errors)
+        print(warning, flush=True)
+        # Best-effort: drop the empty/partial store so a later read-source probe
+        # can't mis-resolve the run to it.
+        try:
+            import shutil
+            shutil.rmtree(store, ignore_errors=True)
+        except Exception:  # noqa: BLE001
+            pass
+        return {"output_kind": None, "warning": warning}
     return {"output_kind": "zarr", "store_path": store, "steps": steps,
             "run_id": run_id, "composite": composite}
 
@@ -454,15 +542,21 @@ def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
     from process_bigraph import Composite
 
     kind = output_kind(name)
+    fallback_warning = None
 
     if kind == "zarr":
         prov = _run_xarray(
             state=state, run_id=run_id, emit_paths=emit_paths, out_dir=out_dir,
             core=core, steps=steps, progress_cb=progress_cb,
             emitter_config=emitter_config)
-        if prov is not None:
+        if prov is not None and prov.get("output_kind") == "zarr":
             return prov
-        kind = "sqlite"  # empty view → fall back to the default store
+        # Empty view (prov is None) OR empty store (sentinel with a warning) →
+        # fall back to the default sqlite store. Carry any warning into the
+        # fall-back provenance so the empty result is DIAGNOSABLE (not silent).
+        if isinstance(prov, dict):
+            fallback_warning = prov.get("warning")
+        kind = "sqlite"
 
     if kind == "sqlite":
         from vivarium_dashboard.lib import composite_runs as cr
@@ -477,9 +571,12 @@ def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
         core.register_link("SQLiteEmitter", SQLiteEmitter)
         composite = Composite({"state": st}, core=core)
         _drive(composite, steps, progress_cb)
-        return {"output_kind": "sqlite",
-                "store_path": str(db_file) if db_file is not None else None,
-                "steps": steps, "run_id": run_id, "composite": composite}
+        result = {"output_kind": "sqlite",
+                  "store_path": str(db_file) if db_file is not None else None,
+                  "steps": steps, "run_id": run_id, "composite": composite}
+        if fallback_warning:
+            result["warning"] = fallback_warning
+        return result
 
     if kind == "parquet":
         from pbg_superpowers.composite_generator import install_default_emitters
@@ -488,7 +585,7 @@ def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
             state, spec, run_id=run_id, out_dir=parquet_dir, core=core)
         composite = Composite({"state": st}, core=core)
         _drive(composite, steps, progress_cb)
-        _flush_step_emitters(composite)
+        _flush_step_emitters(composite)  # parquet flush; close errors are non-fatal
         return {"output_kind": "parquet", "store_path": parquet_dir,
                 "steps": steps, "run_id": run_id, "composite": composite}
 

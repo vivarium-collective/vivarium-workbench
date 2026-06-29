@@ -75,7 +75,12 @@ def test_run_with_emitter_sqlite_writes_history(tmp_path):
 
 def test_run_with_emitter_default_name_is_xarray(tmp_path):
     """The framework DEFAULT is xarray as of Task 6 — a default run with a
-    non-empty selection writes a zarr store (``output_kind == "zarr"``)."""
+    non-empty selection writes a zarr store that actually CONTAINS data.
+
+    Asserting only ``output_kind == "zarr"`` is too weak: the broker returns
+    that even for an EMPTY store. This asserts the scalar series round-trips
+    (non-empty, advancing), so an empty-store regression is caught.
+    """
     pytest.importorskip("xarray")
     pytest.importorskip("zarr")
     db_file = str(tmp_path / "runs.db")
@@ -84,6 +89,55 @@ def test_run_with_emitter_default_name_is_xarray(tmp_path):
         emit_paths=["counter_store"], out_dir=str(tmp_path), core=_core(),
         steps=6, db_file=db_file)
     assert prov["output_kind"] == "zarr"
+
+    store = prov["store_path"]
+    from pathlib import Path as _Path
+    assert _Path(store).exists()
+
+    # The store must hold real data — read the counter leaf array directly.
+    import xarray as xr
+    dt = xr.open_datatree(str(store), engine="zarr")
+    series = []
+    for group in dt.groups:
+        if group.endswith("counter_store/value"):
+            ds = dt[group].ds
+            for var_name in ds.data_vars:
+                series = [float(x) for x in ds[var_name].values.ravel().tolist()]
+                break
+    assert series, "default xarray run wrote an EMPTY store (no data leaves)"
+    assert any(v > 0 for v in series)  # the counter actually advanced
+
+
+def test_run_with_emitter_short_run_does_not_silently_empty(tmp_path):
+    """A run too short to fill the xarray buffer must NOT silently yield an empty
+    store. A 1-emit-tick run deterministically under-fills the flat-Step buffer
+    (the close-time final flush asserts ``not include_static``) → an empty
+    ``.zarr``; the broker's content guard fires and falls back to sqlite with a
+    diagnosable warning. (Regression test for Finding 1: that AssertionError used
+    to be swallowed, leaving an empty store + empty charts with no user-visible
+    error.)"""
+    pytest.importorskip("xarray")
+    pytest.importorskip("zarr")
+    db_file = str(tmp_path / "runs.db")
+    prov = emitters.run_with_emitter(
+        emitters.DEFAULT_EMITTER, state=_doc(), run_id="r-short",
+        emit_paths=["counter_store"], out_dir=str(tmp_path), core=_core(),
+        steps=1, db_file=db_file)
+
+    # Guard fired: fell back to a readable sqlite store with a recorded warning.
+    assert prov["output_kind"] == "sqlite"
+    assert prov["store_path"] == db_file
+    assert "warning" in prov and prov["warning"]
+
+    # The fall-back store holds the run's data (so the run is NOT empty).
+    import pbg_emitters
+    rows = pbg_emitters.load_history(db_file, "r-short")
+    series = [r.get("counter_store_value") for r in rows]
+    assert len(rows) >= 1
+    assert any((v or 0) > 0 for v in series)
+
+    # The empty/partial zarr store was cleaned up (not left to be mis-resolved).
+    assert not (tmp_path / "r-short.zarr").exists()
 
 
 # ---------------------------------------------------------------------------

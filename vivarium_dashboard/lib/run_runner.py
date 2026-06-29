@@ -342,6 +342,14 @@ def execute(request_path: Path) -> int:
 
         composite = prov.get("composite")
 
+        # Surface any broker warning (e.g. an xarray run whose buffer never
+        # filled → empty-store fall-back to sqlite) into the run's log so the
+        # changed output_kind is diagnosable, not a silent swallow.
+        warning = prov.get("warning")
+        if warning:
+            print(warning, flush=True)
+            _write_log(req, warning)
+
         _render_viz(
             composite, run_dir,
             spec_id=req.spec_id, db_file=req.db_file, run_id=req.run_id,

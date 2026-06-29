@@ -2406,7 +2406,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.29" },
     { name = "xarray", specifier = ">=2026.4" },
     { name = "xarray", marker = "extra == 'test'" },
-    { name = "zarr", specifier = "~=3.1.6" },
+    { name = "zarr", specifier = ">=3.1.6" },
     { name = "zarr", marker = "extra == 'test'" },
 ]
 provides-extras = ["viz", "dev", "test"]

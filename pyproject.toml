@@ -30,7 +30,10 @@ dependencies = [
     # specifiers the `[test]` extra below uses (kept consistent).
     "pbg-emitters[sqlite,xarray]",
     "xarray>=2026.04",
-    "zarr~=3.1.6",
+    # Uncapped (>= not ~=): ~=3.1.6 excluded 3.2.x — a downgrade for py3.12+ vs
+    # the prior version-split. The [test] extra below uses a bare `zarr`, so
+    # >=3.1.6 keeps the runtime + test specifiers aligned (a floor, not a cap).
+    "zarr>=3.1.6",
     "bigraph-schema>=1.4.1",
     "pbg-superpowers>=0.14.0",
     # pbg-superpowers 0.14+ requires pbg-basic-processes, which is not yet on
