@@ -1412,10 +1412,11 @@
         data = data || {};
         var saved  = data.saved || [];
         var ptools = data.ptools || {};
-        var reportCards = data.report_cards || [];
         var cards = [];
-        // Comparison report cards lead the gallery (no viewer dependency).
-        cards = cards.concat(reportCards.map(_renderReportCardCard));
+        // NOTE: per-study comparison "report cards" (e.g. config/standard) are
+        // intentionally NOT shown here — they live on each study's detail page.
+        // The Analyses tab is just the workspace analysis tools (Pathway Tools
+        // + Data Explorer).
         // Pathway Tools (E. coli metabolic map) and the Data Explorer
         // (timeseries / allocation / flux maps) are E. coli / metabolic-model
         // analyses. Only show them for workspaces set up as such — detected via
@@ -1438,7 +1439,7 @@
             snapshot: (window.__DASH_CONFIG__ || {}).mode === 'snapshot'
           });
         }
-        var _n = reportCards.length;
+        var _n = cards.length;
         if (countEl) countEl.textContent = _n ? '(' + _n + ')' : '';
       })
       .catch(function(err) {
