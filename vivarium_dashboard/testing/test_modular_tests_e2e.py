@@ -10,9 +10,18 @@ GET /api/study/<slug> returns:
 import json
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+import pytest
 
-from vivarium_dashboard.api.app import create_app, get_workspace
+# NOTE: fastapi's TestClient (via starlette) requires ``httpx`` at *import*
+# time. Importing it at module top-level makes this module a landmine: any
+# eager package-discovery walk (e.g. bigraph-schema's ``build_core()``) that
+# imports everything under the installed ``vivarium_dashboard`` package would
+# crash with a RuntimeError when httpx is absent. ``pytest.importorskip``
+# raises ``Skipped`` (a ``BaseException``), which a plain ``import`` would NOT
+# swallow either — so the heavy imports live *inside* the test function. The
+# module then imports cleanly everywhere; the test simply skips when httpx is
+# not installed. ``httpx`` is declared in the ``[dev]`` extra so dashboard CI
+# still runs it.
 
 
 def _fixture(tmp_path: Path) -> Path:
@@ -43,6 +52,11 @@ def _fixture(tmp_path: Path) -> Path:
 
 
 def test_study_detail_payload_has_mixed_tests_and_card_url(tmp_path: Path) -> None:
+    pytest.importorskip("httpx")  # starlette's TestClient needs httpx at import
+    from fastapi.testclient import TestClient
+
+    from vivarium_dashboard.api.app import create_app, get_workspace
+
     ws = _fixture(tmp_path)
     app = create_app()
     # Inject the fixture workspace via dependency_overrides (create_app takes no args)
