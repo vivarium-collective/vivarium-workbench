@@ -4687,12 +4687,11 @@
         var switchBtn = document.getElementById('investigation-switch-btn');
         if (switchBtn) switchBtn.style.display = window._isetIndex.length > 1 ? '' : 'none';
         // List-first: clicking the Investigations menu always returns to the
-        // card list. Auto-open only when there is exactly one investigation;
-        // cards (and deep-links) open a detail explicitly via _openInvestigationDetail.
-        var cur = (window._isetIndex || []).filter(function(i){return i.current;})[0];
-        if (cur) {
-          _openInvestigationDetail(cur.name);
-        } else if (window._isetIndex.length === 1) {
+        // card list. Auto-open ONLY when there is exactly one investigation
+        // (a one-item list is pointless); cards and deep-links open a detail
+        // explicitly via _openInvestigationDetail. (Previously this auto-opened
+        // the "current" investigation, so the menu never returned to the list.)
+        if (window._isetIndex.length === 1) {
           _openInvestigationDetail(window._isetIndex[0].name);
         } else {
           _showInvestigationList();

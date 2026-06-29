@@ -1258,7 +1258,7 @@
 {% endif %}
   <!-- Configure & Run widget (SP-C) — native run launcher for this study -->
   <div id="study-configure-run" style="margin-bottom:18px"></div>
-  <div class="panel" style="margin-bottom:18px">
+  <div class="panel" id="remote-run-panel" style="margin-bottom:18px">
     <h3 style="margin-top:0">Run on remote (smsvpctest)</h3>
     <p class="muted" style="font-size:0.9em">
       Pushes the workspace's current branch, builds a simulator from that commit, and runs
@@ -2084,6 +2084,12 @@ window._seedFollowupProposal = _seedFollowupProposal;
   {% endif %}
   var slug = window._studyName || "{{ name }}";
   ConfigureRun.mount(el, { composite: compositeRef, target: "study", study: slug });
+  // Read-only bundle: there's no live backend to run on — hide the remote-run
+  // launcher (the Configure & Run widget already renders a disabled preview).
+  if (window.__DASH_CONFIG__ && window.__DASH_CONFIG__.mode === "snapshot") {
+    var rp = document.getElementById("remote-run-panel");
+    if (rp) rp.style.display = "none";
+  }
 })();
 </script>
 </body>

@@ -56,7 +56,8 @@
     // Read-only (published) bundle has no live backend — resolve the composite's
     // parameters from the static snapshot and render a DISABLED preview, instead
     // of hitting the live /api/composite-resolve (which 404s in a static bundle).
-    var isSnapshot = document.body.classList.contains("snapshot");
+    var isSnapshot = document.body.classList.contains("snapshot")
+      || !!(window.__DASH_CONFIG__ && window.__DASH_CONFIG__.mode === "snapshot");
     var p = (isSnapshot && window.DataSource && window.DataSource.loadCompositeResolve)
       ? window.DataSource.loadCompositeResolve(id)
       : fetch("/api/composite-resolve?id=" + encodeURIComponent(id) + "&overrides=%7B%7D")
