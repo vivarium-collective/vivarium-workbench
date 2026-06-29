@@ -39,6 +39,7 @@ from typing import Optional
 import yaml
 
 from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_dashboard.lib import study_derivations as _study_derivations
 
 # Slug pattern shared by server.py and api/app.py (neither imports the other).
 # Study/investigation names are generated with underscores (e.g. derived from
@@ -697,4 +698,5 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
                 rc_urls[card] = {"url": "/" + html.relative_to(ws_root).as_posix(),
                                  "verdict": verdict}
         spec["report_card_urls"] = rc_urls
+    spec["derived"] = _study_derivations.derived_block(spec)
     return spec
