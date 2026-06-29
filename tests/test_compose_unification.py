@@ -38,3 +38,14 @@ def test_inner_hooks_preserved_in_compose():
 def test_other_panels_untouched():
     for k in ["overview", "simulations", "observables", "runs", "tests", "visualizations", "conclusions"]:
         assert f'id="panel-{k}"' in HTML, f"unrelated panel disturbed: panel-{k}"
+
+
+def test_build_guard_preserves_conditions_and_baseline():
+    # Regression: the merged build-block guard must mirror the pre-merge
+    # panel-build guard so a non-v3 study with conditions/baseline (but no
+    # model_change/impl_reqs) keeps its Model + Conditions sections.
+    p = _panel_compose()
+    i = p.index("_has_build =")
+    guard = p[i:i + 120]
+    for field in ["study.model_change", "study.implementation_requirements", "study.conditions", "study.baseline"]:
+        assert field in guard, f"build guard dropped {field}: {guard!r}"

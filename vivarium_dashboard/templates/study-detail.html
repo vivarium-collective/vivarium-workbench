@@ -681,7 +681,8 @@
 {# ─── Compose tab: Build + Baseline + Variants + Interventions ── #}
 <section class="study-tab-panel" data-kind="compose" id="panel-compose" hidden>
   <h2 class="overview-label" style="margin-bottom:8px">Model composition</h2>
-  {% set _has_build = _is_v3 or study.model_change or study.implementation_requirements %}
+  {# Build-block visibility mirrors the pre-merge panel-build guard exactly (model_change/impl_reqs/conditions/baseline) so non-v3 studies keep their Model + Conditions sections. #}
+  {% set _has_build = study.model_change or study.implementation_requirements or study.conditions or study.baseline %}
   {% if _has_build %}
 
   {# Model — every study runs at least one composite. Auto-shown from the
