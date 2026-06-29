@@ -45,3 +45,15 @@ def test_card_decluttered():
     block = JS[i:i + 4200]
     assert 'click to open DAG' not in block      # filler removed
     assert 'font-family:monospace' not in block  # standalone slug row removed
+
+
+def test_investigations_tab_resets_to_list_on_same_hash():
+    # Re-clicking the Investigations menu-link while already on #investigations
+    # (viewing a detail) fires no hashchange, so an explicit click handler must
+    # force the reset via _switchPage('investigations').
+    assert '.menu-link[data-page="investigations"]' in JS
+    i = JS.index('.menu-link[data-page="investigations"]')
+    block = JS[i:i + 400]
+    assert "addEventListener('click'" in block
+    assert "=== 'investigations'" in block
+    assert "_switchPage('investigations')" in block

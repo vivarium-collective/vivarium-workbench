@@ -566,6 +566,19 @@
       fromHash();
     }
 
+    // The Investigations menu-link must return to the top-level card list even
+    // when an investigation detail is already open. That detail is a sub-state
+    // of the #investigations hash, so re-clicking the link sets an UNCHANGED
+    // hash → no hashchange fires → _switchPage never runs. Force the reset on
+    // click when we're already on #investigations.
+    document.querySelectorAll('.menu-link[data-page="investigations"]').forEach(function (link) {
+      link.addEventListener('click', function () {
+        if ((window.location.hash || '').replace(/^#/, '') === 'investigations') {
+          _switchPage('investigations');
+        }
+      });
+    });
+
     // ?investigation=<name> → auto-open that investigation's detail view.
     // The setTimeout retries to handle the race where the iframe / API
     // load races with the page swap.
