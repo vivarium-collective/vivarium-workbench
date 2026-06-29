@@ -1580,205 +1580,74 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
   {% set _reg = _cv.regression_compatibility or {} %}
   {% set _bio = _cv.biological_validation or {} %}
   {% set _exp = _cv.explanatory_gain or {} %}
-  {# ── Discovery implications ─────────────────────────────────────────────
-     Where this study's results leave the mechanism model and what to
-     investigate next. Mirrors the report's discovery_implications block
-     (static/walkthrough.js v3StudySection). Spine C1c: ELEVATED to the top of
-     the Decide tab (was buried at the bottom) — it's high-signal for the next
-     studies, so it leads, above the verdict form + synthesised conclusion. #}
-  {% if study.discovery_implications %}
-  {% set _di = study.discovery_implications %}
-  <div class="overview-section" id="discovery-implications-section" style="margin-top:18px">
-    <h2 class="overview-label">Discovery implications</h2>
-    <p class="muted" style="margin:0 0 10px 0;font-size:0.88em">Where this study's results leave the mechanism model — and what to investigate next.</p>
 
-    {% if _di.resolved_uncertainties or _di.remaining_uncertainties %}
-    <div class="di-uncertainties">
-      {% if _di.resolved_uncertainties %}
-      <div class="di-unc di-unc-resolved">
-        <h4>✓ Resolved uncertainties</h4>
-        <ul>{% for u in _di.resolved_uncertainties %}<li>{{ u }}</li>{% endfor %}</ul>
-      </div>
-      {% endif %}
-      {% if _di.remaining_uncertainties %}
-      <div class="di-unc di-unc-remaining">
-        <h4>● Remaining uncertainties</h4>
-        <ul>{% for u in _di.remaining_uncertainties %}<li>{{ u }}</li>{% endfor %}</ul>
-      </div>
-      {% endif %}
-    </div>
-    {% endif %}
+  {# ── Group 1: Verdict & conclusion ───────────────────────────────────────── #}
+  <div class="overview-section"><h2 class="overview-label">Verdict &amp; conclusion</h2>
 
-    {% if _di.alternate_hypotheses %}
-    <div class="di-group">
-      <h3>Alternate hypotheses <span class="muted" style="font-weight:normal;font-size:0.85em">({{ _di.alternate_hypotheses | length }})</span></h3>
-      {% for h in _di.alternate_hypotheses %}
-      <div class="di-card">
-        <div class="di-card-stmt"><strong>{{ h.statement or '(untitled hypothesis)' }}</strong></div>
-        {% if h.why_plausible %}<div class="di-card-why">{{ h.why_plausible }}</div>{% endif %}
-        {% if h.mechanism_elements_affected %}
-        <div class="di-card-line"><span class="di-lbl">Mechanism elements:</span>
-          {% for e in h.mechanism_elements_affected %}<code>{{ e }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
-        </div>
-        {% endif %}
-        {% if h.discriminating_observables %}
-        <div class="di-card-line"><span class="di-lbl">Discriminating observables:</span>
-          {% for d in h.discriminating_observables %}<code>{{ d }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
-        </div>
-        {% endif %}
-      </div>
-      {% endfor %}
-    </div>
-    {% endif %}
-
-    {% if _di.mechanism_update_proposals %}
-    <div class="di-group">
-      <h3>Mechanism update proposals <span class="muted" style="font-weight:normal;font-size:0.85em">({{ _di.mechanism_update_proposals | length }})</span></h3>
-      {% for m in _di.mechanism_update_proposals %}
-      <div class="di-card di-mech-card">
-        <div class="di-mech-head">
-          <code>{{ m.mechanism_node_or_edge or '(unspecified)' }}</code>
-          <span class="di-update-chip">{{ m.update_type or 'revise' }}</span>
-          {% if m.confidence_change %}<span class="di-conf-change">Δconfidence: {{ m.confidence_change }}</span>{% endif %}
-          {% if m.requires_expert_approval %}<span class="di-approval-badge">needs expert approval</span>{% endif %}
-        </div>
-        {% if m.rationale %}<div class="di-card-why">{{ m.rationale }}</div>{% endif %}
-      </div>
-      {% endfor %}
-    </div>
-    {% endif %}
-
-    {# Spine C1b: discovered proposals are a DISTINCT family from authored
-       follow_up_studies — render them together on this canonical Decide
-       surface, clearly distinguished, de-duplicated by id (skip any proposal
-       already present as an authored follow-up). #}
-    {% set _fup_ids = (study.follow_up_studies or []) | map(attribute='id') | select | list %}
-    {% if _di.followup_study_proposals %}
-    <div class="di-group">
-      <h3>Follow-up study proposals
-        <span class="muted" style="font-weight:normal;font-size:0.82em">(discovered)</span>
-        <span class="muted" style="font-weight:normal;font-size:0.85em">({{ _di.followup_study_proposals | length }})</span></h3>
-      <p class="muted" style="margin:0 0 8px 0;font-size:0.85em">Click <strong>➕ Add to investigation</strong> to spawn a new study node in the investigation graph.</p>
-      <div class="followup-list">
-        {% for p in _di.followup_study_proposals if (p.id or '') not in _fup_ids %}
-        {% set _gain = (p.expected_information_gain or '')|lower %}
-        <div class="di-card di-fup-card">
-          <div class="followup-header">
-            <strong class="followup-title">{{ p.title or '(untitled proposal)' }}</strong>
-            {% if p.study_type %}<span class="di-chip">{{ p.study_type }}</span>{% endif %}
-            {% if p.source_trigger %}<span class="di-chip">{{ p.source_trigger }}</span>{% endif %}
-            {% if _gain %}<span class="di-chip di-gain-{{ _gain }}">gain: {{ _gain }}</span>{% endif %}
-            {% if p.priority %}<span class="di-chip">priority: {{ p.priority }}</span>{% endif %}
-          </div>
-          {% if p.proposed_experiment %}<div class="di-card-why">{{ p.proposed_experiment }}</div>{% endif %}
-          {% if p.target_mechanism_elements %}
-          <div class="di-card-line"><span class="di-lbl">Targets:</span>
-            {% for t in p.target_mechanism_elements %}<code>{{ t }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
-          </div>
-          {% endif %}
-          <div class="followup-actions" style="margin-top:8px">
-            <button class="btn-seed-followup"
-                    onclick="_seedFollowupProposal('{{ name }}', {{ (p.id or '')|tojson }})">➕ Add to investigation</button>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-    {% endif %}
-  </div>
-  {% endif %}
-  <div class="overview-section narrative-card" data-narrative-card="conclusion_verdicts" style="margin-bottom:18px">
-    <h2 class="overview-label">⚖️ Verdicts — three-track outcome
-      <span class="narrative-card-hint">(regression / biological / explanatory)</span>
-    </h2>
-    <p class="muted" style="margin:0 0 10px 0;font-size:0.88em">
-      Each track is independent. <em>Regression</em> answers "does the code
-      still build and run cleanly?", <em>biological</em> answers "does the
-      model match the literature?", <em>explanatory</em> answers "did we
-      learn something new?". Each <strong>result is computed</strong> from
-      canonical fields (gate evaluator, run status, finding tiers) — author
-      only the <em>basis</em> (the rationale) for each track.
-    </p>
-    <div class="narrative-grid">
-      <label class="narrative-row">
-        <span class="narrative-label">Regression compatibility</span>
-        <span class="narrative-input verdict-badge-computed" data-verdict-track="regression_compatibility"
-              title="Computed from run status (read-only)"
-              style="display:inline-block;padding:2px 12px;border-radius:9999px;font-weight:700;font-size:0.85em;background:#f1f5f9;color:#475569">{{ _reg.result or 'PENDING' }}</span>
-        <span class="muted small" style="margin-left:6px">computed from run status</span>
-      </label>
-      <label class="narrative-row narrative-row-wide">
-        <span class="narrative-label">Regression basis</span>
-        <textarea class="narrative-input narrative-textarea" rows="2"
-                  data-narrative-path="conclusion_verdicts.regression_compatibility.basis"
-                  placeholder="e.g. Builds cleanly; tests pass; pyproject deps unchanged.">{{ _reg.basis or '' }}</textarea>
-      </label>
-      <label class="narrative-row">
-        <span class="narrative-label">Biological validation</span>
-        <span class="narrative-input verdict-badge-computed" data-verdict-track="biological_validation"
-              title="Computed from the gate evaluator (read-only)"
-              style="display:inline-block;padding:2px 12px;border-radius:9999px;font-weight:700;font-size:0.85em;background:#f1f5f9;color:#475569">{{ _bio.result or 'PENDING' }}</span>
-        <span class="muted small" style="margin-left:6px">computed from gate evaluator</span>
-      </label>
-      <label class="narrative-row narrative-row-wide">
-        <span class="narrative-label">Biological basis</span>
-        <textarea class="narrative-input narrative-textarea" rows="2"
-                  data-narrative-path="conclusion_verdicts.biological_validation.basis"
-                  placeholder="e.g. atp_fraction = 0.997, outside Boesen 2024 band [0.2, 0.5].">{{ _bio.basis or '' }}</textarea>
-      </label>
-      <label class="narrative-row">
-        <span class="narrative-label">Explanatory gain</span>
-        <span class="narrative-input verdict-badge-computed" data-verdict-track="explanatory_gain"
-              title="Computed from interpretation-tier findings (read-only)"
-              style="display:inline-block;padding:2px 12px;border-radius:9999px;font-weight:700;font-size:0.85em;background:#f1f5f9;color:#475569">{{ _exp.result or 'PENDING' }}</span>
-        <span class="muted small" style="margin-left:6px">computed from interpretation-tier findings</span>
-      </label>
-      <label class="narrative-row narrative-row-wide">
-        <span class="narrative-label">Explanatory basis</span>
-        <textarea class="narrative-input narrative-textarea" rows="2"
-                  data-narrative-path="conclusion_verdicts.explanatory_gain.basis"
-                  placeholder="e.g. Three findings worth keeping; design_pivot_required closed.">{{ _exp.basis or '' }}</textarea>
-      </label>
-    </div>
-  </div>
-
-  {% if _is_v3 %}
-  <div class="decide-v3">
-    <h2 style="margin:0 0 4px 0">Decide</h2>
+    {% if _is_v3 %}
     <p class="muted" style="margin:0 0 16px 0;font-size:0.9em">
       Synthesises the latest run's outcomes against the pre-stated
       <code>conclusion_logic</code>, then surfaces concrete follow-up actions
       you can either review (existing studies) or seed (new ones).
     </p>
-
-    {# ── Latest run outcomes ────────────────────────────────────────── #}
-    {% set _latest = (study.runs or [])[-1] if study.runs else None %}
-    {% if _latest %}
-    <div class="decide-section">
-      <h3 class="overview-label">Latest run outcomes</h3>
-      <div style="font-size:0.88em;color:#64748b;margin-bottom:8px">
-        {{ _latest.simulation or 'baseline' }} · seed {{ _latest.seed or '?' }} ·
-        {{ _latest.duration_s or '?' }}s simulated ·
-        {{ _latest.rows or '?' }} history rows ·
-        started {{ _latest.started_at or '?' }}
-      </div>
-      {# Spine C1b: outcomes are CANONICAL on the Tests tab (thread B — per-test
-         measured value · evaluator · band). Defer to it instead of re-dumping a
-         second, cruder raw k:v table here. #}
-      {% if _latest.outcomes %}
-      {% set _npass = _latest.outcomes.values() | selectattr('result', 'equalto', 'PASS') | list | length %}
-      {% set _nfail = _latest.outcomes.values() | selectattr('result', 'equalto', 'FAIL') | list | length %}
-      <p class="muted" style="margin:0;font-size:0.9em">
-        <strong>{{ _latest.outcomes | length }}</strong> test outcome{{ '' if _latest.outcomes|length == 1 else 's' }}
-        — <span style="color:#065f46;font-weight:600">{{ _npass }} PASS</span> ·
-        <span style="color:#991b1b;font-weight:600">{{ _nfail }} FAIL</span>.
-        Per-test outcomes (measured value · evaluator · band) are canonical on the
-        <a onclick="_setStudyTab('tests')" style="cursor:pointer;color:#3b82f6;text-decoration:underline">Tests tab →</a>.
-      </p>
-      {% endif %}
-    </div>
     {% endif %}
 
+    <div class="overview-section narrative-card" data-narrative-card="conclusion_verdicts" style="margin-bottom:18px">
+      <h3 class="overview-label">⚖️ Verdicts — three-track outcome
+        <span class="narrative-card-hint">(regression / biological / explanatory)</span>
+      </h3>
+      <p class="muted" style="margin:0 0 10px 0;font-size:0.88em">
+        Each track is independent. <em>Regression</em> answers "does the code
+        still build and run cleanly?", <em>biological</em> answers "does the
+        model match the literature?", <em>explanatory</em> answers "did we
+        learn something new?". Each <strong>result is computed</strong> from
+        canonical fields (gate evaluator, run status, finding tiers) — author
+        only the <em>basis</em> (the rationale) for each track.
+      </p>
+      <div class="narrative-grid">
+        <label class="narrative-row">
+          <span class="narrative-label">Regression compatibility</span>
+          <span class="narrative-input verdict-badge-computed" data-verdict-track="regression_compatibility"
+                title="Computed from run status (read-only)"
+                style="display:inline-block;padding:2px 12px;border-radius:9999px;font-weight:700;font-size:0.85em;background:#f1f5f9;color:#475569">{{ _reg.result or 'PENDING' }}</span>
+          <span class="muted small" style="margin-left:6px">computed from run status</span>
+        </label>
+        <label class="narrative-row narrative-row-wide">
+          <span class="narrative-label">Regression basis</span>
+          <textarea class="narrative-input narrative-textarea" rows="2"
+                    data-narrative-path="conclusion_verdicts.regression_compatibility.basis"
+                    placeholder="e.g. Builds cleanly; tests pass; pyproject deps unchanged.">{{ _reg.basis or '' }}</textarea>
+        </label>
+        <label class="narrative-row">
+          <span class="narrative-label">Biological validation</span>
+          <span class="narrative-input verdict-badge-computed" data-verdict-track="biological_validation"
+                title="Computed from the gate evaluator (read-only)"
+                style="display:inline-block;padding:2px 12px;border-radius:9999px;font-weight:700;font-size:0.85em;background:#f1f5f9;color:#475569">{{ _bio.result or 'PENDING' }}</span>
+          <span class="muted small" style="margin-left:6px">computed from gate evaluator</span>
+        </label>
+        <label class="narrative-row narrative-row-wide">
+          <span class="narrative-label">Biological basis</span>
+          <textarea class="narrative-input narrative-textarea" rows="2"
+                    data-narrative-path="conclusion_verdicts.biological_validation.basis"
+                    placeholder="e.g. atp_fraction = 0.997, outside Boesen 2024 band [0.2, 0.5].">{{ _bio.basis or '' }}</textarea>
+        </label>
+        <label class="narrative-row">
+          <span class="narrative-label">Explanatory gain</span>
+          <span class="narrative-input verdict-badge-computed" data-verdict-track="explanatory_gain"
+                title="Computed from interpretation-tier findings (read-only)"
+                style="display:inline-block;padding:2px 12px;border-radius:9999px;font-weight:700;font-size:0.85em;background:#f1f5f9;color:#475569">{{ _exp.result or 'PENDING' }}</span>
+          <span class="muted small" style="margin-left:6px">computed from interpretation-tier findings</span>
+        </label>
+        <label class="narrative-row narrative-row-wide">
+          <span class="narrative-label">Explanatory basis</span>
+          <textarea class="narrative-input narrative-textarea" rows="2"
+                    data-narrative-path="conclusion_verdicts.explanatory_gain.basis"
+                    placeholder="e.g. Three findings worth keeping; design_pivot_required closed.">{{ _exp.basis or '' }}</textarea>
+        </label>
+      </div>
+    </div>
+
+    {% if _is_v3 %}
     {# ── Conclusion logic (gate decision) ───────────────────────────── #}
     {% if study.conclusion_logic %}
     {% set _cl = study.conclusion_logic %}
@@ -1823,7 +1692,190 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
       <pre style="background:#f8fafc;padding:12px;border-left:3px solid #94a3b8;border-radius:3px;white-space:pre-wrap;font-family:inherit;font-size:0.9em;line-height:1.5;margin:0">{{ study.conclusion }}</pre>
     </div>
     {% endif %}
+    {% endif %}
 
+  </div>
+
+  {# ── Group 2: Evidence ────────────────────────────────────────────────────── #}
+  <div class="overview-section"><h2 class="overview-label">Evidence</h2>
+
+    {% if _is_v3 %}
+    {# ── Latest run outcomes ────────────────────────────────────────── #}
+    {% set _latest = (study.runs or [])[-1] if study.runs else None %}
+    {% if _latest %}
+    <div class="decide-section">
+      <h3 class="overview-label">Latest run outcomes</h3>
+      <div style="font-size:0.88em;color:#64748b;margin-bottom:8px">
+        {{ _latest.simulation or 'baseline' }} · seed {{ _latest.seed or '?' }} ·
+        {{ _latest.duration_s or '?' }}s simulated ·
+        {{ _latest.rows or '?' }} history rows ·
+        started {{ _latest.started_at or '?' }}
+      </div>
+      {# Spine C1b: outcomes are CANONICAL on the Tests tab (thread B — per-test
+         measured value · evaluator · band). Defer to it instead of re-dumping a
+         second, cruder raw k:v table here. #}
+      {% if _latest.outcomes %}
+      {% set _npass = _latest.outcomes.values() | selectattr('result', 'equalto', 'PASS') | list | length %}
+      {% set _nfail = _latest.outcomes.values() | selectattr('result', 'equalto', 'FAIL') | list | length %}
+      <p class="muted" style="margin:0;font-size:0.9em">
+        <strong>{{ _latest.outcomes | length }}</strong> test outcome{{ '' if _latest.outcomes|length == 1 else 's' }}
+        — <span style="color:#065f46;font-weight:600">{{ _npass }} PASS</span> ·
+        <span style="color:#991b1b;font-weight:600">{{ _nfail }} FAIL</span>.
+        Per-test outcomes (measured value · evaluator · band) are canonical on the
+        <a onclick="_setStudyTab('tests')" style="cursor:pointer;color:#3b82f6;text-decoration:underline">Tests tab →</a>.
+      </p>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% else %}
+    {# ── Read-only synthesis: Claims + Evidence (C3) ──────────────────────
+       DERIVED from canonical structured fields. Claims/Evidence ← findings.
+       Edit those source fields and this synthesis — and the generated report
+       — update together. #}
+    <p class="muted" style="margin:0 0 10px 0;font-size:0.85em">
+      Synthesised read-only from canonical fields — edit <code>findings</code>,
+      <code>limitations</code>, and <code>discovery_implications</code> to change
+      this (and the generated report) together.
+    </p>
+    <div class="conclusions-grid conclusions-synthesis">
+      <div class="conclusion-field">
+        <h3>Claims <span class="muted small">(from findings)</span></h3>
+        {% if study.findings %}
+        <ul class="synthesis-list">
+          {% for f in study.findings %}{% if f.statement or f.summary %}
+          <li>{{ f.statement or f.summary }}{% if f.tier %} <span class="finding-tier tier-{{ f.tier }}">{{ f.tier }}</span>{% endif %}</li>
+          {% endif %}{% endfor %}
+        </ul>
+        {% else %}<p class="muted">No findings recorded yet.</p>{% endif %}
+      </div>
+      <div class="conclusion-field">
+        <h3>Evidence <span class="muted small">(from findings)</span></h3>
+        {% set _has_ev = study.findings and (study.findings | selectattr('evidence') | list) %}
+        {% if _has_ev %}
+        <ul class="synthesis-list">
+          {% for f in study.findings %}{% if f.evidence %}
+          <li>{% if f.evidence is string %}{{ f.evidence }}{% elif f.evidence is mapping %}{% for k, v in f.evidence.items() %}{{ k }}: {{ v }}{% if not loop.last %}; {% endif %}{% endfor %}{% else %}{% for e in f.evidence %}{{ e }}{% if not loop.last %}; {% endif %}{% endfor %}{% endif %}</li>
+          {% endif %}{% endfor %}
+        </ul>
+        {% else %}<p class="muted">No evidence recorded on findings yet.</p>{% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+  </div>
+
+  {# ── Group 3: Follow-ups & decisions ──────────────────────────────────────── #}
+  <div class="overview-section"><h2 class="overview-label">Follow-ups &amp; decisions</h2>
+
+    {# ── Discovery implications ─────────────────────────────────────────────
+       Where this study's results leave the mechanism model and what to
+       investigate next. Mirrors the report's discovery_implications block
+       (static/walkthrough.js v3StudySection). Spine C1c: ELEVATED to the top of
+       the Decide tab (was buried at the bottom) — it's high-signal for the next
+       studies, so it leads, above the verdict form + synthesised conclusion. #}
+    {% if study.discovery_implications %}
+    {% set _di = study.discovery_implications %}
+    <div class="overview-section" id="discovery-implications-section" style="margin-top:18px">
+      <h3 class="overview-label">Discovery implications</h3>
+      <p class="muted" style="margin:0 0 10px 0;font-size:0.88em">Where this study's results leave the mechanism model — and what to investigate next.</p>
+
+      {% if _di.resolved_uncertainties or _di.remaining_uncertainties %}
+      <div class="di-uncertainties">
+        {% if _di.resolved_uncertainties %}
+        <div class="di-unc di-unc-resolved">
+          <h4>✓ Resolved uncertainties</h4>
+          <ul>{% for u in _di.resolved_uncertainties %}<li>{{ u }}</li>{% endfor %}</ul>
+        </div>
+        {% endif %}
+        {% if _di.remaining_uncertainties %}
+        <div class="di-unc di-unc-remaining">
+          <h4>● Remaining uncertainties</h4>
+          <ul>{% for u in _di.remaining_uncertainties %}<li>{{ u }}</li>{% endfor %}</ul>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if _di.alternate_hypotheses %}
+      <div class="di-group">
+        <h3>Alternate hypotheses <span class="muted" style="font-weight:normal;font-size:0.85em">({{ _di.alternate_hypotheses | length }})</span></h3>
+        {% for h in _di.alternate_hypotheses %}
+        <div class="di-card">
+          <div class="di-card-stmt"><strong>{{ h.statement or '(untitled hypothesis)' }}</strong></div>
+          {% if h.why_plausible %}<div class="di-card-why">{{ h.why_plausible }}</div>{% endif %}
+          {% if h.mechanism_elements_affected %}
+          <div class="di-card-line"><span class="di-lbl">Mechanism elements:</span>
+            {% for e in h.mechanism_elements_affected %}<code>{{ e }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+          </div>
+          {% endif %}
+          {% if h.discriminating_observables %}
+          <div class="di-card-line"><span class="di-lbl">Discriminating observables:</span>
+            {% for d in h.discriminating_observables %}<code>{{ d }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if _di.mechanism_update_proposals %}
+      <div class="di-group">
+        <h3>Mechanism update proposals <span class="muted" style="font-weight:normal;font-size:0.85em">({{ _di.mechanism_update_proposals | length }})</span></h3>
+        {% for m in _di.mechanism_update_proposals %}
+        <div class="di-card di-mech-card">
+          <div class="di-mech-head">
+            <code>{{ m.mechanism_node_or_edge or '(unspecified)' }}</code>
+            <span class="di-update-chip">{{ m.update_type or 'revise' }}</span>
+            {% if m.confidence_change %}<span class="di-conf-change">Δconfidence: {{ m.confidence_change }}</span>{% endif %}
+            {% if m.requires_expert_approval %}<span class="di-approval-badge">needs expert approval</span>{% endif %}
+          </div>
+          {% if m.rationale %}<div class="di-card-why">{{ m.rationale }}</div>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {# Spine C1b: discovered proposals are a DISTINCT family from authored
+         follow_up_studies — render them together on this canonical Decide
+         surface, clearly distinguished, de-duplicated by id (skip any proposal
+         already present as an authored follow-up). #}
+      {% set _fup_ids = (study.follow_up_studies or []) | map(attribute='id') | select | list %}
+      {% if _di.followup_study_proposals %}
+      <div class="di-group">
+        <h3>Follow-up study proposals
+          <span class="muted" style="font-weight:normal;font-size:0.82em">(discovered)</span>
+          <span class="muted" style="font-weight:normal;font-size:0.85em">({{ _di.followup_study_proposals | length }})</span></h3>
+        <p class="muted" style="margin:0 0 8px 0;font-size:0.85em">Click <strong>➕ Add to investigation</strong> to spawn a new study node in the investigation graph.</p>
+        <div class="followup-list">
+          {% for p in _di.followup_study_proposals if (p.id or '') not in _fup_ids %}
+          {% set _gain = (p.expected_information_gain or '')|lower %}
+          <div class="di-card di-fup-card">
+            <div class="followup-header">
+              <strong class="followup-title">{{ p.title or '(untitled proposal)' }}</strong>
+              {% if p.study_type %}<span class="di-chip">{{ p.study_type }}</span>{% endif %}
+              {% if p.source_trigger %}<span class="di-chip">{{ p.source_trigger }}</span>{% endif %}
+              {% if _gain %}<span class="di-chip di-gain-{{ _gain }}">gain: {{ _gain }}</span>{% endif %}
+              {% if p.priority %}<span class="di-chip">priority: {{ p.priority }}</span>{% endif %}
+            </div>
+            {% if p.proposed_experiment %}<div class="di-card-why">{{ p.proposed_experiment }}</div>{% endif %}
+            {% if p.target_mechanism_elements %}
+            <div class="di-card-line"><span class="di-lbl">Targets:</span>
+              {% for t in p.target_mechanism_elements %}<code>{{ t }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+            </div>
+            {% endif %}
+            <div class="followup-actions" style="margin-top:8px">
+              <button class="btn-seed-followup"
+                      onclick="_seedFollowupProposal('{{ name }}', {{ (p.id or '')|tojson }})">➕ Add to investigation</button>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if _is_v3 %}
     {# ── Follow-up studies with one-click seed ──────────────────────── #}
     {% if study.follow_up_studies %}
     <div class="decide-section" id="followups-authored" style="margin-top:18px">
@@ -1866,63 +1918,48 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
       </div>
     </div>
     {% endif %}
+    {% endif %}
+
   </div>
-  {% else %}
-  {# ── Read-only synthesis (C3) ──────────────────────────────────────────
-     The four buckets are DERIVED from the canonical structured fields rather
-     than hand-entered free text (the old textareas saved to study.conclusion,
-     which reached no report). Claims/Evidence ← findings; Limitations ←
-     limitations; Next steps ← discovery_implications.followup_study_proposals
-     (or follow_up_studies). Edit those source fields and this synthesis — and
-     the generated report — update together. #}
-  {% set _di = study.discovery_implications or {} %}
-  {% set _nexts = _di.followup_study_proposals or study.follow_up_studies or [] %}
-  <p class="muted" style="margin:0 0 10px 0;font-size:0.85em">
-    Synthesised read-only from canonical fields — edit <code>findings</code>,
-    <code>limitations</code>, and <code>discovery_implications</code> to change
-    this (and the generated report) together.
-  </p>
-  <div class="conclusions-grid conclusions-synthesis">
-    <div class="conclusion-field">
-      <h3>Claims <span class="muted small">(from findings)</span></h3>
-      {% if study.findings %}
-      <ul class="synthesis-list">
-        {% for f in study.findings %}{% if f.statement or f.summary %}
-        <li>{{ f.statement or f.summary }}{% if f.tier %} <span class="finding-tier tier-{{ f.tier }}">{{ f.tier }}</span>{% endif %}</li>
-        {% endif %}{% endfor %}
-      </ul>
-      {% else %}<p class="muted">No findings recorded yet.</p>{% endif %}
+
+  {# ── Group 4: Limitations & provenance (collapsed) ─────────────────────────
+     Only rendered for non-v3 studies — its body (synthesis Limitations + Next
+     steps) is not-v3-only, so wrapping the whole <details> avoids an empty
+     collapsed shell for v3 studies. #}
+  {% if not _is_v3 %}
+  <details class="overview-section"><summary class="overview-label">Limitations &amp; provenance</summary>
+
+    {# ── Read-only synthesis: Limitations + Next steps (C3) ──────────────────
+       The four buckets are DERIVED from the canonical structured fields rather
+       than hand-entered free text (the old textareas saved to study.conclusion,
+       which reached no report). Limitations ← limitations; Next steps ←
+       discovery_implications.followup_study_proposals (or follow_up_studies).
+       Edit those source fields and this synthesis — and the generated report
+       — update together. #}
+    {% set _di = study.discovery_implications or {} %}
+    {% set _nexts = _di.followup_study_proposals or study.follow_up_studies or [] %}
+    <div class="conclusions-grid conclusions-synthesis">
+      <div class="conclusion-field">
+        <h3>Limitations <span class="muted small">(from limitations)</span></h3>
+        {% if study.limitations is string %}<p>{{ study.limitations }}</p>
+        {% elif study.limitations %}
+        <ul class="synthesis-list">{% for l in study.limitations %}<li>{{ l }}</li>{% endfor %}</ul>
+        {% else %}<p class="muted">None recorded.</p>{% endif %}
+      </div>
+      <div class="conclusion-field">
+        <h3>Next steps <span class="muted small">(from discovery implications)</span></h3>
+        {% if _nexts %}
+        <ul class="synthesis-list">
+          {% for n in _nexts %}
+          {% if n is string %}<li>{{ n }}</li>
+          {% else %}<li><strong>{{ n.title or n.name or 'proposal' }}</strong>{% if n.why or n.motivation %} — {{ n.why or n.motivation }}{% endif %}</li>{% endif %}
+          {% endfor %}
+        </ul>
+        {% else %}<p class="muted">No follow-up proposals recorded yet.</p>{% endif %}
+      </div>
     </div>
-    <div class="conclusion-field">
-      <h3>Evidence <span class="muted small">(from findings)</span></h3>
-      {% set _has_ev = study.findings and (study.findings | selectattr('evidence') | list) %}
-      {% if _has_ev %}
-      <ul class="synthesis-list">
-        {% for f in study.findings %}{% if f.evidence %}
-        <li>{% if f.evidence is string %}{{ f.evidence }}{% elif f.evidence is mapping %}{% for k, v in f.evidence.items() %}{{ k }}: {{ v }}{% if not loop.last %}; {% endif %}{% endfor %}{% else %}{% for e in f.evidence %}{{ e }}{% if not loop.last %}; {% endif %}{% endfor %}{% endif %}</li>
-        {% endif %}{% endfor %}
-      </ul>
-      {% else %}<p class="muted">No evidence recorded on findings yet.</p>{% endif %}
-    </div>
-    <div class="conclusion-field">
-      <h3>Limitations <span class="muted small">(from limitations)</span></h3>
-      {% if study.limitations is string %}<p>{{ study.limitations }}</p>
-      {% elif study.limitations %}
-      <ul class="synthesis-list">{% for l in study.limitations %}<li>{{ l }}</li>{% endfor %}</ul>
-      {% else %}<p class="muted">None recorded.</p>{% endif %}
-    </div>
-    <div class="conclusion-field">
-      <h3>Next steps <span class="muted small">(from discovery implications)</span></h3>
-      {% if _nexts %}
-      <ul class="synthesis-list">
-        {% for n in _nexts %}
-        {% if n is string %}<li>{{ n }}</li>
-        {% else %}<li><strong>{{ n.title or n.name or 'proposal' }}</strong>{% if n.why or n.motivation %} — {{ n.why or n.motivation }}{% endif %}</li>{% endif %}
-        {% endfor %}
-      </ul>
-      {% else %}<p class="muted">No follow-up proposals recorded yet.</p>{% endif %}
-    </div>
-  </div>
+
+  </details>
   {% endif %}
 
 </section>
