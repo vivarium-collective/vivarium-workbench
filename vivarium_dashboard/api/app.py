@@ -781,8 +781,9 @@ def create_app() -> FastAPI:
         Mirrors ``GET /api/composite-resolve?id=<spec_id>&overrides=<json>`` from
         the stdlib server — the real client (the Composite Explorer) sends the
         spec under ``id`` (not ``ref``) plus an ``overrides`` JSON blob.  Returns
-        the composite payload when found, or ``null`` (200 with null body) when
-        ``id`` doesn't match any spec or generator.
+        the composite payload (200) when found — including when the generator
+        artifact is missing (``wiring_status:"unavailable"`` + honest ``notice``).
+        Only returns 404 (``unresolved: true``) when ``id`` is genuinely unknown.
 
         Library-backed via ``lib.composite_resolve.resolve_composite`` — the
         single implementation the stdlib ``_composite_resolve_data`` now forwards

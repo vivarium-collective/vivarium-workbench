@@ -9,9 +9,11 @@ thin wrapper.
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
+
+import yaml
+from process_bigraph.composite_spec import CompositeSpec, get as _get_spec  # module-level for monkeypatch
 
 from vivarium_dashboard.lib.sms_api_client import SmsApiClient
 from vivarium_dashboard.lib.workspace_deps_views import _sms_api_base
@@ -24,6 +26,23 @@ def _ws_add_to_sys_path(ws_root: Path) -> None:
         sys.path.insert(0, ws)
 
 
+def _prime_registry() -> None:
+    """Best-effort: import bigraph-schema packages so decorator-registered
+    generators populate the process-bigraph registry. Monkeypatched in tests."""
+    try:
+        from pbg_superpowers.composite_generator import discover_generators
+        discover_generators()
+    except Exception:
+        pass
+
+
+def _artifact_base_dir(ws_root: "Path", spec: "CompositeSpec") -> "Path":
+    """Where a generator's default-state artifact lives. Reuses the dashboard's
+    existing snapshot dir if present, else the workspace root."""
+    snap = Path(ws_root) / "api" / "composite-state"
+    return snap if snap.is_dir() else Path(ws_root)
+
+
 def resolve_composite(
     ws_root: Path, spec_id: str, overrides: "dict | None" = None
 ) -> "dict | None":
@@ -34,16 +53,21 @@ def resolve_composite(
     live handler.  Used by ``publish.build_bundle`` (via the server.py forwarder)
     to pre-build ``api/composite-state/<id>.json`` files.
 
+    A generator whose default-state artifact is missing returns a 200 payload
+    with ``wiring_status:"unavailable"`` and an honest ``notice``.  Only a
+    genuinely-unregistered id returns ``None`` (→ 404).
+
     Parameters
     ----------
     ws_root:
         Workspace root directory (must contain ``workspace.yaml``).
     spec_id:
-        Dotted composite identifier (e.g. ``pbg_my_ws.composites.my_composite``).
+        Dotted composite identifier (e.g. ``pbg_my_ws.composites.my_composite``
+        for static specs, or ``<module>.<name>`` for generators).
     overrides:
-        Optional parameter overrides applied when building a generator or
-        substituting spec parameters (matches the live handler's ``overrides=``
-        query arg).  ``None`` is treated as ``{}``.
+        Optional parameter overrides (preserved in signature for callers;
+        parameter substitution is applied by CompositeSpec.to_document at
+        run-time; default_state returns the canonical stored state).
 
     Returns
     -------
@@ -51,97 +75,57 @@ def resolve_composite(
         Payload dict, or ``None`` on any failure (not found, import errors,
         missing packages).
     """
-    import yaml
-
-    ov = overrides or {}
+    ws_root = Path(ws_root)
     _ws_add_to_sys_path(ws_root)
-    try:
-        from vivarium_dashboard.lib.composite_lookup import (
-            substitute_parameters,
-            find_composite_path,
-        )
-        ws_data = yaml.safe_load(
-            (ws_root / "workspace.yaml").read_text(encoding="utf-8")
-        )
-        pkg = ws_data.get("package_path") or (
-            "pbg_" + ws_data.get("name", "").replace("-", "_")
-        )
-
-        # Generator-kind branch (pbg-superpowers @composite_generator)
-        try:
-            from pbg_superpowers.composite_generator import (
-                _REGISTRY, build_generator, discover_generators,
-            )
-            if not _REGISTRY:
-                discover_generators()
-            entry = _REGISTRY.get(spec_id)
-        except ImportError:
-            entry = None
-
-        if entry is not None:
-            try:
-                doc = build_generator(entry, overrides=ov)
-            except Exception:
-                return None
-            if isinstance(doc, dict) and "state" in doc and isinstance(doc["state"], dict):
-                state = doc["state"]
-            else:
-                state = doc
-            try:
-                from vivarium_dashboard.lib.process_docs import attach_process_docs
-                attach_process_docs(state)
-            except Exception:
-                pass
-            return {
-                "id": spec_id,
-                "name": entry.name,
-                "description": entry.description,
-                "parameters": entry.parameters,
-                "state": state,
-                "svg": None,
-                "kind": "generator",
-                "module": entry.module,
-                "default_n_steps": getattr(entry, "default_n_steps", None),
-            }
-
-        # Spec-file branch
+    _prime_registry()
+    spec = _get_spec(spec_id)                       # generator branch: "<module>.<name>"
+    if spec is None:                                # static branch: "<pkg>.composites.<stem>"
+        from vivarium_dashboard.lib.composite_lookup import find_composite_path
+        ws_yaml = ws_root / "workspace.yaml"
+        ws_data = yaml.safe_load(ws_yaml.read_text(encoding="utf-8")) if ws_yaml.is_file() else {}
+        pkg = ws_data.get("package_path") or ("pbg_" + str(ws_data.get("name", "")).replace("-", "_"))
         path = find_composite_path(ws_root, pkg, spec_id)
         if path is None:
             return None
-
-        text = path.read_text(encoding="utf-8")
-        spec = (
-            json.loads(text) if path.suffix.lower() == ".json"
-            else yaml.safe_load(text)
-        )
-        state = substitute_parameters(
-            spec.get("state") or {},
-            spec.get("parameters") or {},
-            ov,
-        )
         try:
-            from vivarium_dashboard.lib.composite_lookup import _derive_module_from_spec_id
-            module = _derive_module_from_spec_id(spec_id)
-        except Exception:
-            module = ""
+            spec = CompositeSpec.from_file(path)
+        except Exception as e:
+            return {
+                "id": spec_id, "name": spec_id.rsplit(".", 1)[-1],
+                "description": "", "parameters": {}, "state": None,
+                "schema": {}, "requires": {}, "tags": [], "analyses": [],
+                "visualizations": [], "emitters": [], "kind": "spec",
+                "module": "", "default_n_steps": None, "svg": None,
+                "wiring_status": "unavailable",
+                "notice": f"composite file could not be parsed: {e}",
+            }
+    try:
+        state = spec.default_state(base_dir=_artifact_base_dir(ws_root, spec))
+    except Exception:
+        state = None
+    wiring_status = "ready" if state is not None else "unavailable"
+    notice = None
+    if wiring_status == "unavailable":
+        if spec.kind == "generator":
+            notice = (f"default state for generator '{spec.name}' is not generated yet — "
+                      f"run it, or regenerate its default-state artifact to see the wiring.")
+        else:
+            notice = (f"static composite '{spec.name}' has no inline state to display.")
+    if state is not None:
         try:
             from vivarium_dashboard.lib.process_docs import attach_process_docs
             attach_process_docs(state)
         except Exception:
             pass
-        return {
-            "id": spec_id,
-            "name": spec.get("name", spec_id.rsplit(".composites.", 1)[-1]),
-            "description": spec.get("description", ""),
-            "parameters": spec.get("parameters") or {},
-            "state": state,
-            "svg": None,
-            "kind": "spec",
-            "module": module,
-            "default_n_steps": None,
-        }
-    except Exception:
-        return None
+    return {
+        "id": spec_id, "name": spec.name, "description": spec.description,
+        "parameters": spec.parameters, "state": state, "schema": spec.schema,
+        "requires": spec.requires, "tags": spec.tags,
+        "visualizations": spec.visualizations, "analyses": spec.analyses,
+        "emitters": spec.emitters, "kind": spec.kind, "module": spec.module,
+        "default_n_steps": spec.default_n_steps, "svg": None,
+        "wiring_status": wiring_status, "notice": notice,
+    }
 
 
 def resolve_composite_for_request(

@@ -5,7 +5,8 @@
     return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]; }); }
 
   // Build a config form from composite-resolve's parameters:
-  // {name: {type:"string"|"float"|"int"|"bool", default, description}}. May be null/{}.
+  // {name: {type:"string"|"float"|"int"|"bool"|"integer"|"boolean", default, description}}. May be null/{}.
+  // Accepts both legacy aliases (int/bool) and canonical vocabulary (integer/boolean).
   function _buildConfigForm(parameters) {
     var params = parameters || {};
     var names = Object.keys(params);
@@ -15,12 +16,13 @@
       var t = p.type, d = p.default, desc = p.description || "";
       var inputId = "cfg-" + name;
       var field;
-      if (t === "bool") {
+      if (t === "bool" || t === "boolean") {
         field = '<input type="checkbox" id="' + esc(inputId) + '" data-param="' + esc(name) +
           '" data-type="bool"' + (d ? " checked" : "") + ">";
-      } else if (t === "float" || t === "int") {
+      } else if (t === "float" || t === "int" || t === "integer") {
+        var normT = (t === "integer") ? "int" : t;
         field = '<input type="number" id="' + esc(inputId) + '" data-param="' + esc(name) +
-          '" data-type="' + esc(t) + '" value="' + esc(d) + '"' + (t === "float" ? ' step="any"' : "") + ">";
+          '" data-type="' + esc(normT) + '" value="' + esc(d) + '"' + (normT === "float" ? ' step="any"' : "") + ">";
       } else {
         field = '<input type="text" id="' + esc(inputId) + '" data-param="' + esc(name) +
           '" data-type="string" value="' + esc(d) + '">';
@@ -37,9 +39,9 @@
     var inputs = formEl.querySelectorAll("[data-param]");
     for (var i = 0; i < inputs.length; i++) {
       var el = inputs[i], name = el.getAttribute("data-param"), type = el.getAttribute("data-type");
-      if (type === "bool") out[name] = !!el.checked;
+      if (type === "bool" || type === "boolean") out[name] = !!el.checked;
       else if (type === "float") out[name] = parseFloat(el.value);
-      else if (type === "int") out[name] = parseInt(el.value, 10);
+      else if (type === "int" || type === "integer") out[name] = parseInt(el.value, 10);
       else out[name] = el.value;
     }
     return out;

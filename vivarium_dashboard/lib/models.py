@@ -764,6 +764,14 @@ class CompositeResolvePayload(BaseModel):
     kind: Optional[str] = None
     module: Optional[str] = None
     default_n_steps: Optional[int] = None
+    schema: dict = {}
+    requires: dict = {}
+    tags: list = []
+    analyses: list = []
+    visualizations: list = []
+    emitters: list = []
+    wiring_status: Optional[str] = None
+    notice: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

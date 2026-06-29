@@ -4175,19 +4175,17 @@
         '&overrides=' + encodeURIComponent(JSON.stringify(window._ceCurrent.overrides));
       // Parse defensively: an unguarded r.json() on a non-2xx / non-JSON
       // response throws "SyntaxError: The string did not match the expected
-      // pattern" (Safari) → a useless "Network error". A remote build can't
-      // resolve generator composites (no local ParCa cache to run build_core)
-      // and unregistered refs 404 — turn both into the {error}/{unresolved}
-      // shapes the loader below already renders gracefully.
+      // pattern" (Safari) → a useless "Network error". Unregistered refs 404;
+      // other errors carry a server {error}/{detail}/{notice} — surface those
+      // rather than a hardcoded local-build message.
       p = fetch(url).then(function(r) {
         return r.text().then(function(t) {
           var d = null;
           try { d = t ? JSON.parse(t) : null; } catch (e) { d = null; }
           if (r.ok && d) return d;
           if (r.status === 404) return { unresolved: true, ref: id };
-          var msg = (d && (d.error || d.detail)) ? (d.error || d.detail)
-            : ('HTTP ' + r.status + ' — could not resolve this composite. A remote '
-               + 'build cannot build generator composites (no local ParCa cache).');
+          var msg = (d && (d.error || d.detail || d.notice)) ? (d.error || d.detail || d.notice)
+            : ('HTTP ' + r.status + ' — could not resolve this composite.');
           return { error: msg };
         });
       });
@@ -4209,6 +4207,19 @@
         if (data.error) {
           document.getElementById('ce-loading').innerHTML =
             '<span style="color:#c00">Error: ' + _esc(data.error) + '</span>';
+          return;
+        }
+        if (data.wiring_status === 'unavailable' || data.state == null) {
+          // Wiring state is not available (e.g. a generator composite on a local
+          // workspace whose build artifact hasn't been produced yet).  Show the
+          // server notice as an amber info banner instead of crashing on null
+          // state.  The Configure & Run panel is handled separately so the user
+          // can still trigger a build run.
+          document.getElementById('ce-loading').innerHTML =
+            '<div style="color:#92400e;background:#fffbeb;border:1px solid #f59e0b;' +
+            'border-radius:6px;padding:10px 14px">ℹ️ ' +
+            _esc(data.notice || 'Wiring diagram unavailable for this composite.') +
+            '</div>';
           return;
         }
         document.getElementById('ce-loading').style.display = 'none';
