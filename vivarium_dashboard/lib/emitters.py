@@ -17,6 +17,7 @@ imported by the very modules it dispatches into without an import cycle.
 """
 from __future__ import annotations
 
+import traceback
 from pathlib import Path
 from typing import Callable
 
@@ -220,3 +221,267 @@ def chart_source(
                 ("study-parquet", study_charts._extract_paths_from_parquet(hive_root, path_specs))
             )
     return sources
+
+
+# ---------------------------------------------------------------------------
+# Uniform WRITE path — inject any emitter as a process-bigraph Step and run.
+# ---------------------------------------------------------------------------
+#
+# ``run_with_emitter`` is the single write-side locus mirroring ``reader_for``
+# on the read side: every emitter is injected as a Step, the Composite drives
+# it via ``run(N)``, and the function returns a small provenance dict. It keeps
+# the dashboard's TWO write paths (``run_runner.execute`` — the Composite
+# Explorer "Run" tab — and, for non-v2ecoli emitters, the study-run subprocess)
+# from each re-implementing per-emitter ``inject + run + flush`` branches.
+#
+# Dispatch is keyed on ``output_kind`` (so ``xarray → zarr``). The default
+# emitter stays ``sqlite`` (Task 6 flips it), so default runs produce
+# byte-identical sqlite/parquet/ram output to the pre-broker inline code: the
+# sqlite branch reuses ``inject_emitter_for_paths`` + ``inject_sqlite_emitter``
+# and a plain per-tick ``run(1)`` loop exactly as ``run_runner.execute`` did.
+
+
+def _drive(composite, steps: int, progress_cb: "Callable | None") -> None:
+    """Advance ``composite`` one tick at a time, calling ``progress_cb(step)``.
+
+    Plain ``run(1)`` per tick (NOT division-aware) — byte-identical to the loop
+    ``run_runner.execute`` ran before this broker existed. ``progress_cb`` may
+    raise to abort the run (``run_runner`` uses this for its max-runtime guard);
+    the exception propagates so the caller can record a ``failed`` status.
+    """
+    for step in range(1, int(steps) + 1):
+        composite.run(1)
+        if progress_cb is not None:
+            progress_cb(step)
+
+
+def _flush_step_emitters(composite) -> int:
+    """Close every buffering Step emitter in a composite so its trailing batch
+    lands on disk. Returns the number closed.
+
+    Generalises ``run_runner._flush_parquet_emitters``: targets any node
+    ``instance`` exposing a callable ``close`` that buffers to a store — keyed
+    off the emitter's own ``out_uri`` (ParquetEmitter, the tyssue
+    DataFrameParquetEmitter, …) OR a ``writer.out_uri`` (XArrayEmitter, whose
+    store handle lives on its writer). Skips already-closed emitters and never
+    raises (a failed close is logged, not propagated), so callers needn't import
+    workspace-specific emitter classes.
+    """
+    closed = 0
+
+    def _buffers(inst) -> bool:
+        if not callable(getattr(inst, "close", None)):
+            return False
+        if getattr(inst, "_closed", False):
+            return False
+        if hasattr(inst, "out_uri"):
+            return True
+        return hasattr(getattr(inst, "writer", None), "out_uri")
+
+    def _walk(node):
+        nonlocal closed
+        if isinstance(node, dict):
+            inst = node.get("instance")
+            if inst is not None and _buffers(inst):
+                try:
+                    inst.close(success=True)
+                    closed += 1
+                except Exception:  # noqa: BLE001 — a failed flush must not sink the run
+                    traceback.print_exc()
+            for v in node.values():
+                _walk(v)
+
+    _walk(getattr(composite, "state", None) or {})
+    return closed
+
+
+def _normalize_emit_path(p: str) -> str:
+    """A '/'-joined, dot-normalised, edge-stripped store path for matching."""
+    return str(p or "").strip().strip("/").replace(".", "/")
+
+
+def _xarray_emitter_config(store: str, view: list, emitter_config: "dict | None") -> dict:
+    """Build the flat-Step XArrayEmitter config (the Task-2 wiring).
+
+    ``strategy='flat'`` + ``emit_root=()`` consume the wired flat state directly
+    (no colony/lineage envelope, no external driver loop). A colony
+    ``emitter_config`` (e.g. ``{"strategy": "colony", "emit_root": [...]}``) is
+    layered on top so a workspace can opt into lineage semantics.
+    """
+    config = {
+        "out_uri": store,
+        "strategy": "flat",
+        "emit_root": [],
+        "transducer": {
+            "predicate": [[{"subsample": {"interval": 1}}]],
+            "buffer": {"size": 100},
+        },
+        "view": view,
+        "writer": {
+            "backend": "zarr",
+            "store": store,
+            "buffers_per_chunk": 1,
+            "backend_config": {"format": 3},
+        },
+        "metadata": {"experiment_id": ""},
+        "metadata_keys": [],
+        "metadata_validators": {},
+        "output_metadata": {},
+        "debug": False,
+    }
+    if emitter_config:
+        config.update(emitter_config)
+    return config
+
+
+def _inject_xarray_step(composite, core, config: dict, inputs: dict) -> None:
+    """Inject XArrayEmitter into ``composite`` as a flat Step (Task-2 wiring).
+
+    Mirrors ``process_bigraph.emitter.add_emitter_to_composite`` (merge an
+    emitter step spec, register it in ``step_paths``, rebuild the step network)
+    but supplies the rich XArrayEmitter ``config`` alongside the auto-derived
+    ``emit``/``inputs`` wiring. The composite itself drives the emitter via
+    ``run(N)`` — there is NO external driver loop.
+    """
+    from bigraph_schema import set_path
+
+    emit = {port: "node" for port in inputs}
+    emitter_state = {
+        "_type": "step",
+        "address": "local:XArrayEmitter",
+        "config": {**config, "emit": emit},
+        "inputs": dict(inputs),
+    }
+    path = ("emitter",)
+    composite.merge({}, set_path({}, path, emitter_state))
+    _, instance = core.traverse(composite.schema, composite.state, path)
+    composite.step_paths[path] = instance
+    composite.build_step_network()
+
+
+def _run_xarray(*, state, run_id, emit_paths, out_dir, core, steps,
+                progress_cb, emitter_config) -> "dict | None":
+    """Inject XArrayEmitter as a flat Step, run, flush. Returns provenance, or
+    ``None`` when the auto-derived view is empty (signalling the caller to fall
+    back to sqlite).
+    """
+    if not emit_paths:
+        return None  # no selection → empty view → fall back to sqlite
+
+    from process_bigraph import Composite
+    from process_bigraph.emitter import collect_input_ports
+    from pbg_emitters.xarray_emitter import XArrayEmitter
+    from pbg_emitters.xarray_emitter.view import view_from_emit_paths
+
+    core.register_link("XArrayEmitter", XArrayEmitter)
+    composite = Composite({"state": state}, core=core)
+
+    # collect_input_ports gives the flat emit-port -> store-path wiring for
+    # every store; select the ports the caller asked to emit (a port matches an
+    # emit_path when it equals it or is nested under it).
+    all_wires = collect_input_ports(composite.state)
+    wanted = [_normalize_emit_path(p) for p in emit_paths]
+    selected: dict = {}
+    for port, wire in all_wires.items():
+        if port == "global_time":
+            continue
+        for ep in wanted:
+            if ep and (port == ep or port.startswith(ep + "/")):
+                selected[port] = wire
+                break
+    emit_ports = sorted(selected)
+    if not emit_ports:
+        return None  # nothing present → empty view → fall back to sqlite
+
+    store = str(Path(out_dir) / f"{run_id}.zarr")
+    view = view_from_emit_paths(emit_ports, dtype="<f8")
+    config = _xarray_emitter_config(store, view, emitter_config)
+    config["metadata"] = {**(config.get("metadata") or {}), "experiment_id": run_id}
+
+    # Wire the selected ports plus global_time (the transducer's time source).
+    inputs = dict(selected)
+    inputs["global_time"] = all_wires.get("global_time", ["global_time"])
+
+    _inject_xarray_step(composite, core, config, inputs)
+    _drive(composite, steps, progress_cb)
+    _flush_step_emitters(composite)
+    return {"output_kind": "zarr", "store_path": store, "steps": steps,
+            "run_id": run_id, "composite": composite}
+
+
+def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
+                     db_file=None, progress_cb=None, spec=None,
+                     emitter_config=None) -> dict:
+    """Inject the named emitter as a Step, build a Composite, run ``steps`` ticks
+    (calling ``progress_cb(step)`` each tick), flush/close, and return provenance.
+
+    Dispatch by ``output_kind`` (every emitter is a Step):
+
+    - ``sqlite``  → ``inject_emitter_for_paths`` + ``inject_sqlite_emitter``;
+      ``store_path`` is ``db_file``.
+    - ``parquet`` → ``install_default_emitters`` (the composite's declared sink)
+      then ``_flush_step_emitters``; ``store_path`` is ``<out_dir>/parquet``.
+    - ``ram``     → process-bigraph RAMEmitter convention (in-memory; no store).
+    - ``xarray``  → XArrayEmitter as a flat Step (``out_uri`` under ``out_dir``,
+      ``emit_root=()``, a view auto-derived from ``emit_paths``). A colony
+      ``emitter_config`` (``strategy``/``emit_root``) is passed through. An EMPTY
+      view (no ``emit_paths`` / none present) auto-falls-back to sqlite.
+
+    Returns ``{"output_kind", "store_path", "steps", "run_id"}`` plus the live
+    ``"composite"`` (so callers can render visualizations off the finished run).
+    """
+    from process_bigraph import Composite
+
+    kind = output_kind(name)
+
+    if kind == "zarr":
+        prov = _run_xarray(
+            state=state, run_id=run_id, emit_paths=emit_paths, out_dir=out_dir,
+            core=core, steps=steps, progress_cb=progress_cb,
+            emitter_config=emitter_config)
+        if prov is not None:
+            return prov
+        kind = "sqlite"  # empty view → fall back to the default store
+
+    if kind == "sqlite":
+        from vivarium_dashboard.lib import composite_runs as cr
+        st = state
+        if emit_paths:
+            st = cr.inject_emitter_for_paths(st, list(emit_paths))
+        st = cr.inject_sqlite_emitter(st, run_id=run_id, db_file=db_file)
+        try:
+            from pbg_emitters.sqlite_emitter import SQLiteEmitter
+        except ImportError:  # process-bigraph < 1.4.17 (legacy location)
+            from process_bigraph.emitter import SQLiteEmitter
+        core.register_link("SQLiteEmitter", SQLiteEmitter)
+        composite = Composite({"state": st}, core=core)
+        _drive(composite, steps, progress_cb)
+        return {"output_kind": "sqlite",
+                "store_path": str(db_file) if db_file is not None else None,
+                "steps": steps, "run_id": run_id, "composite": composite}
+
+    if kind == "parquet":
+        from pbg_superpowers.composite_generator import install_default_emitters
+        parquet_dir = str(Path(out_dir) / "parquet") if out_dir else None
+        st = install_default_emitters(
+            state, spec, run_id=run_id, out_dir=parquet_dir, core=core)
+        composite = Composite({"state": st}, core=core)
+        _drive(composite, steps, progress_cb)
+        _flush_step_emitters(composite)
+        return {"output_kind": "parquet", "store_path": parquet_dir,
+                "steps": steps, "run_id": run_id, "composite": composite}
+
+    if kind == "ram":
+        from vivarium_dashboard.lib import composite_runs as cr
+        from process_bigraph.emitter import RAMEmitter
+        st = state
+        if emit_paths:
+            st = cr.inject_emitter_for_paths(st, list(emit_paths))
+        core.register_link("RAMEmitter", RAMEmitter)
+        composite = Composite({"state": st}, core=core)
+        _drive(composite, steps, progress_cb)
+        return {"output_kind": "ram", "store_path": None, "steps": steps,
+                "run_id": run_id, "composite": composite}
+
+    raise ValueError(
+        f"run_with_emitter: unsupported emitter {name!r} (output_kind={kind!r})")

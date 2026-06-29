@@ -95,30 +95,14 @@ def _resolve_state(req: RunRequest) -> tuple[dict, dict | None]:
     return state, spec
 
 
-def _flush_parquet_emitters(composite) -> int:
-    """Close every parquet-family emitter in a composite so its trailing batch
-    lands on disk. Generic: targets any node ``instance`` exposing ``out_uri``
-    and a callable ``close`` (ParquetEmitter, DataFrameParquetEmitter, ...), so
-    run_runner needn't import workspace-specific emitter classes. Returns count.
+class _RunTimeout(Exception):
+    """Raised by the progress callback when a run exceeds ``MAX_RUNTIME_SEC``.
+
+    Carries the step at which the limit tripped so ``execute`` can record an
+    accurate ``n_steps`` on the failed run. Raising from the progress callback
+    lets the broker own the run loop while ``execute`` keeps the self-terminate
+    semantics it had before the broker existed.
     """
-    closed = 0
-
-    def _walk(node):
-        nonlocal closed
-        if isinstance(node, dict):
-            inst = node.get("instance")
-            close = getattr(inst, "close", None)
-            if callable(close) and hasattr(inst, "out_uri") and not getattr(inst, "_closed", False):
-                try:
-                    close(success=True)
-                    closed += 1
-                except Exception:
-                    traceback.print_exc()
-            for v in node.values():
-                _walk(v)
-
-    _walk(getattr(composite, "state", None) or {})
-    return closed
 
 
 def _emit_paths_for(req: RunRequest, state: dict) -> list[str]:
@@ -313,57 +297,50 @@ def execute(request_path: Path) -> int:
         # build_core lives in the workspace's own package (e.g.
         # pbg_ws_increase_demo.core). Import it dynamically by package name.
         core_mod = __import__(f"{req.pkg}.core", fromlist=["build_core"])
-        from process_bigraph import Composite
         core = core_mod.build_core()
 
-        # Composite default-emitter convention: when a static spec declares an
-        # `emitters:` default sink, install it (per-run out_dir + experiment_id
-        # layered on) instead of the dashboard's RAM+SQLite injection. The
-        # workspace's build_core() registers the declared emitter address; an
-        # unregistered address degrades to RAMEmitter inside the installer.
-        from pbg_superpowers.composite_generator import (
-            emitter_defaults, install_default_emitters,
-        )
+        # Uniform write path: pick the emitter NAME, then let the broker inject
+        # it as a Step, build the Composite, run, and flush. A static spec that
+        # declares an `emitters:` default sink still routes to the parquet
+        # convention (install_default_emitters); otherwise the workspace's
+        # `runtime.default_emitter` (default "sqlite", Task 6 flips it) selects
+        # the sink. The broker's sqlite branch reuses the same
+        # inject_emitter_for_paths + inject_sqlite_emitter + per-tick run(1)
+        # loop this function used inline, so default runs are byte-identical.
+        from vivarium_dashboard.lib import emitters
+        from pbg_superpowers.composite_generator import emitter_defaults
         declared = emitter_defaults(spec) if spec is not None else []
-        use_convention = bool(declared)
-        if use_convention:
-            state = install_default_emitters(
-                state, spec, run_id=req.run_id,
-                out_dir=str(run_dir / "parquet"), core=core)
-        else:
-            emit_paths = _emit_paths_for(req, state)
-            if emit_paths:
-                state = cr.inject_emitter_for_paths(state, emit_paths)
-            state = cr.inject_sqlite_emitter(state, run_id=req.run_id,
-                                             db_file=req.db_file)
-            try:
-                from pbg_emitters.sqlite_emitter import SQLiteEmitter
-            except ImportError:  # process-bigraph < 1.4.17 (legacy location)
-                from process_bigraph.emitter import SQLiteEmitter
-            core.register_link("SQLiteEmitter", SQLiteEmitter)
+        name = "parquet" if declared else emitters.default_emitter(
+            spec, Path(req.db_file))
+        emit_paths = _emit_paths_for(req, state)
 
-        composite = Composite({"state": state}, core=core)
-
+        # The progress callback both heartbeats and enforces the max-runtime
+        # self-terminate: raising _RunTimeout aborts the broker's run loop and
+        # is caught below, preserving the prior failed-status behavior.
         started = time.monotonic()
-        for step in range(1, req.steps + 1):
-            composite.run(1)
+
+        def _progress(step: int) -> None:
             cr.update_progress(conn, run_id=req.run_id, progress_step=step,
                                heartbeat_at=time.time())
             if time.monotonic() - started > MAX_RUNTIME_SEC:
-                msg = (f"run exceeded max runtime ({MAX_RUNTIME_SEC}s) — "
-                       f"terminating at step {step}")
-                print(msg, flush=True)
-                _write_log(req, msg)
-                cr.complete_metadata(conn, run_id=req.run_id, n_steps=step,
-                                     status="failed")
-                return 1
+                raise _RunTimeout(step)
 
-        # Flush convention-installed parquet sinks: their trailing (< batch_size)
-        # rows live in memory until close(). Generic over emitter class — any
-        # emitter exposing out_uri + close() (ParquetEmitter, the tyssue
-        # DataFrameParquetEmitter, ...) is flushed here.
-        if use_convention:
-            _flush_parquet_emitters(composite)
+        try:
+            prov = emitters.run_with_emitter(
+                name=name, state=state, run_id=req.run_id, emit_paths=emit_paths,
+                out_dir=str(run_dir), core=core, steps=req.steps,
+                db_file=req.db_file, progress_cb=_progress, spec=spec)
+        except _RunTimeout as exc:
+            step = exc.args[0] if exc.args else req.steps
+            msg = (f"run exceeded max runtime ({MAX_RUNTIME_SEC}s) — "
+                   f"terminating at step {step}")
+            print(msg, flush=True)
+            _write_log(req, msg)
+            cr.complete_metadata(conn, run_id=req.run_id, n_steps=step,
+                                 status="failed")
+            return 1
+
+        composite = prov.get("composite")
 
         _render_viz(
             composite, run_dir,

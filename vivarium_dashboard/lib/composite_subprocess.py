@@ -151,7 +151,13 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
         try:
             _ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
             _runtime = (_ws_data.get("runtime") or {}) if isinstance(_ws_data, dict) else {}
-            _default_emitter = str(_runtime.get("default_emitter") or "sqlite").lower()
+            # Emitter NAME selection is centralized in the broker (Task 4/5):
+            # resolve runtime.default_emitter through emitters.default_emitter so
+            # every write path agrees on the default (still "sqlite" until Task
+            # 6). max_generations / single_daughters stay local — they drive the
+            # v2ecoli colony/lineage run loop the broker does not own.
+            from vivarium_dashboard.lib import emitters as _emitters
+            _default_emitter = _emitters.default_emitter({"runtime": _runtime}, None)
             _max_generations = int(_runtime.get("max_generations") or 3)
             _single_daughters = bool(_runtime.get("single_daughters") or False)
         except Exception:
