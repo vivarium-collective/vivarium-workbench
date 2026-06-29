@@ -36,7 +36,10 @@ def test_inner_hooks_preserved_in_compose():
 
 
 def test_other_panels_untouched():
-    for k in ["overview", "simulations", "observables", "runs", "tests", "visualizations", "conclusions"]:
+    # Post pillar-unification (Simulate/Visualize merge), the non-compose panels
+    # are overview / simulate / visualize / tests / conclusions; the old split
+    # simulations/observables/runs/visualizations panels were merged away.
+    for k in ["overview", "simulate", "visualize", "tests", "conclusions"]:
         assert f'id="panel-{k}"' in HTML, f"unrelated panel disturbed: panel-{k}"
 
 
