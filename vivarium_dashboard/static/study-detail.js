@@ -1291,7 +1291,7 @@
   }
 
   // ── C2 — conclusion verdicts: read precomputed block from window._study.derived ─
-  // Computed server-side by derive_study_block() (Task 2). Rendering unchanged.
+  // Computed server-side by study_derivations.derived_block(). Rendering unchanged.
   function _populateConclusionVerdictBadges() {
     var badges = document.querySelectorAll('[data-verdict-track]');
     if (!badges.length) return;
