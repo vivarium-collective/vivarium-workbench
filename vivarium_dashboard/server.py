@@ -8081,14 +8081,16 @@ class Handler(BaseHTTPRequestHandler):
     def _get_composite_resolve(self):
         """GET /api/composite-resolve — resolve a composite spec with param overrides, return state + SVG.
 
-        Also resolves ``@composite_generator`` entries (kind=generator) by
-        calling ``build_generator`` with overrides — the returned payload
-        carries ``kind`` and ``module`` so the Composite Explorer page can
-        surface the source-module info.
+        Delegates to ``lib.composite_resolve.resolve_composite`` (the unified,
+        ParCa-free resolve path introduced in Task 9).  Generators whose
+        default-state artifact has not been generated return a 200 payload with
+        ``wiring_status:"unavailable"`` and an honest ``notice`` rather than
+        crashing or calling ``build_generator`` (which needs a ParCa cache).
+        SVG is rendered here when state is available; when it is not, the
+        Explorer's graceful-degrade banner fires on the ``wiring_status`` field.
         """
         from urllib.parse import urlparse, parse_qs
-        _ws_add_to_sys_path()
-        from vivarium_dashboard.lib.composite_lookup import substitute_parameters, find_composite_path
+        from vivarium_dashboard.lib.composite_resolve import resolve_composite
 
         qs = parse_qs(urlparse(self.path).query)
         spec_id = (qs.get("id") or [""])[0]
@@ -8101,56 +8103,8 @@ class Handler(BaseHTTPRequestHandler):
         if not spec_id:
             return self._json({"error": "missing id"}, 400)
 
-        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
-        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-
-        # Generator-kind branch: resolve via pbg-superpowers' live registry.
-        try:
-            from pbg_superpowers.composite_generator import _REGISTRY, build_generator, discover_generators
-            if not _REGISTRY:
-                discover_generators()
-            entry = _REGISTRY.get(spec_id)
-        except ImportError:
-            entry = None
-        if entry is not None:
-            try:
-                doc = build_generator(entry, overrides=overrides)
-            except ValueError as e:
-                return self._json({"error": str(e)}, 400)
-            except Exception as e:  # noqa: BLE001
-                return self._json({"error": f"generator build failed: {e}"}, 400)
-            # build_generator may return {state: ..., schema: ...} or a bare
-            # state dict. Normalize to a state dict for the iframe / JSON view.
-            if isinstance(doc, dict) and "state" in doc and isinstance(doc["state"], dict):
-                state = doc["state"]
-            else:
-                state = doc
-            svg = _render_composite_svg(state, pkg)
-            # Attach per-process docstrings so the explorer inspector's
-            # Description section is populated on the composite-resolve path
-            # too (not just /api/composite-state). Done after the SVG render
-            # so the bigraph-viz subprocess sees clean state.
-            from vivarium_dashboard.lib.process_docs import attach_process_docs
-            attach_process_docs(state)
-            return self._json({
-                "id": spec_id,
-                "name": entry.name,
-                "description": entry.description,
-                "parameters": entry.parameters,
-                "state": state,
-                "svg": svg,
-                "kind": "generator",
-                "module": entry.module,
-                # GeneratorEntry has no default_n_steps field; guard like
-                # _get_composites does rather than crashing the resolve.
-                "default_n_steps": getattr(entry, "default_n_steps", None),
-            }, 200)
-
-        path = find_composite_path(WORKSPACE, pkg, spec_id)
-        if path is None:
-            # Honest degrade payload (see _get_composite_state): the explorer
-            # renders "composite not found / not a registered composite" rather
-            # than a bare error node, keying on ``unresolved``.
+        data = resolve_composite(WORKSPACE, spec_id, overrides)
+        if data is None:
             return self._json({
                 "error": (f"composite not found: {spec_id} — not a registered "
                           "composite (this study may not declare a real composite)"),
@@ -8158,32 +8112,19 @@ class Handler(BaseHTTPRequestHandler):
                 "ref": spec_id,
             }, 404)
 
-        text = path.read_text(encoding="utf-8")
-        if path.suffix.lower() == ".json":
-            spec = json.loads(text)
-        else:
-            spec = yaml.safe_load(text)
-        state = substitute_parameters(spec.get("state") or {},
-                                       spec.get("parameters") or {},
-                                       overrides)
+        # Render SVG only when a display state is available.  attach_process_docs
+        # is already called inside resolve_composite when state is present — do
+        # NOT call it again here.
+        state = data.get("state")
+        if state is not None:
+            try:
+                ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text(encoding="utf-8"))
+                pkg = ws_data.get("package_path") or ("pbg_" + str(ws_data.get("name", "")).replace("-", "_"))
+                data["svg"] = _render_composite_svg(state, pkg)
+            except Exception:  # noqa: BLE001
+                pass  # leave data["svg"] as None; don't let an SVG failure 500 the resolve
 
-        # Render the wiring diagram via bigraph-viz subprocess.
-        svg = _render_composite_svg(state, pkg)
-
-        from vivarium_dashboard.lib.composite_lookup import _derive_module_from_spec_id
-        from vivarium_dashboard.lib.process_docs import attach_process_docs
-        attach_process_docs(state)  # per-process docstrings for the inspector
-        return self._json({
-            "id": spec_id,
-            "name": spec.get("name", spec_id.rsplit(".composites.", 1)[-1]),
-            "description": spec.get("description", ""),
-            "parameters": spec.get("parameters") or {},
-            "state": state,
-            "svg": svg,
-            "kind": "spec",
-            "module": _derive_module_from_spec_id(spec_id),
-            "default_n_steps": None,
-        }, 200)
+        return self._json(data, 200)
 
     def _post_composite_test_run(self, body: dict):
         """POST /api/composite-test-run — start a detached composite run.
