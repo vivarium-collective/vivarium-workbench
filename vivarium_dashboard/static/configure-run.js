@@ -24,8 +24,13 @@
         field = '<input type="number" id="' + esc(inputId) + '" data-param="' + esc(name) +
           '" data-type="' + esc(normT) + '" value="' + esc(d) + '"' + (normT === "float" ? ' step="any"' : "") + ">";
       } else {
+        // Object/list-typed params (e.g. config_overrides) have a structured
+        // default — don't render "[object Object]"; show an empty JSON field.
+        var isObj = (d != null && typeof d === "object");
+        var sval = isObj ? "" : (d == null ? "" : d);
+        var ph = isObj ? ' placeholder="(advanced — JSON object)"' : '';
         field = '<input type="text" id="' + esc(inputId) + '" data-param="' + esc(name) +
-          '" data-type="string" value="' + esc(d) + '">';
+          '" data-type="string" value="' + esc(sval) + '"' + ph + ">";
       }
       return '<label class="cfg-row" title="' + esc(desc) + '"><span class="cfg-name">' +
         esc(name) + "</span>" + field + "</label>";

@@ -2328,3 +2328,24 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
 .study-subnav .study-tab:hover { background: #f1f5f9; color: #334155; }
 .study-subnav .study-tab.active { background: #e0e7ff; color: #1e40af; font-weight: 600; }
 /* When a pillar has a single visible member, the pill row reads as a label, not a choice. */
+
+/* ── Composite Explorer: Wiring viewer / Configure & Run tabs ─────────────── */
+.ce-page-tabs { display: flex; gap: 20px; border-bottom: 1px solid #e5e7eb; margin: 14px 0 18px; }
+.ce-page-tab { background: transparent; border: 0; padding: 9px 2px; font: inherit; font-size: 0.98em; color: #6b7280; cursor: pointer; border-bottom: 2px solid transparent; transition: color .12s, border-color .12s; }
+.ce-page-tab:hover { color: #1f2937; }
+.ce-page-tab.active { color: #2563eb; border-bottom-color: #2563eb; font-weight: 600; }
+.ce-page-panel[hidden] { display: none; }
+
+/* ── Configure & Run form ─────────────────────────────────────────────────── */
+.cfg-run h4 { margin: 0 0 4px; font-size: 1.1em; font-weight: 600; }
+.cfg-run .muted { color: #6b7280; }
+.cfg-form { display: flex; flex-direction: column; gap: 10px; max-width: 640px; margin: 14px 0 18px; }
+.cfg-row { display: flex; align-items: center; gap: 14px; }
+.cfg-name { flex: 0 0 220px; font-weight: 500; color: #374151; font-size: 0.95em; }
+.cfg-run input[type="text"], .cfg-run input[type="number"] { flex: 1; max-width: 300px; padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 6px; font: inherit; box-sizing: border-box; }
+.cfg-run input[type="text"]:focus, .cfg-run input[type="number"]:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
+.cfg-run input[type="checkbox"] { width: 17px; height: 17px; accent-color: #2563eb; }
+.cfg-actions { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
+.cfg-run-btn { padding: 8px 18px; font-size: 0.95em; }
+.cfg-status { margin-top: 12px; font-size: 0.9em; }
+.cfg-loading { color: #6b7280; padding: 8px 0; }
