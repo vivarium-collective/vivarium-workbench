@@ -181,5 +181,15 @@ def test_emitter_choice_finds_workspace_yaml_in_nested_layout(tmp_path: Path):
     assert _emitter_choice({}, runs_db) == "xarray"
 
 
-def test_emitter_choice_default_still_sqlite():
-    assert _emitter_choice({}, None) == "sqlite"
+def test_emitter_choice_default_is_xarray():
+    # Task 6 flipped the framework default emitter from sqlite to xarray;
+    # _emitter_choice delegates to emitters.default_emitter, so an undeclared
+    # workspace now resolves to xarray.
+    from vivarium_dashboard.lib import emitters
+    assert _emitter_choice({}, None) == "xarray"
+    assert _emitter_choice({}, None) == emitters.DEFAULT_EMITTER
+
+
+def test_emitter_choice_sqlite_optout():
+    # The explicit sqlite opt-out must survive the xarray-default flip.
+    assert _emitter_choice({"runtime": {"default_emitter": "sqlite"}}, None) == "sqlite"

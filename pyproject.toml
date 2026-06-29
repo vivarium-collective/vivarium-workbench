@@ -23,7 +23,17 @@ dependencies = [
     # only re-exports SQLiteEmitter when pbg-emitters is installed. The dashboard
     # imports SQLiteEmitter (lazily, in several run paths), so depend on it
     # directly. The `[sqlite]` extra is stdlib-only (no extra deps).
-    "pbg-emitters[sqlite]",
+    #
+    # Task 6 flipped the default emitter to xarray (see lib/emitters.py
+    # DEFAULT_EMITTER), so its runtime deps are now MANDATORY, not test-only:
+    # pull the pbg-emitters `[xarray]` extra and pin xarray + zarr at the same
+    # specifiers the `[test]` extra below uses (kept consistent).
+    "pbg-emitters[sqlite,xarray]",
+    "xarray>=2026.04",
+    # Uncapped (>= not ~=): ~=3.1.6 excluded 3.2.x — a downgrade for py3.12+ vs
+    # the prior version-split. The [test] extra below uses a bare `zarr`, so
+    # >=3.1.6 keeps the runtime + test specifiers aligned (a floor, not a cap).
+    "zarr>=3.1.6",
     "bigraph-schema>=1.4.1",
     "pbg-superpowers>=0.14.0",
     # pbg-superpowers 0.14+ requires pbg-basic-processes, which is not yet on
@@ -57,6 +67,12 @@ vivarium-dashboard-publish = "vivarium_dashboard.publish:main"
 # the URL OUT of the published metadata so it never conflicts with the bare
 # requirement from pbg-superpowers.
 [tool.uv.sources]
+# INTERIM: pin to pbg-emitters @main (the interchangeable-emitter framework, PR #11,
+# merged 2026-06-29). The dashboard hard-imports `contract_for` /
+# `view_from_emit_paths`/`emit_root`/`strategy`, which the last PyPI release (0.1.0)
+# lacks. FOLLOW-UP: once pbg-emitters cuts a release carrying these, revert to the
+# bare `pbg-emitters[sqlite,xarray]` PyPI dep and drop this source.
+pbg-emitters = { git = "https://github.com/vivarium-collective/pbg-emitters.git", branch = "main" }
 pbg-basic-processes = { git = "https://github.com/vivarium-collective/pbg-basic-processes.git", branch = "main" }
 # investigation-contracts is declared bare in [project.dependencies] (kept out
 # of published metadata) and is not on PyPI; supply its git URL here so `uv
