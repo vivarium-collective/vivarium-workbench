@@ -19,6 +19,8 @@ import sqlite3
 from pathlib import Path
 from xml.sax.saxutils import escape
 
+from vivarium_dashboard.lib import emitters
+
 # DnaA monomer index (PD03831[c]) in monomer_ids; hardcoded fallback.
 DNAA_MONOMER_IDX = 3861
 
@@ -527,24 +529,18 @@ def render_v4_test_charts(spec: dict,
     if not path_specs:
         return []
 
-    # Choose the read source explicitly from runtime.default_emitter. SQLite
-    # is the framework default; we only read zarr when the workspace has
-    # opted in via `runtime.default_emitter: xarray`. No silent disk-probe —
-    # that was the design bug in the prior attempt: it flipped sources based
-    # on whatever happened to be on disk, hiding drift for the sqlite-default
-    # workspaces.
-    emitter_kind = _emitter_choice(spec, runs_db)
+    # Choose the read source via the broker (the single locus for emitter
+    # dispatch). ``output_kind`` maps the workspace's declared emitter name
+    # (xarray/parquet/sqlite) to its store kind (zarr/parquet/sqlite). SQLite is
+    # the framework default; we only read an alternate store when the workspace
+    # has opted in via ``runtime.default_emitter``. No silent disk-probe — that
+    # was the design bug in the prior attempt: it flipped sources based on
+    # whatever happened to be on disk, hiding drift for sqlite-default workspaces.
+    out_kind = emitters.output_kind(emitters.default_emitter(spec, runs_db))
     study_dir = runs_db.parent if runs_db is not None else None
 
-    sources: list[tuple[str, dict]] = []
-    if emitter_kind == "xarray":
-        zarr_path = _latest_zarr_for_study(study_dir) if study_dir else None
-        if zarr_path is not None:
-            sources.append(("study-zarr", _extract_paths_from_zarr(zarr_path, path_specs)))
-    elif emitter_kind == "parquet":
-        hive_root = _latest_parquet_for_study(study_dir) if study_dir else None
-        if hive_root is not None:
-            sources.append(("study-parquet", _extract_paths_from_parquet(hive_root, path_specs)))
+    sources: list[tuple[str, dict]] = emitters.chart_source(
+        spec, runs_db, study_dir, path_specs)
 
     # SQLite chain: primary in the default sqlite mode, fallback in xarray
     # and parquet modes (covers per-test observables the alt store doesn't
@@ -592,7 +588,7 @@ def render_v4_test_charts(spec: dict,
         if t.get("status"):
             caption_bits.append(f"Current verdict: {t['status']}")
         if used_source == "default-baseline":
-            suffix = " (parquet)" if emitter_kind == "parquet" else ""
+            suffix = " (parquet)" if out_kind == "parquet" else ""
             caption_bits.append(
                 "⚠ Drawn from workspace default-baseline"
                 + suffix
@@ -613,38 +609,13 @@ def render_v4_test_charts(spec: dict,
 def _emitter_choice(spec: dict, runs_db: Path | None) -> str:
     """Return ``'xarray'``, ``'parquet'``, or ``'sqlite'`` per workspace config.
 
-    Resolves ``runtime.default_emitter`` from (1) the study spec's runtime
-    block, then (2) workspace.yaml's runtime block, defaulting to
-    ``'sqlite'`` (the framework's documented default). Deliberately does
-    NOT probe disk state — workspaces that haven't opted into xarray /
-    parquet must not silently flip read sources, since that hides drift.
+    Thin back-compat wrapper over :func:`emitters.default_emitter` (the broker
+    is now the single locus). Resolves ``runtime.default_emitter`` from the study
+    spec then the nearest ancestor ``workspace.yaml``, defaulting to ``'sqlite'``.
+    Deliberately does NOT probe disk state — workspaces that haven't opted into
+    xarray / parquet must not silently flip read sources, since that hides drift.
     """
-    _ACCEPTED = ("xarray", "sqlite", "parquet")
-    spec_rt = (spec or {}).get("runtime") or {}
-    if isinstance(spec_rt, dict) and spec_rt.get("default_emitter") in _ACCEPTED:
-        return spec_rt["default_emitter"]
-    if runs_db is not None:
-        # Find the nearest ancestor workspace.yaml. The studies layout varies —
-        # flat (<ws>/studies/<slug>/runs.db) or nested (<ws>/workspace/studies/
-        # <slug>/runs.db) — so walk up rather than assuming a fixed depth. A
-        # fixed `.parent.parent.parent` looked at <ws>/workspace/workspace.yaml
-        # in the nested layout (which doesn't exist) and silently fell back to
-        # sqlite, so a declared xarray emitter never took effect and zarr runs
-        # (incl. landed remote runs) never rendered.
-        for ancestor in runs_db.parents:
-            ws_yaml = ancestor / "workspace.yaml"
-            if not ws_yaml.is_file():
-                continue
-            try:
-                import yaml as _yaml
-                ws = _yaml.safe_load(ws_yaml.read_text(encoding="utf-8")) or {}
-                ws_rt = ws.get("runtime") or {}
-                if isinstance(ws_rt, dict) and ws_rt.get("default_emitter") in _ACCEPTED:
-                    return ws_rt["default_emitter"]
-            except (OSError, Exception):  # noqa: BLE001 — read-fail = default
-                pass
-            break  # nearest workspace.yaml is the workspace root; don't climb past it
-    return "sqlite"
+    return emitters.default_emitter(spec, runs_db)
 
 
 def _latest_zarr_for_study(study_dir: Path) -> Path | None:

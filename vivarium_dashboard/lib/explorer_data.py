@@ -12,6 +12,7 @@ from pathlib import Path
 
 from vivarium_dashboard.lib import simulations_index
 from vivarium_dashboard.lib import comparative_viz
+from vivarium_dashboard.lib import emitters
 
 
 # Top-level store key -> friendly category. Order defines display order.
@@ -295,7 +296,7 @@ def _zarr_observables(store):
 
 
 def list_observables(db_path: str, run_id: str | None = None, workspace=None) -> dict:
-    kind, resolved = _resolve_run_source(db_path, workspace)
+    kind, resolved = emitters.read_source(db_path, workspace)
     if kind == "zarr":
         return _zarr_observables(resolved)
     if kind == "parquet":
@@ -387,7 +388,7 @@ def get_series(db_path, paths, subsample=400, run_id=None, workspace=None):
     XArrayEmitter (zarr) runs are dispatched via _extract_trace_from_zarr; bulk[id]
     remains SQLite-only for v1 (zarr bulk would need its own leaf handling).
     ParquetEmitter runs read column-by-column via _parquet_table."""
-    kind, resolved = _resolve_run_source(db_path, workspace)
+    kind, resolved = emitters.read_source(db_path, workspace)
     series, time = {}, []
 
     if kind == "parquet":
@@ -417,15 +418,17 @@ def get_series(db_path, paths, subsample=400, run_id=None, workspace=None):
         return {"time": time, "series": series}
 
     for path, index in paths:
+        # The kind→trace-reader mapping lives in the broker's reader_for table;
+        # the per-kind ARGUMENT shape (positional order, bulk[id] special case)
+        # is store-layout and stays here.
         if kind == "zarr":
-            t, v = comparative_viz._extract_trace_from_zarr(
-                resolved, path, subsample, index)
+            t, v = emitters.reader_for("zarr")(resolved, path, subsample, index)
         elif path.startswith("bulk[") and path.endswith("]"):
             mol_id = path[len("bulk["):-1]
             t, v = _extract_bulk_trace(resolved if kind == "sqlite" else db_path,
                                        mol_id, subsample, run_id)
         elif kind == "sqlite":
-            t, v = comparative_viz._extract_trace(
+            t, v = emitters.reader_for("sqlite")(
                 resolved, path, index, subsample, sim_name=None, sim_id=run_id)
         else:
             t, v = [], []
@@ -542,7 +545,7 @@ def _pick_even(seq, k):
 def _validation_step_keys(db_path, run_id, workspace, n_steps_hint, samples):
     """Up to `samples` step keys to average over. sqlite uses real step values;
     parquet/zarr use positional indices (get_vector indexes positionally)."""
-    kind, resolved = _resolve_run_source(db_path, workspace)
+    kind, resolved = emitters.read_source(db_path, workspace)
     if kind == "sqlite":
         try:
             conn = sqlite3.connect(str(resolved))
@@ -604,7 +607,7 @@ def get_validation_scatter(db_path, dataset="schmidt", run_id=None, workspace=No
         return {"points": [], "dataset": field, "n": 0, "pearson": None,
                 "error": "validation asset missing"}
     # parquet columns use "__" separators; sqlite/zarr use dotted paths.
-    kind, _ = _resolve_run_source(db_path, workspace)
+    kind, _ = emitters.read_source(db_path, workspace)
     mpath = "listeners__monomer_counts" if kind == "parquet" else _MONOMER_PATH
     steps = _validation_step_keys(db_path, run_id, workspace, n_steps, samples)
     sums = None
@@ -764,7 +767,7 @@ def get_vector(db_path, path, step, run_id=None, workspace=None):
     """One vector observable's per-entity (ids, values) at a timepoint.
     zarr: ids from the id_<leaf> coord. sqlite: positional index ids.
     parquet: ids from config_meta (output_metadata__<col>), or bulk__id for bulk."""
-    kind, resolved = _resolve_run_source(db_path, workspace)
+    kind, resolved = emitters.read_source(db_path, workspace)
     if kind == "zarr":
         leaf = path.split(".")[-1].split("[")[0]
         ids, vals = _zarr_vector(resolved, leaf, step)
@@ -868,7 +871,7 @@ def get_flux_auto(db_path, step, id_map, run_id=None, workspace=None):
     store; sqlite uses get_flux with asset/run base_ids; parquet reads the FBA
     vector + config ids. Environment exchange fluxes (external_exchange_fluxes)
     are merged onto the map's EX_ reactions when the run emits them."""
-    kind, resolved = _resolve_run_source(db_path, workspace)
+    kind, resolved = emitters.read_source(db_path, workspace)
     fluxes, total, time_val = {}, 0, None
     try:
         if kind == "zarr":
@@ -919,7 +922,7 @@ def get_base_fluxes(db_path, step, run_id=None, workspace=None):
     reactions under their native EcoCyc ids — the full metabolism, suitable for
     grouping by EcoCyc pathway. Returns {step, time, fluxes: {base_id: flux}}.
     """
-    kind, resolved = _resolve_run_source(db_path, workspace)
+    kind, resolved = emitters.read_source(db_path, workspace)
     ids, vals, time_val = [], [], None
     if kind == "zarr":
         ids, vals = _zarr_flux(resolved, step)
@@ -997,7 +1000,7 @@ def list_runs(workspace: Path) -> list[dict]:
         db = r.get("db_path")
         if not db:
             continue
-        kind, resolved = _resolve_run_source(db, ws)
+        kind, resolved = emitters.read_source(db, ws)
         if kind not in ("sqlite", "zarr") or not _run_has_data(kind, resolved):
             continue
         existing_resolved.add(str(resolved))

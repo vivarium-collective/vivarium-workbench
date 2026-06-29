@@ -23,6 +23,7 @@ import yaml
 from pydantic import ValidationError
 
 from vivarium_dashboard.lib import composite_runs as cr
+from vivarium_dashboard.lib import emitters
 from vivarium_dashboard.lib.models import SimRow
 from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 
@@ -650,46 +651,11 @@ def _discover_xarray_runs(workspace: Path) -> list[dict]:
 def _emitter_for_row(workspace: Path, row: dict) -> str:
     """Resolve the emitter that persisted a row: 'parquet' / 'xarray' / 'sqlite'.
 
-    parquet/xarray are known from their source tag; for SQLite-table rows
-    (runs_meta / sqlite_emitter) we still check whether a zarr store exists on
-    disk for the run_id (a backfilled XArray run lands in runs_meta but its
-    data lives in zarr) before defaulting to 'sqlite'."""
-    # A remote run lands its native store next to runs.db, so _row_to_dict
-    # already derived the emitter from the store_path. Honor that — the
-    # .pbg/runs/<rid> disk probe below only covers the LOCAL backfill layout.
-    em0 = row.get("emitter")
-    if isinstance(em0, str) and em0 in ("xarray", "parquet"):
-        return em0
-    src = row.get("source")
-    if src == "parquet":
-        return "parquet"
-    if src == "xarray":
-        return "xarray"
-    if src == "study_yaml":
-        # surface the emitter the run DECLARES in study.yaml (e.g. xarray), if
-        # any; else 'none' (recorded in the spec, not persisted by a step emitter).
-        # The declared value may be a plain string ("parquet") or a structured
-        # dict ({"kind": "parquet", "store": ...}); normalise to the kind string
-        # so downstream label mapping (which lower-cases the tag) never sees a
-        # dict — a dict here used to crash the server's emitter_type loop and
-        # blank every row's pill to the "SQLite" default.
-        em = row.get("emitter")
-        if isinstance(em, dict):
-            em = em.get("kind")
-        return em if isinstance(em, str) and em else "none"
-    rid = row.get("run_id")
-    if rid:
-        run_dir = Path(workspace) / ".pbg" / "runs" / str(rid)
-        try:
-            if run_dir.is_dir() and (
-                list(run_dir.glob("store.zarr"))
-                or list(run_dir.glob("*/store.zarr"))
-                or list(run_dir.glob("*/*/store.zarr"))
-            ):
-                return "xarray"
-        except Exception:
-            pass
-    return "sqlite"
+    Thin back-compat wrapper over :func:`emitters.label_for_run` (the broker is
+    now the single locus for emitter dispatch). parquet/xarray are known from
+    their source tag; for SQLite-table rows we still disk-probe for a backfilled
+    zarr store before defaulting to 'sqlite'."""
+    return emitters.label_for_run(row, workspace)
 
 
 def list_simulations(workspace: Path) -> list[dict]:
