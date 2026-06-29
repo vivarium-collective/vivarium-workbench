@@ -262,6 +262,39 @@ def _stage_embed_visualizations(spec, ws_root: Path, out_dir: Path,
             embed["url"] = base_path + url
 
 
+def _stage_report_cards(spec, ws_root: Path, out_dir: Path,
+                        base_path: str) -> None:
+    """Copy a study's ``report_card_urls`` source HTML into the bundle and
+    base-path-prefix their URLs (mutates *spec* in place).
+
+    The study-detail panel renders each graded report card as an
+    ``<iframe src=URL>`` the browser fetches at runtime. The URLs are
+    workspace-root-absolute (e.g.
+    ``/workspace/investigations/<inv>/studies/<name>/viz/report_card/standard.html``).
+    In snapshot mode those files must (a) exist in the bundle and (b) carry the
+    hosting base path — otherwise every comparison card 404s (the static build
+    previously copied neither, so report-card studies showed no visualizations).
+    Mirrors ``_stage_embed_visualizations``.
+    """
+    cards = spec.get("report_card_urls")
+    if not isinstance(cards, dict):
+        return
+    for card in cards.values():
+        url = (card or {}).get("url") if isinstance(card, dict) else None
+        # Only stage local, root-absolute workspace files (skip api/, externals).
+        if not url or not url.startswith("/") or url.startswith(("/api/", "//")):
+            continue
+        rel = url.lstrip("/")
+        src = ws_root / rel
+        if not src.is_file():
+            continue
+        dst = out_dir / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        if base_path:
+            card["url"] = base_path + url
+
+
 def _stage_gif_visualizations(spec: dict, ws_root: Path, out_dir: Path, slug: str) -> None:
     """Stage a study's ``gif:`` visualization artifacts into the bundle.
 
@@ -850,6 +883,7 @@ def _do_build(
             continue
         if data is not None:
             _stage_embed_visualizations(data, ws_root, out_dir, base_path)
+            _stage_report_cards(data, ws_root, out_dir, base_path)
             _stage_gif_visualizations(data, ws_root, out_dir, slug)
             _write_json(api_dir / "study" / f"{slug}.json", data)
 
@@ -930,6 +964,7 @@ def _do_build(
         # /assets/ + /bigraph-loom/, not embed URLs.)
         try:
             _stage_embed_visualizations(spec, ws_root, out_dir, base_path)
+            _stage_report_cards(spec, ws_root, out_dir, base_path)
             study_html = _render_study_detail_html(slug, spec)
             study_html = _normalize_asset_urls(study_html)
             study_html = _apply_base_path(study_html, base_path)
