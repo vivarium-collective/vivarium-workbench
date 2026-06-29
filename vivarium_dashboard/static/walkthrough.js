@@ -6364,24 +6364,10 @@
   // Render the Evidence & rigor section from an /api/investigation-rigor payload
   // (deterministic skeptic-feedback). Returns '' when no payload (older server /
   // fetch failure) so the report degrades gracefully.
-  // ── C2 — derived 3-track conclusion verdicts (read-only, computed) ─────
-  // These three rules are kept IDENTICAL to single_study_report.py
-  // (_derive_conclusion_verdicts) and study-detail.js so every surface
-  // shows the same badge.
-  var _GATE_RESULT_NORM = {
-    pass: 'PASS', passed: 'PASS', ok: 'PASS',
-    fail: 'FAIL', failed: 'FAIL',
-    partial: 'PARTIAL', mixed: 'PARTIAL', needs_calibration: 'PARTIAL'
-  };
-  var _RUN_ERRORED = {error: 1, errored: 1, failed: 1, crashed: 1, fail: 1};
-  var _RUN_COMPLETED = {completed: 1, complete: 1, success: 1, succeeded: 1, ok: 1, done: 1, finished: 1};
   var _TRACK_COLORS = {
     PASS: ['#dcfce7', '#166534'], PARTIAL: ['#fef3c7', '#92400e'],
     FAIL: ['#fee2e2', '#991b1b'], GAP: ['#f1f5f9', '#475569'], PENDING: ['#f1f5f9', '#475569']
   };
-  function _normGateResult(v) {
-    return _GATE_RESULT_NORM[String(v == null ? '' : v).trim().toLowerCase()] || 'PENDING';
-  }
   // ── Shared run/outcome helpers (bug-fix: pills + decision read the run that
   // actually CARRIES outcomes, not blindly runs[last]) ───────────────────────
   // A study's recorded test outcomes live on its canonical/grade run, which is
@@ -6595,36 +6581,12 @@
     if (v && typeof v === 'object') return Array.isArray(v.entries) ? v.entries : Object.values(v);
     return [];
   }
-  function _deriveConclusionVerdicts(s) {
-    var authored = s.conclusion_verdicts || {};
-    var ge = (s.pipeline_gate || {}).gate_evaluator || {};
-    var bio = _normGateResult(ge.result || s.gate_status);
-
-    var runs = (s.runs || []).filter(function(r) { return r && typeof r === 'object'; });
-    var reg;
-    if (!runs.length) { reg = 'PENDING'; }
-    else {
-      var statuses = runs.map(function(r) { return String(r.status == null ? '' : r.status).trim().toLowerCase(); });
-      if (statuses.some(function(x) { return _RUN_ERRORED[x]; })) reg = 'FAIL';
-      else if (statuses.every(function(x) { return _RUN_COMPLETED[x]; })) reg = 'PASS';
-      else reg = 'PARTIAL';
-    }
-
-    var findings = _asFindings(s.findings).filter(function(f) { return f && typeof f === 'object'; });
-    var exp;
-    if (!findings.length) exp = 'GAP';
-    else if (findings.some(function(f) { return f.tier === 'interpretation' || f.mechanism_origin; })) exp = 'PASS';
-    else exp = 'PARTIAL';
-
-    function basis(t) { var x = authored[t]; return (x && typeof x === 'object') ? (x.basis || '') : ''; }
-    return {
-      biological_validation:    {result: bio, basis: basis('biological_validation')},
-      regression_compatibility: {result: reg, basis: basis('regression_compatibility')},
-      explanatory_gain:         {result: exp, basis: basis('explanatory_gain')}
-    };
-  }
   function _conclusionVerdictsHtml(s, slug) {
-    var cv = _deriveConclusionVerdicts(s);
+    var cv = (s.derived || {}).conclusion_verdicts || {
+      biological_validation: { result: 'PENDING' },
+      regression_compatibility: { result: 'PENDING' },
+      explanatory_gain: { result: 'GAP' }
+    };
     var tracks = [
       ['biological_validation', 'Biological validation', 'from gate evaluator'],
       ['regression_compatibility', 'Regression compatibility', 'from run status'],
