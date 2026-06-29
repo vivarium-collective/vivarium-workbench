@@ -87,13 +87,27 @@ def resolve_composite(
         path = find_composite_path(ws_root, pkg, spec_id)
         if path is None:
             return None
-        spec = CompositeSpec.from_file(path)
+        try:
+            spec = CompositeSpec.from_file(path)
+        except Exception as e:
+            return {
+                "id": spec_id, "name": spec_id.rsplit(".", 1)[-1],
+                "description": "", "parameters": {}, "state": None,
+                "schema": {}, "requires": {}, "tags": [], "analyses": [],
+                "visualizations": [], "emitters": [], "kind": "spec",
+                "module": "", "default_n_steps": None, "svg": None,
+                "wiring_status": "unavailable",
+                "notice": f"composite file could not be parsed: {e}",
+            }
     state = spec.default_state(base_dir=_artifact_base_dir(ws_root, spec))
     wiring_status = "ready" if state is not None else "unavailable"
     notice = None
     if wiring_status == "unavailable":
-        notice = (f"default state for generator '{spec.name}' is not generated yet — "
-                  f"run it, or regenerate its default-state artifact to see the wiring.")
+        if spec.kind == "generator":
+            notice = (f"default state for generator '{spec.name}' is not generated yet — "
+                      f"run it, or regenerate its default-state artifact to see the wiring.")
+        else:
+            notice = (f"static composite '{spec.name}' has no inline state to display.")
     if state is not None:
         try:
             from vivarium_dashboard.lib.process_docs import attach_process_docs
