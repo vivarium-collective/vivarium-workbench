@@ -47,6 +47,7 @@
     });
     if (kind === 'tests') { loadTestsTab(window._study); }
     if (kind === 'visualize') { _loadReadouts(); _loadCharts('viz-charts-panel'); }
+    if (kind === 'data') { _loadAnalysisOutputs(); }
   }
   window._setStudyTab = _setStudyTab;
 
@@ -81,6 +82,70 @@
       })
       .catch(function() {
         host.innerHTML = '<p class="empty-message">Readouts unavailable.</p>';
+      });
+  }
+
+  // --- Data tab: downloadable Analysis result files (CSV/TSV) ---
+  var _analysisOutputsLoaded = false;
+  function _fmtBytes(n) {
+    if (!n && n !== 0) return '';
+    if (n < 1024) return n + ' B';
+    var u = ['KB', 'MB', 'GB'], i = -1, v = n;
+    do { v /= 1024; i++; } while (v >= 1024 && i < u.length - 1);
+    return (v >= 10 ? Math.round(v) : v.toFixed(1)) + ' ' + u[i];
+  }
+  function _renderAnalysisOutputs(j) {
+    var e = escapeHtmlForTests;
+    var files = (j && j.files) || [];
+    if (!files.length) {
+      return '<p class="empty-message">No result files yet. Analysis steps write '
+        + '<code>.csv</code>/<code>.tsv</code> files here once this study has run.</p>';
+    }
+    // Group by parent dir so ptools/ and per-run analysis tables read cleanly.
+    var groups = {}, order = [];
+    files.forEach(function (f) {
+      var g = f.dir || '(study root)';
+      if (!groups[g]) { groups[g] = []; order.push(g); }
+      groups[g].push(f);
+    });
+    var html = '';
+    order.forEach(function (g) {
+      html += '<div class="data-group" style="margin-bottom:14px">'
+        + '<div class="muted" style="font-family:ui-monospace,monospace;font-size:0.82em;'
+        + 'margin:0 0 4px 0">' + e(g) + '/</div>'
+        + '<table class="data-files-table" style="width:100%;border-collapse:collapse;font-size:0.9em">';
+      groups[g].forEach(function (f) {
+        html += '<tr style="border-top:1px solid #eef2f6">'
+          + '<td style="padding:5px 8px"><a href="' + e(f.download_url) + '">'
+          + e(f.name) + '</a></td>'
+          + '<td style="padding:5px 8px;text-align:right;color:#64748b;white-space:nowrap">'
+          + e(_fmtBytes(f.size)) + '</td></tr>';
+      });
+      html += '</table></div>';
+    });
+    return html;
+  }
+  function _loadAnalysisOutputs() {
+    if (_analysisOutputsLoaded) return;
+    _analysisOutputsLoaded = true;
+    var host = document.getElementById('data-files');
+    if (!host) return;
+    var slug = host.getAttribute('data-study') || studyName();
+    if (!slug) return;
+    fetch('/api/study-analysis-outputs?study=' + encodeURIComponent(slug),
+          {headers: {Accept: 'application/json'}})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || !Array.isArray(j.files)) {
+          host.innerHTML = '<p class="empty-message">Result files unavailable.</p>';
+          return;
+        }
+        host.innerHTML = _renderAnalysisOutputs(j);
+        var dl = document.getElementById('data-download-all');
+        if (dl) dl.style.display = j.files.length ? '' : 'none';
+      })
+      .catch(function () {
+        host.innerHTML = '<p class="empty-message">Result files unavailable.</p>';
       });
   }
 
