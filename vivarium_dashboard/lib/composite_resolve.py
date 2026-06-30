@@ -9,6 +9,7 @@ thin wrapper.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -41,6 +42,27 @@ def _artifact_base_dir(ws_root: "Path", spec: "CompositeSpec") -> "Path":
     existing snapshot dir if present, else the workspace root."""
     snap = Path(ws_root) / "api" / "composite-state"
     return snap if snap.is_dir() else Path(ws_root)
+
+
+def _committed_default_state(ws_root, spec_id: str) -> "dict | None":
+    """Fallback default state for a generator that declares no ``default_state_ref``.
+
+    The regen tooling (``scripts/regenerate_composite_states.py`` in a workspace)
+    commits a generator's resolved state to ``reports/composite-state/<id>.json``.
+    ``CompositeSpec.default_state`` only reads that artifact when the generator
+    *declares* a ``default_state_ref``; most generators don't. This fallback reads
+    the committed artifact directly by id, so every generator's wiring renders
+    without per-generator annotation. Returns the state dict, or None when the
+    artifact is absent, unreadable, or carries no usable ``state``."""
+    art = Path(ws_root) / "reports" / "composite-state" / f"{spec_id}.json"
+    if not art.is_file():
+        return None
+    try:
+        data = json.loads(art.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 — a malformed artifact must not break resolve
+        return None
+    state = data.get("state") if isinstance(data, dict) else None
+    return state if isinstance(state, dict) else None
 
 
 def resolve_composite(
@@ -103,6 +125,11 @@ def resolve_composite(
         state = spec.default_state(base_dir=_artifact_base_dir(ws_root, spec))
     except Exception:
         state = None
+    if state is None:
+        # Generators that declare no default_state_ref still have a committed
+        # artifact from the regen script (reports/composite-state/<id>.json) —
+        # serve it so the wiring renders instead of "not generated yet".
+        state = _committed_default_state(ws_root, spec_id)
     wiring_status = "ready" if state is not None else "unavailable"
     notice = None
     if wiring_status == "unavailable":
