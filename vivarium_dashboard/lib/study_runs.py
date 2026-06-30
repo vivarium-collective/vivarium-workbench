@@ -316,6 +316,26 @@ def run_study_variant(ws_root, body):
     ws_default_n_steps = _runtime.get("default_n_steps")
     steps = int(body.get("steps") or params_n_steps or ws_default_n_steps or 5)
 
+    # Hoisted dry-run guard: fires before the if/else branch split and before any
+    # invoke_run / workflow call so there are zero side effects (no DB write, no
+    # subprocess, no out/ directory).  generate_run_id is a pure function — it
+    # only hashes (spec_id, params); it does NOT touch runs.db.
+    if body.get("dry_run"):
+        full_params = dict(generator_overrides)
+        if params_n_steps is not None:
+            full_params["n_steps"] = params_n_steps
+        run_id = cr.generate_run_id(spec_id, full_params)
+        return {
+            "dry_run": True,
+            "request": {
+                "spec_id": spec_id,
+                "overrides": generator_overrides,
+                "steps": steps,
+                "run_id": run_id,
+                "db_file": str(study_dir / "runs.db"),
+            },
+        }, 200
+
     kind = variant.get("kind")
     if kind in ("sweep", "seeds"):
         # Review FIX 1: branch on the variant being an ENSEMBLE first. A
@@ -374,18 +394,6 @@ def run_study_variant(ws_root, body):
         except run_core.RunTargetUnavailable as e:
             return {"error": str(e)}, 409
         run_id = plan.run_id
-
-        if body.get("dry_run"):
-            return {
-                "dry_run": True,
-                "request": {
-                    "spec_id": spec_id,
-                    "overrides": generator_overrides,
-                    "steps": steps,
-                    "run_id": run_id,
-                    "db_file": db_file,
-                },
-            }, 200
 
         state, err = study_run_state.resolve_study_baseline_state(ws_root, pkg, spec_id, generator_overrides)
         if err is not None:
