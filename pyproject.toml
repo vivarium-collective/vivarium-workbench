@@ -59,6 +59,7 @@ test = ["polars", "xarray", "zarr", "pyarrow"]
 
 [project.scripts]
 vivarium-dashboard = "vivarium_dashboard.cli:main"
+vdash = "vivarium_dashboard.cli:main"
 vivarium-dashboard-publish = "vivarium_dashboard.publish:main"
 
 # Git source for the bare pbg-basic-processes dependency (not on PyPI). uv reads
