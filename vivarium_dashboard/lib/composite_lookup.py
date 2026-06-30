@@ -324,14 +324,23 @@ def unresolved_study_composite_refs(spec: dict, known_ids: set[str]) -> list[str
     Prefers ``pbg_superpowers.report_linter.unresolved_composite_refs`` (the
     canonical, spec-only contract) when available; falls back to the local
     extraction + last-segment match. Defensive: never raises.
+
+    The canonical linter is a STRICT membership test (``ref not in known_ids``)
+    with no registry knowledge, so it can't resolve a short slug alias — e.g. a
+    study declaring ``composite: baseline`` against the registered dotted id
+    ``v2ecoli.composites.baseline``. The dashboard owns that alias semantics
+    (see :func:`_ref_resolves`), so we keep it: a ref the strict linter flags is
+    only reported when the local alias match ALSO can't resolve it. Without this
+    every study using the short ``baseline`` alias false-flags as "composite not
+    found in registry".
     """
+    known = set(known_ids)
     try:
         from pbg_superpowers.report_linter import unresolved_composite_refs as _ps
-        return list(_ps(spec, set(known_ids)))
+        flagged = list(_ps(spec, known))
     except Exception:  # noqa: BLE001 — older/absent pbg_superpowers → local fallback
-        pass
-    known = set(known_ids)
-    return [r for r in _study_composite_refs(spec) if not _ref_resolves(r, known)]
+        return [r for r in _study_composite_refs(spec) if not _ref_resolves(r, known)]
+    return [r for r in flagged if not _ref_resolves(r, known)]
 
 
 def _dedupe_alias_composites(records: list) -> list:
