@@ -5,6 +5,18 @@ import pytest
 from vivarium_dashboard.lib import cli_runs, composite_runs as cr
 
 
+def test_run_study_server_dryrun_is_rejected(fixture_study_ws):
+    """--dry-run is local-only; combining it with --server must be rejected
+    without making any network call (400 returned before _post_server is
+    reached, so a non-existent server URL does not raise ConnectionError)."""
+    ws, study = fixture_study_ws
+    resp, code = cli_runs.run_study(
+        ws, study, server="http://localhost:9", dry_run=True
+    )
+    assert code == 400
+    assert "local-only" in resp.get("error", "")
+
+
 def test_run_study_dry_run_returns_request(fixture_study_ws):
     ws, study = fixture_study_ws
     resp, code = cli_runs.run_study(ws, study, steps=9, dry_run=True)

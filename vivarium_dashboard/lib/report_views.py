@@ -651,7 +651,7 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
             # so the investigation-report SPA can render run-command chips off the
             # projection without re-deriving — mirrors Task 6's wiring of
             # load_study_detail_spec for /api/study/<slug>.
-            "run_commands": study_run_commands(study_spec, study_spec["name"]),
+            "run_commands": study_run_commands(study_spec, study_spec.get("name") or ""),
         })
 
     member_statuses = [s.get("status", "planning") for s in studies_out]

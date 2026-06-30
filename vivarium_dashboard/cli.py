@@ -546,7 +546,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_common(rc)
     rc.set_defaults(func=cmd_run_composite)
 
-    pr = sub.add_parser("rerun", help="Re-run a recorded run with its exact config")
+    pr = sub.add_parser("rerun", help="Re-run a recorded run (replays its composite + recorded params/steps)")
     pr.add_argument("run_id")
     pr.add_argument("--steps", type=int, default=None)
     pr.add_argument("--detach", action="store_true")

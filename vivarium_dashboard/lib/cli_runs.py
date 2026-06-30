@@ -33,6 +33,11 @@ def _post_server(base_url: str, route: str, payload: dict) -> tuple[dict, int]:
 
 def run_study(ws_root, study, *, variant=None, steps=None, params=None,
               dry_run=False, detach=False, server=None) -> tuple[dict, int]:
+    if server and dry_run:
+        return (
+            {"error": "--dry-run is local-only; drop --server to preview a run"},
+            400,
+        )
     body = {"study": study}
     if steps is not None:
         body["steps"] = int(steps)
@@ -41,7 +46,6 @@ def run_study(ws_root, study, *, variant=None, steps=None, params=None,
     if variant:
         body["variant"] = variant
     if server:
-        # dry_run is a local-only preview; intentionally not forwarded to the server.
         route = "/api/study-run-variant" if variant else "/api/study-run-baseline"
         return _post_server(server, route, body)
     if dry_run:
@@ -109,6 +113,20 @@ def list_study_runs(ws_root, study) -> list[dict]:
 
 
 def rerun(ws_root, run_id, *, steps=None, detach=False) -> tuple[dict, int]:
+    """Replay a previously recorded run as a composite run.
+
+    Looks up ``run_id`` across all known DBs (study runs.db files and the
+    workspace-level composite-runs.db), then calls ``run_composite`` with the
+    recorded ``spec_id``, ``params``, and ``n_steps`` (overridden by ``steps``
+    if supplied).
+
+    Note: runs that originally executed through the study path (baseline /
+    variant) are replayed as composite runs — they are not re-resolved through
+    the study path and do not restore study-specific emit paths or runtime
+    config.  The recorded ``spec_id`` + params + step count are faithfully
+    reproduced; only the landing DB changes (composite-runs.db, not the
+    study's runs.db).
+    """
     db_file, row = find_run(ws_root, run_id)
     if row is None:
         return {"error": f"run not found: {run_id}"}, 404
