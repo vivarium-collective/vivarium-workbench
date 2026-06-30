@@ -125,6 +125,18 @@ def run_study_baseline(ws_root, body):
     ws_default_n_steps = _runtime.get("default_n_steps")
     steps = int(body.get("steps") or params_n_steps or ws_default_n_steps or 5)
 
+    if body.get("dry_run"):
+        return {
+            "dry_run": True,
+            "request": {
+                "spec_id": spec_id,
+                "overrides": generator_overrides,
+                "steps": steps,
+                "run_id": run_id,
+                "db_file": db_file,
+            },
+        }, 200
+
     state, err = study_run_state.resolve_study_baseline_state(ws_root, pkg, spec_id, generator_overrides)
     if err is not None:
         return err, 400
@@ -351,10 +363,6 @@ def run_study_variant(ws_root, body):
         response, code = composite_subprocess.invoke_v2ecoli_workflow(
             str(cfg_path), out_dir, ws_root, timeout_s)
     else:
-        state, err = study_run_state.resolve_study_baseline_state(ws_root, pkg, spec_id, generator_overrides)
-        if err is not None:
-            return err, 400
-
         full_params = dict(generator_overrides)
         if params_n_steps is not None:
             full_params["n_steps"] = params_n_steps
@@ -366,6 +374,22 @@ def run_study_variant(ws_root, body):
         except run_core.RunTargetUnavailable as e:
             return {"error": str(e)}, 409
         run_id = plan.run_id
+
+        if body.get("dry_run"):
+            return {
+                "dry_run": True,
+                "request": {
+                    "spec_id": spec_id,
+                    "overrides": generator_overrides,
+                    "steps": steps,
+                    "run_id": run_id,
+                    "db_file": db_file,
+                },
+            }, 200
+
+        state, err = study_run_state.resolve_study_baseline_state(ws_root, pkg, spec_id, generator_overrides)
+        if err is not None:
+            return err, 400
         # v2ecoli friction #6: per-study subprocess timeout.
         runtime_cfg = (spec.get("runtime") or {}) if isinstance(spec.get("runtime"), dict) else {}
         timeout_s = int(runtime_cfg.get("subprocess_timeout_s") or 1800)

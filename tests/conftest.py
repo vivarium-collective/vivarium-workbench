@@ -124,3 +124,59 @@ def dashboard_client():
         except subprocess.TimeoutExpired:
             p.kill()
             p.wait()
+
+
+# ---------------------------------------------------------------------------
+# Minimal workspace fixture for study-run tests (dry-run guard, CLI, etc.)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def fixture_study_ws(tmp_path):
+    """Return (ws_path, study_slug) for a minimal workspace with one baseline study.
+
+    The workspace has:
+      - workspace.yaml  (name + package_path)
+      - studies/<slug>/study.yaml  (v4 schema, conditions.baseline.composite,
+                                    params: {n_steps: 5}, one variant)
+    The composite id is intentionally un-registered (tests that use dry_run
+    never reach composite resolution; tests that need resolution must mock it).
+    """
+    import yaml as _yaml
+
+    ws = tmp_path / "test_ws"
+    slug = "demo-study"
+    pkg = "pbg_demo"
+    composite_id = f"{pkg}.composites.demo"
+
+    # workspace.yaml
+    (ws).mkdir(parents=True)
+    (ws / "workspace.yaml").write_text(
+        _yaml.safe_dump({"name": "demo", "package_path": pkg}),
+        encoding="utf-8",
+    )
+
+    # studies/<slug>/study.yaml  (v4 shape with conditions block)
+    study_dir = ws / "studies" / slug
+    study_dir.mkdir(parents=True)
+    (study_dir / "study.yaml").write_text(
+        _yaml.safe_dump({
+            "schema_version": 4,
+            "name": slug,
+            "conditions": {
+                "baseline": {
+                    "composite": composite_id,
+                    "params": {"n_steps": 5},
+                },
+                "variants": [
+                    {
+                        "name": "var-one",
+                        "composite": composite_id,
+                        "parameter_overrides": {"n_steps": 10},
+                    }
+                ],
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    return ws, slug
