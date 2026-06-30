@@ -7194,6 +7194,16 @@
     bibEntries.forEach(function(e) { bibByKey[e.key] = e; });
     var now = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
 
+    // Task 9: render a canonical `vdash …` command as a copy-to-run chip. The
+    // command strings come PRECOMPUTED off each study's `run_commands` payload
+    // (the single source of truth — server lib/run_commands.study_run_commands),
+    // never hand-built here. Returns '' for a falsy command so older payloads /
+    // the published bundle degrade to no chip rather than "undefined".
+    function _runChip(cmd) {
+      if (!cmd) return '';
+      return '<code class="run-chip" title="Copy to run">' + _h(cmd) + '</code>';
+    }
+
     // ── Coordinated-generation banner (expert-feedback A.3) ──────────────
     // One prominent provenance stamp so the reviewer knows every panel below
     // reflects a single (git_sha, params) state — and a loud warning when
@@ -8612,12 +8622,13 @@
             + '<td>' + _compositeCell(sim.base_model) + '</td>'
             + '<td>' + _changes(sim) + '</td>'
             + '<td class="muted small">' + (runParts.join(' · ') || '—') + '</td>'
+            + '<td>' + _runChip(s.run_commands && s.run_commands.baseline) + '</td>'
             + '<td>' + statusPill + '</td>'
             + '</tr>';
         }).join('');
         simsHtml = '<div id="' + sid.sims + '"><h3>What we ran <span class="muted small">(' + sims.length + ' simulation' + (sims.length === 1 ? '' : 's') + ')</span></h3>'
           + '<p class="muted small" style="margin:0 0 8px 0">One row per concrete run: the model composite, what changes vs the reference baseline, the condition / length, and its status.</p>'
-          + '<table class="sim-table"><thead><tr><th>Simulation</th><th>Composite</th><th>Changes vs baseline</th><th>Run</th><th>Status</th></tr></thead>'
+          + '<table class="sim-table"><thead><tr><th>Simulation</th><th>Composite</th><th>Changes vs baseline</th><th>Run</th><th>CLI</th><th>Status</th></tr></thead>'
           + '<tbody>' + rows + '</tbody></table>'
           + '</div>';
       } else {
@@ -8646,12 +8657,13 @@
               + '<td>' + _compositeCell(b.composite) + '</td>'
               + '<td>' + _paramsCell(b.params) + '</td>'
               + '<td class="muted small">' + _h(replCell) + '</td>'
+              + '<td>' + _runChip(s.run_commands && s.run_commands.baseline) + '</td>'
               + '<td><span class="sim-status-pill sim-status-ran">' + _h(status) + '</span></td>'
               + '</tr>';
           }).join('');
           simsHtml = '<div id="' + sid.sims + '"><h3>What we ran <span class="muted small">(composite + parameters)</span></h3>'
             + '<p class="muted small" style="margin:0 0 8px 0">The composite(s) and parameter settings actually simulated for this study (from its baseline).</p>'
-            + '<table class="sim-table"><thead><tr><th>Run</th><th>Composite</th><th>Parameters</th><th>Replication</th><th>Status</th></tr></thead>'
+            + '<table class="sim-table"><thead><tr><th>Run</th><th>Composite</th><th>Parameters</th><th>Replication</th><th>CLI</th><th>Status</th></tr></thead>'
             + '<tbody>' + brows + '</tbody></table>'
             + '</div>';
         } else {
@@ -9719,18 +9731,24 @@
               '<h4>Variants <span class="muted small">(' + variants.length + ')</span></h4>' +
               '<p class="muted small" style="margin:0 0 6px 0">Each variant is a perturbation of the baseline — typically a parameter override or a swapped composite. These define the runs that test the assumption.</p>' +
               '<table class="cond-table">' +
-                '<thead><tr><th>Variant</th><th>Composite / base</th><th>Parameter overrides</th><th>Notes</th></tr></thead>' +
+                '<thead><tr><th>Variant</th><th>Composite / base</th><th>Parameter overrides</th><th>Notes</th><th>Run</th></tr></thead>' +
                 '<tbody>' +
                   variants.map(function(v) {
                     var ovr = v.parameter_overrides || v.params || {};
                     var base = v.composite || v.base_composite || '<em class="muted">(inherits baseline)</em>';
                     var name = v.name || '?';
                     var notes = v.description || v.notes || '';
+                    // Task 9: look up this variant's precomputed `vdash …` command
+                    // off the study payload (single source of truth). Degrade to
+                    // no chip when run_commands is absent (older / static bundle).
+                    var _rcVariants = (s.run_commands && s.run_commands.variants) || [];
+                    var _vc = (_rcVariants.find && _rcVariants.find(function(x){ return x.name === v.name; })) || null;
                     return '<tr>' +
                       '<td><code>' + _h(name) + '</code></td>' +
                       '<td>' + (typeof base === 'string' && base.indexOf('<em') === 0 ? base : '<code>' + _h(base) + '</code>') + '</td>' +
                       '<td>' + _kvList(ovr) + '</td>' +
                       '<td>' + (notes ? _multiline(notes) : '<em class="muted">—</em>') + '</td>' +
+                      '<td>' + _runChip(_vc && _vc.cmd) + '</td>' +
                     '</tr>';
                   }).join('') +
                 '</tbody>' +
@@ -10039,11 +10057,20 @@
         depsLine = '<p class="study-deps muted small">' + bits.join(' &nbsp;·&nbsp; ') + '</p>';
       }
 
+      // Task 9: per-study "Reproduce" line — the canonical baseline `vdash …`
+      // command off the study payload (single source of truth). Absent on
+      // older payloads / the static bundle → no line, never "undefined".
+      var _reproBase = s.run_commands && s.run_commands.baseline;
+      var reproLine = _reproBase
+        ? '<p class="reproduce-line muted small">Reproduce: ' + _runChip(_reproBase) + '</p>'
+        : '';
+
       return ''
         + '<details class="study-fold" id="study-fold-' + slug + '">'
         + foldSummary
         + '<section class="study" id="study-' + slug + '">'
         +   depsLine
+        +   reproLine
 
         +   '<div class="qh" id="' + sidQ + '">'
         +     (s.question   ? '<p><strong>Question.</strong> '   + _multiline(s.question)   + '</p>' : '')
@@ -10605,6 +10632,9 @@
       // sticky study-nav.
       + '.study [id^="study-"]{scroll-margin-top:96px}'
       + '.study-header h2{border:0;padding:0;margin:0 0 4px 0}'
+      // Task 9: run-command chips (copy-to-run `vdash …` strings).
+      + '.run-chip{display:inline-block;font-family:ui-monospace,monospace;font-size:0.82em;background:#0f172a;color:#e2e8f0;padding:2px 7px;border-radius:4px;white-space:nowrap;cursor:pointer}'
+      + '.reproduce-line{margin:4px 0 8px 0}'
       + '.study-num{color:#94a3b8;font-weight:normal;font-size:0.85em;margin-right:4px}'
       + '.qh{padding:12px 16px;background:#f8fafc;border-left:4px solid #3b82f6;border-radius:4px;margin:12px 0}'
       + '.qh p{margin:6px 0}'

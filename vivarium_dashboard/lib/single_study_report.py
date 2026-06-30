@@ -198,6 +198,36 @@ def _render_study_type_badge(spec: dict) -> str:
     )
 
 
+def _reproduce_block_html(spec: dict, slug: str) -> str:
+    """Render a 'Reproduce this study' block with CLI commands.
+
+    Commands are sourced exclusively from ``run_commands.study_run_commands``
+    so this block can never drift from the CLI's actual command surface.
+    """
+    from vivarium_dashboard.lib.run_commands import study_run_commands
+    c = study_run_commands(spec, slug)
+    rows = [
+        f'<div><code>{_h(c["baseline"])}</code>'
+        f' <span style="color:#64748b">— run the baseline</span></div>'
+    ]
+    for v in c["variants"]:
+        rows.append(
+            f'<div><code>{_h(v["cmd"])}</code>'
+            f' <span style="color:#64748b">— variant {_h(v["name"])}</span></div>'
+        )
+    rows.append(
+        f'<div><code>{_h(c["rerun_hint"])}</code>'
+        f' <span style="color:#64748b">— re-run a recorded run by id</span></div>'
+    )
+    return (
+        '<section class="reproduce-study" style="margin:18px 0;padding:12px 14px;'
+        'background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px">'
+        '<h3 style="margin:0 0 6px 0;font-size:0.95em">Reproduce this study</h3>'
+        + "".join(rows)
+        + '</section>'
+    )
+
+
 def _next_action_type_chip(finding: dict) -> str:
     """Render a finding's ``next_action_type`` pill (critique #7). Returns ''
     when absent; renders unknown values too (the linter flags them, the render
@@ -1964,6 +1994,9 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
         f'  {metrics_html}\n'
         '</section>'
     )
+    reproduce_html = _reproduce_block_html(
+        study_spec, study_spec.get("name") or ""
+    )
     biology_section = f'<section id="biology">\n{biology_html}\n</section>'
     viz_section = f'<section id="viz">\n{viz_html}\n</section>'
 
@@ -1974,6 +2007,7 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
         # debts → THEN the usual verdicts / synthesis / biology / viz.
         seq = [
             ("overview", "Overview", overview_section, bool(head_blocks or metrics_html)),
+            ("reproduce-study", "Reproduce", reproduce_html, True),
             ("commitment", "Commitment", commitment_html, bool(commitment_html)),
             ("invariants", "Invariants", invariants_html, bool(invariants_html)),
             ("audit-trail", "Audit trail", audit_html, bool(audit_html)),
@@ -2025,6 +2059,7 @@ def _render_html(study_spec: dict, viz_entries: list[dict],
         # render with the build/model detail near the end.
         body_main = "\n\n".join([
             overview_section,
+            reproduce_html,
             commitment_html,
             invariants_html,
             verdicts_html,

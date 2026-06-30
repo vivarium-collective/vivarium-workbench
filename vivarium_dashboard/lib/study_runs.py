@@ -41,6 +41,22 @@ from vivarium_dashboard.lib import study_spec
 from vivarium_dashboard.lib.study_crud_mutations import _study_name_from_body
 
 
+def _resolve_study_dir(ws_root, name):
+    """Resolve a study's directory honoring the workspace ``layout:`` map.
+
+    Uses :class:`WorkspacePaths` (nested investigations/<inv>/studies/<s> and
+    relocated layouts), falling back to the classic flat ``studies/<name>`` /
+    ``investigations/<name>`` paths for legacy studies whose dir lacks a
+    ``study.yaml`` (so WorkspacePaths' study.yaml gate skips them).
+    """
+    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+    try:
+        return WorkspacePaths.load(ws_root).study_dir(name)
+    except FileNotFoundError:
+        flat = ws_root / "studies" / name
+        return flat if flat.is_dir() else ws_root / "investigations" / name
+
+
 def run_study_baseline(ws_root, body):
     """Run a Study's baseline composite. Returns (response_dict, status_code).
 
@@ -55,8 +71,7 @@ def run_study_baseline(ws_root, body):
     if not name:
         return {"error": "missing study"}, 400
     # Resolve study dir from ws_root so _for_test callers don't need WORKSPACE patched.
-    studies_path = ws_root / "studies" / name
-    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / name
+    study_dir = _resolve_study_dir(ws_root, name)
     sf = study_spec.study_spec_file(study_dir)
     if not sf.is_file():
         return {"error": "study not found"}, 404
@@ -124,6 +139,18 @@ def run_study_baseline(ws_root, body):
     _runtime = (ws_data.get("runtime") or {}) if isinstance(ws_data, dict) else {}
     ws_default_n_steps = _runtime.get("default_n_steps")
     steps = int(body.get("steps") or params_n_steps or ws_default_n_steps or 5)
+
+    if body.get("dry_run"):
+        return {
+            "dry_run": True,
+            "request": {
+                "spec_id": spec_id,
+                "overrides": generator_overrides,
+                "steps": steps,
+                "run_id": run_id,
+                "db_file": db_file,
+            },
+        }, 200
 
     state, err = study_run_state.resolve_study_baseline_state(ws_root, pkg, spec_id, generator_overrides)
     if err is not None:
@@ -240,10 +267,9 @@ def run_study_variant(ws_root, body):
     variant_name = (body.get("variant") or "").strip()
     if not name or not variant_name:
         return {"error": "missing study or variant"}, 400
-    # Resolve study dir from ws_root (matches Task 5 pattern; supports
-    # standalone tests without monkeypatching WORKSPACE).
-    studies_path = ws_root / "studies" / name
-    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / name
+    # Resolve study dir from ws_root (honors layout:; supports standalone tests
+    # without monkeypatching WORKSPACE).
+    study_dir = _resolve_study_dir(ws_root, name)
     sf = study_spec.study_spec_file(study_dir)
     if not sf.is_file():
         return {"error": "study not found"}, 404
@@ -304,6 +330,26 @@ def run_study_variant(ws_root, body):
     ws_default_n_steps = _runtime.get("default_n_steps")
     steps = int(body.get("steps") or params_n_steps or ws_default_n_steps or 5)
 
+    # Hoisted dry-run guard: fires before the if/else branch split and before any
+    # invoke_run / workflow call so there are zero side effects (no DB write, no
+    # subprocess, no out/ directory).  generate_run_id is a pure function — it
+    # only hashes (spec_id, params); it does NOT touch runs.db.
+    if body.get("dry_run"):
+        full_params = dict(generator_overrides)
+        if params_n_steps is not None:
+            full_params["n_steps"] = params_n_steps
+        run_id = cr.generate_run_id(spec_id, full_params)
+        return {
+            "dry_run": True,
+            "request": {
+                "spec_id": spec_id,
+                "overrides": generator_overrides,
+                "steps": steps,
+                "run_id": run_id,
+                "db_file": str(study_dir / "runs.db"),
+            },
+        }, 200
+
     kind = variant.get("kind")
     if kind in ("sweep", "seeds"):
         # Review FIX 1: branch on the variant being an ENSEMBLE first. A
@@ -351,10 +397,6 @@ def run_study_variant(ws_root, body):
         response, code = composite_subprocess.invoke_v2ecoli_workflow(
             str(cfg_path), out_dir, ws_root, timeout_s)
     else:
-        state, err = study_run_state.resolve_study_baseline_state(ws_root, pkg, spec_id, generator_overrides)
-        if err is not None:
-            return err, 400
-
         full_params = dict(generator_overrides)
         if params_n_steps is not None:
             full_params["n_steps"] = params_n_steps
@@ -366,6 +408,10 @@ def run_study_variant(ws_root, body):
         except run_core.RunTargetUnavailable as e:
             return {"error": str(e)}, 409
         run_id = plan.run_id
+
+        state, err = study_run_state.resolve_study_baseline_state(ws_root, pkg, spec_id, generator_overrides)
+        if err is not None:
+            return err, 400
         # v2ecoli friction #6: per-study subprocess timeout.
         runtime_cfg = (spec.get("runtime") or {}) if isinstance(spec.get("runtime"), dict) else {}
         timeout_s = int(runtime_cfg.get("subprocess_timeout_s") or 1800)

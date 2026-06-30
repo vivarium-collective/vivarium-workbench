@@ -124,3 +124,95 @@ def dashboard_client():
         except subprocess.TimeoutExpired:
             p.kill()
             p.wait()
+
+
+# ---------------------------------------------------------------------------
+# Minimal workspace fixture for study-run tests (dry-run guard, CLI, etc.)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def fixture_study_ws(tmp_path):
+    """Return (ws_path, study_slug) for a minimal workspace with one baseline study.
+
+    The workspace has:
+      - workspace.yaml  (name + package_path)
+      - studies/<slug>/study.yaml  (v4 schema, conditions.baseline.composite,
+                                    params: {n_steps: 5}, one variant)
+    The composite id is intentionally un-registered (tests that use dry_run
+    never reach composite resolution; tests that need resolution must mock it).
+    """
+    import yaml as _yaml
+
+    ws = tmp_path / "test_ws"
+    slug = "demo-study"
+    pkg = "pbg_demo"
+    composite_id = f"{pkg}.composites.demo"
+
+    # workspace.yaml
+    (ws).mkdir(parents=True)
+    (ws / "workspace.yaml").write_text(
+        _yaml.safe_dump({"name": "demo", "package_path": pkg}),
+        encoding="utf-8",
+    )
+
+    # studies/<slug>/study.yaml  (v4 shape with conditions block)
+    study_dir = ws / "studies" / slug
+    study_dir.mkdir(parents=True)
+    (study_dir / "study.yaml").write_text(
+        _yaml.safe_dump({
+            "schema_version": 4,
+            "name": slug,
+            "question": "Does the demo composite run correctly?",
+            "conditions": {
+                "baseline": {
+                    "composite": composite_id,
+                    "params": {"n_steps": 5},
+                },
+                "variants": [
+                    {
+                        "name": "var-one",
+                        "composite": composite_id,
+                        "parameter_overrides": {"n_steps": 10},
+                    }
+                ],
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    return ws, slug
+
+
+@pytest.fixture
+def fixture_study_with_recorded_run(fixture_study_ws):
+    """Return (ws_path, study_slug, run_id) with a recorded run in runs.db.
+
+    Builds on fixture_study_ws and seeds the study's runs.db with one
+    completed run via composite_runs helpers so find_run / list_study_runs
+    can locate it without spinning up a real simulation.
+    """
+    import time
+    from vivarium_dashboard.lib import composite_runs as cr
+
+    ws, slug = fixture_study_ws
+    study_dir = ws / "studies" / slug
+    db_file = str(study_dir / "runs.db")
+
+    spec_id = "pbg_demo.composites.demo"
+    run_id = cr.generate_run_id(spec_id, {"seed": 42})
+    conn = cr.connect(db_file)
+    try:
+        cr.save_metadata(
+            conn,
+            spec_id=spec_id,
+            run_id=run_id,
+            params={"seed": 42},
+            label="baseline",
+            started_at=time.time(),
+            n_steps=5,
+        )
+        cr.complete_metadata(conn, run_id=run_id, n_steps=5, status="complete")
+    finally:
+        conn.close()
+
+    return ws, slug, run_id

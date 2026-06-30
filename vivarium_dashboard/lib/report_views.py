@@ -560,6 +560,7 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         InvestigationSpecError,
         normalize_dag_edges,
     )
+    from vivarium_dashboard.lib.run_commands import study_run_commands  # noqa: PLC0415
 
     def _normalize_parents(study_spec: dict) -> list:  # type: ignore[return]
         return normalize_dag_edges(study_spec)
@@ -646,6 +647,11 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
                 else None
             ),
             "derived": _study_derivations.derived_block(study_spec),
+            # Task 9: canonical CLI run-command strings (single source of truth)
+            # so the investigation-report SPA can render run-command chips off the
+            # projection without re-deriving — mirrors Task 6's wiring of
+            # load_study_detail_spec for /api/study/<slug>.
+            "run_commands": study_run_commands(study_spec, study_spec.get("name") or ""),
         })
 
     member_statuses = [s.get("status", "planning") for s in studies_out]

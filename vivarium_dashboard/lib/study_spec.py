@@ -698,5 +698,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
                 rc_urls[card] = {"url": "/" + html.relative_to(ws_root).as_posix(),
                                  "verdict": verdict}
         spec["report_card_urls"] = rc_urls
+    from vivarium_dashboard.lib.run_commands import study_run_commands
+    spec["run_commands"] = study_run_commands(spec, name)
     spec["derived"] = _study_derivations.derived_block(spec)
     return spec

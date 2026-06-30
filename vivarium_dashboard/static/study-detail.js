@@ -48,8 +48,34 @@
     if (kind === 'tests') { loadTestsTab(window._study); }
     if (kind === 'visualize') { _loadReadouts(); _loadCharts('viz-charts-panel'); }
     if (kind === 'data') { _loadAnalysisOutputs(); }
+    if (kind === 'simulate') { _renderReproduceCard(); }
   }
   window._setStudyTab = _setStudyTab;
+
+  function _renderReproduceCard() {
+    var host = document.getElementById('reproduce-card');
+    if (!host) return;
+    var rc = (window._study && window._study.run_commands) || null;
+    if (!rc) { host.style.display = 'none'; return; }
+    var e = escapeHtmlForTests;
+    function chip(cmd) {
+      return '<code style="display:inline-block;padding:2px 6px;background:#fff;'
+        + 'border:1px solid #e2e8f0;border-radius:3px">' + e(cmd) + '</code>'
+        + ' <button class="cli-copy" data-cmd="' + e(cmd)
+        + '" style="font-size:0.8em;cursor:pointer">copy</button>';
+    }
+    var html = '<strong>Reproduce / run (CLI)</strong><br/>'
+      + '<div style="margin-top:4px">' + chip(rc.baseline) + '</div>';
+    (rc.variants || []).forEach(function (v) {
+      html += '<div style="margin-top:3px">' + chip(v.cmd) + '</div>';
+    });
+    host.innerHTML = html;
+    host.querySelectorAll('.cli-copy').forEach(function (b) {
+      b.addEventListener('click', function () {
+        navigator.clipboard && navigator.clipboard.writeText(b.dataset.cmd);
+      });
+    });
+  }
 
   // Click a pillar -> reveal its member sub-nav and open its first member panel.
   function _setStudyPillar(pillar) {
