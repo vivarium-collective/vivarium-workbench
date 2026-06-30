@@ -190,10 +190,111 @@ def cmd_migrate_investigations(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_run_composite(args: argparse.Namespace) -> int:
+def cmd_run_composite_worker(args: argparse.Namespace) -> int:
     """CLI handler for the run-composite subcommand — runs one detached composite."""
     from vivarium_dashboard.lib.run_runner import execute
     return execute(Path(args.request))
+
+
+# ---------------------------------------------------------------------------
+# User-facing run/rerun/runs/status/logs helpers
+# ---------------------------------------------------------------------------
+
+def _emit(result: dict, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(result, indent=2, default=str))
+    else:
+        for k, v in result.items():
+            print(f"{k}: {v}")
+
+
+def _parse_params(pairs) -> dict:
+    out = {}
+    for p in (pairs or []):
+        if "=" not in p:
+            raise SystemExit(f"--param must be key=value, got: {p!r}")
+        k, v = p.split("=", 1)
+        try:
+            out[k] = json.loads(v)
+        except Exception:
+            out[k] = v
+    return out
+
+
+def cmd_run_study(args) -> int:
+    from vivarium_dashboard.lib import cli_runs
+    resp, code = cli_runs.run_study(
+        Path(args.workspace).resolve(), args.slug,
+        variant=args.variant, steps=args.steps,
+        params=_parse_params(args.param), dry_run=args.dry_run,
+        detach=args.detach, server=args.server)
+    _emit(resp, args.json)
+    if code < 400 and not args.dry_run and resp.get("run_id"):
+        print(f"\nFollow:  vdash status {resp['run_id']}")
+        print(f"Rerun:   vdash rerun {resp['run_id']}")
+    return 0 if code < 400 else 1
+
+
+def cmd_run_investigation(args) -> int:
+    from vivarium_dashboard.lib import cli_runs
+    studies = args.studies.split(",") if args.studies else None
+    resp, code = cli_runs.run_investigation(
+        Path(args.workspace).resolve(), args.slug,
+        studies=studies, server=args.server)
+    _emit(resp, args.json)
+    return 0 if code < 400 else 1
+
+
+def cmd_run_composite(args) -> int:
+    from vivarium_dashboard.lib import cli_runs
+    emit = args.emit.split(",") if args.emit else None
+    resp, code = cli_runs.run_composite(
+        Path(args.workspace).resolve(), args.spec_id,
+        steps=args.steps, emit_paths=emit,
+        dry_run=args.dry_run, detach=args.detach)
+    _emit(resp, args.json)
+    return 0 if code < 400 else 1
+
+
+def cmd_rerun(args) -> int:
+    from vivarium_dashboard.lib import cli_runs
+    resp, code = cli_runs.rerun(
+        Path(args.workspace).resolve(), args.run_id,
+        steps=args.steps, detach=args.detach)
+    _emit(resp, args.json)
+    return 0 if code < 400 else 1
+
+
+def cmd_runs(args) -> int:
+    from vivarium_dashboard.lib import cli_runs
+    rows = cli_runs.list_study_runs(Path(args.workspace).resolve(), args.slug)
+    if args.json:
+        print(json.dumps(rows, indent=2, default=str))
+    else:
+        for r in rows:
+            print(f"{r['run_id']:50}  {r.get('status',''):10}  "
+                  f"steps={r.get('n_steps','')}")
+    return 0
+
+
+def cmd_status(args) -> int:
+    from vivarium_dashboard.lib import cli_runs
+    _db, row = cli_runs.find_run(Path(args.workspace).resolve(), args.run_id)
+    if row is None:
+        print(f"run not found: {args.run_id}")
+        return 1
+    _emit(row, args.json)
+    return 0
+
+
+def cmd_logs(args) -> int:
+    from vivarium_dashboard.lib import cli_runs
+    text = cli_runs.read_run_log(Path(args.workspace).resolve(), args.run_id)
+    if text is None:
+        print(f"no log for run: {args.run_id}")
+        return 1
+    print(text)
+    return 0
 
 
 def _load_manifest(source: str) -> dict:
@@ -317,7 +418,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_run.add_argument("--request", required=True,
                        help="Path to the run-request JSON file")
-    p_run.set_defaults(func=cmd_run_composite)
+    p_run.set_defaults(func=cmd_run_composite_worker)
 
     p_prep = sub.add_parser(
         "prepare-investigation",
@@ -374,6 +475,67 @@ def main(argv: list[str] | None = None) -> int:
     p_sync.add_argument("--run-post-sync", action="store_true",
                         help="run manifest-declared cache-rebuild commands (executes remote-authored commands)")
     p_sync.set_defaults(func=cmd_sync)
+
+    # ------------------------------------------------------------------
+    # User-facing: run study|investigation|composite, rerun, runs, status, logs
+    # ------------------------------------------------------------------
+    def _add_common(p):
+        p.add_argument("--workspace", default=".")
+        p.add_argument("--json", action="store_true")
+
+    p_run_user = sub.add_parser("run", help="Run a study, investigation, or composite")
+    run_sub = p_run_user.add_subparsers(dest="run_what", required=True)
+
+    rs = run_sub.add_parser("study", help="Run a study's baseline or a variant")
+    rs.add_argument("slug")
+    rs.add_argument("--variant", default=None)
+    rs.add_argument("--steps", type=int, default=None)
+    rs.add_argument("--seed", type=int, default=None)
+    rs.add_argument("--param", action="append", help="key=value (repeatable)")
+    rs.add_argument("--dry-run", action="store_true")
+    rs.add_argument("--detach", action="store_true")
+    rs.add_argument("--server", default=None)
+    _add_common(rs)
+    rs.set_defaults(func=cmd_run_study)
+
+    ri = run_sub.add_parser("investigation", help="Run all studies in an investigation")
+    ri.add_argument("slug")
+    ri.add_argument("--studies", default=None, help="comma-separated subset")
+    ri.add_argument("--server", default=None)
+    _add_common(ri)
+    ri.set_defaults(func=cmd_run_investigation)
+
+    rc = run_sub.add_parser("composite", help="Run a catalog composite for N steps")
+    rc.add_argument("spec_id")
+    rc.add_argument("--steps", type=int, default=5)
+    rc.add_argument("--emit", default=None, help="comma-separated store paths")
+    rc.add_argument("--dry-run", action="store_true")
+    rc.add_argument("--detach", action="store_true")
+    _add_common(rc)
+    rc.set_defaults(func=cmd_run_composite)
+
+    pr = sub.add_parser("rerun", help="Re-run a recorded run with its exact config")
+    pr.add_argument("run_id")
+    pr.add_argument("--steps", type=int, default=None)
+    pr.add_argument("--detach", action="store_true")
+    _add_common(pr)
+    pr.set_defaults(func=cmd_rerun)
+
+    pl = sub.add_parser("runs", help="List a study's recorded runs")
+    pl.add_argument("slug")
+    _add_common(pl)
+    pl.set_defaults(func=cmd_runs)
+
+    pst = sub.add_parser("status", help="Show one run's state + progress")
+    pst.add_argument("run_id")
+    _add_common(pst)
+    pst.set_defaults(func=cmd_status)
+
+    plog = sub.add_parser("logs", help="Print a run's log")
+    plog.add_argument("run_id")
+    plog.add_argument("--follow", action="store_true")
+    _add_common(plog)
+    plog.set_defaults(func=cmd_logs)
 
     args = parser.parse_args(argv)
     return args.func(args)
