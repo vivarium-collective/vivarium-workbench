@@ -41,6 +41,22 @@ from vivarium_dashboard.lib import study_spec
 from vivarium_dashboard.lib.study_crud_mutations import _study_name_from_body
 
 
+def _resolve_study_dir(ws_root, name):
+    """Resolve a study's directory honoring the workspace ``layout:`` map.
+
+    Uses :class:`WorkspacePaths` (nested investigations/<inv>/studies/<s> and
+    relocated layouts), falling back to the classic flat ``studies/<name>`` /
+    ``investigations/<name>`` paths for legacy studies whose dir lacks a
+    ``study.yaml`` (so WorkspacePaths' study.yaml gate skips them).
+    """
+    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+    try:
+        return WorkspacePaths.load(ws_root).study_dir(name)
+    except FileNotFoundError:
+        flat = ws_root / "studies" / name
+        return flat if flat.is_dir() else ws_root / "investigations" / name
+
+
 def run_study_baseline(ws_root, body):
     """Run a Study's baseline composite. Returns (response_dict, status_code).
 
@@ -55,8 +71,7 @@ def run_study_baseline(ws_root, body):
     if not name:
         return {"error": "missing study"}, 400
     # Resolve study dir from ws_root so _for_test callers don't need WORKSPACE patched.
-    studies_path = ws_root / "studies" / name
-    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / name
+    study_dir = _resolve_study_dir(ws_root, name)
     sf = study_spec.study_spec_file(study_dir)
     if not sf.is_file():
         return {"error": "study not found"}, 404
@@ -252,10 +267,9 @@ def run_study_variant(ws_root, body):
     variant_name = (body.get("variant") or "").strip()
     if not name or not variant_name:
         return {"error": "missing study or variant"}, 400
-    # Resolve study dir from ws_root (matches Task 5 pattern; supports
-    # standalone tests without monkeypatching WORKSPACE).
-    studies_path = ws_root / "studies" / name
-    study_dir = studies_path if studies_path.is_dir() else ws_root / "investigations" / name
+    # Resolve study dir from ws_root (honors layout:; supports standalone tests
+    # without monkeypatching WORKSPACE).
+    study_dir = _resolve_study_dir(ws_root, name)
     sf = study_spec.study_spec_file(study_dir)
     if not sf.is_file():
         return {"error": "study not found"}, 404

@@ -85,23 +85,20 @@ def test_rerun_replays_recorded_overrides(tmp_path, monkeypatch):
     finally:
         conn.close()
 
-    # Monkeypatch composite_test_run to capture the body and return a fake response.
-    # The import is local inside run_composite, so we patch at the module level.
-    import sys
-    from types import ModuleType
+    # Monkeypatch composite_test_run to capture the body and return a fake
+    # response. run_composite does `from vivarium_dashboard.lib import
+    # composite_test_run_views`, which resolves the module as a package
+    # attribute once any earlier test has imported it — so patch the function
+    # ON the real module object (not a sys.modules swap, which that attribute
+    # binding bypasses).
+    from vivarium_dashboard.lib import composite_test_run_views as _ctrv
     captured = {}
 
     def fake_composite_test_run(ws_root, body):
         captured["body"] = dict(body)
         return {"run_id": "x"}, 202
 
-    fake_mod = ModuleType("vivarium_dashboard.lib.composite_test_run_views")
-    fake_mod.composite_test_run = fake_composite_test_run  # type: ignore[attr-defined]
-    monkeypatch.setitem(
-        sys.modules,
-        "vivarium_dashboard.lib.composite_test_run_views",
-        fake_mod,
-    )
+    monkeypatch.setattr(_ctrv, "composite_test_run", fake_composite_test_run)
 
     resp, code = cli_runs.rerun(ws, run_id)
     assert code == 202
