@@ -194,6 +194,14 @@ def set_pid(conn: sqlite3.Connection, *, run_id: str, pid: int) -> None:
     conn.commit()
 
 
+def query_all_runs(conn: sqlite3.Connection) -> list[dict]:
+    """All runs in this DB, newest first (any spec_id)."""
+    cur = conn.execute(
+        "SELECT * FROM runs_meta ORDER BY started_at DESC")
+    cols = [d[0] for d in cur.description]
+    return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
 def mark_orphaned(conn: sqlite3.Connection, *, run_id: str) -> None:
     """Mark a run whose process died without writing a terminal status."""
     conn.execute(

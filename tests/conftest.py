@@ -180,3 +180,38 @@ def fixture_study_ws(tmp_path):
     )
 
     return ws, slug
+
+
+@pytest.fixture
+def fixture_study_with_recorded_run(fixture_study_ws):
+    """Return (ws_path, study_slug, run_id) with a recorded run in runs.db.
+
+    Builds on fixture_study_ws and seeds the study's runs.db with one
+    completed run via composite_runs helpers so find_run / list_study_runs
+    can locate it without spinning up a real simulation.
+    """
+    import time
+    from vivarium_dashboard.lib import composite_runs as cr
+
+    ws, slug = fixture_study_ws
+    study_dir = ws / "studies" / slug
+    db_file = str(study_dir / "runs.db")
+
+    spec_id = "pbg_demo.composites.demo"
+    run_id = cr.generate_run_id(spec_id, {"seed": 42})
+    conn = cr.connect(db_file)
+    try:
+        cr.save_metadata(
+            conn,
+            spec_id=spec_id,
+            run_id=run_id,
+            params={"seed": 42},
+            label="baseline",
+            started_at=time.time(),
+            n_steps=5,
+        )
+        cr.complete_metadata(conn, run_id=run_id, n_steps=5, status="complete")
+    finally:
+        conn.close()
+
+    return ws, slug, run_id
