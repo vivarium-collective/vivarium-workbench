@@ -77,6 +77,23 @@ def test_unresolved_study_composite_refs_empty_when_all_resolve():
     assert cl.unresolved_study_composite_refs(spec, known) == []
 
 
+def test_unresolved_study_composite_refs_resolves_short_slug_alias():
+    """A study declaring the short alias ``baseline`` must resolve against the
+    registered dotted id ``pkg.composites.baseline`` — even though the canonical
+    pbg_superpowers linter is a strict membership test that would flag it.
+
+    Regression: every v2ecoli study uses ``conditions.baseline.composite:
+    baseline``; without the local alias match they all false-flagged as
+    "composite not found in registry: baseline".
+    """
+    known = {"v2ecoli.composites.baseline", "v2ecoli.composites.baseline.baseline"}
+    spec = {"conditions": {"baseline": {"composite": "baseline"}}}
+    assert cl.unresolved_study_composite_refs(spec, known) == []
+    # A genuinely-unregistered ref is still flagged.
+    bogus = {"conditions": {"baseline": {"composite": "totally_made_up"}}}
+    assert cl.unresolved_study_composite_refs(bogus, known) == ["totally_made_up"]
+
+
 # ---------------------------------------------------------------------------
 # known_composite_ids over a real (tiny) workspace
 # ---------------------------------------------------------------------------
