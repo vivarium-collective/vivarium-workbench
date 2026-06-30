@@ -152,6 +152,112 @@ class SmsApiClient:
             params["observables"] = observables  # list → repeated key via doseq
         return self._post("/api/v1/simulations", params=params)
 
+    # ------------------------------------------------------------------
+    # Compose endpoints (generic .pbg runner, Phase C)
+    # ------------------------------------------------------------------
+
+    def compose_check(self, pbg_bytes: bytes) -> dict:
+        """GET /compose/v1/simulation/check — verify compose endpoint reachability.
+
+        Raises :exc:`SmsApiError` if the server is unreachable or returns a
+        non-200 status.
+        """
+        return self._get("/compose/v1/simulation/check")
+
+    def compose_submit(
+        self,
+        pbg_bytes: bytes,
+        extra_pip_deps: list[str] | None = None,
+        interval_time: float = 1.0,
+        filename: str = "composite.pbg",
+    ) -> int:
+        """POST /compose/v1/simulation/run — submit a .pbg file for execution.
+
+        The file is uploaded as multipart/form-data with the field name
+        ``uploaded_file`` (required by the sms-api endpoint).  Any
+        ``extra_pip_deps`` are appended as repeated ``extra_pip_deps`` query
+        parameters so the container can install them before running.
+
+        Parameters
+        ----------
+        pbg_bytes:
+            Raw bytes of the ``.pbg`` JSON document.
+        extra_pip_deps:
+            Additional pip-installable dependencies (e.g.
+            ``["git+https://github.com/org/repo.git@sha"]``).
+        interval_time:
+            Step interval forwarded to the sms-api run endpoint.
+        filename:
+            Filename reported in the multipart header (cosmetic).
+
+        Returns
+        -------
+        int
+            ``simulation_database_id`` from the response.
+        """
+        boundary = "----vivdash00boundary"
+        body = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="uploaded_file"; filename="{filename}"\r\n'
+            "Content-Type: application/octet-stream\r\n"
+            "\r\n"
+        ).encode() + pbg_bytes + f"\r\n--{boundary}--\r\n".encode()
+        content_type = f"multipart/form-data; boundary={boundary}"
+
+        params: dict = {"interval_time": interval_time}
+        if extra_pip_deps:
+            params["extra_pip_deps"] = extra_pip_deps  # list → repeated key via doseq
+
+        url = self.base_url + "/compose/v1/simulation/run"
+        if params:
+            url = f"{url}?{urlencode(params, doseq=True)}"
+
+        req = Request(
+            url,
+            data=body,
+            method="POST",
+            headers={"Accept": "application/json", "Content-Type": content_type},
+        )
+        try:
+            with urlopen(req, timeout=self.timeout) as r:  # noqa: S310
+                data = json.loads(r.read().decode())
+        except HTTPError as e:
+            raise SmsApiError(f"POST {url} -> {e.code}") from e
+        except (URLError, OSError) as e:
+            raise SmsApiError(
+                f"POST {url} failed (sms-api unreachable — is the tunnel up?): {e}"
+            ) from e
+        return int(data["simulation_database_id"])
+
+    def compose_status(self, task_id: int) -> dict:
+        """GET /compose/v1/simulation/{id}/status — poll run status."""
+        return self._get(f"/compose/v1/simulation/{task_id}/status")
+
+    def download_compose_results(self, sim_id: int, dest: Path, timeout: float | None = None) -> Path:
+        """GET /compose/v1/simulation/{id}/results — stream results.zip to dest.
+
+        Returns
+        -------
+        Path
+            ``dest / "results.zip"``
+        """
+        dest = Path(dest)
+        dest.mkdir(parents=True, exist_ok=True)
+        out_path = dest / "results.zip"
+        url = f"{self.base_url}/compose/v1/simulation/{sim_id}/results"
+        req = Request(url, method="GET", headers={"Accept": "application/zip"})
+        to = timeout if timeout is not None else self.timeout
+        try:
+            with urlopen(req, timeout=to) as r, open(out_path, "wb") as f:  # noqa: S310
+                shutil.copyfileobj(r, f)
+        except HTTPError as e:
+            raise SmsApiError(f"GET {url} -> {e.code}") from e
+        except (URLError, OSError) as e:
+            raise SmsApiError(
+                f"GET {url} failed (sms-api unreachable — is the tunnel up?): {e}"
+            ) from e
+        return out_path
+
     def download_data(self, simulation_id: int, dest_dir: Path, timeout: float | None = None) -> Path:
         """Stream the run's native-store tar.gz (POST /data) to dest_dir/sim_<id>.tar.gz."""
         dest_dir = Path(dest_dir)
