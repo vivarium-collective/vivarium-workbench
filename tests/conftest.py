@@ -162,6 +162,7 @@ def fixture_study_ws(tmp_path):
         _yaml.safe_dump({
             "schema_version": 4,
             "name": slug,
+            "question": "Does the demo composite run correctly?",
             "conditions": {
                 "baseline": {
                     "composite": composite_id,
