@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import sys
+import time
 import warnings
 from pathlib import Path
 
@@ -223,10 +224,13 @@ def _parse_params(pairs) -> dict:
 
 def cmd_run_study(args) -> int:
     from vivarium_dashboard.lib import cli_runs
+    params = _parse_params(args.param)
+    if args.seed is not None:
+        params["seed"] = args.seed
     resp, code = cli_runs.run_study(
         Path(args.workspace).resolve(), args.slug,
         variant=args.variant, steps=args.steps,
-        params=_parse_params(args.param), dry_run=args.dry_run,
+        params=params, dry_run=args.dry_run,
         detach=args.detach, server=args.server)
     _emit(resp, args.json)
     if code < 400 and not args.dry_run and resp.get("run_id"):
@@ -253,6 +257,9 @@ def cmd_run_composite(args) -> int:
         steps=args.steps, emit_paths=emit,
         dry_run=args.dry_run, detach=args.detach)
     _emit(resp, args.json)
+    if code < 400 and not args.dry_run and resp.get("run_id"):
+        print(f"\nFollow:  vdash status {resp['run_id']}")
+        print(f"Rerun:   vdash rerun {resp['run_id']}")
     return 0 if code < 400 else 1
 
 
@@ -287,13 +294,38 @@ def cmd_status(args) -> int:
     return 0
 
 
+_TERMINAL_STATUSES = {"completed", "failed", "cancelled", "error", "complete", "orphaned"}
+
+
 def cmd_logs(args) -> int:
     from vivarium_dashboard.lib import cli_runs
-    text = cli_runs.read_run_log(Path(args.workspace).resolve(), args.run_id)
+    ws = Path(args.workspace).resolve()
+    text = cli_runs.read_run_log(ws, args.run_id)
     if text is None:
         print(f"no log for run: {args.run_id}")
         return 1
     print(text)
+    if not args.follow:
+        return 0
+
+    # Check if already terminal — if so, nothing to follow.
+    _db, row = cli_runs.find_run(ws, args.run_id)
+    if row is None or row.get("status") in _TERMINAL_STATUSES:
+        return 0
+
+    # Poll for appended content until terminal status or timeout.
+    printed = len(text)
+    deadline = time.monotonic() + 1800
+    while time.monotonic() < deadline:
+        time.sleep(1)
+        new_text = cli_runs.read_run_log(ws, args.run_id)
+        if new_text and len(new_text) > printed:
+            sys.stdout.write(new_text[printed:])
+            sys.stdout.flush()
+            printed = len(new_text)
+        _db, row = cli_runs.find_run(ws, args.run_id)
+        if row is None or row.get("status") in _TERMINAL_STATUSES:
+            break
     return 0
 
 
