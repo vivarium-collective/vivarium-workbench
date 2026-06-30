@@ -69,6 +69,7 @@ from vivarium_dashboard.lib import active_workspace
 from vivarium_dashboard.lib import study_viz_views as _study_viz
 from vivarium_dashboard.lib import system_info as _system_info_lib
 from vivarium_dashboard.lib import download_views as _download_views
+from vivarium_dashboard.lib import analysis_outputs as _analysis_outputs
 from vivarium_dashboard.lib import events as _events_lib
 from vivarium_dashboard.lib import metadata_mutations as _meta_mut
 from vivarium_dashboard.lib import study_crud_mutations as _study_crud_lib
@@ -3251,6 +3252,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_investigation_detail()
         if self.path.startswith("/api/investigations"):
             return self._get_investigations()
+        if self.path.startswith("/api/study-analysis-outputs"):
+            return self._get_study_analysis_outputs()
+        if self.path.startswith("/api/study-analysis-file"):
+            return self._get_study_analysis_file()
+        if self.path.startswith("/api/study-analysis-zip"):
+            return self._get_study_analysis_zip()
         if self.path.startswith("/api/study-export"):
             return self._get_study_export()
         if self.path.startswith("/api/composites"):
@@ -7530,6 +7537,55 @@ class Handler(BaseHTTPRequestHandler):
             "tests": result.tests,
             "note": result.note,
         }, 200)
+
+    def _get_study_analysis_outputs(self):
+        """GET /api/study-analysis-outputs?study=<slug> — list result CSV/TSV files."""
+        from urllib.parse import urlparse, parse_qs
+        params = parse_qs(urlparse(self.path).query)
+        slug = (params.get("study", [""])[0] or "").strip()
+        try:
+            body = _analysis_outputs.list_analysis_outputs(WORKSPACE, slug)
+        except _download_views.DownloadError as exc:
+            return self._json(exc.body, exc.status)
+        return self._json(body, 200)
+
+    def _get_study_analysis_file(self):
+        """GET /api/study-analysis-file?study=<slug>&path=<relpath> — serve one file."""
+        from urllib.parse import urlparse, parse_qs
+        params = parse_qs(urlparse(self.path).query)
+        slug = (params.get("study", [""])[0] or "").strip()
+        relpath = (params.get("path", [""])[0] or "").strip()
+        try:
+            data, mime, filename = _analysis_outputs.resolve_analysis_output(
+                WORKSPACE, slug, relpath
+            )
+        except _download_views.DownloadError as exc:
+            return self._json(exc.body, exc.status)
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _get_study_analysis_zip(self):
+        """GET /api/study-analysis-zip?study=<slug> — zip all result files."""
+        from urllib.parse import urlparse, parse_qs
+        params = parse_qs(urlparse(self.path).query)
+        slug = (params.get("study", [""])[0] or "").strip()
+        try:
+            data, filename = _analysis_outputs.build_analysis_outputs_zip(
+                WORKSPACE, slug
+            )
+        except _download_views.DownloadError as exc:
+            return self._json(exc.body, exc.status)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/zip")
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def _get_study_export(self):
         """GET /api/study-export?study=<name>"""
