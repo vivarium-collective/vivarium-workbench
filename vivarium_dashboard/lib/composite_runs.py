@@ -199,7 +199,15 @@ def query_all_runs(conn: sqlite3.Connection) -> list[dict]:
     cur = conn.execute(
         "SELECT * FROM runs_meta ORDER BY started_at DESC")
     cols = [d[0] for d in cur.description]
-    return [dict(zip(cols, row)) for row in cur.fetchall()]
+    out = []
+    for row in cur.fetchall():
+        d = dict(zip(cols, row))
+        try:
+            d["params"] = json.loads(d.pop("params_json") or "{}")
+        except json.JSONDecodeError:
+            d["params"] = {}
+        out.append(d)
+    return out
 
 
 def mark_orphaned(conn: sqlite3.Connection, *, run_id: str) -> None:

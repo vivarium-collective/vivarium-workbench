@@ -41,6 +41,7 @@ def run_study(ws_root, study, *, variant=None, steps=None, params=None,
     if variant:
         body["variant"] = variant
     if server:
+        # dry_run is a local-only preview; intentionally not forwarded to the server.
         route = "/api/study-run-variant" if variant else "/api/study-run-baseline"
         return _post_server(server, route, body)
     if dry_run:
@@ -61,15 +62,19 @@ def run_investigation(ws_root, name, *, studies=None, server=None) -> tuple[dict
 
 
 def run_composite(ws_root, spec_id, *, steps=5, emit_paths=None,
-                  dry_run=False, detach=False) -> tuple[dict, int]:
+                  params=None, dry_run=False, detach=False) -> tuple[dict, int]:
     from vivarium_dashboard.lib import composite_test_run_views
     body = {"id": spec_id, "steps": int(steps),
             "emit_paths": list(emit_paths or [])}
+    if params:
+        body["overrides"] = dict(params)
     if dry_run:
-        run_id = cr.generate_run_id(spec_id, {})
+        run_id = cr.generate_run_id(spec_id, params or {})
         return {"dry_run": True, "request": {
             "spec_id": spec_id, "steps": int(steps),
-            "emit_paths": list(emit_paths or []), "run_id": run_id}}, 200
+            "emit_paths": list(emit_paths or []),
+            "overrides": dict(params or {}),
+            "run_id": run_id}}, 200
     return composite_test_run_views.composite_test_run(ws_root, body)
 
 
@@ -111,7 +116,7 @@ def rerun(ws_root, run_id, *, steps=None, detach=False) -> tuple[dict, int]:
     overrides = row.get("params") or {}
     n_steps = int(steps) if steps is not None else int(row.get("n_steps") or 5)
     return run_composite(ws_root, row["spec_id"], steps=n_steps,
-                         emit_paths=[], detach=detach)
+                         params=overrides, emit_paths=[], detach=detach)
 
 
 def read_run_log(ws_root, run_id) -> str | None:
