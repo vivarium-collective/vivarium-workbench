@@ -1035,6 +1035,11 @@
 
 {# ─── Simulate tab: Simulations + Runs ─────────────────────────────── #}
 <section class="study-tab-panel" data-kind="simulate" id="panel-simulate" hidden>
+
+  <div id="reproduce-card" class="reproduce-card"
+       style="margin:0 0 14px 0;padding:10px 12px;background:#f8fafc;
+              border:1px solid #e2e8f0;border-radius:6px;font-size:0.9em"></div>
+
 {% if study.simulation_set or study.baseline or study.runs %}
 
   {# Auto-derived from baseline (composite + params) + runs + robustness, so the
