@@ -1,11 +1,12 @@
 """HTTP-free builders for the composite-run read routes.
 
-These are the library seam behind four dashboard GET routes:
+These are the library seam behind five dashboard GET routes:
 
   * ``GET /api/composite-runs?spec_id=X``            → :func:`build_composite_runs`
   * ``GET /api/composite-run/{run_id}``              → :func:`build_composite_run`
   * ``GET /api/composite-run/{run_id}/state?step=N`` → :func:`build_composite_run_state`
   * ``GET /api/composite-run/{run_id}/status``       → :func:`build_composite_run_status`
+  * ``GET /api/composite-run/{run_id}/download``     → :func:`build_composite_run_zip`
 
 All read from the workspace's ``.pbg/composite-runs.db`` via ``lib.composite_runs``.
 Pure ``ws_root``-parameterised functions: NO ``import server`` (docstring reference only).
@@ -15,11 +16,15 @@ The FastAPI app (``api/app.py``) imports these builders directly; ``server.py``'
 """
 from __future__ import annotations
 
+import io
 import json
+import zipfile
 from pathlib import Path
 
 from vivarium_dashboard.lib import composite_runs as cr
 from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+
+_TERMINAL_STATUSES = {"completed", "failed", "orphaned"}
 
 
 def _db_file(ws_root: Path) -> Path:
@@ -171,3 +176,50 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
     else:
         resp["downloadable"] = False
     return resp, 200
+
+
+def _run_is_terminal(ws_root, run_id: str) -> bool:
+    """Return True iff the run's status is terminal (completed/failed/orphaned).
+
+    Reuses the same ``connect`` + ``query_run_meta`` path as
+    :func:`build_composite_run_status` — no parallel DB read.
+    Returns False when the DB is absent or ``run_id`` is unknown.
+    """
+    db = _db_file(Path(ws_root))
+    if not db.is_file():
+        return False
+    conn = cr.connect(db)
+    try:
+        meta = cr.query_run_meta(conn, run_id=run_id)
+    finally:
+        conn.close()
+    if meta is None:
+        return False
+    return meta["status"] in _TERMINAL_STATUSES
+
+
+def build_composite_run_zip(ws_root, run_id: str) -> tuple[bytes, str, int]:
+    """Zip the run directory for ``GET /api/composite-run/{run_id}/download``.
+
+    Mirrors ``lib.analysis_outputs.build_analysis_outputs_zip`` using
+    ``io.BytesIO`` + ``zipfile.ZIP_DEFLATED``.
+
+    Returns ``(zip_bytes, filename, http_status)``:
+
+    * HTTP 404 — run directory is absent (run never wrote results).
+    * HTTP 409 — run exists but is not in a terminal state; download not yet safe.
+    * HTTP 200 — success; ``zip_bytes`` is a valid ZIP archive of every file in
+      the run directory except ``request.json`` (implementation detail).
+    """
+    run_dir = WorkspacePaths.load(ws_root).pbg / "runs" / run_id
+    fname = f"run_{run_id}.zip"
+    if not run_dir.is_dir():
+        return b"", fname, 404
+    if not _run_is_terminal(ws_root, run_id):
+        return b"", fname, 409
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for src in sorted(run_dir.rglob("*")):
+            if src.is_file() and src.name != "request.json":
+                zf.write(src, str(src.relative_to(run_dir)))
+    return buf.getvalue(), fname, 200
