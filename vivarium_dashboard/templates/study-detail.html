@@ -696,7 +696,7 @@
         {{ b.name or 'baseline' }}
         {% if b.composite %}
         <button type="button" class="action-btn" style="margin-left:8px;font-size:0.82em"
-                onclick="_openCompositeLoom('{{ b.composite }}')">🧬 {{ b.composite.split('.composites.')[-1] if '.composites.' in b.composite else b.composite }} — explore in bigraph-loom ↗</button>
+                onclick="_openCompositeLoom('{{ b.composite }}')">🧬 {{ b.composite.split('.composites.')[-1] if '.composites.' in b.composite else b.composite }} — configure & run ↗</button>
         {% endif %}
       </div>
       {% if b.params %}
