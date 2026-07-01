@@ -143,6 +143,7 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
         "n_steps": meta.get("n_steps"),
         "heartbeat_at": meta.get("heartbeat_at"),
     }
+    resp["downloadable"] = False
     if meta["status"] in ("failed", "orphaned"):
         log_rel = meta.get("log_path")
         if log_rel:

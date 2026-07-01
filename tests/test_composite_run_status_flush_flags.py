@@ -91,6 +91,33 @@ def test_completed_run_no_report_no_analyses_when_files_absent(tmp_path):
     assert body["downloadable"] is True
 
 
+def test_failed_run_downloadable_false(tmp_path):
+    """A failed run → status=='failed' and downloadable key present and False."""
+    run_id = "rF"
+    pbg = tmp_path / ".pbg"
+    pbg.mkdir(parents=True, exist_ok=True)
+    db_file = pbg / "composite-runs.db"
+    conn = connect(db_file)
+    save_metadata(
+        conn,
+        spec_id="pkg.composites.demo",
+        run_id=run_id,
+        params={},
+        label="",
+        started_at=0.0,
+        n_steps=5,
+    )
+    complete_metadata(conn, run_id=run_id, n_steps=5, status="failed")
+    conn.close()
+
+    body, code = crv.build_composite_run_status(tmp_path, run_id)
+
+    assert code == 200
+    assert body["status"] == "failed"
+    assert "downloadable" in body, "downloadable key must be present for failed runs"
+    assert body["downloadable"] is False
+
+
 def test_non_completed_run_downloadable_false(tmp_path):
     """A running (non-completed) run → downloadable False."""
     run_id = "rW"
