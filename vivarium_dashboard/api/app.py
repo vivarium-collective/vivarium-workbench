@@ -2026,6 +2026,36 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=status, content=body)
 
     @app.get(
+        "/api/composite-run/{run_id}/download",
+        tags=["Composites"],
+        summary="Download run results as a ZIP archive",
+        response_class=Response,
+    )
+    def composite_run_download_route(
+        run_id: str,
+        ws: Path = Depends(get_workspace),
+    ) -> Response:
+        """Zip the run directory and serve it as ``application/zip``.
+
+        Mirrors stdlib ``GET /api/composite-run/<run_id>/download``.
+
+        HTTP 404 — run directory absent.  HTTP 409 — run not in a terminal
+        state.  HTTP 200 — ZIP of every file in the run dir except
+        ``request.json``.
+
+        Library-backed via ``lib.composite_run_views.build_composite_run_zip``.
+        """
+        data, fname, code = _cr_views.build_composite_run_zip(ws, run_id)
+        if code != 200:
+            return JSONResponse(status_code=code,
+                                content={"error": f"run not downloadable ({code})"})
+        return Response(
+            content=data,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+
+    @app.get(
         "/api/composite-run/{run_id}",
         response_model=CompositeRunTrajectory,
         tags=["Composites"],
