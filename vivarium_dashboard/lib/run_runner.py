@@ -480,6 +480,12 @@ def execute(request_path: Path) -> int:
             spec_id=req.spec_id, db_file=req.db_file, run_id=req.run_id,
             core=core,
         )
+        try:
+            from vivarium_dashboard.lib.composite_flush import run_flush
+            run_flush(run_dir, req=req, spec_id=req.spec_id,
+                      db_file=req.db_file, run_id=req.run_id, core=core)
+        except Exception:
+            traceback.print_exc()   # flush must never fail the run
         cr.complete_metadata(conn, run_id=req.run_id, n_steps=req.steps,
                              status="completed")
         print(f"run {req.run_id} completed: {req.steps} steps", flush=True)
