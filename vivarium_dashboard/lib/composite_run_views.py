@@ -152,10 +152,21 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
                 resp["error"] = log_full.read_text(encoding="utf-8")[-2000:]
     elif meta["status"] == "completed":
         wp = WorkspacePaths.load(ws_root)
-        viz_file = wp.pbg / "runs" / run_id / "viz.json"
+        run_dir = wp.pbg / "runs" / run_id
+        viz_file = run_dir / "viz.json"
         if viz_file.is_file():
             try:
                 resp["viz_html"] = json.loads(viz_file.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 pass
+        analyses_file = run_dir / "analyses.json"
+        has_analyses = False
+        if analyses_file.is_file():
+            content = analyses_file.read_text(encoding="utf-8").strip()
+            has_analyses = content not in ("", "[]")
+        resp["has_analyses"] = has_analyses
+        resp["has_report"] = (run_dir / "report.html").is_file()
+        resp["downloadable"] = True
+    else:
+        resp["downloadable"] = False
     return resp, 200
