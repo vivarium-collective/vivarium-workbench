@@ -689,14 +689,14 @@
   {% if study.baseline %}
   <div class="overview-section" id="model-section">
     <h3>Model <span class="muted" style="font-size:0.85em;font-weight:normal">— the composite(s) this study runs</span></h3>
-    <p class="muted" style="font-size:0.88em">Every study runs at least one composite. Click a composite to open a static view in the bigraph-loom explorer.</p>
+    <p class="muted" style="font-size:0.88em">Every study runs at least one composite. Click a composite to open it in the bigraph-loom explorer — live: configure &amp; run; published bundle: read-only wiring view.</p>
     {% for b in study.baseline %}
     <div class="cond-block">
       <div class="cond-block-title">
         {{ b.name or 'baseline' }}
         {% if b.composite %}
         <button type="button" class="action-btn" style="margin-left:8px;font-size:0.82em"
-                onclick="_openCompositeLoom('{{ b.composite }}')">🧬 {{ b.composite.split('.composites.')[-1] if '.composites.' in b.composite else b.composite }} — explore in bigraph-loom ↗</button>
+                onclick="_openCompositeLoom('{{ b.composite }}')">🧬 {{ b.composite.split('.composites.')[-1] if '.composites.' in b.composite else b.composite }} — configure & run ↗</button>
         {% endif %}
       </div>
       {% if b.params %}
@@ -1048,7 +1048,7 @@
   {% if study.baseline or study.runs %}
   <div class="overview-section" id="ran-section">
     <h3>What we ran <span class="muted" style="font-size:0.85em;font-weight:normal">(composite + parameters)</span></h3>
-    <p class="muted" style="font-size:0.88em">The composite(s) this study simulated, their parameters, replication, and run status. Click a composite to open a static view in bigraph-loom.</p>
+    <p class="muted" style="font-size:0.88em">The composite(s) this study simulated, their parameters, replication, and run status. Click a composite to open it in the bigraph-loom explorer — live: configure &amp; run; published bundle: read-only wiring view.</p>
     {% if study.baseline %}
     <table class="cond-table" style="width:100%;border-collapse:collapse">
       <thead><tr><th style="text-align:left">Run</th><th style="text-align:left">Composite</th><th style="text-align:left">Parameters</th><th style="text-align:left">Replication</th><th style="text-align:left">Status</th></tr></thead>

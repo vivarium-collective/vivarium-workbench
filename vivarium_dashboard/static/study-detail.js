@@ -371,10 +371,15 @@
     var origin = (typeof location !== 'undefined' && location.origin
                   && /^https?:/.test(location.origin)) ? location.origin : '';
     var base = origin + (isSnap ? (cfg.basePath || '') : '');
-    var stateUrl = isSnap
-      ? base + '/api/composite-state/' + encodeURIComponent(composite) + '.json'
-      : base + '/api/composite-state?ref=' + encodeURIComponent(composite);
-    var u = base + '/bigraph-loom/index.html?static=1&stateUrl=' + encodeURIComponent(stateUrl);
+    var u;
+    if (isSnap) {
+      // Published bundle: no live backend → read-only wiring from a static snapshot.
+      var stateUrl = base + '/api/composite-state/' + encodeURIComponent(composite) + '.json';
+      u = base + '/bigraph-loom/index.html?static=1&stateUrl=' + encodeURIComponent(stateUrl);
+    } else {
+      // Live dashboard: full Setup & Run (loom self-hydrates via ?id= → /api/composite-state?ref=).
+      u = base + '/bigraph-loom/index.html?id=' + encodeURIComponent(composite);
+    }
     window.open(u, 'loom', 'width=1200,height=840');
   }
   window._openCompositeLoom = _openCompositeLoom;

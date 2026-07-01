@@ -1309,34 +1309,15 @@ window.addEventListener('pageshow', function (e) {
       <p><strong>Module:</strong> <code id="ce-module"></code> <span id="ce-kind" class="kind-badge"></span></p>
     </div>
 
-    <!-- Explorer view tabs: Wiring viewer | Configure & Run -->
-    <nav class="ce-page-tabs" aria-label="Composite views">
-      <button type="button" class="ce-page-tab active" data-cepanel="viewer" onclick="_ceShowPanel('viewer')">Wiring viewer</button>
-      <button type="button" class="ce-page-tab" data-cepanel="configure" onclick="_ceShowPanel('configure')">&#9881; Configure &amp; Run</button>
-    </nav>
-
-    <!-- Wiring viewer panel: the loom-explore iframe (internal View/Run/Document tabs live inside) -->
-    <div class="ce-page-panel" data-cepanel="viewer">
-      <div class="panel">
-        <div class="loom-frame-toolbar" style="display:flex;justify-content:flex-end;margin-bottom:6px">
-          <button class="btn-mini" onclick="_popoutLoom('composite-explore-frame')" title="Open in a separate window. If it opens as a tab, your browser's 'open new pages as tabs' preference is overriding the popup hint (Safari → Tabs → 'Open pages in tabs instead of windows' → set to 'Manually').">Pop out &#8599;</button>
-        </div>
-        <iframe id="composite-explore-frame"
-                src="/bigraph-loom/index.html"
-                title="Composite Explorer"
-                style="width:100%;height:720px;border:1px solid #ddd;background:#fff"></iframe>
+    <!-- Loom explorer: bigraph-loom iframe (Setup & Run tab lives inside) -->
+    <div class="panel">
+      <div class="loom-frame-toolbar" style="display:flex;justify-content:flex-end;margin-bottom:6px">
+        <button class="btn-mini" onclick="_popoutLoom('composite-explore-frame')" title="Open in a separate window. If it opens as a tab, your browser's 'open new pages as tabs' preference is overriding the popup hint (Safari → Tabs → 'Open pages in tabs instead of windows' → set to 'Manually').">Pop out &#8599;</button>
       </div>
-    </div>
-
-    <!-- Configure & Run panel -->
-    <div class="ce-page-panel" data-cepanel="configure" hidden>
-      <!-- Post-run actions: shown after a successful test run via explore:run-complete postMessage -->
-      <div id="ce-post-run-bar" style="display:none;margin-bottom:14px;padding:12px 16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;align-items:center;gap:12px">
-        <span style="flex:1;color:#166534;font-size:0.9em">Run complete. Save this run as a Study to track variants and conclusions.</span>
-        <button id="save-as-study-btn" class="action-btn" onclick="_ceOpenSaveAsStudyModal()" style="background:#16a34a;border-color:#16a34a">Save as Study</button>
-      </div>
-      <!-- Configure & Run widget (SP-C) — mounts when a composite is resolved -->
-      <div id="ce-configure-run"></div>
+      <iframe id="composite-explore-frame"
+              src="/bigraph-loom/index.html"
+              title="Composite Explorer"
+              style="width:100%;height:720px;border:1px solid #ddd;background:#fff"></iframe>
     </div>
 
   </div>
@@ -1685,38 +1666,6 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
      for CLI tooling. -->
 <script src="assets/investigation-switcher.js"></script>
 <script src="assets/branch-source.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
-<script src="assets/configure-run.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* configure-run unavailable */"></script>
-<script>
-// Configure & Run widget integration for Composite Explorer.
-// Wraps _initCompositeExplorer (defined in walkthrough.js) to mount the widget
-// once a composite is resolved and the explorer page is shown.
-(function() {
-  // Switch the explorer between the wiring-viewer panel and the Configure & Run panel.
-  window._ceShowPanel = function(name) {
-    document.querySelectorAll('.ce-page-tab').forEach(function (b) {
-      b.classList.toggle('active', b.getAttribute('data-cepanel') === name);
-    });
-    document.querySelectorAll('.ce-page-panel').forEach(function (p) {
-      p.hidden = (p.getAttribute('data-cepanel') !== name);
-    });
-  };
-
-  var _origInit = window._initCompositeExplorer;
-  window._initCompositeExplorer = function() {
-    if (_origInit) _origInit.apply(this, arguments);
-    var params = new URLSearchParams(window.location.search);
-    var id = params.get('id');
-    var el = document.getElementById("ce-configure-run");
-    if (el && window.ConfigureRun && id) {
-      ConfigureRun.mount(el, { composite: id, target: "adhoc" });
-    }
-    // Arriving via a "Configure & Run" button opens that tab directly;
-    // otherwise default to the wiring viewer.
-    window._ceShowPanel(window._ceScrollToConfigure ? 'configure' : 'viewer');
-    window._ceScrollToConfigure = false;
-  };
-})();
-</script>
 <script>
 // Initialize drop zones once walkthrough.js is loaded.
 document.addEventListener("DOMContentLoaded", function() {

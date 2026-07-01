@@ -162,6 +162,15 @@ def _render_viz(composite, run_dir: Path, *,
         except Exception:
             traceback.print_exc()
 
+    # 3. Default figure when a composite declares no visualizations.
+    if not viz_html and db_file and run_id and core is not None:
+        try:
+            for k, html in _render_default_viz(
+                    db_file=db_file, run_id=run_id, core=core).items():
+                viz_html.setdefault(k, html)
+        except Exception:
+            traceback.print_exc()
+
     try:
         (run_dir / "viz.json").write_text(json.dumps(viz_html, default=str), encoding="utf-8")
     except Exception:
@@ -267,6 +276,125 @@ def _render_canonical_viz(*, spec_id: str, db_file: str, run_id: str, core) -> d
     return out
 
 
+def _numeric_observables(gathered_filtered: dict) -> list[str]:
+    """Derive observable names from gathered emitter output.
+
+    Returns keys that appear in at least one run's observables dict,
+    are not "time", and have at least one numeric (int or float, but NOT
+    bool) value. Booleans are excluded because ``bool`` is a subclass of
+    ``int`` and a boolean observable is not a meaningful time series.
+    The returned list is sorted for determinism.
+    """
+    numeric_keys: set[str] = set()
+    for runs in (gathered_filtered.get("by_sim") or {}).values():
+        for run in runs:
+            for key, vals in (run.get("observables") or {}).items():
+                if key == "time":
+                    continue
+                if any(isinstance(v, (int, float)) and not isinstance(v, bool)
+                       for v in (vals or [])):
+                    numeric_keys.add(key)
+    return sorted(numeric_keys)
+
+
+def _render_default_viz(*, db_file: str, run_id: str, core) -> dict:
+    """A default 'observables over time' figure for composites that declare
+    no visualizations.
+
+    Uses TimeSeriesFromObservables, which reads runs.db directly and plots
+    every numeric leaf found in this run's emitter output. The observable
+    names are derived from the gathered output's non-"time" numeric keys.
+    Best-effort; returns {} on any failure.
+    """
+    try:
+        from vivarium_dashboard.lib.investigations import (
+            build_viz_composite, gather_emitter_outputs,
+        )
+        from pbg_superpowers.visualizations import (
+            TimeSeriesPlot, TimeSeriesFromObservables,
+        )
+        from process_bigraph import Composite
+    except ImportError:
+        return {}
+
+    # Register viz classes the same way _render_canonical_viz does so
+    # `local:<ClassName>` addresses resolve through core.link_registry.
+    registry = dict(core.link_registry)
+    try:
+        from pbg_superpowers.visualizations import (
+            ParamVsObservable, Distribution, PhaseSpace, Heatmap,
+        )
+        for cls in (
+            TimeSeriesPlot, TimeSeriesFromObservables,
+            ParamVsObservable, Distribution, PhaseSpace, Heatmap,
+        ):
+            try:
+                core.register_link(cls.__name__, cls)
+                registry[cls.__name__] = cls
+            except Exception:
+                pass
+    except ImportError:
+        pass
+
+    try:
+        from pbg_superpowers.visualization import Visualization
+        def _walk(cls):
+            for sub in cls.__subclasses__():
+                yield sub
+                yield from _walk(sub)
+        for sub in _walk(Visualization):
+            if sub.__name__ in registry:
+                continue
+            try:
+                core.register_link(sub.__name__, sub)
+                registry[sub.__name__] = sub
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    gathered = gather_emitter_outputs(Path(db_file))
+    by_sim_filtered: dict = {}
+    for sim_name, runs in (gathered.get("by_sim") or {}).items():
+        keep = [r for r in runs if r.get("run_id") == run_id]
+        if keep:
+            by_sim_filtered[sim_name] = keep
+    if not by_sim_filtered:
+        return {}
+    gathered_filtered = {
+        "schemas": gathered.get("schemas") or {},
+        "by_sim": by_sim_filtered,
+    }
+
+    # Derive numeric observable names from the gathered output, then hand
+    # them plus the db path to TimeSeriesFromObservables which reads
+    # runs.db itself and plots all requested series.
+    obs_names = _numeric_observables(gathered_filtered)
+    if not obs_names:
+        return {}
+
+    viz_spec = {
+        "name": "observables_over_time",
+        "address": "local:TimeSeriesFromObservables",
+        "config": {
+            "title": "Observables over time",
+            "observables": obs_names,
+            "_runs_db_path": db_file,
+        },
+    }
+    try:
+        doc = build_viz_composite(viz_spec, gathered_filtered, registry)
+        viz_composite = Composite({"state": doc}, core=core)
+        viz_composite.run(1)
+        html = viz_composite.state.get("output_store")
+        if isinstance(html, dict):
+            html = html.get("value") or html.get("_value") or ""
+        return {"observables_over_time": html} if isinstance(html, str) and html else {}
+    except Exception:
+        traceback.print_exc()
+        return {}
+
+
 def execute(request_path: Path) -> int:
     """Run one composite to completion. Returns 0 on success, 1 on failure.
 
@@ -355,6 +483,12 @@ def execute(request_path: Path) -> int:
             spec_id=req.spec_id, db_file=req.db_file, run_id=req.run_id,
             core=core,
         )
+        try:
+            from vivarium_dashboard.lib.composite_flush import run_flush
+            run_flush(run_dir, req=req, spec_id=req.spec_id,
+                      db_file=req.db_file, run_id=req.run_id, core=core)
+        except Exception:
+            traceback.print_exc()   # flush must never fail the run
         cr.complete_metadata(conn, run_id=req.run_id, n_steps=req.steps,
                              status="completed")
         print(f"run {req.run_id} completed: {req.steps} steps", flush=True)

@@ -3179,6 +3179,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_composite_run_state()
         if self.path.startswith("/api/composite-run/") and self.path.split("?", 1)[0].endswith("/status"):
             return self._get_composite_run_status()
+        if self.path.startswith("/api/composite-run/") and self.path.split("?", 1)[0].endswith("/download"):
+            return self._get_composite_run_download()
         if self.path.startswith("/api/composite-run/"):
             return self._get_composite_run()
         if self.path.startswith("/api/composite-runs"):
@@ -5222,6 +5224,35 @@ class Handler(BaseHTTPRequestHandler):
 
         body, status = build_composite_run_status(WORKSPACE, run_id)
         return self._json(body, status)
+
+    def _get_composite_run_download(self):
+        """GET /api/composite-run/<run_id>/download — zip of the run dir.
+
+        Streams ``application/zip`` with ``Content-Disposition: attachment``.
+        Returns JSON errors for 404 (no run dir) and 409 (non-terminal run).
+
+        Thin shim → ``lib.composite_run_views.build_composite_run_zip``.
+        """
+        _ws_add_to_sys_path()
+        from vivarium_dashboard.lib.composite_run_views import build_composite_run_zip
+
+        path_only = self.path.split("?", 1)[0]
+        rest = path_only[len("/api/composite-run/"):]
+        run_id = rest[: -len("/download")]
+
+        data, fname, code = build_composite_run_zip(WORKSPACE, run_id)
+        if code != 200:
+            msg = {
+                404: f"run not found: {run_id}",
+                409: f"run not ready for download (not in a terminal state): {run_id}",
+            }.get(code, f"run not downloadable ({code})")
+            return self._json({"error": msg}, code)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/zip")
+        self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def _get_investigation_detail(self):
         """GET /api/investigation/<name> — full spec + viz file paths + runs summary."""
