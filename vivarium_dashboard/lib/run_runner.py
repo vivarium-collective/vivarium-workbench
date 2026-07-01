@@ -162,6 +162,15 @@ def _render_viz(composite, run_dir: Path, *,
         except Exception:
             traceback.print_exc()
 
+    # 3. Default figure when a composite declares no visualizations.
+    if not viz_html and db_file and run_id and core is not None:
+        try:
+            for k, html in _render_default_viz(
+                    db_file=db_file, run_id=run_id, core=core).items():
+                viz_html.setdefault(k, html)
+        except Exception:
+            traceback.print_exc()
+
     try:
         (run_dir / "viz.json").write_text(json.dumps(viz_html, default=str), encoding="utf-8")
     except Exception:
@@ -265,6 +274,57 @@ def _render_canonical_viz(*, spec_id: str, db_file: str, run_id: str, core) -> d
                 f'<code>{type(e).__name__}: {e}</code></p>'
             )
     return out
+
+
+def _render_default_viz(*, db_file: str, run_id: str, core) -> dict:
+    """A default 'observables over time' figure for composites that declare
+    no visualizations. Renders a TimeSeriesPlot over every numeric observable
+    in this run's emitter output. Best-effort; returns {} on any failure."""
+    try:
+        from vivarium_dashboard.lib.investigations import (
+            build_viz_composite, gather_emitter_outputs,
+        )
+        from pbg_superpowers.visualizations import TimeSeriesPlot
+        from process_bigraph import Composite
+    except ImportError:
+        return {}
+
+    registry = dict(core.link_registry)
+    try:
+        core.register_link(TimeSeriesPlot.__name__, TimeSeriesPlot)
+        registry[TimeSeriesPlot.__name__] = TimeSeriesPlot
+    except Exception:
+        pass
+
+    gathered = gather_emitter_outputs(Path(db_file))
+    by_sim_filtered: dict = {}
+    for sim_name, runs in (gathered.get("by_sim") or {}).items():
+        keep = [r for r in runs if r.get("run_id") == run_id]
+        if keep:
+            by_sim_filtered[sim_name] = keep
+    if not by_sim_filtered:
+        return {}
+    gathered_filtered = {
+        "schemas": gathered.get("schemas") or {},
+        "by_sim": by_sim_filtered,
+    }
+
+    viz_spec = {
+        "name": "observables_over_time",
+        "address": "local:TimeSeriesPlot",
+        "config": {"title": "Observables over time"},
+    }
+    try:
+        doc = build_viz_composite(viz_spec, gathered_filtered, registry)
+        viz_composite = Composite({"state": doc}, core=core)
+        viz_composite.run(1)
+        html = viz_composite.state.get("output_store")
+        if isinstance(html, dict):
+            html = html.get("value") or html.get("_value") or ""
+        return {"observables_over_time": html} if isinstance(html, str) and html else {}
+    except Exception:
+        traceback.print_exc()
+        return {}
 
 
 def execute(request_path: Path) -> int:
