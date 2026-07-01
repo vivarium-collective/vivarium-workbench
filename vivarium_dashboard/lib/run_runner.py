@@ -276,23 +276,77 @@ def _render_canonical_viz(*, spec_id: str, db_file: str, run_id: str, core) -> d
     return out
 
 
+def _numeric_observables(gathered_filtered: dict) -> list[str]:
+    """Derive observable names from gathered emitter output.
+
+    Returns keys that appear in at least one run's observables dict,
+    are not "time", and have at least one numeric (int or float) value.
+    The returned list is sorted for determinism.
+    """
+    numeric_keys: set[str] = set()
+    for runs in (gathered_filtered.get("by_sim") or {}).values():
+        for run in runs:
+            for key, vals in (run.get("observables") or {}).items():
+                if key == "time":
+                    continue
+                if any(isinstance(v, (int, float)) for v in (vals or [])):
+                    numeric_keys.add(key)
+    return sorted(numeric_keys)
+
+
 def _render_default_viz(*, db_file: str, run_id: str, core) -> dict:
     """A default 'observables over time' figure for composites that declare
-    no visualizations. Renders a TimeSeriesPlot over every numeric observable
-    in this run's emitter output. Best-effort; returns {} on any failure."""
+    no visualizations.
+
+    Uses TimeSeriesFromObservables, which reads runs.db directly and plots
+    every numeric leaf found in this run's emitter output. The observable
+    names are derived from the gathered output's non-"time" numeric keys.
+    Best-effort; returns {} on any failure.
+    """
     try:
         from vivarium_dashboard.lib.investigations import (
             build_viz_composite, gather_emitter_outputs,
         )
-        from pbg_superpowers.visualizations import TimeSeriesPlot
+        from pbg_superpowers.visualizations import (
+            TimeSeriesPlot, TimeSeriesFromObservables,
+        )
         from process_bigraph import Composite
     except ImportError:
         return {}
 
+    # Register viz classes the same way _render_canonical_viz does so
+    # `local:<ClassName>` addresses resolve through core.link_registry.
     registry = dict(core.link_registry)
     try:
-        core.register_link(TimeSeriesPlot.__name__, TimeSeriesPlot)
-        registry[TimeSeriesPlot.__name__] = TimeSeriesPlot
+        from pbg_superpowers.visualizations import (
+            ParamVsObservable, Distribution, PhaseSpace, Heatmap,
+        )
+        for cls in (
+            TimeSeriesPlot, TimeSeriesFromObservables,
+            ParamVsObservable, Distribution, PhaseSpace, Heatmap,
+        ):
+            try:
+                core.register_link(cls.__name__, cls)
+                registry[cls.__name__] = cls
+            except Exception:
+                pass
+    except ImportError:
+        pass
+
+    try:
+        from pbg_superpowers.visualization import Visualization
+        def _walk(cls):
+            for sub in cls.__subclasses__():
+                yield sub
+                yield from _walk(sub)
+        for sub in _walk(Visualization):
+            if sub.__name__ in registry:
+                continue
+            try:
+                core.register_link(sub.__name__, sub)
+                registry[sub.__name__] = sub
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -309,10 +363,21 @@ def _render_default_viz(*, db_file: str, run_id: str, core) -> dict:
         "by_sim": by_sim_filtered,
     }
 
+    # Derive numeric observable names from the gathered output, then hand
+    # them plus the db path to TimeSeriesFromObservables which reads
+    # runs.db itself and plots all requested series.
+    obs_names = _numeric_observables(gathered_filtered)
+    if not obs_names:
+        return {}
+
     viz_spec = {
         "name": "observables_over_time",
-        "address": "local:TimeSeriesPlot",
-        "config": {"title": "Observables over time"},
+        "address": "local:TimeSeriesFromObservables",
+        "config": {
+            "title": "Observables over time",
+            "observables": obs_names,
+            "_runs_db_path": db_file,
+        },
     }
     try:
         doc = build_viz_composite(viz_spec, gathered_filtered, registry)
