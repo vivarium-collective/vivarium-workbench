@@ -11823,72 +11823,63 @@
       });
       groups.push({name: iset.name, title: iset.title || iset.name, studies: members});
     });
-    var ungrouped = window._investigations.filter(function(s) { return !seen[s.name]; });
-    if (ungrouped.length) groups.push({name: '__ungrouped__', title: 'Ungrouped', studies: ungrouped});
-
-    // Scope to current investigation: when the cross-worktree registry
-    // has identified a current iset (window._currentIsetSlug, set by
-    // investigation-switcher.js after fetching /api/investigation-registry)
-    // AND that iset has a group here, drop every other group so the rail
-    // reflects only the studies the user is actively working on. The
-    // iset dropdown at the top of the rail is the way to switch isets;
-    // listing every iset's studies in the rail itself was just noise.
-    // Falls back to the full all-groups render if no current slug is
-    // known yet (registry still loading) or if the current slug doesn't
-    // match any group (defensive).
+    // Scope the rail to a SINGLE investigation. We never render the
+    // "Ungrouped" bucket or an all-investigations list here: the rail shows
+    // either the current investigation's studies or a chooser. (Orphan studies
+    // that belong to no investigation are intentionally not surfaced here.)
     var currentSlug = window._currentIsetSlug || '';
-    if (currentSlug) {
-      var hasCurrent = groups.some(function(g) { return g.name === currentSlug; });
-      if (hasCurrent) {
-        groups = groups.filter(function(g) { return g.name === currentSlug; });
-      }
-    }
+    var currentGroup = currentSlug
+      ? groups.filter(function(g) { return g.name === currentSlug; })[0] || null
+      : null;
 
-    // List-first (State A): no investigation selected yet + several available ->
-    // prompt the user to pick one rather than dumping every investigation's
-    // studies into the rail.
-    if (!currentSlug && groups.length > 1) {
-      host.innerHTML = '<div style="padding:6px 14px;color:#94a3b8;font-style:italic">'
-        + 'Select an investigation &rarr;</div>';
+    var picker = _railInvestigationPicker(currentSlug);
+
+    if (!currentGroup) {
+      // No valid current investigation → picker + placeholder, no study rows.
+      host.innerHTML = picker
+        + '<div class="viv-rail-empty" style="font-size:0.85em;color:#94a3b8;'
+        + 'padding:6px 14px;font-style:italic">Choose an investigation to see its studies.</div>';
       return;
     }
 
-    // Flat-list mode: when there's exactly one investigation (no
-    // ungrouped studies), render its studies as a flat list directly
-    // under the "Studies" rail-section label — no redundant group header.
-    if (groups.length === 1 && groups[0].name !== '__ungrouped__') {
-      var g = groups[0];
-      var _iset = (window._isetIndex || []).filter(function(i){ return i.name === g.name; })[0] || {};
-      host.innerHTML = '<div class="rail-iset-name" title="' + _esc(_iset.title || g.name) + '"'
-        + ' onclick="window._railOpenInvestigationDetail(\'' + _esc(g.name) + '\');"'
-        + ' style="cursor:pointer;">'
-        + _esc(_iset.title || g.name) + '</div>'
-        + g.studies.map(function(s) { return _railStudyItem(s); }).join('');
-      return;
-    }
-
-    var collapsedState = window._isetRailCollapsed || {};
-    host.innerHTML = groups.map(function(g) {
-      var isCollapsed = !!collapsedState[g.name];
-      var children = isCollapsed ? '' : g.studies.map(function(s) {
-        return _railStudyItem(s, { indent: true });
-      }).join('');
-      var headerClick = "event.preventDefault(); window._isetRailCollapsed = window._isetRailCollapsed || {}; window._isetRailCollapsed['" + _esc(g.name) + "'] = !window._isetRailCollapsed['" + _esc(g.name) + "']; _renderRailInvestigationGroups();";
-      var groupClick = g.name === '__ungrouped__' ? '' :
-        ' <a onclick="event.stopPropagation();event.preventDefault();_switchPage(\'investigations\');_openInvestigationDetail(\'' + _esc(g.name) + '\');return false;" ' +
-        'href="#" style="font-size:0.7em;color:#3b82f6;margin-left:auto;">[DAG]</a>';
-      return '<div class="viv-rail-iset-group" data-iset="' + _esc(g.name) + '">' +
-        '<div onclick="' + headerClick + '" ' +
-             'style="display:flex;align-items:center;gap:4px;padding:4px 12px;cursor:pointer;user-select:none;font-size:0.85em;color:#374151;font-weight:600;">' +
-          '<span style="display:inline-block;width:10px;text-align:center;color:#94a3b8;">' + (isCollapsed ? '▸' : '▾') + '</span>' +
-          '<span style="flex:1">' + _esc(g.title) + '</span>' +
-          '<span class="muted" style="font-size:0.72em;font-weight:normal;">(' + g.studies.length + ')</span>' +
-          groupClick +
-        '</div>' +
-        children +
-      '</div>';
-    }).join('');
+    // Current investigation → its studies as a flat list under the picker.
+    host.innerHTML = picker
+      + '<div class="rail-iset-name" title="' + _esc(currentGroup.title || currentGroup.name) + '"'
+      + ' onclick="window._railOpenInvestigationDetail(\'' + _esc(currentGroup.name) + '\');"'
+      + ' style="cursor:pointer;">' + _esc(currentGroup.title || currentGroup.name) + '</div>'
+      + currentGroup.studies.map(function(s) { return _railStudyItem(s); }).join('');
   }
+
+  // Per-workspace localStorage key for the remembered investigation. The URL
+  // path differs per hosted workspace (base-path), so it namespaces cleanly.
+  function _railIsetKey() {
+    return 'viv:rail-iset:' + (window.location.pathname || '/');
+  }
+
+  // Build the investigation <select> shown at the top of the STUDIES rail.
+  function _railInvestigationPicker(currentSlug) {
+    var isets = (window._isetIndex || []).slice().sort(function(a, b) {
+      return String(a.title || a.name).localeCompare(String(b.title || b.name));
+    });
+    var opts = ['<option value="">Choose an investigation…</option>'];
+    isets.forEach(function(i) {
+      var sel = i.name === currentSlug ? ' selected' : '';
+      opts.push('<option value="' + _esc(i.name) + '"' + sel + '>'
+        + _esc(i.title || i.name) + '</option>');
+    });
+    return '<select class="rail-iset-picker" style="width:calc(100% - 24px);'
+      + 'margin:2px 12px 6px;padding:3px 6px;font-size:0.82em;color:#374151;'
+      + 'border:1px solid #e5e7eb;border-radius:4px;background:#fff;cursor:pointer;"'
+      + ' onchange="window._railSelectInvestigation(this.value)">'
+      + opts.join('') + '</select>';
+  }
+
+  // Picker onchange: set the current investigation, persist it, re-render.
+  window._railSelectInvestigation = function(name) {
+    window._currentIsetSlug = name || '';
+    try { window.localStorage.setItem(_railIsetKey(), name || ''); } catch (_) { /* ignore */ }
+    _renderRailInvestigationGroups();
+  };
   window._renderRailInvestigationGroups = _renderRailInvestigationGroups;
 
   function _buildInvestigationTagChips() {
