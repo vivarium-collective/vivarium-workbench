@@ -1,5 +1,5 @@
-"""Task 6: Verify that configure-run.js is loaded and ConfigureRun.mount is called
-in the correct context in both templates."""
+"""Verify configure-run.js is loaded only where needed (study-detail),
+and that composite cards carry a single Explore button (Tasks 9 & 10 revamp)."""
 from pathlib import Path
 from vivarium_dashboard import server
 
@@ -8,19 +8,29 @@ def _read(rel):
     return (Path(server.__file__).parent / rel).read_text(encoding="utf-8")
 
 
-def test_widget_script_loaded_and_mounted():
-    idx = _read("templates/index.html.j2")
-    assert "configure-run.js" in idx                       # script included
-    assert "ConfigureRun.mount" in idx                     # explorer + list mount
-    assert 'target: "adhoc"' in idx or "target:'adhoc'" in idx
+def test_widget_script_loaded_in_study_detail():
+    """configure-run.js is still loaded (and mounted) in study-detail for study runs."""
     sd = _read("templates/study-detail.html")
     assert "ConfigureRun.mount" in sd                      # study Runs tab
     assert 'target: "study"' in sd or "target:'study'" in sd
 
 
-def test_composites_list_has_configure_and_run_action():
-    """I3: both grid and list views in walkthrough.js carry a 'Configure & Run' button."""
+def test_widget_script_not_in_composite_explorer():
+    """configure-run.js must NOT be loaded in index.html.j2 (Tasks 9 & 10 removed it)."""
+    idx = _read("templates/index.html.j2")
+    assert "ce-configure-run" not in idx
+    assert "_ceShowPanel" not in idx
+
+
+def test_composites_list_has_single_explore_action():
+    """I3 (revised): both grid and list views carry exactly one Explore button; no Configure & Run."""
     wt = _read("static/walkthrough.js")
-    assert "Configure &amp; Run" in wt, (
-        "walkthrough.js composite cards must render a 'Configure & Run' button"
+    assert "_openCompositeExplorer" in wt, (
+        "walkthrough.js composite cards must render an Explore button"
+    )
+    assert "_openCompositeConfigureRun" not in wt, (
+        "walkthrough.js must not reference the retired _openCompositeConfigureRun"
+    )
+    assert "Configure &amp; Run" not in wt, (
+        "walkthrough.js composite cards must not render a 'Configure & Run' button"
     )
