@@ -39,9 +39,12 @@ def _free_port() -> int:
 
 
 class _Response:
-    def __init__(self, status_code: int, body: bytes):
+    def __init__(self, status_code: int, body: bytes, headers=None):
         self.status_code = status_code
         self._body = body
+        # Case-insensitive header map (keys lowercased) so tests can assert
+        # Content-Type / Content-Disposition regardless of the server's casing.
+        self.headers = {str(k).lower(): v for k, v in (headers or {}).items()}
 
     def json(self):
         return json.loads(self._body.decode())
@@ -64,9 +67,9 @@ class _Client:
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=15) as r:
-                return _Response(r.status, r.read())
+                return _Response(r.status, r.read(), headers=r.headers)
         except urllib.error.HTTPError as e:
-            return _Response(e.code, e.read())
+            return _Response(e.code, e.read(), headers=e.headers)
 
     def get(self, path: str):
         return self._request("GET", path)

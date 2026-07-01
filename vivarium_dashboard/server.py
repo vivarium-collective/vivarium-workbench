@@ -5242,7 +5242,11 @@ class Handler(BaseHTTPRequestHandler):
 
         data, fname, code = build_composite_run_zip(WORKSPACE, run_id)
         if code != 200:
-            return self._json({"error": f"run not downloadable ({code})"}, code)
+            msg = {
+                404: f"run not found: {run_id}",
+                409: f"run not ready for download (not in a terminal state): {run_id}",
+            }.get(code, f"run not downloadable ({code})")
+            return self._json({"error": msg}, code)
         self.send_response(200)
         self.send_header("Content-Type", "application/zip")
         self.send_header("Content-Disposition", f'attachment; filename="{fname}"')

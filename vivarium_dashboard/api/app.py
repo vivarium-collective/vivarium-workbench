@@ -2047,8 +2047,11 @@ def create_app() -> FastAPI:
         """
         data, fname, code = _cr_views.build_composite_run_zip(ws, run_id)
         if code != 200:
-            return JSONResponse(status_code=code,
-                                content={"error": f"run not downloadable ({code})"})
+            msg = {
+                404: f"run not found: {run_id}",
+                409: f"run not ready for download (not in a terminal state): {run_id}",
+            }.get(code, f"run not downloadable ({code})")
+            return JSONResponse(status_code=code, content={"error": msg})
         return Response(
             content=data,
             media_type="application/zip",

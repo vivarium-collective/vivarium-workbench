@@ -280,7 +280,9 @@ def _numeric_observables(gathered_filtered: dict) -> list[str]:
     """Derive observable names from gathered emitter output.
 
     Returns keys that appear in at least one run's observables dict,
-    are not "time", and have at least one numeric (int or float) value.
+    are not "time", and have at least one numeric (int or float, but NOT
+    bool) value. Booleans are excluded because ``bool`` is a subclass of
+    ``int`` and a boolean observable is not a meaningful time series.
     The returned list is sorted for determinism.
     """
     numeric_keys: set[str] = set()
@@ -289,7 +291,8 @@ def _numeric_observables(gathered_filtered: dict) -> list[str]:
             for key, vals in (run.get("observables") or {}).items():
                 if key == "time":
                     continue
-                if any(isinstance(v, (int, float)) for v in (vals or [])):
+                if any(isinstance(v, (int, float)) and not isinstance(v, bool)
+                       for v in (vals or [])):
                     numeric_keys.add(key)
     return sorted(numeric_keys)
 

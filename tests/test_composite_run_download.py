@@ -205,10 +205,11 @@ def test_http_download_completed_run_returns_zip(tmp_path, dashboard_client):
     client = dashboard_client(workspace=ws)
     resp = client.get(f"/api/composite-run/{run_id}/download")
     assert resp.status_code == 200, resp.text
-    ct = resp._body  # raw bytes
-    # Verify Content-Type header is application/zip (best effort via urllib resp)
-    # We check the body is a valid non-empty zip.
-    zf = zipfile.ZipFile(io.BytesIO(ct))
+    # The response must declare itself a zip attachment...
+    assert resp.headers.get("content-type") == "application/zip"
+    assert 'filename="run_run-complete.zip"' in resp.headers.get("content-disposition", "")
+    # ...and the body must be a valid non-empty zip.
+    zf = zipfile.ZipFile(io.BytesIO(resp._body))
     names = zf.namelist()
     assert len(names) > 0
     assert "report.html" in names
