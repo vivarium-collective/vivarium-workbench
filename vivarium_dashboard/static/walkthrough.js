@@ -4683,6 +4683,17 @@
       .then(function(j) {
         window._isetIndex = j.investigations || [];
         _renderInvestigationSets();
+        // Resolve the current investigation once, if nothing set it yet:
+        // remembered selection (validated against known isets) → the server's
+        // `current` flag (branch/running/first) → none (rail shows the chooser).
+        if (!window._currentIsetSlug) {
+          var _isets = window._isetIndex || [];
+          var _persisted = '';
+          try { _persisted = window.localStorage.getItem(_railIsetKey()) || ''; } catch (_) { /* ignore */ }
+          var _valid = _persisted && _isets.some(function(i) { return i.name === _persisted; });
+          var _cur = (_isets.filter(function(i) { return i.current; })[0] || {}).name || '';
+          window._currentIsetSlug = _valid ? _persisted : _cur;
+        }
         _renderRailInvestigationGroups();
         if (!window._isetIndex.length) return;
         // LIST-FIRST UX: show the cards and let the user pick. Auto-open only
