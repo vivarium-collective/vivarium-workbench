@@ -615,3 +615,53 @@ def _apply_create_from_composite(
         "status": "draft",
     }
     (inv_dir / "spec.yaml").write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
+
+
+def delete_investigation_composite(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
+    """DELETE /api/investigation-composite — remove a composite from an investigation.
+
+    Refuses with 409 if any run, visualization, or other composite references it.
+    Relocated from the retired ``server._delete_investigation_composite`` (minus
+    the ``_commit_or_run`` wrapper — the git commit is the caller's concern).
+
+    Status codes: 400 missing fields; 404 investigation not found;
+    409 has dependents; 200 removed (``{ok: True}``).
+    """
+    from vivarium_dashboard.lib import study_spec as _study_spec
+
+    inv_name = (body.get("investigation") or "").strip()
+    comp_name = (body.get("name") or "").strip()
+    if not (inv_name and comp_name):
+        return {"error": "investigation, name required"}, 400
+    inv_dir = _study_spec.study_dir(ws_root, inv_name)
+    spec_path = _spec_path_for(inv_dir)
+    if not spec_path.is_file():
+        return {"error": "investigation not found"}, 404
+    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
+
+    # Dependents: runs[].composite, visualizations[].config.sources, composites[].extends
+    dependents: list[str] = []
+    for r in (spec.get("runs") or []):
+        if r.get("composite") == comp_name:
+            dependents.append(f"run({r})")
+    for v in (spec.get("visualizations") or []):
+        sources = (v.get("config") or {}).get("sources") or []
+        if comp_name in sources:
+            dependents.append(f"visualization({v.get('name')})")
+    for c in (spec.get("composites") or []):
+        if c.get("extends") == comp_name:
+            dependents.append(f"composite({c.get('name')})")
+    if dependents:
+        return {
+            "error": f"composite {comp_name!r} has dependents",
+            "dependents": dependents,
+        }, 409
+
+    doc_path = inv_dir / "composites" / f"{comp_name}.yaml"
+    if doc_path.is_file():
+        doc_path.unlink()
+    spec["composites"] = [
+        c for c in (spec.get("composites") or []) if c.get("name") != comp_name
+    ]
+    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
+    return {"ok": True}, 200

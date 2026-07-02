@@ -11,14 +11,35 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vivarium_dashboard.server import (
+from vivarium_dashboard.lib.investigation_status import (
     compute_investigation_status,
-    compute_study_effective_status,
-    _post_iset_create_for_test,
-    _post_iset_clone_for_test,
-    _build_iset_summary_for_test,
-    _build_iset_detail_for_test,
+    build_iset_summary,
+    study_run_slugs,
 )
+from vivarium_dashboard.lib.report_views import (
+    _compute_study_effective_status as compute_study_effective_status,
+    build_iset_detail,
+)
+from vivarium_dashboard.lib.scaffold_mutations import (
+    investigation_create as _post_iset_create_for_test,
+    iset_clone as _post_iset_clone_for_test,
+)
+
+
+def _build_iset_summary_for_test(ws):
+    run_slugs = study_run_slugs(ws)
+
+    def _has_runs(slug, spec):
+        return slug in run_slugs or bool((spec or {}).get("runs"))
+
+    return build_iset_summary(ws, study_has_runs=_has_runs)
+
+
+def _build_iset_detail_for_test(ws, name):
+    detail = build_iset_detail(ws, name)
+    if detail is None:
+        return {"error": f"investigation '{name}' not found"}, 404
+    return detail, 200
 
 
 # ---------------------------------------------------------------------------
@@ -561,7 +582,7 @@ def test_iset_detail_discovery_implications_absent_is_empty_dict(_ws):
 # to [] with a single stderr warning rather than 500-ing the endpoint.
 # ---------------------------------------------------------------------------
 
-from vivarium_dashboard.server import _coerce_list_field
+from vivarium_dashboard.lib.report_views import _coerce_list_field
 
 
 def test_coerce_list_field_passes_through_list():
@@ -636,7 +657,7 @@ def test_iset_detail_with_list_acceptance_criteria_passes_through(_ws):
 def test_registry_imports_meta_dict_and_list_forms():
     """_registry_imports_meta returns per-repo metadata from workspace.yaml
     imports (both dict and list shapes), sorted by name."""
-    from vivarium_dashboard.server import _registry_imports_meta
+    from vivarium_dashboard.lib.registry import _registry_imports_meta
 
     dict_form = {"imports": {
         "pbg_ketchup": {"source": "https://github.com/x/pbg-ketchup",
@@ -663,6 +684,6 @@ def test_registry_imports_meta_dict_and_list_forms():
 
 
 def test_registry_imports_meta_empty():
-    from vivarium_dashboard.server import _registry_imports_meta
+    from vivarium_dashboard.lib.registry import _registry_imports_meta
     assert _registry_imports_meta({}) == []
     assert _registry_imports_meta(None) == []

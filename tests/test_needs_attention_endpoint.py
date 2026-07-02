@@ -9,18 +9,16 @@ The dashboard adds no AI — it just runs the scan and renders. Tolerant: never
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import yaml
 import pytest
 
+from vivarium_dashboard.lib.report_views import build_needs_attention
+
 
 @pytest.fixture
-def tmp_ws_uncovered_ac(tmp_path, monkeypatch):
+def tmp_ws_uncovered_ac(tmp_path):
     """A workspace with an unkeyed acceptance criterion → an uncovered-AC gap,
     so ``scan_investigation`` returns a non-empty ``items`` list."""
-    import vivarium_dashboard.server as srv
     ws = tmp_path / "ws"
     ws.mkdir(parents=True)
     (ws / "workspace.yaml").write_text("name: ws\n")
@@ -42,15 +40,12 @@ def tmp_ws_uncovered_ac(tmp_path, monkeypatch):
         "runs": [{"name": "r1", "status": "completed",
                   "outcomes": {"b1": {"result": "PASS"}}}],
     }))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
     return ws
 
 
 def test_needs_attention_endpoint(tmp_ws_uncovered_ac):
-    import vivarium_dashboard.server as server
-    body, code = server.Handler._needs_attention_test(
-        server.WORKSPACE, investigation="the-inv")
-    d = json.loads(body)
+    d, code = build_needs_attention(
+        tmp_ws_uncovered_ac, investigation="the-inv")
     assert code == 200
     assert "items" in d and "summary" in d
     assert isinstance(d["items"], list)
@@ -63,27 +58,23 @@ def test_needs_attention_endpoint(tmp_ws_uncovered_ac):
 
 
 def test_needs_attention_tolerant_on_missing_ws(tmp_path):
-    import vivarium_dashboard.server as server
     missing = tmp_path / "does-not-exist"
-    body, code = server.Handler._needs_attention_test(missing, investigation="nope")
+    d, code = build_needs_attention(missing, investigation="nope")
     assert code == 200  # never 500
-    d = json.loads(body)
     assert d["items"] == []
     assert d["summary"]["total"] == 0
     assert d["summary"]["by_severity"] == {"high": 0, "medium": 0, "low": 0}
 
 
 def test_needs_attention_tolerant_on_scan_failure(tmp_ws_uncovered_ac, monkeypatch):
-    import vivarium_dashboard.server as server
     from pbg_superpowers import needs_attention as _na
 
     def _boom(ws_root, inv_slug, **kw):
         raise RuntimeError("scan blew up")
 
     monkeypatch.setattr(_na, "scan_investigation", _boom)
-    body, code = server.Handler._needs_attention_test(
-        server.WORKSPACE, investigation="the-inv")
-    d = json.loads(body)
+    d, code = build_needs_attention(
+        tmp_ws_uncovered_ac, investigation="the-inv")
     assert code == 200  # never 500
     assert d["items"] == []
     assert d["summary"] == {

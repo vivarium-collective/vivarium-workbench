@@ -23,7 +23,7 @@ def _study_ws(tmp_path):
 
 
 def test_intervention_add_appends(_study_ws):
-    from vivarium_dashboard.server import _post_study_intervention_add_for_test
+    from vivarium_dashboard.lib.study_crud_mutations import study_intervention_add as _post_study_intervention_add_for_test
     resp, code = _post_study_intervention_add_for_test(
         _study_ws,
         {"study": "s1", "name": "heat-shock", "description": "+10C for 5 min"},
@@ -36,7 +36,7 @@ def test_intervention_add_appends(_study_ws):
 
 
 def test_intervention_add_default_empty_description(_study_ws):
-    from vivarium_dashboard.server import _post_study_intervention_add_for_test
+    from vivarium_dashboard.lib.study_crud_mutations import study_intervention_add as _post_study_intervention_add_for_test
     resp, code = _post_study_intervention_add_for_test(
         _study_ws, {"study": "s1", "name": "x"},
     )
@@ -46,7 +46,7 @@ def test_intervention_add_default_empty_description(_study_ws):
 
 
 def test_intervention_add_rejects_missing_name(_study_ws):
-    from vivarium_dashboard.server import _post_study_intervention_add_for_test
+    from vivarium_dashboard.lib.study_crud_mutations import study_intervention_add as _post_study_intervention_add_for_test
     resp, code = _post_study_intervention_add_for_test(
         _study_ws, {"study": "s1", "description": "no name"},
     )
@@ -54,7 +54,7 @@ def test_intervention_add_rejects_missing_name(_study_ws):
 
 
 def test_intervention_add_rejects_duplicate_name(_study_ws):
-    from vivarium_dashboard.server import _post_study_intervention_add_for_test
+    from vivarium_dashboard.lib.study_crud_mutations import study_intervention_add as _post_study_intervention_add_for_test
     _post_study_intervention_add_for_test(
         _study_ws, {"study": "s1", "name": "x", "description": "first"},
     )
@@ -65,9 +65,9 @@ def test_intervention_add_rejects_duplicate_name(_study_ws):
 
 
 def test_intervention_update_replaces_description(_study_ws):
-    from vivarium_dashboard.server import (
-        _post_study_intervention_add_for_test,
-        _post_study_intervention_update_for_test,
+    from vivarium_dashboard.lib.study_crud_mutations import (
+        study_intervention_add as _post_study_intervention_add_for_test,
+        study_intervention_update as _post_study_intervention_update_for_test,
     )
     _post_study_intervention_add_for_test(
         _study_ws, {"study": "s1", "name": "x", "description": "old"},
@@ -81,7 +81,7 @@ def test_intervention_update_replaces_description(_study_ws):
 
 
 def test_intervention_update_404_unknown(_study_ws):
-    from vivarium_dashboard.server import _post_study_intervention_update_for_test
+    from vivarium_dashboard.lib.study_crud_mutations import study_intervention_update as _post_study_intervention_update_for_test
     resp, code = _post_study_intervention_update_for_test(
         _study_ws, {"study": "s1", "name": "ghost", "description": "x"},
     )
@@ -89,9 +89,9 @@ def test_intervention_update_404_unknown(_study_ws):
 
 
 def test_intervention_delete_removes(_study_ws):
-    from vivarium_dashboard.server import (
-        _post_study_intervention_add_for_test,
-        _post_study_intervention_delete_for_test,
+    from vivarium_dashboard.lib.study_crud_mutations import (
+        study_intervention_add as _post_study_intervention_add_for_test,
+        study_intervention_delete as _post_study_intervention_delete_for_test,
     )
     _post_study_intervention_add_for_test(
         _study_ws, {"study": "s1", "name": "x"},
@@ -108,7 +108,7 @@ def test_intervention_delete_removes(_study_ws):
 
 
 def test_intervention_delete_404_unknown(_study_ws):
-    from vivarium_dashboard.server import _post_study_intervention_delete_for_test
+    from vivarium_dashboard.lib.study_crud_mutations import study_intervention_delete as _post_study_intervention_delete_for_test
     resp, code = _post_study_intervention_delete_for_test(
         _study_ws, {"study": "s1", "name": "ghost"},
     )

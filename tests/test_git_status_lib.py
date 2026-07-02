@@ -327,75 +327,12 @@ class TestBuildDirtyStatus:
 
 
 # ---------------------------------------------------------------------------
-# Cross-shim parity: legacy server.py handler body == lib-builder body
-# ---------------------------------------------------------------------------
-
-class TestServerShimParity:
-    """Spec-required parity test: the legacy stdlib handler must produce the
-    SAME JSON body (and status code) as the lib builder on the same real-git
-    fixture.
-
-    The handlers now delegate to ``lib.git_status``, so these tests exercise
-    the real wiring — query-string parsing, the WORKSPACE plumbing, and the
-    status-code mapping — by invoking the actual ``server.Handler`` methods
-    (constructed via ``__new__`` so we bypass the socket-bound ``__init__``
-    and capture the ``self._json(body, status)`` call).  The equality assertion
-    is real, not a tautology: it confirms the handler hands back exactly what
-    the builder produces, including the 200/400/500 codes.
-    """
-
-    @staticmethod
-    def _invoke(monkeypatch, ws_root: Path, method_name: str, path: str = "/") -> dict:
-        import vivarium_dashboard.server as server
-
-        monkeypatch.setattr(server, "WORKSPACE", ws_root)
-        handler = server.Handler.__new__(server.Handler)
-        captured: dict = {}
-
-        def _fake_json(data, code):
-            captured["body"] = data
-            captured["status"] = code
-
-        handler._json = _fake_json          # type: ignore[method-assign]
-        handler.path = path
-        getattr(handler, method_name)()
-        return captured
-
-    def test_git_status_parity(self, monkeypatch, repo: Path) -> None:
-        # Add an origin remote so the upstream-parsing branch is exercised.
-        _git(repo, "remote", "add", "origin", "https://github.com/acme/widgets.git")
-        captured = self._invoke(monkeypatch, repo, "_get_git_status", "/api/git-status")
-        assert captured["status"] == 200
-        assert captured["body"] == gs.build_git_status(repo)
-        assert captured["body"]["upstream_repo"] == "acme/widgets"   # non-trivial
-
-    def test_work_status_active_parity(self, monkeypatch, repo_with_branch: Path) -> None:
-        pbg = repo_with_branch / ".pbg"
-        pbg.mkdir()
-        (pbg / "state.json").write_text(
-            json.dumps({"active_branch": "feature/x", "base": "main", "pushed": False})
-        )
-        captured = self._invoke(
-            monkeypatch, repo_with_branch, "_get_work_status", "/api/work-status"
-        )
-        assert captured["status"] == 200
-        assert captured["body"] == gs.build_work_status(repo_with_branch)
-        assert captured["body"]["active"] is True   # real active payload, not {active:false}
-
-    def test_work_status_inactive_parity(self, monkeypatch, repo: Path) -> None:
-        captured = self._invoke(monkeypatch, repo, "_get_work_status", "/api/work-status")
-        assert captured["status"] == 200
-        assert captured["body"] == gs.build_work_status(repo) == {"active": False}
-
-
-# ---------------------------------------------------------------------------
-# diagnose_push_error: parity vs the server copy (C-state-3f2 extraction)
+# diagnose_push_error: representative branches + None tails
 # ---------------------------------------------------------------------------
 
 class TestDiagnosePushError:
-    """``git_status.diagnose_push_error`` is a verbatim copy of the pure
-    ``server._diagnose_push_error``; assert byte-identical output across the
-    representative branches + the None tails."""
+    """Exercise ``git_status.diagnose_push_error`` across the representative
+    branches + the None tails."""
 
     _CASES = [
         "",
@@ -406,11 +343,6 @@ class TestDiagnosePushError:
         "! [rejected]  feat -> feat (fetch first, you are behind)",
         "some unrelated error string with no known pattern",
     ]
-
-    def test_parity_vs_server(self) -> None:
-        import vivarium_dashboard.server as server
-        for err in self._CASES:
-            assert gs.diagnose_push_error(err) == server._diagnose_push_error(err)
 
     def test_no_origin_body(self) -> None:
         d = gs.diagnose_push_error("fatal: Could not read from remote repository.")

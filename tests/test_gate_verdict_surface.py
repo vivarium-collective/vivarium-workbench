@@ -26,13 +26,12 @@ _V3_BASE = {
 
 
 @pytest.fixture
-def tmp_study_with_gate_evaluator(tmp_path, monkeypatch):
+def tmp_study_with_gate_evaluator(tmp_path):
     """A study whose study.yaml has a PERSISTED diverging gate_evaluator.
 
     Authored gate_status says 'passed' but the persisted coded evaluator says
     'failed' → diverges_from_authored is True.
     """
-    import vivarium_dashboard.server as srv
     ws = tmp_path / "ws"
     sd = ws / "studies" / "diverge-study"
     sd.mkdir(parents=True)
@@ -58,14 +57,14 @@ def tmp_study_with_gate_evaluator(tmp_path, monkeypatch):
         },
     )
     (sd / "study.yaml").write_text(yaml.safe_dump(spec))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
-    return "diverge-study"
+    return ws, "diverge-study"
 
 
 def test_detail_surfaces_persisted_gate_evaluator(tmp_study_with_gate_evaluator):
     """computed_gate_verdict must carry the persisted divergence, not a recompute."""
-    import vivarium_dashboard.server as srv
-    spec = srv._study_detail_spec(tmp_study_with_gate_evaluator)
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec
+    ws, name = tmp_study_with_gate_evaluator
+    spec = load_study_detail_spec(ws, name)
     assert spec is not None
     ge = (spec.get("pipeline_gate") or {}).get("gate_evaluator") or spec.get("computed_gate_verdict")
     assert ge and ge.get("diverges_from_authored") is True
@@ -75,8 +74,9 @@ def test_detail_surfaces_persisted_gate_evaluator(tmp_study_with_gate_evaluator)
 def test_computed_gate_verdict_prefers_persisted_evaluator(tmp_study_with_gate_evaluator):
     """The exposed computed_gate_verdict key carries diverges_from_authored
     sourced from the persisted slot (the recompute would drop it)."""
-    import vivarium_dashboard.server as srv
-    spec = srv._study_detail_spec(tmp_study_with_gate_evaluator)
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec
+    ws, name = tmp_study_with_gate_evaluator
+    spec = load_study_detail_spec(ws, name)
     cgv = spec["computed_gate_verdict"]
     assert cgv.get("result") == "failed"
     assert cgv.get("evaluated_by") == "code"
@@ -85,9 +85,8 @@ def test_computed_gate_verdict_prefers_persisted_evaluator(tmp_study_with_gate_e
     assert spec.get("gate_status") == "passed"
 
 
-def test_computed_gate_verdict_falls_back_when_no_persisted_slot(tmp_path, monkeypatch):
+def test_computed_gate_verdict_falls_back_when_no_persisted_slot(tmp_path):
     """Without a persisted gate_evaluator, fall back to roll_up_verdict."""
-    import vivarium_dashboard.server as srv
     ws = tmp_path / "ws"
     sd = ws / "studies" / "plain-study"
     sd.mkdir(parents=True)
@@ -99,9 +98,9 @@ def test_computed_gate_verdict_falls_back_when_no_persisted_slot(tmp_path, monke
                "outcomes": {"t1": {"result": "PASS"}}}],
     )
     (sd / "study.yaml").write_text(yaml.safe_dump(spec))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
 
-    result_spec = srv._study_detail_spec("plain-study")
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec
+    result_spec = load_study_detail_spec(ws, "plain-study")
     cgv = result_spec["computed_gate_verdict"]
     assert cgv["result"] == "passed"
     assert cgv["evaluated_by"] == "code"

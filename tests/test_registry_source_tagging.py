@@ -6,25 +6,20 @@ UI can distinguish workspace-declared processes from env-installed ones.
 """
 from __future__ import annotations
 import json
-import sys
-import threading
 import urllib.request
 import urllib.error
-from pathlib import Path
 
 import pytest
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 
 # ---------------------------------------------------------------------------
-# Minimal in-process server fixture (same pattern as test_visualization_endpoints.py)
+# Live FastAPI fixture spun up via the shared dashboard_client factory.
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def registry_server(tmp_path, monkeypatch):
-    """Spin up a Handler-backed server against a minimal temp workspace.
+def registry_server(tmp_path, dashboard_client):
+    """Spin up the live FastAPI app against a minimal temp workspace.
 
     The workspace package (pbg_registry_test) registers exactly ONE custom
     process (FakeProcess) so we have a known in_workspace entry to assert on.
@@ -63,29 +58,13 @@ def registry_server(tmp_path, monkeypatch):
         "simulations": [],
     }, sort_keys=False))
 
-    # Add workspace root to sys.path so subprocess can import pbg_registry_test
-    monkeypatch.syspath_prepend(str(ws_root))
-
-    import importlib
-    import vivarium_dashboard.server as srv
-    importlib.reload(srv)
-    monkeypatch.setattr(srv, "WORKSPACE", ws_root)
-    # Bust any leftover registry cache from other tests
-    srv._REGISTRY_CACHE["data"] = None
-    srv._REGISTRY_CACHE["ts"] = 0.0
-
-    httpd = srv.ThreadingHTTPServer(("127.0.0.1", 0), srv.Handler)
-    port = httpd.server_address[1]
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
+    client = dashboard_client(ws_root)
 
     class _Server:
-        url = f"http://127.0.0.1:{port}"
+        url = client.base_url
         root = ws_root
 
     yield _Server()
-    httpd.shutdown()
-    thread.join(timeout=2)
 
 
 def _get(url):
@@ -171,7 +150,7 @@ def test_registry_includes_workspace_pkgs_field(registry_server):
     )
 
 
-def test_registry_with_declared_import_marks_it_in_workspace(tmp_path, monkeypatch):
+def test_registry_with_declared_import_marks_it_in_workspace(tmp_path, dashboard_client):
     """When workspace.yaml.imports declares a package, its classes get source='in_workspace'."""
     ws_root = tmp_path
 
@@ -202,44 +181,28 @@ def test_registry_with_declared_import_marks_it_in_workspace(tmp_path, monkeypat
         },
     }, sort_keys=False))
 
-    monkeypatch.syspath_prepend(str(ws_root))
+    client = dashboard_client(ws_root)
 
-    import importlib
-    import vivarium_dashboard.server as srv
-    importlib.reload(srv)
-    monkeypatch.setattr(srv, "WORKSPACE", ws_root)
-    srv._REGISTRY_CACHE["data"] = None
-    srv._REGISTRY_CACHE["ts"] = 0.0
+    code, body = _get(client.base_url + "/api/registry")
+    assert code == 200, body
 
-    httpd = srv.ThreadingHTTPServer(("127.0.0.1", 0), srv.Handler)
-    port = httpd.server_address[1]
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
+    # workspace_pkgs must include both the own package and the declared import
+    ws_pkgs = body.get("workspace_pkgs", [])
+    assert "pbg_ws_with_import" in ws_pkgs, f"ws_pkgs={ws_pkgs!r}"
+    assert "spatio_flux" in ws_pkgs, (
+        f"declared import 'spatio_flux' missing from workspace_pkgs={ws_pkgs!r}"
+    )
 
-    try:
-        code, body = _get(f"http://127.0.0.1:{port}/api/registry")
-        assert code == 200, body
-
-        # workspace_pkgs must include both the own package and the declared import
-        ws_pkgs = body.get("workspace_pkgs", [])
-        assert "pbg_ws_with_import" in ws_pkgs, f"ws_pkgs={ws_pkgs!r}"
-        assert "spatio_flux" in ws_pkgs, (
-            f"declared import 'spatio_flux' missing from workspace_pkgs={ws_pkgs!r}"
-        )
-
-        # If spatio_flux is actually installed, its entries must be in_workspace
-        for p in body.get("processes", []):
-            top = p.get("address", "").split(".")[0]
-            if top == "spatio_flux":
-                assert p["source"] == "in_workspace", (
-                    f"spatio_flux entry {p['name']!r} should be in_workspace; got {p['source']!r}"
-                )
-    finally:
-        httpd.shutdown()
-        thread.join(timeout=2)
+    # If spatio_flux is actually installed, its entries must be in_workspace
+    for p in body.get("processes", []):
+        top = p.get("address", "").split(".")[0]
+        if top == "spatio_flux":
+            assert p["source"] == "in_workspace", (
+                f"spatio_flux entry {p['name']!r} should be in_workspace; got {p['source']!r}"
+            )
 
 
-def test_registry_imports_as_list_of_dicts(tmp_path, monkeypatch):
+def test_registry_imports_as_list_of_dicts(tmp_path, dashboard_client):
     """v2ecoli + newer pbg-template workspaces ship workspace.yaml.imports
     as a list of dicts (each with ``name`` + optional ``package``), not
     as the older dict-keyed-by-catalog-name shape. The registry endpoint
@@ -279,36 +242,20 @@ def test_registry_imports_as_list_of_dicts(tmp_path, monkeypatch):
         ],
     }, sort_keys=False))
 
-    monkeypatch.syspath_prepend(str(ws_root))
+    client = dashboard_client(ws_root)
 
-    import importlib
-    import vivarium_dashboard.server as srv
-    importlib.reload(srv)
-    monkeypatch.setattr(srv, "WORKSPACE", ws_root)
-    srv._REGISTRY_CACHE["data"] = None
-    srv._REGISTRY_CACHE["ts"] = 0.0
-
-    httpd = srv.ThreadingHTTPServer(("127.0.0.1", 0), srv.Handler)
-    port = httpd.server_address[1]
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
-
-    try:
-        code, body = _get(f"http://127.0.0.1:{port}/api/registry")
-        assert code == 200, body
-        # No ``error`` field — the list shape parsed cleanly.
-        assert body.get("error") is None, f"unexpected error: {body.get('error')!r}"
-        ws_pkgs = body.get("workspace_pkgs", [])
-        # All three import-shape variants should resolve to package names.
-        assert "pbg_ws_list_imports" in ws_pkgs, f"ws_pkgs={ws_pkgs!r}"
-        assert "spatio_flux" in ws_pkgs, f"name-only entry missing: {ws_pkgs!r}"
-        assert "bigraph_schema" in ws_pkgs, f"string entry missing: {ws_pkgs!r}"
-    finally:
-        httpd.shutdown()
-        thread.join(timeout=2)
+    code, body = _get(client.base_url + "/api/registry")
+    assert code == 200, body
+    # No ``error`` field — the list shape parsed cleanly.
+    assert body.get("error") is None, f"unexpected error: {body.get('error')!r}"
+    ws_pkgs = body.get("workspace_pkgs", [])
+    # All three import-shape variants should resolve to package names.
+    assert "pbg_ws_list_imports" in ws_pkgs, f"ws_pkgs={ws_pkgs!r}"
+    assert "spatio_flux" in ws_pkgs, f"name-only entry missing: {ws_pkgs!r}"
+    assert "bigraph_schema" in ws_pkgs, f"string entry missing: {ws_pkgs!r}"
 
 
-def test_registry_imports_missing_or_none(tmp_path, monkeypatch):
+def test_registry_imports_missing_or_none(tmp_path, dashboard_client):
     """Workspace without an ``imports`` field (or ``imports: null``) — the
     registry shows the workspace's own package + framework classes
     without crashing."""
@@ -330,29 +277,13 @@ def test_registry_imports_missing_or_none(tmp_path, monkeypatch):
         # No imports field at all.
     }, sort_keys=False))
 
-    monkeypatch.syspath_prepend(str(ws_root))
+    client = dashboard_client(ws_root)
 
-    import importlib
-    import vivarium_dashboard.server as srv
-    importlib.reload(srv)
-    monkeypatch.setattr(srv, "WORKSPACE", ws_root)
-    srv._REGISTRY_CACHE["data"] = None
-    srv._REGISTRY_CACHE["ts"] = 0.0
-
-    httpd = srv.ThreadingHTTPServer(("127.0.0.1", 0), srv.Handler)
-    port = httpd.server_address[1]
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
-
-    try:
-        code, body = _get(f"http://127.0.0.1:{port}/api/registry")
-        assert code == 200, body
-        assert body.get("error") is None
-        ws_pkgs = body.get("workspace_pkgs", [])
-        assert ws_pkgs == ["pbg_ws_no_imports"]
-    finally:
-        httpd.shutdown()
-        thread.join(timeout=2)
+    code, body = _get(client.base_url + "/api/registry")
+    assert code == 200, body
+    assert body.get("error") is None
+    ws_pkgs = body.get("workspace_pkgs", [])
+    assert ws_pkgs == ["pbg_ws_no_imports"]
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +294,7 @@ def test_filter_catalog_keeps_installed_modules_outside_include():
     """`dashboard.registry.include` limits which *available* modules surface, but
     INSTALLED modules (the workspace's active deps) must always be kept — else a
     narrow include like [v2ecoli] hides pbg-emitters/viva-munk/etc."""
-    from vivarium_dashboard import server
+    from vivarium_dashboard.lib import catalog
 
     modules = [
         {"name": "v2ecoli", "installed": True},
@@ -372,7 +303,7 @@ def test_filter_catalog_keeps_installed_modules_outside_include():
         {"name": "pbg-cellpack", "package": "pbg_cellpack", "installed": False},
     ]
     ws_data = {"dashboard": {"registry": {"include": ["v2ecoli"]}}}
-    kept = {m["name"] for m in server._filter_catalog_modules(modules, ws_data)}
+    kept = {m["name"] for m in catalog._filter_catalog_modules(modules, ws_data)}
 
     assert kept == {"v2ecoli", "pbg-emitters", "viva-munk"}, (
         "installed modules must survive the include filter; available "
@@ -382,9 +313,9 @@ def test_filter_catalog_keeps_installed_modules_outside_include():
 
 def test_filter_catalog_noop_without_include():
     """No include configured -> full catalog unchanged."""
-    from vivarium_dashboard import server
+    from vivarium_dashboard.lib import catalog
     modules = [{"name": "a", "installed": False}, {"name": "b", "installed": True}]
-    assert server._filter_catalog_modules(modules, {}) == modules
+    assert catalog._filter_catalog_modules(modules, {}) == modules
 
 
 def test_registry_filter_always_keeps_emitters():
@@ -392,7 +323,7 @@ def test_registry_filter_always_keeps_emitters():
     (the workspace's I/O backends, in framework/env packages outside the
     include) must always survive — else the Registry's Emitters section is
     empty under a repo-scoped include like [v2ecoli]."""
-    from vivarium_dashboard import server
+    from vivarium_dashboard.lib import registry
 
     data = {"processes": [
         {"name": "EcoliWCM", "address": "v2ecoli.bridge.EcoliWCM", "kind": "process"},
@@ -400,7 +331,7 @@ def test_registry_filter_always_keeps_emitters():
         {"name": "XArrayEmitter", "address": "pbg_emitters.x.XArrayEmitter", "kind": "emitter"},
         {"name": "ConsoleEmitter", "address": "process_bigraph.emitter.ConsoleEmitter", "kind": "emitter"},
     ]}
-    server._apply_registry_include_filter(data, {"dashboard": {"registry": {"include": ["v2ecoli"]}}})
+    registry._apply_registry_include_filter(data, {"dashboard": {"registry": {"include": ["v2ecoli"]}}})
     kept = {p["name"] for p in data["processes"]}
     assert "EcoliWCM" in kept            # own package
     assert "XArrayEmitter" in kept       # emitter (env pkg) survives

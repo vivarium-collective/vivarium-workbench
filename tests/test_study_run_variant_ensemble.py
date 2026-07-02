@@ -15,7 +15,7 @@ from pathlib import Path
 import yaml
 import pytest
 
-import vivarium_dashboard.server as server
+from vivarium_dashboard.lib import study_runs
 from vivarium_dashboard.lib import composite_subprocess, study_run_state
 
 
@@ -57,7 +57,6 @@ def tmp_v2ecoli_study(tmp_path, monkeypatch):
         {"name": "ens", "kind": "seeds", "base_composite": "core",
          "n_seeds": 4, "generations": 2},
     ])
-    monkeypatch.setattr(server, "WORKSPACE", ws)
     return ws
 
 
@@ -69,7 +68,6 @@ def tmp_other_study(tmp_path, monkeypatch):
         {"name": "sw", "kind": "sweep", "base_composite": "core",
          "sweep_over": {"ecoli-metabolism.kcat": [1, 2, 3]}},
     ])
-    monkeypatch.setattr(server, "WORKSPACE", ws)
     return ws
 
 
@@ -79,7 +77,7 @@ def test_sweep_variant_delegates_to_workflow(tmp_v2ecoli_study, monkeypatch):
         composite_subprocess, "invoke_v2ecoli_workflow",
         lambda cfg_path, out_dir, ws_root, timeout_s:
             invoked.update(cfg=str(cfg_path), out=str(out_dir)) or _ok())
-    resp, code = server._post_study_run_variant_for_test(
+    resp, code = study_runs.run_study_variant(
         tmp_v2ecoli_study, {"study": "s1", "variant": "ens"})
     assert code == 200, resp
     assert invoked  # delegated, not _run_composite_subprocess
@@ -99,7 +97,6 @@ def test_plain_variant_unchanged(tmp_path, monkeypatch):
         {"name": "fast", "base_composite": "core",
          "parameter_overrides": {"n_steps": 3}},
     ])
-    monkeypatch.setattr(server, "WORKSPACE", ws)
     # Make the single-run path reachable (skip real composite resolution).
     monkeypatch.setattr(study_run_state, "resolve_study_baseline_state",
                         lambda *a, **k: ({}, None))
@@ -110,14 +107,14 @@ def test_plain_variant_unchanged(tmp_path, monkeypatch):
     monkeypatch.setattr(composite_subprocess, "invoke_v2ecoli_workflow",
                         lambda *a, **k: (_ for _ in ()).throw(
                             AssertionError("delegation fired for a plain variant")))
-    resp, code = server._post_study_run_variant_for_test(
+    resp, code = study_runs.run_study_variant(
         ws, {"study": "s1", "variant": "fast"})
     assert code == 200, resp
     assert len(calls) == 1  # single-run path untouched
 
 
 def test_sweep_without_v2ecoli_errors_clearly(tmp_other_study):
-    resp, code = server._post_study_run_variant_for_test(
+    resp, code = study_runs.run_study_variant(
         tmp_other_study, {"study": "s1", "variant": "sw"})
     assert code >= 400
     assert "ensemble" in resp.get("error", "").lower()  # clear guard, no half-run
@@ -149,9 +146,8 @@ def test_bare_key_sweep_422_not_single_run(tmp_path, monkeypatch):
         {"name": "bad", "kind": "sweep", "base_composite": "core",
          "sweep_over": {"b": [1, 2]}},  # bare key, no "<proc>."
     ])
-    monkeypatch.setattr(server, "WORKSPACE", ws)
     _guard_single_run(monkeypatch)
-    resp, code = server._post_study_run_variant_for_test(
+    resp, code = study_runs.run_study_variant(
         ws, {"study": "s1", "variant": "bad"})
     assert code == 422, (resp, code)
     assert "<process>.<key>" in resp.get("error", "")
@@ -164,9 +160,8 @@ def test_seeds_without_n_seeds_422(tmp_path, monkeypatch):
     _write_study(ws, "s1", [
         {"name": "bad", "kind": "seeds", "base_composite": "core"},  # no n_seeds
     ])
-    monkeypatch.setattr(server, "WORKSPACE", ws)
     _guard_single_run(monkeypatch)
-    resp, code = server._post_study_run_variant_for_test(
+    resp, code = study_runs.run_study_variant(
         ws, {"study": "s1", "variant": "bad"})
     assert code == 422, (resp, code)
     assert "n_seeds" in resp.get("error", "")
@@ -186,8 +181,7 @@ def test_delegatable_sweep_missing_binary_422_not_raise(tmp_path, monkeypatch):
         {"name": "sw", "kind": "sweep", "base_composite": "core",
          "sweep_over": {"ecoli-metabolism.kcat": [1, 2, 3]}},
     ])
-    monkeypatch.setattr(server, "WORKSPACE", ws)
-    resp, code = server._post_study_run_variant_for_test(
+    resp, code = study_runs.run_study_variant(
         ws, {"study": "s1", "variant": "sw"})
     assert code == 422, (resp, code)
     assert "ensemble" in resp.get("error", "").lower()
@@ -201,7 +195,7 @@ def test_invoke_workflow_missing_binary_returns_error(tmp_path):
     out_dir.mkdir(parents=True)
     cfg = out_dir / "config.json"
     cfg.write_text("{}")
-    resp, code = server._invoke_v2ecoli_workflow(str(cfg), out_dir, ws, 5)
+    resp, code = composite_subprocess.invoke_v2ecoli_workflow(str(cfg), out_dir, ws, 5)
     assert code >= 400
     assert "v2ecoli-workflow" in resp.get("error", "")
 
@@ -246,7 +240,7 @@ def test_ensemble_records_one_run(tmp_v2ecoli_study, monkeypatch):
         return ({"simulation_id": run_id, "ensemble": True}, 200)
 
     monkeypatch.setattr(composite_subprocess, "invoke_v2ecoli_workflow", _stub_invoke)
-    resp, code = server._post_study_run_variant_for_test(
+    resp, code = study_runs.run_study_variant(
         tmp_v2ecoli_study, {"study": "s1", "variant": "ens"})
     assert code == 200, resp
 

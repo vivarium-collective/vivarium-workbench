@@ -26,6 +26,8 @@ from pathlib import Path
 
 import yaml
 
+from vivarium_dashboard.lib import run_store
+
 
 def investigation_emitter_for_study(ws_root, study_name: str | None) -> str | None:
     """Preferred emitter declared by the investigation that owns this study.
@@ -211,6 +213,6 @@ def zarr_store_for_sim(study_db: Path, sim_name: str | None) -> Path | None:
         run_id = row[0]
     except Exception:
         return None
-    # Construct the zarr path: <db_stem>.<run_id>.zarr next to the SQLite db.
-    zarr_dir = study_db.parent / f"{study_db.stem}.{run_id}.zarr"
+    # Resolve the zarr path via the canonical run-store convention.
+    zarr_dir = run_store.zarr_store_path_for_db(study_db, run_id)
     return zarr_dir if zarr_dir.is_dir() else None

@@ -11,11 +11,13 @@ Skipped when v2e-invest is not checked out. NEVER writes to v2e-invest.
 """
 from __future__ import annotations
 
-import json
 import subprocess
 from pathlib import Path
 
 import pytest
+
+from vivarium_dashboard.lib.report_views import build_iset_detail, build_report_lint
+from vivarium_dashboard.lib.study_spec import load_study_detail_spec
 
 _V2E = Path("/Users/eranagmon/code/v2e-invest")
 pytestmark = pytest.mark.skipif(
@@ -33,18 +35,15 @@ def _dirty_count() -> int:
 
 
 @pytest.fixture
-def v2e_workspace(monkeypatch):
-    import vivarium_dashboard.server as srv
-    monkeypatch.setattr(srv, "WORKSPACE", _V2E)
+def v2e_workspace():
     return _V2E
 
 
 def test_golden_report_lint_returns_real_findings(v2e_workspace):
-    import vivarium_dashboard.server as srv
     before = _dirty_count()
-    body, code = srv._report_lint(_V2E)
+    d, code = build_report_lint(_V2E)
     assert code == 200
-    findings = json.loads(body)["findings"]
+    findings = d["findings"]
     assert findings, "real workspace should yield lint findings"
     checks = {f["check"] for f in findings}
     # SP2b-ii readout-migration + SP2c band-citation-gap are surfaced
@@ -56,13 +55,12 @@ def test_golden_report_lint_returns_real_findings(v2e_workspace):
 
 
 def test_golden_study_detail_carries_computed_gate_verdict(v2e_workspace):
-    import vivarium_dashboard.server as srv
     before = _dirty_count()
     # Discover a real study slug deterministically.
     studies = sorted(p.name for p in (_V2E / "studies").iterdir()
                      if (p / "study.yaml").is_file())
     assert studies, "v2e-invest should have studies"
-    spec = srv._study_detail_spec(studies[0])
+    spec = load_study_detail_spec(_V2E, studies[0])
     assert spec is not None
     cgv = spec.get("computed_gate_verdict")
     assert cgv and cgv.get("evaluated_by") == "code"
@@ -70,7 +68,6 @@ def test_golden_study_detail_carries_computed_gate_verdict(v2e_workspace):
 
 
 def test_golden_iset_carries_computed_acceptance(v2e_workspace):
-    import vivarium_dashboard.server as srv
     before = _dirty_count()
     invs = sorted(p.name for p in (_V2E / "investigations").iterdir()
                   if (p / "investigation.yaml").is_file())
@@ -78,7 +75,7 @@ def test_golden_iset_carries_computed_acceptance(v2e_workspace):
     # Find one whose computed_acceptance has criteria.
     found = False
     for inv in invs:
-        data = srv.Handler._iset_detail_data(inv)
+        data = build_iset_detail(_V2E, inv)
         ca = (data or {}).get("computed_acceptance")
         if ca and ca.get("criteria"):
             found = True

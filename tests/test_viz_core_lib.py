@@ -73,13 +73,6 @@ def _write_fake_core(ws_root: Path, pkg: str, *, reg_keys: tuple[str, ...] = (),
     (pkg_dir / "core.py").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _spy(store: dict, key: str, ret):
-    """A recording stand-in: stores positional args under ``key``, returns ``ret``."""
-    def _f(*args):
-        store[key] = args
-        return ret
-    return _f
-
 
 # ---------------------------------------------------------------------------
 # build_workspace_core
@@ -218,36 +211,3 @@ def test_demo_state_for_empty():
     assert viz_core.demo_state_for(C, "NotARealClass") == {}
 
 
-# ---------------------------------------------------------------------------
-# Server-shim parity
-# ---------------------------------------------------------------------------
-
-def test_server_shims_delegate_to_lib(tmp_path, monkeypatch):
-    import vivarium_dashboard.server as server
-
-    monkeypatch.setattr(server, "WORKSPACE", tmp_path)
-    handler = object.__new__(server.Handler)
-    calls: dict = {}
-
-    monkeypatch.setattr(server._viz_core, "build_workspace_core",
-                        _spy(calls, "build", ("CORE", {"k": 1})))
-    assert handler._build_workspace_core() == ("CORE", {"k": 1})
-    assert calls["build"] == (tmp_path,)
-
-    monkeypatch.setattr(server._viz_core, "add_workspace_viz_classes",
-                        _spy(calls, "add", {"injected": True}))
-    reg = {"a": 1}
-    assert handler._add_workspace_viz_classes(reg) == {"injected": True}
-    assert calls["add"] == (tmp_path, reg)
-
-    monkeypatch.setattr(server._viz_core, "resolve_viz_class",
-                        _spy(calls, "resolve", ("CLS", "short")))
-    assert handler._resolve_viz_class("local:Foo") == ("CLS", "short")
-    assert calls["resolve"] == (tmp_path, "local:Foo")
-
-    # demo_state_for takes no WORKSPACE -> equals the lib fn directly.
-    class C:
-        pass
-
-    assert handler._demo_state_for(C, "Distribution") == viz_core.demo_state_for(C, "Distribution")
-    assert server._viz_core is viz_core

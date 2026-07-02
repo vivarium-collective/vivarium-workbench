@@ -349,6 +349,19 @@ def observables_for_ref_payload(ws_root: Path, ref: str) -> dict:
     return {"leaves": payload.get("leaves", []), "catalogs": payload.get("catalogs", {})}
 
 
+def _observables_for_ref(ws_root: Path, ref: str):
+    """GET /api/observables?ref=<id> worker — returns ``(json_bytes, status)``.
+
+    Encodes :func:`build_observables`'s payload dict via ``_json_body``.
+    Relocated from the retired ``server._observables_for_ref`` and retained for
+    external consumers that import it by that name (the dashboard's FastAPI seam
+    uses ``build_observables`` directly).
+    """
+    from vivarium_dashboard.lib.json_serialize import _json_body
+    body, status = build_observables(ws_root, ref)
+    return _json_body(body), status
+
+
 # Register this module's cache-clear with the active-workspace registry so a
 # workspace switch invalidates it via active_workspace.invalidate().
 from . import active_workspace as _aw  # noqa: E402

@@ -29,11 +29,11 @@ _END = "@@@C_END@@@"
 def composites_via_subprocess(ws_root: Path) -> dict | None:
     """Return composite discovery data by running a fresh Python subprocess.
 
-    The child process imports ``vivarium_dashboard.server``, sets its
-    ``WORKSPACE`` global to *ws_root*, calls ``_composites_data(WORKSPACE)``,
-    and prints the result as JSON fenced between ``@@@C_START@@@`` /
-    ``@@@C_END@@@`` markers.  Fencing lets the parent ignore the noisy import
-    warnings that ``@composite_generator`` scanning emits to stdout.
+    The child process imports ``lib.composite_lookup``, calls
+    ``composites_data(ws_root)``, and prints the result as JSON fenced between
+    ``@@@C_START@@@`` / ``@@@C_END@@@`` markers.  Fencing lets the parent ignore
+    the noisy import warnings that ``@composite_generator`` scanning emits to
+    stdout.
 
     Parameters
     ----------
@@ -50,10 +50,10 @@ def composites_via_subprocess(ws_root: Path) -> dict | None:
     script = (
         "import json, sys\n"
         "from pathlib import Path\n"
-        f"import vivarium_dashboard.server as _s\n"
-        f"_s.WORKSPACE = Path({ws_root_str!r})\n"
+        "from vivarium_dashboard.lib.composite_lookup import composites_data\n"
+        f"_ws = Path({ws_root_str!r})\n"
         "try:\n"
-        "    _result = _s._composites_data(_s.WORKSPACE)\n"
+        "    _result = composites_data(_ws)\n"
         "except Exception as _e:\n"
         "    _result = {'composites': [], 'error': str(_e)}\n"
         f"print({_START!r} + json.dumps(_result) + {_END!r})\n"

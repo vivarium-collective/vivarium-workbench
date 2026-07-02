@@ -14,7 +14,6 @@ import pytest
 import yaml
 
 import vivarium_dashboard.lib.lifecycle_mutations as lifecycle_mutations
-import vivarium_dashboard.server as server
 
 
 # ---------------------------------------------------------------------------
@@ -356,78 +355,3 @@ def test_study_seed_followup_bad_proposal_idx(ws: Path) -> None:
     )
     assert code == 400
     assert "proposal_idx" in resp["error"]
-
-
-# ---------------------------------------------------------------------------
-# Shim-parity: server._for_test shims delegate to lib
-# ---------------------------------------------------------------------------
-
-
-def test_shim_feedback_apply_action() -> None:
-    assert server._post_feedback_apply_action_for_test is not lifecycle_mutations.feedback_apply_action
-    # shim should delegate (same result for a trivial body)
-    r1, c1 = server._post_feedback_apply_action_for_test(Path("/tmp"), {})
-    r2, c2 = lifecycle_mutations.feedback_apply_action(Path("/tmp"), {})
-    assert r1 == r2 and c1 == c2
-
-
-def test_shim_study_rename(ws: Path) -> None:
-    _make_study(ws, "orig")
-    r1, c1 = server._post_study_rename_for_test(ws, {"study": "orig", "new_name": "renamed"})
-    assert c1 == 200
-    # second rename should 404 (orig gone) — same error from both paths
-    r_lib, c_lib = lifecycle_mutations.study_rename(ws, {"study": "orig", "new_name": "foo"})
-    assert c_lib == 404
-
-
-def test_shim_decide_proposed_input(ws_with_inv: Path) -> None:
-    # The server shim has positional args; reconstructs body internally.
-    r_shim, c_shim = server._decide_proposed_input_for_test(
-        ws_with_inv, "test-inv", "ref-a", "decline"
-    )
-    assert c_shim == 200
-    # Verify same result from lib (accept would fail: ref-a now declined)
-    r_lib, c_lib = lifecycle_mutations.decide_proposed_input(
-        ws_with_inv,
-        {"investigation": "test-inv", "item_id": "ref-a", "decision": "decline"},
-    )
-    # ref-a already declined → still 200 (idempotent status write)
-    assert c_lib == 200
-
-
-def test_shim_study_create_from_run(ws_with_scratch: Path) -> None:
-    r, c = server._post_study_create_from_run_for_test(
-        ws_with_scratch, {"name": "shim-study", "source_run_id": "rid1"}
-    )
-    assert c == 200
-    assert (ws_with_scratch / "studies" / "shim-study").is_dir()
-
-
-def test_shim_study_seed_followup(ws: Path) -> None:
-    d = ws / "studies" / "parent2"
-    d.mkdir()
-    (d / "study.yaml").write_text(yaml.safe_dump({
-        "schema_version": 4, "name": "parent2", "status": "ran",
-        "baseline": [{"name": "b", "composite": "x"}],
-        "follow_up_studies": [{"title": "t", "kind": "new", "why": "w"}],
-    }, sort_keys=False))
-    r, c = server._post_study_seed_followup_for_test(
-        ws, {"parent": "parent2", "followup_idx": 0}
-    )
-    assert c == 200
-    assert r["new_study_name"]
-
-
-def test_shim_study_sync_runs(ws: Path) -> None:
-    from pbg_superpowers import run_registry, study_io
-
-    d = ws / "studies" / "sync-study"
-    d.mkdir()
-    study_io.save_yaml_atomic(d / "study.yaml", {"name": "sync-study", "runs": []})
-    run_registry.register_run(
-        d / "runs.db", "r2", spec_id="s2", status="completed",
-        started_at="2026-01-01T00:00:00Z", completed_at="2026-01-01T00:01:00Z",
-    )
-    r, c = server._post_study_sync_runs_for_test(ws, {"study": "sync-study"})
-    assert c == 200
-    assert r["ok"] is True

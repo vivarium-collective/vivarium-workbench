@@ -10,7 +10,25 @@ from pathlib import Path
 import yaml
 import pytest
 
-from vivarium_dashboard import server
+from vivarium_dashboard.lib import _root
+from vivarium_dashboard.lib.json_serialize import _json_default
+from vivarium_dashboard.lib.static_serving import STATIC_DIR
+from vivarium_dashboard.lib.study_spec import load_study_detail_spec
+from vivarium_dashboard.lib.system_info import build_workspace_home
+from vivarium_dashboard.lib.investigation_status import (
+    build_iset_summary, study_run_slugs,
+)
+from vivarium_dashboard.lib.report_views import build_iset_detail
+
+
+def _iset_summary(ws):
+    """Mirror the retired server._build_iset_summary_for_test shim."""
+    run_slugs = study_run_slugs(ws)
+
+    def study_has_runs(slug, spec):
+        return slug in run_slugs or bool((spec or {}).get("runs"))
+
+    return build_iset_summary(ws, study_has_runs=study_has_runs)
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +63,7 @@ def tmp_workspace(tmp_path, monkeypatch):
             "objective": f"Objective for {slug}.",
             "status": "draft",
         }))
-    monkeypatch.setattr(server, "WORKSPACE", ws)
+    _root.set_workspace_root(ws)
     return ws
 
 
@@ -58,7 +76,7 @@ def test_build_bundle_structure_and_parity(tmp_workspace, tmp_path):
     from vivarium_dashboard import publish
 
     out = tmp_path / "bundle"
-    summary = publish.build_bundle(server.WORKSPACE, out)
+    summary = publish.build_bundle(tmp_workspace, out)
 
     # Bundle root files
     assert (out / "index.html").is_file(), "home shell missing"
@@ -75,7 +93,8 @@ def test_build_bundle_structure_and_parity(tmp_workspace, tmp_path):
 
     # JSON parity: bundle file == API builder output
     bundle_json = json.loads((out / "api" / "study" / f"{slug}.json").read_text())
-    api_json = json.loads(json.dumps(server._study_detail_spec(slug), default=server._json_default))
+    api_json = json.loads(json.dumps(
+        load_study_detail_spec(tmp_workspace, slug), default=_json_default))
     assert bundle_json == api_json, "study JSON parity failed"
 
     # config.json shape
@@ -89,14 +108,15 @@ def test_build_bundle_investigation_json(tmp_workspace, tmp_path):
     from vivarium_dashboard import publish
 
     out = tmp_path / "bundle"
-    publish.build_bundle(server.WORKSPACE, out)
+    publish.build_bundle(tmp_workspace, out)
 
     iset_file = out / "api" / "investigation" / "main-inv.json"
     assert iset_file.is_file(), "iset JSON missing"
     iset_data = json.loads(iset_file.read_text())
     assert "studies" in iset_data
 
-    expected = json.loads(json.dumps(server.Handler._iset_detail_data("main-inv"), default=server._json_default))
+    expected = json.loads(json.dumps(
+        build_iset_detail(tmp_workspace, "main-inv"), default=_json_default))
     assert iset_data == expected, "iset JSON parity failed"
 
 
@@ -105,12 +125,13 @@ def test_build_bundle_workspace_json(tmp_workspace, tmp_path):
     from vivarium_dashboard import publish
 
     out = tmp_path / "bundle"
-    publish.build_bundle(server.WORKSPACE, out)
+    publish.build_bundle(tmp_workspace, out)
 
     ws_file = out / "api" / "workspace.json"
     assert ws_file.is_file()
     ws_data = json.loads(ws_file.read_text())
-    expected = json.loads(json.dumps(server._workspace_home_data(server.WORKSPACE), default=server._json_default))
+    expected = json.loads(json.dumps(
+        build_workspace_home(tmp_workspace), default=_json_default))
     assert ws_data == expected, "workspace JSON parity failed"
 
 
@@ -119,7 +140,7 @@ def test_build_bundle_summary_keys(tmp_workspace, tmp_path):
     from vivarium_dashboard import publish
 
     out = tmp_path / "bundle"
-    summary = publish.build_bundle(server.WORKSPACE, out)
+    summary = publish.build_bundle(tmp_workspace, out)
     assert "investigations" in summary
     assert "studies" in summary
     assert "out" in summary
@@ -138,7 +159,7 @@ def test_bundle_shell_asset_urls_resolve(tmp_workspace, tmp_path):
     from vivarium_dashboard import publish
 
     out = tmp_path / "bundle"
-    publish.build_bundle(server.WORKSPACE, out)
+    publish.build_bundle(tmp_workspace, out)
 
     shells = [out / "index.html"] + list(out.glob("studies/*/index.html"))
     assert shells, "no shells found"
@@ -168,7 +189,7 @@ def test_bundle_exports_composite_state_and_loom(tmp_workspace, tmp_path):
     from vivarium_dashboard import publish
 
     out = tmp_path / "bundle"
-    publish.build_bundle(server.WORKSPACE, out)
+    publish.build_bundle(tmp_workspace, out)
 
     comps = json.loads((out / "api" / "composites.json").read_text())["composites"]
     if comps:
@@ -192,20 +213,23 @@ def test_bundle_survives_nonfinite_composite_state(tmp_workspace, tmp_path, monk
     unresolvable composite, while finite composites still export their state."""
     from vivarium_dashboard import publish
 
-    monkeypatch.setattr(server, "_composites_data", lambda ws: {"composites": [
-        {"id": "good", "name": "Good"},
-        {"id": "bad", "name": "Bad"},
-    ]})
+    monkeypatch.setattr(
+        "vivarium_dashboard.lib.composite_lookup.composites_data",
+        lambda ws: {"composites": [
+            {"id": "good", "name": "Good"},
+            {"id": "bad", "name": "Bad"},
+        ]})
 
-    def _resolve(cid):
+    def _resolve(ws, cid):
         if cid == "bad":
             return {"state": {"rate": float("inf")}}  # non-finite -> strict JSON rejects
         return {"state": {"rate": 1.0}}
 
-    monkeypatch.setattr(server, "_composite_resolve_data", _resolve)
+    monkeypatch.setattr(
+        "vivarium_dashboard.lib.composite_resolve.resolve_composite", _resolve)
 
     out = tmp_path / "bundle"
-    publish.build_bundle(server.WORKSPACE, out)  # must not raise
+    publish.build_bundle(tmp_workspace, out)  # must not raise
 
     by_id = {c["id"]: c for c in
              json.loads((out / "api" / "composites.json").read_text())["composites"]}
@@ -222,22 +246,25 @@ def test_bundle_uses_committed_composite_state_override(tmp_workspace, tmp_path,
     the committed file is used verbatim and has_wiring=True."""
     from vivarium_dashboard import publish
 
-    monkeypatch.setattr(server, "_composites_data", lambda ws: {"composites": [
-        {"id": "heavy.composite", "name": "Heavy"},
-    ]})
+    monkeypatch.setattr(
+        "vivarium_dashboard.lib.composite_lookup.composites_data",
+        lambda ws: {"composites": [
+            {"id": "heavy.composite", "name": "Heavy"},
+        ]})
 
-    def _resolve(cid):
+    def _resolve(ws, cid):
         raise RuntimeError("needs on-disk cache")  # live resolution fails
 
-    monkeypatch.setattr(server, "_composite_resolve_data", _resolve)
+    monkeypatch.setattr(
+        "vivarium_dashboard.lib.composite_resolve.resolve_composite", _resolve)
 
-    committed_dir = server.WORKSPACE / "reports" / "composite-state"
+    committed_dir = tmp_workspace / "reports" / "composite-state"
     committed_dir.mkdir(parents=True, exist_ok=True)
     committed = {"state": {"step": {"_type": "step", "inputs": {}, "outputs": {}}}}
     (committed_dir / "heavy.composite.json").write_text(json.dumps(committed))
 
     out = tmp_path / "bundle"
-    publish.build_bundle(server.WORKSPACE, out)
+    publish.build_bundle(tmp_workspace, out)
 
     exported = out / "api" / "composite-state" / "heavy.composite.json"
     assert exported.is_file(), "committed override not exported"
@@ -257,7 +284,7 @@ def test_bundle_exports_full_read_surface(tmp_workspace, tmp_path):
     from vivarium_dashboard import publish
 
     out = tmp_path / "bundle"
-    publish.build_bundle(server.WORKSPACE, out)
+    publish.build_bundle(tmp_workspace, out)
 
     assert (out / "api" / "investigation-summaries.json").is_file(), "investigation-summaries.json missing"
     assert (out / "api" / "catalog.json").is_file(), "catalog.json missing"
@@ -274,8 +301,8 @@ def test_bundle_exports_full_read_surface(tmp_workspace, tmp_path):
     # parity for investigation-summaries
     assert json.loads((out / "api" / "investigation-summaries.json").read_text()) == \
         json.loads(json.dumps(
-            {"investigations": server._build_iset_summary_for_test(server.WORKSPACE)},
-            default=server._json_default,
+            {"investigations": _iset_summary(tmp_workspace)},
+            default=_json_default,
         )), "investigation-summaries.json parity failed"
 
 
@@ -285,7 +312,7 @@ def test_bundle_exports_kept_tab_reads(tmp_workspace, tmp_path):
     from vivarium_dashboard import publish
 
     out = tmp_path / "bundle"
-    publish.build_bundle(server.WORKSPACE, out)
+    publish.build_bundle(tmp_workspace, out)
 
     # Global inputs — no investigation slug (empty-slug Sources page)
     global_json = out / "api" / "inputs" / "_global.json"
@@ -319,7 +346,7 @@ def test_snapshot_readonly_css_exists_and_has_key_rules():
     key hiding rules for the github rail link and js-authoring.
     Simulations DB + Visualizations tabs are now read-only enabled (full-surface plan)
     so their hide rules were removed."""
-    css_path = server.STATIC_DIR / "snapshot-readonly.css"
+    css_path = STATIC_DIR / "snapshot-readonly.css"
     assert css_path.is_file(), "snapshot-readonly.css not found in static assets"
     text = css_path.read_text()
     for selector in [
@@ -339,7 +366,7 @@ def test_snapshot_css_bundled_in_home_shell(tmp_workspace, tmp_path):
     import re
 
     out = tmp_path / "bundle"
-    publish.build_bundle(server.WORKSPACE, out)
+    publish.build_bundle(tmp_workspace, out)
 
     assert (out / "assets" / "snapshot-readonly.css").is_file(), \
         "snapshot-readonly.css not in bundle assets/"
@@ -367,7 +394,7 @@ def test_walkthrough_composite_popout_is_snapshot_aware():
     and the live ?ref= query, so every composite link 404'd in the read-only
     dashboard.
     """
-    text = (server.STATIC_DIR / "walkthrough.js").read_text()
+    text = (STATIC_DIR / "walkthrough.js").read_text()
     # Snapshot branch builds the static .json state path...
     assert "'/api/composite-state/' + encodeURIComponent(composite) + '.json'" in text, \
         "loom pop-out missing snapshot static composite-state path"
@@ -384,7 +411,7 @@ def test_walkthrough_has_snapshot_body_class_and_switchpage_gating():
     the github/studies tabs in _switchPage.
     Simulations and Visualizations tabs are now read-only enabled (full-surface plan)
     so their _switchPage redirects were removed."""
-    text = (server.STATIC_DIR / "walkthrough.js").read_text()
+    text = (STATIC_DIR / "walkthrough.js").read_text()
     assert 'document.body.classList.add("snapshot")' in text, \
         "walkthrough.js missing body.snapshot class init"
     assert '_switchPage' in text
@@ -405,7 +432,7 @@ def test_build_bundle_with_base_path(tmp_workspace, tmp_path):
 
     out = tmp_path / "bundle"
     base = "/v2ecoli/dashboard"
-    publish.build_bundle(server.WORKSPACE, out, base_path=base)
+    publish.build_bundle(tmp_workspace, out, base_path=base)
 
     for shell in [out / "index.html"] + list(out.glob("studies/*/index.html")):
         html = shell.read_text()
@@ -437,7 +464,7 @@ def test_build_bundle_base_path_normalization(tmp_workspace, tmp_path):
 
     out = tmp_path / "bundle"
     # Trailing slash should be stripped; no leading slash should be added
-    publish.build_bundle(server.WORKSPACE, out, base_path="v2ecoli/dashboard/")
+    publish.build_bundle(tmp_workspace, out, base_path="v2ecoli/dashboard/")
 
     home_html = (out / "index.html").read_text()
     # Canonical form: leading slash, no trailing slash
@@ -452,7 +479,7 @@ def test_build_bundle_default_base_path_unchanged(tmp_workspace, tmp_path):
     from vivarium_dashboard import publish
 
     out = tmp_path / "bundle"
-    publish.build_bundle(server.WORKSPACE, out)
+    publish.build_bundle(tmp_workspace, out)
 
     home_html = (out / "index.html").read_text()
 
@@ -467,7 +494,7 @@ def test_build_bundle_default_base_path_unchanged(tmp_workspace, tmp_path):
 
 def test_data_source_js_has_base_helper():
     """data-source.js must expose a _base() helper that reads cfg().basePath."""
-    text = (server.STATIC_DIR / "data-source.js").read_text()
+    text = (STATIC_DIR / "data-source.js").read_text()
     # _base helper exists
     assert '_base()' in text, "data-source.js missing _base() helper invocation"
     assert 'basePath' in text, "data-source.js missing basePath reference"
@@ -479,7 +506,7 @@ def test_data_source_js_has_base_helper():
 def test_walkthrough_js_loom_stateurl_prefixed_with_base_path():
     """walkthrough.js must prefix the loom iframe src and stateUrl with
     __DASH_CONFIG__.basePath in snapshot mode."""
-    text = (server.STATIC_DIR / "walkthrough.js").read_text()
+    text = (STATIC_DIR / "walkthrough.js").read_text()
     # basePath is read from __DASH_CONFIG__
     assert '__DASH_CONFIG__' in text and 'basePath' in text, \
         "walkthrough.js missing __DASH_CONFIG__.basePath reference"
@@ -527,15 +554,8 @@ def test_golden_v2e_invest(tmp_path):
     slug = summary["studies"][0]
     bundle_json = json.loads((out / "api" / "study" / f"{slug}.json").read_text())
 
-    # Temporarily set WORKSPACE to v2e-invest to call _study_detail_spec
-    orig_ws = server.WORKSPACE
-    server.WORKSPACE = _V2E_INVEST
-    server._WP_CACHE.clear()
-    try:
-        api_json = json.loads(json.dumps(server._study_detail_spec(slug), default=server._json_default))
-    finally:
-        server.WORKSPACE = orig_ws
-        server._WP_CACHE.clear()
+    api_json = json.loads(json.dumps(
+        load_study_detail_spec(_V2E_INVEST, slug), default=_json_default))
 
     assert bundle_json == api_json, "JSON parity failed for real study"
 
@@ -571,17 +591,10 @@ def test_golden_v2e_invest(tmp_path):
             f"api/inputs/{inv_name}.json missing"
 
     # investigation-summaries parity
-    orig_ws = server.WORKSPACE
-    server.WORKSPACE = _V2E_INVEST
-    server._WP_CACHE.clear()
-    try:
-        expected_isets = json.loads(json.dumps(
-            {"investigations": server._build_iset_summary_for_test(_V2E_INVEST)},
-            default=server._json_default,
-        ))
-    finally:
-        server.WORKSPACE = orig_ws
-        server._WP_CACHE.clear()
+    expected_isets = json.loads(json.dumps(
+        {"investigations": _iset_summary(_V2E_INVEST)},
+        default=_json_default,
+    ))
     assert json.loads((out / "api" / "investigation-summaries.json").read_text()) == expected_isets, \
         "investigation-summaries.json parity failed for v2e-invest"
 
@@ -672,12 +685,12 @@ def test_build_bundle_shell_embeds_are_staged_and_prefixed(tmp_workspace, tmp_pa
     study-detail 'Embedded visualizations' 404 under a hosting base path."""
     from vivarium_dashboard import publish
 
-    fig = server.WORKSPACE / "reports" / "figures" / "alpha"
+    fig = tmp_workspace / "reports" / "figures" / "alpha"
     fig.mkdir(parents=True)
     (fig / "f1.html").write_text("<html><body>fig one</body></html>")
 
     out = tmp_path / "bundle"
-    publish.build_bundle(server.WORKSPACE, out, base_path="/v2ecoli/dashboard")
+    publish.build_bundle(tmp_workspace, out, base_path="/v2ecoli/dashboard")
 
     # file copied into the bundle at the same workspace-relative path
     assert (out / "reports" / "figures" / "alpha" / "f1.html").is_file()
@@ -735,10 +748,10 @@ def ws_with_saved_pack(tmp_workspace):
     """Add a stub study with a saved parsimony 3D pack (+ meta + meshes) to the
     shared workspace. The pack's mesh LOD urls are workspace-rooted-relative
     (as pbg-parsimony writes them)."""
-    sd = server.WORKSPACE / "studies" / "x" / "viz" / "3d"
+    sd = tmp_workspace / "studies" / "x" / "viz" / "3d"
     sd.mkdir(parents=True)
     # A stub study.yaml (no variants/composite) — exists only to host viz assets.
-    (server.WORKSPACE / "studies" / "x" / "study.yaml").write_text(
+    (tmp_workspace / "studies" / "x" / "study.yaml").write_text(
         yaml.safe_dump({"name": "x", "description": "3d stub"})
     )
     pack = {
@@ -759,7 +772,7 @@ def ws_with_saved_pack(tmp_workspace):
     (sd / "meshes").mkdir()
     (sd / "meshes" / "thing.lod0.obj").write_text("o thing0\n")
     (sd / "meshes" / "thing.lod1.obj").write_text("o thing1\n")
-    return server.WORKSPACE
+    return tmp_workspace
 
 
 @pytest.mark.skipif(not _pbg_parsimony_available(),
@@ -773,7 +786,7 @@ def test_build_bundle_exports_saved_visualizations(ws_with_saved_pack, tmp_path)
     from vivarium_dashboard import publish
 
     out = tmp_path / "bundle"
-    publish.build_bundle(server.WORKSPACE, out, base_path="/v2ecoli/dashboard/")
+    publish.build_bundle(ws_with_saved_pack, out, base_path="/v2ecoli/dashboard/")
 
     # api/saved-visualizations.json lists the stub study's pack.
     sv = json.loads((out / "api" / "saved-visualizations.json").read_text())
@@ -812,7 +825,7 @@ def test_build_bundle_saved_viz_root_hosting(ws_with_saved_pack, tmp_path):
     from vivarium_dashboard import publish
 
     out = tmp_path / "bundle"
-    publish.build_bundle(server.WORKSPACE, out, base_path="")
+    publish.build_bundle(ws_with_saved_pack, out, base_path="")
 
     dst_pack = out / "studies" / "x" / "viz" / "3d" / "scene.pack.json"
     pdata = json.loads(dst_pack.read_text())
@@ -830,7 +843,7 @@ def test_build_bundle_exports_investigation_notebooks(tmp_workspace, tmp_path):
     from vivarium_dashboard import publish
 
     out = tmp_path / "bundle"
-    summary = publish.build_bundle(server.WORKSPACE, out)
+    summary = publish.build_bundle(tmp_workspace, out)
 
     for inv_name in summary["investigations"]:
         ipynb = out / "investigation-notebooks" / f"{inv_name}.ipynb"

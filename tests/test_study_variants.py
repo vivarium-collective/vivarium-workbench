@@ -9,7 +9,7 @@ import pytest
 
 @pytest.fixture
 def _study_ws(tmp_path, monkeypatch):
-    import vivarium_dashboard.server as srv
+    from vivarium_dashboard.lib import _root
     ws = tmp_path / "ws"
     sd = ws / "studies" / "s1"
     sd.mkdir(parents=True)
@@ -20,19 +20,19 @@ def _study_ws(tmp_path, monkeypatch):
         "variants": [], "runs": [], "visualizations": [],
         "comparisons": [], "conclusion": None, "parent_studies": [],
     }))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
+    _root.set_workspace_root(ws)
     return ws
 
 
 def test_variant_delete_unknown(_study_ws):
-    from vivarium_dashboard.server import _post_study_variant_delete_for_test
+    from vivarium_dashboard.lib.study_crud_mutations import study_variant_delete as _post_study_variant_delete_for_test
     resp, code = _post_study_variant_delete_for_test(
         _study_ws, {"study": "s1", "variant": "ghost"})
     assert code == 404
 
 
 def test_comparison_add_appends(_study_ws):
-    from vivarium_dashboard.server import _post_study_comparison_add_for_test
+    from vivarium_dashboard.lib.study_crud_mutations import study_comparison_add as _post_study_comparison_add_for_test
     resp, code = _post_study_comparison_add_for_test(_study_ws, {
         "study": "s1", "run_ids": ["r1", "r2"]})
     assert code == 200, resp
@@ -43,7 +43,7 @@ def test_comparison_add_appends(_study_ws):
 
 
 def test_comparison_add_requires_two_runs(_study_ws):
-    from vivarium_dashboard.server import _post_study_comparison_add_for_test
+    from vivarium_dashboard.lib.study_crud_mutations import study_comparison_add as _post_study_comparison_add_for_test
     resp, code = _post_study_comparison_add_for_test(
         _study_ws, {"study": "s1", "run_ids": ["only-one"]})
     assert code == 400

@@ -50,26 +50,30 @@ will run it. Note `bigraph-loom` and `pbg-superpowers` are direct git/path deps.
 
 ## Architecture
 
-### HTTP server (`vivarium_dashboard/server.py`, ~16k lines)
-A single stdlib `BaseHTTPRequestHandler` subclass (`Handler`) is the entire web
-layer — no framework. `do_GET`/`do_POST` (and `do_DELETE`) are long
-`if self.path.startswith("/api/...")` dispatch chains routing to `_<name>(self)`
-methods. There are ~100+ `/api/*` endpoints. When adding an endpoint: add the
-`startswith` branch in the dispatcher AND the handler method; non-GET routes must
-pass the `_csrf_ok()` origin check (see below). Most real logic lives in
-`lib/` modules; handler methods are thin adapters that parse the request, call a
-`lib` function, and `self._json(...)` the result. `serve()` at the bottom boots it;
-`python -m vivarium_dashboard.server --workspace ... --port ...` is how tests
-spawn it as a subprocess.
+### HTTP server (`vivarium_dashboard/api/app.py`, FastAPI)
+The dashboard is served by a **FastAPI app** under uvicorn: `vivarium-dashboard
+serve` → `cli.py` → `lib/startup.serve_fastapi` → `uvicorn.run(app, ...)`. All
+~178 `/api/*` routes (read and write), static/SPA serving, and the SSE stream are
+defined in `api/app.py` via `@app.get`/`@app.post` decorators; each backs onto a
+`lib/` function. Non-GET routes are guarded by the CSRF/origin middleware (see
+below). When adding an endpoint: add the route in `api/app.py`, put the real logic
+in a `lib/` module, and return a pydantic model where possible.
 
-This layer is being migrated, incrementally, to a **typed API**: `lib/models.py`
-holds pydantic models that are the single source of truth for the JSON payloads
-(handlers validate against them), and `api/app.py` is a FastAPI app
-(*strangler-fig*) that serves a growing set of routes with those models — both
-servers calling the same `lib/` functions. `mypy` gates the typed modules and the
-client TypeScript types are generated from the models (`lib/generate_ts.py`). When
-porting a route: extract its builder into `lib/`, return a pydantic model from the
-FastAPI route, and leave a thin delegating shim in `server.py` for back-compat.
+The old stdlib `BaseHTTPRequestHandler` (`server.py`, ~9.6k lines) has been
+**deleted**. All of its real logic was relocated to `lib/`, and the dashboard's
+own code + tests import from there. `server.py` is now a ~40-line **deprecation
+shim** that re-exports only six symbols still consumed by external repos
+(v2ecoli / sms-ecoli import `_json_default`/`_json_sanitize`/`_json_body`;
+pbg-superpowers imports `_build_iset_summary_for_test`/`_build_iset_detail_for_test`/
+`_observables_for_ref`) from their new `lib` homes (`lib/json_serialize.py`,
+`lib/iset_test_shims.py`, `lib/observables_views.py`). The `dashboard_client`
+test fixture now spawns the live FastAPI app. Do **not** add new dependencies on
+`server.py` — import the `lib` homes directly.
+
+Supporting the typed contract: `lib/models.py` holds pydantic models for the JSON
+payloads (many still `extra="allow"` passthroughs — tightening them is tracked in
+the hardening plan); `mypy` gates the typed modules and the client TypeScript types
+are generated from the models (`lib/generate_ts.py`).
 
 ### `lib/` — the domain logic
 Each module owns one concern and is independently testable. Key ones:

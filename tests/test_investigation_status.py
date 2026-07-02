@@ -81,17 +81,3 @@ def test_iter_iset_dirs_empty(tmp_path):
 
 def test_study_run_slugs_empty(tmp_path):
     assert inv.study_run_slugs(tmp_path) == set()
-
-
-def test_server_shim_delegates(tmp_path):
-    """server._build_iset_summary_for_test still works (delegates to lib) and
-    matches the lib builder with an equivalent runs-presence check."""
-    from vivarium_dashboard import server
-
-    ws = _make_ws(tmp_path)
-    via_server = server._build_iset_summary_for_test(ws)
-    via_lib = inv.build_iset_summary(
-        ws, study_has_runs=lambda s, spec: server._count_runs_for_study(s, spec) > 0
-    )
-    assert via_server == via_lib
-    assert via_server[0]["name"] == "inv-a"

@@ -10,7 +10,9 @@ param was flagged against the single flat baseline dict.
 import pytest
 
 pytest.importorskip("pbg_superpowers.param_enforcement")
-from vivarium_dashboard.server import _compute_param_enforcement
+from vivarium_dashboard.lib.study_enrichment import (
+    compute_param_enforcement as _compute_param_enforcement,
+)
 
 
 def test_none_when_no_enforced_params():

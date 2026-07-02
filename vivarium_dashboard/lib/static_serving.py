@@ -40,6 +40,10 @@ from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 # server.py — matches ``server.STATIC_DIR`` (``PACKAGE_ROOT / "static"``).
 STATIC_DIR: Path = Path(_vd_pkg.__file__).parent / "static"
 
+# Package-bundled Jinja templates dir (index.html.j2, study-detail shells, ...).
+# Matches the retired ``server.TEMPLATES_DIR`` (``PACKAGE_ROOT / "templates"``).
+TEMPLATES_DIR: Path = Path(_vd_pkg.__file__).parent / "templates"
+
 
 class AssetTraversal(Exception):
     """Raised by :func:`resolve_loom_asset` (and used by the catch-all guard) to

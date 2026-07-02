@@ -1,13 +1,12 @@
 """SP3b: /api/feedback-apply-action applies a tracked feedback action via the
 pbg-superpowers primitive (the dashboard never computes the action).
 """
-import json
 from pathlib import Path
 
 import pytest
 import yaml
 
-from vivarium_dashboard import server
+from vivarium_dashboard.lib.lifecycle_mutations import feedback_apply_action
 
 
 @pytest.fixture
@@ -58,10 +57,9 @@ def test_feedback_apply_action_endpoint(ws):
     _make_study(ws, "s1", [{"id": "F-01", "statement": "X diverges"}])
     item_id = _seed_feedback_with_action(ws, "s1", "F-01")
 
-    body, code = server.Handler._feedback_apply_action_test(
-        {"workspace": str(ws), "item_id": item_id})
+    payload, code = feedback_apply_action(
+        ws, {"workspace": str(ws), "item_id": item_id})
     assert code == 200
-    payload = json.loads(body)
     assert payload.get("applied") is True
 
     # The finding's next_action was written (the SP3a join).
@@ -71,13 +69,13 @@ def test_feedback_apply_action_endpoint(ws):
 
 
 def test_feedback_apply_action_missing_item_id(ws):
-    body, code = server.Handler._feedback_apply_action_test({"workspace": str(ws)})
+    payload, code = feedback_apply_action(ws, {"workspace": str(ws)})
     assert code == 400
-    assert json.loads(body).get("error")
+    assert payload.get("error")
 
 
 def test_feedback_apply_action_unknown_item(ws):
-    body, code = server.Handler._feedback_apply_action_test(
-        {"workspace": str(ws), "item_id": "fb-deadbeef"})
+    payload, code = feedback_apply_action(
+        ws, {"workspace": str(ws), "item_id": "fb-deadbeef"})
     assert code == 400
-    assert json.loads(body).get("error")
+    assert payload.get("error")

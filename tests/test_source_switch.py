@@ -1,108 +1,86 @@
 from pathlib import Path
 import pytest
 import yaml
-from vivarium_dashboard import server
+import vivarium_dashboard
 from vivarium_dashboard.lib import _root
+from vivarium_dashboard.lib import active_workspace
+from vivarium_dashboard.lib import registry as _registry
 from vivarium_dashboard.lib import observables_views as _obs_views
 from vivarium_dashboard.lib import report_views as _report_views
 from vivarium_dashboard.lib import composite_state_views as _cs_views
+from vivarium_dashboard.lib import source_switch_views as _switch_views
 from vivarium_dashboard.lib.data_sources import _DATA_SOURCES_CACHE
+
+_PKG_DIR = Path(vivarium_dashboard.__file__).parent
 
 
 @pytest.fixture(autouse=True)
 def _restore_workspace():
-    saved_ws = getattr(server, "WORKSPACE", None)
     saved_root = _root.get_workspace_root()
     yield
-    server.WORKSPACE = saved_ws
     if saved_root is not None:
         _root.set_workspace_root(saved_root)
 
 
 def _static(name):
-    return (Path(server.__file__).parent / "static" / name).read_text(encoding="utf-8")
+    return (_PKG_DIR / "static" / name).read_text(encoding="utf-8")
 
 
 def test_switch_active_workspace_repoints_and_invalidates(tmp_path):
     a = tmp_path / "a"; (a).mkdir(); (a / "workspace.yaml").write_text("name: a\n")
     b = tmp_path / "b"; (b).mkdir(); (b / "workspace.yaml").write_text("name: b\n")
 
-    server.WORKSPACE = a
     _root.set_workspace_root(a)
-    # Dirty every workspace-keyed cache.
-    server._REGISTRY_CACHE["data"] = {"stale": True}
-    _report_views._LINKAGE_CACHE["x"] = 1     # linkage cache moved to lib
+    # Dirty every workspace-keyed (lib) cache.
+    _registry._REGISTRY_CACHE["data"] = {"stale": True}
+    _report_views._LINKAGE_CACHE["x"] = 1     # linkage cache (lib)
     _obs_views._OBS_CACHE["x"] = 1            # observables build cache (lib)
     _cs_views._COMPOSITE_STATE_CACHE["x"] = 1  # composite-state build cache (lib)
-    server._RUN_STORE_SUMMARY_CACHE["x"] = 1
-    server._WP_CACHE["x"] = 1
     _DATA_SOURCES_CACHE["x"] = 1
 
-    server._switch_active_workspace(b)
+    active_workspace.switch_workspace(b)
 
-    assert server.WORKSPACE == b.resolve()
     assert _root.get_workspace_root() == b.resolve()
-    assert server._REGISTRY_CACHE["data"] is None
-    assert server._REGISTRY_CACHE["ts"] == 0.0
+    assert _registry._REGISTRY_CACHE["data"] is None
+    assert _registry._REGISTRY_CACHE["ts"] == 0.0
     assert _report_views._LINKAGE_CACHE == {}
     assert _obs_views._OBS_CACHE == {}
     assert _cs_views._COMPOSITE_STATE_CACHE == {}
-    assert server._RUN_STORE_SUMMARY_CACHE == {}
-    assert server._WP_CACHE == {}
     assert _DATA_SOURCES_CACHE == {}
 
 
 def test_invalidate_clears_identical_cache_set_via_registry():
-    """Populate EVERY workspace-keyed cache, call _invalidate_workspace_caches,
+    """Populate EVERY workspace-keyed lib cache, call ``active_workspace.invalidate``,
     and assert all are empty/reset — proving the registry-driven invalidation
-    clears the byte-identical set the old inline clears did.
+    clears the full set the old inline clears did.
     """
-    from vivarium_dashboard.lib import active_workspace
-
-    # The 5 lib caches (cleared via the registry) ...
-    server._REGISTRY_CACHE["data"] = {"stale": True}
-    server._REGISTRY_CACHE["ts"] = 123.0
+    _registry._REGISTRY_CACHE["data"] = {"stale": True}
+    _registry._REGISTRY_CACHE["ts"] = 123.0
     _report_views._LINKAGE_CACHE["x"] = 1
     _obs_views._OBS_CACHE["x"] = 1
     _cs_views._COMPOSITE_STATE_CACHE["x"] = 1
     _DATA_SOURCES_CACHE["x"] = 1
-    # ... and the 3 server-local caches (cleared inline).
-    server._COMPOSITES_LIST_CACHE["x"] = 1
-    server._RUN_STORE_SUMMARY_CACHE["x"] = 1
-    server._WP_CACHE["x"] = 1
 
-    # The 5 lib clears must be reachable through the registry.
+    # Every lib clear must be reachable through the registry.
     assert len(active_workspace._registered_cbs()) >= 5
 
-    server._invalidate_workspace_caches()
+    active_workspace.invalidate()
 
-    assert server._REGISTRY_CACHE["data"] is None
-    assert server._REGISTRY_CACHE["ts"] == 0.0
+    assert _registry._REGISTRY_CACHE["data"] is None
+    assert _registry._REGISTRY_CACHE["ts"] == 0.0
     assert _report_views._LINKAGE_CACHE == {}
     assert _obs_views._OBS_CACHE == {}
     assert _cs_views._COMPOSITE_STATE_CACHE == {}
     assert _DATA_SOURCES_CACHE == {}
-    assert server._COMPOSITES_LIST_CACHE == {}
-    assert server._RUN_STORE_SUMMARY_CACHE == {}
-    assert server._WP_CACHE == {}
-
-
-def test_source_switch_route_registered():
-    assert server._POST_ROUTE_MAP.get("/api/source/switch") == "_post_source_switch"
 
 
 def test_source_switch_rejects_unregistered_path(tmp_path, monkeypatch):
     from pbg_superpowers import workspace_catalog
     monkeypatch.setattr(workspace_catalog, "list_workspaces", lambda: [])
-    captured = {}
 
-    class FakeHandler:
-        def _json(self, obj, code):
-            captured.update(obj=obj, code=code)
-
-    server.Handler._post_source_switch(FakeHandler(), {"path": str(tmp_path / "nope")})
-    assert captured["code"] == 400
-    assert "error" in captured["obj"]
+    obj, code = _switch_views.source_switch({"path": str(tmp_path / "nope")})
+    assert code == 400
+    assert "error" in obj
 
 
 def test_source_switch_accepts_registered_path(tmp_path, monkeypatch):
@@ -110,16 +88,11 @@ def test_source_switch_accepts_registered_path(tmp_path, monkeypatch):
     from pbg_superpowers import workspace_catalog
     monkeypatch.setattr(workspace_catalog, "list_workspaces",
                         lambda: [{"path": str(ws), "name": "w"}])
-    captured = {}
 
-    class FakeHandler:
-        def _json(self, obj, code):
-            captured.update(obj=obj, code=code)
-
-    server.Handler._post_source_switch(FakeHandler(), {"path": str(ws)})
-    assert captured["code"] == 200
-    assert captured["obj"]["ok"] is True
-    assert server.WORKSPACE == ws.resolve()
+    obj, code = _switch_views.source_switch({"path": str(ws)})
+    assert code == 200
+    assert obj["ok"] is True
+    assert _root.get_workspace_root() == ws.resolve()
 
 
 def test_source_switch_js_present_and_wired():
@@ -150,13 +123,13 @@ def test_one_server_switches_between_two_workspaces(tmp_path):
         root = _root.get_workspace_root()
         return yaml.safe_load((root / "workspace.yaml").read_text())["name"]
 
-    server._switch_active_workspace(a)
-    assert server.WORKSPACE == a and active_name() == "alpha"
+    active_workspace.switch_workspace(a)
+    assert _root.get_workspace_root() == a.resolve() and active_name() == "alpha"
 
-    server._switch_active_workspace(b)
-    assert server.WORKSPACE == b and active_name() == "beta"   # re-pointed, no restart
+    active_workspace.switch_workspace(b)
+    assert _root.get_workspace_root() == b.resolve() and active_name() == "beta"   # re-pointed, no restart
 
-    server._switch_active_workspace(a)
+    active_workspace.switch_workspace(a)
     assert active_name() == "alpha"                             # and back
 
 

@@ -1,15 +1,18 @@
-"""FastAPI application — the typed seam for the dashboard's HTTP API.
+"""FastAPI application — the dashboard's HTTP API.
 
-This is the **seed of a strangler-fig migration**: the dashboard is served today
-by a 16.9k-line stdlib ``http.server`` handler (``vivarium_dashboard/server.py``)
-with hand-dispatched routes and untyped dict payloads. Rather than rewrite it in
-one pass, we stand up a FastAPI app here that serves a small, growing set of
-routes with **typed pydantic responses** (so they get automatic validation and
-an OpenAPI schema). Routes move over a few at a time; both servers back onto the
-same ``lib/`` functions, so there is one implementation, not two.
+This is the **live production web layer**. The strangler-fig migration from the
+old stdlib ``http.server`` handler (``vivarium_dashboard/server.py``) is complete
+at the routing layer: ``vivarium-dashboard serve`` boots this app under uvicorn
+(``cli.py`` → ``lib/startup.serve_fastapi`` → ``uvicorn.run(app, ...)``). The
+stdlib ``server.py`` module is **retired** — it is no longer imported on the serve
+path. All ~178 routes (read and write, static/SPA serving, and the SSE stream)
+are defined here; every route backs onto the same ``lib/`` functions.
 
-Run it standalone (does not yet replace the stdlib server) and browse the
-auto-generated **Swagger UI** to see every typed route:
+Known follow-ups (see the architecture-hardening plan): the response contract is
+still uneven — many payloads are ``extra="allow"`` passthroughs and error handling
+is not yet unified behind a single envelope. Those are being addressed separately.
+
+Run it standalone and browse the auto-generated **Swagger UI**:
 
     python -m vivarium_dashboard.api --workspace /path/to/workspace
     # → Swagger UI at http://127.0.0.1:8001/docs
@@ -18,10 +21,6 @@ auto-generated **Swagger UI** to see every typed route:
 
 (or, equivalently, ``uvicorn vivarium_dashboard.api.app:app --reload`` with
 ``VIVARIUM_DASHBOARD_WORKSPACE`` set.)
-
-Today's routes are read-only and stateless (workspace-backed). Stateful routes
-(e.g. remote-run status, which reads the in-memory RemoteRunManager owned by the
-stdlib server) move over once the two servers share process state.
 """
 
 from __future__ import annotations
@@ -34,8 +33,13 @@ import json
 import subprocess
 
 from fastapi import Body, Depends, FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError
+
+from vivarium_dashboard.lib.errors import APIError
+from vivarium_dashboard.lib.request_logging import install_request_logging
 
 from vivarium_dashboard.lib import active_workspace
 from vivarium_dashboard.lib import csrf as _csrf
@@ -66,6 +70,8 @@ from vivarium_dashboard.lib import scaffold_mutations as _scaffold_mut
 from vivarium_dashboard.lib import composite_state_views as _composite_state_views
 from vivarium_dashboard.lib import data_sources as _data_sources
 from vivarium_dashboard.lib import download_views as _download_views
+from vivarium_dashboard.lib import analysis_outputs as _analysis_outputs
+from vivarium_dashboard.lib import simulations_index as _simulations_index
 from vivarium_dashboard.lib import events as _events
 from vivarium_dashboard.lib import explorer_data as _explorer_data
 from vivarium_dashboard.lib import metadata_mutations as _meta_mut
@@ -206,6 +212,16 @@ from vivarium_dashboard.lib.models import (
     InvestigationComparisonUpdateBody,
     InvestigationGroupAddBody,
     InvestigationGroupUpdateBody,
+    # study-* comparison/sync request-body models (v3-native)
+    StudyComparisonAddBody,
+    StudySyncRunsBody,
+    # DELETE-route request-body models
+    SimulationDeleteBody,
+    SimulationRunDeleteBody,
+    VisualizationDeleteBody,
+    InvestigationCompositeDeleteBody,
+    InvestigationComparisonDeleteBody,
+    InvestigationGroupDeleteBody,
     # Batch 23: request-body models for visualization file-write mutations
     VisualizationCreateBody,
     VisualizationAddToProjectBody,
@@ -433,14 +449,14 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="vivarium-dashboard API",
         version="0.1.0",
-        summary="Typed seam over the dashboard HTTP API (strangler-fig migration).",
+        summary="The dashboard HTTP API (FastAPI, live production layer).",
         description=(
-            "Auto-generated, typed view of the dashboard routes that have been "
-            "ported from the legacy stdlib `http.server` handler to FastAPI + "
-            "pydantic. This page (**Swagger UI**) and `/redoc` are generated from "
-            "the same pydantic models that validate every response — so the "
-            "schema can't drift from what the routes actually return. Routes are "
-            "added a few at a time; the legacy server still serves the rest."
+            "The dashboard's HTTP API. All routes are served by this FastAPI app "
+            "under uvicorn; the legacy stdlib `http.server` handler is retired. "
+            "This page (**Swagger UI**) and `/redoc` are generated from the "
+            "pydantic models that type the routes. Errors use one envelope: "
+            "`{\"error\": \"<message>\"}` (request-validation failures add a "
+            "structured `detail` field)."
         ),
         openapi_tags=_OPENAPI_TAGS,
     )
@@ -468,6 +484,40 @@ def create_app() -> FastAPI:
                 )
         return await call_next(request)
 
+    # ------------------------------------------------------------------
+    # Canonical error envelope. Every error the API emits uses the shape
+    # ``{"error": "<message>", ...}`` (see lib/errors.py). These handlers pull
+    # the two shapes that used to escape that convention onto it: FastAPI's
+    # request-validation ``{"detail": [...]}`` (422) and uvicorn's default
+    # unhandled-exception 500.
+    # ------------------------------------------------------------------
+    @app.exception_handler(APIError)
+    async def _api_error_handler(request: Request, exc: APIError) -> JSONResponse:
+        return JSONResponse(exc.to_body(), status_code=exc.status_code)
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        errors = exc.errors()
+        first = errors[0] if errors else {}
+        loc = ".".join(str(p) for p in first.get("loc", []) if p != "body")
+        msg = first.get("msg", "validation error")
+        summary = f"validation error at '{loc}': {msg}" if loc else f"validation error: {msg}"
+        # Preserve the structured detail so anything reading ``.detail`` still works.
+        return JSONResponse(
+            {"error": summary, "detail": jsonable_encoder(errors)}, status_code=422
+        )
+
+    @app.exception_handler(Exception)
+    async def _unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+        # Last resort: emit the canonical envelope instead of a bare 500. The
+        # message is intentionally generic — details go to logs, not the client.
+        return JSONResponse({"error": "internal server error"}, status_code=500)
+
+    # Registered last so it wraps the CSRF middleware and sees the final status.
+    install_request_logging(app)
+
     @app.get("/health", tags=["System"], summary="Service liveness check")
     def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -481,11 +531,14 @@ def create_app() -> FastAPI:
     def simulations(ws: Path = Depends(get_workspace)) -> SimulationsPayload:
         """Workspace-wide simulations index (mirrors the stdlib /api/simulations).
 
-        `current` (the active branch slug) is computed by the stdlib server today
-        and will move here when branch state is shared; until then it is null.
+        Fully library-backed via ``lib.simulations_index.build_simulations_data``,
+        which enriches ``list_simulations`` rows with emitter_type labels + the
+        active-workspace remote runs and reports the current branch slug.
         """
-        rows = [SimRow.model_validate(r) for r in list_simulations(ws)]
-        return SimulationsPayload(simulations=rows, current=None)
+        from vivarium_dashboard.lib.simulations_index import build_simulations_data
+        data = build_simulations_data(ws)
+        rows = [SimRow.model_validate(r) for r in data.get("simulations", [])]
+        return SimulationsPayload(simulations=rows, current=data.get("current"))
 
     @app.get(
         "/api/workspace-manifest",
@@ -3984,6 +4037,487 @@ def create_app() -> FastAPI:
         Delegates to ``lib.investigation_viz_mutations.render_viz``.
         """
         body, status = _inv_viz_mut.render_viz(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    # -----------------------------------------------------------------------
+    # study-* POST aliases + v3-native study routes re-exposed over FastAPI.
+    # These were served by the stdlib server (via _POST_STUDY_ALIASES / the
+    # v3-native POST map) but had no FastAPI equivalent. Each wires to the same
+    # lib builder the stdlib handler called; git commit is deferred to the flip
+    # batch, matching the sibling investigation-* routes above.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/study-comparison-add",
+        tags=["Studies"],
+        summary="Add a named comparison (run_ids set) to a study",
+    )
+    def study_comparison_add(
+        req: StudyComparisonAddBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """v3-native study comparison-add (NOT an alias of the investigation
+        route — the stdlib server mapped this to its own lib builder).
+
+        Body: ``{study|name|investigation, run_ids, name?}``. 400 on missing
+        study / run_ids < 2; 404 when study not found; 200 ``{ok, name}``.
+        Delegates to ``lib.study_crud_mutations.study_comparison_add``.
+        """
+        body, status = _study_crud_mut.study_comparison_add(ws, req.model_dump(exclude_unset=True))
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-comparison-update",
+        tags=["Studies"],
+        summary="Alias of /api/investigation-comparison-update",
+    )
+    def study_comparison_update(
+        req: InvestigationComparisonUpdateBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """study-* alias → ``lib.compare_group_mutations.comparison_update``."""
+        body, status = _compare_grp_mut.comparison_update(ws, req.model_dump(exclude_unset=True))
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-group-add",
+        tags=["Studies"],
+        summary="Alias of /api/investigation-group-add",
+    )
+    def study_group_add(
+        req: InvestigationGroupAddBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """study-* alias → ``lib.compare_group_mutations.group_add``."""
+        body, status = _compare_grp_mut.group_add(ws, req.model_dump(exclude_unset=True))
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-group-update",
+        tags=["Studies"],
+        summary="Alias of /api/investigation-group-update",
+    )
+    def study_group_update(
+        req: InvestigationGroupUpdateBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """study-* alias → ``lib.compare_group_mutations.group_update``."""
+        body, status = _compare_grp_mut.group_update(ws, req.model_dump(exclude_unset=True))
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-delete",
+        tags=["Studies"],
+        summary="Alias of /api/investigation-delete",
+    )
+    def study_delete(
+        req: InvestigationDeleteBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """study-* alias → ``lib.scaffold_mutations.delete_investigation``."""
+        body, status = _scaffold_mut.delete_investigation(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-set-observables",
+        tags=["Studies"],
+        summary="Alias of /api/investigation-set-observables",
+    )
+    def study_set_observables(
+        req: SetObservablesBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """study-* alias → ``lib.metadata_mutations.set_investigation_observables``."""
+        body, status = _meta_mut.set_investigation_observables(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-set-conclusion",
+        tags=["Studies"],
+        summary="Alias of /api/investigation-set-conclusions",
+    )
+    def study_set_conclusion(
+        req: SetConclusionsBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """study-* alias → ``lib.metadata_mutations.set_investigation_conclusions``."""
+        body, status = _meta_mut.set_investigation_conclusions(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-set-description",
+        tags=["Studies"],
+        summary="Alias of /api/investigation-set-overview",
+    )
+    def study_set_description(
+        req: SetOverviewBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """study-* alias → ``lib.metadata_mutations.set_investigation_overview``."""
+        body, status = _meta_mut.set_investigation_overview(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-variant-rebuild",
+        tags=["Studies"],
+        summary="Alias of /api/investigation-composite-rebuild",
+    )
+    def study_variant_rebuild(
+        req: InvestigationCompositeRebuild,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """study-* alias → ``lib.composite_mutations.rebuild_investigation_composite``."""
+        body, status = _composite_mut.rebuild_investigation_composite(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-viz-add",
+        tags=["Studies"],
+        summary="Alias of /api/investigation-add-viz",
+    )
+    def study_viz_add(
+        req: InvestigationAddViz,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """study-* alias → ``lib.investigation_viz_mutations.add_viz``."""
+        body, status = _inv_viz_mut.add_viz(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-viz-render",
+        tags=["Studies"],
+        summary="Alias of /api/investigation-render-viz",
+    )
+    def study_viz_render(
+        req: InvestigationRenderViz,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """study-* alias → ``lib.investigation_viz_mutations.render_viz``."""
+        body, status = _inv_viz_mut.render_viz(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-sync-runs",
+        tags=["Studies"],
+        summary="Reconcile a study's runs[] against its runs.db",
+    )
+    def study_sync_runs(
+        req: StudySyncRunsBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """v3-native study run-sync → ``lib.lifecycle_mutations.study_sync_runs``.
+
+        Body: ``{study}``. Delegates to the same lib builder the stdlib
+        server's ``_post_study_sync_runs`` called.
+        """
+        body, status = _lifecycle_mut.study_sync_runs(ws, req.model_dump(exclude_unset=True))
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    # -----------------------------------------------------------------------
+    # study-* GET routes re-exposed over FastAPI (aliases + v3-native).
+    # -----------------------------------------------------------------------
+
+    @app.get(
+        "/api/study-viz-html",
+        response_model=InvestigationVizHtmlPayload,
+        tags=["Studies"],
+        summary="Alias of /api/investigation-viz-html",
+    )
+    def study_viz_html_route(
+        investigation: Optional[str] = None,
+        study: Optional[str] = None,
+        run_id: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[InvestigationVizHtmlPayload, JSONResponse]:
+        """study-* alias → ``lib.investigation_views.build_investigation_viz_html``.
+
+        Accepts ``?study=`` or ``?investigation=`` for the slug.
+        """
+        slug = (investigation or study or "").strip()
+        try:
+            body = _inv_views.build_investigation_viz_html(ws, slug, run_id or "")
+        except _inv_views.InvViewError as exc:
+            return JSONResponse(status_code=exc.status, content=exc.body)
+        return InvestigationVizHtmlPayload.model_validate(body)
+
+    @app.get(
+        "/api/study-composites",
+        response_model=InvestigationCompositesPayload,
+        tags=["Studies"],
+        summary="Alias of /api/investigation-composites",
+    )
+    def study_composites_route(
+        investigation: Optional[str] = None,
+        study: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[InvestigationCompositesPayload, JSONResponse]:
+        """study-* alias → ``lib.investigation_views.build_investigation_composites``."""
+        slug = (investigation or study or "").strip()
+        try:
+            body = _inv_views.build_investigation_composites(ws, slug)
+        except _inv_views.InvViewError as exc:
+            return JSONResponse(status_code=exc.status, content=exc.body)
+        return InvestigationCompositesPayload.model_validate(body)
+
+    @app.get(
+        "/api/study-state-tree",
+        response_model=InvestigationStateTree,
+        tags=["Studies"],
+        summary="Alias of /api/investigation-state-tree",
+    )
+    def study_state_tree_route(
+        investigation: Optional[str] = None,
+        study: Optional[str] = None,
+        composite: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[InvestigationStateTree, JSONResponse]:
+        """study-* alias → ``lib.investigation_views.build_investigation_state_tree``."""
+        slug = (investigation or study or "").strip()
+        try:
+            body = _inv_views.build_investigation_state_tree(
+                ws, slug, (composite or "").strip()
+            )
+        except _inv_views.InvViewError as exc:
+            return JSONResponse(status_code=exc.status, content=exc.body)
+        return InvestigationStateTree.model_validate(body)
+
+    @app.get(
+        "/api/study-bigraph-paths",
+        response_model=None,
+        tags=["Studies"],
+        summary="Walk a saved composite-state snapshot into state-tree nodes",
+    )
+    def study_bigraph_paths_route(
+        study: Optional[str] = None,
+        baseline: Optional[str] = None,
+        max_depth: int = 8,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[dict, JSONResponse]:
+        """v3-native → ``lib.study_viz_views.build_study_bigraph_paths``.
+
+        Query: ``?study=<slug>[&baseline=<name>][&max_depth=<n>]``.
+        """
+        body, status = _study_viz.build_study_bigraph_paths(
+            ws,
+            (study or "").strip(),
+            baseline_name=(baseline or "").strip(),
+            max_depth=max_depth,
+        )
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.get(
+        "/api/study-analysis-outputs",
+        response_model=None,
+        tags=["Studies"],
+        summary="List a study's result CSV/TSV output files",
+    )
+    def study_analysis_outputs_route(
+        study: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[dict, JSONResponse]:
+        """v3-native → ``lib.analysis_outputs.list_analysis_outputs``."""
+        try:
+            body = _analysis_outputs.list_analysis_outputs(ws, (study or "").strip())
+        except _download_views.DownloadError as exc:
+            return JSONResponse(status_code=exc.status, content=exc.body)
+        return body
+
+    @app.get(
+        "/api/study-analysis-file",
+        tags=["Studies"],
+        summary="Serve one of a study's result files as a download",
+        response_class=Response,
+    )
+    def study_analysis_file_route(
+        study: Optional[str] = None,
+        path: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Response:
+        """v3-native → ``lib.analysis_outputs.resolve_analysis_output``."""
+        try:
+            data, mime, filename = _analysis_outputs.resolve_analysis_output(
+                ws, (study or "").strip(), (path or "").strip()
+            )
+        except _download_views.DownloadError as exc:
+            return JSONResponse(status_code=exc.status, content=exc.body)
+        return Response(
+            content=data,
+            media_type=mime,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store",
+            },
+        )
+
+    @app.get(
+        "/api/study-analysis-zip",
+        tags=["Studies"],
+        summary="Zip all of a study's result files",
+        response_class=Response,
+    )
+    def study_analysis_zip_route(
+        study: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> Response:
+        """v3-native → ``lib.analysis_outputs.build_analysis_outputs_zip``."""
+        try:
+            data, filename = _analysis_outputs.build_analysis_outputs_zip(
+                ws, (study or "").strip()
+            )
+        except _download_views.DownloadError as exc:
+            return JSONResponse(status_code=exc.status, content=exc.body)
+        return Response(
+            content=data,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    # -----------------------------------------------------------------------
+    # DELETE routes re-exposed over FastAPI (the stdlib _DELETE_ROUTE_MAP).
+    # Each reads a JSON body (matching the stdlib do_DELETE) and wires to the
+    # same lib builder. Git commit is deferred to the flip batch, matching the
+    # sibling mutation routes above.
+    # -----------------------------------------------------------------------
+
+    @app.delete(
+        "/api/investigation-composite",
+        tags=["Composites"],
+        summary="Delete a composite from an investigation (refuses if referenced)",
+    )
+    def investigation_composite_delete(
+        req: InvestigationCompositeDeleteBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Body: ``{investigation, name}``. 400 missing; 404 investigation not
+        found; 409 has dependents; 200 ``{ok: True}``.
+        Delegates to ``lib.composite_mutations.delete_investigation_composite``.
+        """
+        body, status = _composite_mut.delete_investigation_composite(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.delete(
+        "/api/investigation-comparison",
+        tags=["Investigations"],
+        summary="Delete a comparison from an investigation (refuses if referenced)",
+    )
+    def investigation_comparison_delete(
+        req: InvestigationComparisonDeleteBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Body: ``{investigation, name}``. 400 missing; 404 investigation not
+        found; 409 still-referenced; 200 ``{ok: True}``.
+        Delegates to ``lib.compare_group_mutations.comparison_delete``.
+        """
+        body, status = _compare_grp_mut.comparison_delete(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.delete(
+        "/api/investigation-group",
+        tags=["Investigations"],
+        summary="Delete a group from an investigation",
+    )
+    def investigation_group_delete(
+        req: InvestigationGroupDeleteBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Body: ``{investigation, name}``. 400 missing; 404 investigation OR
+        group not found; 200 ``{ok: True}``.
+        Delegates to ``lib.compare_group_mutations.group_delete``.
+        """
+        body, status = _compare_grp_mut.group_delete(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.delete(
+        "/api/simulation",
+        tags=["Simulations"],
+        summary="Remove a simulation entry from workspace.yaml",
+    )
+    def simulation_delete(
+        req: SimulationDeleteBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Body: ``{name}``. 400 missing; 404 not found; 200 ``{ok: True}``.
+        Delegates to ``lib.viz_commit_mutations.simulation_delete`` (git commit
+        deferred, matching the sibling add routes).
+        """
+        body, status = _viz_commit_mut.simulation_delete(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.delete(
+        "/api/simulation-run",
+        response_model=None,
+        tags=["Simulations"],
+        summary="Fully delete one persisted run (rows + run dir + study refs)",
+    )
+    def simulation_run_delete(
+        req: SimulationRunDeleteBody,
+        ws: Path = Depends(get_workspace),
+    ) -> Union[dict, JSONResponse]:
+        """Body: ``{run_id}``. 400 missing; 404 run not found; 500 on failure;
+        200 the summary dict.
+        Delegates to ``lib.simulations_index.delete_simulation``.
+        """
+        run_id = (req.run_id or "").strip()
+        if not run_id:
+            return JSONResponse(status_code=400, content={"error": "run_id is required"})
+        try:
+            summary = _simulations_index.delete_simulation(ws, run_id)
+        except _simulations_index.RunNotFound:
+            return JSONResponse(status_code=404, content={"error": "run not found"})
+        except Exception as e:  # noqa: BLE001 — surface the failure, don't crash
+            return JSONResponse(status_code=500, content={"error": f"delete failed: {e}"})
+        return summary
+
+    @app.delete(
+        "/api/visualization",
+        tags=["Visualizations"],
+        summary="Remove a visualization entry from workspace.yaml",
+    )
+    def visualization_delete(
+        req: VisualizationDeleteBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Body: ``{name}``. 400 missing; 404 not found; 200 ``{ok: True}``.
+        Delegates to ``lib.viz_commit_mutations.visualization_delete`` (git
+        commit deferred, matching the sibling add routes).
+        """
+        body, status = _viz_commit_mut.visualization_delete(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body

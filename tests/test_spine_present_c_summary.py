@@ -27,10 +27,9 @@ _V3_BASE = {
 
 
 @pytest.fixture
-def tmp_ws_with_investigation(tmp_path, monkeypatch):
+def tmp_ws_with_investigation(tmp_path):
     """A nested-layout study under an investigation whose investigation.yaml
     carries a PERSISTED executive.computed_acceptance covering the study."""
-    import vivarium_dashboard.server as srv
     ws = tmp_path / "ws"
     inv = ws / "investigations" / "repl-inv"
     sd = inv / "studies" / "oric-study"
@@ -62,15 +61,15 @@ def tmp_ws_with_investigation(tmp_path, monkeypatch):
             "diverges_from_authored": True}},
     )
     (sd / "study.yaml").write_text(yaml.safe_dump(spec))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
-    return "oric-study"
+    return ws, "oric-study"
 
 
 def test_detail_spec_surfaces_spine_acceptance(tmp_ws_with_investigation):
     """spine_acceptance carries the owning investigation + the criterion(s)
     covering THIS study, read from persisted computed_acceptance (no recompute)."""
-    import vivarium_dashboard.server as srv
-    spec = srv._study_detail_spec(tmp_ws_with_investigation)
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec
+    ws, name = tmp_ws_with_investigation
+    spec = load_study_detail_spec(ws, name)
     sa = spec.get("spine_acceptance")
     assert sa and sa.get("investigation") == "repl-inv"
     assert sa.get("verdict_status") == "failing"
@@ -82,18 +81,17 @@ def test_detail_spec_surfaces_spine_acceptance(tmp_ws_with_investigation):
     assert crits[0]["result"] == "failing"
 
 
-def test_detail_spec_spine_acceptance_absent_without_owner(tmp_path, monkeypatch):
+def test_detail_spec_spine_acceptance_absent_without_owner(tmp_path):
     """A study with no owning investigation → spine_acceptance is None/absent
     (the panel omits the acceptance row). Never raises."""
-    import vivarium_dashboard.server as srv
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec
     ws = tmp_path / "ws"
     sd = ws / "studies" / "lonely"
     sd.mkdir(parents=True)
     (ws / "workspace.yaml").write_text("name: ws\n")
     (sd / "study.yaml").write_text(yaml.safe_dump(dict(
         _V3_BASE, name="lonely", objective="x", status="planned")))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
-    spec = srv._study_detail_spec("lonely")
+    spec = load_study_detail_spec(ws, "lonely")
     assert spec is not None
     assert not spec.get("spine_acceptance")
 

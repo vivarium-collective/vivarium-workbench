@@ -258,3 +258,75 @@ def group_update(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
     spec["groups"] = grps
     spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
     return {"ok": True}, 200
+
+
+def comparison_delete(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
+    """DELETE /api/investigation-comparison — remove a comparison entry.
+
+    Refuses with 409 if any visualization's ``config.comparison`` references
+    this comparison. Relocated from the retired
+    ``server._delete_investigation_comparison`` (minus the ``_commit_or_run``
+    wrapper — the git commit is the caller's concern).
+
+    Status codes: 400 missing fields; 404 investigation not found;
+    409 still-referenced; 200 removed (``{ok: True}``).
+    """
+    inv_name = (body.get("investigation") or "").strip()
+    cmp_name = (body.get("name") or "").strip()
+    if not inv_name:
+        return {"error": "investigation required"}, 400
+    if not cmp_name:
+        return {"error": "name required"}, 400
+
+    spec_path = _resolve_spec_path(ws_root, inv_name)
+    if spec_path is None:
+        return {"error": "investigation not found"}, 404
+
+    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
+    dependents = [
+        v.get("name", "<unnamed>")
+        for v in (spec.get("visualizations") or [])
+        if ((v.get("config") or {}).get("comparison") == cmp_name)
+    ]
+    if dependents:
+        return {
+            "error": f"comparison {cmp_name!r} still referenced by visualization(s): {dependents}",
+            "dependents": dependents,
+        }, 409
+
+    spec["comparisons"] = [
+        c for c in (spec.get("comparisons") or []) if c.get("name") != cmp_name
+    ]
+    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
+    return {"ok": True}, 200
+
+
+def group_delete(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
+    """DELETE /api/investigation-group — remove a group entry.
+
+    Relocated from the retired ``server._delete_investigation_group`` (minus the
+    ``_commit_or_run`` wrapper).
+
+    Status codes: 400 missing fields; 404 investigation OR group not found;
+    200 removed (``{ok: True}``).
+    """
+    inv_name = (body.get("investigation") or "").strip()
+    grp_name = (body.get("name") or "").strip()
+    if not inv_name:
+        return {"error": "investigation required"}, 400
+    if not grp_name:
+        return {"error": "name required"}, 400
+
+    spec_path = _resolve_spec_path(ws_root, inv_name)
+    if spec_path is None:
+        return {"error": "investigation not found"}, 404
+
+    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
+    if not any(g.get("name") == grp_name for g in (spec.get("groups") or [])):
+        return {"error": f"group {grp_name!r} not found"}, 404
+
+    spec["groups"] = [
+        g for g in (spec.get("groups") or []) if g.get("name") != grp_name
+    ]
+    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
+    return {"ok": True}, 200

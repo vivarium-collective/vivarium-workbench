@@ -22,13 +22,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _point_at_v2e(monkeypatch):
-    import vivarium_dashboard.server as srv
-    monkeypatch.setattr(srv, "WORKSPACE", V2E)
-    return srv
-
-
-def _find_study_with_findings(srv):
+def _find_study_with_findings():
     """First study dir name whose study.yaml carries findings (read-only scan)."""
     import yaml
     for sy in sorted(V2E.glob("studies/*/study.yaml")):
@@ -41,12 +35,13 @@ def _find_study_with_findings(srv):
     return None
 
 
-def test_real_study_yields_panel_data_sources(monkeypatch):
-    srv = _point_at_v2e(monkeypatch)
-    name = _find_study_with_findings(srv)
+def test_real_study_yields_panel_data_sources():
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec
+    from vivarium_dashboard.lib.study_enrichment import study_acceptance_criterion
+    name = _find_study_with_findings()
     if not name:
         pytest.skip("no real study with findings in v2e-invest")
-    spec = srv._study_detail_spec(name)
+    spec = load_study_detail_spec(V2E, name)
     assert spec is not None
     # "Why" row source — at least one finding with a statement.
     findings = spec.get("findings") or []
@@ -57,16 +52,14 @@ def test_real_study_yields_panel_data_sources(monkeypatch):
     assert "result" in cgv
     # "Acceptance" row source — the helper resolves without raising; None is a
     # tolerated absence (the panel omits the row).
-    sa = srv._study_acceptance_criterion(name)
+    sa = study_acceptance_criterion(V2E, name)
     assert sa is None or isinstance(sa, dict)
 
 
-def test_report_linter_runs_over_real_workspace(monkeypatch):
+def test_report_linter_runs_over_real_workspace():
     """Readiness row source — the deterministic linter runs and returns a
     findings list (possibly empty) without error."""
-    srv = _point_at_v2e(monkeypatch)
-    body, status = srv._report_lint(V2E)
+    from vivarium_dashboard.lib.report_views import build_report_lint
+    data, status = build_report_lint(V2E)
     assert status == 200
-    import json
-    data = json.loads(body.decode("utf-8") if isinstance(body, (bytes, bytearray)) else body)
     assert "findings" in data and isinstance(data["findings"], list)

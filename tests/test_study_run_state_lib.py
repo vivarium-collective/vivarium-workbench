@@ -18,7 +18,6 @@ import yaml
 import pbg_superpowers.composite_generator as cg
 import pbg_superpowers.composite_discovery as cd
 from vivarium_dashboard.lib import study_run_state as srs
-import vivarium_dashboard.server as server
 
 
 # ---------------------------------------------------------------------------
@@ -86,10 +85,9 @@ def test_resolve_generator_build_failure_returns_error(tmp_path, monkeypatch):
 
 
 def test_resolve_reads_ws_root_for_cache_dir_not_global(tmp_path, monkeypatch):
-    """The cache_dir existence check resolves relative to the passed ws_root.
-    Point server.WORKSPACE at an unrelated dir and confirm ws_root is used:
-    when ws_root has the ParCa cache, cache_dir is KEPT (passed to the builder);
-    when it doesn't, cache_dir is DROPPED."""
+    """The cache_dir existence check resolves relative to the passed ws_root
+    (no global): when ws_root has the ParCa cache, cache_dir is KEPT (passed to
+    the builder); when it doesn't, cache_dir is DROPPED."""
     spec = "pkg.composites.cached"
     captured = {}
 
@@ -104,10 +102,6 @@ def test_resolve_reads_ws_root_for_cache_dir_not_global(tmp_path, monkeypatch):
     ws_good = tmp_path / "good"
     (ws_good / "mycache").mkdir(parents=True)
     (ws_good / "mycache" / "initial_state.json").write_text("{}", encoding="utf-8")
-    # server.WORKSPACE points somewhere with no cache -> must be ignored.
-    other = tmp_path / "other"
-    other.mkdir()
-    monkeypatch.setattr(server, "WORKSPACE", other)
 
     srs.resolve_study_baseline_state(ws_good, "pkg", spec, {"cache_dir": "mycache"})
     assert captured["overrides"].get("cache_dir") == "mycache"
@@ -206,51 +200,3 @@ def test_zarr_no_sim_name_returns_none(tmp_path):
 
 def test_zarr_nonexistent_db_returns_none(tmp_path):
     assert srs.zarr_store_for_sim(tmp_path / "nope.db", "simA") is None
-
-
-# ---------------------------------------------------------------------------
-# Server-shim parity — the live names delegate to the lib functions
-# ---------------------------------------------------------------------------
-
-def test_shim_resolve_matches_lib(tmp_path, monkeypatch):
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    spec = "pkg.composites.baseline"
-    _register(monkeypatch, spec, _entry(name="baseline"),
-              build=lambda entry, overrides=None: {"state": {"a": 1}})
-    monkeypatch.setattr(server, "WORKSPACE", ws)
-
-    via_shim = server._resolve_study_baseline_state("pkg", spec, {})
-    via_lib = srs.resolve_study_baseline_state(ws, "pkg", spec, {})
-    assert via_shim == via_lib == ({"a": 1}, None)
-
-
-def test_shim_resolve_error_matches_lib(tmp_path, monkeypatch):
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    _empty_registry(monkeypatch)
-    monkeypatch.setattr(server, "WORKSPACE", ws)
-
-    via_shim = server._resolve_study_baseline_state("pkg", "pkg.composites.nope", {})
-    via_lib = srs.resolve_study_baseline_state(ws, "pkg", "pkg.composites.nope", {})
-    assert via_shim == via_lib
-
-
-def test_shim_emitter_matches_lib(tmp_path, monkeypatch):
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    _write_inv(ws, "inv-a", ["study-1"], runtime={"default_emitter": "xarray"})
-    monkeypatch.setattr(server, "WORKSPACE", ws)
-
-    assert server._investigation_emitter_for_study("study-1") == \
-        srs.investigation_emitter_for_study(ws, "study-1") == "xarray"
-    assert server._investigation_emitter_for_study("orphan") == \
-        srs.investigation_emitter_for_study(ws, "orphan") is None
-
-
-def test_shim_zarr_matches_lib(tmp_path):
-    study = tmp_path / "study"
-    db = _make_study_db(study, [("run-1", "simA", "completed", 100.0)])
-    (study / "runs.run-1.zarr").mkdir()
-    assert server._zarr_store_for_sim(db, "simA") == \
-        srs.zarr_store_for_sim(db, "simA") == study / "runs.run-1.zarr"

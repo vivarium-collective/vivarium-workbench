@@ -6,7 +6,19 @@ fallback when the branch isn't an exact/suffix match).
 """
 import subprocess
 
-from vivarium_dashboard.server import _build_iset_summary_for_test
+from vivarium_dashboard.lib.investigation_status import (
+    build_iset_summary,
+    study_run_slugs,
+)
+
+
+def _build_iset_summary_for_test(ws):
+    run_slugs = study_run_slugs(ws)
+
+    def _has_runs(slug, spec):
+        return slug in run_slugs or bool((spec or {}).get("runs"))
+
+    return build_iset_summary(ws, study_has_runs=_has_runs)
 
 
 def _git_ws(tmp):

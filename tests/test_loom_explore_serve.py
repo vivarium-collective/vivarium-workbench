@@ -6,8 +6,6 @@ rather than the workspace's ``scripts/_assets/`` tree. These tests verify
 that the server still serves the bundle correctly from the new location.
 """
 import json
-import sys
-import threading
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -15,35 +13,22 @@ from pathlib import Path
 import pytest
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 
 @pytest.fixture
-def workspace_server(tmp_path, monkeypatch):
+def workspace_server(tmp_path, dashboard_client):
     ws_root = tmp_path
     (ws_root / "workspace.yaml").write_text(yaml.dump({
         "name": "testws",
         "package_path": "pbg_testws",
     }, sort_keys=False))
 
-    monkeypatch.chdir(ws_root)
-    import importlib
-    import vivarium_dashboard.server as srv
-    importlib.reload(srv)
-    monkeypatch.setattr(srv, "WORKSPACE", ws_root)
-
-    httpd = srv.ThreadingHTTPServer(("127.0.0.1", 0), srv.Handler)
-    port = httpd.server_address[1]
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
+    client = dashboard_client(ws_root)
 
     class _WS:
-        url = f"http://127.0.0.1:{port}"
+        url = client.base_url
         root = ws_root
 
     yield _WS()
-    httpd.shutdown()
-    thread.join(timeout=2)
 
 
 def test_loom_explore_index_served(workspace_server):

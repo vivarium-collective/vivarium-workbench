@@ -13,10 +13,10 @@ import pytest
 # Helper import
 # ---------------------------------------------------------------------------
 
-from vivarium_dashboard.server import (
-    _build_ptools_launch_url,
-    _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
+from vivarium_dashboard.lib.study_viz_views import (
+    build_ptools_launch_url as _build_ptools_launch_url,
 )
+from vivarium_dashboard.lib.system_info import _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +160,7 @@ def test_default_omics_template_has_all_placeholders():
 
 def test_ptools_object_class_inference():
     """Object class is inferred from the analysis / TSV name."""
-    from vivarium_dashboard.server import _ptools_object_class
+    from vivarium_dashboard.lib.study_viz_views import ptools_object_class as _ptools_object_class
 
     assert _ptools_object_class("ptools_rxns__p1.tsv") == "reaction"
     assert _ptools_object_class("ptools_proteins__p1.tsv") == "protein"

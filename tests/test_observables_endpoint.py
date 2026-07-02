@@ -20,7 +20,11 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard import server
+from vivarium_dashboard.lib.observables_views import (
+    augment_lineage_aliases,
+    build_observables,
+    build_study_observable_check,
+)
 
 _FIXTURE = Path(__file__).parent / "_fixtures" / "ws_increase_demo"
 _REF = "pbg_ws_increase_demo.composites.increase-demo"
@@ -46,18 +50,17 @@ def _write_study(ws: Path, slug: str, spec: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def test_observables_endpoint_lists_leaves_and_catalogs(demo_ws):
-    body, code = server.Handler._observables_for_ref_test(demo_ws, _REF)
-    assert code == 200, body
-    d = json.loads(body)
+    d, code = build_observables(demo_ws, _REF)
+    assert code == 200, d
     assert isinstance(d["leaves"], list) and d["leaves"]      # emittable paths
     assert "stores.level" in d["leaves"]                      # a known leaf
     assert isinstance(d["catalogs"], dict)                    # {observable: [labels]}
 
 
 def test_observables_endpoint_unknown_ref_clear_error(demo_ws):
-    body, code = server.Handler._observables_for_ref_test(demo_ws, "nope.not.a.composite")
+    d, code = build_observables(demo_ws, "nope.not.a.composite")
     assert code >= 400
-    assert "error" in json.loads(body)
+    assert "error" in d
 
 
 # ---------------------------------------------------------------------------
@@ -73,9 +76,8 @@ def test_study_observable_check_flags_phantom(demo_ws):
             {"name": "phantom-one", "store_path": "stores.nonexistent"},
         ],
     })
-    body, code = server.Handler._study_observable_check_test(demo_ws, "the-study")
-    assert code == 200, body
-    payload = json.loads(body)
+    payload, code = build_study_observable_check(demo_ws, "the-study")
+    assert code == 200, payload
     res = payload["readouts"]
     assert payload["composite"] == _REF
     # the never-fabricate flag: a phantom selector is flagged, not passed
@@ -90,9 +92,9 @@ def test_study_observable_check_uncomputable_composite_clear_status(demo_ws):
         "baseline": [{"name": "base", "composite": "pbg_ws_increase_demo.composites.does-not-exist"}],
         "readouts": [{"name": "real-one", "store_path": "stores.level"}],
     })
-    body, code = server.Handler._study_observable_check_test(demo_ws, "broken-study")
+    payload, code = build_study_observable_check(demo_ws, "broken-study")
     # composite can't build → a clear non-crash status, never a 500
-    assert code in (200, 422), body
+    assert code in (200, 422), payload
     assert code != 500
 
 
@@ -113,7 +115,7 @@ def test_lineage_prefix_normalization_bare_readouts_match():
         "leaves": ["agents.0.listeners.x", "agents.0.unique.y"],
         "catalogs": {},
     }
-    aug = server._augment_lineage_aliases(available)
+    aug = augment_lineage_aliases(available)
     # raw prefixed forms are preserved …
     assert "agents.0.listeners.x" in aug["leaves"]
     # … and the stripped aliases are added
@@ -157,8 +159,7 @@ def _v2e_observables_or_skip():
         from pbg_superpowers.readout_validation import available_observables  # noqa: F401
     except Exception:
         pytest.skip("pbg_superpowers.readout_validation unavailable")
-    body, code = server.Handler._observables_for_ref_test(_V2E_INVEST, _V2E_BASELINE)
-    payload = json.loads(body)
+    payload, code = build_observables(_V2E_INVEST, _V2E_BASELINE)
     if code != 200 or not payload.get("leaves"):
         pytest.skip(f"v2ecoli baseline not buildable in this interpreter: {code} {payload.get('error')}")
     return payload
@@ -174,9 +175,8 @@ def test_v2e_invest_golden_observables_nonempty():
 
 def test_v2e_invest_golden_study_readout_statuses():
     _v2e_observables_or_skip()  # gate: ensures buildable before checking the study
-    body, code = server.Handler._study_observable_check_test(_V2E_INVEST, _V2E_STUDY)
-    assert code == 200, body
-    payload = json.loads(body)
+    payload, code = build_study_observable_check(_V2E_INVEST, _V2E_STUDY)
+    assert code == 200, payload
     assert payload["composite"] == _V2E_BASELINE
     res = payload["readouts"]
     assert res, "study should declare readouts"
@@ -199,7 +199,7 @@ def test_v2e_invest_golden_real_leaf_ok_phantom_flagged():
     # the real emitted form is prefixed (lineage); the study authors it bare
     assert any(l.endswith("listeners.mass.cell_mass") for l in payload["leaves"])
     assert "listeners.mass.cell_mass" not in payload["leaves"]  # bare form NOT raw-emitted
-    available = server._augment_lineage_aliases(
+    available = augment_lineage_aliases(
         {"leaves": payload["leaves"], "catalogs": payload["catalogs"]}
     )
     spec = {"readouts": [

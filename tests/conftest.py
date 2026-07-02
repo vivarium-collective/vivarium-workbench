@@ -97,26 +97,40 @@ def dashboard_client():
         env = os.environ.copy()
         env["PYTHONPATH"] = os.pathsep.join(
             [str(_REPO_ROOT), str(workspace), env.get("PYTHONPATH", "")])
+        # Spawn the live FastAPI app (via the `serve` CLI -> startup.serve_fastapi,
+        # which writes the .pbg/server/server-info readiness file this fixture waits
+        # on). This exercises the production server, not the retired stdlib server.py.
         proc = subprocess.Popen(
-            [sys.executable, "-m", "vivarium_dashboard.server",
+            [sys.executable, "-m", "vivarium_dashboard.cli", "serve",
              "--workspace", str(workspace), "--port", str(port)],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=env,
         )
         procs.append(proc)
-        info_path = workspace / ".pbg" / "server" / "server-info"
-        for _ in range(40):
-            if info_path.exists():
-                break
+        client = _Client(f"http://127.0.0.1:{port}")
+        # serve_fastapi writes server-info before uvicorn binds the port, so wait
+        # for the app to actually answer /health — not just for the file to exist.
+        for _ in range(60):
+            if proc.poll() is not None:  # process died during startup
+                out, err = proc.communicate(timeout=2)
+                pytest.fail(
+                    f"server exited during startup (code {proc.returncode}):\n"
+                    f"stdout:\n{out.decode()}\nstderr:\n{err.decode()}"
+                )
+            try:
+                if client.get("/health").status_code == 200:
+                    break
+            except Exception:
+                pass
             time.sleep(0.25)
         else:
             proc.terminate()
             out, err = proc.communicate(timeout=2)
             pytest.fail(
-                f"server did not start within 10s:\n"
+                f"server did not answer /health within 15s:\n"
                 f"stdout:\n{out.decode()}\nstderr:\n{err.decode()}"
             )
-        return _Client(f"http://127.0.0.1:{port}")
+        return client
 
     yield _make
 

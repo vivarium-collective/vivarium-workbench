@@ -48,30 +48,31 @@ authors and every result produced lives in the workspace, never in this repo
 - **The workspace's** git history = the scientific audit trail the dashboard
   writes on the user's behalf.
 
-### The HTTP layer and the typed-API migration
+### The HTTP layer
 
-Today the server is a single ~17k-line stdlib `http.server` handler
-(`server.py`) with hand-dispatched `/api/*` routes returning plain `dict`
-payloads. That layer is being migrated, incrementally, to a **typed API**:
+The dashboard is served by a **FastAPI app** (`api/app.py`) run under uvicorn:
+`vivarium-dashboard serve` → `cli.py` → `lib/startup.serve_fastapi` →
+`uvicorn.run(app, ...)`. All routes (read and write, static/SPA serving, and the
+SSE stream) are defined there and back onto the `lib/` functions.
 
-- **`lib/models.py`** — pydantic models are the single source of truth for the
-  JSON the server sends the browser (`SimRow`, `ChartPayload`, `RemoteRunJob`,
-  the `runs_meta` row shape, …). Handlers validate their output against these,
-  so the contract cannot silently drift — validating real output already caught
-  a latent bug (`runs_meta.started_at`/`completed_at` are epoch floats, not
-  strings).
-- **`api/app.py`** — a FastAPI app (a *strangler-fig* alongside the stdlib
-  handler) that serves a growing set of routes with those typed models, giving
-  automatic validation + an OpenAPI schema. Routes move over a few at a time;
-  both servers back onto the same `lib/` functions, so there is one
-  implementation, not two.
+The old ~9.6k-line stdlib `http.server` handler (`server.py`) has been
+**deleted**. The strangler-fig migration is complete: every route and all real
+logic now live in `api/app.py` + `lib/`, and the `dashboard_client` test fixture
+spawns the live FastAPI app. `server.py` is now only a ~40-line deprecation shim
+re-exporting six symbols (`_json_default`/`_json_sanitize`/`_json_body` and
+`_build_iset_summary_for_test`/`_build_iset_detail_for_test`/`_observables_for_ref`)
+from their `lib` homes, retained solely for external consumers (v2ecoli,
+sms-ecoli, pbg-superpowers) until they migrate to the `lib` paths.
+
+Supporting the typed contract:
+
+- **`lib/models.py`** — pydantic models for the JSON payloads (`SimRow`,
+  `ChartPayload`, `RemoteRunJob`, the `runs_meta` row shape, …). Note many of the
+  richest payloads are still `extra="allow"` passthroughs; tightening these into
+  real declared-field models is tracked in the hardening plan.
 - **`mypy`** (scoped, widening) gates the typed modules, and the browser-side
   **TypeScript types are generated from the pydantic models**
   (`lib/generate_ts.py`) — so the client contract is *derived*, not hand-copied.
-
-The goal is a fully FastAPI-served, end-to-end-typed API that eventually retires
-the stdlib handler, pursued incrementally so the dashboard keeps working
-throughout.
 
 ---
 
@@ -303,7 +304,8 @@ snapshot (no Launch buttons, no GitHub mark, etc.).
 ## 6. Git as the audit trail
 
 Every mutating endpoint runs its file writes inside
-`server.py: _commit_or_run / _active_branch_action`, which:
+`lib/work_state.py: active_branch_action` (and the per-mutation commit helpers),
+which:
 1. ensures work is on a workstream branch (creating one if needed),
 2. performs the file writes (`action_fn`),
 3. stages the authored paths and `git commit`s with a conventional message,

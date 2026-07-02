@@ -32,6 +32,14 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1") -> int:
     """
     workspace = Path(workspace).resolve()
 
+    # Configure structured logging so the access-log middleware actually emits.
+    # basicConfig is a no-op if the root logger is already configured.
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+
     # CWD = workspace root (see module docstring).
     os.chdir(workspace)
     if str(workspace) not in sys.path:

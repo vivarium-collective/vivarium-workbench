@@ -15,7 +15,7 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.server import _study_refresh_viz
+from vivarium_dashboard.lib.study_viz_views import study_refresh_viz as _study_refresh_viz
 from vivarium_dashboard.lib.study_viz_views import study_refresh_viz as _lib_study_refresh_viz
 
 

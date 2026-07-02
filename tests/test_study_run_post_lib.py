@@ -27,7 +27,6 @@ from pathlib import Path
 import yaml
 
 from vivarium_dashboard.lib import study_run_post as srp
-import vivarium_dashboard.server as server
 
 
 # ---------------------------------------------------------------------------
@@ -343,13 +342,8 @@ def test_render_study_visualizations_happy_writes_and_reads_ws_root(tmp_path, mo
     study_dir = tmp_path / "study"
     (study_dir / "viz").mkdir(parents=True)
 
-    # server.WORKSPACE points at an unrelated dir with NO workspace.yaml, so a
-    # global read would raise "failed to build core for viz". Success proves
-    # the function reads the passed ws_root.
-    other = tmp_path / "other"
-    other.mkdir()
-    monkeypatch.setattr(server, "WORKSPACE", other)
-
+    # The lib function takes ws_root explicitly (no WORKSPACE global). Success +
+    # the ws-on-sys.path assertion below prove it reads the passed ws_root.
     captured = {}
 
     def fake_render_visualizations(effective_spec, sd, name, core_registry=None,
@@ -371,44 +365,5 @@ def test_render_study_visualizations_happy_writes_and_reads_ws_root(tmp_path, mo
     assert written == ["viz/v1.html"]
     assert (study_dir / "viz" / "v1.html").exists()
     assert captured["name"] == "study-x"
-    # ws_root, not server.WORKSPACE, was added to sys.path.
+    # ws_root was added to sys.path.
     assert str(ws) in sys.path
-
-
-# ---------------------------------------------------------------------------
-# Server-shim parity
-# ---------------------------------------------------------------------------
-
-def test_shim_run_post_run_scripts_parity(tmp_path):
-    spec = {"post_run_scripts": []}
-    assert server._run_post_run_scripts(spec, tmp_path) == \
-        srp.run_post_run_scripts(spec, tmp_path)
-
-
-def test_shim_run_study_analyses_parity(tmp_path):
-    spec: dict = {}
-    assert server._run_study_analyses(tmp_path, spec, "r1", tmp_path) == \
-        srp.run_study_analyses(tmp_path, spec, "r1", tmp_path)
-
-
-def test_shim_build_analysis_options_parity():
-    _inject_analysis_registry({"ptools_rna": "single"})
-    entries = [{"name": "ptools_rna", "params": {"n": 1}}]
-    assert server._build_analysis_options(entries) == \
-        srp.build_analysis_options(entries)
-
-
-def test_shim_render_study_visualizations_threads_workspace(tmp_path, monkeypatch):
-    """The server shim passes server.WORKSPACE as ws_root. Use the no-viz
-    early-return (deterministic, no heavy deps) and confirm shim == lib."""
-    _quiet_discover(monkeypatch)
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    study_dir = tmp_path / "study"
-    study_dir.mkdir()
-    monkeypatch.setattr(server, "WORKSPACE", ws)
-
-    spec = {"name": "s"}  # no visualizations -> ([], [])
-    shim_out = server._render_study_visualizations(study_dir, spec, "spec.absent")
-    lib_out = srp.render_study_visualizations(ws, study_dir, spec, "spec.absent")
-    assert shim_out == lib_out == ([], [])

@@ -9,17 +9,19 @@ authored hypotheses un-enriched on absence/failure.
 """
 from __future__ import annotations
 
-import json
 import sys
 import types
 
 import yaml
 import pytest
 
+from vivarium_dashboard.lib.investigation_views import (
+    build_investigation_hypotheses,
+)
+
 
 @pytest.fixture
-def tmp_ws(tmp_path, monkeypatch):
-    import vivarium_dashboard.server as srv
+def tmp_ws(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir(parents=True)
     (ws / "workspace.yaml").write_text("name: ws\n")
@@ -41,32 +43,24 @@ def tmp_ws(tmp_path, monkeypatch):
             {"claim": "it is closed", "hypothesis_id": "H1", "status": "excluded"},
         ]},
     }))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
     return ws
 
 
 def test_returns_authored_hypotheses(tmp_ws):
-    import vivarium_dashboard.server as server
-    body, code = server.Handler._investigation_hypotheses_test(server.WORKSPACE, "the-inv")
-    assert code == 200
-    d = json.loads(body)
+    d = build_investigation_hypotheses(tmp_ws, "the-inv")
     assert d["investigation"] == "the-inv"
     assert isinstance(d["hypotheses"], list) and len(d["hypotheses"]) == 1
     assert d["hypotheses"][0]["id"] == "H1"
 
 
 def test_tolerant_on_missing_investigation(tmp_ws):
-    import vivarium_dashboard.server as server
-    body, code = server.Handler._investigation_hypotheses_test(server.WORKSPACE, "nope")
-    assert code == 200  # never 500
-    d = json.loads(body)
+    d = build_investigation_hypotheses(tmp_ws, "nope")
     assert d["hypotheses"] == []
 
 
 def test_rollup_support_enriches_support_log(tmp_ws, monkeypatch):
     """When pbg_superpowers.hypotheses.rollup_support is importable, its enriched
     hypotheses (with support_log) flow through to the payload."""
-    import vivarium_dashboard.server as server
 
     def _rollup(inv_spec, study_specs):
         hyps = []
@@ -83,9 +77,7 @@ def test_rollup_support_enriches_support_log(tmp_ws, monkeypatch):
     fake.rollup_support = _rollup
     monkeypatch.setitem(sys.modules, "pbg_superpowers.hypotheses", fake)
 
-    body, code = server.Handler._investigation_hypotheses_test(server.WORKSPACE, "the-inv")
-    assert code == 200
-    d = json.loads(body)
+    d = build_investigation_hypotheses(tmp_ws, "the-inv")
     log = d["hypotheses"][0]["support_log"]
     assert log and log[0]["study"] == "s1"
     assert log[0]["delta"] == "supports"
@@ -94,7 +86,6 @@ def test_rollup_support_enriches_support_log(tmp_ws, monkeypatch):
 def test_falls_back_to_score_support(tmp_ws, monkeypatch):
     """When rollup_support is absent but score_support exists, support_log is
     computed per hypothesis."""
-    import vivarium_dashboard.server as server
 
     fake = types.ModuleType("pbg_superpowers.hypotheses")
     # No rollup_support attribute → the import in the worker raises ImportError.
@@ -104,22 +95,17 @@ def test_falls_back_to_score_support(tmp_ws, monkeypatch):
     ]
     monkeypatch.setitem(sys.modules, "pbg_superpowers.hypotheses", fake)
 
-    body, code = server.Handler._investigation_hypotheses_test(server.WORKSPACE, "the-inv")
-    assert code == 200
-    d = json.loads(body)
+    d = build_investigation_hypotheses(tmp_ws, "the-inv")
     log = d["hypotheses"][0]["support_log"]
     assert log and log[0]["delta"] == "weakens"
 
 
 def test_tolerant_on_compute_failure(tmp_ws, monkeypatch):
     """A throwing rollup_support degrades to the authored hypotheses, not 500."""
-    import vivarium_dashboard.server as server
 
     fake = types.ModuleType("pbg_superpowers.hypotheses")
     fake.rollup_support = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
     monkeypatch.setitem(sys.modules, "pbg_superpowers.hypotheses", fake)
 
-    body, code = server.Handler._investigation_hypotheses_test(server.WORKSPACE, "the-inv")
-    assert code == 200  # never 500
-    d = json.loads(body)
+    d = build_investigation_hypotheses(tmp_ws, "the-inv")
     assert d["hypotheses"][0]["id"] == "H1"  # authored, un-enriched
