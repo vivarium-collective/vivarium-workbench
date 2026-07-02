@@ -17,6 +17,7 @@ import importlib.metadata as metadata
 import importlib.util
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -382,6 +383,54 @@ def _dedupe_alias_composites(records: list) -> list:
             kept[key] = rec
         # else: drop the non-canonical duplicate
     return out
+
+
+def composites_data(ws_root: Path) -> dict:
+    """Pure data builder for GET /api/composites — returns ``{"composites": [...]}``.
+
+    Discovers every composite visible to *ws_root* (workspace-local + installed
+    ``pbg-*`` packages), applies the per-workspace registry allow-list, and
+    collapses alias duplicates. Called by ``lib.composites_query`` (in a fresh
+    subprocess) and by ``publish.build_bundle``.
+
+    Moved from ``vivarium_dashboard.server._composites_data`` so it has no
+    dependency on the retired stdlib server or a module-global ``WORKSPACE``.
+    """
+    import importlib as _importlib
+
+    ws_root = Path(ws_root)
+    ws = str(ws_root)
+    if ws not in sys.path:
+        sys.path.insert(0, ws)
+    try:
+        from vivarium_dashboard.lib.workspace_manifest_views import filter_composites
+    except ImportError as e:
+        return {"composites": [], "error": str(e)}
+
+    try:
+        ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8"))
+        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+        try:
+            _importlib.import_module(pkg)
+        except Exception:
+            pass
+        specs = discover_all_composites(ws_root, pkg)
+        ws_prefix_dot = pkg + "."
+        out: list = []
+        for s in specs.values():
+            rec = {k: v for k, v in s.items() if not k.startswith("_")}
+            rec.setdefault("kind", "spec")
+            rec.setdefault("module", "")
+            if "default_n_steps" not in rec:
+                rec["default_n_steps"] = None
+            mod = rec.get("module") or ""
+            rec["workspace_local"] = bool(mod == pkg or mod.startswith(ws_prefix_dot))
+            out.append(rec)
+        out = filter_composites(out, ws_data)
+        out = _dedupe_alias_composites(out)
+        return {"composites": out, "workspace_package": pkg}
+    except Exception as e:
+        return {"composites": [], "error": str(e)}
 
 
 def substitute_parameters(state: Any, params: dict, overrides: dict | None = None) -> Any:
