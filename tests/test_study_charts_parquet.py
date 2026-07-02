@@ -19,7 +19,7 @@ import pytest
 # (an optional dep). Skip the module cleanly when it isn't installed.
 pl = pytest.importorskip("polars")
 
-from vivarium_dashboard.lib.study_charts import (
+from vivarium_workbench.lib.study_charts import (
     _emitter_choice,
     _extract_paths_from_parquet,
     _latest_parquet_for_study,
@@ -185,7 +185,7 @@ def test_emitter_choice_default_is_xarray():
     # Task 6 flipped the framework default emitter from sqlite to xarray;
     # _emitter_choice delegates to emitters.default_emitter, so an undeclared
     # workspace now resolves to xarray.
-    from vivarium_dashboard.lib import emitters
+    from vivarium_workbench.lib import emitters
     assert _emitter_choice({}, None) == "xarray"
     assert _emitter_choice({}, None) == emitters.DEFAULT_EMITTER
 

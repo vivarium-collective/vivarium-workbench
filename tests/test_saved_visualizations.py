@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib.saved_visualizations import (
+from vivarium_workbench.lib.saved_visualizations import (
     build_saved_visualizations as _build_saved_visualizations,
     parsimony_viewer_dir as _parsimony_viewer_dir,
 )

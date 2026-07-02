@@ -10,9 +10,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from vivarium_dashboard.lib import composite_runs as cr
-from vivarium_dashboard.lib import study_runs
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib import composite_runs as cr
+from vivarium_workbench.lib import study_runs
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 def _post_server(base_url: str, route: str, payload: dict) -> tuple[dict, int]:
@@ -61,13 +61,13 @@ def run_investigation(ws_root, name, *, studies=None, server=None) -> tuple[dict
         body["studies"] = list(studies)
     if server:
         return _post_server(server, "/api/investigation-run", body)
-    from vivarium_dashboard.lib import investigation_run_views
+    from vivarium_workbench.lib import investigation_run_views
     return investigation_run_views.investigation_run(ws_root, body)
 
 
 def run_composite(ws_root, spec_id, *, steps=5, emit_paths=None,
                   params=None, dry_run=False, detach=False) -> tuple[dict, int]:
-    from vivarium_dashboard.lib import composite_test_run_views
+    from vivarium_workbench.lib import composite_test_run_views
     body = {"id": spec_id, "steps": int(steps),
             "emit_paths": list(emit_paths or [])}
     if params:

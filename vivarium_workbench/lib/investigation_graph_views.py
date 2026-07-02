@@ -9,10 +9,10 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
-from vivarium_dashboard.lib.node_store import load_study_nodes
-from vivarium_dashboard.lib.investigations import normalize_dag_edges
-from vivarium_dashboard.lib.chain_derivation import derive_chain_nodes
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.node_store import load_study_nodes
+from vivarium_workbench.lib.investigations import normalize_dag_edges
+from vivarium_workbench.lib.chain_derivation import derive_chain_nodes
 from investigation_contracts import validate_chain
 
 

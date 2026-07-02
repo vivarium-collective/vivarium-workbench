@@ -32,7 +32,7 @@ import textwrap
 import time
 from pathlib import Path
 
-from vivarium_dashboard.lib import run_store
+from vivarium_workbench.lib import run_store
 
 import yaml
 
@@ -115,7 +115,7 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
     ``"simulation_id"``; on success also ``"results"``, ``"viz_html"``,
     ``"steps"``.
     """
-    from vivarium_dashboard.lib import composite_runs as cr
+    from vivarium_workbench.lib import composite_runs as cr
 
     # Are we running a registered @composite_generator? If so, the child can
     # rebuild the composite in its own process from (spec_id, overrides) —
@@ -163,7 +163,7 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
             # deferred Task 3 — so a non-v2ecoli workspace falls back to sqlite.
             # max_generations / single_daughters stay local — they drive the
             # v2ecoli colony/lineage run loop the broker does not own.
-            from vivarium_dashboard.lib import emitters as _emitters
+            from vivarium_workbench.lib import emitters as _emitters
             _default_emitter = _emitters.default_emitter({"runtime": _runtime}, None)
             _max_generations = int(_runtime.get("max_generations") or 3)
             _single_daughters = bool(_runtime.get("single_daughters") or False)
@@ -212,7 +212,7 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
                     _REGISTRY, build_generator, discover_generators,
                     apply_core_extensions,
                 )
-                from vivarium_dashboard.lib import composite_runs as cr
+                from vivarium_workbench.lib import composite_runs as cr
                 from bigraph_schema.json_codec import BigraphJSONEncoder as _BJE
                 _payload = {payload!r}
                 if not _REGISTRY: discover_generators()
@@ -326,7 +326,7 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
                     # writes a partitioned zarr store under out_dir, and
                     # AUTO-FALLS-BACK to sqlite for an empty view (a composite
                     # with no emittable observable) — so this NEVER blocks a run.
-                    from vivarium_dashboard.lib import emitters as _emitters
+                    from vivarium_workbench.lib import emitters as _emitters
                     _out_dir = os.path.dirname(os.path.abspath(_payload['db_file']))
                     # CRITICAL: pin the store to the STUDY convention
                     # (<study>/runs.<run_id>.zarr == _payload['zarr_store']) so the
@@ -408,7 +408,7 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
                 except ImportError:  # process-bigraph < 1.4.17 (legacy location)
                     from process_bigraph.emitter import SQLiteEmitter
                 from bigraph_schema.json_codec import bigraph_json_hook
-                from vivarium_dashboard.lib import composite_runs as cr
+                from vivarium_workbench.lib import composite_runs as cr
                 core = build_core()
                 core.register_link('SQLiteEmitter', SQLiteEmitter)
                 with open({_state_path!r}) as _sf:

@@ -11,7 +11,7 @@ Grounded against ``v2ecoli/v2ecoli/configs/default.json`` +
 """
 import pytest
 
-from vivarium_dashboard.lib.ensemble_config import (
+from vivarium_workbench.lib.ensemble_config import (
     build_workflow_config,
     delegation_available,
     is_delegatable_sweep,

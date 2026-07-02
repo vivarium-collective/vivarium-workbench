@@ -2,7 +2,7 @@
 
 import yaml
 
-from vivarium_dashboard.lib import investigation_status as inv
+from vivarium_workbench.lib import investigation_status as inv
 
 
 def test_compute_investigation_status_rules():

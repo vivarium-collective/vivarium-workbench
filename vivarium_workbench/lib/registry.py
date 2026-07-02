@@ -1,6 +1,6 @@
 """Build the process/type registry payload for a workspace.
 
-Extracted from ``vivarium_dashboard.server._get_registry_data`` so the
+Extracted from ``vivarium_workbench.server._get_registry_data`` so the
 FastAPI seam (``api/app.py``) can call it without importing the stdlib server
 module.  The single implementation is shared: ``server.py`` re-imports
 ``build_registry`` and keeps its old ``_get_registry_data`` name as a thin
@@ -21,7 +21,7 @@ import textwrap
 import time
 from pathlib import Path
 
-from vivarium_dashboard.lib import emitters
+from vivarium_workbench.lib import emitters
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +185,7 @@ def _build_reexport_map(include: set[str]) -> dict[str, str]:
     # namespace. Mirrors _FRAMEWORK_PKGS in the registry subprocess.
     _FRAMEWORK_PKGS = {
         "process_bigraph", "bigraph_schema", "bigraph_viz",
-        "pbg_superpowers", "vivarium_dashboard",
+        "pbg_superpowers", "vivarium_workbench",
     }
 
     reexports: dict[str, str] = {}
@@ -403,7 +403,7 @@ def build_registry(ws_root: Path, *, bypass_cache: bool = False) -> dict:
         declared import (workspace.yaml.imports).
       - ``"framework"`` — class is from the process-bigraph framework
         infrastructure (process_bigraph, bigraph_schema, bigraph_viz,
-        pbg_superpowers, vivarium_dashboard).
+        pbg_superpowers, vivarium_workbench).
       - ``"environment_only"`` — discovered via allocate_core() entry-point scan
         but not declared in workspace.yaml. Installed in the Python env but not
         explicitly imported by this workspace.
@@ -501,7 +501,7 @@ try:
     # Framework infrastructure packages — always shown, never "environment_only".
     _FRAMEWORK_PKGS = {{
         'process_bigraph', 'bigraph_schema', 'bigraph_viz',
-        'pbg_superpowers', 'vivarium_dashboard', 'pbg_emitters',
+        'pbg_superpowers', 'vivarium_workbench', 'pbg_emitters',
     }}
 
     def _classify_source(cls):

@@ -21,8 +21,8 @@ import pytest
 from bigraph_schema import allocate_core
 from process_bigraph.composite import Process
 
-from vivarium_dashboard.lib import emitters
-from vivarium_dashboard.lib import comparative_viz, explorer_data
+from vivarium_workbench.lib import emitters
+from vivarium_workbench.lib import comparative_viz, explorer_data
 
 
 class Counter(Process):

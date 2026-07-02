@@ -36,8 +36,8 @@ def _find_study_with_findings():
 
 
 def test_real_study_yields_panel_data_sources():
-    from vivarium_dashboard.lib.study_spec import load_study_detail_spec
-    from vivarium_dashboard.lib.study_enrichment import study_acceptance_criterion
+    from vivarium_workbench.lib.study_spec import load_study_detail_spec
+    from vivarium_workbench.lib.study_enrichment import study_acceptance_criterion
     name = _find_study_with_findings()
     if not name:
         pytest.skip("no real study with findings in v2e-invest")
@@ -59,7 +59,7 @@ def test_real_study_yields_panel_data_sources():
 def test_report_linter_runs_over_real_workspace():
     """Readiness row source — the deterministic linter runs and returns a
     findings list (possibly empty) without error."""
-    from vivarium_dashboard.lib.report_views import build_report_lint
+    from vivarium_workbench.lib.report_views import build_report_lint
     data, status = build_report_lint(V2E)
     assert status == 200
     assert "findings" in data and isinstance(data["findings"], list)

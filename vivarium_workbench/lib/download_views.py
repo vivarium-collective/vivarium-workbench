@@ -28,9 +28,9 @@ import zipfile
 from pathlib import Path
 from typing import Optional
 
-from vivarium_dashboard.lib import data_sources as _data_sources
-from vivarium_dashboard.lib.notebook_export import export_investigation_notebook
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib import data_sources as _data_sources
+from vivarium_workbench.lib.notebook_export import export_investigation_notebook
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 # ---------------------------------------------------------------------------

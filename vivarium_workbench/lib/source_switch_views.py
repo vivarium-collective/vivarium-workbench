@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vivarium_dashboard.lib import active_workspace
+from vivarium_workbench.lib import active_workspace
 
 
 def source_switch(body: dict) -> tuple[dict, int]:

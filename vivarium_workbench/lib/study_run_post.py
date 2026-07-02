@@ -183,7 +183,7 @@ def run_study_analyses(study_dir: Path, spec: dict, run_id: str,
             return [], build_errors
 
         # 2. Locate the most-recent parquet sweep dir.
-        from vivarium_dashboard.lib.study_charts import _latest_parquet_for_study
+        from vivarium_workbench.lib.study_charts import _latest_parquet_for_study
         hive_root = _latest_parquet_for_study(study_dir)
         if hive_root is None:
             return [], [{"error": "no parquet run found under study dir; analyses need parquet emitter output"}]
@@ -243,7 +243,7 @@ def render_study_visualizations(ws_root, study_dir, spec, spec_id):
     Merges the composite's ``@composite_generator(visualizations=...)``
     defaults (from ``pbg_superpowers._REGISTRY``) with
     ``spec.visualizations`` (Study entries win on name collision), then
-    delegates to ``vivarium_dashboard.lib.investigations.render_visualizations``
+    delegates to ``vivarium_workbench.lib.investigations.render_visualizations``
     to render against ``study_dir/runs.db``.
 
     Returns ``(viz_files, viz_errors)`` — viz_files lists paths relative
@@ -255,7 +255,7 @@ def render_study_visualizations(ws_root, study_dir, spec, spec_id):
         from pbg_superpowers.composite_generator import (
             _REGISTRY, discover_generators,
         )
-        from vivarium_dashboard.lib.investigations import render_visualizations
+        from vivarium_workbench.lib.investigations import render_visualizations
     except ImportError as e:
         return [], [{"error": f"viz render deps missing: {e}"}]
 

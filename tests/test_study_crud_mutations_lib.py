@@ -1,4 +1,4 @@
-"""Tests for vivarium_dashboard.lib.study_crud_mutations (Batch 19).
+"""Tests for vivarium_workbench.lib.study_crud_mutations (Batch 19).
 
 Three sections:
 1. Direct lib builder tests — fixture workspace, assert file mutations and
@@ -15,8 +15,8 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from vivarium_dashboard.lib import study_crud_mutations as scm
-from vivarium_dashboard.api.app import create_app, get_workspace
+from vivarium_workbench.lib import study_crud_mutations as scm
+from vivarium_workbench.api.app import create_app, get_workspace
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ def _read_spec(ws_root):
 
 def _seed_run(ws_root, run_id):
     """Insert one row into runs.db and append to study.yaml.runs."""
-    from vivarium_dashboard.lib.composite_runs import connect
+    from vivarium_workbench.lib.composite_runs import connect
     sd = ws_root / "studies" / "s1"
     db = sd / "runs.db"
     conn = connect(db)

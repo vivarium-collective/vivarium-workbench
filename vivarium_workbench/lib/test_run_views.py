@@ -23,7 +23,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 def study_tests_run(ws_root: Path, body: dict) -> tuple[dict, int]:
@@ -42,7 +42,7 @@ def study_tests_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     spec_path = WorkspacePaths.load(ws_root).studies / slug / "study.yaml"
     if not spec_path.exists():
         return {"error": f"study not found: {slug}"}, 404
-    from vivarium_dashboard.lib.study_tests import (
+    from vivarium_workbench.lib.study_tests import (
         run_study_tests,
         StudyTestsConcurrentError,
     )

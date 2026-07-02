@@ -1,4 +1,4 @@
-"""Parity tests for vivarium_dashboard.lib.metadata_mutations.
+"""Parity tests for vivarium_workbench.lib.metadata_mutations.
 
 Tests are in three sections:
 1. Direct lib builder tests — fixture workspace, assert file mutations and
@@ -13,8 +13,8 @@ import yaml
 import pytest
 from fastapi.testclient import TestClient
 
-from vivarium_dashboard.lib import metadata_mutations as mm
-from vivarium_dashboard.api.app import create_app, get_workspace
+from vivarium_workbench.lib import metadata_mutations as mm
+from vivarium_workbench.api.app import create_app, get_workspace
 
 
 # ---------------------------------------------------------------------------

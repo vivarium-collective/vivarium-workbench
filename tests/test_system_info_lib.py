@@ -72,7 +72,7 @@ def ws(tmp_path: Path) -> Path:
 
 class TestBuildFrameworkMetrics:
     def test_counts_studies_and_investigations(self, ws: Path) -> None:
-        from vivarium_dashboard.lib.system_info import build_framework_metrics
+        from vivarium_workbench.lib.system_info import build_framework_metrics
         result = build_framework_metrics(ws)
         assert result["n_investigations"] == 1
         assert result["n_studies"] == 2
@@ -80,7 +80,7 @@ class TestBuildFrameworkMetrics:
         assert isinstance(result["metrics"], dict)
 
     def test_tolerant_on_missing_workspace(self, tmp_path: Path) -> None:
-        from vivarium_dashboard.lib.system_info import build_framework_metrics
+        from vivarium_workbench.lib.system_info import build_framework_metrics
         result = build_framework_metrics(tmp_path / "does-not-exist")
         assert result["n_investigations"] == 0
         assert result["n_studies"] == 0
@@ -97,7 +97,7 @@ class TestBuildFrameworkMetrics:
             _rigor, "framework_metrics",
             lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
         )
-        from vivarium_dashboard.lib.system_info import build_framework_metrics
+        from vivarium_workbench.lib.system_info import build_framework_metrics
         result = build_framework_metrics(ws)
         assert result["metrics"] == {}
         assert result["n_studies"] == 2
@@ -111,13 +111,13 @@ class TestBuildFrameworkMetrics:
 class TestBuildGithubRepo:
     def test_yaml_fallback_returns_slug(self, ws: Path) -> None:
         """workspace.yaml dashboard.github_repo used when git remote absent."""
-        from vivarium_dashboard.lib.system_info import build_github_repo
+        from vivarium_workbench.lib.system_info import build_github_repo
         result = build_github_repo(ws)
         assert result == {"repo": "acme/test-ws"}
 
     def test_null_when_neither_resolves(self, tmp_path: Path) -> None:
         """Empty workspace with no git remote + no workspace.yaml → {repo: null}."""
-        from vivarium_dashboard.lib.system_info import build_github_repo
+        from vivarium_workbench.lib.system_info import build_github_repo
         result = build_github_repo(tmp_path)
         assert result == {"repo": None}
 
@@ -128,7 +128,7 @@ class TestBuildGithubRepo:
                 "github_repo": "https://github.com/vivarium-collective/v2ecoli.git",
             },
         }))
-        from vivarium_dashboard.lib.system_info import build_github_repo
+        from vivarium_workbench.lib.system_info import build_github_repo
         result = build_github_repo(tmp_path)
         assert result == {"repo": "vivarium-collective/v2ecoli"}
 
@@ -137,15 +137,15 @@ class TestBuildGithubRepo:
         (tmp_path / "workspace.yaml").write_text(yaml.safe_dump({
             "dashboard": {"repository": "org/repo"},
         }))
-        from vivarium_dashboard.lib.system_info import build_github_repo
+        from vivarium_workbench.lib.system_info import build_github_repo
         result = build_github_repo(tmp_path)
         assert result == {"repo": "org/repo"}
 
     def test_detect_github_repo_overrides_yaml(self, ws: Path, monkeypatch) -> None:
         """Git remote (via _detect_github_repo) takes priority over workspace.yaml."""
-        import vivarium_dashboard.lib.system_info as _si
+        import vivarium_workbench.lib.system_info as _si
         # Patch the import inside build_github_repo
-        import vivarium_dashboard.lib.report as report_mod
+        import vivarium_workbench.lib.report as report_mod
         monkeypatch.setattr(report_mod, "_detect_github_repo",
                             lambda ws_root: "git-remote/repo")
         result = _si.build_github_repo(ws)
@@ -158,7 +158,7 @@ class TestBuildGithubRepo:
 
 class TestBuildUiConfig:
     def test_defaults_on_empty_workspace(self, tmp_path: Path) -> None:
-        from vivarium_dashboard.lib.system_info import (
+        from vivarium_workbench.lib.system_info import (
             build_ui_config, _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
         )
         result = build_ui_config(tmp_path)
@@ -167,7 +167,7 @@ class TestBuildUiConfig:
         assert result["ptools_omics_url_template"] == _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE
 
     def test_reads_ui_block(self, ws: Path) -> None:
-        from vivarium_dashboard.lib.system_info import (
+        from vivarium_workbench.lib.system_info import (
             build_ui_config, _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
         )
         result = build_ui_config(ws)
@@ -181,12 +181,12 @@ class TestBuildUiConfig:
         (tmp_path / "workspace.yaml").write_text(yaml.safe_dump({
             "ui": {"ptools_omics_url_template": custom},
         }))
-        from vivarium_dashboard.lib.system_info import build_ui_config
+        from vivarium_workbench.lib.system_info import build_ui_config
         result = build_ui_config(tmp_path)
         assert result["ptools_omics_url_template"] == custom
 
     def test_tolerant_on_missing_yaml(self, tmp_path: Path) -> None:
-        from vivarium_dashboard.lib.system_info import (
+        from vivarium_workbench.lib.system_info import (
             build_ui_config, _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
         )
         result = build_ui_config(tmp_path)
@@ -200,7 +200,7 @@ class TestBuildUiConfig:
 
 class TestBuildWorkspaceHome:
     def test_full_shape(self, ws: Path) -> None:
-        from vivarium_dashboard.lib.system_info import build_workspace_home
+        from vivarium_workbench.lib.system_info import build_workspace_home
         result = build_workspace_home(ws)
         assert result["name"] == "test-ws"
         assert result["description"] == "A test workspace"
@@ -211,7 +211,7 @@ class TestBuildWorkspaceHome:
         assert inv["status"] == "active"
 
     def test_empty_workspace(self, tmp_path: Path) -> None:
-        from vivarium_dashboard.lib.system_info import build_workspace_home
+        from vivarium_workbench.lib.system_info import build_workspace_home
         result = build_workspace_home(tmp_path)
         assert result["investigations"] == []
         assert result["imports"] == {}

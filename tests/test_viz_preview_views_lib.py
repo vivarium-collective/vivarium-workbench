@@ -20,9 +20,9 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import viz_preview_views as views
-from vivarium_dashboard.lib import investigations
-from vivarium_dashboard.lib import study_spec
+from vivarium_workbench.lib import viz_preview_views as views
+from vivarium_workbench.lib import investigations
+from vivarium_workbench.lib import study_spec
 
 
 # ---------------------------------------------------------------------------

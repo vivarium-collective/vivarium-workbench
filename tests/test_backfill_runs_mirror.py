@@ -1,4 +1,4 @@
-"""Drift guard: vendored vivarium_dashboard/lib/backfill_runs.py must keep
+"""Drift guard: vendored vivarium_workbench/lib/backfill_runs.py must keep
 ``backfill_study_runs`` byte-identical to the canonical
 pbg_superpowers/backfill_runs.py.
 
@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 CANONICAL = Path(__file__).parent.parent.parent / "pbg-superpowers" / "pbg_superpowers" / "backfill_runs.py"
-VENDORED = Path(__file__).parent.parent / "vivarium_dashboard" / "lib" / "backfill_runs.py"
+VENDORED = Path(__file__).parent.parent / "vivarium_workbench" / "lib" / "backfill_runs.py"
 
 FUNCS = ["backfill_study_runs"]
 

@@ -1,4 +1,4 @@
-"""Tests for vivarium_dashboard.lib.scaffold_yaml.
+"""Tests for vivarium_workbench.lib.scaffold_yaml.
 
 The helpers emit v4 study + v2 investigation YAML text with the narrative-
 spine fields commented in as TODO placeholders. The tests cover three
@@ -21,7 +21,7 @@ import jsonschema
 import pytest
 import yaml
 
-from vivarium_dashboard.lib.scaffold_yaml import (
+from vivarium_workbench.lib.scaffold_yaml import (
     v2_investigation_scaffold,
     v4_study_scaffold,
 )

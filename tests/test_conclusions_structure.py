@@ -1,6 +1,6 @@
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
-HTML = (ROOT / "vivarium_dashboard/templates/study-detail.html").read_text()
+HTML = (ROOT / "vivarium_workbench/templates/study-detail.html").read_text()
 
 
 def _panel():

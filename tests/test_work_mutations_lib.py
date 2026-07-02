@@ -1,4 +1,4 @@
-"""Behavioural tests for vivarium_dashboard.lib.work_mutations.
+"""Behavioural tests for vivarium_workbench.lib.work_mutations.
 
 The four builders are byte-identical ports of the stdlib workstream handlers
 (``_post_work_start`` / ``_post_work_push`` / ``_post_work_end`` /
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import work_mutations as wm
+from vivarium_workbench.lib import work_mutations as wm
 
 
 def _cp(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess:

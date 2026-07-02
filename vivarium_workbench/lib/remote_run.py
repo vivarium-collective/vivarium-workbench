@@ -16,10 +16,10 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vivarium_dashboard.lib.pbg_export import export_composite_pbg  # noqa: E402 (module-level for patch)
+from vivarium_workbench.lib.pbg_export import export_composite_pbg  # noqa: E402 (module-level for patch)
 
 if TYPE_CHECKING:
-    from vivarium_dashboard.lib.sms_api_client import SmsApiClient
+    from vivarium_workbench.lib.sms_api_client import SmsApiClient
 
 # Default poll interval in seconds
 _DEFAULT_POLL_INTERVAL = 10.0
@@ -110,8 +110,8 @@ def run_remote(
     Path
         Path to the downloaded ``results.zip``.
     """
-    from vivarium_dashboard.lib.sms_api_client import SmsApiClient as _SmsApiClient
-    from vivarium_dashboard.lib.workspace_deps_views import _sms_api_base
+    from vivarium_workbench.lib.sms_api_client import SmsApiClient as _SmsApiClient
+    from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
     ws_root = Path(ws_root).resolve()
 

@@ -1,4 +1,4 @@
-"""Tests for vivarium_dashboard.server._collect_study_feedback (B.1)."""
+"""Tests for vivarium_workbench.server._collect_study_feedback (B.1)."""
 import pytest
 
 pytest.importorskip("pbg_superpowers.feedback_import")
@@ -11,7 +11,7 @@ def _write(path, payload):
 
 
 def _collect(monkeypatch, ws, slug):
-    from vivarium_dashboard.lib.study_enrichment import collect_study_feedback
+    from vivarium_workbench.lib.study_enrichment import collect_study_feedback
     return collect_study_feedback(ws, slug)
 
 

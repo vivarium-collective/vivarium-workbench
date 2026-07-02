@@ -7,12 +7,12 @@ composite-runs DB so that ``build_composite_run_status`` returns
 """
 from pathlib import Path
 
-from vivarium_dashboard.lib.composite_runs import (
+from vivarium_workbench.lib.composite_runs import (
     connect,
     save_metadata,
     complete_metadata,
 )
-from vivarium_dashboard.lib import composite_run_views as crv
+from vivarium_workbench.lib import composite_run_views as crv
 
 
 def _seed_completed_run(ws_root: Path, run_id: str) -> None:

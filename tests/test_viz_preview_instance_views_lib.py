@@ -20,7 +20,7 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib import viz_preview_instance_views as views
+from vivarium_workbench.lib import viz_preview_instance_views as views
 
 
 def _make_ws(tmp_path: Path, visualizations=None, *, name: str = "demo-ws") -> Path:

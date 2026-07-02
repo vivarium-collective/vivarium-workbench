@@ -31,9 +31,9 @@ import re
 import subprocess
 from pathlib import Path
 
-from vivarium_dashboard.lib import git_status
-from vivarium_dashboard.lib import work_state
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib import git_status
+from vivarium_workbench.lib import work_state
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 def work_start(ws_root: Path, body: dict | None) -> tuple[dict, int]:

@@ -18,9 +18,9 @@ from typing import Any
 
 import yaml
 
-from vivarium_dashboard.lib import investigation_status as _invstatus
-from vivarium_dashboard.lib import study_spec as _study_spec_lib
-from vivarium_dashboard.lib.atomic_io import atomic_write_text
+from vivarium_workbench.lib import investigation_status as _invstatus
+from vivarium_workbench.lib import study_spec as _study_spec_lib
+from vivarium_workbench.lib.atomic_io import atomic_write_text
 
 
 # ---------------------------------------------------------------------------

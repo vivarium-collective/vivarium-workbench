@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.cli import main
-from vivarium_dashboard.lib.composite_runs import (
+from vivarium_workbench.cli import main
+from vivarium_workbench.lib.composite_runs import (
     connect, save_metadata, query_run_meta,
 )
 

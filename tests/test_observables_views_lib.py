@@ -16,8 +16,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vivarium_dashboard.lib import observables_views as ov
-from vivarium_dashboard.lib import report_views as rv
+from vivarium_workbench.lib import observables_views as ov
+from vivarium_workbench.lib import report_views as rv
 
 _FIXTURE = Path(__file__).parent / "_fixtures" / "ws_increase_demo"
 _REF = "pbg_ws_increase_demo.composites.increase-demo"

@@ -12,7 +12,7 @@ def test_study_run_baseline_on_remote_build_409(tmp_path, monkeypatch):
     """A workspace stamped with .viv-build.json is a remote build; study runs
     must return 409 (RunTargetUnavailable) rather than attempting a local
     subprocess. This test exercises the invoke_run seam added in SP-A."""
-    from vivarium_dashboard.lib import study_runs
+    from vivarium_workbench.lib import study_runs
     # minimal study with a baseline composite under a remote-build workspace
     (tmp_path / ".viv-build.json").write_text("{}")
     sd = tmp_path / "studies" / "demo"; sd.mkdir(parents=True)
@@ -24,7 +24,7 @@ def test_study_run_baseline_on_remote_build_409(tmp_path, monkeypatch):
 @pytest.fixture
 def _study_ws(tmp_path, monkeypatch):
     """Workspace with one v3 study whose baseline is a real viva-munk composite."""
-    from vivarium_dashboard.lib import _root
+    from vivarium_workbench.lib import _root
     ws = tmp_path / "ws"
     ws.mkdir()
     (ws / "workspace.yaml").write_text(
@@ -67,7 +67,7 @@ def test_run_baseline_persists_to_runs_db_canonical(_study_ws):
     dashboard no longer ALSO appends to study.yaml.runs[]; that field
     stays untouched. See _count_runs_for_study for how the read side now
     merges runs.db + spec.runs for back-compat counts."""
-    from vivarium_dashboard.lib.study_runs import run_study_baseline as _post_study_run_baseline_for_test
+    from vivarium_workbench.lib.study_runs import run_study_baseline as _post_study_run_baseline_for_test
     resp, code = _post_study_run_baseline_for_test(_study_ws, {"study": "s1", "steps": 2})
     assert code == 200, resp
 
@@ -90,7 +90,7 @@ def test_run_baseline_persists_to_runs_db_canonical(_study_ws):
 
 
 def test_run_baseline_missing_study(_study_ws):
-    from vivarium_dashboard.lib.study_runs import run_study_baseline as _post_study_run_baseline_for_test
+    from vivarium_workbench.lib.study_runs import run_study_baseline as _post_study_run_baseline_for_test
     resp, code = _post_study_run_baseline_for_test(_study_ws, {"study": "nope"})
     assert code == 404
 
@@ -103,7 +103,7 @@ def test_run_baseline_missing_study(_study_ws):
 def test_run_variant_layers_overrides(_study_ws):
     """F2: variant run lands in runs_meta with the variant name as sim_name
     (params_json captures the override). study.yaml.runs[] is NOT appended."""
-    from vivarium_dashboard.lib.study_runs import run_study_variant as _post_study_run_variant_for_test
+    from vivarium_workbench.lib.study_runs import run_study_variant as _post_study_run_variant_for_test
     resp, code = _post_study_run_variant_for_test(
         _study_ws, {"study": "s1", "variant": "fast"})
     assert code == 200, resp
@@ -126,7 +126,7 @@ def test_run_variant_layers_overrides(_study_ws):
 
 
 def test_run_variant_unknown_variant(_study_ws):
-    from vivarium_dashboard.lib.study_runs import run_study_variant as _post_study_run_variant_for_test
+    from vivarium_workbench.lib.study_runs import run_study_variant as _post_study_run_variant_for_test
     resp, code = _post_study_run_variant_for_test(
         _study_ws, {"study": "s1", "variant": "ghost"})
     assert code == 404
@@ -135,7 +135,7 @@ def test_run_variant_unknown_variant(_study_ws):
 def _seed_run(study_ws, run_id, variant=None):
     """Helper: put one run row in the Study's runs.db + study.yaml."""
     import sqlite3
-    from vivarium_dashboard.lib.composite_runs import connect
+    from vivarium_workbench.lib.composite_runs import connect
     sd = study_ws / "studies" / "s1"
     db = sd / "runs.db"
     conn = connect(db)
@@ -159,7 +159,7 @@ def _seed_run(study_ws, run_id, variant=None):
 
 
 def test_run_delete_removes_from_db_and_yaml(_study_ws):
-    from vivarium_dashboard.lib.study_crud_mutations import study_run_delete as _post_study_run_delete_for_test
+    from vivarium_workbench.lib.study_crud_mutations import study_run_delete as _post_study_run_delete_for_test
     _seed_run(_study_ws, "r1")
     _seed_run(_study_ws, "r2")
     resp, code = _post_study_run_delete_for_test(
@@ -177,7 +177,7 @@ def test_run_delete_removes_from_db_and_yaml(_study_ws):
 
 
 def test_runs_clear_empties_everything(_study_ws):
-    from vivarium_dashboard.lib.study_crud_mutations import study_runs_clear as _post_study_runs_clear_for_test
+    from vivarium_workbench.lib.study_crud_mutations import study_runs_clear as _post_study_runs_clear_for_test
     _seed_run(_study_ws, "r1")
     _seed_run(_study_ws, "r2")
     resp, code = _post_study_runs_clear_for_test(_study_ws, {"study": "s1"})
@@ -193,14 +193,14 @@ def test_runs_clear_empties_everything(_study_ws):
 
 
 def test_run_delete_missing_study(_study_ws):
-    from vivarium_dashboard.lib.study_crud_mutations import study_run_delete as _post_study_run_delete_for_test
+    from vivarium_workbench.lib.study_crud_mutations import study_run_delete as _post_study_run_delete_for_test
     resp, code = _post_study_run_delete_for_test(_study_ws, {"study": "nope", "run_id": "r1"})
     assert code == 404
 
 
 def test_run_baseline_with_explicit_composite_404s_unknown_name(_study_ws):
     """Body's `composite` selects a baseline entry by name; unknown → 404."""
-    from vivarium_dashboard.lib.study_runs import run_study_baseline as _post_study_run_baseline_for_test
+    from vivarium_workbench.lib.study_runs import run_study_baseline as _post_study_run_baseline_for_test
     resp, code = _post_study_run_baseline_for_test(
         _study_ws, {"study": "s1", "composite": "no-such-name"})
     assert code == 404
@@ -211,7 +211,7 @@ def test_run_baseline_no_baseline_400s():
     """Empty baseline list → 400 with 'no baseline' error."""
     import tempfile
     from pathlib import Path
-    from vivarium_dashboard.lib.study_runs import run_study_baseline as _post_study_run_baseline_for_test
+    from vivarium_workbench.lib.study_runs import run_study_baseline as _post_study_run_baseline_for_test
     with tempfile.TemporaryDirectory() as td:
         ws = Path(td)
         (ws / "workspace.yaml").write_text(
@@ -234,7 +234,7 @@ def test_run_variant_layers_v3_overrides():
     """A v3 variant with base_composite + parameter_overrides resolves and layers."""
     import tempfile
     from pathlib import Path
-    from vivarium_dashboard.lib.study_runs import run_study_variant as _post_study_run_variant_for_test
+    from vivarium_workbench.lib.study_runs import run_study_variant as _post_study_run_variant_for_test
     with tempfile.TemporaryDirectory() as td:
         ws = Path(td)
         (ws / "workspace.yaml").write_text(
@@ -270,7 +270,7 @@ def test_run_variant_unknown_base_composite_404s():
     """Variant referencing a non-existent baseline name → 404."""
     import tempfile
     from pathlib import Path
-    from vivarium_dashboard.lib.study_runs import run_study_variant as _post_study_run_variant_for_test
+    from vivarium_workbench.lib.study_runs import run_study_variant as _post_study_run_variant_for_test
     with tempfile.TemporaryDirectory() as td:
         ws = Path(td)
         (ws / "workspace.yaml").write_text(
@@ -302,8 +302,8 @@ def test_count_runs_for_study_reads_runs_db_first(tmp_path, monkeypatch):
     When runs.db has more rows than spec.runs, the higher count wins —
     F2's whole point is that runs landing via pbg_runner (or any future
     CLI runner) show up without a corresponding study.yaml entry."""
-    from vivarium_dashboard.lib.investigations_index import _count_runs_for_study
-    from vivarium_dashboard.lib.composite_runs import connect
+    from vivarium_workbench.lib.investigations_index import _count_runs_for_study
+    from vivarium_workbench.lib.composite_runs import connect
 
     ws = tmp_path / "ws"
     sd = ws / "studies" / "demo"
@@ -330,7 +330,7 @@ def test_count_runs_for_study_fallback_to_spec_runs(tmp_path, monkeypatch):
     """Legacy v3 spec with historical runs[] entries and no runs.db —
     the count still reflects the legacy entries. This keeps the Studies
     tab honest when migrating a workspace that has yaml-only run records."""
-    from vivarium_dashboard.lib.investigations_index import _count_runs_for_study
+    from vivarium_workbench.lib.investigations_index import _count_runs_for_study
     ws = tmp_path / "ws"
     sd = ws / "studies" / "legacy"
     sd.mkdir(parents=True)
@@ -349,7 +349,7 @@ def test_count_runs_for_study_fallback_to_spec_runs(tmp_path, monkeypatch):
 
 def test_count_runs_for_study_zero_when_neither(tmp_path, monkeypatch):
     """No runs.db and no spec.runs → 0. Doesn't crash on missing study dir."""
-    from vivarium_dashboard.lib.investigations_index import _count_runs_for_study
+    from vivarium_workbench.lib.investigations_index import _count_runs_for_study
     ws = tmp_path / "ws"
     sd = ws / "studies" / "empty"
     sd.mkdir(parents=True)
@@ -366,8 +366,8 @@ def test_count_runs_for_study_takes_max_when_both_present(tmp_path, monkeypatch)
     overlapping run_ids. The helper returns the larger count so the
     dashboard never undercounts. (Exact dedupe by run_id is overkill here;
     counts are display-only.)"""
-    from vivarium_dashboard.lib.investigations_index import _count_runs_for_study
-    from vivarium_dashboard.lib.composite_runs import connect
+    from vivarium_workbench.lib.investigations_index import _count_runs_for_study
+    from vivarium_workbench.lib.composite_runs import connect
 
     ws = tmp_path / "ws"
     sd = ws / "studies" / "mixed"

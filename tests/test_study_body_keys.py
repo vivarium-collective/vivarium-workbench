@@ -1,5 +1,5 @@
 """Aliased /api/study-* handlers accept study/investigation/name body keys."""
-from vivarium_dashboard.lib.metadata_mutations import _study_name_from_body
+from vivarium_workbench.lib.metadata_mutations import _study_name_from_body
 
 
 def test_accepts_name():

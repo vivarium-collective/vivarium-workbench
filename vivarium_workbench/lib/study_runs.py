@@ -32,13 +32,13 @@ import sys
 
 import yaml
 
-from vivarium_dashboard.lib import composite_subprocess
-from vivarium_dashboard.lib import lifecycle_mutations
-from vivarium_dashboard.lib import run_core
-from vivarium_dashboard.lib import study_run_post
-from vivarium_dashboard.lib import study_run_state
-from vivarium_dashboard.lib import study_spec
-from vivarium_dashboard.lib.study_crud_mutations import _study_name_from_body
+from vivarium_workbench.lib import composite_subprocess
+from vivarium_workbench.lib import lifecycle_mutations
+from vivarium_workbench.lib import run_core
+from vivarium_workbench.lib import study_run_post
+from vivarium_workbench.lib import study_run_state
+from vivarium_workbench.lib import study_spec
+from vivarium_workbench.lib.study_crud_mutations import _study_name_from_body
 
 
 def _resolve_study_dir(ws_root, name):
@@ -49,7 +49,7 @@ def _resolve_study_dir(ws_root, name):
     ``investigations/<name>`` paths for legacy studies whose dir lacks a
     ``study.yaml`` (so WorkspacePaths' study.yaml gate skips them).
     """
-    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
     try:
         return WorkspacePaths.load(ws_root).study_dir(name)
     except FileNotFoundError:
@@ -65,7 +65,7 @@ def run_study_baseline(ws_root, body):
       composite: <baseline-entry name>  (optional; default = baseline[0].name)
       steps:     <int>   (optional; overrides params.n_steps; default 5)
     """
-    from vivarium_dashboard.lib import composite_runs as cr
+    from vivarium_workbench.lib import composite_runs as cr
 
     name = _study_name_from_body(body)
     if not name:
@@ -80,13 +80,13 @@ def run_study_baseline(ws_root, body):
     # Auto-migrate legacy v2-shape specs (baseline: <str>, variants: [...]) to
     # the v3 list shape this handler expects. In-memory only; doesn't rewrite
     # the file. Keeps legacy investigations/spec.yaml usable.
-    from vivarium_dashboard.lib.spec_migration import migrate_v2_to_v3
+    from vivarium_workbench.lib.spec_migration import migrate_v2_to_v3
     spec = migrate_v2_to_v3(spec)
     # v4-redesign projection: synthesises legacy fields (baseline list,
     # variants list, behavior_tests, simulation_set) from a v4 conditions
     # block. Idempotent on v3 (no-op when conditions is absent).
     if spec.get("schema_version") == 4 and isinstance(spec.get("conditions"), dict):
-        from vivarium_dashboard.lib.investigations import _project_v4_redesign_to_legacy_view
+        from vivarium_workbench.lib.investigations import _project_v4_redesign_to_legacy_view
         spec = _project_v4_redesign_to_legacy_view(spec)
     baseline = spec.get("baseline") or []
     if not isinstance(baseline, list) or not baseline:
@@ -258,8 +258,8 @@ def run_study_variant(ws_root, body):
     is DELEGATED to v2ecoli-workflow (which packs every grid point into ONE
     parquet hive store), not executed as N independent dashboard subprocesses.
     """
-    from vivarium_dashboard.lib import composite_runs as cr
-    from vivarium_dashboard.lib.ensemble_config import (
+    from vivarium_workbench.lib import composite_runs as cr
+    from vivarium_workbench.lib.ensemble_config import (
         build_workflow_config, delegation_available, is_delegatable_sweep,
     )
 
@@ -276,13 +276,13 @@ def run_study_variant(ws_root, body):
 
     spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
     # Auto-migrate legacy v2-shape specs to v3 list shape (see run-baseline).
-    from vivarium_dashboard.lib.spec_migration import migrate_v2_to_v3
+    from vivarium_workbench.lib.spec_migration import migrate_v2_to_v3
     spec = migrate_v2_to_v3(spec)
     # v4-redesign projection: synthesises legacy fields (baseline list,
     # variants list, behavior_tests, simulation_set) from a v4 conditions
     # block. Idempotent on v3 (no-op when conditions is absent).
     if spec.get("schema_version") == 4 and isinstance(spec.get("conditions"), dict):
-        from vivarium_dashboard.lib.investigations import _project_v4_redesign_to_legacy_view
+        from vivarium_workbench.lib.investigations import _project_v4_redesign_to_legacy_view
         spec = _project_v4_redesign_to_legacy_view(spec)
     baseline = spec.get("baseline") or []
     if not isinstance(baseline, list) or not baseline:

@@ -1,4 +1,4 @@
-# vivarium_dashboard/testing/test_modular_tests_e2e.py
+# vivarium_workbench/testing/test_modular_tests_e2e.py
 """End-to-end payload check: study with mixed behavioral + report_card tests.
 
 Serves a fixture workspace via FastAPI TestClient and asserts that
@@ -15,7 +15,7 @@ import pytest
 # NOTE: fastapi's TestClient (via starlette) requires ``httpx`` at *import*
 # time. Importing it at module top-level makes this module a landmine: any
 # eager package-discovery walk (e.g. bigraph-schema's ``build_core()``) that
-# imports everything under the installed ``vivarium_dashboard`` package would
+# imports everything under the installed ``vivarium_workbench`` package would
 # crash with a RuntimeError when httpx is absent. ``pytest.importorskip``
 # raises ``Skipped`` (a ``BaseException``), which a plain ``import`` would NOT
 # swallow either — so the heavy imports live *inside* the test function. The
@@ -55,7 +55,7 @@ def test_study_detail_payload_has_mixed_tests_and_card_url(tmp_path: Path) -> No
     pytest.importorskip("httpx")  # starlette's TestClient needs httpx at import
     from fastapi.testclient import TestClient
 
-    from vivarium_dashboard.api.app import create_app, get_workspace
+    from vivarium_workbench.api.app import create_app, get_workspace
 
     ws = _fixture(tmp_path)
     app = create_app()

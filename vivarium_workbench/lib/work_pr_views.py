@@ -39,9 +39,9 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib import report
-from vivarium_dashboard.lib import work_state
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib import report
+from vivarium_workbench.lib import work_state
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 def _default_pr_title(ws_root: Path, branch_name: str) -> str:

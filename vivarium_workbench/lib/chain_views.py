@@ -8,9 +8,9 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib.atomic_io import atomic_write_text
-from vivarium_dashboard.lib.event_log import emit_event
-from vivarium_dashboard.lib.node_store import load_study_nodes, study_dir
+from vivarium_workbench.lib.atomic_io import atomic_write_text
+from vivarium_workbench.lib.event_log import emit_event
+from vivarium_workbench.lib.node_store import load_study_nodes, study_dir
 from investigation_contracts import make_core
 from investigation_contracts.lifecycle import check_transition, initial_state
 

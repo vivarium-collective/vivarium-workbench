@@ -19,8 +19,8 @@ import sqlite3
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-from vivarium_dashboard.lib import emitters
-from vivarium_dashboard.lib import run_store
+from vivarium_workbench.lib import emitters
+from vivarium_workbench.lib import run_store
 
 # DnaA monomer index (PD03831[c]) in monomer_ids; hardcoded fallback.
 DNAA_MONOMER_IDX = 3861
@@ -1458,9 +1458,9 @@ def build_study_charts_payload(ws_root, name: str, *, hide_superseded: bool = Fa
     """
     import yaml as _yaml
 
-    from vivarium_dashboard.lib.simulations_index import discover_default_baseline_db
-    from vivarium_dashboard.lib.viz_freshness import chart_freshness, manifest_diff
-    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+    from vivarium_workbench.lib.simulations_index import discover_default_baseline_db
+    from vivarium_workbench.lib.viz_freshness import chart_freshness, manifest_diff
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
     # Layout-aware: a study may live nested under
     # investigations/<inv>/studies/<slug>/ rather than the flat studies/<slug>/.

@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import viz_core
+from vivarium_workbench.lib import viz_core
 
 
 # ---------------------------------------------------------------------------

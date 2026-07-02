@@ -1,6 +1,6 @@
 """Resolve a single composite spec/generator by ID.
 
-Extracted from ``vivarium_dashboard.server._composite_resolve_data`` so the
+Extracted from ``vivarium_workbench.server._composite_resolve_data`` so the
 FastAPI seam (``api/app.py``) can call it without importing the stdlib server
 module.  The single implementation is shared: ``server.py`` re-imports
 ``resolve_composite`` and keeps its old ``_composite_resolve_data`` name as a
@@ -16,8 +16,8 @@ from pathlib import Path
 import yaml
 from process_bigraph.composite_spec import CompositeSpec, get as _get_spec  # module-level for monkeypatch
 
-from vivarium_dashboard.lib.sms_api_client import SmsApiClient
-from vivarium_dashboard.lib.workspace_deps_views import _sms_api_base
+from vivarium_workbench.lib.sms_api_client import SmsApiClient
+from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
 
 def _ws_add_to_sys_path(ws_root: Path) -> None:
@@ -102,7 +102,7 @@ def resolve_composite(
     _prime_registry()
     spec = _get_spec(spec_id)                       # generator branch: "<module>.<name>"
     if spec is None:                                # static branch: "<pkg>.composites.<stem>"
-        from vivarium_dashboard.lib.composite_lookup import find_composite_path
+        from vivarium_workbench.lib.composite_lookup import find_composite_path
         ws_yaml = ws_root / "workspace.yaml"
         ws_data = yaml.safe_load(ws_yaml.read_text(encoding="utf-8")) if ws_yaml.is_file() else {}
         pkg = ws_data.get("package_path") or ("pbg_" + str(ws_data.get("name", "")).replace("-", "_"))
@@ -140,7 +140,7 @@ def resolve_composite(
             notice = (f"static composite '{spec.name}' has no inline state to display.")
     if state is not None:
         try:
-            from vivarium_dashboard.lib.process_docs import attach_process_docs
+            from vivarium_workbench.lib.process_docs import attach_process_docs
             attach_process_docs(state)
         except Exception:
             pass
@@ -161,8 +161,8 @@ def resolve_composite_for_request(
     """Resolve a composite for a UI request, routing by source: a remote build
     (.viv-build.json) resolves on the deployment via sms-api; a local workspace
     resolves locally. Returns the resolve payload dict (or None on a local miss)."""
-    from vivarium_dashboard.lib.run_core import run_target_for
-    from vivarium_dashboard.lib.remote_simulations import _read_build_meta
+    from vivarium_workbench.lib.run_core import run_target_for
+    from vivarium_workbench.lib.remote_simulations import _read_build_meta
 
     ws_root = Path(ws_root)
     if run_target_for(ws_root) == "deployment":

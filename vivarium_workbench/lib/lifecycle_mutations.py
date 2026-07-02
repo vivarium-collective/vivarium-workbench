@@ -24,8 +24,8 @@ from typing import Any
 
 import yaml
 
-from vivarium_dashboard.lib import investigation_status as _invstatus
-from vivarium_dashboard.lib.study_spec import SLUG_RE as _SLUG_RE
+from vivarium_workbench.lib import investigation_status as _invstatus
+from vivarium_workbench.lib.study_spec import SLUG_RE as _SLUG_RE
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +52,7 @@ def _sync_parent_investigation(ws_root: Any, study_dir: Any) -> None:
     """
     try:
         from pbg_superpowers import study_outcomes
-        from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+        from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
         sync_investigation = getattr(study_outcomes, "sync_investigation", None)
         if sync_investigation is None:
@@ -174,7 +174,7 @@ def study_seed_followup(ws_root: Path, body: dict) -> "tuple[dict, int]":
     The pbg import is lazy + tolerant: if pbg-superpowers isn't installed the
     finding path returns a 500 with a clear message rather than crashing.
     """
-    from vivarium_dashboard.lib.study_seed import seed_followup_study
+    from vivarium_workbench.lib.study_seed import seed_followup_study
 
     parent = body.get("parent")
     finding_id = body.get("finding_id")
@@ -273,7 +273,7 @@ def study_create_from_run(ws_root: Path, body: dict) -> "tuple[dict, int]":
     import json as _json
     import tempfile
 
-    from vivarium_dashboard.lib.composite_runs import copy_run_to_new_db
+    from vivarium_workbench.lib.composite_runs import copy_run_to_new_db
 
     name = (body.get("name") or "").strip()
     objective = body.get("objective") or ""
@@ -374,7 +374,7 @@ def study_sync_runs(ws_root: Path, body: dict) -> "tuple[dict, int]":
     Body: ``{study: <slug>}``
     """
     from pbg_superpowers import study_outcomes
-    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
     slug = (body or {}).get("study")
     if not slug:

@@ -1,7 +1,7 @@
 """Test config for vivarium-dashboard.
 
 The dashboard package itself is import-able from the venv (``pip install -e .``)
-so we don't need to munge sys.path for ``vivarium_dashboard.*``. We do need
+so we don't need to munge sys.path for ``vivarium_workbench.*``. We do need
 the fixture workspaces (``_fixtures/<name>/<pbg_pkg>``) on sys.path for
 end-to-end tests that import the workspace's own package.
 """
@@ -101,7 +101,7 @@ def dashboard_client():
         # which writes the .pbg/server/server-info readiness file this fixture waits
         # on). This exercises the production server, not the retired stdlib server.py.
         proc = subprocess.Popen(
-            [sys.executable, "-m", "vivarium_dashboard.cli", "serve",
+            [sys.executable, "-m", "vivarium_workbench.cli", "serve",
              "--workspace", str(workspace), "--port", str(port)],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=env,
@@ -209,7 +209,7 @@ def fixture_study_with_recorded_run(fixture_study_ws):
     can locate it without spinning up a real simulation.
     """
     import time
-    from vivarium_dashboard.lib import composite_runs as cr
+    from vivarium_workbench.lib import composite_runs as cr
 
     ws, slug = fixture_study_ws
     study_dir = ws / "studies" / slug

@@ -1,4 +1,4 @@
-"""Drift guard: vendored vivarium_dashboard/lib/refresh_viz.py must keep its
+"""Drift guard: vendored vivarium_workbench/lib/refresh_viz.py must keep its
 ``refresh_study_viz`` body identical to the canonical
 pbg_superpowers/refresh_viz.py.
 
@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 
 CANONICAL = Path(__file__).parent.parent.parent / "pbg-superpowers" / "pbg_superpowers" / "refresh_viz.py"
-VENDORED = Path(__file__).parent.parent / "vivarium_dashboard" / "lib" / "refresh_viz.py"
+VENDORED = Path(__file__).parent.parent / "vivarium_workbench" / "lib" / "refresh_viz.py"
 
 FUNCS = ["refresh_study_viz"]
 

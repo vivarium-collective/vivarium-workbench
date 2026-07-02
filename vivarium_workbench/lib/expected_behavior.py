@@ -542,7 +542,7 @@ def evaluate(entry: dict, history: list[dict]) -> EvaluationResult:
         One element from ``study.yaml``'s ``expected_behavior:`` list.
     history:
         Ordered list of ``{step, time, state}`` dicts, typically loaded from
-        runs.db via :func:`vivarium_dashboard.testing.study_fixtures.baseline_history`.
+        runs.db via :func:`vivarium_workbench.testing.study_fixtures.baseline_history`.
 
     Returns
     -------

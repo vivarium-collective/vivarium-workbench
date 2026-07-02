@@ -1,4 +1,4 @@
-"""Unit tests for vivarium_dashboard.server._collect_study_observables.
+"""Unit tests for vivarium_workbench.server._collect_study_observables.
 
 v2ecoli friction #14 (2026-05-19): the study-run code path was not passing
 emit_paths to inject_emitter_for_paths, so every history.state row was
@@ -6,7 +6,7 @@ just {"_tick": <global_time>}. _collect_study_observables sweeps the study
 spec for every observable-shaped path declaration so the run handler can
 wire inject_emitter_for_paths automatically.
 """
-from vivarium_dashboard.lib.study_spec import (
+from vivarium_workbench.lib.study_spec import (
     collect_study_observables as _collect_study_observables,
 )
 

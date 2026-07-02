@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from vivarium_dashboard.lib.job_status_views import job_status
+from vivarium_workbench.lib.job_status_views import job_status
 
 
 class _FakeJob:

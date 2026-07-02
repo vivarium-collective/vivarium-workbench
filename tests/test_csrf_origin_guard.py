@@ -111,13 +111,13 @@ _CSRF_CASES = [
 
 @pytest.mark.parametrize("origin, host, expected", _CSRF_CASES)
 def test_csrf_predicate_verdicts(origin, host, expected):
-    from vivarium_dashboard.lib import csrf
+    from vivarium_workbench.lib import csrf
 
     assert csrf.is_request_allowed(origin, host, disabled=False) is expected
 
 
 def test_csrf_predicate_env_disable_bypasses():
-    from vivarium_dashboard.lib import csrf
+    from vivarium_workbench.lib import csrf
 
     # Cross-origin would normally deny; the disabled bypass allows.
     assert csrf.is_request_allowed(

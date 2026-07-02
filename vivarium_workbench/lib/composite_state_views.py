@@ -14,9 +14,9 @@ fallback when a live build fails, then dotted-spec / workspace-relative /
 static path resolution, else a structured 404.
 
 Pure ``ws_root``-parameterised functions: NO ``import server`` — crucially the
-EMBEDDED SUBPROCESS SCRIPT no longer imports ``vivarium_dashboard.server``
+EMBEDDED SUBPROCESS SCRIPT no longer imports ``vivarium_workbench.server``
 either (it does ``sys.path.insert(0, sys.argv[1])`` directly), so this seam is
-flip-ready.  The stdlib ``vivarium_dashboard.server`` keeps thin shims that
+flip-ready.  The stdlib ``vivarium_workbench.server`` keeps thin shims that
 delegate here.  The FastAPI app imports this module directly.
 
 Caching: this module owns :data:`_COMPOSITE_STATE_CACHE`, DISJOINT from
@@ -63,7 +63,7 @@ def composite_state_via_subprocess(ws_root: Path, ref: str) -> "dict | None":
       {"__not_registered__": true}        ref is not a registered generator
       None                                the subprocess itself failed
 
-    NOTE: the embedded script does NOT import ``vivarium_dashboard.server`` —
+    NOTE: the embedded script does NOT import ``vivarium_workbench.server`` —
     it puts the workspace on ``sys.path`` directly (``sys.argv[1]`` is
     ``ws_root``), so this seam stays flip-ready. The body (pbg_superpowers
     discover/build + lib.process_docs summarize/attach) is lib/3rd-party only.
@@ -82,7 +82,7 @@ def composite_state_via_subprocess(ws_root: Path, ref: str) -> "dict | None":
         "    if entry is not None:\n"
         "        try:\n"
         "            doc = build_generator(entry)\n"
-        "            from vivarium_dashboard.lib.process_docs import attach_process_docs, summarize_large_values\n"
+        "            from vivarium_workbench.lib.process_docs import attach_process_docs, summarize_large_values\n"
         "            doc = summarize_large_values(doc)\n"
         "            attach_process_docs(doc)\n"
         "            out = {'state': doc, 'module': getattr(entry, 'module', None)}\n"
@@ -167,7 +167,7 @@ def build_composite_state(
             try:
                 _doc = json.loads(_static.read_text(encoding="utf-8"))
                 _inner = _doc.get("state", _doc) if isinstance(_doc, dict) else _doc
-                from vivarium_dashboard.lib.process_docs import attach_process_docs as _apd
+                from vivarium_workbench.lib.process_docs import attach_process_docs as _apd
                 _apd(_inner)
                 _payload = {"state": _inner, "kind": "static-fallback",
                             "note": f"served pre-generated state (live build failed: {e})"}
@@ -181,7 +181,7 @@ def build_composite_state(
     path = None
     # Try to resolve as a dotted spec ID via composite_lookup.
     try:
-        from vivarium_dashboard.lib.composite_lookup import find_composite_path
+        from vivarium_workbench.lib.composite_lookup import find_composite_path
         ws_data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8"))
         pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
         found = find_composite_path(ws_root, pkg, ref)
@@ -220,7 +220,7 @@ def build_composite_state(
     except Exception as e:  # noqa: BLE001
         return {"error": f"parse failed: {e}"}, 500
 
-    from vivarium_dashboard.lib.process_docs import attach_process_docs
+    from vivarium_workbench.lib.process_docs import attach_process_docs
     attach_process_docs(doc)  # per-process docstrings for the inspector
     return {"state": doc, "kind": "spec"}, 200
 

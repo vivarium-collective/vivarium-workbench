@@ -20,7 +20,7 @@ from typing import Callable, Iterator
 
 import yaml
 
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 # Sets used by compute_investigation_status. Module scope so the derivation
 # rules are inspectable / overridable from tests.
@@ -182,7 +182,7 @@ def study_run_slugs(ws_root: Path) -> set[str]:
     The library-native runs-presence signal for the FastAPI ``/api/investigation-summaries``
     route, so it need not import the stdlib server's runs.db reader.
     """
-    from vivarium_dashboard.lib.simulations_index import list_simulations
+    from vivarium_workbench.lib.simulations_index import list_simulations
 
     slugs: set[str] = set()
     for row in list_simulations(ws_root):

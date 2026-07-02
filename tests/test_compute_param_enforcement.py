@@ -1,4 +1,4 @@
-"""Tests for vivarium_dashboard.server._compute_param_enforcement (D.2).
+"""Tests for vivarium_workbench.server._compute_param_enforcement (D.2).
 
 Per-run param-drift check: each run is compared against the params IT was
 supposed to apply (baseline run → baseline declared values; variant run →
@@ -10,7 +10,7 @@ param was flagged against the single flat baseline dict.
 import pytest
 
 pytest.importorskip("pbg_superpowers.param_enforcement")
-from vivarium_dashboard.lib.study_enrichment import (
+from vivarium_workbench.lib.study_enrichment import (
     compute_param_enforcement as _compute_param_enforcement,
 )
 

@@ -33,9 +33,9 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib import composite_runs as cr
-from vivarium_dashboard.lib import run_registry
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib import composite_runs as cr
+from vivarium_workbench.lib import run_registry
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 def _ws_add_to_sys_path(ws_root: Path) -> None:
@@ -66,7 +66,7 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
         "status": "running"}, 202)``
     """
     _ws_add_to_sys_path(ws_root)
-    from vivarium_dashboard.lib.composite_runs import auto_label
+    from vivarium_workbench.lib.composite_runs import auto_label
 
     spec_id = (body.get("id") or "").strip()
     overrides = body.get("overrides") or {}
@@ -89,7 +89,7 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
             429,
         )
 
-    from vivarium_dashboard.lib import run_core
+    from vivarium_workbench.lib import run_core
     try:
         plan = run_core.invoke_run(ws_root, spec_id=spec_id, config=overrides,
                                    db_path=db_file, label=label, n_steps=0)

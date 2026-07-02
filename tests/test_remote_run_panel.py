@@ -1,15 +1,15 @@
 from pathlib import Path
 
-import vivarium_dashboard
-from vivarium_dashboard.lib import static_serving
-from vivarium_dashboard.lib.study_page import render_study_detail_html
+import vivarium_workbench
+from vivarium_workbench.lib import static_serving
+from vivarium_workbench.lib.study_page import render_study_detail_html
 
 TPL = static_serving.TEMPLATES_DIR / "study-detail.html"
 
 
 def _template_text():
     # study-detail.html lives next to the package templates
-    p = Path(vivarium_dashboard.__file__).parent / "templates" / "study-detail.html"
+    p = Path(vivarium_workbench.__file__).parent / "templates" / "study-detail.html"
     return p.read_text(encoding="utf-8")
 
 
@@ -25,7 +25,7 @@ def test_runs_tab_has_remote_run_form():
 
 
 def _js_text():
-    return (Path(vivarium_dashboard.__file__).parent / "static" / "study-detail.js").read_text(encoding="utf-8")
+    return (Path(vivarium_workbench.__file__).parent / "static" / "study-detail.js").read_text(encoding="utf-8")
 
 
 def test_js_has_remote_run_handlers_and_endpoints():
@@ -69,7 +69,7 @@ def test_rendered_study_detail_includes_remote_run_panel():
 
 
 def _walkthrough_js_text():
-    return (Path(vivarium_dashboard.__file__).parent / "static" / "walkthrough.js").read_text(encoding="utf-8")
+    return (Path(vivarium_workbench.__file__).parent / "static" / "walkthrough.js").read_text(encoding="utf-8")
 
 
 def test_study_detail_js_has_run_hash_handler():

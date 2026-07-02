@@ -4,8 +4,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from vivarium_dashboard.api.app import create_app, get_workspace
-from vivarium_dashboard.lib import provenance_manifest as pm
+from vivarium_workbench.api.app import create_app, get_workspace
+from vivarium_workbench.lib import provenance_manifest as pm
 
 
 def _init_git_repo(ws: Path, origin_url: str) -> str:

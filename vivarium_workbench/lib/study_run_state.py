@@ -26,7 +26,7 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib import run_store
+from vivarium_workbench.lib import run_store
 
 
 def investigation_emitter_for_study(ws_root, study_name: str | None) -> str | None:

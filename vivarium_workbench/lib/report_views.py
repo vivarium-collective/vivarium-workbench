@@ -1,6 +1,6 @@
 """Report / linkage / needs-attention / iset-detail view builders.
 
-Extracted from ``vivarium_dashboard.server`` so the FastAPI seam
+Extracted from ``vivarium_workbench.server`` so the FastAPI seam
 (``api/app.py``) can call them without importing the stdlib server module.
 The single implementation is shared: ``server.py`` keeps thin shims with
 identical names/signatures that delegate here.
@@ -22,21 +22,21 @@ from typing import Any, Callable, Optional
 
 import yaml
 
-from vivarium_dashboard.lib.investigation_status import (
+from vivarium_workbench.lib.investigation_status import (
     compute_investigation_status,
     _STUDY_STATUS_FAILED,
     _STUDY_STATUS_COMPLETE,
     _STUDY_STATUS_RUNNING,
     _STUDY_STATUS_PLANNED,
 )
-from vivarium_dashboard.lib.investigations_index import (
+from vivarium_workbench.lib.investigations_index import (
     _count_runs_for_study,
     _format_baseline_source,
 )
-from vivarium_dashboard.lib.spec_norm import normalize_requirements as _normalize_requirements
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
-from vivarium_dashboard.lib import readouts_views as _readouts_views
-from vivarium_dashboard.lib import study_derivations as _study_derivations
+from vivarium_workbench.lib.spec_norm import normalize_requirements as _normalize_requirements
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib import readouts_views as _readouts_views
+from vivarium_workbench.lib import study_derivations as _study_derivations
 
 # ---------------------------------------------------------------------------
 # Module-level TTL cache for the linkage index (mirrors server._LINKAGE_CACHE)
@@ -108,7 +108,7 @@ def _has_active_run_for_study(
 
     # studies/<name>/runs.db rows.
     try:
-        from vivarium_dashboard.lib.study_spec import read_runs_db_for_study
+        from vivarium_workbench.lib.study_spec import read_runs_db_for_study
         for r in read_runs_db_for_study(ws_root, name):
             if str((r or {}).get("status") or "").strip().lower() == "running" and _fresh(
                 (r or {}).get("heartbeat_at")
@@ -172,7 +172,7 @@ def _composite_resolution_findings(ws_root: Path) -> list[dict]:
     """
     out: list[dict] = []
     try:
-        from vivarium_dashboard.lib.composite_lookup import (
+        from vivarium_workbench.lib.composite_lookup import (
             known_composite_ids,
             unresolved_study_composite_refs,
         )
@@ -451,9 +451,9 @@ def build_inputs(ws_root: Path, slug: Optional[str] = None) -> dict:
     Mirrors ``server._inputs_payload`` parameterised on ``ws_root``; the
     current-branch slug comes from ``lib.investigation_status.current_branch_slug``.
     """
-    from vivarium_dashboard.lib.investigation_inputs import investigation_inputs
-    from vivarium_dashboard.lib.investigation_status import current_branch_slug
-    from vivarium_dashboard.lib.report import _parse_bib_entries, _enrich_with_file_info
+    from vivarium_workbench.lib.investigation_inputs import investigation_inputs
+    from vivarium_workbench.lib.investigation_status import current_branch_slug
+    from vivarium_workbench.lib.report import _parse_bib_entries, _enrich_with_file_info
 
     ws_root = Path(ws_root)
     current = slug or current_branch_slug(ws_root)
@@ -555,12 +555,12 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     if ws_str not in sys.path:
         sys.path.insert(0, ws_str)
 
-    from vivarium_dashboard.lib.investigations import (  # noqa: PLC0415
+    from vivarium_workbench.lib.investigations import (  # noqa: PLC0415
         load_spec,
         InvestigationSpecError,
         normalize_dag_edges,
     )
-    from vivarium_dashboard.lib.run_commands import study_run_commands  # noqa: PLC0415
+    from vivarium_workbench.lib.run_commands import study_run_commands  # noqa: PLC0415
 
     def _normalize_parents(study_spec: dict) -> list:  # type: ignore[return]
         return normalize_dag_edges(study_spec)

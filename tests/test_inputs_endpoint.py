@@ -3,7 +3,7 @@ investigation's inputs (top), the repo-wide global inputs, and the current
 investigation slug (matched to the current git branch)."""
 import subprocess
 
-from vivarium_dashboard.lib.report_views import build_inputs as _inputs_payload
+from vivarium_workbench.lib.report_views import build_inputs as _inputs_payload
 
 
 def _git_ws(tmp):

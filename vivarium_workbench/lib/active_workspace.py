@@ -1,6 +1,6 @@
 """Single source of truth for the active workspace + cache-invalidation registry.
 
-This is a thin facade over :mod:`vivarium_dashboard.lib._root` (the live
+This is a thin facade over :mod:`vivarium_workbench.lib._root` (the live
 ``_WS_ROOT`` global). It does NOT fork the root state — there remains exactly
 one ``_WS_ROOT``; the getters/setters here simply delegate to ``_root``.
 

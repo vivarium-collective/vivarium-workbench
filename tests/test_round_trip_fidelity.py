@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib.provenance_manifest import build_manifest, lockfile_hash
-from vivarium_dashboard.lib import sync_workspace as sw
+from vivarium_workbench.lib.provenance_manifest import build_manifest, lockfile_hash
+from vivarium_workbench.lib import sync_workspace as sw
 
 
 def _make_origin(path: Path) -> str:

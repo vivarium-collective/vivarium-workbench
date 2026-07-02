@@ -23,7 +23,7 @@ import yaml
 # Imports
 # ---------------------------------------------------------------------------
 
-from vivarium_dashboard.lib.study_viz_views import (
+from vivarium_workbench.lib.study_viz_views import (
     build_study_bigraph_paths,
     build_visualization_status,
     build_visualization_instances,

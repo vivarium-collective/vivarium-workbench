@@ -1,6 +1,6 @@
 import time
 
-from vivarium_dashboard.lib.remote_run_jobs import RemoteRunManager, STEP_NAMES
+from vivarium_workbench.lib.remote_run_jobs import RemoteRunManager, STEP_NAMES
 
 
 def _wait(job, timeout=5.0):
@@ -54,7 +54,7 @@ def test_set_step_updates_status_and_message():
 
 from pathlib import Path
 
-from vivarium_dashboard.lib.remote_run_jobs import PipelineCtx, run_remote_pipeline
+from vivarium_workbench.lib.remote_run_jobs import PipelineCtx, run_remote_pipeline
 
 
 class _FakeClient:
@@ -100,7 +100,7 @@ def _ctx(tmp_path, client, **over):
 
 
 def test_pipeline_happy_path(tmp_path):
-    from vivarium_dashboard.lib.remote_run_jobs import RemoteRunJob
+    from vivarium_workbench.lib.remote_run_jobs import RemoteRunJob
 
     client = _FakeClient()
     ctx, landed = _ctx(tmp_path, client)
@@ -119,7 +119,7 @@ def test_pipeline_happy_path(tmp_path):
 
 
 def test_pipeline_marks_failed_step_on_error(tmp_path):
-    from vivarium_dashboard.lib.remote_run_jobs import RemoteRunJob
+    from vivarium_workbench.lib.remote_run_jobs import RemoteRunJob
 
     client = _FakeClient()
 
@@ -138,7 +138,7 @@ def test_pipeline_marks_failed_step_on_error(tmp_path):
 
 def test_pipeline_passes_s3_uri_from_sim_config(tmp_path):
     """When run_simulation returns a config.parca_options.outdir, it's threaded into land()."""
-    from vivarium_dashboard.lib.remote_run_jobs import RemoteRunJob
+    from vivarium_workbench.lib.remote_run_jobs import RemoteRunJob
 
     class _FakeClientWithS3(_FakeClient):
         def run_simulation(self, **kw):
@@ -158,7 +158,7 @@ def test_pipeline_passes_s3_uri_from_sim_config(tmp_path):
 
 def test_pipeline_s3_uri_none_when_no_config(tmp_path):
     """When run_simulation returns no config, s3_uri is None (doesn't raise)."""
-    from vivarium_dashboard.lib.remote_run_jobs import RemoteRunJob
+    from vivarium_workbench.lib.remote_run_jobs import RemoteRunJob
 
     client = _FakeClient()  # returns {"database_id": 50} with no config
     ctx, landed = _ctx(tmp_path, client)

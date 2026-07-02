@@ -18,7 +18,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from vivarium_dashboard.lib import sync_materialize
+from vivarium_workbench.lib import sync_materialize
 
 
 def _catalog_add(path, name=None, package=None) -> dict:

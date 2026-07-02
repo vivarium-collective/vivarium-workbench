@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from vivarium_dashboard.lib.atomic_io import atomic_write_text
+from vivarium_workbench.lib.atomic_io import atomic_write_text
 
 
 def test_writes_utf8_under_ascii_locale(tmp_path):
@@ -20,7 +20,7 @@ def test_writes_utf8_under_ascii_locale(tmp_path):
     target = tmp_path / "doc.yaml"
     code = (
         "from pathlib import Path;"
-        "from vivarium_dashboard.lib.atomic_io import atomic_write_text;"
+        "from vivarium_workbench.lib.atomic_io import atomic_write_text;"
         f"atomic_write_text(Path(r'{target}'), 'title: Colony — HPC readiness\\n')"
     )
     env = {

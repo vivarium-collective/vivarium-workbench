@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "vivarium-dashboard"
+name = "vivarium-workbench"
 version = "0.1.0"
-description = "Web-based dashboard for Vivarium / process-bigraph workspaces"
+description = "Web-based workbench for Vivarium / process-bigraph workspaces"
 authors = [{name = "Vivarium Collective", email = "team@vivarium-collective.org"}]
 requires-python = ">=3.11"
 dependencies = [
@@ -58,9 +58,14 @@ dev = ["pytest>=7.4", "pytest-timeout", "pytest-json-report>=1.5", "mypy>=1.8", 
 test = ["polars", "xarray", "zarr", "pyarrow"]
 
 [project.scripts]
-vivarium-dashboard = "vivarium_dashboard.cli:main"
-vdash = "vivarium_dashboard.cli:main"
-vivarium-dashboard-publish = "vivarium_dashboard.publish:main"
+# New canonical console scripts.
+vivarium-workbench = "vivarium_workbench.cli:main"
+vwb = "vivarium_workbench.cli:main"
+vivarium-workbench-publish = "vivarium_workbench.publish:main"
+# Back-compat aliases (deprecated; removed in Phase 3). Point at the new module.
+vivarium-dashboard = "vivarium_workbench.cli:main"
+vdash = "vivarium_workbench.cli:main"
+vivarium-dashboard-publish = "vivarium_workbench.publish:main"
 
 # Git source for the bare pbg-basic-processes dependency (not on PyPI). uv reads
 # this when vivarium-dashboard is the root project; consumers that depend on it
@@ -83,76 +88,76 @@ python_version = "3.11"
 # Widen `files` as more of lib/ is annotated. The bulk of the codebase
 # (server.py, the dict-building helpers) is intentionally not checked yet.
 files = [
-    "vivarium_dashboard/lib/startup.py",
-    "vivarium_dashboard/lib/models.py",
-    "vivarium_dashboard/lib/active_workspace.py",
-    "vivarium_dashboard/lib/investigation_status.py",
-    "vivarium_dashboard/lib/investigation_registry.py",
-    "vivarium_dashboard/lib/saved_visualizations.py",
-    "vivarium_dashboard/lib/data_sources.py",
-    "vivarium_dashboard/lib/git_status.py",
-    "vivarium_dashboard/lib/investigation_views.py",
-    "vivarium_dashboard/lib/download_views.py",
-    "vivarium_dashboard/lib/study_spec.py",
-    "vivarium_dashboard/lib/study_enrichment.py",
-    "vivarium_dashboard/lib/rigor_views.py",
-    "vivarium_dashboard/lib/observables_views.py",
-    "vivarium_dashboard/lib/composite_state_views.py",
-    "vivarium_dashboard/lib/composite_run_views.py",
-    "vivarium_dashboard/lib/composite_test_run_views.py",
-    "vivarium_dashboard/lib/study_create_views.py",
-    "vivarium_dashboard/lib/investigation_run_one_views.py",
-    "vivarium_dashboard/lib/investigation_run_views.py",
-    "vivarium_dashboard/lib/core_builder.py",
-    "vivarium_dashboard/lib/json_serialize.py",
-    "vivarium_dashboard/lib/report_views.py",
-    "vivarium_dashboard/lib/system_info.py",
-    "vivarium_dashboard/lib/study_viz_views.py",
-    "vivarium_dashboard/lib/work_views.py",
-    "vivarium_dashboard/lib/workspace_deps_views.py",
-    "vivarium_dashboard/lib/workspace_manifest_views.py",
-    "vivarium_dashboard/lib/events.py",
-    "vivarium_dashboard/lib/static_serving.py",
-    "vivarium_dashboard/lib/study_page.py",
-    "vivarium_dashboard/api/app.py",
-    "vivarium_dashboard/lib/metadata_mutations.py",
-    "vivarium_dashboard/lib/study_crud_mutations.py",
-    "vivarium_dashboard/lib/lifecycle_mutations.py",
-    "vivarium_dashboard/lib/scaffold_mutations.py",
-    "vivarium_dashboard/lib/compare_group_mutations.py",
-    "vivarium_dashboard/lib/viz_write_mutations.py",
-    "vivarium_dashboard/lib/viz_commit_mutations.py",
-    "vivarium_dashboard/lib/upload_mutations.py",
-    "vivarium_dashboard/lib/reference_mutations.py",
-    "vivarium_dashboard/lib/composite_mutations.py",
-    "vivarium_dashboard/lib/investigation_viz_mutations.py",
-    "vivarium_dashboard/lib/job_status_views.py",
-    "vivarium_dashboard/lib/csrf.py",
-    "vivarium_dashboard/lib/source_switch_views.py",
-    "vivarium_dashboard/lib/source_build_views.py",
-    "vivarium_dashboard/lib/remote_run_views.py",
-    "vivarium_dashboard/lib/auth_views.py",
-    "vivarium_dashboard/lib/git_commit_views.py",
-    "vivarium_dashboard/lib/work_mutations.py",
-    "vivarium_dashboard/lib/work_pr_views.py",
-    "vivarium_dashboard/lib/workspaces_mutations.py",
-    "vivarium_dashboard/lib/workspaces_process_views.py",
-    "vivarium_dashboard/lib/misc_mutations.py",
-    "vivarium_dashboard/lib/misc_post_views.py",
-    "vivarium_dashboard/lib/viz_accept_views.py",
-    "vivarium_dashboard/lib/composite_subprocess.py",
-    "vivarium_dashboard/lib/study_run_state.py",
-    "vivarium_dashboard/lib/study_run_post.py",
-    "vivarium_dashboard/lib/study_runs.py",
-    "vivarium_dashboard/lib/test_run_views.py",
-    "vivarium_dashboard/lib/comparative_runs.py",
-    "vivarium_dashboard/lib/run_unblocked_views.py",
-    "vivarium_dashboard/lib/viz_core.py",
-    "vivarium_dashboard/lib/viz_preview_views.py",
-    "vivarium_dashboard/lib/viz_preview_instance_views.py",
-    "vivarium_dashboard/lib/install_views.py",
-    "vivarium_dashboard/lib/catalog_install_views.py",
-    "vivarium_dashboard/lib/catalog_uninstall_views.py",
+    "vivarium_workbench/lib/startup.py",
+    "vivarium_workbench/lib/models.py",
+    "vivarium_workbench/lib/active_workspace.py",
+    "vivarium_workbench/lib/investigation_status.py",
+    "vivarium_workbench/lib/investigation_registry.py",
+    "vivarium_workbench/lib/saved_visualizations.py",
+    "vivarium_workbench/lib/data_sources.py",
+    "vivarium_workbench/lib/git_status.py",
+    "vivarium_workbench/lib/investigation_views.py",
+    "vivarium_workbench/lib/download_views.py",
+    "vivarium_workbench/lib/study_spec.py",
+    "vivarium_workbench/lib/study_enrichment.py",
+    "vivarium_workbench/lib/rigor_views.py",
+    "vivarium_workbench/lib/observables_views.py",
+    "vivarium_workbench/lib/composite_state_views.py",
+    "vivarium_workbench/lib/composite_run_views.py",
+    "vivarium_workbench/lib/composite_test_run_views.py",
+    "vivarium_workbench/lib/study_create_views.py",
+    "vivarium_workbench/lib/investigation_run_one_views.py",
+    "vivarium_workbench/lib/investigation_run_views.py",
+    "vivarium_workbench/lib/core_builder.py",
+    "vivarium_workbench/lib/json_serialize.py",
+    "vivarium_workbench/lib/report_views.py",
+    "vivarium_workbench/lib/system_info.py",
+    "vivarium_workbench/lib/study_viz_views.py",
+    "vivarium_workbench/lib/work_views.py",
+    "vivarium_workbench/lib/workspace_deps_views.py",
+    "vivarium_workbench/lib/workspace_manifest_views.py",
+    "vivarium_workbench/lib/events.py",
+    "vivarium_workbench/lib/static_serving.py",
+    "vivarium_workbench/lib/study_page.py",
+    "vivarium_workbench/api/app.py",
+    "vivarium_workbench/lib/metadata_mutations.py",
+    "vivarium_workbench/lib/study_crud_mutations.py",
+    "vivarium_workbench/lib/lifecycle_mutations.py",
+    "vivarium_workbench/lib/scaffold_mutations.py",
+    "vivarium_workbench/lib/compare_group_mutations.py",
+    "vivarium_workbench/lib/viz_write_mutations.py",
+    "vivarium_workbench/lib/viz_commit_mutations.py",
+    "vivarium_workbench/lib/upload_mutations.py",
+    "vivarium_workbench/lib/reference_mutations.py",
+    "vivarium_workbench/lib/composite_mutations.py",
+    "vivarium_workbench/lib/investigation_viz_mutations.py",
+    "vivarium_workbench/lib/job_status_views.py",
+    "vivarium_workbench/lib/csrf.py",
+    "vivarium_workbench/lib/source_switch_views.py",
+    "vivarium_workbench/lib/source_build_views.py",
+    "vivarium_workbench/lib/remote_run_views.py",
+    "vivarium_workbench/lib/auth_views.py",
+    "vivarium_workbench/lib/git_commit_views.py",
+    "vivarium_workbench/lib/work_mutations.py",
+    "vivarium_workbench/lib/work_pr_views.py",
+    "vivarium_workbench/lib/workspaces_mutations.py",
+    "vivarium_workbench/lib/workspaces_process_views.py",
+    "vivarium_workbench/lib/misc_mutations.py",
+    "vivarium_workbench/lib/misc_post_views.py",
+    "vivarium_workbench/lib/viz_accept_views.py",
+    "vivarium_workbench/lib/composite_subprocess.py",
+    "vivarium_workbench/lib/study_run_state.py",
+    "vivarium_workbench/lib/study_run_post.py",
+    "vivarium_workbench/lib/study_runs.py",
+    "vivarium_workbench/lib/test_run_views.py",
+    "vivarium_workbench/lib/comparative_runs.py",
+    "vivarium_workbench/lib/run_unblocked_views.py",
+    "vivarium_workbench/lib/viz_core.py",
+    "vivarium_workbench/lib/viz_preview_views.py",
+    "vivarium_workbench/lib/viz_preview_instance_views.py",
+    "vivarium_workbench/lib/install_views.py",
+    "vivarium_workbench/lib/catalog_install_views.py",
+    "vivarium_workbench/lib/catalog_uninstall_views.py",
 ]
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true
@@ -172,4 +177,6 @@ allow-direct-references = true
 # being added to the wheel archive at the same path: .../static/client.js") and
 # broke every non-editable/wheel build (e.g. uv sync of the git dependency in
 # Docker). They stay shipped via `packages`; no force-include needed.
-packages = ["vivarium_dashboard"]
+# Ship the renamed package AND the thin vivarium_dashboard/ back-compat shim
+# (deprecated; removed in Phase 3) so old imports keep resolving in wheels too.
+packages = ["vivarium_workbench", "vivarium_dashboard"]

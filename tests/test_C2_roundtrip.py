@@ -29,7 +29,7 @@ def _ws_on_path():
 
 def test_export_composite_pbg_creates_file(tmp_path):
     """export_composite_pbg writes a .pbg JSON file."""
-    from vivarium_dashboard.lib.pbg_export import export_composite_pbg
+    from vivarium_workbench.lib.pbg_export import export_composite_pbg
 
     out = tmp_path / "increase-demo.pbg"
     result = export_composite_pbg(FIXTURE_WS, COMPOSITE_ID, out)
@@ -39,7 +39,7 @@ def test_export_composite_pbg_creates_file(tmp_path):
 
 def test_exported_json_has_state_and_schema(tmp_path):
     """The exported .pbg must have top-level 'state' and 'schema' keys."""
-    from vivarium_dashboard.lib.pbg_export import export_composite_pbg
+    from vivarium_workbench.lib.pbg_export import export_composite_pbg
 
     out = tmp_path / "increase-demo.pbg"
     export_composite_pbg(FIXTURE_WS, COMPOSITE_ID, out)
@@ -50,7 +50,7 @@ def test_exported_json_has_state_and_schema(tmp_path):
 
 def test_all_local_addresses_are_full_path(tmp_path):
     """Every local: address in the exported document must be in local:!module.qualname form."""
-    from vivarium_dashboard.lib.pbg_export import export_composite_pbg
+    from vivarium_workbench.lib.pbg_export import export_composite_pbg
 
     out = tmp_path / "increase-demo.pbg"
     export_composite_pbg(FIXTURE_WS, COMPOSITE_ID, out)
@@ -64,7 +64,7 @@ def test_all_local_addresses_are_full_path(tmp_path):
 
 def test_addresses_use_full_module_path(tmp_path):
     """Exported addresses should contain the workspace module path."""
-    from vivarium_dashboard.lib.pbg_export import export_composite_pbg
+    from vivarium_workbench.lib.pbg_export import export_composite_pbg
 
     out = tmp_path / "increase-demo.pbg"
     export_composite_pbg(FIXTURE_WS, COMPOSITE_ID, out)
@@ -83,7 +83,7 @@ def test_addresses_use_full_module_path(tmp_path):
 
 def test_exported_document_is_valid_json(tmp_path):
     """The exported file must be valid, parseable JSON."""
-    from vivarium_dashboard.lib.pbg_export import export_composite_pbg
+    from vivarium_workbench.lib.pbg_export import export_composite_pbg
 
     out = tmp_path / "exported.pbg"
     export_composite_pbg(FIXTURE_WS, COMPOSITE_ID, out)

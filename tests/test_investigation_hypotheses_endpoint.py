@@ -15,7 +15,7 @@ import types
 import yaml
 import pytest
 
-from vivarium_dashboard.lib.investigation_views import (
+from vivarium_workbench.lib.investigation_views import (
     build_investigation_hypotheses,
 )
 

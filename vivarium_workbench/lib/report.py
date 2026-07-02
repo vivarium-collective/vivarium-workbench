@@ -46,12 +46,12 @@ def _copy_assets(target_dir: Path) -> None:
     """Copy bundled static assets (css, js, images) into ``reports/assets/``.
 
     After extraction from pbg-template, asset sources live inside the
-    installed ``vivarium_dashboard`` package — not under the workspace's
+    installed ``vivarium_workbench`` package — not under the workspace's
     ``scripts/`` tree. We copy the flat top-level files in
-    ``vivarium_dashboard/static/`` (everything except the nested
+    ``vivarium_workbench/static/`` (everything except the nested
     ``bigraph-loom/`` viewer, which the server streams directly).
     """
-    import vivarium_dashboard as _pkg
+    import vivarium_workbench as _pkg
     static_dir = Path(_pkg.__file__).parent / "static"
     target_dir.mkdir(parents=True, exist_ok=True)
     if static_dir.is_dir():
@@ -423,7 +423,7 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         (yaml.safe_load(decisions_file.read_text(encoding="utf-8")) or {}).get("decisions", [])
         if decisions_file.exists() else []
     )
-    import vivarium_dashboard as _pkg
+    import vivarium_workbench as _pkg
     template_dir = Path(_pkg.__file__).parent / "templates"
     env = _env(template_dir)
     tpl = env.get_template("index.html.j2")
@@ -440,7 +440,7 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     # Merge cached enrichment data (DOI / publisher URL / OA PDF URL) into
     # each entry so the rendered cards can surface "Open ↗" + "OA PDF ↗" links.
     try:
-        from vivarium_dashboard.lib.references_fetch import (
+        from vivarium_workbench.lib.references_fetch import (
             load_cache as _load_refs_cache, enrich_entries as _enrich_refs,
         )
         bib_entries = _enrich_refs(bib_entries, _load_refs_cache(ws_root))

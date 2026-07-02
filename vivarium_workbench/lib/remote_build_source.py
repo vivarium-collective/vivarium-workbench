@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from vivarium_dashboard.lib.sms_api_client import SmsApiError
+from vivarium_workbench.lib.sms_api_client import SmsApiError
 
 # A git commit ref (the only non-server-controlled value that flows into a
 # filesystem path) must be plain hex. This closes the one allow-list gap in the

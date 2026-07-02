@@ -1,7 +1,7 @@
 from pathlib import Path
 import pytest
-from vivarium_dashboard.lib import run_core
-from vivarium_dashboard.lib.run_core import RunTargetUnavailable
+from vivarium_workbench.lib import run_core
+from vivarium_workbench.lib.run_core import RunTargetUnavailable
 
 def test_target_local_without_viv_build(tmp_path):
     assert run_core.run_target_for(tmp_path) == "local"

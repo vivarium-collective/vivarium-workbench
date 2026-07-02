@@ -27,8 +27,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from vivarium_dashboard.lib import git_status
-from vivarium_dashboard.lib import work_state
+from vivarium_workbench.lib import git_status
+from vivarium_workbench.lib import work_state
 
 
 def branch_push(ws_root: Path, body: dict | None) -> tuple[dict, int]:

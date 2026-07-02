@@ -3,7 +3,7 @@
 
 def test_save_run_as_variant_route(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
-    from vivarium_dashboard.api import app as appmod
+    from vivarium_workbench.api import app as appmod
     monkeypatch.setattr(appmod, "get_workspace", lambda: tmp_path, raising=False)
     captured = {}
 

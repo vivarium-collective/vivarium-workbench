@@ -1,7 +1,7 @@
 # tests/test_study_tabs_structure.py
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
-HTML = (ROOT / "vivarium_dashboard/templates/study-detail.html").read_text()
+HTML = (ROOT / "vivarium_workbench/templates/study-detail.html").read_text()
 
 
 def test_five_pillar_buttons_present():
@@ -35,7 +35,7 @@ def test_deep_link_onclicks_preserved():
 
 
 def test_js_has_pillar_switcher():
-    js = (ROOT / "vivarium_dashboard/static/study-detail.js").read_text()
+    js = (ROOT / "vivarium_workbench/static/study-detail.js").read_text()
     assert "function _setStudyPillar" in js
     assert "window._setStudyPillar" in js
     assert "dataset.pillar" in js or "data-pillar" in js
@@ -43,5 +43,5 @@ def test_js_has_pillar_switcher():
 
 
 def test_css_styles_pillars():
-    css = (ROOT / "vivarium_dashboard/static/style.css").read_text()
+    css = (ROOT / "vivarium_workbench/static/style.css").read_text()
     assert ".study-pillar" in css and ".study-subnav" in css

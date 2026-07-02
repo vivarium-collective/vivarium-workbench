@@ -16,7 +16,7 @@ import tempfile
 import time as _time
 from pathlib import Path
 
-from vivarium_dashboard.lib import composite_runs as cr
+from vivarium_workbench.lib import composite_runs as cr
 
 
 def _detect_and_locate(extract_root: Path, seed: int) -> tuple[str, Path]:

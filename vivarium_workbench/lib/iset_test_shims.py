@@ -2,8 +2,8 @@
 
 These three functions (``_build_iset_summary_for_test``,
 ``_build_iset_detail_for_test``, and the ``_read_study_*`` helpers they use)
-were relocated verbatim from the retired ``vivarium_dashboard.server`` so that
-external repos which still ``from vivarium_dashboard.server import
+were relocated verbatim from the retired ``vivarium_workbench.server`` so that
+external repos which still ``from vivarium_workbench.server import
 _build_iset_summary_for_test`` / ``_build_iset_detail_for_test`` (e.g.
 pbg-superpowers) keep working via the server deprecation shim. The dashboard's
 own FastAPI seam uses ``report_views.build_iset_detail`` /
@@ -19,14 +19,14 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib.investigation_status import (
+from vivarium_workbench.lib.investigation_status import (
     build_iset_summary,
     compute_investigation_status,
     read_study_status,
 )
-from vivarium_dashboard.lib.investigations_index import _count_runs_for_study
-from vivarium_dashboard.lib.report_views import _coerce_list_field
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.investigations_index import _count_runs_for_study
+from vivarium_workbench.lib.report_views import _coerce_list_field
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 _MULTIAXIS_STATUS_FIELDS = (

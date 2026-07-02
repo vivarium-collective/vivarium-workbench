@@ -1,4 +1,4 @@
-"""Parity tests for vivarium_dashboard.lib.remote_run_views.remote_run_start.
+"""Parity tests for vivarium_workbench.lib.remote_run_views.remote_run_start.
 
 The pure builder is a behaviour-preserving port of the stdlib handler
 ``server._post_remote_run_start``.  EVERY external is monkeypatched — these
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import remote_run_views as rrv
+from vivarium_workbench.lib import remote_run_views as rrv
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +131,7 @@ class TestHappyPath:
         assert callable(worker_fn)
 
         # Submits to the SAME singleton (manager.submit was the patched attr).
-        from vivarium_dashboard.lib import remote_run_jobs
+        from vivarium_workbench.lib import remote_run_jobs
         assert rrv.manager is remote_run_jobs.manager
 
     def test_pipeline_ctx_spec_id_from_baseline_composite(self, monkeypatch, tmp_path):

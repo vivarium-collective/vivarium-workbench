@@ -1,6 +1,6 @@
 """Shared normalization helpers for study / investigation spec fields.
 
-Extracted from ``vivarium_dashboard.server`` so both the FastAPI seam
+Extracted from ``vivarium_workbench.server`` so both the FastAPI seam
 (``api/app.py`` routes) and ``server.py``'s handlers can share one
 implementation.  ``server.py`` re-imports ``normalize_requirements`` as
 ``_normalize_requirements`` to keep its existing call-sites unchanged.

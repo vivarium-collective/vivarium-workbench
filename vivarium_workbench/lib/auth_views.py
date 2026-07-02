@@ -6,7 +6,7 @@ Behaviour-preserving ports of the stdlib handlers
 ``_get_auth_github_orgs``.
 
 Each handler is already a THIN wrapper around an existing
-:mod:`vivarium_dashboard.lib.github_auth` function, and the device-flow session
+:mod:`vivarium_workbench.lib.github_auth` function, and the device-flow session
 state lives in that module's process-global singletons (``_PENDING_FLOWS`` /
 ``_CACHED_SESSION``).  So there is nothing to extract: a FastAPI poll/logout
 mutates the SAME ``github_auth`` state the stdlib server uses.  These builders
@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from vivarium_dashboard.lib import github_auth
+from vivarium_workbench.lib import github_auth
 
 
 def auth_start(body: Optional[dict] = None) -> tuple[dict, int]:

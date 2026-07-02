@@ -13,7 +13,7 @@ the FastAPI app (``api.app:app``) under uvicorn:
 * reconcile composite runs left ``running`` by a previous crash/restart;
 * write ``.pbg/server/server-info`` so tests/tools can detect readiness.
 
-No dependency on ``vivarium_dashboard.server``.
+No dependency on ``vivarium_workbench.server``.
 """
 from __future__ import annotations
 
@@ -45,16 +45,16 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1") -> int:
     if str(workspace) not in sys.path:
         sys.path.insert(0, str(workspace))
 
-    from vivarium_dashboard.lib._root import set_workspace_root
+    from vivarium_workbench.lib._root import set_workspace_root
     set_workspace_root(workspace)
     os.environ["VIVARIUM_DASHBOARD_WORKSPACE"] = str(workspace)
 
-    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
     pbg = WorkspacePaths.load(workspace).pbg
 
     # Repair runs left 'running' by a previous crash/restart — never block boot.
     try:
-        from vivarium_dashboard.lib.run_registry import reconcile_stale_runs
+        from vivarium_workbench.lib.run_registry import reconcile_stale_runs
         n = reconcile_stale_runs(pbg / "composite-runs.db")
         if n:
             print(f"reconciled {n} stale composite run(s) on startup")
@@ -79,7 +79,7 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1") -> int:
         print(f"warning: writing server-info failed: {e}", file=sys.stderr)
 
     import uvicorn
-    from vivarium_dashboard.api.app import app
+    from vivarium_workbench.api.app import app
 
     # Run the app object (not an import string) so it shares this process's
     # already-registered workspace root; disables reload, which is correct for

@@ -28,7 +28,7 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 def _dashboard_url(ws: Path, override: str | None = None) -> str:
@@ -123,7 +123,7 @@ def prepare_study(ws: Path, slug: str, dash: str, steps: int | None,
                                 "run_id": run_id})
             print(f"  ran {sn} ({kind}): HTTP {code} run_id={run_id}", flush=True)
 
-    from vivarium_dashboard.lib.comparative_viz import render_comparative_time_series
+    from vivarium_workbench.lib.comparative_viz import render_comparative_time_series
     study_db = studies_dir / slug / "runs.db"
     viz_dir = studies_dir / slug / "viz"
     viz_dir.mkdir(parents=True, exist_ok=True)

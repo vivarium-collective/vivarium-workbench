@@ -2,7 +2,7 @@
 
 Usage in a per-study ``tests/conftest.py``::
 
-    from vivarium_dashboard.testing.study_fixtures import (  # noqa: F401
+    from vivarium_workbench.testing.study_fixtures import (  # noqa: F401
         baseline_history,
         variant_history_factory,
         bulk_count,
@@ -208,7 +208,7 @@ def make_study_fixtures(
 
     Returns a mapping suitable for injection into a per-study ``conftest.py``::
 
-        from vivarium_dashboard.testing.study_fixtures import make_study_fixtures
+        from vivarium_workbench.testing.study_fixtures import make_study_fixtures
         _f = make_study_fixtures(Path(__file__).resolve().parents[1],
                                  variant_names=["stop-dnaA-synthesis"])
         baseline_history = _f["baseline_history"]

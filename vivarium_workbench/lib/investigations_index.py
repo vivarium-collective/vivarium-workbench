@@ -1,6 +1,6 @@
 """Build the investigations index payload for a workspace.
 
-Extracted from ``vivarium_dashboard.server._investigations_data`` so the
+Extracted from ``vivarium_workbench.server._investigations_data`` so the
 FastAPI seam (``api/app.py``) can call it without importing the stdlib server
 module.  The single implementation is shared: ``server.py`` re-imports
 ``build_investigations`` and keeps its old ``_investigations_data`` name as a
@@ -53,7 +53,7 @@ def _iter_study_dirs(ws_root: Path):
     also picks up legacy ``investigations/<name>/spec.yaml`` studies that
     pre-date the nested layout.
     """
-    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
     try:
         wp = WorkspacePaths.load(ws_root)
@@ -97,7 +97,7 @@ def _count_runs_for_study(
     to ``len(spec.runs)``.  Returns the larger of the two so the dashboard
     never undercounts.  Never raises.
     """
-    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
     db_count = 0
     try:
@@ -218,7 +218,7 @@ def _http_get_json(url: str, timeout: float = 1.5) -> Optional[dict]:
 
 def _normalize_parents(spec: dict) -> list[dict]:
     """Normalize a study's DAG prerequisites to ``[{study, condition}]``."""
-    from vivarium_dashboard.lib.investigations import normalize_dag_edges
+    from vivarium_workbench.lib.investigations import normalize_dag_edges
 
     return normalize_dag_edges(spec)
 
@@ -277,11 +277,11 @@ def build_investigations(ws_root: Path) -> dict:
     """
     _ws_add_to_sys_path(ws_root)
 
-    from vivarium_dashboard.lib.investigations import (
+    from vivarium_workbench.lib.investigations import (
         InvestigationSpecError,
         load_spec,
     )
-    from vivarium_dashboard.lib.spec_norm import normalize_requirements
+    from vivarium_workbench.lib.spec_norm import normalize_requirements
 
     # First pass: load every spec so we can resolve cross-study conditions.
     loaded: list[tuple[Path, dict]] = []

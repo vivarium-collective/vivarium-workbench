@@ -48,7 +48,7 @@ def server(tmp_path):
     env["PBG_HOME"] = str(pbg_home)
     proc = subprocess.Popen(
         [
-            sys.executable, "-m", "vivarium_dashboard.cli", "serve",
+            sys.executable, "-m", "vivarium_workbench.cli", "serve",
             "--workspace", str(ws), "--port", str(port),
         ],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,

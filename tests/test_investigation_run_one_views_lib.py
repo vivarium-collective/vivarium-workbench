@@ -24,11 +24,11 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import composite_runs as cr
-from vivarium_dashboard.lib import composite_lookup
-from vivarium_dashboard.lib import investigations
-from vivarium_dashboard.lib import study_spec
-from vivarium_dashboard.lib import investigation_run_one_views as views
+from vivarium_workbench.lib import composite_runs as cr
+from vivarium_workbench.lib import composite_lookup
+from vivarium_workbench.lib import investigations
+from vivarium_workbench.lib import study_spec
+from vivarium_workbench.lib import investigation_run_one_views as views
 
 RID = "demo__1700000000__abcdef"
 

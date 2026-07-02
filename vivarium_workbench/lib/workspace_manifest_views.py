@@ -9,7 +9,7 @@ The manifest aggregates six sections into a single snapshot of workspace state
 health, and installed pbg-* skills) so an agent does not have to stitch together
 ten separate API calls.
 
-No imports from ``vivarium_dashboard.server`` — the stdlib server keeps thin
+No imports from ``vivarium_workbench.server`` — the stdlib server keeps thin
 instance-method shims that forward into this module.
 """
 from __future__ import annotations
@@ -21,9 +21,9 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib import git_status as _git_status
-from vivarium_dashboard.lib import investigations_index as _investigations_index
-from vivarium_dashboard.lib import registry as _registry
+from vivarium_workbench.lib import git_status as _git_status
+from vivarium_workbench.lib import investigations_index as _investigations_index
+from vivarium_workbench.lib import registry as _registry
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +138,7 @@ def manifest_workspace_section(ws_root: Path) -> dict:
     ws = {}
     ws_path = ws_root / "workspace.yaml"
     try:
-        from vivarium_dashboard.lib.workspace_yaml import load_workspace
+        from vivarium_workbench.lib.workspace_yaml import load_workspace
         ws = load_workspace(ws_path)
     except Exception:
         # Fall back to raw yaml.safe_load when validation fails so the
@@ -173,9 +173,9 @@ def manifest_composites_section(ws_root: Path) -> list:
     _add_ws_to_sys_path(ws_root)
     all_comps = {}
     try:
-        from vivarium_dashboard.lib.composite_lookup import discover_all_composites
+        from vivarium_workbench.lib.composite_lookup import discover_all_composites
         try:
-            from vivarium_dashboard.lib.workspace_yaml import load_workspace
+            from vivarium_workbench.lib.workspace_yaml import load_workspace
             ws = load_workspace(ws_root / "workspace.yaml")
         except Exception:
             ws = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
@@ -219,7 +219,7 @@ def manifest_studies_section(ws_root: Path) -> list:
     n_variants, n_groups, n_interventions, n_runs, n_comparisons, conclusions_len."""
     _add_ws_to_sys_path(ws_root)
     try:
-        from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
+        from vivarium_workbench.lib.investigations import load_spec, InvestigationSpecError
     except Exception:
         return []
     out = []

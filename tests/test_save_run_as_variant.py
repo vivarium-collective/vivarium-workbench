@@ -1,8 +1,8 @@
-"""Tests for save_run_as_variant in vivarium_dashboard.lib.study_variants."""
+"""Tests for save_run_as_variant in vivarium_workbench.lib.study_variants."""
 import time
 import yaml
-from vivarium_dashboard.lib import composite_runs as cr
-from vivarium_dashboard.lib import study_variants
+from vivarium_workbench.lib import composite_runs as cr
+from vivarium_workbench.lib import study_variants
 
 
 def test_save_run_as_variant_appends_to_study_yaml(tmp_path):
@@ -49,8 +49,8 @@ def test_save_run_as_variant_missing_run_404(tmp_path):
 
 def test_save_run_as_variant_v4_writes_conditions_variants(tmp_path):
     import time, yaml
-    from vivarium_dashboard.lib import composite_runs as cr
-    from vivarium_dashboard.lib import study_variants
+    from vivarium_workbench.lib import composite_runs as cr
+    from vivarium_workbench.lib import study_variants
     src = tmp_path / "r.db"; conn = cr.connect(src)
     cr.save_metadata(conn, spec_id="pkg.composites.cell", run_id="r1",
                      params={"k": 5}, label="fast", started_at=time.time(), n_steps=3)

@@ -1,5 +1,5 @@
 """Tests for v3 → v4 study spec migration (adds tests/references/implementation_tasks)."""
-from vivarium_dashboard.lib.spec_migration import migrate_v3_to_v4
+from vivarium_workbench.lib.spec_migration import migrate_v3_to_v4
 
 
 def test_migrate_v3_to_v4_adds_empty_tests_block():

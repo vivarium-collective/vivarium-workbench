@@ -1,9 +1,9 @@
 import pytest
 from fastapi.testclient import TestClient
-from vivarium_dashboard.api.app import create_app, get_workspace
-from vivarium_dashboard.lib import active_workspace
+from vivarium_workbench.api.app import create_app, get_workspace
+from vivarium_workbench.lib import active_workspace
 from investigation_contracts import read_log
-from vivarium_dashboard.lib.event_log import log_path
+from vivarium_workbench.lib.event_log import log_path
 
 
 @pytest.fixture(autouse=True)

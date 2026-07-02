@@ -1,6 +1,6 @@
 import yaml
 from pathlib import Path
-from vivarium_dashboard.lib.investigation_graph_views import build_investigation_graph
+from vivarium_workbench.lib.investigation_graph_views import build_investigation_graph
 
 
 def _ws(tmp_path: Path) -> Path:

@@ -1,7 +1,7 @@
 import pytest
 import yaml
 import pathlib
-from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
+from vivarium_workbench.lib.investigations import load_spec, InvestigationSpecError
 
 
 def test_load_spec_v3_yaml_returns_v4_in_memory(tmp_path):

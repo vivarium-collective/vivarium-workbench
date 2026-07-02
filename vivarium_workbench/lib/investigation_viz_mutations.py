@@ -36,8 +36,8 @@ from typing import Any
 
 import yaml
 
-from vivarium_dashboard.lib import study_spec as _study_spec
-from vivarium_dashboard.lib.upload_mutations import _ws_add_to_sys_path
+from vivarium_workbench.lib import study_spec as _study_spec
+from vivarium_workbench.lib.upload_mutations import _ws_add_to_sys_path
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +132,7 @@ def render_viz(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
       500  build-core failure / render failure
     """
     _ws_add_to_sys_path(ws_root)
-    from vivarium_dashboard.lib.investigations import (
+    from vivarium_workbench.lib.investigations import (
         load_spec, render_visualizations, InvestigationSpecError,
     )
 

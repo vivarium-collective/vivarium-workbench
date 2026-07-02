@@ -17,7 +17,7 @@ from pathlib import Path
 import yaml
 import pytest
 
-_PKG = Path(__file__).parent.parent / "vivarium_dashboard"
+_PKG = Path(__file__).parent.parent / "vivarium_workbench"
 
 _V3_BASE = {
     "schema_version": 3,
@@ -67,7 +67,7 @@ def tmp_ws_with_investigation(tmp_path):
 def test_detail_spec_surfaces_spine_acceptance(tmp_ws_with_investigation):
     """spine_acceptance carries the owning investigation + the criterion(s)
     covering THIS study, read from persisted computed_acceptance (no recompute)."""
-    from vivarium_dashboard.lib.study_spec import load_study_detail_spec
+    from vivarium_workbench.lib.study_spec import load_study_detail_spec
     ws, name = tmp_ws_with_investigation
     spec = load_study_detail_spec(ws, name)
     sa = spec.get("spine_acceptance")
@@ -84,7 +84,7 @@ def test_detail_spec_surfaces_spine_acceptance(tmp_ws_with_investigation):
 def test_detail_spec_spine_acceptance_absent_without_owner(tmp_path):
     """A study with no owning investigation → spine_acceptance is None/absent
     (the panel omits the acceptance row). Never raises."""
-    from vivarium_dashboard.lib.study_spec import load_study_detail_spec
+    from vivarium_workbench.lib.study_spec import load_study_detail_spec
     ws = tmp_path / "ws"
     sd = ws / "studies" / "lonely"
     sd.mkdir(parents=True)

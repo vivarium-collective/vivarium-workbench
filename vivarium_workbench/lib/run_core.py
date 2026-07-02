@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from vivarium_dashboard.lib import composite_runs
+from vivarium_workbench.lib import composite_runs
 
 
 class RunTargetUnavailable(RuntimeError):

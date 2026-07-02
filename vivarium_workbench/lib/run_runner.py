@@ -15,7 +15,7 @@ import traceback
 from dataclasses import dataclass
 from pathlib import Path
 
-from vivarium_dashboard.lib import composite_runs as cr
+from vivarium_workbench.lib import composite_runs as cr
 
 # A run exceeding this self-terminates with status='failed'. Matches the
 # "tens of minutes" target from the design spec.
@@ -77,7 +77,7 @@ def _resolve_state(req: RunRequest) -> tuple[dict, dict | None]:
         pass
 
     # File-based spec branch.
-    from vivarium_dashboard.lib.composite_lookup import (
+    from vivarium_workbench.lib.composite_lookup import (
         find_composite_path, substitute_parameters,
     )
     path = find_composite_path(req.workspace, req.pkg, req.spec_id)
@@ -186,7 +186,7 @@ def _render_canonical_viz(*, spec_id: str, db_file: str, run_id: str, core) -> d
     """
     try:
         from pbg_superpowers.composite_generator import _REGISTRY, discover_generators
-        from vivarium_dashboard.lib.investigations import (
+        from vivarium_workbench.lib.investigations import (
             build_viz_composite, gather_emitter_outputs,
         )
     except ImportError:
@@ -307,7 +307,7 @@ def _render_default_viz(*, db_file: str, run_id: str, core) -> dict:
     Best-effort; returns {} on any failure.
     """
     try:
-        from vivarium_dashboard.lib.investigations import (
+        from vivarium_workbench.lib.investigations import (
             build_viz_composite, gather_emitter_outputs,
         )
         from pbg_superpowers.visualizations import (
@@ -435,7 +435,7 @@ def execute(request_path: Path) -> int:
         # the sink. The broker's sqlite branch reuses the same
         # inject_emitter_for_paths + inject_sqlite_emitter + per-tick run(1)
         # loop this function used inline, so default runs are byte-identical.
-        from vivarium_dashboard.lib import emitters
+        from vivarium_workbench.lib import emitters
         from pbg_superpowers.composite_generator import emitter_defaults
         declared = emitter_defaults(spec) if spec is not None else []
         name = "parquet" if declared else emitters.default_emitter(
@@ -484,7 +484,7 @@ def execute(request_path: Path) -> int:
             core=core,
         )
         try:
-            from vivarium_dashboard.lib.composite_flush import run_flush
+            from vivarium_workbench.lib.composite_flush import run_flush
             run_flush(run_dir, req=req, spec_id=req.spec_id,
                       db_file=req.db_file, run_id=req.run_id, core=core)
         except Exception:

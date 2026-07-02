@@ -91,7 +91,7 @@ def read_source(path, workspace=None) -> "tuple[str | None, Path | None]":
     on-disk store detector); kept here so callers select the source through the
     broker rather than reaching into explorer_data directly.
     """
-    from vivarium_dashboard.lib import explorer_data
+    from vivarium_workbench.lib import explorer_data
     return explorer_data._resolve_run_source(path, workspace)
 
 
@@ -104,7 +104,7 @@ def reader_for(kind: str) -> Callable:
     for kinds without a single trace reader (e.g. ``parquet``, which explorer
     reads column-by-column inline).
     """
-    from vivarium_dashboard.lib import comparative_viz
+    from vivarium_workbench.lib import comparative_viz
     table = {
         "zarr": comparative_viz._extract_trace_from_zarr,
         "sqlite": comparative_viz._extract_trace,
@@ -132,7 +132,7 @@ def observable_reader_for(kind: str) -> "Callable | None":
     Signature of every returned reader: ``(resolved, run_id) ->
     {"categories": {...}}``.
     """
-    from vivarium_dashboard.lib import explorer_data as ed
+    from vivarium_workbench.lib import explorer_data as ed
     table = {
         "zarr": ed._zarr_observables,
         "parquet": ed._parquet_observables,
@@ -147,7 +147,7 @@ def vector_reader_for(kind: str) -> "Callable | None":
     Signature of every returned reader: ``(resolved, path, step, run_id) ->
     {"ids", "values", "step", "time"}``.
     """
-    from vivarium_dashboard.lib import explorer_data as ed
+    from vivarium_workbench.lib import explorer_data as ed
     table = {
         "zarr": ed._zarr_get_vector,
         "parquet": ed._parquet_get_vector,
@@ -163,7 +163,7 @@ def flux_auto_reader_for(kind: str) -> "Callable | None":
     run_id) -> (fluxes, total, time_val)`` (BiGG-remapped fluxes for the Escher
     map; the caller then merges environment exchange fluxes).
     """
-    from vivarium_dashboard.lib import explorer_data as ed
+    from vivarium_workbench.lib import explorer_data as ed
     table = {
         "zarr": ed._zarr_get_flux_auto,
         "parquet": ed._parquet_get_flux_auto,
@@ -178,7 +178,7 @@ def base_flux_reader_for(kind: str) -> "Callable | None":
     Signature of every returned reader: ``(resolved, db_path, step, run_id) ->
     (ids, vals, time_val)`` (native EcoCyc base-reaction ids + flux vector).
     """
-    from vivarium_dashboard.lib import explorer_data as ed
+    from vivarium_workbench.lib import explorer_data as ed
     table = {
         "zarr": ed._zarr_get_base_fluxes,
         "parquet": ed._parquet_get_base_fluxes,
@@ -287,7 +287,7 @@ def chart_source(
     Keyed on ``output_kind`` (``xarray → zarr``). Returns an empty list for the
     sqlite default (the sqlite chain is assembled by the caller as before).
     """
-    from vivarium_dashboard.lib import study_charts
+    from vivarium_workbench.lib import study_charts
 
     kind = output_kind(default_emitter(spec, runs_db))
     sources: list[tuple[str, dict]] = []
@@ -653,7 +653,7 @@ def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
         kind = "sqlite"
 
     if kind == "sqlite":
-        from vivarium_dashboard.lib import composite_runs as cr
+        from vivarium_workbench.lib import composite_runs as cr
         st = state
         # MINOR 3 guard: when we fall back from the zarr path that ALREADY drove
         # a Composite built from this same `state`, deep-copy so the sqlite re-run
@@ -700,7 +700,7 @@ def run_with_emitter(name, *, state, run_id, emit_paths, out_dir, core, steps,
                 "steps": steps, "run_id": run_id, "composite": composite}
 
     if kind == "ram":
-        from vivarium_dashboard.lib import composite_runs as cr
+        from vivarium_workbench.lib import composite_runs as cr
         from process_bigraph.emitter import RAMEmitter
         st = state
         if emit_paths:

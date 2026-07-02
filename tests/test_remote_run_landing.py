@@ -3,7 +3,7 @@ import sqlite3
 import tarfile
 from pathlib import Path
 
-from vivarium_dashboard.lib.remote_run_landing import land_remote_run
+from vivarium_workbench.lib.remote_run_landing import land_remote_run
 
 
 def _make_remote_zarr_tar(tmp_path: Path, seed: int = 0) -> Path:
@@ -60,7 +60,7 @@ def test_land_zarr_places_store_and_writes_runs_meta(tmp_path: Path):
 
 
 def test_landed_zarr_is_discovered_by_study_charts(tmp_path: Path):
-    from vivarium_dashboard.lib import study_charts
+    from vivarium_workbench.lib import study_charts
 
     study = tmp_path / "study"
     study.mkdir()

@@ -1608,7 +1608,7 @@ def run_investigation(ws_root: Path, name: str, *,
     Returns:
         {name, n_runs, n_visualizations, status, viz_paths, errors}
     """
-    from vivarium_dashboard.lib import composite_runs as cr
+    from vivarium_workbench.lib import composite_runs as cr
 
     ws_root = Path(ws_root)
     inv_dir = WorkspacePaths.load(ws_root).investigations / name

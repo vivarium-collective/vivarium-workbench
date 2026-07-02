@@ -23,9 +23,9 @@ from __future__ import annotations
 
 import yaml as _yaml
 
-from vivarium_dashboard.lib import study_run_state
-from vivarium_dashboard.lib.comparative_viz import render_comparative_time_series
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib import study_run_state
+from vivarium_workbench.lib.comparative_viz import render_comparative_time_series
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 def render_investigation_comparative_visualisations(

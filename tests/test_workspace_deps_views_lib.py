@@ -30,14 +30,14 @@ class TestBuildSourceBuilds:
 
     def test_happy_path(self, monkeypatch):
         """When sms-api returns simulators, builds list is populated."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
 
         canned = {"builds": [
             {"simulator_id": 1, "repo": "v2ecoli", "commit": "abc123",
              "branch": "main", "label": "v2ecoli @ abc123 (build #1)"},
         ], "error": None}
         monkeypatch.setattr(
-            "vivarium_dashboard.lib.remote_build_source.list_build_sources",
+            "vivarium_workbench.lib.remote_build_source.list_build_sources",
             lambda client: canned,
         )
         result = wdv.build_source_builds()
@@ -47,10 +47,10 @@ class TestBuildSourceBuilds:
 
     def test_sms_api_down_returns_empty_with_error(self, monkeypatch):
         """When sms-api is unreachable, builds is [] and error has a reason."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
 
         monkeypatch.setattr(
-            "vivarium_dashboard.lib.remote_build_source.list_build_sources",
+            "vivarium_workbench.lib.remote_build_source.list_build_sources",
             lambda client: {"builds": [], "error": "connection refused"},
         )
         result = wdv.build_source_builds()
@@ -59,7 +59,7 @@ class TestBuildSourceBuilds:
 
     def test_uses_sms_api_base_env(self, monkeypatch):
         """The SMS_API_BASE env var is forwarded to the SmsApiClient."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
 
         seen_base: list[str] = []
 
@@ -69,11 +69,11 @@ class TestBuildSourceBuilds:
 
         monkeypatch.setenv("SMS_API_BASE", "http://myproxy:9090")
         monkeypatch.setattr(
-            "vivarium_dashboard.lib.sms_api_client.SmsApiClient",
+            "vivarium_workbench.lib.sms_api_client.SmsApiClient",
             _FakeClient,
         )
         monkeypatch.setattr(
-            "vivarium_dashboard.lib.remote_build_source.list_build_sources",
+            "vivarium_workbench.lib.remote_build_source.list_build_sources",
             lambda client: {"builds": [], "error": None},
         )
         wdv.build_source_builds()
@@ -91,7 +91,7 @@ class TestBuildWorkspaces:
 
     def test_current_only_when_catalog_empty(self, tmp_path, monkeypatch):
         """With empty catalog, result has current + one 'current' workspace row."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
 
         ws = self._make_ws(tmp_path, "test-ws")
         monkeypatch.setattr(
@@ -112,7 +112,7 @@ class TestBuildWorkspaces:
 
     def test_catalog_exception_falls_back_to_current_only(self, tmp_path, monkeypatch):
         """catalog.list_workspaces() raising → still returns current-only."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
 
         ws = self._make_ws(tmp_path, "fallback-ws")
 
@@ -135,7 +135,7 @@ class TestBuildWorkspaces:
 
     def test_running_workspace_has_url_and_pid(self, tmp_path, monkeypatch):
         """A catalog entry with an alive PID → status='running', url+pid present."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
 
         ws = self._make_ws(tmp_path, "main-ws")
 
@@ -169,7 +169,7 @@ class TestBuildWorkspaces:
     def test_stale_workspace_when_pid_dead(self, tmp_path, monkeypatch):
         """A catalog entry with a dead PID → status='stale'."""
         import subprocess as _sp
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
 
         ws = self._make_ws(tmp_path, "main-ws2")
         other = tmp_path / "stale-ws"
@@ -198,7 +198,7 @@ class TestBuildWorkspaces:
 
     def test_missing_path_workspace(self, tmp_path, monkeypatch):
         """A catalog entry whose path doesn't exist → status='missing'."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
 
         ws = self._make_ws(tmp_path, "main-ws3")
         ghost_path = str(tmp_path / "ghost" / "workspace")
@@ -218,7 +218,7 @@ class TestBuildWorkspaces:
 
     def test_sort_order(self, tmp_path, monkeypatch):
         """Workspaces are sorted: current → running → stopped → stale → missing."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
 
         ws = self._make_ws(tmp_path, "current-ws")
 
@@ -260,13 +260,13 @@ class TestBuildSystemDepsCheck:
         return ws
 
     def _patch_registry(self, monkeypatch, ws: Path, catalog: list) -> None:
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
         monkeypatch.setattr(
             wdv, "module_registry", lambda root: catalog,
         )
 
     def test_missing_name_returns_400(self, tmp_path, monkeypatch):
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
         ws = self._make_ws(tmp_path)
         self._patch_registry(monkeypatch, ws, [])
         body, status = wdv.build_system_deps_check(ws, "")
@@ -274,7 +274,7 @@ class TestBuildSystemDepsCheck:
         assert body == {"error": "name required"}
 
     def test_unknown_module_returns_404(self, tmp_path, monkeypatch):
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
         ws = self._make_ws(tmp_path)
         self._patch_registry(monkeypatch, ws, [{"name": "other-module"}])
         body, status = wdv.build_system_deps_check(ws, "not-in-registry")
@@ -284,7 +284,7 @@ class TestBuildSystemDepsCheck:
 
     def test_200_all_ok_when_no_checks(self, tmp_path, monkeypatch):
         """A module with no system_dependencies.checks passes trivially."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
         ws = self._make_ws(tmp_path)
         catalog = [{"name": "pbg-trivial", "system_dependencies": {"checks": []}}]
         self._patch_registry(monkeypatch, ws, catalog)
@@ -296,7 +296,7 @@ class TestBuildSystemDepsCheck:
 
     def test_200_ok_with_passing_import_check(self, tmp_path, monkeypatch):
         """A real import_check that succeeds → ok=True."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
         ws = self._make_ws(tmp_path)
         catalog = [{
             "name": "pbg-passes",
@@ -317,7 +317,7 @@ class TestBuildSystemDepsCheck:
 
     def test_200_failing_import_check(self, tmp_path, monkeypatch):
         """A module whose import_check fails → ok=False, reason populated."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
         ws = self._make_ws(tmp_path)
         catalog = [{
             "name": "pbg-fails",
@@ -338,7 +338,7 @@ class TestBuildSystemDepsCheck:
 
     def test_platform_key_in_response(self, tmp_path, monkeypatch):
         """Response includes a valid platform string."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
         ws = self._make_ws(tmp_path)
         catalog = [{"name": "pbg-plat", "system_dependencies": {"checks": []}}]
         self._patch_registry(monkeypatch, ws, catalog)

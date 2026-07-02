@@ -10,7 +10,7 @@ import subprocess
 
 import pytest
 
-from vivarium_dashboard.lib import test_run_views
+from vivarium_workbench.lib import test_run_views
 
 
 def _make_ws(tmp_path):
@@ -52,7 +52,7 @@ class TestStudyTestsRun:
             tests = [{"nodeid": "t::a", "outcome": "passed"}]
             note = "ran 3"
 
-        from vivarium_dashboard.lib import study_tests
+        from vivarium_workbench.lib import study_tests
         captured = {}
 
         def _fake(workspace, slug):
@@ -76,7 +76,7 @@ class TestStudyTestsRun:
         spec.parent.mkdir(parents=True)
         spec.write_text("baseline: []\n", encoding="utf-8")
 
-        from vivarium_dashboard.lib import study_tests
+        from vivarium_workbench.lib import study_tests
 
         def _raise(workspace, slug):
             raise study_tests.StudyTestsConcurrentError(

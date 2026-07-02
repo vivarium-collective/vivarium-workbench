@@ -42,12 +42,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
     ws_str = str(workspace)
     if ws_str not in sys.path:
         sys.path.insert(0, ws_str)
-    from vivarium_dashboard.lib._root import set_workspace_root
+    from vivarium_workbench.lib._root import set_workspace_root
     set_workspace_root(workspace)
 
     # Render the dashboard HTML once before serving.
     try:
-        from vivarium_dashboard.lib.report import render_dashboard
+        from vivarium_workbench.lib.report import render_dashboard
         render_dashboard(workspace, write_all=True)
     except Exception as e:
         print(f"warning: dashboard render failed: {e}", file=sys.stderr)
@@ -122,7 +122,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     # Boot the FastAPI app under uvicorn (the migration's typed seam is now the
     # served entrypoint; the legacy stdlib server.serve path is retired).
-    from vivarium_dashboard.lib.startup import serve_fastapi
+    from vivarium_workbench.lib.startup import serve_fastapi
     return serve_fastapi(workspace=workspace, port=port, host=host)
 
 
@@ -132,7 +132,7 @@ def migrate_investigations_to_studies(ws_root: Path, dry_run: bool = False) -> d
     Returns {migrated|would_migrate: N, errors: [{name, error}], warnings: [...]}.
     Idempotent: if investigations/ does not exist, returns migrated=0 immediately.
     """
-    from vivarium_dashboard.lib.spec_migration import migrate_v2_to_v3
+    from vivarium_workbench.lib.spec_migration import migrate_v2_to_v3
 
     inv_root = ws_root / "investigations"
     studies_root = ws_root / "studies"
@@ -193,7 +193,7 @@ def cmd_migrate_investigations(args: argparse.Namespace) -> int:
 
 def cmd_run_composite_worker(args: argparse.Namespace) -> int:
     """CLI handler for the run-composite subcommand — runs one detached composite."""
-    from vivarium_dashboard.lib.run_runner import execute
+    from vivarium_workbench.lib.run_runner import execute
     return execute(Path(args.request))
 
 
@@ -223,7 +223,7 @@ def _parse_params(pairs) -> dict:
 
 
 def cmd_run_study(args) -> int:
-    from vivarium_dashboard.lib import cli_runs
+    from vivarium_workbench.lib import cli_runs
     params = _parse_params(args.param)
     if args.seed is not None:
         params["seed"] = args.seed
@@ -240,7 +240,7 @@ def cmd_run_study(args) -> int:
 
 
 def cmd_run_investigation(args) -> int:
-    from vivarium_dashboard.lib import cli_runs
+    from vivarium_workbench.lib import cli_runs
     studies = args.studies.split(",") if args.studies else None
     resp, code = cli_runs.run_investigation(
         Path(args.workspace).resolve(), args.slug,
@@ -250,7 +250,7 @@ def cmd_run_investigation(args) -> int:
 
 
 def cmd_run_composite(args) -> int:
-    from vivarium_dashboard.lib import cli_runs
+    from vivarium_workbench.lib import cli_runs
     emit = args.emit.split(",") if args.emit else None
     resp, code = cli_runs.run_composite(
         Path(args.workspace).resolve(), args.spec_id,
@@ -264,7 +264,7 @@ def cmd_run_composite(args) -> int:
 
 
 def cmd_rerun(args) -> int:
-    from vivarium_dashboard.lib import cli_runs
+    from vivarium_workbench.lib import cli_runs
     resp, code = cli_runs.rerun(
         Path(args.workspace).resolve(), args.run_id,
         steps=args.steps, detach=args.detach)
@@ -273,7 +273,7 @@ def cmd_rerun(args) -> int:
 
 
 def cmd_runs(args) -> int:
-    from vivarium_dashboard.lib import cli_runs
+    from vivarium_workbench.lib import cli_runs
     rows = cli_runs.list_study_runs(Path(args.workspace).resolve(), args.slug)
     if args.json:
         print(json.dumps(rows, indent=2, default=str))
@@ -285,7 +285,7 @@ def cmd_runs(args) -> int:
 
 
 def cmd_status(args) -> int:
-    from vivarium_dashboard.lib import cli_runs
+    from vivarium_workbench.lib import cli_runs
     _db, row = cli_runs.find_run(Path(args.workspace).resolve(), args.run_id)
     if row is None:
         print(f"run not found: {args.run_id}")
@@ -298,7 +298,7 @@ _TERMINAL_STATUSES = {"completed", "failed", "cancelled", "error", "complete", "
 
 
 def cmd_logs(args) -> int:
-    from vivarium_dashboard.lib import cli_runs
+    from vivarium_workbench.lib import cli_runs
     ws = Path(args.workspace).resolve()
     text = cli_runs.read_run_log(ws, args.run_id)
     if text is None:
@@ -353,9 +353,9 @@ def cmd_run_remote(args: argparse.Namespace) -> int:
     composite to a .pbg document, submits it to sms-api, polls until
     completion, and lands results.zip in the workspace.
     """
-    from vivarium_dashboard.lib.remote_run import run_remote
-    from vivarium_dashboard.lib.sms_api_client import SmsApiClient, SmsApiError
-    from vivarium_dashboard.lib.workspace_deps_views import _sms_api_base
+    from vivarium_workbench.lib.remote_run import run_remote
+    from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
+    from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
     workspace = Path(args.workspace).resolve()
     if not (workspace / "workspace.yaml").is_file():
@@ -386,7 +386,7 @@ def cmd_run_remote(args: argparse.Namespace) -> int:
 
 
 def cmd_sync(args) -> int:
-    from vivarium_dashboard.lib.sync_workspace import sync_from_manifest
+    from vivarium_workbench.lib.sync_workspace import sync_from_manifest
 
     manifest = _load_manifest(args.manifest)
     dest = Path(args.dest) if args.dest else Path.cwd() / (manifest.get("workspace") or "workspace")
@@ -401,7 +401,7 @@ def cmd_sync(args) -> int:
 
 def cmd_prepare_investigation(args: argparse.Namespace) -> int:
     """CLI handler: prepare an investigation's coordinated generation."""
-    from vivarium_dashboard.lib.prepare_investigation import prepare_investigation
+    from vivarium_workbench.lib.prepare_investigation import prepare_investigation
     workspace = Path(args.workspace).resolve()
     if not (workspace / "workspace.yaml").is_file():
         print(f"ERROR: not a workspace (no workspace.yaml): {workspace}", file=sys.stderr)

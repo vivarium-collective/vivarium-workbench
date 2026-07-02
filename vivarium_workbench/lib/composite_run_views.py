@@ -21,8 +21,8 @@ import json
 import zipfile
 from pathlib import Path
 
-from vivarium_dashboard.lib import composite_runs as cr
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib import composite_runs as cr
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 _TERMINAL_STATUSES = {"completed", "failed", "orphaned"}
 

@@ -24,8 +24,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vivarium_dashboard.lib import catalog as _catalog
-from vivarium_dashboard.lib.catalog import (
+from vivarium_workbench.lib import catalog as _catalog
+from vivarium_workbench.lib.catalog import (
     _detect_workspace_venv_distributions,
     _read_workspace_pyproject_deps,
     build_catalog,

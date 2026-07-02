@@ -1,4 +1,4 @@
-from vivarium_dashboard.lib.readouts_views import _merge_readouts
+from vivarium_workbench.lib.readouts_views import _merge_readouts
 
 
 AVAIL = {"leaves": [
@@ -105,7 +105,7 @@ def test_build_study_readouts_honors_nested_workspace_layout(tmp_path):
     """A workspace.yaml that nests studies under workspace/studies (v2ecoli
     layout) must still resolve the study — not 404 'study not found'."""
     import yaml as _yaml
-    from vivarium_dashboard.lib.readouts_views import build_study_readouts
+    from vivarium_workbench.lib.readouts_views import build_study_readouts
 
     (tmp_path / "workspace.yaml").write_text(_yaml.safe_dump({
         "name": "ws",
@@ -129,7 +129,7 @@ def test_build_study_readouts_extracts_v4_conditions_baseline(tmp_path):
     conditions.baseline.composite — the worker must project it (not 422 with
     'study has no baseline composite')."""
     import yaml as _yaml
-    from vivarium_dashboard.lib.readouts_views import build_study_readouts
+    from vivarium_workbench.lib.readouts_views import build_study_readouts
 
     sd = tmp_path / "studies" / "v4demo"
     sd.mkdir(parents=True)
@@ -152,7 +152,7 @@ def test_readouts_remote_build_degrades_softly(tmp_path, monkeypatch):
     EXPECTED (no local ParCa cache) → soft 200 degrade with authored rows tagged
     'unverified', not a 422 error with the misleading 'not_in_emit_plan' tag."""
     import yaml as _yaml
-    from vivarium_dashboard.lib import readouts_views as rv
+    from vivarium_workbench.lib import readouts_views as rv
 
     sd = tmp_path / "studies" / "rdemo"
     sd.mkdir(parents=True)
@@ -179,7 +179,7 @@ def test_readouts_local_build_failure_still_422_but_unverified(tmp_path, monkeyp
     keeps the hard 422 (a real problem to fix), but the authored row is tagged
     'unverified' (it wasn't checked) rather than the misleading 'not_in_emit_plan'."""
     import yaml as _yaml
-    from vivarium_dashboard.lib import readouts_views as rv
+    from vivarium_workbench.lib import readouts_views as rv
 
     sd = tmp_path / "studies" / "ldemo"
     sd.mkdir(parents=True)

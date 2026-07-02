@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vivarium_dashboard.lib.single_study_report import (
+from vivarium_workbench.lib.single_study_report import (
     build_single_study_report_for_test,
     render_single_study_report,
     resolve_focus_study,
@@ -394,7 +394,7 @@ def test_epistemic_debts_panel_rendered(_ws):
 # section when the field is absent.
 # ---------------------------------------------------------------------------
 
-from vivarium_dashboard.lib.single_study_report import (  # noqa: E402
+from vivarium_workbench.lib.single_study_report import (  # noqa: E402
     _render_composition_commitment,
     _render_invariant_checks,
     _render_causal_necessity,
@@ -536,7 +536,7 @@ def test_representation_omitted_when_absent():
 # Wave 3a — workflow typing + framing render (critiques #10 / #7 / #18)
 # ---------------------------------------------------------------------------
 
-from vivarium_dashboard.lib.single_study_report import (  # noqa: E402
+from vivarium_workbench.lib.single_study_report import (  # noqa: E402
     _study_type,
     _render_study_type_badge,
     _next_action_type_chip,
@@ -605,7 +605,7 @@ def test_preregistration_chip_omitted_when_no_block(_ws):
 def test_preregistration_chip_renders_from_status(monkeypatch):
     # #18 — drive the chip directly via a stubbed preregistration_status so the
     # render is covered even when pbg-superpowers isn't importable.
-    import vivarium_dashboard.lib.single_study_report as ssr
+    import vivarium_workbench.lib.single_study_report as ssr
     monkeypatch.setattr(
         ssr, "_preregistration_status",
         lambda spec: {"preregistered": True, "registered_before_run": True,
@@ -629,7 +629,7 @@ def test_preregistration_chip_renders_from_status(monkeypatch):
 # calibration ladder #20).
 # ---------------------------------------------------------------------------
 
-from vivarium_dashboard.lib.single_study_report import (  # noqa: E402
+from vivarium_workbench.lib.single_study_report import (  # noqa: E402
     _claim_scope_chip,
     _generality_chip,
     _lifecycle_chip,
@@ -668,7 +668,7 @@ def test_generality_chip_axes_and_level():
 
 def test_lifecycle_chip_authored_and_floor(monkeypatch):
     # #25 — authored value wins; absent → derived floor (marked); none → ''.
-    import vivarium_dashboard.lib.single_study_report as ssr
+    import vivarium_workbench.lib.single_study_report as ssr
     monkeypatch.setattr(ssr, "_lifecycle_floor", lambda spec, f: None)
     assert ssr._lifecycle_chip({}, {}) == ""
     authored = ssr._lifecycle_chip({}, {"lifecycle_state": "generalized"})
@@ -774,7 +774,7 @@ def test_measurement_integrity_omitted_when_absent(_ws):
 def test_measurement_integrity_sensitivity_via_stub(monkeypatch, _ws):
     # #9 — drive the sensitivity mini-view through a stubbed bridge so the
     # render is covered even when pbg-superpowers lacks threshold_sensitivity.
-    import vivarium_dashboard.lib.single_study_report as ssr
+    import vivarium_workbench.lib.single_study_report as ssr
     monkeypatch.setattr(ssr, "_threshold_sensitivity",
                         lambda spec, name: [{"cutoff": 0.9, "result": "PASS"},
                                             {"cutoff": 1.1, "result": "FAIL"}])

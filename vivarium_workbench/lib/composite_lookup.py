@@ -356,7 +356,7 @@ def _dedupe_alias_composites(records: list) -> list:
     once and the kept id is the resolvable/explorable one. Records without a
     module, or with a unique (name, module), pass through unchanged.
 
-    Moved from ``vivarium_dashboard.server`` (Task 6) so it can be shared by
+    Moved from ``vivarium_workbench.server`` (Task 6) so it can be shared by
     ``server._composites_data`` (imported back) and ``lib.catalog`` without
     duplication.
     """
@@ -393,7 +393,7 @@ def composites_data(ws_root: Path) -> dict:
     collapses alias duplicates. Called by ``lib.composites_query`` (in a fresh
     subprocess) and by ``publish.build_bundle``.
 
-    Moved from ``vivarium_dashboard.server._composites_data`` so it has no
+    Moved from ``vivarium_workbench.server._composites_data`` so it has no
     dependency on the retired stdlib server or a module-global ``WORKSPACE``.
     """
     import importlib as _importlib
@@ -403,7 +403,7 @@ def composites_data(ws_root: Path) -> dict:
     if ws not in sys.path:
         sys.path.insert(0, ws)
     try:
-        from vivarium_dashboard.lib.workspace_manifest_views import filter_composites
+        from vivarium_workbench.lib.workspace_manifest_views import filter_composites
     except ImportError as e:
         return {"composites": [], "error": str(e)}
 

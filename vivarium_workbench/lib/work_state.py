@@ -127,7 +127,7 @@ def active_branch_action(ws_root: Path, commit_message: str, action_fn) -> tuple
     caller must have registered ``ws_root`` via ``set_workspace_root`` (the FastAPI
     seam + CLI do this at startup).
     """
-    from vivarium_dashboard.lib.git_status import dirty_workspace
+    from vivarium_workbench.lib.git_status import dirty_workspace
 
     ws_root = Path(ws_root)
     ws = str(ws_root)

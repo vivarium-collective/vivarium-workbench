@@ -1,5 +1,5 @@
 from pathlib import Path
-from vivarium_dashboard.lib import event_log
+from vivarium_workbench.lib import event_log
 from investigation_contracts import read_log, SCHEMA_VERSION
 
 

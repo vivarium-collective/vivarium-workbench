@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vivarium_dashboard.lib.study_seed import seed_followup_study
+from vivarium_workbench.lib.study_seed import seed_followup_study
 
 
 @pytest.fixture
@@ -170,7 +170,7 @@ def test_seed_from_finding_adds_investigation_backlink(_ws):
 
 
 def test_post_study_seed_followup_accepts_finding_id(_ws):
-    from vivarium_dashboard.lib.lifecycle_mutations import study_seed_followup as _post_study_seed_followup_for_test
+    from vivarium_workbench.lib.lifecycle_mutations import study_seed_followup as _post_study_seed_followup_for_test
     _write_parent_with_finding(_ws, "p1")
     body, code = _post_study_seed_followup_for_test(
         _ws, {"parent": "p1", "finding_id": "F-01"})
@@ -181,7 +181,7 @@ def test_post_study_seed_followup_accepts_finding_id(_ws):
 
 def test_post_study_seed_followup_legacy_still_works(_ws):
     """The legacy followup_idx path still routes (no finding_id)."""
-    from vivarium_dashboard.lib.lifecycle_mutations import study_seed_followup as _post_study_seed_followup_for_test
+    from vivarium_workbench.lib.lifecycle_mutations import study_seed_followup as _post_study_seed_followup_for_test
     _write_parent(_ws, "p1", follow_up_studies=[
         {"title": "old follow-up", "kind": "new", "why": "because"},
     ])
@@ -227,7 +227,7 @@ def test_post_study_seed_followup_accepts_study_type(_ws):
     """The endpoint threads study_type=diagnostic through to the seeded child
     (critique #19 — the failed-study seed button passes it). Uses the legacy
     followup path so the test does not depend on the pbg/ruamel finding path."""
-    from vivarium_dashboard.lib.lifecycle_mutations import study_seed_followup as _post_study_seed_followup_for_test
+    from vivarium_workbench.lib.lifecycle_mutations import study_seed_followup as _post_study_seed_followup_for_test
     _write_parent(_ws, "p1", follow_up_studies=[
         {"title": "diagnose the failure", "kind": "new", "why": "it failed"},
     ])

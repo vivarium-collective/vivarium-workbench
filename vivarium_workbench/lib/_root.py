@@ -1,4 +1,4 @@
-"""Workspace-root accessor used by ``vivarium_dashboard.lib.*`` helpers.
+"""Workspace-root accessor used by ``vivarium_workbench.lib.*`` helpers.
 
 After extraction from ``pbg-template/template/scripts/_lib/_root.py``, this
 module no longer walks up from ``__file__`` to find ``workspace.yaml`` (the
@@ -48,7 +48,7 @@ def workspace_root() -> Path:
             return candidate
     raise RuntimeError(
         "no workspace root registered and workspace.yaml not found in any "
-        f"ancestor of {here}; call vivarium_dashboard.lib._root.set_workspace_root() "
+        f"ancestor of {here}; call vivarium_workbench.lib._root.set_workspace_root() "
         "or run from inside a workspace"
     )
 
@@ -60,7 +60,7 @@ def workspace_paths() -> WorkspacePaths:
     it; the cache is invalidated whenever :func:`set_workspace_root` is called.
     Call sites use this instead of joining literal directory names::
 
-        from vivarium_dashboard.lib._root import workspace_paths
+        from vivarium_workbench.lib._root import workspace_paths
         wp = workspace_paths()
         path = wp.studies / name          # not: workspace_root() / "studies" / name
     """

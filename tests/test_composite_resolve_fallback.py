@@ -8,7 +8,7 @@ per-generator annotation.
 """
 import json
 
-from vivarium_dashboard.lib.composite_resolve import _committed_default_state
+from vivarium_workbench.lib.composite_resolve import _committed_default_state
 
 
 def _write_artifact(tmp_path, cid, payload):

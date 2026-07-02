@@ -33,9 +33,9 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib import study_crud_mutations
-from vivarium_dashboard.lib import study_spec
-from vivarium_dashboard.lib.json_serialize import _json_default
+from vivarium_workbench.lib import study_crud_mutations
+from vivarium_workbench.lib import study_spec
+from vivarium_workbench.lib.json_serialize import _json_default
 
 
 def _ws_add_to_sys_path(ws_root: Path) -> None:
@@ -72,9 +72,9 @@ def investigation_run_one(ws_root: Path, body: dict) -> tuple[dict, int]:
       * run FAILED                    → ``({"ok": False, "run_id", "error"}, 200)``
     """
     _ws_add_to_sys_path(ws_root)
-    from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
-    from vivarium_dashboard.lib.composite_lookup import substitute_parameters, find_composite_path
-    from vivarium_dashboard.lib import composite_runs as cr
+    from vivarium_workbench.lib.investigations import load_spec, InvestigationSpecError
+    from vivarium_workbench.lib.composite_lookup import substitute_parameters, find_composite_path
+    from vivarium_workbench.lib import composite_runs as cr
 
     inv = study_crud_mutations._study_name_from_body(body)
     sim_name = (body.get("sim_name") or "").strip() or "ad-hoc"

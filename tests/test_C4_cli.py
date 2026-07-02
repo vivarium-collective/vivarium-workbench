@@ -75,12 +75,12 @@ def _make_unpushed_git_repo(tmp_path: Path) -> Path:
 
 def test_run_remote_module_importable():
     """remote_run module must be importable."""
-    from vivarium_dashboard.lib import remote_run  # noqa: F401
+    from vivarium_workbench.lib import remote_run  # noqa: F401
 
 
 def test_git_pip_url_raises_for_dirty_tree(tmp_path):
     """git_pip_url raises RuntimeError when the git working tree is dirty."""
-    from vivarium_dashboard.lib.remote_run import git_pip_url
+    from vivarium_workbench.lib.remote_run import git_pip_url
 
     repo = _make_dirty_git_repo(tmp_path)
     with pytest.raises(RuntimeError, match="uncommitted|dirty|untracked"):
@@ -89,7 +89,7 @@ def test_git_pip_url_raises_for_dirty_tree(tmp_path):
 
 def test_git_pip_url_raises_for_unpushed_commits(tmp_path):
     """git_pip_url raises RuntimeError when HEAD is ahead of remote (unpushed)."""
-    from vivarium_dashboard.lib.remote_run import git_pip_url
+    from vivarium_workbench.lib.remote_run import git_pip_url
 
     repo = _make_unpushed_git_repo(tmp_path)
     with pytest.raises(RuntimeError, match="unpushed|not pushed|ahead"):
@@ -98,7 +98,7 @@ def test_git_pip_url_raises_for_unpushed_commits(tmp_path):
 
 def test_git_pip_url_returns_git_url_for_clean_pushed_repo(tmp_path):
     """git_pip_url returns a git+<origin>@<sha> URL for a clean pushed repo."""
-    from vivarium_dashboard.lib.remote_run import git_pip_url
+    from vivarium_workbench.lib.remote_run import git_pip_url
 
     repo = _make_clean_git_repo(tmp_path)
     url = git_pip_url(repo)
@@ -112,7 +112,7 @@ def test_git_pip_url_returns_git_url_for_clean_pushed_repo(tmp_path):
 
 def test_run_remote_calls_compose_submit(tmp_path):
     """run_remote calls compose_submit with the .pbg content."""
-    from vivarium_dashboard.lib.remote_run import run_remote
+    from vivarium_workbench.lib.remote_run import run_remote
 
     # Set up a clean repo with a workspace
     repo = _make_clean_git_repo(tmp_path)
@@ -131,8 +131,8 @@ def test_run_remote_calls_compose_submit(tmp_path):
         Path(out_path).write_text('{"state": {}, "schema": {}}')
         return Path(out_path)
 
-    with patch("vivarium_dashboard.lib.remote_run.export_composite_pbg", side_effect=fake_export), \
-         patch("vivarium_dashboard.lib.remote_run.git_pip_url", return_value="git+file:///r@abc123"):
+    with patch("vivarium_workbench.lib.remote_run.export_composite_pbg", side_effect=fake_export), \
+         patch("vivarium_workbench.lib.remote_run.git_pip_url", return_value="git+file:///r@abc123"):
         result = run_remote(repo, "test-composite", client=mock_client)
 
     mock_client.compose_submit.assert_called_once()
@@ -144,7 +144,7 @@ def test_run_remote_calls_compose_submit(tmp_path):
 
 def test_run_remote_passes_git_url_as_extra_dep(tmp_path):
     """run_remote passes the workspace git URL as extra_pip_deps to compose_submit."""
-    from vivarium_dashboard.lib.remote_run import run_remote
+    from vivarium_workbench.lib.remote_run import run_remote
 
     repo = _make_clean_git_repo(tmp_path)
     mock_client = MagicMock()
@@ -160,8 +160,8 @@ def test_run_remote_passes_git_url_as_extra_dep(tmp_path):
         Path(out_path).write_text('{"state": {}, "schema": {}}')
         return Path(out_path)
 
-    with patch("vivarium_dashboard.lib.remote_run.export_composite_pbg", side_effect=fake_export), \
-         patch("vivarium_dashboard.lib.remote_run.git_pip_url", return_value=git_url):
+    with patch("vivarium_workbench.lib.remote_run.export_composite_pbg", side_effect=fake_export), \
+         patch("vivarium_workbench.lib.remote_run.git_pip_url", return_value=git_url):
         run_remote(repo, "test-composite", client=mock_client)
 
     call_kwargs = mock_client.compose_submit.call_args
@@ -175,7 +175,7 @@ def test_run_remote_passes_git_url_as_extra_dep(tmp_path):
 
 def test_run_remote_returns_results_path(tmp_path):
     """run_remote returns the path to the downloaded results.zip."""
-    from vivarium_dashboard.lib.remote_run import run_remote
+    from vivarium_workbench.lib.remote_run import run_remote
 
     repo = _make_clean_git_repo(tmp_path)
     mock_client = MagicMock()
@@ -189,8 +189,8 @@ def test_run_remote_returns_results_path(tmp_path):
         Path(out_path).write_text('{"state": {}, "schema": {}}')
         return Path(out_path)
 
-    with patch("vivarium_dashboard.lib.remote_run.export_composite_pbg", side_effect=fake_export), \
-         patch("vivarium_dashboard.lib.remote_run.git_pip_url", return_value="git+file:///r@sha"):
+    with patch("vivarium_workbench.lib.remote_run.export_composite_pbg", side_effect=fake_export), \
+         patch("vivarium_workbench.lib.remote_run.git_pip_url", return_value="git+file:///r@sha"):
         result = run_remote(repo, "test-composite", client=mock_client)
 
     assert result == expected_path
@@ -202,7 +202,7 @@ def test_run_remote_returns_results_path(tmp_path):
 
 def test_run_remote_subcommand_exists_in_cli():
     """The 'run-remote' subcommand must be registered in cli.py."""
-    from vivarium_dashboard import cli
+    from vivarium_workbench import cli
 
     # Parse with --help should show run-remote exists (argparse raises SystemExit on --help)
     with pytest.raises(SystemExit):
@@ -211,7 +211,7 @@ def test_run_remote_subcommand_exists_in_cli():
 
 def test_run_remote_cli_accepts_workspace_and_composite(tmp_path):
     """run-remote CLI accepts --workspace and positional composite argument."""
-    from vivarium_dashboard import cli
+    from vivarium_workbench import cli
 
     # Use a parser-level check: just verify no "unrecognized argument" error
     # by checking the argparse namespace (don't actually run the submission)
@@ -224,9 +224,9 @@ def test_run_remote_cli_accepts_workspace_and_composite(tmp_path):
         return 0
 
     original = getattr(cli, "cmd_run_remote", None)
-    cli_module = sys.modules["vivarium_dashboard.cli"]
+    cli_module = sys.modules["vivarium_workbench.cli"]
     # Patch cmd_run_remote to avoid real execution
-    import vivarium_dashboard.cli as cli_mod
+    import vivarium_workbench.cli as cli_mod
     original_cmd = getattr(cli_mod, "cmd_run_remote", None)
     cli_mod.cmd_run_remote = fake_cmd_run_remote
     try:

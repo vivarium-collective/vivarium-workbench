@@ -29,8 +29,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vivarium_dashboard.lib import study_spec
-from vivarium_dashboard.lib import viz_core
+from vivarium_workbench.lib import study_spec
+from vivarium_workbench.lib import viz_core
 
 
 def visualization_preview(ws_root: Path, body: dict) -> tuple[dict, int]:
@@ -74,7 +74,7 @@ def visualization_preview(ws_root: Path, body: dict) -> tuple[dict, int]:
             notes.append(f"investigation '{inv_name}' has no runs.db; falling back to demo")
         else:
             try:
-                from vivarium_dashboard.lib.investigations import (
+                from vivarium_workbench.lib.investigations import (
                     gather_emitter_outputs, build_viz_composite,
                 )
                 gathered = gather_emitter_outputs(runs_db)

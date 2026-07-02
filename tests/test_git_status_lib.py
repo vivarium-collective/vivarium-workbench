@@ -1,4 +1,4 @@
-"""Parity and unit tests for vivarium_dashboard.lib.git_status.
+"""Parity and unit tests for vivarium_workbench.lib.git_status.
 
 Every test builds a hermetic git repo in ``tmp_path`` (no touches to the real
 repo).  The primary assertion is that the lib builder returns the expected dict
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import git_status as gs
+from vivarium_workbench.lib import git_status as gs
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +149,7 @@ class TestRemoteRepoUrl:
 
     def test_uses_lib_normalize_not_a_new_copy(self, monkeypatch, tmp_path: Path) -> None:
         """remote_repo_url routes through lib.source_build_views._normalize_repo_url."""
-        from vivarium_dashboard.lib import source_build_views as sbv
+        from vivarium_workbench.lib import source_build_views as sbv
         monkeypatch.setattr(
             gs.subprocess, "run",
             lambda *a, **k: _cp(returncode=0, stdout="ssh://git@host/r.git"),
@@ -160,7 +160,7 @@ class TestRemoteRepoUrl:
 
 class TestRemotePushAndSha:
     def test_success_returns_sha(self, monkeypatch, tmp_path: Path) -> None:
-        from vivarium_dashboard.lib import github_auth
+        from vivarium_workbench.lib import github_auth
         monkeypatch.setattr(github_auth, "current_token_env", lambda: {})
         calls = []
 
@@ -190,7 +190,7 @@ class TestRemotePushAndSha:
             gs.remote_push_and_sha(tmp_path)
 
     def test_push_failure_raises_with_tail(self, monkeypatch, tmp_path: Path) -> None:
-        from vivarium_dashboard.lib import github_auth
+        from vivarium_workbench.lib import github_auth
         monkeypatch.setattr(github_auth, "current_token_env", lambda: {})
 
         def _fake_run(args, **kwargs):
@@ -205,7 +205,7 @@ class TestRemotePushAndSha:
             gs.remote_push_and_sha(tmp_path)
 
     def test_empty_sha_raises(self, monkeypatch, tmp_path: Path) -> None:
-        from vivarium_dashboard.lib import github_auth
+        from vivarium_workbench.lib import github_auth
         monkeypatch.setattr(github_auth, "current_token_env", lambda: {})
 
         def _fake_run(args, **kwargs):

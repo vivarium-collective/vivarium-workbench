@@ -1,4 +1,4 @@
-"""vivarium_dashboard.publish — narrative export / "publish" CLI.
+"""vivarium_workbench.publish — narrative export / "publish" CLI.
 
 Sub-project #2: exports a workspace's investigations and studies into a
 self-contained static bundle (per-resource JSON + per-study shells + assets +
@@ -45,7 +45,7 @@ def _write_json(path: Path, data) -> None:
     than ship a misleading null-patched state. Callers that legitimately carry
     non-finite values should sanitize via ``lib.json_serialize._json_sanitize`` first.
     """
-    from vivarium_dashboard.lib.json_serialize import _json_default
+    from vivarium_workbench.lib.json_serialize import _json_default
     path.write_text(
         json.dumps(data, default=_json_default, allow_nan=False),
         encoding="utf-8",
@@ -67,7 +67,7 @@ def _snapshot_explorer(api_dir: Path, ws_root: Path,
     Only the first run is captured per-step (heavy); others get observables,
     validation, and last-step vectors (enough for scatter). Returns file count.
     """
-    from vivarium_dashboard.lib import explorer_data as E
+    from vivarium_workbench.lib import explorer_data as E
 
     base = api_dir / "explorer"
 
@@ -305,7 +305,7 @@ def _stage_gif_visualizations(spec: dict, ws_root: Path, out_dir: Path, slug: st
     artifact hosting until sms-api serves these.
     """
     try:
-        from vivarium_dashboard.lib import study_spec as _ss
+        from vivarium_workbench.lib import study_spec as _ss
         sdir = _ss.study_dir(ws_root, slug)
     except Exception:
         return
@@ -386,7 +386,7 @@ def _export_saved_visualizations(ws_root: Path, out_dir: Path,
         sibling ``meshes/`` dir, with the COPIED pack's mesh urls rewritten to be
         base-path-correct (see ``_rewrite_pack_mesh_urls``).
     """
-    from vivarium_dashboard.lib import saved_visualizations as _savedviz
+    from vivarium_workbench.lib import saved_visualizations as _savedviz
 
     viewer_dir = _savedviz.parsimony_viewer_dir()
     if viewer_dir is None:
@@ -512,7 +512,7 @@ def _render_home_html(ws_root: Path) -> str:
     import yaml
     import jinja2
     from jinja2 import select_autoescape
-    from vivarium_dashboard.lib.static_serving import TEMPLATES_DIR
+    from vivarium_workbench.lib.static_serving import TEMPLATES_DIR
 
     ws: dict = {}
     wf = ws_root / "workspace.yaml"
@@ -534,7 +534,7 @@ def _render_home_html(ws_root: Path) -> str:
     # GitHub repository this workspace is associated with (from `git remote
     # origin`) — rendered as a link in the rail header (live + published).
     try:
-        from vivarium_dashboard.lib.report import _detect_github_repo
+        from vivarium_workbench.lib.report import _detect_github_repo
         _repo_slug = _detect_github_repo(ws_root)
     except Exception:
         _repo_slug = None
@@ -601,7 +601,7 @@ def build_bundle(
             Pass via ``--base-path`` CLI.  Default ``""`` keeps root-absolute
             (domain-root) behavior unchanged.
     """
-    from vivarium_dashboard.lib._root import set_workspace_root
+    from vivarium_workbench.lib._root import set_workspace_root
 
     ws_root = Path(ws_root)
     out_dir = Path(out_dir)
@@ -633,24 +633,24 @@ def _do_build(
     base_path: str = "",
 ) -> dict:
     """Internal build routine — reads the workspace at ws_root via lib fns."""
-    from vivarium_dashboard.lib.static_serving import STATIC_DIR
-    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
-    from vivarium_dashboard.lib.study_charts import build_study_charts_payload
-    from vivarium_dashboard.lib.system_info import build_workspace_home
-    from vivarium_dashboard.lib.study_page import render_study_detail_html
-    from vivarium_dashboard.lib.investigation_status import (
+    from vivarium_workbench.lib.static_serving import STATIC_DIR
+    from vivarium_workbench.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    from vivarium_workbench.lib.study_charts import build_study_charts_payload
+    from vivarium_workbench.lib.system_info import build_workspace_home
+    from vivarium_workbench.lib.study_page import render_study_detail_html
+    from vivarium_workbench.lib.investigation_status import (
         build_iset_summary, study_run_slugs,
     )
-    from vivarium_dashboard.lib.report_views import build_inputs, build_iset_detail
-    from vivarium_dashboard.lib.catalog import build_catalog
-    from vivarium_dashboard.lib.composite_lookup import composites_data
-    from vivarium_dashboard.lib.composite_resolve import resolve_composite
-    from vivarium_dashboard.lib.registry import build_registry
-    from vivarium_dashboard.lib.data_sources import enumerate_data_sources
-    from vivarium_dashboard.lib.investigations_index import build_investigations
-    from vivarium_dashboard.lib.simulations_index import build_simulations_data
-    from vivarium_dashboard.lib.visualization_classes import list_visualization_classes
-    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+    from vivarium_workbench.lib.report_views import build_inputs, build_iset_detail
+    from vivarium_workbench.lib.catalog import build_catalog
+    from vivarium_workbench.lib.composite_lookup import composites_data
+    from vivarium_workbench.lib.composite_resolve import resolve_composite
+    from vivarium_workbench.lib.registry import build_registry
+    from vivarium_workbench.lib.data_sources import enumerate_data_sources
+    from vivarium_workbench.lib.investigations_index import build_investigations
+    from vivarium_workbench.lib.simulations_index import build_simulations_data
+    from vivarium_workbench.lib.visualization_classes import list_visualization_classes
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
     # runs-presence check for the investigation-summaries builder (mirrors the
     # retired server._build_iset_summary_for_test shim).
@@ -824,10 +824,10 @@ def _do_build(
     # Without this the read-only References cards fetch /api/references-bib and
     # 404 in snapshot mode, so the published dashboard shows no papers at all.
     try:
-        from vivarium_dashboard.lib.report import _parse_bib_entries
+        from vivarium_workbench.lib.report import _parse_bib_entries
         references_entries = _parse_bib_entries(ws_root)
         try:
-            from vivarium_dashboard.lib.references_fetch import (
+            from vivarium_workbench.lib.references_fetch import (
                 load_cache, enrich_entries,
             )
             references_entries = enrich_entries(
@@ -851,7 +851,7 @@ def _do_build(
     # bundle/investigation-notebooks/ — the coder-facing complement to the HTML
     # report. Deterministic; guarded per investigation so one failure never
     # aborts the publish (same pattern as the study/charts loops).
-    from vivarium_dashboard.lib.notebook_export import export_investigation_notebook
+    from vivarium_workbench.lib.notebook_export import export_investigation_notebook
     nb_out_dir = out_dir / "investigation-notebooks"
     notebook_manifest: list[dict] = []
     for inv_name in investigations:

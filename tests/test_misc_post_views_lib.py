@@ -13,8 +13,8 @@ import subprocess
 
 import pytest
 
-from vivarium_dashboard.lib import misc_post_views
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib import misc_post_views
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 def _make_ws(tmp_path, name="demo-ws", description="a demo"):

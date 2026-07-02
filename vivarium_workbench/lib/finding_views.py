@@ -7,14 +7,14 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib.atomic_io import atomic_write_text
-from vivarium_dashboard.lib.event_log import emit_event
+from vivarium_workbench.lib.atomic_io import atomic_write_text
+from vivarium_workbench.lib.event_log import emit_event
 from investigation_contracts.lifecycle import initial_state
 
 
 def _study_dir(ws_root: Path, slug: str) -> Path | None:
     try:
-        from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+        from vivarium_workbench.lib.workspace_paths import WorkspacePaths
         wp = WorkspacePaths.load(ws_root)
         d = wp.studies / slug
         if d.is_dir():

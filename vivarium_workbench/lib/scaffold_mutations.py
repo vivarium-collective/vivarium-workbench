@@ -74,8 +74,8 @@ def investigation_create(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, in
     # — the same shape dnaa-replication evolved through use — without having
     # to read docs first. All v2 fields are optional, so the spec validates
     # on day one and the user opts in by uncommenting sections.
-    from vivarium_dashboard.lib.scaffold_yaml import v2_investigation_scaffold
-    from vivarium_dashboard.lib.atomic_io import atomic_write_text
+    from vivarium_workbench.lib.scaffold_yaml import v2_investigation_scaffold
+    from vivarium_workbench.lib.atomic_io import atomic_write_text
 
     body_yaml = v2_investigation_scaffold(
         name,
@@ -91,7 +91,7 @@ def investigation_create(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, in
     # minimal `_build_iset_detail_for_test` shape (every legacy key present with
     # an equal value, plus richer fields). Verified additive-only by
     # tests/test_scaffold_mutations_lib.py::TestIsetDetailAdditive.
-    from vivarium_dashboard.lib.report_views import build_iset_detail as _bld
+    from vivarium_workbench.lib.report_views import build_iset_detail as _bld
     detail = _bld(ws_root, name)
     if detail is None:
         return {"error": "created investigation but failed to load detail"}, 500
@@ -161,7 +161,7 @@ def iset_clone(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
 
     # build_iset_detail returns an additive SUPERSET of the legacy seam's
     # minimal shape (see investigation_create) plus the clone_summary field below.
-    from vivarium_dashboard.lib.report_views import build_iset_detail as _bld
+    from vivarium_workbench.lib.report_views import build_iset_detail as _bld
     detail = _bld(ws_root, target)
     if detail is None:
         return {"error": "cloned investigation but failed to load detail"}, 500
@@ -190,7 +190,7 @@ def delete_investigation(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, in
     if not name:
         return {"error": "name is required"}, 400
 
-    from vivarium_dashboard.lib import study_spec as _study_spec
+    from vivarium_workbench.lib import study_spec as _study_spec
 
     inv_dir = _study_spec.study_dir(ws_root, name)
     if not inv_dir.is_dir():

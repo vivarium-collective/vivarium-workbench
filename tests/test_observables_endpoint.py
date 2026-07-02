@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib.observables_views import (
+from vivarium_workbench.lib.observables_views import (
     augment_lineage_aliases,
     build_observables,
     build_study_observable_check,

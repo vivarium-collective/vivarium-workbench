@@ -26,8 +26,8 @@ from typing import Optional
 
 import yaml
 
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
-from vivarium_dashboard.lib import study_derivations as _D
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib import study_derivations as _D
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +204,7 @@ def _reproduce_block_html(spec: dict, slug: str) -> str:
     Commands are sourced exclusively from ``run_commands.study_run_commands``
     so this block can never drift from the CLI's actual command surface.
     """
-    from vivarium_dashboard.lib.run_commands import study_run_commands
+    from vivarium_workbench.lib.run_commands import study_run_commands
     c = study_run_commands(spec, slug)
     rows = [
         f'<div><code>{_h(c["baseline"])}</code>'
@@ -1840,7 +1840,7 @@ def _resolve_composite_doc(ws_root: Path, spec: dict) -> Optional[dict]:
     # 2) workspace file (dotted spec id or relative path)
     if doc is None:
         try:
-            from vivarium_dashboard.lib.composite_lookup import find_composite_path
+            from vivarium_workbench.lib.composite_lookup import find_composite_path
             ws_data = yaml.safe_load(
                 (Path(ws_root) / "workspace.yaml").read_text(encoding="utf-8")) or {}
             pkg = ws_data.get("package_path") or (
@@ -1859,7 +1859,7 @@ def _resolve_composite_doc(ws_root: Path, spec: dict) -> Optional[dict]:
     if not isinstance(doc, dict) or not doc:
         return None
     try:
-        from vivarium_dashboard.lib.process_docs import (
+        from vivarium_workbench.lib.process_docs import (
             attach_process_docs, summarize_large_values,
         )
         doc = summarize_large_values(doc)
@@ -2222,7 +2222,7 @@ def render_single_study_report(
     # that don't resolve against the live registry. Best-effort; empty on failure.
     unresolved_composites: list[str] = []
     try:
-        from vivarium_dashboard.lib.composite_lookup import (
+        from vivarium_workbench.lib.composite_lookup import (
             known_composite_ids, unresolved_study_composite_refs,
         )
         unresolved_composites = unresolved_study_composite_refs(

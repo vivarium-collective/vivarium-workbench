@@ -38,19 +38,19 @@ from typing import Any
 
 import yaml
 
-from vivarium_dashboard.lib.pdf_metadata import (
+from vivarium_workbench.lib.pdf_metadata import (
     auto_bib_key,
     build_bibtex,
     extract_pdf_metadata,
 )
-from vivarium_dashboard.lib.study_spec import SLUG_RE as _SLUG_RE
-from vivarium_dashboard.lib.upload_mutations import (
+from vivarium_workbench.lib.study_spec import SLUG_RE as _SLUG_RE
+from vivarium_workbench.lib.upload_mutations import (
     _append_investigation_input,
     _save_upload,
     _ws_add_to_sys_path,
 )
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
-from vivarium_dashboard.lib.workspace_yaml import load_workspace, save_workspace
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.workspace_yaml import load_workspace, save_workspace
 
 
 # ---------------------------------------------------------------------------

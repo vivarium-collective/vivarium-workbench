@@ -11,10 +11,10 @@ import json
 
 import pytest
 
-from vivarium_dashboard.lib import _root
-from vivarium_dashboard.lib import active_workspace
-from vivarium_dashboard.lib import source_build_views
-from vivarium_dashboard.lib.sms_api_client import SmsApiError
+from vivarium_workbench.lib import _root
+from vivarium_workbench.lib import active_workspace
+from vivarium_workbench.lib import source_build_views
+from vivarium_workbench.lib.sms_api_client import SmsApiError
 
 
 @pytest.fixture(autouse=True)

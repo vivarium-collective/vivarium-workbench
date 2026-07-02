@@ -5,8 +5,8 @@ import zipfile
 
 import pytest
 
-from vivarium_dashboard.lib import analysis_outputs as ao
-from vivarium_dashboard.lib.download_views import DownloadError
+from vivarium_workbench.lib import analysis_outputs as ao
+from vivarium_workbench.lib.download_views import DownloadError
 
 
 def _ws(tmp_path):

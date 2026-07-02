@@ -23,7 +23,7 @@ from typing import Any
 
 import yaml
 
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 # ---------------------------------------------------------------------------

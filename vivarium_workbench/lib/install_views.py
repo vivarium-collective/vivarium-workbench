@@ -35,10 +35,10 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib import install_errors as _install_errors
-from vivarium_dashboard.lib import registry as _registry
-from vivarium_dashboard.lib import workspace_deps_views as _workspace_deps
-from vivarium_dashboard.lib import workspace_yaml as _workspace_yaml
+from vivarium_workbench.lib import install_errors as _install_errors
+from vivarium_workbench.lib import registry as _registry
+from vivarium_workbench.lib import workspace_deps_views as _workspace_deps
+from vivarium_workbench.lib import workspace_yaml as _workspace_yaml
 
 
 def _ws_add_to_sys_path(ws_root: Path) -> None:

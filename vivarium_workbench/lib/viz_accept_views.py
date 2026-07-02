@@ -28,7 +28,7 @@ from typing import Any
 
 import yaml
 
-from vivarium_dashboard.lib.registry import clear_registry_cache
+from vivarium_workbench.lib.registry import clear_registry_cache
 
 
 def _ws_add_to_sys_path(ws_root: Path) -> None:

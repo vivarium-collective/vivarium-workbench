@@ -1,8 +1,8 @@
-# vivarium_dashboard/testing/test_modular_tests_payload.py
+# vivarium_workbench/testing/test_modular_tests_payload.py
 import json
 from pathlib import Path
 
-from vivarium_dashboard.lib import study_spec
+from vivarium_workbench.lib import study_spec
 
 
 def _ws(tmp_path):

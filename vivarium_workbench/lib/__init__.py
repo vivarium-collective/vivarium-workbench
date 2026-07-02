@@ -1,6 +1,6 @@
 """Workspace helper modules used by the Vivarium dashboard runtime.
 
-Most modules expect ``vivarium_dashboard.lib._root.set_workspace_root(...)``
+Most modules expect ``vivarium_workbench.lib._root.set_workspace_root(...)``
 (or ``configure_workspace_root``) to be called once, at server startup,
 with the absolute path of the active workspace. Helpers that previously
 walked up from ``__file__`` to find ``workspace.yaml`` now read the

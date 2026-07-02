@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib.report_views import build_iset_detail, build_report_lint
-from vivarium_dashboard.lib.study_spec import load_study_detail_spec
+from vivarium_workbench.lib.report_views import build_iset_detail, build_report_lint
+from vivarium_workbench.lib.study_spec import load_study_detail_spec
 
 _V2E = Path("/Users/eranagmon/code/v2e-invest")
 pytestmark = pytest.mark.skipif(

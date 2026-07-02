@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vivarium_dashboard.lib.scaffold_mutations import (
+from vivarium_workbench.lib.scaffold_mutations import (
     delete_investigation,
     investigation_create,
     iset_clone,
@@ -222,7 +222,7 @@ def test_delete_investigation_not_found(ws: Path) -> None:
 def test_fastapi_route_returns_plain_lib_result(ws: Path) -> None:
     """The FastAPI route returns delete_investigation's tuple directly."""
     from fastapi.testclient import TestClient
-    from vivarium_dashboard.api.app import create_app, get_workspace
+    from vivarium_workbench.api.app import create_app, get_workspace
 
     investigation_create(ws, {"name": "to-nuke"})
     app = create_app()

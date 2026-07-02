@@ -21,7 +21,7 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from vivarium_dashboard.lib.metadata_mutations import set_study_narrative as _post_study_narrative_set_for_test
+from vivarium_workbench.lib.metadata_mutations import set_study_narrative as _post_study_narrative_set_for_test
 
 
 # ---------------------------------------------------------------------------

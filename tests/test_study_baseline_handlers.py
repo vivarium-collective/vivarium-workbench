@@ -23,7 +23,7 @@ def _study_ws(tmp_path):
 
 
 def test_baseline_add_appends(_study_ws):
-    from vivarium_dashboard.lib.study_crud_mutations import study_baseline_add as _post_study_baseline_add_for_test
+    from vivarium_workbench.lib.study_crud_mutations import study_baseline_add as _post_study_baseline_add_for_test
     resp, code = _post_study_baseline_add_for_test(
         _study_ws,
         {"study": "s1", "name": "alt",
@@ -38,7 +38,7 @@ def test_baseline_add_appends(_study_ws):
 
 
 def test_baseline_add_default_empty_params(_study_ws):
-    from vivarium_dashboard.lib.study_crud_mutations import study_baseline_add as _post_study_baseline_add_for_test
+    from vivarium_workbench.lib.study_crud_mutations import study_baseline_add as _post_study_baseline_add_for_test
     resp, code = _post_study_baseline_add_for_test(
         _study_ws,
         {"study": "s1", "name": "alt", "composite": "pkg.composites.bar"},
@@ -50,7 +50,7 @@ def test_baseline_add_default_empty_params(_study_ws):
 
 
 def test_baseline_add_rejects_missing_composite(_study_ws):
-    from vivarium_dashboard.lib.study_crud_mutations import study_baseline_add as _post_study_baseline_add_for_test
+    from vivarium_workbench.lib.study_crud_mutations import study_baseline_add as _post_study_baseline_add_for_test
     resp, code = _post_study_baseline_add_for_test(
         _study_ws,
         {"study": "s1", "name": "alt"},
@@ -60,7 +60,7 @@ def test_baseline_add_rejects_missing_composite(_study_ws):
 
 
 def test_baseline_add_rejects_duplicate_name(_study_ws):
-    from vivarium_dashboard.lib.study_crud_mutations import study_baseline_add as _post_study_baseline_add_for_test
+    from vivarium_workbench.lib.study_crud_mutations import study_baseline_add as _post_study_baseline_add_for_test
     resp, code = _post_study_baseline_add_for_test(
         _study_ws,
         {"study": "s1", "name": "core", "composite": "pkg.composites.other"},
@@ -70,7 +70,7 @@ def test_baseline_add_rejects_duplicate_name(_study_ws):
 
 
 def test_baseline_add_rejects_missing_name(_study_ws):
-    from vivarium_dashboard.lib.study_crud_mutations import study_baseline_add as _post_study_baseline_add_for_test
+    from vivarium_workbench.lib.study_crud_mutations import study_baseline_add as _post_study_baseline_add_for_test
     resp, code = _post_study_baseline_add_for_test(
         _study_ws,
         {"study": "s1", "composite": "pkg.composites.other"},
@@ -80,7 +80,7 @@ def test_baseline_add_rejects_missing_name(_study_ws):
 
 def test_baseline_remove_succeeds(_study_ws):
     """Removing a baseline entry that no variant references → 200."""
-    from vivarium_dashboard.lib.study_crud_mutations import (
+    from vivarium_workbench.lib.study_crud_mutations import (
         study_baseline_add as _post_study_baseline_add_for_test,
         study_baseline_remove as _post_study_baseline_remove_for_test,
     )
@@ -96,7 +96,7 @@ def test_baseline_remove_succeeds(_study_ws):
 
 
 def test_baseline_remove_404_unknown(_study_ws):
-    from vivarium_dashboard.lib.study_crud_mutations import study_baseline_remove as _post_study_baseline_remove_for_test
+    from vivarium_workbench.lib.study_crud_mutations import study_baseline_remove as _post_study_baseline_remove_for_test
     resp, code = _post_study_baseline_remove_for_test(
         _study_ws, {"study": "s1", "name": "ghost"},
     )
@@ -105,7 +105,7 @@ def test_baseline_remove_404_unknown(_study_ws):
 
 def test_baseline_remove_409_when_variant_references_it(_study_ws):
     """Refuses to remove a baseline entry that variants depend on."""
-    from vivarium_dashboard.lib.study_crud_mutations import (
+    from vivarium_workbench.lib.study_crud_mutations import (
         study_variant_add as _post_study_variant_add_for_test,
         study_baseline_remove as _post_study_baseline_remove_for_test,
     )
@@ -122,7 +122,7 @@ def test_baseline_remove_409_when_variant_references_it(_study_ws):
 
 def test_baseline_remove_400_when_would_be_empty(_study_ws):
     """Refuses to remove the last baseline entry."""
-    from vivarium_dashboard.lib.study_crud_mutations import study_baseline_remove as _post_study_baseline_remove_for_test
+    from vivarium_workbench.lib.study_crud_mutations import study_baseline_remove as _post_study_baseline_remove_for_test
     resp, code = _post_study_baseline_remove_for_test(
         _study_ws, {"study": "s1", "name": "core"},
     )

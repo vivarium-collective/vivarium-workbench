@@ -15,8 +15,8 @@ from pathlib import Path
 import yaml
 import pytest
 
-from vivarium_dashboard.lib import study_runs
-from vivarium_dashboard.lib import composite_subprocess, study_run_state
+from vivarium_workbench.lib import study_runs
+from vivarium_workbench.lib import composite_subprocess, study_run_state
 
 
 def _ok():

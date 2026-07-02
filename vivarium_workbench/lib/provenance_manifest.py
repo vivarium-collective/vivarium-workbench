@@ -48,7 +48,7 @@ def lockfile_hash(ws_root: Path) -> str | None:
 def _result_pointers(ws_root: Path) -> dict:
     """Best-effort: distinct result store_paths for this workspace's runs."""
     try:
-        from vivarium_dashboard.lib.simulations_index import list_simulations
+        from vivarium_workbench.lib.simulations_index import list_simulations
         data = list_simulations(Path(ws_root))
         rows = data.get("simulations", []) if isinstance(data, dict) else (data or [])
         stores = []
@@ -87,7 +87,7 @@ def build_manifest(ws_root: Path) -> dict:
         branch = git_branch(ws_root)
 
     try:
-        from vivarium_dashboard.lib.workspace_deps_views import read_workspace_name
+        from vivarium_workbench.lib.workspace_deps_views import read_workspace_name
         name = read_workspace_name(ws_root)
     except Exception:
         name = ws_root.name

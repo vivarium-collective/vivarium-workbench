@@ -31,9 +31,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-import vivarium_dashboard as _vd_pkg
-from vivarium_dashboard.lib.saved_visualizations import parsimony_viewer_dir
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+import vivarium_workbench as _vd_pkg
+from vivarium_workbench.lib.saved_visualizations import parsimony_viewer_dir
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 # Package-bundled static dir (style.css, walkthrough.js, vivarium-logo.png,
 # render-helpers.js, client.js, ...).  Derived from the package, NOT from

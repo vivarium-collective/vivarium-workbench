@@ -28,7 +28,7 @@ def _ws_with_v2_investigation(tmp_path):
 
 
 def test_migration_creates_studies_dir(_ws_with_v2_investigation):
-    from vivarium_dashboard.cli import migrate_investigations_to_studies
+    from vivarium_workbench.cli import migrate_investigations_to_studies
     result = migrate_investigations_to_studies(_ws_with_v2_investigation, dry_run=False)
     sd = _ws_with_v2_investigation / "studies" / "old"
     assert sd.is_dir()
@@ -39,7 +39,7 @@ def test_migration_creates_studies_dir(_ws_with_v2_investigation):
 
 
 def test_migration_dry_run_makes_no_changes(_ws_with_v2_investigation):
-    from vivarium_dashboard.cli import migrate_investigations_to_studies
+    from vivarium_workbench.cli import migrate_investigations_to_studies
     result = migrate_investigations_to_studies(_ws_with_v2_investigation, dry_run=True)
     assert (_ws_with_v2_investigation / "investigations" / "old").is_dir()
     assert not (_ws_with_v2_investigation / "studies").exists()
@@ -49,7 +49,7 @@ def test_migration_dry_run_makes_no_changes(_ws_with_v2_investigation):
 def test_migration_rewrites_spec_to_v3(_ws_with_v2_investigation):
     """Plan 1 changed the v3 shape: ``baseline`` is now a list of
     ``{name, composite, params}`` mappings (not a single dict)."""
-    from vivarium_dashboard.cli import migrate_investigations_to_studies
+    from vivarium_workbench.cli import migrate_investigations_to_studies
     migrate_investigations_to_studies(_ws_with_v2_investigation, dry_run=False)
     spec = yaml.safe_load(
         (_ws_with_v2_investigation / "studies" / "old" / "study.yaml").read_text()
@@ -65,7 +65,7 @@ def test_migration_rewrites_spec_to_v3(_ws_with_v2_investigation):
 
 
 def test_migration_idempotent(_ws_with_v2_investigation):
-    from vivarium_dashboard.cli import migrate_investigations_to_studies
+    from vivarium_workbench.cli import migrate_investigations_to_studies
     migrate_investigations_to_studies(_ws_with_v2_investigation, dry_run=False)
     # Running again is a no-op (investigations/ is gone)
     result = migrate_investigations_to_studies(_ws_with_v2_investigation, dry_run=False)

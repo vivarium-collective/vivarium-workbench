@@ -1,4 +1,4 @@
-# vivarium_dashboard/testing/test_modular_tests_render.py
+# vivarium_workbench/testing/test_modular_tests_render.py
 from jinja2 import Environment, FileSystemLoader
 from pathlib import Path
 

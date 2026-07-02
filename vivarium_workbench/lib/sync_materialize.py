@@ -7,7 +7,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from vivarium_dashboard.lib.provenance_manifest import lockfile_hash
+from vivarium_workbench.lib.provenance_manifest import lockfile_hash
 
 
 def git_clone_checkout(repo: str, commit: str, dest: Path) -> tuple[dict, int]:

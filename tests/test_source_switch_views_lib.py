@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import pytest
 
-from vivarium_dashboard.lib import _root
-from vivarium_dashboard.lib import active_workspace
-from vivarium_dashboard.lib import source_switch_views
+from vivarium_workbench.lib import _root
+from vivarium_workbench.lib import active_workspace
+from vivarium_workbench.lib import source_switch_views
 
 
 @pytest.fixture(autouse=True)

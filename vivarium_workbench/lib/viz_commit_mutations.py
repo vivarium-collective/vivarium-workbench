@@ -27,7 +27,7 @@ from typing import Any
 
 import yaml
 
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 def _ws_add_to_sys_path(ws_root: Path) -> None:
@@ -101,7 +101,7 @@ def visualization_add(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]"
       400  validation failures (name required, regex, type/observables, unknown class)
       409  visualization name already registered
     """
-    from vivarium_dashboard.lib.visualization_classes import (
+    from vivarium_workbench.lib.visualization_classes import (
         list_visualization_classes as _list_viz_classes,
     )
 

@@ -2,7 +2,7 @@
 import yaml
 from pathlib import Path
 
-from vivarium_dashboard.lib.investigation_migrate import (
+from vivarium_workbench.lib.investigation_migrate import (
     needs_migration, migrate_investigation,
 )
 

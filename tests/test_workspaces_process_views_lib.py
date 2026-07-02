@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import workspaces_process_views as wp
+from vivarium_workbench.lib import workspaces_process_views as wp
 
 
 def _fake_catalog(workspaces=None, running=None, entry=None, **overrides):
@@ -141,7 +141,7 @@ class TestWorkspacesStart:
         )
         # The spawn argv + kwargs reproduce the legacy handler byte-for-byte.
         assert spawned["argv"] == [
-            wp.sys.executable, "-m", "vivarium_dashboard.cli",
+            wp.sys.executable, "-m", "vivarium_workbench.cli",
             "serve", "--workspace", str(Path(target).expanduser().resolve()),
         ]
         kw = spawned["kwargs"]

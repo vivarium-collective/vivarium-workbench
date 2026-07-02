@@ -31,10 +31,10 @@ from typing import Any
 
 import yaml
 
-from vivarium_dashboard.lib import investigation_status as _invstatus
-from vivarium_dashboard.lib.imports import register_import
-from vivarium_dashboard.lib.study_spec import SLUG_RE as _SLUG_RE
-from vivarium_dashboard.lib.workspace_yaml import (
+from vivarium_workbench.lib import investigation_status as _invstatus
+from vivarium_workbench.lib.imports import register_import
+from vivarium_workbench.lib.study_spec import SLUG_RE as _SLUG_RE
+from vivarium_workbench.lib.workspace_yaml import (
     WorkspaceValidationError,
     load_workspace,
     save_workspace,

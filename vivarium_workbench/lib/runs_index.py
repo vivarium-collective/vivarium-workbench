@@ -7,7 +7,7 @@ byte-identical to canonical (the drift guard in
 tests/test_runs_index_mirror.py compares both).
 
 The workspace-wide run listing itself is owned by
-``vivarium_dashboard.lib.simulations_index.list_simulations``; these helpers
+``vivarium_workbench.lib.simulations_index.list_simulations``; these helpers
 just classify an emitter store path into its canonical type label and are
 reused by the ``GET /api/simulations`` handler to tag each sim's emitter_type.
 """

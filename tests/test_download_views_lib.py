@@ -1,4 +1,4 @@
-"""Parity and unit tests for vivarium_dashboard.lib.download_views.
+"""Parity and unit tests for vivarium_workbench.lib.download_views.
 
 The download builders return raw bytes (or a path) plus serving metadata
 (content-type, inline-vs-attachment, filename). These tests verify the happy
@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vivarium_dashboard.lib import download_views as dv
+from vivarium_workbench.lib import download_views as dv
 
 
 # ---------------------------------------------------------------------------

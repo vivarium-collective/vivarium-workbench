@@ -1,6 +1,6 @@
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
-JS = (ROOT / "vivarium_dashboard/static/walkthrough.js").read_text()
+JS = (ROOT / "vivarium_workbench/static/walkthrough.js").read_text()
 
 
 def test_card_double_click_opens_full_study():

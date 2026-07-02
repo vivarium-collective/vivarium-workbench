@@ -6,7 +6,7 @@ generators.  Running a fresh Python interpreter in a child process avoids that
 problem: the child sees the full, current set.
 
 This module is **stdlib-only** (``subprocess``, ``json``, ``sys``).  It must
-never import ``vivarium_dashboard.server`` — the FastAPI seam (``api/app.py``)
+never import ``vivarium_workbench.server`` — the FastAPI seam (``api/app.py``)
 calls this from a context where importing server would couple the typed app to
 the legacy 16k-line module.
 
@@ -50,7 +50,7 @@ def composites_via_subprocess(ws_root: Path) -> dict | None:
     script = (
         "import json, sys\n"
         "from pathlib import Path\n"
-        "from vivarium_dashboard.lib.composite_lookup import composites_data\n"
+        "from vivarium_workbench.lib.composite_lookup import composites_data\n"
         f"_ws = Path({ws_root_str!r})\n"
         "try:\n"
         "    _result = composites_data(_ws)\n"

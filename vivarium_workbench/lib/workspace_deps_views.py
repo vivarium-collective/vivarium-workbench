@@ -4,7 +4,7 @@ These are pure, ws_root-parameterised functions extracted from server.py so the
 FastAPI seam (``api/app.py``) can call them without importing the stdlib server
 module.
 
-No imports from ``vivarium_dashboard.server`` — those live as shim wrappers
+No imports from ``vivarium_workbench.server`` — those live as shim wrappers
 inside server.py itself.
 """
 from __future__ import annotations
@@ -33,8 +33,8 @@ def build_source_builds() -> dict:
     no ws_root needed.  Always returns a dict — best-effort (empty builds +
     error reason when sms-api is down).
     """
-    from vivarium_dashboard.lib import remote_build_source
-    from vivarium_dashboard.lib.sms_api_client import SmsApiClient
+    from vivarium_workbench.lib import remote_build_source
+    from vivarium_workbench.lib.sms_api_client import SmsApiClient
 
     return remote_build_source.list_build_sources(SmsApiClient(_sms_api_base()))
 
@@ -246,7 +246,7 @@ def module_registry(ws_root: Path) -> list[dict]:
         from pbg_superpowers.catalog import load_registry
         return load_registry(ws_root)
     except Exception:
-        from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+        from vivarium_workbench.lib.workspace_paths import WorkspacePaths
         legacy = WorkspacePaths.load(ws_root).scripts / "_catalog" / "modules.json"
         if legacy.is_file():
             try:

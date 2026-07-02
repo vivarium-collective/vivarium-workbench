@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vivarium_dashboard.lib import composite_state_views as csv
+from vivarium_workbench.lib import composite_state_views as csv
 
 
 def _make_ws(tmp_path: Path) -> Path:
@@ -38,7 +38,7 @@ def _patch_subprocess(monkeypatch, result):
 
 def test_subprocess_script_does_not_import_server():
     src = inspect.getsource(csv.composite_state_via_subprocess)
-    assert "import vivarium_dashboard.server" not in src
+    assert "import vivarium_workbench.server" not in src
     assert "sys.path.insert(0, sys.argv[1])" in src
 
 

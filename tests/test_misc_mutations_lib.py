@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-from vivarium_dashboard.lib import misc_mutations as mm
+from vivarium_workbench.lib import misc_mutations as mm
 
 
 # ---------------------------------------------------------------------------

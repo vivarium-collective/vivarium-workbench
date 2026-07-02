@@ -1,12 +1,12 @@
 """Dashboard resolves nested investigation studies (Phase 2)."""
 import subprocess
 
-from vivarium_dashboard.lib.investigation_status import (
+from vivarium_workbench.lib.investigation_status import (
     build_iset_summary,
     read_study_status,
     study_run_slugs,
 )
-from vivarium_dashboard.lib.report_views import build_iset_detail
+from vivarium_workbench.lib.report_views import build_iset_detail
 
 
 def _has_runs_fn(ws):
@@ -75,8 +75,8 @@ def test_lifecycle_badge_main_vs_branch(tmp_path):
 
 
 def test_report_dir_and_helper(tmp_path):
-    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
-    from vivarium_dashboard.lib.download_views import (
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+    from vivarium_workbench.lib.download_views import (
         resolve_iset_report as _iset_report_file,
     )
     ws = _nested_ws(tmp_path)

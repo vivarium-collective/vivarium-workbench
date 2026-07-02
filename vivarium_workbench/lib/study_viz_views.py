@@ -8,7 +8,7 @@ HTTP-free builders behind four dashboard routes:
   * ``GET /api/ptools-launch/{study}``   → :func:`build_ptools_launch`
 
 Pure ``ws_root``-parameterised functions: NO ``import server`` (the stdlib
-``vivarium_dashboard.server`` keeps thin shims that delegate here, passing the
+``vivarium_workbench.server`` keeps thin shims that delegate here, passing the
 ``WORKSPACE`` global).  The FastAPI app imports this module directly.
 
 Helpers moved here from ``server.py``:
@@ -29,9 +29,9 @@ from urllib.parse import quote
 
 import yaml
 
-from vivarium_dashboard.lib.study_spec import study_dir as _study_dir_fn
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
-from vivarium_dashboard.lib.system_info import _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE
+from vivarium_workbench.lib.study_spec import study_dir as _study_dir_fn
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.system_info import _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE
 
 # ---------------------------------------------------------------------------
 # study_refresh_viz — re-render a study's declared visualizations
@@ -51,8 +51,8 @@ def study_refresh_viz(ws_root: Path, name: str) -> dict:
     ``{"error": ..., "not_found": True}`` when the study does not exist (the
     HTTP wrapper maps that to 404).
     """
-    from vivarium_dashboard.lib.refresh_viz import refresh_study_viz
-    from vivarium_dashboard.lib.study_charts import latest_run_row
+    from vivarium_workbench.lib.refresh_viz import refresh_study_viz
+    from vivarium_workbench.lib.study_charts import latest_run_row
 
     study_dir = WorkspacePaths.load(ws_root).studies / name
     if not study_dir.is_dir():
@@ -149,7 +149,7 @@ def build_study_bigraph_paths(
     cache_key = (str(source_file), mtime, max_depth)
     nodes = _BIGRAPH_PATH_CACHE.get(cache_key)
     if nodes is None:
-        from vivarium_dashboard.lib.composite_recipes import walk_state_snapshot
+        from vivarium_workbench.lib.composite_recipes import walk_state_snapshot
         try:
             doc = json.loads(source_file.read_text(encoding="utf-8"))
         except Exception as e:

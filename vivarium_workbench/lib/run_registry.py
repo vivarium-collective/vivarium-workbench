@@ -20,7 +20,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from vivarium_dashboard.lib import composite_runs as cr
+from vivarium_workbench.lib import composite_runs as cr
 
 # Maximum simultaneous in-flight runs. POST returns 429 above this.
 CONCURRENCY_CAP = 4
@@ -103,7 +103,7 @@ def spawn_detached(request_path: Path, *, workspace: Path,
         env = os.environ.copy()
         env["PYTHONPATH"] = str(workspace) + os.pathsep + env.get("PYTHONPATH", "")
         proc = subprocess.Popen(
-            [sys.executable, "-m", "vivarium_dashboard.cli",
+            [sys.executable, "-m", "vivarium_workbench.cli",
              "run-composite", "--request", str(request_path)],
             cwd=str(workspace),
             stdout=log_fh,

@@ -44,9 +44,9 @@ from typing import Any
 
 import yaml
 
-from vivarium_dashboard.lib import study_spec as _study_spec
-from vivarium_dashboard.lib.upload_mutations import _ws_add_to_sys_path
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib import study_spec as _study_spec
+from vivarium_workbench.lib.upload_mutations import _ws_add_to_sys_path
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 def _spec_path_for(inv_dir: Path) -> Path:
@@ -89,7 +89,7 @@ def add_investigation_composite(ws_root: Path, body: dict[str, Any]) -> "tuple[d
         return {"error": "investigation, name, source required"}, 400
 
     _ws_add_to_sys_path(ws_root)
-    from vivarium_dashboard.lib.investigation_migrate import (
+    from vivarium_workbench.lib.investigation_migrate import (
         _resolve_composite_source_or_generate,
         materialize_generator_doc,
     )
@@ -205,7 +205,7 @@ def perturb_investigation_composite(ws_root: Path, body: dict[str, Any]) -> "tup
     # NB: do NOT 409 on existing — perturb of an existing variant means
     # "edit this intervention", which overwrites the sidecar in-place.
 
-    from vivarium_dashboard.lib.composite_recipes import (
+    from vivarium_workbench.lib.composite_recipes import (
         apply_parameter_overrides, apply_process_overrides,
     )
     parent_doc = yaml.safe_load(parent.read_text(encoding="utf-8")) or {}
@@ -406,7 +406,7 @@ def rebuild_investigation_composite(ws_root: Path, body: dict[str, Any]) -> "tup
     if not parent_path.is_file():
         return {"error": f"parent {extends!r} document missing"}, 404
 
-    from vivarium_dashboard.lib.composite_recipes import (
+    from vivarium_workbench.lib.composite_recipes import (
         apply_parameter_overrides, apply_process_overrides,
     )
     parent_doc = yaml.safe_load(parent_path.read_text(encoding="utf-8")) or {}
@@ -481,8 +481,8 @@ def create_from_composite(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, i
 
     _ws_add_to_sys_path(ws_root)
     try:
-        from vivarium_dashboard.lib.composite_lookup import discover_all_composites
-        from vivarium_dashboard.lib.investigation_migrate import _resolve_composite_source
+        from vivarium_workbench.lib.composite_lookup import discover_all_composites
+        from vivarium_workbench.lib.investigation_migrate import _resolve_composite_source
     except ImportError as e:
         return {"error": f"composite lookup unavailable: {e}"}, 500
 
@@ -627,7 +627,7 @@ def delete_investigation_composite(ws_root: Path, body: dict[str, Any]) -> "tupl
     Status codes: 400 missing fields; 404 investigation not found;
     409 has dependents; 200 removed (``{ok: True}``).
     """
-    from vivarium_dashboard.lib import study_spec as _study_spec
+    from vivarium_workbench.lib import study_spec as _study_spec
 
     inv_name = (body.get("investigation") or "").strip()
     comp_name = (body.get("name") or "").strip()

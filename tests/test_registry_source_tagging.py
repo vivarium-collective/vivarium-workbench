@@ -120,7 +120,7 @@ def test_registry_environment_packages_not_in_workspace(registry_server):
     # and is not a framework package, should be environment_only.
     framework_pkgs = {
         "process_bigraph", "bigraph_schema", "bigraph_viz",
-        "pbg_superpowers", "vivarium_dashboard",
+        "pbg_superpowers", "vivarium_workbench",
     }
     for p in processes:
         top_pkg = p.get("address", "").split(".")[0]
@@ -294,7 +294,7 @@ def test_filter_catalog_keeps_installed_modules_outside_include():
     """`dashboard.registry.include` limits which *available* modules surface, but
     INSTALLED modules (the workspace's active deps) must always be kept — else a
     narrow include like [v2ecoli] hides pbg-emitters/viva-munk/etc."""
-    from vivarium_dashboard.lib import catalog
+    from vivarium_workbench.lib import catalog
 
     modules = [
         {"name": "v2ecoli", "installed": True},
@@ -313,7 +313,7 @@ def test_filter_catalog_keeps_installed_modules_outside_include():
 
 def test_filter_catalog_noop_without_include():
     """No include configured -> full catalog unchanged."""
-    from vivarium_dashboard.lib import catalog
+    from vivarium_workbench.lib import catalog
     modules = [{"name": "a", "installed": False}, {"name": "b", "installed": True}]
     assert catalog._filter_catalog_modules(modules, {}) == modules
 
@@ -323,7 +323,7 @@ def test_registry_filter_always_keeps_emitters():
     (the workspace's I/O backends, in framework/env packages outside the
     include) must always survive — else the Registry's Emitters section is
     empty under a repo-scoped include like [v2ecoli]."""
-    from vivarium_dashboard.lib import registry
+    from vivarium_workbench.lib import registry
 
     data = {"processes": [
         {"name": "EcoliWCM", "address": "v2ecoli.bridge.EcoliWCM", "kind": "process"},

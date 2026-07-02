@@ -1,6 +1,6 @@
 """Study-detail page builder — Jinja2 render + page builder.
 
-Extracted from ``vivarium_dashboard.server`` so both the FastAPI seam
+Extracted from ``vivarium_workbench.server`` so both the FastAPI seam
 (``api/app.py``) and ``server.py``'s handler can share one implementation.
 ``server.py`` re-exports ``_render_study_detail_html`` as a thin shim (2-arg
 ``(name, spec)``) so ``publish.py`` and existing call-sites keep working
@@ -21,11 +21,11 @@ import re
 from pathlib import Path
 from typing import Optional
 
-import vivarium_dashboard as _vd_pkg
+import vivarium_workbench as _vd_pkg
 
 _TEMPLATES_DIR: Path = Path(_vd_pkg.__file__).parent / "templates"
 
-from vivarium_dashboard.lib.study_spec import SLUG_RE as _SLUG_RE  # noqa: E402
+from vivarium_workbench.lib.study_spec import SLUG_RE as _SLUG_RE  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -161,14 +161,14 @@ def render_study_detail_html(ws_root: Path, name: str, spec: dict) -> str:
     """
     import yaml
     import jinja2
-    from vivarium_dashboard.lib.investigations import effective_status
-    from vivarium_dashboard.lib.study_spec import study_dir
+    from vivarium_workbench.lib.investigations import effective_status
+    from vivarium_workbench.lib.study_spec import study_dir
 
     spec = dict(spec)
     spec["runs"] = _enrich_runs_with_meta(study_dir(ws_root, name), spec.get("runs") or [])
     # Normalize implementation_requirements / gaps so the template iterates a
     # list of dicts — never a prose STRING.
-    from vivarium_dashboard.lib.spec_norm import normalize_requirements as _normalize_requirements
+    from vivarium_workbench.lib.spec_norm import normalize_requirements as _normalize_requirements
     if spec.get("implementation_requirements") is not None:
         spec["implementation_requirements"] = _normalize_requirements(
             spec.get("implementation_requirements"))
@@ -203,7 +203,7 @@ def render_study_detail_html(ws_root: Path, name: str, spec: dict) -> str:
     # Composite-resolution lint: flag declared composite refs that don't resolve.
     unresolved_composites: list = []
     try:
-        from vivarium_dashboard.lib.composite_lookup import (
+        from vivarium_workbench.lib.composite_lookup import (
             known_composite_ids, unresolved_study_composite_refs,
         )
         unresolved_composites = unresolved_study_composite_refs(
@@ -224,7 +224,7 @@ def build_study_detail_page(ws_root: Path, slug: str) -> tuple[str, int]:
     or 404 for an invalid/unknown slug.  The 404 bodies are byte-identical
     to the legacy handler's ``_send_html`` responses.
     """
-    from vivarium_dashboard.lib.study_spec import load_study_detail_spec
+    from vivarium_workbench.lib.study_spec import load_study_detail_spec
 
     if not _SLUG_RE.match(slug):
         return "<h1>Not found</h1>", 404

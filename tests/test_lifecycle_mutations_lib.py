@@ -1,4 +1,4 @@
-"""Tests for vivarium_dashboard.lib.lifecycle_mutations builders.
+"""Tests for vivarium_workbench.lib.lifecycle_mutations builders.
 
 Covers all 6 builders (happy + 400/404 per builder) and the shim-parity
 assertions confirming that server._for_test shims delegate to the lib.
@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-import vivarium_dashboard.lib.lifecycle_mutations as lifecycle_mutations
+import vivarium_workbench.lib.lifecycle_mutations as lifecycle_mutations
 
 
 # ---------------------------------------------------------------------------

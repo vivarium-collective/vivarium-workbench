@@ -11,7 +11,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from vivarium_dashboard.lib import explorer_data
+from vivarium_workbench.lib import explorer_data
 
 
 # ---------------------------------------------------------------------------

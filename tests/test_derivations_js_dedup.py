@@ -1,7 +1,7 @@
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
-SD = (ROOT / "vivarium_dashboard/static/study-detail.js")
-WT = (ROOT / "vivarium_dashboard/static/walkthrough.js")
+SD = (ROOT / "vivarium_workbench/static/study-detail.js")
+WT = (ROOT / "vivarium_workbench/static/walkthrough.js")
 
 
 def test_study_detail_js_reads_derived_not_recompute():

@@ -15,7 +15,7 @@ resolved, with a best-effort workspace ``build_core()`` threaded through for
 ``pbg_superpowers.readout_validation.available_observables``.
 
 Pure ``ws_root``-parameterised functions: NO ``import server`` (the stdlib
-``vivarium_dashboard.server`` keeps thin shims that delegate here, passing the
+``vivarium_workbench.server`` keeps thin shims that delegate here, passing the
 ``WORKSPACE`` global).  The FastAPI app imports this module directly.
 
 Caching: this module owns :data:`_OBS_CACHE`, DISJOINT from
@@ -147,7 +147,7 @@ def build_composite_state_for_observables(ws_root: Path, ref: str) -> tuple[Any,
 
     # Spec-parse branch (mirrors _get_composite_resolve): read the file +
     # substitute parameter defaults to get the live state tree.
-    from vivarium_dashboard.lib.composite_lookup import find_composite_path, substitute_parameters
+    from vivarium_workbench.lib.composite_lookup import find_composite_path, substitute_parameters
     path = find_composite_path(ws_root, pkg, ref)
     if path is None or not path.is_file():
         raise LookupError(f"composite not found: {ref}")
@@ -265,7 +265,7 @@ def build_study_observable_check(ws_root: Path, slug: str) -> tuple[dict, int]:
     does not expose. If the composite can't build, returns a clear non-500
     (422 + all readouts marked aspirational with a note), never a crash.
     """
-    from vivarium_dashboard.lib.study_spec import SLUG_RE, study_spec_file
+    from vivarium_workbench.lib.study_spec import SLUG_RE, study_spec_file
 
     ws_root = Path(ws_root)
     if not SLUG_RE.match(slug or ""):
@@ -284,7 +284,7 @@ def build_study_observable_check(ws_root: Path, slug: str) -> tuple[dict, int]:
         return {"error": f"study spec parse failed: {e}"}, 400
 
     # Project legacy v2 shape (baseline: <str>) into the v3 baseline list.
-    from vivarium_dashboard.lib.spec_migration import migrate_v2_to_v3
+    from vivarium_workbench.lib.spec_migration import migrate_v2_to_v3
     spec = migrate_v2_to_v3(spec)
 
     baseline = spec.get("baseline") or []
@@ -357,7 +357,7 @@ def _observables_for_ref(ws_root: Path, ref: str):
     external consumers that import it by that name (the dashboard's FastAPI seam
     uses ``build_observables`` directly).
     """
-    from vivarium_dashboard.lib.json_serialize import _json_body
+    from vivarium_workbench.lib.json_serialize import _json_body
     body, status = build_observables(ws_root, ref)
     return _json_body(body), status
 

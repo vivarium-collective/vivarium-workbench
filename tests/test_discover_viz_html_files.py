@@ -1,4 +1,4 @@
-"""Unit tests for vivarium_dashboard.server._discover_viz_html_files.
+"""Unit tests for vivarium_workbench.server._discover_viz_html_files.
 
 v2ecoli friction #17: an unconditional glob surfaced eagerly-rendered
 topology.html / workflow.html as "(auto)" tabs that persisted forever on
@@ -48,21 +48,21 @@ def _runs_db(path, *, latest_completed_at: float | None):
 
 
 def test_no_viz_dir_returns_empty(_ws):
-    from vivarium_dashboard.lib.study_spec import discover_viz_html_files
+    from vivarium_workbench.lib.study_spec import discover_viz_html_files
     assert discover_viz_html_files(_ws, "foo") == []
 
 
 def test_no_runs_db_skips_all_viz(_ws):
     """The genuine pre-data guard: no runs.db == no real run == no auto-viz.
     Eagerly-rendered junk on study-creation must not surface."""
-    from vivarium_dashboard.lib.study_spec import discover_viz_html_files
+    from vivarium_workbench.lib.study_spec import discover_viz_html_files
     _touch(_ws / "studies" / "s1" / "viz" / "topology.html", mtime=time.time())
     assert discover_viz_html_files(_ws, "s1") == []
 
 
 def test_viz_after_run_surfaces_not_stale(_ws):
     """Normal case: run completed, viz rendered just after → surfaced, fresh."""
-    from vivarium_dashboard.lib.study_spec import discover_viz_html_files
+    from vivarium_workbench.lib.study_spec import discover_viz_html_files
     now = time.time()
     _runs_db(_ws / "studies" / "s1" / "runs.db", latest_completed_at=now - 10)
     _touch(_ws / "studies" / "s1" / "viz" / "coupling-trace.html", mtime=now)
@@ -76,7 +76,7 @@ def test_viz_rendered_before_db_file_mtime_still_surfaces(_ws):
     """Regression: a WAL checkpoint bumps the runs.db FILE mtime after the
     viz was written, but the recorded run completed_at is older. The viz is
     legitimate and must NOT be dropped (the original silent-drop bug)."""
-    from vivarium_dashboard.lib.study_spec import discover_viz_html_files
+    from vivarium_workbench.lib.study_spec import discover_viz_html_files
     now = time.time()
     db = _ws / "studies" / "s1" / "runs.db"
     # run completed 20s ago; viz rendered right after (10s ago) ...
@@ -93,7 +93,7 @@ def test_stale_viz_is_surfaced_with_flag_not_dropped(_ws):
     """A new run happened after the viz was rendered: the chart predates the
     latest run. It is SURFACED with stale=True (and a warning note), never
     silently dropped."""
-    from vivarium_dashboard.lib.study_spec import discover_viz_html_files
+    from vivarium_workbench.lib.study_spec import discover_viz_html_files
     now = time.time()
     _runs_db(_ws / "studies" / "s1" / "runs.db", latest_completed_at=now)
     _touch(_ws / "studies" / "s1" / "viz" / "stale.html", mtime=now - 120)
@@ -106,7 +106,7 @@ def test_stale_viz_is_surfaced_with_flag_not_dropped(_ws):
 
 def test_mixed_fresh_and_stale_both_surface(_ws):
     """Both fresh and stale viz surface; staleness is flagged, not hidden."""
-    from vivarium_dashboard.lib.study_spec import discover_viz_html_files
+    from vivarium_workbench.lib.study_spec import discover_viz_html_files
     now = time.time()
     _runs_db(_ws / "studies" / "s1" / "runs.db", latest_completed_at=now)
     _touch(_ws / "studies" / "s1" / "viz" / "stale.html", mtime=now - 120)
@@ -125,7 +125,7 @@ def test_mixed_fresh_and_stale_both_surface(_ws):
 def test_discovers_reports_figures_without_runs_db_gate(_ws):
     """reports/figures/<name>/*.html surfaces even with no runs.db. These
     are hand-authored (not run-derived), so the runs.db gate doesn't apply."""
-    from vivarium_dashboard.lib.study_spec import discover_viz_html_files
+    from vivarium_workbench.lib.study_spec import discover_viz_html_files
     now = time.time()
     _touch(_ws / "reports" / "figures" / "s1" / "diagram.html", mtime=now)
     _touch(_ws / "reports" / "figures" / "s1" / "summary.html", mtime=now)
@@ -144,7 +144,7 @@ def test_discovers_reports_figures_without_runs_db_gate(_ws):
 def test_both_sources_concat(_ws):
     """A study with BOTH studies/<name>/viz/*.html (auto) and
     reports/figures/<name>/*.html (hand-authored) shows ALL entries."""
-    from vivarium_dashboard.lib.study_spec import discover_viz_html_files
+    from vivarium_workbench.lib.study_spec import discover_viz_html_files
     now = time.time()
     _runs_db(_ws / "studies" / "s1" / "runs.db", latest_completed_at=now)
     _touch(_ws / "studies" / "s1" / "viz" / "auto.html", mtime=now + 1)

@@ -1,11 +1,11 @@
-"""Unit tests for vivarium_dashboard.lib.simulations_index."""
+"""Unit tests for vivarium_workbench.lib.simulations_index."""
 from pathlib import Path
 
 import pytest
 import yaml
 
-from vivarium_dashboard.lib.composite_runs import connect, save_metadata
-from vivarium_dashboard.lib.simulations_index import list_simulations
+from vivarium_workbench.lib.composite_runs import connect, save_metadata
+from vivarium_workbench.lib.simulations_index import list_simulations
 
 
 def _seed_run(db_file, *, spec_id, run_id, started_at, sim_name=None):
@@ -343,7 +343,7 @@ def test_runs_meta_derives_study_slug_from_nested_db_path(tmp_path):
 
 import os
 
-from vivarium_dashboard.lib.simulations_index import (
+from vivarium_workbench.lib.simulations_index import (
     delete_simulation, RunNotFound,
 )
 
@@ -638,7 +638,7 @@ def test_discover_parquet_hives_finds_nested_and_flat(tmp_path):
     handle the flat ``parquet-runs/<run>/`` shape. Regression: previously only
     the flat depth-0 shape was found, so nested sweeps showed 0 runs.
     """
-    from vivarium_dashboard.lib.simulations_index import _discover_parquet_hives
+    from vivarium_workbench.lib.simulations_index import _discover_parquet_hives
 
     pr = tmp_path / "studies" / "s1" / "parquet-runs"
     # flat: hive IS the run dir

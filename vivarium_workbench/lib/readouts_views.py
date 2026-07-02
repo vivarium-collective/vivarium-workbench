@@ -156,7 +156,7 @@ def build_study_readouts(ws_root: Path, slug: str) -> tuple[dict, int]:
         # project it onto the legacy v3 baseline-list shape this worker reads
         # (mirrors study_runs.py / investigations.py).
         if spec.get("schema_version") == 4 and isinstance(spec.get("conditions"), dict):
-            from vivarium_dashboard.lib.investigations import (
+            from vivarium_workbench.lib.investigations import (
                 _project_v4_redesign_to_legacy_view,
             )
             spec = _project_v4_redesign_to_legacy_view(spec)

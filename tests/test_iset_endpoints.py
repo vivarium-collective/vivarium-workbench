@@ -11,16 +11,16 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vivarium_dashboard.lib.investigation_status import (
+from vivarium_workbench.lib.investigation_status import (
     compute_investigation_status,
     build_iset_summary,
     study_run_slugs,
 )
-from vivarium_dashboard.lib.report_views import (
+from vivarium_workbench.lib.report_views import (
     _compute_study_effective_status as compute_study_effective_status,
     build_iset_detail,
 )
-from vivarium_dashboard.lib.scaffold_mutations import (
+from vivarium_workbench.lib.scaffold_mutations import (
     investigation_create as _post_iset_create_for_test,
     iset_clone as _post_iset_clone_for_test,
 )
@@ -582,7 +582,7 @@ def test_iset_detail_discovery_implications_absent_is_empty_dict(_ws):
 # to [] with a single stderr warning rather than 500-ing the endpoint.
 # ---------------------------------------------------------------------------
 
-from vivarium_dashboard.lib.report_views import _coerce_list_field
+from vivarium_workbench.lib.report_views import _coerce_list_field
 
 
 def test_coerce_list_field_passes_through_list():
@@ -657,7 +657,7 @@ def test_iset_detail_with_list_acceptance_criteria_passes_through(_ws):
 def test_registry_imports_meta_dict_and_list_forms():
     """_registry_imports_meta returns per-repo metadata from workspace.yaml
     imports (both dict and list shapes), sorted by name."""
-    from vivarium_dashboard.lib.registry import _registry_imports_meta
+    from vivarium_workbench.lib.registry import _registry_imports_meta
 
     dict_form = {"imports": {
         "pbg_ketchup": {"source": "https://github.com/x/pbg-ketchup",
@@ -684,6 +684,6 @@ def test_registry_imports_meta_dict_and_list_forms():
 
 
 def test_registry_imports_meta_empty():
-    from vivarium_dashboard.lib.registry import _registry_imports_meta
+    from vivarium_workbench.lib.registry import _registry_imports_meta
     assert _registry_imports_meta({}) == []
     assert _registry_imports_meta(None) == []

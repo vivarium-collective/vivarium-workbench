@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib import composite_runs
+from vivarium_workbench.lib import composite_runs
 
 
 def _study_yaml(workspace: Path, study: str) -> Path | None:

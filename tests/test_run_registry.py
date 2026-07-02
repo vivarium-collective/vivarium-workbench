@@ -1,10 +1,10 @@
-"""Unit tests for vivarium_dashboard.lib.run_registry."""
+"""Unit tests for vivarium_workbench.lib.run_registry."""
 import os
 
-from vivarium_dashboard.lib.composite_runs import (
+from vivarium_workbench.lib.composite_runs import (
     connect, save_metadata, complete_metadata, query_run_meta,
 )
-from vivarium_dashboard.lib.run_registry import (
+from vivarium_workbench.lib.run_registry import (
     reconcile_stale_runs, count_running,
 )
 

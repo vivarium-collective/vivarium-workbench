@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 def parsimony_viewer_dir() -> Path | None:

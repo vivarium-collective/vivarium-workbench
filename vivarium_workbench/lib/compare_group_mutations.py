@@ -27,7 +27,7 @@ from typing import Any
 
 def _resolve_spec_path(ws_root: Path, inv_name: str) -> "Path | None":
     """Return the spec/study.yaml path for an investigation, or None if not found."""
-    from vivarium_dashboard.lib import study_spec as _study_spec
+    from vivarium_workbench.lib import study_spec as _study_spec
 
     inv_dir = _study_spec.study_dir(ws_root, inv_name)
     sp = (

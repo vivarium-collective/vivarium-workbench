@@ -139,7 +139,7 @@ def list_remote_simulations(ws_root: Path, base_url: str | None = None) -> list[
     if active_id is None:
         return []
     try:
-        from vivarium_dashboard.lib.sms_api_client import SmsApiClient, SmsApiError
+        from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
     except ImportError:
         return []
     client = SmsApiClient(base_url or _sms_api_base())

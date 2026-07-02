@@ -22,11 +22,11 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError
 
-from vivarium_dashboard.lib import composite_runs as cr
-from vivarium_dashboard.lib import emitters
-from vivarium_dashboard.lib import run_store
-from vivarium_dashboard.lib.models import SimRow
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib import composite_runs as cr
+from vivarium_workbench.lib import emitters
+from vivarium_workbench.lib import run_store
+from vivarium_workbench.lib.models import SimRow
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 class RunNotFound(Exception):
@@ -939,7 +939,7 @@ def _append_remote_simulations(sims: list, ws_root: Path) -> list:
     or when sms-api is unreachable — single source for the local+remote merge,
     shared by ``build_simulations_data`` and the ``/api/simulations`` handler."""
     try:
-        from vivarium_dashboard.lib.remote_simulations import list_remote_simulations
+        from vivarium_workbench.lib.remote_simulations import list_remote_simulations
         remote = list_remote_simulations(ws_root)
     except Exception:
         remote = []
@@ -964,7 +964,7 @@ def build_simulations_data(ws_root: Path) -> dict:
     except Exception:
         return {"simulations": [], "current": None}
     try:
-        from vivarium_dashboard.lib.runs_index import emitter_type_of
+        from vivarium_workbench.lib.runs_index import emitter_type_of
         _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray",
                           "none": "—"}  # no step emitter (summary-only run)
         for s in sims:
@@ -973,5 +973,5 @@ def build_simulations_data(ws_root: Path) -> dict:
     except Exception:
         pass
     sims = _append_remote_simulations(sims, ws_root)
-    from vivarium_dashboard.lib.investigation_status import current_branch_slug
+    from vivarium_workbench.lib.investigation_status import current_branch_slug
     return {"simulations": sims, "current": current_branch_slug(ws_root)}

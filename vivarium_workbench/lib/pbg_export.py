@@ -148,7 +148,7 @@ def export_composite_pbg(
     # Resolve spec: generator branch first, then static-file branch
     spec = _get_spec(composite_id)
     if spec is None:
-        from vivarium_dashboard.lib.composite_lookup import find_composite_path
+        from vivarium_workbench.lib.composite_lookup import find_composite_path
 
         ws_yaml = ws_root / "workspace.yaml"
         ws_data = (

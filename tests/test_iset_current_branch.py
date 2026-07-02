@@ -6,7 +6,7 @@ fallback when the branch isn't an exact/suffix match).
 """
 import subprocess
 
-from vivarium_dashboard.lib.investigation_status import (
+from vivarium_workbench.lib.investigation_status import (
     build_iset_summary,
     study_run_slugs,
 )

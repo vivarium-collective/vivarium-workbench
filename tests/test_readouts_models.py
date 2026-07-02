@@ -1,4 +1,4 @@
-from vivarium_dashboard.lib.models import ReadoutRow, StudyReadouts
+from vivarium_workbench.lib.models import ReadoutRow, StudyReadouts
 
 
 def test_readout_row_defaults_and_dump():

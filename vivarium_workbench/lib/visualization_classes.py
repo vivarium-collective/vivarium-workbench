@@ -1,6 +1,6 @@
 """List registered Visualization / Analysis classes for a workspace.
 
-Extracted from ``vivarium_dashboard.server._visualization_classes_data`` so the
+Extracted from ``vivarium_workbench.server._visualization_classes_data`` so the
 FastAPI seam (``api/app.py``) can call it without importing the stdlib server
 module.  The single implementation is shared: ``server.py`` re-imports
 ``list_visualization_classes`` and keeps its old ``_visualization_classes_data``

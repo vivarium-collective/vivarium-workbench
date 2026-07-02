@@ -19,9 +19,9 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import composite_subprocess as cs
-from vivarium_dashboard.lib import composite_runs as cr
-from vivarium_dashboard.lib import _root
+from vivarium_workbench.lib import composite_subprocess as cs
+from vivarium_workbench.lib import composite_runs as cr
+from vivarium_workbench.lib import _root
 import pbg_superpowers.composite_generator as cg
 
 
@@ -440,7 +440,7 @@ def test_xarray_default_nonv2ecoli_multigen_falls_back_to_sqlite(tmp_path, monke
     try:
         # Default emitter genuinely resolves to xarray for this workspace (so the
         # test is exercising the boundary path, not a sqlite shortcut).
-        from vivarium_dashboard.lib import emitters as _em
+        from vivarium_workbench.lib import emitters as _em
         assert _em.default_emitter({"runtime": {"default_emitter": "xarray"}}, None) == "xarray"
 
         resp, code = cs.run_composite_subprocess(
@@ -507,14 +507,14 @@ def test_xarray_default_nonv2ecoli_single_gen_writes_zarr(tmp_path, monkeypatch)
     # (2) The dashboard's study read-path RESOLVES it: zarr_store_for_sim maps
     # sim_name → latest completed run_id → the on-disk zarr store. This is the
     # exact resolver the study UI uses; a None here is the original Critical.
-    from vivarium_dashboard.lib import study_run_state
+    from vivarium_workbench.lib import study_run_state
     resolved_study = study_run_state.zarr_store_for_sim(db, "z-sim")
     assert resolved_study is not None, \
         "study read-path could not resolve the written zarr store (regression)"
     assert Path(resolved_study) == study_store
 
     # (3) Data round-trips through the read broker (read_source / reader_for).
-    from vivarium_dashboard.lib import emitters as _em
+    from vivarium_workbench.lib import emitters as _em
     kind, resolved = _em.read_source(str(study_store))
     assert kind == "zarr"
     assert Path(resolved) == study_store

@@ -1,6 +1,6 @@
 import yaml
 from pathlib import Path
-from vivarium_dashboard.lib.node_store import load_study_nodes, study_dir
+from vivarium_workbench.lib.node_store import load_study_nodes, study_dir
 
 
 def _seed(ws: Path):

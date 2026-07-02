@@ -1,6 +1,6 @@
 """Launch the typed FastAPI seam so you can browse the Swagger UI.
 
-    python -m vivarium_dashboard.api --workspace /path/to/workspace
+    python -m vivarium_workbench.api --workspace /path/to/workspace
 
 Then open the printed URLs:
     /docs           Swagger UI (interactive, try-it-out)
@@ -17,12 +17,12 @@ from __future__ import annotations
 import argparse
 import os
 
-from vivarium_dashboard.api.app import WORKSPACE_ENV
+from vivarium_workbench.api.app import WORKSPACE_ENV
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="python -m vivarium_dashboard.api",
+        prog="python -m vivarium_workbench.api",
         description="Serve the typed dashboard API and its Swagger UI (/docs).",
     )
     parser.add_argument(
@@ -45,7 +45,7 @@ def main() -> None:
     print(f"  ReDoc      : {base}/redoc")
     print(f"  OpenAPI    : {base}/openapi.json")
     # Import string (not the app object) so --reload works.
-    uvicorn.run("vivarium_dashboard.api.app:app", host=args.host, port=args.port, reload=args.reload)
+    uvicorn.run("vivarium_workbench.api.app:app", host=args.host, port=args.port, reload=args.reload)
 
 
 if __name__ == "__main__":

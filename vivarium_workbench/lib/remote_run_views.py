@@ -23,18 +23,18 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from vivarium_dashboard.lib import git_status
-from vivarium_dashboard.lib import github_auth
-from vivarium_dashboard.lib import study_spec
-from vivarium_dashboard.lib.investigations import load_spec
-from vivarium_dashboard.lib.remote_run_jobs import (
+from vivarium_workbench.lib import git_status
+from vivarium_workbench.lib import github_auth
+from vivarium_workbench.lib import study_spec
+from vivarium_workbench.lib.investigations import load_spec
+from vivarium_workbench.lib.remote_run_jobs import (
     PipelineCtx,
     manager,
     run_remote_pipeline,
 )
-from vivarium_dashboard.lib.remote_run_landing import land_remote_run
-from vivarium_dashboard.lib.sms_api_client import SmsApiClient, SmsApiError
-from vivarium_dashboard.lib.workspace_deps_views import _sms_api_base
+from vivarium_workbench.lib.remote_run_landing import land_remote_run
+from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
+from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
 # sms-api JobStatus terminal sets (relocated here from remote_run_jobs, which R5
 # deletes). The thin client maps a raw sms-api status into a UI phase.

@@ -15,7 +15,7 @@ from pathlib import Path
 import yaml
 import pytest
 
-_PKG = Path(__file__).parent.parent / "vivarium_dashboard"
+_PKG = Path(__file__).parent.parent / "vivarium_workbench"
 
 
 _V3_BASE = {
@@ -62,7 +62,7 @@ def tmp_study_with_gate_evaluator(tmp_path):
 
 def test_detail_surfaces_persisted_gate_evaluator(tmp_study_with_gate_evaluator):
     """computed_gate_verdict must carry the persisted divergence, not a recompute."""
-    from vivarium_dashboard.lib.study_spec import load_study_detail_spec
+    from vivarium_workbench.lib.study_spec import load_study_detail_spec
     ws, name = tmp_study_with_gate_evaluator
     spec = load_study_detail_spec(ws, name)
     assert spec is not None
@@ -74,7 +74,7 @@ def test_detail_surfaces_persisted_gate_evaluator(tmp_study_with_gate_evaluator)
 def test_computed_gate_verdict_prefers_persisted_evaluator(tmp_study_with_gate_evaluator):
     """The exposed computed_gate_verdict key carries diverges_from_authored
     sourced from the persisted slot (the recompute would drop it)."""
-    from vivarium_dashboard.lib.study_spec import load_study_detail_spec
+    from vivarium_workbench.lib.study_spec import load_study_detail_spec
     ws, name = tmp_study_with_gate_evaluator
     spec = load_study_detail_spec(ws, name)
     cgv = spec["computed_gate_verdict"]
@@ -99,7 +99,7 @@ def test_computed_gate_verdict_falls_back_when_no_persisted_slot(tmp_path):
     )
     (sd / "study.yaml").write_text(yaml.safe_dump(spec))
 
-    from vivarium_dashboard.lib.study_spec import load_study_detail_spec
+    from vivarium_workbench.lib.study_spec import load_study_detail_spec
     result_spec = load_study_detail_spec(ws, "plain-study")
     cgv = result_spec["computed_gate_verdict"]
     assert cgv["result"] == "passed"

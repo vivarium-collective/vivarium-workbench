@@ -22,8 +22,8 @@ import io
 import zipfile
 from pathlib import Path
 
-from vivarium_dashboard.lib.download_views import DownloadError
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.download_views import DownloadError
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 # Tabular result extensions surfaced in the Data tab. Served inline-friendly
 # (text) but offered as a download by the route. Keep in sync with the

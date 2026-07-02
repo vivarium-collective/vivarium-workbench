@@ -39,9 +39,9 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib import core_builder
-from vivarium_dashboard.lib import study_crud_mutations
-from vivarium_dashboard.lib.json_serialize import _json_default
+from vivarium_workbench.lib import core_builder
+from vivarium_workbench.lib import study_crud_mutations
+from vivarium_workbench.lib.json_serialize import _json_default
 
 
 def _ws_add_to_sys_path(ws_root: Path) -> None:
@@ -65,13 +65,13 @@ def investigation_run(ws_root: Path, body: dict) -> "tuple[dict, int]":
     commit).  See the module docstring for the outcome table.
     """
     _ws_add_to_sys_path(ws_root)
-    from vivarium_dashboard.lib.investigations import (
+    from vivarium_workbench.lib.investigations import (
         run_investigation, InvestigationSpecError,
     )
-    from vivarium_dashboard.lib.composite_lookup import (
+    from vivarium_workbench.lib.composite_lookup import (
         substitute_parameters, find_composite_path,
     )
-    from vivarium_dashboard.lib import composite_runs as cr
+    from vivarium_workbench.lib import composite_runs as cr
 
     name = study_crud_mutations._study_name_from_body(body)
     if not name:

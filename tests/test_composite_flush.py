@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from vivarium_dashboard.lib import composite_flush
+from vivarium_workbench.lib import composite_flush
 
 
 class _Req:

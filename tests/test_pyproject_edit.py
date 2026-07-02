@@ -1,4 +1,4 @@
-"""Unit tests for vivarium_dashboard.lib.pyproject_edit."""
+"""Unit tests for vivarium_workbench.lib.pyproject_edit."""
 import sys
 import textwrap
 import tempfile
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib.pyproject_edit import add_dependency, remove_dependency, remove_uv_source
+from vivarium_workbench.lib.pyproject_edit import add_dependency, remove_dependency, remove_uv_source
 
 
 MINIMAL_PYPROJECT = textwrap.dedent("""\

@@ -23,8 +23,8 @@ import re
 import yaml
 from pathlib import Path
 
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
-from vivarium_dashboard.lib.registry import _dashboard_config
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.registry import _dashboard_config
 
 # ---------------------------------------------------------------------------
 # Single-sourced constant: default PTools Omics Viewer URL template
@@ -122,7 +122,7 @@ def build_github_repo(ws_root: Path) -> dict:
 
     # 1. Try git remote (authoritative live checkout).
     try:
-        from vivarium_dashboard.lib.report import _detect_github_repo
+        from vivarium_workbench.lib.report import _detect_github_repo
         repo = _detect_github_repo(ws_root)
     except Exception:  # noqa: BLE001
         repo = None

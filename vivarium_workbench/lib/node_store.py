@@ -10,7 +10,7 @@ _NODE_DIRS = ("findings", "evidence", "decisions", "conclusions")
 
 def study_dir(ws_root: Path, slug: str) -> Path | None:
     try:
-        from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+        from vivarium_workbench.lib.workspace_paths import WorkspacePaths
         wp = WorkspacePaths.load(ws_root)
         d = wp.studies / slug
         if d.is_dir():

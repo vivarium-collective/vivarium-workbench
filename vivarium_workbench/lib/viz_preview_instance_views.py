@@ -33,8 +33,8 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib import viz_preview_views
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib import viz_preview_views
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 def visualization_preview_instance(ws_root: Path, body: dict) -> tuple[dict, int]:

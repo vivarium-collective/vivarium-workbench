@@ -27,7 +27,7 @@ def _load_work_state(ws_root: Path) -> dict:
     Byte-identical to ``lib.git_status._load_work_state`` — we inline here to
     avoid a circular dependency between two lib modules.
     """
-    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
     import json
 
     state_path = WorkspacePaths.load(ws_root).pbg / "state.json"

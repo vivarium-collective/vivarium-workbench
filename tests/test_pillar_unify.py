@@ -1,7 +1,7 @@
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
-HTML = (ROOT / "vivarium_dashboard/templates/study-detail.html").read_text()
-JS = (ROOT / "vivarium_dashboard/static/study-detail.js").read_text()
+HTML = (ROOT / "vivarium_workbench/templates/study-detail.html").read_text()
+JS = (ROOT / "vivarium_workbench/static/study-detail.js").read_text()
 
 
 def test_merged_panels_exist_and_old_gone():

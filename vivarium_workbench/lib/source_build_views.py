@@ -27,10 +27,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from vivarium_dashboard.lib import active_workspace
-from vivarium_dashboard.lib.remote_build_source import list_build_sources, materialize_build
-from vivarium_dashboard.lib.sms_api_client import SmsApiClient, SmsApiError
-from vivarium_dashboard.lib.workspace_deps_views import _sms_api_base
+from vivarium_workbench.lib import active_workspace
+from vivarium_workbench.lib.remote_build_source import list_build_sources, materialize_build
+from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
+from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
 
 def _normalize_repo_url(url: str) -> str:

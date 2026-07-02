@@ -44,11 +44,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from vivarium_dashboard.lib import catalog as _catalog
-from vivarium_dashboard.lib import pyproject_edit as _pyproject_edit
-from vivarium_dashboard.lib import registry as _registry
-from vivarium_dashboard.lib import workspace_deps_views as _workspace_deps
-from vivarium_dashboard.lib import workspace_yaml as _workspace_yaml
+from vivarium_workbench.lib import catalog as _catalog
+from vivarium_workbench.lib import pyproject_edit as _pyproject_edit
+from vivarium_workbench.lib import registry as _registry
+from vivarium_workbench.lib import workspace_deps_views as _workspace_deps
+from vivarium_workbench.lib import workspace_yaml as _workspace_yaml
 
 
 def _ws_add_to_sys_path(ws_root: Path) -> None:

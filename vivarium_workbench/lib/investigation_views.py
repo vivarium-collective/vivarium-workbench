@@ -26,7 +26,7 @@ from typing import Optional
 
 import yaml
 
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +134,7 @@ def build_investigation_composites(ws_root: Path, investigation: str) -> dict:
 
     Mirrors ``server.Handler._get_investigation_composites``.
     """
-    from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
+    from vivarium_workbench.lib.investigations import load_spec, InvestigationSpecError
 
     if not investigation:
         raise InvViewError({"error": "investigation is required"}, 400)
@@ -205,7 +205,7 @@ def build_investigation_state_tree(
 
     Mirrors ``server.Handler._get_investigation_state_tree``.
     """
-    from vivarium_dashboard.lib.composite_recipes import walk_state_tree
+    from vivarium_workbench.lib.composite_recipes import walk_state_tree
 
     if not investigation or not composite:
         raise InvViewError({"error": "investigation + composite required"}, 400)

@@ -2,7 +2,7 @@
 
 This is the clean library seam that both the legacy stdlib handler
 (``server.Handler._get_investigation_registry``) and the FastAPI route
-(``api/app.py``) call.  It has NO dependency on ``vivarium_dashboard.server`` —
+(``api/app.py``) call.  It has NO dependency on ``vivarium_workbench.server`` —
 the helper functions that used to live in ``server.py`` (peer probing, worktree
 scanning, the iset-summary default) are vendored here so the typed seam can
 build the registry without importing the stdlib module.
@@ -19,8 +19,8 @@ from pathlib import Path
 
 import yaml as _yaml
 
-from vivarium_dashboard.lib import investigation_status as _invstatus
-from vivarium_dashboard.lib.investigations_index import (
+from vivarium_workbench.lib import investigation_status as _invstatus
+from vivarium_workbench.lib.investigations_index import (
     _count_runs_for_study as _ii_count_runs_for_study,
     _http_get_json,
 )
@@ -171,7 +171,7 @@ def default_iset_summary(ws_root: Path) -> list[dict]:
 
 def _default_current_branch(ws_root: Path):
     try:
-        from vivarium_dashboard.lib.work_state import _current_git_branch
+        from vivarium_workbench.lib.work_state import _current_git_branch
         return _current_git_branch(ws_root)
     except Exception:
         return None

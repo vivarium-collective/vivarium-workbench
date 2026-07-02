@@ -1,10 +1,10 @@
-"""Tests for vivarium_dashboard.lib.active_workspace — the single source of
+"""Tests for vivarium_workbench.lib.active_workspace — the single source of
 truth for the active workspace root + the cache-invalidation callback registry.
 """
 
 import pytest
 
-from vivarium_dashboard.lib import active_workspace, _root
+from vivarium_workbench.lib import active_workspace, _root
 
 
 @pytest.fixture(autouse=True)
@@ -51,7 +51,7 @@ def test_get_set_workspace_root_delegates_to_root(tmp_path):
 def test_lib_caches_registered_on_import():
     """Importing the cache modules registers ≥5 lib clear_cache callbacks."""
     # Import side effects register the callbacks at module import time.
-    from vivarium_dashboard.lib import (  # noqa: F401
+    from vivarium_workbench.lib import (  # noqa: F401
         registry,
         report_views,
         observables_views,

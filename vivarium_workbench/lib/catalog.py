@@ -1,6 +1,6 @@
 """Build the catalog payload (``GET /api/catalog``) for a workspace.
 
-Extracted from ``vivarium_dashboard.server._catalog_data`` so the FastAPI
+Extracted from ``vivarium_workbench.server._catalog_data`` so the FastAPI
 seam (``api/app.py``) can call it without importing the stdlib server module.
 The single implementation is shared: ``server.py`` re-imports
 ``build_catalog`` and keeps its old ``_catalog_data`` name as a thin wrapper.
@@ -31,12 +31,12 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib.registry import (
+from vivarium_workbench.lib.registry import (
     _build_reexport_map,
     _registry_include_pkgs,
     _registry_modules_override,
 )
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 # ---------------------------------------------------------------------------

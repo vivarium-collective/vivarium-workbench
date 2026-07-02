@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
-from vivarium_dashboard.api.app import create_app, get_workspace
-from vivarium_dashboard.lib import active_workspace
+from vivarium_workbench.api.app import create_app, get_workspace
+from vivarium_workbench.lib import active_workspace
 from pbg_superpowers.event_client import EventClient, on_finding_created
 
 

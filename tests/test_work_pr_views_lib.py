@@ -1,4 +1,4 @@
-"""Behavioural tests for vivarium_dashboard.lib.work_pr_views.
+"""Behavioural tests for vivarium_workbench.lib.work_pr_views.
 
 ``work_create_pr`` is a byte-identical port of the stdlib handler
 ``_post_work_create_pr``.  Every test monkeypatches the lib seam reached via the
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import work_pr_views as wp
+from vivarium_workbench.lib import work_pr_views as wp
 
 
 def _cp(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess:

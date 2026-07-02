@@ -7,7 +7,7 @@ colleagues reading it — get types generated FROM the Python models rather than
 hand-copied out of them (which is how the earlier hand-written TS drifted:
 started_at typed as string when it is really an epoch float).
 
-Run:  python -m vivarium_dashboard.lib.generate_ts
+Run:  python -m vivarium_workbench.lib.generate_ts
 A test (tests/test_generate_ts.py) asserts the committed file is up to date.
 
 Intentionally dependency-free (no npm / json-schema tooling): the model
@@ -25,7 +25,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from vivarium_dashboard.lib import models as _models
+from vivarium_workbench.lib import models as _models
 
 # Named Literal aliases to preserve in the output. pydantic inlines these in
 # field annotations, so we re-attach the name by matching the value set.
@@ -228,8 +228,8 @@ def _emit_interface(model: type[BaseModel]) -> str:
 def generate_ts() -> str:
     """Return the full TypeScript declaration text for the payload models."""
     blocks = [
-        "// AUTO-GENERATED from vivarium_dashboard/lib/models.py — do not edit by hand.\n"
-        "// Regenerate: python -m vivarium_dashboard.lib.generate_ts"
+        "// AUTO-GENERATED from vivarium_workbench/lib/models.py — do not edit by hand.\n"
+        "// Regenerate: python -m vivarium_workbench.lib.generate_ts"
     ]
     for name, tp in _ALIASES.items():
         union = " | ".join(_ts_literal(v) for v in typing.get_args(tp))

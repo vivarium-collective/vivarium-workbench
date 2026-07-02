@@ -24,8 +24,8 @@ from typing import Optional
 
 import yaml
 
-from vivarium_dashboard.lib.study_spec import load_study_detail_spec
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.study_spec import load_study_detail_spec
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 # ---------------------------------------------------------------------------

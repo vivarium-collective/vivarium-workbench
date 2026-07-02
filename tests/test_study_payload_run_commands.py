@@ -3,7 +3,7 @@
 Tests that load_study_detail_spec always includes the `run_commands` key whose
 `baseline` value matches the canonical CLI string from study_run_commands.
 """
-from vivarium_dashboard.lib import study_spec
+from vivarium_workbench.lib import study_spec
 
 
 def test_detail_spec_has_run_commands(fixture_study_ws):

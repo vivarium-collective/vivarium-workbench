@@ -19,10 +19,10 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import composite_lookup
-from vivarium_dashboard.lib import core_builder
-from vivarium_dashboard.lib import investigations
-from vivarium_dashboard.lib import investigation_run_views as views
+from vivarium_workbench.lib import composite_lookup
+from vivarium_workbench.lib import core_builder
+from vivarium_workbench.lib import investigations
+from vivarium_workbench.lib import investigation_run_views as views
 
 
 def _make_ws(tmp_path: Path, *, name: str = "demo-ws") -> Path:

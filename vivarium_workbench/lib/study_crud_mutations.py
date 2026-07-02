@@ -19,7 +19,7 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib import study_spec as _study_spec_lib
+from vivarium_workbench.lib import study_spec as _study_spec_lib
 
 
 # ---------------------------------------------------------------------------

@@ -110,7 +110,7 @@ def remote_repo_url(ws_root: Path) -> str | None:
     :func:`lib.source_build_views._normalize_repo_url` (reused, not re-copied —
     server keeps its own ``_normalize_repo_url``; dedup at the flip).
     """
-    from vivarium_dashboard.lib.source_build_views import _normalize_repo_url
+    from vivarium_workbench.lib.source_build_views import _normalize_repo_url
 
     r = subprocess.run(
         ["git", "remote", "get-url", "origin"], cwd=ws_root,
@@ -131,7 +131,7 @@ def remote_push_and_sha(ws_root: Path) -> str:
     (raises with the stderr/stdout ``[-300:]`` tail on failure), then resolves
     and returns the HEAD SHA (raising if empty).
     """
-    from vivarium_dashboard.lib import github_auth
+    from vivarium_workbench.lib import github_auth
 
     branch = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=ws_root,
@@ -303,7 +303,7 @@ def _load_work_state(ws_root: Path) -> dict:
     ``lib.work_state.load_state`` (which reads
     ``WorkspacePaths.load(workspace_root()).pbg / "state.json"``).
     """
-    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
     state_path = WorkspacePaths.load(ws_root).pbg / "state.json"
     if not state_path.exists():

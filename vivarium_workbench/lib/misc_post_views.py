@@ -37,10 +37,10 @@ from typing import Any
 
 import yaml
 
-from vivarium_dashboard.lib import suggest_requests
-from vivarium_dashboard.lib import work_state
-from vivarium_dashboard.lib import single_study_report
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib import suggest_requests
+from vivarium_workbench.lib import work_state
+from vivarium_workbench.lib import single_study_report
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 def _ws_add_to_sys_path(ws_root: Path) -> None:

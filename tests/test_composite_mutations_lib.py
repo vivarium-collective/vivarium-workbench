@@ -27,10 +27,10 @@ import yaml
 
 import types
 
-from vivarium_dashboard.lib import composite_mutations as cm
-from vivarium_dashboard.lib import investigation_migrate as _imig
-from vivarium_dashboard.lib import composite_recipes as _recipes
-from vivarium_dashboard.lib import composite_lookup as _clookup
+from vivarium_workbench.lib import composite_mutations as cm
+from vivarium_workbench.lib import investigation_migrate as _imig
+from vivarium_workbench.lib import composite_recipes as _recipes
+from vivarium_workbench.lib import composite_lookup as _clookup
 
 
 _INV = "demo"

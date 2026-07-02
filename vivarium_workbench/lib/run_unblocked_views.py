@@ -34,10 +34,10 @@ from pathlib import Path
 
 import yaml as _yaml
 
-from vivarium_dashboard.lib import comparative_runs
-from vivarium_dashboard.lib import study_runs
-from vivarium_dashboard.lib.run_jobs import enumerate_unblocked, manager
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib import comparative_runs
+from vivarium_workbench.lib import study_runs
+from vivarium_workbench.lib.run_jobs import enumerate_unblocked, manager
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 def investigation_run_unblocked(ws_root: Path, body: dict) -> tuple[dict, int]:

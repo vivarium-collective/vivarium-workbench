@@ -30,8 +30,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from vivarium_dashboard.lib.report import render_workspace_report
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.report import render_workspace_report
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 # Mirrors the stdlib server's process-global ``LOCK`` — serialises concurrent
 # appends to the events log so interleaved writers can't corrupt a JSON line.

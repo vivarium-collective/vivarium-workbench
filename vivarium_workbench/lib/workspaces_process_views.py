@@ -83,7 +83,7 @@ def workspaces_start(ws_root: Path, body: Any) -> tuple[dict, int]:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("ab") as logf:
         subprocess.Popen(
-            [sys.executable, "-m", "vivarium_dashboard.cli",
+            [sys.executable, "-m", "vivarium_workbench.cli",
              "serve", "--workspace", str(target)],
             stdout=logf, stderr=logf, stdin=subprocess.DEVNULL,
             start_new_session=True,

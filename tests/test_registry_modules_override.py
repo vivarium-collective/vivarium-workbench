@@ -9,11 +9,11 @@ process-registry allow-list, and the guard that leaves classic behavior
 """
 from __future__ import annotations
 
-from vivarium_dashboard.lib.registry import (
+from vivarium_workbench.lib.registry import (
     _registry_modules_override,
     _registry_include_pkgs,
 )
-from vivarium_dashboard.lib.catalog import _build_override_catalog
+from vivarium_workbench.lib.catalog import _build_override_catalog
 
 
 DEFAULT_CATALOG = [

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import run_unblocked_views as ruv
+from vivarium_workbench.lib import run_unblocked_views as ruv
 
 
 # ---------------------------------------------------------------------------

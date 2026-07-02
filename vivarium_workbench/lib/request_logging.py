@@ -3,7 +3,7 @@
 The dashboard previously did no structured logging — errors went to ``print`` and
 there was no per-request record, which is the biggest observability gap for a
 server that orchestrates multi-minute detached runs. This adds one access line
-per request (method, path, status, duration) under the ``vivarium_dashboard.access``
+per request (method, path, status, duration) under the ``vivarium_workbench.access``
 logger, and assigns/propagates an ``X-Request-ID`` so a request can be correlated
 across logs. It is additive: the only response change is the added header.
 """
@@ -15,7 +15,7 @@ import uuid
 
 from fastapi import FastAPI, Request
 
-logger = logging.getLogger("vivarium_dashboard.access")
+logger = logging.getLogger("vivarium_workbench.access")
 
 REQUEST_ID_HEADER = "X-Request-ID"
 

@@ -10,9 +10,9 @@ import re
 import sqlite3
 from pathlib import Path
 
-from vivarium_dashboard.lib import simulations_index
-from vivarium_dashboard.lib import comparative_viz
-from vivarium_dashboard.lib import emitters
+from vivarium_workbench.lib import simulations_index
+from vivarium_workbench.lib import comparative_viz
+from vivarium_workbench.lib import emitters
 
 
 # Top-level store key -> friendly category. Order defines display order.

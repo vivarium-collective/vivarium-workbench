@@ -1,7 +1,7 @@
 # tests/test_compose_unification.py
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
-HTML = (ROOT / "vivarium_dashboard/templates/study-detail.html").read_text()
+HTML = (ROOT / "vivarium_workbench/templates/study-detail.html").read_text()
 
 
 def test_panel_compose_exists_and_old_wrappers_gone():
@@ -44,7 +44,7 @@ def test_other_panels_untouched():
 
 
 def test_subnav_hidden_for_single_member_pillar():
-    js = (ROOT / "vivarium_dashboard/static/study-detail.js").read_text()
+    js = (ROOT / "vivarium_workbench/static/study-detail.js").read_text()
     # _showPillarSubnav hides the sub-nav row when the pillar has <= 1 member
     i = js.index("function _showPillarSubnav")
     block = js[i:i + 700]

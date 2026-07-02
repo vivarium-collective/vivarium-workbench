@@ -231,7 +231,7 @@ def collect_study_feedback(ws_root: Path, study_slug: str) -> list:
     from pbg_superpowers.feedback_import import (  # noqa: PLC0415
         load_investigation_feedback, feedback_for_study,
     )
-    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths  # noqa: PLC0415
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths  # noqa: PLC0415
     wp = WorkspacePaths.load(ws_root)
     inv_root = wp.investigations
     if not inv_root.is_dir():
@@ -267,7 +267,7 @@ def study_acceptance_criterion(ws_root: Path, name: str) -> Optional[dict]:
     Pure disk read — never recomputes.
     """
     import yaml as _yaml  # noqa: PLC0415
-    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths  # noqa: PLC0415
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths  # noqa: PLC0415
     wp = WorkspacePaths.load(ws_root)
     owner = wp.study_owner(name)
     if not owner:

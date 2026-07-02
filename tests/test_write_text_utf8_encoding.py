@@ -1,6 +1,6 @@
 """
-Static guard: every .write_text(...) call in vivarium_dashboard/lib/*.py and
-vivarium_dashboard/server.py must pass an encoding= argument.
+Static guard: every .write_text(...) call in vivarium_workbench/lib/*.py and
+vivarium_workbench/server.py must pass an encoding= argument.
 
 The check handles multi-line calls by tracking paren depth until the closing
 `)` of the write_text call is found (no fixed lookahead limit).
@@ -10,7 +10,7 @@ reintroduced.
 """
 import pathlib
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent / "vivarium_dashboard"
+ROOT = pathlib.Path(__file__).resolve().parent.parent / "vivarium_workbench"
 
 
 def _bare_write_text_calls(text: str) -> list[tuple[int, str]]:

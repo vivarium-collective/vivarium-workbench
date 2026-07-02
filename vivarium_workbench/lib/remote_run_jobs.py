@@ -20,7 +20,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from vivarium_dashboard.lib.models import RemoteRunJob as RemoteRunJobModel
+from vivarium_workbench.lib.models import RemoteRunJob as RemoteRunJobModel
 
 STEP_NAMES = ["push", "build", "run", "poll", "download", "land"]
 

@@ -4,7 +4,7 @@ These tests feed REAL handler output into the models (not hand-written literals)
 so they fail if a handler's dict shape drifts away from its model.
 """
 
-from vivarium_dashboard.lib.models import (
+from vivarium_workbench.lib.models import (
     ChartPayload,
     RemoteOrigin,
     RemoteRunJob as RemoteRunJobModel,
@@ -12,8 +12,8 @@ from vivarium_dashboard.lib.models import (
     SimulationsPayload,
     StudyChartsPayload,
 )
-from vivarium_dashboard.lib.remote_run_jobs import RemoteRunJob
-from vivarium_dashboard.lib.simulations_index import _row_to_dict
+from vivarium_workbench.lib.remote_run_jobs import RemoteRunJob
+from vivarium_workbench.lib.simulations_index import _row_to_dict
 
 import json
 

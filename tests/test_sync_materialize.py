@@ -2,7 +2,7 @@
 import subprocess
 from pathlib import Path
 
-from vivarium_dashboard.lib import sync_materialize as sm
+from vivarium_workbench.lib import sync_materialize as sm
 
 
 def _make_origin(path: Path) -> tuple[str, str]:
@@ -35,7 +35,7 @@ def test_verify_lockfile_matches(tmp_path):
     url, sha = _make_origin(tmp_path / "origin")
     dest = tmp_path / "local"
     sm.git_clone_checkout(url, sha, dest)
-    from vivarium_dashboard.lib.provenance_manifest import lockfile_hash
+    from vivarium_workbench.lib.provenance_manifest import lockfile_hash
     expected = lockfile_hash(tmp_path / "origin")
     body, status = sm.verify_lockfile(dest, expected)
     assert status == 200, body

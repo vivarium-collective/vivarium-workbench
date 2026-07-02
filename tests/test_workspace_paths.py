@@ -4,7 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from vivarium_dashboard.lib.workspace_paths import (
+from vivarium_workbench.lib.workspace_paths import (
     WorkspacePaths, LAYOUT_DEFAULTS, package_slug,
 )
 
@@ -32,7 +32,7 @@ def test_load_handles_non_ascii_yaml_under_ascii_locale(tmp_path):
     }
     code = (
         "from pathlib import Path;"
-        "from vivarium_dashboard.lib.workspace_paths import WorkspacePaths;"
+        "from vivarium_workbench.lib.workspace_paths import WorkspacePaths;"
         f"print(WorkspacePaths.load(Path(r'{tmp_path}')).studies)"
     )
     proc = subprocess.run(

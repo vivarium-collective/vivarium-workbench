@@ -41,7 +41,7 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 
 def _ws_add_to_sys_path(ws_root: Path) -> None:
@@ -88,7 +88,7 @@ def study_create(ws_root: Path, body: dict) -> "tuple[dict, int]":
     baseline_name = None
     if source:
         _ws_add_to_sys_path(ws_root)
-        from vivarium_dashboard.lib.investigation_migrate import (
+        from vivarium_workbench.lib.investigation_migrate import (
             _resolve_composite_source_or_generate,
         )
         try:
@@ -112,7 +112,7 @@ def study_create(ws_root: Path, body: dict) -> "tuple[dict, int]":
             # so the user sees the target shape — the same shape the
             # dnaa-replication investigation evolved through use — without
             # having to read docs first.
-            from vivarium_dashboard.lib.scaffold_yaml import (
+            from vivarium_workbench.lib.scaffold_yaml import (
                 v4_study_scaffold,
             )
             body_yaml = v4_study_scaffold(

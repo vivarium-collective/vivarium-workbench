@@ -38,8 +38,8 @@ from typing import Optional
 
 import yaml
 
-from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
-from vivarium_dashboard.lib import study_derivations as _study_derivations
+from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+from vivarium_workbench.lib import study_derivations as _study_derivations
 
 # Slug pattern shared by server.py and api/app.py (neither imports the other).
 # Study/investigation names are generated with underscores (e.g. derived from
@@ -492,8 +492,8 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
 
     Mirrors ``server._study_detail_spec`` parameterised on ``ws_root``.
     """
-    from vivarium_dashboard.lib.investigations import load_spec
-    from vivarium_dashboard.lib.study_enrichment import (  # noqa: PLC0415
+    from vivarium_workbench.lib.investigations import load_spec
+    from vivarium_workbench.lib.study_enrichment import (  # noqa: PLC0415
         reconcile_simset_with_runs,
         compute_param_enforcement,
         collect_study_feedback,
@@ -698,7 +698,7 @@ def load_study_detail_spec(ws_root: Path, name: str) -> Optional[dict]:
                 rc_urls[card] = {"url": "/" + html.relative_to(ws_root).as_posix(),
                                  "verdict": verdict}
         spec["report_card_urls"] = rc_urls
-    from vivarium_dashboard.lib.run_commands import study_run_commands
+    from vivarium_workbench.lib.run_commands import study_run_commands
     spec["run_commands"] = study_run_commands(spec, name)
     spec["derived"] = _study_derivations.derived_block(spec)
     return spec

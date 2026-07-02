@@ -1,4 +1,4 @@
-"""Parity tests for vivarium_dashboard.lib.study_enrichment.
+"""Parity tests for vivarium_workbench.lib.study_enrichment.
 
 Covers the four helpers extracted from server.py in Phase A, Batch 4:
 
@@ -114,19 +114,19 @@ class TestReconcileSimsetWithRuns:
     """Smoke tests for the pure helper — behavior mirrors the old server function."""
 
     def test_empty_simset_passthrough(self) -> None:
-        from vivarium_dashboard.lib.study_enrichment import reconcile_simset_with_runs
+        from vivarium_workbench.lib.study_enrichment import reconcile_simset_with_runs
         assert reconcile_simset_with_runs(None, []) is None
         assert reconcile_simset_with_runs([], [{"run_id": "r1"}]) == []
 
     def test_no_runs_passthrough(self) -> None:
-        from vivarium_dashboard.lib.study_enrichment import reconcile_simset_with_runs
+        from vivarium_workbench.lib.study_enrichment import reconcile_simset_with_runs
         sim_set = [{"name": "baseline", "is_baseline": True}]
         result = reconcile_simset_with_runs(sim_set, [])
         # sim_set returned unchanged when runs is empty
         assert result == [{"name": "baseline", "is_baseline": True}]
 
     def test_completed_run_flips_status(self) -> None:
-        from vivarium_dashboard.lib.study_enrichment import reconcile_simset_with_runs
+        from vivarium_workbench.lib.study_enrichment import reconcile_simset_with_runs
         sim_set = [{"name": "b", "is_baseline": True, "status": "ready"}]
         runs = [{"run_id": "r1", "status": "completed", "seed": 42}]
         result = reconcile_simset_with_runs(sim_set, runs)
@@ -146,7 +146,7 @@ class TestComputeParamEnforcement:
         mod = pytest.importorskip("pbg_superpowers.param_enforcement")
         if not hasattr(mod, "resolve_run_expected"):
             pytest.skip("pbg_superpowers.param_enforcement.resolve_run_expected not available")
-        from vivarium_dashboard.lib.study_enrichment import compute_param_enforcement
+        from vivarium_workbench.lib.study_enrichment import compute_param_enforcement
         assert compute_param_enforcement({"runs": []}) is None
 
 
@@ -157,12 +157,12 @@ class TestComputeParamEnforcement:
 class TestCollectStudyFeedback:
     def test_empty_when_no_investigations(self, tmp_path: Path) -> None:
         pytest.importorskip("pbg_superpowers.feedback_import")
-        from vivarium_dashboard.lib.study_enrichment import collect_study_feedback
+        from vivarium_workbench.lib.study_enrichment import collect_study_feedback
         assert collect_study_feedback(tmp_path, "any-study") == []
 
     def test_collects_matching_annotation(self, tmp_path: Path) -> None:
         ws, slug = _make_feedback_workspace(tmp_path)
-        from vivarium_dashboard.lib.study_enrichment import collect_study_feedback
+        from vivarium_workbench.lib.study_enrichment import collect_study_feedback
         out = collect_study_feedback(ws, slug)
         assert len(out) == 1
         assert out[0]["author"] == "Reviewer"
@@ -175,12 +175,12 @@ class TestCollectStudyFeedback:
 
 class TestStudyAcceptanceCriterion:
     def test_none_when_no_investigations(self, tmp_path: Path) -> None:
-        from vivarium_dashboard.lib.study_enrichment import study_acceptance_criterion
+        from vivarium_workbench.lib.study_enrichment import study_acceptance_criterion
         assert study_acceptance_criterion(tmp_path, "missing") is None
 
     def test_returns_acceptance_for_owned_study(self, tmp_path: Path) -> None:
         ws, slug = _make_workspace_with_acceptance(tmp_path)
-        from vivarium_dashboard.lib.study_enrichment import study_acceptance_criterion
+        from vivarium_workbench.lib.study_enrichment import study_acceptance_criterion
         result = study_acceptance_criterion(ws, slug)
         assert result is not None
         assert result["investigation"] == "my-inv"
@@ -218,7 +218,7 @@ class TestLoadStudyDetailSpecParityBatch4:
         self, tmp_path: Path, monkeypatch: Any
     ) -> None:
         ws = self._make_ws(tmp_path)
-        from vivarium_dashboard.lib import study_spec
+        from vivarium_workbench.lib import study_spec
         lib_spec = study_spec.load_study_detail_spec(ws, "parity-study")
         # The run recorded in runs.db is merged into the loaded spec.
         assert lib_spec is not None

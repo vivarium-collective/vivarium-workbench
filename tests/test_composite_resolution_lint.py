@@ -19,9 +19,9 @@ from pathlib import Path
 import yaml
 import pytest
 
-from vivarium_dashboard.lib import composite_lookup as cl
+from vivarium_workbench.lib import composite_lookup as cl
 
-_PKG = Path(__file__).parent.parent / "vivarium_dashboard"
+_PKG = Path(__file__).parent.parent / "vivarium_workbench"
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +130,7 @@ def _seed_study(ws: Path, slug: str, composite: str):
 
 
 def test_composite_resolution_findings_flags_unresolved(tmp_path):
-    from vivarium_dashboard.lib.report_views import _composite_resolution_findings
+    from vivarium_workbench.lib.report_views import _composite_resolution_findings
     ws = _make_ws(tmp_path, with_composite=True)
     _seed_study(ws, "good-study", "pbg_ws.composites.foo")
     _seed_study(ws, "bad-study", "pbg_ws.composites.ghost")
@@ -146,7 +146,7 @@ def test_composite_resolution_findings_flags_unresolved(tmp_path):
 
 
 def test_report_lint_surfaces_unresolved_composite(tmp_path):
-    from vivarium_dashboard.lib.report_views import build_report_lint
+    from vivarium_workbench.lib.report_views import build_report_lint
     ws = _make_ws(tmp_path, with_composite=False)
     _seed_study(ws, "bad-study", "pkg.composites.ghost")
 
@@ -163,7 +163,7 @@ def test_report_lint_surfaces_unresolved_composite(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_study_detail_renders_unresolved_banner(tmp_path):
-    from vivarium_dashboard.lib.study_page import render_study_detail_html
+    from vivarium_workbench.lib.study_page import render_study_detail_html
     ws = _make_ws(tmp_path, with_composite=True)
     spec = {
         "schema_version": 4,
@@ -176,7 +176,7 @@ def test_study_detail_renders_unresolved_banner(tmp_path):
 
 
 def test_study_detail_no_banner_when_resolvable(tmp_path):
-    from vivarium_dashboard.lib.study_page import render_study_detail_html
+    from vivarium_workbench.lib.study_page import render_study_detail_html
     ws = _make_ws(tmp_path, with_composite=True)
     spec = {
         "schema_version": 4,
@@ -200,7 +200,7 @@ def test_explorer_js_handles_unresolved_payload():
 
 
 def test_single_study_report_renders_unresolved_banner():
-    from vivarium_dashboard.lib.single_study_report import _render_html
+    from vivarium_workbench.lib.single_study_report import _render_html
     html = _render_html(
         {"name": "s", "baseline": [{"composite": "pkg.composites.ghost"}]},
         [], investigation_slug=None, generated_at="now",

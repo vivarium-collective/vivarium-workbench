@@ -1,12 +1,12 @@
-"""Unit tests for vivarium_dashboard.lib.run_runner."""
+"""Unit tests for vivarium_workbench.lib.run_runner."""
 import json
 import sys
 from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib.run_runner import execute, _emit_paths_for, RunRequest
-from vivarium_dashboard.lib.composite_runs import connect, query_run_meta, query_run
+from vivarium_workbench.lib.run_runner import execute, _emit_paths_for, RunRequest
+from vivarium_workbench.lib.composite_runs import connect, query_run_meta, query_run
 
 _REPO_ROOT = Path(__file__).parent.parent
 FIXTURE_WS = _REPO_ROOT / "tests" / "_fixtures" / "ws_increase_demo"
@@ -61,7 +61,7 @@ def _write_request(tmp_path, *, steps=3, spec_id=None, overrides=None):
     request_path.write_text(json.dumps(request))
     # Seed the runs_meta row the way the POST handler would.
     conn = connect(request["db_file"])
-    from vivarium_dashboard.lib.composite_runs import save_metadata
+    from vivarium_workbench.lib.composite_runs import save_metadata
     save_metadata(conn, spec_id=request["spec_id"], run_id=run_id, params={},
                   label="", started_at=0.0, n_steps=steps,
                   log_path=request["log_path"])

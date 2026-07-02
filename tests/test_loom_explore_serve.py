@@ -1,7 +1,7 @@
 """Test that the loom-explore static bundle is served by the dashboard.
 
 After the extraction from pbg-template, the bundle lives inside the
-``vivarium_dashboard`` package (``vivarium_dashboard/static/loom-explore/``)
+``vivarium_workbench`` package (``vivarium_workbench/static/loom-explore/``)
 rather than the workspace's ``scripts/_assets/`` tree. These tests verify
 that the server still serves the bundle correctly from the new location.
 """
@@ -54,8 +54,8 @@ def test_loom_explore_root_redirects_to_index(workspace_server):
 
 def test_loom_explore_js_assets_served(workspace_server):
     """Every .js file under assets/ should be servable."""
-    import vivarium_dashboard
-    bundle = Path(vivarium_dashboard.__file__).parent / "static" / "loom-explore" / "assets"
+    import vivarium_workbench
+    bundle = Path(vivarium_workbench.__file__).parent / "static" / "loom-explore" / "assets"
     js_files = list(bundle.glob("*.js"))
     if not js_files:
         pytest.skip("no JS files in bundled loom-explore/assets")
@@ -67,8 +67,8 @@ def test_loom_explore_js_assets_served(workspace_server):
 
 def test_loom_explore_css_assets_served(workspace_server):
     """Every .css file under assets/ should be servable."""
-    import vivarium_dashboard
-    bundle = Path(vivarium_dashboard.__file__).parent / "static" / "loom-explore" / "assets"
+    import vivarium_workbench
+    bundle = Path(vivarium_workbench.__file__).parent / "static" / "loom-explore" / "assets"
     css_files = list(bundle.glob("*.css"))
     if not css_files:
         pytest.skip("no CSS files in bundled loom-explore/assets")

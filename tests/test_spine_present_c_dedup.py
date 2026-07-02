@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-_PKG = Path(__file__).parent.parent / "vivarium_dashboard"
+_PKG = Path(__file__).parent.parent / "vivarium_workbench"
 _HTML = (_PKG / "templates" / "study-detail.html").read_text(encoding="utf-8")
 
 

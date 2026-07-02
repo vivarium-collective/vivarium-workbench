@@ -32,7 +32,7 @@ def _study_workspace(tmp_path):
 
 
 def test_set_objective_updates_yaml(_study_workspace):
-    from vivarium_dashboard.lib.metadata_mutations import set_study_objective as _post_study_set_objective_for_test
+    from vivarium_workbench.lib.metadata_mutations import set_study_objective as _post_study_set_objective_for_test
     body = {"study": "s1", "text": "Does X cause Y?"}
     resp, code = _post_study_set_objective_for_test(_study_workspace, body)
     assert code == 200
@@ -41,7 +41,7 @@ def test_set_objective_updates_yaml(_study_workspace):
 
 
 def test_rename_moves_directory_and_updates_name(_study_workspace):
-    from vivarium_dashboard.lib.lifecycle_mutations import study_rename as _post_study_rename_for_test
+    from vivarium_workbench.lib.lifecycle_mutations import study_rename as _post_study_rename_for_test
     body = {"study": "s1", "new_name": "renamed-study"}
     resp, code = _post_study_rename_for_test(_study_workspace, body)
     assert code == 200
@@ -55,14 +55,14 @@ def test_rename_refuses_collision(_study_workspace):
     # Create a sibling
     (_study_workspace / "studies" / "s2").mkdir()
     (_study_workspace / "studies" / "s2" / "study.yaml").write_text("name: s2")
-    from vivarium_dashboard.lib.lifecycle_mutations import study_rename as _post_study_rename_for_test
+    from vivarium_workbench.lib.lifecycle_mutations import study_rename as _post_study_rename_for_test
     body = {"study": "s1", "new_name": "s2"}
     resp, code = _post_study_rename_for_test(_study_workspace, body)
     assert code == 409
 
 
 def test_export_returns_zip_bytes(_study_workspace):
-    from vivarium_dashboard.lib.download_views import study_export_zip as _study_export_zip
+    from vivarium_workbench.lib.download_views import study_export_zip as _study_export_zip
     data = _study_export_zip(_study_workspace, "s1")
     # First 4 bytes of a zip file are PK\x03\x04
     assert data[:4] == b"PK\x03\x04"
@@ -75,7 +75,7 @@ def test_study_detail_page_renders(_study_workspace):
     embedded as window._study JSON. Assertions that relied on JSON-embed
     content are now verified via _study_detail_spec instead (see test_data_endpoints).
     """
-    from vivarium_dashboard.lib.study_page import render_study_detail_html
+    from vivarium_workbench.lib.study_page import render_study_detail_html
     import yaml
     spec = yaml.safe_load((_study_workspace / "studies" / "s1" / "study.yaml").read_text())
     html = render_study_detail_html(_study_workspace, "s1", spec)
@@ -92,7 +92,7 @@ def test_study_detail_page_renders(_study_workspace):
 
 def test_variant_add_writes_flat_v3_shape(_study_workspace):
     """variant-add writes {name, base_composite, parameter_overrides} flat."""
-    from vivarium_dashboard.lib.study_crud_mutations import study_variant_add as _post_study_variant_add_for_test
+    from vivarium_workbench.lib.study_crud_mutations import study_variant_add as _post_study_variant_add_for_test
     resp, code = _post_study_variant_add_for_test(
         _study_workspace,
         {"study": "s1", "name": "fast", "base_composite": "core",
@@ -107,7 +107,7 @@ def test_variant_add_writes_flat_v3_shape(_study_workspace):
 
 def test_variant_add_default_empty_overrides(_study_workspace):
     """Omitting parameter_overrides yields {} in the stored variant."""
-    from vivarium_dashboard.lib.study_crud_mutations import study_variant_add as _post_study_variant_add_for_test
+    from vivarium_workbench.lib.study_crud_mutations import study_variant_add as _post_study_variant_add_for_test
     resp, code = _post_study_variant_add_for_test(
         _study_workspace,
         {"study": "s1", "name": "fast", "base_composite": "core"},
@@ -118,7 +118,7 @@ def test_variant_add_default_empty_overrides(_study_workspace):
 
 
 def test_variant_add_rejects_missing_base_composite(_study_workspace):
-    from vivarium_dashboard.lib.study_crud_mutations import study_variant_add as _post_study_variant_add_for_test
+    from vivarium_workbench.lib.study_crud_mutations import study_variant_add as _post_study_variant_add_for_test
     resp, code = _post_study_variant_add_for_test(
         _study_workspace,
         {"study": "s1", "name": "fast"},
@@ -128,7 +128,7 @@ def test_variant_add_rejects_missing_base_composite(_study_workspace):
 
 
 def test_variant_add_rejects_unknown_base_composite(_study_workspace):
-    from vivarium_dashboard.lib.study_crud_mutations import study_variant_add as _post_study_variant_add_for_test
+    from vivarium_workbench.lib.study_crud_mutations import study_variant_add as _post_study_variant_add_for_test
     resp, code = _post_study_variant_add_for_test(
         _study_workspace,
         {"study": "s1", "name": "fast", "base_composite": "ghost"},
@@ -138,7 +138,7 @@ def test_variant_add_rejects_unknown_base_composite(_study_workspace):
 
 
 def test_variant_add_rejects_duplicate_name(_study_workspace):
-    from vivarium_dashboard.lib.study_crud_mutations import study_variant_add as _post_study_variant_add_for_test
+    from vivarium_workbench.lib.study_crud_mutations import study_variant_add as _post_study_variant_add_for_test
     _post_study_variant_add_for_test(
         _study_workspace,
         {"study": "s1", "name": "fast", "base_composite": "core"},
@@ -152,7 +152,7 @@ def test_variant_add_rejects_duplicate_name(_study_workspace):
 
 def test_variant_set_params_replaces_overrides(_study_workspace):
     """Replaces parameter_overrides wholesale (not a merge)."""
-    from vivarium_dashboard.lib.study_crud_mutations import (
+    from vivarium_workbench.lib.study_crud_mutations import (
         study_variant_add as _post_study_variant_add_for_test,
         study_variant_set_params as _post_study_variant_set_params_for_test,
     )
@@ -172,7 +172,7 @@ def test_variant_set_params_replaces_overrides(_study_workspace):
 
 
 def test_variant_set_params_404_unknown_variant(_study_workspace):
-    from vivarium_dashboard.lib.study_crud_mutations import study_variant_set_params as _post_study_variant_set_params_for_test
+    from vivarium_workbench.lib.study_crud_mutations import study_variant_set_params as _post_study_variant_set_params_for_test
     resp, code = _post_study_variant_set_params_for_test(
         _study_workspace,
         {"study": "s1", "variant": "ghost", "parameter_overrides": {}},
@@ -182,7 +182,7 @@ def test_variant_set_params_404_unknown_variant(_study_workspace):
 
 def test_variant_set_params_400_non_dict(_study_workspace):
     """parameter_overrides must be an object."""
-    from vivarium_dashboard.lib.study_crud_mutations import (
+    from vivarium_workbench.lib.study_crud_mutations import (
         study_variant_add as _post_study_variant_add_for_test,
         study_variant_set_params as _post_study_variant_set_params_for_test,
     )

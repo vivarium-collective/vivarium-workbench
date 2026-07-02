@@ -1,4 +1,4 @@
-from vivarium_dashboard.lib.run_commands import study_run_commands
+from vivarium_workbench.lib.run_commands import study_run_commands
 
 
 def test_baseline_and_variant_commands():

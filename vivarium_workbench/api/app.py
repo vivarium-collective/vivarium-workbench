@@ -1,7 +1,7 @@
 """FastAPI application — the dashboard's HTTP API.
 
 This is the **live production web layer**. The strangler-fig migration from the
-old stdlib ``http.server`` handler (``vivarium_dashboard/server.py``) is complete
+old stdlib ``http.server`` handler (``vivarium_workbench/server.py``) is complete
 at the routing layer: ``vivarium-dashboard serve`` boots this app under uvicorn
 (``cli.py`` → ``lib/startup.serve_fastapi`` → ``uvicorn.run(app, ...)``). The
 stdlib ``server.py`` module is **retired** — it is no longer imported on the serve
@@ -14,12 +14,12 @@ is not yet unified behind a single envelope. Those are being addressed separatel
 
 Run it standalone and browse the auto-generated **Swagger UI**:
 
-    python -m vivarium_dashboard.api --workspace /path/to/workspace
+    python -m vivarium_workbench.api --workspace /path/to/workspace
     # → Swagger UI at http://127.0.0.1:8001/docs
     #   ReDoc      at http://127.0.0.1:8001/redoc
     #   raw schema at http://127.0.0.1:8001/openapi.json
 
-(or, equivalently, ``uvicorn vivarium_dashboard.api.app:app --reload`` with
+(or, equivalently, ``uvicorn vivarium_workbench.api.app:app --reload`` with
 ``VIVARIUM_DASHBOARD_WORKSPACE`` set.)
 """
 
@@ -38,81 +38,81 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError
 
-from vivarium_dashboard.lib.errors import APIError
-from vivarium_dashboard.lib.request_logging import install_request_logging
+from vivarium_workbench.lib.errors import APIError
+from vivarium_workbench.lib.request_logging import install_request_logging
 
-from vivarium_dashboard.lib import active_workspace
-from vivarium_dashboard.lib import csrf as _csrf
-from vivarium_dashboard.lib import source_switch_views as _source_switch_views
-from vivarium_dashboard.lib import source_build_views as _source_build_views
-from vivarium_dashboard.lib import job_status_views as _job_status_views
-from vivarium_dashboard.lib import run_jobs as _run_jobs
-from vivarium_dashboard.lib import remote_run_jobs as _remote_run_jobs
-from vivarium_dashboard.lib import remote_run_views as _remote_run_views
-from vivarium_dashboard.lib import auth_views as _auth_views
-from vivarium_dashboard.lib import composite_run_views as _cr_views
-from vivarium_dashboard.lib import composite_test_run_views as _composite_test_run_views
-from vivarium_dashboard.lib import study_create_views as _study_create_views
-from vivarium_dashboard.lib import investigation_run_one_views as _investigation_run_one_views
-from vivarium_dashboard.lib import investigation_run_views as _investigation_run_views
-from vivarium_dashboard.lib import compare_group_mutations as _compare_grp_mut
-from vivarium_dashboard.lib import viz_write_mutations as _viz_write_mut
-from vivarium_dashboard.lib import viz_commit_mutations as _viz_commit_mut
-from vivarium_dashboard.lib import viz_accept_views as _viz_accept_views
-from vivarium_dashboard.lib import viz_preview_views as _viz_preview_views
-from vivarium_dashboard.lib import viz_preview_instance_views as _viz_preview_instance_views
-from vivarium_dashboard.lib import upload_mutations as _upload_mut
-from vivarium_dashboard.lib import reference_mutations as _reference_mut
-from vivarium_dashboard.lib import composite_mutations as _composite_mut
-from vivarium_dashboard.lib import investigation_viz_mutations as _inv_viz_mut
-from vivarium_dashboard.lib import lifecycle_mutations as _lifecycle_mut
-from vivarium_dashboard.lib import scaffold_mutations as _scaffold_mut
-from vivarium_dashboard.lib import composite_state_views as _composite_state_views
-from vivarium_dashboard.lib import data_sources as _data_sources
-from vivarium_dashboard.lib import download_views as _download_views
-from vivarium_dashboard.lib import analysis_outputs as _analysis_outputs
-from vivarium_dashboard.lib import simulations_index as _simulations_index
-from vivarium_dashboard.lib import events as _events
-from vivarium_dashboard.lib import explorer_data as _explorer_data
-from vivarium_dashboard.lib import metadata_mutations as _meta_mut
-from vivarium_dashboard.lib import study_crud_mutations as _study_crud_mut
-from vivarium_dashboard.lib import git_status as _git_status
-from vivarium_dashboard.lib import git_commit_views as _git_commit_views
-from vivarium_dashboard.lib import work_mutations as _work_mutations
-from vivarium_dashboard.lib import work_pr_views as _work_pr_views
-from vivarium_dashboard.lib import workspaces_mutations as _workspaces_mut
-from vivarium_dashboard.lib import workspaces_process_views as _workspaces_proc
-from vivarium_dashboard.lib import misc_mutations as _misc_mut
-from vivarium_dashboard.lib import misc_post_views as _misc_post_views
-from vivarium_dashboard.lib import investigation_status
-from vivarium_dashboard.lib import investigation_views as _inv_views
-from vivarium_dashboard.lib import observables_views as _obs_views
-from vivarium_dashboard.lib import readouts_views as _readouts_views
-from vivarium_dashboard.lib import report_views as _report_views
-from vivarium_dashboard.lib import rigor_views as _rigor_views
-from vivarium_dashboard.lib import saved_visualizations as _saved_viz
-from vivarium_dashboard.lib import static_serving as _static_serving
-from vivarium_dashboard.lib import study_page as _study_page
-from vivarium_dashboard.lib import study_runs as _study_runs
-from vivarium_dashboard.lib import run_unblocked_views as _run_unblocked_views
-from vivarium_dashboard.lib import test_run_views as _test_run_views
-from vivarium_dashboard.lib import study_spec as _study_spec
-from vivarium_dashboard.lib import study_viz_views as _study_viz
-from vivarium_dashboard.lib import system_info as _system_info
-from vivarium_dashboard.lib import work_views as _work_views
-from vivarium_dashboard.lib import workspace_deps_views as _workspace_deps
-from vivarium_dashboard.lib import workspace_manifest_views as _workspace_manifest_views
-from vivarium_dashboard.lib import install_views as _install_views
-from vivarium_dashboard.lib import catalog_install_views as _catalog_install_views
-from vivarium_dashboard.lib import catalog_uninstall_views as _catalog_uninstall_views
-from vivarium_dashboard.lib import finding_views as _finding_views
-from vivarium_dashboard.lib import investigation_graph_views as _ig_views
-from vivarium_dashboard.lib import chain_views as _chain_views
-from vivarium_dashboard.lib import study_variants as _study_variants
-from vivarium_dashboard.lib import composite_runs as _composite_runs
-from vivarium_dashboard.lib.composite_resolve import resolve_composite_for_request
-from vivarium_dashboard.lib.composites_query import composites_via_subprocess
-from vivarium_dashboard.lib.models import (
+from vivarium_workbench.lib import active_workspace
+from vivarium_workbench.lib import csrf as _csrf
+from vivarium_workbench.lib import source_switch_views as _source_switch_views
+from vivarium_workbench.lib import source_build_views as _source_build_views
+from vivarium_workbench.lib import job_status_views as _job_status_views
+from vivarium_workbench.lib import run_jobs as _run_jobs
+from vivarium_workbench.lib import remote_run_jobs as _remote_run_jobs
+from vivarium_workbench.lib import remote_run_views as _remote_run_views
+from vivarium_workbench.lib import auth_views as _auth_views
+from vivarium_workbench.lib import composite_run_views as _cr_views
+from vivarium_workbench.lib import composite_test_run_views as _composite_test_run_views
+from vivarium_workbench.lib import study_create_views as _study_create_views
+from vivarium_workbench.lib import investigation_run_one_views as _investigation_run_one_views
+from vivarium_workbench.lib import investigation_run_views as _investigation_run_views
+from vivarium_workbench.lib import compare_group_mutations as _compare_grp_mut
+from vivarium_workbench.lib import viz_write_mutations as _viz_write_mut
+from vivarium_workbench.lib import viz_commit_mutations as _viz_commit_mut
+from vivarium_workbench.lib import viz_accept_views as _viz_accept_views
+from vivarium_workbench.lib import viz_preview_views as _viz_preview_views
+from vivarium_workbench.lib import viz_preview_instance_views as _viz_preview_instance_views
+from vivarium_workbench.lib import upload_mutations as _upload_mut
+from vivarium_workbench.lib import reference_mutations as _reference_mut
+from vivarium_workbench.lib import composite_mutations as _composite_mut
+from vivarium_workbench.lib import investigation_viz_mutations as _inv_viz_mut
+from vivarium_workbench.lib import lifecycle_mutations as _lifecycle_mut
+from vivarium_workbench.lib import scaffold_mutations as _scaffold_mut
+from vivarium_workbench.lib import composite_state_views as _composite_state_views
+from vivarium_workbench.lib import data_sources as _data_sources
+from vivarium_workbench.lib import download_views as _download_views
+from vivarium_workbench.lib import analysis_outputs as _analysis_outputs
+from vivarium_workbench.lib import simulations_index as _simulations_index
+from vivarium_workbench.lib import events as _events
+from vivarium_workbench.lib import explorer_data as _explorer_data
+from vivarium_workbench.lib import metadata_mutations as _meta_mut
+from vivarium_workbench.lib import study_crud_mutations as _study_crud_mut
+from vivarium_workbench.lib import git_status as _git_status
+from vivarium_workbench.lib import git_commit_views as _git_commit_views
+from vivarium_workbench.lib import work_mutations as _work_mutations
+from vivarium_workbench.lib import work_pr_views as _work_pr_views
+from vivarium_workbench.lib import workspaces_mutations as _workspaces_mut
+from vivarium_workbench.lib import workspaces_process_views as _workspaces_proc
+from vivarium_workbench.lib import misc_mutations as _misc_mut
+from vivarium_workbench.lib import misc_post_views as _misc_post_views
+from vivarium_workbench.lib import investigation_status
+from vivarium_workbench.lib import investigation_views as _inv_views
+from vivarium_workbench.lib import observables_views as _obs_views
+from vivarium_workbench.lib import readouts_views as _readouts_views
+from vivarium_workbench.lib import report_views as _report_views
+from vivarium_workbench.lib import rigor_views as _rigor_views
+from vivarium_workbench.lib import saved_visualizations as _saved_viz
+from vivarium_workbench.lib import static_serving as _static_serving
+from vivarium_workbench.lib import study_page as _study_page
+from vivarium_workbench.lib import study_runs as _study_runs
+from vivarium_workbench.lib import run_unblocked_views as _run_unblocked_views
+from vivarium_workbench.lib import test_run_views as _test_run_views
+from vivarium_workbench.lib import study_spec as _study_spec
+from vivarium_workbench.lib import study_viz_views as _study_viz
+from vivarium_workbench.lib import system_info as _system_info
+from vivarium_workbench.lib import work_views as _work_views
+from vivarium_workbench.lib import workspace_deps_views as _workspace_deps
+from vivarium_workbench.lib import workspace_manifest_views as _workspace_manifest_views
+from vivarium_workbench.lib import install_views as _install_views
+from vivarium_workbench.lib import catalog_install_views as _catalog_install_views
+from vivarium_workbench.lib import catalog_uninstall_views as _catalog_uninstall_views
+from vivarium_workbench.lib import finding_views as _finding_views
+from vivarium_workbench.lib import investigation_graph_views as _ig_views
+from vivarium_workbench.lib import chain_views as _chain_views
+from vivarium_workbench.lib import study_variants as _study_variants
+from vivarium_workbench.lib import composite_runs as _composite_runs
+from vivarium_workbench.lib.composite_resolve import resolve_composite_for_request
+from vivarium_workbench.lib.composites_query import composites_via_subprocess
+from vivarium_workbench.lib.models import (
     BibEntry,
     CatalogModule,
     CatalogPayload,
@@ -317,11 +317,11 @@ from vivarium_dashboard.lib.models import (
     CatalogUninstallRequest,
 )
 from investigation_contracts import FindingCreateBody, EvidenceCreateBody, DecisionCreateBody, ConclusionCreateBody
-from vivarium_dashboard.lib.catalog import build_catalog
-from vivarium_dashboard.lib.registry import build_registry
-from vivarium_dashboard.lib.visualization_classes import list_visualization_classes
-from vivarium_dashboard.lib.simulations_index import list_simulations
-from vivarium_dashboard.lib.study_charts import build_study_charts_payload
+from vivarium_workbench.lib.catalog import build_catalog
+from vivarium_workbench.lib.registry import build_registry
+from vivarium_workbench.lib.visualization_classes import list_visualization_classes
+from vivarium_workbench.lib.simulations_index import list_simulations
+from vivarium_workbench.lib.study_charts import build_study_charts_payload
 
 WORKSPACE_ENV = "VIVARIUM_DASHBOARD_WORKSPACE"
 
@@ -535,7 +535,7 @@ def create_app() -> FastAPI:
         which enriches ``list_simulations`` rows with emitter_type labels + the
         active-workspace remote runs and reports the current branch slug.
         """
-        from vivarium_dashboard.lib.simulations_index import build_simulations_data
+        from vivarium_workbench.lib.simulations_index import build_simulations_data
         data = build_simulations_data(ws)
         rows = [SimRow.model_validate(r) for r in data.get("simulations", [])]
         return SimulationsPayload(simulations=rows, current=data.get("current"))
@@ -611,8 +611,8 @@ def create_app() -> FastAPI:
     def references_bib(ws: Path = Depends(get_workspace)) -> ReferencesBibPayload:
         """Parsed `references/papers.bib` entries (+ enrichment cache). Bibtex
         fields vary, so `BibEntry` preserves unknown keys (extra='allow')."""
-        from vivarium_dashboard.lib.references_fetch import enrich_entries, load_cache
-        from vivarium_dashboard.lib.report import _parse_bib_entries
+        from vivarium_workbench.lib.references_fetch import enrich_entries, load_cache
+        from vivarium_workbench.lib.report import _parse_bib_entries
 
         try:
             entries = _parse_bib_entries(ws)
@@ -953,7 +953,7 @@ def create_app() -> FastAPI:
         the single implementation the stdlib ``_investigations_data`` now
         forwards to.
         """
-        from vivarium_dashboard.lib.investigations_index import build_investigations
+        from vivarium_workbench.lib.investigations_index import build_investigations
 
         return InvestigationsPayload.model_validate(build_investigations(ws))
 
@@ -2166,7 +2166,7 @@ def create_app() -> FastAPI:
         summary="Provenance manifest for the active workspace (repo@commit + lockfile + results)",
     )
     def source_manifest(ws: Path = Depends(get_workspace)) -> ProvenanceManifest:
-        from vivarium_dashboard.lib.provenance_manifest import build_manifest
+        from vivarium_workbench.lib.provenance_manifest import build_manifest
         return ProvenanceManifest(**build_manifest(ws))
 
     @app.get(
@@ -2425,7 +2425,7 @@ def create_app() -> FastAPI:
         Last-Event-ID header resume (wins over ?since), ?type filter. ?once=1 is a
         test-only bounded mode that replays history and closes."""
         from investigation_contracts import read_log
-        from vivarium_dashboard.lib.event_log import log_path
+        from vivarium_workbench.lib.event_log import log_path
         cursor = request.headers.get("Last-Event-ID") or (since or None)
         types = [type] if type else None
         bounded = bool(once)
@@ -2484,7 +2484,7 @@ def create_app() -> FastAPI:
         Library-backed via ``lib.suggest_requests.read_response`` — no stdlib
         server dependency.
         """
-        from vivarium_dashboard.lib.suggest_requests import read_response
+        from vivarium_workbench.lib.suggest_requests import read_response
 
         if not id:
             return JSONResponse(content={"error": "missing id"}, status_code=400)
@@ -2556,7 +2556,7 @@ def create_app() -> FastAPI:
         Mirrors the legacy ``do_GET`` ``("/", "/index.html")`` branch.
         """
         try:
-            from vivarium_dashboard.lib.report import render_workspace_report
+            from vivarium_workbench.lib.report import render_workspace_report
             render_workspace_report(ws)
         except Exception as render_exc:  # noqa: BLE001 — never block load
             import sys as _sys

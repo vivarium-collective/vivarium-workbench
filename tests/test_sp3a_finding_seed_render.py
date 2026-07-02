@@ -12,7 +12,7 @@ verification):
 """
 from pathlib import Path
 
-_PKG = Path(__file__).resolve().parent.parent / "vivarium_dashboard"
+_PKG = Path(__file__).resolve().parent.parent / "vivarium_workbench"
 
 
 def test_study_detail_js_has_seed_from_finding_button():
