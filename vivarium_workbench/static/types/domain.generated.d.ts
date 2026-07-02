@@ -1,5 +1,5 @@
-// AUTO-GENERATED from vivarium_dashboard/lib/models.py — do not edit by hand.
-// Regenerate: python -m vivarium_dashboard.lib.generate_ts
+// AUTO-GENERATED from vivarium_workbench/lib/models.py — do not edit by hand.
+// Regenerate: python -m vivarium_workbench.lib.generate_ts
 
 export type EmitterKind = 'xarray' | 'parquet' | 'sqlite';
 

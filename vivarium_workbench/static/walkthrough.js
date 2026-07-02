@@ -8893,7 +8893,7 @@
                 var kind = (t.measure && t.measure.kind) || null;
                 var op = (t.pass_if && t.pass_if.op) || (t.expect && t.expect.op) || null;
                 if (!kind && !op) return;
-                var ref = 'Python: <code>vivarium_dashboard/lib/expected_behavior.py</code> → <code>evaluate()</code>';
+                var ref = 'Python: <code>vivarium_workbench/lib/expected_behavior.py</code> → <code>evaluate()</code>';
                 if (kind) ref += '; measure kind <code>' + _h(kind) + '</code> via <code>_series_for_simple_kind()</code>/<code>_measure()</code>';
                 if (op) ref += '; op <code>' + _h(op) + '</code> via <code>_check()</code>';
                 techBits.push(ref);

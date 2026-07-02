@@ -1,4 +1,4 @@
-// vivarium_dashboard/static/aig-graph.js
+// vivarium_workbench/static/aig-graph.js
 // Phase B4 (superset): render a study's typed evidence chain as a compact block
 // that _renderInvestigationDag appends INSIDE the study card (so it is measured
 // and stacked with the card and never collides). Pure string builder — node-testable.
