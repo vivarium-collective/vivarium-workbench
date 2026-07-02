@@ -10,7 +10,7 @@ run from the workspace venv) see [docs/USAGE.md](docs/USAGE.md).
 
 ## What this is
 
-`vivarium-dashboard` is a local web UI for [process-bigraph](https://github.com/vivarium-collective/process-bigraph)
+`vivarium-workbench` is a local web UI for [process-bigraph](https://github.com/vivarium-collective/process-bigraph)
 workspaces. You point it at a workspace directory (one containing `workspace.yaml`,
 scaffolded from [pbg-template](https://github.com/vivarium-collective/pbg-template))
 and it serves an interactive dashboard over that workspace's registry, composites,
@@ -23,12 +23,24 @@ lives in a separate workspace directory passed via `--workspace`. The workspace 
 where `studies/`, `composites/`, `.pbg/`, `runs.db` files, etc. live — never in
 this repo (except under `tests/_fixtures/`).
 
+**Rename (in progress).** The tool was `vivarium-dashboard`; the package/dist/CLI
+is now `vivarium-workbench` (`vivarium_workbench` import package; `vivarium-workbench`
+/ `vwb` / `vivarium-workbench-publish` CLIs; `VIVARIUM_WORKBENCH_*` env vars). The
+old `vivarium-dashboard` / `vdash` / `vivarium-dashboard-publish` commands, the
+`vivarium_dashboard` import package (a shim with a meta-path finder), and the
+`VIVARIUM_DASHBOARD_*` env vars all still work as deprecated aliases (emit a
+`DeprecationWarning`; removed in a future major release). The published static
+bundle is still the "read-only dashboard". Back-compat identifiers not covered by
+an alias — the `vivarium-dashboard` keyring service and `~/.config/vivarium-dashboard/`
+hint dir in `lib/github_auth.py` — are intentionally left unchanged so stored
+credentials keep resolving.
+
 ## Commands
 
 ```bash
 # Run the dashboard against a workspace (renders HTML once, then serves)
-vivarium-dashboard serve --workspace /path/to/workspace          # picks a free port
-vivarium-dashboard serve --workspace . --port 8000 --host 0.0.0.0
+vivarium-workbench serve --workspace /path/to/workspace          # picks a free port
+vivarium-workbench serve --workspace . --port 8000 --host 0.0.0.0
 
 # Tests (pytest; requires editable install of this package + its deps)
 pytest                                    # full suite
@@ -37,10 +49,10 @@ pytest tests/test_composite_runs.py::test_name -x   # one test, stop on first fa
 pytest -k "csrf or origin"                # by keyword
 
 # Export a workspace as a static read-only bundle (the "read-only dashboard")
-vivarium-dashboard-publish --workspace /path/to/workspace --out /tmp/bundle
+vivarium-workbench-publish --workspace /path/to/workspace --out /tmp/bundle
 
 # One-shot legacy migration (investigations/<name>/spec.yaml → studies/, v2→v3)
-vivarium-dashboard migrate-investigations --workspace /path/to/ws [--dry-run]
+vivarium-workbench migrate-investigations --workspace /path/to/ws [--dry-run]
 ```
 
 There is no separate build step (pure Python + static assets) and no linter
@@ -50,8 +62,8 @@ will run it. Note `bigraph-loom` and `pbg-superpowers` are direct git/path deps.
 
 ## Architecture
 
-### HTTP server (`vivarium_dashboard/api/app.py`, FastAPI)
-The dashboard is served by a **FastAPI app** under uvicorn: `vivarium-dashboard
+### HTTP server (`vivarium_workbench/api/app.py`, FastAPI)
+The dashboard is served by a **FastAPI app** under uvicorn: `vivarium-workbench
 serve` → `cli.py` → `lib/startup.serve_fastapi` → `uvicorn.run(app, ...)`. All
 ~178 `/api/*` routes (read and write), static/SPA serving, and the SSE stream are
 defined in `api/app.py` via `@app.get`/`@app.post` decorators; each backs onto a
@@ -96,7 +108,7 @@ Each module owns one concern and is independently testable. Key ones:
 ### Running simulations (detached process model)
 Composite runs can take tens of minutes, far longer than an HTTP request. The
 flow: an endpoint writes a **run-request JSON file**, then spawns
-`vivarium-dashboard run-composite --request <file>` as a *detached* subprocess.
+`vivarium-workbench run-composite --request <file>` as a *detached* subprocess.
 `run_runner.execute()` is pure — it reads everything from the request file, never
 from argv or globals (this structurally avoids "Argument list too long" and lets
 runs outlive the server). Each run writes results to
@@ -122,7 +134,7 @@ behavior, consider both the live and snapshot data sources.
 - **CSRF/origin guard**: every mutating (`POST`/`DELETE`) endpoint calls
   `_csrf_ok()`. Requests with no `Origin` (curl, local CLI) are allowed; a present
   `Origin` must match `Host`. Bypass for tests/tools with
-  `VIVARIUM_DASHBOARD_DISABLE_CSRF=1`.
+  `VIVARIUM_WORKBENCH_DISABLE_CSRF=1`.
 - **Atomic writes**: use `lib/atomic_io.py` for file writes that must not be seen
   half-written.
 - **JSON serialization**: the server's `_json_default` handles numpy/dataclasses;

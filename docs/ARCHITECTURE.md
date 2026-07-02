@@ -1,4 +1,4 @@
-# vivarium-dashboard — Design & Data Architecture
+# vivarium-workbench — Design & Data Architecture
 
 This document explains **what the dashboard does**, **where data lives**, **how
 data flows and is transformed**, and **which repository is the source of truth**
@@ -14,18 +14,24 @@ commands and code layout). For how the dashboard is *deployed* with a workspace
 
 ## 1. What this actually is
 
-`vivarium-dashboard` is a **local, single-process web server that turns a
+`vivarium-workbench` is a **local, single-process web server that turns a
 process-bigraph *workspace* into an interactive, git-backed research notebook.**
 It is *not* a simulation engine and it has *no database of its own* — it reads
 and writes plain files in a workspace directory and delegates simulation to
 [process-bigraph](https://github.com/vivarium-collective/process-bigraph).
+
+> **Renamed from `vivarium-dashboard`.** The `vivarium_dashboard` import package,
+> the `vivarium-dashboard`/`vdash`/`vivarium-dashboard-publish` CLIs, and the
+> `VIVARIUM_DASHBOARD_*` env vars keep working as deprecated aliases during the
+> migration window (removed in a future major release). The published static
+> bundle is still the "read-only dashboard".
 
 The mental model is three layers:
 
 ```
    ENGINE            process-bigraph + bigraph-schema     (runs the science)
       │
-   TOOLING           vivarium-dashboard  (THIS REPO)      (UI + orchestration + git)
+   TOOLING           vivarium-workbench  (THIS REPO)      (UI + orchestration + git)
    + AI TOOLING      pbg-superpowers (/pbg-* Claude skills)
       │
    DATA              a workspace directory                (the only source of truth)
@@ -51,7 +57,7 @@ authors and every result produced lives in the workspace, never in this repo
 ### The HTTP layer
 
 The dashboard is served by a **FastAPI app** (`api/app.py`) run under uvicorn:
-`vivarium-dashboard serve` → `cli.py` → `lib/startup.serve_fastapi` →
+`vivarium-workbench serve` → `cli.py` → `lib/startup.serve_fastapi` →
 `uvicorn.run(app, ...)`. All routes (read and write, static/SPA serving, and the
 SSE stream) are defined there and back onto the `lib/` functions.
 
@@ -131,7 +137,7 @@ and is computed on read — it is not persisted.
 
 An investigation groups studies into ordered "parts" and wires the
 study-to-study DAG. It defines a **baseline** plus **comparison variants**
-(parameter-overridden versions). `vivarium-dashboard prepare-investigation`
+(parameter-overridden versions). `vivarium-workbench prepare-investigation`
 (→ `lib/prepare_investigation.py`) is the coordinated orchestrator: it runs the
 baseline + every variant and re-renders the comparative overlays as one
 "generation", so all traces on a chart come from a consistent run set. See
@@ -210,7 +216,7 @@ they execute in **detached subprocesses** decoupled from the HTTP request.
                 │  Inserts a runs_meta row: status='running', started_at=now()
                 ▼
 3. SPAWN     run_registry.spawn_detached() launches, fully detached (start_new_session=True):
-                │     python -m vivarium_dashboard.cli run-composite --request <file>
+                │     python -m vivarium_workbench.cli run-composite --request <file>
                 │  Records child PID in runs_meta. Returns 202 immediately.
                 ▼
 4. EXECUTE   lib/run_runner.execute() (the PURE detached executor):
@@ -320,7 +326,7 @@ which is gitignored.
 
 Mutating requests are guarded by `_csrf_ok()`: requests with no `Origin` (curl,
 local CLI) are allowed; a present `Origin` must match `Host`
-(bypass with `VIVARIUM_DASHBOARD_DISABLE_CSRF=1`).
+(bypass with `VIVARIUM_WORKBENCH_DISABLE_CSRF=1`).
 
 ---
 
@@ -349,7 +355,7 @@ process or database between the two tools.
 
 ## 8. One-paragraph summary
 
-You point `vivarium-dashboard serve` at a process-bigraph workspace. The
+You point `vivarium-workbench serve` at a process-bigraph workspace. The
 workspace's YAML files (`workspace.yaml`, `studies/*/study.yaml`,
 `investigations/*/investigation.yaml`) are the source of truth for *design*;
 `runs.db` files are the source of truth for *results*; the workspace's git
