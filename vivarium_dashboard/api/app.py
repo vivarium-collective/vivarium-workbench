@@ -1,15 +1,18 @@
-"""FastAPI application — the typed seam for the dashboard's HTTP API.
+"""FastAPI application — the dashboard's HTTP API.
 
-This is the **seed of a strangler-fig migration**: the dashboard is served today
-by a 16.9k-line stdlib ``http.server`` handler (``vivarium_dashboard/server.py``)
-with hand-dispatched routes and untyped dict payloads. Rather than rewrite it in
-one pass, we stand up a FastAPI app here that serves a small, growing set of
-routes with **typed pydantic responses** (so they get automatic validation and
-an OpenAPI schema). Routes move over a few at a time; both servers back onto the
-same ``lib/`` functions, so there is one implementation, not two.
+This is the **live production web layer**. The strangler-fig migration from the
+old stdlib ``http.server`` handler (``vivarium_dashboard/server.py``) is complete
+at the routing layer: ``vivarium-dashboard serve`` boots this app under uvicorn
+(``cli.py`` → ``lib/startup.serve_fastapi`` → ``uvicorn.run(app, ...)``). The
+stdlib ``server.py`` module is **retired** — it is no longer imported on the serve
+path. All ~178 routes (read and write, static/SPA serving, and the SSE stream)
+are defined here; every route backs onto the same ``lib/`` functions.
 
-Run it standalone (does not yet replace the stdlib server) and browse the
-auto-generated **Swagger UI** to see every typed route:
+Known follow-ups (see the architecture-hardening plan): the response contract is
+still uneven — many payloads are ``extra="allow"`` passthroughs and error handling
+is not yet unified behind a single envelope. Those are being addressed separately.
+
+Run it standalone and browse the auto-generated **Swagger UI**:
 
     python -m vivarium_dashboard.api --workspace /path/to/workspace
     # → Swagger UI at http://127.0.0.1:8001/docs
@@ -18,10 +21,6 @@ auto-generated **Swagger UI** to see every typed route:
 
 (or, equivalently, ``uvicorn vivarium_dashboard.api.app:app --reload`` with
 ``VIVARIUM_DASHBOARD_WORKSPACE`` set.)
-
-Today's routes are read-only and stateless (workspace-backed). Stateful routes
-(e.g. remote-run status, which reads the in-memory RemoteRunManager owned by the
-stdlib server) move over once the two servers share process state.
 """
 
 from __future__ import annotations
