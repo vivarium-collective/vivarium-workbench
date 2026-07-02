@@ -9,16 +9,16 @@ with no behavioral value once dispatch moved to explicit FastAPI
 ``@app.get``/``@app.post`` decorators.  Those assertions were deleted with the
 dispatch tables they tested.
 
-FINDING (worth a maintainer's attention): in the FastAPI app only the canonical
-``/api/study/{slug}`` route survives (served directly, not as an alias).  The
-other ``/api/study-*`` aliases the old tests enumerated — ``studies``,
-``study-viz-html``, ``study-composites``, ``study-state-tree``, ``study-delete``,
-``study-viz-render``, ``study-viz-add``, ``study-set-observables``,
-``study-set-conclusion``, ``study-set-description``, ``study-comparison-update``,
-``study-group-add``, ``study-group-update``, ``study-variant-rebuild`` — are NOT
-registered on the FastAPI app; only their ``/api/investigation-*`` forms are.  So
-there is no behavioral endpoint to convert those cases to; they were dropped in
-the migration.  This file keeps a behavioral check for the one surviving alias.
+UPDATE (harden/fastapi-routes): the ``/api/study-*`` aliases the old tests
+enumerated — ``study-viz-html``, ``study-composites``, ``study-state-tree``,
+``study-delete``, ``study-viz-render``, ``study-viz-add``,
+``study-set-observables``, ``study-set-conclusion``, ``study-set-description``,
+``study-comparison-add``, ``study-comparison-update``, ``study-group-add``,
+``study-group-update``, ``study-variant-rebuild``, ``study-sync-runs``,
+``study-bigraph-paths``, ``study-analysis-{outputs,file,zip}`` — plus the six
+``DELETE`` routes were re-exposed on the FastAPI app.  Their behavioral coverage
+now lives in ``test_fastapi_route_gaps.py``.  This file keeps a behavioral check
+for the canonical ``/api/study/{slug}`` route.
 """
 import yaml
 

@@ -239,3 +239,69 @@ def visualization_commit_batch(ws_root: Path, body: dict[str, Any]) -> "tuple[di
         src.unlink()  # remove staged copy
 
     return {"ok": True, "committed": names}, 200
+
+
+# ---------------------------------------------------------------------------
+# simulation_delete / visualization_delete
+# ---------------------------------------------------------------------------
+
+
+def _delete_named_ws_entry(
+    ws_root: Path, section: str, name: str, kind: str
+) -> "tuple[dict, int]":
+    """Remove the ``{name: <name>}`` entry from ``workspace.yaml[<section>]``.
+
+    Shared helper for :func:`simulation_delete` and :func:`visualization_delete`.
+    Relocated from the retired ``server._delete_simulation`` /
+    ``server._delete_visualization`` (minus the ``_active_branch_action`` git
+    wrapper — the git commit is the caller's concern, deferred to the flip
+    batch like the other FastAPI mutation routes).
+
+    Returns:
+      200  ``{ok: True}``
+      400  name missing
+      404  no such entry
+    """
+    if not name:
+        return {"error": "name is required"}, 400
+
+    _ws_add_to_sys_path(ws_root)
+    ws_file = ws_root / "workspace.yaml"
+    ws: dict = yaml.safe_load(ws_file.read_text(encoding="utf-8")) or {}
+    entries = ws.get(section) or []
+    kept = [
+        e for e in entries
+        if not (isinstance(e, dict) and e.get("name") == name)
+    ]
+    if len(kept) == len(entries):
+        return {"error": f"{kind} '{name}' not found"}, 404
+    if kept:
+        ws[section] = kept
+    else:
+        ws.pop(section, None)
+    ws_file.write_text(
+        yaml.safe_dump(ws, sort_keys=False, allow_unicode=True), encoding="utf-8"
+    )
+    return {"ok": True}, 200
+
+
+def simulation_delete(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
+    """DELETE /api/simulation — remove a simulation entry from workspace.yaml.
+
+    Body: ``{name}``.  400 when name missing; 404 when not found; 200
+    ``{ok: True}`` on success.
+    """
+    return _delete_named_ws_entry(
+        ws_root, "simulations", (body.get("name") or "").strip(), "simulation"
+    )
+
+
+def visualization_delete(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
+    """DELETE /api/visualization — remove a visualization entry from workspace.yaml.
+
+    Body: ``{name}``.  400 when name missing; 404 when not found; 200
+    ``{ok: True}`` on success.
+    """
+    return _delete_named_ws_entry(
+        ws_root, "visualizations", (body.get("name") or "").strip(), "visualization"
+    )

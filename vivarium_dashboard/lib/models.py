@@ -1637,6 +1637,63 @@ class InvestigationGroupUpdateBody(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# DELETE-route request-body models (re-exposed over FastAPI). The old stdlib
+# server read a JSON body on DELETE; these mirror that shape verbatim.
+# ---------------------------------------------------------------------------
+
+
+class SimulationDeleteBody(BaseModel):
+    """DELETE /api/simulation {name}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+
+
+class SimulationRunDeleteBody(BaseModel):
+    """DELETE /api/simulation-run {run_id}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    run_id: Optional[str] = None
+
+
+class VisualizationDeleteBody(BaseModel):
+    """DELETE /api/visualization {name}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+
+
+class InvestigationCompositeDeleteBody(BaseModel):
+    """DELETE /api/investigation-composite {investigation, name}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: Optional[str] = None
+    name: Optional[str] = None
+
+
+class InvestigationComparisonDeleteBody(BaseModel):
+    """DELETE /api/investigation-comparison {investigation, name}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: Optional[str] = None
+    name: Optional[str] = None
+
+
+class InvestigationGroupDeleteBody(BaseModel):
+    """DELETE /api/investigation-group {investigation, name}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    investigation: Optional[str] = None
+    name: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
 # Batch 23: Visualization file-write mutation request-body models
 # ---------------------------------------------------------------------------
 
