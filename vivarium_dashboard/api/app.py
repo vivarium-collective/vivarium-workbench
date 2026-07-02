@@ -39,6 +39,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError
 
 from vivarium_dashboard.lib.errors import APIError
+from vivarium_dashboard.lib.request_logging import install_request_logging
 
 from vivarium_dashboard.lib import active_workspace
 from vivarium_dashboard.lib import csrf as _csrf
@@ -501,6 +502,9 @@ def create_app() -> FastAPI:
         # Last resort: emit the canonical envelope instead of a bare 500. The
         # message is intentionally generic — details go to logs, not the client.
         return JSONResponse({"error": "internal server error"}, status_code=500)
+
+    # Registered last so it wraps the CSRF middleware and sees the final status.
+    install_request_logging(app)
 
     @app.get("/health", tags=["System"], summary="Service liveness check")
     def health() -> dict[str, str]:
