@@ -5,6 +5,7 @@ Persisted at .pbg/state.json — gitignored, never committed.
 from __future__ import annotations
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 from ._root import workspace_root
@@ -114,3 +115,90 @@ def load_state_or_adopt_current() -> dict:
     }
     save_state(adopted)
     return adopted
+
+
+def active_branch_action(ws_root: Path, commit_message: str, action_fn) -> tuple[dict, int]:
+    """Run ``action_fn`` on the active workstream branch, commit, stay on it.
+
+    Returns ``(payload, status)``. Relocated from the retired
+    ``server._active_branch_action`` — parameterised on ``ws_root`` (used as the
+    git cwd) instead of the module-global ``WORKSPACE``. The workstream-state
+    helpers (load/save/adopt) read the active workspace via ``_root``, so the
+    caller must have registered ``ws_root`` via ``set_workspace_root`` (the FastAPI
+    seam + CLI do this at startup).
+    """
+    from vivarium_dashboard.lib.git_status import dirty_workspace
+
+    ws_root = Path(ws_root)
+    ws = str(ws_root)
+    if ws not in sys.path:
+        sys.path.insert(0, ws)
+
+    state = load_state_or_adopt_current()
+    branch = state.get("active_branch")
+    if not branch:
+        return {"error": "no active workstream — click Start workstream at the top of the dashboard, or check out a feature branch first"}, 409
+
+    # Make sure we're on the active branch (auto-recover from drift)
+    current = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=ws_root, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    if current != branch:
+        r = subprocess.run(["git", "checkout", branch], cwd=ws_root, capture_output=True, text=True)
+        if r.returncode != 0:
+            return {"error": f"could not check out workstream branch '{branch}': {r.stderr[:200]}"}, 500
+
+    if dirty_workspace(ws_root).strip():
+        return {"error": f"working tree dirty: {dirty_workspace(ws_root)[:300]}"}, 409
+
+    try:
+        action_fn()
+        # Stage only the content the dashboard authors. A blanket `git add -A`
+        # can sweep large untracked artifact dirs (out/, the ~175 MB ParCa
+        # cache) into the commit; scoping the pathspec makes that impossible.
+        # reports/ is intentionally excluded — it is generated, not authored.
+        _STAGE_PATHS = [
+            "studies/", "investigations/", "models/", "scripts/",
+            "workspace.yaml", "pyproject.toml", ".gitmodules", ".gitignore",
+            "external/",
+        ]
+        present = [p for p in _STAGE_PATHS if (ws_root / p).exists()]
+        if present:
+            subprocess.run(
+                ["git", "add", "-A", "--", *present],
+                cwd=ws_root, check=True, capture_output=True,
+            )
+        # Also stage any already-tracked top-level *.py / *.yaml the action
+        # touched, without picking up untracked files.
+        subprocess.run(
+            ["git", "add", "--update"],
+            cwd=ws_root, check=True, capture_output=True,
+        )
+        diff = subprocess.run(
+            ["git", "diff", "--cached", "--stat"],
+            cwd=ws_root, capture_output=True, text=True, check=True,
+        ).stdout
+        if not diff.strip():
+            return {"error": "action made no changes (already at this state?)"}, 409
+        subprocess.run([
+            "git", "-c", "user.email=pbg-template@local",
+                  "-c", "user.name=pbg-template",
+                  "commit", "-m", commit_message,
+        ], cwd=ws_root, check=True, capture_output=True)
+        commit_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=ws_root, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+
+        # Reload state (action_fn may have side-effects) and keep file fresh
+        state = load_state()
+        if state.get("active_branch") == branch:
+            save_state(state)
+
+        return {"branch": branch, "commit": commit_sha[:7], "message": commit_message}, 200
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
+        return {"error": f"git operation failed: {stderr[:300]}"}, 500
+    except Exception as e:
+        return {"error": str(e)}, 500
