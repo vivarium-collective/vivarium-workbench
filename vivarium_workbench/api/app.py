@@ -447,7 +447,7 @@ def _apply_readonly_filter(app: FastAPI) -> None:
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="vivarium-dashboard API",
+        title="vivarium-workbench API",
         version="0.1.0",
         summary="The dashboard HTTP API (FastAPI, live production layer).",
         description=(

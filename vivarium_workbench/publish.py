@@ -1011,7 +1011,7 @@ def main(argv=None):
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="vivarium-dashboard-publish",
+        prog="vivarium-workbench-publish",
         description=(
             "Export a vivarium-dashboard workspace into a self-contained "
             "static bundle (investigations + studies + assets + config)."

@@ -40,7 +40,7 @@ def main() -> None:
     import uvicorn
 
     base = f"http://{args.host}:{args.port}"
-    print(f"vivarium-dashboard typed API — workspace: {os.environ.get(WORKSPACE_ENV, '.')}")
+    print(f"vivarium-workbench typed API — workspace: {os.environ.get(WORKSPACE_ENV, '.')}")
     print(f"  Swagger UI : {base}/docs")
     print(f"  ReDoc      : {base}/redoc")
     print(f"  OpenAPI    : {base}/openapi.json")

@@ -1,4 +1,4 @@
-"""vivarium-dashboard CLI - serve a workspace via the dashboard."""
+"""vivarium-workbench CLI - serve a workspace via the workbench."""
 from __future__ import annotations
 import argparse
 import json
@@ -419,7 +419,7 @@ def cmd_prepare_investigation(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="vivarium-dashboard")
+    parser = argparse.ArgumentParser(prog="vivarium-workbench")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_serve = sub.add_parser("serve", help="Serve the dashboard for a workspace")
