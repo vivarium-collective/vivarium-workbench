@@ -33,8 +33,12 @@ import json
 import subprocess
 
 from fastapi import Body, Depends, FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError
+
+from vivarium_dashboard.lib.errors import APIError
 
 from vivarium_dashboard.lib import active_workspace
 from vivarium_dashboard.lib import csrf as _csrf
@@ -432,14 +436,14 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="vivarium-dashboard API",
         version="0.1.0",
-        summary="Typed seam over the dashboard HTTP API (strangler-fig migration).",
+        summary="The dashboard HTTP API (FastAPI, live production layer).",
         description=(
-            "Auto-generated, typed view of the dashboard routes that have been "
-            "ported from the legacy stdlib `http.server` handler to FastAPI + "
-            "pydantic. This page (**Swagger UI**) and `/redoc` are generated from "
-            "the same pydantic models that validate every response — so the "
-            "schema can't drift from what the routes actually return. Routes are "
-            "added a few at a time; the legacy server still serves the rest."
+            "The dashboard's HTTP API. All routes are served by this FastAPI app "
+            "under uvicorn; the legacy stdlib `http.server` handler is retired. "
+            "This page (**Swagger UI**) and `/redoc` are generated from the "
+            "pydantic models that type the routes. Errors use one envelope: "
+            "`{\"error\": \"<message>\"}` (request-validation failures add a "
+            "structured `detail` field)."
         ),
         openapi_tags=_OPENAPI_TAGS,
     )
@@ -466,6 +470,37 @@ def create_app() -> FastAPI:
                     {"error": "cross-origin request forbidden"}, status_code=403
                 )
         return await call_next(request)
+
+    # ------------------------------------------------------------------
+    # Canonical error envelope. Every error the API emits uses the shape
+    # ``{"error": "<message>", ...}`` (see lib/errors.py). These handlers pull
+    # the two shapes that used to escape that convention onto it: FastAPI's
+    # request-validation ``{"detail": [...]}`` (422) and uvicorn's default
+    # unhandled-exception 500.
+    # ------------------------------------------------------------------
+    @app.exception_handler(APIError)
+    async def _api_error_handler(request: Request, exc: APIError) -> JSONResponse:
+        return JSONResponse(exc.to_body(), status_code=exc.status_code)
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        errors = exc.errors()
+        first = errors[0] if errors else {}
+        loc = ".".join(str(p) for p in first.get("loc", []) if p != "body")
+        msg = first.get("msg", "validation error")
+        summary = f"validation error at '{loc}': {msg}" if loc else f"validation error: {msg}"
+        # Preserve the structured detail so anything reading ``.detail`` still works.
+        return JSONResponse(
+            {"error": summary, "detail": jsonable_encoder(errors)}, status_code=422
+        )
+
+    @app.exception_handler(Exception)
+    async def _unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+        # Last resort: emit the canonical envelope instead of a bare 500. The
+        # message is intentionally generic — details go to logs, not the client.
+        return JSONResponse({"error": "internal server error"}, status_code=500)
 
     @app.get("/health", tags=["System"], summary="Service liveness check")
     def health() -> dict[str, str]:
