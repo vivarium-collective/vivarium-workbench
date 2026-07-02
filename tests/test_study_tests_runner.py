@@ -1,7 +1,7 @@
 """Tests for the per-study pytest runner."""
 import yaml
 from pathlib import Path
-from vivarium_dashboard.lib.study_tests import (
+from vivarium_workbench.lib.study_tests import (
     run_study_tests, StudyTestsResult, StudyTestsConcurrentError,
 )
 
@@ -15,7 +15,7 @@ def _make_study(workspace: Path, slug: str, *, test_body: str) -> Path:
         "references": [], "implementation_tasks": "",
     }))
     (study / "tests" / "conftest.py").write_text(
-        "from vivarium_dashboard.testing import run  # noqa: F401\n"
+        "from vivarium_workbench.testing import run  # noqa: F401\n"
     )
     (study / "tests" / "test_demo.py").write_text(test_body)
     return study

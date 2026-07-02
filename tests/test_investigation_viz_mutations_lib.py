@@ -27,7 +27,7 @@ from typing import Any
 import pytest
 import yaml
 
-from vivarium_dashboard.lib import investigation_viz_mutations as ivm
+from vivarium_workbench.lib import investigation_viz_mutations as ivm
 
 
 _INV = "demo"
@@ -170,7 +170,7 @@ class TestRenderViz:
         monkeypatch.setitem(sys.modules, "pbg_testws", fake_pkg)
         monkeypatch.setitem(sys.modules, "pbg_testws.core", fake_core)
 
-        from vivarium_dashboard.lib import investigations as _inv_lib
+        from vivarium_workbench.lib import investigations as _inv_lib
         monkeypatch.setattr(
             _inv_lib, "render_visualizations",
             lambda spec, inv_dir, name, **kw: [Path("a.html"), Path("b.html")],

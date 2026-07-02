@@ -1,7 +1,7 @@
 """Tests for the canonical run-store path/kind resolution (lib/run_store.py)."""
 from pathlib import Path
 
-from vivarium_dashboard.lib import run_store
+from vivarium_workbench.lib import run_store
 
 
 def test_zarr_store_path_convention():

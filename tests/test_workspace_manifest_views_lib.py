@@ -1,4 +1,4 @@
-"""Tests for vivarium_dashboard.lib.workspace_manifest_views — the pure,
+"""Tests for vivarium_workbench.lib.workspace_manifest_views — the pure,
 ws_root-parameterised builders backing GET /api/workspace-manifest.
 
 Hermetic: every test drives a tmp ws_root and monkeypatches the lib helpers
@@ -8,8 +8,8 @@ runs DB, so no real git repo or subprocess discovery runs.
 
 import yaml
 
-from vivarium_dashboard.lib import workspace_manifest_views as wmv
-from vivarium_dashboard.lib import composite_lookup
+from vivarium_workbench.lib import workspace_manifest_views as wmv
+from vivarium_workbench.lib import composite_lookup
 
 
 def _write_workspace(root, **extra):

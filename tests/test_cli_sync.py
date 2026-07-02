@@ -2,7 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from vivarium_dashboard import cli
+from vivarium_workbench import cli
 
 
 def _make_origin(path: Path) -> tuple[str, str]:
@@ -21,13 +21,13 @@ def _make_origin(path: Path) -> tuple[str, str]:
 
 def test_cmd_sync_from_manifest_file(tmp_path, monkeypatch):
     url, sha = _make_origin(tmp_path / "origin")
-    from vivarium_dashboard.lib.provenance_manifest import lockfile_hash
+    from vivarium_workbench.lib.provenance_manifest import lockfile_hash
     manifest = {"repo": url, "commit": sha, "branch": "main", "workspace": "demo",
                 "lockfile": lockfile_hash(tmp_path / "origin"), "results": {"runs": []}}
     mfile = tmp_path / "manifest.json"
     mfile.write_text(json.dumps(manifest))
     # avoid a real uv sync + real catalog write
-    import vivarium_dashboard.lib.sync_workspace as sw
+    import vivarium_workbench.lib.sync_workspace as sw
     monkeypatch.setattr(sw.sync_materialize, "run_uv_sync", lambda ws, **k: ({"ok": True}, 200))
     monkeypatch.setattr(sw, "_catalog_add", lambda p, name=None, package=None: {"path": str(p)})
 

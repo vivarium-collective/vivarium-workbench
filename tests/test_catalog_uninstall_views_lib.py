@@ -18,12 +18,12 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib import catalog
-from vivarium_dashboard.lib import catalog_uninstall_views as views
-from vivarium_dashboard.lib import pyproject_edit
-from vivarium_dashboard.lib import registry
-from vivarium_dashboard.lib import workspace_deps_views
-from vivarium_dashboard.lib import workspace_yaml
+from vivarium_workbench.lib import catalog
+from vivarium_workbench.lib import catalog_uninstall_views as views
+from vivarium_workbench.lib import pyproject_edit
+from vivarium_workbench.lib import registry
+from vivarium_workbench.lib import workspace_deps_views
+from vivarium_workbench.lib import workspace_yaml
 
 
 def _write_ws(tmp_path: Path, data: dict) -> Path:

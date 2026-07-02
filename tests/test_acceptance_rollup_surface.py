@@ -15,7 +15,7 @@ from pathlib import Path
 import yaml
 import pytest
 
-_PKG = Path(__file__).parent.parent / "vivarium_dashboard"
+_PKG = Path(__file__).parent.parent / "vivarium_workbench"
 
 _V3_BASE = {
     "schema_version": 3,

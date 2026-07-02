@@ -39,7 +39,7 @@ def server(tmp_path):
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ws) + os.pathsep + env.get("PYTHONPATH", "")
     proc = subprocess.Popen(
-        [sys.executable, "-m", "vivarium_dashboard.cli", "serve",
+        [sys.executable, "-m", "vivarium_workbench.cli", "serve",
          "--workspace", str(ws), "--port", str(port)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=env,
@@ -157,7 +157,7 @@ def test_discover_all_composites_propagates_default_n_steps(tmp_path, monkeypatc
     from pbg_superpowers.composite_generator import (
         composite_generator, _REGISTRY,
     )
-    from vivarium_dashboard.lib.composite_lookup import discover_all_composites
+    from vivarium_workbench.lib.composite_lookup import discover_all_composites
 
     _REGISTRY.clear()
     try:
@@ -198,7 +198,7 @@ def test_discover_all_composites_propagates_none_default_n_steps(tmp_path, monke
     from pbg_superpowers.composite_generator import (
         composite_generator, _REGISTRY,
     )
-    from vivarium_dashboard.lib.composite_lookup import discover_all_composites
+    from vivarium_workbench.lib.composite_lookup import discover_all_composites
 
     _REGISTRY.clear()
     try:

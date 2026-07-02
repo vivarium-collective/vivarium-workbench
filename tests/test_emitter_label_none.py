@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-_PKG = Path(__file__).parent.parent / "vivarium_dashboard"
+_PKG = Path(__file__).parent.parent / "vivarium_workbench"
 
 
 def test_simulations_data_labels_emitterless_run_as_dash(tmp_path, monkeypatch):
-    import vivarium_dashboard.lib.simulations_index as si
+    import vivarium_workbench.lib.simulations_index as si
 
     ws = tmp_path / "ws"
     ws.mkdir()
@@ -38,7 +38,7 @@ def test_simulations_data_labels_dict_declared_emitters(tmp_path, monkeypatch):
     mid-loop, and every row after it (plus the dict row) lost its emitter_type
     and rendered as the "SQLite" default in the read-only dashboard.
     """
-    import vivarium_dashboard.lib.simulations_index as si
+    import vivarium_workbench.lib.simulations_index as si
 
     ws = tmp_path / "ws"
     ws.mkdir()

@@ -28,33 +28,33 @@ def _ws(tmp_path):
 
 
 def test_study_dir_prefers_studies(_ws):
-    from vivarium_dashboard.lib.study_spec import study_dir
+    from vivarium_workbench.lib.study_spec import study_dir
     d = study_dir(_ws, "new-study")
     assert d == _ws / "studies" / "new-study"
 
 
 def test_study_dir_falls_back_to_investigations(_ws):
-    from vivarium_dashboard.lib.study_spec import study_dir
+    from vivarium_workbench.lib.study_spec import study_dir
     d = study_dir(_ws, "old-inv")
     assert d == _ws / "investigations" / "old-inv"
 
 
 def test_study_spec_path_picks_study_yaml(_ws):
-    from vivarium_dashboard.lib.study_spec import study_spec_path
+    from vivarium_workbench.lib.study_spec import study_spec_path
     p = study_spec_path(_ws, "new-study")
     assert p.name == "study.yaml"
     assert p == _ws / "studies" / "new-study" / "study.yaml"
 
 
 def test_study_spec_path_picks_spec_yaml_for_legacy(_ws):
-    from vivarium_dashboard.lib.study_spec import study_spec_path
+    from vivarium_workbench.lib.study_spec import study_spec_path
     p = study_spec_path(_ws, "old-inv")
     assert p.name == "spec.yaml"
     assert p == _ws / "investigations" / "old-inv" / "spec.yaml"
 
 
 def test_iter_study_dirs_includes_both(_ws):
-    from vivarium_dashboard.lib.investigations_index import _iter_study_dirs
+    from vivarium_workbench.lib.investigations_index import _iter_study_dirs
     names = sorted(d.name for d in _iter_study_dirs(_ws))
     assert names == ["new-study", "old-inv"]
 
@@ -81,7 +81,7 @@ def test_iter_study_dirs_honors_nested_layout(tmp_path, monkeypatch):
         "variants": [], "runs": [], "visualizations": [],
         "conclusion": None, "parent_studies": [],
     }))
-    from vivarium_dashboard.lib.investigations_index import _iter_study_dirs
+    from vivarium_workbench.lib.investigations_index import _iter_study_dirs
     names = sorted(d.name for d in _iter_study_dirs(ws))
     assert names == ["nested-study"]
 
@@ -98,7 +98,7 @@ def test_iter_study_dirs_flat_layout_still_works(tmp_path, monkeypatch):
         "variants": [], "runs": [], "visualizations": [],
         "conclusion": None, "parent_studies": [],
     }))
-    from vivarium_dashboard.lib.investigations_index import _iter_study_dirs
+    from vivarium_workbench.lib.investigations_index import _iter_study_dirs
     names = sorted(d.name for d in _iter_study_dirs(ws))
     assert names == ["flat-study"]
 
@@ -129,7 +129,7 @@ def test_iter_study_dirs_includes_investigation_nested_studies(tmp_path, monkeyp
         "variants": [], "runs": [], "visualizations": [],
         "conclusion": None, "parent_studies": [],
     }))
-    from vivarium_dashboard.lib.investigations_index import _iter_study_dirs
+    from vivarium_workbench.lib.investigations_index import _iter_study_dirs
     names = sorted(d.name for d in _iter_study_dirs(ws))
     # The nested study is found; the investigation collection dir is NOT
     # mistaken for a study.

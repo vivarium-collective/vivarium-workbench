@@ -12,7 +12,7 @@ import types
 import pytest
 import yaml
 
-from vivarium_dashboard.lib.investigation_migrate import (
+from vivarium_workbench.lib.investigation_migrate import (
     _resolve_composite_source_or_generate,
     materialize_generator_doc,
 )

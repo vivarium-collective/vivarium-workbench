@@ -40,7 +40,7 @@ def test_viz_stale_demoted_to_one_info_per_study_on_v2e_invest():
 def test_observable_check_returns_per_readout_statuses(tmp_path):
     """The never-fabricate guard returns a status for every readout even when
     the composite can't build (tolerated 422). Synthetic workspace — hermetic."""
-    from vivarium_dashboard.lib.observables_views import build_study_observable_check
+    from vivarium_workbench.lib.observables_views import build_study_observable_check
 
     ws = tmp_path / "ws"
     sdir = ws / "studies" / "s1"

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from vivarium_dashboard.lib import csrf
+from vivarium_workbench.lib import csrf
 
 
 @pytest.mark.parametrize(

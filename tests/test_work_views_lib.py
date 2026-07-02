@@ -63,7 +63,7 @@ def git_ws(tmp_path: Path) -> Path:
 class TestBuildGeneration:
     def test_null_when_pbg_superpowers_absent(self, tmp_path: Path) -> None:
         """When pbg_superpowers is absent (or raises) → {generation: null}."""
-        from vivarium_dashboard.lib.work_views import build_generation
+        from vivarium_workbench.lib.work_views import build_generation
         result = build_generation(tmp_path)
         assert result == {"generation": None}
 
@@ -73,7 +73,7 @@ class TestBuildGeneration:
             from pbg_superpowers import generation as _gen  # noqa: F401
         except ImportError:
             pytest.skip("pbg_superpowers.generation not available")
-        from vivarium_dashboard.lib.work_views import build_generation
+        from vivarium_workbench.lib.work_views import build_generation
         result = build_generation(git_ws)
         assert result == {"generation": None}
 
@@ -95,7 +95,7 @@ class TestBuildGeneration:
         import pbg_superpowers.generation as gen_mod
         monkeypatch.setattr(gen_mod, "current_generation",
                             lambda ws_root: _FakeGen())
-        from vivarium_dashboard.lib.work_views import build_generation
+        from vivarium_workbench.lib.work_views import build_generation
         result = build_generation(git_ws)
         assert result["generation"] is not None
         g = result["generation"]
@@ -111,7 +111,7 @@ class TestBuildGeneration:
 class TestBuildWorkCompositeDiff:
     def test_non_git_dir_returns_error_in_body(self, tmp_path: Path) -> None:
         """A non-git directory causes merge-base to fail → error in body, 200."""
-        from vivarium_dashboard.lib.work_views import build_work_composite_diff
+        from vivarium_workbench.lib.work_views import build_work_composite_diff
         result = build_work_composite_diff(tmp_path)
         assert "error" in result
         assert result["changes"] == []
@@ -122,7 +122,7 @@ class TestBuildWorkCompositeDiff:
         self, git_ws: Path
     ) -> None:
         """On the initial main branch merge-base == HEAD → empty changes."""
-        from vivarium_dashboard.lib.work_views import build_work_composite_diff
+        from vivarium_workbench.lib.work_views import build_work_composite_diff
         result = build_work_composite_diff(git_ws)
         # Either empty changes or an error — no exception
         assert "changes" in result
@@ -139,13 +139,13 @@ class TestBuildWorkCompositeDiff:
         state = {"active_branch": "feat/test", "base": "main"}
         (pbg_dir / "state.json").write_text(json.dumps(state))
 
-        from vivarium_dashboard.lib.work_views import build_work_composite_diff
+        from vivarium_workbench.lib.work_views import build_work_composite_diff
         result = build_work_composite_diff(git_ws)
         assert result["base"] == "main"
 
     def test_returns_dict_always(self, tmp_path: Path) -> None:
         """Always returns a dict (never raises), even on completely empty dir."""
-        from vivarium_dashboard.lib.work_views import build_work_composite_diff
+        from vivarium_workbench.lib.work_views import build_work_composite_diff
         result = build_work_composite_diff(tmp_path)
         assert isinstance(result, dict)
         assert "changes" in result

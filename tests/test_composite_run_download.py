@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import composite_run_views as crv
-from vivarium_dashboard.lib import composite_runs as cr
+from vivarium_workbench.lib import composite_run_views as crv
+from vivarium_workbench.lib import composite_runs as cr
 
 
 # ---------------------------------------------------------------------------

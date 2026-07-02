@@ -1,17 +1,17 @@
 from pathlib import Path
 import pytest
 import yaml
-import vivarium_dashboard
-from vivarium_dashboard.lib import _root
-from vivarium_dashboard.lib import active_workspace
-from vivarium_dashboard.lib import registry as _registry
-from vivarium_dashboard.lib import observables_views as _obs_views
-from vivarium_dashboard.lib import report_views as _report_views
-from vivarium_dashboard.lib import composite_state_views as _cs_views
-from vivarium_dashboard.lib import source_switch_views as _switch_views
-from vivarium_dashboard.lib.data_sources import _DATA_SOURCES_CACHE
+import vivarium_workbench
+from vivarium_workbench.lib import _root
+from vivarium_workbench.lib import active_workspace
+from vivarium_workbench.lib import registry as _registry
+from vivarium_workbench.lib import observables_views as _obs_views
+from vivarium_workbench.lib import report_views as _report_views
+from vivarium_workbench.lib import composite_state_views as _cs_views
+from vivarium_workbench.lib import source_switch_views as _switch_views
+from vivarium_workbench.lib.data_sources import _DATA_SOURCES_CACHE
 
-_PKG_DIR = Path(vivarium_dashboard.__file__).parent
+_PKG_DIR = Path(vivarium_workbench.__file__).parent
 
 
 @pytest.fixture(autouse=True)

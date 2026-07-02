@@ -5,7 +5,7 @@ warnings.filterwarnings("ignore")
 os.chdir("/Users/eranagmon/code/v2ecoli")
 import pickle, numpy as np
 
-OUT = "/Users/eranagmon/code/vdash-explorer/vivarium_dashboard/static/explorer/monomer_meta.json"
+OUT = "/Users/eranagmon/code/vdash-explorer/vivarium_workbench/static/explorer/monomer_meta.json"
 
 # 1) monomer ids + MW from the real sim_data pickle (aligned to monomer_counts)
 _cands = ["out/workflow/simData.cPickle", "out/kb/simData.cPickle"]

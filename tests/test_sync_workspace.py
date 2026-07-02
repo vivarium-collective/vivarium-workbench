@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import sync_workspace as sw
+from vivarium_workbench.lib import sync_workspace as sw
 
 
 def _make_origin(path: Path) -> tuple[str, str]:
@@ -38,7 +38,7 @@ def _capture_catalog(monkeypatch):
 
 def test_sync_from_manifest_happy_path(tmp_path, _no_real_uv, _capture_catalog):
     url, sha = _make_origin(tmp_path / "origin")
-    from vivarium_dashboard.lib.provenance_manifest import lockfile_hash
+    from vivarium_workbench.lib.provenance_manifest import lockfile_hash
     manifest = {"repo": url, "commit": sha, "branch": "main", "workspace": "demo",
                 "lockfile": lockfile_hash(tmp_path / "origin"), "results": {"runs": []}}
     dest = tmp_path / "local"
@@ -61,7 +61,7 @@ def test_sync_aborts_on_lockfile_mismatch(tmp_path, _no_real_uv, _capture_catalo
 
 def test_post_sync_runs_only_when_flagged(tmp_path, _no_real_uv, _capture_catalog):
     url, sha = _make_origin(tmp_path / "origin")
-    from vivarium_dashboard.lib.provenance_manifest import lockfile_hash
+    from vivarium_workbench.lib.provenance_manifest import lockfile_hash
     manifest = {"repo": url, "commit": sha, "branch": "main", "workspace": "demo",
                 "lockfile": lockfile_hash(tmp_path / "origin"), "results": {"runs": []},
                 "post_sync": ["touch POST_SYNC_RAN"]}
@@ -73,7 +73,7 @@ def test_post_sync_runs_only_when_flagged(tmp_path, _no_real_uv, _capture_catalo
 
 def test_post_sync_runs_when_enabled(tmp_path, _no_real_uv, _capture_catalog):
     url, sha = _make_origin(tmp_path / "origin")
-    from vivarium_dashboard.lib.provenance_manifest import lockfile_hash
+    from vivarium_workbench.lib.provenance_manifest import lockfile_hash
     manifest = {"repo": url, "commit": sha, "branch": "main", "workspace": "demo",
                 "lockfile": lockfile_hash(tmp_path / "origin"), "results": {"runs": []},
                 "post_sync": ["touch POST_SYNC_RAN"]}

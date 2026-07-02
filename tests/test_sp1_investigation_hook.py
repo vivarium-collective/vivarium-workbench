@@ -7,7 +7,7 @@ through the study-sync endpoint (behavioral).
 from pathlib import Path
 
 from pbg_superpowers import study_io, run_registry
-from vivarium_dashboard.lib import lifecycle_mutations, study_runs
+from vivarium_workbench.lib import lifecycle_mutations, study_runs
 
 
 INV_YAML = """\

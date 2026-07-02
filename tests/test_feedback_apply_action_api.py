@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vivarium_dashboard.lib.lifecycle_mutations import feedback_apply_action
+from vivarium_workbench.lib.lifecycle_mutations import feedback_apply_action
 
 
 @pytest.fixture

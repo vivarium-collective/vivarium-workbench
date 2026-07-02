@@ -17,8 +17,8 @@ Fakes added (beyond the brief's skeleton):
 """
 from __future__ import annotations
 
-from vivarium_dashboard.lib import composite_test_run_views as v
-from vivarium_dashboard.lib import composite_runs as cr
+from vivarium_workbench.lib import composite_test_run_views as v
+from vivarium_workbench.lib import composite_runs as cr
 
 
 def test_runs_are_durable_no_prune(tmp_path, monkeypatch):

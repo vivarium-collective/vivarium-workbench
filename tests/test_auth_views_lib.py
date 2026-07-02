@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from vivarium_dashboard.lib import auth_views
+from vivarium_workbench.lib import auth_views
 
 
 # ---------------------------------------------------------------------------

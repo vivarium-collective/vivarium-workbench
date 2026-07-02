@@ -1,8 +1,8 @@
-"""Tests for vivarium_dashboard.lib.pbg_export - C1: address rewriter."""
+"""Tests for vivarium_workbench.lib.pbg_export - C1: address rewriter."""
 from __future__ import annotations
 import collections
 import pytest
-from vivarium_dashboard.lib.pbg_export import rewrite_local_addresses
+from vivarium_workbench.lib.pbg_export import rewrite_local_addresses
 
 
 class _FakeRegistry(dict):

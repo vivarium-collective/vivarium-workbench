@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import core_builder
+from vivarium_workbench.lib import core_builder
 
 
 def _write_fake_pkg(ws_root: Path, pkg: str, *, reg_keys: tuple[str, ...] = (),

@@ -1,4 +1,4 @@
-from vivarium_dashboard.lib.readout_migration import lift_store_paths
+from vivarium_workbench.lib.readout_migration import lift_store_paths
 
 
 def test_lifts_leading_dotted_path_from_notes():

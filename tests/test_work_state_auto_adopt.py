@@ -25,11 +25,11 @@ def _init_repo(ws: Path, branch: str = "main") -> None:
 
 def _patch_root(ws: Path):
     """Patch workspace_root() so work_state reads from this fixture."""
-    return patch("vivarium_dashboard.lib.work_state.workspace_root", return_value=ws)
+    return patch("vivarium_workbench.lib.work_state.workspace_root", return_value=ws)
 
 
 def test_adopts_current_feature_branch_when_state_empty(tmp_path):
-    from vivarium_dashboard.lib import work_state
+    from vivarium_workbench.lib import work_state
 
     ws = tmp_path / "ws"
     _init_repo(ws, branch="main")
@@ -45,7 +45,7 @@ def test_adopts_current_feature_branch_when_state_empty(tmp_path):
 
 
 def test_skips_when_on_main(tmp_path):
-    from vivarium_dashboard.lib import work_state
+    from vivarium_workbench.lib import work_state
 
     ws = tmp_path / "ws"
     _init_repo(ws, branch="main")
@@ -57,7 +57,7 @@ def test_skips_when_on_main(tmp_path):
 
 
 def test_skips_when_on_master(tmp_path):
-    from vivarium_dashboard.lib import work_state
+    from vivarium_workbench.lib import work_state
 
     ws = tmp_path / "ws"
     _init_repo(ws, branch="master")
@@ -68,7 +68,7 @@ def test_skips_when_on_master(tmp_path):
 
 
 def test_idempotent_when_state_already_has_active_branch(tmp_path):
-    from vivarium_dashboard.lib import work_state
+    from vivarium_workbench.lib import work_state
 
     ws = tmp_path / "ws"
     _init_repo(ws, branch="main")
@@ -87,7 +87,7 @@ def test_idempotent_when_state_already_has_active_branch(tmp_path):
 
 
 def test_no_op_outside_git_repo(tmp_path):
-    from vivarium_dashboard.lib import work_state
+    from vivarium_workbench.lib import work_state
 
     ws = tmp_path / "not-a-repo"
     ws.mkdir()
@@ -99,7 +99,7 @@ def test_no_op_outside_git_repo(tmp_path):
 
 
 def test_marks_pushed_true_when_local_matches_origin(tmp_path):
-    from vivarium_dashboard.lib import work_state
+    from vivarium_workbench.lib import work_state
 
     # Bare "remote" repo
     remote = tmp_path / "remote.git"
@@ -119,7 +119,7 @@ def test_marks_pushed_true_when_local_matches_origin(tmp_path):
 
 
 def test_marks_pushed_false_when_branch_has_local_only_commits(tmp_path):
-    from vivarium_dashboard.lib import work_state
+    from vivarium_workbench.lib import work_state
 
     remote = tmp_path / "remote.git"
     subprocess.run(["git", "init", "--bare", "-b", "main", str(remote)], check=True, capture_output=True)

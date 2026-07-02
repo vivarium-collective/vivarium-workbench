@@ -6,8 +6,8 @@ accept/decline an item in `proposed_inputs.items[]`, and on accept promote a
 """
 import yaml
 
-from vivarium_dashboard.lib.lifecycle_mutations import decide_proposed_input
-from vivarium_dashboard.lib.report_views import build_iset_detail
+from vivarium_workbench.lib.lifecycle_mutations import decide_proposed_input
+from vivarium_workbench.lib.report_views import build_iset_detail
 
 
 def _decide_proposed_input_for_test(ws, inv, item_id, decision):

@@ -1,6 +1,6 @@
 """Tests for resolve_composite_for_request — local vs deployment dispatch."""
 from pathlib import Path
-from vivarium_dashboard.lib import composite_resolve as cr
+from vivarium_workbench.lib import composite_resolve as cr
 
 
 def test_dispatch_local_when_no_viv_build(tmp_path, monkeypatch):
@@ -26,7 +26,7 @@ def test_dispatch_deployment_when_viv_build(tmp_path, monkeypatch):
 
 def test_resolve_generator_without_artifact_degrades(tmp_path, monkeypatch):
     from process_bigraph import composite_spec as cs
-    from vivarium_dashboard.lib import composite_resolve as cr
+    from vivarium_workbench.lib import composite_resolve as cr
     cs.clear_registry()
     cs.register(cs.CompositeSpec(id="m.g", name="g", builder=lambda core=None: {"state": {}},
                                  default_state_ref="m.g.default-state.json",
@@ -41,7 +41,7 @@ def test_resolve_generator_without_artifact_degrades(tmp_path, monkeypatch):
 def test_resolve_static_via_find_path(tmp_path, monkeypatch):
     # A real static spec file resolved through the dashboard's id scheme
     # "<pkg>.composites.<stem>" via find_composite_path.
-    from vivarium_dashboard.lib import composite_resolve as cr
+    from vivarium_workbench.lib import composite_resolve as cr
     from process_bigraph import composite_spec as cs
     cs.clear_registry()
     (tmp_path / "workspace.yaml").write_text("name: demo-ws\npackage_path: pbg_demo\n", encoding="utf-8")
@@ -58,14 +58,14 @@ def test_resolve_static_via_find_path(tmp_path, monkeypatch):
 
 def test_resolve_unregistered_returns_none(tmp_path, monkeypatch):
     from process_bigraph import composite_spec as cs
-    from vivarium_dashboard.lib import composite_resolve as cr
+    from vivarium_workbench.lib import composite_resolve as cr
     cs.clear_registry()
     monkeypatch.setattr(cr, "_prime_registry", lambda: None)
     assert cr.resolve_composite(tmp_path, "pbg_demo.composites.absent") is None
 
 
 def test_resolve_malformed_static_file_degrades(tmp_path, monkeypatch):
-    from vivarium_dashboard.lib import composite_resolve as cr
+    from vivarium_workbench.lib import composite_resolve as cr
     from process_bigraph import composite_spec as cs
     cs.clear_registry()
     (tmp_path / "workspace.yaml").write_text("name: demo-ws\npackage_path: pbg_demo\n", encoding="utf-8")
@@ -79,7 +79,7 @@ def test_resolve_malformed_static_file_degrades(tmp_path, monkeypatch):
 
 
 def test_resolve_static_no_state_notice_not_generator(tmp_path, monkeypatch):
-    from vivarium_dashboard.lib import composite_resolve as cr
+    from vivarium_workbench.lib import composite_resolve as cr
     from process_bigraph import composite_spec as cs
     cs.clear_registry()
     cs.register(cs.CompositeSpec(id="m.s", name="s", state={}))  # empty inline state
@@ -94,7 +94,7 @@ def test_resolve_static_no_state_notice_not_generator(tmp_path, monkeypatch):
 
 def test_resolve_generator_with_corrupt_artifact_degrades(tmp_path, monkeypatch):
     from process_bigraph import composite_spec as cs
-    from vivarium_dashboard.lib import composite_resolve as cr
+    from vivarium_workbench.lib import composite_resolve as cr
     cs.clear_registry()
     # generator whose default_state() raises (corrupt artifact)
     spec = cs.CompositeSpec(id="m.boom", name="boom",

@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vivarium_dashboard.lib.study_page import (
+from vivarium_workbench.lib.study_page import (
     render_study_detail_html as _lib_render_study_detail_html,
 )
 

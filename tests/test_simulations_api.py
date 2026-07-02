@@ -42,7 +42,7 @@ def server(tmp_path):
     env["PYTHONPATH"] = (str(_REPO_ROOT) + os.pathsep + str(ws)
                          + os.pathsep + env.get("PYTHONPATH", ""))
     proc = subprocess.Popen(
-        [sys.executable, "-m", "vivarium_dashboard.cli", "serve",
+        [sys.executable, "-m", "vivarium_workbench.cli", "serve",
          "--workspace", str(ws), "--port", str(port)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
     # serve_fastapi writes server-info before uvicorn binds the port, so wait
@@ -167,7 +167,7 @@ def test_delete_simulation_run_removes_everything(server):
     # The stdlib ``DELETE /api/simulation-run`` (full-summary delete) was
     # retired; the FastAPI app only exposes the lighter ``/api/run-delete``.
     # Exercise the lib function that owned the summary contract directly.
-    from vivarium_dashboard.lib.simulations_index import delete_simulation
+    from vivarium_workbench.lib.simulations_index import delete_simulation
     base = server["url"]
     ws = server["ws"]
     spec_id = "pbg_ws_increase_demo.composites.increase-demo"
@@ -190,7 +190,7 @@ def test_delete_simulation_run_removes_everything(server):
 
 def test_delete_simulation_run_404_unknown(server):
     # Unknown run id → the lib delete raises RunNotFound (was HTTP 404).
-    from vivarium_dashboard.lib.simulations_index import (
+    from vivarium_workbench.lib.simulations_index import (
         delete_simulation, RunNotFound)
     ws = server["ws"]
     with pytest.raises(RunNotFound):
@@ -200,7 +200,7 @@ def test_delete_simulation_run_404_unknown(server):
 def test_delete_simulation_run_400_missing_run_id(server):
     # Missing/empty run id → the lib delete finds no DB and raises RunNotFound
     # (was the HTTP 400 "missing run_id" validation).
-    from vivarium_dashboard.lib.simulations_index import (
+    from vivarium_workbench.lib.simulations_index import (
         delete_simulation, RunNotFound)
     ws = server["ws"]
     with pytest.raises(RunNotFound):

@@ -1,6 +1,6 @@
 import yaml
 from pathlib import Path
-from vivarium_dashboard.lib.report_views import build_iset_detail
+from vivarium_workbench.lib.report_views import build_iset_detail
 
 
 def _ws(tmp_path: Path) -> Path:
@@ -25,7 +25,7 @@ def test_build_iset_detail_attaches_derived_per_study(tmp_path):
 
 def test_study_detail_route_attaches_derived(tmp_path):
     from fastapi.testclient import TestClient
-    from vivarium_dashboard.api.app import create_app, get_workspace
+    from vivarium_workbench.api.app import create_app, get_workspace
 
     ws = _ws(tmp_path)
     app = create_app()

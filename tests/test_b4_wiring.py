@@ -4,13 +4,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_index_loads_aig_graph_before_walkthrough():
-    html = (ROOT / "vivarium_dashboard/templates/index.html.j2").read_text()
+    html = (ROOT / "vivarium_workbench/templates/index.html.j2").read_text()
     assert "assets/aig-graph.js" in html
     assert html.index("assets/aig-graph.js") < html.index("assets/walkthrough.js")
 
 
 def test_walkthrough_overlays_chains_as_superset_with_fallback():
-    js = (ROOT / "vivarium_dashboard/static/walkthrough.js").read_text()
+    js = (ROOT / "vivarium_workbench/static/walkthrough.js").read_text()
     # fetches the typed graph
     assert "/api/investigation-graph?investigation=" in js
     # EXTENDS the legacy renderer (superset) rather than replacing it

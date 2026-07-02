@@ -1,7 +1,7 @@
-# Using vivarium-dashboard with a workspace
+# Using vivarium-workbench with a workspace
 
 This document explains the **deployment relationship** between
-`vivarium-dashboard` and a process-bigraph *workspace*: how the dashboard is
+`vivarium-workbench` and a process-bigraph *workspace*: how the dashboard is
 obtained, where it runs, and why. For the conceptual data model see
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -14,12 +14,12 @@ obtained, where it runs, and why. For the conceptual data model see
 
 ## TL;DR — the direction of the dependency
 
-**The workspace depends on vivarium-dashboard, not the other way around.**
+**The workspace depends on vivarium-workbench, not the other way around.**
 
-- vivarium-dashboard is a **pip dependency** of the workspace's `pyproject.toml`.
+- vivarium-workbench is a **pip dependency** of the workspace's `pyproject.toml`.
 - It is **not** a git submodule and **not** vendored into the workspace.
 - It is installed into the **workspace's own virtualenv**, and the
-  `vivarium-dashboard serve` CLI is run from there.
+  `vivarium-workbench serve` CLI is run from there.
 - The dashboard runs *inside the workspace's venv on purpose* — it imports the
   workspace's own Python package (`build_core()`) and any installed `pbg-*`
   simulation stacks to build and run composites. A dashboard installed in some
@@ -27,15 +27,15 @@ obtained, where it runs, and why. For the conceptual data model see
 
 ```
   workspace repo (e.g. my-project, scaffolded from pbg-template)
-    pyproject.toml  ──depends-on──▶  vivarium-dashboard  (pip package)
+    pyproject.toml  ──depends-on──▶  vivarium-workbench  (pip package)
     .venv/                                    │
-      ├── vivarium_dashboard/   ◀─ installed ─┘
+      ├── vivarium_workbench/   ◀─ installed ─┘
       ├── my_project/           ◀─ the workspace's OWN package (build_core)
       ├── process_bigraph/      ◀─ the simulation engine
       └── pbg_superpowers/, pbg_*  ◀─ generators / sim stacks
 ```
 
-So: a workspace is the *project*; vivarium-dashboard is a *library/tool* that
+So: a workspace is the *project*; vivarium-workbench is a *library/tool* that
 project pulls in to get a UI. One installed dashboard is not "shared" across
 workspaces by reference — each workspace's venv has its own copy, and a running
 server is bound to exactly one workspace (`--workspace <dir>`).
@@ -54,7 +54,7 @@ dependencies = [
     "bigraph-schema",
     "bigraph-viz>=2.0.3",
     # ... pyyaml, jsonschema, jinja2, plotly, matplotlib ...
-    "vivarium-dashboard",          # the web UI; provides the `vivarium-dashboard serve` CLI
+    "vivarium-workbench",          # the web UI; provides the `vivarium-workbench serve` CLI
 ]
 
 [tool.hatch.metadata]
@@ -68,10 +68,19 @@ Docker, and collaborators all resolve identically):
 
 ```toml
 [tool.uv.sources]
-vivarium-dashboard = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git", branch = "main" }
+vivarium-workbench = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git", branch = "main" }
 ```
 
 The git ref can be overridden at init via `VIVARIUM_DASHBOARD_REF`.
+
+> **Rename note.** The distribution was renamed `vivarium-dashboard` →
+> `vivarium-workbench`. The `vivarium_dashboard` import package, the
+> `vivarium-dashboard` / `vdash` / `vivarium-dashboard-publish` CLIs, and the
+> `VIVARIUM_DASHBOARD_*` env vars all keep working as deprecated aliases during
+> the migration window. The one consumer-facing change is the **dependency
+> name** (`"vivarium-dashboard"` → `"vivarium-workbench"` in `[project]` and the
+> `[tool.uv.sources]` key); the git URL still points at the old repo path until
+> the GitHub repo is renamed (it auto-redirects).
 
 ---
 
@@ -87,11 +96,11 @@ python3 scripts/lint-workspace.py        # → "workspace lint: OK"
 
 # 3. serve the dashboard against this workspace
 bash scripts/serve.sh                     # convenience wrapper
-#   ≡  vivarium-dashboard serve --workspace .
+#   ≡  vivarium-workbench serve --workspace .
 ```
 
 `scripts/serve.sh` is a thin shim that **prefers the workspace venv's**
-`.venv/bin/vivarium-dashboard`, falling back to a system-wide one, then runs
+`.venv/bin/vivarium-workbench`, falling back to a system-wide one, then runs
 `serve --workspace <workspace-root>`. The dashboard renders the workspace once,
 picks a free port (or `--port`), prints the URL, and serves until Ctrl-C.
 
@@ -108,7 +117,7 @@ workspace's venv**, pointing at your local clone:
 uv pip install -e /path/to/vivarium-dashboard      # or ../vivarium-dashboard
 ```
 
-Now `vivarium-dashboard serve --workspace .` runs your working copy against a
+Now `vivarium-workbench serve --workspace .` runs your working copy against a
 real workspace. This is the standard inner loop: edit the dashboard here, serve
 a workspace there. (The dashboard's own test suite uses a similar trick — it
 spawns the server as a subprocess with the fixture workspace prepended to
@@ -124,10 +133,10 @@ workspace:
 
 | Script | Imports from the dashboard |
 |---|---|
-| `scripts/lint-workspace.py` | `vivarium_dashboard.lib.investigations` (spec validation) |
-| `scripts/render-dashboard.py` | `vivarium_dashboard.lib.report.render_dashboard` |
-| `scripts/add-dataset.sh` (py) | `vivarium_dashboard.lib.workspace_yaml` (load/save/validate) |
-| `scripts/publish_investigation_reports.py` | the `vivarium-dashboard-publish` CLI |
+| `scripts/lint-workspace.py` | `vivarium_workbench.lib.investigations` (spec validation) |
+| `scripts/render-dashboard.py` | `vivarium_workbench.lib.report.render_dashboard` |
+| `scripts/add-dataset.sh` (py) | `vivarium_workbench.lib.workspace_yaml` (load/save/validate) |
+| `scripts/publish_investigation_reports.py` | the `vivarium-workbench-publish` CLI |
 
 These degrade gracefully (skip dashboard-specific checks) if the dashboard
 isn't installed, but in the normal flow it always is.

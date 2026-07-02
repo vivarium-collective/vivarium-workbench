@@ -3,8 +3,8 @@ import logging
 
 from fastapi.testclient import TestClient
 
-from vivarium_dashboard.api.app import create_app
-from vivarium_dashboard.lib.request_logging import REQUEST_ID_HEADER
+from vivarium_workbench.api.app import create_app
+from vivarium_workbench.lib.request_logging import REQUEST_ID_HEADER
 
 
 def test_health_response_carries_request_id():
@@ -23,9 +23,9 @@ def test_provided_request_id_is_echoed_back():
 
 def test_access_line_is_logged(caplog):
     client = TestClient(create_app())
-    with caplog.at_level(logging.INFO, logger="vivarium_dashboard.access"):
+    with caplog.at_level(logging.INFO, logger="vivarium_workbench.access"):
         client.get("/health")
-    lines = [rec for rec in caplog.records if rec.name == "vivarium_dashboard.access"]
+    lines = [rec for rec in caplog.records if rec.name == "vivarium_workbench.access"]
     assert lines, "expected an access log record"
     rec = lines[-1]
     assert rec.path == "/health"

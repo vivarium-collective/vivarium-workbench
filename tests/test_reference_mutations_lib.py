@@ -31,7 +31,7 @@ import yaml
 
 import pbg_superpowers
 
-from vivarium_dashboard.lib import reference_mutations as rm
+from vivarium_workbench.lib import reference_mutations as rm
 
 
 _SCHEMA_SRC = Path(pbg_superpowers.__file__).parent / "schemas" / "workspace.schema.json"
@@ -73,7 +73,7 @@ def ws(tmp_path: Path, monkeypatch: Any) -> Path:
     """Workspace fixture; registers the workspace root so schema validation
     (load_workspace / save_workspace) resolves the bundled schema."""
     w = _make_ws(tmp_path)
-    import vivarium_dashboard.lib._root as _root
+    import vivarium_workbench.lib._root as _root
     monkeypatch.setattr(_root, "_WS_ROOT", w.resolve())
     monkeypatch.setattr(_root, "_WS_PATHS", None)
     return w

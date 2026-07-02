@@ -1,8 +1,8 @@
 from pathlib import Path
-import vivarium_dashboard
+import vivarium_workbench
 
 def _js():
-    return (Path(vivarium_dashboard.__file__).parent / "static" / "configure-run.js").read_text(encoding="utf-8")
+    return (Path(vivarium_workbench.__file__).parent / "static" / "configure-run.js").read_text(encoding="utf-8")
 
 def test_configure_run_form_generation_present():
     js = _js()

@@ -1,4 +1,4 @@
-"""Tests for vivarium_dashboard.publish — narrative export / "publish".
+"""Tests for vivarium_workbench.publish — narrative export / "publish".
 
 Sub-project #2: narrative export.
 See docs/superpowers/plans/2026-06-10-narrative-export-subproject-2.md.
@@ -10,15 +10,15 @@ from pathlib import Path
 import yaml
 import pytest
 
-from vivarium_dashboard.lib import _root
-from vivarium_dashboard.lib.json_serialize import _json_default
-from vivarium_dashboard.lib.static_serving import STATIC_DIR
-from vivarium_dashboard.lib.study_spec import load_study_detail_spec
-from vivarium_dashboard.lib.system_info import build_workspace_home
-from vivarium_dashboard.lib.investigation_status import (
+from vivarium_workbench.lib import _root
+from vivarium_workbench.lib.json_serialize import _json_default
+from vivarium_workbench.lib.static_serving import STATIC_DIR
+from vivarium_workbench.lib.study_spec import load_study_detail_spec
+from vivarium_workbench.lib.system_info import build_workspace_home
+from vivarium_workbench.lib.investigation_status import (
     build_iset_summary, study_run_slugs,
 )
-from vivarium_dashboard.lib.report_views import build_iset_detail
+from vivarium_workbench.lib.report_views import build_iset_detail
 
 
 def _iset_summary(ws):
@@ -73,7 +73,7 @@ def tmp_workspace(tmp_path, monkeypatch):
 
 def test_build_bundle_structure_and_parity(tmp_workspace, tmp_path):
     """build_bundle writes the bundle layout and study JSON matches the API builder."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     out = tmp_path / "bundle"
     summary = publish.build_bundle(tmp_workspace, out)
@@ -105,7 +105,7 @@ def test_build_bundle_structure_and_parity(tmp_workspace, tmp_path):
 
 def test_build_bundle_investigation_json(tmp_workspace, tmp_path):
     """build_bundle writes api/investigation/<name>.json with the same data as _iset_detail_data."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     out = tmp_path / "bundle"
     publish.build_bundle(tmp_workspace, out)
@@ -122,7 +122,7 @@ def test_build_bundle_investigation_json(tmp_workspace, tmp_path):
 
 def test_build_bundle_workspace_json(tmp_workspace, tmp_path):
     """build_bundle writes api/workspace.json matching _workspace_home_data."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     out = tmp_path / "bundle"
     publish.build_bundle(tmp_workspace, out)
@@ -137,7 +137,7 @@ def test_build_bundle_workspace_json(tmp_workspace, tmp_path):
 
 def test_build_bundle_summary_keys(tmp_workspace, tmp_path):
     """summary dict has investigations, studies, out keys."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     out = tmp_path / "bundle"
     summary = publish.build_bundle(tmp_workspace, out)
@@ -156,7 +156,7 @@ def test_build_bundle_summary_keys(tmp_workspace, tmp_path):
 def test_bundle_shell_asset_urls_resolve(tmp_workspace, tmp_path):
     """Every src/href asset URL in every shell (home + per-study) must resolve
     to an existing file in the bundle — no broken relative or root paths."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     out = tmp_path / "bundle"
     publish.build_bundle(tmp_workspace, out)
@@ -186,7 +186,7 @@ def test_bundle_shell_asset_urls_resolve(tmp_workspace, tmp_path):
 def test_bundle_exports_composite_state_and_loom(tmp_workspace, tmp_path):
     """build_bundle writes api/composite-state/<id>.json for each composite and
     copies bigraph-loom dist to bundle/bigraph-loom/ (when bigraph_loom installed)."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     out = tmp_path / "bundle"
     publish.build_bundle(tmp_workspace, out)
@@ -211,10 +211,10 @@ def test_bundle_survives_nonfinite_composite_state(tmp_workspace, tmp_path, monk
     must NOT crash the whole bundle build — strict JSON rejects inf/nan, so the
     composite degrades to has_wiring=False (Explore hidden), exactly like an
     unresolvable composite, while finite composites still export their state."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     monkeypatch.setattr(
-        "vivarium_dashboard.lib.composite_lookup.composites_data",
+        "vivarium_workbench.lib.composite_lookup.composites_data",
         lambda ws: {"composites": [
             {"id": "good", "name": "Good"},
             {"id": "bad", "name": "Bad"},
@@ -226,7 +226,7 @@ def test_bundle_survives_nonfinite_composite_state(tmp_workspace, tmp_path, monk
         return {"state": {"rate": 1.0}}
 
     monkeypatch.setattr(
-        "vivarium_dashboard.lib.composite_resolve.resolve_composite", _resolve)
+        "vivarium_workbench.lib.composite_resolve.resolve_composite", _resolve)
 
     out = tmp_path / "bundle"
     publish.build_bundle(tmp_workspace, out)  # must not raise
@@ -244,10 +244,10 @@ def test_bundle_uses_committed_composite_state_override(tmp_workspace, tmp_path,
     baseline, which needs the on-disk ParCa cache) still becomes navigable when a
     pre-resolved state JSON is committed under reports/composite-state/<id>.json:
     the committed file is used verbatim and has_wiring=True."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     monkeypatch.setattr(
-        "vivarium_dashboard.lib.composite_lookup.composites_data",
+        "vivarium_workbench.lib.composite_lookup.composites_data",
         lambda ws: {"composites": [
             {"id": "heavy.composite", "name": "Heavy"},
         ]})
@@ -256,7 +256,7 @@ def test_bundle_uses_committed_composite_state_override(tmp_workspace, tmp_path,
         raise RuntimeError("needs on-disk cache")  # live resolution fails
 
     monkeypatch.setattr(
-        "vivarium_dashboard.lib.composite_resolve.resolve_composite", _resolve)
+        "vivarium_workbench.lib.composite_resolve.resolve_composite", _resolve)
 
     committed_dir = tmp_workspace / "reports" / "composite-state"
     committed_dir.mkdir(parents=True, exist_ok=True)
@@ -281,7 +281,7 @@ def test_bundle_uses_committed_composite_state_override(tmp_workspace, tmp_path,
 def test_bundle_exports_full_read_surface(tmp_workspace, tmp_path):
     """build_bundle writes api/{investigation-summaries,catalog,composites,registry}.json
     and api/inputs/<inv>.json per investigation; investigation-summaries parity."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     out = tmp_path / "bundle"
     publish.build_bundle(tmp_workspace, out)
@@ -309,7 +309,7 @@ def test_bundle_exports_full_read_surface(tmp_workspace, tmp_path):
 def test_bundle_exports_kept_tab_reads(tmp_workspace, tmp_path):
     """build_bundle writes the three new files needed by kept tabs in the viewer:
     api/inputs/_global.json, api/data-sources.json, api/investigations.json."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     out = tmp_path / "bundle"
     publish.build_bundle(tmp_workspace, out)
@@ -362,7 +362,7 @@ def test_snapshot_readonly_css_exists_and_has_key_rules():
 def test_snapshot_css_bundled_in_home_shell(tmp_workspace, tmp_path):
     """build_bundle copies snapshot-readonly.css to assets/ and the
     home shell's href resolves to an existing file in the bundle."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
     import re
 
     out = tmp_path / "bundle"
@@ -428,7 +428,7 @@ def test_walkthrough_has_snapshot_body_class_and_switchpage_gating():
 def test_build_bundle_with_base_path(tmp_workspace, tmp_path):
     """build_bundle(base_path='/v2ecoli/dashboard') prefixes /assets/ and
     /bigraph-loom/ URLs in all shells and injects basePath into __DASH_CONFIG__."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     out = tmp_path / "bundle"
     base = "/v2ecoli/dashboard"
@@ -460,7 +460,7 @@ def test_build_bundle_with_base_path(tmp_workspace, tmp_path):
 
 def test_build_bundle_base_path_normalization(tmp_workspace, tmp_path):
     """base_path is normalized: trailing slash stripped, leading slash added."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     out = tmp_path / "bundle"
     # Trailing slash should be stripped; no leading slash should be added
@@ -476,7 +476,7 @@ def test_build_bundle_base_path_normalization(tmp_workspace, tmp_path):
 
 def test_build_bundle_default_base_path_unchanged(tmp_workspace, tmp_path):
     """Default base_path='' leaves root-absolute URLs untouched."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     out = tmp_path / "bundle"
     publish.build_bundle(tmp_workspace, out)
@@ -526,7 +526,7 @@ _V2E_INVEST = Path("/Users/eranagmon/code/v2e-invest")
 def test_golden_v2e_invest(tmp_path):
     """Export the real v2e-invest workspace; assert real content + JSON parity +
     asset resolution + commit sha.  v2e-invest must stay UNTOUCHED."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     # Confirm read-only: record the workspace git status BEFORE
     import subprocess
@@ -632,7 +632,7 @@ def test_golden_v2e_invest(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_stage_embed_visualizations_copies_and_prefixes(tmp_path):
-    from vivarium_dashboard.publish import _stage_embed_visualizations
+    from vivarium_workbench.publish import _stage_embed_visualizations
 
     ws = tmp_path / "ws"
     fig = ws / "reports" / "figures" / "my-study"
@@ -666,7 +666,7 @@ def test_stage_embed_visualizations_copies_and_prefixes(tmp_path):
 
 def test_stage_embed_visualizations_no_base_path(tmp_path):
     """With no base path (root hosting), files still copy but URLs stay root-absolute."""
-    from vivarium_dashboard.publish import _stage_embed_visualizations
+    from vivarium_workbench.publish import _stage_embed_visualizations
     ws = tmp_path / "ws"
     fig = ws / "reports" / "figures" / "s"
     fig.mkdir(parents=True)
@@ -683,7 +683,7 @@ def test_build_bundle_shell_embeds_are_staged_and_prefixed(tmp_workspace, tmp_pa
     bundle AND its URL base-path-prefixed in BOTH the study JSON and the
     server-rendered per-study shell (the <iframe src>). Regression for the
     study-detail 'Embedded visualizations' 404 under a hosting base path."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     fig = tmp_workspace / "reports" / "figures" / "alpha"
     fig.mkdir(parents=True)
@@ -709,7 +709,7 @@ def test_stage_report_cards_copies_and_prefixes(tmp_path):
     its workspace-relative path AND its URL base-path-prefixed in place.
     Regression for report-card studies showing no visualizations in the
     published snapshot (the /workspace/... card URLs 404'd — never staged)."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     ws_root = tmp_path / "ws"
     rel = "workspace/investigations/inv/studies/s/viz/report_card/standard.html"
@@ -783,7 +783,7 @@ def test_build_bundle_exports_saved_visualizations(ws_with_saved_pack, tmp_path)
     preserving the studies/<name>/viz/3d path, and rewrites the copied pack's
     mesh urls to be base-path-prefixed (so the viewer's resolveMeshUrl, which
     prepends '/', resolves them under the hosting base path)."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     out = tmp_path / "bundle"
     publish.build_bundle(ws_with_saved_pack, out, base_path="/v2ecoli/dashboard/")
@@ -822,7 +822,7 @@ def test_build_bundle_exports_saved_visualizations(ws_with_saved_pack, tmp_path)
 def test_build_bundle_saved_viz_root_hosting(ws_with_saved_pack, tmp_path):
     """With an empty base path (root hosting) the copied pack's mesh urls stay
     workspace-rooted-relative (resolveMeshUrl → /studies/...obj at the root)."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     out = tmp_path / "bundle"
     publish.build_bundle(ws_with_saved_pack, out, base_path="")
@@ -840,7 +840,7 @@ def test_build_bundle_saved_viz_root_hosting(ws_with_saved_pack, tmp_path):
 def test_build_bundle_exports_investigation_notebooks(tmp_workspace, tmp_path):
     """build_bundle ships a runnable notebook + .py per investigation and a
     manifest, without mutating the (parity-checked) iset payloads."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     out = tmp_path / "bundle"
     summary = publish.build_bundle(tmp_workspace, out)

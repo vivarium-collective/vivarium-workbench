@@ -1,6 +1,6 @@
 # tests/test_study_run_dry_run.py
 import pytest
-from vivarium_dashboard.lib import study_runs
+from vivarium_workbench.lib import study_runs
 
 
 def test_baseline_dry_run_resolves_without_spawn(fixture_study_ws):
@@ -31,7 +31,7 @@ def test_baseline_dry_run_false_does_not_short_circuit(fixture_study_ws, monkeyp
     """Without dry_run the code proceeds past the guard (may fail later — that's fine)."""
     ws, study = fixture_study_ws
     # Patch resolve_study_baseline_state to raise so we know it was called
-    import vivarium_dashboard.lib.study_run_state as srs
+    import vivarium_workbench.lib.study_run_state as srs
     calls = []
 
     def fake_resolve(*a, **kw):
@@ -49,7 +49,7 @@ def test_sweep_variant_dry_run_does_not_execute(tmp_path, monkeypatch):
     """A kind:seeds variant with dry_run=True must return the preview without
     calling invoke_v2ecoli_workflow (or any workflow/subprocess entry)."""
     import yaml as _yaml
-    from vivarium_dashboard.lib import composite_subprocess
+    from vivarium_workbench.lib import composite_subprocess
 
     ws = tmp_path / "sweep_ws"
     slug = "sweep-study"

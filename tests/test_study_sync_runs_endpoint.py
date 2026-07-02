@@ -1,6 +1,6 @@
 from pathlib import Path
 from pbg_superpowers import study_io, run_registry
-from vivarium_dashboard.lib import lifecycle_mutations
+from vivarium_workbench.lib import lifecycle_mutations
 
 
 def test_sync_runs_for_test(tmp_path: Path):

@@ -1,4 +1,4 @@
-"""Unit tests for the emitter broker (``vivarium_dashboard.lib.emitters``).
+"""Unit tests for the emitter broker (``vivarium_workbench.lib.emitters``).
 
 The broker is the SINGLE locus for ``output_kind -> reader / label / chart``
 dispatch. These tests pin its contract resolution, the output_kind alias map,
@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import emitters
-from vivarium_dashboard.lib import comparative_viz
+from vivarium_workbench.lib import emitters
+from vivarium_workbench.lib import comparative_viz
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +82,7 @@ def test_read_source_missing_is_none(tmp_path: Path):
 
 
 def test_read_source_matches_explorer_data_directly(tmp_path: Path):
-    from vivarium_dashboard.lib import explorer_data
+    from vivarium_workbench.lib import explorer_data
     db = tmp_path / "runs.db"
     conn = sqlite3.connect(str(db))
     conn.execute("CREATE TABLE history (step INTEGER)")
@@ -116,7 +116,7 @@ def test_reader_for_unknown_raises():
 # ---------------------------------------------------------------------------
 
 def test_observable_reader_for_dispatch():
-    from vivarium_dashboard.lib import explorer_data as ed
+    from vivarium_workbench.lib import explorer_data as ed
     assert emitters.observable_reader_for("zarr") is ed._zarr_observables
     assert emitters.observable_reader_for("parquet") is ed._parquet_observables
     assert emitters.observable_reader_for("sqlite") is ed._sqlite_observables
@@ -128,7 +128,7 @@ def test_observable_reader_for_unknown_is_none():
 
 
 def test_vector_reader_for_dispatch():
-    from vivarium_dashboard.lib import explorer_data as ed
+    from vivarium_workbench.lib import explorer_data as ed
     assert emitters.vector_reader_for("zarr") is ed._zarr_get_vector
     assert emitters.vector_reader_for("parquet") is ed._parquet_get_vector
     assert emitters.vector_reader_for("sqlite") is ed._sqlite_get_vector
@@ -140,7 +140,7 @@ def test_vector_reader_for_unknown_is_none():
 
 
 def test_flux_auto_reader_for_dispatch():
-    from vivarium_dashboard.lib import explorer_data as ed
+    from vivarium_workbench.lib import explorer_data as ed
     assert emitters.flux_auto_reader_for("zarr") is ed._zarr_get_flux_auto
     assert emitters.flux_auto_reader_for("parquet") is ed._parquet_get_flux_auto
     assert emitters.flux_auto_reader_for("sqlite") is ed._sqlite_get_flux_auto
@@ -152,7 +152,7 @@ def test_flux_auto_reader_for_unknown_is_none():
 
 
 def test_base_flux_reader_for_dispatch():
-    from vivarium_dashboard.lib import explorer_data as ed
+    from vivarium_workbench.lib import explorer_data as ed
     assert emitters.base_flux_reader_for("zarr") is ed._zarr_get_base_fluxes
     assert emitters.base_flux_reader_for("parquet") is ed._parquet_get_base_fluxes
     assert emitters.base_flux_reader_for("sqlite") is ed._sqlite_get_base_fluxes
@@ -242,7 +242,7 @@ def test_label_for_run_defaults_to_sqlite(tmp_path: Path):
 
 
 def test_label_for_run_matches_old_emitter_for_row(tmp_path: Path):
-    from vivarium_dashboard.lib import simulations_index
+    from vivarium_workbench.lib import simulations_index
     rows = [
         {"source": "parquet"},
         {"source": "xarray"},

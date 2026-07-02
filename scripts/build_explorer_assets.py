@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate static assets for the Analyses Data Explorer flux map.
 
-Outputs (under vivarium_dashboard/static/explorer/):
+Outputs (under vivarium_workbench/static/explorer/):
   - ecoli_core.map.json     Escher central-carbon map (BiGG-keyed); skipped if unavailable
   - reaction_id_map.json    v2ecoli/EcoCyc base reaction id -> BiGG id
   - base_reaction_ids.json  ordered base reaction ids (flux-vector ordering)
@@ -23,7 +23,7 @@ import shutil
 import urllib.request
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parents[1] / "vivarium_dashboard" / "static" / "explorer"
+OUT = Path(__file__).resolve().parents[1] / "vivarium_workbench" / "static" / "explorer"
 
 ESCHER_MAP_URL = (
     "https://escher.github.io/1-0-0/6/maps/Escherichia%20coli/"

@@ -14,9 +14,9 @@ from pathlib import Path
 import yaml
 import pytest
 
-from vivarium_dashboard.lib.report_views import build_report_lint
+from vivarium_workbench.lib.report_views import build_report_lint
 
-_PKG = Path(__file__).parent.parent / "vivarium_dashboard"
+_PKG = Path(__file__).parent.parent / "vivarium_workbench"
 
 
 @pytest.fixture

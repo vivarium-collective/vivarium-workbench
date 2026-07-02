@@ -1,9 +1,9 @@
-"""Unit tests for vivarium_dashboard.lib.investigations."""
+"""Unit tests for vivarium_workbench.lib.investigations."""
 from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib.investigations import (
+from vivarium_workbench.lib.investigations import (
     load_spec, expand_simulations, InvestigationSpecError,
 )
 
@@ -142,7 +142,7 @@ def test_expand_simulations_mixed():
 import json
 import sqlite3
 
-from vivarium_dashboard.lib.investigations import gather_results, load_overlays
+from vivarium_workbench.lib.investigations import gather_results, load_overlays
 
 
 def _setup_runs_db(tmp_path):
@@ -243,7 +243,7 @@ def test_load_overlays_cross_investigation_missing(tmp_path):
     assert payload[0]["kind"] == "warning"
 
 
-from vivarium_dashboard.lib.investigations import (
+from vivarium_workbench.lib.investigations import (
     update_spec_status, acquire_run_lock, release_run_lock,
     gather_emitter_outputs, build_viz_composite,
 )
@@ -353,7 +353,7 @@ def test_build_viz_composite_shape():
 
 def test_render_visualizations_v2_writes_html(tmp_path):
     """End-to-end: build_viz_composite + Composite.run(1) writes html to viz/."""
-    from vivarium_dashboard.lib.investigations import render_visualizations
+    from vivarium_workbench.lib.investigations import render_visualizations
 
     inv_dir = tmp_path / "investigations" / "demo"
     inv_dir.mkdir(parents=True)
@@ -410,7 +410,7 @@ def test_load_spec_accepts_composites_list(tmp_path):
     variants carry ``base_composite`` + ``parameter_overrides`` (no nested
     ``intervention`` wrapper).
     """
-    from vivarium_dashboard.lib.investigations import load_spec
+    from vivarium_workbench.lib.investigations import load_spec
     spec_path = tmp_path / 'spec.yaml'
     spec_path.write_text(
         'name: multi\n'
@@ -450,7 +450,7 @@ def test_load_spec_accepts_composites_list(tmp_path):
 
 
 def test_load_spec_rejects_extends_referencing_undeclared():
-    from vivarium_dashboard.lib.investigations import load_spec, InvestigationSpecError
+    from vivarium_workbench.lib.investigations import load_spec, InvestigationSpecError
     import tempfile, pathlib, yaml
     bad = {
         'name': 'x',
@@ -477,7 +477,7 @@ def test_load_spec_rejects_extends_referencing_undeclared():
 
 def test_load_spec_legacy_single_composite_still_accepted(tmp_path):
     """During migration window, the old single-composite shape must still load."""
-    from vivarium_dashboard.lib.investigations import load_spec
+    from vivarium_workbench.lib.investigations import load_spec
     spec_path = tmp_path / 'spec.yaml'
     spec_path.write_text(
         'name: legacy\n'
@@ -499,7 +499,7 @@ def test_load_spec_legacy_single_composite_still_accepted(tmp_path):
 def test_inject_emitter_from_observables_paths():
     """Orchestrator helper: given a composite doc + spec.yaml.observables,
     rewrite (or add) the emitter step to record those paths."""
-    from vivarium_dashboard.lib.investigations import inject_emitter_step
+    from vivarium_workbench.lib.investigations import inject_emitter_step
 
     doc = {
         'state': {
@@ -523,7 +523,7 @@ def test_inject_emitter_from_observables_paths():
 
 
 def test_inject_emitter_skips_missing_paths():
-    from vivarium_dashboard.lib.investigations import inject_emitter_step
+    from vivarium_workbench.lib.investigations import inject_emitter_step
 
     doc = {'state': {'chromosome': {'DnaA_count': {'_type': 'integer', '_default': 100}}}}
     observables = [
@@ -537,7 +537,7 @@ def test_inject_emitter_skips_missing_paths():
 
 
 def test_inject_emitter_empty_observables_returns_empty_emit():
-    from vivarium_dashboard.lib.investigations import inject_emitter_step
+    from vivarium_workbench.lib.investigations import inject_emitter_step
     doc = {'state': {'chromosome': {'DnaA_count': {'_type': 'integer', '_default': 100}}}}
     out = inject_emitter_step(doc, [])
     em = out['state']['emitter']
@@ -549,7 +549,7 @@ def test_inject_emitter_empty_observables_returns_empty_emit():
 def test_inject_emitter_handles_emit_all_sentinel():
     """The set-observables endpoint represents 'emit entire state' as [{path: []}].
     The injector should treat this as wiring an emitter at the root."""
-    from vivarium_dashboard.lib.investigations import inject_emitter_step
+    from vivarium_workbench.lib.investigations import inject_emitter_step
     doc = {'state': {'chromosome': {'DnaA_count': {'_type': 'integer', '_default': 100}}}}
     out = inject_emitter_step(doc, [{'path': []}])
     em = out['state']['emitter']
@@ -564,7 +564,7 @@ def test_inject_emitter_handles_emit_all_sentinel():
 def test_run_investigation_iterates_runs_and_passes_state_doc(tmp_path):
     """Stub run_one_composite to verify the orchestrator loads each composite
     document and passes it forward as state_doc."""
-    from vivarium_dashboard.lib.investigations import run_investigation
+    from vivarium_workbench.lib.investigations import run_investigation
     import yaml as _yaml
 
     inv = tmp_path / 'investigations' / 'demo'
@@ -709,7 +709,7 @@ def test_load_spec_accepts_groups_list(tmp_path):
 
 import warnings as _warnings
 
-from vivarium_dashboard.lib.investigations import normalize_dag_edges
+from vivarium_workbench.lib.investigations import normalize_dag_edges
 
 
 def test_normalize_dag_edges_reads_pipeline_gate_first():
@@ -814,7 +814,7 @@ def test_normalize_dag_edges_no_warning_when_using_canonical():
 # ----------------------------------------------------------------------------
 
 
-from vivarium_dashboard.lib.investigations import effective_status
+from vivarium_workbench.lib.investigations import effective_status
 
 
 def test_effective_status_returns_none_when_nothing_set():
@@ -917,7 +917,7 @@ def test_evaluated_parent_satisfies_ran_prerequisite(tmp_path, monkeypatch):
     surrogate-modeling sm-02/sm-03 studies).
     """
     import yaml as _yaml
-    from vivarium_dashboard.lib.investigations_index import build_investigations
+    from vivarium_workbench.lib.investigations_index import build_investigations
 
     ws = tmp_path / "ws"
     (ws).mkdir()

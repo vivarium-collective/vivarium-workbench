@@ -1,4 +1,4 @@
-"""Tests for vivarium_dashboard.lib.static_serving (Phase C, Batch 16).
+"""Tests for vivarium_workbench.lib.static_serving (Phase C, Batch 16).
 
 Covers the asset-resolution priority (bundled → assets-strip → workspace →
 reports), the mime table, the loom traversal guard, and the parsimony
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import static_serving as ss
+from vivarium_workbench.lib import static_serving as ss
 
 
 def test_guess_mime_table():

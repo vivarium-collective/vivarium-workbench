@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import github_auth as ga
+from vivarium_workbench.lib import github_auth as ga
 
 
 @pytest.fixture(autouse=True)

@@ -13,7 +13,7 @@ test_study_sync_runs_endpoint, …); here we assert the wiring, not the logic.
 import yaml
 from fastapi.testclient import TestClient
 
-from vivarium_dashboard.api import app as appmod
+from vivarium_workbench.api import app as appmod
 
 
 def _client(ws):

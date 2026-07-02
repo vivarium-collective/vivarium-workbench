@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import sms_api_client as sac
-from vivarium_dashboard.lib import remote_build_source as rbs
+from vivarium_workbench.lib import sms_api_client as sac
+from vivarium_workbench.lib import remote_build_source as rbs
 
 
 class _Resp:
@@ -178,7 +178,7 @@ def test_list_build_sources_maps_and_labels():
 def test_list_build_sources_degrades_on_error():
     class _Boom:
         def list_simulators(self):
-            from vivarium_dashboard.lib.sms_api_client import SmsApiError
+            from vivarium_workbench.lib.sms_api_client import SmsApiError
             raise SmsApiError("tunnel down")
     out = rbs.list_build_sources(_Boom())
     assert out["builds"] == [] and "tunnel down" in out["error"]
@@ -186,8 +186,8 @@ def test_list_build_sources_degrades_on_error():
 
 def test_source_builds_route_in_do_get(monkeypatch):
     """The GET /api/source/builds builder returns the sms-api build list."""
-    from vivarium_dashboard.lib import workspace_deps_views as wdv
-    from vivarium_dashboard.lib import remote_build_source
+    from vivarium_workbench.lib import workspace_deps_views as wdv
+    from vivarium_workbench.lib import remote_build_source
     monkeypatch.setattr(
         remote_build_source, "list_build_sources",
         lambda client: {"builds": [{"simulator_id": 7, "label": "x"}], "error": None},
@@ -197,7 +197,7 @@ def test_source_builds_route_in_do_get(monkeypatch):
 
 
 def test_switch_build_unknown_id_404(monkeypatch):
-    from vivarium_dashboard.lib import source_build_views as sbv
+    from vivarium_workbench.lib import source_build_views as sbv
     monkeypatch.setattr(sbv, "list_build_sources",
                         lambda client: {"builds": [], "error": None})
     obj, code = sbv.switch_build({"simulator_id": 999})
@@ -205,7 +205,7 @@ def test_switch_build_unknown_id_404(monkeypatch):
 
 
 def test_switch_build_materializes_and_switches(monkeypatch, tmp_path):
-    from vivarium_dashboard.lib import source_build_views as sbv
+    from vivarium_workbench.lib import source_build_views as sbv
     cache = tmp_path / "sim45-32b901"; cache.mkdir()
     (cache / "workspace.yaml").write_text("name: built\n")
     monkeypatch.setattr(sbv, "list_build_sources",
@@ -224,7 +224,7 @@ def test_switch_build_materializes_and_switches(monkeypatch, tmp_path):
 
 
 def test_switch_build_sms_api_down_502_not_404(monkeypatch):
-    from vivarium_dashboard.lib import source_build_views as sbv
+    from vivarium_workbench.lib import source_build_views as sbv
     # sms-api unreachable: list degrades to empty builds + an error reason.
     monkeypatch.setattr(sbv, "list_build_sources",
                         lambda client: {"builds": [], "error": "tunnel down"})
@@ -234,14 +234,14 @@ def test_switch_build_sms_api_down_502_not_404(monkeypatch):
 
 
 def test_switch_build_missing_id_400():
-    from vivarium_dashboard.lib import source_build_views as sbv
+    from vivarium_workbench.lib import source_build_views as sbv
     obj, code = sbv.switch_build({})
     assert code == 400
 
 
 def test_switch_build_materialize_failure_502_leaves_state_unchanged(monkeypatch):
-    from vivarium_dashboard.lib import source_build_views as sbv
-    from vivarium_dashboard.lib.sms_api_client import SmsApiError
+    from vivarium_workbench.lib import source_build_views as sbv
+    from vivarium_workbench.lib.sms_api_client import SmsApiError
     monkeypatch.setattr(sbv, "list_build_sources",
                         lambda client: {"builds": [{"simulator_id": 45, "commit": "32b901",
                                                     "label": "v2ecoli @ 32b901 (build #45)"}], "error": None})

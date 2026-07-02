@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import work_state
+from vivarium_workbench.lib import work_state
 
 
 def _git(args, cwd):
@@ -26,7 +26,7 @@ def repo(tmp_path, monkeypatch):
     _git(["add", "-A"], ws)
     _git(["commit", "-m", "init"], ws)
     _git(["checkout", "-b", "stage/test"], ws)
-    from vivarium_dashboard.lib._root import set_workspace_root
+    from vivarium_workbench.lib._root import set_workspace_root
     set_workspace_root(ws)
     # Point work_state at this repo's active branch.
     monkeypatch.setattr(work_state, "load_state",

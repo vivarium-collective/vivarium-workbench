@@ -1,5 +1,5 @@
 # tests/test_report_views_readout_lint.py
-from vivarium_dashboard.lib import report_views
+from vivarium_workbench.lib import report_views
 
 
 def test_emit_plan_findings_flag_orphan_rows(monkeypatch, tmp_path):

@@ -13,7 +13,7 @@ import types
 
 import pytest
 
-from vivarium_dashboard.lib import workspaces_mutations as wm
+from vivarium_workbench.lib import workspaces_mutations as wm
 
 
 def _fake_catalog(**overrides):

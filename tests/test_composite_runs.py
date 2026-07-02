@@ -1,5 +1,5 @@
-"""Unit tests for vivarium_dashboard.lib.composite_runs."""
-from vivarium_dashboard.lib.composite_runs import (
+"""Unit tests for vivarium_workbench.lib.composite_runs."""
+from vivarium_workbench.lib.composite_runs import (
     connect, save_metadata, complete_metadata, query_runs, query_run,
     query_run_meta, update_progress, set_pid, mark_orphaned, prune_runs,
     inject_sqlite_emitter, auto_label, inject_emitter_for_paths,
@@ -312,7 +312,7 @@ def test_all_store_paths_empty_state():
 
 def test_connect_runs_meta_has_sim_name(tmp_path):
     """Fresh runs.db must have sim_name — _get_investigation_detail SELECTs it."""
-    from vivarium_dashboard.lib.composite_runs import connect
+    from vivarium_workbench.lib.composite_runs import connect
     conn = connect(tmp_path / "fresh.db")
     cols = {row[1] for row in conn.execute("PRAGMA table_info(runs_meta)")}
     conn.close()
@@ -338,7 +338,7 @@ def test_connect_adds_sim_name_to_legacy_db(tmp_path):
     raw.commit()
     raw.close()
 
-    from vivarium_dashboard.lib.composite_runs import connect
+    from vivarium_workbench.lib.composite_runs import connect
     conn = connect(db)
     cols = {row[1] for row in conn.execute("PRAGMA table_info(runs_meta)")}
     # Existing row survives the migration.

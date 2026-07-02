@@ -12,7 +12,7 @@ from __future__ import annotations
 import yaml
 import pytest
 
-from vivarium_dashboard.lib.system_info import build_framework_metrics
+from vivarium_workbench.lib.system_info import build_framework_metrics
 
 
 @pytest.fixture

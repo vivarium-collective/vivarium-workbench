@@ -1,7 +1,7 @@
 import re
 from pathlib import Path
 
-TPL = Path("vivarium_dashboard/templates/study-detail.html").read_text(encoding="utf-8")
+TPL = Path("vivarium_workbench/templates/study-detail.html").read_text(encoding="utf-8")
 
 
 def test_readouts_panel_has_async_shell_not_authored_loop():

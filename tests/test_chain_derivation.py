@@ -1,6 +1,6 @@
 # tests/test_chain_derivation.py
 from investigation_contracts import validate_chain
-from vivarium_dashboard.lib.chain_derivation import derive_chain_nodes
+from vivarium_workbench.lib.chain_derivation import derive_chain_nodes
 
 
 def _cv(study_extra=None, verdicts=None):

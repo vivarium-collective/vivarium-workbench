@@ -1,4 +1,4 @@
-"""Tests for vivarium_dashboard.lib.references_fetch.
+"""Tests for vivarium_workbench.lib.references_fetch.
 
 Outbound HTTP is mocked at the urlopen layer so the test suite doesn't
 depend on crossref.org / unpaywall.org being reachable.
@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from vivarium_dashboard.lib import references_fetch as rf
+from vivarium_workbench.lib import references_fetch as rf
 
 
 # ---------------------------------------------------------------------------

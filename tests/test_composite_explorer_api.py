@@ -40,13 +40,13 @@ def server(tmp_path):
     port = _free_port()
     env = os.environ.copy()
     # The subprocess (and the detached run-composite child it spawns) needs
-    # (a) this repo's vivarium_dashboard — put _REPO_ROOT first so the test
+    # (a) this repo's vivarium_workbench — put _REPO_ROOT first so the test
     # exercises the working tree, not whatever happens to be pip-installed —
     # and (b) the workspace's own package (pbg_ws_increase_demo).
     env["PYTHONPATH"] = os.pathsep.join(
         [str(_REPO_ROOT), str(ws), env.get("PYTHONPATH", "")])
     proc = subprocess.Popen(
-        [sys.executable, "-m", "vivarium_dashboard.cli", "serve",
+        [sys.executable, "-m", "vivarium_workbench.cli", "serve",
          "--workspace", str(ws), "--port", str(port)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=env,

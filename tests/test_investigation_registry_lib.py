@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib import investigation_registry as ir
+from vivarium_workbench.lib import investigation_registry as ir
 
 
 def _write_iset(ws: Path, slug: str, *, title=None, status="planning") -> None:

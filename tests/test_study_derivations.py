@@ -1,4 +1,4 @@
-from vivarium_dashboard.lib import study_derivations as D
+from vivarium_workbench.lib import study_derivations as D
 
 
 def test_conclusion_verdicts_passed_gate_completed_runs_interp_finding():

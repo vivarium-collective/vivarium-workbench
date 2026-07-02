@@ -6,7 +6,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from vivarium_dashboard.lib.sms_api_client import SmsApiClient, SmsApiError
+from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
 
 
 class _Resp(io.BytesIO):
@@ -35,7 +35,7 @@ def _patch_urlopen(monkeypatch, capture, payload, status=200):
             raise HTTPError(req.full_url, status, "err", {}, io.BytesIO(b"boom"))
         return _Resp(payload, status)
 
-    monkeypatch.setattr("vivarium_dashboard.lib.sms_api_client.urlopen", fake_urlopen)
+    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
     yield
 
 
@@ -133,7 +133,7 @@ def test_download_data_streams_to_file(monkeypatch, tmp_path):
         cap["method"] = req.get_method()
         return _RawResp()
 
-    monkeypatch.setattr("vivarium_dashboard.lib.sms_api_client.urlopen", fake_urlopen)
+    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
     c = SmsApiClient("http://h:8080")
     out = c.download_data(49, tmp_path)
     assert out == tmp_path / "sim_49.tar.gz"

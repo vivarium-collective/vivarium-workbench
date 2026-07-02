@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib.investigation_registry import (
+from vivarium_workbench.lib.investigation_registry import (
     build_investigation_registry as _build_investigation_registry_for_test,
 )
 
@@ -367,7 +367,7 @@ def test_dormant_excludes_self_worktree(tmp_path):
 def test_dormant_filters_closed_and_archived_statuses(tmp_path):
     """Investigations with status closed/archived/complete must not
     appear in the dormant bucket."""
-    from vivarium_dashboard.lib.investigation_registry import (
+    from vivarium_workbench.lib.investigation_registry import (
         scan_worktree_investigations as _scan_worktree_investigations,
     )
 
@@ -388,7 +388,7 @@ def test_dormant_filters_closed_and_archived_statuses(tmp_path):
 
 def test_dormant_handles_missing_investigations_dir(tmp_path):
     """A worktree with no investigations/ directory contributes nothing."""
-    from vivarium_dashboard.lib.investigation_registry import (
+    from vivarium_workbench.lib.investigation_registry import (
         scan_worktree_investigations as _scan_worktree_investigations,
     )
     assert _scan_worktree_investigations(str(tmp_path / "nope")) == []
@@ -414,7 +414,7 @@ def test_list_other_worktrees_excludes_self(tmp_path):
     subprocess.run(["git", "worktree", "add", "-q", "-b", "sib-branch",
                     str(sib)], cwd=str(repo), check=True)
 
-    from vivarium_dashboard.lib.investigation_registry import (
+    from vivarium_workbench.lib.investigation_registry import (
         list_other_worktrees as _list_other_worktrees,
     )
     out = _list_other_worktrees(repo)
@@ -426,7 +426,7 @@ def test_list_other_worktrees_excludes_self(tmp_path):
 
 def test_list_other_worktrees_handles_non_git_dir(tmp_path):
     """Non-git dirs return [] without raising."""
-    from vivarium_dashboard.lib.investigation_registry import (
+    from vivarium_workbench.lib.investigation_registry import (
         list_other_worktrees as _list_other_worktrees,
     )
     assert _list_other_worktrees(tmp_path) == []

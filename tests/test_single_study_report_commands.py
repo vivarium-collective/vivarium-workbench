@@ -6,7 +6,7 @@ Verifies:
 - A variant command also appears (fixture has one variant named "var-one").
 - The rerun hint appears.
 """
-from vivarium_dashboard.lib.single_study_report import render_single_study_report
+from vivarium_workbench.lib.single_study_report import render_single_study_report
 
 
 def test_report_has_reproduce_block(fixture_study_ws):

@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import composite_runs as cr
-from vivarium_dashboard.lib.composite_run_views import (
+from vivarium_workbench.lib import composite_runs as cr
+from vivarium_workbench.lib.composite_run_views import (
     build_composite_run,
     build_composite_run_state,
     build_composite_run_status,

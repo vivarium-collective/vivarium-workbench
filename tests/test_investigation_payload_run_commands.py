@@ -9,7 +9,7 @@ endpoints. This test pins the per-study projection's ``run_commands.baseline``.
 """
 import yaml
 
-from vivarium_dashboard.lib import report_views
+from vivarium_workbench.lib import report_views
 
 
 def _make_ws(tmp_path):
@@ -69,7 +69,7 @@ def test_iset_detail_per_study_has_run_commands(tmp_path):
 
 def test_iset_baseline_matches_single_source(tmp_path):
     """The chip string must come from study_run_commands, not a literal."""
-    from vivarium_dashboard.lib.run_commands import study_run_commands
+    from vivarium_workbench.lib.run_commands import study_run_commands
     ws, inv, slug = _make_ws(tmp_path)
     spec = yaml.safe_load(
         (ws / "studies" / slug / "study.yaml").read_text(encoding="utf-8")

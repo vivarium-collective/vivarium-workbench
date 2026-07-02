@@ -3,7 +3,7 @@
 vivarium-dashboard is the AI-free UI+data layer — pure rendering of
 deterministic functions. ALL AI assistance lives in the pbg-superpowers
 ``/pbg-*`` skills, never in the dashboard. This test statically scans every
-module under ``vivarium_dashboard/`` and fails if any of them imports a known
+module under ``vivarium_workbench/`` and fails if any of them imports a known
 LLM/AI SDK, so the boundary can't erode silently.
 
 Note: importing ``pbg_superpowers`` (its DETERMINISTIC modules) is allowed —
@@ -37,7 +37,7 @@ _FORBIDDEN_PREFIXES = ("langchain",)  # langchain, langchain_core, langchain_ope
 # Dotted module paths that are forbidden even though their root is innocuous.
 _FORBIDDEN_DOTTED = ("google.generativeai",)
 
-_PKG_ROOT = Path(__file__).resolve().parent.parent / "vivarium_dashboard"
+_PKG_ROOT = Path(__file__).resolve().parent.parent / "vivarium_workbench"
 
 
 def _module_files() -> list[Path]:

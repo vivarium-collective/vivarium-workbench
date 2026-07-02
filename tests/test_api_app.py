@@ -1,4 +1,4 @@
-"""Tests for the FastAPI seam (vivarium_dashboard.api.app)."""
+"""Tests for the FastAPI seam (vivarium_workbench.api.app)."""
 
 import json
 from pathlib import Path
@@ -6,12 +6,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from vivarium_dashboard.lib.json_serialize import _json_default
+from vivarium_workbench.lib.json_serialize import _json_default
 
-from vivarium_dashboard.api import app as api_app
-from vivarium_dashboard.api.app import create_app, get_workspace
-from vivarium_dashboard.lib import active_workspace
-from vivarium_dashboard.lib import _root
+from vivarium_workbench.api import app as api_app
+from vivarium_workbench.api.app import create_app, get_workspace
+from vivarium_workbench.lib import active_workspace
+from vivarium_workbench.lib import _root
 
 
 @pytest.fixture(autouse=True)
@@ -56,7 +56,7 @@ def test_simulations_returns_typed_rows(client, monkeypatch):
     }
     # /api/simulations is now backed by lib.simulations_index.build_simulations_data,
     # which calls the module-level list_simulations — patch it there.
-    from vivarium_dashboard.lib import simulations_index as _si
+    from vivarium_workbench.lib import simulations_index as _si
     monkeypatch.setattr(_si, "list_simulations", lambda ws: [dict(row)])
     r = client.get("/api/simulations")
     assert r.status_code == 200
@@ -172,8 +172,8 @@ def test_data_sources_typed(client, monkeypatch):
 def test_references_bib_preserves_extra_fields(client, monkeypatch):
     """BibEntry uses extra='allow', so arbitrary bibtex fields survive the typed
     response (FastAPI does not strip them) — only `key` is required."""
-    import vivarium_dashboard.lib.references_fetch as rf
-    import vivarium_dashboard.lib.report as report_mod
+    import vivarium_workbench.lib.references_fetch as rf
+    import vivarium_workbench.lib.report as report_mod
 
     entries = [{"key": "smith2020", "title": "T", "author": "Smith",
                 "publisher": "ACME", "weird_field": "xyz"}]
@@ -307,7 +307,7 @@ def test_visualization_classes_empty_workspace(client, monkeypatch):
     payload — not a 500.  We patch ``list_visualization_classes`` to return
     empty so the assertion is deterministic regardless of which pbg packages are
     installed in the test environment."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     monkeypatch.setattr(_app, "list_visualization_classes", lambda ws: {"classes": []})
     r = client.get("/api/visualization-classes")
@@ -318,7 +318,7 @@ def test_visualization_classes_empty_workspace(client, monkeypatch):
 def test_visualization_classes_typed_passthrough(client, monkeypatch):
     """The route validates the builder's output through VisualizationClassesPayload;
     extra fields on each VizClass entry are preserved (extra='allow')."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     payload = {
         "classes": [
@@ -371,7 +371,7 @@ def test_composite_resolve_missing_returns_unresolved(client):
 
 def test_composite_resolve_typed_passthrough(client, monkeypatch):
     """A valid resolve payload validates through CompositeResolvePayload."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     payload = {
         "id": "pbg_ws.composites.my_comp",
@@ -425,7 +425,7 @@ def test_registry_empty_workspace(client, monkeypatch):
     We patch ``build_registry`` to return the empty shape that a workspace with
     no importable package would produce (subprocess fails gracefully) so the
     test is deterministic regardless of which pbg packages are installed."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     monkeypatch.setattr(_app, "build_registry", lambda ws, **kw: {
         "processes": [], "types": [], "imports": [],
@@ -442,7 +442,7 @@ def test_registry_typed_passthrough(client, monkeypatch):
     """The route validates the builder's output through RegistryPayload;
     extra top-level fields (default_emitter, workspace_pkgs, error) are
     preserved by extra='allow'."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     payload = {
         "processes": [
@@ -503,7 +503,7 @@ def test_registry_typed_passthrough(client, monkeypatch):
 def test_registry_error_field_preserved(client, monkeypatch):
     """When the subprocess fails, build_registry returns an 'error' key alongside
     empty lists.  The route must not 422 — RegistryPayload extra='allow' keeps it."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     monkeypatch.setattr(_app, "build_registry", lambda ws, **kw: {
         "processes": [], "types": [], "imports": [],
@@ -536,7 +536,7 @@ def test_composites_typed_passthrough(client, monkeypatch):
     Both a spec-kind and a generator-kind composite survive; the generator carries
     an extra field (workspace_local) that is preserved by CompositeRecord extra='allow'.
     """
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     payload = {
         "composites": [
@@ -581,7 +581,7 @@ def test_composites_typed_passthrough(client, monkeypatch):
 def test_composites_subprocess_none_returns_error_payload(client, monkeypatch):
     """When composites_via_subprocess returns None the route must not 500 — it
     returns the empty + error payload with HTTP 200."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     monkeypatch.setattr(_app, "composites_via_subprocess", lambda ws: None)
 
@@ -622,7 +622,7 @@ def test_investigations_typed_passthrough(client, monkeypatch):
     - An invalid row {name, status, error} (the parse-failure shape).
     Both must validate through the model without 422.
     """
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     rich_row = {
         "name": "dnaa-1",
@@ -662,7 +662,7 @@ def test_investigations_typed_passthrough(client, monkeypatch):
 
     from unittest.mock import patch
     with patch(
-        "vivarium_dashboard.lib.investigations_index.build_investigations",
+        "vivarium_workbench.lib.investigations_index.build_investigations",
         return_value=payload,
     ):
         r = client.get("/api/investigations")
@@ -733,7 +733,7 @@ def test_catalog_typed_passthrough(client):
     payload = {"modules": [rich_module], "extra_top_level": "ok"}
 
     with patch(
-        "vivarium_dashboard.api.app.build_catalog",
+        "vivarium_workbench.api.app.build_catalog",
         return_value=payload,
     ):
         r = client.get("/api/catalog")
@@ -755,7 +755,7 @@ def test_catalog_workspace_yaml(tmp_path):
     """A workspace.yaml without imports yields the workspace's own module (if
     the package dir exists) or an empty modules list."""
     import yaml as _yaml
-    from vivarium_dashboard.lib.catalog import build_catalog
+    from vivarium_workbench.lib.catalog import build_catalog
 
     # Minimal workspace.yaml — no package_path, no imports, no pbg_superpowers
     (tmp_path / "workspace.yaml").write_text(
@@ -784,7 +784,7 @@ def test_catalog_in_openapi(client):
 
 def test_git_status_empty_workspace(client, monkeypatch):
     """Empty workspace (no git) → 200 with default/null fields, not a 500."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     monkeypatch.setattr(
         _app._git_status, "build_git_status",
@@ -806,7 +806,7 @@ def test_git_status_empty_workspace(client, monkeypatch):
 
 def test_git_status_with_data(client, monkeypatch):
     """Typed response validates a realistic payload through GitStatus."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     payload = {
         "upstream_repo": "org/repo", "branch": "feat/thing", "push_state": "ahead",
@@ -841,7 +841,7 @@ def test_work_status_inactive(client, monkeypatch):
 
     The discriminated union must not leak the active model's 13 null defaults.
     """
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     monkeypatch.setattr(_app._git_status, "build_work_status", lambda ws: {"active": False})
     r = client.get("/api/work-status")
@@ -851,7 +851,7 @@ def test_work_status_inactive(client, monkeypatch):
 
 def test_work_status_active(client, monkeypatch):
     """Active workstream → full 14-key payload, including null pr_number/pr_url."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     payload = {
         "active": True, "branch": "feat/my-branch", "base": "main",
@@ -883,7 +883,7 @@ def test_work_status_in_openapi(client):
 
 def test_dirty_status_clean(client, monkeypatch):
     """Clean workspace → {count: 0, files: []}."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     monkeypatch.setattr(
         _app._git_status, "build_dirty_status",
@@ -897,7 +897,7 @@ def test_dirty_status_clean(client, monkeypatch):
 
 def test_dirty_status_with_files(client, monkeypatch):
     """Dirty workspace → count + files list."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     payload = {
         "count": 2,
@@ -918,7 +918,7 @@ def test_dirty_status_with_files(client, monkeypatch):
 def test_dirty_status_500_git_failure(client, monkeypatch):
     """git status failure → HTTP 500."""
     import subprocess
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     def _raise(ws):
         raise subprocess.CalledProcessError(128, ["git", "status"], stderr="not a git repo")
@@ -945,7 +945,7 @@ def test_dirty_status_in_openapi(client):
 
 def test_investigation_viz_html_200(client, monkeypatch):
     """Happy path: returns typed viz_files list."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
     monkeypatch.setattr(
         _app._inv_views, "build_investigation_viz_html",
         lambda ws, inv, run_id: {
@@ -994,7 +994,7 @@ def test_investigation_viz_html_in_openapi(client):
 
 def test_investigation_composites_200(client, monkeypatch):
     """Happy path: returns typed composites list."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
     monkeypatch.setattr(
         _app._inv_views, "build_investigation_composites",
         lambda ws, inv: {
@@ -1023,8 +1023,8 @@ def test_investigation_composites_400_missing(client):
 
 def test_investigation_composites_404_not_found(client, monkeypatch):
     """Unknown investigation → HTTP 404, {"error": ...}."""
-    import vivarium_dashboard.api.app as _app
-    from vivarium_dashboard.lib.investigation_views import InvViewError
+    import vivarium_workbench.api.app as _app
+    from vivarium_workbench.lib.investigation_views import InvViewError
 
     def _raise(ws, inv):
         raise InvViewError({"error": f"investigation '{inv}' not found"}, 404)
@@ -1054,7 +1054,7 @@ def test_investigation_composites_in_openapi(client):
 
 def test_investigation_composite_doc_200(client, monkeypatch):
     """Happy path: returns {state: <parsed YAML>}."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
     monkeypatch.setattr(
         _app._inv_views, "build_investigation_composite_doc",
         lambda ws, inv, comp: {"state": {"process": "MyProcess", "config": {"n": 10}}},
@@ -1076,8 +1076,8 @@ def test_investigation_composite_doc_400_missing(client):
 
 def test_investigation_composite_doc_404_not_found(client, monkeypatch):
     """Composite file absent → HTTP 404, {"error": "composite document not found"}."""
-    import vivarium_dashboard.api.app as _app
-    from vivarium_dashboard.lib.investigation_views import InvViewError
+    import vivarium_workbench.api.app as _app
+    from vivarium_workbench.lib.investigation_views import InvViewError
 
     def _raise(ws, inv, comp):
         raise InvViewError({"error": "composite document not found"}, 404)
@@ -1090,8 +1090,8 @@ def test_investigation_composite_doc_404_not_found(client, monkeypatch):
 
 def test_investigation_composite_doc_500_parse_failure(client, monkeypatch):
     """YAML parse failure → HTTP 500, {"error": "parse failed: ..."}."""
-    import vivarium_dashboard.api.app as _app
-    from vivarium_dashboard.lib.investigation_views import InvViewError
+    import vivarium_workbench.api.app as _app
+    from vivarium_workbench.lib.investigation_views import InvViewError
 
     def _raise(ws, inv, comp):
         raise InvViewError({"error": "parse failed: unexpected char"}, 500)
@@ -1115,7 +1115,7 @@ def test_investigation_composite_doc_in_openapi(client):
 
 def test_investigation_hypotheses_200(client, monkeypatch):
     """Happy path: returns {hypotheses: [...], investigation: name}."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
     monkeypatch.setattr(
         _app._inv_views, "build_investigation_hypotheses",
         lambda ws, name: {
@@ -1145,7 +1145,7 @@ def test_investigation_hypotheses_missing_returns_empty(client):
 def test_investigation_hypotheses_query_param_aliases(client, monkeypatch):
     """The slug accepts ?investigation= / ?inv= / ?name= (legacy precedence:
     investigation > inv > name), matching the stdlib dispatcher."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
     seen = {}
 
     def _capture(ws, name):
@@ -1169,7 +1169,7 @@ def test_investigation_hypotheses_query_param_aliases(client, monkeypatch):
 
 def test_investigation_hypotheses_extra_fields_preserved(client, monkeypatch):
     """Extra fields on hypothesis entries survive extra='allow'."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
     monkeypatch.setattr(
         _app._inv_views, "build_investigation_hypotheses",
         lambda ws, name: {
@@ -1198,7 +1198,7 @@ def test_investigation_hypotheses_in_openapi(client):
 
 def test_investigation_rigor_200(client, monkeypatch):
     """Happy path: the roll-up passes through untouched (extra='allow')."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
     payload = {
         "dimensions": [{"id": "adversarial", "severity": "warn"}],
         "per_study": {"my-study": {"summary": "ok"}},
@@ -1227,7 +1227,7 @@ def test_investigation_rigor_404_not_found(client):
 
 def test_investigation_rigor_200_with_error(client, monkeypatch):
     """An unreadable investigation.yaml degrades to a 200 body carrying error."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
     monkeypatch.setattr(
         _app._rigor_views, "build_investigation_rigor",
         lambda ws, slug: {"error": "unreadable investigation.yaml: bad"})
@@ -1426,7 +1426,7 @@ def test_explorer_runs_empty_workspace(client):
 
 def test_explorer_runs_never_500_on_error(client, monkeypatch):
     """Route exception → 200 with {error, runs: []}, not HTTP 500."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     monkeypatch.setattr(_app._explorer_data, "list_runs", lambda ws: (_ for _ in ()).throw(
         RuntimeError("simulations-index exploded")
@@ -1552,7 +1552,7 @@ def test_explorer_series_hash_index_parsing(tmp_path):
 
 def test_explorer_series_never_500(client, monkeypatch):
     """Builder exception → 200 with error body."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     monkeypatch.setattr(
         _app._explorer_data, "get_series",
@@ -1596,7 +1596,7 @@ def test_explorer_flux_step_fallback(client):
 
 def test_explorer_flux_never_500(client, monkeypatch):
     """Builder exception → 200 with error body."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     monkeypatch.setattr(
         _app._explorer_data, "get_flux_auto",
@@ -1650,7 +1650,7 @@ def test_explorer_vector_step_fallback(client):
 
 def test_explorer_vector_never_500(client, monkeypatch):
     """Builder exception → 200 with error body."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     monkeypatch.setattr(
         _app._explorer_data, "get_vector",
@@ -1684,7 +1684,7 @@ def test_explorer_protein_breakdown_missing_params(client):
 
 def test_explorer_protein_breakdown_never_500(client, monkeypatch):
     """Builder exception → 200 with error body."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     monkeypatch.setattr(
         _app._explorer_data, "get_protein_breakdown",
@@ -1759,7 +1759,7 @@ class TestStudyDetailRoute:
 
     def test_200_matches_lib_builder(self, tmp_path):
         ws = _make_study_workspace(tmp_path)
-        from vivarium_dashboard.lib.study_spec import load_study_detail_spec
+        from vivarium_workbench.lib.study_spec import load_study_detail_spec
         expected = json.loads(json.dumps(
             load_study_detail_spec(ws, "my-study"), default=_json_default))
 
@@ -1800,7 +1800,7 @@ def test_report_lint_200_empty_workspace(client):
 
 def test_report_lint_typed_passthrough(client, monkeypatch):
     """Extra fields on findings survive the typed response (pass-through model)."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     monkeypatch.setattr(
         _app._report_views, "build_report_lint",
@@ -1844,7 +1844,7 @@ def test_needs_attention_200_empty_workspace(client):
 
 def test_needs_attention_investigation_param(client, monkeypatch):
     """?investigation= param is forwarded to build_needs_attention."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
     captured: dict = {}
 
     def _spy(ws, *, investigation=None):
@@ -1877,7 +1877,7 @@ def test_inputs_200_empty_workspace(client):
 
 def test_inputs_investigation_param(client, monkeypatch):
     """?investigation= slug is forwarded to lib.report_views.build_inputs."""
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
     captured: list = []
 
     def _spy(ws, slug=None):
@@ -1948,7 +1948,7 @@ def test_iset_detail_404_body_matches_lib(tmp_path, monkeypatch):
     the FastAPI route maps that to the verbatim body
     ``{"error": "no investigation.yaml for '<slug>'"}``.
     """
-    from vivarium_dashboard.lib.report_views import build_iset_detail
+    from vivarium_workbench.lib.report_views import build_iset_detail
 
     ws = _make_iset_workspace(tmp_path)
     slug = "no-such"
@@ -2008,7 +2008,7 @@ def test_observables_unknown_ref_404(tmp_path):
 
 
 def test_observables_real_build_200(tmp_path):
-    from vivarium_dashboard.lib import observables_views as _ov
+    from vivarium_workbench.lib import observables_views as _ov
     _ov.clear_cache()
     c, _ws, _yaml = _obs_demo_client(tmp_path)
     r = c.get("/api/observables", params={"ref": _OBS_REF})
@@ -2065,8 +2065,8 @@ def test_linkage_index_200(client):
 def test_linkage_index_matches_lib_builder(tmp_path, monkeypatch):
     """FastAPI linkage route body == lib.report_views.build_linkage_index (source query)."""
     import yaml as _yaml
-    from vivarium_dashboard.lib import report_views as _report_views
-    from vivarium_dashboard.lib import observables_views as _obs_views
+    from vivarium_workbench.lib import report_views as _report_views
+    from vivarium_workbench.lib import observables_views as _obs_views
     ws = tmp_path / "ws"
     ws.mkdir(parents=True)
     (ws / "workspace.yaml").write_text("name: ws\n")
@@ -2128,7 +2128,7 @@ def _cs_client(ws):
 
 
 def _patch_cs_subprocess(monkeypatch, result):
-    from vivarium_dashboard.lib import composite_state_views as _csv
+    from vivarium_workbench.lib import composite_state_views as _csv
     _csv.clear_cache()
     monkeypatch.setattr(_csv, "composite_state_via_subprocess", lambda ws, ref: result)
 
@@ -2220,7 +2220,7 @@ class TestFrameworkMetricsRoute:
 
     def test_delegates_to_lib_builder(self, client, monkeypatch, tmp_path):
         """Route body == lib builder output on the same workspace."""
-        from vivarium_dashboard.lib.system_info import build_framework_metrics
+        from vivarium_workbench.lib.system_info import build_framework_metrics
         app = create_app()
         app.dependency_overrides[get_workspace] = lambda: tmp_path
         from fastapi.testclient import TestClient
@@ -2255,7 +2255,7 @@ class TestGithubRepoRoute:
 
 class TestUiConfigRoute:
     def test_defaults_on_empty_workspace(self, client):
-        from vivarium_dashboard.lib.system_info import _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE
+        from vivarium_workbench.lib.system_info import _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE
         r = client.get("/api/ui-config")
         assert r.status_code == 200
         body = r.json()
@@ -2332,7 +2332,7 @@ class TestWorkspaceHomeRoute:
 
 import json as _json_cr  # noqa: E402
 
-from vivarium_dashboard.lib import composite_runs as _cr_lib  # noqa: E402
+from vivarium_workbench.lib import composite_runs as _cr_lib  # noqa: E402
 
 
 def _make_cr_workspace(tmp_path: Path, *, seed_run: bool = False,
@@ -2532,7 +2532,7 @@ class TestVisualizationStatusRoute:
         assert "detail" not in r.json()
 
     def test_name_not_in_workspace_returns_200_missing(self, client, tmp_path, monkeypatch):
-        import vivarium_dashboard.api.app as _app
+        import vivarium_workbench.api.app as _app
         monkeypatch.setattr(
             _app._study_viz, "build_visualization_status",
             lambda ws, name: ({"status": "missing", "name": name}, 200),
@@ -2543,7 +2543,7 @@ class TestVisualizationStatusRoute:
         assert r.json()["name"] == "nonexistent"
 
     def test_happy_path_described(self, client, tmp_path, monkeypatch):
-        import vivarium_dashboard.api.app as _app
+        import vivarium_workbench.api.app as _app
         monkeypatch.setattr(
             _app._study_viz, "build_visualization_status",
             lambda ws, name: ({
@@ -2578,7 +2578,7 @@ class TestVisualizationInstancesRoute:
         assert r.json() == {"instances": []}
 
     def test_happy_path(self, client, monkeypatch):
-        import vivarium_dashboard.api.app as _app
+        import vivarium_workbench.api.app as _app
         monkeypatch.setattr(
             _app._study_viz, "build_visualization_instances",
             lambda ws: {"instances": [
@@ -2610,7 +2610,7 @@ class TestPtoolsLaunchRoute:
         assert "detail" not in r.json()
 
     def test_no_ptools_config_returns_400(self, client, monkeypatch):
-        import vivarium_dashboard.api.app as _app
+        import vivarium_workbench.api.app as _app
         monkeypatch.setattr(
             _app._study_viz, "build_ptools_launch",
             lambda ws, study, **kw: ({"error": "ptools_server_url not configured"}, 400),
@@ -2621,7 +2621,7 @@ class TestPtoolsLaunchRoute:
         assert "detail" not in r.json()
 
     def test_study_not_found_returns_404(self, client, monkeypatch):
-        import vivarium_dashboard.api.app as _app
+        import vivarium_workbench.api.app as _app
         monkeypatch.setattr(
             _app._study_viz, "build_ptools_launch",
             lambda ws, study, **kw: ({"error": f"study not found: {study}"}, 404),
@@ -2632,7 +2632,7 @@ class TestPtoolsLaunchRoute:
         assert "detail" not in r.json()
 
     def test_happy_path_returns_200(self, client, monkeypatch):
-        import vivarium_dashboard.api.app as _app
+        import vivarium_workbench.api.app as _app
         monkeypatch.setattr(
             _app._study_viz, "build_ptools_launch",
             lambda ws, study, **kw: ({
@@ -2661,7 +2661,7 @@ class TestPtoolsLaunchRoute:
 class TestGenerationRoute:
     def test_generation_null_when_empty(self, client, monkeypatch):
         """An empty workspace (no pbg_superpowers generation) → {generation: null}."""
-        import vivarium_dashboard.api.app as _app
+        import vivarium_workbench.api.app as _app
 
         monkeypatch.setattr(_app._work_views, "build_generation",
                             lambda ws: {"generation": None})
@@ -2671,7 +2671,7 @@ class TestGenerationRoute:
 
     def test_generation_typed_passthrough(self, client, monkeypatch):
         """A full generation summary validates through Generation."""
-        import vivarium_dashboard.api.app as _app
+        import vivarium_workbench.api.app as _app
 
         gen_data = {
             "generation": {
@@ -2713,7 +2713,7 @@ class TestWorkCompositeDiffRoute:
 
     def test_work_composite_diff_typed_passthrough(self, client, monkeypatch):
         """A full diff payload validates through WorkCompositeDiff."""
-        import vivarium_dashboard.api.app as _app
+        import vivarium_workbench.api.app as _app
 
         payload = {
             "base": "main",
@@ -2739,7 +2739,7 @@ class TestWorkCompositeDiffRoute:
 
     def test_work_composite_diff_error_in_body(self, client, monkeypatch):
         """On merge-base failure the response is still 200 with error in body."""
-        import vivarium_dashboard.api.app as _app
+        import vivarium_workbench.api.app as _app
 
         monkeypatch.setattr(_app._work_views, "build_work_composite_diff",
                             lambda ws: {
@@ -2765,14 +2765,14 @@ class TestWorkCompositeDiffRoute:
 class TestSourceBuildsRoute:
     def test_always_200(self, client, monkeypatch):
         """GET /api/source/builds always returns HTTP 200."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
         monkeypatch.setattr(wdv, "build_source_builds", lambda: {"builds": [], "error": None})
         r = client.get("/api/source/builds")
         assert r.status_code == 200
 
     def test_returns_builds_list_and_error(self, client, monkeypatch):
         """Body carries builds[] and error (null or string)."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
         monkeypatch.setattr(wdv, "build_source_builds", lambda: {"builds": [], "error": None})
         body = client.get("/api/source/builds").json()
         assert "builds" in body
@@ -2780,7 +2780,7 @@ class TestSourceBuildsRoute:
 
     def test_degraded_when_sms_api_down(self, client, monkeypatch):
         """When sms-api is down, builds=[] and error carries a reason (still 200)."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
         monkeypatch.setattr(
             wdv, "build_source_builds",
             lambda: {"builds": [], "error": "connection refused"},
@@ -2799,7 +2799,7 @@ class TestSourceBuildsRoute:
 class TestWorkspacesRoute:
     def test_always_200(self, client, tmp_path, monkeypatch):
         """GET /api/workspaces always returns HTTP 200."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
         monkeypatch.setattr(
             wdv, "build_workspaces",
             lambda root: {"current": {"name": "ws", "path": str(root)}, "workspaces": []},
@@ -2809,7 +2809,7 @@ class TestWorkspacesRoute:
 
     def test_body_shape(self, client, monkeypatch):
         """Body has current{name,path} and workspaces[]."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
         monkeypatch.setattr(
             wdv, "build_workspaces",
             lambda root: {
@@ -2835,7 +2835,7 @@ class TestWorkspacesRoute:
 class TestSystemDepsCheckRoute:
     def test_400_missing_name(self, client, monkeypatch):
         """GET /api/system-deps-check without ?name= → 400."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
         monkeypatch.setattr(wdv, "module_registry", lambda root: [])
         r = client.get("/api/system-deps-check")
         assert r.status_code == 400
@@ -2843,7 +2843,7 @@ class TestSystemDepsCheckRoute:
 
     def test_404_unknown_module(self, client, monkeypatch):
         """GET /api/system-deps-check?name=ghost → 404."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
         monkeypatch.setattr(wdv, "module_registry", lambda root: [])
         r = client.get("/api/system-deps-check?name=ghost")
         assert r.status_code == 404
@@ -2852,7 +2852,7 @@ class TestSystemDepsCheckRoute:
 
     def test_200_ok_trivial(self, client, monkeypatch):
         """GET /api/system-deps-check?name=pbg-trivial → 200 with ok=True."""
-        from vivarium_dashboard.lib import workspace_deps_views as wdv
+        from vivarium_workbench.lib import workspace_deps_views as wdv
         catalog = [{"name": "pbg-trivial", "system_dependencies": {"checks": []}}]
         monkeypatch.setattr(wdv, "module_registry", lambda root: catalog)
         r = client.get("/api/system-deps-check?name=pbg-trivial")
@@ -2943,7 +2943,7 @@ class TestStudyExportRoute:
 
 class TestDataSourceFileRoute:
     def test_200_inline_text(self, client, monkeypatch):
-        from vivarium_dashboard.lib import download_views as dv
+        from vivarium_workbench.lib import download_views as dv
         monkeypatch.setattr(
             dv, "resolve_data_source_file",
             lambda ws, key: (b"a\tb\n", "text/tab-separated-values; charset=utf-8", True, "t.tsv"),
@@ -2956,7 +2956,7 @@ class TestDataSourceFileRoute:
         assert r.content == b"a\tb\n"
 
     def test_200_binary_attachment(self, client, monkeypatch):
-        from vivarium_dashboard.lib import download_views as dv
+        from vivarium_workbench.lib import download_views as dv
         monkeypatch.setattr(
             dv, "resolve_data_source_file",
             lambda ws, key: (b"\x00\x01", "application/octet-stream", False, "blob.bin"),
@@ -2972,7 +2972,7 @@ class TestDataSourceFileRoute:
         assert r.json() == {"error": "missing ?key="}
 
     def test_404_unknown_key(self, client, monkeypatch):
-        from vivarium_dashboard.lib import download_views as dv
+        from vivarium_workbench.lib import download_views as dv
         def _raise(ws, key):
             raise dv.DownloadError({"error": f"key not in data-source bundle: {key!r}"}, 404)
         monkeypatch.setattr(dv, "resolve_data_source_file", _raise)
@@ -3029,7 +3029,7 @@ class TestGuidanceRoute:
 
 class TestInvestigationNotebookRoute:
     def test_200_download(self, client, monkeypatch):
-        from vivarium_dashboard.lib import download_views as dv
+        from vivarium_workbench.lib import download_views as dv
         monkeypatch.setattr(
             dv, "build_investigation_notebook",
             lambda ws, slug, fmt: (b"print(1)\n", "text/x-python", "inv.py"),
@@ -3042,7 +3042,7 @@ class TestInvestigationNotebookRoute:
         assert r.content == b"print(1)\n"
 
     def test_404_unknown(self, client, monkeypatch):
-        from vivarium_dashboard.lib import download_views as dv
+        from vivarium_workbench.lib import download_views as dv
         def _raise(ws, slug, fmt):
             raise dv.DownloadError({"error": f"no investigation {slug!r}"}, 404)
         monkeypatch.setattr(dv, "build_investigation_notebook", _raise)
@@ -3068,7 +3068,7 @@ class TestEventsRoute:
         The real infinite loop is covered by ``tests/test_events_lib.py``.
         """
         import yaml as _yaml
-        import vivarium_dashboard.lib.events as _ev
+        import vivarium_workbench.lib.events as _ev
 
         (tmp_path / "workspace.yaml").write_text(
             _yaml.safe_dump({"name": "test-ws"}), encoding="utf-8"
@@ -3104,7 +3104,7 @@ class TestStaticRoutes:
     def test_index_shell_renders_then_serves(self, client, tmp_path, monkeypatch):
         """GET / re-renders (best-effort) then serves reports/index.html as
         text/html + Cache-Control: no-store."""
-        import vivarium_dashboard.lib.report as _report
+        import vivarium_workbench.lib.report as _report
         calls = []
         monkeypatch.setattr(_report, "render_workspace_report", lambda ws: calls.append(ws))
         (tmp_path / "reports").mkdir()
@@ -3118,7 +3118,7 @@ class TestStaticRoutes:
 
     def test_index_shell_render_failure_is_nonblocking(self, client, tmp_path, monkeypatch):
         """A render exception never blocks the load — the on-disk file still serves."""
-        import vivarium_dashboard.lib.report as _report
+        import vivarium_workbench.lib.report as _report
 
         def _boom(ws):
             raise RuntimeError("render kaboom")
@@ -3131,7 +3131,7 @@ class TestStaticRoutes:
         assert r.text == "ondisk"
 
     def test_index_shell_404_when_absent(self, client, tmp_path, monkeypatch):
-        import vivarium_dashboard.lib.report as _report
+        import vivarium_workbench.lib.report as _report
         monkeypatch.setattr(_report, "render_workspace_report", lambda ws: None)
         r = client.get("/")
         assert r.status_code == 404
@@ -3789,7 +3789,7 @@ class TestBatch26ReferenceRoutes:
             encoding="utf-8",
         )
         # Register the root so load_workspace/save_workspace resolve the schema.
-        import vivarium_dashboard.lib._root as _root
+        import vivarium_workbench.lib._root as _root
         monkeypatch.setattr(_root, "_WS_ROOT", w.resolve())
         monkeypatch.setattr(_root, "_WS_PATHS", None)
         return w
@@ -4094,9 +4094,9 @@ class TestBatch28InvVizRoutes:
     def test_create_happy(self, rc: TestClient, ws: Path, monkeypatch) -> None:
         import types
         import yaml as _yaml
-        from vivarium_dashboard.lib import composite_lookup as _clookup
-        from vivarium_dashboard.lib import investigation_migrate as _imig
-        from vivarium_dashboard.lib import composite_mutations as _cm
+        from vivarium_workbench.lib import composite_lookup as _clookup
+        from vivarium_workbench.lib import investigation_migrate as _imig
+        from vivarium_workbench.lib import composite_mutations as _cm
 
         cdir = ws / "pbg_testws" / "composites"
         cdir.mkdir(parents=True)
@@ -4120,7 +4120,7 @@ class TestBatch28InvVizRoutes:
         assert r.json()["error"] == "composite_name required"
 
     def test_create_404_not_in_catalog(self, rc: TestClient, monkeypatch) -> None:
-        from vivarium_dashboard.lib import composite_lookup as _clookup
+        from vivarium_workbench.lib import composite_lookup as _clookup
         monkeypatch.setattr(_clookup, "discover_all_composites", lambda root, pkg: {})
         r = rc.post("/api/study-create-from-composite", json={"composite_name": "ghost"})
         assert r.status_code == 404
@@ -4221,14 +4221,14 @@ class TestJobStatusRoutes:
     # -- investigation-run-unblocked-status (lib.run_jobs.manager) -----------
 
     def test_run_unblocked_jobs_list_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import run_jobs
+        from vivarium_workbench.lib import run_jobs
         monkeypatch.setattr(run_jobs, "manager", _FakeManager(recent=[{"job_id": "r1"}]))
         r = client.get("/api/investigation-run-unblocked-status")
         assert r.status_code == 200
         assert r.json() == {"jobs": [{"job_id": "r1"}]}
 
     def test_run_unblocked_single_job_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import run_jobs
+        from vivarium_workbench.lib import run_jobs
         job = _FakeJob({"job_id": "r9", "items": [{"status": "running"}]})
         monkeypatch.setattr(run_jobs, "manager", _FakeManager(jobs={"r9": job}))
         r = client.get("/api/investigation-run-unblocked-status?job_id=r9")
@@ -4236,7 +4236,7 @@ class TestJobStatusRoutes:
         assert r.json() == {"job_id": "r9", "items": [{"status": "running"}]}
 
     def test_run_unblocked_missing_404(self, client, monkeypatch):
-        from vivarium_dashboard.lib import run_jobs
+        from vivarium_workbench.lib import run_jobs
         monkeypatch.setattr(run_jobs, "manager", _FakeManager(jobs={}))
         r = client.get("/api/investigation-run-unblocked-status?job_id=ghost")
         assert r.status_code == 404
@@ -4245,14 +4245,14 @@ class TestJobStatusRoutes:
     # -- remote-run-status (lib.remote_run_jobs.manager) ---------------------
 
     def test_remote_run_jobs_list_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import remote_run_jobs
+        from vivarium_workbench.lib import remote_run_jobs
         monkeypatch.setattr(remote_run_jobs, "manager", _FakeManager(recent=[{"job_id": "rr1"}]))
         r = client.get("/api/remote-run-status")
         assert r.status_code == 200
         assert r.json() == {"jobs": [{"job_id": "rr1"}]}
 
     def test_remote_run_single_job_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import remote_run_jobs
+        from vivarium_workbench.lib import remote_run_jobs
         job = _FakeJob({"job_id": "rr9", "steps": [{"name": "fetch", "status": "done"}]})
         monkeypatch.setattr(remote_run_jobs, "manager", _FakeManager(jobs={"rr9": job}))
         r = client.get("/api/remote-run-status?job_id=rr9")
@@ -4260,7 +4260,7 @@ class TestJobStatusRoutes:
         assert r.json() == {"job_id": "rr9", "steps": [{"name": "fetch", "status": "done"}]}
 
     def test_remote_run_missing_404(self, client, monkeypatch):
-        from vivarium_dashboard.lib import remote_run_jobs
+        from vivarium_workbench.lib import remote_run_jobs
         monkeypatch.setattr(remote_run_jobs, "manager", _FakeManager(jobs={}))
         r = client.get("/api/remote-run-status?job_id=ghost")
         assert r.status_code == 404
@@ -4350,7 +4350,7 @@ class TestSourceSwitchRoute:
 
     def test_happy_path_repoints(self, client, tmp_path, monkeypatch):
         from pbg_superpowers import workspace_catalog
-        from vivarium_dashboard.lib import _root
+        from vivarium_workbench.lib import _root
         ws = tmp_path / "ws2"
         ws.mkdir()
         (ws / "workspace.yaml").write_text("name: w2\n")
@@ -4382,7 +4382,7 @@ class TestSourceBuildRemoteRoute:
         assert r.json() == {"error": "repo and branch are required"}
 
     def test_no_commit_502(self, client, monkeypatch):
-        from vivarium_dashboard.lib import source_build_views as sbv
+        from vivarium_workbench.lib import source_build_views as sbv
 
         class _Client:
             def __init__(self, base=None):
@@ -4397,8 +4397,8 @@ class TestSourceBuildRemoteRoute:
         assert r.json() == {"error": "could not resolve branch HEAD via sms-api"}
 
     def test_sms_api_error_502(self, client, monkeypatch):
-        from vivarium_dashboard.lib import source_build_views as sbv
-        from vivarium_dashboard.lib.sms_api_client import SmsApiError
+        from vivarium_workbench.lib import source_build_views as sbv
+        from vivarium_workbench.lib.sms_api_client import SmsApiError
 
         class _Client:
             def __init__(self, base=None):
@@ -4413,7 +4413,7 @@ class TestSourceBuildRemoteRoute:
         assert r.json() == {"error": "sms-api: boom"}
 
     def test_happy_path(self, client, monkeypatch):
-        from vivarium_dashboard.lib import source_build_views as sbv
+        from vivarium_workbench.lib import source_build_views as sbv
 
         class _Client:
             def __init__(self, base=None):
@@ -4459,7 +4459,7 @@ class TestSourceSwitchBuildRoute:
         assert r.json() == {"error": "missing 'simulator_id'"}
 
     def test_listing_error_502(self, client, monkeypatch):
-        from vivarium_dashboard.lib import source_build_views as sbv
+        from vivarium_workbench.lib import source_build_views as sbv
         monkeypatch.setattr(sbv, "SmsApiClient", lambda base=None: object())
         monkeypatch.setattr(
             sbv, "list_build_sources",
@@ -4470,7 +4470,7 @@ class TestSourceSwitchBuildRoute:
         assert r.json() == {"error": "sms-api unavailable: tunnel down"}
 
     def test_not_found_404(self, client, monkeypatch):
-        from vivarium_dashboard.lib import source_build_views as sbv
+        from vivarium_workbench.lib import source_build_views as sbv
         monkeypatch.setattr(sbv, "SmsApiClient", lambda base=None: object())
         monkeypatch.setattr(
             sbv, "list_build_sources", lambda c: {"builds": [self._entry(99)]},
@@ -4480,8 +4480,8 @@ class TestSourceSwitchBuildRoute:
         assert r.json() == {"error": "build 5 not found"}
 
     def test_materialize_error_502(self, client, monkeypatch):
-        from vivarium_dashboard.lib import source_build_views as sbv
-        from vivarium_dashboard.lib.sms_api_client import SmsApiError
+        from vivarium_workbench.lib import source_build_views as sbv
+        from vivarium_workbench.lib.sms_api_client import SmsApiError
         monkeypatch.setattr(sbv, "SmsApiClient", lambda base=None: object())
         monkeypatch.setattr(
             sbv, "list_build_sources", lambda c: {"builds": [self._entry(5)]},
@@ -4496,8 +4496,8 @@ class TestSourceSwitchBuildRoute:
         assert r.json() == {"error": "materialize failed: no tarball"}
 
     def test_happy_path_repoints(self, client, tmp_path, monkeypatch):
-        from vivarium_dashboard.lib import source_build_views as sbv
-        from vivarium_dashboard.lib import _root
+        from vivarium_workbench.lib import source_build_views as sbv
+        from vivarium_workbench.lib import _root
         cache = tmp_path / "cache"
         cache.mkdir()
         monkeypatch.setattr(sbv, "SmsApiClient", lambda base=None: object())
@@ -4529,21 +4529,21 @@ class TestSourceSwitchBuildRoute:
 # ===========================================================================
 class TestRemoteRunStartRoute:
     def test_not_authenticated_401(self, client, monkeypatch):
-        from vivarium_dashboard.lib import remote_run_views as rrv
+        from vivarium_workbench.lib import remote_run_views as rrv
         monkeypatch.setattr(rrv.github_auth, "current_session", lambda: None)
         r = client.post("/api/remote-run-start", json={"study": "s"})
         assert r.status_code == 401
         assert r.json() == {"error": "not authenticated"}
 
     def test_missing_study_400(self, client, monkeypatch):
-        from vivarium_dashboard.lib import remote_run_views as rrv
+        from vivarium_workbench.lib import remote_run_views as rrv
         monkeypatch.setattr(rrv.github_auth, "current_session", lambda: object())
         r = client.post("/api/remote-run-start", json={"study": "   "})
         assert r.status_code == 400
         assert r.json() == {"error": "study is required"}
 
     def test_happy_path_202(self, client, tmp_path, monkeypatch):
-        from vivarium_dashboard.lib import remote_run_views as rrv
+        from vivarium_workbench.lib import remote_run_views as rrv
 
         class _Job:
             job_id = "JX"
@@ -4609,7 +4609,7 @@ class TestRemoteRunStartRoute:
     def test_run_parca_defaults_true_when_omitted(self, client, tmp_path, monkeypatch):
         # Legacy raw-JSON contract: an OMITTED run_parca runs ParCa (.get(..., True)).
         # The route must not let pydantic's None default flip it to False.
-        from vivarium_dashboard.lib import remote_run_views as rrv
+        from vivarium_workbench.lib import remote_run_views as rrv
         captured = {}
         self._wire_happy(rrv, tmp_path, monkeypatch, captured)
         r = client.post("/api/remote-run-start", json={"study": "study-a"})
@@ -4617,7 +4617,7 @@ class TestRemoteRunStartRoute:
         assert captured["run_parca"] is True
 
     def test_run_parca_explicit_false_preserved(self, client, tmp_path, monkeypatch):
-        from vivarium_dashboard.lib import remote_run_views as rrv
+        from vivarium_workbench.lib import remote_run_views as rrv
         captured = {}
         self._wire_happy(rrv, tmp_path, monkeypatch, captured)
         r = client.post("/api/remote-run-start", json={"study": "study-a", "run_parca": False})
@@ -4642,7 +4642,7 @@ class TestAuthRoutes:
     # -- POST /api/auth/github/start -----------------------------------------
 
     def test_start_no_client_id_503(self, client, monkeypatch):
-        from vivarium_dashboard.lib import auth_views as av
+        from vivarium_workbench.lib import auth_views as av
         monkeypatch.setattr(
             av.github_auth, "start_device_flow",
             lambda: {"error": "no_client_id", "hint": "set env"},
@@ -4652,7 +4652,7 @@ class TestAuthRoutes:
         assert r.json() == {"error": "no_client_id", "hint": "set env"}
 
     def test_start_other_error_502(self, client, monkeypatch):
-        from vivarium_dashboard.lib import auth_views as av
+        from vivarium_workbench.lib import auth_views as av
         monkeypatch.setattr(
             av.github_auth, "start_device_flow",
             lambda: {"error": "device_code_failed"},
@@ -4662,7 +4662,7 @@ class TestAuthRoutes:
         assert r.json() == {"error": "device_code_failed"}
 
     def test_start_success_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import auth_views as av
+        from vivarium_workbench.lib import auth_views as av
         payload = {
             "flow_id": "abc", "user_code": "WXYZ-1234",
             "verification_uri": "https://github.com/login/device",
@@ -4682,7 +4682,7 @@ class TestAuthRoutes:
         assert r.json() == {"status": "error", "detail": "missing_flow_id"}
 
     def test_poll_pending_202(self, client, monkeypatch):
-        from vivarium_dashboard.lib import auth_views as av
+        from vivarium_workbench.lib import auth_views as av
         monkeypatch.setattr(
             av.github_auth, "poll_device_flow",
             lambda fid: {"status": "pending", "interval": 5},
@@ -4692,7 +4692,7 @@ class TestAuthRoutes:
         assert r.json() == {"status": "pending", "interval": 5}
 
     def test_poll_ok_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import auth_views as av
+        from vivarium_workbench.lib import auth_views as av
         monkeypatch.setattr(
             av.github_auth, "poll_device_flow",
             lambda fid: {"status": "ok", "login": "octocat"},
@@ -4702,7 +4702,7 @@ class TestAuthRoutes:
         assert r.json() == {"status": "ok", "login": "octocat"}
 
     def test_poll_expired_410(self, client, monkeypatch):
-        from vivarium_dashboard.lib import auth_views as av
+        from vivarium_workbench.lib import auth_views as av
         monkeypatch.setattr(
             av.github_auth, "poll_device_flow", lambda fid: {"status": "expired"},
         )
@@ -4710,7 +4710,7 @@ class TestAuthRoutes:
         assert r.status_code == 410
 
     def test_poll_denied_403(self, client, monkeypatch):
-        from vivarium_dashboard.lib import auth_views as av
+        from vivarium_workbench.lib import auth_views as av
         monkeypatch.setattr(
             av.github_auth, "poll_device_flow", lambda fid: {"status": "denied"},
         )
@@ -4718,7 +4718,7 @@ class TestAuthRoutes:
         assert r.status_code == 403
 
     def test_poll_error_400(self, client, monkeypatch):
-        from vivarium_dashboard.lib import auth_views as av
+        from vivarium_workbench.lib import auth_views as av
         monkeypatch.setattr(
             av.github_auth, "poll_device_flow",
             lambda fid: {"status": "error", "detail": "unknown_flow"},
@@ -4730,7 +4730,7 @@ class TestAuthRoutes:
     # -- GET /api/auth/github/status -----------------------------------------
 
     def test_status_unauthenticated_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import auth_views as av
+        from vivarium_workbench.lib import auth_views as av
         monkeypatch.setattr(
             av.github_auth, "status_payload", lambda: {"authenticated": False},
         )
@@ -4739,7 +4739,7 @@ class TestAuthRoutes:
         assert r.json() == {"authenticated": False}
 
     def test_status_authenticated_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import auth_views as av
+        from vivarium_workbench.lib import auth_views as av
         payload = {
             "authenticated": True, "login": "octocat",
             "source": "device_flow", "scopes": ["repo"],
@@ -4752,7 +4752,7 @@ class TestAuthRoutes:
     # -- POST /api/auth/github/logout ----------------------------------------
 
     def test_logout_200_calls_logout(self, client, monkeypatch):
-        from vivarium_dashboard.lib import auth_views as av
+        from vivarium_workbench.lib import auth_views as av
         called = {"n": 0}
         monkeypatch.setattr(
             av.github_auth, "logout",
@@ -4766,7 +4766,7 @@ class TestAuthRoutes:
     # -- GET /api/auth/github/orgs -------------------------------------------
 
     def test_orgs_unauthenticated_401(self, client, monkeypatch):
-        from vivarium_dashboard.lib import auth_views as av
+        from vivarium_workbench.lib import auth_views as av
         monkeypatch.setattr(
             av.github_auth, "list_orgs", lambda: {"error": "unauthenticated"},
         )
@@ -4775,7 +4775,7 @@ class TestAuthRoutes:
         assert r.json() == {"error": "unauthenticated"}
 
     def test_orgs_other_error_502(self, client, monkeypatch):
-        from vivarium_dashboard.lib import auth_views as av
+        from vivarium_workbench.lib import auth_views as av
         monkeypatch.setattr(
             av.github_auth, "list_orgs",
             lambda: {"error": "orgs_lookup_failed", "status": 500},
@@ -4785,7 +4785,7 @@ class TestAuthRoutes:
         assert r.json()["error"] == "orgs_lookup_failed"
 
     def test_orgs_success_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import auth_views as av
+        from vivarium_workbench.lib import auth_views as av
         payload = {
             "login": "octocat",
             "orgs": [{"name": "octocat", "kind": "personal"}],
@@ -4822,7 +4822,7 @@ class TestGitCommitRoutes:
     # -- POST /api/branch/push -----------------------------------------------
 
     def test_branch_push_happy_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import git_commit_views as gcv
+        from vivarium_workbench.lib import git_commit_views as gcv
         seen = {}
 
         def _fake(ws_root, message):
@@ -4836,7 +4836,7 @@ class TestGitCommitRoutes:
         assert seen["message"] == "my msg"
 
     def test_branch_push_default_message_when_omitted(self, client, monkeypatch):
-        from vivarium_dashboard.lib import git_commit_views as gcv
+        from vivarium_workbench.lib import git_commit_views as gcv
         seen = {}
         monkeypatch.setattr(
             gcv.git_status, "remote_commit_and_push",
@@ -4848,8 +4848,8 @@ class TestGitCommitRoutes:
         assert seen["msg"] == "dashboard commit"
 
     def test_branch_push_not_a_git_repo_409(self, client, monkeypatch):
-        from vivarium_dashboard.lib import git_commit_views as gcv
-        from vivarium_dashboard.lib import git_status as gs
+        from vivarium_workbench.lib import git_commit_views as gcv
+        from vivarium_workbench.lib import git_status as gs
 
         def _raise(ws, msg):
             raise gs.NotAGitRepo("active source is not a git workspace (no commit/push)")
@@ -4860,7 +4860,7 @@ class TestGitCommitRoutes:
         assert r.json() == {"error": "active source is not a git workspace (no commit/push)"}
 
     def test_branch_push_error_500(self, client, monkeypatch):
-        from vivarium_dashboard.lib import git_commit_views as gcv
+        from vivarium_workbench.lib import git_commit_views as gcv
 
         def _raise(ws, msg):
             raise RuntimeError("git push failed: boom")
@@ -4873,7 +4873,7 @@ class TestGitCommitRoutes:
     # -- POST /api/dirty-commit-all ------------------------------------------
 
     def test_dirty_commit_all_no_workstream_409(self, client, monkeypatch):
-        from vivarium_dashboard.lib import git_commit_views as gcv
+        from vivarium_workbench.lib import git_commit_views as gcv
         monkeypatch.setattr(gcv.work_state, "load_state_or_adopt_current", lambda: {})
         r = client.post("/api/dirty-commit-all", json={})
         assert r.status_code == 409
@@ -4881,7 +4881,7 @@ class TestGitCommitRoutes:
 
     def test_dirty_commit_all_happy_200(self, client, monkeypatch):
         import subprocess
-        from vivarium_dashboard.lib import git_commit_views as gcv
+        from vivarium_workbench.lib import git_commit_views as gcv
 
         monkeypatch.setattr(
             gcv.work_state, "load_state_or_adopt_current", lambda: {"active_branch": "feat/x"}
@@ -4921,7 +4921,7 @@ class TestGitCommitRoutes:
 
     def test_dirty_commit_all_already_clean_409(self, client, monkeypatch):
         import subprocess
-        from vivarium_dashboard.lib import git_commit_views as gcv
+        from vivarium_workbench.lib import git_commit_views as gcv
 
         monkeypatch.setattr(
             gcv.work_state, "load_state_or_adopt_current", lambda: {"active_branch": "feat/x"}
@@ -4959,7 +4959,7 @@ class TestWorkstreamRoutes:
     # -- POST /api/work-start ------------------------------------------------
 
     def test_work_start_happy_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import work_mutations as wm
+        from vivarium_workbench.lib import work_mutations as wm
         seen = {}
 
         def _fake(ws, body):
@@ -4973,7 +4973,7 @@ class TestWorkstreamRoutes:
         assert seen["body"] == {"branch": "feat/x"}  # exclude_none drops base
 
     def test_work_start_invalid_branch_400(self, client, monkeypatch):
-        from vivarium_dashboard.lib import work_mutations as wm
+        from vivarium_workbench.lib import work_mutations as wm
         monkeypatch.setattr(wm, "work_start",
                             lambda ws, body: ({"error": "invalid branch name"}, 400))
         r = client.post("/api/work-start", json={"branch": ""})
@@ -4983,7 +4983,7 @@ class TestWorkstreamRoutes:
     # -- POST /api/work-push -------------------------------------------------
 
     def test_work_push_happy_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import work_mutations as wm
+        from vivarium_workbench.lib import work_mutations as wm
         monkeypatch.setattr(wm, "work_push",
                             lambda ws, body: ({"ok": True, "branch": "feat/x", "log": "ok"}, 200))
         r = client.post("/api/work-push", json={})
@@ -4991,7 +4991,7 @@ class TestWorkstreamRoutes:
         assert r.json() == {"ok": True, "branch": "feat/x", "log": "ok"}
 
     def test_work_push_no_origin_409(self, client, monkeypatch):
-        from vivarium_dashboard.lib import work_mutations as wm
+        from vivarium_workbench.lib import work_mutations as wm
         body = {
             "error": "no GitHub remote configured",
             "diagnosis": {"category": "no_origin", "summary": "s", "suggestion": "x"},
@@ -5004,14 +5004,14 @@ class TestWorkstreamRoutes:
     # -- POST /api/work-end --------------------------------------------------
 
     def test_work_end_happy_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import work_mutations as wm
+        from vivarium_workbench.lib import work_mutations as wm
         monkeypatch.setattr(wm, "work_end", lambda ws, body: ({"ok": True}, 200))
         r = client.post("/api/work-end", json={})
         assert r.status_code == 200
         assert r.json() == {"ok": True}
 
     def test_work_end_no_workstream_409(self, client, monkeypatch):
-        from vivarium_dashboard.lib import work_mutations as wm
+        from vivarium_workbench.lib import work_mutations as wm
         monkeypatch.setattr(wm, "work_end",
                             lambda ws, body: ({"error": "no active workstream"}, 409))
         r = client.post("/api/work-end", json={})
@@ -5021,7 +5021,7 @@ class TestWorkstreamRoutes:
     # -- POST /api/work-attach-report ----------------------------------------
 
     def test_work_attach_report_happy_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import work_mutations as wm
+        from vivarium_workbench.lib import work_mutations as wm
         seen = {}
 
         def _fake(ws, body):
@@ -5037,7 +5037,7 @@ class TestWorkstreamRoutes:
         assert seen["body"] == {"filename": "r.html", "html": "<x>"}
 
     def test_work_attach_report_no_branch_409(self, client, monkeypatch):
-        from vivarium_dashboard.lib import work_mutations as wm
+        from vivarium_workbench.lib import work_mutations as wm
         monkeypatch.setattr(wm, "work_attach_report",
                             lambda ws, body: ({"error": "no active investigation branch"}, 409))
         r = client.post("/api/work-attach-report", json={"filename": "r.html", "html": "<x>"})
@@ -5047,7 +5047,7 @@ class TestWorkstreamRoutes:
     # -- POST /api/work-create-pr --------------------------------------------
 
     def test_work_create_pr_happy_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import work_pr_views as wp
+        from vivarium_workbench.lib import work_pr_views as wp
         seen = {}
 
         def _fake(ws, body):
@@ -5061,7 +5061,7 @@ class TestWorkstreamRoutes:
         assert seen["body"] == {"title": "T", "draft": True}  # exclude_none drops body
 
     def test_work_create_pr_no_workstream_409(self, client, monkeypatch):
-        from vivarium_dashboard.lib import work_pr_views as wp
+        from vivarium_workbench.lib import work_pr_views as wp
         monkeypatch.setattr(wp, "work_create_pr",
                             lambda ws, body: ({"error": "no active workstream"}, 409))
         r = client.post("/api/work-create-pr", json={})
@@ -5071,7 +5071,7 @@ class TestWorkstreamRoutes:
     # -- POST /api/work-link-branch ------------------------------------------
 
     def test_work_link_branch_happy_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import work_pr_views as wp
+        from vivarium_workbench.lib import work_pr_views as wp
         seen = {}
 
         def _fake(ws, body):
@@ -5088,7 +5088,7 @@ class TestWorkstreamRoutes:
         assert seen["body"] == {"upstream_repo": "o/r", "mode": "branch"}
 
     def test_work_link_branch_bad_mode_400(self, client, monkeypatch):
-        from vivarium_dashboard.lib import work_pr_views as wp
+        from vivarium_workbench.lib import work_pr_views as wp
         monkeypatch.setattr(wp, "work_link_branch",
                             lambda ws, body: ({"error": "mode must be 'branch' or 'fork'; got 'x'"}, 400))
         r = client.post("/api/work-link-branch", json={"mode": "x"})
@@ -5096,7 +5096,7 @@ class TestWorkstreamRoutes:
         assert r.json() == {"error": "mode must be 'branch' or 'fork'; got 'x'"}
 
     def test_work_link_branch_no_workstream_409(self, client, monkeypatch):
-        from vivarium_dashboard.lib import work_pr_views as wp
+        from vivarium_workbench.lib import work_pr_views as wp
         monkeypatch.setattr(wp, "work_link_branch",
                             lambda ws, body: ({"error": "no active workstream — Start one first so the push has a target"}, 409))
         r = client.post("/api/work-link-branch", json={})
@@ -5132,7 +5132,7 @@ class TestWorkspacesRegistryRoutes:
     # -- POST /api/workspaces/add --------------------------------------------
 
     def test_add_happy_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import workspaces_mutations as wm
+        from vivarium_workbench.lib import workspaces_mutations as wm
         seen = {}
 
         def _fake(body):
@@ -5146,7 +5146,7 @@ class TestWorkspacesRegistryRoutes:
         assert seen["body"] == {"path": "/abs/ws"}
 
     def test_add_value_error_400(self, client, monkeypatch):
-        from vivarium_dashboard.lib import workspaces_mutations as wm
+        from vivarium_workbench.lib import workspaces_mutations as wm
         monkeypatch.setattr(wm, "workspaces_add",
                             lambda body: ({"error": "not a workspace"}, 400))
         r = client.post("/api/workspaces/add", json={"path": "/abs/ws"})
@@ -5156,14 +5156,14 @@ class TestWorkspacesRegistryRoutes:
     def test_add_omitted_path_400_not_422(self, client, monkeypatch):
         # No monkeypatch — exercise the real builder's own validation so an
         # omitted path yields the legacy 400 (NOT FastAPI's 422).
-        from vivarium_dashboard.lib import workspaces_mutations as wm
+        from vivarium_workbench.lib import workspaces_mutations as wm
         monkeypatch.setattr(wm, "workspace_catalog", object())  # never reached
         r = client.post("/api/workspaces/add", json={})
         assert r.status_code == 400
         assert r.json() == {"error": "path must be an absolute string"}
 
     def test_add_no_body_400_not_422(self, client, monkeypatch):
-        from vivarium_dashboard.lib import workspaces_mutations as wm
+        from vivarium_workbench.lib import workspaces_mutations as wm
         monkeypatch.setattr(wm, "workspace_catalog", object())
         r = client.post("/api/workspaces/add")  # no body at all
         assert r.status_code == 400
@@ -5172,7 +5172,7 @@ class TestWorkspacesRegistryRoutes:
     # -- POST /api/workspaces/forget -----------------------------------------
 
     def test_forget_happy_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import workspaces_mutations as wm
+        from vivarium_workbench.lib import workspaces_mutations as wm
         seen = {}
 
         def _fake(body):
@@ -5186,7 +5186,7 @@ class TestWorkspacesRegistryRoutes:
         assert seen["body"] == {"path": "/abs/ws"}
 
     def test_forget_running_409(self, client, monkeypatch):
-        from vivarium_dashboard.lib import workspaces_mutations as wm
+        from vivarium_workbench.lib import workspaces_mutations as wm
         monkeypatch.setattr(
             wm, "workspaces_forget",
             lambda body: ({"error": "stop the server before forgetting"}, 409))
@@ -5195,7 +5195,7 @@ class TestWorkspacesRegistryRoutes:
         assert r.json() == {"error": "stop the server before forgetting"}
 
     def test_forget_omitted_path_400_not_422(self, client, monkeypatch):
-        from vivarium_dashboard.lib import workspaces_mutations as wm
+        from vivarium_workbench.lib import workspaces_mutations as wm
         monkeypatch.setattr(wm, "workspace_catalog", object())
         r = client.post("/api/workspaces/forget", json={})
         assert r.status_code == 400
@@ -5204,7 +5204,7 @@ class TestWorkspacesRegistryRoutes:
     # -- POST /api/workspaces/cleanup-stale ----------------------------------
 
     def test_cleanup_stale_happy_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import workspaces_mutations as wm
+        from vivarium_workbench.lib import workspaces_mutations as wm
         seen = {}
 
         def _fake(body):
@@ -5218,7 +5218,7 @@ class TestWorkspacesRegistryRoutes:
         assert seen["body"] == {"path": "/abs/ws"}
 
     def test_cleanup_stale_running_409(self, client, monkeypatch):
-        from vivarium_dashboard.lib import workspaces_mutations as wm
+        from vivarium_workbench.lib import workspaces_mutations as wm
         monkeypatch.setattr(
             wm, "workspaces_cleanup_stale",
             lambda body: ({"error": "server is still running"}, 409))
@@ -5227,7 +5227,7 @@ class TestWorkspacesRegistryRoutes:
         assert r.json() == {"error": "server is still running"}
 
     def test_cleanup_stale_omitted_path_400_not_422(self, client, monkeypatch):
-        from vivarium_dashboard.lib import workspaces_mutations as wm
+        from vivarium_workbench.lib import workspaces_mutations as wm
         monkeypatch.setattr(wm, "workspace_catalog", object())
         r = client.post("/api/workspaces/cleanup-stale", json={})
         assert r.status_code == 400
@@ -5259,7 +5259,7 @@ class TestWorkspacesProcessRoutes:
     # -- POST /api/workspaces/start ------------------------------------------
 
     def test_start_happy_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import workspaces_process_views as wp
+        from vivarium_workbench.lib import workspaces_process_views as wp
         seen = {}
 
         def _fake(ws_root, body):
@@ -5274,7 +5274,7 @@ class TestWorkspacesProcessRoutes:
         assert seen["body"] == {"path": "/abs/ws"}
 
     def test_start_not_in_catalog_400(self, client, monkeypatch):
-        from vivarium_dashboard.lib import workspaces_process_views as wp
+        from vivarium_workbench.lib import workspaces_process_views as wp
         monkeypatch.setattr(
             wp, "workspaces_start",
             lambda ws_root, body: ({"error": "workspace not in catalog — Add it first"}, 400))
@@ -5283,7 +5283,7 @@ class TestWorkspacesProcessRoutes:
         assert r.json() == {"error": "workspace not in catalog — Add it first"}
 
     def test_start_timeout_504(self, client, monkeypatch):
-        from vivarium_dashboard.lib import workspaces_process_views as wp
+        from vivarium_workbench.lib import workspaces_process_views as wp
         monkeypatch.setattr(
             wp, "workspaces_start",
             lambda ws_root, body: (
@@ -5295,14 +5295,14 @@ class TestWorkspacesProcessRoutes:
     def test_start_omitted_path_400_not_422(self, client, monkeypatch):
         # No monkeypatch of the builder — exercise the real builder's own
         # validation so an omitted path yields the legacy 400 (NOT 422).
-        from vivarium_dashboard.lib import workspaces_process_views as wp
+        from vivarium_workbench.lib import workspaces_process_views as wp
         monkeypatch.setattr(wp, "workspace_catalog", object())  # never reached
         r = client.post("/api/workspaces/start", json={})
         assert r.status_code == 400
         assert r.json() == {"error": "path must be an absolute string"}
 
     def test_start_no_body_400_not_422(self, client, monkeypatch):
-        from vivarium_dashboard.lib import workspaces_process_views as wp
+        from vivarium_workbench.lib import workspaces_process_views as wp
         monkeypatch.setattr(wp, "workspace_catalog", object())
         r = client.post("/api/workspaces/start")  # no body at all
         assert r.status_code == 400
@@ -5311,7 +5311,7 @@ class TestWorkspacesProcessRoutes:
     # -- POST /api/workspaces/stop -------------------------------------------
 
     def test_stop_happy_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import workspaces_process_views as wp
+        from vivarium_workbench.lib import workspaces_process_views as wp
         seen = {}
 
         def _fake(ws_root, body):
@@ -5325,7 +5325,7 @@ class TestWorkspacesProcessRoutes:
         assert seen["body"] == {"path": "/abs/ws"}
 
     def test_stop_self_stop_400(self, client, monkeypatch):
-        from vivarium_dashboard.lib import workspaces_process_views as wp
+        from vivarium_workbench.lib import workspaces_process_views as wp
         monkeypatch.setattr(
             wp, "workspaces_stop",
             lambda ws_root, body: (
@@ -5335,7 +5335,7 @@ class TestWorkspacesProcessRoutes:
         assert r.json() == {"error": "refusing to stop self — use the terminal: kill 5"}
 
     def test_stop_not_running_400(self, client, monkeypatch):
-        from vivarium_dashboard.lib import workspaces_process_views as wp
+        from vivarium_workbench.lib import workspaces_process_views as wp
         monkeypatch.setattr(
             wp, "workspaces_stop",
             lambda ws_root, body: ({"error": "not running"}, 400))
@@ -5344,7 +5344,7 @@ class TestWorkspacesProcessRoutes:
         assert r.json() == {"error": "not running"}
 
     def test_stop_omitted_path_400_not_422(self, client, monkeypatch):
-        from vivarium_dashboard.lib import workspaces_process_views as wp
+        from vivarium_workbench.lib import workspaces_process_views as wp
         monkeypatch.setattr(wp, "workspace_catalog", object())
         r = client.post("/api/workspaces/stop", json={})
         assert r.status_code == 400
@@ -5427,7 +5427,7 @@ class TestMiscFsRoutes:
 # ===========================================================================
 class TestStudyRunRoutes:
     def test_study_run_baseline_passthrough(self, client, monkeypatch):
-        from vivarium_dashboard.lib import study_runs
+        from vivarium_workbench.lib import study_runs
         captured = {}
 
         def _fake(ws, body):
@@ -5442,7 +5442,7 @@ class TestStudyRunRoutes:
         assert captured["body"] == {"study": "s1", "steps": 7}
 
     def test_study_run_baseline_omitted_steps_absent(self, client, monkeypatch):
-        from vivarium_dashboard.lib import study_runs
+        from vivarium_workbench.lib import study_runs
         captured = {}
         monkeypatch.setattr(
             study_runs, "run_study_baseline",
@@ -5454,7 +5454,7 @@ class TestStudyRunRoutes:
         assert "steps" not in captured["body"]
 
     def test_study_run_baseline_error_status_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import study_runs
+        from vivarium_workbench.lib import study_runs
         monkeypatch.setattr(
             study_runs, "run_study_baseline",
             lambda ws, body: ({"error": "study not found"}, 404),
@@ -5464,7 +5464,7 @@ class TestStudyRunRoutes:
         assert r.json() == {"error": "study not found"}
 
     def test_study_run_variant_passthrough(self, client, monkeypatch):
-        from vivarium_dashboard.lib import study_runs
+        from vivarium_workbench.lib import study_runs
         captured = {}
 
         def _fake(ws, body):
@@ -5481,7 +5481,7 @@ class TestStudyRunRoutes:
         assert captured["body"] == {"study": "s1", "variant": "v1", "steps": 3}
 
     def test_study_run_variant_422_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import study_runs
+        from vivarium_workbench.lib import study_runs
         monkeypatch.setattr(
             study_runs, "run_study_variant",
             lambda ws, body: ({"error": "kind: seeds requires n_seeds >= 1"}, 422),
@@ -5491,7 +5491,7 @@ class TestStudyRunRoutes:
         assert r.json() == {"error": "kind: seeds requires n_seeds >= 1"}
 
     def test_study_tests_run_passthrough(self, client, monkeypatch):
-        from vivarium_dashboard.lib import test_run_views
+        from vivarium_workbench.lib import test_run_views
         captured = {}
 
         def _fake(ws, body):
@@ -5505,7 +5505,7 @@ class TestStudyRunRoutes:
         assert captured["body"] == {"study": "s1"}
 
     def test_study_tests_run_409_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import test_run_views
+        from vivarium_workbench.lib import test_run_views
         monkeypatch.setattr(
             test_run_views, "study_tests_run",
             lambda ws, body: ({"error": "tests already running"}, 409),
@@ -5515,7 +5515,7 @@ class TestStudyRunRoutes:
         assert r.json() == {"error": "tests already running"}
 
     def test_run_tests_passthrough(self, client, monkeypatch):
-        from vivarium_dashboard.lib import test_run_views
+        from vivarium_workbench.lib import test_run_views
         captured = {}
 
         def _fake(ws, body):
@@ -5529,7 +5529,7 @@ class TestStudyRunRoutes:
         assert captured["body"] == {}
 
     def test_run_tests_timeout_500_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import test_run_views
+        from vivarium_workbench.lib import test_run_views
         monkeypatch.setattr(
             test_run_views, "run_workspace_tests",
             lambda ws, body: ({"error": "pytest timed out after 120s"}, 500),
@@ -5690,7 +5690,7 @@ class TestMiscPostRoutes:
 # ===========================================================================
 class TestCompositeTestRunRoute:
     def test_happy_202(self, client, monkeypatch):
-        from vivarium_dashboard.lib import composite_test_run_views
+        from vivarium_workbench.lib import composite_test_run_views
         captured = {}
 
         def _fake(ws, body):
@@ -5708,7 +5708,7 @@ class TestCompositeTestRunRoute:
         assert captured["body"] == {"id": "demo.spec", "steps": 9}
 
     def test_omitted_optionals_absent(self, client, monkeypatch):
-        from vivarium_dashboard.lib import composite_test_run_views
+        from vivarium_workbench.lib import composite_test_run_views
         captured = {}
         monkeypatch.setattr(
             composite_test_run_views, "composite_test_run",
@@ -5720,7 +5720,7 @@ class TestCompositeTestRunRoute:
             assert k not in captured["body"]
 
     def test_missing_id_400_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import composite_test_run_views
+        from vivarium_workbench.lib import composite_test_run_views
         monkeypatch.setattr(
             composite_test_run_views, "composite_test_run",
             lambda ws, body: ({"error": "missing id"}, 400),
@@ -5730,7 +5730,7 @@ class TestCompositeTestRunRoute:
         assert r.json() == {"error": "missing id"}
 
     def test_at_cap_429_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import composite_test_run_views
+        from vivarium_workbench.lib import composite_test_run_views
         monkeypatch.setattr(
             composite_test_run_views, "composite_test_run",
             lambda ws, body: (
@@ -5742,7 +5742,7 @@ class TestCompositeTestRunRoute:
             "error": "too many runs in progress — wait for one to finish"}
 
     def test_spawn_failure_500_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import composite_test_run_views
+        from vivarium_workbench.lib import composite_test_run_views
         monkeypatch.setattr(
             composite_test_run_views, "composite_test_run",
             lambda ws, body: ({"error": "spawn failed: boom", "run_id": "r"}, 500),
@@ -5768,7 +5768,7 @@ class TestCompositeTestRunRoute:
 # ===========================================================================
 class TestInvestigationRunOneRoute:
     def test_happy_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import investigation_run_one_views
+        from vivarium_workbench.lib import investigation_run_one_views
         captured = {}
 
         def _fake(ws, body):
@@ -5790,7 +5790,7 @@ class TestInvestigationRunOneRoute:
         assert captured["body"] == {"investigation": "inv-x", "steps": 7}
 
     def test_run_failure_200_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import investigation_run_one_views
+        from vivarium_workbench.lib import investigation_run_one_views
         monkeypatch.setattr(
             investigation_run_one_views, "investigation_run_one",
             lambda ws, body: (
@@ -5802,7 +5802,7 @@ class TestInvestigationRunOneRoute:
         assert r.json() == {"ok": False, "run_id": "r", "error": "boom"}
 
     def test_missing_investigation_400_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import investigation_run_one_views
+        from vivarium_workbench.lib import investigation_run_one_views
         monkeypatch.setattr(
             investigation_run_one_views, "investigation_run_one",
             lambda ws, body: ({"error": "investigation required"}, 400),
@@ -5812,7 +5812,7 @@ class TestInvestigationRunOneRoute:
         assert r.json() == {"error": "investigation required"}
 
     def test_spec_not_found_404_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import investigation_run_one_views
+        from vivarium_workbench.lib import investigation_run_one_views
         monkeypatch.setattr(
             investigation_run_one_views, "investigation_run_one",
             lambda ws, body: ({"error": "spec.yaml not found"}, 404),
@@ -5839,7 +5839,7 @@ class TestInvestigationRunOneRoute:
 # ===========================================================================
 class TestInvestigationRunRoute:
     def test_happy_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import investigation_run_views
+        from vivarium_workbench.lib import investigation_run_views
         captured = {}
 
         def _fake(ws, body):
@@ -5855,7 +5855,7 @@ class TestInvestigationRunRoute:
         assert captured["body"] == {"name": "inv-x"}
 
     def test_missing_name_400_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import investigation_run_views
+        from vivarium_workbench.lib import investigation_run_views
         monkeypatch.setattr(
             investigation_run_views, "investigation_run",
             lambda ws, body: ({"error": "name is required"}, 400))
@@ -5864,7 +5864,7 @@ class TestInvestigationRunRoute:
         assert r.json() == {"error": "name is required"}
 
     def test_core_build_500_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import investigation_run_views
+        from vivarium_workbench.lib import investigation_run_views
         monkeypatch.setattr(
             investigation_run_views, "investigation_run",
             lambda ws, body: ({"error": "failed to build core: boom"}, 500))
@@ -5889,7 +5889,7 @@ class TestInvestigationRunRoute:
 # ===========================================================================
 class TestInvestigationRunUnblockedRoute:
     def test_happy_202(self, client, monkeypatch):
-        from vivarium_dashboard.lib import run_unblocked_views
+        from vivarium_workbench.lib import run_unblocked_views
         captured = {}
         items = [{"study": "s", "variant": "baseline", "kind": "baseline",
                   "status": "queued"}]
@@ -5908,7 +5908,7 @@ class TestInvestigationRunUnblockedRoute:
         assert captured["body"] == {"investigation": "inv-x", "studies": ["s"]}
 
     def test_missing_investigation_400_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import run_unblocked_views
+        from vivarium_workbench.lib import run_unblocked_views
         monkeypatch.setattr(
             run_unblocked_views, "investigation_run_unblocked",
             lambda ws, body: ({"error": "investigation is required"}, 400))
@@ -5917,7 +5917,7 @@ class TestInvestigationRunUnblockedRoute:
         assert r.json() == {"error": "investigation is required"}
 
     def test_not_found_404_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import run_unblocked_views
+        from vivarium_workbench.lib import run_unblocked_views
         monkeypatch.setattr(
             run_unblocked_views, "investigation_run_unblocked",
             lambda ws, body: ({"error": "investigation not found: inv-x"}, 404))
@@ -5927,7 +5927,7 @@ class TestInvestigationRunUnblockedRoute:
         assert r.json() == {"error": "investigation not found: inv-x"}
 
     def test_no_queued_breakdown_400_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import run_unblocked_views
+        from vivarium_workbench.lib import run_unblocked_views
         items = [{"study": "s", "variant": "v", "status": "blocked"}]
         monkeypatch.setattr(
             run_unblocked_views, "investigation_run_unblocked",
@@ -5954,7 +5954,7 @@ class TestInvestigationRunUnblockedRoute:
 # ===========================================================================
 class TestVisualizationPreviewRoute:
     def test_happy_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import viz_preview_views
+        from vivarium_workbench.lib import viz_preview_views
         captured = {}
 
         def _fake(ws, body):
@@ -5975,7 +5975,7 @@ class TestVisualizationPreviewRoute:
         assert captured["body"] == {"address": "local:FakeViz"}
 
     def test_demo_render_failure_200_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import viz_preview_views
+        from vivarium_workbench.lib import viz_preview_views
         monkeypatch.setattr(
             viz_preview_views, "visualization_preview",
             lambda ws, body: (
@@ -5988,7 +5988,7 @@ class TestVisualizationPreviewRoute:
         assert r.json()["ok"] is False
 
     def test_missing_address_400_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import viz_preview_views
+        from vivarium_workbench.lib import viz_preview_views
         monkeypatch.setattr(
             viz_preview_views, "visualization_preview",
             lambda ws, body: ({"error": "address is required"}, 400),
@@ -5998,7 +5998,7 @@ class TestVisualizationPreviewRoute:
         assert r.json() == {"error": "address is required"}
 
     def test_class_not_registered_404_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import viz_preview_views
+        from vivarium_workbench.lib import viz_preview_views
         monkeypatch.setattr(
             viz_preview_views, "visualization_preview",
             lambda ws, body: ({"error": "class not registered: local:Nope"}, 404),
@@ -6025,7 +6025,7 @@ class TestVisualizationPreviewRoute:
 # ===========================================================================
 class TestVisualizationPreviewInstanceRoute:
     def test_happy_200(self, client, monkeypatch):
-        from vivarium_dashboard.lib import viz_preview_instance_views
+        from vivarium_workbench.lib import viz_preview_instance_views
         captured = {}
 
         def _fake(ws, body):
@@ -6046,7 +6046,7 @@ class TestVisualizationPreviewInstanceRoute:
         assert captured["body"] == {"name": "viz1"}
 
     def test_source_passed_through(self, client, monkeypatch):
-        from vivarium_dashboard.lib import viz_preview_instance_views
+        from vivarium_workbench.lib import viz_preview_instance_views
         captured = {}
         monkeypatch.setattr(
             viz_preview_instance_views, "visualization_preview_instance",
@@ -6057,7 +6057,7 @@ class TestVisualizationPreviewInstanceRoute:
         assert captured == {"name": "viz1", "source": "investigation:abc"}
 
     def test_missing_name_400_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import viz_preview_instance_views
+        from vivarium_workbench.lib import viz_preview_instance_views
         monkeypatch.setattr(
             viz_preview_instance_views, "visualization_preview_instance",
             lambda ws, body: ({"error": "name is required"}, 400),
@@ -6067,7 +6067,7 @@ class TestVisualizationPreviewInstanceRoute:
         assert r.json() == {"error": "name is required"}
 
     def test_not_registered_404_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import viz_preview_instance_views
+        from vivarium_workbench.lib import viz_preview_instance_views
         monkeypatch.setattr(
             viz_preview_instance_views, "visualization_preview_instance",
             lambda ws, body: ({"error": "visualization 'x' not registered"}, 404),
@@ -6093,7 +6093,7 @@ class TestVisualizationPreviewInstanceRoute:
 # ===========================================================================
 class TestSystemDepsInstallRoute:
     def test_happy_passthrough(self, client, monkeypatch):
-        from vivarium_dashboard.lib import install_views
+        from vivarium_workbench.lib import install_views
         captured = {}
 
         def _fake(ws, body):
@@ -6110,7 +6110,7 @@ class TestSystemDepsInstallRoute:
         assert captured["body"] == {"name": "mod", "check_names": ["c1"]}
 
     def test_missing_400_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import install_views
+        from vivarium_workbench.lib import install_views
         monkeypatch.setattr(
             install_views, "system_deps_install",
             lambda ws, body: ({"error": "name + check_names required"}, 400),
@@ -6120,7 +6120,7 @@ class TestSystemDepsInstallRoute:
         assert r.json() == {"error": "name + check_names required"}
 
     def test_unknown_module_404_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import install_views
+        from vivarium_workbench.lib import install_views
         monkeypatch.setattr(
             install_views, "system_deps_install",
             lambda ws, body: ({"error": "unknown module: mod"}, 404),
@@ -6135,7 +6135,7 @@ class TestSystemDepsInstallRoute:
 
 class TestImportInstallRoute:
     def test_happy_passthrough(self, client, monkeypatch):
-        from vivarium_dashboard.lib import install_views
+        from vivarium_workbench.lib import install_views
         captured = {}
 
         def _fake(ws, body):
@@ -6150,7 +6150,7 @@ class TestImportInstallRoute:
         assert captured["body"] == {"name": "foo"}
 
     def test_target_passed_through(self, client, monkeypatch):
-        from vivarium_dashboard.lib import install_views
+        from vivarium_workbench.lib import install_views
         captured = {}
         monkeypatch.setattr(
             install_views, "import_install",
@@ -6160,7 +6160,7 @@ class TestImportInstallRoute:
         assert captured == {"name": "foo", "target": "pkg"}
 
     def test_missing_name_400_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import install_views
+        from vivarium_workbench.lib import install_views
         monkeypatch.setattr(
             install_views, "import_install",
             lambda ws, body: ({"error": "missing name"}, 400),
@@ -6170,7 +6170,7 @@ class TestImportInstallRoute:
         assert r.json() == {"error": "missing name"}
 
     def test_install_failed_500_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import install_views
+        from vivarium_workbench.lib import install_views
         monkeypatch.setattr(
             install_views, "import_install",
             lambda ws, body: ({"error": "install failed", "log": "x"}, 500),
@@ -6182,7 +6182,7 @@ class TestImportInstallRoute:
 
 class TestCatalogInstallRoute:
     def test_happy_passthrough(self, client, monkeypatch):
-        from vivarium_dashboard.lib import catalog_install_views
+        from vivarium_workbench.lib import catalog_install_views
         captured = {}
 
         def _fake(ws, body):
@@ -6197,7 +6197,7 @@ class TestCatalogInstallRoute:
         assert captured["body"] == {"name": "foo"}
 
     def test_skip_flag_passed_through(self, client, monkeypatch):
-        from vivarium_dashboard.lib import catalog_install_views
+        from vivarium_workbench.lib import catalog_install_views
         captured = {}
         monkeypatch.setattr(
             catalog_install_views, "catalog_install",
@@ -6207,7 +6207,7 @@ class TestCatalogInstallRoute:
         assert captured == {"name": "foo", "skip_system_deps_check": True}
 
     def test_missing_name_400_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import catalog_install_views
+        from vivarium_workbench.lib import catalog_install_views
         monkeypatch.setattr(
             catalog_install_views, "catalog_install",
             lambda ws, body: ({"error": "missing name"}, 400),
@@ -6217,7 +6217,7 @@ class TestCatalogInstallRoute:
         assert r.json() == {"error": "missing name"}
 
     def test_not_in_catalog_404_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import catalog_install_views
+        from vivarium_workbench.lib import catalog_install_views
         monkeypatch.setattr(
             catalog_install_views, "catalog_install",
             lambda ws, body: ({"error": "module 'foo' not in catalog"}, 404),
@@ -6227,7 +6227,7 @@ class TestCatalogInstallRoute:
         assert r.json() == {"error": "module 'foo' not in catalog"}
 
     def test_system_deps_409_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import catalog_install_views
+        from vivarium_workbench.lib import catalog_install_views
         body409 = {
             "error": "unmet system dependencies",
             "name": "foo",
@@ -6246,7 +6246,7 @@ class TestCatalogInstallRoute:
 
 class TestCatalogUninstallRoute:
     def test_happy_passthrough(self, client, monkeypatch):
-        from vivarium_dashboard.lib import catalog_uninstall_views
+        from vivarium_workbench.lib import catalog_uninstall_views
         captured = {}
 
         def _fake(ws, body):
@@ -6260,7 +6260,7 @@ class TestCatalogUninstallRoute:
         assert captured["body"] == {"name": "foo"}
 
     def test_missing_name_400_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import catalog_uninstall_views
+        from vivarium_workbench.lib import catalog_uninstall_views
         monkeypatch.setattr(
             catalog_uninstall_views, "catalog_uninstall",
             lambda ws, body: ({"error": "missing name"}, 400),
@@ -6270,7 +6270,7 @@ class TestCatalogUninstallRoute:
         assert r.json() == {"error": "missing name"}
 
     def test_unmanaged_409_preserved(self, client, monkeypatch):
-        from vivarium_dashboard.lib import catalog_uninstall_views
+        from vivarium_workbench.lib import catalog_uninstall_views
         body409 = {
             "error": "foo is required by bar — uninstall the parent(s) first",
             "transitive_via": ["bar"],
@@ -6326,7 +6326,7 @@ def test_suggest_poll_missing_id(client):
 
 
 def test_suggest_poll_not_ready(client, monkeypatch):
-    import vivarium_dashboard.lib.suggest_requests as sr
+    import vivarium_workbench.lib.suggest_requests as sr
     monkeypatch.setattr(sr, "read_response", lambda ws, rid: None)
     r = client.get("/api/suggest-poll", params={"id": "req-1"})
     assert r.status_code == 200
@@ -6334,7 +6334,7 @@ def test_suggest_poll_not_ready(client, monkeypatch):
 
 
 def test_suggest_poll_ready(client, monkeypatch):
-    import vivarium_dashboard.lib.suggest_requests as sr
+    import vivarium_workbench.lib.suggest_requests as sr
     monkeypatch.setattr(
         sr, "read_response",
         lambda ws, rid: {"suggestion": "pbg-foo", "rationale": "because"},
@@ -6357,7 +6357,7 @@ def test_study_refresh_viz_404_for_unknown_study(client):
 
 
 def test_study_refresh_viz_success(client, monkeypatch):
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
     payload = {"study": "dnaa-1", "results": [{"name": "c1", "status": "ok"}]}
     monkeypatch.setattr(_app._study_viz, "study_refresh_viz", lambda ws, name: payload)
     r = client.post("/api/study-refresh-viz/dnaa-1")
@@ -6366,7 +6366,7 @@ def test_study_refresh_viz_success(client, monkeypatch):
 
 
 def test_study_refresh_viz_unexpected_error_is_500(client, monkeypatch):
-    import vivarium_dashboard.api.app as _app
+    import vivarium_workbench.api.app as _app
 
     def _boom(ws, name):
         raise RuntimeError("kaboom")

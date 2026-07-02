@@ -1,4 +1,4 @@
-# vivarium-dashboard
+# vivarium-workbench
 
 Web UI for [Process-Bigraph](https://github.com/vivarium-collective/process-bigraph)
 workspaces. Browse composites, run studies, inspect state-trees, and render
@@ -26,8 +26,16 @@ venv), see [docs/USAGE.md](docs/USAGE.md).
 ### 1. Install
 
 ```bash
-pip install vivarium-dashboard         # or: uv pip install vivarium-dashboard
+pip install vivarium-workbench         # or: uv pip install vivarium-workbench
 ```
+
+> **Renamed:** the tool was `vivarium-dashboard`; it is now `vivarium-workbench`
+> (it authors, runs, evaluates, and publishes across the whole lifecycle — a
+> workbench, not a read-only dashboard). The old `vivarium-dashboard` / `vdash` /
+> `vivarium-dashboard-publish` commands, the `vivarium_dashboard` import package,
+> and the `VIVARIUM_DASHBOARD_*` env vars all still work as deprecated aliases
+> (they emit a `DeprecationWarning`) and are removed in a future major release.
+> The published static bundle is still the "read-only dashboard".
 
 Not on PyPI yet during beta — install editable from a clone instead:
 
@@ -64,7 +72,7 @@ for the full walkthrough.
 
 ```bash
 cd my-workspace
-vivarium-dashboard serve --workspace .
+vivarium-workbench serve --workspace .
 # or, from inside a scaffolded workspace:
 bash scripts/serve.sh
 ```
@@ -96,7 +104,7 @@ What [Getting Started](#getting-started) sets up: serve a workspace, run studies
 on the local engine, commit every action to a git branch.
 
 ```bash
-vivarium-dashboard serve --workspace .
+vivarium-workbench serve --workspace .
 ```
 
 ### Remote compute — sms-api backend
@@ -106,7 +114,7 @@ simulator versions and run large batches on a remote backend (AWS GovCloud, or
 an HPC cluster) instead of the local engine:
 
 ```bash
-SMS_API_BASE=http://localhost:8080 vivarium-dashboard serve --workspace .
+SMS_API_BASE=http://localhost:8080 vivarium-workbench serve --workspace .
 ```
 
 - **Reaching a GovCloud sms-api:** it sits behind an internal load balancer, so
@@ -130,15 +138,15 @@ host (CDN / object storage) with no backend — for sharing committed results
 publicly:
 
 ```bash
-vivarium-dashboard-publish --workspace . --out ./bundle --base-path /dashboard/<name>
+vivarium-workbench-publish --workspace . --out ./bundle --base-path /dashboard/<name>
 ```
 
 - Read-only: all mutating/compute routes are stripped; it serves committed
   investigations, studies, runs, composites, and registry. The same stripping is
-  available on a *live* server via `VIVARIUM_DASHBOARD_READONLY=1`.
+  available on a *live* server via `VIVARIUM_WORKBENCH_READONLY=1`.
 - The **Source** page becomes a navigator across sibling published workspaces;
   **"Sync to local"** reproduces a published `repo@commit` on your machine via
-  `vivarium-dashboard sync <url>` (clone at the commit + lockfile-pinned env +
+  `vivarium-workbench sync <url>` (clone at the commit + lockfile-pinned env +
   cache rebuild) — the round-trip back to local authoring.
 
 These three planes — and the round-trip between them — are specified in
@@ -172,7 +180,7 @@ If your workspace has `investigations/<name>/spec.yaml` directories from
 before schema_version 3, run the one-time migration:
 
 ```bash
-vivarium-dashboard migrate-investigations --workspace /path/to/workspace
+vivarium-workbench migrate-investigations --workspace /path/to/workspace
 # add --dry-run to preview
 ```
 

@@ -4,8 +4,8 @@
 def test_run_delete_route(monkeypatch, tmp_path):
     import time
     from fastapi.testclient import TestClient
-    from vivarium_dashboard.api import app as appmod
-    from vivarium_dashboard.lib import composite_runs as cr
+    from vivarium_workbench.api import app as appmod
+    from vivarium_workbench.lib import composite_runs as cr
     monkeypatch.setattr(appmod, "get_workspace", lambda: tmp_path, raising=False)
     db = tmp_path / ".pbg" / "composite-runs.db"; db.parent.mkdir(parents=True)
     conn = cr.connect(db)

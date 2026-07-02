@@ -1,4 +1,4 @@
-"""Drift guard: vendored vivarium_dashboard/lib/viz_freshness.py must stay
+"""Drift guard: vendored vivarium_workbench/lib/viz_freshness.py must stay
 identical to the canonical pbg_superpowers/viz_freshness.py.
 
 Uses the file-read approach (pbg_superpowers is not installed in the dashboard
@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 CANONICAL = Path(__file__).parent.parent.parent / "pbg-superpowers" / "pbg_superpowers" / "viz_freshness.py"
-VENDORED = Path(__file__).parent.parent / "vivarium_dashboard" / "lib" / "viz_freshness.py"
+VENDORED = Path(__file__).parent.parent / "vivarium_workbench" / "lib" / "viz_freshness.py"
 
 FUNCS = ["stamp_meta", "read_meta", "chart_freshness", "manifest_diff", "_meta_path", "_hash"]
 CONSTANTS = ["FRESH", "STALE", "UNRENDERED", "UNTRACKED"]

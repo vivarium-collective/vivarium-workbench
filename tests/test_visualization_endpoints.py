@@ -588,7 +588,7 @@ def test_delete_composite_with_dependents_refuses(workspace_server):
 
     # DELETE-with-body is not expressible over the FastAPI client; unit-test the
     # lib mutation directly (it returns (dict, status)).
-    from vivarium_dashboard.lib.composite_mutations import delete_investigation_composite
+    from vivarium_workbench.lib.composite_mutations import delete_investigation_composite
     body, code = delete_investigation_composite(
         workspace_server.root, {'investigation': 'demo', 'name': 'baseline'})
     assert code == 409, f"expected 409, got {code}"
@@ -615,7 +615,7 @@ def test_delete_composite_removes_when_no_dependents(workspace_server):
 
     # DELETE-with-body is not expressible over the FastAPI client; unit-test the
     # lib mutation directly (it returns (dict, status)).
-    from vivarium_dashboard.lib.composite_mutations import delete_investigation_composite
+    from vivarium_workbench.lib.composite_mutations import delete_investigation_composite
     _body, code = delete_investigation_composite(
         workspace_server.root, {'investigation': 'demo', 'name': 'orphan'})
     # 500 acceptable for bare-workspace git failures, but the file changes
@@ -684,7 +684,7 @@ def test_post_set_observables_rejects_non_list_paths(workspace_server):
     (inv / 'spec.yaml').write_text('name: demo\ncomposites: []\nruns: []\n')
     # A non-list `paths` is a lib-level 400 (FastAPI/pydantic would surface 422
     # for the same body), so unit-test the lib validation directly.
-    from vivarium_dashboard.lib.metadata_mutations import set_investigation_observables
+    from vivarium_workbench.lib.metadata_mutations import set_investigation_observables
     body, code = set_investigation_observables(
         workspace_server.root, {'investigation': 'demo', 'paths': 'not-a-list'})
     assert code == 400
@@ -893,7 +893,7 @@ def test_delete_comparison_refuses_with_viz_dependents(workspace_server):
 
     # DELETE-with-body is not expressible over the FastAPI client; unit-test the
     # lib mutation directly (it returns (dict, status)).
-    from vivarium_dashboard.lib.compare_group_mutations import comparison_delete
+    from vivarium_workbench.lib.compare_group_mutations import comparison_delete
     body, code = comparison_delete(
         workspace_server.root, {'investigation': 'demo', 'name': 'rate-cmp'})
     assert code == 409, f"expected 409, got {code}"
@@ -922,7 +922,7 @@ def test_delete_comparison_succeeds_when_unreferenced(workspace_server):
 
     # DELETE-with-body is not expressible over the FastAPI client; unit-test the
     # lib mutation directly (it returns (dict, status)).
-    from vivarium_dashboard.lib.compare_group_mutations import comparison_delete
+    from vivarium_workbench.lib.compare_group_mutations import comparison_delete
     _body, code = comparison_delete(
         workspace_server.root, {'investigation': 'demo', 'name': 'rate-cmp'})
     # 500 acceptable for bare-workspace git failures, but file changes happen eagerly
@@ -1033,7 +1033,7 @@ def test_delete_group_succeeds_and_404_on_missing(workspace_server):
 
     # DELETE-with-body is not expressible over the FastAPI client; unit-test the
     # lib mutation directly (it returns (dict, status)).
-    from vivarium_dashboard.lib.compare_group_mutations import group_delete
+    from vivarium_workbench.lib.compare_group_mutations import group_delete
 
     # Existing group → succeeds
     _body, code = group_delete(
@@ -1297,7 +1297,7 @@ def test_get_investigations_includes_topic(workspace_server):
 
 def test_format_baseline_source_single_entry_short_form():
     """Single baseline entry with a `.composites.` source → pkg_short:name."""
-    from vivarium_dashboard.lib.investigations_index import _format_baseline_source
+    from vivarium_workbench.lib.investigations_index import _format_baseline_source
     spec = {"baseline": [
         {"name": "core", "composite": "pbg_chromosome_rep1.composites.chromosome-partition", "params": {}},
     ]}
@@ -1306,14 +1306,14 @@ def test_format_baseline_source_single_entry_short_form():
 
 def test_format_baseline_source_opaque_composite():
     """Single baseline entry with an opaque composite ID → returned verbatim."""
-    from vivarium_dashboard.lib.investigations_index import _format_baseline_source
+    from vivarium_workbench.lib.investigations_index import _format_baseline_source
     spec = {"baseline": [{"name": "x", "composite": "some.opaque.path", "params": {}}]}
     assert _format_baseline_source(spec) == "some.opaque.path"
 
 
 def test_format_baseline_source_multiple_entries():
     """Multiple baseline entries → first entry formatted + ' (+N more)'."""
-    from vivarium_dashboard.lib.investigations_index import _format_baseline_source
+    from vivarium_workbench.lib.investigations_index import _format_baseline_source
     spec = {"baseline": [
         {"name": "a", "composite": "pkg_x.composites.first", "params": {}},
         {"name": "b", "composite": "pkg_y.composites.second", "params": {}},
@@ -1324,7 +1324,7 @@ def test_format_baseline_source_multiple_entries():
 
 def test_format_baseline_source_empty_or_absent():
     """Missing or empty baseline → empty string."""
-    from vivarium_dashboard.lib.investigations_index import _format_baseline_source
+    from vivarium_workbench.lib.investigations_index import _format_baseline_source
     assert _format_baseline_source({}) == ""
     assert _format_baseline_source({"baseline": []}) == ""
 
@@ -1470,8 +1470,8 @@ def test_post_dirty_commit_all_commits_and_returns_message(workspace_server, mon
         json.dumps({"active_branch": "feat/test-branch", "base": "main"}) + "\n"
     )
     # Point work_state.workspace_root at our temp dir so load_state reads our state file.
-    import vivarium_dashboard.lib._root as root_mod
-    import vivarium_dashboard.lib.work_state as work_state_mod
+    import vivarium_workbench.lib._root as root_mod
+    import vivarium_workbench.lib.work_state as work_state_mod
     monkeypatch.setattr(root_mod, "workspace_root", lambda: ws_root)
     monkeypatch.setattr(work_state_mod, "_state_path", lambda: ws_root / ".pbg" / "state.json")
 
@@ -1504,8 +1504,8 @@ def test_post_dirty_commit_all_409_when_clean(workspace_server, monkeypatch):
     (ws_root / ".pbg" / "state.json").write_text(
         json.dumps({"active_branch": "feat/clean-branch", "base": "main"}) + "\n"
     )
-    import vivarium_dashboard.lib._root as root_mod
-    import vivarium_dashboard.lib.work_state as work_state_mod
+    import vivarium_workbench.lib._root as root_mod
+    import vivarium_workbench.lib.work_state as work_state_mod
     monkeypatch.setattr(root_mod, "workspace_root", lambda: ws_root)
     monkeypatch.setattr(work_state_mod, "_state_path", lambda: ws_root / ".pbg" / "state.json")
 
@@ -1896,7 +1896,7 @@ def test_post_open_window_missing_server_info_503(workspace_server):
     # The live FastAPI fixture writes its own server-info readiness file into the
     # workspace root, so exercise the lib builder against a clean workspace dir
     # that has no server-info.
-    from vivarium_dashboard.lib.misc_post_views import open_window
+    from vivarium_workbench.lib.misc_post_views import open_window
     clean = workspace_server.root / "clean_ws"
     clean.mkdir()
     (clean / "workspace.yaml").write_text("name: clean\n")
@@ -1911,7 +1911,7 @@ def test_post_open_window_normalises_route(workspace_server, monkeypatch):
     We don't actually invoke `open` (side effect); we call the lib builder
     directly with a fake server-info file and a stubbed ``subprocess.run``.
     """
-    from vivarium_dashboard.lib import misc_post_views
+    from vivarium_workbench.lib import misc_post_views
 
     info_dir = workspace_server.root / ".pbg" / "server"
     info_dir.mkdir(parents=True, exist_ok=True)

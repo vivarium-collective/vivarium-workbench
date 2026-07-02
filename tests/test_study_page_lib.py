@@ -1,4 +1,4 @@
-"""Tests for vivarium_dashboard.lib.study_page.
+"""Tests for vivarium_workbench.lib.study_page.
 
 Covers:
 - build_study_detail_page: slug validation → 404, unknown slug → 404, valid → 200
@@ -46,39 +46,39 @@ def ws(tmp_path: Path) -> Path:
 
 class TestBuildStudyDetailPage:
     def test_invalid_slug_returns_404_not_found(self, ws: Path):
-        from vivarium_dashboard.lib.study_page import build_study_detail_page
+        from vivarium_workbench.lib.study_page import build_study_detail_page
         html, status = build_study_detail_page(ws, "../etc/passwd")
         assert status == 404
         assert "<h1>Not found</h1>" in html
 
     def test_invalid_slug_leading_dot(self, ws: Path):
-        from vivarium_dashboard.lib.study_page import build_study_detail_page
+        from vivarium_workbench.lib.study_page import build_study_detail_page
         html, status = build_study_detail_page(ws, ".hidden")
         assert status == 404
         assert "<h1>Not found</h1>" in html
 
     def test_invalid_slug_uppercase(self, ws: Path):
-        from vivarium_dashboard.lib.study_page import build_study_detail_page
+        from vivarium_workbench.lib.study_page import build_study_detail_page
         html, status = build_study_detail_page(ws, "BadSlug")
         assert status == 404
         assert "<h1>Not found</h1>" in html
 
     def test_unknown_slug_returns_404_study_not_found(self, ws: Path):
-        from vivarium_dashboard.lib.study_page import build_study_detail_page
+        from vivarium_workbench.lib.study_page import build_study_detail_page
         html, status = build_study_detail_page(ws, "does-not-exist")
         assert status == 404
         assert "<h1>Study not found</h1>" in html
         assert "<code>does-not-exist</code>" in html
 
     def test_valid_study_returns_200(self, ws: Path):
-        from vivarium_dashboard.lib.study_page import build_study_detail_page
+        from vivarium_workbench.lib.study_page import build_study_detail_page
         html, status = build_study_detail_page(ws, "dnaa-01-binding")
         assert status == 200
         assert isinstance(html, str)
         assert len(html) > 100
 
     def test_valid_study_html_contains_study_name(self, ws: Path):
-        from vivarium_dashboard.lib.study_page import build_study_detail_page
+        from vivarium_workbench.lib.study_page import build_study_detail_page
         html, status = build_study_detail_page(ws, "dnaa-01-binding")
         assert status == 200
         # The template renders the study name somewhere on the page
@@ -86,7 +86,7 @@ class TestBuildStudyDetailPage:
 
     def test_underscore_slug_is_valid(self, ws: Path, tmp_path: Path):
         """Slugs with underscores (e.g. generated study names) must be accepted."""
-        from vivarium_dashboard.lib.study_page import build_study_detail_page
+        from vivarium_workbench.lib.study_page import build_study_detail_page
         slug = "study-monod_kinetics-01"
         inv = tmp_path / "studies" / slug
         inv.mkdir(parents=True)
@@ -115,8 +115,8 @@ class TestBuildStudyDetailPage:
 class TestRenderStudyDetailHtml:
     def test_render_produces_html_with_tab_scaffold(self, ws: Path):
         """The real Jinja render includes the 8-tab scaffold."""
-        from vivarium_dashboard.lib.study_page import render_study_detail_html
-        from vivarium_dashboard.lib.study_spec import load_study_detail_spec
+        from vivarium_workbench.lib.study_page import render_study_detail_html
+        from vivarium_workbench.lib.study_spec import load_study_detail_spec
         spec = load_study_detail_spec(ws, "dnaa-01-binding")
         assert spec is not None
         html = render_study_detail_html(ws, "dnaa-01-binding", spec)
@@ -127,8 +127,8 @@ class TestRenderStudyDetailHtml:
 
     def test_render_includes_study_name_in_js(self, ws: Path):
         """The rendered page sets window._studyName (fetch-seam pattern)."""
-        from vivarium_dashboard.lib.study_page import render_study_detail_html
-        from vivarium_dashboard.lib.study_spec import load_study_detail_spec
+        from vivarium_workbench.lib.study_page import render_study_detail_html
+        from vivarium_workbench.lib.study_spec import load_study_detail_spec
         spec = load_study_detail_spec(ws, "dnaa-01-binding")
         assert spec is not None
         html = render_study_detail_html(ws, "dnaa-01-binding", spec)
@@ -136,7 +136,7 @@ class TestRenderStudyDetailHtml:
 
     def test_builder_delegates_to_render_via_monkeypatch(self, ws: Path, monkeypatch):
         """build_study_detail_page delegates to render_study_detail_html."""
-        import vivarium_dashboard.lib.study_page as sp
+        import vivarium_workbench.lib.study_page as sp
         called = []
 
         def fake_render(ws_root, name, spec):

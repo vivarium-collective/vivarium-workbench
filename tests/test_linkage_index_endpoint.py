@@ -11,7 +11,7 @@ from __future__ import annotations
 import yaml
 import pytest
 
-from vivarium_dashboard.lib.report_views import build_linkage_index
+from vivarium_workbench.lib.report_views import build_linkage_index
 
 
 @pytest.fixture

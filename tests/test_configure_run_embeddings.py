@@ -1,11 +1,11 @@
 """Verify configure-run.js is loaded only where needed (study-detail),
 and that composite cards carry a single Explore button (Tasks 9 & 10 revamp)."""
 from pathlib import Path
-import vivarium_dashboard
+import vivarium_workbench
 
 
 def _read(rel):
-    return (Path(vivarium_dashboard.__file__).parent / rel).read_text(encoding="utf-8")
+    return (Path(vivarium_workbench.__file__).parent / rel).read_text(encoding="utf-8")
 
 
 def test_widget_script_loaded_in_study_detail():

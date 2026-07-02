@@ -1,5 +1,5 @@
 """attach_process_docs: resolve per-process docstrings for the inspector."""
-from vivarium_dashboard.lib.process_docs import attach_process_docs, _doc_for_address
+from vivarium_workbench.lib.process_docs import attach_process_docs, _doc_for_address
 
 
 def test_doc_for_address_resolves_full_dotted_path():
@@ -39,7 +39,7 @@ def test_existing_doc_not_overwritten():
     assert doc["doc"] == "custom"
 
 
-from vivarium_dashboard.lib.process_docs import summarize_large_values
+from vivarium_workbench.lib.process_docs import summarize_large_values
 
 
 def test_summarize_collapses_large_lists_keeps_structure():

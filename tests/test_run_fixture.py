@@ -2,7 +2,7 @@
 import sqlite3, json
 from pathlib import Path
 import pytest
-from vivarium_dashboard.testing.run_fixture import Run, RunNotAvailableError
+from vivarium_workbench.testing.run_fixture import Run, RunNotAvailableError
 
 
 def _make_runs_db(path: Path, *, runs: list[dict]) -> None:
@@ -130,7 +130,7 @@ def test_runs_fixture_parametrizes_over_all_runs(tmp_path):
     ])
     (study / "tests").mkdir()
     (study / "tests" / "conftest.py").write_text(
-        "from vivarium_dashboard.testing import run, runs, pytest_generate_tests  # noqa: F401\n"
+        "from vivarium_workbench.testing import run, runs, pytest_generate_tests  # noqa: F401\n"
     )
     (study / "tests" / "test_demo.py").write_text(textwrap.dedent("""
         def test_each_run(runs):

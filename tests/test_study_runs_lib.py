@@ -14,7 +14,7 @@ from pathlib import Path
 import yaml
 import pytest
 
-from vivarium_dashboard.lib import (
+from vivarium_workbench.lib import (
     composite_subprocess,
     ensemble_config,
     study_run_post,

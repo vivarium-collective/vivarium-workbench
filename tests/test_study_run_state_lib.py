@@ -17,7 +17,7 @@ import yaml
 
 import pbg_superpowers.composite_generator as cg
 import pbg_superpowers.composite_discovery as cd
-from vivarium_dashboard.lib import study_run_state as srs
+from vivarium_workbench.lib import study_run_state as srs
 
 
 # ---------------------------------------------------------------------------

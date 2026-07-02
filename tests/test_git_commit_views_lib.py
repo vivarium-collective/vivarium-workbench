@@ -20,8 +20,8 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import git_commit_views as gcv
-from vivarium_dashboard.lib import git_status as gs
+from vivarium_workbench.lib import git_commit_views as gcv
+from vivarium_workbench.lib import git_status as gs
 
 
 # ===========================================================================

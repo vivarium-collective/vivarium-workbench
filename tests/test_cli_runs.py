@@ -2,7 +2,7 @@ import time
 
 import pytest
 
-from vivarium_dashboard.lib import cli_runs, composite_runs as cr
+from vivarium_workbench.lib import cli_runs, composite_runs as cr
 
 
 def test_run_study_server_dryrun_is_rejected(fixture_study_ws):
@@ -86,12 +86,12 @@ def test_rerun_replays_recorded_overrides(tmp_path, monkeypatch):
         conn.close()
 
     # Monkeypatch composite_test_run to capture the body and return a fake
-    # response. run_composite does `from vivarium_dashboard.lib import
+    # response. run_composite does `from vivarium_workbench.lib import
     # composite_test_run_views`, which resolves the module as a package
     # attribute once any earlier test has imported it — so patch the function
     # ON the real module object (not a sys.modules swap, which that attribute
     # binding bypasses).
-    from vivarium_dashboard.lib import composite_test_run_views as _ctrv
+    from vivarium_workbench.lib import composite_test_run_views as _ctrv
     captured = {}
 
     def fake_composite_test_run(ws_root, body):

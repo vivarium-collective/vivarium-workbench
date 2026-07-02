@@ -6,7 +6,7 @@ Ports the static reference data that the (now-deactivated) sms-api marimo
 dashboard explorer can offer the same capabilities without importing vEcoli at
 runtime.
 
-Outputs (under vivarium_dashboard/static/explorer/):
+Outputs (under vivarium_workbench/static/explorer/):
   - pathways.json              {pathway_name: {reactions, proteins, rnas, compounds}}
                               powers the Timeseries pathway-preset dropdown.
   - validation_proteomics.json {monomer_base_id: {gene, gene_name, monomer_name,
@@ -35,7 +35,7 @@ import json
 import re
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parents[1] / "vivarium_dashboard" / "static" / "explorer"
+OUT = Path(__file__).resolve().parents[1] / "vivarium_workbench" / "static" / "explorer"
 
 
 def _read_tsv(path):

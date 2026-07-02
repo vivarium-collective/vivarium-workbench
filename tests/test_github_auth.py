@@ -1,4 +1,4 @@
-"""Unit tests for ``vivarium_dashboard.lib.github_auth`` (todo #8 Phase B-bis).
+"""Unit tests for ``vivarium_workbench.lib.github_auth`` (todo #8 Phase B-bis).
 
 Tests run entirely in-process and mock the GitHub HTTP endpoints + the ``gh``
 CLI delegate. No real network calls; no real keyring writes (keyring is
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from vivarium_dashboard.lib import github_auth as ga
+from vivarium_workbench.lib import github_auth as ga
 
 
 @pytest.fixture(autouse=True)

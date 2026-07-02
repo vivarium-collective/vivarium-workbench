@@ -1,7 +1,7 @@
 """Behavioral tests for the extracted ``lib/study_run_post.py`` helpers.
 
 E3 lib-extraction: the post-run side-effect stage moved out of ``server.py``
-into ``vivarium_dashboard.lib.study_run_post`` (parameterized on ``ws_root``),
+into ``vivarium_workbench.lib.study_run_post`` (parameterized on ``ws_root``),
 with server name-shims left behind for the live call-sites:
 
   ``render_study_visualizations`` / ``run_post_run_scripts`` /
@@ -26,7 +26,7 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib import study_run_post as srp
+from vivarium_workbench.lib import study_run_post as srp
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +258,7 @@ def test_run_study_analyses_happy_collects_and_reports_errors(tmp_path, monkeypa
         lambda entries: ({"single": {"ptools_rna": {}}}, []))
 
     # _latest_parquet_for_study -> the history hive root (parent = sweep_dir).
-    import vivarium_dashboard.lib.study_charts as sc
+    import vivarium_workbench.lib.study_charts as sc
     monkeypatch.setattr(sc, "_latest_parquet_for_study", lambda sd: sweep / "history")
 
     # Fake v2ecoli analysis runner: writes outputs + returns a results dict
@@ -354,7 +354,7 @@ def test_render_study_visualizations_happy_writes_and_reads_ws_root(tmp_path, mo
         p.write_text("<html>", encoding="utf-8")
         return [str(p)]
 
-    import vivarium_dashboard.lib.investigations as inv
+    import vivarium_workbench.lib.investigations as inv
     monkeypatch.setattr(inv, "render_visualizations", fake_render_visualizations)
 
     spec = {"name": "study-x",

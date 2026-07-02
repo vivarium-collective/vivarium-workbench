@@ -1,6 +1,6 @@
 from pathlib import Path
 
-TPL = Path("vivarium_dashboard/templates/study-detail.html").read_text(encoding="utf-8")
+TPL = Path("vivarium_workbench/templates/study-detail.html").read_text(encoding="utf-8")
 
 
 def test_group_headers_present():

@@ -17,9 +17,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vivarium_dashboard.lib import study_create_views as views
-from vivarium_dashboard.lib import investigation_migrate
-from vivarium_dashboard.lib import scaffold_yaml
+from vivarium_workbench.lib import study_create_views as views
+from vivarium_workbench.lib import investigation_migrate
+from vivarium_workbench.lib import scaffold_yaml
 
 
 def _make_ws(tmp_path: Path, *, name: str = "demo-ws") -> Path:

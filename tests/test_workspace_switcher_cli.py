@@ -41,7 +41,7 @@ def test_cmd_serve_registers_on_boot(pbg_home, workspace_dir):
     port = _free_port()
     env = {**os.environ, "PBG_HOME": str(pbg_home)}
     proc = subprocess.Popen(
-        [sys.executable, "-m", "vivarium_dashboard.cli",
+        [sys.executable, "-m", "vivarium_workbench.cli",
          "serve", "--workspace", str(workspace_dir), "--port", str(port)],
         env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
@@ -102,7 +102,7 @@ def test_cmd_serve_continues_when_registration_fails(tmp_path, workspace_dir):
 
         _cat.register_server = _bad_register
 
-        from vivarium_dashboard.cli import main
+        from vivarium_workbench.cli import main
         sys.exit(main(["serve",
                        "--workspace", {str(workspace_dir)!r},
                        "--port", {str(port)!r}]))

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import explorer_data
+from vivarium_workbench.lib import explorer_data
 
 
 def make_fake_runs_db(db_path: Path, states: list[dict], run_id="run-1", name="baseline"):
@@ -180,8 +180,8 @@ def test_base_ids_from_run_reads_emitted_ids(tmp_path):
 
 
 def test_explorer_assets_are_valid_json():
-    import vivarium_dashboard
-    base = Path(vivarium_dashboard.__file__).parent / "static" / "explorer"
+    import vivarium_workbench
+    base = Path(vivarium_workbench.__file__).parent / "static" / "explorer"
     for name in ("ecoli_core.map.json", "reaction_id_map.json", "base_reaction_ids.json",
                  "pathways.json", "validation_proteomics.json", "explorer_labels.json"):
         p = base / name

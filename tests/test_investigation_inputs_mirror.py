@@ -1,4 +1,4 @@
-"""Drift guard: vendored vivarium_dashboard/lib/investigation_inputs.py must
+"""Drift guard: vendored vivarium_workbench/lib/investigation_inputs.py must
 stay identical to the canonical pbg_superpowers/investigation_inputs.py.
 
 Uses the file-read approach (pbg_superpowers is not installed in the dashboard
@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 CANONICAL = Path(__file__).parent.parent.parent / "pbg-superpowers" / "pbg_superpowers" / "investigation_inputs.py"
-VENDORED = Path(__file__).parent.parent / "vivarium_dashboard" / "lib" / "investigation_inputs.py"
+VENDORED = Path(__file__).parent.parent / "vivarium_workbench" / "lib" / "investigation_inputs.py"
 
 FUNCS = ["investigation_inputs"]
 

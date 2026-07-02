@@ -1,7 +1,7 @@
 """Tests for user-facing CLI run subcommands: run study|investigation|composite,
 rerun, runs, status, logs."""
 import json
-from vivarium_dashboard.cli import main
+from vivarium_workbench.cli import main
 
 
 def test_run_study_dry_run_prints_request(fixture_study_ws, capsys):
@@ -33,8 +33,8 @@ def test_logs_follow_terminal_run_returns_promptly(fixture_study_with_recorded_r
     """--follow on an already-terminal run prints the log and returns without polling."""
     ws, study, run_id = fixture_study_with_recorded_run
     # Write a small log file so the logs command can find it.
-    from vivarium_dashboard.lib import composite_runs as cr
-    from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+    from vivarium_workbench.lib import composite_runs as cr
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
     wp = WorkspacePaths.load(ws)
     study_dir = wp.study_dir(study)

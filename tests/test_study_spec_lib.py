@@ -1,4 +1,4 @@
-"""Unit + parity tests for vivarium_dashboard.lib.study_spec.
+"""Unit + parity tests for vivarium_workbench.lib.study_spec.
 
 Covers the run-merging study-detail loader extracted in Phase A, Batch 3:
 
@@ -19,7 +19,7 @@ from typing import Any
 
 import yaml
 
-from vivarium_dashboard.lib import study_spec
+from vivarium_workbench.lib import study_spec
 
 
 # ---------------------------------------------------------------------------

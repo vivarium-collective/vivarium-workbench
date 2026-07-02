@@ -2,7 +2,7 @@
 import textwrap
 import yaml
 
-from vivarium_dashboard.lib.spec_migration import (
+from vivarium_workbench.lib.spec_migration import (
     migrate_study_to_v2_vocabulary,
     migrate_v2_to_v3,
     migrate_v3_to_v4,

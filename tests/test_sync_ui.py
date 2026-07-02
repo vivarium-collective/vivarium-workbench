@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 from fastapi.testclient import TestClient
-from vivarium_dashboard.api.app import create_app, get_workspace
+from vivarium_workbench.api.app import create_app, get_workspace
 
 
 def _init(ws: Path):

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib.notebook_export import export_investigation_notebook
+from vivarium_workbench.lib.notebook_export import export_investigation_notebook
 
 # Distinctive numbers planted in *result* fields — must NOT appear in the text.
 _RESULT_TOKENS = ["9999", "8888", "7777", "6666", "5555"]

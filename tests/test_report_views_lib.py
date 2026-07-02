@@ -89,7 +89,7 @@ def missing_ws(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_build_report_lint_returns_200(tmp_ws):
-    from vivarium_dashboard.lib.report_views import build_report_lint
+    from vivarium_workbench.lib.report_views import build_report_lint
     body, status = build_report_lint(tmp_ws)
     assert status == 200
     assert "findings" in body
@@ -97,7 +97,7 @@ def test_build_report_lint_returns_200(tmp_ws):
 
 
 def test_build_report_lint_tolerant_missing_ws(missing_ws):
-    from vivarium_dashboard.lib.report_views import build_report_lint
+    from vivarium_workbench.lib.report_views import build_report_lint
     body, status = build_report_lint(missing_ws)
     assert status == 200
     assert "findings" in body
@@ -108,14 +108,14 @@ def test_build_report_lint_tolerant_missing_ws(missing_ws):
 # ---------------------------------------------------------------------------
 
 def test_build_linkage_index_returns_200(tmp_ws):
-    from vivarium_dashboard.lib.report_views import build_linkage_index
+    from vivarium_workbench.lib.report_views import build_linkage_index
     body, status = build_linkage_index(tmp_ws)
     assert status == 200
     assert isinstance(body, dict)
 
 
 def test_build_linkage_index_source_param(tmp_ws):
-    from vivarium_dashboard.lib.report_views import build_linkage_index
+    from vivarium_workbench.lib.report_views import build_linkage_index
     body, status = build_linkage_index(tmp_ws, source="Ref2024")
     assert status == 200
     # Tolerant: result has 'studies' key (list, possibly empty)
@@ -123,7 +123,7 @@ def test_build_linkage_index_source_param(tmp_ws):
 
 
 def test_build_linkage_index_investigation_param(tmp_ws):
-    from vivarium_dashboard.lib.report_views import build_linkage_index
+    from vivarium_workbench.lib.report_views import build_linkage_index
     body, status = build_linkage_index(tmp_ws, investigation="the-inv")
     assert status == 200
     # May return nodes/edges or ac_matrix depending on pbg_superpowers version
@@ -131,7 +131,7 @@ def test_build_linkage_index_investigation_param(tmp_ws):
 
 
 def test_build_linkage_index_tolerant_missing_ws(missing_ws):
-    from vivarium_dashboard.lib.report_views import build_linkage_index
+    from vivarium_workbench.lib.report_views import build_linkage_index
     body, status = build_linkage_index(missing_ws, investigation="nope")
     assert status == 200
     assert isinstance(body, dict)
@@ -139,7 +139,7 @@ def test_build_linkage_index_tolerant_missing_ws(missing_ws):
 
 def test_build_linkage_index_observable_registry_no_fn(tmp_ws):
     """Without observables_for_ref_fn, observable_registry path degrades to empty."""
-    from vivarium_dashboard.lib.report_views import build_linkage_index
+    from vivarium_workbench.lib.report_views import build_linkage_index
     body, status = build_linkage_index(tmp_ws, observable_registry="some.token")
     assert status == 200
     # With no fn, will either fail gracefully or return {studies, composites}
@@ -148,7 +148,7 @@ def test_build_linkage_index_observable_registry_no_fn(tmp_ws):
 
 def test_build_linkage_index_observable_registry_with_fn(tmp_ws):
     """With an injectable fn, observable_registry path calls pbg_superpowers."""
-    from vivarium_dashboard.lib.report_views import build_linkage_index
+    from vivarium_workbench.lib.report_views import build_linkage_index
 
     def _stub_obs(ws_root, ref):
         return {"leaves": ["agents.0.listeners.mass.cell_mass"], "catalogs": {}}
@@ -166,7 +166,7 @@ def test_build_linkage_index_observable_registry_with_fn(tmp_ws):
 # ---------------------------------------------------------------------------
 
 def test_build_needs_attention_returns_200(tmp_ws):
-    from vivarium_dashboard.lib.report_views import build_needs_attention
+    from vivarium_workbench.lib.report_views import build_needs_attention
     body, status = build_needs_attention(tmp_ws, investigation="the-inv")
     assert status == 200
     assert "items" in body
@@ -177,7 +177,7 @@ def test_build_needs_attention_returns_200(tmp_ws):
 
 
 def test_build_needs_attention_tolerant_missing_ws(missing_ws):
-    from vivarium_dashboard.lib.report_views import build_needs_attention
+    from vivarium_workbench.lib.report_views import build_needs_attention
     body, status = build_needs_attention(missing_ws, investigation="nope")
     assert status == 200
     assert body["items"] == []
@@ -189,7 +189,7 @@ def test_build_needs_attention_tolerant_missing_ws(missing_ws):
 # ---------------------------------------------------------------------------
 
 def test_build_iset_detail_returns_dict(tmp_ws):
-    from vivarium_dashboard.lib.report_views import build_iset_detail
+    from vivarium_workbench.lib.report_views import build_iset_detail
     result = build_iset_detail(tmp_ws, "the-inv")
     assert result is not None
     assert result["name"] == "the-inv"
@@ -199,13 +199,13 @@ def test_build_iset_detail_returns_dict(tmp_ws):
 
 
 def test_build_iset_detail_missing_yaml_returns_none(tmp_ws):
-    from vivarium_dashboard.lib.report_views import build_iset_detail
+    from vivarium_workbench.lib.report_views import build_iset_detail
     result = build_iset_detail(tmp_ws, "no-such-investigation")
     assert result is None
 
 
 def test_build_iset_detail_study_fields(tmp_ws):
-    from vivarium_dashboard.lib.report_views import build_iset_detail
+    from vivarium_workbench.lib.report_views import build_iset_detail
     result = build_iset_detail(tmp_ws, "the-inv")
     assert result is not None
     study = result["studies"][0]
@@ -216,7 +216,7 @@ def test_build_iset_detail_study_fields(tmp_ws):
 
 
 def test_build_iset_detail_effective_status(tmp_ws):
-    from vivarium_dashboard.lib.report_views import build_iset_detail
+    from vivarium_workbench.lib.report_views import build_iset_detail
     result = build_iset_detail(tmp_ws, "the-inv")
     assert result is not None
     assert "effective_status" in result

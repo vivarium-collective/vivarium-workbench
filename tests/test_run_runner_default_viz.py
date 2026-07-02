@@ -3,7 +3,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from vivarium_dashboard.lib import run_runner
+from vivarium_workbench.lib import run_runner
 
 
 def test_numeric_observables_filters_correctly():

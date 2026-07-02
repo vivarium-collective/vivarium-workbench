@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vivarium_dashboard.lib.expected_behavior import (
+from vivarium_workbench.lib.expected_behavior import (
     EvaluationResult,
     MissingExpectError,
     MissingMeasureError,
@@ -27,7 +27,7 @@ from vivarium_dashboard.lib.expected_behavior import (
     pre_post_event,
     window,
 )
-from vivarium_dashboard.lib.investigations import InvestigationSpecError, load_spec
+from vivarium_workbench.lib.investigations import InvestigationSpecError, load_spec
 
 
 # ─── Synthetic state factories ──────────────────────────────────────────────

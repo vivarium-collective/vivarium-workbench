@@ -1,4 +1,4 @@
-"""Parity and unit tests for vivarium_dashboard.lib.investigation_views.
+"""Parity and unit tests for vivarium_workbench.lib.investigation_views.
 
 Tests verify that the lib builders return the expected dict shapes, and that
 the legacy stdlib server.py handler shims produce identical bodies to the lib
@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 import yaml
 
-from vivarium_dashboard.lib import investigation_views as inv_views
+from vivarium_workbench.lib import investigation_views as inv_views
 
 
 # ---------------------------------------------------------------------------

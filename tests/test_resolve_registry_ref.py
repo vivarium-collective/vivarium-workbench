@@ -1,4 +1,4 @@
-from vivarium_dashboard.lib.observables_views import _resolve_registry_ref
+from vivarium_workbench.lib.observables_views import _resolve_registry_ref
 
 KEYS = [
     "v2ecoli.composites.baseline",

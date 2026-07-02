@@ -1,19 +1,19 @@
 """The generated TypeScript types must stay in sync with the pydantic models."""
 
-from vivarium_dashboard.lib.generate_ts import OUTPUT_PATH, generate_ts
+from vivarium_workbench.lib.generate_ts import OUTPUT_PATH, generate_ts
 
 
 def test_generated_ts_is_current():
     """The committed domain.generated.d.ts must match a fresh generation.
 
-    If this fails, run:  python -m vivarium_dashboard.lib.generate_ts
+    If this fails, run:  python -m vivarium_workbench.lib.generate_ts
     (the models changed without regenerating the TypeScript types).
     """
     expected = generate_ts()
     actual = OUTPUT_PATH.read_text(encoding="utf-8")
     assert actual == expected, (
         "domain.generated.d.ts is stale — regenerate with "
-        "`python -m vivarium_dashboard.lib.generate_ts`"
+        "`python -m vivarium_workbench.lib.generate_ts`"
     )
 
 

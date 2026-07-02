@@ -1,4 +1,4 @@
-"""Unit + parity tests for vivarium_dashboard.lib.rigor_views.
+"""Unit + parity tests for vivarium_workbench.lib.rigor_views.
 
 Covers the rigor builder ported in Phase A, Batch 3 (backed by the
 run-merging ``lib.study_spec.load_study_detail_spec``):
@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 import yaml
 
-from vivarium_dashboard.lib import rigor_views
+from vivarium_workbench.lib import rigor_views
 
 
 # ---------------------------------------------------------------------------

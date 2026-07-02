@@ -9,16 +9,16 @@ import json
 import yaml
 import pytest
 
-from vivarium_dashboard.lib.json_serialize import _json_body, _json_default
-from vivarium_dashboard.lib.report_views import build_iset_detail
-from vivarium_dashboard.lib.static_serving import STATIC_DIR, TEMPLATES_DIR
-from vivarium_dashboard.lib.study_page import render_study_detail_html
-from vivarium_dashboard.lib.study_spec import (
+from vivarium_workbench.lib.json_serialize import _json_body, _json_default
+from vivarium_workbench.lib.report_views import build_iset_detail
+from vivarium_workbench.lib.static_serving import STATIC_DIR, TEMPLATES_DIR
+from vivarium_workbench.lib.study_page import render_study_detail_html
+from vivarium_workbench.lib.study_spec import (
     SLUG_RE,
     load_study_detail_spec,
 )
-from vivarium_dashboard.lib.study_spec import study_dir as resolve_study_dir
-from vivarium_dashboard.lib.system_info import build_workspace_home
+from vivarium_workbench.lib.study_spec import study_dir as resolve_study_dir
+from vivarium_workbench.lib.system_info import build_workspace_home
 
 
 # ---------------------------------------------------------------------------
@@ -393,7 +393,7 @@ def test_walkthrough_routes_simulations_through_data_source():
 
 def test_bundle_exports_simulations(tmp_workspace, tmp_path):
     """build_bundle writes api/simulations.json."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
     out = tmp_path / "bundle"
     publish.build_bundle(tmp_workspace, out)
     assert (out / "api" / "simulations.json").is_file(), "api/simulations.json missing"
@@ -423,7 +423,7 @@ def test_walkthrough_routes_visualizations_through_data_source():
 
 def test_bundle_exports_visualization_classes(tmp_workspace, tmp_path):
     """build_bundle writes api/visualization-classes.json."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
     out = tmp_path / "bundle"
     publish.build_bundle(tmp_workspace, out)
     assert (out / "api" / "visualization-classes.json").is_file(), \
@@ -469,7 +469,7 @@ def test_walkthrough_does_not_override_static_banner_link():
 
 def test_set_snapshot_config_injects_interactive_url():
     """_set_snapshot_config injects interactiveUrl when provided."""
-    from vivarium_dashboard.publish import _set_snapshot_config
+    from vivarium_workbench.publish import _set_snapshot_config
     html = 'window.__DASH_CONFIG__ = { mode: "local-server" };'
     result = _set_snapshot_config(html, interactive_url="https://example.com/dash")
     assert 'mode: "snapshot"' in result
@@ -479,7 +479,7 @@ def test_set_snapshot_config_injects_interactive_url():
 
 def test_set_snapshot_config_no_url_omits_interactive_url():
     """_set_snapshot_config without interactiveUrl produces minimal config."""
-    from vivarium_dashboard.publish import _set_snapshot_config
+    from vivarium_workbench.publish import _set_snapshot_config
     html = 'window.__DASH_CONFIG__ = { mode: "local-server" };'
     result = _set_snapshot_config(html)
     assert 'mode: "snapshot"' in result
@@ -567,7 +567,7 @@ def test_template_has_studies_rail_section_id():
 
 def test_bundle_composites_have_has_wiring(tmp_workspace, tmp_path):
     """build_bundle must annotate each composite entry with has_wiring: bool."""
-    from vivarium_dashboard import publish
+    from vivarium_workbench import publish
 
     out = tmp_path / "bundle"
     publish.build_bundle(tmp_workspace, out)

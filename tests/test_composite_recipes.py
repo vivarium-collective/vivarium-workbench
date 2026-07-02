@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-# Make repo root importable for vivarium_dashboard.lib.composite_recipes
+# Make repo root importable for vivarium_workbench.lib.composite_recipes
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "template"))
 
-from vivarium_dashboard.lib.composite_recipes import (
+from vivarium_workbench.lib.composite_recipes import (
     apply_parameter_overrides,
     apply_process_overrides,
     walk_state_tree,

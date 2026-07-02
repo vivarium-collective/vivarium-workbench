@@ -1,7 +1,7 @@
 """discover_static_study_charts: SVG inline + PNG/GIF base64 + dedupe + meta."""
 from pathlib import Path
 
-from vivarium_dashboard.lib.study_charts import (
+from vivarium_workbench.lib.study_charts import (
     discover_static_study_charts,
     discover_declared_figure_charts,
 )

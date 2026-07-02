@@ -8,8 +8,8 @@ cannot shadow them).
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
-from vivarium_dashboard.api.app import create_app
-from vivarium_dashboard.lib.errors import APIError, error_body
+from vivarium_workbench.api.app import create_app
+from vivarium_workbench.lib.errors import APIError, error_body
 
 
 def _app_with_probe_routes():

@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from vivarium_dashboard.lib import events
+from vivarium_workbench.lib import events
 
 
 # ---------------------------------------------------------------------------

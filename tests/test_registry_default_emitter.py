@@ -16,7 +16,7 @@ import urllib.error
 import pytest
 import yaml
 
-from vivarium_dashboard.lib import registry as reg
+from vivarium_workbench.lib import registry as reg
 
 
 # ---------------------------------------------------------------------------

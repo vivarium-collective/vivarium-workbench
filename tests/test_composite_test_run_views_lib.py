@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard.lib import composite_runs as cr
-from vivarium_dashboard.lib import run_registry
-from vivarium_dashboard.lib import composite_test_run_views as views
+from vivarium_workbench.lib import composite_runs as cr
+from vivarium_workbench.lib import run_registry
+from vivarium_workbench.lib import composite_test_run_views as views
 
 
 def _make_ws(tmp_path: Path, *, name: str = "demo-ws") -> Path:

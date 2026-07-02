@@ -40,7 +40,7 @@ def server(tmp_path):
     env["PYTHONPATH"] = (str(_REPO_ROOT) + os.pathsep + str(ws)
                          + os.pathsep + env.get("PYTHONPATH", ""))
     proc = subprocess.Popen(
-        [sys.executable, "-m", "vivarium_dashboard.cli", "serve",
+        [sys.executable, "-m", "vivarium_workbench.cli", "serve",
          "--workspace", str(ws), "--port", str(port)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
     # serve_fastapi writes server-info before uvicorn binds the port, so wait

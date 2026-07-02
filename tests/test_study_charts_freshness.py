@@ -13,8 +13,8 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib.study_charts import build_study_charts_payload as _study_charts_payload
-from vivarium_dashboard.lib.viz_freshness import stamp_meta
+from vivarium_workbench.lib.study_charts import build_study_charts_payload as _study_charts_payload
+from vivarium_workbench.lib.viz_freshness import stamp_meta
 
 
 def _write_runs_db(study_dir: Path, run_id: str, completed_at: float) -> None:

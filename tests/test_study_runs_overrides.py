@@ -8,7 +8,7 @@ from dataclasses import dataclass
 @pytest.fixture
 def _override_ws(tmp_path, monkeypatch):
     """Minimal workspace with one v3 study; all subprocess/resolve steps mocked."""
-    from vivarium_dashboard.lib import (
+    from vivarium_workbench.lib import (
         composite_subprocess,
         run_core,
         study_run_post,
@@ -73,7 +73,7 @@ def test_run_study_baseline_overlays_body_overrides(_override_ws):
     """run_study_baseline with body {overrides: {k: 9}} must pass k=9 into
     composite_subprocess.run_composite_subprocess as overrides["k"] == 9."""
     ws, captured = _override_ws
-    from vivarium_dashboard.lib import study_runs
+    from vivarium_workbench.lib import study_runs
 
     body, status = study_runs.run_study_baseline(ws, {"study": "demo", "overrides": {"k": 9}})
     assert status == 200, body
@@ -86,7 +86,7 @@ def test_run_study_baseline_overlays_body_overrides(_override_ws):
 def test_run_study_baseline_overlay_does_not_stomp_baseline_params(_override_ws):
     """Existing baseline params (seed=42) survive the overlay when not in body.overrides."""
     ws, captured = _override_ws
-    from vivarium_dashboard.lib import study_runs
+    from vivarium_workbench.lib import study_runs
 
     body, status = study_runs.run_study_baseline(ws, {"study": "demo", "overrides": {"k": 9}})
     assert status == 200, body
@@ -98,11 +98,11 @@ def test_run_study_baseline_overlay_does_not_stomp_baseline_params(_override_ws)
 def test_run_study_baseline_body_steps_honored(_override_ws):
     """body[\"steps\"] overrides the baseline params n_steps for the subprocess call."""
     ws, captured = _override_ws
-    from vivarium_dashboard.lib import study_runs
+    from vivarium_workbench.lib import study_runs
 
     # We can't directly capture steps from run_composite_subprocess kwargs here
     # because it's a positional-or-keyword arg; patch at the module level to capture it.
-    from vivarium_dashboard.lib import composite_subprocess
+    from vivarium_workbench.lib import composite_subprocess
     steps_seen = {}
 
     def _capture_steps(ws_root, *, steps, **kwargs):

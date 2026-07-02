@@ -15,7 +15,7 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib import comparative_runs
+from vivarium_workbench.lib import comparative_runs
 
 
 # ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 field into investigations/<slug>/investigation.yaml."""
 import yaml
 
-from vivarium_dashboard.lib.metadata_mutations import set_investigation_status
+from vivarium_workbench.lib.metadata_mutations import set_investigation_status
 
 
 def _ws(tmp):
