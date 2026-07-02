@@ -1,9 +1,12 @@
 """Tests for the FastAPI seam (vivarium_dashboard.api.app)."""
 
+import json
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+
+from vivarium_dashboard.lib.json_serialize import _json_default
 
 from vivarium_dashboard.api import app as api_app
 from vivarium_dashboard.api.app import create_app, get_workspace
@@ -1700,38 +1703,14 @@ def test_explorer_protein_breakdown_in_openapi(client):
 # Parity: FastAPI route body == REAL legacy stdlib Handler body
 # ---------------------------------------------------------------------------
 
-class TestExplorerServerShimParity:
-    """The FastAPI explorer route bodies match the REAL legacy stdlib handler.
+class TestExplorerRoutes:
+    """The FastAPI explorer route bodies carry the expected non-trivial shape.
 
-    Both servers back onto the same ``lib.explorer_data`` builders, but the
-    legacy *handler* also does its own query-string parsing and dict-wrapping
-    (e.g. ``{"runs": ...}``).  Comparing against the lib function alone can't
-    catch a divergence in that handler-level wrapping, so these tests invoke the
-    actual ``server.Handler._get_explorer_*`` methods — constructed via
-    ``__new__`` to bypass the socket-bound ``__init__``, with ``_json`` patched
-    to capture ``(body, status)`` and ``self.path`` set to the request URL the
-    handler parses — and assert the captured body == the FastAPI route body
-    (and status 200).  This mirrors ``TestStudyDetailServerShimParity`` and the
-    git/rigor/investigation-view ``TestServerShimParity`` classes.
+    (Formerly a parity check against the retired stdlib ``server.Handler``; now
+    that the stdlib server is gone these assert the FastAPI route bodies
+    directly — the same non-trivial structural invariants the parity check
+    relied on.)
     """
-
-    @staticmethod
-    def _invoke_legacy(monkeypatch, ws_root: Path, method_name: str, path: str):
-        """Call the real stdlib explorer handler, capturing (body, status)."""
-        import vivarium_dashboard.server as server
-
-        monkeypatch.setattr(server, "WORKSPACE", ws_root)
-        handler = server.Handler.__new__(server.Handler)
-        captured: dict = {}
-
-        def _fake_json(data, code):
-            captured["body"] = data
-            captured["status"] = code
-
-        handler._json = _fake_json          # type: ignore[method-assign]
-        handler.path = path
-        getattr(handler, method_name)()
-        return captured
 
     @staticmethod
     def _fastapi_body(ws_root: Path, path: str):
@@ -1740,104 +1719,66 @@ class TestExplorerServerShimParity:
         c = TestClient(app)
         return c.get(path)
 
-    def test_runs_parity(self, tmp_path, monkeypatch):
-        """GET /api/explorer/runs: real handler body == FastAPI route body."""
+    def test_runs(self, tmp_path):
+        """GET /api/explorer/runs wraps list_runs() under a non-empty "runs" key."""
         ws = _make_explorer_workspace(tmp_path)
-        path = "/api/explorer/runs"
-
-        legacy = self._invoke_legacy(monkeypatch, ws, "_get_explorer_runs", path)
-        assert legacy["status"] == 200
-        # Non-trivial: the handler wraps list_runs() under a "runs" key.
-        assert "runs" in legacy["body"] and legacy["body"]["runs"]
-
-        r = self._fastapi_body(ws, path)
+        r = self._fastapi_body(ws, "/api/explorer/runs")
         assert r.status_code == 200
-        assert r.json() == legacy["body"]
+        body = r.json()
+        assert "runs" in body and body["runs"]
 
-    def test_observables_parity(self, tmp_path, monkeypatch):
-        """GET /api/explorer/observables: real handler body == FastAPI route body."""
+    def test_observables(self, tmp_path):
+        """GET /api/explorer/observables returns real categorized observables."""
         ws = _make_explorer_workspace(tmp_path)
         db_path = str(ws / "studies" / "demo" / "runs.db")
-        path = f"/api/explorer/observables?db={db_path}&run=run-1"
-
-        legacy = self._invoke_legacy(
-            monkeypatch, ws, "_get_explorer_observables", path)
-        assert legacy["status"] == 200
-        # Non-trivial: real categorized observables, not an empty/error body.
-        assert legacy["body"].get("categories")
-
-        r = self._fastapi_body(ws, path)
+        r = self._fastapi_body(
+            ws, f"/api/explorer/observables?db={db_path}&run=run-1")
         assert r.status_code == 200
-        assert r.json() == legacy["body"]
+        assert r.json().get("categories")
 
-    def test_series_parity(self, tmp_path, monkeypatch):
-        """GET /api/explorer/series: real handler body == FastAPI route body."""
+    def test_series(self, tmp_path):
+        """GET /api/explorer/series returns a real time axis + named series."""
         ws = _make_explorer_workspace(tmp_path)
         db_path = str(ws / "studies" / "demo" / "runs.db")
-        path = (f"/api/explorer/series?db={db_path}"
+        r = self._fastapi_body(
+            ws, f"/api/explorer/series?db={db_path}"
                 f"&paths=listeners.mass.cell_mass&run=run-1")
-
-        legacy = self._invoke_legacy(
-            monkeypatch, ws, "_get_explorer_series", path)
-        assert legacy["status"] == 200
-        # Non-trivial: a real time axis + named series, not the empty error body.
-        assert legacy["body"]["time"]
-        assert "listeners.mass.cell_mass" in legacy["body"]["series"]
-
-        r = self._fastapi_body(ws, path)
         assert r.status_code == 200
-        assert r.json() == legacy["body"]
+        body = r.json()
+        assert body["time"]
+        assert "listeners.mass.cell_mass" in body["series"]
 
 
-class TestStudyDetailServerShimParity:
-    """The FastAPI route body matches the legacy server builder for 200 + 404 + 400."""
+class TestStudyDetailRoute:
+    """The FastAPI /api/study/<slug> route: 200 body matches the lib builder,
+    and 404 / 400 carry the expected status + error body."""
 
-    def test_200_parity(self, tmp_path, monkeypatch):
+    def test_200_matches_lib_builder(self, tmp_path):
         ws = _make_study_workspace(tmp_path)
-        import vivarium_dashboard.server as srv
-        monkeypatch.setattr(srv, "WORKSPACE", ws)
-        srv._WP_CACHE.clear()
+        from vivarium_dashboard.lib.study_spec import load_study_detail_spec
+        expected = json.loads(json.dumps(
+            load_study_detail_spec(ws, "my-study"), default=_json_default))
 
-        # Legacy builder response
-        legacy_bytes, legacy_status = srv.Handler._build_api_study_response("my-study")
-        import json as _json
-        legacy_body = _json.loads(legacy_bytes)
-
-        # FastAPI route response
         app = create_app()
         app.dependency_overrides[get_workspace] = lambda: ws
         from fastapi.testclient import TestClient as _TC
         c = _TC(app)
         r = c.get("/api/study/my-study")
 
-        assert r.status_code == legacy_status == 200
-        assert r.json() == legacy_body
+        assert r.status_code == 200
+        assert r.json() == expected
 
-    def test_404_parity(self, client, tmp_path, monkeypatch):
-        import vivarium_dashboard.server as srv
-        monkeypatch.setattr(srv, "WORKSPACE", tmp_path)
-        srv._WP_CACHE.clear()
-
-        legacy_bytes, legacy_status = srv.Handler._build_api_study_response("no-study")
-        import json as _json
-        legacy_body = _json.loads(legacy_bytes)
-
+    def test_404_unknown_study(self, client, tmp_path, monkeypatch):
         r = client.get("/api/study/no-study")
-        assert r.status_code == legacy_status == 404
-        assert r.json() == legacy_body
+        assert r.status_code == 404
+        assert "error" in r.json()
 
-    def test_400_parity(self, client):
-        """Slug that fails SLUG_RE → identical 400 body from both paths."""
-        import vivarium_dashboard.server as srv
-        import json as _json
+    def test_400_invalid_slug(self, client):
+        """Slug that fails SLUG_RE → 400 with an error body."""
         # Use a slug that FastAPI routes (no encoded '/') but SLUG_RE rejects
-        bad_slug = "UPPER-CASE"
-        legacy_bytes, legacy_status = srv.Handler._build_api_study_response(bad_slug)
-        legacy_body = _json.loads(legacy_bytes)
-
-        r = client.get(f"/api/study/{bad_slug}")
-        assert r.status_code == legacy_status == 400
-        assert r.json() == legacy_body
+        r = client.get("/api/study/UPPER-CASE")
+        assert r.status_code == 400
+        assert "error" in r.json()
 
 
 # ---------------------------------------------------------------------------
@@ -1996,23 +1937,21 @@ def test_iset_detail_404_unknown_slug(client):
     assert "detail" not in body   # must NOT be FastAPI default {"detail":...}
 
 
-def test_iset_detail_404_body_matches_legacy(tmp_path, monkeypatch):
-    """Exact 404 body parity with the legacy _get_iset_detail handler.
+def test_iset_detail_404_body_matches_lib(tmp_path, monkeypatch):
+    """Exact 404 body for an unknown investigation slug.
 
-    The legacy handler maps ``_iset_detail_data(...) is None`` to the verbatim
-    body ``{"error": "no investigation.yaml for '<slug>'"}``; the FastAPI route
-    must emit the identical 404 body.
+    ``lib.report_views.build_iset_detail(...) is None`` for an unknown slug, and
+    the FastAPI route maps that to the verbatim body
+    ``{"error": "no investigation.yaml for '<slug>'"}``.
     """
-    import vivarium_dashboard.server as srv
+    from vivarium_dashboard.lib.report_views import build_iset_detail
 
     ws = _make_iset_workspace(tmp_path)
     slug = "no-such"
 
-    # Legacy handler maps a None builder result to the verbatim 404 string.
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
-    srv._WP_CACHE.clear()
-    assert srv.Handler._iset_detail_data(slug) is None
-    legacy_body = {"error": f"no investigation.yaml for {slug!r}"}
+    # The lib builder returns None for an unknown slug.
+    assert build_iset_detail(ws, slug) is None
+    expected_body = {"error": f"no investigation.yaml for {slug!r}"}
 
     # FastAPI route 404 body must be byte-identical.
     app = create_app()
@@ -2021,7 +1960,7 @@ def test_iset_detail_404_body_matches_legacy(tmp_path, monkeypatch):
     c = _TC(app)
     r = c.get(f"/api/investigation/{slug}")
     assert r.status_code == 404
-    assert r.json() == legacy_body
+    assert r.json() == expected_body
 
 
 def test_iset_detail_in_openapi(client):
@@ -2119,11 +2058,11 @@ def test_linkage_index_200(client):
     assert "nodes" in body and "edges" in body
 
 
-def test_linkage_index_parity_with_server(tmp_path, monkeypatch):
-    """FastAPI linkage route body == legacy server worker (source query)."""
+def test_linkage_index_matches_lib_builder(tmp_path, monkeypatch):
+    """FastAPI linkage route body == lib.report_views.build_linkage_index (source query)."""
     import yaml as _yaml
-    import json as _json
-    import vivarium_dashboard.server as srv
+    from vivarium_dashboard.lib import report_views as _report_views
+    from vivarium_dashboard.lib import observables_views as _obs_views
     ws = tmp_path / "ws"
     ws.mkdir(parents=True)
     (ws / "workspace.yaml").write_text("name: ws\n")
@@ -2139,15 +2078,18 @@ def test_linkage_index_parity_with_server(tmp_path, monkeypatch):
         "name": "s1", "investigation": "the-inv", "cites": ["bib-X"],
         "tests": [{"name": "b1"}],
     }))
-    legacy_bytes, legacy_status = srv.Handler._linkage_index_test(ws, source="bib-X")
-    legacy_body = _json.loads(legacy_bytes)
+    expected_body, expected_status = _report_views.build_linkage_index(
+        ws, source="bib-X",
+        observables_for_ref_fn=_obs_views.observables_for_ref_payload,
+    )
+    expected_body = json.loads(json.dumps(expected_body, default=_json_default))
 
     app = create_app()
     app.dependency_overrides[get_workspace] = lambda: ws
     c = TestClient(app)
     r = c.get("/api/linkage-index", params={"source": "bib-X"})
-    assert r.status_code == legacy_status == 200
-    assert r.json() == legacy_body
+    assert r.status_code == expected_status == 200
+    assert r.json() == expected_body
 
 
 def test_observables_routes_in_openapi(client):
