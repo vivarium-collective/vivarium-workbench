@@ -47,7 +47,8 @@ def _stamp_build_meta(cache: Path, simulator_id: int, commit: str) -> None:
 
 def build_cache_root() -> Path:
     """Root dir for materialized build workspaces (env-overridable for tests)."""
-    env = os.environ.get("VIVARIUM_DASHBOARD_BUILD_CACHE")
+    from vivarium_workbench.lib.env_compat import get_env
+    env = get_env("BUILD_CACHE")
     return Path(env) if env else Path.home() / ".pbg" / "build-cache"
 
 

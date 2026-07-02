@@ -9,7 +9,7 @@ the FastAPI app (``api.app:app``) under uvicorn:
 * put the workspace on ``sys.path`` so its ``pbg_*`` package imports;
 * register the active workspace root (the FastAPI ``get_workspace`` dependency
   reads it via ``active_workspace`` → ``_root``) and mirror it into the
-  ``VIVARIUM_DASHBOARD_WORKSPACE`` env var;
+  ``VIVARIUM_WORKBENCH_WORKSPACE`` env var;
 * reconcile composite runs left ``running`` by a previous crash/restart;
 * write ``.pbg/server/server-info`` so tests/tools can detect readiness.
 
@@ -47,7 +47,7 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1") -> int:
 
     from vivarium_workbench.lib._root import set_workspace_root
     set_workspace_root(workspace)
-    os.environ["VIVARIUM_DASHBOARD_WORKSPACE"] = str(workspace)
+    os.environ["VIVARIUM_WORKBENCH_WORKSPACE"] = str(workspace)
 
     from vivarium_workbench.lib.workspace_paths import WorkspacePaths
     pbg = WorkspacePaths.load(workspace).pbg

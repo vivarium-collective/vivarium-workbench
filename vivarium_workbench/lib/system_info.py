@@ -168,8 +168,8 @@ def build_ui_config(ws_root: Path) -> dict:
     except Exception:  # noqa: BLE001
         ws = {}
     ui = ws.get("ui") or {}
-    import os
-    readonly = os.environ.get("VIVARIUM_DASHBOARD_READONLY", "").strip().lower() \
+    from vivarium_workbench.lib.env_compat import get_env
+    readonly = (get_env("READONLY", "") or "").strip().lower() \
         not in ("", "0", "false", "no")
     return {
         "readonly": readonly,

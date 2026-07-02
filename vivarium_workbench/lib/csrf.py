@@ -38,5 +38,9 @@ def is_request_allowed(
 
 
 def is_disabled_via_env(env: Mapping[str, str]) -> bool:
-    """True if the CSRF bypass escape hatch is set (``VIVARIUM_DASHBOARD_DISABLE_CSRF=1``)."""
-    return env.get("VIVARIUM_DASHBOARD_DISABLE_CSRF") == "1"
+    """True if the CSRF bypass escape hatch is set (``VIVARIUM_WORKBENCH_DISABLE_CSRF=1``).
+
+    Dual-reads the deprecated ``VIVARIUM_DASHBOARD_DISABLE_CSRF`` for back-compat.
+    """
+    from vivarium_workbench.lib.env_compat import get_env
+    return get_env("DISABLE_CSRF", env=env) == "1"

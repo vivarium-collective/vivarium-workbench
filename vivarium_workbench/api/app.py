@@ -20,7 +20,7 @@ Run it standalone and browse the auto-generated **Swagger UI**:
     #   raw schema at http://127.0.0.1:8001/openapi.json
 
 (or, equivalently, ``uvicorn vivarium_workbench.api.app:app --reload`` with
-``VIVARIUM_DASHBOARD_WORKSPACE`` set.)
+``VIVARIUM_WORKBENCH_WORKSPACE`` set.)
 """
 
 from __future__ import annotations
@@ -323,7 +323,7 @@ from vivarium_workbench.lib.visualization_classes import list_visualization_clas
 from vivarium_workbench.lib.simulations_index import list_simulations
 from vivarium_workbench.lib.study_charts import build_study_charts_payload
 
-WORKSPACE_ENV = "VIVARIUM_DASHBOARD_WORKSPACE"
+WORKSPACE_ENV = "VIVARIUM_WORKBENCH_WORKSPACE"
 
 
 def get_workspace() -> Path:
@@ -331,13 +331,14 @@ def get_workspace() -> Path:
 
     Prefers a root registered via ``active_workspace.set_workspace_root`` (the
     single source of truth shared with the stdlib server). Falls back to the
-    ``VIVARIUM_DASHBOARD_WORKSPACE`` env var (default ``"."``) when none is set,
+    ``VIVARIUM_WORKBENCH_WORKSPACE`` env var (default ``"."``) when none is set,
     preserving the prior env-var + dependency_overrides behavior.
     """
     root = active_workspace.get_workspace_root()
     if root is not None:
         return root
-    return Path(os.environ.get(WORKSPACE_ENV, ".")).resolve()
+    from vivarium_workbench.lib.env_compat import get_env
+    return Path(get_env("WORKSPACE", ".")).resolve()
 
 
 _OPENAPI_TAGS = [
@@ -397,14 +398,14 @@ _OPENAPI_TAGS = [
 
 
 # Read-only mode --------------------------------------------------------------
-# When ``VIVARIUM_DASHBOARD_READONLY`` is set, the app serves a read-only
+# When ``VIVARIUM_WORKBENCH_READONLY`` is set, the app serves a read-only
 # surface: every GET (reads/display/sync) stays, but mutating routes are
 # dropped EXCEPT a small whitelist of *actions* the client legitimately
 # triggers — run launches, the remote-build flow, and GitHub auth. The dropped
 # authoring/local-management endpoints simply 404 (no route registered), which
 # is exactly the "reader/displayer of git-committed content, remote-only
 # server" model. Reversible: unset the flag to restore the full surface.
-READONLY_ENV = "VIVARIUM_DASHBOARD_READONLY"
+READONLY_ENV = "VIVARIUM_WORKBENCH_READONLY"
 
 _READONLY_ALLOWED_MUTATIONS = {
     # run triggers (local or remote execution)
@@ -427,7 +428,8 @@ _READONLY_ALLOWED_MUTATIONS = {
 
 
 def _readonly_enabled() -> bool:
-    return os.environ.get(READONLY_ENV, "").strip().lower() not in ("", "0", "false", "no")
+    from vivarium_workbench.lib.env_compat import get_env
+    return (get_env("READONLY", "") or "").strip().lower() not in ("", "0", "false", "no")
 
 
 def _apply_readonly_filter(app: FastAPI) -> None:
@@ -471,7 +473,7 @@ def create_app() -> FastAPI:
         forbidden"}`` — emitted via ``JSONResponse`` (NOT ``HTTPException``, whose
         body is ``{"detail": ...}``).  GET and other safe methods are never
         blocked.  No ``Origin`` header (e.g. curl, local CLI, starlette's
-        ``TestClient``) → allowed; ``VIVARIUM_DASHBOARD_DISABLE_CSRF=1`` → allowed.
+        ``TestClient``) → allowed; ``VIVARIUM_WORKBENCH_DISABLE_CSRF=1`` → allowed.
         """
         if request.method in ("POST", "DELETE"):
             if not _csrf.is_request_allowed(

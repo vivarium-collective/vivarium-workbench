@@ -1084,7 +1084,7 @@ class UiConfig(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    # True when VIVARIUM_DASHBOARD_READONLY is set — the client hides authoring
+    # True when VIVARIUM_WORKBENCH_READONLY is set — the client hides authoring
     # controls and goes remote-only (no Local source option).
     readonly: bool = False
     composite_view: str

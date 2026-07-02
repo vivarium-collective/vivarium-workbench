@@ -13,7 +13,7 @@ Two auth paths, in resolution order:
    No client secret, no redirect URI — appropriate for a binary that runs
    locally. Requires a public ``client_id`` registered against an OAuth App
    in the ``vivarium-collective`` org. The app's client_id is read from the
-   ``VIVARIUM_DASHBOARD_GH_CLIENT_ID`` env var (no default ships, so an
+   ``VIVARIUM_WORKBENCH_GH_CLIENT_ID`` env var (no default ships, so an
    unconfigured deployment cannot accidentally talk to a wrong app).
 
 Tokens are persisted in the system keychain via ``keyring`` when available.
@@ -51,7 +51,7 @@ _KEYRING_SERVICE = "vivarium-dashboard"
 # Public OAuth App client_id. Must be set via env for the device flow to work;
 # the gh-cli delegate path doesn't need it. Empty string disables device flow
 # (start_device_flow returns a 503-shaped error in that case).
-_CLIENT_ID_ENV = "VIVARIUM_DASHBOARD_GH_CLIENT_ID"
+_CLIENT_ID_ENV = "VIVARIUM_WORKBENCH_GH_CLIENT_ID"
 
 # Minimum sufficient scopes for the dashboard's actions:
 #   - repo:          create / push to user repos and orgs (Phase C, Todo #1).
@@ -272,7 +272,8 @@ def read_gh_cli_session() -> Session | None:
 
 
 def _client_id() -> str:
-    return os.environ.get(_CLIENT_ID_ENV, "").strip()
+    from vivarium_workbench.lib.env_compat import get_env
+    return (get_env("GH_CLIENT_ID", "") or "").strip()
 
 
 def _http_post(url: str, data: dict, *, headers: dict | None = None) -> tuple[int, dict]:
