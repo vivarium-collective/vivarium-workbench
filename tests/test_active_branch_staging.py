@@ -1,10 +1,10 @@
-"""_active_branch_action must never stage large untracked artifact dirs."""
+"""active_branch_action must never stage large untracked artifact dirs."""
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from vivarium_dashboard import server as srv
+from vivarium_dashboard.lib import work_state
 
 
 def _git(args, cwd):
@@ -26,9 +26,9 @@ def repo(tmp_path, monkeypatch):
     _git(["add", "-A"], ws)
     _git(["commit", "-m", "init"], ws)
     _git(["checkout", "-b", "stage/test"], ws)
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
+    from vivarium_dashboard.lib._root import set_workspace_root
+    set_workspace_root(ws)
     # Point work_state at this repo's active branch.
-    import vivarium_dashboard.lib.work_state as work_state
     monkeypatch.setattr(work_state, "load_state",
                         lambda: {"active_branch": "stage/test"})
     monkeypatch.setattr(work_state, "save_state", lambda state: None)
@@ -45,7 +45,7 @@ def test_untracked_out_dir_is_not_committed(repo):
         (repo / "studies").mkdir(exist_ok=True)
         (repo / "studies" / "new.yaml").write_text("k: v\n")
 
-    resp, code = srv._active_branch_action("test commit", action)
+    resp, code = work_state.active_branch_action(repo, "test commit", action)
     assert code == 200, resp
     # The commit contains studies/new.yaml but NOT anything under out/.
     files = _git(["show", "--name-only", "--format=", "HEAD"], repo).stdout
