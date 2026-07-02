@@ -2,7 +2,7 @@
 
 ## Two services, two layers
 
-**Dashboard typed API** (`vivarium_dashboard/api/app.py`, this seam) reads the
+**Dashboard typed API** (`vivarium_workbench/api/app.py`, this seam) reads the
 **local workspace**: investigations, studies, composites, registry, charts, and
 catalog.  It is a strangler-fig migration of the stdlib `http.server` handler
 — routes move here one at a time, backed by the same `lib/` functions, so
@@ -68,7 +68,7 @@ hosts and the mismatch causes no practical conflict.
 
 2. **Share the 2-3 genuinely-shared models.**  Define `SimRunRef` (the
    `run_id` + `study_slug` join key) in a shared location (e.g.
-   `vivarium_dashboard/lib/models.py`) so the sms-api client and the
+   `vivarium_workbench/lib/models.py`) so the sms-api client and the
    `SimRow` index use the same field names at the boundary.
 
 3. **Document ownership explicitly.**  Add a one-line ownership comment to

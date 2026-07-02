@@ -26,7 +26,7 @@ Reactions with no mapping render grey. See [flux ID-map coverage caveat](#flux-i
 
 ## HTTP Endpoints
 
-All endpoints live under `/api/explorer/` and are registered in `vivarium_dashboard/server.py`.
+All endpoints live under `/api/explorer/` and are registered in `vivarium_workbench/api/app.py`.
 
 | Endpoint | Method | Description |
 |---|---|---|
@@ -44,7 +44,7 @@ When the dashboard runs in hosted snapshot mode (`window.__DASH_CONFIG__.mode ==
 
 ## Emitter support
 
-The data layer (`vivarium_dashboard/lib/explorer_data.py`) transparently handles two storage formats:
+The data layer (`vivarium_workbench/lib/explorer_data.py`) transparently handles two storage formats:
 
 **SQLite (`runs.db`)** — written by `process_bigraph.SQLiteEmitter`. Each row in the `history` table holds a JSON-serialised state dict. `list_runs` discovers these by globbing `studies/*/runs.db`.
 
@@ -54,7 +54,7 @@ The data layer (`vivarium_dashboard/lib/explorer_data.py`) transparently handles
 
 ## Asset generation
 
-The flux-map view requires three pre-generated static assets under `vivarium_dashboard/static/explorer/`:
+The flux-map view requires three pre-generated static assets under `vivarium_workbench/static/explorer/`:
 
 | File | Content |
 |---|---|
