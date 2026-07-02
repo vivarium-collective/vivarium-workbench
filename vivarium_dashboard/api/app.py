@@ -519,11 +519,14 @@ def create_app() -> FastAPI:
     def simulations(ws: Path = Depends(get_workspace)) -> SimulationsPayload:
         """Workspace-wide simulations index (mirrors the stdlib /api/simulations).
 
-        `current` (the active branch slug) is computed by the stdlib server today
-        and will move here when branch state is shared; until then it is null.
+        Fully library-backed via ``lib.simulations_index.build_simulations_data``,
+        which enriches ``list_simulations`` rows with emitter_type labels + the
+        active-workspace remote runs and reports the current branch slug.
         """
-        rows = [SimRow.model_validate(r) for r in list_simulations(ws)]
-        return SimulationsPayload(simulations=rows, current=None)
+        from vivarium_dashboard.lib.simulations_index import build_simulations_data
+        data = build_simulations_data(ws)
+        rows = [SimRow.model_validate(r) for r in data.get("simulations", [])]
+        return SimulationsPayload(simulations=rows, current=data.get("current"))
 
     @app.get(
         "/api/workspace-manifest",

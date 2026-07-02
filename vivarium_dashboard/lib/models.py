@@ -80,6 +80,9 @@ class SimRow(BaseModel):
     # Canonically "xarray" | "parquet" | "sqlite" (``EmitterKind``), but a
     # spec may declare a free-form emitter (e.g. "unknown"), so accept any str.
     emitter: Optional[str] = None
+    # Human-facing emitter label ("SQLite" | "Parquet" | "XArray" | "—"),
+    # computed by ``build_simulations_data`` for the /api/simulations index.
+    emitter_type: Optional[str] = None
     # DB-path rows carry ``StudyRef`` objects; spec/study-synthesised rows carry
     # bare study-slug strings — accept either.
     studies: list[Union[StudyRef, str]] = []
