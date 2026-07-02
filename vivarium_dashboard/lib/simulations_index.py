@@ -917,3 +917,61 @@ def delete_simulation(workspace: Path, run_id: str) -> dict:
         "unlinked_studies": unlinked,
         "errors": errors,
     }
+
+
+def _emitter_tag(emitter) -> str:
+    """Normalise a row's ``emitter`` field to a lowercase string tag.
+
+    The value may be a plain string ("parquet"), a structured dict
+    ({"kind": "parquet", "store": ...}) declared in a study.yaml ``runs:``
+    entry, or None. A dict reaching ``.lower()`` used to raise AttributeError
+    inside the emitter_type loop — silently swallowed — which blanked every
+    row's emitter_type and made the UI default the pill to "SQLite".
+    """
+    if isinstance(emitter, dict):
+        emitter = emitter.get("kind")
+    return emitter.lower() if isinstance(emitter, str) else ""
+
+
+def _append_remote_simulations(sims: list, ws_root: Path) -> list:
+    """Append the active remote build's server-side runs (scoped to the build's
+    commit/repo) to the local Simulations-DB rows. No-op for local workspaces
+    or when sms-api is unreachable — single source for the local+remote merge,
+    shared by ``build_simulations_data`` and the ``/api/simulations`` handler."""
+    try:
+        from vivarium_dashboard.lib.remote_simulations import list_remote_simulations
+        remote = list_remote_simulations(ws_root)
+    except Exception:
+        remote = []
+    return list(sims) + remote if remote else sims
+
+
+def build_simulations_data(ws_root: Path) -> dict:
+    """Data builder for GET /api/simulations — the ``list_simulations`` rows
+    enriched with emitter_type labels + active remote build runs + current slug.
+
+    Returns ``{"simulations": [...], "current": <slug|None>}``.  Tolerates
+    missing DB / import errors → returns an empty list.  Relocated verbatim from
+    the retired ``server._simulations_data`` so publish.build_bundle and the
+    ``/api/simulations`` seam share one implementation.
+    """
+    ws = str(ws_root)
+    import sys as _sys
+    if ws not in _sys.path:
+        _sys.path.insert(0, ws)
+    try:
+        sims = list_simulations(ws_root)
+    except Exception:
+        return {"simulations": [], "current": None}
+    try:
+        from vivarium_dashboard.lib.runs_index import emitter_type_of
+        _emitter_label = {"sqlite": "SQLite", "parquet": "Parquet", "xarray": "XArray",
+                          "none": "—"}  # no step emitter (summary-only run)
+        for s in sims:
+            s["emitter_type"] = _emitter_label.get(
+                _emitter_tag(s.get("emitter"))) or emitter_type_of(s.get("db_path"))
+    except Exception:
+        pass
+    sims = _append_remote_simulations(sims, ws_root)
+    from vivarium_dashboard.lib.investigation_status import current_branch_slug
+    return {"simulations": sims, "current": current_branch_slug(ws_root)}
