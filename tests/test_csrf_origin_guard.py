@@ -75,7 +75,9 @@ def test_post_same_origin_is_allowed(tmp_path, dashboard_client):
     # client.base_url is "http://127.0.0.1:<port>" == scheme://Host.
     code = _post(client.base_url, _PROBE_PATH, origin=client.base_url)
     assert code != 403
-    assert code == 404  # passed the guard, fell through to the route map
+    # Passed the guard and reached routing: 404 (no route) or 405 (the FastAPI
+    # static catch-all matches the path for GET, so POST is method-not-allowed).
+    assert code in (404, 405)
 
 
 def test_post_no_origin_is_allowed(tmp_path, dashboard_client):
@@ -84,7 +86,9 @@ def test_post_no_origin_is_allowed(tmp_path, dashboard_client):
     client = dashboard_client(ws)
     code = _post(client.base_url, _PROBE_PATH, origin=None)
     assert code != 403
-    assert code == 404
+    # Passed the guard and reached routing (404 no-route or 405 method-not-allowed
+    # from the FastAPI static catch-all — see test_post_same_origin_is_allowed).
+    assert code in (404, 405)
 
 
 # ---------------------------------------------------------------------------
