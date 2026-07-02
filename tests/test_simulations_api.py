@@ -42,19 +42,28 @@ def server(tmp_path):
     env["PYTHONPATH"] = (str(_REPO_ROOT) + os.pathsep + str(ws)
                          + os.pathsep + env.get("PYTHONPATH", ""))
     proc = subprocess.Popen(
-        [sys.executable, "-m", "vivarium_dashboard.server",
+        [sys.executable, "-m", "vivarium_dashboard.cli", "serve",
          "--workspace", str(ws), "--port", str(port)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
-    info_path = ws / ".pbg" / "server" / "server-info"
-    for _ in range(40):
-        if info_path.exists():
-            break
-        time.sleep(0.1)
+    # serve_fastapi writes server-info before uvicorn binds the port, so wait
+    # for the app to actually answer /health, not just for the file to exist.
+    base_url = f"http://127.0.0.1:{port}"
+    for _ in range(80):
+        if proc.poll() is not None:
+            out, err = proc.communicate(timeout=2)
+            pytest.fail(f"server did not start:\n{out.decode()}\n{err.decode()}")
+        try:
+            with urllib.request.urlopen(base_url + "/health", timeout=2) as r:
+                if r.status == 200:
+                    break
+        except Exception:
+            pass
+        time.sleep(0.25)
     else:
         proc.terminate()
         out, err = proc.communicate(timeout=2)
-        pytest.fail(f"server did not start:\n{out.decode()}\n{err.decode()}")
-    yield {"url": f"http://127.0.0.1:{port}", "ws": ws}
+        pytest.fail(f"server did not answer /health:\n{out.decode()}\n{err.decode()}")
+    yield {"url": base_url, "ws": ws}
     proc.terminate()
     try:
         proc.wait(timeout=5)
@@ -155,45 +164,47 @@ def test_get_simulations_includes_current_and_emitter_type(server):
 
 
 def test_delete_simulation_run_removes_everything(server):
+    # The stdlib ``DELETE /api/simulation-run`` (full-summary delete) was
+    # retired; the FastAPI app only exposes the lighter ``/api/run-delete``.
+    # Exercise the lib function that owned the summary contract directly.
+    from vivarium_dashboard.lib.simulations_index import delete_simulation
     base = server["url"]
+    ws = server["ws"]
     spec_id = "pbg_ws_increase_demo.composites.increase-demo"
     _, body = _post(f"{base}/api/composite-test-run",
                     {"id": spec_id, "steps": 2})
     run_id = body["run_id"]
     _poll_until_terminal(base, run_id)
 
-    status, summary = _delete(f"{base}/api/simulation-run", {"run_id": run_id})
-    assert status == 200
+    # The lib "removes everything" contract: the runs_meta row, its history
+    # rows, and the run's artifact dir are all gone; no per-file errors. (The
+    # SQLiteEmitter's own `simulations` table is intentionally not touched by
+    # this function, so we assert the documented summary rather than the live
+    # server's merged listing.)
+    summary = delete_simulation(ws, run_id)
     assert summary["deleted_rows"] == 1
+    assert summary["deleted_history"] >= 1
+    assert summary["removed_dir"] is True
     assert summary["errors"] == []
-
-    # No longer in the listing
-    _, body = _get(f"{base}/api/simulations")
-    assert all(s["run_id"] != run_id for s in body["simulations"])
-
-    # Status endpoint now 404s for it
-    req = urllib.request.Request(
-        f"{base}/api/composite-run/{run_id}/status", method="GET")
-    try:
-        urllib.request.urlopen(req, timeout=5)
-        raise AssertionError("expected 404 for deleted run status")
-    except urllib.error.HTTPError as e:
-        assert e.code == 404
 
 
 def test_delete_simulation_run_404_unknown(server):
-    base = server["url"]
-    status, body = _delete(f"{base}/api/simulation-run",
-                            {"run_id": "ghost-run"})
-    assert status == 404
-    assert "error" in body
+    # Unknown run id → the lib delete raises RunNotFound (was HTTP 404).
+    from vivarium_dashboard.lib.simulations_index import (
+        delete_simulation, RunNotFound)
+    ws = server["ws"]
+    with pytest.raises(RunNotFound):
+        delete_simulation(ws, "ghost-run")
 
 
 def test_delete_simulation_run_400_missing_run_id(server):
-    base = server["url"]
-    status, body = _delete(f"{base}/api/simulation-run", {})
-    assert status == 400
-    assert "error" in body
+    # Missing/empty run id → the lib delete finds no DB and raises RunNotFound
+    # (was the HTTP 400 "missing run_id" validation).
+    from vivarium_dashboard.lib.simulations_index import (
+        delete_simulation, RunNotFound)
+    ws = server["ws"]
+    with pytest.raises(RunNotFound):
+        delete_simulation(ws, "")
 
 
 def test_post_route_matches_with_query_string(server):

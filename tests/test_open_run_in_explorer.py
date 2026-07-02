@@ -40,19 +40,28 @@ def server(tmp_path):
     env["PYTHONPATH"] = (str(_REPO_ROOT) + os.pathsep + str(ws)
                          + os.pathsep + env.get("PYTHONPATH", ""))
     proc = subprocess.Popen(
-        [sys.executable, "-m", "vivarium_dashboard.server",
+        [sys.executable, "-m", "vivarium_dashboard.cli", "serve",
          "--workspace", str(ws), "--port", str(port)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
-    info_path = ws / ".pbg" / "server" / "server-info"
-    for _ in range(40):
-        if info_path.exists():
-            break
-        time.sleep(0.1)
+    # serve_fastapi writes server-info before uvicorn binds the port, so wait
+    # for the app to actually answer /health, not just for the file to exist.
+    base_url = f"http://127.0.0.1:{port}"
+    for _ in range(80):
+        if proc.poll() is not None:
+            out, err = proc.communicate(timeout=2)
+            pytest.fail(f"server did not start:\n{out.decode()}\n{err.decode()}")
+        try:
+            with urllib.request.urlopen(base_url + "/health", timeout=2) as r:
+                if r.status == 200:
+                    break
+        except Exception:
+            pass
+        time.sleep(0.25)
     else:
         proc.terminate()
         out, err = proc.communicate(timeout=2)
-        pytest.fail(f"server did not start:\n{out.decode()}\n{err.decode()}")
-    yield {"url": f"http://127.0.0.1:{port}", "ws": ws}
+        pytest.fail(f"server did not answer /health:\n{out.decode()}\n{err.decode()}")
+    yield {"url": base_url, "ws": ws}
     proc.terminate()
     try:
         proc.wait(timeout=5)
