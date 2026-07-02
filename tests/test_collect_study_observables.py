@@ -6,7 +6,9 @@ just {"_tick": <global_time>}. _collect_study_observables sweeps the study
 spec for every observable-shaped path declaration so the run handler can
 wire inject_emitter_for_paths automatically.
 """
-from vivarium_dashboard.server import _collect_study_observables
+from vivarium_dashboard.lib.study_spec import (
+    collect_study_observables as _collect_study_observables,
+)
 
 
 def test_empty_spec_returns_empty_list():
@@ -136,51 +138,12 @@ def test_malformed_entries_are_skipped():
 
 
 # ---------------------------------------------------------------------------
-# C-state-3c: lib copy (study_spec.collect_study_observables) parity with the
-# server original.  The remote-run builder consumes the lib copy; it must agree
-# with the server byte-for-byte across every recognised declaration shape.
+# C-state-3c: the lib copy (study_spec.collect_study_observables) must recognise
+# every declaration shape, including the v4 comparative_visualizations[] loop.
 # ---------------------------------------------------------------------------
-from vivarium_dashboard.lib.study_spec import (  # noqa: E402
-    collect_study_observables as _lib_collect,
-)
 
 
-_REPRESENTATIVE_SPECS = [
-    {},
-    {
-        "readouts": [
-            {"store_path": "agents.0.listeners.dnaA_binding.free_total"},
-            {"store_path": "agents/0/listeners/dnaA_binding/chromosome/occupied"},
-        ],
-        "behavior_tests": [
-            {"measure": {"path": "listeners.A"}},
-            {"measure": {"series_x": {"path": "listeners.B"}, "series_y": {"path": "listeners.C"}}},
-        ],
-        "simulation_set": [
-            {"observe": ["stores/level", "stores/flux"]},
-            {"observe": "stores/extra"},
-        ],
-        # v4 shapes — tests[] + comparative_visualizations[] (the loop the lib
-        # copy was missing before the C-state-3c fix).
-        "tests": [
-            {"measure": {"path": "listeners.v4_path"}},
-            {"measure": {"x": {"path": "listeners.v4_x"}, "y": {"path": "listeners.v4_y"}}},
-        ],
-        "comparative_visualizations": [
-            {"observable_path": "agents.0.overlay_observable"},
-            {"observable_path": "listeners.A"},  # dup of an earlier path → dropped
-        ],
-    },
-]
-
-
-def test_lib_copy_matches_server_for_representative_specs():
-    for spec in _REPRESENTATIVE_SPECS:
-        assert _lib_collect(spec) == _collect_study_observables(spec)
-
-
-def test_lib_copy_collects_comparative_visualizations():
-    """Regression: the lib copy must include comparative_visualizations[] (v4)."""
+def test_collects_comparative_visualizations():
+    """Regression: comparative_visualizations[] (v4) contributes observables."""
     spec = {"comparative_visualizations": [{"observable_path": "agents.0.cv_obs"}]}
-    assert _lib_collect(spec) == ["agents/0/cv_obs"]
-    assert _lib_collect(spec) == _collect_study_observables(spec)
+    assert _collect_study_observables(spec) == ["agents/0/cv_obs"]

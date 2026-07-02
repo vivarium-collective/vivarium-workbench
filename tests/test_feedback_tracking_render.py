@@ -23,12 +23,10 @@ def _write(path, payload):
 
 
 @pytest.fixture
-def _ws_with_feedback(tmp_path, monkeypatch):
+def _ws_with_feedback(tmp_path):
     """Workspace with a study + feedback files containing both open and
     addressed items.  The feedback file uses the dated-round-folder layout
     so _feedback_files picks it up."""
-    import vivarium_dashboard.server as srv
-
     ws = tmp_path / "ws"
     sd = ws / "studies" / "fb-test"
     sd.mkdir(parents=True)
@@ -83,15 +81,12 @@ def _ws_with_feedback(tmp_path, monkeypatch):
         },
     )
 
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
     return ws
 
 
 @pytest.fixture
-def _ws_no_feedback(tmp_path, monkeypatch):
+def _ws_no_feedback(tmp_path):
     """Workspace with a study but no feedback files."""
-    import vivarium_dashboard.server as srv
-
     ws = tmp_path / "ws"
     sd = ws / "studies" / "no-fb"
     sd.mkdir(parents=True)
@@ -107,7 +102,6 @@ def _ws_no_feedback(tmp_path, monkeypatch):
         "runs": [],
     }))
     (ws / "investigations").mkdir(parents=True)
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
     return ws
 
 
@@ -118,9 +112,9 @@ def _ws_no_feedback(tmp_path, monkeypatch):
 
 def test_study_detail_spec_carries_feedback_tracked(_ws_with_feedback):
     """_study_detail_spec must attach spec['feedback_tracked'] with items and summary."""
-    from vivarium_dashboard.server import _study_detail_spec
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
 
-    spec = _study_detail_spec("fb-test")
+    spec = _study_detail_spec(_ws_with_feedback, "fb-test")
     assert spec is not None
 
     assert "feedback_tracked" in spec, (
@@ -136,9 +130,9 @@ def test_study_detail_spec_carries_feedback_tracked(_ws_with_feedback):
 
 def test_feedback_tracked_has_correct_statuses(_ws_with_feedback):
     """Items have status field; the study-fb-test-charts section is addressed."""
-    from vivarium_dashboard.server import _study_detail_spec
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
 
-    spec = _study_detail_spec("fb-test")
+    spec = _study_detail_spec(_ws_with_feedback, "fb-test")
     ft = spec["feedback_tracked"]
     items = ft["items"]
 
@@ -156,9 +150,9 @@ def test_feedback_tracked_has_correct_statuses(_ws_with_feedback):
 
 def test_feedback_tracked_summary_correct(_ws_with_feedback):
     """Summary counts open/addressed/dismissed/total correctly."""
-    from vivarium_dashboard.server import _study_detail_spec
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
 
-    spec = _study_detail_spec("fb-test")
+    spec = _study_detail_spec(_ws_with_feedback, "fb-test")
     summary = spec["feedback_tracked"]["summary"]
 
     assert summary["open"] == 1
@@ -169,9 +163,9 @@ def test_feedback_tracked_summary_correct(_ws_with_feedback):
 
 def test_feedback_tracked_absent_when_no_feedback(_ws_no_feedback):
     """When there's no feedback, feedback_tracked has empty items and zero summary."""
-    from vivarium_dashboard.server import _study_detail_spec
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
 
-    spec = _study_detail_spec("no-fb")
+    spec = _study_detail_spec(_ws_no_feedback, "no-fb")
     # feedback_tracked should be present (attached) but have no items
     # OR absent entirely (spec has no feedback_tracked key) — both are acceptable
     # if there's no feedback; but it must not raise.
@@ -196,9 +190,9 @@ def test_feedback_tracked_in_study_spec(_ws_with_feedback):
     window._study JSON embed is no longer in the rendered HTML.  We verify the
     DATA is in the spec (what the API returns) rather than in the HTML.
     """
-    from vivarium_dashboard.server import _study_detail_spec
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
 
-    spec = _study_detail_spec("fb-test")
+    spec = _study_detail_spec(_ws_with_feedback, "fb-test")
     assert "feedback_tracked" in spec, (
         "feedback_tracked must be present in the spec returned by _study_detail_spec "
         "so study-detail.js can render the Feedback panel via the fetched spec"
@@ -214,10 +208,11 @@ def test_feedback_tracked_in_study_spec(_ws_with_feedback):
 def test_feedback_panel_anchor_in_html(_ws_with_feedback):
     """The rendered HTML contains the feedback-tracked-panel anchor div
     so JS has a container to populate."""
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
 
-    spec = _study_detail_spec("fb-test")
-    html = _render_study_detail_html("fb-test", spec)
+    spec = _study_detail_spec(_ws_with_feedback, "fb-test")
+    html = _render_study_detail_html(_ws_with_feedback, "fb-test", spec)
 
     assert "feedback-tracked-panel" in html, (
         "HTML must contain a #feedback-tracked-panel element for the JS render"
@@ -231,12 +226,10 @@ def test_no_ai_dependency_in_feedback_tracking(_ws_with_feedback):
     (plain Python, no network calls). We verify by monkey-patching the AI client
     to raise if called — the spec must still be populated.
     """
-    import sys
-    import vivarium_dashboard.server as srv
-    from vivarium_dashboard.server import _study_detail_spec
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
 
     # The spec must be computed without any AI call
-    spec = _study_detail_spec("fb-test")
+    spec = _study_detail_spec(_ws_with_feedback, "fb-test")
     ft = spec.get("feedback_tracked")
     assert ft is not None and ft["summary"]["total"] > 0, (
         "feedback_tracked must be populated by pure Python, not AI"

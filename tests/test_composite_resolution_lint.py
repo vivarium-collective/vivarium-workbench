@@ -14,7 +14,6 @@ Covers:
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import yaml
@@ -130,14 +129,13 @@ def _seed_study(ws: Path, slug: str, composite: str):
     }))
 
 
-def test_composite_resolution_findings_flags_unresolved(tmp_path, monkeypatch):
-    import vivarium_dashboard.server as srv
+def test_composite_resolution_findings_flags_unresolved(tmp_path):
+    from vivarium_dashboard.lib.report_views import _composite_resolution_findings
     ws = _make_ws(tmp_path, with_composite=True)
     _seed_study(ws, "good-study", "pbg_ws.composites.foo")
     _seed_study(ws, "bad-study", "pbg_ws.composites.ghost")
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
 
-    findings = srv._composite_resolution_findings(ws)
+    findings = _composite_resolution_findings(ws)
     bad = [f for f in findings if f["study"] == "bad-study"]
     good = [f for f in findings if f["study"] == "good-study"]
     assert bad, f"expected an unresolved-composite finding for bad-study; got {findings}"
@@ -147,15 +145,14 @@ def test_composite_resolution_findings_flags_unresolved(tmp_path, monkeypatch):
     assert not good, "resolvable baseline should not be flagged"
 
 
-def test_report_lint_surfaces_unresolved_composite(tmp_path, monkeypatch):
-    import vivarium_dashboard.server as srv
+def test_report_lint_surfaces_unresolved_composite(tmp_path):
+    from vivarium_dashboard.lib.report_views import build_report_lint
     ws = _make_ws(tmp_path, with_composite=False)
     _seed_study(ws, "bad-study", "pkg.composites.ghost")
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
 
-    body, code = srv._report_lint(ws)
+    data, code = build_report_lint(ws)
     assert code == 200
-    findings = json.loads(body)["findings"]
+    findings = data["findings"]
     assert any(f.get("check") == "unresolved_composite" for f in findings), (
         f"report-lint should include the composite-resolution finding; got {findings}"
     )
@@ -165,30 +162,28 @@ def test_report_lint_surfaces_unresolved_composite(tmp_path, monkeypatch):
 # study-detail banner
 # ---------------------------------------------------------------------------
 
-def test_study_detail_renders_unresolved_banner(tmp_path, monkeypatch):
-    import vivarium_dashboard.server as srv
+def test_study_detail_renders_unresolved_banner(tmp_path):
+    from vivarium_dashboard.lib.study_page import render_study_detail_html
     ws = _make_ws(tmp_path, with_composite=True)
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
     spec = {
         "schema_version": 4,
         "name": "bad-study",
         "baseline": [{"name": "b", "composite": "pbg_ws.composites.ghost"}],
     }
-    html = srv._render_study_detail_html("bad-study", spec)
+    html = render_study_detail_html(ws, "bad-study", spec)
     assert "composite not found in registry" in html
     assert "pbg_ws.composites.ghost" in html
 
 
-def test_study_detail_no_banner_when_resolvable(tmp_path, monkeypatch):
-    import vivarium_dashboard.server as srv
+def test_study_detail_no_banner_when_resolvable(tmp_path):
+    from vivarium_dashboard.lib.study_page import render_study_detail_html
     ws = _make_ws(tmp_path, with_composite=True)
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
     spec = {
         "schema_version": 4,
         "name": "good-study",
         "baseline": [{"name": "b", "composite": "pbg_ws.composites.foo"}],
     }
-    html = srv._render_study_detail_html("good-study", spec)
+    html = render_study_detail_html(ws, "good-study", spec)
     assert "composite not found in registry" not in html
 
 

@@ -299,37 +299,3 @@ def test_reads_from_ws_root_not_global(tmp_path, monkeypatch):
     out = Path(rec.calls[0]["output_path"])
     assert str(out).startswith(str(ws_b))
     assert not str(out).startswith(str(ws_a))
-
-
-# ---------------------------------------------------------------------------
-# Server instance-method shim ↔ lib parity
-# ---------------------------------------------------------------------------
-
-def test_server_shim_matches_lib(tmp_path, monkeypatch):
-    """The legacy ``server.Handler`` instance-method shim (threading WORKSPACE
-    as ws_root) must produce calls identical to the lib function."""
-    import vivarium_dashboard.server as server
-
-    ws = tmp_path / "ws"
-    _write_workspace(ws)
-    _write_study(ws, "s1", comparative=_CV)
-
-    rec = _Recorder()
-    _patch(monkeypatch, renderer=rec, zarr_return=None)
-    monkeypatch.setattr(server, "WORKSPACE", ws)
-
-    # Drive the real instance method without constructing a live HTTP handler.
-    handler = object.__new__(server.Handler)
-    job_shim = FakeJob()
-    handler._render_investigation_comparative_visualisations(
-        "inv", {"studies": ["s1"]}, job_shim)
-
-    shim_call = dict(rec.calls[-1])
-
-    # Same inputs straight through the lib function.
-    rec.calls.clear()
-    comparative_runs.render_investigation_comparative_visualisations(
-        ws, "inv", {"studies": ["s1"]}, FakeJob())
-    lib_call = dict(rec.calls[-1])
-
-    assert shim_call == lib_call

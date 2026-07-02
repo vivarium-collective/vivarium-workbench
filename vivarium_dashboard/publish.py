@@ -35,7 +35,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 def _write_json(path: Path, data) -> None:
-    """Write *data* as JSON using the server's ``_json_default`` serializer.
+    """Write *data* as JSON using the shared ``_json_default`` serializer.
 
     ``allow_nan=False`` keeps the bundle spec-compliant (the browser SPA parses
     it with ``JSON.parse``, which rejects the ``Infinity``/``NaN`` tokens
@@ -43,9 +43,9 @@ def _write_json(path: Path, data) -> None:
     makes the write raise, which the composite-state loop catches per-composite
     to hide a broken composite from the loom Explorer (has_wiring=False) rather
     than ship a misleading null-patched state. Callers that legitimately carry
-    non-finite values should sanitize via ``server._json_sanitize`` first.
+    non-finite values should sanitize via ``lib.json_serialize._json_sanitize`` first.
     """
-    from vivarium_dashboard.server import _json_default
+    from vivarium_dashboard.lib.json_serialize import _json_default
     path.write_text(
         json.dumps(data, default=_json_default, allow_nan=False),
         encoding="utf-8",
@@ -367,7 +367,7 @@ def _rewrite_pack_mesh_urls(obj, pack_dir_rel: str, base_no_slash: str) -> None:
     _walk(obj)
 
 
-def _export_saved_visualizations(ws_root: Path, out_dir: Path, srv,
+def _export_saved_visualizations(ws_root: Path, out_dir: Path,
                                  base_path: str) -> None:
     """Export the Analyses-tab saved 3D visualizations into the static bundle.
 
@@ -386,11 +386,13 @@ def _export_saved_visualizations(ws_root: Path, out_dir: Path, srv,
         sibling ``meshes/`` dir, with the COPIED pack's mesh urls rewritten to be
         base-path-correct (see ``_rewrite_pack_mesh_urls``).
     """
-    viewer_dir = srv._parsimony_viewer_dir()
+    from vivarium_dashboard.lib import saved_visualizations as _savedviz
+
+    viewer_dir = _savedviz.parsimony_viewer_dir()
     if viewer_dir is None:
         return  # pbg_parsimony not installed → no parsimony assets in this bundle
 
-    payload = srv._build_saved_visualizations(ws_root)
+    payload = _savedviz.build_saved_visualizations(ws_root)
 
     api_dir = out_dir / "api"
     api_dir.mkdir(parents=True, exist_ok=True)
@@ -510,7 +512,7 @@ def _render_home_html(ws_root: Path) -> str:
     import yaml
     import jinja2
     from jinja2 import select_autoescape
-    from vivarium_dashboard.server import TEMPLATES_DIR
+    from vivarium_dashboard.lib.static_serving import TEMPLATES_DIR
 
     ws: dict = {}
     wf = ws_root / "workspace.yaml"
@@ -586,7 +588,7 @@ def build_bundle(
 
     JSON parity guarantee: each ``api/study/<slug>.json`` file is byte-for-byte
     identical to ``GET /api/study/<slug>`` (modulo key ordering), because both
-    use ``server._study_detail_spec`` + ``server._json_default``.
+    use ``lib.study_spec.load_study_detail_spec`` + ``lib.json_serialize._json_default``.
 
     Args:
         interactive_url: Optional URL injected into the snapshot banner's
@@ -599,7 +601,7 @@ def build_bundle(
             Pass via ``--base-path`` CLI.  Default ``""`` keeps root-absolute
             (domain-root) behavior unchanged.
     """
-    import vivarium_dashboard.server as srv
+    from vivarium_dashboard.lib._root import set_workspace_root
 
     ws_root = Path(ws_root)
     out_dir = Path(out_dir)
@@ -607,55 +609,55 @@ def build_bundle(
 
     base_path = _normalize_base_path(base_path)
 
-    # Temporarily point the server module at ws_root so all lookups
-    # (_study_detail_spec, _iset_detail_data, workspace_paths …) use the right
-    # workspace.  Restore afterwards, even on exceptions.
+    # Point the global workspace root at ws_root so any lib fn that still reads
+    # the global (rather than taking ws_root explicitly) resolves against the
+    # right workspace.
     # Resolve symlinks: WorkspacePaths resolves its root internally, so viz
-    # discovery's ``html_file.relative_to(WORKSPACE)`` raises (and silently drops
-    # that study's figures) if WORKSPACE is left unresolved while the globbed
+    # discovery's ``html_file.relative_to(ws_root)`` raises (and silently drops
+    # that study's figures) if the root is left unresolved while the globbed
     # paths come back resolved — e.g. a ws_root under /tmp (-> /private/tmp on
     # macOS) or any symlinked parent.
-    orig_ws = srv.WORKSPACE
-    srv.WORKSPACE = ws_root.resolve()
-    srv._WP_CACHE.clear()
-    try:
-        return _do_build(
-            ws_root, out_dir, srv,
-            interactive_url=interactive_url,
-            base_path=base_path,
-        )
-    finally:
-        srv.WORKSPACE = orig_ws
-        srv._WP_CACHE.clear()
+    set_workspace_root(ws_root.resolve())
+    return _do_build(
+        ws_root, out_dir,
+        interactive_url=interactive_url,
+        base_path=base_path,
+    )
 
 
 def _do_build(
     ws_root: Path,
     out_dir: Path,
-    srv,
     *,
     interactive_url: str = "",
     base_path: str = "",
 ) -> dict:
-    """Internal build routine — called with WORKSPACE already set to ws_root."""
-    from vivarium_dashboard.server import (
-        STATIC_DIR,
-        _study_detail_spec,
-        _study_charts_payload,
-        _workspace_home_data,
-        _render_study_detail_html,
-        _build_iset_summary_for_test,
-        _inputs_payload,
-        _catalog_data,
-        _composites_data,
-        _composite_resolve_data,
-        _get_registry_data,
-        _enumerate_data_sources,
-        _investigations_data,
-        _simulations_data,
-        _visualization_classes_data,
+    """Internal build routine — reads the workspace at ws_root via lib fns."""
+    from vivarium_dashboard.lib.static_serving import STATIC_DIR
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    from vivarium_dashboard.lib.study_charts import build_study_charts_payload
+    from vivarium_dashboard.lib.system_info import build_workspace_home
+    from vivarium_dashboard.lib.study_page import render_study_detail_html
+    from vivarium_dashboard.lib.investigation_status import (
+        build_iset_summary, study_run_slugs,
     )
+    from vivarium_dashboard.lib.report_views import build_inputs, build_iset_detail
+    from vivarium_dashboard.lib.catalog import build_catalog
+    from vivarium_dashboard.lib.composite_lookup import composites_data
+    from vivarium_dashboard.lib.composite_resolve import resolve_composite
+    from vivarium_dashboard.lib.registry import build_registry
+    from vivarium_dashboard.lib.data_sources import enumerate_data_sources
+    from vivarium_dashboard.lib.investigations_index import build_investigations
+    from vivarium_dashboard.lib.simulations_index import build_simulations_data
+    from vivarium_dashboard.lib.visualization_classes import list_visualization_classes
     from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
+
+    # runs-presence check for the investigation-summaries builder (mirrors the
+    # retired server._build_iset_summary_for_test shim).
+    _run_slugs = study_run_slugs(ws_root)
+
+    def _study_has_runs(slug, spec):
+        return slug in _run_slugs or bool((spec or {}).get("runs"))
 
     wp = WorkspacePaths.load(ws_root)
 
@@ -682,15 +684,15 @@ def _do_build(
     (api_dir / "inputs").mkdir(parents=True, exist_ok=True)
 
     # api/workspace.json
-    _write_json(api_dir / "workspace.json", _workspace_home_data(ws_root))
+    _write_json(api_dir / "workspace.json", build_workspace_home(ws_root))
 
     # api/investigation-summaries.json — investigations list (GET /api/investigation-summaries)
     _write_json(api_dir / "investigation-summaries.json",
-                {"investigations": _build_iset_summary_for_test(ws_root)})
+                {"investigations": build_iset_summary(ws_root, study_has_runs=_study_has_runs)})
 
     # api/inputs/_global.json — global/shared inputs (GET /api/inputs with no slug)
     try:
-        global_inputs = _inputs_payload(ws_root, "")
+        global_inputs = build_inputs(ws_root, "")
     except Exception:
         global_inputs = {}
     _write_json(api_dir / "inputs" / "_global.json", global_inputs)
@@ -698,14 +700,14 @@ def _do_build(
     # api/inputs/<inv>.json — per-investigation inputs (GET /api/inputs?investigation=<slug>)
     for inv_name in investigations:
         try:
-            payload = _inputs_payload(ws_root, inv_name)
+            payload = build_inputs(ws_root, inv_name)
         except Exception:
             payload = {}
         _write_json(api_dir / "inputs" / f"{inv_name}.json", payload)
 
     # api/catalog.json — curated module catalog (GET /api/catalog)
     try:
-        catalog = _catalog_data(ws_root)
+        catalog = build_catalog(ws_root)
     except Exception:
         catalog = {"modules": []}
     # A static snapshot has no live venv, so the build-time install-sync probe
@@ -727,7 +729,7 @@ def _do_build(
     # api/composites.json — composite specs (GET /api/composites)
     # Written AFTER the composite-state loop so each entry can carry has_wiring.
     try:
-        composites = _composites_data(ws_root)
+        composites = composites_data(ws_root)
     except Exception:
         composites = {"composites": []}
 
@@ -755,7 +757,7 @@ def _do_build(
             except Exception:
                 pass
         try:
-            data = _composite_resolve_data(cid)
+            data = resolve_composite(ws_root, cid)
             if data is not None:
                 # The write itself can also fail (e.g. a resolved state that
                 # carries non-finite floats like inf/nan, which strict JSON
@@ -792,28 +794,28 @@ def _do_build(
 
     # api/simulations.json — pre-run simulations (GET /api/simulations)
     try:
-        sims = _simulations_data(ws_root)
+        sims = build_simulations_data(ws_root)
     except Exception:
         sims = {"simulations": [], "current": None}
     _write_json(api_dir / "simulations.json", sims)
 
     # api/visualization-classes.json — registered viz/analysis classes
     try:
-        viz_classes = _visualization_classes_data(ws_root)
+        viz_classes = list_visualization_classes(ws_root)
     except Exception:
         viz_classes = {"classes": []}
     _write_json(api_dir / "visualization-classes.json", viz_classes)
 
     # api/registry.json — discovered process/type registry (GET /api/registry)
     try:
-        registry = _get_registry_data(bypass_cache=True)
+        registry = build_registry(ws_root, bypass_cache=True)
     except Exception:
         registry = {"processes": [], "types": []}
     _write_json(api_dir / "registry.json", registry)
 
     # api/data-sources.json — repo-wide data-source bundle (GET /api/data-sources)
     try:
-        data_sources = _enumerate_data_sources(bypass_cache=True)
+        data_sources = enumerate_data_sources(ws_root, True)
     except Exception:
         data_sources = {"sources": []}
     _write_json(api_dir / "data-sources.json", data_sources)
@@ -839,7 +841,7 @@ def _do_build(
 
     # api/investigations.json — flat studies list with DAG (GET /api/investigations)
     try:
-        investigations_flat = _investigations_data(ws_root)
+        investigations_flat = build_investigations(ws_root)
     except Exception:
         investigations_flat = {"investigations": []}
     _write_json(api_dir / "investigations.json", investigations_flat)
@@ -853,7 +855,7 @@ def _do_build(
     nb_out_dir = out_dir / "investigation-notebooks"
     notebook_manifest: list[dict] = []
     for inv_name in investigations:
-        data = srv.Handler._iset_detail_data(inv_name)
+        data = build_iset_detail(ws_root, inv_name)
         if data is None:
             continue
         # iset JSON stays byte-parity with the live builder; notebook urls live
@@ -877,7 +879,7 @@ def _do_build(
     # same way the charts/composites loops degrade gracefully below.
     for slug in studies:
         try:
-            data = _study_detail_spec(slug)
+            data = _study_detail_spec(ws_root, slug)
         except Exception as exc:  # noqa: BLE001 — never abort a publish on one study
             print(f"  warn: study-detail export failed for {slug!r}: {exc}")
             continue
@@ -900,7 +902,7 @@ def _do_build(
         try:
             # Feedback-friction: the published per-investigation report shows
             # only current figures — hide charts from superseded runs (opt-in).
-            payload = _study_charts_payload(ws_root, slug, hide_superseded=True)
+            payload = build_study_charts_payload(ws_root, slug, hide_superseded=True)
         except Exception as exc:  # noqa: BLE001 — never abort a publish on one study
             print(f"  warn: study-charts export failed for {slug!r}: {exc}")
             continue
@@ -910,7 +912,7 @@ def _do_build(
     # the Analyses-tab gallery. Feature-detected on pbg_parsimony; no-op when the
     # viewer package isn't installed (mirrors the live /parsimony-viewer route).
     try:
-        _export_saved_visualizations(ws_root, out_dir, srv, base_path)
+        _export_saved_visualizations(ws_root, out_dir, base_path)
     except Exception as exc:  # noqa: BLE001 — never abort a publish on the gallery
         print(f"  warn: saved-visualizations export failed: {exc}")
 
@@ -951,7 +953,7 @@ def _do_build(
     # ------------------------------------------------------------------
     for slug in studies:
         try:
-            spec = _study_detail_spec(slug)
+            spec = _study_detail_spec(ws_root, slug)
         except Exception as exc:  # noqa: BLE001 — one bad study must not abort
             print(f"  warn: study-shell export failed for {slug!r}: {exc}")
             continue
@@ -965,7 +967,7 @@ def _do_build(
         try:
             _stage_embed_visualizations(spec, ws_root, out_dir, base_path)
             _stage_report_cards(spec, ws_root, out_dir, base_path)
-            study_html = _render_study_detail_html(slug, spec)
+            study_html = render_study_detail_html(ws_root, slug, spec)
             study_html = _normalize_asset_urls(study_html)
             study_html = _apply_base_path(study_html, base_path)
             study_html = _set_snapshot_config(

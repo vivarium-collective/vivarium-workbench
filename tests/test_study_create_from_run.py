@@ -52,7 +52,7 @@ def _ws_with_scratch_run(tmp_path):
 
 
 def test_create_from_run_writes_study_yaml(_ws_with_scratch_run):
-    from vivarium_dashboard.server import _post_study_create_from_run_for_test
+    from vivarium_dashboard.lib.lifecycle_mutations import study_create_from_run as _post_study_create_from_run_for_test
     body = {
         "name": "my-study",
         "objective": "Why?",
@@ -73,7 +73,7 @@ def test_create_from_run_writes_study_yaml(_ws_with_scratch_run):
 
 
 def test_create_from_run_copies_history_rows(_ws_with_scratch_run):
-    from vivarium_dashboard.server import _post_study_create_from_run_for_test
+    from vivarium_dashboard.lib.lifecycle_mutations import study_create_from_run as _post_study_create_from_run_for_test
     body = {"name": "my-study", "objective": "?",
             "description": "", "source_run_id": "rid1"}
     resp, code = _post_study_create_from_run_for_test(_ws_with_scratch_run, body)
@@ -89,7 +89,7 @@ def test_create_from_run_copies_history_rows(_ws_with_scratch_run):
 
 
 def test_create_from_run_leaves_scratch_untouched(_ws_with_scratch_run):
-    from vivarium_dashboard.server import _post_study_create_from_run_for_test
+    from vivarium_dashboard.lib.lifecycle_mutations import study_create_from_run as _post_study_create_from_run_for_test
     body = {"name": "my-study", "objective": "?",
             "description": "", "source_run_id": "rid1"}
     _post_study_create_from_run_for_test(_ws_with_scratch_run, body)
@@ -101,7 +101,7 @@ def test_create_from_run_leaves_scratch_untouched(_ws_with_scratch_run):
 
 
 def test_create_from_run_refuses_collision(_ws_with_scratch_run):
-    from vivarium_dashboard.server import _post_study_create_from_run_for_test
+    from vivarium_dashboard.lib.lifecycle_mutations import study_create_from_run as _post_study_create_from_run_for_test
     body = {"name": "my-study", "objective": "?",
             "description": "", "source_run_id": "rid1"}
     _post_study_create_from_run_for_test(_ws_with_scratch_run, body)
@@ -110,7 +110,7 @@ def test_create_from_run_refuses_collision(_ws_with_scratch_run):
 
 
 def test_create_from_run_missing_source(_ws_with_scratch_run):
-    from vivarium_dashboard.server import _post_study_create_from_run_for_test
+    from vivarium_dashboard.lib.lifecycle_mutations import study_create_from_run as _post_study_create_from_run_for_test
     body = {"name": "n", "objective": "?", "description": "", "source_run_id": "nope"}
     resp, code = _post_study_create_from_run_for_test(_ws_with_scratch_run, body)
     assert code == 404

@@ -213,22 +213,3 @@ class TestDownloadError:
         assert str(err) == "oops"
 
 
-# ---------------------------------------------------------------------------
-# TestServerShimParity: legacy handler shims resolve through the lib
-# ---------------------------------------------------------------------------
-
-class TestServerShimParity:
-    def test_study_export_zip_shim(self, tmp_path: Path) -> None:
-        ws = _make_workspace(tmp_path)
-        from vivarium_dashboard.server import _study_export_zip
-        assert _study_export_zip(ws, "s1") == dv.study_export_zip(ws, "s1")
-
-    def test_iset_report_file_shim(self, tmp_path: Path) -> None:
-        ws = _make_workspace(tmp_path)
-        from vivarium_dashboard.server import _iset_report_file
-        assert _iset_report_file(ws, "inv-a") == dv.resolve_iset_report(ws, "inv-a")
-        assert _iset_report_file(ws, "ghost") is None
-
-    def test_data_source_mime_single_sourced(self) -> None:
-        import vivarium_dashboard.server as server
-        assert server._DATA_SOURCE_MIME is dv._DATA_SOURCE_MIME

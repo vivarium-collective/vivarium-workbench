@@ -13,10 +13,8 @@ native libs happen to be present on the host.
 """
 from __future__ import annotations
 
-import importlib
 import json
 import sys
-import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -24,19 +22,15 @@ from pathlib import Path
 import pytest
 import yaml
 
-# Make repo root importable for vivarium_dashboard.server (mirrors
-# test_visualization_endpoints.py).
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 
 # ---------------------------------------------------------------------------
-# Fixture — spins up an in-process server against a temp workspace whose
+# Fixture — spins up the live FastAPI app against a temp workspace whose
 # catalog contains one synthetic module with a deliberately-failing
-# system-deps check. Mirrors test_visualization_endpoints.py.
+# system-deps check.
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def sys_deps_server(tmp_path, monkeypatch):
+def sys_deps_server(tmp_path, dashboard_client):
     ws_root = tmp_path
 
     # Minimal workspace.yaml.
@@ -92,25 +86,13 @@ def sys_deps_server(tmp_path, monkeypatch):
     venv_bin.mkdir(parents=True)
     (venv_bin / "python3").symlink_to(Path(sys.executable))
 
-    monkeypatch.chdir(ws_root)
-
-    import vivarium_dashboard.server as srv
-    importlib.reload(srv)
-    monkeypatch.setattr(srv, "WORKSPACE", ws_root)
-
-    httpd = srv.ThreadingHTTPServer(("127.0.0.1", 0), srv.Handler)
-    port = httpd.server_address[1]
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
+    client = dashboard_client(ws_root)
 
     class _WS:
-        url = f"http://127.0.0.1:{port}"
+        url = client.base_url
         root = ws_root
-        module = srv
 
     yield _WS()
-    httpd.shutdown()
-    thread.join(timeout=2)
 
 
 # ---------------------------------------------------------------------------

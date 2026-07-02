@@ -358,26 +358,7 @@ class _FakeSubprocess:
         self.run = run
 
 
-class TestSuggestDirtyCommitMessageParity:
-    @pytest.mark.parametrize("paths", [
-        [],
-        ["scripts/a.py"],
-        ["scripts/a.py", "scripts/b.py"],
-        ["docs/x.md", "docs/y.md"],
-        ["composites/c.yaml"],
-        ["investigations/i.yaml"],
-        ["tests/t.py"],
-        ["reports/r.html"],
-        ["pbg_chromosome_rep1/mod.py"],
-        ["weird_dir/file.py", "weird_dir/two.py"],
-        ["scripts/a.py", "docs/x.md"],  # multiple top dirs → generic chore:
-        ["topfile.py"],  # single top dir == the file's own segment
-    ])
-    def test_parity_vs_server_copy(self, paths):
-        import vivarium_dashboard.server as server
-
-        assert gs.suggest_dirty_commit_message(paths) == server._suggest_dirty_commit_message(paths)
-
+class TestSuggestDirtyCommitMessage:
     def test_known_categories(self):
         assert gs.suggest_dirty_commit_message([]) == "chore: commit pending files"
         assert (

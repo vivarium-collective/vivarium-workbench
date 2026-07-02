@@ -10,7 +10,7 @@ composite, whose 55-process whole-cell initial state contains 9 infinite values.
 import json
 import math
 
-from vivarium_dashboard.server import _json_sanitize, _json_body
+from vivarium_dashboard.lib.json_serialize import _json_sanitize, _json_body
 
 
 def test_json_sanitize_replaces_non_finite_floats_with_none():
@@ -85,7 +85,7 @@ def test_structured_arrays_serialize_with_field_names():
     """
     import json
     import numpy as np
-    from vivarium_dashboard.server import _json_default, _json_body
+    from vivarium_dashboard.lib.json_serialize import _json_default, _json_body
 
     bulk = np.array(
         [("WATER[c]", 120), ("K+[c]", 9)],

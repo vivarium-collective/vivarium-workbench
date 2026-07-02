@@ -7,12 +7,25 @@ reasons, and round-trip alongside back-compat single entries.
 """
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import pytest
 import yaml
 
-from vivarium_dashboard.server import _render_study_detail_html
+from vivarium_dashboard.lib.study_page import (
+    render_study_detail_html as _lib_render_study_detail_html,
+)
+
+# These are pure template-render tests: the spec dict is supplied directly and
+# the workspace filesystem is not read meaningfully (all ws_root reads in the
+# lib fn are tolerant of an empty/missing workspace). Provide a throwaway
+# workspace root so the 2-arg call-sites below stay unchanged.
+_WS = Path(tempfile.mkdtemp(prefix="sweep_render_ws_"))
+
+
+def _render_study_detail_html(name: str, spec: dict) -> str:
+    return _lib_render_study_detail_html(_WS, name, spec)
 
 
 SINGLE_ENTRY = {

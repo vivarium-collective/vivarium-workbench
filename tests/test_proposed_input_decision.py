@@ -6,10 +6,20 @@ accept/decline an item in `proposed_inputs.items[]`, and on accept promote a
 """
 import yaml
 
-from vivarium_dashboard.server import (
-    _decide_proposed_input_for_test,
-    _build_iset_detail_for_test,
-)
+from vivarium_dashboard.lib.lifecycle_mutations import decide_proposed_input
+from vivarium_dashboard.lib.report_views import build_iset_detail
+
+
+def _decide_proposed_input_for_test(ws, inv, item_id, decision):
+    return decide_proposed_input(
+        ws, {"investigation": inv, "item_id": item_id, "decision": decision})
+
+
+def _build_iset_detail_for_test(ws, name):
+    detail = build_iset_detail(ws, name)
+    if detail is None:
+        return {"error": f"investigation '{name}' not found"}, 404
+    return detail, 200
 
 _INV_YAML = """\
 name: dnaa-replication

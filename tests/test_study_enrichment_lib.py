@@ -134,18 +134,6 @@ class TestReconcileSimsetWithRuns:
         assert result[0]["n_runs_recorded"] == 1
         assert result[0]["seeds"] == [42]
 
-    def test_server_shim_parity(self) -> None:
-        """The server shim and lib function produce identical output."""
-        import vivarium_dashboard.server as srv
-        from vivarium_dashboard.lib.study_enrichment import reconcile_simset_with_runs
-        sim_set = [{"name": "b", "is_baseline": True, "status": "ready"}]
-        runs = [{"run_id": "r1", "status": "completed", "seed": 1}]
-        lib_result = reconcile_simset_with_runs(
-            [dict(sim_set[0])], list(runs))
-        srv_result = srv._reconcile_simset_with_runs(
-            [dict(sim_set[0])], list(runs))
-        assert lib_result == srv_result
-
 
 # ---------------------------------------------------------------------------
 # compute_param_enforcement
@@ -160,16 +148,6 @@ class TestComputeParamEnforcement:
             pytest.skip("pbg_superpowers.param_enforcement.resolve_run_expected not available")
         from vivarium_dashboard.lib.study_enrichment import compute_param_enforcement
         assert compute_param_enforcement({"runs": []}) is None
-
-    def test_server_shim_parity(self) -> None:
-        """lib and server shim return identical results."""
-        mod = pytest.importorskip("pbg_superpowers.param_enforcement")
-        if not hasattr(mod, "resolve_run_expected"):
-            pytest.skip("pbg_superpowers.param_enforcement.resolve_run_expected not available")
-        import vivarium_dashboard.server as srv
-        from vivarium_dashboard.lib.study_enrichment import compute_param_enforcement
-        spec = {"enforced_params": {"te": 1}, "runs": []}
-        assert compute_param_enforcement(spec) == srv._compute_param_enforcement(spec)
 
 
 # ---------------------------------------------------------------------------
@@ -189,17 +167,6 @@ class TestCollectStudyFeedback:
         assert len(out) == 1
         assert out[0]["author"] == "Reviewer"
         assert out[0]["text"] == "Looks good"
-
-    def test_server_shim_parity(
-        self, tmp_path: Path, monkeypatch: Any
-    ) -> None:
-        ws, slug = _make_feedback_workspace(tmp_path)
-        import vivarium_dashboard.server as srv
-        monkeypatch.setattr(srv, "WORKSPACE", ws)
-        # also clear the workspace-paths cache so the patched root is used
-        srv._WP_CACHE.clear()
-        from vivarium_dashboard.lib.study_enrichment import collect_study_feedback
-        assert collect_study_feedback(ws, slug) == srv._collect_study_feedback(slug)
 
 
 # ---------------------------------------------------------------------------
@@ -221,24 +188,14 @@ class TestStudyAcceptanceCriterion:
         assert len(result["criteria"]) == 1
         assert result["criteria"][0]["study"] == slug
 
-    def test_server_shim_parity(
-        self, tmp_path: Path, monkeypatch: Any
-    ) -> None:
-        ws, slug = _make_workspace_with_acceptance(tmp_path)
-        import vivarium_dashboard.server as srv
-        monkeypatch.setattr(srv, "WORKSPACE", ws)
-        srv._WP_CACHE.clear()
-        from vivarium_dashboard.lib.study_enrichment import study_acceptance_criterion
-        assert study_acceptance_criterion(ws, slug) == srv._study_acceptance_criterion(slug)
-
 
 # ---------------------------------------------------------------------------
 # load_study_detail_spec parity (with lib helpers now called directly)
 # ---------------------------------------------------------------------------
 
 class TestLoadStudyDetailSpecParityBatch4:
-    """Confirm the loader still produces the same spec after the import-server
-    removal: the lib helpers are now called directly (no lazy import)."""
+    """Confirm the loader produces a spec with runs merged in: the lib helpers
+    are called directly (no lazy import server)."""
 
     def _make_ws(self, tmp_path: Path) -> Path:
         study_dir = tmp_path / "studies" / "parity-study"
@@ -257,17 +214,13 @@ class TestLoadStudyDetailSpecParityBatch4:
         _make_runs_db(study_dir / "runs.db", "parity-study")
         return tmp_path
 
-    def test_loader_parity_with_server_shim(
+    def test_loader_merges_runs_from_db(
         self, tmp_path: Path, monkeypatch: Any
     ) -> None:
         ws = self._make_ws(tmp_path)
-        import vivarium_dashboard.server as srv
         from vivarium_dashboard.lib import study_spec
-        monkeypatch.setattr(srv, "WORKSPACE", ws)
         lib_spec = study_spec.load_study_detail_spec(ws, "parity-study")
-        srv_spec = srv._study_detail_spec("parity-study")
-        assert lib_spec == srv_spec
-        # Also verify the run was merged in
+        # The run recorded in runs.db is merged into the loaded spec.
         assert lib_spec is not None
         run_ids = {(r or {}).get("run_id") for r in lib_spec.get("runs", [])}
         assert "r1" in run_ids

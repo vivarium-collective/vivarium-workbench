@@ -55,11 +55,14 @@ The dashboard is served by a **FastAPI app** (`api/app.py`) run under uvicorn:
 `uvicorn.run(app, ...)`. All routes (read and write, static/SPA serving, and the
 SSE stream) are defined there and back onto the `lib/` functions.
 
-The old ~17k-line stdlib `http.server` handler (`server.py`) is **retired** — the
-strangler-fig migration is complete at the routing layer and `server.py` is no
-longer imported on the serve path. It remains on disk pending removal (a handful
-of `lib/` helpers and the `dashboard_client` test fixture still reference symbols
-that live in it; these are being relocated to `lib/` before the file is deleted).
+The old ~9.6k-line stdlib `http.server` handler (`server.py`) has been
+**deleted**. The strangler-fig migration is complete: every route and all real
+logic now live in `api/app.py` + `lib/`, and the `dashboard_client` test fixture
+spawns the live FastAPI app. `server.py` is now only a ~40-line deprecation shim
+re-exporting six symbols (`_json_default`/`_json_sanitize`/`_json_body` and
+`_build_iset_summary_for_test`/`_build_iset_detail_for_test`/`_observables_for_ref`)
+from their `lib` homes, retained solely for external consumers (v2ecoli,
+sms-ecoli, pbg-superpowers) until they migrate to the `lib` paths.
 
 Supporting the typed contract:
 
@@ -301,7 +304,8 @@ snapshot (no Launch buttons, no GitHub mark, etc.).
 ## 6. Git as the audit trail
 
 Every mutating endpoint runs its file writes inside
-`server.py: _commit_or_run / _active_branch_action`, which:
+`lib/work_state.py: active_branch_action` (and the per-mutation commit helpers),
+which:
 1. ensures work is on a workstream branch (creating one if needed),
 2. performs the file writes (`action_fn`),
 3. stages the authored paths and `git commit`s with a conventional message,

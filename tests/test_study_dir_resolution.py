@@ -4,9 +4,8 @@ import pytest
 
 
 @pytest.fixture
-def _ws(tmp_path, monkeypatch):
+def _ws(tmp_path):
     """Workspace with one study in studies/ and one legacy investigation."""
-    import vivarium_dashboard.server as srv
     ws = tmp_path / "ws"
     # A v3 study under studies/
     sd = ws / "studies" / "new-study"
@@ -25,39 +24,38 @@ def _ws(tmp_path, monkeypatch):
         "schema_version": 2, "name": "old-inv", "created": "2026-04-01",
         "composites": [{"name": "main", "source": "pkg.bar"}],
     }))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
     return ws
 
 
 def test_study_dir_prefers_studies(_ws):
-    from vivarium_dashboard.server import _study_dir
-    d = _study_dir("new-study")
+    from vivarium_dashboard.lib.study_spec import study_dir
+    d = study_dir(_ws, "new-study")
     assert d == _ws / "studies" / "new-study"
 
 
 def test_study_dir_falls_back_to_investigations(_ws):
-    from vivarium_dashboard.server import _study_dir
-    d = _study_dir("old-inv")
+    from vivarium_dashboard.lib.study_spec import study_dir
+    d = study_dir(_ws, "old-inv")
     assert d == _ws / "investigations" / "old-inv"
 
 
 def test_study_spec_path_picks_study_yaml(_ws):
-    from vivarium_dashboard.server import _study_spec_path
-    p = _study_spec_path("new-study")
+    from vivarium_dashboard.lib.study_spec import study_spec_path
+    p = study_spec_path(_ws, "new-study")
     assert p.name == "study.yaml"
     assert p == _ws / "studies" / "new-study" / "study.yaml"
 
 
 def test_study_spec_path_picks_spec_yaml_for_legacy(_ws):
-    from vivarium_dashboard.server import _study_spec_path
-    p = _study_spec_path("old-inv")
+    from vivarium_dashboard.lib.study_spec import study_spec_path
+    p = study_spec_path(_ws, "old-inv")
     assert p.name == "spec.yaml"
     assert p == _ws / "investigations" / "old-inv" / "spec.yaml"
 
 
 def test_iter_study_dirs_includes_both(_ws):
-    from vivarium_dashboard.server import _iter_study_dirs
-    names = sorted(d.name for d in _iter_study_dirs())
+    from vivarium_dashboard.lib.investigations_index import _iter_study_dirs
+    names = sorted(d.name for d in _iter_study_dirs(_ws))
     assert names == ["new-study", "old-inv"]
 
 
@@ -68,7 +66,6 @@ def test_iter_study_dirs_honors_nested_layout(tmp_path, monkeypatch):
     Regression for the empty-sidebar bug on nested-layout workspaces, where
     _iter_study_dirs walked WORKSPACE/studies (absent) instead of
     workspace/studies (declared via layout:)."""
-    import vivarium_dashboard.server as srv
     ws = tmp_path / "ws"
     ws.mkdir()
     (ws / "workspace.yaml").write_text(yaml.safe_dump({
@@ -84,14 +81,13 @@ def test_iter_study_dirs_honors_nested_layout(tmp_path, monkeypatch):
         "variants": [], "runs": [], "visualizations": [],
         "conclusion": None, "parent_studies": [],
     }))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
-    names = sorted(d.name for d in srv._iter_study_dirs())
+    from vivarium_dashboard.lib.investigations_index import _iter_study_dirs
+    names = sorted(d.name for d in _iter_study_dirs(ws))
     assert names == ["nested-study"]
 
 
 def test_iter_study_dirs_flat_layout_still_works(tmp_path, monkeypatch):
     """No `layout:` block -> classic flat studies/<slug>/ is still discovered."""
-    import vivarium_dashboard.server as srv
     ws = tmp_path / "ws"
     sd = ws / "studies" / "flat-study"
     sd.mkdir(parents=True)
@@ -102,8 +98,8 @@ def test_iter_study_dirs_flat_layout_still_works(tmp_path, monkeypatch):
         "variants": [], "runs": [], "visualizations": [],
         "conclusion": None, "parent_studies": [],
     }))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
-    names = sorted(d.name for d in srv._iter_study_dirs())
+    from vivarium_dashboard.lib.investigations_index import _iter_study_dirs
+    names = sorted(d.name for d in _iter_study_dirs(ws))
     assert names == ["flat-study"]
 
 
@@ -113,7 +109,6 @@ def test_iter_study_dirs_includes_investigation_nested_studies(tmp_path, monkeyp
     discovered. Regression: _iter_study_dirs used to yield the investigation dir
     itself (which holds investigation.yaml, not study.yaml) and dropped every
     nested study -> /api/investigations missing them entirely."""
-    import vivarium_dashboard.server as srv
     ws = tmp_path / "ws"
     ws.mkdir()
     (ws / "workspace.yaml").write_text(yaml.safe_dump({
@@ -134,8 +129,8 @@ def test_iter_study_dirs_includes_investigation_nested_studies(tmp_path, monkeyp
         "variants": [], "runs": [], "visualizations": [],
         "conclusion": None, "parent_studies": [],
     }))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
-    names = sorted(d.name for d in srv._iter_study_dirs())
+    from vivarium_dashboard.lib.investigations_index import _iter_study_dirs
+    names = sorted(d.name for d in _iter_study_dirs(ws))
     # The nested study is found; the investigation collection dir is NOT
     # mistaken for a study.
     assert names == ["nested"]

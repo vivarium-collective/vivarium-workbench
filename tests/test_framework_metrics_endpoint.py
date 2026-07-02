@@ -9,15 +9,14 @@ absence/failure.
 """
 from __future__ import annotations
 
-import json
-
 import yaml
 import pytest
 
+from vivarium_dashboard.lib.system_info import build_framework_metrics
+
 
 @pytest.fixture
-def tmp_ws(tmp_path, monkeypatch):
-    import vivarium_dashboard.server as srv
+def tmp_ws(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir(parents=True)
     (ws / "workspace.yaml").write_text("name: ws\n")
@@ -34,25 +33,18 @@ def tmp_ws(tmp_path, monkeypatch):
             "findings": [{"id": "F-01", "tier": "observation",
                           "statement": "x"}],
         }))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
     return ws
 
 
 def test_framework_metrics_counts_studies_and_investigations(tmp_ws):
-    import vivarium_dashboard.server as server
-    body, code = server.Handler._framework_metrics_test(server.WORKSPACE)
-    assert code == 200
-    d = json.loads(body)
+    d = build_framework_metrics(tmp_ws)
     assert d["n_investigations"] == 1
     assert d["n_studies"] == 2
     assert "metrics" in d and isinstance(d["metrics"], dict)
 
 
 def test_framework_metrics_tolerant_on_missing_ws(tmp_path):
-    import vivarium_dashboard.server as server
-    body, code = server.Handler._framework_metrics_test(tmp_path / "nope")
-    assert code == 200  # never 500
-    d = json.loads(body)
+    d = build_framework_metrics(tmp_path / "nope")
     # No studies / investigations on disk → zero counts; metrics is a dict
     # (empty when pbg-superpowers is absent, all-zero entries when present).
     assert d["n_investigations"] == 0
@@ -61,7 +53,6 @@ def test_framework_metrics_tolerant_on_missing_ws(tmp_path):
 
 
 def test_framework_metrics_tolerant_on_compute_failure(tmp_ws, monkeypatch):
-    import vivarium_dashboard.server as server
     pytest.importorskip("pbg_superpowers.rigor")
     from pbg_superpowers import rigor as _rigor
     if not hasattr(_rigor, "framework_metrics"):
@@ -69,9 +60,7 @@ def test_framework_metrics_tolerant_on_compute_failure(tmp_ws, monkeypatch):
 
     monkeypatch.setattr(_rigor, "framework_metrics",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
-    body, code = server.Handler._framework_metrics_test(server.WORKSPACE)
-    assert code == 200  # never 500
-    d = json.loads(body)
+    d = build_framework_metrics(tmp_ws)
     assert d["metrics"] == {}
     # The counts are still computed even when the metric math fails.
     assert d["n_studies"] == 2

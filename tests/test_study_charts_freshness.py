@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.server import _study_charts_payload
+from vivarium_dashboard.lib.study_charts import build_study_charts_payload as _study_charts_payload
 from vivarium_dashboard.lib.viz_freshness import stamp_meta
 
 

@@ -13,7 +13,6 @@ FastAPI route tests:
 """
 from __future__ import annotations
 
-import importlib
 import threading
 import urllib.request
 import urllib.error
@@ -280,52 +279,6 @@ class TestVisualizationGenerate:
         content = (ws / ".pbg" / "viz-requests" / "fresh-viz.md").read_text()
         assert "as_visualization" in content
         assert "def visualize(results" not in content
-
-
-# ---------------------------------------------------------------------------
-# Server shim parity (spot-check)
-# ---------------------------------------------------------------------------
-
-
-class TestServerShimParity:
-    """The server _post_X shims must return the same (dict, code) as the lib."""
-
-    def _make_server_shim(self, ws: Path) -> object:
-        """Return a mock-ish Handler instance with WORKSPACE patched."""
-        import vivarium_dashboard.server as srv
-        importlib.reload(srv)
-        srv.WORKSPACE = ws
-        # Create a minimal fake handler (not bound to a socket)
-        obj = object.__new__(srv.Handler)
-        return obj
-
-    def _invoke_shim(self, ws: Path, method_name: str, body: dict):
-        """Drive the REAL server.Handler._post_* shim and capture its _json output."""
-        import vivarium_dashboard.server as srv
-        importlib.reload(srv)
-        srv.WORKSPACE = ws
-        obj = object.__new__(srv.Handler)
-        captured = {}
-        obj._json = lambda resp, code: captured.update(resp=resp, code=code)  # type: ignore[method-assign]
-        getattr(obj, method_name)(body)
-        return captured["resp"], captured["code"]
-
-    def test_visualization_generate_shim_equals_lib(self, ws: Path) -> None:
-        """The server shim returns the SAME (resp, code) as the lib builder."""
-        body = {"name": "parity-test", "description": "parity test desc"}
-        shim_resp, shim_code = self._invoke_shim(ws, "_post_visualization_generate", body)
-        # On a fresh ws, the lib builder produces the same result (file overwrite is idempotent).
-        lib_resp, lib_code = vwm.visualization_generate(ws, body)
-        assert (shim_resp, shim_code) == (lib_resp, lib_code)
-        assert shim_code == 200
-
-    def test_visualization_add_to_project_shim_404_equals_lib(self, ws: Path) -> None:
-        """The server shim's 404 path matches the lib builder's."""
-        shim_resp, shim_code = self._invoke_shim(
-            ws, "_post_visualization_add_to_project", {"name": "nonexistent"})
-        lib_resp, lib_code = vwm.visualization_add_to_project(ws, {"name": "nonexistent"})
-        assert (shim_resp, shim_code) == (lib_resp, lib_code)
-        assert shim_code == 404
 
 
 # ---------------------------------------------------------------------------

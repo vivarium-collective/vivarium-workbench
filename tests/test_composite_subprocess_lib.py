@@ -21,8 +21,8 @@ import pytest
 
 from vivarium_dashboard.lib import composite_subprocess as cs
 from vivarium_dashboard.lib import composite_runs as cr
+from vivarium_dashboard.lib import _root
 import pbg_superpowers.composite_generator as cg
-import vivarium_dashboard.server as server
 
 
 # ---------------------------------------------------------------------------
@@ -189,11 +189,11 @@ def test_runtime_emitter_per_study_override_wins(tmp_path, monkeypatch):
 
 
 def test_reads_ws_root_workspace_yaml_not_a_global(tmp_path, monkeypatch):
-    """Resolution reads the passed ws_root/workspace.yaml — point server.WORKSPACE
-    at an unrelated dir and confirm the ws_root value is used."""
+    """Resolution reads the passed ws_root/workspace.yaml — point the global
+    workspace root at an unrelated dir and confirm the ws_root arg is used."""
     ws = _make_ws(tmp_path, runtime={"max_generations": 9})
     other = _make_ws(tmp_path / "elsewhere", runtime={"max_generations": 1})
-    monkeypatch.setattr(server, "WORKSPACE", other)
+    _root.set_workspace_root(other)
     db = tmp_path / "runs.db"
     spec = _gen_spec(monkeypatch)
     fake = FakeRun(stdout=_ok_stdout())
@@ -611,73 +611,3 @@ def test_strip_process_instances():
     assert out["leaf"] == 42
     # Original not mutated.
     assert "instance" in state["proc"]
-
-
-# ---------------------------------------------------------------------------
-# Server-shim parity — the live names delegate to the lib functions
-# ---------------------------------------------------------------------------
-
-def test_shim_run_delegates_with_workspace(tmp_path, monkeypatch):
-    """server._run_composite_subprocess forwards server.WORKSPACE + every kwarg
-    unchanged to the lib function and returns its result."""
-    ws = _make_ws(tmp_path)
-    monkeypatch.setattr(server, "WORKSPACE", ws)
-    captured = {}
-    sentinel = ({"simulation_id": "z"}, 200)
-
-    def _spy(ws_root, **kwargs):
-        captured["ws_root"] = ws_root
-        captured["kwargs"] = kwargs
-        return sentinel
-
-    monkeypatch.setattr(server._composite_subprocess, "run_composite_subprocess", _spy)
-    kw = _run_kwargs(ws, tmp_path / "runs.db", spec_id="s", run_id="r",
-                     overrides={"a": 1}, sim_name="sn", timeout=99,
-                     emit_paths=["p"], study_emitter="xarray",
-                     study_max_generations=4, study_single_daughters=True)
-    result = server._run_composite_subprocess(**kw)
-    assert result == sentinel
-    assert captured["ws_root"] is ws
-    assert captured["kwargs"] == kw
-
-
-def test_shim_invoke_matches_lib(tmp_path, monkeypatch):
-    out_dir = tmp_path / "out" / "run-p"
-    out_dir.mkdir(parents=True)
-    monkeypatch.setattr(cs.subprocess, "run", FakeRun(returncode=0, stdout="ok"))
-    via_shim = server._invoke_v2ecoli_workflow("cfg.json", out_dir, tmp_path, 5)
-
-    monkeypatch.setattr(cs.subprocess, "run", FakeRun(returncode=0, stdout="ok"))
-    via_lib = cs.invoke_v2ecoli_workflow("cfg.json", out_dir, tmp_path, 5)
-    assert via_shim == via_lib
-
-
-def test_shim_strip_matches_lib():
-    state = {"p": {"_type": "process", "instance": object(), "keep": 1}}
-    assert server._strip_process_instances(state) == cs.strip_process_instances(state)
-
-
-def test_shim_run_produces_same_script_as_lib(tmp_path, monkeypatch):
-    """End-to-end shim parity: the real server shim (WORKSPACE patched) builds
-    the byte-identical subprocess script the lib builds for the same inputs."""
-    ws = _make_ws(tmp_path, runtime={"default_emitter": "xarray", "max_generations": 5})
-    spec = _gen_spec(monkeypatch)
-
-    # lib call -> capture script (db dir + run_id).
-    db = tmp_path / "lib" / "runs.db"
-    db.parent.mkdir()
-    fake_lib = FakeRun(stdout=_ok_stdout())
-    monkeypatch.setattr(cs.subprocess, "run", fake_lib)
-    cs.run_composite_subprocess(ws, **_run_kwargs(ws, db, spec_id=spec, run_id="R"))
-
-    # Clear the db so the shim's save_metadata doesn't trip the duplicate-run_id
-    # guard; reuse the SAME db path + run_id so the embedded db_file/zarr_store
-    # strings line up and the scripts are directly comparable.
-    for p in db.parent.glob("runs.db*"):
-        p.unlink()
-    monkeypatch.setattr(server, "WORKSPACE", ws)
-    fake_shim = FakeRun(stdout=_ok_stdout())
-    monkeypatch.setattr(cs.subprocess, "run", fake_shim)
-    server._run_composite_subprocess(**_run_kwargs(ws, db, spec_id=spec, run_id="R"))
-
-    assert fake_shim.script == fake_lib.script

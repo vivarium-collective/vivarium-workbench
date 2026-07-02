@@ -917,7 +917,7 @@ def test_evaluated_parent_satisfies_ran_prerequisite(tmp_path, monkeypatch):
     surrogate-modeling sm-02/sm-03 studies).
     """
     import yaml as _yaml
-    from vivarium_dashboard import server
+    from vivarium_dashboard.lib.investigations_index import build_investigations
 
     ws = tmp_path / "ws"
     (ws).mkdir()
@@ -931,12 +931,11 @@ def test_evaluated_parent_satisfies_ran_prerequisite(tmp_path, monkeypatch):
         "composite": "pkg.demo",
         "pipeline_gate": {"prerequisites": [{"study": "parent", "condition": "ran"}]},
     })
-    monkeypatch.setattr(server, "WORKSPACE", ws)
 
-    rows = {r["name"]: r for r in server._investigations_data(ws)["investigations"]}
+    rows = {r["name"]: r for r in build_investigations(ws)["investigations"]}
     assert rows["child"]["blocked"] is False, rows["child"].get("blocked_by")
 
     # Sanity: a still-planned parent does NOT satisfy a `ran` prerequisite.
     _mk_study(ws, "parent", {"status": "planned", "composite": "pkg.demo"})
-    rows = {r["name"]: r for r in server._investigations_data(ws)["investigations"]}
+    rows = {r["name"]: r for r in build_investigations(ws)["investigations"]}
     assert rows["child"]["blocked"] is True

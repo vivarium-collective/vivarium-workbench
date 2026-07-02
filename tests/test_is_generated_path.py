@@ -5,7 +5,7 @@ output through this predicate. Any path that returns True is treated as
 "the dashboard's own generated artifact" and skipped — so it must NOT
 block the Install / commit / workstream-push actions.
 """
-from vivarium_dashboard.server import _is_generated_path
+from vivarium_dashboard.lib.git_status import is_generated_path as _is_generated_path
 
 
 def test_reports_directory_is_generated():

@@ -9,19 +9,19 @@ linter and renders the result.
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import yaml
 import pytest
 
+from vivarium_dashboard.lib.report_views import build_report_lint
+
 _PKG = Path(__file__).parent.parent / "vivarium_dashboard"
 
 
 @pytest.fixture
-def tmp_workspace_with_legacy_readouts(tmp_path, monkeypatch):
+def tmp_workspace_with_legacy_readouts(tmp_path):
     """Workspace with a study that has no readouts → a readout lint finding."""
-    import vivarium_dashboard.server as srv
     ws = tmp_path / "ws"
     sd = ws / "studies" / "legacy-study"
     sd.mkdir(parents=True)
@@ -37,15 +37,13 @@ def tmp_workspace_with_legacy_readouts(tmp_path, monkeypatch):
         # No readouts → triggers the missing_readouts (readout) check.
     }
     (sd / "study.yaml").write_text(yaml.safe_dump(spec))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
     return ws
 
 
 def test_report_lint_endpoint_returns_findings(tmp_workspace_with_legacy_readouts):
-    import vivarium_dashboard.server as server
-    body, code = server.Handler._report_lint_test(server.WORKSPACE)
+    d, code = build_report_lint(tmp_workspace_with_legacy_readouts)
     assert code == 200
-    findings = json.loads(body)["findings"]
+    findings = d["findings"]
     # The fixture study declares no readouts, so the linter MUST surface
     # findings — no `or findings == []` escape hatch (an empty result here would
     # mean the endpoint silently dropped the linter output). Assert the
@@ -61,22 +59,20 @@ def test_report_lint_endpoint_returns_findings(tmp_workspace_with_legacy_readout
 
 
 def test_report_lint_findings_have_expected_shape(tmp_workspace_with_legacy_readouts):
-    import vivarium_dashboard.server as server
-    body, code = server.Handler._report_lint_test(server.WORKSPACE)
+    d, code = build_report_lint(tmp_workspace_with_legacy_readouts)
     assert code == 200
-    findings = json.loads(body)["findings"]
+    findings = d["findings"]
     assert findings, "fixture study with no readouts should yield findings"
     f = findings[0]
     for key in ("study", "check", "severity", "message"):
         assert key in f, f"finding missing {key!r}: {f}"
 
 
-def test_report_lint_tolerant_when_linter_absent(tmp_path, monkeypatch):
+def test_report_lint_tolerant_when_linter_absent(tmp_path):
     """If the linter import fails, the endpoint returns 200 with empty findings."""
-    import vivarium_dashboard.server as server
-    body, code = server._report_lint(tmp_path / "does-not-exist")
+    d, code = build_report_lint(tmp_path / "does-not-exist")
     assert code == 200
-    assert "findings" in json.loads(body)
+    assert "findings" in d
 
 
 def test_walkthrough_js_renders_readiness_panel():

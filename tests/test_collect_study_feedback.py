@@ -11,9 +11,8 @@ def _write(path, payload):
 
 
 def _collect(monkeypatch, ws, slug):
-    import vivarium_dashboard.server as srv
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
-    return srv._collect_study_feedback(slug)
+    from vivarium_dashboard.lib.study_enrichment import collect_study_feedback
+    return collect_study_feedback(ws, slug)
 
 
 def test_empty_when_no_investigations(tmp_path, monkeypatch):

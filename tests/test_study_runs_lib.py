@@ -219,30 +219,3 @@ def test_run_study_variant_unknown_variant_404(tmp_path, hermetic_engine):
                  variants=[])
     resp, code = study_runs.run_study_variant(ws, {"study": "s1", "variant": "ghost"})
     assert code == 404
-
-
-# ---------------------------------------------------------------------------
-# Server-shim ↔ lib parity
-# ---------------------------------------------------------------------------
-
-def test_server_shims_match_lib(tmp_path, hermetic_engine, monkeypatch):
-    """The server ``_post_study_run_*_for_test`` shims must produce results
-    identical to the lib orchestrators they delegate to (same inputs)."""
-    import vivarium_dashboard.server as server
-
-    ws = tmp_path / "ws"
-    _write_workspace(ws)
-    _write_study(ws, "s1",
-                 baseline=[{"name": "core", "composite": "demo_pkg.composites.cell",
-                            "params": {"k": 1}}],
-                 variants=[{"name": "fast", "base_composite": "core",
-                            "parameter_overrides": {"k": 5}}])
-    monkeypatch.setattr(server, "WORKSPACE", ws)
-
-    base_body = {"study": "s1"}
-    assert (server._post_study_run_baseline_for_test(ws, dict(base_body))
-            == study_runs.run_study_baseline(ws, dict(base_body)))
-
-    var_body = {"study": "s1", "variant": "fast"}
-    assert (server._post_study_run_variant_for_test(ws, dict(var_body))
-            == study_runs.run_study_variant(ws, dict(var_body)))

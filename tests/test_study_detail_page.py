@@ -17,7 +17,7 @@ import pytest
 def test_slug_re_accepts_underscores_rejects_traversal():
     """_SLUG_RE must accept underscore-bearing study names (they're generated
     that way) while still rejecting path-traversal / invalid slugs."""
-    from vivarium_dashboard.server import _SLUG_RE
+    from vivarium_dashboard.lib.study_spec import SLUG_RE as _SLUG_RE
     assert _SLUG_RE.match("study-monod_kinetics-096184")
     assert _SLUG_RE.match("t1")
     assert _SLUG_RE.match("a_b-c")
@@ -31,11 +31,10 @@ def test_slug_re_accepts_underscores_rejects_traversal():
 
 
 @pytest.fixture
-def _ws(tmp_path, monkeypatch):
+def _ws(tmp_path):
     """Workspace with a legacy study under investigations/ — real v2ecoli
     shape: a `variants`-as-composites spec.yaml, no studies/ dir, name with
     underscores."""
-    import vivarium_dashboard.server as srv
     ws = tmp_path / "ws"
     legacy = ws / "investigations" / "study-monod_kinetics-096184"
     legacy.mkdir(parents=True)
@@ -55,15 +54,14 @@ def _ws(tmp_path, monkeypatch):
         "comparisons": [], "conclusions": "", "question": "",
         "hypothesis": "", "status": "draft",
     }))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
     return ws
 
 
 def test_study_detail_spec_resolves_legacy_investigation(_ws):
     """A legacy study in investigations/<name>/spec.yaml resolves via
     _study_spec_path + load_spec (the v2ecoli shape that previously 404'd)."""
-    from vivarium_dashboard.server import _study_detail_spec
-    spec = _study_detail_spec("study-monod_kinetics-096184")
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
     assert spec is not None
     assert spec["name"] == "study-monod_kinetics-096184"
     assert "variants" in spec
@@ -71,8 +69,8 @@ def test_study_detail_spec_resolves_legacy_investigation(_ws):
 
 def test_study_detail_spec_returns_none_for_missing(_ws):
     """A name with no spec file resolves to None (handler renders 404)."""
-    from vivarium_dashboard.server import _study_detail_spec
-    assert _study_detail_spec("does-not-exist") is None
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    assert _study_detail_spec(_ws, "does-not-exist") is None
 
 
 def test_study_detail_page_has_eight_tabs(_ws):
@@ -83,9 +81,10 @@ def test_study_detail_page_has_eight_tabs(_ws):
     eight base tabs are all present", not "exactly eight". Tabs have
     accreted as the platform grew; the count check was brittle.)
     """
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    spec = _study_detail_spec("study-monod_kinetics-096184")
-    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
+    html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
     # Eight required buttons
     for kind in ("overview", "baseline", "variants", "interventions", "tests", "runs", "visualizations", "conclusions"):
         assert f'class="study-tab' in html
@@ -105,9 +104,10 @@ def test_study_page_is_a_fetch_shell_not_an_embed(_ws):
     - expose window._studyName so the bootstrap can fetch the right slug,
     - NOT embed the full spec as window._study = {...} (data is fetched).
     """
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    spec = _study_detail_spec("study-monod_kinetics-096184")
-    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
+    html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
     assert "window.__DASH_CONFIG__" in html
     assert "data-source.js" in html
     assert (
@@ -120,18 +120,20 @@ def test_study_page_is_a_fetch_shell_not_an_embed(_ws):
 
 def test_study_detail_page_loads_set_tab_helper(_ws):
     """The page ships the _setStudyTab helper inline or via study-detail.js."""
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    spec = _study_detail_spec("study-monod_kinetics-096184")
-    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
+    html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
     # The page must reference _setStudyTab somewhere (in the script tag or via onclick)
     assert "_setStudyTab" in html
 
 
 def test_overview_panel_has_objective_editable(_ws):
     """Overview tab includes inline-editable objective field (conclusion moved to Conclusions tab)."""
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    spec = _study_detail_spec("study-monod_kinetics-096184")
-    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
+    html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
     assert 'id="objective-text"' in html
     assert 'data-editable="true"' in html
     # conclusion-text is no longer in the Overview; it now lives in the Conclusions tab
@@ -141,9 +143,10 @@ def test_overview_panel_has_objective_editable(_ws):
 
 def test_overview_panel_has_counts_strip(_ws):
     """Overview tab shows a counts strip: variants · runs · interventions."""
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    spec = _study_detail_spec("study-monod_kinetics-096184")
-    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
+    html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
     assert 'study-counts-strip' in html or 'class="counts-strip"' in html
     # Each label appears
     for label in ('variants', 'runs', 'interventions'):
@@ -152,9 +155,10 @@ def test_overview_panel_has_counts_strip(_ws):
 
 def test_baseline_panel_lists_entries(_ws):
     """Baseline panel renders one .baseline-entry per baseline[] entry."""
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    spec = _study_detail_spec("study-monod_kinetics-096184")
-    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
+    html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
     # The legacy fixture has one variants-as-composites that migrates to one baseline entry
     # named "monod_kinetics" (per Plan 1 migration rules).
     assert 'class="baseline-entry"' in html
@@ -163,65 +167,73 @@ def test_baseline_panel_lists_entries(_ws):
 
 def test_baseline_panel_has_add_button(_ws):
     """Baseline panel has a '+ Add composite' button."""
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    spec = _study_detail_spec("study-monod_kinetics-096184")
-    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
+    html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
     assert 'btn-baseline-add' in html
 
 
 def test_baseline_panel_per_entry_buttons(_ws):
     """Each baseline entry has Run + Remove buttons carrying its name."""
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    spec = _study_detail_spec("study-monod_kinetics-096184")
-    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
+    html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
     assert 'btn-run-baseline' in html
     assert 'btn-baseline-remove' in html
 
 
 def test_variants_panel_lists_entries(_ws):
     """Variants panel renders one .variant-row per variants[] entry, with name + base_composite + params count."""
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    spec = _study_detail_spec("study-monod_kinetics-096184")
-    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
+    html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
     # The legacy fixture has no variants[] (the only variant has `source:` so it migrated
     # to baseline). So expect the empty-message instead of a row.
     assert 'variant-row' in html or 'No variants yet' in html
 
 
 def test_variants_panel_has_new_variant_button(_ws):
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    spec = _study_detail_spec("study-monod_kinetics-096184")
-    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
+    html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
     assert 'btn-variant-new' in html
 
 
 def test_interventions_panel_lists_entries(_ws):
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    spec = _study_detail_spec("study-monod_kinetics-096184")
-    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
+    html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
     assert 'intervention-row' in html or 'No interventions yet' in html
 
 
 def test_interventions_panel_has_new_button(_ws):
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    spec = _study_detail_spec("study-monod_kinetics-096184")
-    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
+    html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
     assert 'btn-intervention-new' in html
 
 
 def test_runs_panel_has_runs_table(_ws):
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    spec = _study_detail_spec("study-monod_kinetics-096184")
-    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
+    html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
     assert 'id="runs-table"' in html
 
 
 def test_visualizations_panel_present(_ws):
     """Visualizations tab panel is present; the manual registered-viz list +
     add-viz button were retired (auto latest-run charts only)."""
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    spec = _study_detail_spec("study-monod_kinetics-096184")
-    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
+    html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
     assert 'id="panel-visualizations"' in html
     # Registered-visualization-modules section + "+ Add visualization" removed.
     assert 'id="viz-list"' not in html
@@ -230,9 +242,8 @@ def test_visualizations_panel_present(_ws):
 
 
 @pytest.fixture
-def _rich_ws(tmp_path, monkeypatch):
+def _rich_ws(tmp_path):
     """Workspace with a richly-populated v3 study to exercise every tab."""
-    import vivarium_dashboard.server as srv
     ws = tmp_path / "ws"
     sd = ws / "studies" / "rich"
     sd.mkdir(parents=True)
@@ -263,14 +274,14 @@ def _rich_ws(tmp_path, monkeypatch):
         ],
         "conclusion": "Variant `hi` showed faster early growth but plateaued sooner.",
     }))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
     return ws
 
 
 def test_full_study_renders_all_tabs(_rich_ws):
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    spec = _study_detail_spec("rich")
-    html = _render_study_detail_html("rich", spec)
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(_rich_ws, "rich")
+    html = _render_study_detail_html(_rich_ws, "rich", spec)
 
     # 8 tabs scaffolded (added Visualizations)
     for kind in ("overview", "baseline", "variants", "interventions", "tests", "runs", "visualizations", "conclusions"):
@@ -326,8 +337,9 @@ def _section(html: str, start_marker: str, end_marker: str) -> str:
 def test_runs_tab_does_not_render_charts_panel(_rich_ws):
     """The inline 'Latest run — visualizations' panel was removed from the
     Runs tab. Charts now live exclusively in the Visualizations tab."""
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    html = _render_study_detail_html("rich", _study_detail_spec("rich"))
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    html = _render_study_detail_html(_rich_ws, "rich", _study_detail_spec(_rich_ws, "rich"))
     runs_panel = _section(html, 'id="panel-runs"', 'id="panel-tests"')
     assert 'id="charts-panel"' not in runs_panel, (
         "Runs tab still contains the inline charts panel — should have moved "
@@ -340,18 +352,18 @@ def test_runs_tab_does_not_render_charts_panel(_rich_ws):
 
 def test_runs_tab_has_richer_columns(_rich_ws):
     """The Runs table now exposes Composite, Started, Duration, and Model changes."""
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    html = _render_study_detail_html("rich", _study_detail_spec("rich"))
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    html = _render_study_detail_html(_rich_ws, "rich", _study_detail_spec(_rich_ws, "rich"))
     runs_panel = _section(html, 'id="panel-runs"', 'id="panel-tests"')
     for header in ("Composite", "Started (UTC)", "Duration", "Model changes"):
         assert f">{header}<" in runs_panel, f"missing column header: {header}"
 
 
 @pytest.fixture
-def _ws_with_runs_db(tmp_path, monkeypatch):
+def _ws_with_runs_db(tmp_path):
     """Workspace whose study has both a study.yaml runs[] list AND a populated
     runs.db, so _enrich_runs_with_meta has a real DB to merge from."""
-    import vivarium_dashboard.server as srv
     from vivarium_dashboard.lib.composite_runs import (
         connect, save_metadata, complete_metadata,
     )
@@ -403,15 +415,15 @@ def _ws_with_runs_db(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
 
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
     return ws
 
 
 def test_runs_table_renders_started_and_duration_from_runs_db(_ws_with_runs_db):
     """When runs.db has a metadata row, the Runs table shows formatted
     started/duration columns derived from runs_meta."""
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    html = _render_study_detail_html("rich-runs", _study_detail_spec("rich-runs"))
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    html = _render_study_detail_html(_ws_with_runs_db, "rich-runs", _study_detail_spec(_ws_with_runs_db, "rich-runs"))
     runs_panel = _section(html, 'id="panel-runs"', 'id="panel-tests"')
 
     # run-A: started_at=1700000000 → 2023-11-14 22:13 UTC; duration=95s → "1m 35s"
@@ -423,8 +435,9 @@ def test_runs_table_renders_started_and_duration_from_runs_db(_ws_with_runs_db):
 
 def test_runs_table_renders_param_overrides(_ws_with_runs_db):
     """params_json from runs_meta surfaces as the Model-changes details block."""
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    html = _render_study_detail_html("rich-runs", _study_detail_spec("rich-runs"))
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    html = _render_study_detail_html(_ws_with_runs_db, "rich-runs", _study_detail_spec(_ws_with_runs_db, "rich-runs"))
     runs_panel = _section(html, 'id="panel-runs"', 'id="panel-tests"')
 
     # run-A has empty params → "—"; run-B has 2 overrides → "2 overrides"
@@ -438,8 +451,9 @@ def test_runs_table_renders_param_overrides(_ws_with_runs_db):
 def test_runs_table_tolerates_orphan_runs(_ws_with_runs_db):
     """A study.runs[] entry with no matching runs.db row still renders — the
     metadata columns are simply empty for that row."""
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    html = _render_study_detail_html("rich-runs", _study_detail_spec("rich-runs"))
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    html = _render_study_detail_html(_ws_with_runs_db, "rich-runs", _study_detail_spec(_ws_with_runs_db, "rich-runs"))
     runs_panel = _section(html, 'id="panel-runs"', 'id="panel-tests"')
     assert 'data-run-id="run-orphan"' in runs_panel
 
@@ -447,8 +461,9 @@ def test_runs_table_tolerates_orphan_runs(_ws_with_runs_db):
 def test_runs_table_tolerates_missing_runs_db(_rich_ws):
     """A study with study.runs[] but no runs.db still renders rows; metadata
     columns are blank (function returns runs unchanged on missing DB)."""
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    html = _render_study_detail_html("rich", _study_detail_spec("rich"))
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    html = _render_study_detail_html(_rich_ws, "rich", _study_detail_spec(_rich_ws, "rich"))
     runs_panel = _section(html, 'id="panel-runs"', 'id="panel-tests"')
     assert 'data-run-id="r1"' in runs_panel
     assert 'data-run-id="r2"' in runs_panel
@@ -460,7 +475,7 @@ def test_runs_table_tolerates_missing_runs_db(_rich_ws):
 
 
 def test_fmt_duration_handles_ranges():
-    from vivarium_dashboard.server import _jinja_fmt_duration
+    from vivarium_dashboard.lib.study_page import _jinja_fmt_duration
     assert _jinja_fmt_duration(None) == ""
     assert _jinja_fmt_duration(-1) == ""
     assert _jinja_fmt_duration(0) == "0s"
@@ -472,7 +487,7 @@ def test_fmt_duration_handles_ranges():
 
 
 def test_fmt_ts_handles_none_and_unix():
-    from vivarium_dashboard.server import _jinja_fmt_ts
+    from vivarium_dashboard.lib.study_page import _jinja_fmt_ts
     assert _jinja_fmt_ts(None) == ""
     assert _jinja_fmt_ts(0) == ""  # epoch zero treated as falsy/no-data
     assert _jinja_fmt_ts(1700000000.0) == "2023-11-14 22:13"
@@ -485,11 +500,9 @@ def test_fmt_ts_handles_none_and_unix():
 
 
 @pytest.fixture
-def _ws_with_computed_outcomes(tmp_path, monkeypatch):
+def _ws_with_computed_outcomes(tmp_path):
     """Workspace whose study has one run with both authored outcomes and
     computed_outcomes (agree + divergent + no_authored entries + _status key)."""
-    import vivarium_dashboard.server as srv
-
     ws = tmp_path / "ws"
     sd = ws / "studies" / "computed-test"
     sd.mkdir(parents=True)
@@ -539,16 +552,15 @@ def _ws_with_computed_outcomes(tmp_path, monkeypatch):
             }
         ],
     }))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
     return ws
 
 
 def test_computed_outcomes_survive_study_detail_spec(_ws_with_computed_outcomes):
     """_study_detail_spec must return runs[].computed_outcomes intact so the
     SPA (window._study) can render the code-computed vs authored comparison."""
-    from vivarium_dashboard.server import _study_detail_spec
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
 
-    spec = _study_detail_spec("computed-test")
+    spec = _study_detail_spec(_ws_with_computed_outcomes, "computed-test")
     assert spec is not None
 
     runs = spec.get("runs") or []
@@ -590,14 +602,12 @@ def test_computed_outcomes_survive_enrich_runs(_ws_with_computed_outcomes):
     We verify that the spec returned by _study_detail_spec retains computed_outcomes
     after _render_study_detail_html exercises _enrich_runs_with_meta internally.
     """
-    from vivarium_dashboard.server import (
-        _study_detail_spec,
-        _render_study_detail_html,
-    )
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
 
-    spec = _study_detail_spec("computed-test")
+    spec = _study_detail_spec(_ws_with_computed_outcomes, "computed-test")
     # Exercise _enrich_runs_with_meta by rendering the page (it's called internally).
-    _render_study_detail_html("computed-test", spec)
+    _render_study_detail_html(_ws_with_computed_outcomes, "computed-test", spec)
     # The spec the JS fetches (via GET /api/study/<slug>) must carry computed_outcomes.
     runs = spec.get("runs") or []
     run_with_co = next(
@@ -626,9 +636,10 @@ except Exception:  # pragma: no cover
 
 def test_study_detail_has_skeptic_toggle(_ws):
     """W24 — the 'View as skeptic' toggle renders on the study-detail page."""
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    spec = _study_detail_spec("study-monod_kinetics-096184")
-    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
+    html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
     assert "btn-view-skeptic" in html
     assert "View as skeptic" in html
 
@@ -637,8 +648,9 @@ def test_study_detail_has_skeptic_toggle(_ws):
 def test_study_detail_renders_epistemic_debts_panel(_ws):
     """W15 — a study with no controls/alternatives/replication accrues debts,
     so the server-computed panel renders on the detail page."""
-    from vivarium_dashboard.server import _render_study_detail_html, _study_detail_spec
-    spec = _study_detail_spec("study-monod_kinetics-096184")
-    html = _render_study_detail_html("study-monod_kinetics-096184", spec)
+    from vivarium_dashboard.lib.study_page import render_study_detail_html as _render_study_detail_html
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(_ws, "study-monod_kinetics-096184")
+    html = _render_study_detail_html(_ws, "study-monod_kinetics-096184", spec)
     assert "Open epistemic debts" in html
     assert 'id="epistemic-debts-panel"' in html

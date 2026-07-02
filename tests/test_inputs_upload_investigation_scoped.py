@@ -8,10 +8,7 @@ commit on the active workstream branch). These tests patch that seam to run the
 action directly so we can exercise the write logic without a git workstream.
 """
 import base64
-import importlib
 import json
-import sys
-import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -19,11 +16,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 
 @pytest.fixture
-def workspace_server(tmp_path, monkeypatch):
+def workspace_server(tmp_path, dashboard_client):
     ws_root = tmp_path
     (ws_root / "workspace.yaml").write_text(
         yaml.dump({"name": "testws", "datasets": [], "expert_docs": []},
@@ -37,32 +32,16 @@ def workspace_server(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    monkeypatch.chdir(ws_root)
-    import vivarium_dashboard.server as srv
-    importlib.reload(srv)
-    monkeypatch.setattr(srv, "WORKSPACE", ws_root)
-
-    # Bypass git workstream plumbing: run the action_fn directly.
-    def _run_action(commit_message, action_fn):
-        result = action_fn()
-        if isinstance(result, tuple):
-            return result
-        return ({"ok": True, "commit": "deadbeef"}, 200)
-
-    monkeypatch.setattr(srv, "_active_branch_action", _run_action)
-
-    httpd = srv.ThreadingHTTPServer(("127.0.0.1", 0), srv.Handler)
-    port = httpd.server_address[1]
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
+    # The FastAPI routes call the lib builder directly (no _active_branch_action,
+    # no git commit), so the file writes happen eagerly and return 200 without a
+    # git workstream — exactly what the old fixture's monkeypatch simulated.
+    client = dashboard_client(ws_root)
 
     class _WS:
-        url = f"http://127.0.0.1:{port}"
+        url = client.base_url
         root = ws_root
 
     yield _WS()
-    httpd.shutdown()
-    thread.join(timeout=2)
 
 
 def _post(url, body):

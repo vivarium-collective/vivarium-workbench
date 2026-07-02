@@ -10,7 +10,6 @@ build-free + SP4b linkage paths (including the ``observable_registry`` /
 """
 from __future__ import annotations
 
-import json
 import shutil
 from pathlib import Path
 
@@ -39,54 +38,33 @@ def _write_study(ws: Path, slug: str, spec: dict) -> None:
     (sdir / "study.yaml").write_text(yaml.safe_dump(spec), encoding="utf-8")
 
 
-def _legacy(seam_result):
-    """(json_bytes, status) → (dict, status)."""
-    body, status = seam_result
-    return json.loads(body), status
-
-
 # ---------------------------------------------------------------------------
-# observables parity (real build + error paths)
+# observables (real build + error paths)
 # ---------------------------------------------------------------------------
 
-def test_observables_parity_real_build(demo_ws):
-    from vivarium_dashboard import server
-    # Server shim + lib builder share ov._OBS_CACHE; clear before each so neither
-    # observes the other's cache entry (which would add a "cached": True key).
-    ov.clear_cache()
-    legacy_body, legacy_status = _legacy(
-        server.Handler._observables_for_ref_test(demo_ws, _REF))
+def test_observables_real_build(demo_ws):
     ov.clear_cache()
     lib_body, lib_status = ov.build_observables(demo_ws, _REF)
-    assert legacy_status == lib_status == 200
-    assert legacy_body == lib_body
+    assert lib_status == 200
     assert _REAL_LEAF in lib_body["leaves"]
 
 
-def test_observables_parity_no_ref_400(demo_ws):
-    from vivarium_dashboard import server
-    legacy_body, legacy_status = _legacy(
-        server.Handler._observables_for_ref_test(demo_ws, ""))
+def test_observables_no_ref_400(demo_ws):
     lib_body, lib_status = ov.build_observables(demo_ws, "")
-    assert legacy_status == lib_status == 400
-    assert legacy_body == lib_body == {"error": "ref required"}
+    assert lib_status == 400
+    assert lib_body == {"error": "ref required"}
 
 
-def test_observables_parity_unknown_ref_404(demo_ws):
-    from vivarium_dashboard import server
-    legacy_body, legacy_status = _legacy(
-        server.Handler._observables_for_ref_test(demo_ws, "nope.not.a.composite"))
+def test_observables_unknown_ref_404(demo_ws):
     lib_body, lib_status = ov.build_observables(demo_ws, "nope.not.a.composite")
-    assert legacy_status == lib_status == 404
-    assert legacy_body == lib_body
+    assert lib_status == 404
 
 
 # ---------------------------------------------------------------------------
-# study-observable-check parity (real build + error paths)
+# study-observable-check (real build + error paths)
 # ---------------------------------------------------------------------------
 
-def test_study_observable_check_parity_real_build(demo_ws):
-    from vivarium_dashboard import server
+def test_study_observable_check_real_build(demo_ws):
     _write_study(demo_ws, "the-study", {
         "name": "the-study",
         "baseline": [{"name": "base", "composite": _REF}],
@@ -95,51 +73,37 @@ def test_study_observable_check_parity_real_build(demo_ws):
             {"name": "phantom-one", "store_path": "stores.nonexistent"},
         ],
     })
-    legacy_body, legacy_status = _legacy(
-        server.Handler._study_observable_check_test(demo_ws, "the-study"))
     lib_body, lib_status = ov.build_study_observable_check(demo_ws, "the-study")
-    assert legacy_status == lib_status == 200
-    assert legacy_body == lib_body
+    assert lib_status == 200
     assert lib_body["composite"] == _REF
     assert any(r["name"] == "phantom-one" and r["status"] == "not_in_structure"
                for r in lib_body["readouts"])
 
 
-def test_study_observable_check_parity_invalid_slug_400(demo_ws):
-    from vivarium_dashboard import server
-    legacy_body, legacy_status = _legacy(
-        server.Handler._study_observable_check_test(demo_ws, "UPPER-CASE"))
+def test_study_observable_check_invalid_slug_400(demo_ws):
     lib_body, lib_status = ov.build_study_observable_check(demo_ws, "UPPER-CASE")
-    assert legacy_status == lib_status == 400
-    assert legacy_body == lib_body == {"error": "invalid slug"}
+    assert lib_status == 400
+    assert lib_body == {"error": "invalid slug"}
 
 
-def test_study_observable_check_parity_not_found_404(demo_ws):
-    from vivarium_dashboard import server
-    legacy_body, legacy_status = _legacy(
-        server.Handler._study_observable_check_test(demo_ws, "no-such-study"))
+def test_study_observable_check_not_found_404(demo_ws):
     lib_body, lib_status = ov.build_study_observable_check(demo_ws, "no-such-study")
-    assert legacy_status == lib_status == 404
-    assert legacy_body == lib_body
+    assert lib_status == 404
 
 
-def test_study_observable_check_parity_uncomputable_422(demo_ws):
-    from vivarium_dashboard import server
+def test_study_observable_check_uncomputable_422(demo_ws):
     _write_study(demo_ws, "broken-study", {
         "name": "broken-study",
         "baseline": [{"name": "base",
                       "composite": "pbg_ws_increase_demo.composites.does-not-exist"}],
         "readouts": [{"name": "real-one", "store_path": _REAL_LEAF}],
     })
-    legacy_body, legacy_status = _legacy(
-        server.Handler._study_observable_check_test(demo_ws, "broken-study"))
     lib_body, lib_status = ov.build_study_observable_check(demo_ws, "broken-study")
-    assert legacy_status == lib_status == 422
-    assert legacy_body == lib_body
+    assert lib_status == 422
 
 
 # ---------------------------------------------------------------------------
-# linkage-index parity — build-free paths
+# linkage-index — build-free paths
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
@@ -169,61 +133,55 @@ def linkage_ws(tmp_path):
     return ws
 
 
-def _linkage_parity(ws, **kw):
-    from vivarium_dashboard import server
-    legacy_body, legacy_status = _legacy(
-        server.Handler._linkage_index_test(ws, **kw))
+def _linkage_build(ws, **kw):
     lib_body, lib_status = rv.build_linkage_index(
         ws,
         # build_linkage_index (Batch 7) calls fn(ws_root, ref) — pass a 2-arg callable.
         observables_for_ref_fn=ov.observables_for_ref_payload,
         **kw,
     )
-    assert legacy_status == 200
     assert lib_status == 200
-    assert legacy_body == lib_body
     return lib_body
 
 
-def test_linkage_parity_investigation(linkage_ws):
-    body = _linkage_parity(linkage_ws, investigation="the-inv")
+def test_linkage_investigation(linkage_ws):
+    body = _linkage_build(linkage_ws, investigation="the-inv")
     assert "ac_matrix" in body or "nodes" in body
 
 
-def test_linkage_parity_source(linkage_ws):
-    body = _linkage_parity(linkage_ws, source="bib-X")
+def test_linkage_source(linkage_ws):
+    body = _linkage_build(linkage_ws, source="bib-X")
     assert "s1" in (body.get("studies") or [])
 
 
-def test_linkage_parity_no_filter(linkage_ws):
-    _linkage_parity(linkage_ws)
+def test_linkage_no_filter(linkage_ws):
+    _linkage_build(linkage_ws)
 
 
-def test_linkage_parity_tolerant_missing_ws(tmp_path):
-    _linkage_parity(tmp_path / "does-not-exist", investigation="nope")
+def test_linkage_tolerant_missing_ws(tmp_path):
+    _linkage_build(tmp_path / "does-not-exist", investigation="nope")
 
 
 # ---------------------------------------------------------------------------
-# linkage-index parity — SP4b observable_registry / composite (real build,
-# observables sourced from lib).  This locks the route to the server worker on
-# the build paths.
+# linkage-index — SP4b observable_registry / composite (real build,
+# observables sourced from lib).
 # ---------------------------------------------------------------------------
 
-def test_linkage_parity_observable_registry_real_build(demo_ws):
+def test_linkage_observable_registry_real_build(demo_ws):
     _write_study(demo_ws, "s1", {
         "name": "s1",
         "baseline": {"name": "bl", "composite": _REF},
         "tests": [{"name": "b1", "measure": {"field": _REAL_LEAF}}],
     })
-    body = _linkage_parity(demo_ws, observable_registry=_REAL_LEAF)
+    body = _linkage_build(demo_ws, observable_registry=_REAL_LEAF)
     assert set(body) == {"studies", "composites"}
 
 
-def test_linkage_parity_composite_real_build(demo_ws):
+def test_linkage_composite_real_build(demo_ws):
     _write_study(demo_ws, "s1", {
         "name": "s1",
         "baseline": {"name": "bl", "composite": _REF},
         "tests": [{"name": "b1", "measure": {"field": _REAL_LEAF}}],
     })
-    body = _linkage_parity(demo_ws, composite=_REF)
+    body = _linkage_build(demo_ws, composite=_REF)
     assert set(body) == {"emits", "used_by_studies"}

@@ -13,21 +13,18 @@ _PKG = Path(__file__).parent.parent / "vivarium_dashboard"
 
 
 def test_simulations_data_labels_emitterless_run_as_dash(tmp_path, monkeypatch):
-    import vivarium_dashboard.server as srv
     import vivarium_dashboard.lib.simulations_index as si
 
     ws = tmp_path / "ws"
     ws.mkdir()
     (ws / "workspace.yaml").write_text("name: ws\n")
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
-
     # A study.yaml-sourced run carries emitter tag "none" (no step emitter).
     monkeypatch.setattr(si, "list_simulations", lambda _ws: [
         {"run_id": "summary-run", "emitter": "none", "db_path": None},
         {"run_id": "sqlite-run", "emitter": "sqlite", "db_path": None},
     ])
 
-    data = srv._simulations_data(ws)
+    data = si.build_simulations_data(ws)
     by_id = {s["run_id"]: s for s in data["simulations"]}
     assert by_id["summary-run"]["emitter_type"] == "—"
     assert by_id["sqlite-run"]["emitter_type"] == "SQLite"
@@ -41,14 +38,11 @@ def test_simulations_data_labels_dict_declared_emitters(tmp_path, monkeypatch):
     mid-loop, and every row after it (plus the dict row) lost its emitter_type
     and rendered as the "SQLite" default in the read-only dashboard.
     """
-    import vivarium_dashboard.server as srv
     import vivarium_dashboard.lib.simulations_index as si
 
     ws = tmp_path / "ws"
     ws.mkdir()
     (ws / "workspace.yaml").write_text("name: ws\n")
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
-
     monkeypatch.setattr(si, "list_simulations", lambda _ws: [
         {"run_id": "none-run", "emitter": "none", "db_path": None},
         # dict-declared emitter appears mid-list; must not abort the loop.
@@ -58,7 +52,7 @@ def test_simulations_data_labels_dict_declared_emitters(tmp_path, monkeypatch):
         {"run_id": "parquet-str-run", "emitter": "parquet", "db_path": None},
     ])
 
-    data = srv._simulations_data(ws)
+    data = si.build_simulations_data(ws)
     by_id = {s["run_id"]: s for s in data["simulations"]}
     assert by_id["none-run"]["emitter_type"] == "—"
     assert by_id["parquet-dict-run"]["emitter_type"] == "Parquet"

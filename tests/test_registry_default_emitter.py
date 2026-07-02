@@ -10,18 +10,13 @@ ParquetEmitter is the registered emitter.
 """
 from __future__ import annotations
 import json
-import sys
-import threading
 import urllib.request
 import urllib.error
-from pathlib import Path
 
 import pytest
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-import vivarium_dashboard.server as srv  # noqa: E402
+from vivarium_dashboard.lib import registry as reg
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +55,7 @@ def test_mark_default_emitter_parquet_match():
         ],
         "types": [],
     }
-    srv._mark_default_emitter(data, {"runtime": {"default_emitter": "parquet"}})
+    reg._mark_default_emitter(data, {"runtime": {"default_emitter": "parquet"}})
 
     by_name = {p["name"]: p for p in data["processes"]}
     assert by_name["ParquetEmitter"]["is_workspace_default"] is True
@@ -77,7 +72,7 @@ def test_mark_default_emitter_sqlite_match():
         ],
         "types": [],
     }
-    srv._mark_default_emitter(data, {"runtime": {"default_emitter": "sqlite"}})
+    reg._mark_default_emitter(data, {"runtime": {"default_emitter": "sqlite"}})
     by_name = {p["name"]: p for p in data["processes"]}
     assert by_name["SQLiteEmitter"]["is_workspace_default"] is True
     assert by_name["ParquetEmitter"]["is_workspace_default"] is False
@@ -89,7 +84,7 @@ def test_mark_default_emitter_case_insensitive():
         "processes": [_emitter_entry("ParquetEmitter")],
         "types": [],
     }
-    srv._mark_default_emitter(data, {"runtime": {"default_emitter": "PARQUET"}})
+    reg._mark_default_emitter(data, {"runtime": {"default_emitter": "PARQUET"}})
     assert data["processes"][0]["is_workspace_default"] is True
 
 
@@ -99,14 +94,14 @@ def test_mark_default_emitter_no_runtime_block():
         "processes": [_emitter_entry("ParquetEmitter")],
         "types": [],
     }
-    srv._mark_default_emitter(data, {"name": "x"})
+    reg._mark_default_emitter(data, {"name": "x"})
     assert data["processes"][0]["is_workspace_default"] is False
     assert data["default_emitter"] is None
 
 
 def test_mark_default_emitter_missing_ws_data():
     data = {"processes": [_emitter_entry("ParquetEmitter")], "types": []}
-    srv._mark_default_emitter(data, None)
+    reg._mark_default_emitter(data, None)
     assert data["processes"][0]["is_workspace_default"] is False
 
 
@@ -121,7 +116,7 @@ def test_mark_default_emitter_only_emitter_kind():
         ],
         "types": [],
     }
-    srv._mark_default_emitter(data, {"runtime": {"default_emitter": "parquet"}})
+    reg._mark_default_emitter(data, {"runtime": {"default_emitter": "parquet"}})
     by_name = {p["name"]: p for p in data["processes"]}
     assert by_name["ParquetEmitter"]["is_workspace_default"] is True
     # The non-emitter must not have the flag set at all.
@@ -137,7 +132,7 @@ def test_mark_default_emitter_unknown_value():
         ],
         "types": [],
     }
-    srv._mark_default_emitter(data, {"runtime": {"default_emitter": "rabbit"}})
+    reg._mark_default_emitter(data, {"runtime": {"default_emitter": "rabbit"}})
     for p in data["processes"]:
         assert p["is_workspace_default"] is False
 
@@ -147,8 +142,8 @@ def test_mark_default_emitter_unknown_value():
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def registry_server_with_parquet_default(tmp_path, monkeypatch):
-    """Spin up an in-process server with workspace.yaml setting
+def registry_server_with_parquet_default(tmp_path, dashboard_client):
+    """Spin up the live FastAPI app with workspace.yaml setting
     runtime.default_emitter='parquet' and a workspace package that
     registers a fake ParquetEmitter subclass under the link registry.
     """
@@ -189,26 +184,13 @@ def registry_server_with_parquet_default(tmp_path, monkeypatch):
         "simulations": [],
     }, sort_keys=False))
 
-    monkeypatch.syspath_prepend(str(ws_root))
-
-    import importlib
-    importlib.reload(srv)
-    monkeypatch.setattr(srv, "WORKSPACE", ws_root)
-    srv._REGISTRY_CACHE["data"] = None
-    srv._REGISTRY_CACHE["ts"] = 0.0
-
-    httpd = srv.ThreadingHTTPServer(("127.0.0.1", 0), srv.Handler)
-    port = httpd.server_address[1]
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
+    client = dashboard_client(ws_root)
 
     class _Server:
-        url = f"http://127.0.0.1:{port}"
+        url = client.base_url
         root = ws_root
 
     yield _Server()
-    httpd.shutdown()
-    thread.join(timeout=2)
 
 
 def _get(url):

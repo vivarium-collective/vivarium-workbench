@@ -7,7 +7,7 @@ through the study-sync endpoint (behavioral).
 from pathlib import Path
 
 from pbg_superpowers import study_io, run_registry
-from vivarium_dashboard import server
+from vivarium_dashboard.lib import lifecycle_mutations, study_runs
 
 
 INV_YAML = """\
@@ -47,7 +47,7 @@ def test_study_sync_endpoint_rolls_up_investigation_acceptance(tmp_path: Path):
     executive.computed_acceptance on disk."""
     ws, inv_dir, _study_dir = _nested_ws(tmp_path)
 
-    resp, code = server._post_study_sync_runs_for_test(ws, {"study": "s1"})
+    resp, code = lifecycle_mutations.study_sync_runs(ws, {"study": "s1"})
     assert code == 200
 
     spec = study_io.load_yaml_mapping(inv_dir / "investigation.yaml")
@@ -65,12 +65,14 @@ def test_sync_parent_investigation_helper_best_effort(tmp_path: Path):
     d.mkdir(parents=True)
     study_io.save_yaml_atomic(d / "study.yaml", {"name": "loner", "runs": []})
     # Must not raise.
-    server._sync_parent_investigation(tmp_path, d)
+    lifecycle_mutations._sync_parent_investigation(tmp_path, d)
 
 
 def test_hook_wired_at_all_study_sync_sites():
     """Structural: _sync_parent_investigation is invoked wherever a study syncs."""
-    src = Path(server.__file__).read_text()
-    assert "def _sync_parent_investigation" in src
-    # one definition + three call sites (run-baseline, run-variant, sync endpoint)
-    assert src.count("_sync_parent_investigation(") >= 3
+    lm_src = Path(lifecycle_mutations.__file__).read_text()
+    sr_src = Path(study_runs.__file__).read_text()
+    assert "def _sync_parent_investigation" in lm_src
+    # one definition (lifecycle_mutations) + three call sites (run-baseline,
+    # run-variant in study_runs, sync endpoint in lifecycle_mutations)
+    assert (lm_src + sr_src).count("_sync_parent_investigation(") >= 4

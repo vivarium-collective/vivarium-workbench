@@ -59,14 +59,16 @@ defined in `api/app.py` via `@app.get`/`@app.post` decorators; each backs onto a
 below). When adding an endpoint: add the route in `api/app.py`, put the real logic
 in a `lib/` module, and return a pydantic model where possible.
 
-The old stdlib `BaseHTTPRequestHandler` (`server.py`, ~16k lines) is **retired** —
-it is no longer on the serve path. It remains on disk pending removal: a few `lib/`
-helpers and the `dashboard_client` test fixture (`tests/conftest.py`) still import
-symbols that live in it (including `_*_for_test` shims and helpers like
-`_json_default`/`_render_study_detail_html`). Those are being relocated to `lib/`,
-after which `server.py` and the fixture's subprocess spawn will be deleted and the
-fixture repointed at the live FastAPI app. Do **not** add new dependencies on
-`server.py`.
+The old stdlib `BaseHTTPRequestHandler` (`server.py`, ~9.6k lines) has been
+**deleted**. All of its real logic was relocated to `lib/`, and the dashboard's
+own code + tests import from there. `server.py` is now a ~40-line **deprecation
+shim** that re-exports only six symbols still consumed by external repos
+(v2ecoli / sms-ecoli import `_json_default`/`_json_sanitize`/`_json_body`;
+pbg-superpowers imports `_build_iset_summary_for_test`/`_build_iset_detail_for_test`/
+`_observables_for_ref`) from their new `lib` homes (`lib/json_serialize.py`,
+`lib/iset_test_shims.py`, `lib/observables_views.py`). The `dashboard_client`
+test fixture now spawns the live FastAPI app. Do **not** add new dependencies on
+`server.py` — import the `lib` homes directly.
 
 Supporting the typed contract: `lib/models.py` holds pydantic models for the JSON
 payloads (many still `extra="allow"` passthroughs — tightening them is tracked in

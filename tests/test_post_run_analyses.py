@@ -34,7 +34,7 @@ def test_single_entry_places_correct_scale():
     fake_mod.ANALYSIS_REGISTRY = fake_registry  # type: ignore[attr-defined]
     sys.modules["v2ecoli.workflow.analysis"] = fake_mod
 
-    from vivarium_dashboard.server import _build_analysis_options
+    from vivarium_dashboard.lib.study_run_post import build_analysis_options as _build_analysis_options
 
     entries = [{"name": "ptools_rna", "params": {"n_tp": 8}}]
     opts, errors = _build_analysis_options(entries)
@@ -55,7 +55,7 @@ def test_multiple_entries_different_scales(monkeypatch):
     fake_mod.ANALYSIS_REGISTRY = fake_registry  # type: ignore[attr-defined]
     sys.modules["v2ecoli.workflow.analysis"] = fake_mod
 
-    from vivarium_dashboard.server import _build_analysis_options
+    from vivarium_dashboard.lib.study_run_post import build_analysis_options as _build_analysis_options
 
     entries = [
         {"name": "ptools_rna"},
@@ -76,7 +76,7 @@ def test_unknown_analysis_name_records_error(monkeypatch):
     fake_mod.ANALYSIS_REGISTRY = fake_registry  # type: ignore[attr-defined]
     sys.modules["v2ecoli.workflow.analysis"] = fake_mod
 
-    from vivarium_dashboard.server import _build_analysis_options
+    from vivarium_dashboard.lib.study_run_post import build_analysis_options as _build_analysis_options
 
     entries = [{"name": "ptools_rna"}, {"name": "does_not_exist"}]
     opts, errors = _build_analysis_options(entries)
@@ -95,7 +95,7 @@ def test_empty_entries_returns_empty(monkeypatch):
     fake_mod.ANALYSIS_REGISTRY = {}  # type: ignore[attr-defined]
     sys.modules["v2ecoli.workflow.analysis"] = fake_mod
 
-    from vivarium_dashboard.server import _build_analysis_options
+    from vivarium_dashboard.lib.study_run_post import build_analysis_options as _build_analysis_options
 
     opts, errors = _build_analysis_options([])
     assert opts == {}

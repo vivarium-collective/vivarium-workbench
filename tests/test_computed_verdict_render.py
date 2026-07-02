@@ -35,9 +35,8 @@ def _v3_study(name: str, tests: list, runs: list) -> dict:
 
 
 @pytest.fixture
-def ws_with_passing_study(tmp_path, monkeypatch):
+def ws_with_passing_study(tmp_path):
     """Workspace with a v3 study where all tests pass."""
-    import vivarium_dashboard.server as srv
     ws = tmp_path / "ws"
     sd = ws / "studies" / "my-study"
     sd.mkdir(parents=True)
@@ -51,14 +50,13 @@ def ws_with_passing_study(tmp_path, monkeypatch):
         }],
     )
     (sd / "study.yaml").write_text(yaml.safe_dump(spec))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
     return ws
 
 
 def test_study_detail_spec_carries_computed_gate_verdict(ws_with_passing_study):
     """_study_detail_spec must attach computed_gate_verdict to the spec."""
-    from vivarium_dashboard.server import _study_detail_spec
-    spec = _study_detail_spec("my-study")
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(ws_with_passing_study, "my-study")
     assert spec is not None
     assert "computed_gate_verdict" in spec, (
         "spec must carry computed_gate_verdict when study has test outcomes"
@@ -66,8 +64,8 @@ def test_study_detail_spec_carries_computed_gate_verdict(ws_with_passing_study):
 
 
 def test_computed_gate_verdict_has_required_fields(ws_with_passing_study):
-    from vivarium_dashboard.server import _study_detail_spec
-    spec = _study_detail_spec("my-study")
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    spec = _study_detail_spec(ws_with_passing_study, "my-study")
     cgv = spec["computed_gate_verdict"]
     assert "result" in cgv
     assert "blocked_by" in cgv
@@ -79,10 +77,10 @@ def test_computed_gate_verdict_passed_matches_server_condition_satisfied(
         ws_with_passing_study):
     """The computed verdict 'passed' MUST equal server._condition_satisfied
     tests-passed branch: counts['fail']==0 and counts['pass']>0."""
-    from vivarium_dashboard.server import _study_detail_spec
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
     from pbg_superpowers import study_status
 
-    spec = _study_detail_spec("my-study")
+    spec = _study_detail_spec(ws_with_passing_study, "my-study")
     # Verify the server predicate agrees
     counts = study_status.count_test_outcomes(spec, spec.get("runs"))
     server_passed = counts["fail"] == 0 and counts["pass"] > 0
@@ -90,8 +88,7 @@ def test_computed_gate_verdict_passed_matches_server_condition_satisfied(
     assert spec["computed_gate_verdict"]["result"] == "passed"
 
 
-def test_computed_gate_verdict_failed_when_tests_fail(tmp_path, monkeypatch):
-    import vivarium_dashboard.server as srv
+def test_computed_gate_verdict_failed_when_tests_fail(tmp_path):
     ws = tmp_path / "ws"
     sd = ws / "studies" / "fail-study"
     sd.mkdir(parents=True)
@@ -103,10 +100,9 @@ def test_computed_gate_verdict_failed_when_tests_fail(tmp_path, monkeypatch):
                "outcomes": {"t1": {"result": "FAIL"}}}],
     )
     (sd / "study.yaml").write_text(yaml.safe_dump(spec))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
 
-    from vivarium_dashboard.server import _study_detail_spec
-    result_spec = _study_detail_spec("fail-study")
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    result_spec = _study_detail_spec(ws, "fail-study")
     assert result_spec["computed_gate_verdict"]["result"] == "failed"
     assert "t1" in result_spec["computed_gate_verdict"]["blocked_by"]
 
@@ -118,8 +114,8 @@ def test_computed_gate_verdict_does_not_modify_gate_status(ws_with_passing_study
     spec_data["gate_status"] = "passed"
     sd.write_text(yaml.safe_dump(spec_data))
 
-    from vivarium_dashboard.server import _study_detail_spec
-    result_spec = _study_detail_spec("my-study")
+    from vivarium_dashboard.lib.study_spec import load_study_detail_spec as _study_detail_spec
+    result_spec = _study_detail_spec(ws_with_passing_study, "my-study")
     # authored gate_status must be untouched
     assert result_spec.get("gate_status") == "passed"
     # computed verdict is attached separately

@@ -185,114 +185,77 @@ def test_list_build_sources_degrades_on_error():
 
 
 def test_source_builds_route_in_do_get(monkeypatch):
-    from vivarium_dashboard import server
+    """The GET /api/source/builds builder returns the sms-api build list."""
+    from vivarium_dashboard.lib import workspace_deps_views as wdv
     from vivarium_dashboard.lib import remote_build_source
     monkeypatch.setattr(
         remote_build_source, "list_build_sources",
         lambda client: {"builds": [{"simulator_id": 7, "label": "x"}], "error": None},
     )
-    captured = {}
-
-    class H:
-        path = "/api/source/builds"
-        def _json(self, obj, code):
-            captured.update(obj=obj, code=code)
-
-    server.Handler._get_source_builds(H())
-    assert captured["code"] == 200
-    assert captured["obj"]["builds"][0]["simulator_id"] == 7
+    out = wdv.build_source_builds()
+    assert out["builds"][0]["simulator_id"] == 7
 
 
 def test_switch_build_unknown_id_404(monkeypatch):
-    from vivarium_dashboard import server
-    from vivarium_dashboard.lib import remote_build_source
-    monkeypatch.setattr(remote_build_source, "list_build_sources",
+    from vivarium_dashboard.lib import source_build_views as sbv
+    monkeypatch.setattr(sbv, "list_build_sources",
                         lambda client: {"builds": [], "error": None})
-    captured = {}
-
-    class H:
-        def _json(self, obj, code):
-            captured.update(obj=obj, code=code)
-
-    server.Handler._post_source_switch_build(H(), {"simulator_id": 999})
-    assert captured["code"] == 404
+    obj, code = sbv.switch_build({"simulator_id": 999})
+    assert code == 404
 
 
 def test_switch_build_materializes_and_switches(monkeypatch, tmp_path):
-    from vivarium_dashboard import server
-    from vivarium_dashboard.lib import remote_build_source
+    from vivarium_dashboard.lib import source_build_views as sbv
     cache = tmp_path / "sim45-32b901"; cache.mkdir()
     (cache / "workspace.yaml").write_text("name: built\n")
-    monkeypatch.setattr(remote_build_source, "list_build_sources",
+    monkeypatch.setattr(sbv, "list_build_sources",
                         lambda client: {"builds": [{"simulator_id": 45, "commit": "32b901",
                                                     "label": "v2ecoli @ 32b901 (build #45)"}], "error": None})
-    monkeypatch.setattr(remote_build_source, "materialize_build",
+    monkeypatch.setattr(sbv, "materialize_build",
                         lambda client, sim_id, commit, **k: cache)
     switched = {}
-    monkeypatch.setattr(server, "_switch_active_workspace", lambda root: switched.update(root=root))
-    captured = {}
+    monkeypatch.setattr(sbv.active_workspace, "switch_workspace",
+                        lambda root: switched.update(root=root))
 
-    class H:
-        def _json(self, obj, code):
-            captured.update(obj=obj, code=code)
-
-    server.Handler._post_source_switch_build(H(), {"simulator_id": 45})
-    assert captured["code"] == 200 and captured["obj"]["ok"] is True
+    obj, code = sbv.switch_build({"simulator_id": 45})
+    assert code == 200 and obj["ok"] is True
+    assert obj["source"]["path"] == str(cache)
     assert switched["root"] == cache
-    assert server._POST_ROUTE_MAP.get("/api/source/switch-build") == "_post_source_switch_build"
 
 
 def test_switch_build_sms_api_down_502_not_404(monkeypatch):
-    from vivarium_dashboard import server
-    from vivarium_dashboard.lib import remote_build_source
+    from vivarium_dashboard.lib import source_build_views as sbv
     # sms-api unreachable: list degrades to empty builds + an error reason.
-    monkeypatch.setattr(remote_build_source, "list_build_sources",
+    monkeypatch.setattr(sbv, "list_build_sources",
                         lambda client: {"builds": [], "error": "tunnel down"})
-    captured = {}
-
-    class H:
-        def _json(self, obj, code):
-            captured.update(obj=obj, code=code)
-
-    server.Handler._post_source_switch_build(H(), {"simulator_id": 45})
-    assert captured["code"] == 502  # not a misleading 404
-    assert "tunnel down" in captured["obj"]["error"]
+    obj, code = sbv.switch_build({"simulator_id": 45})
+    assert code == 502  # not a misleading 404
+    assert "tunnel down" in obj["error"]
 
 
 def test_switch_build_missing_id_400():
-    from vivarium_dashboard import server
-    captured = {}
-
-    class H:
-        def _json(self, obj, code):
-            captured.update(obj=obj, code=code)
-
-    server.Handler._post_source_switch_build(H(), {})
-    assert captured["code"] == 400
+    from vivarium_dashboard.lib import source_build_views as sbv
+    obj, code = sbv.switch_build({})
+    assert code == 400
 
 
 def test_switch_build_materialize_failure_502_leaves_state_unchanged(monkeypatch):
-    from vivarium_dashboard import server
-    from vivarium_dashboard.lib import remote_build_source
+    from vivarium_dashboard.lib import source_build_views as sbv
     from vivarium_dashboard.lib.sms_api_client import SmsApiError
-    monkeypatch.setattr(remote_build_source, "list_build_sources",
+    monkeypatch.setattr(sbv, "list_build_sources",
                         lambda client: {"builds": [{"simulator_id": 45, "commit": "32b901",
                                                     "label": "v2ecoli @ 32b901 (build #45)"}], "error": None})
 
     def _boom(client, sim_id, commit, **k):
         raise SmsApiError("tunnel down")
 
-    monkeypatch.setattr(remote_build_source, "materialize_build", _boom)
+    monkeypatch.setattr(sbv, "materialize_build", _boom)
     switched = {}
-    monkeypatch.setattr(server, "_switch_active_workspace", lambda root: switched.update(root=root))
-    captured = {}
+    monkeypatch.setattr(sbv.active_workspace, "switch_workspace",
+                        lambda root: switched.update(root=root))
 
-    class H:
-        def _json(self, obj, code):
-            captured.update(obj=obj, code=code)
-
-    server.Handler._post_source_switch_build(H(), {"simulator_id": 45})
-    assert captured["code"] == 502
+    obj, code = sbv.switch_build({"simulator_id": 45})
+    assert code == 502
     assert switched == {}  # switch never fired → active workspace unchanged
 
 # NOTE: test_source_switch_js_has_builds_section was removed — source-switch.js's

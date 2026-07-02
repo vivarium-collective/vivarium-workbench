@@ -1,91 +1,57 @@
-"""Verify /api/study-* aliases hit the same handlers as /api/investigation-*.
+"""Behavioral coverage for the surviving ``/api/study/*`` alias in the FastAPI app.
 
-Dispatcher structure in server.py:
-- GET  routes: do_GET rewrites self.path at entry using _GET_STUDY_ALIASES so
-               the rest of the dispatch chain only sees /api/investigation-*
-               paths.  _GET_STUDY_ALIASES is the single source of truth;
-               tests inspect it directly.
-- POST routes: module-level _POST_ROUTE_MAP dict {route: method_name_str}.
-               do_POST resolves route → getattr(self, method_name)(body).
-               _POST_STUDY_ALIASES injects alias keys at import time so both
-               old and new keys map to the same method-name string.
+Historical context: the retired stdlib ``server.py`` exposed a large family of
+``/api/study-*`` routes as ALIASES of the canonical ``/api/investigation-*``
+handlers, tracked in two module-level dispatch tables (``_POST_ROUTE_MAP`` +
+``_POST_STUDY_ALIASES`` and ``_GET_STUDY_ALIASES``).  The old tests here asserted
+"old key and new key map to the same handler string" — a pure dict-entry mapping
+with no behavioral value once dispatch moved to explicit FastAPI
+``@app.get``/``@app.post`` decorators.  Those assertions were deleted with the
+dispatch tables they tested.
+
+FINDING (worth a maintainer's attention): in the FastAPI app only the canonical
+``/api/study/{slug}`` route survives (served directly, not as an alias).  The
+other ``/api/study-*`` aliases the old tests enumerated — ``studies``,
+``study-viz-html``, ``study-composites``, ``study-state-tree``, ``study-delete``,
+``study-viz-render``, ``study-viz-add``, ``study-set-observables``,
+``study-set-conclusion``, ``study-set-description``, ``study-comparison-update``,
+``study-group-add``, ``study-group-update``, ``study-variant-rebuild`` — are NOT
+registered on the FastAPI app; only their ``/api/investigation-*`` forms are.  So
+there is no behavioral endpoint to convert those cases to; they were dropped in
+the migration.  This file keeps a behavioral check for the one surviving alias.
 """
-import pytest
-
-import vivarium_dashboard.server as srv
+import yaml
 
 
-# ---------------------------------------------------------------------------
-# POST aliases: both old and new keys must map to the same method-name string.
-# ---------------------------------------------------------------------------
-POST_ALIAS_PAIRS = [
-    # /api/study-create is now a v3-native route (not an alias), so it
-    # intentionally maps to _post_study_create, not _post_investigation_create
-    # (which is now the investigation.yaml creator, formerly the iset-create route).
-    ("/api/investigation-delete",             "/api/study-delete"),
-    # /api/study-run-baseline is now a v3-native route (not an alias), so it
-    # intentionally maps to _post_study_run_baseline, not _post_investigation_run.
-    # /api/study-run-variant is now a v3-native route (not an alias), so it
-    # intentionally maps to _post_study_run_variant, not _post_investigation_run_one.
-    ("/api/investigation-render-viz",         "/api/study-viz-render"),
-    ("/api/investigation-add-viz",            "/api/study-viz-add"),
-    # /api/study-run-delete is now a v3-native route (not an alias), so it
-    # intentionally maps to _post_study_run_delete, not _post_investigation_run_delete.
-    # /api/study-runs-clear is now a v3-native route (not an alias), so it
-    # intentionally maps to _post_study_runs_clear, not _post_investigation_runs_clear.
-    # /api/study-variant-add is now a v3-native route (not an alias), so it
-    # intentionally maps to _post_study_variant_add, not _post_investigation_composite_perturb.
-    ("/api/investigation-composite-rebuild",  "/api/study-variant-rebuild"),
-    ("/api/investigation-set-observables",    "/api/study-set-observables"),
-    ("/api/investigation-set-conclusions",    "/api/study-set-conclusion"),
-    ("/api/investigation-set-overview",       "/api/study-set-description"),
-    # /api/study-comparison-add is now a v3-native route (not an alias), so it
-    # intentionally maps to _post_study_comparison_add, not the old alias target.
-    ("/api/investigation-comparison-update",  "/api/study-comparison-update"),
-    ("/api/investigation-group-add",          "/api/study-group-add"),
-    ("/api/investigation-group-update",       "/api/study-group-update"),
-]
+def _study_ws(tmp_path, slug="demo-study"):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "workspace.yaml").write_text("name: alias-test\n")
+    (ws / ".pbg").mkdir()
+    sd = ws / "studies" / slug
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "schema_version": 4,
+        "name": slug,
+        "question": "does the study route resolve?",
+        "conditions": {"baseline": {"composite": "x.y.z", "params": {"n_steps": 5}}},
+    }))
+    return ws, slug
 
 
-@pytest.mark.parametrize("old,new", POST_ALIAS_PAIRS)
-def test_post_study_alias_same_handler(old, new):
-    """New /api/study-* POST key maps to the same method name as the original."""
-    route_map = srv._POST_ROUTE_MAP
-    if old not in route_map:
-        pytest.skip(f"original route {old!r} not in POST route map; alias skipped")
-    assert new in route_map, f"alias {new!r} missing from POST route map"
-    assert route_map[new] == route_map[old], (
-        f"{new!r} → {route_map[new]!r} differs from "
-        f"{old!r} → {route_map[old]!r}"
-    )
+def test_study_detail_alias_route_resolves(tmp_path, dashboard_client):
+    """GET /api/study/<slug> (the surviving study alias) serves the study spec."""
+    ws, slug = _study_ws(tmp_path)
+    client = dashboard_client(ws)
+    r = client.get(f"/api/study/{slug}")
+    assert r.status_code == 200
+    assert r.json().get("name") == slug
 
 
-# ---------------------------------------------------------------------------
-# GET aliases: _GET_STUDY_ALIASES records (old_prefix, new_prefix) pairs so
-# tests can verify coverage without executing a live HTTP request.
-# ---------------------------------------------------------------------------
-GET_ALIAS_PAIRS = [
-    ("/api/investigations",           "/api/studies"),
-    ("/api/investigation-viz-html",   "/api/study-viz-html"),
-    ("/api/investigation-composites", "/api/study-composites"),
-    ("/api/investigation-state-tree", "/api/study-state-tree"),
-    # /api/investigation/<name>  →  /api/study/<name>
-    ("/api/investigation/",           "/api/study/"),
-]
-
-
-@pytest.mark.parametrize("old,new", GET_ALIAS_PAIRS)
-def test_get_study_alias_registered(old, new):
-    """Both old and new GET prefixes appear as a pair in _GET_STUDY_ALIASES."""
-    registered = srv._GET_STUDY_ALIASES
-    registered_olds = {o for o, _ in registered}
-    registered_news = {n for _, n in registered}
-    if old not in registered_olds:
-        pytest.skip(f"original GET prefix {old!r} not registered; alias skipped")
-    assert new in registered_news, (
-        f"alias prefix {new!r} missing from _GET_STUDY_ALIASES"
-    )
-    # Verify the old→new mapping is a single pair (not accidentally cross-wired).
-    assert (old, new) in registered, (
-        f"({old!r}, {new!r}) not found as a pair in _GET_STUDY_ALIASES"
-    )
+def test_study_detail_alias_route_404_for_unknown(tmp_path, dashboard_client):
+    """A registered route (not a missing one) returns the loader's 404 body."""
+    ws, _ = _study_ws(tmp_path)
+    client = dashboard_client(ws)
+    r = client.get("/api/study/does-not-exist")
+    assert r.status_code == 404
+    assert "not found" in r.json().get("error", "")

@@ -24,6 +24,13 @@ from pathlib import Path
 import pytest
 import yaml
 
+from vivarium_dashboard.lib import catalog as _catalog
+from vivarium_dashboard.lib.catalog import (
+    _detect_workspace_venv_distributions,
+    _read_workspace_pyproject_deps,
+    build_catalog,
+)
+
 
 # ---------------------------------------------------------------------------
 # Helpers under test
@@ -73,7 +80,6 @@ def _ws_with_catalog(tmp_path):
 def test_read_workspace_pyproject_deps(_ws_with_catalog):
     """The pyproject parser extracts bare package names, lowercased,
     stripping version markers + extras."""
-    from vivarium_dashboard.server import _read_workspace_pyproject_deps
     deps = _read_workspace_pyproject_deps(_ws_with_catalog)
     assert "pbg-copasi" in deps
     assert "viva-munk" in deps
@@ -85,20 +91,17 @@ def test_read_workspace_pyproject_deps(_ws_with_catalog):
 
 def test_read_workspace_pyproject_deps_missing_file(tmp_path):
     """No pyproject → empty set (degrades gracefully)."""
-    from vivarium_dashboard.server import _read_workspace_pyproject_deps
     assert _read_workspace_pyproject_deps(tmp_path) == set()
 
 
 def test_read_workspace_pyproject_deps_malformed(tmp_path):
     """Malformed pyproject → empty set (degrades gracefully)."""
-    from vivarium_dashboard.server import _read_workspace_pyproject_deps
     (tmp_path / "pyproject.toml").write_text("this is { not valid toml")
     assert _read_workspace_pyproject_deps(tmp_path) == set()
 
 
 def test_detect_venv_distributions_missing_venv(tmp_path):
     """No .venv → empty dict (degrades gracefully)."""
-    from vivarium_dashboard.server import _detect_workspace_venv_distributions
     assert _detect_workspace_venv_distributions(tmp_path) == {}
 
 
@@ -108,13 +111,15 @@ def test_detect_venv_distributions_missing_venv(tmp_path):
 
 
 @pytest.fixture
-def _patched_server(monkeypatch, _ws_with_catalog):
-    """Point the server module at the test workspace + stub the venv probe
-    to return a fixed dict (so we can test the three-layer detection
-    without spinning up a real venv)."""
-    import vivarium_dashboard.server as srv
-    monkeypatch.setattr(srv, "WORKSPACE", _ws_with_catalog)
+def _patched_ws(monkeypatch, _ws_with_catalog):
+    """Return the test workspace + stub the venv probe to return a fixed dict
+    (so we can test the three-layer detection without spinning up a real venv).
 
+    The catalog is sourced via ``pbg_superpowers.catalog.load_registry`` (the
+    canonical registry seam ``build_catalog`` consults) rather than a
+    per-workspace modules.json. Feed this test's controlled 3-entry catalog
+    through that seam so the install-source annotation logic is exercised
+    against a known set."""
     # Venv-probe stub: spatio_flux is installed as a transitive dep of
     # viva-munk; pbg-copasi is also installed (matches pyproject); pbg-readdy
     # is installed (matches workspace.yaml.imports).
@@ -125,44 +130,25 @@ def _patched_server(monkeypatch, _ws_with_catalog):
         "pbg-superpowers": {"version": "0.1", "requires": [],                "requires_by": []},
         "pbg-readdy":      {"version": "0.1", "requires": [],                "requires_by": []},
     }
-    monkeypatch.setattr(srv, "_detect_workspace_venv_distributions",
+    monkeypatch.setattr(_catalog, "_detect_workspace_venv_distributions",
                         lambda _ws: fake_dists)
     # Stub the sync-check so it never shells out to a real venv.
-    monkeypatch.setattr(srv, "_check_installed_module_sync",
-                        lambda pkg, path: None)
-    # The catalog is now sourced via _module_registry (canonical pbg-superpowers
-    # registry + workspace overlay) rather than a per-workspace modules.json.
-    # Feed this test's controlled 3-entry catalog through that seam so the
-    # install-source annotation logic is exercised against a known set.
+    monkeypatch.setattr(_catalog, "_check_installed_module_sync",
+                        lambda ws, pkg, path: None)
     fixture_modules = json.loads(
         (_ws_with_catalog / "scripts" / "_catalog" / "modules.json").read_text())
-    monkeypatch.setattr(srv.Handler, "_module_registry",
-                        lambda self: [dict(m) for m in fixture_modules])
-    return srv
+    monkeypatch.setattr("pbg_superpowers.catalog.load_registry",
+                        lambda _ws: [dict(m) for m in fixture_modules])
+    return _ws_with_catalog
 
 
-def _run_get_catalog(srv) -> list[dict]:
-    """Invoke the bound _get_catalog handler via a stub `self` object
-    and return the parsed modules list. The handler's only side-effect
-    we care about is the JSON body it would have written."""
-    captured = {}
-    class _Stub:
-        # Delegate the workspace-self-module helper to the real Handler
-        # implementation (it only reads WORKSPACE + shells out for the
-        # git branch, both of which work fine from the stub context).
-        _workspace_self_module = srv.Handler._workspace_self_module
-        # _module_registry is monkeypatched on Handler by _patched_server.
-        _module_registry = srv.Handler._module_registry
-        def _json(self, payload, code):
-            captured["payload"] = payload
-            captured["code"] = code
-    srv.Handler._get_catalog(_Stub())
-    assert captured["code"] == 200
-    return captured["payload"]["modules"]
+def _run_get_catalog(ws) -> list[dict]:
+    """Build the catalog for ``ws`` and return the parsed modules list."""
+    return build_catalog(ws)["modules"]
 
 
-def test_three_layer_detection_marks_each_source(_patched_server):
-    modules = _run_get_catalog(_patched_server)
+def test_three_layer_detection_marks_each_source(_patched_ws):
+    modules = _run_get_catalog(_patched_ws)
     by_name = {m["name"]: m for m in modules}
 
     # pbg-readdy: declared in workspace.yaml.imports → install_source: imports
@@ -186,25 +172,24 @@ def test_three_layer_detection_marks_each_source(_patched_server):
     assert sf.get("installed_via") == ["viva-munk"]
 
 
-def test_workspace_self_entry_prepended(_patched_server):
-    modules = _run_get_catalog(_patched_server)
+def test_workspace_self_entry_prepended(_patched_ws):
+    modules = _run_get_catalog(_patched_ws)
     assert modules[0]["kind"] == "workspace"
     assert modules[0]["installed"] is True
     assert modules[0]["package"] == "pbg_testws"
 
 
-def test_uninstalled_module_has_no_install_source(_patched_server, monkeypatch):
+def test_uninstalled_module_has_no_install_source(_patched_ws, monkeypatch):
     """A module that's in the catalog but in NONE of the three install
     layers should be `installed: False` and have no install_source field
     (the UI then renders an Install button)."""
-    import vivarium_dashboard.server as srv
     # Drop spatio-flux from the venv-probe stub so it's no longer detected.
-    monkeypatch.setattr(srv, "_detect_workspace_venv_distributions",
+    monkeypatch.setattr(_catalog, "_detect_workspace_venv_distributions",
                         lambda _ws: {
                             "pbg-readdy": {"version": "0.1", "requires": [], "requires_by": []},
                             "pbg-copasi": {"version": "0.1", "requires": [], "requires_by": []},
                         })
-    modules = _run_get_catalog(_patched_server)
+    modules = _run_get_catalog(_patched_ws)
     sf = next(m for m in modules if m["name"] == "spatio-flux")
     assert sf["installed"] is False
     assert "install_source" not in sf
@@ -215,13 +200,12 @@ def test_module_registry_is_canonical_plus_overlay(tmp_path, monkeypatch):
     """The registry is now the canonical pbg-superpowers list (single source
     of truth) merged with the workspace's optional overlay.json — NOT a
     vendored per-workspace modules.json."""
-    import vivarium_dashboard.server as srv
+    from pbg_superpowers.catalog import load_registry
     ws = tmp_path / "ws"
     (ws / "scripts" / "_catalog").mkdir(parents=True)
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
 
     # No per-workspace catalog file at all → still populated from canonical.
-    reg = srv.Handler._module_registry(object())
+    reg = load_registry(ws)
     names = {m["name"] for m in reg}
     assert "v2ecoli" in names                 # a known canonical module
     assert "pbg-physicell" not in names       # removed from the ecosystem
@@ -230,7 +214,7 @@ def test_module_registry_is_canonical_plus_overlay(tmp_path, monkeypatch):
     # A local-only module added via overlay.json appears on top of canonical.
     (ws / "scripts" / "_catalog" / "overlay.json").write_text(
         json.dumps([{"name": "pbg-localonly", "description": "local"}]))
-    names2 = {m["name"] for m in srv.Handler._module_registry(object())}
+    names2 = {m["name"] for m in load_registry(ws)}
     assert "pbg-localonly" in names2
     assert names2 >= names
 
@@ -240,7 +224,6 @@ def test_uncurated_declared_import_surfaces_in_catalog(tmp_path, monkeypatch):
     must still appear in /api/catalog as an installed module (install_source
     'imports') — otherwise imported pbg-* repos silently vanish from the
     Modules grid."""
-    import vivarium_dashboard.server as srv
     ws = tmp_path / "ws"
     ws.mkdir()
     (ws / "workspace.yaml").write_text(yaml.safe_dump({
@@ -252,17 +235,15 @@ def test_uncurated_declared_import_surfaces_in_catalog(tmp_path, monkeypatch):
             },
         },
     }))
-    monkeypatch.setattr(srv, "WORKSPACE", ws)
     # Curated catalog deliberately does NOT include pbg_ketchup.
-    monkeypatch.setattr(srv, "_read_workspace_pyproject_deps", lambda _w: set())
-    monkeypatch.setattr(srv, "_detect_workspace_venv_distributions", lambda _w: {})
-    monkeypatch.setattr(srv, "_check_installed_module_sync", lambda pkg, path: None)
-    import vivarium_dashboard.server  # ensure module ref
+    monkeypatch.setattr(_catalog, "_read_workspace_pyproject_deps", lambda _w: set())
+    monkeypatch.setattr(_catalog, "_detect_workspace_venv_distributions", lambda _w: {})
+    monkeypatch.setattr(_catalog, "_check_installed_module_sync", lambda ws, pkg, path: None)
     monkeypatch.setattr("pbg_superpowers.catalog.load_registry",
                         lambda _w: [{"name": "pbg-copasi", "package": "pbg_copasi",
                                      "description": "c"}])
 
-    data = srv._catalog_data(ws)
+    data = build_catalog(ws)
     by_name = {m["name"]: m for m in data["modules"]}
     assert "pbg_ketchup" in by_name, list(by_name)
     ket = by_name["pbg_ketchup"]
