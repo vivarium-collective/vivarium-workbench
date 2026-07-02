@@ -31,6 +31,7 @@ export interface SimRow {
   db_path: string | null;
   store_path: string | null;
   emitter: string | null;
+  emitter_type: string | null;
   studies: (StudyRef | string)[];
   study_slug: string | null;
   investigation_slug: string | null;

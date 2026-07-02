@@ -54,15 +54,19 @@ def test_simulations_returns_typed_rows(client, monkeypatch):
         "emitter": "xarray", "studies": [], "study_slug": "study-a",
         "investigation_slug": None, "remote_origin": None,
     }
-    monkeypatch.setattr(api_app, "list_simulations", lambda ws: [row])
+    # /api/simulations is now backed by lib.simulations_index.build_simulations_data,
+    # which calls the module-level list_simulations — patch it there.
+    from vivarium_dashboard.lib import simulations_index as _si
+    monkeypatch.setattr(_si, "list_simulations", lambda ws: [dict(row)])
     r = client.get("/api/simulations")
     assert r.status_code == 200
     body = r.json()
-    assert body["current"] is None
+    assert body["current"] is None   # tmp workspace is not a git checkout
     assert len(body["simulations"]) == 1
     sim = body["simulations"][0]
     assert sim["run_id"] == "r1"
     assert sim["emitter"] == "xarray"
+    assert sim["emitter_type"] == "XArray"   # enrichment label from emitter tag
     assert sim["started_at"] == 1700000000.0   # epoch float survives the round-trip
 
 
