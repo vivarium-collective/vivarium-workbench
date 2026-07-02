@@ -32,6 +32,8 @@ import textwrap
 import time
 from pathlib import Path
 
+from vivarium_dashboard.lib import run_store
+
 import yaml
 
 
@@ -176,8 +178,9 @@ def run_composite_subprocess(ws_root, *, pkg, state, steps, db_file, run_id, spe
             _max_generations = int(study_max_generations)
         if study_single_daughters is not None:
             _single_daughters = bool(study_single_daughters)
-        # Derive a zarr store path alongside the SQLite db_file (one per run).
-        _zarr_store = str(Path(db_file).with_suffix("")) + f".{run_id}.zarr"
+        # Derive a zarr store path alongside the SQLite db_file (one per run)
+        # via the canonical run-store convention (<study>/runs.<run_id>.zarr).
+        _zarr_store = str(run_store.zarr_store_path_for_db(Path(db_file), run_id))
         payload = {
             "spec_id": spec_id,
             "overrides": overrides or {},

@@ -20,6 +20,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 from vivarium_dashboard.lib import emitters
+from vivarium_dashboard.lib import run_store
 
 # DnaA monomer index (PD03831[c]) in monomer_ids; hardcoded fallback.
 DNAA_MONOMER_IDX = 3861
@@ -629,7 +630,7 @@ def _latest_zarr_for_study(study_dir: Path) -> Path | None:
     if not study_dir or not study_dir.is_dir():
         return None
     candidates = sorted(
-        (p for p in study_dir.glob("runs.*.zarr") if p.is_dir()),
+        run_store.iter_zarr_stores(study_dir),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )

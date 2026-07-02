@@ -24,6 +24,7 @@ from pydantic import ValidationError
 
 from vivarium_dashboard.lib import composite_runs as cr
 from vivarium_dashboard.lib import emitters
+from vivarium_dashboard.lib import run_store
 from vivarium_dashboard.lib.models import SimRow
 from vivarium_dashboard.lib.workspace_paths import WorkspacePaths
 
@@ -141,13 +142,12 @@ def _row_to_dict(row, db_path_str: str) -> dict:
     # A remote run lands its native store next to runs.db (a .zarr or parquet-runs
     # dir), so its emitter type must come from that store_path — NOT from db_path,
     # which is always the runs.db SQLite metadata file (would mislabel it "SQLite").
-    store_path = str(prov.get("store_path") or "").lower()
-    if ".zarr" in store_path:
-        emitter: str | None = "xarray"
-    elif "parquet" in store_path:
-        emitter = "parquet"
-    else:
-        emitter = None
+    # Emitter kind is inferred from the native store path (NOT db_path, which is
+    # always the runs.db SQLite metadata file). Detection is centralized in
+    # run_store.detect_kind; map its canonical kind to this view's display label.
+    emitter: str | None = {"zarr": "xarray", "parquet": "parquet"}.get(
+        run_store.detect_kind(prov.get("store_path"))
+    )
     raw = {
         "run_id": row["run_id"],
         "spec_id": row["spec_id"],
