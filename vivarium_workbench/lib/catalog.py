@@ -321,9 +321,22 @@ def _check_installed_module_sync(
     venv_py = ws_root / ".venv" / "bin" / "python3"
     if not venv_py.is_file():
         return None  # no venv to introspect; treat as consistent
+    # The import name is derived from the display/dist name (hyphen→underscore),
+    # which preserves case — but Python top-level packages are conventionally
+    # lowercase (e.g. dist "Viva-munk" installs the package ``viva_munk``). Probe
+    # the given name AND its lowercased form so a mixed-case dist name doesn't
+    # read as a false "out of sync". Any candidate importing cleanly = in sync.
+    candidates = []
+    for c in (pkg_name, pkg_name.lower()):
+        if c and c not in candidates:
+            candidates.append(c)
+    probe = "import importlib,sys\n" + "".join(
+        f"try:\n importlib.import_module({c!r}); sys.exit(0)\nexcept Exception: pass\n"
+        for c in candidates
+    ) + "sys.exit(1)\n"
     try:
         result = subprocess.run(
-            [str(venv_py), "-c", f"import {pkg_name}"],
+            [str(venv_py), "-c", probe],
             cwd=ws_root, capture_output=True, text=True, timeout=3,
         )
         if result.returncode != 0:
@@ -514,7 +527,7 @@ def build_catalog(ws_root: Path) -> dict:
             m["installed"] = True
             m["install_source"] = "imports"
             imp = declared_imp or {}
-            for k in ("source", "ref", "path", "install_path", "package"):
+            for k in ("source", "ref", "path", "install_path", "package", "mode"):
                 v = imp.get(k)
                 if v is not None:
                     m[k] = v
@@ -534,7 +547,12 @@ def build_catalog(ws_root: Path) -> dict:
         else:
             m["installed"] = False
         if m["installed"]:
-            if m.get("install_source") in ("imports", "pyproject"):
+            # `mode: reference` modules are declared for browsing only and are
+            # not expected to be importable in the venv — never flag them.
+            if (
+                m.get("install_source") in ("imports", "pyproject")
+                and str(m.get("mode") or "").lower() != "reference"
+            ):
                 pkg_name = m.get("package") or m["name"].replace("-", "_")
                 sync_reason = _check_installed_module_sync(
                     ws_root, pkg_name, m.get("install_path")
@@ -560,24 +578,33 @@ def build_catalog(ws_root: Path) -> dict:
             if variants & _known_variants:
                 continue  # already represented by a curated entry
             desc = (imp.get("description") or "").strip().split("\n")[0]
+            # `mode: reference` imports are declared for BROWSING only (e.g. an
+            # engine whose real solver can't be installed here) — they are not
+            # expected to be importable in the venv, so they must not be sync-
+            # checked or flagged "out of sync".
+            mode = str(imp.get("mode") or "").lower()
+            is_reference = mode == "reference"
             mod = {
                 "name": imp_name,
                 "package": pkg,
                 "description": desc or f"Imported package {imp_name}.",
                 "installed": True,
                 "install_source": "imports",
+                "mode": mode or None,
             }
             for k in ("source", "ref", "path", "install_path"):
                 if imp.get(k) is not None:
                     mod[k] = imp[k]
             # Mirror the out-of-sync check curated installed modules get, so an
-            # imported-but-unimportable package is flagged here too.
-            sync_reason = _check_installed_module_sync(
-                ws_root, pkg, mod.get("install_path")
-            )
-            if sync_reason:
-                mod["out_of_sync"] = True
-                mod["out_of_sync_reason"] = sync_reason
+            # imported-but-unimportable package is flagged here too — but skip
+            # reference-mode modules, which are browse-only by design.
+            if not is_reference:
+                sync_reason = _check_installed_module_sync(
+                    ws_root, pkg, mod.get("install_path")
+                )
+                if sync_reason:
+                    mod["out_of_sync"] = True
+                    mod["out_of_sync_reason"] = sync_reason
             modules.append(mod)
             _known_variants |= variants
 

@@ -975,3 +975,56 @@ def build_simulations_data(ws_root: Path) -> dict:
     sims = _append_remote_simulations(sims, ws_root)
     from vivarium_workbench.lib.investigation_status import current_branch_slug
     return {"simulations": sims, "current": current_branch_slug(ws_root)}
+
+
+def build_simulation_run_zip(workspace: Path, run_id: str) -> "tuple[bytes, str, int]":
+    """Zip a run's RAW EMITTER DATA for download (GET /api/simulation-run-download).
+
+    Resolves the run's on-disk store from ``run_id`` via the workspace scan, so
+    NO filesystem path is trusted from the client. Prefers the native
+    zarr/parquet store directory; falls back to the SQLite ``runs.db`` that holds
+    the run's rows. Remote (``s3://``) stores can't be zipped locally, so those
+    fall back to the local metadata DB.
+
+    Returns ``(zip_bytes, filename, status)``:
+      200 — zip built;  404 — run not found or its store is absent on disk.
+    """
+    import io
+    import re as _re
+    import zipfile
+
+    workspace = Path(workspace)
+    row = next(
+        (r for r in list_simulations(workspace) if r.get("run_id") == run_id),
+        None,
+    )
+    if row is None:
+        return b"", "", 404
+
+    def _resolve(p: "str | None") -> "Path | None":
+        if not p or str(p).startswith(("s3://", "http://", "https://")):
+            return None
+        pp = Path(p)
+        pp = pp if pp.is_absolute() else (workspace / pp)
+        try:
+            pp = pp.resolve()
+        except OSError:
+            return None
+        return pp if pp.exists() else None
+
+    target = _resolve(row.get("store_path")) or _resolve(row.get("db_path"))
+    if target is None:
+        return b"", "", 404
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        if target.is_dir():
+            base = target.parent
+            for f in sorted(target.rglob("*")):
+                if f.is_file():
+                    zf.write(f, f.relative_to(base))
+        else:
+            zf.write(target, target.name)
+
+    safe = _re.sub(r"[^A-Za-z0-9._-]+", "_", str(run_id)).strip("_") or "run"
+    return buf.getvalue(), f"{safe}_emitter.zip", 200

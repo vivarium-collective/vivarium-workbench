@@ -10,10 +10,11 @@ h2{margin-top:0}
 .subtitle{color:var(--gray);font-size:0.92em}
 main{padding:20px;margin:0 auto}
 /* Other dashboard pages keep their own narrower cap via `.viv-content > .page`
- * (max-width:1200px, line 862). Studies + Investigations + the embedded
- * study-detail page fill the whole window. */
+ * (max-width:1200px, line 862). Studies + Investigations + the Composite
+ * Explorer + the embedded study-detail page fill the whole window. */
 #page-studies, .viv-content > #page-studies,
-#page-investigations, .viv-content > #page-investigations
+#page-investigations, .viv-content > #page-investigations,
+#page-composite-explore, .viv-content > #page-composite-explore
   {max-width:none;width:auto}
 .viv-content:has(> #page-investigations.active){
   padding:8px 12px !important;
@@ -210,7 +211,9 @@ img{max-width:100%}
 .page{ display:none }
 .page.active{ display:block }
 .page-title{ margin-top:0 }
-.page-lead{ color:#6b7280; margin-bottom:20px; max-width:680px }
+/* Intro/lead text spans the full content width (matching the panels + cards
+ * below it) instead of wrapping early at a cramped 680px. */
+.page-lead{ color:#6b7280; margin-bottom:20px; max-width:none }
 .count-badge{ font-size:0.78em; color:#6b7280; font-weight:normal }
 .registry-schema{
   display:inline-block; max-width:480px; overflow:hidden; text-overflow:ellipsis;
@@ -755,6 +758,17 @@ body.focus-mode .page.active{ display:block !important; min-height:0 !important 
   background:#e5e7eb; color:#4b5563;
   font-size:0.7em; padding:1px 7px; border-radius:9999px;
 }
+/* Active investigation (matches the current branch/context): rendered first and
+ * expanded, with a left accent + weightier header so it reads as "you are here". */
+.viv-rail-investigations-group.rail-iset-active{
+  border-left:2px solid #6366f1; background:#f5f3ff;
+}
+.viv-rail-investigations-group.rail-iset-active .viv-rail-investigations-group-header{
+  color:#4338ca; font-weight:600;
+}
+.viv-rail-investigations-group.rail-iset-active .viv-rail-investigations-group-count{
+  background:#6366f1; color:#fff;
+}
 .viv-rail-investigations-group-items{
   display:flex; flex-direction:column;
   padding:2px 0 4px;
@@ -997,7 +1011,10 @@ body.focus-mode .page.active{ display:block !important; min-height:0 !important 
   padding:24px;
   background:var(--bg);
 }
-.viv-content > .page{ max-width:1200px; margin:0 auto }
+/* Pages fill the full content width (up to the scrollbar) instead of a centered
+ * 1200px column that left an awkward blank strip on the right. Inner elements
+ * that need a comfortable reading measure keep their own max-width. */
+.viv-content > .page{ max-width:none; margin:0 }
 
 /* Tooltip for decoration-only controls ------------------------------------- */
 .viv-tooltip{

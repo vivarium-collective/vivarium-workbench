@@ -902,6 +902,52 @@
   }
   window._inputsAdd = _inputsAdd;
 
+  // ── Drag-and-drop source upload ──────────────────────────────────────────
+  function _inputsDzHi(z, on) {
+    if (!z) return;
+    z.style.background = on ? '#eef2ff' : '#f8fafc';
+    z.style.borderColor = on ? '#818cf8' : '#cbd5e1';
+  }
+  function _inputsDragOver(e) {
+    e.preventDefault(); e.stopPropagation();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    _inputsDzHi(e.currentTarget, true);
+  }
+  function _inputsDragLeave(e) {
+    e.preventDefault(); _inputsDzHi(e.currentTarget, false);
+  }
+  function _inputsDrop(e) {
+    e.preventDefault(); e.stopPropagation();
+    _inputsDzHi(e.currentTarget, false);
+    var slug = window._inputsSelectedSlug || window._currentIsetSlug || '';
+    if (!slug) { alert('Select an investigation first (Load sources into: …).'); return; }
+    var files = (e.dataTransfer && e.dataTransfer.files)
+      ? Array.prototype.slice.call(e.dataTransfer.files) : [];
+    files.forEach(_inputsUploadDropped);
+  }
+  // Infer the source category from a dropped file's extension and upload it,
+  // deriving the display name from the filename (no prompt).
+  function _inputsUploadDropped(f) {
+    var name = f.name || 'file';
+    var dot = name.lastIndexOf('.');
+    var ext = (dot >= 0 ? name.slice(dot + 1) : '').toLowerCase();
+    var stem = (dot > 0 ? name.slice(0, dot) : name);
+    var DOCLIKE = ['md', 'markdown', 'txt', 'rst', 'org', 'doc', 'docx', 'odt', 'tex'];
+    _inputsReadFileB64(f, function (b64) {
+      if (ext === 'pdf') {
+        _inputsPost('/api/reference-pdf', { pdf_b64: b64 });
+      } else if (DOCLIKE.indexOf(ext) >= 0) {
+        _inputsPost('/api/expert-doc', { name: stem, filename: name, file_b64: b64 });
+      } else {
+        _inputsPost('/api/dataset', { name: stem, filename: name, file_b64: b64 });
+      }
+    });
+  }
+  window._inputsDragOver = _inputsDragOver;
+  window._inputsDragLeave = _inputsDragLeave;
+  window._inputsDrop = _inputsDrop;
+  window._inputsUploadDropped = _inputsUploadDropped;
+
   function _renderInputs(el, data) {
     var inv = data.investigation || {};
     var glob = data.global || {};
@@ -947,6 +993,17 @@
         html += '<p class="muted" style="font-style:italic;font-size:0.85em">' +
           'migrating: showing repo-level inputs</p>';
       }
+      // Drag-and-drop upload zone: drop files straight in — no name prompt,
+      // no file picker. Category is inferred from the extension and the name
+      // from the filename (the "+ Add" buttons below remain for manual naming).
+      html += '<div id="inputs-dropzone" ' +
+        'ondragover="_inputsDragOver(event)" ondragleave="_inputsDragLeave(event)" ondrop="_inputsDrop(event)" ' +
+        'style="border:2px dashed #cbd5e1;border-radius:8px;padding:16px 14px;text-align:center;' +
+        'color:#64748b;font-size:0.9em;margin:10px 0 6px;background:#f8fafc;transition:background .12s,border-color .12s">' +
+        '<div style="font-weight:600;color:#475569">⬆ Drag datasets or expert docs here to upload</div>' +
+        '<div style="font-size:0.78em;color:#94a3b8;margin-top:3px">' +
+          'PDFs → references · .md / .txt / .docx → expert docs · everything else → datasets' +
+        '</div></div>';
       html += '<h4 style="margin:12px 0 4px">Datasets ' +
         _inputsAddBtn('dataset') + '</h4>' +
         _inputsDatasetsHtml(inv.datasets);
@@ -4763,16 +4820,31 @@
       // divergence goes into the status-pill tooltip (not a separate line).
       var effStatus  = iset.effective_status || iset.status || 'planning';
       var authStatus = iset.status || 'planning';
-      var pillClass  = effStatus.replace(/[^a-z_]/g, '_');
-      var pillTip = (authStatus && authStatus !== effStatus)
-        ? 'effective: ' + effStatus + '  ·  intent: ' + authStatus
-        : 'status: ' + effStatus;
+      // Effective status is derived from the investigation's member studies
+      // (server: compute_investigation_status). Human label + color + a tooltip
+      // that says what each state actually MEANS — "running" (a study is
+      // executing right now) vs "in_progress" (partly done, nothing running)
+      // were the confusing pair.
+      var STATUS_META = {
+        planning:    {label:'Planned',     bg:'#f1f5f9', fg:'#475569', bd:'#cbd5e1', tip:'Not started — every study is still planned.'},
+        in_progress: {label:'In progress', bg:'#fef9c3', fg:'#854d0e', bd:'#fde047', tip:'Partly done — some studies have results, but none are running right now.'},
+        running:     {label:'Running now', bg:'#dbeafe', fg:'#1e40af', bd:'#93c5fd', tip:'A study is executing right now.'},
+        complete:    {label:'Complete',    bg:'#dcfce7', fg:'#166534', bd:'#86efac', tip:'All studies are done.'},
+        failed:      {label:'Failed',      bg:'#fee2e2', fg:'#991b1b', bd:'#fca5a5', tip:'A study failed or is invalid — needs attention.'}
+      };
+      var meta = STATUS_META[effStatus] || {label: effStatus, bg:'#f1f5f9', fg:'#475569', bd:'#cbd5e1', tip:'status: ' + effStatus};
+      var statusTip = meta.tip + (authStatus && authStatus !== effStatus ? '  ·  author intent: ' + authStatus : '');
+      // "Current branch" is NOT a status — it means this investigation is your
+      // current git checkout (what you're working on). Render it as a distinct
+      // context chip (indigo outline + branch glyph) so it doesn't read as the
+      // green "Complete" status it used to mimic.
+      var pillBase = 'font-size:0.72em;border-radius:9999px;padding:1px 9px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;';
       var currentPill = iset.current
-        ? '<span class="status-pill" style="font-size:0.72em;background:#dcfce7;color:#166534;border:1px solid #86efac">● current branch</span>'
+        ? '<span class="iset-here-chip" title="You are working on this investigation — it is the current git branch." style="' + pillBase + 'background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;font-weight:600">⎇ current branch</span>'
         : '';
       var statusPill = closed
-        ? '<span class="status-pill" style="font-size:0.78em;background:#e5e7eb;color:#4b5563;border:1px solid #d1d5db">Closed</span>'
-        : '<span class="status-pill ' + pillClass + '" style="font-size:0.78em" title="' + _esc(pillTip) + '">' + _esc(effStatus) + '</span>';
+        ? '<span class="status-pill" style="' + pillBase + 'background:#e5e7eb;color:#4b5563;border:1px solid #d1d5db">Closed</span>'
+        : '<span class="status-pill" style="' + pillBase + 'background:' + meta.bg + ';color:' + meta.fg + ';border:1px solid ' + meta.bd + '" title="' + _esc(statusTip) + '">' + _esc(meta.label) + '</span>';
       var cardStyle = 'background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;cursor:pointer;transition:box-shadow 0.1s,border-color 0.1s;' +
         (closed ? 'opacity:0.6;' : '');
       var filterStatus = (closed ? 'closed' : effStatus);
@@ -11834,31 +11906,67 @@
       });
       groups.push({name: iset.name, title: iset.title || iset.name, studies: members});
     });
-    // Scope the rail to a SINGLE investigation. We never render the
-    // "Ungrouped" bucket or an all-investigations list here: the rail shows
-    // either the current investigation's studies or a chooser. (Orphan studies
-    // that belong to no investigation are intentionally not surfaced here.)
+    // Show EVERY study in the repo, grouped by investigation. The active
+    // investigation (window._currentIsetSlug, which follows the current
+    // branch/context) is rendered first and expanded; all other
+    // investigations follow as collapsed groups. Studies that belong to no
+    // investigation collect in a final "Ungrouped" group so nothing is hidden.
     var currentSlug = window._currentIsetSlug || '';
-    var currentGroup = currentSlug
-      ? groups.filter(function(g) { return g.name === currentSlug; })[0] || null
-      : null;
+    var railDepthMap = window._investigationsDepth || {};
 
-    var picker = _railInvestigationPicker(currentSlug);
+    // Active investigation first; the rest by topological depth then title.
+    var ordered = groups.slice().sort(function(a, b) {
+      if (a.name === currentSlug) return -1;
+      if (b.name === currentSlug) return 1;
+      var da = railDepthMap[a.name] || 0, db = railDepthMap[b.name] || 0;
+      return da - db || String(a.title || a.name).localeCompare(String(b.title || b.name));
+    });
 
-    if (!currentGroup) {
-      // No valid current investigation → picker + placeholder, no study rows.
-      host.innerHTML = picker
-        + '<div class="viv-rail-empty" style="font-size:0.85em;color:#94a3b8;'
-        + 'padding:6px 14px;font-style:italic">Choose an investigation to see its studies.</div>';
-      return;
+    // Studies not a member of any investigation.
+    var ungrouped = window._investigations.filter(function(s) { return !seen[s.name]; });
+    if (ungrouped.length) {
+      ungrouped.sort(function(a, b) { return String(a.name).localeCompare(String(b.name)); });
+      ordered.push({ name: '__ungrouped__', title: 'Ungrouped', studies: ungrouped, _ungrouped: true });
     }
 
-    // Current investigation → its studies as a flat list under the picker.
-    host.innerHTML = picker
-      + '<div class="rail-iset-name" title="' + _esc(currentGroup.title || currentGroup.name) + '"'
-      + ' onclick="window._railOpenInvestigationDetail(\'' + _esc(currentGroup.name) + '\');"'
-      + ' style="cursor:pointer;">' + _esc(currentGroup.title || currentGroup.name) + '</div>'
-      + currentGroup.studies.map(function(s) { return _railStudyItem(s); }).join('');
+    var hasActive = ordered.some(function(g) { return g.name === currentSlug; });
+
+    function _railGroupHtml(g, forceOpen) {
+      var isActive = g.name === currentSlug;
+      // Collapsed unless active, or the caller forces it open (first group when
+      // there is no active investigation), so the rail opens on something.
+      var collapsed = (isActive || forceOpen) ? '' : ' collapsed';
+      var activeCls = isActive ? ' rail-iset-active' : '';
+      var clickName = g._ungrouped
+        ? ''
+        : ' onclick="window._railOpenInvestigationDetail(\'' + _esc(g.name) + '\');event.stopPropagation();"';
+      var nameStyle = g._ungrouped ? '' : 'cursor:pointer;';
+      return '<div class="viv-rail-investigations-group' + collapsed + activeCls + '" data-iset="' + _esc(g.name) + '">'
+        + '<div class="viv-rail-investigations-group-header" onclick="_vivToggleInvGroup(this)"'
+        + ' title="' + _esc(g.title || g.name) + (g._ungrouped ? '' : ' — open investigation') + '">'
+        + '<span class="viv-rail-investigations-group-arrow viv-arrow">▾</span>'
+        + '<span class="viv-rail-investigations-group-name" style="' + nameStyle + '"' + clickName + '>'
+        + _esc(g.title || g.name) + '</span>'
+        + '<span class="viv-rail-investigations-group-count">' + g.studies.length + '</span>'
+        + '</div>'
+        + '<div class="viv-rail-investigations-group-items">'
+        + (g.studies.length
+            ? g.studies.map(function(s) { return _railStudyItem(s, { indent: true }); }).join('')
+            : '<div class="viv-rail-empty" style="font-size:0.82em;color:#94a3b8;'
+              + 'padding:4px 14px 4px 28px;font-style:italic">No studies</div>')
+        + '</div>'
+        + '</div>';
+    }
+
+    var html = ordered.map(function(g, i) {
+      // With no active investigation, open the first group so the rail isn't
+      // entirely collapsed on load.
+      return _railGroupHtml(g, !hasActive && i === 0);
+    }).join('');
+
+    host.innerHTML = html
+      || '<div class="viv-rail-empty" style="font-size:0.85em;color:#94a3b8;'
+       + 'padding:6px 14px;font-style:italic">No studies yet.</div>';
   }
 
   // Per-workspace localStorage key for the remembered investigation. The URL
@@ -14467,25 +14575,24 @@
     // Actions: if the run belongs to a study → open its Runs tab at the run;
     // else if it has a spec_id → open in the Composite Explorer. The
     // {simulations} shape carries spec_id + db_path so both are reconstructable.
-    var specId = row.spec_id || '';
     var studySlug = _simStudy(row);
-    var openBtn;
-    if (studySlug) {
-      openBtn = '<a href="/studies/' + encodeURIComponent(studySlug) + '#run-' + encodeURIComponent(runId) + '" ' +
-        'class="action-btn js-authoring" title="View this run\'s results in the study" ' +
-        'style="text-decoration:none;">Open</a>';
-    } else if (specId) {
-      openBtn = '<a href="?id=' + encodeURIComponent(specId) +
-          '&run_id=' + encodeURIComponent(runId) + '#composite-explore" ' +
-          'class="action-btn js-authoring" title="Open in Composite Explorer" ' +
-          'style="text-decoration:none;" ' +
-          'onclick="event.preventDefault(); _openSimulationInExplorer(\'' +
-            _escSim(runId) + '\', \'' + _escSim(specId) + '\');">Open</a>';
-    } else {
-      openBtn = '';
-    }
-    var deleteBtn = '<button class="action-btn js-authoring" title="Delete simulation" ' +
-      'onclick="_deleteSimulationRun(\'' + _escSim(runId) + '\')">🗑</button>';
+    var runIdEnc = encodeURIComponent(runId);
+    // Download the run's RAW EMITTER DATA (native zarr/parquet store, else the
+    // SQLite runs.db) as a zip. The server resolves the on-disk store from the
+    // run_id via its own workspace scan — no path is trusted from the client.
+    // Only offered when the run has a local store; yaml-referenced history runs
+    // whose artifacts aren't in this checkout have nothing to download.
+    var hasLocalData = !!(row.store_path || row.db_path);
+    var emitterDl = (runId && hasLocalData)
+      ? '<a class="action-btn js-authoring" title="Download this run\'s raw emitter data (.zip)" ' +
+        'href="/api/simulation-run-download?run_id=' + runIdEnc + '" download style="text-decoration:none;">⬇ Data</a>'
+      : '';
+    // Download the ANALYSIS-FLUSH OUTPUT (analyses / figures / report cards) for
+    // the run's study, when the run belongs to one.
+    var analysisDl = studySlug
+      ? '<a class="action-btn js-authoring" title="Download the analysis-flush output for this run\'s study (.zip)" ' +
+        'href="/api/study-analysis-zip?study=' + encodeURIComponent(studySlug) + '" download style="text-decoration:none;">⬇ Analysis</a>'
+      : '';
     return (
       '<tr data-run-id="' + _escSim(runId) + '" style="border-bottom:1px solid #f3f4f6;">' +
       '<td style="padding:6px 8px; overflow-wrap:anywhere;">' + invCell + '</td>' +
@@ -14499,7 +14606,7 @@
       '<td style="padding:6px 8px; color:#6b7280;">' + _escSim(_simFmtTime(timeSec)) + '</td>' +
       '<td style="padding:6px 8px;">' + _simStatusChip(row.status) + '</td>' +
       '<td style="padding:6px 8px; text-align:center; white-space:nowrap;">' +
-        openBtn + (openBtn && deleteBtn ? ' ' : '') + deleteBtn + '</td>' +
+        emitterDl + (emitterDl && analysisDl ? ' ' : '') + analysisDl + '</td>' +
       '</tr>'
     );
   }
