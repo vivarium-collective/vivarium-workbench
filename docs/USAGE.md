@@ -68,7 +68,7 @@ Docker, and collaborators all resolve identically):
 
 ```toml
 [tool.uv.sources]
-vivarium-workbench = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git", branch = "main" }
+vivarium-workbench = { git = "https://github.com/vivarium-collective/vivarium-workbench.git", branch = "main" }
 ```
 
 The git ref can be overridden at init via `VIVARIUM_DASHBOARD_REF`.

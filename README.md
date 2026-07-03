@@ -40,7 +40,7 @@ pip install vivarium-workbench         # or: uv pip install vivarium-workbench
 Not on PyPI yet during beta — install editable from a clone instead:
 
 ```bash
-git clone https://github.com/vivarium-collective/vivarium-dashboard ~/code/vivarium-dashboard
+git clone https://github.com/vivarium-collective/vivarium-workbench.git ~/code/vivarium-dashboard
 ./.venv/bin/pip install -e ~/code/vivarium-dashboard   # into your workspace's venv
 ```
 

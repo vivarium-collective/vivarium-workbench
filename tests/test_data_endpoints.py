@@ -444,8 +444,8 @@ def test_snapshot_banner_in_template():
     assert "snapshot-banner" in text, "index.html.j2 missing #snapshot-banner"
     assert "snapshot-interactive-link" in text, \
         "index.html.j2 missing #snapshot-interactive-link"
-    assert "github.com/vivarium-collective/vivarium-dashboard" in text, \
-        "snapshot banner link should point at the vivarium-dashboard GitHub repo"
+    assert "github.com/vivarium-collective/vivarium-workbench" in text, \
+        "snapshot banner link should point at the vivarium-workbench GitHub repo"
 
 
 def test_snapshot_banner_css_rules():
