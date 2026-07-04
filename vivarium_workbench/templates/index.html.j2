@@ -166,15 +166,10 @@ window.addEventListener('pageshow', function (e) {
 .viv-ws-repo-link:hover { color: #0f172a; }
 .viv-ws-gh-mark { flex: none; color: #94a3b8; }
 .viv-ws-repo-link:hover .viv-ws-gh-mark { color: #0f172a; }
-/* Collapsed rail: a single centered GitHub mark (the switcher is hidden). */
+/* The collapsed rail shows only the "open sidebar" toggle + the nav icons —
+   no brand avatar, no GitHub mark (both live in the expanded rail). */
 .viv-rail-repo-mini { display: none; }
-.viv-rail.viv-rail-collapsed .viv-rail-repo-mini {
-  display: flex; justify-content: center; align-items: center;
-  /* Sit in the nav-icon rhythm: breathing room under the brand avatar, not
-     crammed against it. Muted to match the expanded name's GitHub mark. */
-  padding: 10px 0 14px; color: #94a3b8;
-}
-.viv-rail.viv-rail-collapsed .viv-rail-repo-mini:hover { color: #0f172a; }
+.viv-rail.viv-rail-collapsed .viv-rail-repo-mini { display: none; }
 /* Keep the snapshot repo label out of the collapsed rail (avoids truncation). */
 .viv-rail.viv-rail-collapsed #snapshot-repo-label { display: none !important; }
 .viv-glyph-stopped { color: #999; }
@@ -591,9 +586,10 @@ window.addEventListener('pageshow', function (e) {
     </a>
     {% endif %}
 
-    <button class="viv-rail-toggle" id="viv-rail-toggle" type="button" aria-label="Collapse rail" onclick="_vivToggleRail()">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-toggle-svg">
-        <path d="M15 18l-6-6 6-6"/>
+    <button class="viv-rail-toggle" id="viv-rail-toggle" type="button" aria-label="Collapse sidebar" title="Collapse sidebar" onclick="_vivToggleRail()">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-toggle-svg">
+        <rect x="3" y="4" width="18" height="16" rx="2"/>
+        <line x1="9" y1="4" x2="9" y2="20"/>
       </svg>
     </button>
 

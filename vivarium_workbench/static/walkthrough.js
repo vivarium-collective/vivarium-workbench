@@ -3424,10 +3424,19 @@
   // Vivarium left rail — collapse toggle (V4)
   // -------------------------------------------------------------------------
 
+  function _vivSyncRailToggleLabel(collapsed) {
+    var btn = document.getElementById('viv-rail-toggle');
+    if (!btn) return;
+    var label = collapsed ? 'Open sidebar' : 'Collapse sidebar';
+    btn.setAttribute('title', label);
+    btn.setAttribute('aria-label', label);
+  }
+
   function _vivToggleRail() {
     var rail = document.getElementById('viv-rail');
     if (!rail) return;
     var collapsed = rail.classList.toggle('viv-rail-collapsed');
+    _vivSyncRailToggleLabel(collapsed);
     try { localStorage.setItem('vivarium.rail-collapsed', collapsed ? '1' : '0'); } catch (e) {}
   }
   window._vivToggleRail = _vivToggleRail;
@@ -3435,10 +3444,12 @@
   function _vivRestoreRailState() {
     var stored = null;
     try { stored = localStorage.getItem('vivarium.rail-collapsed'); } catch (e) {}
-    if (stored === '1') {
+    var collapsed = stored === '1';
+    if (collapsed) {
       var rail = document.getElementById('viv-rail');
       if (rail) rail.classList.add('viv-rail-collapsed');
     }
+    _vivSyncRailToggleLabel(collapsed);
   }
   window._vivRestoreRailState = _vivRestoreRailState;
 

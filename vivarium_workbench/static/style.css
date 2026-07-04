@@ -855,11 +855,15 @@ body.focus-mode .page.active{ display:block !important; min-height:0 !important 
   transition:transform 0.2s;
 }
 .viv-rail.viv-rail-collapsed .viv-rail-toggle{
-  /* Center the button when rail is narrow */
-  top:14px; right:14px;
+  /* A clean, centered "open sidebar" square button — the only affordance in
+     the collapsed rail's top slot (no avatar behind it). Shares the nav-icon
+     center axis (28px) with the links below. */
+  top:12px; left:50%; right:auto; transform:translateX(-50%);
+  width:32px; height:32px;
+  background:#fff; border-color:#e5e7eb;
 }
-.viv-rail.viv-rail-collapsed .viv-rail-toggle-svg{
-  transform:rotate(180deg);
+.viv-rail.viv-rail-collapsed .viv-rail-toggle:hover{
+  background:#f3f4f6; border-color:#cbd5e1; color:#1f2937;
 }
 
 /* Collapsed-rail state ----------------------------------------------------- */
@@ -867,13 +871,19 @@ body.focus-mode .page.active{ display:block !important; min-height:0 !important 
   width:56px; flex-basis:56px;
 }
 .viv-rail.viv-rail-collapsed .viv-rail-header{
-  padding:0 8px 14px; justify-content:center;
+  /* Keep the header as a spacer (border-bottom divider + room for the toggle),
+     but drop the brand avatar so nothing sits behind the toggle button. */
+  padding:0 8px 12px; justify-content:center; min-height:34px;
 }
+.viv-rail.viv-rail-collapsed .viv-rail-logo{ display:none }
 .viv-rail.viv-rail-collapsed .viv-rail-brand{ display:none }
 .viv-rail.viv-rail-collapsed .viv-workspace-switcher{ display:none }
 .viv-rail.viv-rail-collapsed .viv-rail-section-label{ display:none }
 .viv-rail.viv-rail-collapsed .viv-rail-link{
-  padding:8px 0; justify-content:center; gap:0;
+  /* Drop the 3px left accent border so the icon centers on the true 28px
+     rail axis (matching the toggle button above). Active state reads via the
+     background tint alone when collapsed. */
+  padding:8px 0; justify-content:center; gap:0; border-left-width:0;
 }
 .viv-rail.viv-rail-collapsed .viv-rail-link-label{ display:none }
 .viv-rail.viv-rail-collapsed .viv-rail-link-badge{ display:none }
