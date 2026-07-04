@@ -68,6 +68,7 @@ from vivarium_workbench.lib import investigation_viz_mutations as _inv_viz_mut
 from vivarium_workbench.lib import lifecycle_mutations as _lifecycle_mut
 from vivarium_workbench.lib import scaffold_mutations as _scaffold_mut
 from vivarium_workbench.lib import composite_state_views as _composite_state_views
+from vivarium_workbench.lib import analysis_viewers as _analysis_viewers
 from vivarium_workbench.lib import data_sources as _data_sources
 from vivarium_workbench.lib import download_views as _download_views
 from vivarium_workbench.lib import analysis_outputs as _analysis_outputs
@@ -766,6 +767,44 @@ def create_app() -> FastAPI:
         if status == 200:
             return PtoolsLaunch.model_validate(body)
         return JSONResponse(status_code=status, content=body)
+
+    @app.get(
+        "/api/analysis-viewers",
+        tags=["Analyses"],
+        summary="Repo-contributed analysis viewers for this workspace",
+    )
+    def analysis_viewers(ws: Path = Depends(get_workspace)) -> JSONResponse:
+        """Analysis viewers contributed by the workspace package or any installed
+        ``pbg-*`` distribution (via a ``workbench_viewers.get_viewers`` module).
+
+        Generic + name-agnostic: the workbench discovers and exposes JSON-safe
+        descriptors (``uid``, ``title``, ``kind``, ``assets``) without knowing
+        anything repo-specific. Launcher viewers are actuated via
+        ``GET /api/analysis-viewer/{uid}/launch``. Never 500s — a broken
+        contributor is skipped with a warning.
+        """
+        return JSONResponse(content={"viewers": _analysis_viewers.viewers_public(ws)})
+
+    @app.get(
+        "/api/analysis-viewer/{uid}/launch",
+        tags=["Analyses"],
+        summary="Resolve a contributed launcher viewer to its URL",
+    )
+    def analysis_viewer_launch(
+        uid: str,
+        study: Optional[str] = None,
+        run: Optional[str] = None,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Invoke a contributed launcher viewer's ``launch`` callable and return
+        its result (``{"url": ...}`` on success). The contributing package owns
+        all repo-specific launch logic; the workbench only routes the call.
+
+        Status: 200 on success; 400/404/500 (shaped by the contributor) otherwise.
+        """
+        result = _analysis_viewers.resolve_launch(ws, uid, study=study, run=run)
+        status = int(result.pop("status", 200)) if "error" in result else 200
+        return JSONResponse(status_code=status, content=result)
 
     @app.get(
         "/api/registry",
