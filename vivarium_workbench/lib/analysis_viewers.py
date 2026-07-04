@@ -26,6 +26,9 @@ Each viewer dict:
                                          #   externally-reachable base URL derived
                                          #   from the request Host, for viewers
                                          #   that serve data back over HTTP.
+      "targets":     callable|list,      # optional; (ws_root)->[{study,label,detail}]
+                                         #   — the launchable rows the card renders
+                                         #   (e.g. studies with exported data).
       # embed-only:
       "assets":      {"js":[url,...], "mount_id": str, "api_prefix": str},
     }
@@ -140,7 +143,29 @@ def discover_viewers(ws_root: Path) -> list[dict]:
     return out
 
 
-def _public_spec(viewer: dict) -> dict:
+def _resolve_targets(viewer: dict, ws_root: Path) -> list[dict]:
+    """Resolve a launcher viewer's ``targets`` (callable or list) into a JSON-safe
+    list of ``{study, label, detail}`` rows. Never raises."""
+    t = viewer.get("targets")
+    if callable(t):
+        try:
+            t = t(ws_root)
+        except Exception:  # noqa: BLE001
+            return []
+    if not isinstance(t, list):
+        return []
+    out: list[dict] = []
+    for item in t:
+        if isinstance(item, dict) and item.get("study"):
+            out.append({
+                "study": str(item["study"]),
+                "label": str(item.get("label") or item["study"]),
+                "detail": str(item.get("detail") or ""),
+            })
+    return out
+
+
+def _public_spec(viewer: dict, ws_root: Path) -> dict:
     """Strip callables → the JSON-safe descriptor the frontend renders."""
     assets = viewer.get("assets") or {}
     return {
@@ -150,6 +175,7 @@ def _public_spec(viewer: dict) -> dict:
         "title": viewer.get("title") or viewer.get("id"),
         "description": viewer.get("description", ""),
         "kind": viewer.get("kind", "launcher"),
+        "targets": _resolve_targets(viewer, ws_root),
         "assets": {
             "js": list(assets.get("js") or []),
             "mount_id": assets.get("mount_id"),
@@ -160,7 +186,8 @@ def _public_spec(viewer: dict) -> dict:
 
 def viewers_public(ws_root: Path) -> list[dict]:
     """JSON-safe descriptors for GET /api/analysis-viewers."""
-    return [_public_spec(v) for v in discover_viewers(ws_root)]
+    ws_root = Path(ws_root)
+    return [_public_spec(v, ws_root) for v in discover_viewers(ws_root)]
 
 
 def resolve_launch(ws_root: Path, uid: str, study: str | None = None,
