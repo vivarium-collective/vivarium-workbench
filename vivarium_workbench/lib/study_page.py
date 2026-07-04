@@ -184,14 +184,6 @@ def render_study_detail_html(ws_root: Path, name: str, spec: dict) -> str:
     env.filters["fmt_duration"] = _jinja_fmt_duration
     tpl = env.get_template("study-detail.html")
     _hn = _humanize_study_name(name)
-    # PTools (Pathway Tools Omics Viewer) is a v2ecoli-style feature; only offer
-    # the "Launch ptools" action when the workspace configures ui.ptools_server_url.
-    _ptools_enabled = False
-    try:
-        _ws = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
-        _ptools_enabled = bool((_ws.get("ui") or {}).get("ptools_server_url"))
-    except Exception:
-        _ptools_enabled = False
     # W15 — open epistemic debts, computed server-side via the deterministic
     # pbg_superpowers collector. Defensive: degrade to no panel if not importable.
     epistemic_debts: list = []
@@ -212,7 +204,7 @@ def render_study_detail_html(ws_root: Path, name: str, spec: dict) -> str:
         unresolved_composites = []
     return tpl.render(study=spec, name=name,
                       display_name=spec.get("title") or _hn["title"],
-                      name_chip=_hn["chip"], ptools_enabled=_ptools_enabled,
+                      name_chip=_hn["chip"],
                       epistemic_debts=epistemic_debts,
                       unresolved_composites=unresolved_composites)
 

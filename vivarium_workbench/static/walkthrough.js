@@ -1383,39 +1383,40 @@
     '</div>';
   }
 
-  function _renderPtoolsCard(ptools) {
-    ptools = ptools || {};
-    var studies = ptools.studies || [];
+  // Generic repo-contributed analysis viewer card (launcher kind). The workbench
+  // knows nothing repo-specific: a viewer is discovered via /api/analysis-viewers
+  // (contributed by a package's workbench_viewers module) and launched via
+  // /api/analysis-viewer/{uid}/launch. `targets` are the launchable rows the
+  // contributor computed (e.g. studies with exported data).
+  function _renderViewerCard(v) {
+    v = v || {};
+    var targets = v.targets || [];
     var html = '<div class="analyses-card">' +
-      '<div class="analyses-card-head"><strong>Pathway Tools &mdash; Omics Viewer</strong></div>' +
-      '<p class="muted" style="font-size:0.85em;margin:4px 0 8px">Overlay a study\'s PTools TSV exports onto the E. coli metabolic map in the Pathway Tools Omics Viewer.</p>';
-    if (!ptools.configured) {
-      html += '<p class="empty-state muted" style="margin:0">PTools not configured. Set <code>ui.ptools_server_url</code> in <code>workspace.yaml</code> to enable launching.</p>';
-    } else if (!studies.length) {
-      html += '<p class="empty-state muted" style="margin:0">No <code>ptools/*.tsv</code> exports found yet. Run a study\'s ptools analyses first.</p>';
+      '<div class="analyses-card-head"><strong>' + _esc(v.title || v.id || 'Viewer') + '</strong></div>';
+    if (v.description) {
+      html += '<p class="muted" style="font-size:0.85em;margin:4px 0 8px">' + _esc(v.description) + '</p>';
+    }
+    if (!targets.length) {
+      html += '<p class="empty-state muted" style="margin:0">No launchable data found yet.</p>';
     } else {
-      // Launching builds a Pathway Tools URL server-side and points at the
-      // workspace-local sms-ptools container (ui.ptools_server_url, e.g.
-      // http://localhost:1555). Neither the /api/ptools-launch endpoint nor
-      // that container exists for the hosted read-only snapshot, so in snapshot
-      // mode we surface an honest note instead of a button that would 404 and
-      // throw "SyntaxError: The string did not match the expected pattern".
+      // A contributed launcher opens against a workspace-local service; the
+      // hosted read-only snapshot has neither the launch backend nor that
+      // service, so surface an honest note instead of a button that would 404.
       var _isSnapshot = (window.__DASH_CONFIG__ || {}).mode === 'snapshot';
-      html += '<div class="ptools-study-list">' + studies.map(function(s) {
+      html += '<div class="viewer-target-list">' + targets.map(function(t) {
         var action = _isSnapshot
-          ? '<span class="muted" style="font-size:0.8em">Launch from the local dashboard</span>'
-          : '<button class="btn-mini" onclick="_launchPtools(\'' + _esc(s.study) + '\')">Launch in Omics Viewer</button>';
+          ? '<span class="muted" style="font-size:0.8em">Launch from the local workbench</span>'
+          : '<button class="btn-mini" onclick="_launchViewer(\'' + _esc(v.uid) + '\',\'' + _esc(t.study) + '\')">Launch</button>';
         return '<div class="picker-row">' +
-          '<div class="picker-row-main"><strong>' + _esc(s.study) + '</strong>' +
-            ' <span class="muted" style="font-size:0.82em">' + (s.n_tsvs || 0) + ' TSV' + (s.n_tsvs === 1 ? '' : 's') + '</span></div>' +
+          '<div class="picker-row-main"><strong>' + _esc(t.label || t.study) + '</strong>' +
+            (t.detail ? ' <span class="muted" style="font-size:0.82em">' + _esc(t.detail) + '</span>' : '') + '</div>' +
           '<div class="picker-row-actions">' + action + '</div>' +
         '</div>';
       }).join('') + '</div>';
       if (_isSnapshot) {
         html += '<p class="muted" style="font-size:0.8em;margin:8px 0 0">' +
-          'The Omics Viewer launches against a local <code>sms-ptools</code> container and is only ' +
-          'available when running the dashboard locally; this read-only view shows which studies ' +
-          'have PTools exports.</p>';
+          'This viewer launches against a local service and is only available when running ' +
+          'the workbench locally; this read-only view shows which studies have exports.</p>';
       }
     }
     html += '</div>';
@@ -1430,72 +1431,67 @@
       '<div id="explorer-mount"></div></div>';
   }
 
-  function _launchPtools(study) {
-    // The read-only snapshot has no /api/ptools-launch backend and no local
-    // sms-ptools container to launch against. Bail with a clear message rather
-    // than fetch a 404 HTML page and throw a cryptic JSON-parse SyntaxError.
+  function _launchViewer(uid, study) {
+    // The read-only snapshot has no launch backend to call. Bail with a clear
+    // message rather than fetch a 404 HTML page and throw a JSON-parse error.
     if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot') {
-      alert('The PTools Omics Viewer launches against a local sms-ptools ' +
-            'container and is only available when running the dashboard locally.');
+      alert('This viewer launches against a local service and is only available ' +
+            'when running the workbench locally.');
       return;
     }
-    var url = '/api/ptools-launch/' + encodeURIComponent(study);
+    var url = '/api/analysis-viewer/' + encodeURIComponent(uid) + '/launch' +
+      (study ? '?study=' + encodeURIComponent(study) : '');
     fetch(url).then(function(r) {
-      // Parse defensively: a non-JSON body (e.g. a 404 HTML page) otherwise
-      // throws "SyntaxError: The string did not match the expected pattern".
       return r.text().then(function(t) {
         var d = {};
         try { d = t ? JSON.parse(t) : {}; }
-        catch (e) { d = { error: 'server returned ' + r.status + ' (no PTools backend)' }; }
+        catch (e) { d = { error: 'server returned ' + r.status }; }
         return { status: r.status, body: d };
       });
     }).then(function(res) {
       var b = res.body || {};
       if (res.status === 200 && b.url) {
         window.open(b.url, '_blank');
-      } else if (b.error === 'ptools_server_url not configured') {
-        alert('PTools not configured.\nSet ui.ptools_server_url in workspace.yaml.');
       } else {
-        alert('PTools launch failed: ' + (b.error || res.status));
+        alert('Launch failed: ' + (b.error || res.status));
       }
-    }).catch(function(err) { alert('PTools launch failed: ' + err); });
+    }).catch(function(err) { alert('Launch failed: ' + err); });
   }
-  window._launchPtools = _launchPtools;
+  window._launchViewer = _launchViewer;
 
   function _loadAnalysesPage() {
     var container = document.getElementById('analyses-gallery');
     var countEl   = document.getElementById('viz-count');
     if (!container) return;
-    var _savedUrl = (window.DataSource && window.DataSource.savedVisualizationsUrl)
-      ? window.DataSource.savedVisualizationsUrl()
-      : '/api/saved-visualizations';
-    fetch(_savedUrl)
+    // Repo-contributed analysis viewers (name-agnostic): a package's
+    // workbench_viewers module supplies these; the workbench itself hardcodes
+    // nothing repo-specific. The Data Explorer is shown alongside them when a
+    // workspace contributes any viewer (metabolic-model workspaces like
+    // v2ecoli) — it doesn't apply to e.g. agent-based colony workspaces.
+    // NOTE: per-study comparison "report cards" are intentionally NOT shown
+    // here — they live on each study's detail page.
+    var _viewersUrl = (window.DataSource && window.DataSource.basePath)
+      ? (window.DataSource.basePath() + '/api/analysis-viewers')
+      : '/api/analysis-viewers';
+    fetch(_viewersUrl)
       .then(function(r) { return r.json(); })
       .then(function(data) {
         data = data || {};
-        var saved  = data.saved || [];
-        var ptools = data.ptools || {};
+        var viewers = data.viewers || [];
         var cards = [];
-        // NOTE: per-study comparison "report cards" (e.g. config/standard) are
-        // intentionally NOT shown here — they live on each study's detail page.
-        // The Analyses tab is just the workspace analysis tools (Pathway Tools
-        // + Data Explorer).
-        // Pathway Tools (E. coli metabolic map) and the Data Explorer
-        // (timeseries / allocation / flux maps) are E. coli / metabolic-model
-        // analyses. Only show them for workspaces set up as such — detected via
-        // ui.ptools_server_url being configured (currently v2ecoli). They don't
-        // apply to e.g. agent-based colony workspaces (viva-munk).
-        var _ecoliAnalyses = !!(ptools && (ptools.configured || (ptools.studies || []).length));
-        if (_ecoliAnalyses) {
-          cards.push(_renderPtoolsCard(ptools));
+        viewers.forEach(function(v) {
+          if (v && v.kind === 'launcher') cards.push(_renderViewerCard(v));
+        });
+        var _hasViewers = viewers.length > 0;
+        if (_hasViewers) {
           cards.push(_renderExplorerCard());
         }
         if (!cards.length) {
-          container.innerHTML = '<p class="empty-state">No saved visualizations yet. Run a parsimony packing composite or a PTools analysis to populate this gallery.</p>';
+          container.innerHTML = '<p class="empty-state">No analysis viewers for this workspace. Analyses are contributed by the repo (a package\'s <code>workbench_viewers</code> module).</p>';
         } else {
           container.innerHTML = cards.join('');
         }
-        if (_ecoliAnalyses && window.Explorer) {
+        if (_hasViewers && window.Explorer) {
           var _em = document.getElementById('explorer-mount');
           if (_em) window.Explorer.mount(_em, {
             basePath: (window.DataSource && window.DataSource.basePath) ? window.DataSource.basePath() : '',
@@ -1506,7 +1502,7 @@
         if (countEl) countEl.textContent = _n ? '(' + _n + ')' : '';
       })
       .catch(function(err) {
-        container.innerHTML = '<p class="empty-state" style="color:#991b1b">Error loading saved visualizations: ' + _esc(String(err)) + '</p>';
+        container.innerHTML = '<p class="empty-state" style="color:#991b1b">Error loading analysis viewers: ' + _esc(String(err)) + '</p>';
       });
   }
   window._loadAnalysesPage = _loadAnalysesPage;

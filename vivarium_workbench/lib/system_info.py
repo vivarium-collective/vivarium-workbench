@@ -12,9 +12,6 @@ Each function returns a plain ``dict`` (the FastAPI route returns it via a typed
 model; the legacy server.py shim wraps it into ``(json_bytes, status)`` via
 ``_json_body``).  All errors are swallowed and degrade to a typed empty-default
 body — callers must never 500 on these routes.
-
-The default PTools Omics Viewer URL template is single-sourced here so both the
-FastAPI route and the legacy server.py handler share the same constant.
 """
 
 from __future__ import annotations
@@ -25,19 +22,6 @@ from pathlib import Path
 
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 from vivarium_workbench.lib.registry import _dashboard_config
-
-# ---------------------------------------------------------------------------
-# Single-sourced constant: default PTools Omics Viewer URL template
-# ---------------------------------------------------------------------------
-
-# NOTE: the default targets the Omics Viewer auto-load endpoint
-# (omics=t&url=…&class=…&column1=…), verified against sms-ptools 0.8.2.
-# Override via ui.ptools_omics_url_template in workspace.yaml if your PTools
-# build differs.  Placeholders: {server},{orgid},{tsv_url},{cls},{columns}.
-_PTOOLS_DEFAULT_OMICS_URL_TEMPLATE = (
-    "{server}/overviewsWeb/celOv.shtml"
-    "?omics=t&url={tsv_url}&orgid={orgid}&class={cls}&column1={columns}"
-)
 
 
 # ---------------------------------------------------------------------------
@@ -157,8 +141,6 @@ def build_ui_config(ws_root: Path) -> dict:
 
     Keys returned:
       composite_view          — default "bigraph-loom"
-      ptools_server_url       — default ""
-      ptools_omics_url_template — default ``_PTOOLS_DEFAULT_OMICS_URL_TEMPLATE``
     """
     ws_root = Path(ws_root)
     try:
@@ -174,11 +156,6 @@ def build_ui_config(ws_root: Path) -> dict:
     return {
         "readonly": readonly,
         "composite_view": ui.get("composite_view", "bigraph-loom"),
-        "ptools_server_url": ui.get("ptools_server_url", ""),
-        "ptools_omics_url_template": ui.get(
-            "ptools_omics_url_template",
-            _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
-        ),
     }
 
 

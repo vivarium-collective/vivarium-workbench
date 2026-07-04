@@ -3,7 +3,7 @@
 Extracted from server.py so the FastAPI ``/api/saved-visualizations`` route can
 build the payload without reaching into the stdlib server. A pure filesystem
 scan of the workspace's study dirs for packed 3D scenes (``viz/3d/*.pack.json``),
-comparison report cards (``viz/report_card/*.html``), and PTools TSV exports.
+and comparison report cards (``viz/report_card/*.html``).
 """
 
 from __future__ import annotations
@@ -33,13 +33,12 @@ def parsimony_viewer_dir() -> Path | None:
 def build_saved_visualizations(ws_root) -> dict:
     """Discover saved, interactive visualizations in the workspace.
 
-    Returns ``{parsimony_available, saved: [...], ptools: {...}, report_cards: [...]}``.
+    Returns ``{parsimony_available, saved: [...], report_cards: [...]}``.
     Pure (no socket I/O) — call with an explicit ``ws_root``.
     """
     ws_root = Path(ws_root)
     wp = WorkspacePaths.load(ws_root)
     saved: list[dict] = []
-    ptools_studies: list[dict] = []
     report_cards: list[dict] = []
     for study_dir in wp.iter_study_dirs():
         study = study_dir.name
@@ -106,18 +105,11 @@ def build_saved_visualizations(ws_root) -> dict:
                     "n_placed": n_placed,
                     "created": created,
                 })
-        if sorted(study_dir.glob("**/ptools/*.tsv")):
-            ptools_studies.append({
-                "study": study,
-                "n_tsvs": len(sorted(study_dir.glob("**/ptools/*.tsv"))),
-            })
-
     try:
         ws = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
     except Exception:
         ws = {}
     ui = ws.get("ui") or {}
-    ptools_configured = bool(str(ui.get("ptools_server_url", "")).strip())
 
     # Optional per-pack external viewer URL (ui.viz_viewer_urls: {<pack-name>: url}).
     viewer_urls = ui.get("viz_viewer_urls") or {}
@@ -130,6 +122,5 @@ def build_saved_visualizations(ws_root) -> dict:
     return {
         "parsimony_available": parsimony_viewer_dir() is not None,
         "saved": saved,
-        "ptools": {"configured": ptools_configured, "studies": ptools_studies},
         "report_cards": report_cards,
     }

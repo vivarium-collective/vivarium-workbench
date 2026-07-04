@@ -68,6 +68,7 @@ from vivarium_workbench.lib import investigation_viz_mutations as _inv_viz_mut
 from vivarium_workbench.lib import lifecycle_mutations as _lifecycle_mut
 from vivarium_workbench.lib import scaffold_mutations as _scaffold_mut
 from vivarium_workbench.lib import composite_state_views as _composite_state_views
+from vivarium_workbench.lib import analysis_viewers as _analysis_viewers
 from vivarium_workbench.lib import data_sources as _data_sources
 from vivarium_workbench.lib import download_views as _download_views
 from vivarium_workbench.lib import analysis_outputs as _analysis_outputs
@@ -158,7 +159,6 @@ from vivarium_workbench.lib.models import (
     StudyDetail,
     RegistryPayload,
     SavedVisualizationsPayload,
-    PtoolsLaunch,
     SimRow,
     SimulationsPayload,
     ProvenanceManifest,
@@ -630,10 +630,10 @@ def create_app() -> FastAPI:
         "/api/saved-visualizations",
         response_model=SavedVisualizationsPayload,
         tags=["Studies"],
-        summary="Saved 3D packs, report cards, and PTools TSVs",
+        summary="Saved 3D packs and report cards",
     )
     def saved_visualizations(ws: Path = Depends(get_workspace)) -> SavedVisualizationsPayload:
-        """Saved interactive visualizations (3D packs, report cards, PTools TSVs),
+        """Saved interactive visualizations (3D packs, report cards),
         via lib.saved_visualizations — no stdlib server dependency."""
         return SavedVisualizationsPayload.model_validate(
             _saved_viz.build_saved_visualizations(ws))
@@ -679,7 +679,7 @@ def create_app() -> FastAPI:
         )
 
     # -----------------------------------------------------------------------
-    # Batch 11: visualization-status/instances, ptools-launch
+    # Batch 11: visualization-status/instances
     # -----------------------------------------------------------------------
 
     @app.get(
@@ -729,43 +729,45 @@ def create_app() -> FastAPI:
         )
 
     @app.get(
-        "/api/ptools-launch/{study}",
-        response_model=PtoolsLaunch,
-        tags=["Studies"],
-        summary="Pathway Tools Omics Viewer launch URL for a study",
+        "/api/analysis-viewers",
+        tags=["Analyses"],
+        summary="Repo-contributed analysis viewers for this workspace",
     )
-    def ptools_launch(
-        study: str,
+    def analysis_viewers(ws: Path = Depends(get_workspace)) -> JSONResponse:
+        """Analysis viewers contributed by the workspace package or any installed
+        ``pbg-*`` distribution (via a ``workbench_viewers.get_viewers`` module).
+
+        Generic + name-agnostic: the workbench discovers and exposes JSON-safe
+        descriptors (``uid``, ``title``, ``kind``, ``assets``) without knowing
+        anything repo-specific. Launcher viewers are actuated via
+        ``GET /api/analysis-viewer/{uid}/launch``. Never 500s — a broken
+        contributor is skipped with a warning.
+        """
+        return JSONResponse(content={"viewers": _analysis_viewers.viewers_public(ws)})
+
+    @app.get(
+        "/api/analysis-viewer/{uid}/launch",
+        tags=["Analyses"],
+        summary="Resolve a contributed launcher viewer to its URL",
+    )
+    def analysis_viewer_launch(
+        uid: str,
+        study: Optional[str] = None,
         run: Optional[str] = None,
-        analysis: Optional[str] = None,
         request: Request = None,  # type: ignore[assignment]
         ws: Path = Depends(get_workspace),
-    ) -> Union[PtoolsLaunch, JSONResponse]:
-        """Pathway Tools Omics Viewer launch URL for a study.
+    ) -> JSONResponse:
+        """Invoke a contributed launcher viewer's ``launch`` callable and return
+        its result (``{"url": ...}`` on success). The contributing package owns
+        all repo-specific launch logic; the workbench only routes the call.
 
-        Mirrors ``GET /api/ptools-launch/<study>?run=<run_id>&analysis=<name>``
-        from the stdlib server.  The slug is validated before delegation
-        (identical to the dispatcher's check).
-
-        Status codes:
-          - 400  ``ptools_server_url not configured`` / invalid slug
-          - 404  study not found / no ptools TSVs found
-          - 200  ``{url, tsv_url, available}``
-
-        Library-backed via ``lib.study_viz_views.build_ptools_launch``.
+        Status: 200 on success; 400/404/500 (shaped by the contributor) otherwise.
         """
-        if not _study_spec.SLUG_RE.match(study):
-            return JSONResponse(status_code=400, content={"error": "invalid study name"})
-        # Resolve public_base from the Host header; workspace.yaml config
-        # (ui.dashboard_public_base_url) takes priority inside the lib builder.
         host = (request.headers.get("host", "localhost") if request else "localhost")
-        public_base = f"http://{host}"
-        body, status = _study_viz.build_ptools_launch(
-            ws, study, run=run, analysis=analysis, public_base=public_base,
-        )
-        if status == 200:
-            return PtoolsLaunch.model_validate(body)
-        return JSONResponse(status_code=status, content=body)
+        ctx = {"public_base": f"http://{host}"}
+        result = _analysis_viewers.resolve_launch(ws, uid, study=study, run=run, ctx=ctx)
+        status = int(result.pop("status", 200)) if "error" in result else 200
+        return JSONResponse(status_code=status, content=result)
 
     @app.get(
         "/api/registry",
@@ -1952,9 +1954,7 @@ def create_app() -> FastAPI:
         Reads workspace.yaml's ``ui:`` block.  Missing/unreadable workspace →
         all-default values.  Always 200.
 
-        Keys: ``composite_view`` (default "bigraph-loom"),
-        ``ptools_server_url`` (default ""),
-        ``ptools_omics_url_template`` (default template string).
+        Keys: ``composite_view`` (default "bigraph-loom").
 
         The legacy handler serializes whatever ``ui.get(...)`` returns at HTTP
         200, even a non-string value (e.g. ``composite_view: 42``).  The typed

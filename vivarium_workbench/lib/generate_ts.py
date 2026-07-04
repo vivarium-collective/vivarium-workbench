@@ -51,8 +51,6 @@ _MODELS: list[type[BaseModel]] = [
     _models.BibEntry,
     _models.ReferencesBibPayload,
     _models.SavedViz,
-    _models.PtoolsStudy,
-    _models.PtoolsInfo,
     _models.ReportCard,
     _models.SavedVisualizationsPayload,
     # Git & branch models
@@ -106,11 +104,10 @@ _MODELS: list[type[BaseModel]] = [
     _models.CompositeRunTrajectory,
     _models.CompositeRunState,
     _models.CompositeRunStatus,
-    # Batch 11: study-bigraph-paths, visualization status/instances, ptools-launch
+    # Batch 11: study-bigraph-paths, visualization status/instances
     _models.StudyBigraphPaths,
     _models.VisualizationStatus,
     _models.VisualizationInstances,
-    _models.PtoolsLaunch,
     # Workspace & source models
     _models.SourceBuilds,
     _models.WorkspacesList,

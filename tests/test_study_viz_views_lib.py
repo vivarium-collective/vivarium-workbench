@@ -1,13 +1,9 @@
-"""Tests for lib.study_viz_views builders + server.Handler shim parity.
+"""Tests for lib.study_viz_views builders.
 
 Covers:
   - build_study_bigraph_paths  (happy + 400/404/500 paths)
   - build_visualization_status (happy + 400 + missing + lifecycle ordering)
   - build_visualization_instances (happy + tolerant empty)
-  - build_ptools_launch        (happy + 400 + 404)
-  - ptools_object_class        (class inference)
-  - build_ptools_launch_url    (URL structure)
-  - TestServerShimParity       (real server.Handler methods == lib output)
 """
 
 from __future__ import annotations
@@ -27,10 +23,6 @@ from vivarium_workbench.lib.study_viz_views import (
     build_study_bigraph_paths,
     build_visualization_status,
     build_visualization_instances,
-    build_ptools_launch,
-    build_ptools_launch_url,
-    ptools_object_class,
-    _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
 )
 
 
@@ -50,9 +42,6 @@ def ws(tmp_path):
              "description": "Class-backed viz",
              "config": {"color": "blue"}},
         ],
-        "ui": {
-            "ptools_server_url": "http://ptools.example.com",
-        },
     }), encoding="utf-8")
     return tmp_path
 
@@ -75,28 +64,6 @@ def study_ws(tmp_path):
     (tmp_path / "workspace.yaml").write_text(yaml.dump({
         "name": "testws",
         "package_path": "pbg_testws",
-    }), encoding="utf-8")
-    return tmp_path
-
-
-@pytest.fixture()
-def ptools_ws(tmp_path):
-    """Workspace with a ptools study containing TSV files."""
-    study_dir = tmp_path / "studies" / "my-study"
-    ptools_dir = study_dir / "ptools"
-    ptools_dir.mkdir(parents=True)
-    (ptools_dir / "ptools_rna__p1.tsv").write_text(
-        "$\tt0\tt1\tt2\nb0001\t1.0\t2.0\t3.0\n", encoding="utf-8"
-    )
-    (ptools_dir / "ptools_rxns__p1.tsv").write_text(
-        "$\tt0\nRXN-1\t1.0\n", encoding="utf-8"
-    )
-    (tmp_path / "workspace.yaml").write_text(yaml.dump({
-        "name": "testws",
-        "package_path": "pbg_testws",
-        "ui": {
-            "ptools_server_url": "http://ptools.example.com",
-        },
     }), encoding="utf-8")
     return tmp_path
 
@@ -274,155 +241,3 @@ class TestBuildStudyBigraphPaths:
         body, status = build_study_bigraph_paths(tmp_path, "s")
         assert status == 500
         assert "failed to parse" in body["error"]
-
-
-# ---------------------------------------------------------------------------
-# ptools_object_class
-# ---------------------------------------------------------------------------
-
-class TestPtoolsObjectClass:
-    def test_rxn_returns_reaction(self):
-        assert ptools_object_class("ptools_rxns__p1.tsv") == "reaction"
-        assert ptools_object_class("reaction_data") == "reaction"
-
-    def test_protein_returns_protein(self):
-        assert ptools_object_class("ptools_proteins__p1.tsv") == "protein"
-
-    def test_gene_default(self):
-        assert ptools_object_class("ptools_rna__p1.tsv") == "gene"
-        assert ptools_object_class("anything_else") == "gene"
-
-    def test_compound(self):
-        assert ptools_object_class("metabolite_data") == "compound"
-        assert ptools_object_class("compound_flux") == "compound"
-
-
-# ---------------------------------------------------------------------------
-# build_ptools_launch_url
-# ---------------------------------------------------------------------------
-
-class TestBuildPtoolsLaunchUrl:
-    def test_happy_path_returns_url(self, ptools_ws):
-        study_dir = ptools_ws / "studies" / "my-study"
-        result = build_ptools_launch_url(
-            study_dir=study_dir,
-            ws_root=ptools_ws,
-            ptools_server_url="http://ptools.example.com",
-            ptools_omics_url_template=_PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
-            public_base="http://dash.example.com",
-        )
-        assert "error" not in result
-        assert "url" in result
-        assert "tsv_url" in result
-        assert len(result["available"]) == 2
-        assert result["tsv_url"].startswith("http://dash.example.com/")
-        assert result["tsv_url"].endswith(".tsv")
-
-    def test_no_tsvs_returns_error(self, tmp_path):
-        study_dir = tmp_path / "studies" / "empty"
-        study_dir.mkdir(parents=True)
-        result = build_ptools_launch_url(
-            study_dir=study_dir,
-            ws_root=tmp_path,
-            ptools_server_url="http://ptools.example.com",
-            ptools_omics_url_template=_PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
-            public_base="http://dash.example.com",
-        )
-        assert "error" in result
-        assert result["available"] == []
-
-    def test_analysis_filter(self, ptools_ws):
-        study_dir = ptools_ws / "studies" / "my-study"
-        result = build_ptools_launch_url(
-            study_dir=study_dir,
-            ws_root=ptools_ws,
-            ptools_server_url="http://ptools.example.com",
-            ptools_omics_url_template=_PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
-            public_base="http://dash.example.com",
-            analysis="ptools_rna",
-        )
-        assert "error" not in result
-        assert len(result["available"]) == 1
-        assert "ptools_rna" in result["available"][0]
-
-    def test_relpath_is_workspace_relative(self, ptools_ws):
-        study_dir = ptools_ws / "studies" / "my-study"
-        result = build_ptools_launch_url(
-            study_dir=study_dir,
-            ws_root=ptools_ws,
-            ptools_server_url="http://ptools.example.com",
-            ptools_omics_url_template=_PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
-            public_base="http://dash.example.com",
-        )
-        for rel in result["available"]:
-            assert not rel.startswith("/")
-            assert rel.startswith("studies/my-study/ptools/")
-
-    def test_column_count_from_tsv_header(self, ptools_ws):
-        """3-column TSV → column1=1-3 in the URL."""
-        study_dir = ptools_ws / "studies" / "my-study"
-        result = build_ptools_launch_url(
-            study_dir=study_dir,
-            ws_root=ptools_ws,
-            ptools_server_url="http://ptools.example.com",
-            ptools_omics_url_template=_PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
-            public_base="http://dash.example.com",
-            analysis="ptools_rna",
-        )
-        # ptools_rna TSV has $, t0, t1, t2 → 3 data columns
-        assert "column1=1-3" in result["url"]
-
-
-# ---------------------------------------------------------------------------
-# build_ptools_launch
-# ---------------------------------------------------------------------------
-
-class TestBuildPtoolsLaunch:
-    def test_no_ptools_server_url_returns_400(self, tmp_path):
-        (tmp_path / "workspace.yaml").write_text(
-            yaml.dump({"name": "ws"}), encoding="utf-8"
-        )
-        body, status = build_ptools_launch(tmp_path, "my-study")
-        assert status == 400
-        assert "ptools_server_url not configured" in body["error"]
-
-    def test_study_not_found_returns_404(self, ws):
-        body, status = build_ptools_launch(ws, "no-such-study")
-        assert status == 404
-        assert "study not found" in body["error"]
-
-    def test_no_tsvs_returns_404(self, ws):
-        study_dir = ws / "studies" / "my-study"
-        study_dir.mkdir(parents=True)
-        body, status = build_ptools_launch(ws, "my-study")
-        assert status == 404
-        assert "error" in body
-
-    def test_happy_path_returns_200(self, ptools_ws):
-        body, status = build_ptools_launch(
-            ptools_ws, "my-study", public_base="http://dash.example.com"
-        )
-        assert status == 200
-        assert "url" in body
-        assert "tsv_url" in body
-        assert "available" in body
-        assert len(body["available"]) == 2
-
-    def test_public_base_overridden_by_workspace_config(self, tmp_path):
-        study_dir = tmp_path / "studies" / "my-study"
-        ptools_dir = study_dir / "ptools"
-        ptools_dir.mkdir(parents=True)
-        (ptools_dir / "ptools_rna__p1.tsv").write_text("gene\tt0\n", encoding="utf-8")
-        (tmp_path / "workspace.yaml").write_text(yaml.dump({
-            "name": "ws",
-            "ui": {
-                "ptools_server_url": "http://ptools.example.com",
-                "dashboard_public_base_url": "http://override.example.com",
-            },
-        }), encoding="utf-8")
-        body, status = build_ptools_launch(
-            tmp_path, "my-study", public_base="http://ignored.example.com"
-        )
-        assert status == 200
-        # dashboard_public_base_url from config takes priority
-        assert body["tsv_url"].startswith("http://override.example.com/")

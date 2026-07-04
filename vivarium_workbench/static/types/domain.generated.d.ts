@@ -144,16 +144,6 @@ export interface SavedViz {
   viewer_url: string | null;
 }
 
-export interface PtoolsStudy {
-  study: string;
-  n_tsvs: number;
-}
-
-export interface PtoolsInfo {
-  configured: boolean;
-  studies: PtoolsStudy[];
-}
-
 export interface ReportCard {
   study: string | null;
   name: string;
@@ -165,7 +155,6 @@ export interface ReportCard {
 export interface SavedVisualizationsPayload {
   parsimony_available: boolean;
   saved: SavedViz[];
-  ptools: PtoolsInfo;
   report_cards: ReportCard[];
 }
 
@@ -340,8 +329,6 @@ export interface GithubRepo {
 export interface UiConfig {
   readonly: boolean;
   composite_view: string;
-  ptools_server_url: string;
-  ptools_omics_url_template: string;
 }
 
 export interface WorkspaceHome {
@@ -366,9 +353,6 @@ export interface VisualizationStatus {
 }
 
 export interface VisualizationInstances {
-}
-
-export interface PtoolsLaunch {
 }
 
 export interface SourceBuilds {

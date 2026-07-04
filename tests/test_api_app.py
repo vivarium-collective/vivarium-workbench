@@ -192,7 +192,6 @@ def test_saved_visualizations_empty(client):
     b = client.get("/api/saved-visualizations").json()
     assert b["saved"] == []
     assert b["report_cards"] == []
-    assert b["ptools"]["studies"] == []
 
 
 def test_saved_visualizations_typed(client, monkeypatch):
@@ -202,7 +201,6 @@ def test_saved_visualizations_typed(client, monkeypatch):
                    "pack_url": "/studies/s1/viz/3d/ecoli_3d.pack.json",
                    "meta_url": None, "n_placed": 1200, "created": 1700000000,
                    "viewer_url": "http://x"}],
-        "ptools": {"configured": True, "studies": [{"study": "s1", "n_tsvs": 3}]},
         "report_cards": [{"study": "s1", "name": "rc",
                           "url": "/studies/s1/viz/report_card/rc.html",
                           "verdict": "PASS", "created": 1700000001}],
@@ -214,7 +212,6 @@ def test_saved_visualizations_typed(client, monkeypatch):
     sv = b["saved"][0]
     assert sv["name"] == "ecoli_3d" and sv["n_placed"] == 1200
     assert sv["viewer_url"] == "http://x"
-    assert b["ptools"]["studies"][0]["n_tsvs"] == 3
     assert b["report_cards"][0]["verdict"] == "PASS"
 
 
@@ -2255,20 +2252,16 @@ class TestGithubRepoRoute:
 
 class TestUiConfigRoute:
     def test_defaults_on_empty_workspace(self, client):
-        from vivarium_workbench.lib.system_info import _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE
         r = client.get("/api/ui-config")
         assert r.status_code == 200
         body = r.json()
         assert body["composite_view"] == "bigraph-loom"
-        assert body["ptools_server_url"] == ""
-        assert body["ptools_omics_url_template"] == _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE
 
     def test_reads_workspace_yaml_ui_block(self, tmp_path):
         import yaml as _yaml
         (tmp_path / "workspace.yaml").write_text(_yaml.safe_dump({
             "ui": {
                 "composite_view": "custom-view",
-                "ptools_server_url": "http://ptools:1555",
             },
         }))
         app = create_app()
@@ -2276,7 +2269,6 @@ class TestUiConfigRoute:
         from fastapi.testclient import TestClient
         body = TestClient(app).get("/api/ui-config").json()
         assert body["composite_view"] == "custom-view"
-        assert body["ptools_server_url"] == "http://ptools:1555"
 
     def test_ui_config_in_openapi(self, client):
         components = client.get("/openapi.json").json()["components"]["schemas"]
@@ -2599,59 +2591,35 @@ class TestVisualizationInstancesRoute:
 
 
 # ---------------------------------------------------------------------------
-# Batch 11: /api/ptools-launch/{study}
+# Repo-contributed analysis viewers (generic; replaced the hardcoded PTools)
 # ---------------------------------------------------------------------------
 
-class TestPtoolsLaunchRoute:
-    def test_invalid_slug_returns_400(self, client):
-        r = client.get("/api/ptools-launch/INVALID-SLUG")
-        assert r.status_code == 400
-        assert r.json() == {"error": "invalid study name"}
-        assert "detail" not in r.json()
-
-    def test_no_ptools_config_returns_400(self, client, monkeypatch):
+class TestAnalysisViewersRoute:
+    def test_viewers_list_shape(self, client, monkeypatch):
         import vivarium_workbench.api.app as _app
         monkeypatch.setattr(
-            _app._study_viz, "build_ptools_launch",
-            lambda ws, study, **kw: ({"error": "ptools_server_url not configured"}, 400),
+            _app._analysis_viewers, "viewers_public",
+            lambda ws: [{"uid": "pkg::demo", "title": "Demo", "kind": "launcher",
+                         "targets": [], "assets": None}],
         )
-        r = client.get("/api/ptools-launch/my-study")
-        assert r.status_code == 400
-        assert r.json() == {"error": "ptools_server_url not configured"}
-        assert "detail" not in r.json()
-
-    def test_study_not_found_returns_404(self, client, monkeypatch):
-        import vivarium_workbench.api.app as _app
-        monkeypatch.setattr(
-            _app._study_viz, "build_ptools_launch",
-            lambda ws, study, **kw: ({"error": f"study not found: {study}"}, 404),
-        )
-        r = client.get("/api/ptools-launch/my-study")
-        assert r.status_code == 404
-        assert "study not found" in r.json()["error"]
-        assert "detail" not in r.json()
-
-    def test_happy_path_returns_200(self, client, monkeypatch):
-        import vivarium_workbench.api.app as _app
-        monkeypatch.setattr(
-            _app._study_viz, "build_ptools_launch",
-            lambda ws, study, **kw: ({
-                "url": "http://ptools.example.com/omics?omics=t",
-                "tsv_url": "http://dash.example.com/studies/s/ptools/f.tsv",
-                "available": ["studies/s/ptools/f.tsv"],
-            }, 200),
-        )
-        r = client.get("/api/ptools-launch/my-study")
+        r = client.get("/api/analysis-viewers")
         assert r.status_code == 200
-        body = r.json()
-        assert "url" in body
-        assert "tsv_url" in body
-        assert "available" in body
+        assert r.json()["viewers"][0]["uid"] == "pkg::demo"
 
-    def test_ptools_launch_in_openapi(self, client):
+    def test_launch_unknown_uid_returns_shaped_error(self, client, monkeypatch):
+        import vivarium_workbench.api.app as _app
+        monkeypatch.setattr(
+            _app._analysis_viewers, "resolve_launch",
+            lambda ws, uid, **kw: {"error": "viewer not found: " + uid, "status": 404},
+        )
+        r = client.get("/api/analysis-viewer/nope::x/launch")
+        assert r.status_code == 404
+        assert "not found" in r.json()["error"]
+
+    def test_analysis_viewers_in_openapi(self, client):
         spec = client.get("/openapi.json").json()
-        assert "/api/ptools-launch/{study}" in spec["paths"]
-        assert "PtoolsLaunch" in spec["components"]["schemas"]
+        assert "/api/analysis-viewers" in spec["paths"]
+        assert "/api/analysis-viewer/{uid}/launch" in spec["paths"]
 
 
 # ---------------------------------------------------------------------------

@@ -158,40 +158,27 @@ class TestBuildGithubRepo:
 
 class TestBuildUiConfig:
     def test_defaults_on_empty_workspace(self, tmp_path: Path) -> None:
-        from vivarium_workbench.lib.system_info import (
-            build_ui_config, _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
-        )
+        from vivarium_workbench.lib.system_info import build_ui_config
         result = build_ui_config(tmp_path)
         assert result["composite_view"] == "bigraph-loom"
-        assert result["ptools_server_url"] == ""
-        assert result["ptools_omics_url_template"] == _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE
 
     def test_reads_ui_block(self, ws: Path) -> None:
-        from vivarium_workbench.lib.system_info import (
-            build_ui_config, _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
-        )
+        from vivarium_workbench.lib.system_info import build_ui_config
         result = build_ui_config(ws)
         assert result["composite_view"] == "bigraph-loom"
-        assert result["ptools_server_url"] == "http://ptools:1555"
-        # template not overridden → falls back to default
-        assert result["ptools_omics_url_template"] == _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE
 
-    def test_omics_url_template_override(self, tmp_path: Path) -> None:
-        custom = "http://custom.ptools/{server}?omics=1"
+    def test_reads_composite_view_override(self, tmp_path: Path) -> None:
         (tmp_path / "workspace.yaml").write_text(yaml.safe_dump({
-            "ui": {"ptools_omics_url_template": custom},
+            "ui": {"composite_view": "custom-view"},
         }))
         from vivarium_workbench.lib.system_info import build_ui_config
         result = build_ui_config(tmp_path)
-        assert result["ptools_omics_url_template"] == custom
+        assert result["composite_view"] == "custom-view"
 
     def test_tolerant_on_missing_yaml(self, tmp_path: Path) -> None:
-        from vivarium_workbench.lib.system_info import (
-            build_ui_config, _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
-        )
+        from vivarium_workbench.lib.system_info import build_ui_config
         result = build_ui_config(tmp_path)
         assert result["composite_view"] == "bigraph-loom"
-        assert result["ptools_omics_url_template"] == _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE
 
 
 # ---------------------------------------------------------------------------
