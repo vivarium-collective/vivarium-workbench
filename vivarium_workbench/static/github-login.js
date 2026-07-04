@@ -224,8 +224,65 @@
   }
 
   // -----------------------------------------------------------------------
+  // Token paste fallback — the universal sign-in path (no gh session, no
+  // device-flow OAuth App required). POST /api/auth/github/token.
+  // -----------------------------------------------------------------------
+
+  function wireTokenFallback() {
+    const toggle = document.getElementById('viv-gh-token-toggle');
+    const box = document.getElementById('viv-gh-token-box');
+    const input = document.getElementById('viv-gh-token-input');
+    const submit = document.getElementById('viv-gh-token-submit');
+    const msg = document.getElementById('viv-gh-token-msg');
+    if (!toggle || !box || !input || !submit) return;
+
+    toggle.onclick = function (e) {
+      e.preventDefault();
+      box.style.display = (box.style.display === 'none') ? 'block' : 'none';
+      if (box.style.display === 'block') input.focus();
+    };
+
+    async function doSubmit() {
+      const token = (input.value || '').trim();
+      if (!token) { if (msg) msg.textContent = 'Paste a token first.'; return; }
+      submit.disabled = true;
+      if (msg) { msg.style.color = '#666'; msg.textContent = 'Verifying…'; }
+      let resp, body;
+      try {
+        resp = await fetch('/api/auth/github/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: token }),
+        });
+        body = await resp.json().catch(() => ({}));
+      } catch (err) {
+        if (msg) { msg.style.color = '#b91c1c'; msg.textContent = 'Network error.'; }
+        submit.disabled = false;
+        return;
+      }
+      submit.disabled = false;
+      if (resp.ok && body.authenticated) {
+        input.value = '';
+        if (msg) { msg.style.color = '#15803d'; msg.textContent = 'Signed in as @' + body.login; }
+        box.style.display = 'none';
+        refreshChip();
+        if (window._loadGithubOrgs) window._loadGithubOrgs();
+      } else {
+        if (msg) {
+          msg.style.color = '#b91c1c';
+          msg.textContent = (body.hint || body.detail || body.error || ('HTTP ' + resp.status));
+        }
+      }
+    }
+
+    submit.onclick = doSubmit;
+    input.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); doSubmit(); } };
+  }
+
+  // -----------------------------------------------------------------------
   // Boot
   // -----------------------------------------------------------------------
 
   refreshChip();
+  wireTokenFallback();
 })();

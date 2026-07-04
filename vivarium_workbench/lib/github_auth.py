@@ -72,7 +72,7 @@ _TOKEN_RE = re.compile(r"\bgh[opusr]_[A-Za-z0-9_]{20,}\b")
 # Session shape (returned by status / read_session helpers)
 # ---------------------------------------------------------------------------
 
-Source = Literal["device_flow", "gh_cli"]
+Source = Literal["device_flow", "gh_cli", "token"]
 
 
 @dataclass(frozen=True)
@@ -486,10 +486,40 @@ def current_session() -> Session | None:
     return None
 
 
+def set_token_session(token: str) -> dict:
+    """Authenticate by validating a pasted GitHub token (PAT or ``gh`` token).
+
+    The universal fallback when neither a ``gh`` CLI session nor a device-flow
+    OAuth App client_id is available (e.g. headless / remote servers). Validates
+    the token via ``GET /user``; on success it caches + persists the session
+    (keyring + last-login hint) so it survives restarts, exactly like a
+    device-flow login. Returns a status-shaped payload, or ``{"error": ...}``.
+    """
+    token = (token or "").strip()
+    if not token:
+        return {"error": "empty_token", "hint": "paste a GitHub token"}
+    status, payload = _http_get("https://api.github.com/user", token=token)
+    if status != 200 or not isinstance(payload, dict) or not payload.get("login"):
+        return {
+            "error": "invalid_token",
+            "status": status,
+            "detail": (payload.get("message") if isinstance(payload, dict) else None),
+            "hint": "GitHub rejected the token — check it hasn't expired and has "
+                    "repo scope",
+        }
+    login = payload["login"]
+    session = Session(login=login, token=token, source="token")
+    _set_cached_session(session)
+    _keyring_set(login, token)
+    _remember_login(login)
+    return {"authenticated": True, "login": login, "source": "token"}
+
+
 def logout() -> None:
     """Clear the cached session AND any persisted keyring entry."""
     session = _get_cached_session()
-    if session is not None and session.source == "device_flow":
+    # Persisted sources (device_flow / token) live in the keyring; gh_cli does not.
+    if session is not None and session.source != "gh_cli":
         _keyring_delete(session.login)
     elif session is None:
         # No cached session, but we may have a persisted one to remove.
@@ -558,17 +588,32 @@ def list_orgs() -> dict:
     session = current_session()
     if session is None:
         return {"error": "unauthenticated"}
+    # The personal namespace is always known from the session — the user can act
+    # there even if org enumeration fails, so we never hard-fail once signed in.
+    personal = [{"name": session.login, "kind": "personal"}]
+    # /user/orgs occasionally returns a transient 5xx; retry once before degrading.
     status, payload = _http_get(
         "https://api.github.com/user/orgs", token=session.token,
     )
+    if status >= 500:
+        status, payload = _http_get(
+            "https://api.github.com/user/orgs", token=session.token,
+        )
     if status != 200 or not isinstance(payload, list):
+        # Degrade gracefully: return the personal namespace with a non-fatal
+        # warning (HTTP 200) rather than a 500 that blocks the whole panel.
         return {
-            "error": "orgs_lookup_failed",
-            "status": status,
-            "detail": (payload.get("message") if isinstance(payload, dict) else None),
+            "login": session.login,
+            "orgs": personal,
+            "warning": "orgs_lookup_failed",
+            "warning_status": status,
+            "warning_detail": (
+                payload.get("message") if isinstance(payload, dict) else None
+            ),
         }
-    orgs = [{"name": session.login, "kind": "personal"}]
-    for o in payload:
-        if isinstance(o, dict) and o.get("login"):
-            orgs.append({"name": o["login"], "kind": "org"})
+    orgs = personal + [
+        {"name": o["login"], "kind": "org"}
+        for o in payload
+        if isinstance(o, dict) and o.get("login")
+    ]
     return {"login": session.login, "orgs": orgs}
