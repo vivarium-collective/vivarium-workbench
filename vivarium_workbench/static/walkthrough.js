@@ -952,6 +952,12 @@
     var inv = data.investigation || {};
     var glob = data.global || {};
     var current = data.current || null;
+    // Keep the selected-slug in sync with the investigation actually shown, so
+    // the drop zone + "+ Add" buttons resolve the right target even before the
+    // user touches the "Load sources into" dropdown (data.current reflects the
+    // git branch / last selection). Without this, dropping a file falsely
+    // reported "Select an investigation first".
+    if (current) window._inputsSelectedSlug = current;
 
     var invList = data._investigations || [];
 
