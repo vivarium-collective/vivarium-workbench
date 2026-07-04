@@ -885,8 +885,6 @@ window.addEventListener('pageshow', function (e) {
         <button class="btn-mini" onclick="_generateInvestigationReport()" title="Generate a shareable HTML report (self-contained, attach to email)">Report 📄</button>
         <button class="btn-mini" onclick="_downloadInvestigationNotebook()" title="Download a self-contained Jupyter notebook (+ matching .py) that re-runs this investigation's studies via the process-bigraph protocol and renders their figures. The coder-facing complement to the HTML report.">Notebook 📓</button>
       </span>
-      <button class="btn-mini" id="investigation-detail-refresh" onclick="_refreshInvestigationDetail()" title="Re-fetch the investigation + its studies from disk. Use after editing YAML files directly (which the dashboard can't see otherwise).">↻</button>
-      <span class="viv-info-chip" data-tooltip="Report &mdash; self-contained HTML report you can email.&#10;&#10;Notebook &mdash; a self-contained Jupyter notebook (+ matching .py) that re-runs the studies and renders their figures.&#10;&#10;Refresh (↻) &mdash; re-fetch the investigation from disk after editing YAML directly.">?</span>
     </div>
     <!-- Run-progress panel: rendered while a run-unblocked job is active. -->
     <div id="investigation-run-progress" class="inv-run-progress" style="display:none"></div>
@@ -1181,7 +1179,7 @@ window.addEventListener('pageshow', function (e) {
         <th style="text-align:left; padding:6px 8px; width:80px;">Emitter</th>
         <th style="text-align:left; padding:6px 8px; width:104px;">Time</th>
         <th style="text-align:left; padding:6px 8px; width:84px;">Status</th>
-        <th style="text-align:center; padding:6px 8px; width:96px;">Actions</th>
+        <th style="text-align:center; padding:6px 8px; width:158px;">Actions</th>
       </tr>
     </thead>
     <tbody id="sim-tbody"></tbody>
