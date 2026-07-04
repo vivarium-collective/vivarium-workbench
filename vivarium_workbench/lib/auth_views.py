@@ -87,6 +87,23 @@ def auth_logout(body: Optional[dict] = None) -> tuple[dict, int]:
     return {"ok": True}, 200
 
 
+def auth_token(body: Optional[dict] = None) -> tuple[dict, int]:
+    """POST /api/auth/github/token — sign in by pasting a GitHub token.
+
+    The universal fallback (no ``gh`` session, no device-flow client_id needed).
+
+      * ``{"error": "empty_token"}``   → 400
+      * ``{"error": "invalid_token"}`` → 401 (GitHub rejected it)
+      * success                        → 200 ``{authenticated, login, source}``
+    """
+    token = (body or {}).get("token", "") if isinstance(body, dict) else ""
+    result = github_auth.set_token_session(token)
+    if "error" in result:
+        code = 400 if result["error"] == "empty_token" else 401
+        return result, code
+    return result, 200
+
+
 def auth_orgs() -> tuple[dict, int]:
     """GET /api/auth/github/orgs — user's personal namespace + orgs.
 

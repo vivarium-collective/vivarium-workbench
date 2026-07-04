@@ -5222,6 +5222,26 @@ def create_app() -> FastAPI:
         resp, code = _auth_views.auth_start(body)
         return JSONResponse(content=resp, status_code=code)
 
+    @app.post(
+        "/api/auth/github/token",
+        response_model=AuthPayload,
+        tags=["Auth"],
+        summary="Sign in by pasting a GitHub token",
+    )
+    def auth_github_token(body: dict = Body(default={})) -> JSONResponse:
+        """Sign in with a pasted GitHub token (PAT or ``gh`` token).
+
+        The universal fallback that needs neither a ``gh`` CLI session nor a
+        device-flow OAuth App client_id — usable on headless/remote servers.
+        Validates the token via GitHub's ``/user`` and persists the session.
+
+        Status: 200 ``{authenticated, login, source}``; 400 (empty token);
+        401 (GitHub rejected the token).  Library-backed via
+        ``lib.auth_views.auth_token``.
+        """
+        resp, code = _auth_views.auth_token(body)
+        return JSONResponse(content=resp, status_code=code)
+
     @app.get(
         "/api/auth/github/poll",
         response_model=AuthPayload,

@@ -1310,9 +1310,8 @@
   }
 
   // -------------------------------------------------------------------------
-  // Analyses page: a gallery of special, saved, interactive visualizations —
-  // embedded parsimony 3D scenes + a PTools Omics-Viewer launcher.
-  // Backed by GET /api/saved-visualizations.
+  // Analyses page: repo-contributed analysis viewers (launcher/embed cards).
+  // Backed by GET /api/analysis-viewers (a package's workbench_viewers module).
   // -------------------------------------------------------------------------
 
   function _render3dVizCard(v) {
@@ -15600,19 +15599,26 @@
     var hint = document.getElementById('viv-gh-default-org-hint');
     if (!sel) return;
     sel.disabled = true;
+    var _retry = ' <a href="#" id="viv-gh-org-retry" style="color:#2563eb">Retry</a>';
+    function _bindRetry() {
+      var a = document.getElementById('viv-gh-org-retry');
+      if (a) a.onclick = function (e) { e.preventDefault(); _loadGithubOrgs(); };
+    }
     fetch('/api/auth/github/orgs').then(function (r) {
       if (r.status === 401) {
         sel.innerHTML = '<option value="">Sign in to load orgs…</option>';
-        if (hint) hint.textContent = '';
+        if (hint) hint.textContent = 'Sign in above to pick a default org.';
         return;
       }
       if (!r.ok) {
+        // Backend now degrades gracefully, so a hard non-OK here is unusual
+        // (network/proxy). Keep the picker usable + offer a retry.
         sel.innerHTML = '<option value="">Could not load orgs</option>';
-        if (hint) hint.textContent = 'GitHub returned HTTP ' + r.status + '.';
+        if (hint) { hint.innerHTML = 'GitHub request failed (HTTP ' + r.status + ').' + _retry; _bindRetry(); }
         return;
       }
       return r.json().then(function (data) {
-        // API shape: {login, orgs: [{name, kind: "personal"|"org"}, ...]}
+        // API shape: {login, orgs: [{name, kind}], warning?: "orgs_lookup_failed"}
         var orgs = (data && data.orgs) || [];
         var saved = '';
         try { saved = localStorage.getItem(GH_DEFAULT_ORG_KEY) || ''; } catch (_e) {}
@@ -15623,13 +15629,21 @@
           return '<option value="' + _esc(name) + '"' + selAttr + '>' + _esc(label) + '</option>';
         }).join('') || '<option value="">No orgs found</option>';
         if (hint) {
-          hint.textContent = saved
-            ? 'Default: ' + saved + ' (saved in this browser).'
-            : 'Pick one to use as the default for new-repo flows.';
+          if (data && data.warning) {
+            // Org list couldn't be fetched, but the personal namespace is
+            // available — the user isn't blocked.
+            hint.innerHTML = 'Showing your personal namespace — couldn’t list orgs right now.' + _retry;
+            _bindRetry();
+          } else {
+            hint.textContent = saved
+              ? 'Default: ' + saved + ' (saved in this browser).'
+              : 'Pick one to use as the default for new-repo flows.';
+          }
         }
       });
     }).catch(function () {
       sel.innerHTML = '<option value="">Network error</option>';
+      if (hint) { hint.innerHTML = 'Network error reaching the workbench.' + _retry; _bindRetry(); }
     }).then(function () {
       sel.disabled = false;
     });

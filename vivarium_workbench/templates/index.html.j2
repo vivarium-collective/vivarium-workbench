@@ -999,7 +999,21 @@ window.addEventListener('pageshow', function (e) {
               <small>checking…</small>
             </div>
           </div>
-          <div class="gh-value-hint">No terminal required. Uses your <code>gh</code> session if present, otherwise OAuth Device Flow (browser code-paste).</div>
+          <div class="gh-value-hint">No terminal required. Uses your <code>gh</code> session if present; otherwise sign in with a token below (works anywhere) or the OAuth Device Flow.</div>
+          <div class="gh-value-hint" id="viv-gh-token-fallback" style="margin-top:8px">
+            Or <a href="#" id="viv-gh-token-toggle">paste a GitHub token</a> — the simplest path on any machine (no popup, no CLI).
+            <div id="viv-gh-token-box" style="display:none;margin-top:8px">
+              <input id="viv-gh-token-input" class="gh-input" type="password"
+                     placeholder="ghp_… / gho_… / github_pat_…" autocomplete="off"
+                     spellcheck="false" style="width:280px;max-width:100%">
+              <button id="viv-gh-token-submit" class="btn-mini" type="button">Sign in</button>
+              <span id="viv-gh-token-msg" style="margin-left:8px;font-size:0.85em"></span>
+              <div class="gh-value-hint" style="margin-top:6px">
+                Create one at <a href="https://github.com/settings/tokens" target="_blank" rel="noopener">github.com/settings/tokens</a>
+                with <code>repo</code> scope. Stored in your OS keychain, never written to the workspace.
+              </div>
+            </div>
+          </div>
           <noscript>
             <div class="gh-value-hint">Dashboard JS is disabled — run <code>gh auth login</code> from a terminal.</div>
           </noscript>
