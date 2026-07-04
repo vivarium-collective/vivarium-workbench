@@ -20,8 +20,12 @@ Each viewer dict:
       "kind":        "launcher"|"embed", # default "launcher"
       "applies":     callable|bool,      # optional; (ws_root)->bool, default True
       # launcher-only:
-      "launch":      callable,           # (ws_root, study, run)->{"url":..}
+      "launch":      callable,           # (ws_root, study, run, ctx)->{"url":..}
                                          #   | {"error":.., "status":..}
+                                         # ctx: {"public_base": str} — the
+                                         #   externally-reachable base URL derived
+                                         #   from the request Host, for viewers
+                                         #   that serve data back over HTTP.
       # embed-only:
       "assets":      {"js":[url,...], "mount_id": str, "api_prefix": str},
     }
@@ -160,14 +164,18 @@ def viewers_public(ws_root: Path) -> list[dict]:
 
 
 def resolve_launch(ws_root: Path, uid: str, study: str | None = None,
-                   run: str | None = None) -> dict[str, Any]:
+                   run: str | None = None,
+                   ctx: dict | None = None) -> dict[str, Any]:
     """Resolve a launcher viewer's ``uid`` and invoke its ``launch`` callable.
 
-    Returns the contributor's result dict (expected ``{"url": ...}`` on success,
-    or ``{"error": ..., "status": ...}``). Never raises: unknown uid → 404-shaped
+    ``ctx`` carries request-derived context (e.g. ``public_base``) for viewers
+    that serve data back over HTTP; contributors may ignore it. Returns the
+    contributor's result dict (expected ``{"url": ...}`` on success, or
+    ``{"error": ..., "status": ...}``). Never raises: unknown uid → 404-shaped
     error; a launch that raises → 500-shaped error.
     """
     ws_root = Path(ws_root)
+    ctx = ctx or {}
     match = next((v for v in discover_viewers(ws_root) if v.get("uid") == uid), None)
     if match is None:
         return {"error": f"viewer not found: {uid}", "status": 404}
@@ -175,7 +183,7 @@ def resolve_launch(ws_root: Path, uid: str, study: str | None = None,
     if not callable(launch):
         return {"error": f"viewer {uid} is not launchable", "status": 400}
     try:
-        result = launch(ws_root, study, run)
+        result = launch(ws_root, study, run, ctx)
     except Exception as e:  # noqa: BLE001
         return {"error": f"{type(e).__name__}: {e}", "status": 500}
     if not isinstance(result, dict):

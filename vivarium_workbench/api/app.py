@@ -794,6 +794,7 @@ def create_app() -> FastAPI:
         uid: str,
         study: Optional[str] = None,
         run: Optional[str] = None,
+        request: Request = None,  # type: ignore[assignment]
         ws: Path = Depends(get_workspace),
     ) -> JSONResponse:
         """Invoke a contributed launcher viewer's ``launch`` callable and return
@@ -802,7 +803,9 @@ def create_app() -> FastAPI:
 
         Status: 200 on success; 400/404/500 (shaped by the contributor) otherwise.
         """
-        result = _analysis_viewers.resolve_launch(ws, uid, study=study, run=run)
+        host = (request.headers.get("host", "localhost") if request else "localhost")
+        ctx = {"public_base": f"http://{host}"}
+        result = _analysis_viewers.resolve_launch(ws, uid, study=study, run=run, ctx=ctx)
         status = int(result.pop("status", 200)) if "error" in result else 200
         return JSONResponse(status_code=status, content=result)
 
