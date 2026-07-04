@@ -642,6 +642,7 @@ body.focus-mode .page.active{ display:block !important; min-height:0 !important 
   display:flex; align-items:center; gap:10px;
   padding:0 16px 14px;
   border-bottom:1px solid #ececec;
+  position:relative;   /* positioning context for the collapse toggle */
 }
 .viv-rail-logo{
   width:36px; height:36px; flex:0 0 36px;
@@ -836,7 +837,7 @@ body.focus-mode .page.active{ display:block !important; min-height:0 !important 
 
 /* Rail collapse toggle ----------------------------------------------------- */
 .viv-rail-toggle{
-  position:absolute; top:14px; right:8px;
+  position:absolute; top:4px; right:8px;
   width:28px; height:28px;
   border:1px solid transparent; background:transparent;
   border-radius:6px;
@@ -854,36 +855,43 @@ body.focus-mode .page.active{ display:block !important; min-height:0 !important 
   display:block;
   transition:transform 0.2s;
 }
+/* Collapsed: the toggle overlays the whole header, hidden until the header is
+   hovered — so the Vivarium logo shows by default and the expand icon appears
+   only on mouse-over (logo dims behind it). Click it to expand. */
 .viv-rail.viv-rail-collapsed .viv-rail-toggle{
-  /* A clean, centered "open sidebar" square button — the only affordance in
-     the collapsed rail's top slot (no avatar behind it). Shares the nav-icon
-     center axis (28px) with the links below. */
-  top:12px; left:50%; right:auto; transform:translateX(-50%);
-  width:32px; height:32px;
-  background:#fff; border-color:#e5e7eb;
+  top:0; left:0; right:0; bottom:0; transform:none;
+  width:auto; height:auto;
+  border-radius:8px;
+  opacity:0; transition:opacity 0.12s;
+  z-index:3;
 }
-.viv-rail.viv-rail-collapsed .viv-rail-toggle:hover{
-  background:#f3f4f6; border-color:#cbd5e1; color:#1f2937;
+.viv-rail.viv-rail-collapsed .viv-rail-header:hover .viv-rail-toggle{
+  opacity:1; background:rgba(249,250,251,0.94);
+  border-color:#e5e7eb; color:#1f2937;
 }
+.viv-rail.viv-rail-collapsed .viv-rail-header:hover .viv-rail-logo{ opacity:0.12 }
 
 /* Collapsed-rail state ----------------------------------------------------- */
 .viv-rail.viv-rail-collapsed{
   width:56px; flex-basis:56px;
 }
 .viv-rail.viv-rail-collapsed .viv-rail-header{
-  /* Keep the header as a spacer (border-bottom divider + room for the toggle),
-     but drop the brand avatar so nothing sits behind the toggle button. */
-  padding:0 8px 12px; justify-content:center; min-height:34px;
+  /* Keep the Vivarium logo (the toggle overlays it on hover); center it. */
+  padding:0 8px 12px; justify-content:center;
 }
-.viv-rail.viv-rail-collapsed .viv-rail-logo{ display:none }
+.viv-rail.viv-rail-collapsed .viv-rail-logo{ transition:opacity 0.12s }
 .viv-rail.viv-rail-collapsed .viv-rail-brand{ display:none }
-.viv-rail.viv-rail-collapsed .viv-workspace-switcher{ display:none }
+/* A short stand-in for the workspace-name chip: just the status dot, centered.
+   Still opens the Branch page on click. */
+.viv-rail.viv-rail-collapsed .viv-workspace-switcher{ display:flex; justify-content:center; margin:10px 0 2px; }
+.viv-rail.viv-rail-collapsed .viv-workspace-name{ padding:0; justify-content:center; }
+.viv-rail.viv-rail-collapsed .viv-ws-text{ display:none }
+.viv-rail.viv-rail-collapsed .viv-workspace-name .viv-workspace-switcher-glyph{ font-size:12px; margin-top:0; }
 .viv-rail.viv-rail-collapsed .viv-rail-section-label{ display:none }
 .viv-rail.viv-rail-collapsed .viv-rail-link{
-  /* Drop the 3px left accent border so the icon centers on the true 28px
-     rail axis (matching the toggle button above). Active state reads via the
-     background tint alone when collapsed. */
-  padding:8px 0; justify-content:center; gap:0; border-left-width:0;
+  /* Keep the SAME left padding + accent border as expanded so each icon sits at
+     the exact same x-position — no horizontal shift when collapsing/expanding. */
+  padding:8px 16px;
 }
 .viv-rail.viv-rail-collapsed .viv-rail-link-label{ display:none }
 .viv-rail.viv-rail-collapsed .viv-rail-link-badge{ display:none }
@@ -2298,7 +2306,7 @@ details.overview-section[open] > summary.overview-label{ margin-bottom:8px; }
   margin-bottom: 2px;
 }
 .analyses-card .viz-embed { display: block; }
-.ptools-study-list { display: flex; flex-direction: column; gap: 4px; }
+.viewer-target-list { display: flex; flex-direction: column; gap: 4px; }
 .explorer { display:flex; flex-direction:column; gap:10px; }
 /* top bar: run picker · view tabs · pop-out */
 .exp-topbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center;
