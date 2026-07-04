@@ -73,33 +73,12 @@ def test_discovers_saved_3d_pack(ws_with_saved_viz):
     assert isinstance(entry["created"], int)
 
 
-def test_ptools_discovery_and_config_flag(ws_with_saved_viz):
-    data = _build_saved_visualizations(ws_with_saved_viz)
-    ptools = data["ptools"]
-    # No ui.ptools_server_url in workspace.yaml -> not configured.
-    assert ptools["configured"] is False
-    studies = {s["study"]: s for s in ptools["studies"]}
-    assert "metabo" in studies
-    assert studies["metabo"]["n_tsvs"] == 2
-    # The 3D-only study has no ptools dir, so it is absent.
-    assert "cell-3d" not in studies
-
-
-def test_ptools_configured_flag_reads_workspace_yaml(tmp_path):
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    (ws / "workspace.yaml").write_text("name: t\nui:\n  ptools_server_url: http://ptools.example.com\n")
-    data = _build_saved_visualizations(ws)
-    assert data["ptools"]["configured"] is True
-
-
 def test_empty_workspace(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
     (ws / "workspace.yaml").write_text("name: empty\n")
     data = _build_saved_visualizations(ws)
     assert data["saved"] == []
-    assert data["ptools"]["studies"] == []
     # parsimony_available is a bool reflecting the optional dep.
     assert isinstance(data["parsimony_available"], bool)
 

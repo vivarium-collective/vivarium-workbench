@@ -251,16 +251,6 @@ class SavedViz(BaseModel):
     viewer_url: Optional[str] = None  # set only when ui.viz_viewer_urls maps it
 
 
-class PtoolsStudy(BaseModel):
-    study: str
-    n_tsvs: int
-
-
-class PtoolsInfo(BaseModel):
-    configured: bool = False
-    studies: list[PtoolsStudy] = []
-
-
 class ReportCard(BaseModel):
     """One saved comparison report card (``report_cards`` list)."""
 
@@ -276,7 +266,6 @@ class SavedVisualizationsPayload(BaseModel):
 
     parsimony_available: bool = False
     saved: list[SavedViz] = []
-    ptools: PtoolsInfo = PtoolsInfo()
     report_cards: list[ReportCard] = []
 
 
@@ -1088,8 +1077,6 @@ class UiConfig(BaseModel):
     # controls and goes remote-only (no Local source option).
     readonly: bool = False
     composite_view: str
-    ptools_server_url: str
-    ptools_omics_url_template: str
 
 
 class WorkspaceHome(BaseModel):
@@ -1185,15 +1172,6 @@ class VisualizationInstances(BaseModel):
     """``GET /api/visualization-instances`` payload (lib.study_viz_views.build_visualization_instances).
 
     Class-backed visualization instances configured in workspace.yaml.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-
-class PtoolsLaunch(BaseModel):
-    """``GET /api/ptools-launch/{study}`` payload (lib.study_viz_views.build_ptools_launch).
-
-    Pathway Tools Omics Viewer launch URL + TSV discovery result.
     """
 
     model_config = ConfigDict(extra="allow")

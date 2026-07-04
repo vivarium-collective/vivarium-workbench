@@ -1372,9 +1372,6 @@
           </td>
           <td>
             <button class="btn-view-run" data-run-id="{{ r.run_id }}">View</button>
-            {% if ptools_enabled %}
-            <button class="btn-launch-ptools" data-run-id="{{ r.run_id }}" title="Launch Pathway Tools Omics Viewer for this run">Launch ptools</button>
-            {% endif %}
             <button class="btn-delete-run" data-run-id="{{ r.run_id }}">Delete</button>
           </td>
         </tr>
@@ -1459,7 +1456,7 @@
     </div>
     <p class="muted" style="margin:0 0 10px 0;font-size:0.88em">
       Tabular outputs (<code>.csv</code> / <code>.tsv</code>) written by this study's
-      Analysis steps — e.g. PTools exports and per-run analysis tables. Click a file to
+      Analysis steps — e.g. per-run analysis tables and exports. Click a file to
       download it.
     </p>
     <div id="data-files" data-study="{{ name }}">

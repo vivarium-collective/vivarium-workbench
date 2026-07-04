@@ -1,23 +1,14 @@
-"""Study-spec + visualization lifecycle + PTools launch builders (library seam).
+"""Study-spec + visualization lifecycle builders (library seam).
 
-HTTP-free builders behind four dashboard routes:
+HTTP-free builders behind three dashboard routes:
 
   * ``GET /api/study-bigraph-paths``     → :func:`build_study_bigraph_paths`
   * ``GET /api/visualization-status``    → :func:`build_visualization_status`
   * ``GET /api/visualization-instances`` → :func:`build_visualization_instances`
-  * ``GET /api/ptools-launch/{study}``   → :func:`build_ptools_launch`
 
 Pure ``ws_root``-parameterised functions: NO ``import server`` (the stdlib
 ``vivarium_workbench.server`` keeps thin shims that delegate here, passing the
 ``WORKSPACE`` global).  The FastAPI app imports this module directly.
-
-Helpers moved here from ``server.py``:
-
-  * :func:`ptools_object_class`   — infer gene/reaction/protein/compound from name
-  * :func:`build_ptools_launch_url` — pure TSV-discovery + Omics-Viewer URL build
-
-Both are re-exported from ``server`` for backward-compatible callers (e.g.
-``test_ptools_launch.py`` imports them as ``server._build_ptools_launch_url``).
 """
 
 from __future__ import annotations
@@ -25,13 +16,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Optional
-from urllib.parse import quote
 
 import yaml
 
 from vivarium_workbench.lib.study_spec import study_dir as _study_dir_fn
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
-from vivarium_workbench.lib.system_info import _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE
 
 # ---------------------------------------------------------------------------
 # study_refresh_viz — re-render a study's declared visualizations
@@ -268,180 +257,3 @@ def build_visualization_instances(ws_root: Path) -> dict:
             "description": entry.get("description") or "",
         })
     return {"instances": out}
-
-
-# ---------------------------------------------------------------------------
-# PTools helpers
-# ---------------------------------------------------------------------------
-
-def ptools_object_class(name: str) -> str:
-    """Infer the Pathway Tools object class from an analysis/TSV name.
-
-    The Omics Viewer needs to know whether the row IDs are genes, reactions,
-    proteins, or compounds.  v2ecoli's ptools analyses are named accordingly
-    (ptools_rna → genes, ptools_rxns → reactions, ptools_proteins → proteins).
-
-    Mirrors ``server._ptools_object_class``.
-    """
-    n = name.lower()
-    if "rxn" in n or "reaction" in n:
-        return "reaction"
-    if "protein" in n:
-        return "protein"
-    if "metabolite" in n or "compound" in n:
-        return "compound"
-    return "gene"  # rna / default
-
-
-def build_ptools_launch_url(
-    study_dir: "Path | str",
-    ws_root: "Path | str",
-    ptools_server_url: str,
-    ptools_omics_url_template: str,
-    public_base: str,
-    run_id: Optional[str] = None,
-    analysis: Optional[str] = None,
-    data_dir: Optional[str] = None,
-) -> dict:
-    """Discover ptools TSVs and build a Pathway Tools Omics Viewer URL.
-
-    Returns a dict with keys:
-      - ``url`` + ``tsv_url`` + ``available`` on success
-      - ``error`` + optional ``available`` on failure
-
-    Two data-delivery modes:
-      - **HTTP** (default): ``tsv_url`` is an absolute URL on the dashboard's
-        externally-reachable host; the PTools server fetches it over HTTP.
-      - **Filesystem** (``data_dir`` set): ``tsv_url`` is the server-local
-        path ``<data_dir>/<rel>``.
-
-    Mirrors ``server._build_ptools_launch_url`` exactly.
-    """
-    study_dir = Path(study_dir)
-    ws_root = Path(ws_root)
-
-    # Discover all ptools TSVs under the study directory.
-    all_tsvs = sorted(study_dir.glob("**/ptools/*.tsv"))
-
-    # Filter by analysis prefix when requested.
-    if analysis:
-        prefix = f"{analysis}__"
-        all_tsvs = [p for p in all_tsvs if p.name.startswith(prefix)]
-
-    # Build workspace-relative paths for the static handler + available list.
-    def _relpath(p: Path) -> str:
-        try:
-            return p.relative_to(ws_root).as_posix()
-        except ValueError:
-            return p.as_posix()
-
-    available = [_relpath(p) for p in all_tsvs]
-
-    if not available:
-        return {"error": "no ptools TSVs found for this run", "available": []}
-
-    # Use the first available TSV (most useful when analysis is filtered).
-    chosen = all_tsvs[0]
-    rel = available[0]
-    if data_dir:
-        tsv_url = f"{data_dir.rstrip('/')}/{rel}"
-    else:
-        tsv_url = f"{public_base.rstrip('/')}/{rel}"
-
-    # Object class for the overlay (gene/reaction/protein/compound).
-    cls = ptools_object_class(analysis or chosen.name)
-
-    # Animate across every data column.
-    columns = "1"
-    try:
-        for line in chosen.read_text(encoding="utf-8").splitlines():
-            if not line or line.startswith(("#", ";")):
-                continue
-            ncol = len(line.split("\t")) - 1  # minus the name/ID column
-            columns = f"1-{ncol}" if ncol > 1 else "1"
-            break
-    except Exception:
-        pass
-
-    # Percent-encode the TSV URL before embedding it as the {tsv_url} query
-    # parameter. Left raw, the nested "http://host:port/…" lands unencoded in
-    # the Omics-Viewer query string; strict URL parsers (WebKit/Safari
-    # window.open) reject it. PTools decodes the param, so the fetched URL is
-    # unchanged.
-    launch_url = ptools_omics_url_template.format(
-        server=ptools_server_url.rstrip("/"),
-        tsv_url=quote(tsv_url, safe=""),
-        orgid="ECOLI",
-        cls=cls,
-        columns=columns,
-    )
-    return {"url": launch_url, "tsv_url": tsv_url, "available": available}
-
-
-def build_ptools_launch(
-    ws_root: Path,
-    study: str,
-    run: Optional[str] = None,
-    analysis: Optional[str] = None,
-    *,
-    public_base: str = "http://localhost",
-) -> tuple[dict, int]:
-    """Return ``(body, status)`` for ``GET /api/ptools-launch/{study}``.
-
-    Reads ``ui.ptools_server_url`` from workspace.yaml (400 if absent), then
-    discovers per-run ptools TSV files under the study directory and returns a
-    Pathway Tools Omics Viewer launch URL.
-
-    ``public_base`` is the fallback base URL the PTools server uses to fetch the
-    TSV file over HTTP; ``ui.dashboard_public_base_url`` in workspace.yaml takes
-    priority if set.  Callers (the server shim, FastAPI route) supply it from the
-    HTTP ``Host`` header.
-
-    Status codes mirror ``server.Handler._get_ptools_launch``:
-      - 400  ``ptools_server_url not configured``
-      - 404  study not found / TSV discovery error
-      - 200  ``{url, tsv_url, available}``
-    """
-    ws_root = Path(ws_root)
-
-    try:
-        ws = yaml.safe_load(
-            (ws_root / "workspace.yaml").read_text(encoding="utf-8")
-        ) or {}
-    except Exception:
-        ws = {}
-    ui = ws.get("ui") or {}
-
-    ptools_server_url = ui.get("ptools_server_url", "").strip()
-    if not ptools_server_url:
-        return {"error": "ptools_server_url not configured"}, 400
-
-    ptools_omics_url_template = ui.get(
-        "ptools_omics_url_template",
-        _PTOOLS_DEFAULT_OMICS_URL_TEMPLATE,
-    )
-
-    # workspace.yaml config takes priority over the caller-supplied public_base.
-    cfg_base = (ui.get("dashboard_public_base_url") or "").strip()
-    if cfg_base:
-        public_base = cfg_base
-
-    data_dir: Optional[str] = (ui.get("ptools_data_dir") or "").strip() or None
-
-    sd = _study_dir_fn(ws_root, study)
-    if not sd.is_dir():
-        return {"error": f"study not found: {study}"}, 404
-
-    result = build_ptools_launch_url(
-        study_dir=sd,
-        ws_root=ws_root,
-        ptools_server_url=ptools_server_url,
-        ptools_omics_url_template=ptools_omics_url_template,
-        public_base=public_base,
-        run_id=run,
-        analysis=analysis,
-        data_dir=data_dir,
-    )
-    if "error" in result:
-        return result, 404
-    return result, 200

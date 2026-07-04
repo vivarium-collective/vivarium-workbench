@@ -159,7 +159,6 @@ from vivarium_workbench.lib.models import (
     StudyDetail,
     RegistryPayload,
     SavedVisualizationsPayload,
-    PtoolsLaunch,
     SimRow,
     SimulationsPayload,
     ProvenanceManifest,
@@ -631,10 +630,10 @@ def create_app() -> FastAPI:
         "/api/saved-visualizations",
         response_model=SavedVisualizationsPayload,
         tags=["Studies"],
-        summary="Saved 3D packs, report cards, and PTools TSVs",
+        summary="Saved 3D packs and report cards",
     )
     def saved_visualizations(ws: Path = Depends(get_workspace)) -> SavedVisualizationsPayload:
-        """Saved interactive visualizations (3D packs, report cards, PTools TSVs),
+        """Saved interactive visualizations (3D packs, report cards),
         via lib.saved_visualizations — no stdlib server dependency."""
         return SavedVisualizationsPayload.model_validate(
             _saved_viz.build_saved_visualizations(ws))
@@ -680,7 +679,7 @@ def create_app() -> FastAPI:
         )
 
     # -----------------------------------------------------------------------
-    # Batch 11: visualization-status/instances, ptools-launch
+    # Batch 11: visualization-status/instances
     # -----------------------------------------------------------------------
 
     @app.get(
@@ -728,45 +727,6 @@ def create_app() -> FastAPI:
         return VisualizationInstances.model_validate(
             _study_viz.build_visualization_instances(ws)
         )
-
-    @app.get(
-        "/api/ptools-launch/{study}",
-        response_model=PtoolsLaunch,
-        tags=["Studies"],
-        summary="Pathway Tools Omics Viewer launch URL for a study",
-    )
-    def ptools_launch(
-        study: str,
-        run: Optional[str] = None,
-        analysis: Optional[str] = None,
-        request: Request = None,  # type: ignore[assignment]
-        ws: Path = Depends(get_workspace),
-    ) -> Union[PtoolsLaunch, JSONResponse]:
-        """Pathway Tools Omics Viewer launch URL for a study.
-
-        Mirrors ``GET /api/ptools-launch/<study>?run=<run_id>&analysis=<name>``
-        from the stdlib server.  The slug is validated before delegation
-        (identical to the dispatcher's check).
-
-        Status codes:
-          - 400  ``ptools_server_url not configured`` / invalid slug
-          - 404  study not found / no ptools TSVs found
-          - 200  ``{url, tsv_url, available}``
-
-        Library-backed via ``lib.study_viz_views.build_ptools_launch``.
-        """
-        if not _study_spec.SLUG_RE.match(study):
-            return JSONResponse(status_code=400, content={"error": "invalid study name"})
-        # Resolve public_base from the Host header; workspace.yaml config
-        # (ui.dashboard_public_base_url) takes priority inside the lib builder.
-        host = (request.headers.get("host", "localhost") if request else "localhost")
-        public_base = f"http://{host}"
-        body, status = _study_viz.build_ptools_launch(
-            ws, study, run=run, analysis=analysis, public_base=public_base,
-        )
-        if status == 200:
-            return PtoolsLaunch.model_validate(body)
-        return JSONResponse(status_code=status, content=body)
 
     @app.get(
         "/api/analysis-viewers",
@@ -1994,9 +1954,7 @@ def create_app() -> FastAPI:
         Reads workspace.yaml's ``ui:`` block.  Missing/unreadable workspace →
         all-default values.  Always 200.
 
-        Keys: ``composite_view`` (default "bigraph-loom"),
-        ``ptools_server_url`` (default ""),
-        ``ptools_omics_url_template`` (default template string).
+        Keys: ``composite_view`` (default "bigraph-loom").
 
         The legacy handler serializes whatever ``ui.get(...)`` returns at HTTP
         200, even a non-string value (e.g. ``composite_view: 42``).  The typed
