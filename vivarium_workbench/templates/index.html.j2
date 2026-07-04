@@ -664,7 +664,7 @@ window.addEventListener('pageshow', function (e) {
 <!-- ===== PAGE: ANALYSES ===== -->
 <section id="page-visualizations" class="page" data-page="visualizations">
   <h2 class="page-title">Analyses</h2>
-  <p class="page-lead">A gallery of special, saved, interactive visualizations for this workspace &mdash; embedded <strong>3D structural models</strong> (parsimony packs) and a <strong>Pathway Tools</strong> Omics-Viewer launcher. Looking for the chart/analysis <em>class</em> catalog? It now lives in <a href="#registry" onclick="setTimeout(function(){_setRegistrySubtab&amp;&amp;_setRegistrySubtab('discovered');_setRegistryTab&amp;&amp;_setRegistryTab('visualization');},0)">Registry &rarr; Discovered &rarr; Visualizations</a>.</p>
+  <p class="page-lead">A gallery of saved, interactive visualizations and analysis views for this workspace. Each repo contributes its own domain-specific analyses and viewers here. Looking for the chart/analysis <em>class</em> catalog? It now lives in <a href="#registry" onclick="setTimeout(function(){_setRegistrySubtab&amp;&amp;_setRegistrySubtab('discovered');_setRegistryTab&amp;&amp;_setRegistryTab('visualization');},0)">Registry &rarr; Discovered &rarr; Visualizations</a>.</p>
 
   <div class="panel">
     <h3>Saved visualizations <span id="viz-count" class="count-badge"></span></h3>
@@ -1291,15 +1291,6 @@ window.addEventListener('pageshow', function (e) {
   <div id="ce-loading" class="empty-state">Loading composite&hellip;</div>
 
   <div id="ce-main" style="display:none">
-
-    <!-- Begin Study CTA -->
-    <div id="ce-begin-study-bar" class="panel" style="display:flex;align-items:center;gap:12px;background:#f0f9ff;border:1px solid #bae6fd">
-      <div style="flex:1">
-        <strong>Ready to investigate?</strong>
-        <span class="muted">Start a Composite Study to design variants, run simulations, and capture conclusions.</span>
-      </div>
-      <button class="action-btn" id="ce-begin-study-btn" onclick="_beginStudyFromComposite()">Begin Study</button>
-    </div>
 
     <!-- Metadata header -->
     <div class="panel">

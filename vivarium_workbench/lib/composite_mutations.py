@@ -36,6 +36,7 @@ Batch 27 of the FastAPI strangler-fig migration (POST phase, Phase C).
 from __future__ import annotations
 
 import copy
+import json
 import re
 import shutil
 import uuid
@@ -45,8 +46,24 @@ from typing import Any
 import yaml
 
 from vivarium_workbench.lib import study_spec as _study_spec
+from vivarium_workbench.lib.json_serialize import _json_body
 from vivarium_workbench.lib.upload_mutations import _ws_add_to_sys_path
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+
+
+def _yaml_dump_doc(doc: object) -> str:
+    """YAML-dump a composite/generator document that may contain numpy.
+
+    ``@composite_generator`` docs (e.g. the v2ecoli baseline) carry numpy
+    structured arrays (bulk-molecule state) and numpy scalars that
+    ``yaml.safe_dump`` cannot represent — it raises ``RepresenterError`` and the
+    create-from-composite flow 500s. Normalize through the JSON-safe path first
+    (``_json_body`` never raises: it converts numpy via ``_json_default`` and
+    falls back to ``repr`` for anything exotic), yielding pure native types that
+    dump cleanly.
+    """
+    native = json.loads(_json_body(doc).decode())
+    return yaml.safe_dump(native, sort_keys=False)
 
 
 def _spec_path_for(inv_dir: Path) -> Path:
@@ -153,7 +170,7 @@ def _apply_add_investigation_composite(
     if source_path is not None:
         shutil.copy2(source_path, sidecar)
     else:
-        sidecar.write_text(yaml.safe_dump(generator_doc, sort_keys=False), encoding="utf-8")
+        sidecar.write_text(_yaml_dump_doc(generator_doc), encoding="utf-8")
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
     composites = spec.setdefault('composites', [])
     composites.append({
@@ -595,7 +612,7 @@ def _apply_create_from_composite(
     composites_dir.mkdir(parents=True, exist_ok=True)
     sidecar = composites_dir / f"{composite_name}.yaml"
     if is_generator:
-        sidecar.write_text(yaml.safe_dump(generator_doc, sort_keys=False), encoding="utf-8")
+        sidecar.write_text(_yaml_dump_doc(generator_doc), encoding="utf-8")
     else:
         assert source_path is not None  # non-generator → resolved source path
         shutil.copy2(source_path, sidecar)

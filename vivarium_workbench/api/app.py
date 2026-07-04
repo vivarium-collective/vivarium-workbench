@@ -2114,6 +2114,35 @@ def create_app() -> FastAPI:
         )
 
     @app.get(
+        "/api/simulation-run-download",
+        tags=["Runs"],
+        summary="Download a run's raw emitter data as a zip",
+    )
+    def simulation_run_download_route(
+        run_id: str,
+        ws: Path = Depends(get_workspace),
+    ) -> Response:
+        """Zip a Simulations-DB run's raw emitter store (native zarr/parquet dir,
+        else the SQLite ``runs.db``) and serve it as ``application/zip``.
+
+        The store is resolved from ``run_id`` via the workspace scan — no path is
+        trusted from the client. HTTP 404 when the run or its store is absent.
+
+        Library-backed via ``lib.simulations_index.build_simulation_run_zip``.
+        """
+        data, fname, code = _simulations_index.build_simulation_run_zip(ws, run_id)
+        if code != 200:
+            return JSONResponse(
+                status_code=code,
+                content={"error": f"run data not found: {run_id}"},
+            )
+        return Response(
+            content=data,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+
+    @app.get(
         "/api/composite-run/{run_id}",
         response_model=CompositeRunTrajectory,
         tags=["Composites"],
