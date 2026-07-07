@@ -56,6 +56,7 @@ dev = ["pytest>=7.4", "pytest-timeout", "pytest-json-report>=1.5", "mypy>=1.8", 
 # fail. Install with: uv pip install -e ".[dev,test]". See CONTRIBUTING.md.
 # (zarr is needed alongside xarray for DataTree.to_zarr in the zarr tests.)
 test = ["polars", "xarray", "zarr", "pyarrow"]
+demo = ["v2ecoli"]
 
 [project.scripts]
 # New canonical console scripts.
@@ -78,6 +79,11 @@ pbg-basic-processes = { git = "https://github.com/vivarium-collective/pbg-basic-
 # of published metadata) and is not on PyPI; supply its git URL here so `uv
 # sync`/`uv lock` can resolve it (the editable-install gap that was failing CI).
 investigation-contracts = { git = "https://github.com/vivarium-collective/investigation-contracts.git", branch = "main" }
+# v2ecoli is NOT a runtime dependency of the vivarium-workbench package — it is
+# only needed for the demos/v2ecoli/ scripts. Declare it in [tool.uv.sources]
+# so `uv sync --extra demo` resolves the local checkout. The bare `v2ecoli`
+# requirement is listed in [project.optional-dependencies] → `demo`.
+v2ecoli = { path = "../v2ecoli", editable = true }
 
 # bigraph-loom is a PEP 508 direct git URL (not on PyPI), so the wheel build
 # backend must opt into direct references — without this, hatchling refuses the
