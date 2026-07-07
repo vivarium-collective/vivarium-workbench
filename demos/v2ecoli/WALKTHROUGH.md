@@ -1,6 +1,6 @@
 # vivarium-workbench Dashboard Demo — Unified Walkthrough
 
-**Last verified**: 2026-07-06
+**Last verified**: 2026-07-07
 **Branch**: `demo-v2ecoli` in `vivarium-collective/vivarium-dashboard`
 
 ---
@@ -173,24 +173,24 @@ open http://localhost:8771
    - `pbg_torch` — neural surrogate models
    - `pbg_parsimony` — capsule cell geometry
 3. Click **Discovered registry** → **Processes** sub-tab
-4. Scroll: **174 Process classes** from 7 packages, interspersed — `viva_munk`'s `PymunkProcess` sits next to v2ecoli's `PolypeptideElongation`
+4. Scroll: **173 Process classes** from 7 packages, interspersed — `viva_munk`'s `PymunkProcess` sits next to v2ecoli's `PolypeptideElongation`
 
 ### API
 `GET /api/catalog` → 11 packages
-`GET /api/registry` → 174 Process classes
+`GET /api/registry` → 173 Process classes
 
 ### Narration
 > "Seven different simulation packages. One dashboard. One type system. Any process from any package can be composed into any composite. To onboard a new simulator, you pip install it and declare it in `workspace.yaml` — it just appears."
 
 ### Key Number
-> **174** Process classes from **7** different simulation packages, all in one type system.
+> **173** Process classes from **7** different simulation packages, all in one type system.
 
 ---
 
 ## 4. Segment 3: Composites — Swappability (3 min)
 
 ### Actions
-1. Click **Composites** — **30 composites** across all packages
+1. Click **Composites** — **28 composites** across all packages
 
 #### Cell-Engine Swappability
 2. Click `baseline` — "v2ecoli whole-cell model, 55 processes, tFBA metabolism"
@@ -206,13 +206,13 @@ open http://localhost:8771
 8. Click `chemotaxis` (viva_munk) — "Bacterial chemotaxis in a 2D ligand gradient. Same dashboard."
 
 ### API
-`GET /api/composites` → 30 composites: 10 v2ecoli, 3 pbg_copasi, 1 pbg_parsimony, 9 viva_munk, 3 pbg_ketchup, ~2 spatio-flux
+`GET /api/composites` → 28 composites: 12 v2ecoli, 3 pbg_copasi, 1 pbg_parsimony, 9 viva_munk, 3 pbg_ketchup
 
 ### Narration
 > "Three different cell engines, all sharing the same reactor coupler, all managed by the same dashboard. Swappability means ONE workflow — Composite → Run → View results — for ANY simulator."
 
 ### Key Number
-> **30** runnable models — whole-cell, colony physics, kinetic fitting, ODE solving.
+> **28** runnable models — whole-cell, colony physics, kinetic fitting, ODE solving.
 
 ---
 
@@ -255,8 +255,8 @@ open http://localhost:8771
 1. Click **Investigations** — **8 investigations** (Active / Closed)
 2. Open **`v2ecoli-baseline-showcase`**
 3. Show the detail panel: Status pill, Report button, Notebook download, "About this investigation" disclosure
-4. Show the **DAG**: 6 study nodes with dependency edges:
-   `showcase-1-parca` → `showcase-2-baseline-figures` → `showcase-3-variant-decide` → `showcase-4-variant-comparison` → `showcase-5-next-direction-decide` → `showcase-6-equivalence-large`
+4. Show the **DAG**: 6 study nodes with dependency edges — not a straight line, it fans out:
+   `showcase-1-parca` → `showcase-2-baseline-figures`, which then branches to three parallel children — `showcase-3-variant-decide`, `showcase-4-variant-comparison`, and `showcase-6-equivalence-large` — with `showcase-5-next-direction-decide` depending on `showcase-4`
 5. Gate mechanism: "showcase-2 can't proceed until showcase-1 passes its gate"
 6. Click **showcase-1-parca** — study detail in iframe:
    - **3 behavior tests** (all passing): `parca-builds-full-51-conditions`, `cache-bundle-complete`, `sim_data-reproduces-parca-comparison`
@@ -285,12 +285,12 @@ This segment requires the SMS API tunnel (Section 0.3) to be running on `localho
 2. Show the **52-run** table: columns — Investigation, Study, Run, Location, Origin, Emitter, Time, Status
 3. Point out **Emitter type pills**: sqlite (gray), parquet (amber), xarray (teal)
 4. Point out **Origin badges**: local vs. remote (☁️ blue pill)
-5. Point out the **3 remote runs** with full provenance (simulation_id, experiment_id, backend=ray, s3_uri from sms-api)
-6. Show **status variety**: 4 failed (including `5-variant sweep ΔO2`), 1 running (`BiRD reactor + Millard cell`)
+5. Point out the **4 remote runs** with full provenance (simulation_id, experiment_id, backend=ray, s3_uri from sms-api)
+6. Show **status variety**: 4 failed (including `5-variant sweep ΔO2`), 1 orphaned (`BiRD reactor + Millard cell` — a stale in-progress run whose backing process died; shows as `orphaned`, not `running`)
 
 ### API
-`GET /api/simulations` → 52 runs: 3 remote ☁️, 4 failed, 1 running
-Emitter distribution: sqlite=5, parquet=14, xarray=10, unknown=23
+`GET /api/simulations` → 52 runs: 4 remote ☁️, 4 failed, 1 orphaned
+Emitter distribution: sqlite=12, parquet=13, xarray=11, unknown=16
 
 ### Actions — Part B: Live Remote Run
 7. From any study page, click **"Run remotely"**
@@ -312,7 +312,7 @@ Emitter distribution: sqlite=5, parquet=14, xarray=10, unknown=23
 > **52** runs, **3** emitter backends, local and remote side-by-side.
 
 ### Fallback (tunnel down)
-Skip Part B. Show the 3 pre-landed remote ☁️ runs in Simulations DB and narrate the pipeline architecture. Mention the `ptools-proxy.sh -s smsvpctest` command to establish the tunnel when ready.
+Skip Part B. Show the 4 pre-landed remote ☁️ runs in Simulations DB and narrate the pipeline architecture. Mention the `ptools-proxy.sh -s smsvpctest` command to establish the tunnel when ready.
 
 ---
 
@@ -341,7 +341,7 @@ Skip Part B. Show the 3 pre-landed remote ☁️ runs in Simulations DB and narr
 ### Actions
 1. Rapid click-through of all tabs as recap
 2. Highlight architecture pillars:
-   - **One dashboard, many simulators** — Registry: 174 processes from 7 packages
+   - **One dashboard, many simulators** — Registry: 173 processes from 7 packages
    - **Swappable cell engines** — Composites: baseline, Millard, PDMP, all sharing reactor coupler
    - **Modular pipelines** — ParCa: 9 Steps, each independently swappable
    - **Reproducible, git-tracked runs** — Simulations DB: 52 runs with full provenance
@@ -404,7 +404,7 @@ A: No — only Segment 6 (remote runs) requires it. Segments 1–5 and 7–8 wor
 | 0:30 | Open browser | — | `http://localhost:8771` |
 | 1:00 | **1. Intro** | Home | Rail, workspace chip |
 | 3:00 | **2. Registry** | Registry → Modules | 11 packages |
-| 4:00 | **2. Registry** | Registry → Processes | **174** processes from 7 packages |
+| 4:00 | **2. Registry** | Registry → Processes | **173** processes from 7 packages |
 | 6:00 | **3. Composites** | Composites | baseline → millard → pdmp |
 | 8:00 | **3. Composites** | Composites | External: ketchup, chemotaxis |
 | 9:00 | **4. ParCa** | Composites → Explore on parca | **9-step** pipeline |
@@ -461,7 +461,7 @@ All demo artifacts are under `demos/v2ecoli/`. Zero modifications to existing v2
 2. **Branch**: `demo-v2ecoli` in `vivarium-collective/vivarium-dashboard` — no v2ecoli files modified
 3. **Auth**: `stanford test` in `~/.zshrc` sets `AWS_PROFILE=stanford-sso`, `AWS_DEFAULT_REGION=us-gov-west-1`, runs `aws sso login`
 4. **Tunnel**: `~/sms/sms-cdk/scripts/ptools-proxy.sh -s smsvpctest` proxies `localhost:8080` → SMS API via batch submit node + internal ALB
-5. **Simulations DB**: 52 runs, 16 synthetic + 3 remote ☁️ + real runs; seeded by `populate_demo_runs.py`
+5. **Simulations DB**: 52 runs, 16 synthetic + 4 remote ☁️ + real runs; seeded by `populate_demo_runs.py`
 6. **No raw simulation data**: Showcase chart PNGs are present and render correctly. You CANNOT re-run showcase sims without rebuilding ParCa caches — which is not needed for this demo.
 7. **ParCa live run**: Fast mode ~15s (7 TF conditions). Full mode ~2.4 min (51 conditions).
 8. **Reset**: `python demos/v2ecoli/populate_demo_runs.py` restores synthetic run entries.
