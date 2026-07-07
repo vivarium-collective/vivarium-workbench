@@ -34,7 +34,7 @@ from vivarium_dashboard.lib.workspace_deps_views import _sms_api_base
 
 WORKSPACE_ROOT = Path(_os.environ.get(
     "V2ECOLI_ROOT", str(Path(_v2ecoli.__file__).resolve().parent.parent)))
-DEMO_DIR = WORKSPACE_ROOT / "demos" / "dashboard"
+DEMO_DIR = WORKSPACE_ROOT / ".pbg" / "demo"
 STATE_FILE = DEMO_DIR / ".demo_state.json"
 POLL_INTERVAL = 10  # seconds between status polls
 MAX_WAIT = 600  # max seconds to wait for build
