@@ -8,10 +8,14 @@
 > read it first. This document proposes where we go and in what order; it does
 > not change code.
 >
-> A design review (Jim, 2026-07-07) **resolved the foundational architecture** —
-> captured in **§2A**. The remaining §2 items (tenancy, auth source, the eventual
-> science/environment *repo* split) are still open. Please comment inline / in
-> the tracking issue.
+> Design reviews (Jim + Alex, 2026-07-07) **resolved the foundational
+> architecture** (**§2A**), the **deployment & storage** model (**§2B**), and the
+> **demo + rollout strategy** (**§5C**). What remains genuinely open is small — the
+> eventual science/environment *repo* split, and "make work permanent under an S3
+> record." This RFC is now **demo-driven**: a customer demo is ~2 weeks out, so the
+> near-term plan (§5C) is deliberately low-risk deployment of the *current* code,
+> with the structural refactor sequenced *after* the internal demo and validated on
+> a persistent Dev site. Please comment inline / in the tracking issue.
 
 ---
 
@@ -82,6 +86,11 @@ for A-with-B-in-mind; §11 marks where B needs extra work.
 
 ### 2.2 Authentication & authorization model
 
+> **⚠ Superseded by §2B (2026-07-07).** For single-tenant behind the existing
+> AWS/VPC/tunnel perimeter, **app auth drops out of the near-term plan** — the
+> perimeter is the control. The options below apply only when we expose a *live*
+> instance outside the perimeter or go multi-tenant. See §2B.4.
+
 Options: **(a)** front the app with an **ALB + OIDC/Cognito** (auth happens
 before the request reaches uvicorn — least app code, recommended for Option A);
 **(b)** in-app OIDC/session middleware (needed for B's per-tenant authz); **(c)**
@@ -91,6 +100,11 @@ is **not** app auth and must not be conflated. **Recommendation:** ALB+OIDC fron
 door for A; add an in-app authz layer only when we do B.
 
 ### 2.3 Where the workspace lives in the cloud
+
+> **⚠ Superseded by §2B (2026-07-07).** Resolved: the demo uses a **private EBS
+> `gp3` PVC** (POSIX, for git/SQLite) — *not* FSx, *not* s3fs (which lacks the
+> locking/rename git & SQLite need). Sim results couple to services **only through
+> S3**; the S3-native store comes later via sms-api's `FileService`. See §2B.3.
 
 Options: **(a)** EFS-mounted git working copy per instance (closest to today's
 model, works for A); **(b)** clone-on-start from a git remote + object storage
@@ -214,18 +228,90 @@ weakest → strongest:
 - **First phase keeps the workspace as a single *fused* repo** (science + env
   together, Q2 deferred) — enforce the boundary by interface shape + path
   allow-list (§2A.4 layers 1 + 3). No repo split, no pbg-template change, no cloud.
+- **Tenancy = single-tenant appliance first** (was open) — B-ready, but the
+  near-term target is one instance / one workspace.
+- **Auth deferred** (was open) — behind the existing AWS/VPC/tunnel perimeter,
+  single-tenant needs no app auth (§2B.4); the `Principal` port is
+  attribution/future-proofing, not security. Auth re-enters only at multi-tenant
+  or exposure of a *live* instance outside the perimeter.
+- **Deployment & storage settled** (§2B) — EKS peer of sms-api; private EBS PVC;
+  results couple to services only through S3.
+- **Rollout settled** (§5C) — dev/prod split; continuous small PRs; guardrails
+  first; agent-coded, dual-lens-reviewed increments on persistent EKS staging.
 
-**Still open**
-- **Tenancy** (§2.1): single-tenant appliance first vs. multi-tenant.
+**Still open (small)**
 - **Science/environment *repo* split** (Q2 target): when, and its pbg-template
   blast radius (how `build_core()` discovery changes when env is its own repo).
 - **"Make work permanent" under an S3 record:** keep the branch + PR *review*
   workflow (a separable collaboration policy) or commit straight to the record?
-- **Auth source of truth** (Cognito vs org IdP); first hosted users.
+
+---
+
+## 2B. Deployment & storage (resolved 2026-07-07)
+
+Supersedes §2.2, §2.3, and the §3/§6 ECS/Fargate framing. Grounded in the
+existing infra (`../sms-api`, `../sms-cdk`): an **EKS cluster on GovCloud**,
+services as Deployment+Service composed by **Kustomize** overlays, ALB via
+**`TargetGroupBinding`**, ghcr images, IRSA, and a shared internal ALB reached by
+tunnel.
+
+### 2B.1 Where it runs — a peer of sms-api on the existing EKS cluster
+The workbench deploys as **another Deployment+Service in the existing EKS
+cluster**, not ECS/Fargate (which would duplicate the K8s stack). It reuses the
+sms-api pattern verbatim: a Kustomize `base` + per-env overlay
+(`vivarium-workbench-stanford` / `-test`), a pinned ghcr image, a
+`TargetGroupBinding` onto the existing internal ALB (reached via the same tunnel),
+sealed secrets. The **one new infra piece** is a target group + ALB listener rule
+for the workbench — a small `sms-cdk` addition.
+
+### 2B.2 sms-api is the workbench's only cloud backend — in-cluster
+`SMS_API_BASE` points at the **in-cluster service DNS**
+(`http://api.<ns>.svc.cluster.local:8000`), not a `localhost:8080` tunnel — which
+removes the single most fragile thing in the run path. The workbench calls sms-api
+over HTTP for builds, run submit/status, and result download, so it needs **no
+direct S3 access and no IRSA** — sms-api owns all S3/Batch credentials.
+
+### 2B.3 Storage — private POSIX volume now, S3-native later
+Resolved after ruling out two traps:
+- **No shared filesystem** (FSx-for-Lustre dropped) and **no git/SQLite on s3fs**
+  (s3fs lacks the locking/rename semantics git and SQLite require — a corruption
+  risk).
+- **Sim results and services never share a filesystem — they couple only through
+  S3.** The workbench does **not** mount the compute's results volume.
+
+So:
+- **Demo:** the workbench gets its **own private EBS `gp3` PVC** (RWO) for its
+  workspace (git/YAML/SQLite) + caches (venv, ParCa ~175 MB, `~/.pbg/build-cache`).
+  POSIX-safe, durable across restarts; single replica → global state / `os.chdir`
+  is fine. (EFS is an acceptable temporary alternative if cross-AZ rescheduling
+  matters; slower for SQLite, so EBS is the default.)
+- **Run outputs:** fetched from **S3 via sms-api's download** (the existing
+  `remote_run_landing` path) into the pod's private cache, then rendered. S3 is the
+  only coupling; no code change.
+- **Target (post-demo):** S3-native via the `WorkspaceFs`/`RunStore` ports,
+  implemented with **sms-api's tested `common/storage/FileService`** (S3 /
+  Qumulo-S3 / GCS backends) — reused, not hand-rolled.
+
+### 2B.4 Auth — deferred behind the existing perimeter
+Authentication, authorization, and perimeter are three different things. For
+single-tenant the **perimeter is already provided by AWS account isolation + VPC +
+tunnels** (the same way sms-api is reached), so the workbench runs **auth-free as a
+private peer of sms-api** — the accepted trade-off is flat trust inside the VPC,
+identical to sms-api's posture, with git history making destructive actions
+revertible. **Authorization** (capabilities, read-only gradations) is a
+*multi-tenant* concern. **Read-only** is a capability posture; the truly-safe
+public artifact is the **static published bundle** (no server). The `Principal`
+port is worth introducing for *attribution* (so commits aren't all
+`pbg-template@local`), not security. Auth re-enters only at multi-tenant or
+exposure of a *live* instance outside the perimeter.
 
 ---
 
 ## 3. Target architecture (Option A, B-ready)
+
+> **⚠ Superseded by §2B (2026-07-07).** The diagram below (ECS/Fargate + ALB+OIDC
+> front door) predates the decision to deploy on the **existing EKS cluster** as a
+> peer of sms-api with no app auth. Kept for history; the real target is §2B.
 
 ```
                     ┌─────────────────────────────────────────────┐
@@ -490,7 +576,70 @@ multi-tenant (§2.1, still open).
 
 ---
 
+## 5C. Demo track & rollout strategy (resolved 2026-07-07)
+
+Context: an **internal demo ~1 week out** and a **customer demo ~2 weeks out**,
+intense work between. The near-term plan is deliberately low-risk: deploy the
+**current code as a fixed appliance**; reserve the structural refactor for *after*
+the internal demo, validated on a persistent Dev site.
+
+### 5C.1 Demo track (Week 1 → internal demo) — additive only, no app-code surgery
+- **Day 0–1:** confirm the demo narrative; **prove the in-cluster integration
+  first** (workbench pod → in-cluster sms-api → land a run) — the single most
+  likely thing to break.
+- **Week 1:** Dockerfile (workbench + the v2ecoli workspace deps, `linux/amd64` →
+  ghcr); Kustomize base + Dev + Prod overlays (private EBS PVC, in-cluster
+  `SMS_API_BASE`, `TargetGroupBinding`); the one `sms-cdk` target-group add; verify
+  author→commit + remote-run end-to-end on **AWS Dev**. Static published bundle as
+  a fallback.
+- **Steer the live demo to the remote (sms-api) run path**, away from the fragile
+  local synchronous engine; pre-seed runs so nothing time-sensitive can hang.
+- **Internal demo = a full dry run on Dev**, then **promote the validated image tag
+  to Prod**.
+
+### 5C.2 The dev/prod split — the mechanism that lets the refactor start early
+Two overlays with independent image tags: **Dev** (persistent staging, where
+refactor increments continuously deploy) and **Prod** (the customer demo). During
+the customer-demo window **Prod is pinned to the known-good tag while Dev iterates
+freely** — so the refactor track can open right after the *internal* demo without
+endangering the *customer* demo.
+
+### 5C.3 Rollout of the refactor (post internal-demo) — strangler-style
+Reuses the approach that already worked here (the stdlib→FastAPI migration):
+incremental, behavior-preserving, continuously merged to main and **deployed to Dev
+each time**. Sequence:
+1. **Guardrails** — import-linter layering gate + revive the JS test harness
+   (makes later refactors safe *before* touching god-files).
+2. **`WorkspaceContext` + `AuthoredRecord`** — the per-request threading spine + the
+   first port (resume `refactor/phase0-authored-record`).
+3. **Remaining ports incrementally** — `RunBackend` (unify the two engines), then
+   `RunStore`/`EnvironmentResolver` (S3-native via sms-api's `FileService`).
+4. **Larger structural lifts** — science/env split, run-engine unification,
+   god-file/frontend decomposition — *after* the ports exist and are enforced.
+
+### 5C.4 Working model
+- **Continuous small PRs to main**, each behavior-preserving, import-linter green,
+  auto-deployed to Dev — never a long-lived refactor branch.
+- **Agents do the coding step-by-step; humans hand-review each increment** with two
+  lenses: **Alex** (does it preserve app behavior?) and **Jim** (is it the right
+  structural move? — objectivity / problem-spotting). Infra is shared (both know
+  it).
+- **Persistent EKS Dev staging throughout** — every increment is observed in the
+  real cluster, not just unit-tested.
+- **Adapter selection at one composition root** so incomplete cloud adapters never
+  affect the running deployment; **promotion Dev→Prod** is a manual image-tag bump
+  of a validated build.
+
+---
+
 ## 6. AWS specifics (Option A)
+
+> **⚠ Superseded by §2B / §5C (2026-07-07).** The bullets below assume
+> ECS/Fargate + an ALB+OIDC front door + a `runs_meta`→RDS path. The resolved
+> target is an **EKS Deployment peer of sms-api** (Kustomize + `TargetGroupBinding`),
+> a **private EBS PVC**, **no app auth** (perimeter), and **no direct S3/IRSA** in
+> the workbench. Still-valid bits (Secrets Manager, CloudWatch logging via the
+> existing structured logs, `/health` for the target group) carry over.
 
 - **Compute:** ECS/Fargate service (1 task/tenant for A). Container = the
   existing app image; SPA assets either in-container or pushed to S3+CloudFront.
@@ -541,25 +690,30 @@ multi-tenant (§2.1, still open).
 ---
 
 ## 9. Open questions for Jim + Alex
-1. **Tenancy (§2.1):** single-tenant appliance first, or straight to multi-tenant?
-   (Recommendation: appliance-first, B-ready.)
-2. **Who are the first hosted users** — the two of us + a small lab, or external?
-   (Sets the auth/isolation bar.)
-3. **Auth source of truth** — Cognito, or an existing org IdP?
-4. **Is retiring the local synchronous study-run engine for hosted acceptable**,
-   i.e. hosted runs *always* go through sms-api/Batch? (Recommendation: yes.)
-5. **Metadata store for B** — RDS Postgres vs DynamoDB, if/when we go multi-tenant.
-6. **Do we align the deployment IaC with the existing sms-cdk repo**, or stand up
-   a separate stack for the app tier?
+
+**Resolved since first draft** (see §2A.5, §2B, §5C): tenancy (single-tenant
+first), auth (deferred behind the perimeter), IaC (reuse `sms-cdk` — the workbench
+is a peer of sms-api), and the run path (hosted runs go through sms-api; steer the
+demo there). Remaining:
+
+1. **Demo narrative** — confirm the must-show (working assumption: author/adjust a
+   study → launch a remote sms-api run → results land & render, on AWS).
+2. **Owner of the one `sms-cdk` change** (workbench target group + ALB listener).
+3. **Science/environment *repo* split** (Q2) — when, and its pbg-template blast
+   radius. (Post-demo.)
+4. **"Make work permanent" under an S3 record** — keep branch+PR review, or commit
+   straight to the record? (Post-demo.)
+5. **Metadata store for B** — RDS Postgres vs DynamoDB, if/when multi-tenant.
 
 ---
 
-## 10. Immediate next steps (regardless of the above)
-- Land **Phase 0** (guardrails + security stopgaps) — pure win, unblocks safe change.
-- Turn Workstreams A–G into a tracking issue / project board with the audit's
-  ranked risks as the checklist.
-- Prototype the **ALB+OIDC front door** against a single Fargate instance to
-  de-risk Phase 1's auth model early.
+## 10. Immediate next steps
+- **Demo track (Week 1, §5C.1):** Dockerfile + Kustomize base/Dev/Prod overlays +
+  the `sms-cdk` target-group add; prove the in-cluster sms-api integration Day 1;
+  deploy to AWS Dev; internal-demo dry run; promote to Prod.
+- **Land the doc PRs** (#454 audit → then #455 RFC) as the shared reference.
+- **Refactor track opens after the internal demo (§5C.3):** guardrails first, then
+  `WorkspaceContext` + `AuthoredRecord`, continuous small PRs auto-deployed to Dev.
 
 ## 11. What Option B (multi-tenant) additionally requires
 - In-app authorization (per-tenant resource scoping), not just an auth front door.
