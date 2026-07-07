@@ -416,6 +416,80 @@ pass with no behavior change.
 
 ---
 
+## 5B. Deferred phases — rough roadmap (how each realizes the ports)
+
+Sketch-level, not a spec — enough to see the trajectory. The through-line: **each
+phase introduces or completes one port from §2A, always local-adapter-first
+(behavior-preserving), with the cloud adapter added later, and every new seam
+gets its own import-linter rule.** Phase 0 (§5A) built `AuthoredRecord`; the rest:
+
+### Phase 1 — Identity + per-request context *(introduces `Principal`; realizes `WorkspaceContext`)*
+- **Where it goes:** one hosted instance, reachable by an authenticated user, and
+  safe to run with >1 worker. Still single fused repo, still local run engine.
+- **How (rough):** introduce a `WorkspaceContext` object that carries the ports +
+  the `Principal`, and thread it **per request** exactly the way `ws_root` is
+  already threaded (95 modules are ready; finish the ~13 that still read the
+  global `_root`). Remove `os.chdir`; make the module caches workspace-keyed. Put
+  an **ALB+OIDC front door** ahead of uvicorn to populate `Principal`; commit
+  attribution becomes the principal (retiring `pbg-template@local`). Fix/replace
+  the half-done `/api/source/switch`.
+- **Exit:** two workers, no cross-talk; `os.chdir` gone; mutations require an
+  authenticated principal; `READONLY` is genuinely read-only.
+
+### Phase 2 — Durable run execution *(introduces `RunBackend`)*
+- **Where it goes:** runs survive a restart and can scale out; the two-engines
+  liability is resolved.
+- **How (rough):** define the `RunBackend` port. **Local adapter** = unify both of
+  today's engines onto Engine A's request-file/**detached** model and retire the
+  in-request `python -c` engine. **Cloud adapter** = the sms-api → Ray → Batch
+  thin-client path (delete the legacy threaded pipeline — the promised "R5").
+  Add restart reconciliation for study `runs.db` (today only `composite-runs.db`
+  is reconciled), a concurrency cap, and scratch cleanup.
+- **Exit:** a study run survives a server restart; runs execute on Batch; no run
+  blocks an HTTP request.
+
+### Phase 3 — Cloud storage + the science/environment repo split *(completes `AuthoredRecord` cloud adapter, `EnvironmentResolver`, `RunStore`; executes Q2)*
+- **Where it goes:** the instance becomes cattle (destroy/recreate, no data loss),
+  and the boundary graduates from path-allow-list to **repo/IAM-enforced**.
+- **How (rough):** `AuthoredRecord` cloud adapter = **git-as-engine with the
+  durable remote in S3/CodeCommit** (GitHub optional; interface still opaque
+  version-ids). `RunStore` cloud adapter over S3; `EnvironmentResolver` cloud
+  adapter = sms-api build images. **Execute the science/environment split (Q2):**
+  science record repo (workbench writes) vs. environment repo (read-only), with
+  the **env coordinate** now a first-class field on run bindings. This is the
+  phase that touches **pbg-template** (how `build_core()` discovery changes when
+  the environment is its own repo) — coordinate it there.
+- **Also resolve here:** the "**make work permanent under an S3 record**"
+  question — keep the branch + PR *review* workflow (separable collaboration
+  policy) or commit straight to the record.
+- **Exit:** instance recreatable with no data loss; boundary is a repo/IAM
+  boundary; environment pinned by immutable coordinate; reproducibility =
+  (science version) + (env coordinate) + (params).
+
+### Phase 4 — Contract & maintainability hardening *(no new ports; pays down god-files/coupling)*
+- **How (rough):** split `app.py` into `APIRouter`s by the existing OpenAPI tags;
+  decompose `walkthrough.js` per page (**stand up the frontend test harness
+  first** — Phase 0 companion — since the audit's one JS test is broken); split
+  `investigations.py` / `single_study_report.py`; tighten the hottest `models.py`
+  payloads + actually consume the generated TS types; the one `superpowers_api.py`
+  adapter (§F); typed pydantic-settings validated at boot (§G).
+- **Exit:** no source file > ~1.5k lines; client type-checks; config validated at
+  boot; a pbg-superpowers bump touches one file.
+
+### Phase 5 — Multi-tenant *(optional; completes `Principal`/authz + isolation)*
+- **How (rough):** in-app authorization (per-tenant resource scoping) on top of the
+  auth front door; per-request tenant context end to end (the Phase-1 discipline
+  makes this an increment); `runs_meta` → a shared store (RDS/Dynamo); per-tenant
+  secrets, quotas, and noisy-neighbor controls on the run backend.
+- **Exit:** many tenants on one fleet.
+
+**Dependency shape:** 0 → 1 is the gate (nothing hosted until identity +
+per-request context land). 2, 3, 4 can then largely parallelize (2 needs 1's
+context; 3 needs 2's `RunStore` shape; 4 is independent). 5 only if we choose
+multi-tenant (§2.1, still open).
+
+---
+
 ## 6. AWS specifics (Option A)
 
 - **Compute:** ECS/Fargate service (1 task/tenant for A). Container = the
