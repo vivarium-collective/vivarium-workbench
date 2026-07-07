@@ -8,8 +8,10 @@
 > read it first. This document proposes where we go and in what order; it does
 > not change code.
 >
-> Nothing here is settled — the §2 decisions are the point of the draft. Please
-> comment inline / in the tracking issue.
+> A design review (Jim, 2026-07-07) **resolved the foundational architecture** —
+> captured in **§2A**. The remaining §2 items (tenancy, auth source, the eventual
+> science/environment *repo* split) are still open. Please comment inline / in
+> the tracking issue.
 
 ---
 
@@ -111,6 +113,115 @@ EFS. For B (many concurrent writers, cross-workspace queries) it likely needs a
 real store (RDS/Postgres or DynamoDB). **Recommendation:** keep SQLite for A;
 abstract `runs_meta` access behind a repository interface now (small) so a store
 swap for B is localized.
+
+---
+
+## 2A. Converged design (resolved in review, 2026-07-07)
+
+This section supersedes the looser framing elsewhere in the RFC. The design
+review settled the *shape* of the system; the phases below build toward it.
+
+### 2A.1 Ports & adapters — the seam is enumerable, not emergent
+
+Local vs. cloud is **not "two modes"** (branching logic scattered across 150
+modules — the thing the audit already flagged with `if READONLY`/`if SMS_API_BASE`/
+`if snapshot`). It is **one architecture with two adapter sets** behind a small,
+fixed set of **ports**. The domain (studies, investigations, verdicts, rendering)
+depends only on the ports and never knows which world it runs in; the choice is
+**one wiring decision at the composition root**.
+
+The entire surface that differs between deployments is ~5 ports:
+
+| Port | Local adapter | Cloud adapter (later) | Replaces today |
+|---|---|---|---|
+| **AuthoredRecord** — versioned science system-of-record (write study/investigation/decision/reference/run-binding; `snapshot()→version_id`; history; diff) | local `git` | git-as-engine, durable remote in S3/CodeCommit | `work_state.active_branch_action`, `git_status` |
+| **EnvironmentResolver** — resolve an opaque env **coordinate** → a runnable environment | venv / `build_core()` | sms-api `repo@commit` image build | (implicit in the workspace repo today) |
+| **RunBackend** — submit / poll / land a run | detached subprocess | sms-api → Ray → Batch | Engine A + Engine B + 3 remote impls |
+| **RunStore** — read run outputs | SQLite/zarr on disk | zarr/parquet on S3 | `simulations_index`, `run_store`, emitters |
+| **Principal** — who is acting | anonymous / local | OIDC principal | (none; GitHub device-flow is separate) |
+
+**Success test:** a human or an AI can list everything that differs between local
+and cloud on one screen (these ports). Today they cannot.
+
+### 2A.2 What is versioned vs. what is referenced
+
+The "system of record" is **not one fused store**. It decomposes:
+
+- **Scientific record** (AuthoredRecord) — investigations, studies, decisions,
+  references, composite **specs**, and **run bindings**. Small, YAML, authored,
+  diffable. *This* is what git-as-engine versions. Restoring a version restores
+  the science and its pointers.
+- **Execution environment** (EnvironmentResolver) — the Python package(s),
+  process code, simulators, lockfile. **Referenced by an immutable coordinate,
+  never stored in the record.** Materialized as a venv (local) or image (cloud).
+  It owns its own lifecycle — you can upgrade a simulator and re-run an old study
+  against it *because* the study references, not owns, the engine.
+- **Run outputs** (RunStore) — large zarr/parquet, addressed by URI, referenced
+  from the record (never committed).
+
+A **run is a binding**: `{ study@ver, composite_ref, env_id, params, outputs_uri,
+provenance }`. Reproducibility = (science version) + (env coordinate) + (params) —
+three pins, not one fused `repo@commit`. This is *more* honest than today's model
+and it's already latent (the `provenance_manifest` records exactly this).
+
+**Composite-code boundary rule:** a `.composite.yaml` spec is science (in the
+record); a `@composite_generator` is engine (in the environment). To keep the
+record *readable* without importing the environment, a generator's **output is
+snapshotted into the record as a spec** — you only need the environment to
+*re-execute*, not to *read*.
+
+### 2A.3 git-as-engine, S3-as-durable-host, interface abstracted to version-ids
+
+We keep **git as the engine** (its content-addressing gives the `repo@commit`
+reproducibility contract that sms-api and the sync round-trip already depend on —
+too valuable and too cross-repo to reinvent). But the **AuthoredRecord interface
+leaks no git-isms** — callers see `version_id`/`snapshot`/`history`, never "SHA"
+or "push". So on AWS the *durable host* can become S3/CodeCommit (GitHub optional,
+a mirror at most) by swapping the adapter, and a future move to a fully S3-native
+or event-sourced store is an adapter change the domain never sees.
+
+### 2A.4 Enforcing the science/environment boundary (three layers)
+
+Path-allow-listing inside one repo is a **convention, not a boundary**. Strength,
+weakest → strongest:
+
+1. **Interface shape (primary, always).** The AuthoredRecord port has domain
+   operations only and **no "write arbitrary path" method** — there is no API to
+   cross the boundary. Environment changes go through EnvironmentResolver, which
+   never commits into the record.
+2. **Store/IAM boundary (target).** When we split science and environment into two
+   repos, the workbench service role has *write* to the science repo, *read-only*
+   to the environment repo. In git-as-a-service, repo-level IAM is first-class;
+   path-level gating is not — so the real boundary is a *repo* boundary.
+3. **Path allow-list (transitional, for a fused repo).** While science + env share
+   one repo, the AuthoredRecord adapter stages only science paths (a config-driven
+   allow-list resolved through `workspace_paths` — formalizing today's *hardcoded*
+   pathspec, which the audit flagged). This is the weak-but-adequate bridge until
+   the split.
+
+### 2A.5 Decisions log
+
+**Resolved**
+- **Ports & adapters**, seam enforced by an import-linter rule, not convention.
+- **git-as-engine**; AuthoredRecord interface abstracted to opaque `version_id`s;
+  S3/CodeCommit as the durable host on AWS, GitHub optional.
+- **Three-store decoupling:** AuthoredRecord + EnvironmentResolver + RunStore,
+  with a **run as the binding** across them.
+- **Environment = single repo for now** (Q1). Multi-repo simulators are aspirational
+  and, when needed, reconciled **offline** into one merged repo/branch — so the
+  runtime always resolves *exactly one* environment. Keep the env coordinate
+  **opaque** so multi-repo is later a widening, not a breaking change.
+- **First phase keeps the workspace as a single *fused* repo** (science + env
+  together, Q2 deferred) — enforce the boundary by interface shape + path
+  allow-list (§2A.4 layers 1 + 3). No repo split, no pbg-template change, no cloud.
+
+**Still open**
+- **Tenancy** (§2.1): single-tenant appliance first vs. multi-tenant.
+- **Science/environment *repo* split** (Q2 target): when, and its pbg-template
+  blast radius (how `build_core()` discovery changes when env is its own repo).
+- **"Make work permanent" under an S3 record:** keep the branch + PR *review*
+  workflow (a separable collaboration policy) or commit straight to the record?
+- **Auth source of truth** (Cognito vs org IdP); first hosted users.
 
 ---
 
@@ -235,7 +346,7 @@ Each is scoped so it can land as its own PR series. **P#** = audit risk number
 
 | Phase | Theme | Contents | Exit criterion |
 |---|---|---|---|
-| **0. Guardrails** | Make change safe | Import-linter/layering test; wire the broken JS test + a minimal harness; security stopgaps (bind localhost by default + loud warning on `0.0.0.0`; fix `READONLY` whitelist; scrub traceback leak); pin `investigation-contracts` | CI enforces layering + runs a frontend test; no known "footgun default" |
+| **0. Boundary seed + guardrails** (see **§5A**) | Make the boundary real, safely | `AuthoredRecord` port + local git adapter; config-driven science-path allow-list (fused repo); import-linter rule; + companion guardrails (JS test harness; security stopgaps; pin `investigation-contracts`) | AuthoredRecord is the only writer to the science record; lint rule green; allow-list layout-driven; no behavior change |
 | **1. Identity + statelessness** | Make it hostable | Workstreams **A** + **B**; ALB+OIDC front door; per-request workspace context; kill `os.chdir` | One authenticated user reaches a hosted single-tenant instance; two workers don't cross-talk |
 | **2. Durable runs** | Make it scale | Workstream **C**; study runs via sms-api/Batch for hosted; restart reconciliation; collapse remote-run impls | A study run survives restart and runs on Batch |
 | **3. Cloud storage** | Make it durable | Workstream **D**; git remote + S3 run outputs; `runs_meta` repository interface | Instance is cattle, not a pet |
@@ -243,7 +354,65 @@ Each is scoped so it can land as its own PR series. **P#** = audit risk number
 | **5. (optional) Multi-tenant** | Make it a service | §11 items: in-app authz, per-tenant isolation, metadata store swap, quotas | Many tenants on one fleet |
 
 Phase 0 is small and pure-win; do it regardless of the §2 decisions. Phases 1–2
-are the real "get it on AWS" work. Phase 5 only if we choose Option B.
+are the real "get it on AWS" work. Phase 5 only if we choose Option B. The
+concrete, agreed definition of Phase 0 is **§5A**.
+
+---
+
+## 5A. Phase 0 — concrete definition (single fused repo, behavior-preserving)
+
+**Framing.** Two repos are in play; only one changes. The **workspace repo** (the
+user's data: `studies/`/`investigations/` *and* the `pbg_<project>` package) stays
+**one fused repo** — no split, no pbg-template change, no user migration. The
+refactor lives entirely in the **vivarium-workbench** tool and is invisible to any
+workspace. Goal: make the science/environment boundary *real structure* while
+behavior is byte-for-byte unchanged. This is debt-paydown that stands alone even
+if AWS never happens.
+
+**In scope**
+1. **`AuthoredRecord` port + one local git adapter.** A narrow write API for the
+   science system-of-record — domain operations only (`write_study`,
+   `record_decision`, `append_run_binding`, `snapshot()→version_id`, `history`,
+   `diff`), **no "write arbitrary path" method** (§2A.4 layer 1). The local adapter
+   wraps today's exact behavior (`work_state.active_branch_action` + `git_status`);
+   `version_id`s are opaque (git SHAs underneath, never surfaced).
+2. **Config-driven science-path allow-list.** Replace the *hardcoded* staging
+   pathspec in `active_branch_action` (`["studies/", "investigations/", …]` — an
+   audit-flagged bug that breaks under a custom `layout:`) with an allow-list
+   *derived through `workspace_paths`*. In the fused repo this list **is** the
+   boundary (§2A.4 layer 3): a science mutation can never touch `pyproject.toml`
+   or package code. Fixes the audit bug as a side effect.
+3. **One guardrail (`import-linter` rule).** Only the AuthoredRecord adapter may
+   import git/subprocess-for-commit; domain modules cannot reach around it. Green
+   while the app still does exactly what it does today.
+
+Companion guardrails from the generic Phase-0 (safe, independent): wire the broken
+JS test + a minimal harness; security stopgaps (localhost-default + loud
+`0.0.0.0` warning, fix the `READONLY` whitelist, scrub the traceback leak); pin
+`investigation-contracts`.
+
+**Explicitly deferred (this is what makes Phase 0 "least destructive")**
+- No splitting the workspace into two repos; no pbg-template change (§2A.4 layer 2
+  and the Q2 repo split come later).
+- No cloud/S3/IAM/CodeCommit adapters; no auth; no server-side hooks (local git only).
+- No unifying the two run engines (the genuinely invasive change — Phase 2).
+- No `EnvironmentResolver`/`RunStore`/`RunBackend`/`Principal` ports yet — they are
+  *named* (§2A.1) but Phase 0 builds only the one port fully reasoned through.
+- No frontend decomposition.
+
+**Enforcement recap (fused repo):** interface shape (no cross-boundary API) + path
+allow-list at the adapter. No IAM, no repo boundary — those arrive only with the
+opt-in split.
+
+**Risk & verification.** The one load-bearing change is routing the existing commit
+path through the new adapter — behavior-preserving by construction (same git
+commands, same pathspec *content*, just sourced from the layout config). Gated by
+the existing suite plus a new unit test asserting the allow-list rejects
+environment paths.
+
+**Exit criterion.** AuthoredRecord is the only writer to the science record; the
+import-linter rule is green; the allow-list is layout-driven; all existing tests
+pass with no behavior change.
 
 ---
 
