@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Dev / persistent-staging overlay — the refactor track continuously deploys here
+# (RFC §5C.2). Prod mirrors this with its own image tag + target group.
+
+# TODO(alex): confirm the workbench namespace (sms-api uses `sms-api-stanford`).
+namespace: vivarium-workbench-dev
+
+resources:
+  - ../../base
+  - pvc.yaml
+  # TODO: add target-group-binding.yaml once sms-cdk provisions a workbench
+  # target group + ALB listener rule (mirrors sms-api's target-group-binding.yaml).
+
+images:
+  - name: ghcr.io/vivarium-collective/vivarium-workbench
+    # TODO: pin to a tag produced by deploy/build-and-push.sh (a git sha).
+    newTag: dev
+
+# The base defaults SMS_API_BASE to the sms-api-stanford in-cluster service. If
+# the sms-api namespace differs for this env, override it here, e.g.:
+#   patches:
+#     - patch: |-
+#         - op: replace
+#           path: /spec/template/spec/containers/0/env/0/value
+#           value: "http://api.<sms-api-ns>.svc.cluster.local:8000"
+#       target: { kind: Deployment, name: workbench }
