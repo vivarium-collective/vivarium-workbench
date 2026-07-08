@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 
-def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1") -> int:
+def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path: str = "") -> int:
     """Boot the FastAPI dashboard app under uvicorn against ``workspace``.
 
     ``host`` defaults to loopback; pass ``0.0.0.0`` to bind every interface
@@ -84,5 +84,5 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1") -> int:
     # Run the app object (not an import string) so it shares this process's
     # already-registered workspace root; disables reload, which is correct for
     # the served entrypoint.
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    uvicorn.run(app, host=host, port=port, log_level="info", root_path=(base_path or ""))
     return 0

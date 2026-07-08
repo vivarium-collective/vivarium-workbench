@@ -412,7 +412,50 @@ def _detect_github_repo(ws_root: Path) -> str | None:
     return None
 
 
-def render_workspace_report(ws_root: Path | None = None, *, today: str | None = None) -> Path:
+def _apply_live_base_path(html: str, base_path: str) -> str:
+    """Rewrite the rendered dashboard HTML to be served under *base_path* (e.g.
+    ``/workbench``) behind a shared reverse proxy / ALB.
+
+    - Prefixes static asset refs (relative ``assets/…`` and absolute
+      ``/assets/…`` / ``/bigraph-loom/…``).
+    - Injects ``basePath`` into ``__DASH_CONFIG__`` and a small runtime shim that
+      prepends the prefix to root-absolute app URLs used by ``fetch`` /
+      ``EventSource`` / ``XMLHttpRequest`` (the SPA builds many raw requests that
+      don't route through DataSource).
+
+    No-op when *base_path* is empty (root hosting). Known gap: URLs assigned via
+    an element's ``.src``/``.href`` in JS (e.g. the bigraph-loom iframe) are not
+    caught by the request shim and rely on the reverse proxy also routing those
+    top-level paths (e.g. ``/bigraph-loom/*``) to this service.
+    """
+    if not base_path:
+        return html
+    import re as _re
+    bp = base_path
+    html = _re.sub(r'(\b(?:src|href)=")assets/', rf'\1{bp}/assets/', html)
+    html = _re.sub(r'(\b(?:src|href)=")(/(?:assets|bigraph-loom)/)', rf'\1{bp}\2', html)
+    bpj = json.dumps(bp)
+    prefixes = json.dumps(["/api/", "/bigraph-loom/", "/loom-explore", "/studies/", "/health", "/assets/"])
+    shim = (
+        "<script>(function(){var BP=" + bpj + ";window.__BASE_PATH__=BP;if(!BP)return;"
+        "var P=" + prefixes + ";"
+        "function fix(u){if(typeof u!=='string')return u;"
+        "if(u.charAt(0)!=='/'||u.charAt(1)==='/')return u;"
+        "if(u.indexOf(BP+'/')===0||u===BP)return u;"
+        "for(var i=0;i<P.length;i++){if(u.indexOf(P[i])===0)return BP+u;}return u;}"
+        "var of=window.fetch;if(of)window.fetch=function(x,o){return of.call(this,typeof x==='string'?fix(x):x,o);};"
+        "var OE=window.EventSource;if(OE){var NE=function(u,c){return new OE(fix(u),c);};NE.prototype=OE.prototype;window.EventSource=NE;}"
+        "var xo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){var a=[].slice.call(arguments);a[1]=fix(u);return xo.apply(this,a);};"
+        "})();</script>"
+    )
+    html = html.replace(
+        '<script>window.__DASH_CONFIG__ = { mode: "local-server" };</script>',
+        '<script>window.__DASH_CONFIG__ = { mode: "local-server", basePath: ' + bpj + ' };</script>' + shim,
+    )
+    return html
+
+
+def render_workspace_report(ws_root: Path | None = None, *, today: str | None = None, base_path: str = "") -> Path:
     """Build <ws_root>/reports/index.html from workspace.yaml + pending branches."""
     ws_root = ws_root or _ws_root()
     wp = WorkspacePaths.load(ws_root)
@@ -544,7 +587,7 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
             _workspace_subtitle = "" if _b == "HEAD" else _b
         except Exception:
             _workspace_subtitle = ""
-    out.write_text(tpl.render(
+    _html = tpl.render(
         workspace_name=ws["name"],
         workspace_branch=_workspace_subtitle,
         workspace_is_remote=_workspace_is_remote,
@@ -576,7 +619,10 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         owner_html_url=owner.get("html_url") or "",
         owner_initials=owner.get("initials") or "",
         owner_source=owner.get("source") or "",
-    ), encoding="utf-8")
+    )
+    if base_path:
+        _html = _apply_live_base_path(_html, base_path)
+    out.write_text(_html, encoding="utf-8")
     return out
 
 
@@ -651,10 +697,12 @@ def _resolve_workspace_owner() -> dict:
     return out
 
 
-def render_dashboard(ws_root: Path | str, *, write_all: bool = True) -> Path:
+def render_dashboard(ws_root: Path | str, *, write_all: bool = True, base_path: str = "") -> Path:
     """CLI-facing alias for :func:`render_workspace_report`.
 
     ``write_all`` is accepted for forward-compatibility with multi-page
     renderers but currently ignored (we only render the workspace dashboard).
+    ``base_path`` serves the dashboard under a URL prefix (see
+    :func:`_apply_live_base_path`).
     """
-    return render_workspace_report(Path(ws_root))
+    return render_workspace_report(Path(ws_root), base_path=base_path)
