@@ -370,7 +370,9 @@
     var isSnap = cfg.mode === 'snapshot';
     var origin = (typeof location !== 'undefined' && location.origin
                   && /^https?:/.test(location.origin)) ? location.origin : '';
-    var base = origin + (isSnap ? (cfg.basePath || '') : '');
+    // basePath applies in BOTH modes now: snapshot (published subpath) and live
+    // hosting under a prefix (e.g. /workbench). Empty in normal local serving.
+    var base = origin + (cfg.basePath || '');
     var u;
     if (isSnap) {
       // Published bundle: no live backend → read-only wiring from a static snapshot.
