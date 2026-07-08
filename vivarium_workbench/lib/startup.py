@@ -108,12 +108,14 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     from vivarium_workbench.api.app import app
 
     # Under a base path the ALB forwards the FULL /workbench/... path (no strip),
-    # so wrap the app to strip the prefix for route matching (uvicorn root_path
-    # alone does not strip when the proxy doesn't). No-op when base_path is empty.
+    # so wrap the app to strip the prefix for route matching AND record it as the
+    # per-request root_path (which index_shell reads to base-path the render).
+    # The middleware is the SOLE source of root_path — do NOT also set it on
+    # uvicorn, or the access log double-counts the prefix. No-op when empty.
     served = _BasePathStripMiddleware(app, base_path) if base_path else app
 
     # Run the app object (not an import string) so it shares this process's
     # already-registered workspace root; disables reload, which is correct for
     # the served entrypoint.
-    uvicorn.run(served, host=host, port=port, log_level="info", root_path=(base_path or ""))
+    uvicorn.run(served, host=host, port=port, log_level="info")
     return 0

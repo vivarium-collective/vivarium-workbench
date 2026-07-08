@@ -2575,7 +2575,7 @@ def create_app() -> FastAPI:
         response_class=Response,
         include_in_schema=False,
     )
-    def index_shell(ws: Path = Depends(get_workspace)) -> Response:
+    def index_shell(request: Request, ws: Path = Depends(get_workspace)) -> Response:
         """Render the SPA shell (best-effort) then serve ``reports/index.html``.
 
         Re-renders via ``lib.report.render_workspace_report`` BEFORE serving so
@@ -2584,11 +2584,15 @@ def create_app() -> FastAPI:
         load — we fall back to whatever is on disk.  Served as ``text/html`` with
         ``Cache-Control: no-store``; 404 when the file is absent.
 
+        When served under a URL prefix (``serve --base-path``), the proxy-strip
+        middleware records the prefix as the request's ``root_path``; pass it as
+        ``base_path`` so the re-rendered HTML carries the prefixed asset/API refs.
+
         Mirrors the legacy ``do_GET`` ``("/", "/index.html")`` branch.
         """
         try:
             from vivarium_workbench.lib.report import render_workspace_report
-            render_workspace_report(ws)
+            render_workspace_report(ws, base_path=(request.scope.get("root_path") or ""))
         except Exception as render_exc:  # noqa: BLE001 — never block load
             import sys as _sys
             print(
