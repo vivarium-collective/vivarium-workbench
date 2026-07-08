@@ -10,8 +10,10 @@ namespace: vivarium-workbench-dev
 resources:
   - ../../base
   - pvc.yaml
-  # TODO: add target-group-binding.yaml once sms-cdk provisions a workbench
-  # target group + ALB listener rule (mirrors sms-api's target-group-binding.yaml).
+  # Binds the workbench Service to the sms-cdk workbench target group. The ARN is
+  # a placeholder until `cdk deploy` emits WorkbenchTargetGroupArn — fill it in
+  # target-group-binding.yaml before applying this overlay.
+  - target-group-binding.yaml
 
 images:
   - name: ghcr.io/vivarium-collective/vivarium-workbench

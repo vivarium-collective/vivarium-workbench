@@ -42,6 +42,12 @@ spec:
             - "0.0.0.0"
             - "--port"
             - "8000"
+            # Served under the /workbench prefix so it co-tenants the internal
+            # ALB with sms-api (RFC §2B.2 / the sms-cdk /workbench/* listener
+            # rule). uvicorn root_path is derived from this by the strip
+            # middleware; verified in-container.
+            - "--base-path"
+            - "/workbench"
           ports:
             - containerPort: 8000
           env:
