@@ -42,11 +42,25 @@ deploy/
 Dockerfile                          # workbench image (+ workspace deps) → ghcr
 ```
 
+## Image (approach A — combined)
+
+The workbench must import the workspace's package (`pbg_v2ecoli`, via
+`build_core()`) **in-process** to render, so it needs the *same* environment
+v2ecoli runs in. The [`Dockerfile`](../Dockerfile) therefore **mirrors
+v2ecoli's Dockerfile** — clones v2ecoli, `uv sync`s its locked env *including*
+the workbench's deps, then overlays this repo's workbench (`uv pip install
+--no-deps .`) and serves. The sim-runtime layers (upstream vEcoli/Cython, AWS
+CLI, Ray-on-Batch entrypoint) are omitted — the workbench renders, it doesn't run
+sims. Build: `docker build -t ghcr.io/vivarium-collective/vivarium-workbench:dev .`
+(needs a first build-test to shake out uv/import specifics.)
+
+> A **v2ecoli sidecar** was considered and rejected for now: the workbench imports
+> `pbg_v2ecoli` in-process, which can't cross a container boundary. A separate
+> environment container is the right shape *later*, once the `EnvironmentResolver`
+> port lets the workbench resolve the env over a boundary instead of importing it.
+
 ## Open items (tracked as follow-up PRs / for Alex to confirm)
 
-- **Dockerfile** — base image, Python version, and how the demo workspace's
-  package (`v2ecoli`) + deps are installed so `build_core()` imports for
-  rendering. (`v2ecoli` is a path dep today — needs a build-context strategy.)
 - **Cluster specifics** — namespace(s), the EBS `gp3` StorageClass name, the
   workspace pod `runAsUser`/`fsGroup` (sms-api uses `17163`/`10000`), and the
   ghcr pull secret name.
