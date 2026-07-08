@@ -23,6 +23,32 @@ import sys
 from pathlib import Path
 
 
+class _BasePathStripMiddleware:
+    """Serve the app under a URL prefix when the upstream proxy forwards the
+    FULL path (does NOT strip it) — e.g. an AWS ALB path rule ``/workbench/*``.
+
+    Strips ``base_path`` from the front of the request path for route matching
+    and records it as ``root_path`` (for URL generation). Requests that do NOT
+    carry the prefix pass through unchanged — the ``/health`` target-group check
+    and ``/bigraph-loom/*`` (which the ALB routes to this service *unprefixed*).
+    Lifespan and other non-HTTP scopes pass straight through.
+    """
+
+    def __init__(self, app, base_path: str):
+        self.app = app
+        self.base_path = base_path
+
+    async def __call__(self, scope, receive, send):
+        bp = self.base_path
+        if bp and scope.get("type") in ("http", "websocket"):
+            path = scope.get("path", "")
+            if path == bp or path.startswith(bp + "/"):
+                scope = dict(scope)
+                scope["path"] = path[len(bp):] or "/"
+                scope["root_path"] = bp
+        await self.app(scope, receive, send)
+
+
 def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path: str = "") -> int:
     """Boot the FastAPI dashboard app under uvicorn against ``workspace``.
 
@@ -81,8 +107,13 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     import uvicorn
     from vivarium_workbench.api.app import app
 
+    # Under a base path the ALB forwards the FULL /workbench/... path (no strip),
+    # so wrap the app to strip the prefix for route matching (uvicorn root_path
+    # alone does not strip when the proxy doesn't). No-op when base_path is empty.
+    served = _BasePathStripMiddleware(app, base_path) if base_path else app
+
     # Run the app object (not an import string) so it shares this process's
     # already-registered workspace root; disables reload, which is correct for
     # the served entrypoint.
-    uvicorn.run(app, host=host, port=port, log_level="info", root_path=(base_path or ""))
+    uvicorn.run(served, host=host, port=port, log_level="info", root_path=(base_path or ""))
     return 0
