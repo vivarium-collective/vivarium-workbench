@@ -1,7 +1,7 @@
 # vivarium-workbench Dashboard Demo — Plan
 
-**Status**: Draft — awaiting review
-**Last updated**: 2026-07-06
+**Status**: In verification — 2026-07-09
+**Last updated**: 2026-07-09
 
 ---
 
@@ -143,6 +143,23 @@ This script (to be created alongside this plan) checks:
 - Expected study directories exist
 - ParCa cache is present
 - Dashboard server can start (starts and immediately stops)
+
+### 3.1b Iterative Segment Verification Protocol
+
+After the quick verification passes, each presenter segment (1–8) is verified
+programmatically against the live dashboard server. Results are recorded in
+`demos/v2ecoli/VERIFICATION_REPORT.md`, creating a static, tangible, provable
+record of functionality. The protocol for each segment is:
+
+1. **Start the server**: `vivarium-workbench serve --workspace ~/vivarium-app/v2ecoli --port 8771`
+2. **Hit the relevant API endpoint(s)** to confirm the data backing that segment's claims
+3. **Record results** in `VERIFICATION_REPORT.md` under that segment's heading
+4. **Update `SAVE_SLOT.md`** and **`NEXT_STEPS.md`** to reflect current progress
+5. **Proceed** to the next segment only after the current one passes
+
+The `VERIFICATION_REPORT.md` serves as the final deliverable: a reviewer can open
+it and see that every claim in the presenter script was verified against live,
+running code.
 
 ### 3.2 Pre-build sms-api simulator image (remote demo)
 
@@ -529,9 +546,10 @@ After completing the walkthrough, you should have:
 | Asset | Purpose | Status |
 |---|---|---|
 | `PLAN.md` | This file | In review |
-| `verify_demo.py` | Pre-demo verification script | To create |
-| `prep_remote_build.py` | Pre-build sms-api simulator image | To create |
-| `prep_remote_land.py` | Pre-land a remote run into the workspace | To create |
+| `verify_demo.py` | Pre-demo verification script | Completed (350 lines, 39 checks) |
+| `prep_remote_build.py` | Pre-build sms-api simulator image | Completed (161 lines) |
+| `prep_remote_land.py` | Pre-land a remote run into the workspace | Completed (266 lines) |
+| `populate_demo_runs.py` | Seed Simulations DB with synthetic demo runs | Completed (176 lines) |
 | `.demo_state.json` | Cached simulator_id and remote run state | Auto-generated |
 | `demo-runs/` | Directory for pre-landed remote runs | Auto-generated |
 

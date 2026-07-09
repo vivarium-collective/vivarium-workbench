@@ -85,6 +85,7 @@ investigation-contracts = { git = "https://github.com/vivarium-collective/invest
 # requirement is listed in [project.optional-dependencies] → `demo`.
 v2ecoli = { path = "../v2ecoli", editable = true }
 
+
 # bigraph-loom is a PEP 508 direct git URL (not on PyPI), so the wheel build
 # backend must opt into direct references — without this, hatchling refuses the
 # build on stricter uv/hatchling versions.
